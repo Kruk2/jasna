@@ -39,7 +39,7 @@ def main() -> None:
 
     from jasna.mosaic import RfDetrMosaicDetectionModel
     from jasna.pipeline import Pipeline
-    from jasna.restorer import RestorationPipeline
+    from jasna.restorer import RedTintRestorer, RestorationPipeline
 
     input_video = Path(args.input)
     if not input_video.exists():
@@ -71,7 +71,7 @@ def main() -> None:
         batch_size=batch_size,
         device=device,
     )
-    restoration_pipeline = RestorationPipeline(alpha=0.3)
+    restoration_pipeline = RestorationPipeline(restorers=[RedTintRestorer(alpha=0.3)])
 
     Pipeline(
         input_video=input_video,

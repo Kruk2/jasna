@@ -64,7 +64,7 @@ class RfDetrMosaicDetectionModel:
         target_hw: tuple[int, int],
         score_threshold: float,
         max_select: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         b, q, c = pred_logits.shape
         prob = pred_logits.sigmoid()
         topk_values, topk_indexes = torch.topk(prob.view(b, -1), int(q), dim=1)
@@ -75,7 +75,6 @@ class RfDetrMosaicDetectionModel:
         topk_values, sel = torch.topk(topk_values, k, dim=1)
         topk_indexes = topk_indexes.gather(1, sel)
         topk_boxes = topk_indexes // c
-        labels = topk_indexes % c
 
         x_c, y_c, w, h = pred_boxes.unbind(-1)
         boxes = torch.stack((x_c - 0.5 * w, y_c - 0.5 * h, x_c + 0.5 * w, y_c + 0.5 * h), dim=-1)
@@ -90,12 +89,12 @@ class RfDetrMosaicDetectionModel:
         masks = F.interpolate(masks.reshape(b * k, 1, hm, wm), size=(th, tw), mode="bilinear", align_corners=False)
         masks = masks.reshape(b, k, th, tw) > 0.0
 
-        return topk_values, labels, boxes, masks
+        return topk_values, boxes, masks
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)
         outs = self.runner.infer(x)
-        scores, labels, boxes, masks = self._postprocess_same_hw(
+        scores, boxes, masks = self._postprocess_same_hw(
             pred_boxes=outs[self.boxes_out],
             pred_logits=outs[self.logits_out],
             pred_masks=outs[self.masks_out],
@@ -103,5 +102,10 @@ class RfDetrMosaicDetectionModel:
             score_threshold=self.score_threshold,
             max_select=self.max_select,
         )
-        return Detections(scores=scores, labels=labels, boxes_xyxy=boxes, masks=masks)
+        cpu_data = torch.cat([scores.unsqueeze(-1), boxes], dim=-1).cpu()
+        return Detections(
+            scores=cpu_data[..., 0],
+            boxes_xyxy=cpu_data[..., 1:],
+            masks=masks,
+        )
 

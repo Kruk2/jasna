@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -75,7 +76,7 @@ class Pipeline:
                     pts = int(pts_list[i])
                     frame = frames_eff[i]
 
-                    keep_k = torch.isfinite(detections.scores[i])
+                    keep_k = np.isfinite(detections.scores[i].numpy())
                     valid_boxes = detections.boxes_xyxy[i][keep_k]
                     valid_masks = detections.masks[i][keep_k]
                     n_detections = valid_boxes.shape[0]

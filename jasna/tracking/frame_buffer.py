@@ -52,12 +52,12 @@ class FrameBuffer:
             if clip.track_id not in pending.pending_clips:
                 continue
 
-            bbox = clip.bboxes[i].int()
+            bbox = clip.bboxes[i].astype(int)
             mask = clip.masks[i]
             restored = restored_regions[i]
 
-            x1 = bbox[0].clamp(min=0)
-            y1 = bbox[1].clamp(min=0)
+            x1 = max(0, bbox[0])
+            y1 = max(0, bbox[1])
             x2 = bbox[2]
             y2 = bbox[3]
 
