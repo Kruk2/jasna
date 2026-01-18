@@ -1,14 +1,14 @@
 import torch
+import logging
+
 import PyNvVideoCodec as nvc
 from pathlib import Path
 from jasna.media import VideoMetadata, get_subprocess_startup_info
 import av
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import heapq
-from collections import deque
+from collections  import deque
 import subprocess
-
-import logging
 av.logging.set_level(logging.ERROR)
 
 

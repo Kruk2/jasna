@@ -1,6 +1,22 @@
 import argparse
 import logging
+import shutil
+import sys
 from pathlib import Path
+
+
+def check_required_executables() -> None:
+    """Check that required external tools are available in PATH."""
+    missing = []
+    for exe in ("ffmpeg", "mkvmerge"):
+        if shutil.which(exe) is None:
+            missing.append(exe)
+    
+    if missing:
+        print(f"Error: Required executable(s) not found in PATH: {', '.join(missing)}")
+        print("Please install them and ensure they are available in your system PATH.")
+        sys.exit(1)
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jasna")
@@ -41,6 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    check_required_executables()
+    
     args = build_parser().parse_args()
 
     logging.basicConfig(
