@@ -56,7 +56,6 @@ class RfDetrMosaicDetectionModel:
         return (x - mean) / std
 
     @staticmethod
-    @torch.compile(mode="max-autotune", fullgraph=True)
     def _postprocess_same_hw(
         *,
         pred_boxes: torch.Tensor,  # (B, Q, 4) cxcywh normalized

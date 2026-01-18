@@ -19,9 +19,9 @@ class Pipeline:
         output_video: Path,
         detection_model,
         restoration_pipeline,
-        stream: torch.cuda.Stream | None = None,
-        batch_size: int = 4,
-        device: torch.device = torch.device("cuda:0"),
+        stream: torch.cuda.Stream,
+        batch_size: int,
+        device: torch.device,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -32,7 +32,7 @@ class Pipeline:
         self.device = device
 
     def run(self) -> None:
-        stream = self.stream if self.stream is not None else torch.cuda.Stream()
+        stream = self.stream
         metadata = get_video_meta_data(str(self.input_video))
 
         with (
