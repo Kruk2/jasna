@@ -1,7 +1,20 @@
-## jasna
+## Jasna
 
-Package name: `jasna`  
-Version: `0.1`
+JAV model restoration tool inspired by [Lada](https://codeberg.org/ladaapp/lada).
+Differences:
+- GPU only processing (benchmarks TBD)
+- Improved mosaic detection model.
+- Accurate color conversions on gpu (input matches output and no banding).
+- VR support (TDB).
+- Only modern Nvidia gpu is supported.
+- TensorRT support.
+
+Consider this release as very alpha.
+
+
+### Usage
+Go to releases page and download last package. Built for windows on cuda 13.0.
+
 
 ### Install (editable)
 
