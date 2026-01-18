@@ -2,14 +2,18 @@
 
 JAV model restoration tool inspired by [Lada](https://codeberg.org/ladaapp/lada).
 Differences:
-- GPU only processing (benchmarks TBD)
+- GPU only processing (benchmarks TBD). Intial test for 10min: lada: 4min 12s and jasna: 3min 5s
 - Improved mosaic detection model.
 - Accurate color conversions on gpu (input matches output and no banding).
-- VR support (TDB).
 - Only modern Nvidia gpu is supported.
 - TensorRT support.
 
 Consider this release as very alpha.
+
+TODO:
+- improve blending
+- improve performance (this version is very simple
+- proper VR support
 
 
 ### Usage
