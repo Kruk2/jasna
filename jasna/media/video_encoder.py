@@ -172,7 +172,7 @@ class NvidiaVideoEncoder:
 
         encoder_options = {
             'codec': 'hevc',
-            'preset': 'P6',
+            'preset': 'P5',
             'tuning_info': 'high_quality',
             'profile': 'main',
             'rc': 'constqp',

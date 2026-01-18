@@ -3,14 +3,12 @@
 block_cipher = None
 
 from PyInstaller.utils.hooks import collect_all
+from importlib.util import find_spec
 
 def _collect(name: str):
-    d, b, h = [], [], []
-    try:
-        d, b, h = collect_all(name)
-    except Exception:
-        pass
-    return d, b, h
+    if find_spec(name) is None:
+        return [], [], []
+    return collect_all(name)
 
 datas, binaries, hiddenimports = [], [], []
 for pkg in ["torch", "av", "PyNvVideoCodec", "python_vali", "tensorrt", "tensorrt_libs"]:
@@ -28,7 +26,6 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
     noarchive=False,
 )
 
