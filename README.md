@@ -14,7 +14,8 @@ Consider this release as very alpha.
 
 ### Usage
 Go to releases page and download last package. Built for windows on cuda 13.0.
-
+Make sure that ```ffmpeg``` and ```mkvmerge``` is in your path.
+You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html)
 
 ### Install (editable)
 
