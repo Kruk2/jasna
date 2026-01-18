@@ -14,6 +14,7 @@ TODO:
 - improve blending
 - improve performance (this version is very simple
 - proper VR support
+- TVAI and SeedVR
 
 
 ### Usage
