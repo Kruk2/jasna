@@ -1,4 +1,5 @@
 import argparse
+import logging
 from pathlib import Path
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,17 +21,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
+    parser.add_argument("--max-clip-size", type=int, default=30, help="Maximum clip size for tracking")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
 
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.WARNING,
+        format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     import torch
 
     from jasna.mosaic import RfDetrMosaicDetectionModel
     from jasna.pipeline import Pipeline
-    from jasna.restorer import FramesRestorer, RestorationPipeline
+    from jasna.restorer import RestorationPipeline
 
     input_video = Path(args.input)
     if not input_video.exists():
@@ -46,6 +55,10 @@ def main() -> None:
     if batch_size <= 0:
         raise ValueError("--batch-size must be > 0")
 
+    max_clip_size = int(args.max_clip_size)
+    if max_clip_size <= 0:
+        raise ValueError("--max-clip-size must be > 0")
+
     device = torch.device(str(args.device))
 
     if restorer_model != "rfdetr":
@@ -58,8 +71,7 @@ def main() -> None:
         batch_size=batch_size,
         device=device,
     )
-    frame_restorer = FramesRestorer(clip_len=8, alpha=0.3)
-    restoration_pipeline = RestorationPipeline(frame_restorer=frame_restorer)
+    restoration_pipeline = RestorationPipeline(alpha=0.3)
 
     Pipeline(
         input_video=input_video,
@@ -69,6 +81,7 @@ def main() -> None:
         stream=stream,
         batch_size=batch_size,
         device=device,
+        max_clip_size=max_clip_size,
     ).run()
 
 
