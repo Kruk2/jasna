@@ -7,6 +7,7 @@ Differences:
 - Accurate color conversions on gpu (input matches output and no banding).
 - Only modern Nvidia gpu is supported.
 - TensorRT support.
+- CLI only
 
 Consider this release as very alpha.
 
@@ -15,12 +16,15 @@ TODO:
 - improve performance (this version is very simple
 - proper VR support
 - TVAI and SeedVR
+- Proper stream that can be played in Stash (and maybe others?)
 
 
 ### Usage
 Go to releases page and download last package. Built for windows on cuda 13.0.
 Make sure that ```ffmpeg``` and ```mkvmerge``` is in your path.
-You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html)
+You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html).
+First run might be slow because models will be compiled for your hardware.
+Remember to have up to date nvidia drivers.
 
 ### Install (editable)
 
