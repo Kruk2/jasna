@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=70", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jasna"
+version = "0.1"
+description = "Jasna"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "torch==2.8.0",
+  "tqdm",
+  "opencv-python-headless",
+]
+
+[project.scripts]
+jasna = "jasna.main:main"
+
+[project.optional-dependencies]
+dev = [
+  "pyinstaller>=6.0",
+]
+
+[tool.setuptools]
+packages = ["jasna"]
+

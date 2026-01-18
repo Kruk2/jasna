@@ -1,0 +1,42 @@
+.venv/
+venv/
+ENV/
+env/
+
+__pycache__/
+*.py[cod]
+*.pyd
+*.pyo
+*.pdb
+*.so
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# PyInstaller
+*.spec.bak
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs/editors
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+Desktop.ini
+
+# Cursor
+.cursor/
+
