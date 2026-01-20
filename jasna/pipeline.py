@@ -48,16 +48,15 @@ class Pipeline:
         active_tracks: set[int] = set()
 
         with (
-            NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=self.device, stream=stream) as reader,
+            NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=self.device, stream=stream, metadata=metadata) as reader,
             NvidiaVideoEncoder(str(self.output_video), device=self.device, stream=stream, metadata=metadata, stream_mode=False) as encoder,
             torch.inference_mode(),
             torch.cuda.stream(stream),
         ):
-            total_frames = reader.total_frames if reader.total_frames else 1
-            pb = Progressbar(total_frames=total_frames, video_fps=metadata.video_fps)
+            pb = Progressbar(total_frames=metadata.num_frames, video_fps=metadata.video_fps)
             pb.init()
             
-            target_hw = (int(reader.decoder.Height), int(reader.decoder.Width))
+            target_hw = (int(metadata.video_height), int(metadata.video_width))
             frame_idx = 0
 
             try:
