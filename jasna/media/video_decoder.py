@@ -2,7 +2,6 @@ import torch
 import python_vali as vali
 from jasna.media import VideoMetadata
 from typing import Iterator
-import av
 
 class NvidiaVideoReader:
     def __init__(self, file: str, batch_size: int, device: torch.device, stream: torch.cuda.Stream, metadata: VideoMetadata):
