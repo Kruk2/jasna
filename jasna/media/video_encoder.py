@@ -73,6 +73,40 @@ def _extract_hevc_extradata(data: bytes) -> bytes:
     return b''.join(extradata_parts)
 
 
+def chw_rgb_to_nv12_bt709_limited(img_chw: torch.Tensor) -> torch.Tensor:
+    R = img_chw[0].float()
+    G = img_chw[1].float()
+    B = img_chw[2].float()
+
+    R_norm = R / 255.0
+    G_norm = G / 255.0
+    B_norm = B / 255.0
+
+    Yf = 16.0 + 219.0 * (0.2126 * R_norm + 0.7152 * G_norm + 0.0722 * B_norm)
+    Uf = 128.0 + 224.0 * (-0.114572 * R_norm - 0.385428 * G_norm + 0.500000 * B_norm)
+    Vf = 128.0 + 224.0 * (0.500000 * R_norm - 0.454153 * G_norm - 0.045847 * B_norm)
+
+    Y = Yf.round().clamp(16, 235).to(torch.uint8)
+
+    U00 = Uf[0::2, 0::2]
+    U01 = Uf[0::2, 1::2]
+    U10 = Uf[1::2, 0::2]
+    U11 = Uf[1::2, 1::2]
+    V00 = Vf[0::2, 0::2]
+    V01 = Vf[0::2, 1::2]
+    V10 = Vf[1::2, 0::2]
+    V11 = Vf[1::2, 1::2]
+
+    U_ds = ((U00 + U01 + U10 + U11) * 0.25).round().clamp(16, 240).to(torch.uint8)
+    V_ds = ((V00 + V01 + V10 + V11) * 0.25).round().clamp(16, 240).to(torch.uint8)
+
+    uv = torch.stack((U_ds, V_ds), dim=-1)
+    uv_interleaved = uv.reshape(uv.shape[0], uv.shape[1] * 2)
+
+    nv12 = torch.cat([Y, uv_interleaved], dim=0).contiguous()
+    return nv12
+
+
 def mux_hevc_to_mkv(hevc_path: Path, output_path: Path, pts_list, time_base):
     timecodes_path = output_path.with_suffix('.txt')
     with open(timecodes_path, 'w') as f:
@@ -162,7 +196,7 @@ class NvidiaVideoEncoder:
             width=metadata.video_width,
             height=metadata.video_height,
             cudastream=stream.cuda_stream,
-            fmt="ARGB",
+            fmt="NV12",
             usecpuinputbuffer=False,
             **encoder_options
         )
@@ -261,10 +295,8 @@ class NvidiaVideoEncoder:
         self.reordered_pts_queue.append(pts)
 
         with torch.cuda.stream(self.stream):
-            bgr_hwc = frame.flip(0).permute(1, 2, 0)
-            alpha = frame.new_full((frame.shape[1], frame.shape[2], 1), 255)
-            bgra = torch.cat([bgr_hwc, alpha], dim=2).contiguous()
-            bitstream = self.encoder.Encode(bgra)
+            nv12_frame = chw_rgb_to_nv12_bt709_limited(frame)
+            bitstream = self.encoder.Encode(nv12_frame)
 
         if len(bitstream) > 0:
             data = bytearray(bitstream)
