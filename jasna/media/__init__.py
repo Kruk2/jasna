@@ -31,16 +31,11 @@ class VideoMetadata:
 
 
 def _get_frame_count_by_counting(path: str) -> int:
-    cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames', 
-           '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', path]
-    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=get_subprocess_startup_info())
-    out, err = p.communicate()
-    if p.returncode != 0:
-        return 0
-    try:
-        return int(out.decode().strip())
-    except (ValueError, AttributeError):
-        return 0
+    import cv2
+    cap = cv2.VideoCapture(path)
+    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    return frame_count
 
 
 def get_video_meta_data(path: str) -> VideoMetadata:
