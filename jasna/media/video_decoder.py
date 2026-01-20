@@ -1,14 +1,16 @@
 import torch
 import python_vali as vali
+from jasna.media import VideoMetadata
 from typing import Iterator
 import av
 
 class NvidiaVideoReader:
-    def __init__(self, file: str, batch_size: int | None, device: torch.device, stream: torch.cuda.Stream):
+    def __init__(self, file: str, batch_size: int, device: torch.device, stream: torch.cuda.Stream, metadata: VideoMetadata):
         self.device = device
         self.file = file
         self.stream = stream
         self.batch_size = batch_size
+        self.metadata = metadata
 
     def __enter__(self):
         self.decoder = vali.PyDecoder(
@@ -17,15 +19,6 @@ class NvidiaVideoReader:
             gpu_id=self.device.index,
             stream=self.stream.cuda_stream,
         )
-        container = av.open(self.file)
-        stream = container.streams.video[0]
-        self.duration = stream.duration
-        self.timebase = stream.time_base
-        self.average_rate = stream.average_rate
-        self.guessed_rate = stream.guessed_rate
-        self.total_frames = stream.frames
-        container.close()
-        self.is_vfr = self.decoder.IsVFR
         self.rgb_planar_surface = vali.Surface.Make(
             format=vali.PixelFormat.RGB_PLANAR if self.decoder.Format == vali.PixelFormat.NV12 else vali.PixelFormat.RGB10_PLANAR,
             width=self.decoder.Width,

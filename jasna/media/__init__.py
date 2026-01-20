@@ -27,6 +27,21 @@ class VideoMetadata:
     start_pts: int
     color_range: AvColorRange
     color_space: AvColorspace
+    num_frames: int
+
+
+def _get_frame_count_by_counting(path: str) -> int:
+    cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames', 
+           '-show_entries', 'stream=nb_read_frames', '-of', 'csv=p=0', path]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=get_subprocess_startup_info())
+    out, err = p.communicate()
+    if p.returncode != 0:
+        return 0
+    try:
+        return int(out.decode().strip())
+    except (ValueError, AttributeError):
+        return 0
+
 
 def get_video_meta_data(path: str) -> VideoMetadata:
     cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-select_streams', 'v', '-show_streams', '-show_format', path]
@@ -53,6 +68,10 @@ def get_video_meta_data(path: str) -> VideoMetadata:
     color_range = AvColorRange.MPEG if 'color_range' not in json_video_stream or json_video_stream['color_range'] == 'tv' else AvColorRange.JPEG if json_video_stream['color_range'] == 'jpeg' else AvColorRange.MPEG
     color_space = AvColorspace.ITU709 if 'color_space' not in json_video_stream or json_video_stream['color_space'] == 'bt709' else AvColorspace.ITU601 if json_video_stream['color_space'] == 'bt601' else AvColorspace.ITU709
 
+    num_frames = int(json_video_stream.get('nb_frames', 0))
+    if num_frames == 0:
+        num_frames = _get_frame_count_by_counting(path)
+
     metadata = VideoMetadata(
         video_file=path,
         video_height=int(json_video_stream['height']),
@@ -65,6 +84,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         time_base=time_base,
         start_pts=start_pts,
         color_range=color_range,
-        color_space=color_space
+        color_space=color_space,
+        num_frames=num_frames,
     )
     return metadata
