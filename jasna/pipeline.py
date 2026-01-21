@@ -28,6 +28,7 @@ class Pipeline:
         batch_size: int,
         device: torch.device,
         max_clip_size: int,
+        temporal_overlap: int,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -37,6 +38,7 @@ class Pipeline:
         self.batch_size = int(batch_size)
         self.device = device
         self.max_clip_size = int(max_clip_size)
+        self.temporal_overlap = int(temporal_overlap)
 
     def run(self) -> None:
         stream = self.stream
@@ -45,6 +47,7 @@ class Pipeline:
         tracker = ClipTracker(max_clip_size=self.max_clip_size)
         frame_buffer = FrameBuffer(device=self.device)
         active_tracks: set[int] = set()
+        continuation_context: dict[int, list[torch.Tensor]] = {}
 
         with (
             NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=self.device, stream=stream, metadata=metadata) as reader,
@@ -92,21 +95,36 @@ class Pipeline:
                         new_tracks = active_track_ids - active_tracks
                         for track_id in new_tracks:
                             log.debug("clip %d started at frame %d", track_id, current_frame_idx)
-                        active_tracks = (active_tracks | active_track_ids) - {c.track_id for c in ended_clips}
+                        active_tracks = (active_tracks | active_track_ids) - {ec.clip.track_id for ec in ended_clips}
 
                         frame_buffer.add_frame(current_frame_idx, pts, frame, active_track_ids)
 
-                        for clip in ended_clips:
+                        for ended_clip in ended_clips:
+                            clip = ended_clip.clip
                             log.debug("clip %d ended: frames %d-%d (%d frames)", clip.track_id, clip.start_frame, clip.end_frame, clip.frame_count)
                             frames_for_clip = [frame_buffer.get_frame(fi) for fi in clip.frame_indices()]
                             frames_for_clip = [f for f in frames_for_clip if f is not None]
                             if frames_for_clip:
+                                # Check if this clip is a continuation of a previously split clip
+                                source_track_id = tracker.get_continuation_source(clip.track_id)
+                                prefix_frames = None
+                                if source_track_id is not None and source_track_id in continuation_context:
+                                    prefix_frames = continuation_context.pop(source_track_id)
+                                    log.debug("clip %d using %d prefix frames from clip %d", clip.track_id, len(prefix_frames), source_track_id)
+                                    tracker.clear_continuation(clip.track_id)
+                                
                                 restored_clip = self.restoration_pipeline.restore_clip(
-                                    clip, frames_for_clip
+                                    clip, frames_for_clip, prefix_restored_frames=prefix_frames
                                 )
                                 log.debug("clip %d restored", clip.track_id)
                                 frame_buffer.blend_clip(clip, restored_clip)
                                 log.debug("clip %d blended onto frames %d-%d", clip.track_id, clip.start_frame, clip.end_frame)
+                                
+                                # Store context for potential continuation if this clip was split
+                                if ended_clip.split_due_to_max_size and self.temporal_overlap > 0:
+                                    n_context = min(self.temporal_overlap, len(restored_clip.restored_frames))
+                                    continuation_context[clip.track_id] = restored_clip.restored_frames[-n_context:]
+                                    log.debug("clip %d storing %d frames for continuation", clip.track_id, n_context)
 
                         ready_frames = frame_buffer.get_ready_frames()
                         for ready_idx, ready_frame, ready_pts in ready_frames:
@@ -119,13 +137,21 @@ class Pipeline:
                 final_clips = tracker.flush()
                 if final_clips:
                     log.debug("flushing %d remaining clip(s)", len(final_clips))
-                for clip in final_clips:
+                for ended_clip in final_clips:
+                    clip = ended_clip.clip
                     log.debug("clip %d ended: frames %d-%d (%d frames)", clip.track_id, clip.start_frame, clip.end_frame, clip.frame_count)
                     frames_for_clip = [frame_buffer.get_frame(fi) for fi in clip.frame_indices()]
                     frames_for_clip = [f for f in frames_for_clip if f is not None]
                     if frames_for_clip:
+                        # Check if this clip is a continuation of a previously split clip
+                        source_track_id = tracker.get_continuation_source(clip.track_id)
+                        prefix_frames = None
+                        if source_track_id is not None and source_track_id in continuation_context:
+                            prefix_frames = continuation_context.pop(source_track_id)
+                            log.debug("clip %d using %d prefix frames from clip %d", clip.track_id, len(prefix_frames), source_track_id)
+                        
                         restored_clip = self.restoration_pipeline.restore_clip(
-                            clip, frames_for_clip
+                            clip, frames_for_clip, prefix_restored_frames=prefix_frames
                         )
                         log.debug("clip %d restored", clip.track_id)
                         frame_buffer.blend_clip(clip, restored_clip)

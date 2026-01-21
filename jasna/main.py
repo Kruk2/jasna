@@ -52,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--fp16", action="store_true", help="Use FP16 for restoration model")
     parser.add_argument("--max-clip-size", type=int, default=30, help="Maximum clip size for tracking")
+    parser.add_argument("--temporal-overlap", type=int, default=3, help="Number of restored frames to use as context for split clips")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
     return parser
 
@@ -97,6 +98,10 @@ def main() -> None:
     if max_clip_size <= 0:
         raise ValueError("--max-clip-size must be > 0")
 
+    temporal_overlap = int(args.temporal_overlap)
+    if temporal_overlap < 0:
+        raise ValueError("--temporal-overlap must be >= 0")
+
     device = torch.device(str(args.device))
     fp16 = bool(args.fp16)
 
@@ -130,6 +135,7 @@ def main() -> None:
         batch_size=batch_size,
         device=device,
         max_clip_size=max_clip_size,
+        temporal_overlap=temporal_overlap,
     ).run()
 
 
