@@ -24,7 +24,7 @@ TODO:
 Go to releases page and download last package. Built for windows on cuda 13.0.
 Make sure that ```ffmpeg``` and ```mkvmerge``` is in your path.
 You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html).
-First run might be slow because models will be compiled for your hardware.
+*First run might be slow because models will be compiled for your hardware (you can copy .engine files from models_directory to a new version!)*
 Remember to have up to date nvidia drivers.
 
 ### Install (editable)
