@@ -12,7 +12,6 @@ def get_subprocess_startup_info():
     startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     return startup_info
 
-
 @dataclass
 class VideoMetadata:
     video_file: str
@@ -28,7 +27,7 @@ class VideoMetadata:
     color_range: AvColorRange
     color_space: AvColorspace
     num_frames: int
-
+    is_10bit: bool
 
 def _get_frame_count_by_counting(path: str) -> int:
     import cv2
@@ -37,6 +36,25 @@ def _get_frame_count_by_counting(path: str) -> int:
     cap.release()
     return frame_count
 
+
+def is_stream_10bit(json_video_stream: dict) -> bool:
+    bprs = json_video_stream.get('bits_per_raw_sample')
+    if isinstance(bprs, (int, float)):
+        return int(bprs) == 10
+    if isinstance(bprs, str):
+        try:
+            if int(bprs) == 10:
+                return True
+        except Exception:
+            pass
+    pix_fmt = (json_video_stream.get('pix_fmt') or '').lower()
+    ten_bit_markers = (
+        'p10',
+        'p010',
+        'v210',
+        'rgb10', 'bgr10', 'x2rgb10', 'x2bgr10', 'yuv10', 'gray10'
+    )
+    return any(marker in pix_fmt for marker in ten_bit_markers)
 
 def get_video_meta_data(path: str) -> VideoMetadata:
     cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-select_streams', 'v', '-show_streams', '-show_format', path]
@@ -66,6 +84,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
     num_frames = int(json_video_stream.get('nb_frames', 0))
     if num_frames == 0:
         num_frames = _get_frame_count_by_counting(path)
+    is_10bit = is_stream_10bit(json_video_stream)
 
     metadata = VideoMetadata(
         video_file=path,
@@ -81,5 +100,6 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         color_range=color_range,
         color_space=color_space,
         num_frames=num_frames,
+        is_10bit=is_10bit,
     )
     return metadata
