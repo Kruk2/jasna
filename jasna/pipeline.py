@@ -101,11 +101,11 @@ class Pipeline:
                             frames_for_clip = [frame_buffer.get_frame(fi) for fi in clip.frame_indices()]
                             frames_for_clip = [f for f in frames_for_clip if f is not None]
                             if frames_for_clip:
-                                restored_regions = self.restoration_pipeline.restore_clip(
+                                restored_clip = self.restoration_pipeline.restore_clip(
                                     clip, frames_for_clip
                                 )
                                 log.debug("clip %d restored", clip.track_id)
-                                frame_buffer.blend_clip(clip, restored_regions, target_hw)
+                                frame_buffer.blend_clip(clip, restored_clip)
                                 log.debug("clip %d blended onto frames %d-%d", clip.track_id, clip.start_frame, clip.end_frame)
 
                         ready_frames = frame_buffer.get_ready_frames()
@@ -124,11 +124,11 @@ class Pipeline:
                     frames_for_clip = [frame_buffer.get_frame(fi) for fi in clip.frame_indices()]
                     frames_for_clip = [f for f in frames_for_clip if f is not None]
                     if frames_for_clip:
-                        restored_regions = self.restoration_pipeline.restore_clip(
+                        restored_clip = self.restoration_pipeline.restore_clip(
                             clip, frames_for_clip
                         )
                         log.debug("clip %d restored", clip.track_id)
-                        frame_buffer.blend_clip(clip, restored_regions, target_hw)
+                        frame_buffer.blend_clip(clip, restored_clip)
                         log.debug("clip %d blended onto frames %d-%d", clip.track_id, clip.start_frame, clip.end_frame)
 
                 remaining_frames = frame_buffer.flush()

@@ -15,18 +15,16 @@ class BasicvsrppMosaicRestorer:
 
     def restore(self, video: list[Tensor]) -> list[Tensor]:
         """
-        Restore a sequence of video frames.
-        
         Args:
-            video: list of (H, W, C) uint8 tensors in BGR format
-        
+            video: list of (H, W, C) uint8 tensors in RGB format
         Returns:
-            list of (256, 256, C) uint8 tensors in BGR format
+            list of (256, 256, C) uint8 tensors in RGB format
         """
         with torch.inference_mode():
             resized = []
             for frame in video:
-                f = frame.permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.dtype).div_(255.0)
+                # RGB to BGR
+                f = frame.flip(-1).permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.dtype).div_(255.0)
                 f = F.interpolate(f, size=(INFERENCE_SIZE, INFERENCE_SIZE), mode='bilinear', align_corners=False)
                 resized.append(f.squeeze(0))
             stacked = torch.stack(resized, dim=0)
@@ -34,6 +32,7 @@ class BasicvsrppMosaicRestorer:
             result = self.model(inputs=stacked.unsqueeze(0))
 
             result = result.squeeze(0)
-            result = result.mul_(255.0).round_().clamp_(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1)
+            # BGR to RGB
+            result = result.flip(1).mul_(255.0).round_().clamp_(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1)
 
         return list(torch.unbind(result, 0))
