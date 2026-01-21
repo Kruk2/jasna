@@ -136,27 +136,31 @@ class NvidiaVideoEncoder:
         self.stream_mode = stream_mode
         bf = 1 if stream_mode else 4 # 1 or 2?
 
+        #todo for streaming mode enable tuning low latency, disable qpass
         encoder_options = {
             'codec': 'hevc',
-            'preset': 'P6',
+            'preset': 'P5',
             'tuning_info': 'high_quality',
             'profile': 'main10',
             'rc': 'vbr',
-            "cq": 26,
-            "qmin": 19,
-            "qmax": 38,
+            "cq": 25,
+            "qmin": 17,
+            "qmax": 34,
             # 'rc': 'constqp',
-            # 'constqp': 19,
+            # 'constqp': 21,
+            'nonrefp': 1,
+            # 'multipass': 'qres', # lower psnr
             'gop': 250,
             'fps': float(metadata.video_fps_exact),
             "maxbitrate": 0,
+            # "maxbitrate": 153600,
             "vbvinit": 0,
             "vbvbufsize": 0,
             'temporalaq': 1,
             'lookahead': 32,
             'lookahead_level': 1,
             'aq': 8,
-            # "initqp": 0,
+            "initqp": 17,
             'bf': bf,
             'tflevel': 0,
             "bref": 2 if not stream_mode else 0,
