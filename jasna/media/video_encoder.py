@@ -4,13 +4,13 @@ import logging
 import PyNvVideoCodec as nvc
 from pathlib import Path
 from jasna.media import VideoMetadata, get_subprocess_startup_info
+from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
 import av
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import heapq
 from collections  import deque
 import subprocess
 av.logging.set_level(logging.ERROR)
-
 
 def _parse_hevc_nal_units(data: bytes):
     """Parse HEVC NAL units from Annex B bitstream. Returns list of (nal_type, start, end)."""
@@ -138,23 +138,27 @@ class NvidiaVideoEncoder:
 
         encoder_options = {
             'codec': 'hevc',
-            'preset': 'P5',
+            'preset': 'P6',
             'tuning_info': 'high_quality',
-            'profile': 'main',
-            'rc': 'constqp',
-            'qp': 21,
-            'gop': 30,
+            'profile': 'main10',
+            'rc': 'vbr',
+            "cq": 26,
+            "qmin": 19,
+            "qmax": 38,
+            # 'rc': 'constqp',
+            # 'constqp': 19,
+            'gop': 250,
             'fps': float(metadata.video_fps_exact),
             "maxbitrate": 0,
             "vbvinit": 0,
             "vbvbufsize": 0,
             'temporalaq': 1,
-            'lookahead': 30,
+            'lookahead': 32,
+            'lookahead_level': 1,
             'aq': 8,
-            "qmin": "0,0,0",
-            "qmax": "0,0,0",
-            "initqp": "0,0,0",
+            # "initqp": 0,
             'bf': bf,
+            'tflevel': 0,
             "bref": 2 if not stream_mode else 0,
         }
 
@@ -162,7 +166,7 @@ class NvidiaVideoEncoder:
             width=metadata.video_width,
             height=metadata.video_height,
             cudastream=stream.cuda_stream,
-            fmt="ARGB",
+            fmt="P010",
             usecpuinputbuffer=False,
             **encoder_options
         )
@@ -261,10 +265,8 @@ class NvidiaVideoEncoder:
         self.reordered_pts_queue.append(pts)
 
         with torch.cuda.stream(self.stream):
-            bgr_hwc = frame.flip(0).permute(1, 2, 0)
-            alpha = frame.new_full((frame.shape[1], frame.shape[2], 1), 255)
-            bgra = torch.cat([bgr_hwc, alpha], dim=2).contiguous()
-            bitstream = self.encoder.Encode(bgra)
+            p010 = chw_rgb_to_p010_bt709_limited(frame)
+            bitstream = self.encoder.Encode(p010)
 
         if len(bitstream) > 0:
             data = bytearray(bitstream)
