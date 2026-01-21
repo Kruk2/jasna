@@ -9,9 +9,6 @@ from jasna.tracking.clip_tracker import TrackedClip
 
 
 def create_blend_mask(h: int, w: int, device: torch.device, border_ratio: float = 0.05) -> torch.Tensor:
-    """
-    Create a blend mask with soft edges using inner rectangle + box blur approach.
-    """
     h_inner, w_inner = int(h * (1.0 - border_ratio)), int(w * (1.0 - border_ratio))
     h_outer, w_outer = h - h_inner, w - w_inner
     border_size = min(h_outer, w_outer)
@@ -71,7 +68,11 @@ class FrameBuffer:
         pending = self.frames.get(frame_idx)
         return pending.frame if pending else None
 
-    def blend_clip(self, clip: TrackedClip, restored_regions: list[torch.Tensor]) -> None:
+    def blend_clip(
+        self, clip: TrackedClip, restored_regions: list[torch.Tensor], frame_hw: tuple[int, int]
+    ) -> None:
+        frame_h, frame_w = frame_hw
+        
         for i, frame_idx in enumerate(clip.frame_indices()):
             if frame_idx not in self.frames:
                 continue
@@ -81,7 +82,6 @@ class FrameBuffer:
                 continue
 
             bbox = clip.bboxes[i].astype(int)
-            mask = clip.masks[i]
             restored = restored_regions[i]
 
             x1 = max(0, bbox[0])
@@ -92,7 +92,6 @@ class FrameBuffer:
             crop_h = y2 - y1
             crop_w = x2 - x1
 
-            frame_h, frame_w = mask.shape
             if y2 > frame_h or x2 > frame_w:
                 crop_h = min(crop_h, frame_h - y1)
                 crop_w = min(crop_w, frame_w - x1)
@@ -115,11 +114,6 @@ class FrameBuffer:
             pending.pending_clips.discard(clip.track_id)
 
     def get_ready_frames(self) -> list[tuple[int, torch.Tensor, int]]:
-        """
-        Get frames that are ready to encode (all clips blended) in order.
-        Returns list of (frame_idx, frame, pts) tuples.
-        Removes them from the buffer.
-        """
         ready: list[tuple[int, torch.Tensor, int]] = []
 
         while self.next_encode_idx in self.frames:
@@ -133,10 +127,6 @@ class FrameBuffer:
         return ready
 
     def flush(self) -> list[tuple[int, torch.Tensor, int]]:
-        """
-        Flush all remaining frames in order, regardless of pending clips.
-        Used at end of video.
-        """
         remaining: list[tuple[int, torch.Tensor, int]] = []
         for frame_idx in sorted(self.frames.keys()):
             pending = self.frames[frame_idx]
