@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import torch
 from torch.nn import functional as F
 
@@ -56,7 +57,7 @@ class RfDetrMosaicDetectionModel:
         return (x - mean) / std
 
     @staticmethod
-    def _postprocess_same_hw(
+    def _postprocess(
         *,
         pred_boxes: torch.Tensor,  # (B, Q, 4) cxcywh normalized
         pred_logits: torch.Tensor,  # (B, Q, C)
@@ -64,14 +65,14 @@ class RfDetrMosaicDetectionModel:
         target_hw: tuple[int, int],
         score_threshold: float,
         max_select: int,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[list[np.ndarray], list[torch.Tensor]]:
         b, q, c = pred_logits.shape
         prob = pred_logits.sigmoid()
-        topk_values, topk_indexes = torch.topk(prob.view(b, -1), int(q), dim=1)
-        keep = topk_values > float(score_threshold)
+        topk_values, topk_indexes = torch.topk(prob.view(b, -1), q, dim=1)
+        keep = topk_values > score_threshold
         topk_values = topk_values.masked_fill(~keep, float("-inf"))
 
-        k = min(int(max_select), int(q))
+        k = min(max_select, q)
         topk_values, sel = torch.topk(topk_values, k, dim=1)
         topk_indexes = topk_indexes.gather(1, sel)
         topk_boxes = topk_indexes // c
@@ -81,20 +82,28 @@ class RfDetrMosaicDetectionModel:
         boxes = boxes.gather(1, topk_boxes.unsqueeze(-1).expand(b, k, 4))
 
         th, tw = target_hw
-        scale = boxes.new_tensor((tw, th, tw, th))
-        boxes = boxes * scale
+        boxes = boxes * boxes.new_tensor((tw, th, tw, th))
 
         hm, wm = pred_masks.shape[-2], pred_masks.shape[-1]
-        masks = pred_masks.gather(1, topk_boxes[:, :, None, None].expand(b, k, hm, wm))
-        masks = F.interpolate(masks.reshape(b * k, 1, hm, wm), size=(th, tw), mode="bilinear", align_corners=False)
-        masks = masks.reshape(b, k, th, tw) > 0.0
+        masks = pred_masks.gather(1, topk_boxes[:, :, None, None].expand(b, k, hm, wm)) > 0.0
 
-        return topk_values, boxes, masks
+        valid_mask = topk_values > score_threshold  # (B, K)
+        boxes_cpu = boxes.to(device='cpu', dtype=torch.float32).numpy()  # (B, K, 4)
+        valid_mask_cpu = valid_mask.cpu().numpy()  # (B, K)
+        
+        boxes_list: list[np.ndarray] = []
+        masks_list: list[torch.Tensor] = []
+        for i in range(b):
+            valid_i = valid_mask_cpu[i]
+            boxes_list.append(boxes_cpu[i][valid_i])  # (N_i, 4) CPU
+            masks_list.append(masks[i][valid_mask[i]])  # (N_i, Hm, Wm) GPU
+        
+        return boxes_list, masks_list
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)
         outs = self.runner.infer(x)
-        scores, boxes, masks = self._postprocess_same_hw(
+        boxes_list, masks_list = self._postprocess(
             pred_boxes=outs[self.boxes_out],
             pred_logits=outs[self.logits_out],
             pred_masks=outs[self.masks_out],
@@ -102,10 +111,8 @@ class RfDetrMosaicDetectionModel:
             score_threshold=self.score_threshold,
             max_select=self.max_select,
         )
-        cpu_data = torch.cat([scores.unsqueeze(-1), boxes], dim=-1).float().cpu().numpy()
         return Detections(
-            scores=cpu_data[..., 0],
-            boxes_xyxy=cpu_data[..., 1:],
-            masks=masks,
+            boxes_xyxy=boxes_list,
+            masks=masks_list,
         )
 

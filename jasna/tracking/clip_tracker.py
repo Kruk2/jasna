@@ -10,8 +10,9 @@ import torch
 class TrackedClip:
     track_id: int
     start_frame: int
+    mask_resolution: tuple[int, int]  # (Hm, Wm) model mask resolution
     bboxes: list[np.ndarray] = field(default_factory=list)  # each (4,) xyxy, CPU
-    masks: list[torch.Tensor] = field(default_factory=list)  # each (H, W) bool, GPU
+    masks: list[torch.Tensor] = field(default_factory=list)  # each (Hm, Wm) bool, GPU
 
     @property
     def end_frame(self) -> int:
@@ -27,9 +28,8 @@ class TrackedClip:
 
 def compute_iou_matrix(boxes1: np.ndarray, boxes2: np.ndarray) -> np.ndarray:
     """
-    Compute IoU matrix between two sets of boxes (xyxy format) on CPU.
-    boxes1: (N, 4)
-    boxes2: (M, 4)
+    boxes1: (N, 4) xyxy, CPU
+    boxes2: (M, 4) xyxy, CPU
     Returns: (N, M) IoU matrix
     """
     n = boxes1.shape[0]
@@ -60,13 +60,14 @@ def merge_overlapping_boxes(
     bboxes: np.ndarray, masks: torch.Tensor, iou_threshold: float
 ) -> tuple[np.ndarray, torch.Tensor]:
     """
-    Merge overlapping bboxes within a single frame.
-    bboxes: (K, 4) xyxy on CPU
-    masks: (K, H, W) bool on GPU
-    Returns merged (N, 4) bboxes (CPU) and (N, H, W) masks (GPU) where N <= K
+    bboxes: (K, 4) xyxy, CPU
+    masks: (K, Hm, Wm) bool, GPU
+    Returns: merged (N, 4) bboxes (CPU) and (N, Hm, Wm) masks (GPU) where N <= K
     """
     n = bboxes.shape[0]
-    if n <= 1:
+    if n == 0:
+        return bboxes, masks
+    if n == 1:
         return bboxes, masks
 
     iou_matrix = compute_iou_matrix(bboxes, bboxes)
@@ -104,21 +105,16 @@ class ClipTracker:
         self.iou_threshold = iou_threshold
         self.active_clips: dict[int, TrackedClip] = {}
         self.next_track_id = 0
-        self.last_frame_boxes: np.ndarray | None = None  # (T, 4) stacked boxes, CPU
+        self.last_frame_boxes: np.ndarray | None = None  # (T, 4) xyxy, CPU
         self.track_ids: list[int] = []  # track_id for each row in last_frame_boxes
 
     def update(
         self, frame_idx: int, bboxes: np.ndarray, masks: torch.Tensor
     ) -> tuple[list[TrackedClip], set[int]]:
         """
-        Update tracker with detections from a new frame.
-        
-        bboxes: (K, 4) xyxy format, on CPU (numpy)
-        masks: (K, H, W) bool, on GPU
-        
-        Returns:
-            ended_clips: clips that ended this frame (max size or no match)
-            active_track_ids: track ids that cover this frame
+        bboxes: (K, 4) xyxy, CPU
+        masks: (K, Hm, Wm) bool, GPU
+        Returns: (ended_clips, active_track_ids)
         """
         if bboxes.shape[0] > 0:
             bboxes, masks = merge_overlapping_boxes(bboxes, masks, self.iou_threshold)
@@ -178,6 +174,7 @@ class ClipTracker:
                 clip = TrackedClip(
                     track_id=track_id,
                     start_frame=frame_idx,
+                    mask_resolution=(masks.shape[1], masks.shape[2]),
                     bboxes=[bboxes[det_idx]],
                     masks=[masks[det_idx]],
                 )
@@ -202,7 +199,6 @@ class ClipTracker:
         return ended_clips, active_track_ids
 
     def flush(self) -> list[TrackedClip]:
-        """End all active clips and return them."""
         clips = list(self.active_clips.values())
         self.active_clips.clear()
         self.last_frame_boxes = None

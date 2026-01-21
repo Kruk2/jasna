@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-import numpy as np
 import torch
 
 from jasna.media import get_video_meta_data
@@ -79,9 +78,8 @@ class Pipeline:
                         pts = int(pts_list[i])
                         frame = frames_eff[i]
 
-                        keep_k = np.isfinite(detections.scores[i])
-                        valid_boxes = detections.boxes_xyxy[i][keep_k]
-                        valid_masks = detections.masks[i][keep_k]
+                        valid_boxes = detections.boxes_xyxy[i]
+                        valid_masks = detections.masks[i]
                         n_detections = valid_boxes.shape[0]
 
                         if n_detections > 0:
@@ -107,7 +105,7 @@ class Pipeline:
                                     clip, frames_for_clip
                                 )
                                 log.debug("clip %d restored", clip.track_id)
-                                frame_buffer.blend_clip(clip, restored_regions)
+                                frame_buffer.blend_clip(clip, restored_regions, target_hw)
                                 log.debug("clip %d blended onto frames %d-%d", clip.track_id, clip.start_frame, clip.end_frame)
 
                         ready_frames = frame_buffer.get_ready_frames()
@@ -130,7 +128,7 @@ class Pipeline:
                             clip, frames_for_clip
                         )
                         log.debug("clip %d restored", clip.track_id)
-                        frame_buffer.blend_clip(clip, restored_regions)
+                        frame_buffer.blend_clip(clip, restored_regions, target_hw)
                         log.debug("clip %d blended onto frames %d-%d", clip.track_id, clip.start_frame, clip.end_frame)
 
                 remaining_frames = frame_buffer.flush()
