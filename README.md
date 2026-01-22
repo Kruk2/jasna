@@ -2,8 +2,11 @@
 
 JAV model restoration tool inspired by [Lada](https://codeberg.org/ladaapp/lada).
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
-Differences:
-- GPU only processing (benchmarks TBD). Intial tests show that it can be 2x faster. Raw processing for places without mosaic is ~250fps on RTX 5090.
+
+### Differences:
+- GPU only processing (benchmarks TBD). Intial tests show that it can be 2x faster. Raw processing for places without mosaic is ~250fps on RTX 5090
+<img width="860" height="56" alt="image" src="https://github.com/user-attachments/assets/a80ecaee-e36d-4c91-93e4-8bdd75048ac3" />
+
 - Improved mosaic detection model.
 - Temporal overlap which reduces flickering (beta)
 - Accurate color conversions on gpu (input matches output and no banding).
@@ -11,7 +14,7 @@ Differences:
 - TensorRT support.
 - CLI only
 
-TODO:
+### TODO:
 - improve performance (this version is very simple)
 - proper VR support
 - TVAI and SeedVR
