@@ -29,6 +29,7 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
 class RestoredClip:
     restored_frames: list[torch.Tensor]  # each (C, 256, 256), GPU
     masks: list[torch.Tensor]  # each (Hm, Wm) bool, GPU (model resolution)
+    frame_shape: tuple[int, int]  # (H, W) original frame shape
     enlarged_bboxes: list[tuple[int, int, int, int]]  # each (x1, y1, x2, y2) after expansion
     crop_shapes: list[tuple[int, int]]  # each (H, W) original crop shape before resize
     pad_offsets: list[tuple[int, int]]  # each (pad_left, pad_top)
@@ -113,9 +114,11 @@ class RestorationPipeline:
         
         restored_frames = [r.permute(2, 0, 1) for r in restored]
 
+        _, frame_h, frame_w = frames[0].shape
         return RestoredClip(
             restored_frames=restored_frames,
             masks=clip.masks,
+            frame_shape=(frame_h, frame_w),
             enlarged_bboxes=enlarged_bboxes,
             crop_shapes=crop_shapes,
             pad_offsets=pad_offsets,
@@ -145,15 +148,23 @@ class RestorationPipeline:
             expand_w = min(need_w, max_expand_w)
             expand_h = min(need_h, max_expand_h)
 
-            expand_left = expand_w // 2
-            expand_right = expand_w - expand_left
-            expand_top = expand_h // 2
-            expand_bottom = expand_h - expand_top
+            avail_left = x1_exp
+            avail_right = frame_w - x2_exp
+            avail_top = y1_exp
+            avail_bottom = frame_h - y2_exp
 
-            x1_exp = max(0, x1_exp - expand_left)
-            x2_exp = min(frame_w, x2_exp + expand_right)
-            y1_exp = max(0, y1_exp - expand_top)
-            y2_exp = min(frame_h, y2_exp + expand_bottom)
+            expand_lr = min(avail_left, avail_right, expand_w // 2)
+            expand_left = expand_lr + min(avail_left - expand_lr, expand_w - expand_lr * 2)
+            expand_right = expand_lr + min(avail_right - expand_lr, expand_w - expand_lr - expand_left)
+
+            expand_tb = min(avail_top, avail_bottom, expand_h // 2)
+            expand_top = expand_tb + min(avail_top - expand_tb, expand_h - expand_tb * 2)
+            expand_bottom = expand_tb + min(avail_bottom - expand_tb, expand_h - expand_tb - expand_top)
+
+            x1_exp -= expand_left
+            x2_exp += expand_right
+            y1_exp -= expand_top
+            y2_exp += expand_bottom
 
         return x1_exp, y1_exp, x2_exp, y2_exp
 

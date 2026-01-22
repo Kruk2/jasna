@@ -98,9 +98,11 @@ class FrameBuffer:
                 align_corners=False
             ).squeeze(0)
 
-            # Upscale mask from model resolution directly to crop size
+            # Upscale mask to frame resolution, then crop to bbox region
+            frame_h, frame_w = restored_clip.frame_shape
             mask = restored_clip.masks[i].float().unsqueeze(0).unsqueeze(0)  # (1, 1, Hm, Wm)
-            crop_mask = F.interpolate(mask, size=(crop_h, crop_w), mode='nearest').squeeze()
+            mask_fullres = F.interpolate(mask, size=(frame_h, frame_w), mode='nearest').squeeze()  # (H, W)
+            crop_mask = mask_fullres[y1:y2, x1:x2]
 
             blend_mask = create_blend_mask(crop_mask)
 
