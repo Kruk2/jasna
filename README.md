@@ -3,25 +3,22 @@
 JAV model restoration tool inspired by [Lada](https://codeberg.org/ladaapp/lada).
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
 Differences:
-- GPU only processing (benchmarks TBD). Intial test for 10min: lada: 4min 12s and jasna: 3min 5s
+- GPU only processing (benchmarks TBD). Intial tests show that it can be 2x faster. Raw processing for places without mosaic is ~250fps on RTX 5090.
 - Improved mosaic detection model.
+- Temporal overlap which reduces flickering (beta)
 - Accurate color conversions on gpu (input matches output and no banding).
 - Only modern Nvidia gpu is supported.
 - TensorRT support.
 - CLI only
 
-Consider this release as very alpha.
-
 TODO:
-- improve blending
-- improve performance (this version is very simple
+- improve performance (this version is very simple)
 - proper VR support
 - TVAI and SeedVR
 - Proper stream that can be played in Stash (and maybe others?)
 
-
 ### Usage
-Go to releases page and download last package. Built for windows on cuda 13.0.
+Go to releases page and download last package. Built for windows/linux on cuda 13.0.
 Make sure that ```ffmpeg``` and ```mkvmerge``` is in your path.
 You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html).
 
