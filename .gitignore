@@ -20,6 +20,7 @@ htmlcov/
 
 build/
 dist/
+dist_linux/
 *.egg-info/
 .eggs/
 
