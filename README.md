@@ -1,6 +1,6 @@
 ## Jasna
 
-JAV model restoration tool inspired by [Lada](https://codeberg.org/ladaapp/lada).
+JAV model restoration tool inspired (and in some places based on) by [Lada](https://codeberg.org/ladaapp/lada).
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
 
 ### Differences:
