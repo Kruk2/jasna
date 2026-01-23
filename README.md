@@ -1,6 +1,6 @@
 ## Jasna
 
-AI video restoration tool inspired by Lada.
+AI video restoration tool inspired (and in some places based on) by Lada.
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
 
 ### Differences:
