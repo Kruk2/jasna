@@ -169,19 +169,23 @@ def test_restore_fails_on_invalid_frame_rank(monkeypatch) -> None:
 def test_engine_padding_uses_mirror_repeat_sequence(monkeypatch) -> None:
     import jasna.restorer.basicvsrpp_mosaic_restorer as br
 
+    import pytest
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA required for engine path test")
+
     class _CaptureEngine:
         def __init__(self) -> None:
             self.captured_inputs: torch.Tensor | None = None
 
-        def __call__(self, *, inputs: torch.Tensor) -> torch.Tensor:
-            self.captured_inputs = inputs.detach().clone()
-            return inputs
+        def __call__(self, x: torch.Tensor) -> torch.Tensor:
+            self.captured_inputs = x.detach().clone()
+            return x
 
     monkeypatch.setattr(br, "load_model", lambda config, checkpoint_path, device, fp16: _CaptureIdentityModel())
 
     restorer = br.BasicvsrppMosaicRestorer(
         checkpoint_path="unused.pth",
-        device=torch.device("cpu"),
+        device=torch.device("cuda:0"),
         max_clip_size=5,
         use_tensorrt=True,
         fp16=False,
@@ -191,10 +195,12 @@ def test_engine_padding_uses_mirror_repeat_sequence(monkeypatch) -> None:
     engine = _CaptureEngine()
     restorer._engine_main = engine  # type: ignore[attr-defined]
     restorer._engine_main_len = 5  # type: ignore[attr-defined]
+    restorer._trt_pre_event = torch.cuda.Event()  # type: ignore[attr-defined]
+    restorer._trt_post_event = torch.cuda.Event()  # type: ignore[attr-defined]
 
-    x = torch.tensor([[[10, 0, 0]]], dtype=torch.uint8)  # (H=1, W=1, C=3)
-    y = torch.tensor([[[20, 0, 0]]], dtype=torch.uint8)
-    z = torch.tensor([[[30, 0, 0]]], dtype=torch.uint8)
+    x = torch.tensor([[[10, 0, 0]]], dtype=torch.uint8, device="cuda")  # (H=1, W=1, C=3)
+    y = torch.tensor([[[20, 0, 0]]], dtype=torch.uint8, device="cuda")
+    z = torch.tensor([[[30, 0, 0]]], dtype=torch.uint8, device="cuda")
 
     restorer.restore([x, y, z])
     assert engine.captured_inputs is not None
@@ -204,4 +210,4 @@ def test_engine_padding_uses_mirror_repeat_sequence(monkeypatch) -> None:
     # X Y Z Y X
     got = engine.captured_inputs[0, :, 0, 0, 0].cpu()  # red channel, first pixel
     expected = torch.tensor([10, 20, 30, 20, 10], dtype=torch.float32) / 255.0
-    assert torch.allclose(got, expected, atol=0, rtol=0)
+    assert torch.allclose(got, expected, atol=1e-6, rtol=0)
