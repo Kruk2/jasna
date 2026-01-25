@@ -10,6 +10,8 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 import heapq
 from collections  import deque
 import subprocess
+import threading
+import queue
 av.logging.set_level(logging.ERROR)
 
 def _parse_hevc_nal_units(data: bytes):
@@ -181,6 +183,11 @@ class NvidiaVideoEncoder:
         self.pts_set = set()
         self.reordered_pts_queue = deque()
 
+        self._stop_sentinel = object()
+        self._encode_queue: queue.Queue = queue.Queue(maxsize=self.BUFFER_MAX_SIZE)
+        self._encode_thread = threading.Thread(target=self._encode_worker, name="NvidiaVideoEncoderWorker", daemon=True)
+        self._encode_thread.start()
+
         if metadata.color_space != AvColorspace.ITU709 and metadata.color_range != AvColorRange.MPEG:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
 
@@ -214,6 +221,10 @@ class NvidiaVideoEncoder:
         while self.frame_buffer:
             self._process_buffer(flush_all=True)
 
+        self._encode_queue.join()
+        self._encode_queue.put(self._stop_sentinel)
+        self._encode_thread.join()
+
         while True:
             with torch.cuda.stream(self.stream):
                 bitstream = self.encoder.EndEncode()
@@ -239,6 +250,20 @@ class NvidiaVideoEncoder:
 
         del self.encoder
 
+    def _encode_worker(self):
+        if self.device.type == "cuda":
+            torch.cuda.set_device(self.device)
+
+        while True:
+            item = self._encode_queue.get()
+            try:
+                if item is self._stop_sentinel:
+                    return
+                frame, pts = item
+                self._encode_frame(frame, pts)
+            finally:
+                self._encode_queue.task_done()
+
     def _mux_packet_pyav(self, data: bytearray, pts: int):
         data_bytes = bytes(data)
         
@@ -263,7 +288,7 @@ class NvidiaVideoEncoder:
             frame_to_encode = self.frame_buffer.popleft()
             pts_to_assign = heapq.heappop(self.pts_heap)
             self.pts_set.remove(pts_to_assign)
-            self._encode_frame(frame_to_encode, pts_to_assign)
+            self._encode_queue.put((frame_to_encode, pts_to_assign))
 
     def _encode_frame(self, frame: torch.Tensor, pts: int):
         self.reordered_pts_queue.append(pts)
