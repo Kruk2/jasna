@@ -8,8 +8,10 @@ import torch
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
+from jasna.mosaic import RfDetrMosaicDetectionModel
 from jasna.mosaic import Detections
 from jasna.progressbar import Progressbar
+from jasna.restorer import BasicvsrppMosaicRestorer
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
 
@@ -22,30 +24,44 @@ class Pipeline:
         *,
         input_video: Path,
         output_video: Path,
-        detection_model,
-        restoration_pipeline: RestorationPipeline,
+        detection_model_path: Path,
+        restoration_model_path: Path,
         stream: torch.cuda.Stream,
         batch_size: int,
         device: torch.device,
         max_clip_size: int,
         temporal_overlap: int,
+        fp16: bool,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
-        self.detection_model = detection_model
-        self.restoration_pipeline = restoration_pipeline
         self.stream = stream
         self.batch_size = int(batch_size)
         self.device = device
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
+        self.fp16 = bool(fp16)
+
+        self.detection_model = RfDetrMosaicDetectionModel(
+            onnx_path=detection_model_path,
+            stream=self.stream,
+            batch_size=self.batch_size,
+            device=self.device,
+            fp16=self.fp16,
+        )
+        restorer = BasicvsrppMosaicRestorer(
+            checkpoint_path=str(restoration_model_path),
+            device=self.device,
+            fp16=self.fp16,
+        )
+        self.restoration_pipeline = RestorationPipeline(restorer=restorer)
 
     def run(self) -> None:
         stream = self.stream
         metadata = get_video_meta_data(str(self.input_video))
 
         tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=self.temporal_overlap)
-        frame_buffer = FrameBuffer(device=self.device)
+        frame_buffer = FrameBuffer(device=self.device, compute_dtype=self.restoration_pipeline.restorer.dtype)
         active_tracks: set[int] = set()
         continuation_context: dict[int, list[torch.Tensor]] = {}
 
