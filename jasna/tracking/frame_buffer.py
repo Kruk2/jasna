@@ -36,13 +36,12 @@ class FrameBuffer:
     def add_frame(
         self, frame_idx: int, pts: int, frame: torch.Tensor, clip_track_ids: set[int]
     ) -> None:
-        blended = frame.clone() if clip_track_ids else frame
         self.frames[frame_idx] = PendingFrame(
             frame_idx=frame_idx,
             pts=pts,
             frame=frame,
             pending_clips=clip_track_ids.copy(),
-            blended_frame=blended,
+            blended_frame=frame,
         )
 
     def get_frame(self, frame_idx: int) -> torch.Tensor | None:
@@ -64,6 +63,8 @@ class FrameBuffer:
             crop_h, crop_w = restored_clip.crop_shapes[i]
             x1, y1, x2, y2 = restored_clip.enlarged_bboxes[i]
 
+            if pending.blended_frame is pending.frame:
+                pending.blended_frame = pending.frame.clone()
             blended = pending.blended_frame
 
             unpadded = restored[:, pad_top:pad_top + resize_h, pad_left:pad_left + resize_w]
@@ -76,9 +77,11 @@ class FrameBuffer:
             ).squeeze(0)
 
             frame_h, frame_w = restored_clip.frame_shape
-            mask = restored_clip.masks[i].to(dtype=self.compute_dtype).unsqueeze(0).unsqueeze(0)  # (1, 1, Hm, Wm)
-            mask_fullres = F.interpolate(mask, size=(frame_h, frame_w), mode="nearest").squeeze(0).squeeze(0)  # (H, W)
-            crop_mask = mask_fullres[y1:y2, x1:x2]
+            mask_lr = restored_clip.masks[i].to(dtype=self.compute_dtype)  # (Hm, Wm)
+            hm, wm = mask_lr.shape
+            y_idx = (torch.arange(y1, y2, device=mask_lr.device) * hm) // frame_h
+            x_idx = (torch.arange(x1, x2, device=mask_lr.device) * wm) // frame_w
+            crop_mask = mask_lr.index_select(0, y_idx).index_select(1, x_idx)
 
             blend_mask = self.blend_mask_fn(crop_mask)
 

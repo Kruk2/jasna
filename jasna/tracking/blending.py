@@ -4,6 +4,8 @@ import torch
 import torch.nn.functional as F
 from torchvision.transforms.functional import gaussian_blur
 
+_KERNEL_CACHE: dict[tuple[str, torch.dtype, int], torch.Tensor] = {}
+
 
 def create_blend_mask(crop_mask: torch.Tensor, border_ratio: float = 0.05) -> torch.Tensor:
     """Create blend mask from detection mask with blurred border."""
@@ -36,7 +38,11 @@ def create_blend_mask(crop_mask: torch.Tensor, border_ratio: float = 0.05) -> to
     feathered = gaussian_blur(mask4.unsqueeze(0).unsqueeze(0), [blur_size, blur_size], [3.0, 3.0]).squeeze(0).squeeze(0)
     blend = torch.minimum(feathered, blend)
 
-    kernel = torch.ones((1, 1, blur_size, blur_size), device=blend.device, dtype=blend_dtype) / (blur_size**2)
+    cache_key = (str(blend.device), blend_dtype, blur_size)
+    kernel = _KERNEL_CACHE.get(cache_key)
+    if kernel is None:
+        kernel = torch.ones((1, 1, blur_size, blur_size), device=blend.device, dtype=blend_dtype) / (blur_size**2)
+        _KERNEL_CACHE[cache_key] = kernel
     pad_size = blur_size // 2
     blend_4d = F.pad(blend.unsqueeze(0).unsqueeze(0), (pad_size, pad_size, pad_size, pad_size), mode="reflect")
     blend = F.conv2d(blend_4d, kernel).squeeze(0).squeeze(0)
