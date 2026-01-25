@@ -92,8 +92,8 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-model-path",
         type=str,
-        default=str(Path("model_weights") / "rfdetr.onnx"),
-        help='Path to detection ONNX model (default: "model_weights/rfdetr.onnx")',
+        default=str(Path("model_weights") / "rfdetr-v2.onnx"),
+        help='Path to detection ONNX model (default: "model_weights/rfdetr-v2.onnx")',
     )
 
     encoding = parser.add_argument_group("Encoding")
