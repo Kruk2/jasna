@@ -27,7 +27,6 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
 class RestorationPipeline:
     def __init__(self, restorer: BasicvsrppMosaicRestorer) -> None:
         self.restorer = restorer
-        self._resize_dtype = restorer.dtype
 
     def restore_clip(
         self, clip: TrackedClip, frames: list[torch.Tensor], prefix_restored_frames: list[torch.Tensor] | None = None
@@ -82,7 +81,7 @@ class RestorationPipeline:
             resize_shapes.append((new_h, new_w))
 
             resized = F.interpolate(
-                crop.unsqueeze(0).to(dtype=self._resize_dtype),
+                crop.unsqueeze(0).float(),
                 size=(new_h, new_w),
                 mode='bilinear',
                 align_corners=False

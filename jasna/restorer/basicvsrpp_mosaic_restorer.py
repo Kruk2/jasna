@@ -11,6 +11,7 @@ class BasicvsrppMosaicRestorer:
     def __init__(self, checkpoint_path: str, device: torch.device, fp16: bool, config: str | dict | None = None):
         self.device: torch.device = torch.device(device)
         self.dtype = torch.float16 if fp16 else torch.float32
+        self.input_dtype = self.dtype
         self.model = load_model(config, checkpoint_path, self.device, fp16)
 
     def restore(self, video: list[Tensor]) -> list[Tensor]:
@@ -23,7 +24,7 @@ class BasicvsrppMosaicRestorer:
         with torch.inference_mode():
             resized = []
             for frame in video:
-                f = frame.permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.dtype).div_(255.0)
+                f = frame.permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.input_dtype).div_(255.0)
                 f = F.interpolate(f, size=(INFERENCE_SIZE, INFERENCE_SIZE), mode='bilinear', align_corners=False)
                 resized.append(f.squeeze(0))
             stacked = torch.stack(resized, dim=0)

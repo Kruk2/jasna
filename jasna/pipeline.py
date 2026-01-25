@@ -40,19 +40,18 @@ class Pipeline:
         self.device = device
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
-        self.fp16 = bool(fp16)
 
         self.detection_model = RfDetrMosaicDetectionModel(
             onnx_path=detection_model_path,
             stream=self.stream,
             batch_size=self.batch_size,
             device=self.device,
-            fp16=self.fp16,
+            fp16=bool(fp16),
         )
         restorer = BasicvsrppMosaicRestorer(
             checkpoint_path=str(restoration_model_path),
             device=self.device,
-            fp16=self.fp16,
+            fp16=bool(fp16),
         )
         self.restoration_pipeline = RestorationPipeline(restorer=restorer)
 
@@ -61,7 +60,7 @@ class Pipeline:
         metadata = get_video_meta_data(str(self.input_video))
 
         tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=self.temporal_overlap)
-        frame_buffer = FrameBuffer(device=self.device, compute_dtype=self.restoration_pipeline.restorer.dtype)
+        frame_buffer = FrameBuffer(device=self.device)
         active_tracks: set[int] = set()
         continuation_context: dict[int, list[torch.Tensor]] = {}
 

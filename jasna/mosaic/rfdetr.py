@@ -35,16 +35,15 @@ class RfDetrMosaicDetectionModel:
         self.resolution = int(resolution)
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
-        self.fp16 = bool(fp16)
-        self.input_dtype = torch.float16 if self.fp16 else torch.float32
 
-        self.engine_path = compile_onnx_to_tensorrt_engine(self.onnx_path, fp16=self.fp16)
+        self.engine_path = compile_onnx_to_tensorrt_engine(self.onnx_path, fp16=bool(fp16))
         self.runner = TrtRunner(
             self.engine_path,
             stream=self.stream,
             input_shape=(self.batch_size, 3, self.resolution, self.resolution),
             device=self.device,
         )
+        self.input_dtype = self.runner.input_dtype
 
         self.boxes_out = next(
             k for k in self.runner.output_names if self.runner.outputs[k].ndim == 3 and self.runner.outputs[k].shape[-1] == 4
