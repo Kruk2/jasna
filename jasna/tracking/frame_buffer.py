@@ -6,26 +6,32 @@ from dataclasses import dataclass, field
 import torch
 import torch.nn.functional as F
 
+from jasna.restorer.restored_clip import RestoredClip
 from jasna.tracking.clip_tracker import TrackedClip
 from jasna.tracking.blending import create_blend_mask
-from jasna.restorer.restoration_pipeline import RestoredClip
-
 
 @dataclass
 class PendingFrame:
     frame_idx: int
     pts: int
     frame: torch.Tensor
+    blended_frame: torch.Tensor
     pending_clips: set[int] = field(default_factory=set)
-    blended_frame: torch.Tensor | None = None
 
 
 class FrameBuffer:
-    def __init__(self, device: torch.device, *, blend_mask_fn: Callable[[torch.Tensor], torch.Tensor] = create_blend_mask):
+    def __init__(
+        self,
+        device: torch.device,
+        compute_dtype: torch.dtype,
+        *,
+        blend_mask_fn: Callable[[torch.Tensor], torch.Tensor] = create_blend_mask,
+    ):
         self.device = device
         self.frames: dict[int, PendingFrame] = {}
         self.next_encode_idx: int = 0
         self.blend_mask_fn = blend_mask_fn
+        self.compute_dtype = compute_dtype
 
     def add_frame(
         self, frame_idx: int, pts: int, frame: torch.Tensor, clip_track_ids: set[int]
@@ -58,25 +64,28 @@ class FrameBuffer:
             crop_h, crop_w = restored_clip.crop_shapes[i]
             x1, y1, x2, y2 = restored_clip.enlarged_bboxes[i]
 
+            blended = pending.blended_frame
+
             unpadded = restored[:, pad_top:pad_top + resize_h, pad_left:pad_left + resize_w]
 
             resized_back = F.interpolate(
-                unpadded.unsqueeze(0).float(),
+                unpadded.unsqueeze(0).to(dtype=self.compute_dtype),
                 size=(crop_h, crop_w),
                 mode='bilinear',
                 align_corners=False
             ).squeeze(0)
 
-            # Upscale mask to frame resolution, then crop to bbox region
-            frame_h, frame_w = restored_clip.frame_shape
-            mask = restored_clip.masks[i].float().unsqueeze(0).unsqueeze(0)  # (1, 1, Hm, Wm)
-            mask_fullres = F.interpolate(mask, size=(frame_h, frame_w), mode='nearest').squeeze()  # (H, W)
-            crop_mask = mask_fullres[y1:y2, x1:x2]
+            padded_mask = restored_clip.padded_masks[i]
+            unpadded_mask = padded_mask[pad_top:pad_top + resize_h, pad_left:pad_left + resize_w].to(dtype=self.compute_dtype)
+            crop_mask = F.interpolate(
+                unpadded_mask.unsqueeze(0).unsqueeze(0),
+                size=(crop_h, crop_w),
+                mode="nearest",
+            ).squeeze(0).squeeze(0)
 
             blend_mask = self.blend_mask_fn(crop_mask)
 
-            blended = pending.blended_frame
-            original_crop = blended[:, y1:y2, x1:x2].float()
+            original_crop = blended[:, y1:y2, x1:x2].to(dtype=self.compute_dtype)
 
             blended_crop = original_crop + (resized_back - original_crop) * blend_mask.unsqueeze(0)
             blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)

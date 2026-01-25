@@ -50,7 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
-    parser.add_argument("--fp16", action="store_true", help="Use FP16 for restoration model")
+    parser.add_argument(
+        "--fp16",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Use FP16 where supported (restoration + TensorRT).",
+    )
     parser.add_argument("--max-clip-size", type=int, default=30, help="Maximum clip size for tracking")
     parser.add_argument("--temporal-overlap", type=int, default=3, help="Number of restored frames to use as context for split clips")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
@@ -70,9 +75,7 @@ def main() -> None:
 
     import torch
 
-    from jasna.mosaic import RfDetrMosaicDetectionModel
     from jasna.pipeline import Pipeline
-    from jasna.restorer import BasicvsrppMosaicRestorer, RestorationPipeline
 
     input_video = Path(args.input)
     if not input_video.exists():
@@ -114,30 +117,17 @@ def main() -> None:
         raise ValueError(f"Unsupported restoration model: {restoration_model_name}")
 
     stream = torch.cuda.Stream()
-    detection_model = RfDetrMosaicDetectionModel(
-        onnx_path=detection_model_path,
-        stream=stream,
-        batch_size=batch_size,
-        device=device,
-    )
-
-    restorer = BasicvsrppMosaicRestorer(
-        checkpoint_path=str(restoration_model_path),
-        device=device,
-        fp16=fp16,
-    )
-    restoration_pipeline = RestorationPipeline(restorer=restorer)
-
     Pipeline(
         input_video=input_video,
         output_video=output_video,
-        detection_model=detection_model,
-        restoration_pipeline=restoration_pipeline,
+        detection_model_path=detection_model_path,
+        restoration_model_path=restoration_model_path,
         stream=stream,
         batch_size=batch_size,
         device=device,
         max_clip_size=max_clip_size,
         temporal_overlap=temporal_overlap,
+        fp16=fp16,
     ).run()
 
 

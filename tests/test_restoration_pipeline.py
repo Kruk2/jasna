@@ -6,6 +6,8 @@ from jasna.tracking.clip_tracker import TrackedClip
 
 
 class _IdentityRestorer:
+    dtype = torch.float32
+
     def restore(self, crops: list[torch.Tensor]) -> list[torch.Tensor]:
         return crops
 
@@ -37,6 +39,8 @@ def test_restore_clip_uses_floor_ceil_xyxy_rounding(monkeypatch) -> None:
     # floor(x1/y1)=2, ceil(x2/y2)=7; xyxy are exclusive for slicing.
     assert restored.enlarged_bboxes == [(2, 2, 7, 7)]
     assert restored.crop_shapes == [(5, 5)]
+    assert len(restored.padded_masks) == 1
+    assert restored.padded_masks[0].shape == (256, 256)
 
 
 def test_restore_clip_drops_prefix_frames_from_output(monkeypatch) -> None:
@@ -62,4 +66,5 @@ def test_restore_clip_drops_prefix_frames_from_output(monkeypatch) -> None:
     prefix = [torch.zeros((3, 256, 256), dtype=torch.uint8) for _ in range(3)]
     restored = pipeline.restore_clip(clip, [frame], prefix_restored_frames=prefix)
     assert len(restored.restored_frames) == 1
+    assert len(restored.padded_masks) == 1
 
