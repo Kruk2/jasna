@@ -44,7 +44,7 @@ class Pipeline:
         stream = self.stream
         metadata = get_video_meta_data(str(self.input_video))
 
-        tracker = ClipTracker(max_clip_size=self.max_clip_size)
+        tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=self.temporal_overlap)
         frame_buffer = FrameBuffer(device=self.device)
         active_tracks: set[int] = set()
         continuation_context: dict[int, list[torch.Tensor]] = {}

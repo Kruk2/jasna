@@ -107,14 +107,27 @@ class EndedClip:
 
 
 class ClipTracker:
-    def __init__(self, max_clip_size: int, iou_threshold: float = 0.3):
-        self.max_clip_size = max_clip_size
+    def __init__(self, max_clip_size: int, temporal_overlap: int = 0, iou_threshold: float = 0.3):
+        self.max_clip_size = int(max_clip_size)
+        self.temporal_overlap = int(temporal_overlap)
         self.iou_threshold = iou_threshold
         self.active_clips: dict[int, TrackedClip] = {}
         self.next_track_id = 0
         self.last_frame_boxes: np.ndarray | None = None  # (T, 4) xyxy, CPU
         self.track_ids: list[int] = []  # track_id for each row in last_frame_boxes
         self._continuation_map: dict[int, int] = {}  # new_track_id -> original_track_id that was split
+        self._pending_splits: dict[int, tuple[int, np.ndarray]] = {}  # split_track_id -> (split_frame_idx, last bbox)
+        if self.temporal_overlap < 0:
+            raise ValueError("temporal_overlap must be >= 0")
+        if self.temporal_overlap >= self.max_clip_size:
+            raise ValueError("temporal_overlap must be < max_clip_size")
+
+    def _effective_max_size(self, track_id: int) -> int:
+        if self.temporal_overlap == 0:
+            return self.max_clip_size
+        if track_id in self._continuation_map:
+            return self.max_clip_size - self.temporal_overlap
+        return self.max_clip_size
 
     def update(
         self, frame_idx: int, bboxes: np.ndarray, masks: torch.Tensor
@@ -130,11 +143,19 @@ class ClipTracker:
         ended_clips: list[EndedClip] = []
         active_track_ids: set[int] = set()
 
+        if self._pending_splits:
+            self._pending_splits = {
+                tid: (split_frame_idx, bbox)
+                for tid, (split_frame_idx, bbox) in self._pending_splits.items()
+                if split_frame_idx == frame_idx - 1
+            }
+
         if bboxes.shape[0] == 0:
             for track_id in self.track_ids:
                 ended_clips.append(EndedClip(clip=self.active_clips.pop(track_id), split_due_to_max_size=False))
             self.last_frame_boxes = None
             self.track_ids = []
+            self._pending_splits.clear()
             return ended_clips, active_track_ids
 
         n_detections = bboxes.shape[0]
@@ -160,8 +181,6 @@ class ClipTracker:
                 matched_det[det_idx] = True
                 matched_track_indices.add(track_idx)
                 det_to_track[det_idx] = track_idx
-        split_track_ids: dict[int, tuple[np.ndarray, int]] = {}  # track_id -> (last_bbox, det_idx that matched)
-
         for det_idx, track_idx in det_to_track.items():
             track_id = self.track_ids[track_idx]
             clip = self.active_clips[track_id]
@@ -169,11 +188,10 @@ class ClipTracker:
             clip.masks.append(masks[det_idx])
             active_track_ids.add(track_id)
 
-            if clip.frame_count >= self.max_clip_size:
+            if clip.frame_count >= self._effective_max_size(track_id):
                 ended_clips.append(EndedClip(clip=clip, split_due_to_max_size=True))
-                split_track_ids[track_id] = (bboxes[det_idx], det_idx)
+                self._pending_splits[track_id] = (frame_idx, bboxes[det_idx])
                 del self.active_clips[track_id]
-                matched_det[det_idx] = False
 
         for track_idx, track_id in enumerate(self.track_ids):
             if track_idx not in matched_track_indices and track_id in self.active_clips:
@@ -193,11 +211,15 @@ class ClipTracker:
                 self.active_clips[track_id] = clip
                 active_track_ids.add(track_id)
                 
-                # Check if this new clip is a continuation of a split clip
-                for split_track_id, (split_bbox, split_det_idx) in split_track_ids.items():
-                    if split_det_idx == det_idx:
-                        self._continuation_map[track_id] = split_track_id
-                        break
+                if self._pending_splits:
+                    split_track_ids = list(self._pending_splits.keys())
+                    split_boxes = np.stack([self._pending_splits[tid][1] for tid in split_track_ids])
+                    ious = compute_iou_matrix(bboxes[det_idx : det_idx + 1], split_boxes)[0]
+                    best_idx = int(ious.argmax())
+                    if float(ious[best_idx]) > self.iou_threshold:
+                        source_track_id = split_track_ids[best_idx]
+                        self._continuation_map[track_id] = source_track_id
+                        del self._pending_splits[source_track_id]
 
         new_boxes = []
         new_track_ids = []
@@ -230,4 +252,5 @@ class ClipTracker:
         self.last_frame_boxes = None
         self.track_ids = []
         self._continuation_map.clear()
+        self._pending_splits.clear()
         return clips
