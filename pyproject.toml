@@ -19,8 +19,16 @@ jasna = "jasna.main:main"
 [project.optional-dependencies]
 dev = [
   "pyinstaller>=6.0",
+  "pytest",
+  "pytest-cov",
 ]
 
 [tool.setuptools]
 packages = ["jasna", "jasna.mosaic", "jasna.restorer", "jasna.trt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+  "ignore:'maxsplit' is passed as positional argument:DeprecationWarning:mmengine\\.utils\\.misc",
+]
 

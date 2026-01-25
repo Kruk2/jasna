@@ -1,46 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import torch
 import torch.nn.functional as F
 
 from jasna.tracking.clip_tracker import TrackedClip
+from jasna.tracking.blending import create_blend_mask
 from jasna.restorer.restoration_pipeline import RestoredClip
-
-
-def create_blend_mask(crop_mask: torch.Tensor, border_ratio: float = 0.05) -> torch.Tensor:
-    """Create blend mask from detection mask with blurred border."""
-    mask = crop_mask.squeeze()
-    h, w = mask.shape
-    h_inner = int(h * (1.0 - border_ratio))
-    w_inner = int(w * (1.0 - border_ratio))
-    h_outer = h - h_inner
-    w_outer = w - w_inner
-    border_size = min(h_outer, w_outer)
-
-    if border_size < 5:
-        return torch.ones_like(mask, dtype=torch.float32)
-
-    blur_size = border_size
-    if blur_size % 2 == 0:
-        blur_size += 1
-
-    inner = torch.ones((h_inner, w_inner), device=mask.device, dtype=torch.float32)
-    pad_top = h_outer // 2
-    pad_bottom = h_outer - pad_top
-    pad_left = w_outer // 2
-    pad_right = w_outer - pad_left
-    blend = F.pad(inner, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
-
-    blend = torch.maximum((mask > 0).float(), blend)
-
-    kernel = torch.ones((1, 1, blur_size, blur_size), device=blend.device, dtype=torch.float32) / (blur_size ** 2)
-    pad_size = blur_size // 2
-    blend_4d = F.pad(blend.unsqueeze(0).unsqueeze(0), (pad_size, pad_size, pad_size, pad_size), mode='replicate')
-    blend = F.conv2d(blend_4d, kernel).squeeze(0).squeeze(0)
-
-    return blend.clamp(0, 1)
 
 
 @dataclass
@@ -53,10 +21,11 @@ class PendingFrame:
 
 
 class FrameBuffer:
-    def __init__(self, device: torch.device):
+    def __init__(self, device: torch.device, *, blend_mask_fn: Callable[[torch.Tensor], torch.Tensor] = create_blend_mask):
         self.device = device
         self.frames: dict[int, PendingFrame] = {}
         self.next_encode_idx: int = 0
+        self.blend_mask_fn = blend_mask_fn
 
     def add_frame(
         self, frame_idx: int, pts: int, frame: torch.Tensor, clip_track_ids: set[int]
@@ -104,7 +73,7 @@ class FrameBuffer:
             mask_fullres = F.interpolate(mask, size=(frame_h, frame_w), mode='nearest').squeeze()  # (H, W)
             crop_mask = mask_fullres[y1:y2, x1:x2]
 
-            blend_mask = create_blend_mask(crop_mask)
+            blend_mask = self.blend_mask_fn(crop_mask)
 
             blended = pending.blended_frame
             original_crop = blended[:, y1:y2, x1:x2].float()
