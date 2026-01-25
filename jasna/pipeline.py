@@ -24,6 +24,7 @@ class Pipeline:
         input_video: Path,
         output_video: Path,
         detection_model_path: Path,
+        detection_score_threshold: float,
         restoration_pipeline: RestorationPipeline,
         codec: str,
         encoder_settings: dict[str, object],
@@ -49,6 +50,7 @@ class Pipeline:
             stream=self.stream,
             batch_size=self.batch_size,
             device=self.device,
+            score_threshold=float(detection_score_threshold),
             fp16=bool(fp16),
         )
         self.restoration_pipeline = restoration_pipeline

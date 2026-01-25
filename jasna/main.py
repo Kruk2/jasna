@@ -95,6 +95,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(Path("model_weights") / "rfdetr-v2.onnx"),
         help='Path to detection ONNX model (default: "model_weights/rfdetr-v2.onnx")',
     )
+    detection.add_argument(
+        "--detection-score-threshold",
+        type=float,
+        default=0.2,
+        help="Detection score threshold (default: 0.2)",
+    )
 
     encoding = parser.add_argument_group("Encoding")
     encoding.add_argument(
@@ -167,6 +173,9 @@ def main() -> None:
 
     device = torch.device(str(args.device))
     fp16 = bool(args.fp16)
+    detection_score_threshold = float(args.detection_score_threshold)
+    if not (0.0 <= detection_score_threshold <= 1.0):
+        raise ValueError("--detection-score-threshold must be in [0, 1]")
 
     if detection_model_name != "rfdetr":
         raise ValueError(f"Unsupported detection model: {detection_model_name}")
@@ -201,6 +210,7 @@ def main() -> None:
         input_video=input_video,
         output_video=output_video,
         detection_model_path=detection_model_path,
+        detection_score_threshold=detection_score_threshold,
         restoration_pipeline=restoration_pipeline,
         codec=codec,
         encoder_settings=encoder_settings,
