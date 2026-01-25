@@ -5,6 +5,85 @@ from fractions import Fraction
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import json
 
+SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
+    {
+        "preset",
+        "tuning_info",
+        "rc",
+        "cq",
+        "qmin",
+        "qmax",
+        "nonrefp",
+        "gop",
+        "maxbitrate",
+        "vbvinit",
+        "vbvbufsize",
+        "temporalaq",
+        "lookahead",
+        "lookahead_level",
+        "aq",
+        "initqp",
+        "tflevel",
+    }
+)
+
+
+def _parse_encoder_setting_scalar(value: str) -> object:
+    v = value.strip()
+    if v.lower() == "true":
+        return True
+    if v.lower() == "false":
+        return False
+    try:
+        return int(v)
+    except ValueError:
+        pass
+    try:
+        return float(v)
+    except ValueError:
+        pass
+    return v
+
+
+def parse_encoder_settings(value: str) -> dict[str, object]:
+    value = (value or "").strip()
+    if value == "":
+        return {}
+
+    if value.startswith("{"):
+        parsed = json.loads(value)
+        if not isinstance(parsed, dict):
+            raise ValueError("--encoder-settings JSON must be an object")
+        return parsed
+
+    settings: dict[str, object] = {}
+    for part in value.split(","):
+        part = part.strip()
+        if part == "":
+            continue
+        if "=" not in part:
+            raise ValueError(f"Invalid --encoder-settings item: {part!r} (expected key=value)")
+        k, v = part.split("=", 1)
+        k = k.strip()
+        if k == "":
+            raise ValueError(f"Invalid --encoder-settings item: {part!r} (empty key)")
+        settings[k] = _parse_encoder_setting_scalar(v)
+
+    return settings
+
+
+def validate_encoder_settings(settings: dict[str, object]) -> dict[str, object]:
+    invalid = sorted(set(settings.keys()) - set(SUPPORTED_ENCODER_SETTINGS))
+    if invalid:
+        raise ValueError(
+            "Unsupported encoder setting(s): "
+            + ", ".join(invalid)
+            + ". Supported: "
+            + ", ".join(sorted(SUPPORTED_ENCODER_SETTINGS))
+        )
+    return settings
+
+
 def get_subprocess_startup_info():
     if os.name != "nt":
         return None

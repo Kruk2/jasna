@@ -25,6 +25,8 @@ class Pipeline:
         output_video: Path,
         detection_model_path: Path,
         restoration_pipeline: RestorationPipeline,
+        codec: str,
+        encoder_settings: dict[str, object],
         stream: torch.cuda.Stream,
         batch_size: int,
         device: torch.device,
@@ -34,6 +36,8 @@ class Pipeline:
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
+        self.codec = str(codec)
+        self.encoder_settings = dict(encoder_settings)
         self.stream = stream
         self.batch_size = int(batch_size)
         self.device = device
@@ -60,7 +64,15 @@ class Pipeline:
 
         with (
             NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=self.device, stream=stream, metadata=metadata) as reader,
-            NvidiaVideoEncoder(str(self.output_video), device=self.device, stream=stream, metadata=metadata, stream_mode=False) as encoder,
+            NvidiaVideoEncoder(
+                str(self.output_video),
+                device=self.device,
+                stream=stream,
+                metadata=metadata,
+                codec=self.codec,
+                encoder_settings=self.encoder_settings,
+                stream_mode=False,
+            ) as encoder,
             torch.inference_mode(),
             torch.cuda.stream(stream),
         ):
