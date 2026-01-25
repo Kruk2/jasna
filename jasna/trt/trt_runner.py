@@ -28,6 +28,7 @@ class TrtRunner:
         self.input_names, self.output_names = _engine_io_names(self.engine)
         self.input_name = self.input_names[0]
         self.context.set_input_shape(self.input_name, self.input_shape)
+        self.input_dtype = _trt_dtype_to_torch(self.engine.get_tensor_dtype(self.input_name))
 
         dev = torch.device(self.device)
         self.outputs: dict[str, torch.Tensor] = {}

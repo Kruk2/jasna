@@ -34,7 +34,7 @@ class _FakeRestoredClip:
 
 
 def test_frame_buffer_ready_when_no_pending_clips() -> None:
-    fb = FrameBuffer(device=torch.device("cpu"), compute_dtype=torch.get_default_dtype())
+    fb = FrameBuffer(device=torch.device("cpu"))
 
     frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=111, frame=frame, clip_track_ids=set())
@@ -50,7 +50,7 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
         captured.append(crop_mask)
         return torch.ones_like(crop_mask.squeeze(), dtype=torch.float32)
 
-    fb = FrameBuffer(device=torch.device("cpu"), compute_dtype=torch.get_default_dtype(), blend_mask_fn=blend_mask_fn)
+    fb = FrameBuffer(device=torch.device("cpu"), blend_mask_fn=blend_mask_fn)
 
     frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=123, frame=frame, clip_track_ids={7})
@@ -90,7 +90,6 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
 def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
-        compute_dtype=torch.get_default_dtype(),
         blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
     )
 
@@ -125,7 +124,7 @@ def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
 
 
 def test_frame_buffer_flush_returns_remaining_in_order() -> None:
-    fb = FrameBuffer(device=torch.device("cpu"), compute_dtype=torch.get_default_dtype())
+    fb = FrameBuffer(device=torch.device("cpu"))
 
     f0 = torch.zeros((3, 4, 4), dtype=torch.uint8)
     f2 = torch.ones((3, 4, 4), dtype=torch.uint8)
@@ -141,7 +140,6 @@ def test_frame_buffer_flush_returns_remaining_in_order() -> None:
 def test_frame_buffer_blend_clip_ignores_missing_frames() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
-        compute_dtype=torch.get_default_dtype(),
         blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
     )
     clip = _FakeClip(track_id=7, frame_idxs=[0])
@@ -162,7 +160,6 @@ def test_frame_buffer_blend_clip_ignores_missing_frames() -> None:
 def test_frame_buffer_uses_blend_mask_value() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
-        compute_dtype=torch.get_default_dtype(),
         blend_mask_fn=lambda crop: torch.zeros_like(crop.squeeze(), dtype=torch.float32),
     )
 
