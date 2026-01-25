@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
+from torchvision.transforms.functional import gaussian_blur
 
 
 def create_blend_mask(crop_mask: torch.Tensor, border_ratio: float = 0.05) -> torch.Tensor:
@@ -29,7 +30,11 @@ def create_blend_mask(crop_mask: torch.Tensor, border_ratio: float = 0.05) -> to
     pad_right = w_outer - pad_left
     blend = F.pad(inner, (pad_left, pad_right, pad_top, pad_bottom), value=0.0)
 
-    blend = torch.maximum((mask > 0).to(dtype=blend.dtype), blend)
+    mask4 = (mask > 0).to(dtype=blend.dtype)
+    blend = torch.maximum(mask4, blend)
+
+    feathered = gaussian_blur(mask4.unsqueeze(0).unsqueeze(0), [blur_size, blur_size], [3.0, 3.0]).squeeze(0).squeeze(0)
+    blend = torch.minimum(feathered, blend)
 
     kernel = torch.ones((1, 1, blur_size, blur_size), device=blend.device, dtype=blend_dtype) / (blur_size**2)
     pad_size = blur_size // 2
