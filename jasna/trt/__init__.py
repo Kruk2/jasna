@@ -45,12 +45,19 @@ def _trt_dtype_to_torch(trt_dtype: trt.DataType) -> torch.dtype:
 
 def compile_onnx_to_tensorrt_engine(
     onnx_path: str | Path,
+    batch_size: int | None = None,
     fp16: bool = True,
     optimization_level: int = 3,
     workspace_gb: int = 20,
 ) -> Path:
     onnx_path = Path(onnx_path)
-    suffix = ".fp16" if fp16 else ""
+    suffix = ""
+    if batch_size is not None:
+        batch_size = int(batch_size)
+        if batch_size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {batch_size}")
+        suffix += f".bs{batch_size}"
+    suffix += ".fp16" if fp16 else ""
     suffix += ".win" if os.name == "nt" else ".linux"
     suffix += ".engine"
     engine_path = onnx_path.with_suffix(suffix)

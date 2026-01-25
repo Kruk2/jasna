@@ -36,7 +36,11 @@ class RfDetrMosaicDetectionModel:
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
 
-        self.engine_path = compile_onnx_to_tensorrt_engine(self.onnx_path, fp16=bool(fp16))
+        self.engine_path = compile_onnx_to_tensorrt_engine(
+            self.onnx_path,
+            batch_size=self.batch_size,
+            fp16=bool(fp16),
+        )
         self.runner = TrtRunner(
             self.engine_path,
             stream=self.stream,
