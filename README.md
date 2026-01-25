@@ -32,3 +32,14 @@ Remember to have up to date nvidia drivers.
 
 ### Disclamer
 This project is aimed at more technical users.
+
+## Building
+Install these libs via ```uv pip install . --no-build-isolation```
+make sure you have cmake and ninja ```uv pip install cmake ninja```
+and cuda 13.0 in your system.
+
+https://codeberg.org/Kruk2/vali
+https://codeberg.org/Kruk2/PyNvVideoCodec
+
+Then:
+```uv pip install -e .[dev]```
