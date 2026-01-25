@@ -12,9 +12,10 @@ dependencies = [
   "torch==2.9.1",
   "tensorrt==10.13.3.9.post1",
   "torch-tensorrt==2.9.0",
-  "pyav>=16.1.0",
+  "av>=16.1.0",
   "numpy",
   "mmengine==0.10.7",
+  "opencv-python",
   "tqdm"
 ]
 
