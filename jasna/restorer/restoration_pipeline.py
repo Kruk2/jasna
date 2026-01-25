@@ -40,7 +40,6 @@ class RestorationPipeline:
         """
         n_prefix = len(prefix_restored_frames) if prefix_restored_frames else 0
         crops: list[torch.Tensor] = []
-        crop_masks: list[torch.Tensor] = []
         enlarged_bboxes: list[tuple[int, int, int, int]] = []
         crop_shapes: list[tuple[int, int]] = []
 
@@ -65,11 +64,6 @@ class RestorationPipeline:
             crop_shapes.append((crop.shape[1], crop.shape[2]))
             crops.append(crop)
 
-            mask = clip.masks[i].unsqueeze(0).unsqueeze(0).to(dtype=self._resize_dtype)  # (1, 1, Hm, Wm)
-            mask_fullres = F.interpolate(mask, size=(frame_h, frame_w), mode="nearest").squeeze(0).squeeze(0)  # (H, W)
-            crop_mask = mask_fullres[y1_exp:y2_exp, x1_exp:x2_exp]
-            crop_masks.append(crop_mask)
-
         max_h = max(s[0] for s in crop_shapes)
         max_w = max(s[1] for s in crop_shapes)
 
@@ -79,11 +73,10 @@ class RestorationPipeline:
             scale_h = scale_w = 1.0
 
         resized_crops: list[torch.Tensor] = []
-        padded_masks: list[torch.Tensor] = []
         resize_shapes: list[tuple[int, int]] = []
         pad_offsets: list[tuple[int, int]] = []
 
-        for crop, crop_mask, (crop_h, crop_w) in zip(crops, crop_masks, crop_shapes):
+        for crop, (crop_h, crop_w) in zip(crops, crop_shapes):
             new_h = int(crop_h * scale_h)
             new_w = int(crop_w * scale_w)
             resize_shapes.append((new_h, new_w))
@@ -104,14 +97,6 @@ class RestorationPipeline:
             padded = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
             resized_crops.append(padded.to(crop.dtype).permute(1, 2, 0))
 
-            resized_mask = F.interpolate(
-                crop_mask.unsqueeze(0).unsqueeze(0),
-                size=(new_h, new_w),
-                mode="nearest",
-            ).squeeze(0).squeeze(0)
-            padded_mask = F.pad(resized_mask, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=0.0)
-            padded_masks.append(padded_mask > 0.0)
-
         # Prepend prefix frames if provided (already in HWC format, 256x256)
         if prefix_restored_frames:
             prefix_hwc = [f.permute(1, 2, 0) for f in prefix_restored_frames]
@@ -129,7 +114,6 @@ class RestorationPipeline:
         return RestoredClip(
             restored_frames=restored_frames,
             masks=clip.masks,
-            padded_masks=padded_masks,
             frame_shape=(frame_h, frame_w),
             enlarged_bboxes=enlarged_bboxes,
             crop_shapes=crop_shapes,
