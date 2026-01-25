@@ -11,7 +11,6 @@ from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel
 from jasna.mosaic import Detections
 from jasna.progressbar import Progressbar
-from jasna.restorer import BasicvsrppMosaicRestorer
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
 
@@ -25,7 +24,7 @@ class Pipeline:
         input_video: Path,
         output_video: Path,
         detection_model_path: Path,
-        restoration_model_path: Path,
+        restoration_pipeline: RestorationPipeline,
         stream: torch.cuda.Stream,
         batch_size: int,
         device: torch.device,
@@ -48,12 +47,7 @@ class Pipeline:
             device=self.device,
             fp16=bool(fp16),
         )
-        restorer = BasicvsrppMosaicRestorer(
-            checkpoint_path=str(restoration_model_path),
-            device=self.device,
-            fp16=bool(fp16),
-        )
-        self.restoration_pipeline = RestorationPipeline(restorer=restorer)
+        self.restoration_pipeline = restoration_pipeline
 
     def run(self) -> None:
         stream = self.stream
