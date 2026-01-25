@@ -75,13 +75,10 @@ class FrameBuffer:
                 align_corners=False
             ).squeeze(0)
 
-            padded_mask = restored_clip.padded_masks[i]
-            unpadded_mask = padded_mask[pad_top:pad_top + resize_h, pad_left:pad_left + resize_w].to(dtype=self.compute_dtype)
-            crop_mask = F.interpolate(
-                unpadded_mask.unsqueeze(0).unsqueeze(0),
-                size=(crop_h, crop_w),
-                mode="nearest",
-            ).squeeze(0).squeeze(0)
+            frame_h, frame_w = restored_clip.frame_shape
+            mask = restored_clip.masks[i].to(dtype=self.compute_dtype).unsqueeze(0).unsqueeze(0)  # (1, 1, Hm, Wm)
+            mask_fullres = F.interpolate(mask, size=(frame_h, frame_w), mode="nearest").squeeze(0).squeeze(0)  # (H, W)
+            crop_mask = mask_fullres[y1:y2, x1:x2]
 
             blend_mask = self.blend_mask_fn(crop_mask)
 

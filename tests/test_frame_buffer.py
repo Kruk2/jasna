@@ -21,7 +21,7 @@ class _FakeRestoredClip:
         resize_shapes: list[tuple[int, int]],
         crop_shapes: list[tuple[int, int]],
         enlarged_bboxes: list[tuple[int, int, int, int]],
-        padded_masks: list[torch.Tensor],
+        masks: list[torch.Tensor],
         frame_shape: tuple[int, int],
     ) -> None:
         self.restored_frames = restored_frames
@@ -29,7 +29,7 @@ class _FakeRestoredClip:
         self.resize_shapes = resize_shapes
         self.crop_shapes = crop_shapes
         self.enlarged_bboxes = enlarged_bboxes
-        self.padded_masks = padded_masks
+        self.masks = masks
         self.frame_shape = frame_shape
 
 
@@ -61,7 +61,7 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
     x1, y1, x2, y2 = (2, 2, 6, 6)
     crop_h, crop_w = (y2 - y1, x2 - x1)
     restored = torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8)
-    padded_mask = torch.ones((crop_h, crop_w), dtype=torch.bool)
+    mask = torch.ones((8, 8), dtype=torch.bool)
 
     restored_clip = _FakeRestoredClip(
         restored_frames=[restored],
@@ -69,7 +69,7 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
         resize_shapes=[(crop_h, crop_w)],
         crop_shapes=[(crop_h, crop_w)],
         enlarged_bboxes=[(x1, y1, x2, y2)],
-        padded_masks=[padded_mask],
+        masks=[mask],
         frame_shape=(8, 8),
     )
 
@@ -106,7 +106,7 @@ def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
     x1, y1, x2, y2 = (2, 2, 6, 6)
     crop_h, crop_w = (y2 - y1, x2 - x1)
     restored = torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8)
-    padded_mask = torch.ones((crop_h, crop_w), dtype=torch.bool)
+    mask = torch.ones((8, 8), dtype=torch.bool)
 
     restored_clip = _FakeRestoredClip(
         restored_frames=[restored],
@@ -114,7 +114,7 @@ def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
         resize_shapes=[(crop_h, crop_w)],
         crop_shapes=[(crop_h, crop_w)],
         enlarged_bboxes=[(x1, y1, x2, y2)],
-        padded_masks=[padded_mask],
+        masks=[mask],
         frame_shape=(8, 8),
     )
 
@@ -152,7 +152,7 @@ def test_frame_buffer_blend_clip_ignores_missing_frames() -> None:
         resize_shapes=[(4, 4)],
         crop_shapes=[(4, 4)],
         enlarged_bboxes=[(0, 0, 4, 4)],
-        padded_masks=[torch.ones((4, 4), dtype=torch.bool)],
+        masks=[torch.ones((4, 4), dtype=torch.bool)],
         frame_shape=(4, 4),
     )
 
@@ -173,7 +173,7 @@ def test_frame_buffer_uses_blend_mask_value() -> None:
     x1, y1, x2, y2 = (2, 2, 6, 6)
     crop_h, crop_w = (y2 - y1, x2 - x1)
     restored = torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8)
-    padded_mask = torch.ones((crop_h, crop_w), dtype=torch.bool)
+    mask = torch.ones((8, 8), dtype=torch.bool)
 
     restored_clip = _FakeRestoredClip(
         restored_frames=[restored],
@@ -181,7 +181,7 @@ def test_frame_buffer_uses_blend_mask_value() -> None:
         resize_shapes=[(crop_h, crop_w)],
         crop_shapes=[(crop_h, crop_w)],
         enlarged_bboxes=[(x1, y1, x2, y2)],
-        padded_masks=[padded_mask],
+        masks=[mask],
         frame_shape=(8, 8),
     )
 
