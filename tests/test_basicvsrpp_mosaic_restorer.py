@@ -20,6 +20,8 @@ def test_restore_identity_returns_resized_rgb_uint8(monkeypatch) -> None:
     restorer = br.BasicvsrppMosaicRestorer(
         checkpoint_path="unused.pth",
         device=torch.device("cpu"),
+        max_clip_size=30,
+        use_tensorrt=True,
         fp16=False,
         config=None,
     )
@@ -76,6 +78,8 @@ def test_restore_multiple_frames_varied_sizes(monkeypatch) -> None:
     restorer = br.BasicvsrppMosaicRestorer(
         checkpoint_path="unused.pth",
         device=torch.device("cpu"),
+        max_clip_size=30,
+        use_tensorrt=True,
         fp16=False,
         config=None,
     )
@@ -100,6 +104,8 @@ def test_restore_empty_video_raises(monkeypatch) -> None:
     restorer = br.BasicvsrppMosaicRestorer(
         checkpoint_path="unused.pth",
         device=torch.device("cpu"),
+        max_clip_size=30,
+        use_tensorrt=True,
         fp16=False,
         config=None,
     )
@@ -125,6 +131,8 @@ def test_init_sets_device_dtype_and_loads_model(monkeypatch) -> None:
     restorer = br.BasicvsrppMosaicRestorer(
         checkpoint_path="ckpt.pth",
         device=torch.device("cpu"),
+        max_clip_size=30,
+        use_tensorrt=True,
         fp16=True,
         config={"x": 1},
     )
@@ -147,6 +155,8 @@ def test_restore_fails_on_invalid_frame_rank(monkeypatch) -> None:
     restorer = br.BasicvsrppMosaicRestorer(
         checkpoint_path="unused.pth",
         device=torch.device("cpu"),
+        max_clip_size=30,
+        use_tensorrt=True,
         fp16=False,
         config=None,
     )
@@ -154,3 +164,44 @@ def test_restore_fails_on_invalid_frame_rank(monkeypatch) -> None:
     frame_hw = torch.zeros((10, 10), dtype=torch.uint8)
     with pytest.raises(RuntimeError):
         restorer.restore([frame_hw])
+
+
+def test_engine_padding_uses_mirror_repeat_sequence(monkeypatch) -> None:
+    import jasna.restorer.basicvsrpp_mosaic_restorer as br
+
+    class _CaptureEngine:
+        def __init__(self) -> None:
+            self.captured_inputs: torch.Tensor | None = None
+
+        def __call__(self, *, inputs: torch.Tensor) -> torch.Tensor:
+            self.captured_inputs = inputs.detach().clone()
+            return inputs
+
+    monkeypatch.setattr(br, "load_model", lambda config, checkpoint_path, device, fp16: _CaptureIdentityModel())
+
+    restorer = br.BasicvsrppMosaicRestorer(
+        checkpoint_path="unused.pth",
+        device=torch.device("cpu"),
+        max_clip_size=5,
+        use_tensorrt=True,
+        fp16=False,
+        config=None,
+    )
+
+    engine = _CaptureEngine()
+    restorer._engine_main = engine  # type: ignore[attr-defined]
+    restorer._engine_main_len = 5  # type: ignore[attr-defined]
+
+    x = torch.tensor([[[10, 0, 0]]], dtype=torch.uint8)  # (H=1, W=1, C=3)
+    y = torch.tensor([[[20, 0, 0]]], dtype=torch.uint8)
+    z = torch.tensor([[[30, 0, 0]]], dtype=torch.uint8)
+
+    restorer.restore([x, y, z])
+    assert engine.captured_inputs is not None
+    assert engine.captured_inputs.shape[:2] == (1, 5)
+
+    # Expected pad indices for [X,Y,Z] to length 5:
+    # X Y Z Y X
+    got = engine.captured_inputs[0, :, 0, 0, 0].cpu()  # red channel, first pixel
+    expected = torch.tensor([10, 20, 30, 20, 10], dtype=torch.float32) / 255.0
+    assert torch.allclose(got, expected, atol=0, rtol=0)

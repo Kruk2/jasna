@@ -54,7 +54,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--fp16",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Use FP16 where supported (restoration + TensorRT).",
+        help="Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
+    )
+    parser.add_argument(
+        "--compile-basicvsrpp",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes.",
     )
     parser.add_argument("--max-clip-size", type=int, default=30, help="Maximum clip size for tracking")
     parser.add_argument("--temporal-overlap", type=int, default=3, help="Number of restored frames to use as context for split clips")
@@ -116,12 +122,34 @@ def main() -> None:
     if restoration_model_name != "basicvsrpp":
         raise ValueError(f"Unsupported restoration model: {restoration_model_name}")
 
+    from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
+    from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
+    from jasna.restorer.restoration_pipeline import RestorationPipeline
+
+    use_tensorrt = basicvsrpp_startup_policy(
+        restoration_model_path=str(restoration_model_path),
+        max_clip_size=max_clip_size,
+        device=device,
+        fp16=fp16,
+        compile_basicvsrpp=bool(args.compile_basicvsrpp),
+    )
+    
+    restoration_pipeline = RestorationPipeline(
+        restorer=BasicvsrppMosaicRestorer(
+            checkpoint_path=str(restoration_model_path),
+            device=device,
+            max_clip_size=max_clip_size,
+            use_tensorrt=use_tensorrt,
+            fp16=fp16,
+        )
+    )
+
     stream = torch.cuda.Stream()
     Pipeline(
         input_video=input_video,
         output_video=output_video,
         detection_model_path=detection_model_path,
-        restoration_model_path=restoration_model_path,
+        restoration_pipeline=restoration_pipeline,
         stream=stream,
         batch_size=batch_size,
         device=device,
