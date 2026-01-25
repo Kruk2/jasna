@@ -129,7 +129,17 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
 
 
 class NvidiaVideoEncoder:
-    def __init__(self, file: str, device: torch.device, stream: torch.cuda.Stream, metadata: VideoMetadata, stream_mode: bool = False):
+    def __init__(
+        self,
+        file: str,
+        device: torch.device,
+        stream: torch.cuda.Stream,
+        metadata: VideoMetadata,
+        *,
+        codec: str,
+        encoder_settings: dict[str, object],
+        stream_mode: bool = False,
+    ):
         self.metadata = metadata
         self.stream = stream
         self.device = device
@@ -140,7 +150,7 @@ class NvidiaVideoEncoder:
 
         #todo for streaming mode enable tuning low latency, disable qpass
         encoder_options = {
-            'codec': 'hevc',
+            'codec': codec,
             'preset': 'P5',
             'tuning_info': 'high_quality',
             'profile': 'main10',
@@ -167,6 +177,9 @@ class NvidiaVideoEncoder:
             'tflevel': 0,
             "bref": 2 if not stream_mode else 0,
         }
+
+        if encoder_settings:
+            encoder_options.update(encoder_settings)
 
         self.encoder = nvc.CreateEncoder(
             width=metadata.video_width,

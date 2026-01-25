@@ -22,32 +22,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jasna")
     parser.add_argument("--input", required=True, type=str, help="Path to input video")
     parser.add_argument("--output", required=True, type=str, help="Path to output video")
-    parser.add_argument(
-        "--detection-model",
-        type=str,
-        default="rfdetr",
-        choices=["rfdetr"],
-        help='Detection model name (only "rfdetr" supported for now)',
-    )
-    parser.add_argument(
-        "--detection-model-path",
-        type=str,
-        default=str(Path("model_weights") / "rfdetr.onnx"),
-        help='Path to detection ONNX model (default: "model_weights/rfdetr.onnx")',
-    )
-    parser.add_argument(
-        "--restoration-model-name",
-        type=str,
-        default="basicvsrpp",
-        choices=["basicvsrpp"],
-        help='Restoration model name (only "basicvsrpp" supported for now)',
-    )
-    parser.add_argument(
-        "--restoration-model-path",
-        type=str,
-        default=str(Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"),
-        help='Path to restoration model (default: "model_weights/lada_mosaic_restoration_model_generic_v1.2.pth")',
-    )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument(
@@ -56,15 +30,64 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         help="Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
     )
-    parser.add_argument(
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
+
+    restoration = parser.add_argument_group("Restoration")
+    restoration.add_argument(
+        "--restoration-model-name",
+        type=str,
+        default="basicvsrpp",
+        choices=["basicvsrpp"],
+        help='Restoration model name (only "basicvsrpp" supported for now)',
+    )
+    restoration.add_argument(
+        "--restoration-model-path",
+        type=str,
+        default=str(Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"),
+        help='Path to restoration model (default: "model_weights/lada_mosaic_restoration_model_generic_v1.2.pth")',
+    )
+    restoration.add_argument(
         "--compile-basicvsrpp",
         default=True,
         action=argparse.BooleanOptionalAction,
         help="Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes.",
     )
-    parser.add_argument("--max-clip-size", type=int, default=30, help="Maximum clip size for tracking")
-    parser.add_argument("--temporal-overlap", type=int, default=3, help="Number of restored frames to use as context for split clips")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
+    restoration.add_argument("--max-clip-size", type=int, default=30, help="Maximum clip size for tracking")
+    restoration.add_argument(
+        "--temporal-overlap",
+        type=int,
+        default=3,
+        help="Number of restored frames to use as context for split clips",
+    )
+
+    detection = parser.add_argument_group("Detection")
+    detection.add_argument(
+        "--detection-model",
+        type=str,
+        default="rfdetr",
+        choices=["rfdetr"],
+        help='Detection model name (only "rfdetr" supported for now)',
+    )
+    detection.add_argument(
+        "--detection-model-path",
+        type=str,
+        default=str(Path("model_weights") / "rfdetr.onnx"),
+        help='Path to detection ONNX model (default: "model_weights/rfdetr.onnx")',
+    )
+
+    encoding = parser.add_argument_group("Encoding")
+    encoding.add_argument(
+        "--codec",
+        type=str,
+        default="hevc",
+        help='Output video codec (only "hevc" supported for now)',
+    )
+    encoding.add_argument(
+        "--encoder-settings",
+        type=str,
+        default="",
+        help='Encoder settings, as JSON object or comma-separated key=value pairs (e.g. {"cq":22} or cq=22,lookahead=32)',
+    )
     return parser
 
 
@@ -82,6 +105,7 @@ def main() -> None:
     import torch
 
     from jasna.pipeline import Pipeline
+    from jasna.media import parse_encoder_settings, validate_encoder_settings
 
     input_video = Path(args.input)
     if not input_video.exists():
@@ -98,6 +122,12 @@ def main() -> None:
     restoration_model_path = Path(args.restoration_model_path)
     if not restoration_model_path.exists():
         raise FileNotFoundError(str(restoration_model_path))
+
+    codec = str(args.codec).lower()
+    if codec != "hevc":
+        raise ValueError(f"Unsupported codec: {codec} (only hevc supported)")
+
+    encoder_settings = validate_encoder_settings(parse_encoder_settings(str(args.encoder_settings)))
 
     batch_size = int(args.batch_size)
     if batch_size <= 0:
@@ -150,6 +180,8 @@ def main() -> None:
         output_video=output_video,
         detection_model_path=detection_model_path,
         restoration_pipeline=restoration_pipeline,
+        codec=codec,
+        encoder_settings=encoder_settings,
         stream=stream,
         batch_size=batch_size,
         device=device,
