@@ -20,6 +20,7 @@ Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp 
 - TVAI and SeedVR
 - Proper stream that can be played in Stash (and maybe others?)
 
+
 ### Usage
 Go to releases page and download last package. Built for windows/linux on cuda 13.0.
 Make sure that ```ffmpeg``` and ```mkvmerge``` is in your path.
@@ -29,28 +30,5 @@ You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html).
 
 Remember to have up to date nvidia drivers.
 
-### Install (editable)
-
-```bash
-python -m pip install -e .[dev]
-```
-
-### Run
-
-```bash
-python -m jasna --input path\to\in.mp4 --output path\to\out.mp4
-```
-
-Or, after install:
-
-```bash
-jasna --input path\to\in.mp4 --output path\to\out.mp4
-```
-
-### Build a self-bundled executable (PyInstaller)
-
-```bash
-pyinstaller jasna.spec
-```
-
-The output executable will be in `dist/`.
+### Disclamer
+This project is aimed at more technical users.
