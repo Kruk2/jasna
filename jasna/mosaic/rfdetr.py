@@ -26,6 +26,7 @@ class RfDetrMosaicDetectionModel:
         resolution: int = DEFAULT_RESOLUTION,
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         max_select: int = DEFAULT_MAX_SELECT,
+        fp16: bool = True,
     ) -> None:
         self.onnx_path = onnx_path
         self.stream = stream
@@ -34,8 +35,10 @@ class RfDetrMosaicDetectionModel:
         self.resolution = int(resolution)
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
+        self.fp16 = bool(fp16)
+        self.input_dtype = torch.float16 if self.fp16 else torch.float32
 
-        self.engine_path = compile_onnx_to_tensorrt_engine(self.onnx_path, fp16=True)
+        self.engine_path = compile_onnx_to_tensorrt_engine(self.onnx_path, fp16=self.fp16)
         self.runner = TrtRunner(
             self.engine_path,
             stream=self.stream,
@@ -50,7 +53,7 @@ class RfDetrMosaicDetectionModel:
         self.logits_out = next(k for k in self.runner.output_names if k not in {self.boxes_out, self.masks_out})
 
     def _preprocess(self, frames_uint8_bchw: torch.Tensor) -> torch.Tensor:
-        x = frames_uint8_bchw.to(device=self.device, dtype=torch.float16).div_(255.0)
+        x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype).div_(255.0)
         x = F.interpolate(x, size=(self.resolution, self.resolution), mode="bilinear", align_corners=False)
         mean = x.new_tensor([0.485, 0.456, 0.406])[:, None, None]
         std = x.new_tensor([0.229, 0.224, 0.225])[:, None, None]

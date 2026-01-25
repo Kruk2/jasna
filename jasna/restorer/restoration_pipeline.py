@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import math
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
+from jasna.restorer.restored_clip import RestoredClip
 from jasna.tracking.clip_tracker import TrackedClip
 
 RESTORATION_SIZE = 256
@@ -25,21 +24,10 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
         paddings_arr = paddings_arr - possible_paddings
     return image
 
-
-@dataclass
-class RestoredClip:
-    restored_frames: list[torch.Tensor]  # each (C, 256, 256), GPU
-    masks: list[torch.Tensor]  # each (Hm, Wm) bool, GPU (model resolution)
-    frame_shape: tuple[int, int]  # (H, W) original frame shape
-    enlarged_bboxes: list[tuple[int, int, int, int]]  # each (x1, y1, x2, y2) after expansion
-    crop_shapes: list[tuple[int, int]]  # each (H, W) original crop shape before resize
-    pad_offsets: list[tuple[int, int]]  # each (pad_left, pad_top)
-    resize_shapes: list[tuple[int, int]]  # each (H, W) shape after resize, before padding
-
-
 class RestorationPipeline:
     def __init__(self, restorer: BasicvsrppMosaicRestorer) -> None:
         self.restorer = restorer
+        self._resize_dtype = restorer.dtype
 
     def restore_clip(
         self, clip: TrackedClip, frames: list[torch.Tensor], prefix_restored_frames: list[torch.Tensor] | None = None
@@ -52,6 +40,7 @@ class RestorationPipeline:
         """
         n_prefix = len(prefix_restored_frames) if prefix_restored_frames else 0
         crops: list[torch.Tensor] = []
+        crop_masks: list[torch.Tensor] = []
         enlarged_bboxes: list[tuple[int, int, int, int]] = []
         crop_shapes: list[tuple[int, int]] = []
 
@@ -76,6 +65,11 @@ class RestorationPipeline:
             crop_shapes.append((crop.shape[1], crop.shape[2]))
             crops.append(crop)
 
+            mask = clip.masks[i].unsqueeze(0).unsqueeze(0).to(dtype=self._resize_dtype)  # (1, 1, Hm, Wm)
+            mask_fullres = F.interpolate(mask, size=(frame_h, frame_w), mode="nearest").squeeze(0).squeeze(0)  # (H, W)
+            crop_mask = mask_fullres[y1_exp:y2_exp, x1_exp:x2_exp]
+            crop_masks.append(crop_mask)
+
         max_h = max(s[0] for s in crop_shapes)
         max_w = max(s[1] for s in crop_shapes)
 
@@ -85,16 +79,17 @@ class RestorationPipeline:
             scale_h = scale_w = 1.0
 
         resized_crops: list[torch.Tensor] = []
+        padded_masks: list[torch.Tensor] = []
         resize_shapes: list[tuple[int, int]] = []
         pad_offsets: list[tuple[int, int]] = []
 
-        for crop, (crop_h, crop_w) in zip(crops, crop_shapes):
+        for crop, crop_mask, (crop_h, crop_w) in zip(crops, crop_masks, crop_shapes):
             new_h = int(crop_h * scale_h)
             new_w = int(crop_w * scale_w)
             resize_shapes.append((new_h, new_w))
 
             resized = F.interpolate(
-                crop.unsqueeze(0).float(),
+                crop.unsqueeze(0).to(dtype=self._resize_dtype),
                 size=(new_h, new_w),
                 mode='bilinear',
                 align_corners=False
@@ -108,6 +103,14 @@ class RestorationPipeline:
 
             padded = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
             resized_crops.append(padded.to(crop.dtype).permute(1, 2, 0))
+
+            resized_mask = F.interpolate(
+                crop_mask.unsqueeze(0).unsqueeze(0),
+                size=(new_h, new_w),
+                mode="nearest",
+            ).squeeze(0).squeeze(0)
+            padded_mask = F.pad(resized_mask, (pad_left, pad_right, pad_top, pad_bottom), mode="constant", value=0.0)
+            padded_masks.append(padded_mask > 0.0)
 
         # Prepend prefix frames if provided (already in HWC format, 256x256)
         if prefix_restored_frames:
@@ -126,6 +129,7 @@ class RestorationPipeline:
         return RestoredClip(
             restored_frames=restored_frames,
             masks=clip.masks,
+            padded_masks=padded_masks,
             frame_shape=(frame_h, frame_w),
             enlarged_bboxes=enlarged_bboxes,
             crop_shapes=crop_shapes,
