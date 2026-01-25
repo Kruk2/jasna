@@ -101,6 +101,8 @@ def main() -> None:
     temporal_overlap = int(args.temporal_overlap)
     if temporal_overlap < 0:
         raise ValueError("--temporal-overlap must be >= 0")
+    if temporal_overlap >= max_clip_size:
+        raise ValueError("--temporal-overlap must be < --max-clip-size")
 
     device = torch.device(str(args.device))
     fp16 = bool(args.fp16)
