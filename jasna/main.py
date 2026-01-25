@@ -18,6 +18,27 @@ def check_required_executables() -> None:
         sys.exit(1)
 
 
+def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
+    if sys.platform != "win32":
+        return
+
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
+        ) as key:
+            mode, _ = winreg.QueryValueEx(key, "HwSchMode")
+    except OSError:
+        return
+
+    if int(mode) == 2:
+        print(
+            "Warning: Windows 'Hardware-accelerated GPU scheduling' is enabled. "
+            "This will make Jasna slower and might add artifacts to the output video."
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jasna")
     parser.add_argument("--input", required=True, type=str, help="Path to input video")
@@ -93,6 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     check_required_executables()
+    warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
     
     args = build_parser().parse_args()
 
