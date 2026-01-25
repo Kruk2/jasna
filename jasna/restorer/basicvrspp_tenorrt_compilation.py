@@ -96,9 +96,10 @@ def _get_compiled_mosaic_restoration_model_path(
     fp16: bool,
 ) -> str:
     precision = "fp16" if fp16 else "fp32"
+    system_name = ".win" if os.name == "nt" else ".linux"
     output_dir = os.path.dirname(mosaic_restoration_model_path)
     stem = os.path.splitext(os.path.basename(mosaic_restoration_model_path))[0]
-    return os.path.join(output_dir, f"{stem}_clip{clip_length}.trt_{precision}.engine")
+    return os.path.join(output_dir, f"{stem}_clip{clip_length}.trt_{precision}{system_name}.engine")
 
 
 def get_compiled_mosaic_restoration_model_path_for_clip(
