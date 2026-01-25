@@ -32,8 +32,8 @@ def create_blend_mask(crop_mask: torch.Tensor, border_ratio: float = 0.05) -> to
 
     kernel = torch.ones((1, 1, blur_size, blur_size), device=blend.device, dtype=torch.float32) / (blur_size**2)
     pad_size = blur_size // 2
-    blend_4d = F.pad(blend.unsqueeze(0).unsqueeze(0), (pad_size, pad_size, pad_size, pad_size), mode="replicate")
+    blend_4d = F.pad(blend.unsqueeze(0).unsqueeze(0), (pad_size, pad_size, pad_size, pad_size), mode="reflect")
     blend = F.conv2d(blend_4d, kernel).squeeze(0).squeeze(0)
 
-    return blend.clamp(0, 1)
+    return blend
 

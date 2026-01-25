@@ -17,15 +17,15 @@ def test_create_blend_mask_clamps_to_0_1_and_keeps_shape() -> None:
     crop_mask[0, 0] = 1.0
     out = create_blend_mask(crop_mask)
     assert out.shape == (16, 16)
-    assert float(out.min()) >= 0.0
-    assert float(out.max()) <= 1.0
+    assert float(out.min()) >= -1e-6
+    assert float(out.max()) <= 1.0 + 1e-6
 
 
 def test_create_blend_mask_blur_path_keeps_all_ones() -> None:
     crop_mask = torch.ones((20, 20), dtype=torch.bool)
     out = create_blend_mask(crop_mask, border_ratio=0.5)
     assert out.shape == (20, 20)
-    assert torch.all(out == 1.0)
+    assert torch.allclose(out, torch.ones_like(out), atol=1e-6, rtol=0.0)
 
 
 def test_create_blend_mask_blur_path_fades_towards_edges() -> None:

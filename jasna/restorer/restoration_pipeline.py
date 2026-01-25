@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import math
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -56,8 +57,15 @@ class RestorationPipeline:
 
         for i, frame in enumerate(frames):
             _, frame_h, frame_w = frame.shape
-            bbox = clip.bboxes[i].astype(int)
-            x1, y1, x2, y2 = bbox[0], bbox[1], bbox[2], bbox[3]
+            bbox = clip.bboxes[i]
+            x1 = int(np.floor(bbox[0]))
+            y1 = int(np.floor(bbox[1]))
+            x2 = int(np.ceil(bbox[2]))
+            y2 = int(np.ceil(bbox[3]))
+            x1 = max(0, min(x1, frame_w))
+            y1 = max(0, min(y1, frame_h))
+            x2 = max(0, min(x2, frame_w))
+            y2 = max(0, min(y2, frame_h))
 
             x1_exp, y1_exp, x2_exp, y2_exp = self._expand_bbox(
                 x1, y1, x2, y2, frame_h, frame_w
@@ -128,43 +136,57 @@ class RestorationPipeline:
     def _expand_bbox(
         self, x1: int, y1: int, x2: int, y2: int, frame_h: int, frame_w: int
     ) -> tuple[int, int, int, int]:
-        w, h = x2 - x1, y2 - y1
+        w = x2 - x1
+        h = y2 - y1
 
-        border = max(MIN_BORDER, int(max(w, h) * BORDER_RATIO))
+        border = max(MIN_BORDER, int(max(w, h) * BORDER_RATIO)) if BORDER_RATIO > 0.0 else 0
         x1_exp = max(0, x1 - border)
         y1_exp = max(0, y1 - border)
         x2_exp = min(frame_w, x2 + border)
         y2_exp = min(frame_h, y2 + border)
 
-        curr_w = x2_exp - x1_exp
-        curr_h = y2_exp - y1_exp
+        w = x2_exp - x1_exp
+        h = y2_exp - y1_exp
+        down_scale_factor = min(RESTORATION_SIZE / w, RESTORATION_SIZE / h) if w > 0 and h > 0 else 1.0
+        if down_scale_factor > 1.0:
+            down_scale_factor = 1.0
 
-        if curr_w < RESTORATION_SIZE or curr_h < RESTORATION_SIZE:
-            need_w = max(0, RESTORATION_SIZE - curr_w)
-            need_h = max(0, RESTORATION_SIZE - curr_h)
+        missing_w = int((RESTORATION_SIZE - (w * down_scale_factor)) / down_scale_factor) if down_scale_factor > 0 else 0
+        missing_h = int((RESTORATION_SIZE - (h * down_scale_factor)) / down_scale_factor) if down_scale_factor > 0 else 0
 
-            max_expand_w = int(curr_w * MAX_EXPANSION_FACTOR)
-            max_expand_h = int(curr_h * MAX_EXPANSION_FACTOR)
-            expand_w = min(need_w, max_expand_w)
-            expand_h = min(need_h, max_expand_h)
+        available_w_l = x1_exp
+        available_w_r = frame_w - x2_exp
+        available_h_t = y1_exp
+        available_h_b = frame_h - y2_exp
 
-            avail_left = x1_exp
-            avail_right = frame_w - x2_exp
-            avail_top = y1_exp
-            avail_bottom = frame_h - y2_exp
+        budget_w = int(MAX_EXPANSION_FACTOR * w)
+        budget_h = int(MAX_EXPANSION_FACTOR * h)
 
-            expand_lr = min(avail_left, avail_right, expand_w // 2)
-            expand_left = expand_lr + min(avail_left - expand_lr, expand_w - expand_lr * 2)
-            expand_right = expand_lr + min(avail_right - expand_lr, expand_w - expand_lr - expand_left)
+        expand_w_lr = min(available_w_l, available_w_r, missing_w // 2, budget_w)
+        expand_w_l = min(available_w_l - expand_w_lr, missing_w - expand_w_lr * 2, budget_w - expand_w_lr)
+        expand_w_r = min(
+            available_w_r - expand_w_lr,
+            missing_w - expand_w_lr * 2 - expand_w_l,
+            budget_w - expand_w_lr - expand_w_l,
+        )
 
-            expand_tb = min(avail_top, avail_bottom, expand_h // 2)
-            expand_top = expand_tb + min(avail_top - expand_tb, expand_h - expand_tb * 2)
-            expand_bottom = expand_tb + min(avail_bottom - expand_tb, expand_h - expand_tb - expand_top)
+        expand_h_tb = min(available_h_t, available_h_b, missing_h // 2, budget_h)
+        expand_h_t = min(available_h_t - expand_h_tb, missing_h - expand_h_tb * 2, budget_h - expand_h_tb)
+        expand_h_b = min(
+            available_h_b - expand_h_tb,
+            missing_h - expand_h_tb * 2 - expand_h_t,
+            budget_h - expand_h_tb - expand_h_t,
+        )
 
-            x1_exp -= expand_left
-            x2_exp += expand_right
-            y1_exp -= expand_top
-            y2_exp += expand_bottom
+        x1_exp = x1_exp - math.floor(expand_w_lr / 2) - expand_w_l
+        x2_exp = x2_exp + math.ceil(expand_w_lr / 2) + expand_w_r
+        y1_exp = y1_exp - math.floor(expand_h_tb / 2) - expand_h_t
+        y2_exp = y2_exp + math.ceil(expand_h_tb / 2) + expand_h_b
+
+        x1_exp = max(0, min(int(x1_exp), frame_w))
+        x2_exp = max(0, min(int(x2_exp), frame_w))
+        y1_exp = max(0, min(int(y1_exp), frame_h))
+        y2_exp = max(0, min(int(y2_exp), frame_h))
 
         return x1_exp, y1_exp, x2_exp, y2_exp
 
