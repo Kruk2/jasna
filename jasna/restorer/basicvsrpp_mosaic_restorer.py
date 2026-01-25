@@ -42,6 +42,8 @@ class BasicvsrppMosaicRestorer:
         self._engine_small = None
         self._engine_main = None
         self._engine_main_len: int | None = None
+        self._trt_pre_event: torch.cuda.Event | None = None
+        self._trt_post_event: torch.cuda.Event | None = None
 
         if checkpoint_path.endswith(".engine"):
             self._engine_main = load_engine(checkpoint_path, self.device)
@@ -73,11 +75,16 @@ class BasicvsrppMosaicRestorer:
         else:
             self.model = None
 
+        if (self._engine_main is not None or self._engine_small is not None) and self.device.type == "cuda":
+            with torch.cuda.device(self.device):
+                self._trt_pre_event = torch.cuda.Event()
+                self._trt_post_event = torch.cuda.Event()
+
     def _select_engine(self, t: int):
         if self._engine_main is None and self._engine_small is None:
             return None, 0
 
-        if self.max_clip_size > SMALL_TRT_CLIP_LENGTH_TRIGGER and self._engine_small is not None and t <= SMALL_TRT_CLIP_LENGTH:
+        if self._engine_small is not None and t <= SMALL_TRT_CLIP_LENGTH:
             return self._engine_small, SMALL_TRT_CLIP_LENGTH
 
         if self._engine_main is not None:
@@ -96,7 +103,15 @@ class BasicvsrppMosaicRestorer:
                 idx = torch.tensor((base * reps)[:pad_to], dtype=torch.long, device=stacked.device)
             stacked = stacked.index_select(0, idx)
 
-        result = engine(stacked.unsqueeze(0))
+        cur_stream = torch.cuda.current_stream(stacked.device)
+        default_stream = torch.cuda.default_stream(stacked.device)
+
+        self._trt_pre_event.record(cur_stream)
+        default_stream.wait_event(self._trt_pre_event)
+        with torch.cuda.stream(default_stream):
+            result = engine(stacked.unsqueeze(0))
+        self._trt_post_event.record(default_stream)
+        cur_stream.wait_event(self._trt_post_event)
         result = result.squeeze(0)
         return result[:t]
 

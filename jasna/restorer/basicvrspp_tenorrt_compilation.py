@@ -117,7 +117,7 @@ def get_compiled_mosaic_restoration_model_path_for_clip(
 
 def load_engine(checkpoint_path: str, device: torch.device) -> BasicVSRPlusPlusGan:
     logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
-    import torch_tensorrt  # type: ignore[import-not-found]  # noqa: F401
+    import torch_tensorrt
 
     logger.info("Loading TensorRT export from %s", checkpoint_path)
     with open(checkpoint_path, "rb") as f:
