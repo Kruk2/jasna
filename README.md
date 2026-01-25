@@ -20,6 +20,21 @@ Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp 
 - TVAI and SeedVR
 - Proper stream that can be played in Stash (and maybe others?)
 
+### Max clip + temporal overlap
+Main goal for the temporal overlap is to reduce flickering on the edges of clips.
+Initial testings shows that temporal overlap reduces flickering but might sometimes decrease quality of restoration. Feel free to test different values.
+Some guidance from my limited testing:
+30 clip size + temporal overlap 3 looks also ok but if you can fit higher clip size then go for it.
+60 clip size + temporal overlap 4 is fine for most of my test clips
+180 clip size + temporal overlap 8 looks very good in all my tests.
+
+
+### Restoration model compilation.
+Compiled model takes a lot of vram. If you plan to use 180 clip size you have to have 24gb vram+.
+You can opt out from compiled model at the cost of performance.
+
+It's recommended to rather lower clip size and use temporal overlap with compiled model.
+
 
 ### Usage
 Go to releases page and download last package. Built for windows/linux on cuda 13.0.

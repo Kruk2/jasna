@@ -73,11 +73,11 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         help="Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes.",
     )
-    restoration.add_argument("--max-clip-size", type=int, default=30, help="Maximum clip size for tracking")
+    restoration.add_argument("--max-clip-size", type=int, default=60, help="Maximum clip size for tracking")
     restoration.add_argument(
         "--temporal-overlap",
         type=int,
-        default=3,
+        default=5,
         help="Number of restored frames to use as context for split clips",
     )
 
