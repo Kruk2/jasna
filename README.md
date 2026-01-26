@@ -53,6 +53,7 @@ Some guidance from my limited testing:\
 - 180 clip size + temporal overlap 8 looks very good in all my tests.
 
 ### Restoration model compilation.
+Read [#6](https://github.com/Kruk2/jasna/issues/6) for more details.\
 Compiled model takes a lot of vram. Rough estimate is around 2.5GB VRAM per 30 frames in clip size. If you plan to use 180 clip size you have to have 24gb vram+ (180/30 * 2.5).\
 You can opt out from compiled model at the cost of performance.\
 It's recommended to rather lower clip size and use temporal overlap with compiled model.
