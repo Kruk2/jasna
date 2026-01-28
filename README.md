@@ -64,6 +64,7 @@ This project is aimed at more technical users.
 
 ## Building
 Install these libs via ```uv pip install . --no-build-isolation```\
+To build nvidia libs below you need also VS Build Tools 2022 (c++)
 make sure you have cmake and ninja ```uv pip install cmake ninja```\
 and cuda 13.0 in your system.
 
