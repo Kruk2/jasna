@@ -4,6 +4,8 @@
 JAV model restoration tool inspired (and in some places based on) by [Lada](https://codeberg.org/ladaapp/lada).\
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
 
+Features new mosaic detection model & GPU only pipeline.
+
 ### Benchmark
 RTX 5090 + i9 13900k
 | File | Clip (s) | lada 0.10.1 | jasna 0.3.0 | Δ vs lada (0.3.0) |
