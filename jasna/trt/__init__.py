@@ -67,9 +67,12 @@ def compile_onnx_to_tensorrt_engine(
 
     if not onnx_path.exists():
         raise FileNotFoundError(str(onnx_path))
-    print(f"Compiling {onnx_path} to {engine_path}")
+    print(
+        f"Compiling TensorRT engine for {onnx_path} (this can take a few minutes). "
+        f"Output: {engine_path}"
+    )
 
-    logger = trt.Logger(trt.Logger.INFO)
+    logger = trt.Logger(trt.Logger.ERROR)
     builder = trt.Builder(logger)
     explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(explicit_batch)

@@ -61,10 +61,11 @@ def _compile_basicvsrpp_model(
     workspace_size = int(psutil.virtual_memory().available * 0.8)
     inp = torch.randn(1, max_clip_size, 3, 256, 256, dtype=dtype, device=device)
 
-    with torch_tensorrt.logging.info():
+    logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
+    with torch_tensorrt.logging.errors():
         print(
-            f"Compiling BasicVSR++ model (TensorRT workspace_size={workspace_size / (1024 ** 3):.2f} GB). "
-            "For large clip length > 100 this can take even few hours."
+            f"Compiling BasicVSR++ TensorRT engine (workspace_size={workspace_size / (1024 ** 3):.2f} GB). "
+            "This might take anywhere from ~15 minutes to a few hours depending on selected clip size."
         )
         trt_gm = torch_tensorrt.compile(
             model,
