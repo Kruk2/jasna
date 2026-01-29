@@ -17,6 +17,9 @@ Failing to fill this form will result in closing the issue immediately!
 jasna.exe --input "D:/video.mp4" [other params]
 1. [optional] JAV Code with timestamp: 
 
+** Error or behavior that was unexpected**
+Copy the console output or describe what didn't work.
+
 **Desktop (please complete the following information):**
  - OS: [e.g. iOS]
  - Version [e.g. 22]
