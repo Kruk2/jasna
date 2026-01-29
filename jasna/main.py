@@ -10,13 +10,18 @@ from jasna import __version__
 def check_required_executables() -> None:
     """Check that required external tools are available in PATH and callable."""
     missing: list[str] = []
-    for exe in ("ffprobe", "ffmpeg", "mkvmerge"):
+    checks = {
+        "ffprobe": ["ffprobe", "-version"],
+        "ffmpeg": ["ffmpeg", "-version"],
+        "mkvmerge": ["mkvmerge", "--version"],
+    }
+    for exe, cmd in checks.items():
         if shutil.which(exe) is None:
             missing.append(exe)
             continue
         try:
             completed = subprocess.run(
-                [exe, "-version"],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
@@ -28,8 +33,8 @@ def check_required_executables() -> None:
             missing.append(exe)
     
     if missing:
-        print(f"Error: Required executable(s) not found in PATH: {', '.join(missing)}")
-        print("Please install them and ensure they are available in your system PATH.")
+        print(f"Error: Required executable(s) not found in PATH or not callable: {', '.join(missing)}")
+        print("Please install them and ensure they are available in your system PATH and runnable.")
         sys.exit(1)
 
 
