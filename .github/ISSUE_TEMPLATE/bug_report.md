@@ -7,21 +7,21 @@ assignees: ''
 
 ---
 
-**Describe the bug**
 ! ! ! DO NOT POST THE VIDEO OR SCREENSHOTS OF ITS CONTENT ! ! !
-A clear and concise description of what the bug is.
 Failing to fill this form will result in closing the issue immediately!
+Remove this section
+
+**Describe the bug**
+A clear and concise description of what the bug is.
+Copy the console output or describe what didn't work.
 
 **To Reproduce**
 1. Jasna command line that was used:
 jasna.exe --input "D:/video.mp4" [other params]
 1. [optional] Video ID with timestamp: 
 
-** Error or behavior that was unexpected**
-Copy the console output or describe what didn't work.
-
 **Desktop (please complete the following information):**
  - OS: [e.g. iOS]
- - Version [e.g. 22]
+ - Jasna Version [e.g. 0.3]
  - GPU [e.g. RTX 4090]
  - CPU
