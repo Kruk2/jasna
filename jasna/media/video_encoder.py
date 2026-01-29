@@ -3,8 +3,9 @@ import logging
 
 import PyNvVideoCodec as nvc
 from pathlib import Path
-from jasna.media import VideoMetadata, get_subprocess_startup_info
+from jasna.media import VideoMetadata
 from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
+from jasna.os_utils import get_subprocess_startup_info
 import av
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import heapq

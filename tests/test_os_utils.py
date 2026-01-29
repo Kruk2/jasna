@@ -1,0 +1,134 @@
+import pytest
+
+from jasna import os_utils
+
+
+def test_parse_ffmpeg_major_version_parses_plain_semver() -> None:
+    out = "ffmpeg version 8.0.1 Copyright (c) ..."
+    assert os_utils._parse_ffmpeg_major_version(out) == 8
+
+
+def test_parse_ffmpeg_major_version_parses_n_prefix() -> None:
+    out = "ffprobe version n8.1.2-12-gdeadbeef Copyright (c) ..."
+    assert os_utils._parse_ffmpeg_major_version(out) == 8
+
+
+def test_check_required_executables_uses_expected_version_commands(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        exe = cmd[0]
+        if exe == "ffmpeg":
+            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version 8.0.0", "stderr": ""})()
+        if exe == "ffprobe":
+            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.1.0", "stderr": ""})()
+        if exe == "mkvmerge":
+            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+        raise AssertionError(f"Unexpected exe {exe!r}")
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+
+    os_utils.check_required_executables()
+
+    assert calls == [
+        ["ffprobe", "-version"],
+        ["ffmpeg", "-version"],
+        ["mkvmerge", "--version"],
+    ]
+
+
+def test_check_required_executables_errors_on_old_ffmpeg(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
+
+    def fake_run(cmd, **kwargs):
+        exe = cmd[0]
+        if exe == "ffprobe":
+            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.0.0", "stderr": ""})()
+        if exe == "ffmpeg":
+            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version 7.1.0", "stderr": ""})()
+        if exe == "mkvmerge":
+            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+        raise AssertionError(f"Unexpected exe {exe!r}")
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+
+    with pytest.raises(SystemExit) as e:
+        os_utils.check_required_executables()
+    assert int(e.value.code) == 1
+
+    captured = capsys.readouterr()
+    assert "major version must be exactly 8" in captured.out
+
+
+def test_check_required_executables_errors_on_newer_ffmpeg(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
+
+    def fake_run(cmd, **kwargs):
+        exe = cmd[0]
+        if exe == "ffprobe":
+            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.0.0", "stderr": ""})()
+        if exe == "ffmpeg":
+            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version 9.0.0", "stderr": ""})()
+        if exe == "mkvmerge":
+            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+        raise AssertionError(f"Unexpected exe {exe!r}")
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+
+    with pytest.raises(SystemExit) as e:
+        os_utils.check_required_executables()
+    assert int(e.value.code) == 1
+
+    captured = capsys.readouterr()
+    assert "major version must be exactly 8" in captured.out
+
+
+def test_get_subprocess_startup_info_non_nt_returns_none(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.os, "name", "posix", raising=False)
+    assert os_utils.get_subprocess_startup_info() is None
+
+
+def test_get_subprocess_startup_info_nt_sets_startf_flag(monkeypatch) -> None:
+    class _StartupInfo:
+        def __init__(self) -> None:
+            self.dwFlags = 0
+
+    monkeypatch.setattr(os_utils.os, "name", "nt", raising=False)
+    monkeypatch.setattr(os_utils.subprocess, "STARTUPINFO", _StartupInfo, raising=False)
+    monkeypatch.setattr(os_utils.subprocess, "STARTF_USESHOWWINDOW", 1 << 0, raising=False)
+
+    si = os_utils.get_subprocess_startup_info()
+    assert si is not None
+    assert si.dwFlags & (1 << 0)
+
+
+def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_when_enabled(monkeypatch, capsys) -> None:
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Winreg:
+        HKEY_LOCAL_MACHINE = object()
+
+        @staticmethod
+        def OpenKey(root, path):
+            return _Key()
+
+        @staticmethod
+        def QueryValueEx(key, name):
+            assert name == "HwSchMode"
+            return (2, None)
+
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
+
+    os_utils.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
+    out = capsys.readouterr().out
+    assert "Hardware-accelerated GPU scheduling" in out
+

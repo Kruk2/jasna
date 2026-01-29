@@ -1,9 +1,10 @@
-import os
 import subprocess
 from dataclasses import dataclass
 from fractions import Fraction
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import json
+
+from jasna.os_utils import get_subprocess_startup_info
 
 SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
@@ -83,13 +84,6 @@ def validate_encoder_settings(settings: dict[str, object]) -> dict[str, object]:
         )
     return settings
 
-
-def get_subprocess_startup_info():
-    if os.name != "nt":
-        return None
-    startup_info = subprocess.STARTUPINFO()
-    startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-    return startup_info
 
 @dataclass
 class VideoMetadata:
