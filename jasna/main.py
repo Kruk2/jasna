@@ -1,62 +1,9 @@
 import argparse
 import logging
-import shutil
-import subprocess
-import sys
 from pathlib import Path
 
 from jasna import __version__
-
-def check_required_executables() -> None:
-    """Check that required external tools are available in PATH and callable."""
-    missing: list[str] = []
-    checks = {
-        "ffprobe": ["ffprobe", "-version"],
-        "ffmpeg": ["ffmpeg", "-version"],
-        "mkvmerge": ["mkvmerge", "--version"],
-    }
-    for exe, cmd in checks.items():
-        if shutil.which(exe) is None:
-            missing.append(exe)
-            continue
-        try:
-            completed = subprocess.run(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-        except OSError:
-            missing.append(exe)
-            continue
-        if completed.returncode != 0:
-            missing.append(exe)
-    
-    if missing:
-        print(f"Error: Required executable(s) not found in PATH or not callable: {', '.join(missing)}")
-        print("Please install them and ensure they are available in your system PATH and runnable.")
-        sys.exit(1)
-
-
-def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
-    if sys.platform != "win32":
-        return
-
-    try:
-        import winreg
-
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
-        ) as key:
-            mode, _ = winreg.QueryValueEx(key, "HwSchMode")
-    except OSError:
-        return
-
-    if int(mode) == 2:
-        print(
-            "Warning: Windows 'Hardware-accelerated GPU scheduling' is enabled. "
-            "This will make Jasna slower and might add artifacts to the output video."
-        )
+from jasna.os_utils import check_required_executables, warn_if_windows_hardware_accelerated_gpu_scheduling_enabled
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -92,14 +39,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--compile-basicvsrpp",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes.",
+        help="Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes. (default: %(default)s)",
     )
-    restoration.add_argument("--max-clip-size", type=int, default=60, help="Maximum clip size for tracking")
+    restoration.add_argument(
+        "--max-clip-size",
+        type=int,
+        default=60,
+        help="Maximum clip size for tracking (default: %(default)s)",
+    )
     restoration.add_argument(
         "--temporal-overlap",
         type=int,
         default=5,
-        help="Number of restored frames to use as context for split clips",
+        help="Number of restored frames to use as context for split clips (default: %(default)s)",
     )
 
     detection = parser.add_argument_group("Detection")
