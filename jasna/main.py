@@ -1,15 +1,30 @@
 import argparse
 import logging
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
+from jasna import __version__
 
 def check_required_executables() -> None:
-    """Check that required external tools are available in PATH."""
-    missing = []
-    for exe in ("ffmpeg", "mkvmerge"):
+    """Check that required external tools are available in PATH and callable."""
+    missing: list[str] = []
+    for exe in ("ffprobe", "ffmpeg", "mkvmerge"):
         if shutil.which(exe) is None:
+            missing.append(exe)
+            continue
+        try:
+            completed = subprocess.run(
+                [exe, "-version"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except OSError:
+            missing.append(exe)
+            continue
+        if completed.returncode != 0:
             missing.append(exe)
     
     if missing:
@@ -41,6 +56,7 @@ def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jasna")
+    parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--input", required=True, type=str, help="Path to input video")
     parser.add_argument("--output", required=True, type=str, help="Path to output video")
     parser.add_argument("--batch-size", type=int, default=4)
@@ -65,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--restoration-model-path",
         type=str,
         default=str(Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"),
-        help='Path to restoration model (default: "model_weights/lada_mosaic_restoration_model_generic_v1.2.pth")',
+        help="Path to restoration model (default: %(default)s)",
     )
     restoration.add_argument(
         "--compile-basicvsrpp",
@@ -93,13 +109,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--detection-model-path",
         type=str,
         default=str(Path("model_weights") / "rfdetr-v2.onnx"),
-        help='Path to detection ONNX model (default: "model_weights/rfdetr-v2.onnx")',
+        help="Path to detection ONNX model (default: %(default)s)",
     )
     detection.add_argument(
         "--detection-score-threshold",
         type=float,
         default=0.2,
-        help="Detection score threshold (default: 0.2)",
+        help="Detection score threshold (default: %(default)s)",
     )
 
     encoding = parser.add_argument_group("Encoding")
@@ -119,10 +135,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    args = build_parser().parse_args()
     check_required_executables()
     warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
-    
-    args = build_parser().parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING,
