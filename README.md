@@ -75,5 +75,5 @@ https://codeberg.org/Kruk2/vali
 
 https://codeberg.org/Kruk2/PyNvVideoCodec
 
-Then:
-```uv pip install -e .[dev]```
+Once two libs above are installed to your python enviorment run:
+```uv pip install -e .[dev]``` in jasna repository
