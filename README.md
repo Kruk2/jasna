@@ -63,7 +63,9 @@ You can opt out from compiled model at the cost of performance.\
 It's recommended to rather lower clip size and use temporal overlap with compiled model.
 
 ### Disclamer
-This project is aimed at more technical users.
+Since Jasna is in early development the main goal is to improve: restoration quality, mosaic detection, speed & vram consumption (in this order).
+Thats why currently this project is aimed at more technical users, meaning the program accessability is lower and might be gated for some users.
+I do this to dedicate more time on important features and if you want to help Pull Requests are welcomed.
 
 ## Building
 Install these libs via ```uv pip install . --no-build-isolation```\
