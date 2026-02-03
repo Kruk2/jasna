@@ -13,6 +13,7 @@ from jasna.mosaic import Detections
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
+from jasna.pipeline_processing import process_frame_batch, finalize_processing
 
 log = logging.getLogger(__name__)
 
@@ -61,35 +62,9 @@ class Pipeline:
 
         tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=self.temporal_overlap)
         frame_buffer = FrameBuffer(device=self.device)
-        active_tracks: set[int] = set()
 
         discard_margin = int(self.temporal_overlap)
-
-        def _apply_overlap_discard_bookkeeping(clip, ended_clip) -> None:
-            if not ended_clip.split_due_to_max_size or discard_margin <= 0:
-                return
-
-            child_id = ended_clip.continuation_track_id
-            if child_id is None:
-                raise RuntimeError("split clip is missing continuation_track_id")
-
-            overlap_len = 2 * discard_margin
-            overlap_start = clip.end_frame - overlap_len + 1
-            overlap_indices = list(range(overlap_start, clip.end_frame + 1))
-            frame_buffer.add_pending_clip(overlap_indices, child_id)
-
-            tail_start = clip.end_frame - discard_margin + 1
-            tail_indices = list(range(tail_start, clip.end_frame + 1))
-            frame_buffer.remove_pending_clip(tail_indices, clip.track_id)
-
-        def _get_keep_range(clip, ended_clip) -> tuple[int, int]:
-            keep_start = discard_margin if (discard_margin > 0 and clip.is_continuation) else 0
-            keep_end = (
-                clip.frame_count - discard_margin
-                if (discard_margin > 0 and ended_clip.split_due_to_max_size)
-                else clip.frame_count
-            )
-            return keep_start, keep_end
+        raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
 
         with (
             NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=self.device, stream=stream, metadata=metadata) as reader,
@@ -117,78 +92,33 @@ class Pipeline:
                     if effective_bs == 0:
                         continue
 
-                    frames_eff = frames[:effective_bs]
-                    if effective_bs < self.batch_size:
-                        pad = frames_eff[-1:].expand(self.batch_size - effective_bs, -1, -1, -1)
-                        frames_in = torch.cat([frames_eff, pad], dim=0)
-                    else:
-                        frames_in = frames
+                    res = process_frame_batch(
+                        frames=frames,
+                        pts_list=[int(p) for p in pts_list],
+                        start_frame_idx=frame_idx,
+                        batch_size=self.batch_size,
+                        target_hw=target_hw,
+                        detections_fn=self.detection_model,
+                        tracker=tracker,
+                        frame_buffer=frame_buffer,
+                        restoration_pipeline=self.restoration_pipeline,
+                        discard_margin=discard_margin,
+                        raw_frame_context=raw_frame_context,
+                    )
+                    for ready_idx, ready_frame, ready_pts in res.ready_frames:
+                        encoder.encode(ready_frame, ready_pts)
+                        log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
 
-                    detections: Detections = self.detection_model(frames_in, target_hw=target_hw)
-
-                    for i in range(effective_bs):
-                        current_frame_idx = frame_idx + i
-                        pts = int(pts_list[i])
-                        frame = frames_eff[i]
-
-                        valid_boxes = detections.boxes_xyxy[i]
-                        valid_masks = detections.masks[i]
-                        n_detections = valid_boxes.shape[0]
-
-                        if n_detections > 0:
-                            log.debug("frame %d: %d detection(s)", current_frame_idx, n_detections)
-
-                        ended_clips, active_track_ids = tracker.update(
-                            current_frame_idx, valid_boxes, valid_masks
-                        )
-
-                        new_tracks = active_track_ids - active_tracks
-                        for track_id in new_tracks:
-                            log.debug("clip %d started at frame %d", track_id, current_frame_idx)
-                        active_tracks = (active_tracks | active_track_ids) - {ec.clip.track_id for ec in ended_clips}
-
-                        frame_buffer.add_frame(current_frame_idx, pts, frame, active_track_ids)
-
-                        for ended_clip in ended_clips:
-                            clip = ended_clip.clip
-                            log.debug("clip %d ended: frames %d-%d (%d frames)", clip.track_id, clip.start_frame, clip.end_frame, clip.frame_count)
-                            frames_for_clip = [frame_buffer.get_frame(fi) for fi in clip.frame_indices()]
-                            frames_for_clip = [f for f in frames_for_clip if f is not None]
-                            if frames_for_clip:
-                                _apply_overlap_discard_bookkeeping(clip, ended_clip)
-
-                                restored_clip = self.restoration_pipeline.restore_clip(clip, frames_for_clip)
-                                log.debug("clip %d restored", clip.track_id)
-                                keep_start, keep_end = _get_keep_range(clip, ended_clip)
-                                frame_buffer.blend_clip(clip, restored_clip, keep_start=keep_start, keep_end=keep_end)
-                                log.debug("clip %d blended onto frames %d-%d", clip.track_id, clip.start_frame, clip.end_frame)
-
-                        ready_frames = frame_buffer.get_ready_frames()
-                        for ready_idx, ready_frame, ready_pts in ready_frames:
-                            encoder.encode(ready_frame, ready_pts)
-                            log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
-
-                    frame_idx += effective_bs
+                    frame_idx = res.next_frame_idx
                     pb.update(effective_bs)
 
-                final_clips = tracker.flush()
-                if final_clips:
-                    log.debug("flushing %d remaining clip(s)", len(final_clips))
-                for ended_clip in final_clips:
-                    clip = ended_clip.clip
-                    log.debug("clip %d ended: frames %d-%d (%d frames)", clip.track_id, clip.start_frame, clip.end_frame, clip.frame_count)
-                    frames_for_clip = [frame_buffer.get_frame(fi) for fi in clip.frame_indices()]
-                    frames_for_clip = [f for f in frames_for_clip if f is not None]
-                    if frames_for_clip:
-                        _apply_overlap_discard_bookkeeping(clip, ended_clip)
-
-                        restored_clip = self.restoration_pipeline.restore_clip(clip, frames_for_clip)
-                        log.debug("clip %d restored", clip.track_id)
-                        keep_start, keep_end = _get_keep_range(clip, ended_clip)
-                        frame_buffer.blend_clip(clip, restored_clip, keep_start=keep_start, keep_end=keep_end)
-                        log.debug("clip %d blended onto frames %d-%d", clip.track_id, clip.start_frame, clip.end_frame)
-
-                remaining_frames = frame_buffer.flush()
+                remaining_frames = finalize_processing(
+                    tracker=tracker,
+                    frame_buffer=frame_buffer,
+                    restoration_pipeline=self.restoration_pipeline,
+                    discard_margin=discard_margin,
+                    raw_frame_context=raw_frame_context,
+                )
                 if remaining_frames:
                     log.debug("encoding %d remaining frame(s)", len(remaining_frames))
                 for ready_idx, ready_frame, ready_pts in remaining_frames:
