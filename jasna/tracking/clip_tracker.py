@@ -13,6 +13,7 @@ class TrackedClip:
     mask_resolution: tuple[int, int]  # (Hm, Wm) model mask resolution
     bboxes: list[np.ndarray] = field(default_factory=list)  # each (4,) xyxy, CPU
     masks: list[torch.Tensor] = field(default_factory=list)  # each (Hm, Wm) bool, GPU
+    is_continuation: bool = False
 
     @property
     def end_frame(self) -> int:
@@ -104,6 +105,7 @@ class EndedClip:
     """Wrapper for ended clips with metadata about why they ended."""
     clip: TrackedClip
     split_due_to_max_size: bool
+    continuation_track_id: int | None = None
 
 
 class ClipTracker:
@@ -115,19 +117,12 @@ class ClipTracker:
         self.next_track_id = 0
         self.last_frame_boxes: np.ndarray | None = None  # (T, 4) xyxy, CPU
         self.track_ids: list[int] = []  # track_id for each row in last_frame_boxes
-        self._continuation_map: dict[int, int] = {}  # new_track_id -> original_track_id that was split
-        self._pending_splits: dict[int, tuple[int, np.ndarray]] = {}  # split_track_id -> (split_frame_idx, last bbox)
         if self.temporal_overlap < 0:
             raise ValueError("temporal_overlap must be >= 0")
         if self.temporal_overlap >= self.max_clip_size:
             raise ValueError("temporal_overlap must be < max_clip_size")
-
-    def _effective_max_size(self, track_id: int) -> int:
-        if self.temporal_overlap == 0:
-            return self.max_clip_size
-        if track_id in self._continuation_map:
-            return self.max_clip_size - self.temporal_overlap
-        return self.max_clip_size
+        if self.temporal_overlap > 0 and (2 * self.temporal_overlap) >= self.max_clip_size:
+            raise ValueError("temporal_overlap must satisfy 2*temporal_overlap < max_clip_size")
 
     def update(
         self, frame_idx: int, bboxes: np.ndarray, masks: torch.Tensor
@@ -143,19 +138,11 @@ class ClipTracker:
         ended_clips: list[EndedClip] = []
         active_track_ids: set[int] = set()
 
-        if self._pending_splits:
-            self._pending_splits = {
-                tid: (split_frame_idx, bbox)
-                for tid, (split_frame_idx, bbox) in self._pending_splits.items()
-                if split_frame_idx == frame_idx - 1
-            }
-
         if bboxes.shape[0] == 0:
             for track_id in self.track_ids:
                 ended_clips.append(EndedClip(clip=self.active_clips.pop(track_id), split_due_to_max_size=False))
             self.last_frame_boxes = None
             self.track_ids = []
-            self._pending_splits.clear()
             return ended_clips, active_track_ids
 
         n_detections = bboxes.shape[0]
@@ -188,10 +175,35 @@ class ClipTracker:
             clip.masks.append(masks[det_idx])
             active_track_ids.add(track_id)
 
-            if clip.frame_count >= self._effective_max_size(track_id):
-                ended_clips.append(EndedClip(clip=clip, split_due_to_max_size=True))
-                self._pending_splits[track_id] = (frame_idx, bboxes[det_idx])
-                del self.active_clips[track_id]
+            if clip.frame_count >= self.max_clip_size:
+                if self.temporal_overlap > 0:
+                    overlap_len = 2 * self.temporal_overlap
+                    overlap_bboxes = clip.bboxes[-overlap_len:]
+                    overlap_masks = clip.masks[-overlap_len:]
+                    new_start_frame = clip.end_frame - overlap_len + 1
+
+                    new_track_id = self.next_track_id
+                    self.next_track_id += 1
+                    new_clip = TrackedClip(
+                        track_id=new_track_id,
+                        start_frame=new_start_frame,
+                        mask_resolution=clip.mask_resolution,
+                        bboxes=overlap_bboxes.copy(),
+                        masks=overlap_masks.copy(),
+                        is_continuation=True,
+                    )
+                    self.active_clips[new_track_id] = new_clip
+                    active_track_ids.add(new_track_id)
+                    active_track_ids.discard(track_id)
+
+                    ended_clips.append(
+                        EndedClip(clip=clip, split_due_to_max_size=True, continuation_track_id=new_track_id)
+                    )
+                    del self.active_clips[track_id]
+                else:
+                    ended_clips.append(EndedClip(clip=clip, split_due_to_max_size=True))
+                    del self.active_clips[track_id]
+                    active_track_ids.discard(track_id)
 
         for track_idx, track_id in enumerate(self.track_ids):
             if track_idx not in matched_track_indices and track_id in self.active_clips:
@@ -207,19 +219,10 @@ class ClipTracker:
                     mask_resolution=(masks.shape[1], masks.shape[2]),
                     bboxes=[bboxes[det_idx]],
                     masks=[masks[det_idx]],
+                    is_continuation=False,
                 )
                 self.active_clips[track_id] = clip
                 active_track_ids.add(track_id)
-                
-                if self._pending_splits:
-                    split_track_ids = list(self._pending_splits.keys())
-                    split_boxes = np.stack([self._pending_splits[tid][1] for tid in split_track_ids])
-                    ious = compute_iou_matrix(bboxes[det_idx : det_idx + 1], split_boxes)[0]
-                    best_idx = int(ious.argmax())
-                    if float(ious[best_idx]) > self.iou_threshold:
-                        source_track_id = split_track_ids[best_idx]
-                        self._continuation_map[track_id] = source_track_id
-                        del self._pending_splits[source_track_id]
 
         new_boxes = []
         new_track_ids = []
@@ -238,19 +241,9 @@ class ClipTracker:
 
         return ended_clips, active_track_ids
 
-    def get_continuation_source(self, track_id: int) -> int | None:
-        """Get the track_id of the clip that this track is a continuation of, if any."""
-        return self._continuation_map.get(track_id)
-
-    def clear_continuation(self, track_id: int) -> None:
-        """Clear continuation mapping for a track (call after using the context)."""
-        self._continuation_map.pop(track_id, None)
-
     def flush(self) -> list[EndedClip]:
         clips = [EndedClip(clip=c, split_due_to_max_size=False) for c in self.active_clips.values()]
         self.active_clips.clear()
         self.last_frame_boxes = None
         self.track_ids = []
-        self._continuation_map.clear()
-        self._pending_splits.clear()
         return clips

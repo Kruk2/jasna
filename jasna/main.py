@@ -50,8 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     restoration.add_argument(
         "--temporal-overlap",
         type=int,
-        default=5,
-        help="Number of restored frames to use as context for split clips (default: %(default)s)",
+        default=8,
+        help="Discard margin for overlap+discard clip splitting. Each split uses 2*temporal_overlap input overlap and discards temporal_overlap frames at each split boundary (default: %(default)s)",
     )
 
     detection = parser.add_argument_group("Detection")
@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-model-path",
         type=str,
-        default=str(Path("model_weights") / "rfdetr-v2.onnx"),
+        default=str(Path("model_weights") / "rfdetr-v3.onnx"),
         help="Path to detection ONNX model (default: %(default)s)",
     )
     detection.add_argument(
@@ -142,6 +142,8 @@ def main() -> None:
         raise ValueError("--temporal-overlap must be >= 0")
     if temporal_overlap >= max_clip_size:
         raise ValueError("--temporal-overlap must be < --max-clip-size")
+    if temporal_overlap > 0 and (2 * temporal_overlap) >= max_clip_size:
+        raise ValueError("--temporal-overlap must satisfy 2*--temporal-overlap < --max-clip-size")
 
     device = torch.device(str(args.device))
     fp16 = bool(args.fp16)

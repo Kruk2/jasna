@@ -51,17 +51,19 @@ Tested nvidia drivers: **591.67**
 
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\
-Initial testings shows that temporal overlap reduces flickering but might sometimes decrease quality of restoration. Feel free to test different values.\
+Going above 15 doesn't bring much. The larger overlap the longer processing times.\
+Pick highest clip size you can and set overlap to something between 8-15.\
 Some guidance from my limited testing:\
-- 30 clip size + temporal overlap 3 looks also ok but if you can fit higher clip size then go for it.
-- 60 clip size + temporal overlap 4 is fine for most of my test clips
-- 180 clip size + temporal overlap 8 looks very good in all my tests.
+- 60 clip size + temporal overlap 8
+- 90 clip size + temporal overlap 10
+- 180 clip size + temporal overlap 15 if you can fit the model.
+
+Using clip size below 60 might look ok, depends on video but prefer using 60 even if it means disabling model compilation.
 
 ### Restoration model compilation.
 Read [#6](https://github.com/Kruk2/jasna/issues/6) for more details.\
 Compiled model takes a lot of vram. Rough estimate is around 2.5GB VRAM per 30 frames in clip size. If you plan to use 180 clip size you have to have 24gb vram+ (180/30 * 2.5).\
 You can opt out from compiled model at the cost of performance.\
-It's recommended to rather lower clip size and use temporal overlap with compiled model.
 
 ### Disclaimer
 Jasna is in early development and the main goal is to improve: restoration quality, mosaic detection, speed & vram consumption (in this order).

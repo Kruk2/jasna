@@ -46,13 +46,38 @@ class FrameBuffer:
         pending = self.frames.get(frame_idx)
         return pending.frame if pending else None
 
-    def blend_clip(self, clip: TrackedClip, restored_clip: RestoredClip) -> None:
+    def add_pending_clip(self, frame_indices: list[int], track_id: int) -> None:
+        for frame_idx in frame_indices:
+            pending = self.frames.get(frame_idx)
+            if pending is None:
+                continue
+            pending.pending_clips.add(track_id)
+
+    def remove_pending_clip(self, frame_indices: list[int], track_id: int) -> None:
+        for frame_idx in frame_indices:
+            pending = self.frames.get(frame_idx)
+            if pending is None:
+                continue
+            pending.pending_clips.discard(track_id)
+
+    def blend_clip(
+        self,
+        clip: TrackedClip,
+        restored_clip: RestoredClip,
+        *,
+        keep_start: int,
+        keep_end: int,
+    ) -> None:
         for i, frame_idx in enumerate(clip.frame_indices()):
             if frame_idx not in self.frames:
                 continue
 
             pending = self.frames[frame_idx]
             if clip.track_id not in pending.pending_clips:
+                continue
+
+            if not (keep_start <= i < keep_end):
+                pending.pending_clips.discard(clip.track_id)
                 continue
 
             restored = restored_clip.restored_frames[i]
