@@ -29,15 +29,13 @@ class RestorationPipeline:
         self.restorer = restorer
 
     def restore_clip(
-        self, clip: TrackedClip, frames: list[torch.Tensor], prefix_restored_frames: list[torch.Tensor] | None = None
+        self, clip: TrackedClip, frames: list[torch.Tensor]
     ) -> RestoredClip:
         """
         clip: TrackedClip with bbox/mask info
         frames: list of (C, H, W) original frames, GPU
-        prefix_restored_frames: optional list of already-restored (C, 256, 256) frames to prepend for temporal context
-        Returns: RestoredClip with restored frames and metadata for blending (excluding prefix frames)
+        Returns: RestoredClip with restored frames and metadata for blending
         """
-        n_prefix = len(prefix_restored_frames) if prefix_restored_frames else 0
         crops: list[torch.Tensor] = []
         enlarged_bboxes: list[tuple[int, int, int, int]] = []
         crop_shapes: list[tuple[int, int]] = []
@@ -96,17 +94,7 @@ class RestorationPipeline:
             padded = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
             resized_crops.append(padded.to(crop.dtype).permute(1, 2, 0))
 
-        # Prepend prefix frames if provided (already in HWC format, 256x256)
-        if prefix_restored_frames:
-            prefix_hwc = [f.permute(1, 2, 0) for f in prefix_restored_frames]
-            resized_crops = prefix_hwc + resized_crops
-
         restored = self.restorer.restore(resized_crops)
-        
-        # Remove prefix frames from output
-        if n_prefix > 0:
-            restored = restored[n_prefix:]
-        
         restored_frames = [r.permute(2, 0, 1) for r in restored]
 
         _, frame_h, frame_w = frames[0].shape

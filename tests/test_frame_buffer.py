@@ -73,7 +73,7 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
         frame_shape=(8, 8),
     )
 
-    fb.blend_clip(clip, restored_clip)
+    fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
     ready = fb.get_ready_frames()
 
     assert len(captured) == 1
@@ -117,7 +117,7 @@ def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
         frame_shape=(8, 8),
     )
 
-    fb.blend_clip(clip, restored_clip)
+    fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
     ready = fb.get_ready_frames()
     assert len(ready) == 1
     assert ready[0][0] == 1
@@ -154,7 +154,7 @@ def test_frame_buffer_blend_clip_ignores_missing_frames() -> None:
         frame_shape=(4, 4),
     )
 
-    fb.blend_clip(clip, restored_clip)  # should not raise
+    fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)  # should not raise
 
 
 def test_frame_buffer_uses_blend_mask_value() -> None:
@@ -182,9 +182,77 @@ def test_frame_buffer_uses_blend_mask_value() -> None:
         frame_shape=(8, 8),
     )
 
-    fb.blend_clip(clip, restored_clip)
+    fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
     ready = fb.get_ready_frames()
     assert len(ready) == 1
     _, blended, _ = ready[0]
     assert torch.all(blended[:, y1:y2, x1:x2] == 0)
 
+
+def test_frame_buffer_blend_clip_skips_frames_where_clip_is_not_pending() -> None:
+    def blend_mask_fn(_: torch.Tensor) -> torch.Tensor:
+        raise AssertionError("blend_mask_fn should not be called when clip is not pending")
+
+    fb = FrameBuffer(device=torch.device("cpu"), blend_mask_fn=blend_mask_fn)
+
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=123, frame=frame, clip_track_ids={8})
+
+    clip = _FakeClip(track_id=7, frame_idxs=[0])
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    restored = torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+
+    restored_clip = _FakeRestoredClip(
+        restored_frames=[restored],
+        pad_offsets=[(0, 0)],
+        resize_shapes=[(crop_h, crop_w)],
+        crop_shapes=[(crop_h, crop_w)],
+        enlarged_bboxes=[(x1, y1, x2, y2)],
+        masks=[mask],
+        frame_shape=(8, 8),
+    )
+
+    fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
+    assert fb.get_ready_frames() == []
+
+
+def test_frame_buffer_blend_clip_discards_frames_outside_keep_range() -> None:
+    fb = FrameBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+
+    frame0 = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    frame1 = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame0, clip_track_ids={7})
+    fb.add_frame(frame_idx=1, pts=11, frame=frame1, clip_track_ids={7})
+
+    clip = _FakeClip(track_id=7, frame_idxs=[0, 1])
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    restored0 = torch.full((3, crop_h, crop_w), 123, dtype=torch.uint8)
+    restored1 = torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+
+    restored_clip = _FakeRestoredClip(
+        restored_frames=[restored0, restored1],
+        pad_offsets=[(0, 0), (0, 0)],
+        resize_shapes=[(crop_h, crop_w), (crop_h, crop_w)],
+        crop_shapes=[(crop_h, crop_w), (crop_h, crop_w)],
+        enlarged_bboxes=[(x1, y1, x2, y2), (x1, y1, x2, y2)],
+        masks=[mask, mask],
+        frame_shape=(8, 8),
+    )
+
+    fb.blend_clip(clip, restored_clip, keep_start=1, keep_end=2)
+
+    ready = fb.get_ready_frames()
+    assert [r[0] for r in ready] == [0, 1]
+    out0 = ready[0][1]
+    out1 = ready[1][1]
+    assert torch.all(out0[:, y1:y2, x1:x2] == 0)
+    assert torch.all(out1[:, y1:y2, x1:x2] == 200)

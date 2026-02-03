@@ -89,99 +89,36 @@ def test_split_due_to_max_clip_size_starts_new_track_next_frame() -> None:
 
 
 # temporal overlap: continuation clips are shorter so (overlap + normal) == max_clip_size
-def test_temporal_overlap_counts_inside_max_clip_size_for_continuation() -> None:
-    tracker = ClipTracker(max_clip_size=5, temporal_overlap=2, iou_threshold=0.0)
+def test_temporal_overlap_split_creates_overlapping_continuation_clip() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=2, iou_threshold=0.0)
 
-    for frame_idx in range(4):
+    for frame_idx in range(9):
         bboxes, masks = _det()
         ended, _ = tracker.update(frame_idx, bboxes, masks)
         assert ended == []
 
     bboxes, masks = _det()
-    ended, _ = tracker.update(4, bboxes, masks)
+    ended, active = tracker.update(9, bboxes, masks)
     assert len(ended) == 1
     assert ended[0].split_due_to_max_size is True
     assert ended[0].clip.track_id == 0
-    assert ended[0].clip.frame_count == 5
+    assert ended[0].clip.frame_count == 10
+    assert ended[0].continuation_track_id is not None
+
+    child_id = int(ended[0].continuation_track_id)
+    assert active == {child_id}
+    assert child_id in tracker.active_clips
+    child = tracker.active_clips[child_id]
+    assert child.is_continuation is True
+    assert child.start_frame == 6  # last 2*overlap=4 frames: 6,7,8,9
+    assert child.end_frame == 9
+    assert child.frame_count == 4
 
     bboxes, masks = _det()
-    ended, active = tracker.update(5, bboxes, masks)
+    ended, active = tracker.update(10, bboxes, masks)
     assert ended == []
-    assert active == {1}
-    assert tracker.get_continuation_source(1) == 0
-
-    bboxes, masks = _det()
-    ended, active = tracker.update(6, bboxes, masks)
-    assert ended == []
-    assert active == {1}
-
-    bboxes, masks = _det()
-    ended, _ = tracker.update(7, bboxes, masks)
-    assert len(ended) == 1
-    assert ended[0].split_due_to_max_size is True
-    assert ended[0].clip.track_id == 1
-    assert ended[0].clip.frame_count == 3  # 5 - temporal_overlap(2)
-
-
-# split + low IoU next frame: no continuation mapping, new track uses full max_clip_size
-def test_split_then_low_iou_does_not_create_continuation_and_new_track_uses_full_max() -> None:
-    tracker = ClipTracker(max_clip_size=5, temporal_overlap=2, iou_threshold=0.9)
-
-    for frame_idx in range(4):
-        bboxes, masks = _det(box=(0.0, 0.0, 10.0, 10.0))
-        ended, _ = tracker.update(frame_idx, bboxes, masks)
-        assert ended == []
-
-    bboxes, masks = _det(box=(0.0, 0.0, 10.0, 10.0))
-    ended, _ = tracker.update(4, bboxes, masks)
-    assert len(ended) == 1
-    assert ended[0].split_due_to_max_size is True
-    assert ended[0].clip.track_id == 0
-
-    bboxes, masks = _det(box=(100.0, 100.0, 110.0, 110.0))
-    ended, active = tracker.update(5, bboxes, masks)
-    assert ended == []
-    assert active == {1}
-    assert tracker.get_continuation_source(1) is None
-
-    for frame_idx in (6, 7, 8):
-        bboxes, masks = _det(box=(100.0, 100.0, 110.0, 110.0))
-        ended, _ = tracker.update(frame_idx, bboxes, masks)
-        assert ended == []
-
-    bboxes, masks = _det(box=(100.0, 100.0, 110.0, 110.0))
-    ended, _ = tracker.update(9, bboxes, masks)
-    assert len(ended) == 1
-    assert ended[0].split_due_to_max_size is True
-    assert ended[0].clip.track_id == 1
-    assert ended[0].clip.frame_count == 5
-
-
-# split then gap: pending split expires, late detection is not linked as continuation
-def test_pending_split_expires_after_gap_and_does_not_link_late_continuation() -> None:
-    tracker = ClipTracker(max_clip_size=5, temporal_overlap=2, iou_threshold=0.0)
-
-    for frame_idx in range(4):
-        bboxes, masks = _det(box=(0.0, 0.0, 10.0, 10.0))
-        ended, _ = tracker.update(frame_idx, bboxes, masks)
-        assert ended == []
-
-    bboxes, masks = _det(box=(0.0, 0.0, 10.0, 10.0))
-    ended, _ = tracker.update(4, bboxes, masks)
-    assert len(ended) == 1
-    assert ended[0].split_due_to_max_size is True
-    assert ended[0].clip.track_id == 0
-
-    bboxes, masks = _no_det()
-    ended, active = tracker.update(5, bboxes, masks)
-    assert active == set()
-    assert ended == []
-
-    bboxes, masks = _det(box=(0.0, 0.0, 10.0, 10.0))
-    ended, active = tracker.update(6, bboxes, masks)
-    assert ended == []
-    assert active == {1}
-    assert tracker.get_continuation_source(1) is None
+    assert active == {child_id}
+    assert tracker.active_clips[child_id].frame_count == 5
 
 
 # overlapping detections within a frame are merged into one track
@@ -238,12 +175,89 @@ def test_unmatched_track_is_ended_when_other_track_matches() -> None:
     assert active == {0}
 
 
+def test_one_mosaic_splits_into_two_detections_continues_best_and_starts_new_track() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.3)
+
+    bboxes, masks = _det(box=(0.0, 0.0, 10.0, 10.0))
+    ended, active = tracker.update(0, bboxes, masks)
+    assert ended == []
+    assert active == {0}
+
+    bboxes = np.array(
+        [
+            [0.0, 0.0, 10.0, 10.0],  # best continuation for track 0
+            [20.0, 0.0, 30.0, 10.0],  # new mosaic
+        ],
+        dtype=np.float32,
+    )
+    masks = torch.zeros((2, 4, 4), dtype=torch.bool)
+    masks[0, 0, 0] = True
+    masks[1, 1, 1] = True
+
+    ended, active = tracker.update(1, bboxes, masks)
+    assert ended == []
+    assert active == {0, 1}
+    assert tracker.active_clips[0].start_frame == 0
+    assert tracker.active_clips[0].end_frame == 1
+    assert tracker.active_clips[1].start_frame == 1
+
+
+def test_two_mosaics_merge_into_one_detection_continues_best_and_ends_other_track() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.3)
+
+    bboxes = np.array([[0.0, 0.0, 10.0, 10.0], [20.0, 0.0, 30.0, 10.0]], dtype=np.float32)
+    masks = torch.zeros((2, 4, 4), dtype=torch.bool)
+    masks[0, 0, 0] = True
+    masks[1, 1, 1] = True
+
+    ended, active = tracker.update(0, bboxes, masks)
+    assert ended == []
+    assert active == {0, 1}
+
+    # Single detection overlaps only track 1 (acts like "merged region" / blob).
+    bboxes, masks = _det(box=(18.0, 0.0, 30.0, 10.0))
+    ended, active = tracker.update(1, bboxes, masks)
+
+    assert active == {1}
+    assert len(ended) == 1
+    assert ended[0].split_due_to_max_size is False
+    assert ended[0].clip.track_id == 0
+    assert ended[0].clip.frame_count == 1
+
+
+def test_two_mosaics_blend_and_detector_outputs_two_overlapping_boxes_continues_one_track() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.3)
+
+    bboxes = np.array([[0.0, 0.0, 10.0, 10.0], [40.0, 0.0, 50.0, 10.0]], dtype=np.float32)
+    masks = torch.zeros((2, 4, 4), dtype=torch.bool)
+    masks[0, 0, 0] = True
+    masks[1, 1, 1] = True
+
+    ended, active = tracker.update(0, bboxes, masks)
+    assert ended == []
+    assert active == {0, 1}
+
+    # Two detections overlap each other -> merged into one detection before matching.
+    bboxes = np.array([[0.0, 0.0, 12.0, 10.0], [2.0, 0.0, 14.0, 10.0]], dtype=np.float32)
+    masks = torch.zeros((2, 4, 4), dtype=torch.bool)
+    masks[0, 0, 0] = True
+    masks[1, 1, 1] = True
+
+    ended, active = tracker.update(1, bboxes, masks)
+    assert active == {0}
+    assert len(ended) == 1
+    assert ended[0].split_due_to_max_size is False
+    assert ended[0].clip.track_id == 1
+    assert ended[0].clip.frame_count == 1
+
+
 # invalid overlap settings raise
 @pytest.mark.parametrize(
     ("max_clip_size", "temporal_overlap"),
     [
         (5, 5),
         (5, 6),
+        (5, 3),  # 2*overlap >= max_clip_size
         (1, 1),
     ],
 )
