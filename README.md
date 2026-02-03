@@ -43,6 +43,7 @@ RTX 5090 + i9 13900k
 Go to releases page and download last package. Built for windows/linux on cuda 13.0.\
 Make sure that ```ffmpeg```  ```ffprobe``` ```mkvmerge``` is in your path.\
 You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html).
+Tested nvidia drivers: **591.67** 
 
 **First run might be slow because models will be compiled for your hardware (you can copy .engine files from model_weights to a new version!)**
 
