@@ -24,4 +24,5 @@ jasna.exe --input "D:/video.mp4" [other params]
  - OS: [e.g. iOS]
  - Jasna Version [e.g. 0.3]
  - GPU [e.g. RTX 4090]
+- Nvidia Driver version: xxx.yy
  - CPU
