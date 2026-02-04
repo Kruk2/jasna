@@ -62,12 +62,17 @@ def _process_ended_clips(
             frame_buffer.add_pending_clip(tail_indices, child_id)
             frame_buffer.remove_pending_clip(tail_indices, clip.track_id)
 
-        restored_clip = restoration_pipeline.restore_clip(clip, frames_for_clip)
         keep_start, keep_end = compute_keep_range(
             frame_count=clip.frame_count,
             is_continuation=clip.is_continuation,
             split_due_to_max_size=ended_clip.split_due_to_max_size,
             discard_margin=discard_margin,
+        )
+        restored_clip = restoration_pipeline.restore_clip(
+            clip,
+            frames_for_clip,
+            keep_start=int(keep_start),
+            keep_end=int(keep_end),
         )
         frame_buffer.blend_clip(clip, restored_clip, keep_start=keep_start, keep_end=keep_end)
         raw_frame_context.pop(clip.track_id, None)

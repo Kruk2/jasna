@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.restored_clip import RestoredClip
+from jasna.restorer.secondary_restoration import SecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 RESTORATION_SIZE = 256
@@ -25,11 +26,22 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
     return image
 
 class RestorationPipeline:
-    def __init__(self, restorer: BasicvsrppMosaicRestorer) -> None:
+    def __init__(
+        self,
+        restorer: BasicvsrppMosaicRestorer,
+        *,
+        secondary_restorer: SecondaryRestorer | None = None,
+    ) -> None:
         self.restorer = restorer
+        self.secondary_restorer = secondary_restorer
 
     def restore_clip(
-        self, clip: TrackedClip, frames: list[torch.Tensor]
+        self,
+        clip: TrackedClip,
+        frames: list[torch.Tensor],
+        *,
+        keep_start: int,
+        keep_end: int,
     ) -> RestoredClip:
         """
         clip: TrackedClip with bbox/mask info
@@ -94,8 +106,33 @@ class RestorationPipeline:
             padded = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
             resized_crops.append(padded.to(crop.dtype).permute(1, 2, 0))
 
-        restored = self.restorer.restore(resized_crops)
-        restored_frames = [r.permute(2, 0, 1) for r in restored]
+        if self.secondary_restorer is None:
+            restored_hwc = self.restorer.restore(resized_crops)  # list[(256,256,C)] uint8
+            restored_frames = [r.permute(2, 0, 1) for r in restored_hwc]
+        else:
+            primary_hwc = self.restorer.restore(resized_crops)  # list[(256,256,C)] uint8
+            primary_u8 = torch.stack([r.permute(2, 0, 1) for r in primary_hwc], dim=0)  # (T,C,256,256)
+            secondary_u8 = self.secondary_restorer.restore(primary_u8, keep_start=int(keep_start), keep_end=int(keep_end))
+            restored_frames = list(torch.unbind(secondary_u8, 0))
+
+            scaled_pad_offsets: list[tuple[int, int]] = []
+            scaled_resize_shapes: list[tuple[int, int]] = []
+            for i, frame_u8 in enumerate(restored_frames):
+                out_h = int(frame_u8.shape[1])
+                out_w = int(frame_u8.shape[2])
+                pad_left, pad_top = pad_offsets[i]
+                resize_h, resize_w = resize_shapes[i]
+
+                x0 = int(round((pad_left * out_w) / RESTORATION_SIZE))
+                x1 = int(round(((pad_left + resize_w) * out_w) / RESTORATION_SIZE))
+                y0 = int(round((pad_top * out_h) / RESTORATION_SIZE))
+                y1 = int(round(((pad_top + resize_h) * out_h) / RESTORATION_SIZE))
+
+                scaled_pad_offsets.append((x0, y0))
+                scaled_resize_shapes.append((y1 - y0, x1 - x0))
+
+            pad_offsets = scaled_pad_offsets
+            resize_shapes = scaled_resize_shapes
 
         _, frame_h, frame_w = frames[0].shape
         return RestoredClip(
