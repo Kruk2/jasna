@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--secondary-restoration",
         type=str,
         default="none",
-        choices=["none", "swin2sr"],
+        choices=["none", "swin2sr", "tvai"],
         help='Secondary restoration after primary model (default: %(default)s)',
     )
 
@@ -75,6 +75,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8,
         help="Batch size for Swin2SR secondary restoration (default: %(default)s)",
+    )
+
+    tvai = parser.add_argument_group("Topaz Video AI")
+    tvai.add_argument(
+        "--tvai-ffmpeg-path",
+        type=str,
+        default="C:\\Program Files\\Topaz Labs LLC\\Topaz Video AI\\ffmpeg.exe",
+        help="Path to Topaz Video AI ffmpeg.exe (default: %(default)s)",
+    )
+    tvai.add_argument(
+        "--tvai-args",
+        type=str,
+        default="model=iris-3:scale=0:preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1",
+        help='Arguments for tvai_up filter (passed as "tvai_up=<args>" to -filter_complex) (default: %(default)s)',
     )
 
     detection = parser.add_argument_group("Detection")
@@ -184,6 +198,7 @@ def main() -> None:
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
+    from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
 
     use_tensorrt = basicvsrpp_startup_policy(
         restoration_model_path=str(restoration_model_path),
@@ -205,6 +220,13 @@ def main() -> None:
             fp16=fp16,
             batch_size=swin2sr_batch_size,
             use_tensorrt=bool(args.compile_tensorrt),
+        )
+    elif secondary_name == "tvai":
+        secondary_restorer = TvaiSecondaryRestorer(
+            device=device,
+            ffmpeg_path=str(args.tvai_ffmpeg_path),
+            tvai_args=str(args.tvai_args),
+            max_clip_size=max_clip_size,
         )
     else:
         raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
