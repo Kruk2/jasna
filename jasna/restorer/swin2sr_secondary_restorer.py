@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import torch
 
+from jasna.tensor_utils import pad_batch_with_last
+
 
 class Swin2srSecondaryRestorer:
     name = "swin2sr"
@@ -33,15 +35,14 @@ class Swin2srSecondaryRestorer:
         for start in range(0, t, bs):
             end = min(start + bs, t)
             chunk = frames_256[start:end].to(device=self.device, dtype=self.dtype)
-            if end - start < bs:
-                pad = chunk[-1:].expand(bs - (end - start), -1, -1, -1)
-                chunk = torch.cat([chunk, pad], dim=0)
+            n = int(end - start)
+            chunk = pad_batch_with_last(chunk, batch_size=bs)
 
             with torch.inference_mode():
                 outputs = self.model(pixel_values=chunk)
                 reconstruction = outputs.reconstruction
 
-            reconstruction = reconstruction[: end - start].clamp(0, 1)
+            reconstruction = reconstruction[:n].clamp(0, 1)
             out_u8 = reconstruction.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
             out.extend(list(torch.unbind(out_u8, 0)))
 
