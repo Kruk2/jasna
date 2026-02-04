@@ -17,4 +17,3 @@ class SecondaryRestorer(Protocol):
             Either (T, C, H, W) uint8 tensor or list of T tensors each (C, H, W) uint8.
             (H, W) can be any resolution but should be consistent for the clip.
         """
-
