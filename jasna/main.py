@@ -36,6 +36,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to restoration model (default: %(default)s)",
     )
     restoration.add_argument(
+        "--compile-tensorrt",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Enable TensorRT compilation/usage where supported (default: %(default)s)",
+    )
+    restoration.add_argument(
         "--compile-basicvsrpp",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -184,7 +190,7 @@ def main() -> None:
         max_clip_size=max_clip_size,
         device=device,
         fp16=fp16,
-        compile_basicvsrpp=bool(args.compile_basicvsrpp),
+        compile_basicvsrpp=bool(args.compile_tensorrt) and bool(args.compile_basicvsrpp),
     )
 
     secondary_name = str(args.secondary_restoration).lower()
@@ -194,7 +200,12 @@ def main() -> None:
         swin2sr_batch_size = int(args.swin2sr_batch_size)
         if swin2sr_batch_size <= 0:
             raise ValueError("--swin2sr-batch-size must be > 0")
-        secondary_restorer = Swin2srSecondaryRestorer(device=device, fp16=fp16, batch_size=swin2sr_batch_size)
+        secondary_restorer = Swin2srSecondaryRestorer(
+            device=device,
+            fp16=fp16,
+            batch_size=swin2sr_batch_size,
+            use_tensorrt=bool(args.compile_tensorrt),
+        )
     else:
         raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
 

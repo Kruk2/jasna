@@ -8,6 +8,13 @@ import sys
 import torch
 
 from jasna.models.basicvsrpp.basicvsrpp_gan import BasicVSRPlusPlusGan
+from jasna.trt.torch_tensorrt_export import (
+    compile_and_save_torchtrt_dynamo,
+    engine_precision_name,
+    engine_system_suffix,
+    get_workspace_size_bytes,
+    load_torchtrt_export,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,38 +62,21 @@ def _compile_basicvsrpp_model(
     output_path: str,
     max_clip_size: int,
 ) -> str:
-    import psutil
-    import torch_tensorrt  # type: ignore[import-not-found]
-
-    workspace_size = int(psutil.virtual_memory().available * 0.8)
+    workspace_size = get_workspace_size_bytes()
     inp = torch.randn(1, max_clip_size, 3, 256, 256, dtype=dtype, device=device)
 
-    logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
-    with torch_tensorrt.logging.errors():
-        print(
-            f"Compiling BasicVSR++ TensorRT engine (workspace_size={workspace_size / (1024 ** 3):.2f} GB). "
-            "This might take anywhere from ~15 minutes to a few hours depending on selected clip size."
-        )
-        trt_gm = torch_tensorrt.compile(
-            model,
-            ir="dynamo",
-            inputs=[inp],
-            min_block_size=1,
-            workspace_size=workspace_size,
-            enabled_precisions={dtype},
-            use_fp32_acc=False,
-            use_explicit_typing=False,
-            sparse_weights=False,
-            optimization_level=3,
-            hardware_compatible=False,
-            use_python_runtime=False,
-            cache_built_engines=False,
-            reuse_cached_engines=False,
-            truncate_double=True,
-        )
-
-    torch_tensorrt.save(trt_gm, output_path, inputs=[inp])
-    del trt_gm
+    message = (
+        f"Compiling BasicVSR++ TensorRT engine (workspace_size={workspace_size / (1024 ** 3):.2f} GB). "
+        "This might take anywhere from ~15 minutes to a few hours depending on selected clip size."
+    )
+    compile_and_save_torchtrt_dynamo(
+        module=model,
+        inputs=[inp],
+        output_path=output_path,
+        dtype=dtype,
+        workspace_size_bytes=workspace_size,
+        message=message,
+    )
     del inp
     return output_path
 
@@ -96,8 +86,8 @@ def _get_compiled_mosaic_restoration_model_path(
     clip_length: int,
     fp16: bool,
 ) -> str:
-    precision = "fp16" if fp16 else "fp32"
-    system_name = ".win" if os.name == "nt" else ".linux"
+    precision = engine_precision_name(fp16=fp16)
+    system_name = engine_system_suffix()
     output_dir = os.path.dirname(mosaic_restoration_model_path)
     stem = os.path.splitext(os.path.basename(mosaic_restoration_model_path))[0]
     return os.path.join(output_dir, f"{stem}_clip{clip_length}.trt_{precision}{system_name}.engine")
@@ -118,13 +108,7 @@ def get_compiled_mosaic_restoration_model_path_for_clip(
 
 
 def load_engine(checkpoint_path: str, device: torch.device) -> BasicVSRPlusPlusGan:
-    logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
-    import torch_tensorrt
-
-    logger.info("Loading TensorRT export from %s", checkpoint_path)
-    with open(checkpoint_path, "rb") as f:
-        trt_module = torch.export.load(f).module()
-        return trt_module.to(device)
+    return load_torchtrt_export(checkpoint_path=str(checkpoint_path), device=torch.device(device))  # type: ignore[return-value]
 
 
 def compile_mosaic_restoration_model(
