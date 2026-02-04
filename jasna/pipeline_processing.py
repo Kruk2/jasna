@@ -6,6 +6,7 @@ import torch
 
 from jasna.mosaic.detections import Detections
 from jasna.pipeline_overlap import compute_keep_range, compute_overlap_and_tail_indices
+from jasna.tensor_utils import pad_batch_with_last
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip
 from jasna.tracking.frame_buffer import FrameBuffer
 from jasna.restorer.restoration_pipeline import RestorationPipeline
@@ -15,13 +16,6 @@ from jasna.restorer.restoration_pipeline import RestorationPipeline
 class BatchProcessResult:
     next_frame_idx: int
     ready_frames: list[tuple[int, torch.Tensor, int]]
-
-
-def _pad_frames_for_detection(frames_eff: torch.Tensor, *, effective_bs: int, batch_size: int) -> torch.Tensor:
-    if effective_bs == batch_size:
-        return frames_eff
-    pad = frames_eff[-1:].expand(batch_size - effective_bs, -1, -1, -1)
-    return torch.cat([frames_eff, pad], dim=0)
 
 
 def _process_ended_clips(
@@ -97,7 +91,7 @@ def process_frame_batch(
         return BatchProcessResult(next_frame_idx=int(start_frame_idx), ready_frames=[])
 
     frames_eff = frames[:effective_bs]
-    frames_in = _pad_frames_for_detection(frames_eff, effective_bs=effective_bs, batch_size=int(batch_size))
+    frames_in = pad_batch_with_last(frames_eff, batch_size=int(batch_size))
 
     detections: Detections = detections_fn(frames_in, target_hw=target_hw)
 
