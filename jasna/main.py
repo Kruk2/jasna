@@ -63,6 +63,14 @@ def build_parser() -> argparse.ArgumentParser:
         help='Secondary restoration after primary model (default: %(default)s)',
     )
 
+    swin2sr = parser.add_argument_group("Swin2SR")
+    swin2sr.add_argument(
+        "--swin2sr-batch-size",
+        type=int,
+        default=8,
+        help="Batch size for Swin2SR secondary restoration (default: %(default)s)",
+    )
+
     detection = parser.add_argument_group("Detection")
     detection.add_argument(
         "--detection-model",
@@ -169,7 +177,7 @@ def main() -> None:
     from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.restoration_pipeline import RestorationPipeline
-    from jasna.restorer.secondary_restoration import Swin2srSecondaryRestorer
+    from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
 
     use_tensorrt = basicvsrpp_startup_policy(
         restoration_model_path=str(restoration_model_path),
@@ -183,7 +191,10 @@ def main() -> None:
     if secondary_name == "none":
         secondary_restorer = None
     elif secondary_name == "swin2sr":
-        secondary_restorer = Swin2srSecondaryRestorer()
+        swin2sr_batch_size = int(args.swin2sr_batch_size)
+        if swin2sr_batch_size <= 0:
+            raise ValueError("--swin2sr-batch-size must be > 0")
+        secondary_restorer = Swin2srSecondaryRestorer(device=device, fp16=fp16, batch_size=swin2sr_batch_size)
     else:
         raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
 

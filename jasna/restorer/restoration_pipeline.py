@@ -7,7 +7,7 @@ import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.restored_clip import RestoredClip
-from jasna.restorer.secondary_restoration import SecondaryRestorer
+from jasna.restorer.secondary_restorer import SecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 RESTORATION_SIZE = 256
@@ -110,10 +110,12 @@ class RestorationPipeline:
             restored_hwc = self.restorer.restore(resized_crops)  # list[(256,256,C)] uint8
             restored_frames = [r.permute(2, 0, 1) for r in restored_hwc]
         else:
-            primary_hwc = self.restorer.restore(resized_crops)  # list[(256,256,C)] uint8
-            primary_u8 = torch.stack([r.permute(2, 0, 1) for r in primary_hwc], dim=0)  # (T,C,256,256)
-            secondary_u8 = self.secondary_restorer.restore(primary_u8, keep_start=int(keep_start), keep_end=int(keep_end))
-            restored_frames = list(torch.unbind(secondary_u8, 0))
+            primary_raw = self.restorer.raw_process(resized_crops)  # (T,C,256,256) float in [0, 1]
+            secondary_out = self.secondary_restorer.restore(primary_raw, keep_start=int(keep_start), keep_end=int(keep_end))
+            if isinstance(secondary_out, list):
+                restored_frames = secondary_out
+            else:
+                restored_frames = list(torch.unbind(secondary_out, 0))
 
             scaled_pad_offsets: list[tuple[int, int]] = []
             scaled_resize_shapes: list[tuple[int, int]] = []

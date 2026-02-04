@@ -87,6 +87,58 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
     assert torch.all(frame == 0)
 
 
+def test_frame_buffer_add_remove_pending_clip_ignores_missing_frames() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
+    fb.add_frame(frame_idx=1, pts=10, frame=frame, clip_track_ids=set())
+
+    fb.add_pending_clip([0, 1, 2], track_id=7)
+    assert 7 in fb.frames[1].pending_clips
+
+    fb.remove_pending_clip([0, 1, 2], track_id=7)
+    assert 7 not in fb.frames[1].pending_clips
+
+
+def test_frame_buffer_blend_clip_unpads_from_larger_restored_frame_then_resizes_to_crop() -> None:
+    fb = FrameBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=123, frame=frame, clip_track_ids={7})
+
+    clip = _FakeClip(track_id=7, frame_idxs=[0])
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+
+    out_h, out_w = (512, 512)
+    pad_left, pad_top = (120, 100)
+    resize_h, resize_w = (80, 60)
+
+    restored = torch.zeros((3, out_h, out_w), dtype=torch.uint8)
+    restored[:, pad_top : pad_top + resize_h, pad_left : pad_left + resize_w] = 200
+
+    mask = torch.ones((8, 8), dtype=torch.bool)
+    restored_clip = _FakeRestoredClip(
+        restored_frames=[restored],
+        pad_offsets=[(pad_left, pad_top)],
+        resize_shapes=[(resize_h, resize_w)],
+        crop_shapes=[(crop_h, crop_w)],
+        enlarged_bboxes=[(x1, y1, x2, y2)],
+        masks=[mask],
+        frame_shape=(8, 8),
+    )
+
+    fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
+    ready = fb.get_ready_frames()
+    assert len(ready) == 1
+    _, blended, _ = ready[0]
+    assert torch.all(blended[:, y1:y2, x1:x2] == 200)
+    assert torch.all(blended[:, :y1, :] == 0)
+
+
 def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
