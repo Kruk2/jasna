@@ -54,6 +54,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Discard margin for overlap+discard clip splitting. Each split uses 2*temporal_overlap input overlap and discards temporal_overlap frames at each split boundary (default: %(default)s)",
     )
 
+    secondary = parser.add_argument_group("2nd restoration")
+    secondary.add_argument(
+        "--secondary-restoration",
+        type=str,
+        default="none",
+        choices=["none", "swin2sr"],
+        help='Secondary restoration after primary model (default: %(default)s)',
+    )
+
     detection = parser.add_argument_group("Detection")
     detection.add_argument(
         "--detection-model",
@@ -160,6 +169,7 @@ def main() -> None:
     from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.restoration_pipeline import RestorationPipeline
+    from jasna.restorer.secondary_restoration import Swin2srSecondaryRestorer
 
     use_tensorrt = basicvsrpp_startup_policy(
         restoration_model_path=str(restoration_model_path),
@@ -168,7 +178,15 @@ def main() -> None:
         fp16=fp16,
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
     )
-    
+
+    secondary_name = str(args.secondary_restoration).lower()
+    if secondary_name == "none":
+        secondary_restorer = None
+    elif secondary_name == "swin2sr":
+        secondary_restorer = Swin2srSecondaryRestorer()
+    else:
+        raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
+
     restoration_pipeline = RestorationPipeline(
         restorer=BasicvsrppMosaicRestorer(
             checkpoint_path=str(restoration_model_path),
@@ -176,7 +194,8 @@ def main() -> None:
             max_clip_size=max_clip_size,
             use_tensorrt=use_tensorrt,
             fp16=fp16,
-        )
+        ),
+        secondary_restorer=secondary_restorer,
     )
 
     stream = torch.cuda.Stream()

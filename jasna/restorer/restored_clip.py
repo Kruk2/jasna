@@ -7,7 +7,7 @@ import torch
 
 @dataclass
 class RestoredClip:
-    restored_frames: list[torch.Tensor]  # each (C, 256, 256), GPU
+    restored_frames: list[torch.Tensor]  # each (C, H, W), GPU
     masks: list[torch.Tensor]  # each (Hm, Wm) bool, GPU (model resolution)
     frame_shape: tuple[int, int]  # (H, W) original frame shape
     enlarged_bboxes: list[tuple[int, int, int, int]]  # each (x1, y1, x2, y2) after expansion

@@ -47,7 +47,7 @@ def test_restore_clip_uses_floor_ceil_xyxy_rounding(monkeypatch) -> None:
         masks=[mask],
     )
 
-    restored = pipeline.restore_clip(clip, [frame])
+    restored = pipeline.restore_clip(clip, [frame], keep_start=0, keep_end=1)
 
     # floor(x1/y1)=2, ceil(x2/y2)=7; xyxy are exclusive for slicing.
     assert restored.enlarged_bboxes == [(2, 2, 7, 7)]
@@ -68,7 +68,7 @@ def test_restore_clip_clamps_bbox_to_frame(monkeypatch) -> None:
     mask = torch.zeros((2, 2), dtype=torch.bool)
 
     clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=[bbox], masks=[mask])
-    restored = pipeline.restore_clip(clip, [frame])
+    restored = pipeline.restore_clip(clip, [frame], keep_start=0, keep_end=1)
 
     assert restored.enlarged_bboxes == [(0, 0, 10, 10)]
     assert restored.crop_shapes == [(10, 10)]
@@ -89,7 +89,7 @@ def test_restore_clip_does_not_upscale_small_crops(monkeypatch) -> None:
     mask = torch.zeros((2, 2), dtype=torch.bool)
 
     clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=[bbox], masks=[mask])
-    restored = pipeline.restore_clip(clip, [frame])
+    restored = pipeline.restore_clip(clip, [frame], keep_start=0, keep_end=1)
 
     assert restored.crop_shapes == [(10, 20)]
     assert restored.resize_shapes == [(10, 20)]
@@ -126,7 +126,7 @@ def test_restore_clip_downscales_when_crop_is_larger_than_restoration_size(monke
     mask = torch.zeros((1, 1), dtype=torch.bool)
     clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(1, 1), bboxes=[bbox], masks=[mask])
 
-    restored = pipeline.restore_clip(clip, [frame])
+    restored = pipeline.restore_clip(clip, [frame], keep_start=0, keep_end=1)
     assert restored.crop_shapes == [(400, 300)]
     assert restored.resize_shapes == [(256, 256)]
     assert restored.pad_offsets == [(0, 0)]
@@ -156,7 +156,7 @@ def test_restore_clip_raises_on_bbox_with_zero_area(monkeypatch) -> None:
     clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(1, 1), bboxes=[bbox], masks=[mask])
 
     with pytest.raises(ZeroDivisionError):
-        pipeline.restore_clip(clip, [frame])
+        pipeline.restore_clip(clip, [frame], keep_start=0, keep_end=1)
 
 
 def test_restore_clip_raises_on_mismatched_frame_and_clip_lengths(monkeypatch) -> None:
@@ -174,5 +174,5 @@ def test_restore_clip_raises_on_mismatched_frame_and_clip_lengths(monkeypatch) -
     clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(1, 1), bboxes=[bbox], masks=[mask])
 
     with pytest.raises(IndexError):
-        pipeline.restore_clip(clip, frames)
+        pipeline.restore_clip(clip, frames, keep_start=0, keep_end=1)
 

@@ -9,7 +9,15 @@ from jasna.pipeline_processing import process_frame_batch, finalize_processing
 
 
 class _FakeRestorationPipeline:
-    def restore_clip(self, clip: TrackedClip, frames: list[torch.Tensor]) -> RestoredClip:
+    def restore_clip(
+        self,
+        clip: TrackedClip,
+        frames: list[torch.Tensor],
+        *,
+        keep_start: int,
+        keep_end: int,
+    ) -> RestoredClip:
+        del keep_start, keep_end
         restored_frames: list[torch.Tensor] = []
         enlarged_bboxes: list[tuple[int, int, int, int]] = []
         crop_shapes: list[tuple[int, int]] = []

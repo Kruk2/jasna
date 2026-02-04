@@ -141,6 +141,6 @@ class BasicvsrppMosaicRestorer:
 
             if engine is None:
                 result = result.squeeze(0)
-            result = result.mul_(255.0).round_().clamp_(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1)
+            result = result.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1)
 
         return list(torch.unbind(result, 0))
