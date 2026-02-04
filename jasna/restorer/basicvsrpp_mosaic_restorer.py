@@ -115,12 +115,12 @@ class BasicvsrppMosaicRestorer:
         result = result.squeeze(0)
         return result[:t]
 
-    def restore(self, video: list[Tensor]) -> list[Tensor]:
+    def raw_process(self, video: list[Tensor]) -> torch.Tensor:
         """
         Args:
             video: list of (H, W, C) uint8 tensors in RGB format
         Returns:
-            list of (256, 256, C) uint8 tensors in RGB format
+            (T, C, 256, 256) float tensor in [0, 1]
         """
         with torch.inference_mode():
             resized = []
@@ -141,6 +141,15 @@ class BasicvsrppMosaicRestorer:
 
             if engine is None:
                 result = result.squeeze(0)
-            result = result.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1)
+            return result
 
+    def restore(self, video: list[Tensor]) -> list[Tensor]:
+        """
+        Args:
+            video: list of (H, W, C) uint8 tensors in RGB format
+        Returns:
+            list of (256, 256, C) uint8 tensors in RGB format
+        """
+        result = self.raw_process(video)
+        result = result.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1)
         return list(torch.unbind(result, 0))
