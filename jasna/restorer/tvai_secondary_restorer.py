@@ -77,9 +77,8 @@ class _TvaiWorkerFatal:
 
 class _TvaiFfmpegRestorer:
     name = "tvai"
-    OUT_BUFFER_POOL_SIZE = 32
+    BUFFER_POOL_SIZE = 32
     IN_WRITE_CHUNK_FRAMES = 4
-    COMPLETE_BUFFER_POOL_SIZE = 32
 
     def __init__(
         self,
@@ -268,13 +267,13 @@ class _TvaiFfmpegRestorer:
         self._stdout_thread.start()
 
     def _init_output_buffers(self) -> None:
-        for _ in range(self.OUT_BUFFER_POOL_SIZE):
+        for _ in range(self.BUFFER_POOL_SIZE):
             buf = torch.empty((self.out_h, self.out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
             buf_np = buf.numpy()
             mv = memoryview(buf_np).cast("B")
             self._out_pool.put((buf, mv, buf_np))
         self._complete_pool: queue.SimpleQueue[tuple[torch.Tensor, memoryview, np.ndarray]] = queue.SimpleQueue()
-        for _ in range(self.COMPLETE_BUFFER_POOL_SIZE):
+        for _ in range(self.BUFFER_POOL_SIZE):
             buf = torch.empty((self.out_h, self.out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
             buf_np = buf.numpy()
             mv = memoryview(buf_np).cast("B")
