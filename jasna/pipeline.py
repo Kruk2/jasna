@@ -34,6 +34,7 @@ class Pipeline:
         device: torch.device,
         max_clip_size: int,
         temporal_overlap: int,
+        enable_crossfade: bool = True,
         fp16: bool,
     ) -> None:
         self.input_video = input_video
@@ -45,6 +46,7 @@ class Pipeline:
         self.device = device
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
+        self.enable_crossfade = bool(enable_crossfade)
 
         self.detection_model = RfDetrMosaicDetectionModel(
             onnx_path=detection_model_path,
@@ -64,6 +66,7 @@ class Pipeline:
         frame_buffer = FrameBuffer(device=self.device)
 
         discard_margin = int(self.temporal_overlap)
+        blend_frames = self.temporal_overlap // 3 if self.enable_crossfade else 0
         raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
 
         with (
@@ -103,6 +106,7 @@ class Pipeline:
                         frame_buffer=frame_buffer,
                         restoration_pipeline=self.restoration_pipeline,
                         discard_margin=discard_margin,
+                        blend_frames=blend_frames,
                         raw_frame_context=raw_frame_context,
                     )
                     for ready_idx, ready_frame, ready_pts in res.ready_frames:
@@ -117,6 +121,7 @@ class Pipeline:
                     frame_buffer=frame_buffer,
                     restoration_pipeline=self.restoration_pipeline,
                     discard_margin=discard_margin,
+                    blend_frames=blend_frames,
                     raw_frame_context=raw_frame_context,
                 )
                 if remaining_frames:

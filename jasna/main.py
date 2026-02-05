@@ -58,6 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=8,
         help="Discard margin for overlap+discard clip splitting. Each split uses 2*temporal_overlap input overlap and discards temporal_overlap frames at each split boundary (default: %(default)s)",
     )
+    restoration.add_argument(
+        "--enable-crossfade",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Cross-fade between clip boundaries to reduce flickering at seams. Uses frames that are already processed but otherwise discarded, so no extra GPU cost. (default: %(default)s)",
+    )
 
     secondary = parser.add_argument_group("2nd restoration")
     secondary.add_argument(
@@ -301,6 +307,7 @@ def main() -> None:
         device=device,
         max_clip_size=max_clip_size,
         temporal_overlap=temporal_overlap,
+        enable_crossfade=bool(args.enable_crossfade),
         fp16=fp16,
     ).run()
 

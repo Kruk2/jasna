@@ -21,9 +21,23 @@ def compute_keep_range(
     is_continuation: bool,
     split_due_to_max_size: bool,
     discard_margin: int,
+    blend_frames: int = 0,
 ) -> tuple[int, int]:
     d = int(discard_margin)
-    keep_start = d if (d > 0 and bool(is_continuation)) else 0
-    keep_end = int(frame_count) - d if (d > 0 and bool(split_due_to_max_size)) else int(frame_count)
+    bf = min(int(blend_frames), d) if d > 0 else 0
+    keep_start = (d - bf) if (d > 0 and bool(is_continuation)) else 0
+    keep_end = (int(frame_count) - d + bf) if (d > 0 and bool(split_due_to_max_size)) else int(frame_count)
     return keep_start, keep_end
+
+
+def compute_crossfade_weights(*, discard_margin: int, blend_frames: int) -> dict[int, float]:
+    d = int(discard_margin)
+    bf = min(int(blend_frames), d) if d > 0 else 0
+    if bf <= 0:
+        return {}
+    weights: dict[int, float] = {}
+    for j in range(2 * bf):
+        local_idx = d - bf + j
+        weights[local_idx] = (j + 0.5) / (2 * bf)
+    return weights
 

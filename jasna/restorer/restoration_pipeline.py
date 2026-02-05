@@ -41,6 +41,7 @@ class _PendingBlend:
     crop_shape: tuple[int, int]
     pad_offset_256: tuple[int, int]
     resize_shape_256: tuple[int, int]
+    crossfade_weight: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -171,6 +172,7 @@ class RestorationPipeline:
         keep_start: int,
         keep_end: int,
         frame_buffer: FrameBuffer,
+        crossfade_weights: dict[int, float] | None = None,
     ) -> None:
         t = len(frames)
         ks = max(0, keep_start)
@@ -199,6 +201,7 @@ class RestorationPipeline:
                 crop_shape=crop_shapes[i],
                 pad_offset_256=pad_offsets[i],
                 resize_shape_256=resize_shapes[i],
+                crossfade_weight=crossfade_weights.get(i, 1.0) if crossfade_weights else 1.0,
             )
             for i in range(ks, ke)
         ]
@@ -230,6 +233,7 @@ class RestorationPipeline:
                 crop_shape=meta.crop_shape,
                 pad_offset=(x0, y0),
                 resize_shape=(y1 - y0, x1 - x0),
+                crossfade_weight=meta.crossfade_weight,
             )
             item.recycle()
 

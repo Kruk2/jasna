@@ -127,6 +127,7 @@ class FrameBuffer:
         crop_shape: tuple[int, int],
         pad_offset: tuple[int, int],
         resize_shape: tuple[int, int],
+        crossfade_weight: float = 1.0,
     ) -> None:
         pending = self.frames.get(int(frame_idx))
         if pending is None:
@@ -157,6 +158,9 @@ class FrameBuffer:
         x_idx = (torch.arange(x1, x2, device=mask_lr.device) * wm) // frame_w
         crop_mask = mask_lr.float().index_select(0, y_idx).index_select(1, x_idx)
         blend_mask = self.blend_mask_fn(crop_mask)
+
+        if crossfade_weight < 1.0:
+            blend_mask = blend_mask * crossfade_weight
 
         original_crop = blended[:, y1:y2, x1:x2].float()
         blended_crop = original_crop + (resized_back - original_crop) * blend_mask.unsqueeze(0)

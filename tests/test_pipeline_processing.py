@@ -58,6 +58,7 @@ class _FakeRestorationPipeline:
         keep_start: int,
         keep_end: int,
         frame_buffer: FrameBuffer,
+        crossfade_weights: dict[int, float] | None = None,
     ) -> None:
         restored = self.restore_clip(clip, frames, keep_start=int(keep_start), keep_end=int(keep_end))
         frame_buffer.blend_clip(clip, restored, keep_start=int(keep_start), keep_end=int(keep_end))
@@ -125,6 +126,53 @@ def test_process_batch_and_finalize_overlap_discard_delays_tail_until_continuati
         raw_frame_context=raw_frame_context,
     )  # type: ignore[arg-type]
     assert [x[0] for x in remaining] == [5]
+
+
+def test_process_batch_with_crossfade_outputs_all_frames_in_order() -> None:
+    batch_size = 2
+    discard_margin = 2
+    blend_frames = 1
+    tracker = ClipTracker(max_clip_size=6, temporal_overlap=discard_margin, iou_threshold=0.0)
+    fb = FrameBuffer(device=torch.device("cpu"))
+    rest = _FakeRestorationPipeline()
+
+    def detections_fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
+        return _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
+
+    frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
+
+    ready_all: list[tuple[int, torch.Tensor, int]] = []
+    frame_idx = 0
+    raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
+    for pts_list in ([0, 1], [2, 3], [4, 5], [6, 7], [8, 9]):
+        res = process_frame_batch(
+            frames=frames,
+            pts_list=list(pts_list),
+            start_frame_idx=frame_idx,
+            batch_size=batch_size,
+            target_hw=(8, 8),
+            detections_fn=detections_fn,
+            tracker=tracker,
+            frame_buffer=fb,
+            restoration_pipeline=rest,  # type: ignore[arg-type]
+            discard_margin=discard_margin,
+            blend_frames=blend_frames,
+            raw_frame_context=raw_frame_context,
+        )
+        ready_all.extend(res.ready_frames)
+        frame_idx = res.next_frame_idx
+
+    remaining = finalize_processing(
+        tracker=tracker,
+        frame_buffer=fb,
+        restoration_pipeline=rest,
+        discard_margin=discard_margin,
+        blend_frames=blend_frames,
+        raw_frame_context=raw_frame_context,
+    )  # type: ignore[arg-type]
+    out = ready_all + remaining
+    out_indices = [x[0] for x in out]
+    assert out_indices == list(range(10)), f"expected frames 0-9, got {out_indices}"
 
 
 def test_process_batch_without_discard_encodes_all_frames() -> None:

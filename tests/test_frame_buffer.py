@@ -271,6 +271,94 @@ def test_frame_buffer_blend_clip_skips_frames_where_clip_is_not_pending() -> Non
     assert fb.get_ready_frames() == []
 
 
+def test_blend_restored_frame_crossfade_weight_scales_blend() -> None:
+    fb = FrameBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1, 2})
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+
+    # Parent blends at full weight (value=200)
+    fb.blend_restored_frame(
+        frame_idx=0,
+        track_id=1,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=mask,
+        frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0),
+        resize_shape=(crop_h, crop_w),
+        crossfade_weight=1.0,
+    )
+    blended = fb.frames[0].blended_frame
+    assert torch.all(blended[:, y1:y2, x1:x2] == 200)
+
+    # Child blends on top with crossfade_weight=0.5 (value=100)
+    # Expected: 200 + (100 - 200) * 0.5 = 150
+    fb.blend_restored_frame(
+        frame_idx=0,
+        track_id=2,
+        restored=torch.full((3, crop_h, crop_w), 100, dtype=torch.uint8),
+        mask_lr=mask,
+        frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0),
+        resize_shape=(crop_h, crop_w),
+        crossfade_weight=0.5,
+    )
+    blended = fb.frames[0].blended_frame
+    assert torch.all(blended[:, y1:y2, x1:x2] == 150)
+
+    ready = fb.get_ready_frames()
+    assert len(ready) == 1
+
+
+def test_blend_restored_frame_crossfade_weight_zero_keeps_previous() -> None:
+    fb = FrameBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+
+    frame = torch.full((3, 8, 8), 50, dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1, 2})
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+
+    # Parent blends at full weight (value=200)
+    fb.blend_restored_frame(
+        frame_idx=0, track_id=1,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=mask, frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+    )
+
+    # Child blends with weight near zero -- result should stay ~200
+    fb.blend_restored_frame(
+        frame_idx=0, track_id=2,
+        restored=torch.full((3, crop_h, crop_w), 0, dtype=torch.uint8),
+        mask_lr=mask, frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+        crossfade_weight=0.05,
+    )
+    blended = fb.frames[0].blended_frame
+    # 200 + (0 - 200) * 0.05 = 190
+    assert torch.all(blended[:, y1:y2, x1:x2] == 190)
+
+
 def test_frame_buffer_blend_clip_discards_frames_outside_keep_range() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
