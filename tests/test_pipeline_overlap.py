@@ -1,6 +1,6 @@
 import pytest
 
-from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices
+from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
 
 
 def test_compute_overlap_and_tail_indices_zero_margin_returns_empty() -> None:
@@ -117,4 +117,32 @@ def test_compute_crossfade_weights_bf_one() -> None:
     assert len(weights) == 2
     assert weights[4] == pytest.approx(0.25)
     assert weights[5] == pytest.approx(0.75)
+
+
+def test_compute_parent_crossfade_weights_returns_empty_when_no_blend() -> None:
+    assert compute_parent_crossfade_weights(frame_count=180, discard_margin=15, blend_frames=0) == {}
+    assert compute_parent_crossfade_weights(frame_count=180, discard_margin=0, blend_frames=5) == {}
+
+
+def test_compute_parent_crossfade_weights_returns_descending_ramp() -> None:
+    weights = compute_parent_crossfade_weights(frame_count=180, discard_margin=15, blend_frames=5)
+    assert len(weights) == 10
+    assert min(weights.keys()) == 160  # frame_count - d - bf = 180 - 15 - 5
+    assert max(weights.keys()) == 169  # frame_count - d + bf - 1 = 180 - 15 + 5 - 1
+    assert weights[160] == pytest.approx(0.95)
+    assert weights[169] == pytest.approx(0.05)
+    vals = [weights[k] for k in sorted(weights.keys())]
+    for i in range(1, len(vals)):
+        assert vals[i] < vals[i - 1]
+
+
+def test_parent_and_child_crossfade_weights_sum_to_one() -> None:
+    child = compute_crossfade_weights(discard_margin=15, blend_frames=5)
+    parent = compute_parent_crossfade_weights(frame_count=180, discard_margin=15, blend_frames=5)
+    parent_start = min(parent.keys())
+    child_start = min(child.keys())
+    for j in range(10):
+        p = parent[parent_start + j]
+        c = child[child_start + j]
+        assert p + c == pytest.approx(1.0)
 

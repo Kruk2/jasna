@@ -161,10 +161,14 @@ class FrameBuffer:
 
         if crossfade_weight < 1.0:
             blend_mask = blend_mask * crossfade_weight
-
-        original_crop = blended[:, y1:y2, x1:x2].float()
-        blended_crop = original_crop + (resized_back - original_crop) * blend_mask.unsqueeze(0)
-        blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
+            original_crop = pending.frame[:, y1:y2, x1:x2].float()
+            delta = (resized_back - original_crop) * blend_mask.unsqueeze(0)
+            current = blended[:, y1:y2, x1:x2].float()
+            blended[:, y1:y2, x1:x2] = (current + delta).round().clamp(0, 255).to(blended.dtype)
+        else:
+            original_crop = blended[:, y1:y2, x1:x2].float()
+            blended_crop = original_crop + (resized_back - original_crop) * blend_mask.unsqueeze(0)
+            blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
 
         pending.pending_clips.discard(int(track_id))
 

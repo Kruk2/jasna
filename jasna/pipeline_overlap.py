@@ -41,3 +41,15 @@ def compute_crossfade_weights(*, discard_margin: int, blend_frames: int) -> dict
         weights[local_idx] = (j + 0.5) / (2 * bf)
     return weights
 
+
+def compute_parent_crossfade_weights(*, frame_count: int, discard_margin: int, blend_frames: int) -> dict[int, float]:
+    d = int(discard_margin)
+    bf = min(int(blend_frames), d) if d > 0 else 0
+    if bf <= 0:
+        return {}
+    weights: dict[int, float] = {}
+    for j in range(2 * bf):
+        local_idx = int(frame_count) - d - bf + j
+        weights[local_idx] = 1.0 - (j + 0.5) / (2 * bf)
+    return weights
+
