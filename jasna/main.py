@@ -20,6 +20,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--disable-ffmpeg-check",
+        action="store_true",
+        help="Skip checking for ffmpeg/ffprobe in PATH and their version.",
+    )
 
     restoration = parser.add_argument_group("Restoration")
     restoration.add_argument(
@@ -130,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
-    check_required_executables()
+    check_required_executables(disable_ffmpeg_check=args.disable_ffmpeg_check)
     warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
 
     logging.basicConfig(

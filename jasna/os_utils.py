@@ -36,7 +36,13 @@ def _parse_ffmpeg_major_version(version_output: str) -> int:
     return int(m.group(1))
 
 
-def check_required_executables() -> None:
+FFMPEG_DOWNLOAD_LINKS = (
+    "Linux: https://www.ffmpeg.org/download.html  "
+    "Windows: https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-full.7z"
+)
+
+
+def check_required_executables(disable_ffmpeg_check: bool = False) -> None:
     """Check that required external tools are available in PATH and callable."""
     missing: list[str] = []
     wrong_version: list[str] = []
@@ -45,6 +51,8 @@ def check_required_executables() -> None:
         "ffmpeg": ["ffmpeg", "-version"],
         "mkvmerge": ["mkvmerge", "--version"],
     }
+    if disable_ffmpeg_check:
+        checks = {k: v for k, v in checks.items() if k != "ffprobe" and k != "ffmpeg"}
     for exe, cmd in checks.items():
         if shutil.which(exe) is None:
             missing.append(exe)
@@ -75,12 +83,15 @@ def check_required_executables() -> None:
     if missing:
         print(f"Error: Required executable(s) not found in PATH or not callable: {', '.join(missing)}")
         print("Please install them and ensure they are available in your system PATH and runnable.")
+        if "ffmpeg" in missing or "ffprobe" in missing:
+            print(FFMPEG_DOWNLOAD_LINKS)
         sys.exit(1)
     if wrong_version:
         print(
             "Error: ffmpeg/ffprobe major version must be exactly 8 (or detectable as 8): "
             + ", ".join(wrong_version)
         )
+        print(FFMPEG_DOWNLOAD_LINKS)
         sys.exit(1)
 
 

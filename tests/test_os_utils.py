@@ -50,6 +50,25 @@ def test_check_required_executables_uses_expected_version_commands(monkeypatch) 
     ]
 
 
+def test_check_required_executables_skips_ffmpeg_when_disabled(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        exe = cmd[0]
+        if exe == "mkvmerge":
+            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+        raise AssertionError(f"Unexpected exe {exe!r}")
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+
+    os_utils.check_required_executables(disable_ffmpeg_check=True)
+
+    assert calls == [["mkvmerge", "--version"]]
+
+
 def test_check_required_executables_errors_on_old_ffmpeg(monkeypatch, capsys) -> None:
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
 
