@@ -41,12 +41,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to restoration model (default: %(default)s)",
     )
     restoration.add_argument(
-        "--compile-tensorrt",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help="Enable TensorRT compilation/usage where supported (default: %(default)s)",
-    )
-    restoration.add_argument(
         "--compile-basicvsrpp",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -80,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=8,
         help="Batch size for Swin2SR secondary restoration (default: %(default)s)",
+    )
+    swin2sr.add_argument(
+        "--swin2sr-compilation",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Enable Swin2SR TensorRT compilation/usage where supported (default: %(default)s)",
     )
 
     tvai = parser.add_argument_group("Topaz Video AI")
@@ -223,7 +223,7 @@ def main() -> None:
         max_clip_size=max_clip_size,
         device=device,
         fp16=fp16,
-        compile_basicvsrpp=bool(args.compile_tensorrt) and bool(args.compile_basicvsrpp),
+        compile_basicvsrpp=bool(args.compile_basicvsrpp),
     )
 
     secondary_name = str(args.secondary_restoration).lower()
@@ -237,7 +237,7 @@ def main() -> None:
             device=device,
             fp16=fp16,
             batch_size=swin2sr_batch_size,
-            use_tensorrt=bool(args.compile_tensorrt),
+            use_tensorrt=bool(args.swin2sr_compilation),
         )
     elif secondary_name == "tvai":
         tvai_model = str(args.tvai_model).strip()
