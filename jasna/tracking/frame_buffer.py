@@ -115,6 +115,55 @@ class FrameBuffer:
 
             pending.pending_clips.discard(clip.track_id)
 
+    def blend_restored_frame(
+        self,
+        *,
+        frame_idx: int,
+        track_id: int,
+        restored: torch.Tensor,
+        mask_lr: torch.Tensor,
+        frame_shape: tuple[int, int],
+        enlarged_bbox: tuple[int, int, int, int],
+        crop_shape: tuple[int, int],
+        pad_offset: tuple[int, int],
+        resize_shape: tuple[int, int],
+    ) -> None:
+        pending = self.frames.get(int(frame_idx))
+        if pending is None:
+            return
+        if int(track_id) not in pending.pending_clips:
+            return
+
+        x1, y1, x2, y2 = enlarged_bbox
+        crop_h, crop_w = crop_shape
+        pad_left, pad_top = pad_offset
+        resize_h, resize_w = resize_shape
+
+        if pending.blended_frame is pending.frame:
+            pending.blended_frame = pending.frame.clone()
+        blended = pending.blended_frame
+
+        unpadded = restored[:, pad_top:pad_top + resize_h, pad_left:pad_left + resize_w]
+        resized_back = F.interpolate(
+            unpadded.unsqueeze(0).float(),
+            size=(crop_h, crop_w),
+            mode="bilinear",
+            align_corners=False,
+        ).squeeze(0)
+
+        frame_h, frame_w = frame_shape
+        hm, wm = mask_lr.shape
+        y_idx = (torch.arange(y1, y2, device=mask_lr.device) * hm) // frame_h
+        x_idx = (torch.arange(x1, x2, device=mask_lr.device) * wm) // frame_w
+        crop_mask = mask_lr.float().index_select(0, y_idx).index_select(1, x_idx)
+        blend_mask = self.blend_mask_fn(crop_mask)
+
+        original_crop = blended[:, y1:y2, x1:x2].float()
+        blended_crop = original_crop + (resized_back - original_crop) * blend_mask.unsqueeze(0)
+        blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
+
+        pending.pending_clips.discard(int(track_id))
+
     def get_ready_frames(self) -> list[tuple[int, torch.Tensor, int]]:
         ready: list[tuple[int, torch.Tensor, int]] = []
 

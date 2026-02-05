@@ -50,6 +50,21 @@ class _FakeRestorationPipeline:
             resize_shapes=resize_shapes,
         )
 
+    def restore_and_blend_clip(
+        self,
+        clip: TrackedClip,
+        frames: list[torch.Tensor],
+        *,
+        keep_start: int,
+        keep_end: int,
+        frame_buffer: FrameBuffer,
+    ) -> None:
+        restored = self.restore_clip(clip, frames, keep_start=int(keep_start), keep_end=int(keep_end))
+        frame_buffer.blend_clip(clip, restored, keep_start=int(keep_start), keep_end=int(keep_end))
+
+    def flush_secondary(self, *, frame_buffer: FrameBuffer) -> None:
+        del frame_buffer
+
 
 def _make_single_det_batch(*, effective_bs: int, batch_size: int, box=(2.0, 2.0, 6.0, 6.0)) -> Detections:
     boxes_xyxy = []

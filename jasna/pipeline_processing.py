@@ -62,13 +62,13 @@ def _process_ended_clips(
             split_due_to_max_size=ended_clip.split_due_to_max_size,
             discard_margin=discard_margin,
         )
-        restored_clip = restoration_pipeline.restore_clip(
+        restoration_pipeline.restore_and_blend_clip(
             clip,
             frames_for_clip,
             keep_start=int(keep_start),
             keep_end=int(keep_end),
+            frame_buffer=frame_buffer,
         )
-        frame_buffer.blend_clip(clip, restored_clip, keep_start=keep_start, keep_end=keep_end)
         raw_frame_context.pop(clip.track_id, None)
 
 
@@ -136,5 +136,6 @@ def finalize_processing(
         restoration_pipeline=restoration_pipeline,
         raw_frame_context=raw_frame_context,
     )
+    restoration_pipeline.flush_secondary(frame_buffer=frame_buffer)
     return frame_buffer.flush()
 
