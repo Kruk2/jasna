@@ -9,7 +9,7 @@ import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.restored_clip import RestoredClip
-from jasna.restorer.secondary_restorer import SecondaryRestorer
+from jasna.restorer.secondary_restorer import StreamingSecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 if TYPE_CHECKING:
@@ -32,28 +32,67 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
 
 
 @dataclass(frozen=True)
-class _TvaiPendingBlend:
+class _PendingBlend:
     frame_idx: int
     track_id: int
     mask_lr: torch.Tensor
     frame_shape: tuple[int, int]
     enlarged_bbox: tuple[int, int, int, int]
     crop_shape: tuple[int, int]
-    pad_offset: tuple[int, int]
-    resize_shape: tuple[int, int]
+    pad_offset_256: tuple[int, int]
+    resize_shape_256: tuple[int, int]
+
+
+@dataclass(frozen=True)
+class _CompletedFrame:
+    meta: object
+    _frame_u8: torch.Tensor
+
+    def to_frame_u8(self, device: torch.device) -> torch.Tensor:
+        return self._frame_u8 if self._frame_u8.device == device else self._frame_u8.to(device=device)
+
+    def recycle(self) -> None:
+        pass
+
+
+class _PrimaryOnlySecondary:
+    """Pass-through: converts primary float [0,1] output to uint8. Used when no secondary restorer is configured."""
+    name = "none"
+
+    def __init__(self) -> None:
+        self._completed: list[_CompletedFrame] = []
+
+    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object]) -> None:
+        out_u8 = frames_256[keep_start:keep_end].clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
+        for m, f in zip(meta, torch.unbind(out_u8, 0)):
+            self._completed.append(_CompletedFrame(meta=m, _frame_u8=f))
+
+    def drain_completed(self, *, limit: int | None = None) -> list[_CompletedFrame]:
+        if limit is None or limit >= len(self._completed):
+            out = self._completed
+            self._completed = []
+            return out
+        out = self._completed[:limit]
+        self._completed = self._completed[limit:]
+        return out
+
+    def flush(self, *, timeout_s: float = 300.0) -> None:
+        pass
+
 
 class RestorationPipeline:
     def __init__(
         self,
         restorer: BasicvsrppMosaicRestorer,
         *,
-        secondary_restorer: SecondaryRestorer | None = None,
+        secondary_restorer=None,
     ) -> None:
         self.restorer = restorer
-        self.secondary_restorer = secondary_restorer
-
-    def _is_tvai(self) -> bool:
-        return bool(self.secondary_restorer is not None and getattr(self.secondary_restorer, "name", None) == "tvai")
+        self.secondary_restorer = secondary_restorer  # kept for restore_clip() test compat
+        if isinstance(secondary_restorer, StreamingSecondaryRestorer):
+            self._secondary: StreamingSecondaryRestorer = secondary_restorer
+        else:
+            self._secondary = _PrimaryOnlySecondary()
 
     def _prepare_clip_inputs(
         self,
@@ -133,32 +172,54 @@ class RestorationPipeline:
         keep_end: int,
         frame_buffer: FrameBuffer,
     ) -> None:
-        if self._is_tvai():
-            self._restore_and_blend_clip_tvai(
-                clip,
-                frames,
-                keep_start=int(keep_start),
-                keep_end=int(keep_end),
-                frame_buffer=frame_buffer,
-            )
+        t = len(frames)
+        ks = max(0, keep_start)
+        ke = min(t, keep_end)
+
+        for i, frame_idx in enumerate(clip.frame_indices()):
+            if not (ks <= i < ke):
+                pending = frame_buffer.frames.get(frame_idx)
+                if pending is not None:
+                    pending.pending_clips.discard(clip.track_id)
+
+        if ks >= ke:
             return
 
-        restored_clip = self.restore_clip(clip, frames, keep_start=int(keep_start), keep_end=int(keep_end))
-        frame_buffer.blend_clip(clip, restored_clip, keep_start=int(keep_start), keep_end=int(keep_end))
+        resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
+        primary_raw = self.restorer.raw_process(resized_crops)
+
+        frame_h, frame_w = frames[0].shape[1], frames[0].shape[2]
+        meta = [
+            _PendingBlend(
+                frame_idx=clip.start_frame + i,
+                track_id=clip.track_id,
+                mask_lr=clip.masks[i],
+                frame_shape=(frame_h, frame_w),
+                enlarged_bbox=enlarged_bboxes[i],
+                crop_shape=crop_shapes[i],
+                pad_offset_256=pad_offsets[i],
+                resize_shape_256=resize_shapes[i],
+            )
+            for i in range(ks, ke)
+        ]
+
+        self._secondary.submit(primary_raw, keep_start=ks, keep_end=ke, meta=meta)
+        self.poll_secondary(frame_buffer=frame_buffer)
 
     def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> None:
-        if not self._is_tvai():
-            return
-        if self.secondary_restorer is None:
-            return
-        if not hasattr(self.secondary_restorer, "drain_completed"):
-            raise RuntimeError("TVAI secondary restorer is missing drain_completed()")
-
-        completed = self.secondary_restorer.drain_completed(limit=limit)
-        for item in completed:
+        for item in self._secondary.drain_completed(limit=limit):
             meta = item.meta
-            frame_cpu_hwc = item.out_buf
-            frame_u8 = frame_cpu_hwc.permute(2, 0, 1).to(device=meta.mask_lr.device, non_blocking=False)
+            frame_u8 = item.to_frame_u8(meta.mask_lr.device)
+
+            out_h = int(frame_u8.shape[1])
+            out_w = int(frame_u8.shape[2])
+            pl, pt = meta.pad_offset_256
+            rh, rw = meta.resize_shape_256
+            x0 = int(round(pl * out_w / RESTORATION_SIZE))
+            x1 = int(round((pl + rw) * out_w / RESTORATION_SIZE))
+            y0 = int(round(pt * out_h / RESTORATION_SIZE))
+            y1 = int(round((pt + rh) * out_h / RESTORATION_SIZE))
+
             frame_buffer.blend_restored_frame(
                 frame_idx=meta.frame_idx,
                 track_id=meta.track_id,
@@ -167,26 +228,13 @@ class RestorationPipeline:
                 frame_shape=meta.frame_shape,
                 enlarged_bbox=meta.enlarged_bbox,
                 crop_shape=meta.crop_shape,
-                pad_offset=meta.pad_offset,
-                resize_shape=meta.resize_shape,
+                pad_offset=(x0, y0),
+                resize_shape=(y1 - y0, x1 - x0),
             )
-            if hasattr(self.secondary_restorer, "recycle_output"):
-                self.secondary_restorer.recycle_output(
-                    worker_idx=int(item.worker_idx),
-                    out_buf=item.out_buf,
-                    out_mv=item.out_mv,
-                    out_np=item.out_np,
-                )
+            item.recycle()
 
     def flush_secondary(self, *, frame_buffer: FrameBuffer) -> None:
-        if not self._is_tvai():
-            return
-        if self.secondary_restorer is None:
-            return
-
-        if not hasattr(self.secondary_restorer, "flush"):
-            raise RuntimeError("TVAI secondary restorer is missing flush()")
-        self.secondary_restorer.flush(timeout_s=300.0)
+        self._secondary.flush()
         self.poll_secondary(frame_buffer=frame_buffer)
 
     def restore_clip(
@@ -198,20 +246,16 @@ class RestorationPipeline:
         keep_end: int,
     ) -> RestoredClip:
         """
-        clip: TrackedClip with bbox/mask info
-        frames: list of (C, H, W) original frames, GPU
-        Returns: RestoredClip with restored frames and metadata for blending
+        Synchronous restore that returns a complete RestoredClip.
+        Uses self.secondary_restorer.restore() directly (bypasses the streaming path).
         """
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
 
         if self.secondary_restorer is None:
-            restored_hwc = self.restorer.restore(resized_crops)  # list[(256,256,C)] uint8
+            restored_hwc = self.restorer.restore(resized_crops)
             restored_frames = [r.permute(2, 0, 1) for r in restored_hwc]
         else:
-            if self._is_tvai():
-                raise RuntimeError("TVAI secondary must be executed via restore_and_blend_clip()/flush_secondary()")
-
-            primary_raw = self.restorer.raw_process(resized_crops)  # (T,C,256,256) float in [0, 1]
+            primary_raw = self.restorer.raw_process(resized_crops)
             secondary_out = self.secondary_restorer.restore(primary_raw, keep_start=int(keep_start), keep_end=int(keep_end))
             if isinstance(secondary_out, list):
                 restored_frames = secondary_out
@@ -247,69 +291,6 @@ class RestorationPipeline:
             pad_offsets=pad_offsets,
             resize_shapes=resize_shapes,
         )
-
-    def _restore_and_blend_clip_tvai(
-        self,
-        clip: TrackedClip,
-        frames: list[torch.Tensor],
-        *,
-        keep_start: int,
-        keep_end: int,
-        frame_buffer: FrameBuffer,
-    ) -> None:
-        if self.secondary_restorer is None:
-            raise RuntimeError("TVAI secondary restorer is missing")
-        if not hasattr(self.secondary_restorer, "submit"):
-            raise RuntimeError("TVAI secondary restorer is missing submit()")
-
-        t = int(len(frames))
-        ks = max(0, int(keep_start))
-        ke = min(t, int(keep_end))
-
-        for i, frame_idx in enumerate(clip.frame_indices()):
-            if not (ks <= i < ke):
-                pending = frame_buffer.frames.get(int(frame_idx))
-                if pending is not None:
-                    pending.pending_clips.discard(int(clip.track_id))
-
-        if ks >= ke:
-            return
-
-        resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
-        resized_crops_kept = resized_crops[ks:ke]
-        primary_raw = self.restorer.raw_process(resized_crops_kept)  # (T,C,256,256) float in [0, 1]
-
-        out_w = int(getattr(self.secondary_restorer, "out_w", 0))
-        out_h = int(getattr(self.secondary_restorer, "out_h", 0))
-        if out_w <= 0 or out_h <= 0:
-            raise RuntimeError("TVAI secondary restorer is missing out_w/out_h")
-
-        frame_h, frame_w = frames[0].shape[1], frames[0].shape[2]
-        meta: list[_TvaiPendingBlend] = []
-        for i in range(ks, ke):
-            pad_left, pad_top = pad_offsets[i]
-            resize_h, resize_w = resize_shapes[i]
-
-            x0 = int(round((pad_left * out_w) / RESTORATION_SIZE))
-            x1 = int(round(((pad_left + resize_w) * out_w) / RESTORATION_SIZE))
-            y0 = int(round((pad_top * out_h) / RESTORATION_SIZE))
-            y1 = int(round(((pad_top + resize_h) * out_h) / RESTORATION_SIZE))
-
-            meta.append(
-                _TvaiPendingBlend(
-                    frame_idx=int(clip.start_frame) + int(i),
-                    track_id=int(clip.track_id),
-                    mask_lr=clip.masks[i],
-                    frame_shape=(int(frame_h), int(frame_w)),
-                    enlarged_bbox=enlarged_bboxes[i],
-                    crop_shape=crop_shapes[i],
-                    pad_offset=(x0, y0),
-                    resize_shape=(y1 - y0, x1 - x0),
-                )
-            )
-
-        self.secondary_restorer.submit(primary_raw, keep_start=0, keep_end=int(primary_raw.shape[0]), meta=meta)
-        self.poll_secondary(frame_buffer=frame_buffer)
 
     def _expand_bbox(
         self, x1: int, y1: int, x2: int, y2: int, frame_h: int, frame_w: int
@@ -367,4 +348,3 @@ class RestorationPipeline:
         y2_exp = max(0, min(int(y2_exp), frame_h))
 
         return x1_exp, y1_exp, x2_exp, y2_exp
-

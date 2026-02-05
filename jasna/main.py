@@ -111,7 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     tvai.add_argument(
         "--tvai-workers",
         type=int,
-        default=1,
+        default=2,
         help="Number of parallel TVAI ffmpeg workers (default: %(default)s)",
     )
 
