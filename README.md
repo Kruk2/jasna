@@ -46,7 +46,13 @@ You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html).
 **First run might be slow because models will be compiled for your hardware (you can copy .engine files from model_weights to a new version!)**
 
 Remember to have up to date nvidia drivers.\
-Tested nvidia drivers: **591.67** 
+Tested nvidia drivers: **591.67**
+
+### Secondary Restoration Model
+Currently supported:
+- TVAI (windows only). Use _Google_ or buy from [here](https://www.topazlabs.com/topaz-video).\
+  ```--tvai-args``` allows you to customize model and other params. Defaults to iris-3.
+- Swin2SR (windows & linux). I think it's heavier in terms of GPU/VRAM load and has worse results than tvai.
 
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\
