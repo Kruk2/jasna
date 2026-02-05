@@ -4,7 +4,24 @@
 JAV model restoration tool inspired (and in some places based on) by [Lada](https://codeberg.org/ladaapp/lada).\
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
 
-Features new mosaic detection model & GPU only pipeline.
+Features new mosaic detection model & GPU only pipeline.\
+Check benchmarks and usage below.
+
+### Differences:
+- **Improved mosaic detection model.**
+- **Temporal overlap which reduces flickering.**
+- ** Secondary restoration model (Topaz TVAI and Swin2SR).**
+- GPU only processing. Intial tests show that it can be 2x faster. Raw processing for places without mosaic is ~250fps on RTX 5090 <img width="860" height="56" alt="image" src="https://github.com/user-attachments/assets/a80ecaee-e36d-4c91-93e4-8bdd75048ac3" />
+- Accurate color conversions on gpu (input matches output and no banding).
+- Only modern Nvidia gpu is supported.
+- TensorRT support.
+- CLI only
+
+### TODO:
+- proper VR support
+- ~~TVAI~~ and SeedVR
+- Proper stream that can be played in Stash (and maybe others?)
+- improve performance (this version is very simple)
 
 ### Benchmark
 RTX 5090 + i9 13900k
@@ -20,24 +37,6 @@ RTX 5090 + i9 13900k
 | NASK-223_Test | 30 | 03:12 | 01:18 | -01:54 (-59.4%) |
 | test-007 | 30 | 01:16 | 00:41 | -00:35 (-46.1%) |
 | 厚码测试2 | 30 | 01:52 | 00:43 | -01:09 (-61.6%) |
-
-
-### Differences:
-- GPU only processing (benchmarks TBD). Intial tests show that it can be 2x faster. Raw processing for places without mosaic is ~250fps on RTX 5090
-<img width="860" height="56" alt="image" src="https://github.com/user-attachments/assets/a80ecaee-e36d-4c91-93e4-8bdd75048ac3" />
-
-- Improved mosaic detection model.
-- Temporal overlap which reduces flickering (beta)
-- Accurate color conversions on gpu (input matches output and no banding).
-- Only modern Nvidia gpu is supported.
-- TensorRT support.
-- CLI only
-
-### TODO:
-- proper VR support
-- TVAI and SeedVR
-- Proper stream that can be played in Stash (and maybe others?)
-- improve performance (this version is very simple)
  
 ### Usage
 Go to releases page and download last package. Built for windows/linux on cuda 13.0.\
