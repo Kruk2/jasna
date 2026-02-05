@@ -15,3 +15,33 @@ import logging
 
 logging.getLogger("torch_tensorrt.dynamo.conversion.converter_utils").setLevel(logging.ERROR)
 
+warnings.filterwarnings(
+    "ignore",
+    message=r"^Unable to import quantization op\..*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"^Unable to import quantize op\..*",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=r"^TensorRT-LLM is not installed\..*",
+)
+
+
+class _SuppressTorchTensorRTNoises(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "Unable to import quantization op." in msg:
+            return False
+        if "Unable to import quantize op." in msg:
+            return False
+        if "TensorRT-LLM is not installed." in msg:
+            return False
+        return True
+
+
+_trt_filter = _SuppressTorchTensorRTNoises()
+logging.getLogger("torch_tensorrt").addFilter(_trt_filter)
+logging.getLogger("torch_tensorrt.dynamo").addFilter(_trt_filter)
+
