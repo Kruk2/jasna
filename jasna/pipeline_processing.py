@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import torch
 
 from jasna.mosaic.detections import Detections
-from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices
+from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
 from jasna.tensor_utils import pad_batch_with_last
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip
 from jasna.tracking.frame_buffer import FrameBuffer
@@ -82,6 +82,16 @@ def _process_ended_clips(
                 discard_margin=discard_margin,
                 blend_frames=bf,
             )
+        if ended_clip.split_due_to_max_size and bf > 0 and discard_margin > 0:
+            parent_weights = compute_parent_crossfade_weights(
+                frame_count=clip.frame_count,
+                discard_margin=discard_margin,
+                blend_frames=bf,
+            )
+            if crossfade_weights is None:
+                crossfade_weights = parent_weights
+            else:
+                crossfade_weights.update(parent_weights)
 
         restoration_pipeline.restore_and_blend_clip(
             clip,

@@ -284,7 +284,8 @@ def test_blend_restored_frame_crossfade_weight_scales_blend() -> None:
     crop_h, crop_w = (y2 - y1, x2 - x1)
     mask = torch.ones((8, 8), dtype=torch.bool)
 
-    # Parent blends at full weight (value=200)
+    # Parent blends with complementary weight 0.5 (value=200)
+    # Additive delta against original(0): (200-0)*0.5 = 100
     fb.blend_restored_frame(
         frame_idx=0,
         track_id=1,
@@ -295,13 +296,13 @@ def test_blend_restored_frame_crossfade_weight_scales_blend() -> None:
         crop_shape=(crop_h, crop_w),
         pad_offset=(0, 0),
         resize_shape=(crop_h, crop_w),
-        crossfade_weight=1.0,
+        crossfade_weight=0.5,
     )
     blended = fb.frames[0].blended_frame
-    assert torch.all(blended[:, y1:y2, x1:x2] == 200)
+    assert torch.all(blended[:, y1:y2, x1:x2] == 100)
 
-    # Child blends on top with crossfade_weight=0.5 (value=100)
-    # Expected: 200 + (100 - 200) * 0.5 = 150
+    # Child blends with crossfade_weight=0.5 (value=100)
+    # Additive delta against original(0): (100-0)*0.5 = 50, accumulated: 100+50=150
     fb.blend_restored_frame(
         frame_idx=0,
         track_id=2,
@@ -321,20 +322,55 @@ def test_blend_restored_frame_crossfade_weight_scales_blend() -> None:
     assert len(ready) == 1
 
 
-def test_blend_restored_frame_crossfade_weight_zero_keeps_previous() -> None:
+def test_blend_restored_frame_crossfade_is_order_independent() -> None:
+    """Verify that swapping the blend order of parent/child gives the same result."""
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+
+    def _blend_both(first_track: int, second_track: int) -> torch.Tensor:
+        fb = FrameBuffer(
+            device=torch.device("cpu"),
+            blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+        )
+        frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+        fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1, 2})
+        values = {1: 200, 2: 100}
+        weights = {1: 0.75, 2: 0.25}
+        for tid in (first_track, second_track):
+            fb.blend_restored_frame(
+                frame_idx=0, track_id=tid,
+                restored=torch.full((3, crop_h, crop_w), values[tid], dtype=torch.uint8),
+                mask_lr=mask, frame_shape=(8, 8),
+                enlarged_bbox=(x1, y1, x2, y2),
+                crop_shape=(crop_h, crop_w),
+                pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+                crossfade_weight=weights[tid],
+            )
+        return fb.frames[0].blended_frame[:, y1:y2, x1:x2]
+
+    result_ab = _blend_both(1, 2)
+    result_ba = _blend_both(2, 1)
+    assert torch.equal(result_ab, result_ba)
+    # 200*0.75 + 100*0.25 = 175
+    assert torch.all(result_ab == 175)
+
+
+def test_blend_restored_frame_crossfade_weight_near_zero_keeps_parent() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
         blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
     )
 
-    frame = torch.full((3, 8, 8), 50, dtype=torch.uint8)
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1, 2})
 
     x1, y1, x2, y2 = (2, 2, 6, 6)
     crop_h, crop_w = (y2 - y1, x2 - x1)
     mask = torch.ones((8, 8), dtype=torch.bool)
 
-    # Parent blends at full weight (value=200)
+    # Parent blends with weight 0.95 (value=200)
+    # Delta: (200-0)*0.95 = 190
     fb.blend_restored_frame(
         frame_idx=0, track_id=1,
         restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
@@ -342,9 +378,11 @@ def test_blend_restored_frame_crossfade_weight_zero_keeps_previous() -> None:
         enlarged_bbox=(x1, y1, x2, y2),
         crop_shape=(crop_h, crop_w),
         pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+        crossfade_weight=0.95,
     )
 
-    # Child blends with weight near zero -- result should stay ~200
+    # Child blends with weight 0.05 (value=0)
+    # Delta: (0-0)*0.05 = 0, result stays 190
     fb.blend_restored_frame(
         frame_idx=0, track_id=2,
         restored=torch.full((3, crop_h, crop_w), 0, dtype=torch.uint8),
@@ -355,7 +393,7 @@ def test_blend_restored_frame_crossfade_weight_zero_keeps_previous() -> None:
         crossfade_weight=0.05,
     )
     blended = fb.frames[0].blended_frame
-    # 200 + (0 - 200) * 0.05 = 190
+    # 200*0.95 + 0*0.05 = 190
     assert torch.all(blended[:, y1:y2, x1:x2] == 190)
 
 
