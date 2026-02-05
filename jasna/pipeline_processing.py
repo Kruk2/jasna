@@ -137,8 +137,6 @@ def finalize_processing(
         restoration_pipeline=restoration_pipeline,
         raw_frame_context=raw_frame_context,
     )
-    restoration_pipeline.poll_secondary(frame_buffer=frame_buffer)
     restoration_pipeline.flush_secondary(frame_buffer=frame_buffer)
-    restoration_pipeline.poll_secondary(frame_buffer=frame_buffer)
     return frame_buffer.flush()
 
