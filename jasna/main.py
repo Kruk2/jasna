@@ -108,6 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1",
         help='Extra params for tvai_up. (default: %(default)s)',
     )
+    tvai.add_argument(
+        "--tvai-workers",
+        type=int,
+        default=1,
+        help="Number of parallel TVAI ffmpeg workers (default: %(default)s)",
+    )
 
     detection = parser.add_argument_group("Detection")
     detection.add_argument(
@@ -244,6 +250,9 @@ def main() -> None:
         if tvai_model == "":
             raise ValueError("--tvai-model must be non-empty")
         tvai_scale = int(args.tvai_scale)
+        tvai_workers = int(args.tvai_workers)
+        if tvai_workers <= 0:
+            raise ValueError("--tvai-workers must be > 0")
 
         tvai_args_rest = str(args.tvai_args)
         tvai_kv = _parse_tvai_args_kv(tvai_args_rest)
@@ -262,6 +271,7 @@ def main() -> None:
             ffmpeg_path=str(args.tvai_ffmpeg_path),
             tvai_args=tvai_args,
             max_clip_size=max_clip_size,
+            num_workers=tvai_workers,
         )
     else:
         raise ValueError(f"Unsupported secondary restoration: {secondary_name}")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import collections
+from dataclasses import dataclass
 import logging
 import os
 import queue
@@ -9,6 +10,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import Generic, TypeVar
 
 import numpy as np
 import torch
@@ -38,11 +40,37 @@ def _parse_tvai_args_kv(args: str) -> dict[str, str]:
     return out
 
 
-class TvaiSecondaryRestorer:
+TMeta = TypeVar("TMeta")
+
+
+@dataclass(frozen=True)
+class _TvaiTask(Generic[TMeta]):
+    frames_256: torch.Tensor
+    keep_start: int
+    keep_end: int
+    meta: list[TMeta]
+
+
+@dataclass(frozen=True)
+class _TvaiCompleted(Generic[TMeta]):
+    meta: TMeta
+    worker_idx: int
+    out_buf: torch.Tensor  # (H, W, 3) uint8, CPU pinned
+    out_mv: memoryview
+    out_np: np.ndarray
+
+
+@dataclass(frozen=True)
+class _TvaiWorkerFatal:
+    error: BaseException
+
+
+class _TvaiFfmpegRestorer:
     name = "tvai"
     DEFAULT_OUT_SIZE = 1024
     OUT_BUFFER_POOL_SIZE = 32
     IN_WRITE_CHUNK_FRAMES = 4
+    COMPLETE_BUFFER_POOL_SIZE = 32
 
     def __init__(
         self,
@@ -257,6 +285,12 @@ class TvaiSecondaryRestorer:
             buf_np = buf.numpy()
             mv = memoryview(buf_np).cast("B")
             self._out_pool.put((buf, mv, buf_np))
+        self._complete_pool: queue.SimpleQueue[tuple[torch.Tensor, memoryview, np.ndarray]] = queue.SimpleQueue()
+        for _ in range(int(self.COMPLETE_BUFFER_POOL_SIZE)):
+            buf = torch.empty((out_h, out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
+            buf_np = buf.numpy()
+            mv = memoryview(buf_np).cast("B")
+            self._complete_pool.put((buf, mv, buf_np))
         logger.debug("TVAI output buffers: out_w=%d out_h=%d pool_size=%d", out_w, out_h, int(self.OUT_BUFFER_POOL_SIZE))
 
     def close(self) -> None:
@@ -272,11 +306,11 @@ class TvaiSecondaryRestorer:
         finally:
             proc.terminate()
 
-    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> torch.Tensor:
+    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[tuple[torch.Tensor, memoryview, np.ndarray]]:
         t0 = time.perf_counter()
         t = int(frames_256.shape[0])
         if t == 0:
-            return torch.empty((0, 3, int(self.out_h), int(self.out_w)), dtype=torch.uint8, device=self.device)
+            return []
 
         if frames_256.dtype == torch.uint8:
             raise RuntimeError("TVAI secondary expects float frames in [0, 1], got uint8")
@@ -294,7 +328,7 @@ class TvaiSecondaryRestorer:
 
         n = int(restore_end - restore_start)
         if n <= 0:
-            return torch.empty((0, 3, int(self.out_h), int(self.out_w)), dtype=torch.uint8, device=self.device)
+            return []
 
         slice_end = int(restore_end)
         logger.debug(
@@ -330,23 +364,29 @@ class TvaiSecondaryRestorer:
         def _ensure_alive_locked() -> None:
             _ensure_alive()
 
-        def _drain_one_batch_locked() -> int:
-            k = min(int(len(self._out_frames)), int(self.max_clip_size))
-            for i in range(k):
-                buf, mv, buf_np = self._out_frames.popleft()
-                np.copyto(self._out_batch_np[i], buf_np)
-                self._out_pool.put((buf, mv, buf_np))
-            return k
+        def _acquire_complete() -> tuple[torch.Tensor, memoryview, np.ndarray]:
+            try:
+                return self._complete_pool.get_nowait()
+            except Exception:
+                buf = torch.empty((out_h, out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
+                buf_np = buf.numpy()
+                mv = memoryview(buf_np).cast("B")
+                return buf, mv, buf_np
 
-        def _copy_batch_to_gpu(k: int) -> torch.Tensor:
-            if k <= 0:
-                return torch.empty((0, 3, out_h, out_w), dtype=torch.uint8, device=self.device)
-            chunk_gpu_hwc = torch.empty((k, out_h, out_w, 3), dtype=torch.uint8, device=self.device)
-            chunk_gpu_hwc.copy_(self._out_batch_hwc[:k], non_blocking=False)
-            return chunk_gpu_hwc.permute(0, 3, 1, 2)
+        def _drain_available_locked() -> list[tuple[torch.Tensor, memoryview, np.ndarray]]:
+            if not self._out_frames:
+                return []
+            out: list[tuple[torch.Tensor, memoryview, np.ndarray]] = []
+            while self._out_frames:
+                buf, mv, buf_np = self._out_frames.popleft()
+                cbuf, cmv, cnp = _acquire_complete()
+                np.copyto(cnp, buf_np)
+                self._out_pool.put((buf, mv, buf_np))
+                out.append((cbuf, cmv, cnp))
+            return out
 
         _ensure_alive()
-        out_chunks: list[torch.Tensor] = []
+        drained: list[tuple[torch.Tensor, memoryview, np.ndarray]] = []
         chunk_frames = int(self.IN_WRITE_CHUNK_FRAMES)
         for start in range(0, int(n), chunk_frames):
             end = min(int(n), start + chunk_frames)
@@ -366,33 +406,27 @@ class TvaiSecondaryRestorer:
                     _ensure_alive_locked()
                     if not self._out_frames:
                         break
-                    k = _drain_one_batch_locked()
-                if k > 0:
-                    out_chunks.append(_copy_batch_to_gpu(k))
+                    drained.extend(_drain_available_locked())
 
         while True:
             with self._out_cond:
                 _ensure_alive_locked()
                 if not self._out_frames:
                     break
-                k = _drain_one_batch_locked()
-            if k > 0:
-                out_chunks.append(_copy_batch_to_gpu(k))
-
-        out = out_chunks[0] if len(out_chunks) == 1 else torch.cat(out_chunks, dim=0) if out_chunks else torch.empty((0, 3, out_h, out_w), dtype=torch.uint8, device=self.device)
+                drained.extend(_drain_available_locked())
         logger.debug(
             "TVAI restore(stream) done: wrote=%d drained=%d elapsed_ms=%.1f",
             int(n),
-            int(out.shape[0]),
+            int(len(drained)),
             (time.perf_counter() - t0) * 1000.0,
         )
-        return out
+        return drained
 
-    def flush(self, *, timeout_s: float = 30.0) -> torch.Tensor:
+    def flush(self, *, timeout_s: float = 300.0) -> list[tuple[torch.Tensor, memoryview, np.ndarray]]:
         t0 = time.perf_counter()
         proc = getattr(self, "_proc", None)
         if proc is None:
-            return torch.empty((0, 3, int(self.out_h), int(self.out_w)), dtype=torch.uint8, device=self.device)
+            return []
 
         if proc.stdin is not None:
             try:
@@ -400,26 +434,29 @@ class TvaiSecondaryRestorer:
             except BaseException:
                 pass
 
-        out_w = int(self.out_w)
-        out_h = int(self.out_h)
+        def _acquire_complete() -> tuple[torch.Tensor, memoryview, np.ndarray]:
+            try:
+                return self._complete_pool.get_nowait()
+            except Exception:
+                buf = torch.empty((int(self.out_h), int(self.out_w), 3), dtype=torch.uint8, device="cpu", pin_memory=True)
+                buf_np = buf.numpy()
+                mv = memoryview(buf_np).cast("B")
+                return buf, mv, buf_np
 
-        def _drain_one_batch_locked() -> int:
-            k = min(int(len(self._out_frames)), int(self.max_clip_size))
-            for i in range(k):
+        def _drain_available_locked() -> list[tuple[torch.Tensor, memoryview, np.ndarray]]:
+            if not self._out_frames:
+                return []
+            out: list[tuple[torch.Tensor, memoryview, np.ndarray]] = []
+            while self._out_frames:
                 buf, mv, buf_np = self._out_frames.popleft()
-                np.copyto(self._out_batch_np[i], buf_np)
+                cbuf, cmv, cnp = _acquire_complete()
+                np.copyto(cnp, buf_np)
                 self._out_pool.put((buf, mv, buf_np))
-            return k
-
-        def _copy_batch_to_gpu(k: int) -> torch.Tensor:
-            if k <= 0:
-                return torch.empty((0, 3, out_h, out_w), dtype=torch.uint8, device=self.device)
-            chunk_gpu_hwc = torch.empty((k, out_h, out_w, 3), dtype=torch.uint8, device=self.device)
-            chunk_gpu_hwc.copy_(self._out_batch_hwc[:k], non_blocking=False)
-            return chunk_gpu_hwc.permute(0, 3, 1, 2)
+                out.append((cbuf, cmv, cnp))
+            return out
 
         deadline = time.perf_counter() + float(timeout_s)
-        out_chunks: list[torch.Tensor] = []
+        drained: list[tuple[torch.Tensor, memoryview, np.ndarray]] = []
 
         while True:
             while True:
@@ -428,26 +465,18 @@ class TvaiSecondaryRestorer:
                         raise RuntimeError(f"TVAI ffmpeg is not healthy: {self._fatal}") from self._fatal
                     if not self._out_frames:
                         break
-                    k = _drain_one_batch_locked()
-                if k > 0:
-                    out_chunks.append(_copy_batch_to_gpu(k))
+                    drained.extend(_drain_available_locked())
 
             rc = proc.poll()
             if rc is not None:
                 break
 
             if time.perf_counter() >= deadline:
-                proc.terminate()
-                break
+                stderr_text = b"".join(self._stderr_buf).decode(errors="replace").strip()
+                raise RuntimeError(f"TVAI ffmpeg flush timed out after {timeout_s:.1f}s. stderr:\n{stderr_text}")
 
             with self._out_cond:
                 self._out_cond.wait(timeout=0.05)
-
-        try:
-            proc.wait(timeout=5.0)
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            proc.wait(timeout=5.0)
 
         if hasattr(self, "_stdout_thread"):
             self._stdout_thread.join(timeout=1.0)
@@ -458,21 +487,189 @@ class TvaiSecondaryRestorer:
                     raise RuntimeError(f"TVAI ffmpeg is not healthy: {self._fatal}") from self._fatal
                 if not self._out_frames:
                     break
-                k = _drain_one_batch_locked()
-            if k > 0:
-                out_chunks.append(_copy_batch_to_gpu(k))
-
-        out = (
-            out_chunks[0]
-            if len(out_chunks) == 1
-            else torch.cat(out_chunks, dim=0)
-            if out_chunks
-            else torch.empty((0, 3, out_h, out_w), dtype=torch.uint8, device=self.device)
-        )
+                drained.extend(_drain_available_locked())
         logger.debug(
             "TVAI flush done: drained=%d elapsed_ms=%.1f",
-            int(out.shape[0]),
+            int(len(drained)),
             (time.perf_counter() - t0) * 1000.0,
         )
+        return drained
+
+    def recycle_completed(self, token: tuple[torch.Tensor, memoryview, np.ndarray]) -> None:
+        self._complete_pool.put(token)
+
+
+class TvaiSecondaryRestorer(Generic[TMeta]):
+    name = "tvai"
+
+    def __init__(
+        self,
+        *,
+        device: torch.device,
+        ffmpeg_path: str,
+        tvai_args: str,
+        max_clip_size: int,
+        num_workers: int = 2,
+    ) -> None:
+        num_workers = int(num_workers)
+        if num_workers <= 0:
+            raise ValueError("num_workers must be > 0")
+
+        self.device = torch.device(device)
+        self.ffmpeg_path = str(ffmpeg_path)
+        self.tvai_args = str(tvai_args)
+        self.max_clip_size = int(max_clip_size)
+        self.num_workers = num_workers
+
+        self._workers: list[_TvaiFfmpegRestorer] = []
+        self._worker_threads: list[threading.Thread] = []
+        self._task_queues: list[queue.Queue[_TvaiTask[TMeta] | None]] = []
+        self._pending_by_worker: list[collections.deque[TMeta]] = []
+        self._completed: queue.Queue[_TvaiCompleted[TMeta] | _TvaiWorkerFatal] = queue.Queue()
+        self._fatal: BaseException | None = None
+        self._rr = 0
+        self._closed = False
+        self._slots = threading.Semaphore(num_workers)
+
+        for i in range(num_workers):
+            w = _TvaiFfmpegRestorer(
+                device=self.device,
+                ffmpeg_path=self.ffmpeg_path,
+                tvai_args=self.tvai_args,
+                max_clip_size=self.max_clip_size,
+            )
+            self._workers.append(w)
+            self._task_queues.append(queue.Queue())
+            self._pending_by_worker.append(collections.deque())
+
+            def _run(worker_idx: int) -> None:
+                try:
+                    if self.device.type == "cuda":
+                        torch.cuda.set_device(self.device)
+                    rest = self._workers[worker_idx]
+                    pending = self._pending_by_worker[worker_idx]
+                    q = self._task_queues[worker_idx]
+                    while True:
+                        task = q.get()
+                        if task is None:
+                            return
+                        try:
+                            pending.extend(task.meta)
+                            drained = rest.restore(
+                                task.frames_256, keep_start=int(task.keep_start), keep_end=int(task.keep_end)
+                            )
+                            for buf, mv, buf_np in drained:
+                                if not pending:
+                                    break
+                                meta = pending.popleft()
+                                self._completed.put(
+                                    _TvaiCompleted(
+                                        meta=meta,
+                                        worker_idx=int(worker_idx),
+                                        out_buf=buf,
+                                        out_mv=mv,
+                                        out_np=buf_np,
+                                    )
+                                )
+                        finally:
+                            self._slots.release()
+                except BaseException as e:
+                    self._completed.put(_TvaiWorkerFatal(error=e))
+
+            t = threading.Thread(target=_run, args=(i,), daemon=True, name=f"tvai-worker-{i}")
+            t.start()
+            self._worker_threads.append(t)
+
+        self.out_w = int(self._workers[0].out_w)
+        self.out_h = int(self._workers[0].out_h)
+        atexit.register(self.close)
+
+    def close(self) -> None:
+        self._closed = True
+        for q in getattr(self, "_task_queues", []):
+            try:
+                q.put_nowait(None)
+            except BaseException:
+                pass
+        for t in getattr(self, "_worker_threads", []):
+            try:
+                t.join(timeout=1.0)
+            except BaseException:
+                pass
+        for w in getattr(self, "_workers", []):
+            try:
+                w.close()
+            except BaseException:
+                pass
+
+    def _raise_if_fatal(self) -> None:
+        if self._fatal is not None:
+            raise RuntimeError(f"TVAI worker failed: {self._fatal}") from self._fatal
+
+    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[TMeta]) -> None:
+        self._raise_if_fatal()
+        if self._closed:
+            raise RuntimeError("TVAI pool is closed")
+        if not meta:
+            return
+        self._slots.acquire()
+        idx = self._rr % self.num_workers
+        self._rr += 1
+        self._task_queues[idx].put(_TvaiTask(frames_256=frames_256, keep_start=int(keep_start), keep_end=int(keep_end), meta=meta))
+
+    def recycle_output(self, *, worker_idx: int, out_buf: torch.Tensor, out_mv: memoryview, out_np: np.ndarray) -> None:
+        self._workers[int(worker_idx)].recycle_completed((out_buf, out_mv, out_np))
+
+    def drain_completed(self, *, limit: int | None = None) -> list[_TvaiCompleted[TMeta]]:
+        self._raise_if_fatal()
+        out: list[_TvaiCompleted[TMeta]] = []
+        while True:
+            if limit is not None and len(out) >= int(limit):
+                break
+            try:
+                item = self._completed.get_nowait()
+            except queue.Empty:
+                break
+            if isinstance(item, _TvaiWorkerFatal):
+                self._fatal = item.error
+                self._raise_if_fatal()
+            out.append(item)
         return out
+
+    def flush(self, *, timeout_s: float = 300.0) -> None:
+        self._raise_if_fatal()
+        if self._closed:
+            return
+        self._closed = True
+
+        for q in self._task_queues:
+            q.put(None)
+
+        deadline = time.perf_counter() + float(timeout_s)
+        for t in self._worker_threads:
+            remaining = max(0.0, deadline - time.perf_counter())
+            t.join(timeout=remaining)
+            if t.is_alive():
+                raise RuntimeError("TVAI worker did not finish before flush deadline")
+
+        for worker_idx, rest in enumerate(self._workers):
+            remaining = max(0.0, deadline - time.perf_counter())
+            drained = rest.flush(timeout_s=remaining if remaining > 0 else 0.1)
+            pending = self._pending_by_worker[worker_idx]
+            for buf, mv, buf_np in drained:
+                if not pending:
+                    break
+                meta = pending.popleft()
+                self._completed.put(
+                    _TvaiCompleted(
+                        meta=meta,
+                        worker_idx=int(worker_idx),
+                        out_buf=buf,
+                        out_mv=mv,
+                        out_np=buf_np,
+                    )
+                )
+            if pending:
+                raise RuntimeError(f"TVAI flush did not produce all pending frames (worker={worker_idx} pending={len(pending)})")
+
 
