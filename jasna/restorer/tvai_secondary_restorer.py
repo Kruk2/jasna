@@ -74,15 +74,14 @@ class TvaiSecondaryRestorer:
 
         scale_raw = self._tvai_kv.get("scale")
         if scale_raw is None:
-            raise ValueError('Missing "scale" in tvai args. Pass it via --tvai-scale (valid: 0, 2, 4)')
+            raise ValueError('Missing "scale" in tvai args. Pass it via --tvai-scale (valid: 1, 2, 4)')
         scale = int(scale_raw)
-        if scale not in (0, 2, 4):
-            raise ValueError(f'Invalid tvai "scale": {scale} (valid: 0, 2, 4)')
+        if scale not in (1, 2, 4):
+            raise ValueError(f'Invalid tvai "scale": {scale} (valid: 1, 2, 4)')
         self.scale = scale
 
-        scale_for_dims = scale if scale != 0 else 1
-        self.out_w = int(256 * scale_for_dims)
-        self.out_h = int(256 * scale_for_dims)
+        self.out_w = int(256 * scale)
+        self.out_h = int(256 * scale)
 
         parts: list[tuple[str, str]] = []
         if "model" in self._tvai_kv:

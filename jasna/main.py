@@ -99,8 +99,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--tvai-scale",
         type=int,
         default=4,
-        choices=[0, 2, 4],
-        help='Topaz tvai_up scale (0=no scale). Output size is 256*scale (scale=0 treated as 1 => 256x256) (default: %(default)s)',
+        choices=[1, 2, 4],
+        help='Topaz tvai_up scale (1=no scale). Output size is 256*scale (default: %(default)s)',
     )
     tvai.add_argument(
         "--tvai-args",
