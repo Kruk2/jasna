@@ -2,16 +2,20 @@ from __future__ import annotations
 
 import atexit
 import collections
+import logging
 import os
 import queue
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
 import torch
 
 from jasna.os_utils import get_subprocess_startup_info
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_tvai_args_kv(args: str) -> dict[str, str]:
@@ -37,8 +41,13 @@ def _parse_tvai_args_kv(args: str) -> dict[str, str]:
 class TvaiSecondaryRestorer:
     name = "tvai"
     DEFAULT_OUT_SIZE = 1024
+    DEFAULT_TAIL_PAD_FRAMES = 20
+    TAIL_PAD_FRAMES_BY_MODEL = {
+        "iris-2": 18,
+        "iris-3": 20,
+        "prob-4": 20,
+    }
     MIN_TVAI_FRAMES = 4
-    TAIL_PAD_FRAMES = 8
     OUT_BUFFER_POOL_SIZE = 32
     IN_WRITE_CHUNK_FRAMES = 4
 
@@ -56,24 +65,62 @@ class TvaiSecondaryRestorer:
         self.ffmpeg_path = str(ffmpeg_path)
         self.tvai_args = str(tvai_args)
         self._tvai_kv = _parse_tvai_args_kv(self.tvai_args)
+
+        model_name = str(self._tvai_kv.get("model") or "").strip().lower()
+        self.tail_pad_frames = int(self.TAIL_PAD_FRAMES_BY_MODEL.get(model_name, int(self.DEFAULT_TAIL_PAD_FRAMES)))
+
         if ("w" in self._tvai_kv) or ("h" in self._tvai_kv):
-            if ("w" not in self._tvai_kv) or ("h" not in self._tvai_kv):
-                raise ValueError('If you pass "w" or "h" in --tvai-args, you must pass both')
-            self.out_w = int(self._tvai_kv["w"])
-            self.out_h = int(self._tvai_kv["h"])
-            if self.out_w <= 0 or self.out_h <= 0:
-                raise ValueError('--tvai-args "w" and "h" must be > 0')
-        else:
-            self.out_w = int(self.DEFAULT_OUT_SIZE)
-            self.out_h = int(self.DEFAULT_OUT_SIZE)
+            raise ValueError('Do not pass "w" or "h" in --tvai-args; use --tvai-scale instead')
+
+        scale_raw = self._tvai_kv.get("scale")
+        if scale_raw is None:
+            raise ValueError('Missing "scale" in tvai args. Pass it via --tvai-scale (valid: 0, 2, 4)')
+        scale = int(scale_raw)
+        if scale not in (0, 2, 4):
+            raise ValueError(f'Invalid tvai "scale": {scale} (valid: 0, 2, 4)')
+        self.scale = scale
+
+        scale_for_dims = scale if scale != 0 else 1
+        self.out_w = int(256 * scale_for_dims)
+        self.out_h = int(256 * scale_for_dims)
+
+        parts: list[tuple[str, str]] = []
+        if "model" in self._tvai_kv:
+            parts.append(("model", str(self._tvai_kv["model"])))
+        parts.append(("scale", str(int(self.scale))))
+        for k, v in self._tvai_kv.items():
+            if k in {"model", "scale", "w", "h"}:
+                continue
+            parts.append((str(k), str(v)))
+        self._tvai_args_effective = ":".join(f"{k}={v}" for k, v in parts)
+
+        logger.debug(
+            "TVAI init: ffmpeg_path=%r tvai_args=%r tvai_args_effective=%r parsed_args=%r model=%r scale=%d out=%dx%d tail_pad_frames=%d",
+            self.ffmpeg_path,
+            self.tvai_args,
+            self._tvai_args_effective,
+            self._tvai_kv,
+            model_name,
+            int(self.scale),
+            int(self.out_w),
+            int(self.out_h),
+            int(self.tail_pad_frames),
+        )
 
         max_clip_size = int(max_clip_size)
         if max_clip_size <= 0:
             raise ValueError("--max-clip-size must be > 0")
         self.max_clip_size = max_clip_size
+        logger.debug(
+            "TVAI init: device=%s out_w=%d out_h=%d max_clip_size=%d",
+            self.device,
+            int(self.out_w),
+            int(self.out_h),
+            int(self.max_clip_size),
+        )
 
         self._in_buf = torch.empty(
-            (self.max_clip_size + int(self.TAIL_PAD_FRAMES), 256, 256, 3),
+            (self.max_clip_size + int(self.tail_pad_frames), 256, 256, 3),
             dtype=torch.uint8,
             device="cpu",
             pin_memory=True,
@@ -93,6 +140,7 @@ class TvaiSecondaryRestorer:
     def _validate_tvai_environment(self) -> None:
         data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")
         model_dir = os.environ.get("TVAI_MODEL_DIR")
+        logger.debug("TVAI env: TVAI_MODEL_DATA_DIR=%r TVAI_MODEL_DIR=%r", data_dir, model_dir)
         if not data_dir:
             raise RuntimeError("TVAI_MODEL_DATA_DIR env var is not set")
         if not model_dir:
@@ -128,7 +176,7 @@ class TvaiSecondaryRestorer:
             "-sws_flags",
             "spline+accurate_rnd+full_chroma_int",
             "-filter_complex",
-            f"tvai_up={self.tvai_args},scale={out_w}:{out_h}:flags=spline",
+            f"tvai_up={self._tvai_args_effective}",
             "-f",
             "rawvideo",
             "-pix_fmt",
@@ -136,6 +184,7 @@ class TvaiSecondaryRestorer:
             "pipe:1",
         ]
 
+        logger.debug("TVAI starting ffmpeg: %r", cmd)
         self._proc = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
@@ -147,6 +196,7 @@ class TvaiSecondaryRestorer:
         )
         if self._proc.stdin is None or self._proc.stdout is None or self._proc.stderr is None:
             raise RuntimeError("Failed to start TVAI ffmpeg with pipes")
+        logger.debug("TVAI ffmpeg started: pid=%s", self._proc.pid)
 
         self._out_lock = threading.Lock()
         self._out_cond = threading.Condition(self._out_lock)
@@ -171,6 +221,7 @@ class TvaiSecondaryRestorer:
 
         def _stdout_reader() -> None:
             try:
+                frames_read = 0
                 while True:
                     buf, mv, buf_np = self._out_pool.get()
                     view = mv
@@ -180,6 +231,9 @@ class TvaiSecondaryRestorer:
                         if not n:
                             raise RuntimeError(f"Unexpected EOF while reading ffmpeg stdout (got {offset} / {len(view)} bytes)")
                         offset += n
+                    frames_read += 1
+                    if (frames_read <= 3) or (frames_read % 25 == 0):
+                        logger.debug("TVAI stdout: received frame=%d bytes=%d", frames_read, int(len(view)))
                     with self._out_cond:
                         self._out_frames.append((buf, mv, buf_np))
                         self._out_cond.notify_all()
@@ -209,6 +263,7 @@ class TvaiSecondaryRestorer:
             buf_np = buf.numpy()
             mv = memoryview(buf_np).cast("B")
             self._out_pool.put((buf, mv, buf_np))
+        logger.debug("TVAI output buffers: out_w=%d out_h=%d pool_size=%d", out_w, out_h, int(self.OUT_BUFFER_POOL_SIZE))
 
     def close(self) -> None:
         proc = getattr(self, "_proc", None)
@@ -216,6 +271,7 @@ class TvaiSecondaryRestorer:
             return
         if proc.poll() is not None:
             return
+        logger.debug("TVAI closing ffmpeg: pid=%s", getattr(proc, "pid", None))
         try:
             if proc.stdin is not None:
                 proc.stdin.close()
@@ -223,6 +279,7 @@ class TvaiSecondaryRestorer:
             proc.terminate()
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> torch.Tensor:
+        t0 = time.perf_counter()
         t = int(frames_256.shape[0])
         if t == 0:
             return torch.empty((0, 3, int(self.out_h), int(self.out_w)), dtype=torch.uint8, device=self.device)
@@ -242,10 +299,24 @@ class TvaiSecondaryRestorer:
             restore_end = t
 
         n = int(restore_end - restore_start)
-        padded_n = max(int(n + self.TAIL_PAD_FRAMES), int(self.MIN_TVAI_FRAMES))
-        tail_ctx = min(int(self.TAIL_PAD_FRAMES), max(0, t - restore_end))
+        tail_pad_frames = int(self.tail_pad_frames)
+        padded_n = max(int(n + tail_pad_frames), int(self.MIN_TVAI_FRAMES))
+        tail_ctx = 0
 
-        slice_end = int(restore_end + tail_ctx)
+        slice_end = int(restore_end)
+        logger.debug(
+            "TVAI restore: t=%d keep_start=%d keep_end=%d restore_start=%d restore_end=%d n=%d padded_n=%d tail_ctx=%d tail_pad_frames=%d pending_discard_outputs=%d",
+            t,
+            int(keep_start),
+            int(keep_end),
+            restore_start,
+            restore_end,
+            n,
+            padded_n,
+            tail_ctx,
+            tail_pad_frames,
+            int(self._pending_discard_outputs),
+        )
         frames_u8 = frames_256[restore_start:slice_end].mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
 
         def _ensure_alive() -> None:
@@ -261,13 +332,8 @@ class TvaiSecondaryRestorer:
             frames_u8[:n].permute(0, 2, 3, 1),
             non_blocking=True,
         )
-        if tail_ctx > 0:
-            frames_cpu_hwc[n : n + tail_ctx].copy_(
-                frames_u8[n : n + tail_ctx].permute(0, 2, 3, 1),
-                non_blocking=True,
-            )
 
-        filled = n + tail_ctx
+        filled = n
         torch.cuda.synchronize(frames_256.device)
         if padded_n > filled:
             self._in_np[filled:padded_n] = self._in_np[filled - 1]
@@ -276,6 +342,14 @@ class TvaiSecondaryRestorer:
         need_collect = int(n)
         tail_outputs = int(padded_n - n)
         out_write_idx = 0
+        logger.debug(
+            "TVAI io plan: write_frames=%d collect=%d discard=%d tail_outputs=%d chunk_frames=%d",
+            padded_n,
+            need_collect,
+            need_discard,
+            tail_outputs,
+            int(self.IN_WRITE_CHUNK_FRAMES),
+        )
 
         def _ensure_alive_locked() -> None:
             _ensure_alive()
@@ -297,6 +371,13 @@ class TvaiSecondaryRestorer:
         chunk_frames = int(self.IN_WRITE_CHUNK_FRAMES)
         for start in range(0, int(padded_n), chunk_frames):
             end = min(int(padded_n), start + chunk_frames)
+            logger.debug(
+                "TVAI stdin: writing frames [%d, %d) bytes [%d, %d)",
+                int(start),
+                int(end),
+                int(start) * int(self._in_frame_bytes),
+                int(end) * int(self._in_frame_bytes),
+            )
             start_b = int(start) * int(self._in_frame_bytes)
             end_b = int(end) * int(self._in_frame_bytes)
             self._proc.stdin.write(self._in_all_mv[start_b:end_b])
@@ -305,14 +386,31 @@ class TvaiSecondaryRestorer:
                 _drain_outputs_locked()
 
         with self._out_cond:
+            last_wait_log = time.perf_counter()
             while (need_discard > 0) or (need_collect > 0):
                 _ensure_alive_locked()
                 _drain_outputs_locked()
 
+                now = time.perf_counter()
+                if (need_discard > 0 or need_collect > 0) and (now - last_wait_log) >= 1.0:
+                    logger.debug(
+                        "TVAI waiting outputs: need_discard=%d need_collect=%d out_frames=%d out_write_idx=%d",
+                        int(need_discard),
+                        int(need_collect),
+                        int(len(self._out_frames)),
+                        int(out_write_idx),
+                    )
+                    last_wait_log = now
                 if (need_discard > 0) or (need_collect > 0):
                     self._out_cond.wait(timeout=0.1)
 
         self._pending_discard_outputs = tail_outputs
+        logger.debug(
+            "TVAI restore done: collected=%d set_pending_discard_outputs=%d elapsed_ms=%.1f",
+            int(n),
+            int(self._pending_discard_outputs),
+            (time.perf_counter() - t0) * 1000.0,
+        )
 
         out_full_hwc = torch.empty((t, out_h, out_w, 3), dtype=torch.uint8, device=self.device)
         out_full_hwc[restore_start:restore_end].copy_(self._out_batch_hwc[:n], non_blocking=True)

@@ -90,10 +90,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to Topaz Video AI ffmpeg.exe (default: %(default)s)",
     )
     tvai.add_argument(
+        "--tvai-model",
+        type=str,
+        default="iris-2",
+        help='Topaz model name for tvai_up (e.g. "iris-2", "prob-4", "iris-3") (default: %(default)s)',
+    )
+    tvai.add_argument(
+        "--tvai-scale",
+        type=int,
+        default=4,
+        choices=[0, 2, 4],
+        help='Topaz tvai_up scale (0=no scale). Output size is 256*scale (scale=0 treated as 1 => 256x256) (default: %(default)s)',
+    )
+    tvai.add_argument(
         "--tvai-args",
         type=str,
-        default="model=iris-3:scale=0:preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1",
-        help='Arguments for tvai_up filter (passed as "tvai_up=<args>" to -filter_complex) (default: %(default)s)',
+        default="preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1",
+        help='Extra params for tvai_up. (default: %(default)s)',
     )
 
     detection = parser.add_argument_group("Detection")
@@ -203,7 +216,7 @@ def main() -> None:
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
-    from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
+    from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer, _parse_tvai_args_kv
 
     use_tensorrt = basicvsrpp_startup_policy(
         restoration_model_path=str(restoration_model_path),
@@ -227,10 +240,27 @@ def main() -> None:
             use_tensorrt=bool(args.compile_tensorrt),
         )
     elif secondary_name == "tvai":
+        tvai_model = str(args.tvai_model).strip()
+        if tvai_model == "":
+            raise ValueError("--tvai-model must be non-empty")
+        tvai_scale = int(args.tvai_scale)
+
+        tvai_args_rest = str(args.tvai_args)
+        tvai_kv = _parse_tvai_args_kv(tvai_args_rest)
+        if "model" in tvai_kv:
+            raise ValueError('Do not pass "model" in --tvai-args; use --tvai-model instead')
+        if "scale" in tvai_kv:
+            raise ValueError('Do not pass "scale" in --tvai-args; use --tvai-scale instead')
+        if ("w" in tvai_kv) or ("h" in tvai_kv):
+            raise ValueError('Do not pass "w" or "h" in --tvai-args; use --tvai-scale instead')
+
+        tvai_args = f"model={tvai_model}:scale={tvai_scale}"
+        if tvai_args_rest.strip() != "":
+            tvai_args = f"{tvai_args}:{tvai_args_rest}"
         secondary_restorer = TvaiSecondaryRestorer(
             device=device,
             ffmpeg_path=str(args.tvai_ffmpeg_path),
-            tvai_args=str(args.tvai_args),
+            tvai_args=tvai_args,
             max_clip_size=max_clip_size,
         )
     else:
