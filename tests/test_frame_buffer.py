@@ -359,6 +359,55 @@ def test_blend_restored_frame_crossfade_weight_zero_keeps_previous() -> None:
     assert torch.all(blended[:, y1:y2, x1:x2] == 190)
 
 
+def test_blend_restored_frame_ignores_missing_frame() -> None:
+    def blend_mask_fn(_: torch.Tensor) -> torch.Tensor:
+        raise AssertionError("blend_mask_fn should not be called for missing frame")
+
+    fb = FrameBuffer(device=torch.device("cpu"), blend_mask_fn=blend_mask_fn)
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+
+    fb.blend_restored_frame(
+        frame_idx=99,
+        track_id=1,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=torch.ones((8, 8), dtype=torch.bool),
+        frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0),
+        resize_shape=(crop_h, crop_w),
+    )  # should not raise
+
+
+def test_blend_restored_frame_skips_when_track_not_pending() -> None:
+    def blend_mask_fn(_: torch.Tensor) -> torch.Tensor:
+        raise AssertionError("blend_mask_fn should not be called when track is not pending")
+
+    fb = FrameBuffer(device=torch.device("cpu"), blend_mask_fn=blend_mask_fn)
+
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={8})
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+
+    fb.blend_restored_frame(
+        frame_idx=0,
+        track_id=7,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=torch.ones((8, 8), dtype=torch.bool),
+        frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0),
+        resize_shape=(crop_h, crop_w),
+    )  # should not raise
+
+    assert fb.frames[0].blended_frame is fb.frames[0].frame
+
+
 def test_frame_buffer_blend_clip_discards_frames_outside_keep_range() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
