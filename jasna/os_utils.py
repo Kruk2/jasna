@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -13,15 +14,26 @@ def get_subprocess_startup_info():
 
 
 def _parse_ffmpeg_major_version(version_output: str) -> int:
+    def parse_major_from_libavutil(out: str) -> int:
+        m = re.search(r"(?m)^\s*libavutil\s+(\d+)\.", out)
+        if not m:
+            raise ValueError("Could not parse libavutil version from ffmpeg output")
+        libavutil_major = int(m.group(1))
+        return libavutil_major - 52
+
     first_line = version_output.splitlines()[0] if version_output else ""
-    parts = first_line.split()
-    if len(parts) < 3 or parts[1] != "version":
+    m = re.match(r"^\s*(?:ffmpeg|ffprobe)\s+version\s+(\S+)", first_line)
+    if not m:
         raise ValueError(f"Unexpected ffmpeg/ffprobe version output: {first_line!r}")
-    raw = parts[2]
-    raw = raw.lstrip("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-    raw = raw.split("-", 1)[0]
-    major_str = raw.split(".", 1)[0]
-    return int(major_str)
+
+    ver = m.group(1)
+    if ver.startswith(("N-", "git-", "GIT-")):
+        return parse_major_from_libavutil(version_output)
+
+    m = re.search(r"(\d+)", ver)
+    if not m:
+        raise ValueError(f"Could not parse ffmpeg major version from: {ver!r}")
+    return int(m.group(1))
 
 
 def check_required_executables() -> None:
@@ -52,7 +64,11 @@ def check_required_executables() -> None:
             continue
 
         if exe in {"ffprobe", "ffmpeg"}:
-            major = _parse_ffmpeg_major_version((completed.stdout or "") + (completed.stderr or ""))
+            try:
+                major = _parse_ffmpeg_major_version((completed.stdout or "") + (completed.stderr or ""))
+            except ValueError:
+                wrong_version.append(f"{exe} (could not detect major version)")
+                continue
             if major != 8:
                 wrong_version.append(f"{exe} (detected major={major})")
 
@@ -61,7 +77,10 @@ def check_required_executables() -> None:
         print("Please install them and ensure they are available in your system PATH and runnable.")
         sys.exit(1)
     if wrong_version:
-        print(f"Error: ffmpeg/ffprobe major version must be exactly 8: {', '.join(wrong_version)}")
+        print(
+            "Error: ffmpeg/ffprobe major version must be exactly 8 (or detectable as 8): "
+            + ", ".join(wrong_version)
+        )
         sys.exit(1)
 
 

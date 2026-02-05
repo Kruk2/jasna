@@ -13,6 +13,16 @@ def test_parse_ffmpeg_major_version_parses_n_prefix() -> None:
     assert os_utils._parse_ffmpeg_major_version(out) == 8
 
 
+def test_parse_ffmpeg_major_version_parses_nightly_build_from_libavutil() -> None:
+    out = "\n".join(
+        [
+            "ffmpeg version N-113224-gdeadbeef Copyright (c) ...",
+            "libavutil      60.  3.100 / 60.  3.100",
+        ]
+    )
+    assert os_utils._parse_ffmpeg_major_version(out) == 8
+
+
 def test_check_required_executables_uses_expected_version_commands(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
 
@@ -84,6 +94,29 @@ def test_check_required_executables_errors_on_newer_ffmpeg(monkeypatch, capsys) 
 
     captured = capsys.readouterr()
     assert "major version must be exactly 8" in captured.out
+
+
+def test_check_required_executables_errors_when_version_cannot_be_detected(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
+
+    def fake_run(cmd, **kwargs):
+        exe = cmd[0]
+        if exe == "ffprobe":
+            return type("R", (), {"returncode": 0, "stdout": "ffprobe version N-113224-gdeadbeef", "stderr": ""})()
+        if exe == "ffmpeg":
+            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version N-113224-gdeadbeef", "stderr": ""})()
+        if exe == "mkvmerge":
+            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+        raise AssertionError(f"Unexpected exe {exe!r}")
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+
+    with pytest.raises(SystemExit) as e:
+        os_utils.check_required_executables()
+    assert int(e.value.code) == 1
+
+    captured = capsys.readouterr()
+    assert "could not detect major version" in captured.out
 
 
 def test_get_subprocess_startup_info_non_nt_returns_none(monkeypatch) -> None:
