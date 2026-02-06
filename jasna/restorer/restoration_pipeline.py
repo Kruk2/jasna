@@ -215,6 +215,8 @@ class RestorationPipeline:
 
         self._secondary.submit(primary_raw, keep_start=ks, keep_end=ke, meta=meta, track_id=clip.track_id)
         self.poll_secondary(frame_buffer=frame_buffer)
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
     def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> None:
         for item in self._secondary.drain_completed(limit=limit):
@@ -295,6 +297,8 @@ class RestorationPipeline:
             resize_shapes = scaled_resize_shapes
 
         _, frame_h, frame_w = frames[0].shape
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
         return RestoredClip(
             restored_frames=restored_frames,
             masks=clip.masks,
