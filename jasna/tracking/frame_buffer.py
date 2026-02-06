@@ -46,6 +46,12 @@ class FrameBuffer:
         pending = self.frames.get(frame_idx)
         return pending.frame if pending else None
 
+    def needs_blend(self, *, frame_idx: int, track_id: int) -> bool:
+        pending = self.frames.get(int(frame_idx))
+        if pending is None:
+            return False
+        return int(track_id) in pending.pending_clips
+
     def add_pending_clip(self, frame_indices: list[int], track_id: int) -> None:
         for frame_idx in frame_indices:
             pending = self.frames.get(frame_idx)

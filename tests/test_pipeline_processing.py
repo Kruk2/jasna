@@ -69,6 +69,12 @@ class _FakeRestorationPipeline:
     def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> None:
         del frame_buffer, limit
 
+    def flush_track(self, track_id: int) -> None:
+        del track_id
+
+    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
+        del old_track_id, new_track_id
+
 
 def _make_single_det_batch(*, effective_bs: int, batch_size: int, box=(2.0, 2.0, 6.0, 6.0)) -> Detections:
     boxes_xyxy = []

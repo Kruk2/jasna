@@ -10,8 +10,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-import functools
-from typing import Callable, Generic, TypeVar
+from typing import Generic, TypeVar
 
 import numpy as np
 import torch
@@ -53,21 +52,20 @@ class _TvaiTask(Generic[TMeta]):
 
 
 @dataclass(frozen=True)
+class _FlushTask:
+    """Sentinel task to flush the worker's temporal buffer."""
+    timeout_s: float
+
+
+@dataclass(frozen=True)
 class _TvaiCompleted(Generic[TMeta]):
     meta: TMeta
     worker_idx: int
     out_buf: torch.Tensor  # (H, W, 3) uint8, CPU pinned
-    out_mv: memoryview
-    out_np: np.ndarray
-    recycle_fn: Callable[[], None]
 
     def to_frame_u8(self, device: torch.device) -> torch.Tensor:
-        # .to() first while tensor is contiguous so the transfer uses pinned memory DMA;
-        # permute on GPU is free (just changes strides, no data copy)
-        return self.out_buf.to(device=device, non_blocking=False).permute(2, 0, 1)
-
-    def recycle(self) -> None:
-        self.recycle_fn()
+        # Pinned memory enables fast DMA transfer; permute on GPU is free
+        return self.out_buf.to(device=device, non_blocking=True).permute(2, 0, 1)
 
 
 @dataclass(frozen=True)
@@ -77,7 +75,6 @@ class _TvaiWorkerFatal:
 
 class _TvaiFfmpegRestorer:
     name = "tvai"
-    BUFFER_POOL_SIZE = 32
     IN_WRITE_CHUNK_FRAMES = 4
 
     def __init__(
@@ -125,7 +122,7 @@ class _TvaiFfmpegRestorer:
             raise ValueError("--max-clip-size must be > 0")
         self.max_clip_size = max_clip_size
 
-        logger.debug(
+        logger.info(
             "TVAI init: ffmpeg_path=%r tvai_args_effective=%r model=%r scale=%d out=%dx%d device=%s max_clip_size=%d",
             self.ffmpeg_path,
             self._tvai_args_effective,
@@ -137,12 +134,7 @@ class _TvaiFfmpegRestorer:
             self.max_clip_size,
         )
 
-        self._in_buf = torch.empty(
-            (self.max_clip_size, 256, 256, 3),
-            dtype=torch.uint8,
-            device="cpu",
-            pin_memory=True,
-        )
+        self._in_buf = torch.empty((self.max_clip_size, 256, 256, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
         self._in_np = self._in_buf.numpy()
         self._in_frame_bytes = 256 * 256 * 3
         self._in_all_mv = memoryview(self._in_np).cast("B")
@@ -151,7 +143,6 @@ class _TvaiFfmpegRestorer:
 
         self._validate_tvai_environment()
         self._start_ffmpeg()
-        self._init_output_buffers()
         atexit.register(self.close)
 
     def _validate_tvai_environment(self) -> None:
@@ -214,8 +205,7 @@ class _TvaiFfmpegRestorer:
 
         self._out_lock = threading.Lock()
         self._out_cond = threading.Condition(self._out_lock)
-        self._out_frames: collections.deque[tuple[torch.Tensor, memoryview, np.ndarray]] = collections.deque()
-        self._out_pool: queue.SimpleQueue[tuple[torch.Tensor, memoryview, np.ndarray]] = queue.SimpleQueue()
+        self._out_frames: collections.deque[np.ndarray] = collections.deque()
 
         def _stderr_reader() -> None:
             try:
@@ -236,24 +226,25 @@ class _TvaiFfmpegRestorer:
         def _stdout_reader() -> None:
             try:
                 frames_read = 0
+                frame_bytes = self.out_h * self.out_w * 3
                 while True:
-                    buf, mv, buf_np = self._out_pool.get()
+                    out_buf = torch.empty((self.out_h, self.out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
+                    mv = memoryview(out_buf.numpy()).cast("B")
                     offset = 0
-                    while offset < len(mv):
+                    while offset < frame_bytes:
                         n = self._proc.stdout.readinto(mv[offset:])
                         if not n:
                             if offset == 0:
-                                self._out_pool.put((buf, mv, buf_np))
                                 return
                             raise RuntimeError(
-                                f"Unexpected EOF while reading ffmpeg stdout (got {offset} / {len(mv)} bytes)"
+                                f"Unexpected EOF while reading ffmpeg stdout (got {offset} / {frame_bytes} bytes)"
                             )
                         offset += n
                     frames_read += 1
                     if (frames_read <= 3) or (frames_read % 25 == 0):
-                        logger.debug("TVAI stdout: received frame=%d bytes=%d", frames_read, len(mv))
+                        logger.debug("TVAI stdout: received frame=%d bytes=%d", frames_read, frame_bytes)
                     with self._out_cond:
-                        self._out_frames.append((buf, mv, buf_np))
+                        self._out_frames.append(out_buf)
                         self._out_cond.notify_all()
             except BaseException as e:
                 with self._out_cond:
@@ -265,19 +256,6 @@ class _TvaiFfmpegRestorer:
         self._stdout_thread = threading.Thread(target=_stdout_reader, daemon=True)
         self._stderr_thread.start()
         self._stdout_thread.start()
-
-    def _init_output_buffers(self) -> None:
-        for _ in range(self.BUFFER_POOL_SIZE):
-            buf = torch.empty((self.out_h, self.out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
-            buf_np = buf.numpy()
-            mv = memoryview(buf_np).cast("B")
-            self._out_pool.put((buf, mv, buf_np))
-        self._complete_pool: queue.SimpleQueue[tuple[torch.Tensor, memoryview, np.ndarray]] = queue.SimpleQueue()
-        for _ in range(self.BUFFER_POOL_SIZE):
-            buf = torch.empty((self.out_h, self.out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
-            buf_np = buf.numpy()
-            mv = memoryview(buf_np).cast("B")
-            self._complete_pool.put((buf, mv, buf_np))
 
     def _check_alive(self) -> None:
         if self._fatal is not None:
@@ -291,24 +269,11 @@ class _TvaiFfmpegRestorer:
         if self._fatal is not None:
             raise RuntimeError(f"TVAI ffmpeg is not healthy: {self._fatal}") from self._fatal
 
-    def _acquire_complete_buf(self) -> tuple[torch.Tensor, memoryview, np.ndarray]:
-        try:
-            return self._complete_pool.get_nowait()
-        except queue.Empty:
-            buf = torch.empty((self.out_h, self.out_w, 3), dtype=torch.uint8, device="cpu", pin_memory=True)
-            buf_np = buf.numpy()
-            mv = memoryview(buf_np).cast("B")
-            return buf, mv, buf_np
-
-    def _drain_stdout_to_complete(self) -> list[tuple[torch.Tensor, memoryview, np.ndarray]]:
-        """Move frames from stdout deque to complete buffers. Must hold _out_lock."""
-        out: list[tuple[torch.Tensor, memoryview, np.ndarray]] = []
+    def _drain_stdout(self) -> list[np.ndarray]:
+        """Drain all currently available frames from stdout deque. Must hold _out_lock."""
+        out: list[np.ndarray] = []
         while self._out_frames:
-            buf, mv, buf_np = self._out_frames.popleft()
-            cbuf, cmv, cnp = self._acquire_complete_buf()
-            np.copyto(cnp, buf_np)
-            self._out_pool.put((buf, mv, buf_np))
-            out.append((cbuf, cmv, cnp))
+            out.append(self._out_frames.popleft())
         return out
 
     def close(self) -> None:
@@ -324,7 +289,22 @@ class _TvaiFfmpegRestorer:
         finally:
             proc.terminate()
 
-    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[tuple[torch.Tensor, memoryview, np.ndarray]]:
+    def push_padding(self, n: int) -> list[np.ndarray]:
+        """Write n black frames to stdin to flush internal temporal buffers."""
+        if n <= 0:
+            return []
+        self._check_alive()
+        black_frame = bytes(self._in_frame_bytes)
+        drained: list[np.ndarray] = []
+        for i in range(n):
+            self._proc.stdin.write(black_frame)
+            with self._out_cond:
+                self._check_alive()
+                drained.extend(self._drain_stdout())
+        logger.debug("TVAI push_padding: wrote=%d drained=%d", n, len(drained))
+        return drained
+
+    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         t0 = time.perf_counter()
         t = frames_256.shape[0]
         if t == 0:
@@ -348,7 +328,7 @@ class _TvaiFfmpegRestorer:
         torch.cuda.synchronize(frames_256.device)
 
         self._check_alive()
-        drained: list[tuple[torch.Tensor, memoryview, np.ndarray]] = []
+        drained: list[torch.Tensor] = []
 
         for start in range(0, n, self.IN_WRITE_CHUNK_FRAMES):
             end = min(n, start + self.IN_WRITE_CHUNK_FRAMES)
@@ -359,11 +339,11 @@ class _TvaiFfmpegRestorer:
 
             with self._out_cond:
                 self._check_alive()
-                drained.extend(self._drain_stdout_to_complete())
+                drained.extend(self._drain_stdout())
 
         with self._out_cond:
             self._check_alive()
-            drained.extend(self._drain_stdout_to_complete())
+            drained.extend(self._drain_stdout())
 
         logger.debug(
             "TVAI restore(stream) done: wrote=%d drained=%d elapsed_ms=%.1f",
@@ -371,7 +351,7 @@ class _TvaiFfmpegRestorer:
         )
         return drained
 
-    def flush(self, *, timeout_s: float = 300.0) -> list[tuple[torch.Tensor, memoryview, np.ndarray]]:
+    def flush(self, *, timeout_s: float = 300.0) -> list[torch.Tensor]:
         t0 = time.perf_counter()
         proc = getattr(self, "_proc", None)
         if proc is None:
@@ -384,12 +364,12 @@ class _TvaiFfmpegRestorer:
                 pass
 
         deadline = time.perf_counter() + timeout_s
-        drained: list[tuple[torch.Tensor, memoryview, np.ndarray]] = []
+        drained: list[torch.Tensor] = []
 
         while True:
             with self._out_cond:
                 self._check_fatal()
-                drained.extend(self._drain_stdout_to_complete())
+                drained.extend(self._drain_stdout())
 
             if proc.poll() is not None:
                 break
@@ -405,7 +385,7 @@ class _TvaiFfmpegRestorer:
 
         with self._out_cond:
             self._check_fatal()
-            drained.extend(self._drain_stdout_to_complete())
+            drained.extend(self._drain_stdout())
 
         logger.debug(
             "TVAI flush done: drained=%d elapsed_ms=%.1f",
@@ -413,12 +393,13 @@ class _TvaiFfmpegRestorer:
         )
         return drained
 
-    def recycle_completed(self, token: tuple[torch.Tensor, memoryview, np.ndarray]) -> None:
-        self._complete_pool.put(token)
-
 
 class TvaiSecondaryRestorer(Generic[TMeta]):
     name = "tvai"
+
+    # TVAI filter has an internal temporal pipeline. In practice it often needs ~25 frames
+    # of future input before the last outputs of a segment become available.
+    LATENCY_FRAMES = 25
 
     def __init__(
         self,
@@ -442,7 +423,7 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
         self._workers: list[_TvaiFfmpegRestorer] = []
         self._worker_threads: list[threading.Thread] = []
         self._task_queues: list[queue.Queue[_TvaiTask[TMeta] | None]] = []
-        self._pending_by_worker: list[collections.deque[TMeta]] = []
+        self._pending_by_worker: list[collections.deque[TMeta | None]] = []
         self._completed: queue.Queue[_TvaiCompleted[TMeta] | _TvaiWorkerFatal] = queue.Queue()
         self._fatal: BaseException | None = None
         self._track_to_worker: dict[int, int] = {}
@@ -472,12 +453,83 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
                         task = q.get()
                         if task is None:
                             return
+                        if isinstance(task, _FlushTask):
+                            real_remaining = sum(1 for m in pending if m is not None)
+                            logger.debug("worker %d flush: real_pending=%d", worker_idx, real_remaining)
+                            if real_remaining == 0:
+                                continue
+
+                            deadline = time.perf_counter() + task.timeout_s
+                            black_frame = bytes(rest._in_frame_bytes)
+                            padding_pushed = 0
+                            drained_total = 0
+                            last_progress_t = time.perf_counter()
+
+                            # Push some padding upfront to advance TVAI's internal pipeline.
+                            for _ in range(TvaiSecondaryRestorer.LATENCY_FRAMES):
+                                rest._proc.stdin.write(black_frame)
+                                pending.append(None)
+                                padding_pushed += 1
+
+                            # Drain outputs until all real frames are out.
+                            while real_remaining > 0:
+                                with rest._out_cond:
+                                    rest._check_alive()
+                                    drained = rest._drain_stdout()
+                                    if not drained:
+                                        now = time.perf_counter()
+                                        if now >= deadline:
+                                            logger.warning(
+                                                "worker %d flush timed out: real_remaining=%d padding_pushed=%d",
+                                                worker_idx,
+                                                real_remaining,
+                                                padding_pushed,
+                                            )
+                                            break
+                                        # If no progress for a bit, push extra padding to force more output.
+                                        if (now - last_progress_t) >= 0.25:
+                                            for _ in range(5):
+                                                rest._proc.stdin.write(black_frame)
+                                                pending.append(None)
+                                                padding_pushed += 1
+                                            last_progress_t = now
+                                        rest._out_cond.wait(timeout=0.05)
+                                        continue
+
+                                drained_total += len(drained)
+                                last_progress_t = time.perf_counter()
+                                for out_buf in drained:
+                                    if not pending:
+                                        continue
+                                    meta = pending.popleft()
+                                    if meta is not None:
+                                        real_remaining -= 1
+                                    self._completed.put(
+                                        _TvaiCompleted(
+                                            meta=meta,
+                                            worker_idx=worker_idx,
+                                            out_buf=out_buf,
+                                        )
+                                    )
+
+                            # Important: do NOT clear remaining padding markers.
+                            # They must stay queued so any future TVAI outputs (caused by internal latency)
+                            # get consumed as padding and cannot shift alignment for subsequent real frames.
+                            logger.debug(
+                                "worker %d flush done: real_remaining=%d padding_pushed=%d drained=%d pending_after=%d",
+                                worker_idx,
+                                real_remaining,
+                                padding_pushed,
+                                drained_total,
+                                len(pending),
+                            )
+                            continue
                         try:
                             pending.extend(task.meta)
                             drained = rest.restore(
                                 task.frames_256, keep_start=task.keep_start, keep_end=task.keep_end
                             )
-                            for buf, mv, buf_np in drained:
+                            for out_buf in drained:
                                 if not pending:
                                     break
                                 meta = pending.popleft()
@@ -485,10 +537,7 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
                                     _TvaiCompleted(
                                         meta=meta,
                                         worker_idx=worker_idx,
-                                        out_buf=buf,
-                                        out_mv=mv,
-                                        out_np=buf_np,
-                                        recycle_fn=functools.partial(rest.recycle_completed, (buf, mv, buf_np)),
+                                        out_buf=out_buf,
                                     )
                                 )
                         finally:
@@ -540,6 +589,39 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
         self._worker_task_count[idx] += 1
         self._task_queues[idx].put(_TvaiTask(frames_256=frames_256, keep_start=keep_start, keep_end=keep_end, meta=meta))
 
+    def flush_track(self, track_id: int, timeout_s: float = 60.0) -> None:
+        """Flush a specific track by pushing padding frames to its worker.
+        
+        This forces the temporal filter to output remaining real frames.
+        The padding outputs will be discarded when drained.
+        
+        This is async - we submit the flush task and return immediately.
+        The worker will process it when it reaches the task in its queue.
+        """
+        self._raise_if_fatal()
+        if self._closed:
+            logger.debug("flush_track(%d): pool is closed, skipping", track_id)
+            return
+        idx = self._track_to_worker.pop(track_id, None)
+        if idx is None:
+            logger.debug("flush_track(%d): track not mapped to any worker, skipping", track_id)
+            return
+        
+        logger.debug("flush_track(%d): queueing async flush task to worker %d", track_id, idx)
+        # Don't acquire slot - let worker process flush when it reaches it in queue.
+        # This makes flush_track truly non-blocking.
+        self._task_queues[idx].put(_FlushTask(timeout_s=timeout_s))
+
+    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
+        """Transfer worker mapping from old track to new track without flushing.
+        
+        Used when a track is split due to max_clip_size - the continuation should
+        use the same worker so TVAI outputs flow naturally without padding.
+        """
+        idx = self._track_to_worker.pop(old_track_id, None)
+        if idx is not None:
+            self._track_to_worker[new_track_id] = idx
+
     def drain_completed(self, *, limit: int | None = None) -> list[_TvaiCompleted[TMeta]]:
         self._raise_if_fatal()
         out: list[_TvaiCompleted[TMeta]] = []
@@ -553,6 +635,8 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
             if isinstance(item, _TvaiWorkerFatal):
                 self._fatal = item.error
                 self._raise_if_fatal()
+            if item.meta is None:
+                continue
             out.append(item)
         return out
 
@@ -576,7 +660,7 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
             remaining = max(0.0, deadline - time.perf_counter())
             drained = rest.flush(timeout_s=remaining if remaining > 0 else 0.1)
             pending = self._pending_by_worker[worker_idx]
-            for buf, mv, buf_np in drained:
+            for out_buf in drained:
                 if not pending:
                     break
                 meta = pending.popleft()
@@ -584,11 +668,9 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
                     _TvaiCompleted(
                         meta=meta,
                         worker_idx=worker_idx,
-                        out_buf=buf,
-                        out_mv=mv,
-                        out_np=buf_np,
-                        recycle_fn=functools.partial(rest.recycle_completed, (buf, mv, buf_np)),
+                        out_buf=out_buf,
                     )
                 )
-            if pending:
-                raise RuntimeError(f"TVAI flush did not produce all pending frames (worker={worker_idx} pending={len(pending)})")
+            real_remaining = sum(1 for m in pending if m is not None)
+            if real_remaining > 0:
+                raise RuntimeError(f"TVAI flush did not produce all pending frames (worker={worker_idx} real_remaining={real_remaining})")

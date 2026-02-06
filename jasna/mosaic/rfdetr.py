@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import numpy as np
 import torch
+
+logger = logging.getLogger(__name__)
 from torch.nn import functional as F
 
 from jasna.trt import compile_onnx_to_tensorrt_engine
@@ -54,6 +57,7 @@ class RfDetrMosaicDetectionModel:
         )
         self.masks_out = next(k for k in self.runner.output_names if self.runner.outputs[k].ndim == 4)
         self.logits_out = next(k for k in self.runner.output_names if k not in {self.boxes_out, self.masks_out})
+        logger.info("RF-DETR detection model loaded: %s (batch_size=%d)", self.engine_path, self.batch_size)
 
     def _preprocess(self, frames_uint8_bchw: torch.Tensor) -> torch.Tensor:
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype).div_(255.0)
