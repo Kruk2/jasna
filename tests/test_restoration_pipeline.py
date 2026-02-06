@@ -3,7 +3,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from jasna.restorer.denoise import DenoiseStrength
+from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
 from jasna.restorer.restoration_pipeline import RestorationPipeline
 from jasna.tracking.clip_tracker import TrackedClip
 
@@ -292,4 +292,157 @@ def test_restore_clip_with_denoise_strength(monkeypatch) -> None:
         for a, b in zip(restored_none.restored_frames, restored_med.restored_frames)
     )
     assert diff > 0, "Denoise MEDIUM should produce different output from NONE"
+
+
+def test_restore_clip_denoise_step_after_primary_with_secondary_produces_valid_output(monkeypatch) -> None:
+    import jasna.restorer.restoration_pipeline as rp
+
+    monkeypatch.setattr(rp, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(rp, "MIN_BORDER", 0)
+    monkeypatch.setattr(rp, "MAX_EXPANSION_FACTOR", 0.0)
+
+    pipeline = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        secondary_restorer=_Upscale2xSecondary(),
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_PRIMARY,
+    )
+
+    torch.manual_seed(42)
+    T = 3
+    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
+    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
+    clip = TrackedClip(
+        track_id=0,
+        start_frame=0,
+        mask_resolution=(2, 2),
+        bboxes=[bbox] * T,
+        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
+    )
+
+    restored = pipeline.restore_clip(clip, frames, keep_start=0, keep_end=T)
+
+    assert len(restored.restored_frames) == T
+    assert restored.restored_frames[0].shape == (3, 512, 512)
+
+
+def test_restore_clip_denoise_step_after_secondary_denoises_secondary_output(monkeypatch) -> None:
+    import jasna.restorer.restoration_pipeline as rp
+
+    monkeypatch.setattr(rp, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(rp, "MIN_BORDER", 0)
+    monkeypatch.setattr(rp, "MAX_EXPANSION_FACTOR", 0.0)
+
+    pipeline_none = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        secondary_restorer=_Upscale2xSecondary(),
+        denoise_strength=DenoiseStrength.NONE,
+        denoise_step=DenoiseStep.AFTER_SECONDARY,
+    )
+    pipeline_med = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        secondary_restorer=_Upscale2xSecondary(),
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_SECONDARY,
+    )
+
+    torch.manual_seed(123)
+    T = 3
+    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
+    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
+    clip = TrackedClip(
+        track_id=0,
+        start_frame=0,
+        mask_resolution=(2, 2),
+        bboxes=[bbox] * T,
+        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
+    )
+
+    restored_none = pipeline_none.restore_clip(clip, frames, keep_start=0, keep_end=T)
+    restored_med = pipeline_med.restore_clip(clip, frames, keep_start=0, keep_end=T)
+
+    diff = sum(
+        (a.float() - b.float()).abs().sum().item()
+        for a, b in zip(restored_none.restored_frames, restored_med.restored_frames)
+    )
+    assert diff > 0, "AFTER_SECONDARY with MEDIUM should differ from NONE"
+
+
+def test_restore_clip_denoise_step_after_primary_vs_after_secondary_differ_with_secondary(monkeypatch) -> None:
+    import jasna.restorer.restoration_pipeline as rp
+
+    monkeypatch.setattr(rp, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(rp, "MIN_BORDER", 0)
+    monkeypatch.setattr(rp, "MAX_EXPANSION_FACTOR", 0.0)
+
+    pipeline_after_primary = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        secondary_restorer=_Upscale2xSecondary(),
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_PRIMARY,
+    )
+    pipeline_after_secondary = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        secondary_restorer=_Upscale2xSecondary(),
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_SECONDARY,
+    )
+
+    torch.manual_seed(456)
+    T = 3
+    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
+    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
+    clip = TrackedClip(
+        track_id=0,
+        start_frame=0,
+        mask_resolution=(2, 2),
+        bboxes=[bbox] * T,
+        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
+    )
+
+    restored_ap = pipeline_after_primary.restore_clip(clip, frames, keep_start=0, keep_end=T)
+    restored_as = pipeline_after_secondary.restore_clip(clip, frames, keep_start=0, keep_end=T)
+
+    diff = sum(
+        (a.float() - b.float()).abs().sum().item()
+        for a, b in zip(restored_ap.restored_frames, restored_as.restored_frames)
+    )
+    assert diff > 0, "AFTER_PRIMARY vs AFTER_SECONDARY with secondary should produce different output"
+
+
+def test_restore_clip_denoise_step_no_secondary_both_steps_denoise(monkeypatch) -> None:
+    import jasna.restorer.restoration_pipeline as rp
+
+    monkeypatch.setattr(rp, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(rp, "MIN_BORDER", 0)
+    monkeypatch.setattr(rp, "MAX_EXPANSION_FACTOR", 0.0)
+
+    pipeline_after_primary = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_PRIMARY,
+    )
+    pipeline_after_secondary = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_SECONDARY,
+    )
+
+    torch.manual_seed(789)
+    T = 3
+    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
+    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
+    clip = TrackedClip(
+        track_id=0,
+        start_frame=0,
+        mask_resolution=(2, 2),
+        bboxes=[bbox] * T,
+        masks=[torch.zeros((2, 2), dtype=torch.bool)] * T,
+    )
+
+    restored_ap = pipeline_after_primary.restore_clip(clip, frames, keep_start=0, keep_end=T)
+    restored_as = pipeline_after_secondary.restore_clip(clip, frames, keep_start=0, keep_end=T)
+
+    for a, b in zip(restored_ap.restored_frames, restored_as.restored_frames):
+        assert torch.allclose(a.float(), b.float(), atol=1e-5), "No secondary: both steps denoise same output"
 

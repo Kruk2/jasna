@@ -69,7 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="none",
         choices=["none", "low", "medium", "high"],
-        help="Spatial denoising strength applied to restored crops before blending. Reduces the noise artifacts. Probably keep at low/medium. (default: %(default)s)",
+        help="Spatial denoising strength applied to restored crops. Reduces noise artifacts. (default: %(default)s)",
+    )
+    restoration.add_argument(
+        "--denoise-step",
+        type=str,
+        default="after_primary",
+        choices=["after_primary", "after_secondary"],
+        help="When to apply denoising: after_primary (before secondary) or after_secondary (right before blend). (default: %(default)s)",
     )
 
     secondary = parser.add_argument_group("2nd restoration")
@@ -233,7 +240,7 @@ def main() -> None:
 
     from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-    from jasna.restorer.denoise import DenoiseStrength
+    from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
     from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer, _parse_tvai_args_kv
@@ -291,6 +298,7 @@ def main() -> None:
         raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
 
     denoise_strength = DenoiseStrength(str(args.denoise).lower())
+    denoise_step = DenoiseStep(str(args.denoise_step).lower())
 
     restoration_pipeline = RestorationPipeline(
         restorer=BasicvsrppMosaicRestorer(
@@ -302,6 +310,7 @@ def main() -> None:
         ),
         secondary_restorer=secondary_restorer,
         denoise_strength=denoise_strength,
+        denoise_step=denoise_step,
     )
 
     stream = torch.cuda.Stream()

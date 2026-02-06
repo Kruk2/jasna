@@ -12,6 +12,11 @@ class DenoiseStrength(Enum):
     HIGH = "high"
 
 
+class DenoiseStep(Enum):
+    AFTER_PRIMARY = "after_primary"
+    AFTER_SECONDARY = "after_secondary"
+
+
 _DENOISE_PARAMS: dict[DenoiseStrength, tuple[int, float, float]] = {
     DenoiseStrength.LOW: (5, 1.0, 0.04),
     DenoiseStrength.MEDIUM: (5, 1.5, 0.07),
@@ -65,3 +70,18 @@ def apply_denoise(frames: torch.Tensor, strength: DenoiseStrength) -> torch.Tens
         return frames
     kernel_size, sigma_spatial, sigma_range = _DENOISE_PARAMS[strength]
     return spatial_denoise(frames, kernel_size, sigma_spatial, sigma_range)
+
+
+def apply_denoise_u8(frames_u8: torch.Tensor, strength: DenoiseStrength) -> torch.Tensor:
+    """Apply denoise to uint8 tensor. Accepts [T, C, H, W] or [C, H, W]; returns same shape and dtype."""
+    if strength is DenoiseStrength.NONE:
+        return frames_u8
+    single = frames_u8.dim() == 3
+    if single:
+        frames_u8 = frames_u8.unsqueeze(0)
+    f = frames_u8.float().div(255.0)
+    f = apply_denoise(f, strength)
+    out = f.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
+    if single:
+        out = out.squeeze(0)
+    return out

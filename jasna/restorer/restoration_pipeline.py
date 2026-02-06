@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-from jasna.restorer.denoise import DenoiseStrength, apply_denoise
+from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
 from jasna.restorer.restored_clip import RestoredClip
 from jasna.restorer.secondary_restorer import StreamingSecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
@@ -89,10 +89,12 @@ class RestorationPipeline:
         *,
         secondary_restorer=None,
         denoise_strength: DenoiseStrength = DenoiseStrength.NONE,
+        denoise_step: DenoiseStep = DenoiseStep.AFTER_PRIMARY,
     ) -> None:
         self.restorer = restorer
         self.secondary_restorer = secondary_restorer  # kept for restore_clip() test compat
         self._denoise_strength = denoise_strength
+        self._denoise_step = denoise_step
         if isinstance(secondary_restorer, StreamingSecondaryRestorer):
             self._secondary: StreamingSecondaryRestorer = secondary_restorer
         else:
@@ -195,7 +197,8 @@ class RestorationPipeline:
 
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
         primary_raw = self.restorer.raw_process(resized_crops)
-        primary_raw = self._apply_denoise(primary_raw)
+        if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
+            primary_raw = self._apply_denoise(primary_raw)
 
         frame_h, frame_w = frames[0].shape[1], frames[0].shape[2]
         meta = [
@@ -222,6 +225,8 @@ class RestorationPipeline:
         for item in self._secondary.drain_completed(limit=limit):
             meta = item.meta
             frame_u8 = item.to_frame_u8(meta.mask_lr.device)
+            if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
+                frame_u8 = apply_denoise_u8(frame_u8, self._denoise_strength)
 
             out_h = int(frame_u8.shape[1])
             out_w = int(frame_u8.shape[2])
@@ -264,9 +269,12 @@ class RestorationPipeline:
         """
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
         primary_raw = self.restorer.raw_process(resized_crops)
-        primary_raw = self._apply_denoise(primary_raw)
+        if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
+            primary_raw = self._apply_denoise(primary_raw)
 
         if self.secondary_restorer is None:
+            if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
+                primary_raw = self._apply_denoise(primary_raw)
             restored_frames = list(
                 primary_raw.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0)
             )
@@ -276,6 +284,10 @@ class RestorationPipeline:
                 restored_frames = secondary_out
             else:
                 restored_frames = list(torch.unbind(secondary_out, 0))
+            if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
+                batch_u8 = torch.stack(restored_frames, dim=0)
+                batch_u8 = apply_denoise_u8(batch_u8, self._denoise_strength)
+                restored_frames = list(batch_u8.unbind(0))
 
             scaled_pad_offsets: list[tuple[int, int]] = []
             scaled_resize_shapes: list[tuple[int, int]] = []
