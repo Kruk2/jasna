@@ -64,6 +64,13 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         help="Cross-fade between clip boundaries to reduce flickering at seams. Uses frames that are already processed but otherwise discarded, so no extra GPU cost. (default: %(default)s)",
     )
+    restoration.add_argument(
+        "--denoise",
+        type=str,
+        default="none",
+        choices=["none", "low", "medium", "high"],
+        help="Spatial denoising strength applied to restored crops before blending. Reduces the noise artifacts. Probably keep at low/medium. (default: %(default)s)",
+    )
 
     secondary = parser.add_argument_group("2nd restoration")
     secondary.add_argument(
@@ -226,6 +233,7 @@ def main() -> None:
 
     from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
+    from jasna.restorer.denoise import DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
     from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer, _parse_tvai_args_kv
@@ -282,6 +290,8 @@ def main() -> None:
     else:
         raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
 
+    denoise_strength = DenoiseStrength(str(args.denoise).lower())
+
     restoration_pipeline = RestorationPipeline(
         restorer=BasicvsrppMosaicRestorer(
             checkpoint_path=str(restoration_model_path),
@@ -291,6 +301,7 @@ def main() -> None:
             fp16=fp16,
         ),
         secondary_restorer=secondary_restorer,
+        denoise_strength=denoise_strength,
     )
 
     stream = torch.cuda.Stream()

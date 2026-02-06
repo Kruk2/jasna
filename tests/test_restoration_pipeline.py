@@ -3,6 +3,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
+from jasna.restorer.denoise import DenoiseStrength
 from jasna.restorer.restoration_pipeline import RestorationPipeline
 from jasna.tracking.clip_tracker import TrackedClip
 
@@ -258,4 +259,37 @@ def test_restore_clip_raises_on_mismatched_frame_and_clip_lengths(monkeypatch) -
 
     with pytest.raises(IndexError):
         pipeline.restore_clip(clip, frames, keep_start=0, keep_end=1)
+
+
+def test_restore_clip_with_denoise_strength(monkeypatch) -> None:
+    import jasna.restorer.restoration_pipeline as rp
+
+    monkeypatch.setattr(rp, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(rp, "MIN_BORDER", 0)
+    monkeypatch.setattr(rp, "MAX_EXPANSION_FACTOR", 0.0)
+
+    pipeline_none = RestorationPipeline(restorer=_IdentityRestorer(), denoise_strength=DenoiseStrength.NONE)  # type: ignore[arg-type]
+    pipeline_med = RestorationPipeline(restorer=_IdentityRestorer(), denoise_strength=DenoiseStrength.MEDIUM)  # type: ignore[arg-type]
+
+    torch.manual_seed(99)
+    T = 5
+    frames = [torch.randint(0, 256, (3, 30, 40), dtype=torch.uint8) for _ in range(T)]
+    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
+    mask = torch.zeros((2, 2), dtype=torch.bool)
+    bboxes = [bbox] * T
+    masks = [mask] * T
+
+    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(2, 2), bboxes=bboxes, masks=masks)
+
+    restored_none = pipeline_none.restore_clip(clip, frames, keep_start=0, keep_end=T)
+    restored_med = pipeline_med.restore_clip(clip, frames, keep_start=0, keep_end=T)
+
+    assert len(restored_none.restored_frames) == T
+    assert len(restored_med.restored_frames) == T
+
+    diff = sum(
+        (a.float() - b.float()).abs().sum().item()
+        for a, b in zip(restored_none.restored_frames, restored_med.restored_frames)
+    )
+    assert diff > 0, "Denoise MEDIUM should produce different output from NONE"
 

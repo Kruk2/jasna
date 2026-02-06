@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
+from jasna.restorer.denoise import DenoiseStrength, apply_denoise
 from jasna.restorer.restored_clip import RestoredClip
 from jasna.restorer.secondary_restorer import StreamingSecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
@@ -87,13 +88,18 @@ class RestorationPipeline:
         restorer: BasicvsrppMosaicRestorer,
         *,
         secondary_restorer=None,
+        denoise_strength: DenoiseStrength = DenoiseStrength.NONE,
     ) -> None:
         self.restorer = restorer
         self.secondary_restorer = secondary_restorer  # kept for restore_clip() test compat
+        self._denoise_strength = denoise_strength
         if isinstance(secondary_restorer, StreamingSecondaryRestorer):
             self._secondary: StreamingSecondaryRestorer = secondary_restorer
         else:
             self._secondary = _PrimaryOnlySecondary()
+
+    def _apply_denoise(self, frames: torch.Tensor) -> torch.Tensor:
+        return apply_denoise(frames, self._denoise_strength)
 
     def _prepare_clip_inputs(
         self,
@@ -189,6 +195,7 @@ class RestorationPipeline:
 
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
         primary_raw = self.restorer.raw_process(resized_crops)
+        primary_raw = self._apply_denoise(primary_raw)
 
         frame_h, frame_w = frames[0].shape[1], frames[0].shape[2]
         meta = [
@@ -254,12 +261,14 @@ class RestorationPipeline:
         Uses self.secondary_restorer.restore() directly (bypasses the streaming path).
         """
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
+        primary_raw = self.restorer.raw_process(resized_crops)
+        primary_raw = self._apply_denoise(primary_raw)
 
         if self.secondary_restorer is None:
-            restored_hwc = self.restorer.restore(resized_crops)
-            restored_frames = [r.permute(2, 0, 1) for r in restored_hwc]
+            restored_frames = list(
+                primary_raw.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0)
+            )
         else:
-            primary_raw = self.restorer.raw_process(resized_crops)
             secondary_out = self.secondary_restorer.restore(primary_raw, keep_start=int(keep_start), keep_end=int(keep_end))
             if isinstance(secondary_out, list):
                 restored_frames = secondary_out
