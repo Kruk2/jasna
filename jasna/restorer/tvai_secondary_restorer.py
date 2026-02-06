@@ -445,7 +445,8 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
         self._pending_by_worker: list[collections.deque[TMeta]] = []
         self._completed: queue.Queue[_TvaiCompleted[TMeta] | _TvaiWorkerFatal] = queue.Queue()
         self._fatal: BaseException | None = None
-        self._rr = 0
+        self._track_to_worker: dict[int, int] = {}
+        self._worker_task_count: list[int] = [0] * num_workers
         self._closed = False
         self._slots = threading.Semaphore(num_workers)
 
@@ -525,15 +526,18 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
         if self._fatal is not None:
             raise RuntimeError(f"TVAI worker failed: {self._fatal}") from self._fatal
 
-    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[TMeta]) -> None:
+    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[TMeta], track_id: int = 0) -> None:
         self._raise_if_fatal()
         if self._closed:
             raise RuntimeError("TVAI pool is closed")
         if not meta:
             return
         self._slots.acquire()
-        idx = self._rr % self.num_workers
-        self._rr += 1
+        idx = self._track_to_worker.get(track_id)
+        if idx is None:
+            idx = min(range(self.num_workers), key=lambda i: self._worker_task_count[i])
+            self._track_to_worker[track_id] = idx
+        self._worker_task_count[idx] += 1
         self._task_queues[idx].put(_TvaiTask(frames_256=frames_256, keep_start=keep_start, keep_end=keep_end, meta=meta))
 
     def drain_completed(self, *, limit: int | None = None) -> list[_TvaiCompleted[TMeta]]:

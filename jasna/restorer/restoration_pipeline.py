@@ -63,7 +63,7 @@ class _PrimaryOnlySecondary:
     def __init__(self) -> None:
         self._completed: list[_CompletedFrame] = []
 
-    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object]) -> None:
+    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object], track_id: int = 0) -> None:
         out_u8 = frames_256[keep_start:keep_end].clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
         for m, f in zip(meta, torch.unbind(out_u8, 0)):
             self._completed.append(_CompletedFrame(meta=m, _frame_u8=f))
@@ -206,7 +206,7 @@ class RestorationPipeline:
             for i in range(ks, ke)
         ]
 
-        self._secondary.submit(primary_raw, keep_start=ks, keep_end=ke, meta=meta)
+        self._secondary.submit(primary_raw, keep_start=ks, keep_end=ke, meta=meta, track_id=clip.track_id)
         self.poll_secondary(frame_buffer=frame_buffer)
 
     def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> None:

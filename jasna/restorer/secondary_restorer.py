@@ -35,7 +35,7 @@ class StreamingSecondaryCompleted(Protocol):
 class StreamingSecondaryRestorer(Protocol):
     name: str
 
-    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object]) -> None:
+    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object], track_id: int = 0) -> None:
         """Submit work (may complete immediately or later)."""
 
     def drain_completed(self, *, limit: int | None = None) -> list[StreamingSecondaryCompleted]:
