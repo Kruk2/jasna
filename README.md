@@ -59,11 +59,12 @@ Main goal for the temporal overlap is to reduce flickering on the edges of clips
 Going above 20 doesn't bring much. The larger overlap the longer processing times but less flickering.\
 Pick highest clip size you can and set overlap to something between 8-20.\
 Some guidance from my limited testing:\
-- 60 clip size + temporal overlap 8
-- 90 clip size + temporal overlap 10
-- 180 clip size + temporal overlap 20 if you can fit the model.
+- 60 clip size + temporal overlap 6
+- 90 clip size + temporal overlap 8
+- 180 clip size + temporal overlap 15 if you can fit the model.
 
 Using clip size below 60 might look ok, depends on video but prefer using 60 even if it means disabling model compilation.
+```--enable-crossfade``` should probably be always enabled as it reduces flickering .
 
 ### Restoration model compilation.
 Read [#6](https://github.com/Kruk2/jasna/issues/6) for more details.\
