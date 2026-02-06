@@ -101,7 +101,7 @@ class Swin2srSecondaryRestorer:
 
         return out
 
-    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object]) -> None:
+    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object], track_id: int = 0) -> None:
         ks = max(0, int(keep_start))
         ke = min(int(frames_256.shape[0]), int(keep_end))
         expected = int(ke - ks)

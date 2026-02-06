@@ -266,6 +266,24 @@ def test_invalid_temporal_overlap_raises(max_clip_size: int, temporal_overlap: i
         ClipTracker(max_clip_size=max_clip_size, temporal_overlap=temporal_overlap)
 
 
+def test_split_with_zero_overlap_keeps_track_id_in_active_for_split_frame() -> None:
+    tracker = ClipTracker(max_clip_size=3, temporal_overlap=0, iou_threshold=0.0)
+
+    for frame_idx in range(2):
+        bboxes, masks = _det()
+        ended, active = tracker.update(frame_idx, bboxes, masks)
+        assert ended == []
+
+    # Frame 2 is the split frame: clip reaches max_clip_size=3
+    bboxes, masks = _det()
+    ended, active = tracker.update(2, bboxes, masks)
+    assert len(ended) == 1
+    assert ended[0].split_due_to_max_size is True
+    # The split frame's track_id must still be in active_track_ids so
+    # frame_buffer.add_frame records it as pending for blending.
+    assert 0 in active
+
+
 # negative overlap raises
 def test_negative_temporal_overlap_raises() -> None:
     with pytest.raises(ValueError):

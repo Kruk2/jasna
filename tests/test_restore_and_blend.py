@@ -40,7 +40,7 @@ class _DeferredStreamingSecondary:
         self._pending: list[_FakeCompleted] = []
         self._completed: list[_FakeCompleted] = []
 
-    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object]) -> None:
+    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object], track_id: int = 0) -> None:
         out_u8 = frames_256[keep_start:keep_end].clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
         for m, f in zip(meta, torch.unbind(out_u8, 0)):
             self._pending.append(_FakeCompleted(meta=m, frame_u8=f))

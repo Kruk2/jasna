@@ -203,7 +203,6 @@ class ClipTracker:
                 else:
                     ended_clips.append(EndedClip(clip=clip, split_due_to_max_size=True))
                     del self.active_clips[track_id]
-                    active_track_ids.discard(track_id)
 
         for track_idx, track_id in enumerate(self.track_ids):
             if track_idx not in matched_track_indices and track_id in self.active_clips:
