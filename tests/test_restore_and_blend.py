@@ -28,9 +28,6 @@ class _FakeCompleted:
     def to_frame_u8(self, device: torch.device) -> torch.Tensor:
         return self._frame_u8 if self._frame_u8.device == device else self._frame_u8.to(device=device)
 
-    def recycle(self) -> None:
-        pass
-
 
 class _DeferredStreamingSecondary:
     """Buffers submitted items; only releases them on flush()."""
@@ -57,6 +54,12 @@ class _DeferredStreamingSecondary:
     def flush(self, *, timeout_s: float = 300.0) -> None:
         self._completed.extend(self._pending)
         self._pending.clear()
+
+    def flush_track(self, track_id: int) -> None:
+        pass
+
+    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
+        pass
 
 
 def _no_expansion(monkeypatch) -> None:

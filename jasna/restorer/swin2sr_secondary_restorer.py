@@ -18,9 +18,6 @@ class _Completed:
             return self.frame_u8
         return self.frame_u8.to(device=device, non_blocking=False)
 
-    def recycle(self) -> None:
-        return
-
 
 class Swin2srSecondaryRestorer:
     name = "swin2sr"
@@ -125,4 +122,10 @@ class Swin2srSecondaryRestorer:
 
     def flush(self, *, timeout_s: float = 300.0) -> None:
         del timeout_s
+
+    def flush_track(self, track_id: int) -> None:
+        pass
+
+    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
+        pass
 

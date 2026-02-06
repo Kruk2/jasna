@@ -1,7 +1,10 @@
+import logging
 import os
 import re
 
 import torch
+
+logger = logging.getLogger(__name__)
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -72,8 +75,10 @@ class BasicvsrppMosaicRestorer:
 
         if self._engine_main is None:
             self.model = load_model(config, checkpoint_path, self.device, fp16)
+            logger.info("BasicVSR++ loaded from checkpoint: %s (fp16=%s)", checkpoint_path, fp16)
         else:
             self.model = None
+            logger.info("BasicVSR++ using TensorRT engine: clip_len=%s fp16=%s", self._engine_main_len, fp16)
 
         if (self._engine_main is not None or self._engine_small is not None) and self.device.type == "cuda":
             with torch.cuda.device(self.device):

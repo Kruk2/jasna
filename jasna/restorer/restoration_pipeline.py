@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import math
 from typing import TYPE_CHECKING
 import numpy as np
 import torch
+
+logger = logging.getLogger(__name__)
 import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
@@ -53,9 +56,6 @@ class _CompletedFrame:
     def to_frame_u8(self, device: torch.device) -> torch.Tensor:
         return self._frame_u8 if self._frame_u8.device == device else self._frame_u8.to(device=device)
 
-    def recycle(self) -> None:
-        pass
-
 
 class _PrimaryOnlySecondary:
     """Pass-through: converts primary float [0,1] output to uint8. Used when no secondary restorer is configured."""
@@ -81,6 +81,12 @@ class _PrimaryOnlySecondary:
     def flush(self, *, timeout_s: float = 300.0) -> None:
         pass
 
+    def flush_track(self, track_id: int) -> None:
+        pass
+
+    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
+        pass
+
 
 class RestorationPipeline:
     def __init__(
@@ -99,6 +105,12 @@ class RestorationPipeline:
             self._secondary: StreamingSecondaryRestorer = secondary_restorer
         else:
             self._secondary = _PrimaryOnlySecondary()
+        logger.info(
+            "RestorationPipeline: secondary=%s denoise=%s denoise_step=%s",
+            self._secondary.name,
+            denoise_strength.name,
+            denoise_step.name,
+        )
 
     def _apply_denoise(self, frames: torch.Tensor) -> torch.Tensor:
         return apply_denoise(frames, self._denoise_strength)
@@ -218,12 +230,14 @@ class RestorationPipeline:
 
         self._secondary.submit(primary_raw, keep_start=ks, keep_end=ke, meta=meta, track_id=clip.track_id)
         self.poll_secondary(frame_buffer=frame_buffer)
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
 
-    def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> None:
+    def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> int:
+        drained = 0
         for item in self._secondary.drain_completed(limit=limit):
+            drained += 1
             meta = item.meta
+            if not frame_buffer.needs_blend(frame_idx=meta.frame_idx, track_id=meta.track_id):
+                continue
             frame_u8 = item.to_frame_u8(meta.mask_lr.device)
             if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
                 frame_u8 = apply_denoise_u8(frame_u8, self._denoise_strength)
@@ -249,11 +263,26 @@ class RestorationPipeline:
                 resize_shape=(y1 - y0, x1 - x0),
                 crossfade_weight=meta.crossfade_weight,
             )
-            item.recycle()
+            del frame_u8
+
+        if drained > 0:
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+
+        return drained
 
     def flush_secondary(self, *, frame_buffer: FrameBuffer) -> None:
         self._secondary.flush()
         self.poll_secondary(frame_buffer=frame_buffer)
+
+    def flush_track(self, track_id: int) -> None:
+        """Flush a specific track by pushing padding frames (async, non-blocking)."""
+        self._secondary.flush_track(track_id)
+
+    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
+        """Transfer worker mapping from old track to continuation without flushing."""
+        if hasattr(self._secondary, 'transfer_track'):
+            self._secondary.transfer_track(old_track_id, new_track_id)
 
     def restore_clip(
         self,
@@ -309,8 +338,6 @@ class RestorationPipeline:
             resize_shapes = scaled_resize_shapes
 
         _, frame_h, frame_w = frames[0].shape
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
         return RestoredClip(
             restored_frames=restored_frames,
             masks=clip.masks,

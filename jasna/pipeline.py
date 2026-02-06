@@ -62,11 +62,11 @@ class Pipeline:
         stream = self.stream
         metadata = get_video_meta_data(str(self.input_video))
 
-        tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=self.temporal_overlap)
+        tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
         frame_buffer = FrameBuffer(device=self.device)
 
         discard_margin = int(self.temporal_overlap)
-        blend_frames = self.temporal_overlap // 3 if self.enable_crossfade else 0
+        blend_frames = (self.temporal_overlap // 3) if self.enable_crossfade else 0
         raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
 
         with (
@@ -88,6 +88,10 @@ class Pipeline:
             
             target_hw = (int(metadata.video_height), int(metadata.video_width))
             frame_idx = 0
+            log.info(
+                "Processing %s: %d frames @ %s fps, %dx%d",
+                self.input_video.name, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
+            )
 
             try:
                 for frames, pts_list in reader.frames():

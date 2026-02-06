@@ -19,7 +19,13 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         help="Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
     )
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging")
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        default="error",
+        choices=["debug", "info", "warning", "error"],
+        help="Logging level (default: %(default)s)",
+    )
     parser.add_argument(
         "--disable-ffmpeg-check",
         action="store_true",
@@ -178,7 +184,7 @@ def main() -> None:
     warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
 
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.WARNING,
+        level=getattr(logging, args.log_level.upper()),
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
     )
