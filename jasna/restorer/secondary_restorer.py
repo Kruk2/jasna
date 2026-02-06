@@ -27,9 +27,6 @@ class StreamingSecondaryCompleted(Protocol):
     def to_frame_u8(self, device: torch.device) -> torch.Tensor:
         """Return (C, H, W) uint8 tensor on `device`."""
 
-    def recycle(self) -> None:
-        """Recycle any internal buffers back to the restorer."""
-
 
 @runtime_checkable
 class StreamingSecondaryRestorer(Protocol):
@@ -43,3 +40,9 @@ class StreamingSecondaryRestorer(Protocol):
 
     def flush(self, *, timeout_s: float = 300.0) -> None:
         """Finish all pending work and make remaining outputs drainable."""
+
+    def flush_track(self, track_id: int) -> None:
+        """Flush a specific track by pushing padding frames to force outputs."""
+
+    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
+        """Transfer worker mapping from old track to continuation without flushing."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import torch
@@ -10,6 +11,8 @@ from jasna.tensor_utils import pad_batch_with_last
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip
 from jasna.tracking.frame_buffer import FrameBuffer
 from jasna.restorer.restoration_pipeline import RestorationPipeline
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -103,6 +106,16 @@ def _process_ended_clips(
         )
         raw_frame_context.pop(clip.track_id, None)
 
+        if ended_clip.split_due_to_max_size:
+            # Transfer worker mapping to continuation so TVAI outputs flow naturally.
+            restoration_pipeline.transfer_track(clip.track_id, ended_clip.continuation_track_id)
+        else:
+            # True end: push padding frames to drain TVAI's ~25 buffered frames.
+            restoration_pipeline.flush_track(clip.track_id)
+        
+        # Poll to drain any ready outputs and reduce frame_buffer growth.
+        restoration_pipeline.poll_secondary(frame_buffer=frame_buffer)
+
 
 def process_frame_batch(
     *,
@@ -149,8 +162,17 @@ def process_frame_batch(
             raw_frame_context=raw_frame_context,
         )
         restoration_pipeline.poll_secondary(frame_buffer=frame_buffer)
-
         ready_frames.extend(frame_buffer.get_ready_frames())
+
+    buffered_count = len(frame_buffer.frames)
+    if buffered_count > 100:
+        pending_tracks = set()
+        for pf in frame_buffer.frames.values():
+            pending_tracks.update(pf.pending_clips)
+        logger.debug(
+            "frame_buffer has %d frames buffered, waiting for tracks: %s",
+            buffered_count, pending_tracks,
+        )
 
     return BatchProcessResult(next_frame_idx=int(start_frame_idx) + effective_bs, ready_frames=ready_frames)
 
