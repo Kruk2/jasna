@@ -261,6 +261,9 @@ class QueuePanel(ctk.CTkFrame):
             duration=job.duration_str or "",
             status=t("job_pending"),
             on_remove=lambda j=job: self._remove_job(j),
+            on_drag_start=self._on_widget_drag_start,
+            on_drag_move=self._on_widget_drag_move,
+            on_drag_end=self._on_widget_drag_end,
         )
         widget.pack(fill="x", pady=(0, 4))
         self._job_widgets.append(widget)
@@ -302,9 +305,17 @@ class QueuePanel(ctk.CTkFrame):
             self._update_count()
             if self._on_jobs_changed:
                 self._on_jobs_changed()
+        
                 
     def get_jobs(self) -> list[JobItem]:
+        # Return a shallow copy for callers that should not modify the queue
         return self._jobs.copy()
+
+    def get_jobs_ref(self) -> list[JobItem]:
+        """Return the live jobs list reference so callers (like the Processor)
+        can observe additions/removals while processing is running.
+        Use with care: this returns the internal list, not a defensive copy."""
+        return self._jobs
         
     def get_output_folder(self) -> str:
         return self._output_entry.get() or ""
@@ -315,7 +326,7 @@ class QueuePanel(ctk.CTkFrame):
     def set_on_jobs_changed(self, callback: callable):
         self._on_jobs_changed = callback
         
-    def update_job_status(self, index: int, status: JobStatus, progress: float = 0.0):
+    def update_job_status(self, index: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0):
         if 0 <= index < len(self._job_widgets):
             widget = self._job_widgets[index]
             job = self._jobs[index]
@@ -335,6 +346,7 @@ class QueuePanel(ctk.CTkFrame):
             
             if status == JobStatus.PROCESSING:
                 widget.set_progress(progress)
+                widget.set_fps_eta(fps=fps, eta_seconds=eta_seconds)
             else:
                 widget.hide_progress()
                 
@@ -357,3 +369,86 @@ class QueuePanel(ctk.CTkFrame):
         self._pattern_entry.configure(state=state)
         self._clear_btn.configure(state=state)
         self._clear_completed_btn.configure(state=state)
+
+    # --- Drag & reorder support ---
+    def _on_widget_drag_start(self, widget: 'JobListItem', event):
+        # Bring widget briefly to front visually
+        try:
+            widget.lift()
+        except Exception:
+            pass
+
+    def _on_widget_drag_move(self, widget: 'JobListItem', event):
+        # Compute pointer y relative to list frame and determine new index
+        lf = self._list_frame
+        try:
+            y = event.y_root - lf.winfo_rooty()
+        except Exception:
+            return
+
+        # Compute new index among widgets based on center positions
+        new_index = 0
+        for w in self._job_widgets:
+            if w is widget:
+                continue
+            center = (w.winfo_rooty() + w.winfo_height() / 2) - lf.winfo_rooty()
+            if y > center:
+                new_index += 1
+
+        try:
+            current_index = self._job_widgets.index(widget)
+        except ValueError:
+            return
+
+        if new_index != current_index:
+            # Remove and reinsert data + widget and repack
+            job = self._jobs.pop(current_index)
+            self._job_widgets.pop(current_index)
+            self._jobs.insert(new_index, job)
+            self._job_widgets.insert(new_index, widget)
+            # Repack in order
+            for w in self._job_widgets:
+                w.pack_forget()
+            for w in self._job_widgets:
+                w.pack(fill="x", pady=(0, 4))
+            if self._on_jobs_changed:
+                self._on_jobs_changed()
+
+    def _on_widget_drag_end(self, widget: 'JobListItem', event):
+        # No-op for now; ensure layout is consistent
+        for w in self._job_widgets:
+            w.pack_forget()
+        for w in self._job_widgets:
+            w.pack(fill="x", pady=(0, 4))
+        if self._on_jobs_changed:
+            self._on_jobs_changed()
+
+    def set_running(self, running: bool, processing_index: int | None = None):
+        """Set queue running state.
+
+        When running=True the panel is visually dimmed and controls are
+        disabled except the add buttons and removing jobs (except the
+        currently processing item which is protected).
+        """
+        if running:
+            # Disable controls we don't want interactive while running
+            self._clear_btn.configure(state="disabled")
+            self._clear_completed_btn.configure(state="disabled")
+            self._output_browse_btn.configure(state="disabled")
+            self._pattern_entry.configure(state="disabled")
+            # Allow adding files/folders
+            self._add_files_btn.configure(state="normal")
+            self._add_folder_btn.configure(state="normal")
+            # Per-item removability: protect processing index
+            for i, widget in enumerate(self._job_widgets):
+                widget.set_removable(i != processing_index)
+        else:
+            # Restore normal appearance and enable controls
+            self._clear_btn.configure(state="normal")
+            self._clear_completed_btn.configure(state="normal")
+            self._output_browse_btn.configure(state="normal")
+            self._pattern_entry.configure(state="normal")
+            self._add_files_btn.configure(state="normal")
+            self._add_folder_btn.configure(state="normal")
+            for widget in self._job_widgets:
+                widget.set_removable(True)

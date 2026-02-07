@@ -20,11 +20,26 @@ class FirstRunWizard(ctk.CTkToplevel):
         self.geometry("600x480")
         self.resizable(False, False)
         self.configure(fg_color=Colors.BG_MAIN)
-        self.overrideredirect(True)  # Remove title bar (no X button)
-        
+
+        # Avoid using overrideredirect() which can cause grab/focus issues
+        # on some window managers when the user clicks away. Instead keep
+        # the normal title bar but disable the close action so the X button
+        # is inert (prevents accidental close).
         # Make modal
         self.transient(master)
         self.grab_set()
+        # Disable the close window action (WM_DELETE_WINDOW) so user can't
+        # dismiss the wizard via the X button; they must click the provided button.
+        try:
+            self.protocol("WM_DELETE_WINDOW", lambda: None)
+        except Exception:
+            pass
+        # Ensure dialog is on top and has focus
+        try:
+            self.lift()
+            self.focus_force()
+        except Exception:
+            pass
         
         # Center on parent
         self.update_idletasks()

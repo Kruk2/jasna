@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable
 
 import torch
 
@@ -38,7 +37,7 @@ class Pipeline:
         enable_crossfade: bool = True,
         fp16: bool,
         disable_progress: bool = False,
-        progress_callback: Callable[[float, float, float, int, int], None] | None = None,
+        progress_callback: callable | None = None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -50,8 +49,6 @@ class Pipeline:
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
         self.enable_crossfade = bool(enable_crossfade)
-        self.disable_progress = bool(disable_progress)
-        self.progress_callback = progress_callback
 
         self.detection_model = RfDetrMosaicDetectionModel(
             onnx_path=detection_model_path,
@@ -62,6 +59,9 @@ class Pipeline:
             fp16=bool(fp16),
         )
         self.restoration_pipeline = restoration_pipeline
+        # Progress control for console vs GUI
+        self.disable_progress = bool(disable_progress)
+        self.progress_callback = progress_callback
 
     def run(self) -> None:
         stream = self.stream
