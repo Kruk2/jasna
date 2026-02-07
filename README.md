@@ -4,8 +4,10 @@
 JAV model restoration tool inspired (and in some places based on) by [Lada](https://codeberg.org/ladaapp/lada).\
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
 
-Features new mosaic detection model & GPU only pipeline.\
+Features new mosaic detection model & GPU only pipeline & TVAI support & simple GUI.\
 Check benchmarks and usage below.
+![slop_gui](https://github.com/user-attachments/assets/ae5d9b73-ea22-4263-8203-0ff89bbbcc51)
+
 
 ### Differences:
 - **Improved mosaic detection model.**
@@ -15,7 +17,6 @@ Check benchmarks and usage below.
 - Accurate color conversions on gpu (input matches output and no banding).
 - Only modern Nvidia gpu is supported.
 - TensorRT support.
-- CLI only
 
 ### TODO:
 - proper VR support
