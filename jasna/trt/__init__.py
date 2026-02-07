@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
+import logging
 import os
+from pathlib import Path
 
 import tensorrt as trt
 import torch
@@ -67,10 +68,13 @@ def compile_onnx_to_tensorrt_engine(
 
     if not onnx_path.exists():
         raise FileNotFoundError(str(onnx_path))
-    print(
+    log = logging.getLogger(__name__)
+    msg = (
         f"Compiling TensorRT engine for {onnx_path} (this can take a few minutes). "
         f"Output: {engine_path}"
     )
+    print(msg)
+    log.info("%s", msg)
 
     logger = trt.Logger(trt.Logger.ERROR)
     builder = trt.Builder(logger)

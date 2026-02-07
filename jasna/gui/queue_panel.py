@@ -372,9 +372,12 @@ class QueuePanel(ctk.CTkFrame):
 
     # --- Drag & reorder support ---
     def _on_widget_drag_start(self, widget: 'JobListItem', event):
-        # Bring widget briefly to front visually
         try:
             widget.lift()
+        except Exception:
+            pass
+        try:
+            widget.configure(cursor="hand2")
         except Exception:
             pass
 
@@ -415,7 +418,10 @@ class QueuePanel(ctk.CTkFrame):
                 self._on_jobs_changed()
 
     def _on_widget_drag_end(self, widget: 'JobListItem', event):
-        # No-op for now; ensure layout is consistent
+        try:
+            widget.configure(cursor="")
+        except Exception:
+            pass
         for w in self._job_widgets:
             w.pack_forget()
         for w in self._job_widgets:

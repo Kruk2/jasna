@@ -46,6 +46,7 @@ def compile_and_save_torchtrt_dynamo(
     logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
     with torch_tensorrt.logging.errors():
         print(message)
+        logger.info("%s", message)
         trt_gm = torch_tensorrt.compile(
             module,
             ir="dynamo",
