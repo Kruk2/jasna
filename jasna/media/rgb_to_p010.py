@@ -132,8 +132,14 @@ def _get_rgb_to_p010_kernel():
                 extra_cuda_cflags=['-std=c++20'],
             )
         except Exception as e:
-            print('Failed to compile rgb_to_p010 CUDA kernel. Consider installing build tools if on windows and add it to path: winget install --id Microsoft.VisualStudio.2022.BuildTools --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"')
+            msg = (
+                "Failed to compile rgb_to_p010 CUDA kernel. Consider installing build tools if on windows and add it to path: "
+                "winget install --id Microsoft.VisualStudio.2022.BuildTools --force --override \"--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64\""
+            )
+            print(msg)
+            logger.info("%s", msg)
             print("Error:", e)
+            logger.info("Error: %s", e)
             _use_fallback = True
     return _rgb_to_p010_module
 

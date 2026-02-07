@@ -143,44 +143,46 @@ def compile_mosaic_restoration_model(
 
     vram_gb, approx_max_clip_length = _get_approx_max_tensorrt_clip_length(device)
     if approx_max_clip_length == 0:
-        print("Skipping compilation due to low VRAM (< 4 GB). Pass --no-compile-basicvsrpp to suppress this message.")
+        msg = "Skipping compilation due to low VRAM (< 4 GB). Pass --no-compile-basicvsrpp to suppress this message."
+        print(msg)
+        logger.info("%s", msg)
         return output_path if requested_exists else mosaic_restoration_model_path
 
     if not fp16:
-        print(
+        msg = (
             "Skipping compilation due to FP32 compilation is not recommended for TensorRT. "
             "Consider using FP16 instead to save on VRAM and have faster execution times."
         )
+        print(msg)
+        logger.info("%s", msg)
         return output_path if requested_exists else mosaic_restoration_model_path
 
     should_compile_requested = not requested_exists
     if int(clip_length) > approx_max_clip_length and should_compile_requested:
         if interactive and sys.stdin.isatty():
-            print(
-                "\n".join(
-                    [
-                        f"Requested TensorRT clip length {int(clip_length)}, but GPU VRAM is ~{vram_gb:.1f} GB.",
-                        f"Approx safe max is {approx_max_clip_length} frames (rule of thumb: ~2.5 GB per +30 frames).",
-                        "",
-                        "Large clip lengths can:",
-                        "- require significantly more VRAM (compilation may OOM)",
-                        "- take much longer to compile",
-                        "- on videos with poor mosaic detection the performance may be degraded",
-                        "",
-                        "Continue compilation anyway? [y/N] ",
-                    ]
-                ),
-                end="",
-                flush=True,
-            )
+            prompt_lines = [
+                f"Requested TensorRT clip length {int(clip_length)}, but GPU VRAM is ~{vram_gb:.1f} GB.",
+                f"Approx safe max is {approx_max_clip_length} frames (rule of thumb: ~2.5 GB per +30 frames).",
+                "",
+                "Large clip lengths can:",
+                "- require significantly more VRAM (compilation may OOM)",
+                "- take much longer to compile",
+                "- on videos with poor mosaic detection the performance may be degraded",
+                "",
+                "Continue compilation anyway? [y/N] ",
+            ]
+            print("\n".join(prompt_lines), end="", flush=True)
+            logger.info("%s", "\n".join(prompt_lines))
             if input().strip().lower() not in {"y", "yes"}:
                 should_compile_requested = False
         else:
-            print(
+            msg = (
                 f"Skipping compilation due to low VRAM for requested clip length {int(clip_length)} "
                 f"(VRAM ~{vram_gb:.1f} GB, approx safe max {approx_max_clip_length}). "
                 "Large clip lengths can require significantly more VRAM, take much longer to compile, and may degrade performance on videos with poor mosaic detection."
             )
+            print(msg)
+            logger.info("%s", msg)
             should_compile_requested = False
 
     from jasna.models.basicvsrpp.inference import load_model

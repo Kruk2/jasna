@@ -242,6 +242,7 @@ class JobListItem(ctk.CTkFrame):
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             text_color=Colors.TEXT_MUTED,
             width=20,
+            cursor="hand2",
         )
         self._handle.pack(side="left")
         # Bind drag events to handle

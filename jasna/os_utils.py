@@ -1,8 +1,11 @@
+import logging
 import os
 import re
 import shutil
 import subprocess
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def get_subprocess_startup_info():
@@ -81,17 +84,24 @@ def check_required_executables(disable_ffmpeg_check: bool = False) -> None:
                 wrong_version.append(f"{exe} (detected major={major})")
 
     if missing:
-        print(f"Error: Required executable(s) not found in PATH or not callable: {', '.join(missing)}")
+        msg = f"Error: Required executable(s) not found in PATH or not callable: {', '.join(missing)}"
+        print(msg)
+        logger.info("%s", msg)
         print("Please install them and ensure they are available in your system PATH and runnable.")
+        logger.info("Please install them and ensure they are available in your system PATH and runnable.")
         if "ffmpeg" in missing or "ffprobe" in missing:
             print(FFMPEG_DOWNLOAD_LINKS)
+            logger.info("%s", FFMPEG_DOWNLOAD_LINKS)
         sys.exit(1)
     if wrong_version:
-        print(
+        msg = (
             "Error: ffmpeg/ffprobe major version must be exactly 8 (or detectable as 8): "
             + ", ".join(wrong_version)
         )
+        print(msg)
+        logger.info("%s", msg)
         print(FFMPEG_DOWNLOAD_LINKS)
+        logger.info("%s", FFMPEG_DOWNLOAD_LINKS)
         sys.exit(1)
 
 
@@ -110,8 +120,10 @@ def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
         return
 
     if int(mode) == 2:
-        print(
+        msg = (
             "Warning: Windows 'Hardware-accelerated GPU scheduling' is enabled. "
             "This will make Jasna slower and might add artifacts to the output video."
         )
+        print(msg)
+        logger.info("%s", msg)
 
