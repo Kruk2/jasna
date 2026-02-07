@@ -55,18 +55,22 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+_build_cli = os.environ.get("BUILD_CLI", "").lower() in ("1", "true", "yes")
+_exe_name = "jasna-cli" if _build_cli else "jasna"
+_console = True if _build_cli else (os.name != "nt")
+
 exe = EXE(
     pyz,
     a.scripts,
     [],
-    name="jasna",
+    name=_exe_name,
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=["_C*.pyd", "torchtrt.dll"],
     runtime_tmpdir=None,
-    console=True,
+    console=_console,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -83,6 +87,6 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=["_C*.pyd", "torchtrt.dll"],
-    name="jasna",
+    name=_exe_name,
 )
 

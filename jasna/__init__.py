@@ -1,6 +1,6 @@
 __all__ = ["__version__"]
 
-__version__ = "0.4.0-rc3"
+__version__ = "0.4.0"
 
 import warnings
 
