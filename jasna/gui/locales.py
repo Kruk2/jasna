@@ -1,6 +1,7 @@
 """Localization system for Jasna GUI."""
 
 import json
+import locale as _locale
 from pathlib import Path
 from typing import Callable
 
@@ -216,6 +217,8 @@ TRANSLATIONS = {
         "toast_paused": "Processing paused",
         "toast_resumed": "Processing resumed",
         "toast_stopped": "Processing stopped",
+        # Buy Me a Coffee
+        "bmc_support": "Support",
         
         # Tooltips (from CLI)
         "tip_max_clip_size": "Maximum clip size for tracking",
@@ -395,6 +398,8 @@ TRANSLATIONS = {
         "toast_paused": "处理已暂停",
         "toast_resumed": "处理已继续",
         "toast_stopped": "处理已停止",
+        # Buy Me a Coffee
+        "bmc_support": "支持",
         
         # Tooltips
         "tip_max_clip_size": "跟踪的最大片段大小",
@@ -492,6 +497,15 @@ class LocaleManager:
                     data = json.load(f)
                 self._current_lang = data.get("language", "en")
             except (json.JSONDecodeError, IOError):
+                pass
+        else:
+            # If settings.json is missing, try to autodetect system language
+            try:
+                lang, _ = _locale.getdefaultlocale()
+                if lang and lang.startswith("zh"):
+                    self._current_lang = "zh"
+            except Exception:
+                # Fall back to default 'en'
                 pass
                 
     def _save(self):

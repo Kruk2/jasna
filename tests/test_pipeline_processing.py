@@ -118,6 +118,7 @@ def test_process_batch_and_finalize_overlap_discard_delays_tail_until_continuati
             restoration_pipeline=rest,  # type: ignore[arg-type]
             discard_margin=discard_margin,
             raw_frame_context=raw_frame_context,
+            max_clip_size=180,
         )
         ready_all.extend(res.ready_frames)
         frame_idx = res.next_frame_idx
@@ -164,6 +165,7 @@ def test_process_batch_with_crossfade_outputs_all_frames_in_order() -> None:
             discard_margin=discard_margin,
             blend_frames=blend_frames,
             raw_frame_context=raw_frame_context,
+            max_clip_size=180,
         )
         ready_all.extend(res.ready_frames)
         frame_idx = res.next_frame_idx
@@ -208,6 +210,7 @@ def test_process_batch_without_discard_encodes_all_frames() -> None:
             restoration_pipeline=rest,  # type: ignore[arg-type]
             discard_margin=discard_margin,
             raw_frame_context=raw_frame_context,
+            max_clip_size=180,
         )
         ready_all.extend(res.ready_frames)
         frame_idx = res.next_frame_idx

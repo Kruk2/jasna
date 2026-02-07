@@ -3,6 +3,7 @@
 import customtkinter as ctk
 import webbrowser
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.gui.locales import t
 
 
 # Buy Me a Coffee URL
@@ -13,8 +14,14 @@ class BuyMeCoffeeButton(ctk.CTkButton):
     """Buy Me a Coffee button with brand styling and hover animation."""
     
     def __init__(self, master, compact: bool = False, **kwargs):
-        text = "☕︎" if compact else "☕︎ Support"
-        width = 40 if compact else 100
+        # Keep the rocket emoji present; translate the support text
+        if compact:
+            text = "☕ 🚀"
+            width = 40
+        else:
+            label = t("bmc_support")
+            text = f"☕ {label} 🚀"
+            width = 100
         
         super().__init__(
             master,
@@ -189,6 +196,9 @@ class JobListItem(ctk.CTkFrame):
         duration: str,
         status: str,
         on_remove: callable = None,
+        on_drag_start: callable = None,
+        on_drag_move: callable = None,
+        on_drag_end: callable = None,
         **kwargs
     ):
         super().__init__(
@@ -201,6 +211,10 @@ class JobListItem(ctk.CTkFrame):
         self.pack_propagate(False)
         
         self._on_remove = on_remove
+        # Drag callbacks (set by QueuePanel)
+        self._on_drag_start = on_drag_start
+        self._on_drag_move = on_drag_move
+        self._on_drag_end = on_drag_end
         self._progress_visible = False
         self._conflict_visible = False
         
@@ -230,6 +244,10 @@ class JobListItem(ctk.CTkFrame):
             width=20,
         )
         self._handle.pack(side="left")
+        # Bind drag events to handle
+        self._handle.bind("<ButtonPress-1>", self._internal_drag_start)
+        self._handle.bind("<B1-Motion>", self._internal_drag_move)
+        self._handle.bind("<ButtonRelease-1>", self._internal_drag_end)
         
         # Info area (filename + duration inline)
         self._info = ctk.CTkFrame(top_row, fg_color="transparent")
@@ -276,6 +294,26 @@ class JobListItem(ctk.CTkFrame):
         )
         self._status_label.pack(side="left")
         
+        # FPS / ETA small labels on the right of bottom row
+        self._stats_frame = ctk.CTkFrame(bottom_row, fg_color="transparent")
+        self._stats_frame.pack(side="right")
+
+        self._fps_label = ctk.CTkLabel(
+            self._stats_frame,
+            text="",
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.TEXT_MUTED,
+        )
+        self._fps_label.pack(side="left", padx=(0, 8))
+
+        self._eta_label = ctk.CTkLabel(
+            self._stats_frame,
+            text="",
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.TEXT_MUTED,
+        )
+        self._eta_label.pack(side="left")
+        
         # Progress bar (hidden by default)
         self._progress = ctk.CTkProgressBar(
             self,
@@ -298,33 +336,100 @@ class JobListItem(ctk.CTkFrame):
             text_color=Colors.TEXT_MUTED,
             command=self._handle_remove,
         )
+        # By default items are removable; can be toggled when queue is running
+        self._removable = True
         
         # Show remove on hover
+        # Show remove on hover. Bind both Enter and Leave on children to avoid
+        # flicker when moving between the parent and its child widgets.
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
-        # Bind to children to prevent flickering
-        for child in [self._handle, self._info, self._filename, self._duration, 
-                      self._status_frame, self._status_label, self._top_row, self._bottom_row]:
-            child.bind("<Enter>", self._on_enter)
+        # Debounce hide to avoid flicker
+        self._hide_after_id = None
+
+        child_widgets = [
+            self._handle, self._info, self._filename, self._duration,
+            self._status_frame, self._status_label, self._top_row, self._bottom_row,
+        ]
+        for child in child_widgets:
+            try:
+                child.bind("<Enter>", self._on_enter)
+                child.bind("<Leave>", self._on_leave)
+            except Exception:
+                pass
+        # Ensure remove button keeps the enter binding so moving onto it still shows
         self._remove_btn.bind("<Enter>", self._on_enter)
+        self._remove_btn.bind("<Leave>", self._on_leave)
         
     def _on_enter(self, event=None):
-        self._remove_btn.place(relx=1.0, rely=0, anchor="ne", x=-4, y=4)
+        # Only show remove button if the pointer is actually inside this widget
+        if not getattr(self, "_removable", True):
+            return
+        # Cancel any pending hide
+        try:
+            if getattr(self, "_hide_after_id", None):
+                self.after_cancel(self._hide_after_id)
+                self._hide_after_id = None
+        except Exception:
+            pass
+        try:
+            x, y = self.winfo_pointerxy()
+            widget_x = self.winfo_rootx()
+            widget_y = self.winfo_rooty()
+            widget_w = self.winfo_width()
+            widget_h = self.winfo_height()
+            if widget_x <= x <= widget_x + widget_w and widget_y <= y <= widget_y + widget_h:
+                self._remove_btn.place(relx=1.0, rely=0, anchor="ne", x=-4, y=4)
+        except Exception:
+            # Fallback: show button if any error querying pointer
+            self._remove_btn.place(relx=1.0, rely=0, anchor="ne", x=-4, y=4)
         
     def _on_leave(self, event=None):
-        # Check if mouse is still within the frame
-        x, y = self.winfo_pointerxy()
-        widget_x = self.winfo_rootx()
-        widget_y = self.winfo_rooty()
-        widget_w = self.winfo_width()
-        widget_h = self.winfo_height()
-        
-        if not (widget_x <= x <= widget_x + widget_w and widget_y <= y <= widget_y + widget_h):
-            self._remove_btn.place_forget()
+        # Debounced hide: schedule hide shortly to prevent flicker when moving
+        # between child widgets
+        try:
+            if self._hide_after_id:
+                self.after_cancel(self._hide_after_id)
+        except Exception:
+            pass
+
+        def _hide_if_outside():
+            try:
+                x, y = self.winfo_pointerxy()
+                widget_x = self.winfo_rootx()
+                widget_y = self.winfo_rooty()
+                widget_w = self.winfo_width()
+                widget_h = self.winfo_height()
+                if not (widget_x <= x <= widget_x + widget_w and widget_y <= y <= widget_y + widget_h):
+                    self._remove_btn.place_forget()
+            except Exception:
+                try:
+                    self._remove_btn.place_forget()
+                except Exception:
+                    pass
+
+        # Schedule a short delayed check
+        try:
+            self._hide_after_id = self.after(80, _hide_if_outside)
+        except Exception:
+            _hide_if_outside()
         
     def _handle_remove(self):
         if self._on_remove:
             self._on_remove()
+
+    # Internal drag event proxies to allow QueuePanel to handle reordering
+    def _internal_drag_start(self, event):
+        if callable(self._on_drag_start):
+            self._on_drag_start(self, event)
+
+    def _internal_drag_move(self, event):
+        if callable(self._on_drag_move):
+            self._on_drag_move(self, event)
+
+    def _internal_drag_end(self, event):
+        if callable(self._on_drag_end):
+            self._on_drag_end(self, event)
             
     def set_status(self, status: str, icon: str = "", color: str = Colors.TEXT_SECONDARY):
         self._status_label.configure(text=status, text_color=color)
@@ -333,12 +438,53 @@ class JobListItem(ctk.CTkFrame):
             self._status_icon.pack(side="left", padx=(0, 4), before=self._status_label)
         else:
             self._status_icon.pack_forget()
+
+    def set_removable(self, removable: bool):
+        """Enable or disable the remove action for this item.
+
+        When not removable the remove button is hidden and user cannot remove
+        the item (used to protect the currently processing job).
+        """
+        self._removable = bool(removable)
+        if not self._removable:
+            try:
+                self._remove_btn.place_forget()
+            except Exception:
+                pass
             
     def set_progress(self, value: float):
         if not self._progress_visible:
             self._progress.place(relx=0, rely=1.0, anchor="sw", relwidth=1.0)
             self._progress_visible = True
-        self._progress.set(value)
+        # value expected in range 0.0-1.0
+        try:
+            self._progress.set(value)
+        except Exception:
+            # if value is percent (0-100), normalize
+            try:
+                self._progress.set(float(value) / 100.0)
+            except Exception:
+                pass
+
+    def set_fps_eta(self, fps: float = 0.0, eta_seconds: float = 0.0):
+        """Update small FPS and ETA labels shown on the tile."""
+        if fps and fps > 0:
+            self._fps_label.configure(text=f"{fps:.1f}fps")
+        else:
+            self._fps_label.configure(text="")
+
+        if eta_seconds and eta_seconds > 0:
+            mins, secs = divmod(int(eta_seconds), 60)
+            hours, mins = divmod(mins, 60)
+            if hours:
+                eta_str = f"{hours}h {mins}m"
+            elif mins:
+                eta_str = f"{mins}m {secs}s"
+            else:
+                eta_str = f"{secs}s"
+            self._eta_label.configure(text=f"ETA: {eta_str}")
+        else:
+            self._eta_label.configure(text="")
         
     def hide_progress(self):
         self._progress.place_forget()
@@ -438,6 +584,7 @@ class Toast(ctk.CTkFrame):
             border_width=1,
             border_color=Colors.BORDER,
             height=44,
+            width=640,
             **kwargs
         )
         self.pack_propagate(False)
@@ -458,8 +605,9 @@ class Toast(ctk.CTkFrame):
             text=message,
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             text_color=Colors.TEXT_PRIMARY,
+            wraplength=560,
         )
-        label.pack(side="left", padx=12)
+        label.pack(side="left", fill="x", expand=True, padx=12)
         
         self.after(duration_ms, self._dismiss)
         

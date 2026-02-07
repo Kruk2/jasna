@@ -242,8 +242,11 @@ class JasnaApp(ctk.CTk):
         self._log_panel.info(f"Output folder: {output_folder}")
         self._log_panel.info(f"Output pattern: {output_pattern}")
         self._log_panel.info(f"Files queued: {len(jobs)}")
-        
-        self._processor.start(jobs, settings, output_folder, output_pattern)
+
+        # Start processor with a live reference to the queue so new items
+        # added while processing will be picked up.
+        jobs_ref = self._queue_panel.get_jobs_ref()
+        self._processor.start(jobs_ref, settings, output_folder, output_pattern)
                 
     def _on_stop(self):
         if self._processor:
@@ -287,6 +290,22 @@ class JasnaApp(ctk.CTk):
                 queue_current=update.job_index + 1,
                 queue_total=len(jobs),
             )
+            # Mark queue as running and protect the processing job from removal
+            try:
+                self._queue_panel.set_running(True, processing_index=update.job_index)
+            except Exception:
+                pass
+        # Update per-item status (include fps and eta)
+        try:
+            self._queue_panel.update_job_status(
+                update.job_index,
+                update.status,
+                update.progress / 100.0,
+                update.fps,
+                update.eta_seconds,
+            )
+        except Exception:
+            pass
             
     def _on_processor_log(self, level: str, message: str):
         self.after(0, lambda: self._log_panel.add_log(level, message))
@@ -302,6 +321,11 @@ class JasnaApp(ctk.CTk):
         # Re-enable settings and output controls
         self._settings_panel.set_enabled(True)
         self._queue_panel.set_output_enabled(True)
+        # Clear running mode
+        try:
+            self._queue_panel.set_running(False)
+        except Exception:
+            pass
         
     def _on_language_changed(self, lang_name: str):
         """Handle language selection change."""
