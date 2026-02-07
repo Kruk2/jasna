@@ -33,7 +33,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["jasna", "jasna.mosaic", "jasna.restorer", "jasna.trt"]
+packages = ["jasna", "jasna.gui", "jasna.mosaic", "jasna.restorer", "jasna.trt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -12,7 +12,7 @@ def _collect(name: str):
     return collect_all(name)
 
 datas, binaries, hiddenimports = [], [], []
-for pkg in ["torch", "torch_tensorrt", "av", "PyNvVideoCodec", "python_vali", "tensorrt", "tensorrt_libs"]:
+for pkg in ["torch", "torch_tensorrt", "av", "PyNvVideoCodec", "python_vali", "tensorrt", "tensorrt_libs", "customtkinter"]:
     d, b, h = _collect(pkg)
     datas += d
     binaries += b

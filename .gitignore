@@ -38,6 +38,9 @@ dist_linux/
 Thumbs.db
 Desktop.ini
 
+# GUI settings
+jasna/settings.json
+
 # Cursor
 .cursor/
 

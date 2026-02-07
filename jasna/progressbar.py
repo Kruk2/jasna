@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Callable
 
 from tqdm import tqdm
 
@@ -8,16 +9,33 @@ from tqdm import tqdm
 class Progressbar:
     """Progress bar with time remaining estimation and speed display."""
 
-    def __init__(self, total_frames: int, video_fps: float):
+    def __init__(
+        self,
+        total_frames: int,
+        video_fps: float,
+        disable: bool = False,
+        callback: Callable[[float, float, float, int, int], None] | None = None,
+    ):
+        """Initialize progressbar.
+        
+        Args:
+            total_frames: Total number of frames to process
+            video_fps: Video FPS for buffer sizing
+            disable: If True, suppress tqdm console output
+            callback: Optional callback(progress_pct, fps, eta_seconds, frames_done, total_frames)
+        """
         self.total_frames = total_frames
+        self.callback = callback
+        self.frames_processed = 0
         self.frame_processing_durations_buffer: list[float] = []
         self.frame_processing_durations_buffer_min_len = min(
-            total_frames - 1, int(video_fps * 15)
+            total_frames - 1, int(video_fps * 2)  # Show FPS/ETA after 2 seconds of data
         )
         self.frame_processing_durations_buffer_max_len = min(
-            total_frames - 1, int(video_fps * 120)
+            total_frames - 1, int(video_fps * 30)  # Use last 30 seconds for averaging
         )
         self.error = False
+        self.disable = disable
 
         # Bar format: "Processing video: 50%|████     |Processed: 1:23 (2848f) | Remaining: 0:10 | Speed: 35.0fps"
         bar_format = (
@@ -30,6 +48,7 @@ class Progressbar:
             total=total_frames,
             bar_format=bar_format,
             desc=initial_suffix,
+            disable=disable,
         )
         self.duration_start: float | None = None
 
@@ -60,6 +79,8 @@ class Progressbar:
         if self.duration_start is None:
             self.init()
 
+        self.frames_processed += n
+        
         duration_end = time.time()
         duration = duration_end - self.duration_start
         self.duration_start = duration_end
@@ -73,6 +94,17 @@ class Progressbar:
 
         self._update_time_remaining_and_speed()
         self.tqdm.update(n)
+        
+        if self.callback:
+            progress_pct = (self.frames_processed / self.total_frames) * 100 if self.total_frames > 0 else 0
+            fps = 0.0
+            eta_seconds = 0.0
+            if len(self.frame_processing_durations_buffer) > self.frame_processing_durations_buffer_min_len:
+                mean_duration = self._get_mean_processing_duration()
+                fps = 1.0 / mean_duration if mean_duration > 0 else 0.0
+                remaining = self.total_frames - self.frames_processed
+                eta_seconds = remaining * mean_duration
+            self.callback(progress_pct, fps, eta_seconds, self.frames_processed, self.total_frames)
 
     def _get_mean_processing_duration(self) -> float:
         """Calculate mean frame processing duration from the buffer."""

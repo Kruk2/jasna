@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Callable
 
 import torch
 
@@ -36,6 +37,8 @@ class Pipeline:
         temporal_overlap: int,
         enable_crossfade: bool = True,
         fp16: bool,
+        disable_progress: bool = False,
+        progress_callback: Callable[[float, float, float, int, int], None] | None = None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -47,6 +50,8 @@ class Pipeline:
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
         self.enable_crossfade = bool(enable_crossfade)
+        self.disable_progress = bool(disable_progress)
+        self.progress_callback = progress_callback
 
         self.detection_model = RfDetrMosaicDetectionModel(
             onnx_path=detection_model_path,
@@ -83,7 +88,12 @@ class Pipeline:
             torch.inference_mode(),
             torch.cuda.stream(stream),
         ):
-            pb = Progressbar(total_frames=metadata.num_frames, video_fps=metadata.video_fps)
+            pb = Progressbar(
+                total_frames=metadata.num_frames,
+                video_fps=metadata.video_fps,
+                disable=self.disable_progress,
+                callback=self.progress_callback,
+            )
             pb.init()
             
             target_hw = (int(metadata.video_height), int(metadata.video_width))
