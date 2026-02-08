@@ -1,6 +1,7 @@
 """First-run wizard for dependency checking."""
 
 import customtkinter as ctk
+import os
 import subprocess
 
 from jasna import os_utils
@@ -95,6 +96,8 @@ class FirstRunWizard(ctk.CTkToplevel):
             ("gpu", "NVIDIA GPU"),
             ("cuda", "CUDA Runtime"),
         ]
+        if os.name == "nt":
+            checks.append(("hags", "HW GPU Scheduling"))
         
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
@@ -216,6 +219,8 @@ class FirstRunWizard(ctk.CTkToplevel):
             ("gpu", "NVIDIA GPU"),
             ("cuda", "CUDA Runtime"),
         ]
+        if os.name == "nt":
+            checks.append(("hags", "HW GPU Scheduling"))
         
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
@@ -277,6 +282,8 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._check_results["mkvmerge"] = self._check_executable("mkvmerge")
         self._check_results["gpu"] = self._check_gpu()
         self._check_results["cuda"] = self._check_cuda()
+        if os.name == "nt":
+            self._check_results["hags"] = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
         
         # Determine overall pass
         self._checks_passed = all(passed for passed, _ in self._check_results.values())
