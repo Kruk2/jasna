@@ -28,6 +28,7 @@ class Colors:
     STATUS_COMPLETED = "#22c55e"  # Green-500
     STATUS_PENDING = "#94a3b8"    # Slate-400
     STATUS_CONFLICT = "#fbbf24"   # Amber-400 (output file exists)
+
     
     # Log colors
     LOG_INFO = "#34d399"    # Emerald-400
