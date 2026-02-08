@@ -27,17 +27,18 @@ class JasnaApp(ctk.CTk):
         super().__init__()
         
         self.title("Jasna GUI")
-        self.geometry("1200x880")
-        self.minsize(1000, 660)
         self.configure(fg_color=Colors.BG_MAIN)
-        
-        # Center on screen
+
         self.update_idletasks()
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        x = (screen_w - 1200) // 2
-        y = (screen_h - 880) // 2
-        self.geometry(f"1200x880+{x}+{y}")
+
+        win_w = min(1200, screen_w - 40)
+        win_h = min(880, screen_h - 80)
+        x = (screen_w - win_w) // 2
+        y = (screen_h - win_h) // 2
+        self.geometry(f"{win_w}x{win_h}+{x}+{y}")
+        self.minsize(900, 580)
         
         # Set appearance
         ctk.set_appearance_mode("dark")
