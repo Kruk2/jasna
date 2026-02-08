@@ -12,8 +12,6 @@ from jasna.gui.components import BuyMeCoffeeButton
 
 
 _WINDOW_WIDTH = 820
-_WINDOW_HEIGHT = 520
-_INFO_COLUMN_WIDTH = 520
 
 
 class FirstRunWizard(ctk.CTkToplevel):
@@ -27,7 +25,6 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._check_results = {}
         
         self.title("Jasna - System Check")
-        self.geometry(f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}")
         self.resizable(True, False)
         self.configure(fg_color=Colors.BG_MAIN)
 
@@ -37,14 +34,16 @@ class FirstRunWizard(ctk.CTkToplevel):
         self.lift()
         self.focus_force()
         
-        # Center on parent
-        self.update_idletasks()
-        x = master.winfo_x() + (master.winfo_width() - _WINDOW_WIDTH) // 2
-        y = master.winfo_y() + (master.winfo_height() - _WINDOW_HEIGHT) // 2
-        self.geometry(f"+{x}+{y}")
-        
         # Build UI immediately with loading state
         self._build_ui_loading()
+
+        # Let geometry settle, then size to content and center on parent
+        self.update_idletasks()
+        w = max(_WINDOW_WIDTH, self.winfo_reqwidth())
+        h = self.winfo_reqheight()
+        x = master.winfo_x() + (master.winfo_width() - w) // 2
+        y = master.winfo_y() + (master.winfo_height() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
         
         self.after(50, self._start_checks_in_background)
         
@@ -70,10 +69,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         )
         self._subtitle.pack(pady=(8, 0))
         
-        # Checks area - show loading state
-        # Use a scrollable frame so long paths / DPI scaling can't push
-        # the footer buttons out of view.
-        self._checks_frame = ctk.CTkScrollableFrame(
+        self._checks_frame = ctk.CTkFrame(
             self,
             fg_color=Colors.BG_PANEL,
             corner_radius=Sizing.BORDER_RADIUS,
@@ -89,7 +85,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             ("cuda", "CUDA Runtime"),
         ]
         if os.name == "nt":
-            checks.append(("hags", "HW GPU Scheduling"))
+            checks.append(("hags", "Hardware Accelerated GPU Scheduling"))
         
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
@@ -117,12 +113,10 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text="Checking...",
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
                 text_color=Colors.TEXT_MUTED,
-                width=_INFO_COLUMN_WIDTH,
-                wraplength=0,
                 justify="right",
                 anchor="e",
             )
-            info_label.pack(side="right")
+            info_label.pack(side="right", fill="x", expand=True)
             
             self._check_labels[key] = (status_label, info_label)
             
@@ -222,8 +216,8 @@ class FirstRunWizard(ctk.CTkToplevel):
             ("cuda", "CUDA Runtime"),
         ]
         if os.name == "nt":
-            checks.append(("hags", "HW GPU Scheduling"))
-        
+            checks.append(("hags", "Hardware Accelerated GPU Scheduling"))
+
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
             row.pack(fill="x", padx=20, pady=8)
@@ -252,12 +246,10 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text=info,
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
                 text_color=Colors.TEXT_MUTED,
-                width=_INFO_COLUMN_WIDTH,
-                wraplength=_INFO_COLUMN_WIDTH,
                 justify="right",
                 anchor="e",
             )
-            info_label.pack(side="right")
+            info_label.pack(side="right", fill="x", expand=True)
             
         # Footer with OK button (enabled since checks are done)
         footer = ctk.CTkFrame(self, fg_color="transparent")

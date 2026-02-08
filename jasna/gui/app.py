@@ -36,7 +36,7 @@ class JasnaApp(ctk.CTk):
         win_w = min(1200, screen_w - 40)
         win_h = min(880, screen_h - 80)
         x = (screen_w - win_w) // 2
-        y = (screen_h - win_h) // 2
+        y = max(0, (screen_h - win_h) // 2 - int(screen_h * 0.15 / 2))
         self.geometry(f"{win_w}x{win_h}+{x}+{y}")
         self.minsize(900, 580)
         
@@ -237,6 +237,7 @@ class JasnaApp(ctk.CTk):
         try:
             if self._processor:
                 self._processor.stop()
+                self._processor.join(timeout=5.0)
         finally:
             self._stop_system_stats_poller()
             self.destroy()
@@ -536,6 +537,7 @@ class GUILogHandler(logging.Handler):
 def run_gui():
     """Entry point to run the GUI application."""
     import logging
+    import os
     # Set up basic logging - will be connected to GUI after app creation
     logging.basicConfig(
         level=logging.DEBUG,
@@ -561,3 +563,7 @@ def run_gui():
     jasna_logger.propagate = False
     
     app.mainloop()
+
+    # Force-exit the process. CUDA/TensorRT may leave non-daemon threads
+    # or background subprocesses that prevent a clean interpreter shutdown.
+    os._exit(0)
