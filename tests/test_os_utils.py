@@ -226,3 +226,31 @@ def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_when
     out = capsys.readouterr().out
     assert "Hardware-accelerated GPU scheduling" in out
 
+
+def test_check_windows_hardware_accelerated_gpu_scheduling_returns_false_when_enabled(monkeypatch) -> None:
+    class _Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class _Winreg:
+        HKEY_LOCAL_MACHINE = object()
+
+        @staticmethod
+        def OpenKey(root, path):
+            return _Key()
+
+        @staticmethod
+        def QueryValueEx(key, name):
+            assert name == "HwSchMode"
+            return (2, None)
+
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
+
+    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
+    assert ok is False
+    assert "Enabled" in info
+
