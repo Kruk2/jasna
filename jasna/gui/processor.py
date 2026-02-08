@@ -218,6 +218,7 @@ class Processor:
             device=device,
             fp16=settings.fp16_mode,
             compile_basicvsrpp=compile_basicvsrpp,
+            interactive=False,
             allow_unsafe_clip_length=self._allow_unsafe_basicvsrpp_compile_for_run,
         )
         

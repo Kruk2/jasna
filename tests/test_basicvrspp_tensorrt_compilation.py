@@ -1,8 +1,58 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import torch
+
+
+def test_compile_with_none_stdin_does_not_crash(monkeypatch, tmp_path: Path) -> None:
+    """Regression: Windows GUI has sys.stdin=None, must not crash on .isatty()."""
+    import jasna.models.basicvsrpp.inference as inf
+    import jasna.restorer.basicvrspp_tenorrt_compilation as comp
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(comp, "_get_approx_max_tensorrt_clip_length", lambda _dev: (4.0, 10))
+    monkeypatch.setattr(inf, "load_model", lambda *_a, **_k: object())
+    monkeypatch.setattr(comp, "_compile_basicvsrpp_model", lambda *_a, **_k: "dummy")
+    monkeypatch.setattr(sys, "stdin", None)
+
+    out = comp.compile_mosaic_restoration_model(
+        mosaic_restoration_model_path=str(Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"),
+        clip_length=60,
+        device=torch.device("cuda:0"),
+        fp16=True,
+        interactive=True,
+    )
+
+    assert out == str(Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth")
+
+
+def test_startup_policy_interactive_false_skips_stdin(monkeypatch, tmp_path: Path) -> None:
+    """GUI calls startup_policy with interactive=False; no stdin access should occur."""
+    import jasna.models.basicvsrpp.inference as inf
+    import jasna.restorer.basicvrspp_tenorrt_compilation as comp
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(comp, "_get_approx_max_tensorrt_clip_length", lambda _dev: (4.0, 10))
+    monkeypatch.setattr(inf, "load_model", lambda *_a, **_k: object())
+    monkeypatch.setattr(comp, "_compile_basicvsrpp_model", lambda *_a, **_k: "dummy")
+    monkeypatch.setattr(sys, "stdin", None)
+
+    result = comp.basicvsrpp_startup_policy(
+        restoration_model_path=str(Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"),
+        max_clip_size=60,
+        device=torch.device("cuda:0"),
+        fp16=True,
+        compile_basicvsrpp=True,
+        interactive=False,
+    )
+
+    assert result is True
 
 
 def test_compile_clip10_compiles_requested_engine(monkeypatch, tmp_path: Path) -> None:
