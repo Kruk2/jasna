@@ -4,7 +4,7 @@ from fractions import Fraction
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import json
 
-from jasna.os_utils import get_subprocess_startup_info
+from jasna.os_utils import get_subprocess_startup_info, resolve_executable
 
 SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
@@ -130,7 +130,18 @@ def is_stream_10bit(json_video_stream: dict) -> bool:
     return any(marker in pix_fmt for marker in ten_bit_markers)
 
 def get_video_meta_data(path: str) -> VideoMetadata:
-    cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-select_streams', 'v', '-show_streams', '-show_format', path]
+    cmd = [
+        resolve_executable("ffprobe"),
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-select_streams",
+        "v",
+        "-show_streams",
+        "-show_format",
+        path,
+    ]
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, startupinfo=get_subprocess_startup_info())
     out, err =  p.communicate()
     if p.returncode != 0:

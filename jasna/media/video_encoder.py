@@ -15,6 +15,8 @@ import threading
 import queue
 av.logging.set_level(logging.ERROR)
 
+from jasna.os_utils import resolve_executable
+
 def _parse_hevc_nal_units(data: bytes):
     """Parse HEVC NAL units from Annex B bitstream. Returns list of (nal_type, start, end)."""
     nal_units = []
@@ -85,9 +87,12 @@ def mux_hevc_to_mkv(hevc_path: Path, output_path: Path, pts_list, time_base):
             f.write(f"{timestamp_ms:.6f}\n")
     
     cmd = [
-        'mkvmerge', '-o', str(output_path),
-        '--timestamps', f'0:{timecodes_path}',
-        str(hevc_path)
+        resolve_executable("mkvmerge"),
+        "-o",
+        str(output_path),
+        "--timestamps",
+        f"0:{timecodes_path}",
+        str(hevc_path),
     ]
     result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info())
     if result.returncode != 0:
@@ -108,18 +113,30 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
     ffmpeg_color_range = color_range_map.get(metadata.color_range, 'tv')
 
     cmd = [
-        'ffmpeg', '-y',
-        '-i', str(video_input),
-        '-i', metadata.video_file,
-        '-map', '0:v:0',
-        '-map', '1:a?',
-        '-map_metadata', '1',
-        '-c:v', 'copy',
-        '-c:a', 'copy',
-        '-color_primaries', ffmpeg_colorspace,
-        '-color_trc', ffmpeg_colorspace,
-        '-colorspace', ffmpeg_colorspace,
-        '-color_range', ffmpeg_color_range,
+        resolve_executable("ffmpeg"),
+        "-y",
+        "-i",
+        str(video_input),
+        "-i",
+        metadata.video_file,
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a?",
+        "-map_metadata",
+        "1",
+        "-c:v",
+        "copy",
+        "-c:a",
+        "copy",
+        "-color_primaries",
+        ffmpeg_colorspace,
+        "-color_trc",
+        ffmpeg_colorspace,
+        "-colorspace",
+        ffmpeg_colorspace,
+        "-color_range",
+        ffmpeg_color_range,
     ]
     if output_path.suffix.lower() in {'.mp4', '.mov'}:
         cmd += ['-movflags', '+faststart']
