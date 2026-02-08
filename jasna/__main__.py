@@ -1,6 +1,11 @@
 import sys
 from pathlib import Path
 
+from jasna.bootstrap import sanitize_sys_path_for_local_dev
+
+if not getattr(sys, "frozen", False):
+    sanitize_sys_path_for_local_dev(Path(__file__).resolve().parent)
+
 argv0_stem = Path(sys.argv[0]).stem.lower()
 
 if sys.platform == "win32":

@@ -5,17 +5,35 @@ block_cipher = None
 from PyInstaller.utils.hooks import collect_all
 from importlib.util import find_spec
 import os
+import sys
 
 from jasna.packaging.openssl_libs import filter_out_openssl_binaries, pyinstaller_binaries_for_openssl
 
-def _collect(name: str):
+_build_cli = os.environ.get("BUILD_CLI", "").lower() in ("1", "true", "yes")
+
+
+def _collect(name: str, *, required: bool):
     if find_spec(name) is None:
+        if required:
+            raise RuntimeError(
+                f"PyInstaller build requires {name!r} to be installed in this Python environment. "
+                f"Current sys.executable is: {sys.executable}"
+            )
         return [], [], []
     return collect_all(name)
 
 datas, binaries, hiddenimports = [], [], []
-for pkg in ["torch", "torch_tensorrt", "av", "PyNvVideoCodec", "python_vali", "tensorrt", "tensorrt_libs", "customtkinter"]:
-    d, b, h = _collect(pkg)
+required_pkgs = ["customtkinter"] if not _build_cli else []
+optional_pkgs = ["torch", "torch_tensorrt", "av", "PyNvVideoCodec", "python_vali", "tensorrt", "tensorrt_libs"]
+
+for pkg in required_pkgs:
+    d, b, h = _collect(pkg, required=True)
+    datas += d
+    binaries += b
+    hiddenimports += h
+
+for pkg in optional_pkgs:
+    d, b, h = _collect(pkg, required=False)
     datas += d
     binaries += b
     hiddenimports += h
@@ -52,6 +70,12 @@ if os.name == "nt":
         if os.path.isfile(dll_path):
             binaries += [(dll_path, ".")]
 
+runtime_hooks = []
+if os.name == "nt":
+    runtime_hooks.append(os.path.join("jasna", "packaging", "pyinstaller_runtime_hook_windows_dll_paths.py"))
+else:
+    runtime_hooks.append(os.path.join("jasna", "packaging", "pyinstaller_runtime_hook_linux_lib_paths.py"))
+
 a = Analysis(
     ["jasna/__main__.py"],
     pathex=["."],
@@ -60,13 +84,12 @@ a = Analysis(
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=runtime_hooks,
     noarchive=False,
 )
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-_build_cli = os.environ.get("BUILD_CLI", "").lower() in ("1", "true", "yes")
 if os.name == "nt" and not _build_cli:
     _exe_name = "jasna-gui"
     _collect_name = "jasna"

@@ -3,6 +3,7 @@
 import customtkinter as ctk
 import os
 import subprocess
+import threading
 
 from jasna import os_utils
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -30,25 +31,11 @@ class FirstRunWizard(ctk.CTkToplevel):
         self.resizable(True, False)
         self.configure(fg_color=Colors.BG_MAIN)
 
-        # Avoid using overrideredirect() which can cause grab/focus issues
-        # on some window managers when the user clicks away. Instead keep
-        # the normal title bar but disable the close action so the X button
-        # is inert (prevents accidental close).
-        # Make modal
         self.transient(master)
         self.grab_set()
-        # Disable the close window action (WM_DELETE_WINDOW) so user can't
-        # dismiss the wizard via the X button; they must click the provided button.
-        try:
-            self.protocol("WM_DELETE_WINDOW", lambda: None)
-        except Exception:
-            pass
-        # Ensure dialog is on top and has focus
-        try:
-            self.lift()
-            self.focus_force()
-        except Exception:
-            pass
+        self.protocol("WM_DELETE_WINDOW", lambda: None)
+        self.lift()
+        self.focus_force()
         
         # Center on parent
         self.update_idletasks()
@@ -59,8 +46,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         # Build UI immediately with loading state
         self._build_ui_loading()
         
-        # Run checks AFTER UI is visible (defer to next event loop)
-        self.after(50, self._run_checks_and_update)
+        self.after(50, self._start_checks_in_background)
         
     def _build_ui_loading(self):
         """Build UI with loading/checking state shown immediately."""
@@ -85,7 +71,13 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._subtitle.pack(pady=(8, 0))
         
         # Checks area - show loading state
-        self._checks_frame = ctk.CTkFrame(self, fg_color=Colors.BG_PANEL, corner_radius=Sizing.BORDER_RADIUS)
+        # Use a scrollable frame so long paths / DPI scaling can't push
+        # the footer buttons out of view.
+        self._checks_frame = ctk.CTkScrollableFrame(
+            self,
+            fg_color=Colors.BG_PANEL,
+            corner_radius=Sizing.BORDER_RADIUS,
+        )
         self._checks_frame.pack(fill="both", expand=True, padx=40, pady=20)
         
         self._check_labels = {}
@@ -126,7 +118,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
                 text_color=Colors.TEXT_MUTED,
                 width=_INFO_COLUMN_WIDTH,
-                wraplength=_INFO_COLUMN_WIDTH,
+                wraplength=0,
                 justify="right",
                 anchor="e",
             )
@@ -136,7 +128,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             
         # Footer with disabled button during checking
         self._footer = ctk.CTkFrame(self, fg_color="transparent")
-        self._footer.pack(fill="x", padx=40, pady=(20, 40))
+        self._footer.pack(fill="x", side="bottom", padx=40, pady=(20, 40))
         
         # Button container for centering both buttons
         btn_container = ctk.CTkFrame(self._footer, fg_color="transparent")
@@ -162,16 +154,27 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._bmc_btn._original_width = 140
         self._bmc_btn.pack(side="left")
         
-    def _run_checks_and_update(self):
-        """Run checks and update UI with results."""
-        self._run_checks_blocking()
-        
-        # Update subtitle
+    def _start_checks_in_background(self) -> None:
+        self._checks_thread = threading.Thread(target=self._run_checks_blocking, daemon=True)
+        self._checks_thread.start()
+        self.after(50, self._poll_checks_thread)
+
+    def _poll_checks_thread(self) -> None:
+        if not getattr(self, "_checks_thread", None):
+            return
+        if self._checks_thread.is_alive():
+            self.after(100, self._poll_checks_thread)
+            return
+        self._apply_check_results_to_ui()
+
+    def _apply_check_results_to_ui(self) -> None:
+        if not self.winfo_exists():
+            return
+
         subtitle_text = t("wizard_all_passed") if self._checks_passed else t("wizard_some_failed")
         subtitle_color = Colors.STATUS_COMPLETED if self._checks_passed else Colors.STATUS_PAUSED
         self._subtitle.configure(text=subtitle_text, text_color=subtitle_color)
-        
-        # Update each check result
+
         for key, (status_label, info_label) in self._check_labels.items():
             passed, info = self._check_results.get(key, (False, "Not checked"))
             status_label.configure(
@@ -179,8 +182,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text_color=Colors.STATUS_COMPLETED if passed else Colors.STATUS_ERROR,
             )
             info_label.configure(text=info)
-            
-        # Enable continue button
+
         btn_text = t("btn_get_started") if self._checks_passed else t("btn_continue_anyway")
         self._continue_btn.configure(text=btn_text, state="normal")
         
