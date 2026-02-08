@@ -56,7 +56,6 @@ def read_gpu_vram() -> tuple[int | None, int | None]:
             check=False,
             timeout=0.5,
             startupinfo=os_utils.get_subprocess_startup_info(),
-            env=os_utils.get_subprocess_env_for_executable(exe_path),
         )
     except (subprocess.TimeoutExpired, OSError):
         return None, None

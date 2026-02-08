@@ -183,22 +183,6 @@ def test_find_executable_finds_bundled_mkvmerge_recursive(monkeypatch, tmp_path)
     assert os_utils.find_executable("mkvmerge") == str(mkvmerge)
 
 
-def test_get_subprocess_env_for_executable_sets_ld_library_path_for_bundled_tools(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
-    monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
-
-    tools_dir = tmp_path / "_internal" / "tools"
-    lib_dir = tools_dir / "lib"
-    lib_dir.mkdir(parents=True, exist_ok=True)
-
-    exe = tools_dir / "ffmpeg"
-    exe.write_bytes(b"")
-
-    env = os_utils.get_subprocess_env_for_executable(str(exe))
-    assert env is not None
-    assert env.get("LD_LIBRARY_PATH", "").startswith(str(lib_dir))
-
 def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_when_enabled(monkeypatch, capsys) -> None:
     class _Key:
         def __enter__(self):

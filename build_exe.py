@@ -27,58 +27,18 @@ for name in [
     shutil.copy(Path("model_weights") / name, out / "model_weights" / name)
 
 internal = out / "_internal"
-tools_dir = internal / "tools"
-tools_dir.mkdir(parents=True, exist_ok=True)
 
-def _parse_ldd_paths(output: str) -> list[str]:
-    paths: list[str] = []
-    for line in (output or "").splitlines():
-        line = line.strip()
-        if line == "" or "=>" not in line:
-            continue
-        left, right = line.split("=>", 1)
-        right = right.strip()
-        if right.startswith("not found"):
-            continue
-        p = right.split("(", 1)[0].strip()
-        if p.startswith("/"):
-            paths.append(p)
-    return paths
+if os.name == "nt":
+    tools_dir = internal / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
 
-
-for tool in ["ffmpeg", "ffprobe"]:
-    tool_path = shutil.which(tool)
-    if tool_path is None:
-        raise FileNotFoundError(f"Could not find {tool!r} in PATH while building.")
-    dst = tools_dir / Path(tool_path).name
-    shutil.copy2(tool_path, dst)
-    if os.name != "nt":
-        os.chmod(dst, os.stat(dst).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-if os.name != "nt":
-    tools_lib_dir = tools_dir / "lib"
-    tools_lib_dir.mkdir(parents=True, exist_ok=True)
-
-    ffmpeg_path = shutil.which("ffmpeg")
-    if ffmpeg_path is None:
-        raise FileNotFoundError("Could not find 'ffmpeg' in PATH while building.")
-    prefix = Path(ffmpeg_path).resolve().parent.parent
-
-    deps: set[Path] = set()
     for tool in ["ffmpeg", "ffprobe"]:
         tool_path = shutil.which(tool)
         if tool_path is None:
             raise FileNotFoundError(f"Could not find {tool!r} in PATH while building.")
-        completed = subprocess.run(["ldd", tool_path], capture_output=True, text=True, check=True)
-        for p in _parse_ldd_paths(completed.stdout):
-            dep = Path(p)
-            if dep.exists() and dep.is_file() and dep.is_relative_to(prefix):
-                deps.add(dep)
+        dst = tools_dir / Path(tool_path).name
+        shutil.copy2(tool_path, dst)
 
-    for dep in sorted(deps):
-        shutil.copy2(dep, tools_lib_dir / dep.name)
-
-if os.name == "nt":
     mkvtoolnix_url = "https://github.com/Kruk2/jasna/releases/download/0.1/mkvtoolnix.zip"
     zip_path = internal / "mkvtoolnix.zip"
     mkvtoolnix_dir = internal / "mkvtoolnix"

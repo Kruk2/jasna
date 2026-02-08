@@ -7,8 +7,6 @@ from importlib.util import find_spec
 import os
 import sys
 
-from jasna.packaging.openssl_libs import filter_out_openssl_binaries, pyinstaller_binaries_for_openssl
-
 _build_cli = os.environ.get("BUILD_CLI", "").lower() in ("1", "true", "yes")
 
 
@@ -38,15 +36,6 @@ for pkg in optional_pkgs:
     binaries += b
     hiddenimports += h
 
-if os.name != "nt":
-    binaries = filter_out_openssl_binaries(binaries)
-    openssl_roots = []
-    openssl_env_dir = os.environ.get("OPENSSL_LIB_DIR")
-    if openssl_env_dir:
-        openssl_roots.append(openssl_env_dir)
-    openssl_roots += ["/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64"]
-    binaries += pyinstaller_binaries_for_openssl(openssl_roots)
-
 # torch_tensorrt's custom ops are registered by its compiled extension module.
 # `collect_all("torch_tensorrt")` collects `torchtrt.dll` but does not always pick up the `_C*.pyd`.
 trt_ext = find_spec("torch_tensorrt._C")
@@ -73,8 +62,6 @@ if os.name == "nt":
 runtime_hooks = []
 if os.name == "nt":
     runtime_hooks.append(os.path.join("jasna", "packaging", "pyinstaller_runtime_hook_windows_dll_paths.py"))
-else:
-    runtime_hooks.append(os.path.join("jasna", "packaging", "pyinstaller_runtime_hook_linux_lib_paths.py"))
 
 a = Analysis(
     ["jasna/__main__.py"],
