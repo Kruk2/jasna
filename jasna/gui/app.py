@@ -3,6 +3,7 @@
 import customtkinter as ctk
 import logging
 from pathlib import Path
+import threading
 
 from jasna import __version__
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -16,6 +17,7 @@ from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus
 from jasna.gui.validation import validate_gui_start
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
+from jasna.gui.system_stats import read_system_stats
 
 
 class JasnaApp(ctk.CTk):
@@ -43,9 +45,15 @@ class JasnaApp(ctk.CTk):
         
         self._logs_visible = False
         self._processor: Processor | None = None
+
+        self._system_stats_stop = threading.Event()
+        self._system_stats_thread: threading.Thread | None = None
         
         self._build_ui()
         self._setup_processor()
+        self._start_system_stats_poller()
+
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         
         if not skip_wizard:
             self.after(100, self._show_wizard)
@@ -199,6 +207,38 @@ class JasnaApp(ctk.CTk):
             on_log=self._on_processor_log,
             on_complete=self._on_processor_complete,
         )
+
+    def _start_system_stats_poller(self):
+        if self._system_stats_thread and self._system_stats_thread.is_alive():
+            return
+
+        self._system_stats_stop.clear()
+
+        def _loop():
+            while not self._system_stats_stop.is_set():
+                stats = read_system_stats()
+                try:
+                    self.after(0, lambda s=stats: self._control_bar.set_system_stats(s))
+                except Exception:
+                    return
+                self._system_stats_stop.wait(1.5)
+
+        self._system_stats_thread = threading.Thread(target=_loop, daemon=True)
+        self._system_stats_thread.start()
+
+    def _stop_system_stats_poller(self):
+        self._system_stats_stop.set()
+        if self._system_stats_thread:
+            self._system_stats_thread.join(timeout=1.0)
+            self._system_stats_thread = None
+
+    def _on_close(self):
+        try:
+            if self._processor:
+                self._processor.stop()
+        finally:
+            self._stop_system_stats_poller()
+            self.destroy()
         
     def _show_wizard(self):
         FirstRunWizard(self, on_complete=self._on_wizard_complete)
