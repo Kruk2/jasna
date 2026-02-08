@@ -26,11 +26,15 @@ def _process_ended_clips(
     ended_clips: list[EndedClip],
     discard_margin: int,
     blend_frames: int,
+    max_clip_size: int,
     frame_buffer: FrameBuffer,
     restoration_pipeline: RestorationPipeline,
     raw_frame_context: dict[int, dict[int, torch.Tensor]],
 ) -> None:
     bf = min(int(blend_frames), int(discard_margin)) if discard_margin > 0 else 0
+    if bf > 0 and discard_margin > 0:
+        max_bf = max(0, (int(max_clip_size) - 2 * int(discard_margin)) // 2)
+        bf = min(bf, max_bf)
 
     for ended_clip in ended_clips:
         clip = ended_clip.clip
@@ -55,6 +59,8 @@ def _process_ended_clips(
             child_ctx: dict[int, torch.Tensor] = {}
             for fi in overlap_indices:
                 f = frame_buffer.get_frame(fi)
+                if f is None:
+                    f = ctx.get(fi)
                 if f is None:
                     raise RuntimeError(f"missing overlap frame {fi} for continuation clip {child_id}")
                 child_ctx[fi] = f
@@ -157,6 +163,7 @@ def process_frame_batch(
             ended_clips=ended_clips,
             discard_margin=int(discard_margin),
             blend_frames=int(blend_frames),
+            max_clip_size=tracker.max_clip_size,
             frame_buffer=frame_buffer,
             restoration_pipeline=restoration_pipeline,
             raw_frame_context=raw_frame_context,
@@ -191,6 +198,7 @@ def finalize_processing(
         ended_clips=ended_clips,
         discard_margin=int(discard_margin),
         blend_frames=int(blend_frames),
+        max_clip_size=tracker.max_clip_size,
         frame_buffer=frame_buffer,
         restoration_pipeline=restoration_pipeline,
         raw_frame_context=raw_frame_context,
