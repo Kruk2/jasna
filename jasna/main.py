@@ -145,15 +145,15 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-model",
         type=str,
-        default="rfdetr",
-        choices=["rfdetr"],
-        help='Detection model name (only "rfdetr" supported for now)',
+        default="rfdetr-v3",
+        choices=["rfdetr-v3", "rfdetr-v2", "lada-yolo-v4", "lada-yolo-v2"],
+        help="Detection model name (default: %(default)s)",
     )
     detection.add_argument(
         "--detection-model-path",
         type=str,
-        default=str(Path("model_weights") / "rfdetr-v3.onnx"),
-        help="Path to detection ONNX model (default: %(default)s)",
+        default="",
+        help='Optional path to detection weights. If not set, uses "model_weights/<detection-model>.onnx" (RF-DETR) or ".pt" (YOLO).',
     )
     detection.add_argument(
         "--detection-score-threshold",
@@ -200,8 +200,10 @@ def main() -> None:
 
     output_video = Path(args.output)
 
-    detection_model_name = str(args.detection_model)
-    detection_model_path = Path(args.detection_model_path)
+    from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name, detection_model_weights_path
+
+    detection_model_name = coerce_detection_model_name(str(args.detection_model))
+    detection_model_path = Path(str(args.detection_model_path)) if str(args.detection_model_path).strip() else detection_model_weights_path(detection_model_name)
     if not detection_model_path.exists():
         raise FileNotFoundError(str(detection_model_path))
 
@@ -237,9 +239,6 @@ def main() -> None:
     detection_score_threshold = float(args.detection_score_threshold)
     if not (0.0 <= detection_score_threshold <= 1.0):
         raise ValueError("--detection-score-threshold must be in [0, 1]")
-
-    if detection_model_name != "rfdetr":
-        raise ValueError(f"Unsupported detection model: {detection_model_name}")
 
     if restoration_model_name != "basicvsrpp":
         raise ValueError(f"Unsupported restoration model: {restoration_model_name}")
@@ -323,6 +322,7 @@ def main() -> None:
     Pipeline(
         input_video=input_video,
         output_video=output_video,
+        detection_model_name=detection_model_name,
         detection_model_path=detection_model_path,
         detection_score_threshold=detection_score_threshold,
         restoration_pipeline=restoration_pipeline,
