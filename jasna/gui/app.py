@@ -281,6 +281,56 @@ class JasnaApp(ctk.CTk):
             self._log_panel.error(msg)
             messagebox.showerror("Invalid TVAI configuration", msg)
             return
+
+        disable_basicvsrpp_tensorrt = False
+        allow_unsafe_basicvsrpp_compile = False
+        try:
+            from jasna.gui.engine_preflight import run_engine_preflight
+
+            preflight = run_engine_preflight(settings)
+            missing_keys = [r.key for r in preflight.missing]
+
+            def _engine_name(key: str) -> str:
+                if key == "rfdetr":
+                    return t("engine_name_rfdetr")
+                if key == "basicvsrpp":
+                    return t("engine_name_basicvsrpp")
+                if key == "swin2sr":
+                    return t("engine_name_swin2sr")
+                return key
+
+            missing_lines = "\n".join(f"- {_engine_name(k)}" for k in missing_keys)
+
+            if preflight.basicvsrpp_risk.is_risky:
+                from tkinter import messagebox
+
+                r = preflight.basicvsrpp_risk
+                msg = (
+                    t("engine_first_run_body")
+                    + ("\n\n" + t("engine_first_run_missing") + "\n" + missing_lines if missing_lines else "")
+                    + "\n\n"
+                    + t("engine_basicvsrpp_risky_body").format(
+                        vram_gb=f"{r.vram_gb:.1f}",
+                        requested_clip=str(r.requested_clip_length),
+                        safe_clip=str(r.approx_safe_max_clip_length),
+                    )
+                )
+                if messagebox.askyesno(t("engine_basicvsrpp_risky_title"), msg):
+                    allow_unsafe_basicvsrpp_compile = True
+                    self._log_panel.warning(t("engine_log_risky_accepted"))
+                else:
+                    disable_basicvsrpp_tensorrt = True
+                    self._log_panel.warning(t("engine_log_risky_declined"))
+            elif preflight.should_warn_first_run_slow:
+                from tkinter import messagebox
+
+                msg = t("engine_first_run_body")
+                if missing_lines:
+                    msg += "\n\n" + t("engine_first_run_missing") + "\n" + missing_lines
+                messagebox.showinfo(t("engine_first_run_title"), msg)
+                self._log_panel.warning(msg)
+        except Exception as e:
+            self._log_panel.warning(f"Engine preflight warning failed: {e}")
         
         self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)
         self._control_bar.set_running(True)
@@ -297,7 +347,14 @@ class JasnaApp(ctk.CTk):
         # Start processor with a live reference to the queue so new items
         # added while processing will be picked up.
         jobs_ref = self._queue_panel.get_jobs_ref()
-        self._processor.start(jobs_ref, settings, output_folder, output_pattern)
+        self._processor.start(
+            jobs_ref,
+            settings,
+            output_folder,
+            output_pattern,
+            disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
+            allow_unsafe_basicvsrpp_compile=allow_unsafe_basicvsrpp_compile,
+        )
                 
     def _on_stop(self):
         if self._processor:
