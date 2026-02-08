@@ -17,12 +17,15 @@ Copy the console output or describe what didn't work.
 
 **To Reproduce**
 1. Jasna command line that was used:
-jasna.exe --input "D:/video.mp4" [other params]
+jasna --input "D:/video.mp4" [other params]
+OR 
+GUI screenshot
 1. [optional] Video ID with timestamp: 
 
 **Desktop (please complete the following information):**
  - OS: [e.g. iOS]
  - Jasna Version [e.g. 0.3]
+ - GUI or CLI?
  - GPU [e.g. RTX 4090]
 - Nvidia Driver version: xxx.yy
  - CPU
