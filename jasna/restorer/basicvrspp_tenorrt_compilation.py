@@ -203,8 +203,12 @@ def compile_mosaic_restoration_model(
         model = load_model(mosaic_restoration_config_path, mosaic_restoration_model_path, device, fp16)
         if should_compile_small:
             _compile_basicvsrpp_model(model, device, dtype, output_path_small, SMALL_TRT_CLIP_LENGTH)
-        if should_compile_requested and output_path != output_path_small:
-            _compile_basicvsrpp_model(model, device, dtype, output_path, int(clip_length))
+        if should_compile_requested:
+            if output_path == output_path_small:
+                if not should_compile_small:
+                    _compile_basicvsrpp_model(model, device, dtype, output_path, int(clip_length))
+            else:
+                _compile_basicvsrpp_model(model, device, dtype, output_path, int(clip_length))
         del model
 
     gc.collect()
