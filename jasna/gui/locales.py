@@ -5,10 +5,11 @@ import locale as _locale
 from pathlib import Path
 from typing import Callable
 
+from jasna import os_utils
+
 
 def get_settings_path() -> Path:
-    """Get path to settings.json in jasna package directory."""
-    return Path(__file__).parent.parent / "settings.json"
+    return os_utils.get_user_config_dir("jasna") / "settings.json"
 
 
 def _get_cli_descriptions() -> dict[str, str]:
@@ -511,6 +512,7 @@ class LocaleManager:
     def _save(self):
         """Save language preference to settings."""
         path = get_settings_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
         data = {}
         if path.exists():
             try:
