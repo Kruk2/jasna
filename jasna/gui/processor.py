@@ -22,6 +22,16 @@ class ProgressUpdate:
     message: str = ""
 
 
+def _cleanup_torch(torch_mod) -> None:
+    import gc
+
+    gc.collect()
+    if torch_mod.cuda.is_available():
+        torch_mod.cuda.synchronize()
+        torch_mod.cuda.empty_cache()
+        torch_mod.cuda.ipc_collect()
+
+
 class Processor:
     """Handles video processing in a background thread."""
     
@@ -195,97 +205,110 @@ class Processor:
             compile_basicvsrpp=settings.compile_basicvsrpp,
         )
         
-        # Secondary restorer
         secondary_restorer = None
-        if settings.secondary_restoration == "swin2sr":
-            secondary_restorer = Swin2srSecondaryRestorer(
-                device=device,
-                fp16=settings.fp16_mode,
-                batch_size=settings.swin2sr_batch_size,
-                use_tensorrt=settings.swin2sr_tensorrt,
+        restoration_pipeline = None
+        pipeline = None
+        stream = None
+        try:
+            if settings.secondary_restoration == "swin2sr":
+                secondary_restorer = Swin2srSecondaryRestorer(
+                    device=device,
+                    fp16=settings.fp16_mode,
+                    batch_size=settings.swin2sr_batch_size,
+                    use_tensorrt=settings.swin2sr_tensorrt,
+                )
+            elif settings.secondary_restoration == "tvai":
+                tvai_args = f"model={settings.tvai_model}:scale={settings.tvai_scale}"
+                if settings.tvai_args.strip():
+                    tvai_args = f"{tvai_args}:{settings.tvai_args}"
+                secondary_restorer = TvaiSecondaryRestorer(
+                    device=device,
+                    ffmpeg_path=settings.tvai_ffmpeg_path,
+                    tvai_args=tvai_args,
+                    max_clip_size=settings.max_clip_size,
+                    num_workers=settings.tvai_workers,
+                )
+
+            denoise_strength = DenoiseStrength(settings.denoise_strength)
+            denoise_step = DenoiseStep(settings.denoise_step)
+
+            restoration_pipeline = RestorationPipeline(
+                restorer=BasicvsrppMosaicRestorer(
+                    checkpoint_path=str(restoration_model_path),
+                    device=device,
+                    max_clip_size=settings.max_clip_size,
+                    use_tensorrt=use_tensorrt,
+                    fp16=settings.fp16_mode,
+                ),
+                secondary_restorer=secondary_restorer,
+                denoise_strength=denoise_strength,
+                denoise_step=denoise_step,
             )
-        elif settings.secondary_restoration == "tvai":
-            tvai_args = f"model={settings.tvai_model}:scale={settings.tvai_scale}"
-            if settings.tvai_args.strip():
-                tvai_args = f"{tvai_args}:{settings.tvai_args}"
-            secondary_restorer = TvaiSecondaryRestorer(
+
+            encoder_settings = {}
+            if settings.encoder_cq:
+                encoder_settings["cq"] = settings.encoder_cq
+            if settings.encoder_custom_args:
+                encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
+            encoder_settings = validate_encoder_settings(encoder_settings)
+
+            stream = torch.cuda.Stream()
+
+            last_update_time = [0.0]
+
+            def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
+                current_time = time.time()
+                if current_time - last_update_time[0] < 0.1:
+                    return
+                last_update_time[0] = current_time
+
+                self._pause_event.wait()
+                if self._stop_event.is_set():
+                    raise InterruptedError("Processing stopped")
+
+                self._progress(ProgressUpdate(
+                    job_index=job_idx,
+                    status=JobStatus.PROCESSING,
+                    progress=progress_pct,
+                    fps=fps,
+                    eta_seconds=eta_seconds,
+                    frames_processed=frames_done,
+                    total_frames=total,
+                ))
+
+            pipeline = Pipeline(
+                input_video=input_path,
+                output_video=output_path,
+                detection_model_path=detection_model_path,
+                detection_score_threshold=settings.detection_score_threshold,
+                restoration_pipeline=restoration_pipeline,
+                codec=settings.codec,
+                encoder_settings=encoder_settings,
+                stream=stream,
+                batch_size=settings.batch_size,
                 device=device,
-                ffmpeg_path=settings.tvai_ffmpeg_path,
-                tvai_args=tvai_args,
                 max_clip_size=settings.max_clip_size,
-                num_workers=settings.tvai_workers,
-            )
-            
-        denoise_strength = DenoiseStrength(settings.denoise_strength)
-        denoise_step = DenoiseStep(settings.denoise_step)
-        
-        restoration_pipeline = RestorationPipeline(
-            restorer=BasicvsrppMosaicRestorer(
-                checkpoint_path=str(restoration_model_path),
-                device=device,
-                max_clip_size=settings.max_clip_size,
-                use_tensorrt=use_tensorrt,
+                temporal_overlap=settings.temporal_overlap,
+                enable_crossfade=settings.enable_crossfade,
                 fp16=settings.fp16_mode,
-            ),
-            secondary_restorer=secondary_restorer,
-            denoise_strength=denoise_strength,
-            denoise_step=denoise_step,
-        )
-        
-        encoder_settings = {}
-        if settings.encoder_cq:
-            encoder_settings["cq"] = settings.encoder_cq
-        if settings.encoder_custom_args:
-            encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
-        encoder_settings = validate_encoder_settings(encoder_settings)
-        
-        stream = torch.cuda.Stream()
-        
-        last_update_time = [0.0]  # Use list for mutable closure
-        
-        def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
-            current_time = time.time()
-            if current_time - last_update_time[0] < 0.1:  # Throttle updates
-                return
-            last_update_time[0] = current_time
-            
-            # Check for pause/stop
-            self._pause_event.wait()
-            if self._stop_event.is_set():
-                raise InterruptedError("Processing stopped")
-                
-            self._progress(ProgressUpdate(
-                job_index=job_idx,
-                status=JobStatus.PROCESSING,
-                progress=progress_pct,
-                fps=fps,
-                eta_seconds=eta_seconds,
-                frames_processed=frames_done,
-                total_frames=total,
-            ))
-        
-        # Create pipeline with progress callback
-        pipeline = Pipeline(
-            input_video=input_path,
-            output_video=output_path,
-            detection_model_path=detection_model_path,
-            detection_score_threshold=settings.detection_score_threshold,
-            restoration_pipeline=restoration_pipeline,
-            codec=settings.codec,
-            encoder_settings=encoder_settings,
-            stream=stream,
-            batch_size=settings.batch_size,
-            device=device,
-            max_clip_size=settings.max_clip_size,
-            temporal_overlap=settings.temporal_overlap,
-            enable_crossfade=settings.enable_crossfade,
-            fp16=settings.fp16_mode,
-            disable_progress=True,  # Don't write to console in GUI mode
-            progress_callback=progress_callback,
-        )
-            
-        # Run the pipeline
-        pipeline.run()
+                disable_progress=True,
+                progress_callback=progress_callback,
+            )
+
+            pipeline.run()
+        finally:
+            if secondary_restorer is not None and hasattr(secondary_restorer, "close"):
+                try:
+                    secondary_restorer.close()
+                except Exception as e:
+                    self._log("WARNING", f"Cleanup warning: failed to close secondary restorer: {e}")
+
+            del pipeline
+            del restoration_pipeline
+            del secondary_restorer
+            del stream
+
+            _cleanup_torch(torch)
 
     def _get_unique_output_path(self, output_path: Path) -> Path:
         """Find a unique output path by adding a counter suffix if file exists."""
