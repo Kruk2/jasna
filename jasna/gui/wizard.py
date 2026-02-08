@@ -285,6 +285,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         path = os_utils.find_executable(name)
         if not path:
             return False, "Not found"
+        env = os_utils.get_subprocess_env_for_executable(path)
 
         if name in {"ffmpeg", "ffprobe"}:
             completed = subprocess.run(
@@ -293,6 +294,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text=True,
                 check=False,
                 startupinfo=os_utils.get_subprocess_startup_info(),
+                env=env,
             )
             if completed.returncode != 0:
                 return False, f"Not callable: {path}"
@@ -311,6 +313,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text=True,
                 check=False,
                 startupinfo=os_utils.get_subprocess_startup_info(),
+                env=env,
             )
             if completed.returncode != 0:
                 return False, f"Not callable: {path}"

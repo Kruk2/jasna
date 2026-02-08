@@ -1,27 +1,38 @@
-import os
 import sys
+from pathlib import Path
 
-if len(sys.argv) > 1:
-    if sys.platform == "win32":
-        import ctypes
-        import msvcrt
+argv0_stem = Path(sys.argv[0]).stem.lower()
 
-        kernel32 = ctypes.windll.kernel32
-        ATTACH_PARENT_PROCESS = -1
-        STD_OUTPUT_HANDLE = -11
-        STD_ERROR_HANDLE = -12
+if sys.platform == "win32":
+    if argv0_stem == "jasna-cli":
+        if len(sys.argv) == 1:
+            from jasna.main import build_parser
 
-        if kernel32.AttachConsole(ATTACH_PARENT_PROCESS):
-            for handle_id, stream_name in ((STD_OUTPUT_HANDLE, "stdout"), (STD_ERROR_HANDLE, "stderr")):
-                handle = kernel32.GetStdHandle(handle_id)
-                fd = msvcrt.open_osfhandle(handle, 1)
-                setattr(sys, stream_name, os.fdopen(fd, "w"))
+            build_parser().print_help()
+            raise SystemExit(0)
+
+        from jasna.main import main
+
+        main()
+    elif argv0_stem == "jasna-gui":
+        from jasna.gui import run_gui
+
+        run_gui()
+    else:
+        if len(sys.argv) > 1:
+            from jasna.main import main
+
+            main()
         else:
-            kernel32.AllocConsole()
-            sys.stdout = open("CONOUT$", "w")
-            sys.stderr = open("CONOUT$", "w")
-    from jasna.main import main
-    main()
+            from jasna.gui import run_gui
+
+            run_gui()
 else:
-    from jasna.gui import run_gui
-    run_gui()
+    if len(sys.argv) > 1:
+        from jasna.main import main
+
+        main()
+    else:
+        from jasna.gui import run_gui
+
+        run_gui()

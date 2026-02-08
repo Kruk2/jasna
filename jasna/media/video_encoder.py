@@ -15,7 +15,7 @@ import threading
 import queue
 av.logging.set_level(logging.ERROR)
 
-from jasna.os_utils import resolve_executable
+from jasna.os_utils import get_subprocess_env_for_executable, resolve_executable
 
 def _parse_hevc_nal_units(data: bytes):
     """Parse HEVC NAL units from Annex B bitstream. Returns list of (nal_type, start, end)."""
@@ -94,7 +94,8 @@ def mux_hevc_to_mkv(hevc_path: Path, output_path: Path, pts_list, time_base):
         f"0:{timecodes_path}",
         str(hevc_path),
     ]
-    result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info())
+    env = get_subprocess_env_for_executable(cmd[0])
+    result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info(), env=env)
     if result.returncode != 0:
         raise RuntimeError(f"mkvmerge failed with code {result.returncode}: {' '.join(cmd)}\n{result.stderr.decode()}")
     timecodes_path.unlink()
@@ -141,7 +142,8 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
     if output_path.suffix.lower() in {'.mp4', '.mov'}:
         cmd += ['-movflags', '+faststart']
     cmd.append(str(output_path))
-    result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info())
+    env = get_subprocess_env_for_executable(cmd[0])
+    result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info(), env=env)
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg failed with code {result.returncode}: {' '.join(cmd)}\n{result.stderr.decode()}")
 

@@ -56,7 +56,12 @@ a = Analysis(
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 _build_cli = os.environ.get("BUILD_CLI", "").lower() in ("1", "true", "yes")
-_exe_name = "jasna-cli" if _build_cli else "jasna"
+if os.name == "nt" and not _build_cli:
+    _exe_name = "jasna-gui"
+    _collect_name = "jasna"
+else:
+    _exe_name = "jasna-cli" if _build_cli else "jasna"
+    _collect_name = _exe_name
 _console = True if _build_cli else (os.name != "nt")
 
 exe = EXE(
@@ -87,6 +92,6 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=["_C*.pyd", "torchtrt.dll"],
-    name=_exe_name,
+    name=_collect_name,
 )
 
