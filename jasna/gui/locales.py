@@ -258,8 +258,50 @@ TRANSLATIONS = {
         "engine_name_swin2sr": "Swin2SR (secondary)",
         "engine_basicvsrpp_risky_title": "BasicVSR++ compilation warning",
         "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT compilation may be risky with your GPU VRAM.\n\nGPU VRAM (approx): {vram_gb} GB\nRequested clip size: {requested_clip}\nApprox safe max: {safe_clip}\n\nContinue with compilation anyway? This can take a long time and may run out of VRAM.",
-        "engine_log_risky_accepted": "User accepted risky BasicVSR++ compilation; will proceed.",
-        "engine_log_risky_declined": "User declined risky BasicVSR++ compilation; TensorRT disabled for this run.",
+        # About dialog
+        "dialog_about_title": "About Jasna",
+        "dialog_about_version": "Version {version}",
+        "dialog_about_description": "mosaic restoration tool",
+        "dialog_about_credit": "Inspired by Lada",
+        "btn_close": "Close",
+
+        # Language change dialog
+        "dialog_language_changed": "Language Changed",
+        "dialog_language_restart": "Please restart the application for full language change.",
+
+        # App messages
+        "toast_select_output": "Please select an output folder before starting",
+        "error_cannot_start": "Cannot start processing:",
+        "error_invalid_tvai": "Invalid TVAI configuration",
+
+        # Settings panel
+        "dialog_select_tvai_ffmpeg": "Select Topaz Video AI ffmpeg.exe",
+        "placeholder_encoder_args": "e.g. lookahead=32",
+
+        # Wizard check labels
+        "wizard_window_title": "Jasna - System Check",
+        "wizard_check_ffmpeg": "FFmpeg",
+        "wizard_check_ffprobe": "FFprobe",
+        "wizard_check_mkvmerge": "MKVmerge",
+        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_cuda": "CUDA Runtime",
+        "wizard_check_hags": "Hardware Accelerated GPU Scheduling",
+        "wizard_not_checked": "Not checked",
+        "wizard_not_callable": "Not callable: {path}",
+        "wizard_found_version": "Found: {path} ({version})",
+        "wizard_found_no_major": "Found: {path} (could not detect major version)",
+        "wizard_found_bad_major": "Found: {path} (major={major}, expected=8)",
+        "wizard_found_major": "Found: {path} (major={major})",
+        "wizard_no_cuda": "No CUDA device",
+        "wizard_cuda_version": "CUDA {version}",
+        "wizard_not_available": "Not available",
+
+        # Validation errors
+        "error_tvai_data_dir_not_set": "TVAI_MODEL_DATA_DIR env var is not set",
+        "error_tvai_model_dir_not_set": "TVAI_MODEL_DIR env var is not set",
+        "error_tvai_data_dir_missing": "TVAI_MODEL_DATA_DIR does not point to an existing directory: {path}",
+        "error_tvai_model_dir_missing": "TVAI_MODEL_DIR does not point to an existing directory: {path}",
+        "error_tvai_ffmpeg_not_found": "TVAI ffmpeg not found: {path}",
     },
     
     "zh": {
@@ -281,7 +323,7 @@ TRANSLATIONS = {
         "queue_empty": "拖放文件到这里\n或使用上方按钮",
         "items_queued": "队列中有 {count} 个项目",
         "btn_clear": "🗑 清空",
-        "btn_clear_completed": "✓ 清除完成",
+        "btn_clear_completed": "✓ 清除已完成",
         "output_location": "输出位置",
         "output_pattern_placeholder": "{original}_restored.mp4",
         "same_as_input": "与输入相同",
@@ -360,7 +402,7 @@ TRANSLATIONS = {
         "btn_stop": "⏹ 停止",
         "progress": "进度",
         "time_remaining": "剩余时间",
-        "no_file_processing": "无文件处理",
+        "no_file_processing": "未在处理文件",
         "queue_label": "队列",
         "logs_btn": ">_ 日志",
         
@@ -452,47 +494,295 @@ TRANSLATIONS = {
         "engine_name_swin2sr": "Swin2SR（二次）",
         "engine_basicvsrpp_risky_title": "BasicVSR++ 编译警告",
         "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT 编译可能会因显存不足而存在风险。\n\n显存（约）：{vram_gb} GB\n请求的片段大小：{requested_clip}\n建议安全上限：{safe_clip}\n\n仍要继续编译吗？这可能耗时很长并且可能会因显存不足而失败。",
-        "engine_log_risky_accepted": "用户确认继续进行有风险的 BasicVSR++ 编译，将继续执行。",
-        "engine_log_risky_declined": "用户拒绝进行有风险的 BasicVSR++ 编译，本次运行将禁用 TensorRT。",
+        # About dialog
+        "dialog_about_title": "关于 Jasna",
+        "dialog_about_version": "版本 {version}",
+        "dialog_about_description": "马赛克修复工具",
+        "dialog_about_credit": "灵感来源于 Lada",
+        "btn_close": "关闭",
+
+        # Language change dialog
+        "dialog_language_changed": "语言已更改",
+        "dialog_language_restart": "请重启应用程序以完成语言切换。",
+
+        # App messages
+        "toast_select_output": "请在开始前选择输出文件夹",
+        "error_cannot_start": "无法开始处理：",
+        "error_invalid_tvai": "无效的 TVAI 配置",
+
+        # Settings panel
+        "dialog_select_tvai_ffmpeg": "选择 Topaz Video AI ffmpeg.exe",
+        "placeholder_encoder_args": "例如 lookahead=32",
+
+        # Wizard check labels
+        "wizard_window_title": "Jasna - 系统检查",
+        "wizard_check_ffmpeg": "FFmpeg",
+        "wizard_check_ffprobe": "FFprobe",
+        "wizard_check_mkvmerge": "MKVmerge",
+        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_cuda": "CUDA 运行时",
+        "wizard_check_hags": "硬件加速 GPU 调度",
+        "wizard_not_checked": "未检查",
+        "wizard_not_callable": "无法调用：{path}",
+        "wizard_found_version": "已找到：{path}（{version}）",
+        "wizard_found_no_major": "已找到：{path}（无法检测主版本号）",
+        "wizard_found_bad_major": "已找到：{path}（主版本={major}，期望=8）",
+        "wizard_found_major": "已找到：{path}（主版本={major}）",
+        "wizard_no_cuda": "无 CUDA 设备",
+        "wizard_cuda_version": "CUDA {version}",
+        "wizard_not_available": "不可用",
+
+        # Validation errors
+        "error_tvai_data_dir_not_set": "环境变量 TVAI_MODEL_DATA_DIR 未设置",
+        "error_tvai_model_dir_not_set": "环境变量 TVAI_MODEL_DIR 未设置",
+        "error_tvai_data_dir_missing": "TVAI_MODEL_DATA_DIR 指向的目录不存在：{path}",
+        "error_tvai_model_dir_missing": "TVAI_MODEL_DIR 指向的目录不存在：{path}",
+        "error_tvai_ffmpeg_not_found": "TVAI ffmpeg 未找到：{path}",
     },
-    
-    "es": {
+
+    "ja": {
+        # App
         "app_title": "JASNA GUI",
-        "status_idle": "INACTIVO",
-        "status_processing": "PROCESANDO",
-        "btn_help": "Ayuda",
-        "btn_about": "Acerca de",
-        "language": "Idioma",
-        "btn_add_files": "📁 Añadir Archivos",
-        "btn_start": "▶ Iniciar",
-        "btn_pause": "⏸ Pausar",
-        "btn_stop": "⏹ Detener",
+        "status_idle": "待機中",
+        "status_processing": "処理中",
+        "status_paused": "一時停止",
+        "status_completed": "完了",
+        "status_error": "エラー",
+
+        # Header
+        "btn_help": "ヘルプ",
+        "btn_about": "このアプリについて",
+        "language": "言語",
+
+        # Queue Panel
+        "btn_add_files": "📁 ファイル追加",
+        "queue_empty": "ここにファイルをドラッグ＆ドロップ\nまたは上のボタンを使用",
+        "items_queued": "{count} 件がキューに追加済み",
+        "btn_clear": "🗑 クリア",
+        "btn_clear_completed": "✓ 完了済みを削除",
+        "output_location": "出力先",
+        "output_pattern_placeholder": "{original}_restored.mp4",
+        "same_as_input": "入力と同じ",
+        "select_video_files": "動画ファイルを選択",
+        "select_folder": "フォルダを選択",
+        "select_output_folder": "出力フォルダを選択",
+
+        # Job Status
+        "job_pending": "待機中",
+        "job_processing": "処理中",
+        "job_completed": "完了",
+        "job_error": "エラー",
+        "job_paused": "一時停止",
+        "job_skipped": "スキップ",
+
+        # Settings Panel
+        "preset": "プリセット:",
+        "btn_create": "+",
+        "btn_save": "💾",
+        "btn_delete": "🗑",
+        "btn_reset": "↺",
+
+        # Sections
+        "section_basic": "基本設定",
+        "section_advanced": "詳細設定",
+        "section_secondary": "二次修復",
+        "section_encoding": "エンコード",
+
+        # Basic Processing
+        "max_clip_size": "最大クリップサイズ",
+        "detection_model": "検出モデル",
+        "detection_threshold": "検出しきい値",
+        "fp16_mode": "FP16 モード",
+        "compile_basicvsrpp": "BasicVSR++ コンパイル",
+        "file_conflict": "ファイル競合",
+        "file_conflict_auto_rename": "自動リネーム",
+        "file_conflict_overwrite": "上書き",
+        "file_conflict_skip": "スキップ",
+        "file_conflict_overwrite_warning": "既存ファイルは完全に置き換えられます",
+        "tip_file_conflict": "出力ファイルが既に存在する場合の動作",
+        "conflict_tooltip": "出力ファイルが既に存在します",
+        "renamed_output": "出力ファイルが既に存在します。{filename} にリネームしました",
+
+        # Advanced Processing
+        "temporal_overlap": "時間オーバーラップ",
+        "enable_crossfade": "クロスフェード有効化",
+        "denoise_strength": "ノイズ除去強度",
+        "denoise_step": "ノイズ除去適用タイミング",
+        "denoise_none": "なし",
+        "denoise_low": "低",
+        "denoise_medium": "中",
+        "denoise_high": "高",
+        "after_primary": "一次修復後",
+        "after_secondary": "二次修復後",
+
+        # Secondary Restoration
+        "secondary_none": "なし",
+        "secondary_swin2sr": "Swin2SR",
+        "secondary_tvai": "Topaz TVAI",
+        "batch_size": "バッチサイズ",
+        "compile_model": "モデルコンパイル",
+        "ffmpeg_path": "FFmpeg パス",
+        "model": "モデル",
+        "scale": "スケール",
+        "workers": "ワーカー数",
+
+        # Encoding
+        "codec": "コーデック",
+        "quality_cq": "品質 (CQ)",
+        "custom_args": "カスタム引数",
+
+        # Control Bar
+        "btn_start": "▶ 開始",
+        "btn_pause": "⏸ 一時停止",
+        "btn_resume": "▶ 再開",
+        "btn_stop": "⏹ 停止",
+        "progress": "進捗",
+        "time_remaining": "残り時間",
+        "no_file_processing": "処理中のファイルなし",
+        "queue_label": "キュー",
+        "logs_btn": ">_ ログ",
+
+        # Log Panel
+        "logs": "ログ",
+        "btn_export": "エクスポート",
+        "btn_toggle_logs": "ログ ▼",
+        "filter_all": "すべて",
+        "filter_debug": "デバッグ",
+        "filter_info": "情報",
+        "filter_warn": "警告",
+        "filter_error": "エラー",
+        "system_output": "システム出力",
+        "filter_all_levels": "全レベル",
+        "filter_errors_only": "エラーのみ",
+        "filter_warnings_plus": "警告以上",
+        "filter_info_plus": "情報以上",
+
+        # Wizard
+        "wizard_title": "システムチェック",
+        "wizard_subtitle": "必要な依存関係を確認中...",
+        "wizard_checking": "確認中...",
+        "wizard_found": "検出: {path}",
+        "wizard_not_found": "PATH に見つかりません",
+        "wizard_all_passed": "✓ すべてのチェックに合格しました！準備完了です。",
+        "wizard_some_failed": "⚠ 一部の依存関係が不足しています。README のセットアップ手順を確認してください。",
+        "btn_get_started": "開始する",
+        "btn_continue_anyway": "続行する",
         "btn_ok": "OK",
-        # Add more as needed...
+
+        # Dialogs
+        "dialog_create_preset": "プリセット作成",
+        "preset_name": "プリセット名",
+        "preset_placeholder": "カスタムプリセット",
+        "error_name_empty": "名前を入力してください",
+        "error_name_exists": "この名前は既に使用されています",
+        "btn_create_preset": "作成",
+        "btn_cancel": "キャンセル",
+        "dialog_delete_preset": "プリセット削除",
+        "confirm_delete": "プリセット '{name}' を削除しますか？",
+        "btn_delete_confirm": "削除",
+
+        # Toasts
+        "toast_preset_saved": "プリセット '{name}' を保存しました",
+        "toast_preset_created": "プリセット '{name}' を作成しました",
+        "toast_preset_deleted": "プリセット '{name}' を削除しました",
+        "toast_settings_reset": "設定をリセットしました",
+        "toast_no_files": "キューにファイルがありません",
+        "toast_started": "処理を開始しました",
+        "toast_paused": "処理を一時停止しました",
+        "toast_resumed": "処理を再開しました",
+        "toast_stopped": "処理を停止しました",
+        # Buy Me a Coffee
+        "bmc_support": "応援する",
+
+        # Tooltips (from CLI)
+        "tip_max_clip_size": "トラッキングの最大クリップサイズ",
+        "tip_temporal_overlap": "オーバーラップ＋破棄によるクリップ分割の破棄マージン。各分割は 2*temporal_overlap の入力オーバーラップを使用し、各境界で temporal_overlap フレームを破棄します",
+        "tip_enable_crossfade": "クリップ境界間でクロスフェードを行い、つなぎ目のちらつきを軽減します。処理済みだが破棄されるフレームを使用するため、追加の GPU コストはかかりません",
+        "tip_fp16_mode": "対応する処理で FP16 を使用（修復 + TensorRT）。VRAM 使用量を削減し、パフォーマンスが向上する場合があります",
+        "tip_compile_basicvsrpp": "BasicVSR++ をコンパイルして大幅なパフォーマンス向上を実現（VRAM 使用量が増加します）。大きなクリップサイズの使用は推奨されません",
+        "tip_denoise_strength": "修復されたクロップに適用する空間ノイズ除去の強度。ノイズアーティファクトを低減します",
+        "tip_denoise_step": "ノイズ除去の適用タイミング: after_primary（二次修復前）または after_secondary（ブレンド直前）",
+        "tip_secondary_restoration": "一次モデルの後に行う二次修復",
+        "tip_swin2sr_batch_size": "Swin2SR 二次修復のバッチサイズ",
+        "tip_swin2sr_compilation": "対応環境で Swin2SR TensorRT コンパイル/使用を有効化",
+        "tip_tvai_ffmpeg_path": "Topaz Video AI の ffmpeg.exe のパス",
+        "tip_tvai_model": "tvai_up の Topaz モデル名（例: iris-2, prob-4, iris-3）",
+        "tip_tvai_scale": "Topaz tvai_up のスケール（1=スケールなし）。出力サイズは 256*scale",
+        "tip_tvai_workers": "並列 TVAI ffmpeg ワーカー数",
+        "tip_detection_model": "検出モデルのバージョン",
+        "tip_detection_score_threshold": "検出スコアのしきい値",
+        "tip_codec": "出力動画コーデック（現在は HEVC のみ対応）",
+        "tip_encoder_cq": "エンコーダーの固定品質値（低い値 = 高品質・大きなファイル）",
+        "tip_encoder_custom_args": "エンコーダー設定（カンマ区切りの key=value 形式。例: cq=22,lookahead=32）",
+
+        # Preset button tooltips
+        "tip_preset_reset": "保存済みの値にリセット",
+        "tip_preset_delete": "プリセットを削除",
+        "tip_preset_save": "プリセットを保存",
+        "tip_preset_create": "新しいプリセットを作成",
+
+        # Engine compilation / first run warnings
+        "engine_first_run_title": "初回起動は時間がかかる場合があります",
+        "engine_first_run_body": "一部の TensorRT エンジンが見つからず、お使いの GPU 向けにコンパイルされる場合があります。初回起動時にはこれは正常です。コンパイル中はアプリケーションが応答しないように見える場合がありますが、閉じないでください。",
+        "engine_first_run_missing": "不足しているエンジン:",
+        "engine_name_rfdetr": "RF-DETR（検出）",
+        "engine_name_basicvsrpp": "BasicVSR++（修復）",
+        "engine_name_swin2sr": "Swin2SR（二次）",
+        "engine_basicvsrpp_risky_title": "BasicVSR++ コンパイル警告",
+        "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT のコンパイルは、GPU の VRAM 不足によりリスクがあります。\n\nGPU VRAM（概算）: {vram_gb} GB\n要求クリップサイズ: {requested_clip}\n推定安全上限: {safe_clip}\n\nこのままコンパイルを続行しますか？長時間かかる可能性があり、VRAM 不足で失敗する場合があります。",
+        # About dialog
+        "dialog_about_title": "Jasna について",
+        "dialog_about_version": "バージョン {version}",
+        "dialog_about_description": "モザイク修復ツール",
+        "dialog_about_credit": "Lada にインスパイア",
+        "btn_close": "閉じる",
+
+        # Language change dialog
+        "dialog_language_changed": "言語が変更されました",
+        "dialog_language_restart": "言語変更を完全に反映するには、アプリケーションを再起動してください。",
+
+        # App messages
+        "toast_select_output": "開始前に出力フォルダを選択してください",
+        "error_cannot_start": "処理を開始できません:",
+        "error_invalid_tvai": "無効な TVAI 設定",
+
+        # Settings panel
+        "dialog_select_tvai_ffmpeg": "Topaz Video AI の ffmpeg.exe を選択",
+        "placeholder_encoder_args": "例: lookahead=32",
+
+        # Wizard check labels
+        "wizard_window_title": "Jasna - システムチェック",
+        "wizard_check_ffmpeg": "FFmpeg",
+        "wizard_check_ffprobe": "FFprobe",
+        "wizard_check_mkvmerge": "MKVmerge",
+        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_cuda": "CUDA ランタイム",
+        "wizard_check_hags": "ハードウェアアクセラレータによる GPU スケジューリング",
+        "wizard_not_checked": "未確認",
+        "wizard_not_callable": "実行不可: {path}",
+        "wizard_found_version": "検出: {path}（{version}）",
+        "wizard_found_no_major": "検出: {path}（メジャーバージョンを検出できません）",
+        "wizard_found_bad_major": "検出: {path}（major={major}, 期待値=8）",
+        "wizard_found_major": "検出: {path}（major={major}）",
+        "wizard_no_cuda": "CUDA デバイスなし",
+        "wizard_cuda_version": "CUDA {version}",
+        "wizard_not_available": "利用不可",
+
+        # Validation errors
+        "error_tvai_data_dir_not_set": "環境変数 TVAI_MODEL_DATA_DIR が設定されていません",
+        "error_tvai_model_dir_not_set": "環境変数 TVAI_MODEL_DIR が設定されていません",
+        "error_tvai_data_dir_missing": "TVAI_MODEL_DATA_DIR が既存のディレクトリを指していません: {path}",
+        "error_tvai_model_dir_missing": "TVAI_MODEL_DIR が既存のディレクトリを指していません: {path}",
+        "error_tvai_ffmpeg_not_found": "TVAI ffmpeg が見つかりません: {path}",
     },
-    
-    "de": {
-        "app_title": "JASNA GUI",
-        "status_idle": "BEREIT",
-        "status_processing": "VERARBEITUNG",
-        "btn_help": "Hilfe",
-        "btn_about": "Über",
-        "language": "Sprache",
-        "btn_add_files": "📁 Dateien hinzufügen",
-        "btn_start": "▶ Starten",
-        "btn_pause": "⏸ Pause",
-        "btn_stop": "⏹ Stopp",
-        "btn_ok": "OK",
-        # Add more as needed...
-    },
+
 }
 
 
 LANGUAGE_NAMES = {
     "en": "English",
     "zh": "简体中文",
-    "es": "Español",
-    "de": "Deutsch",
+    "ja": "日本語",
 }
 
 
@@ -531,6 +821,8 @@ class LocaleManager:
                 lang, _ = _locale.getdefaultlocale()
                 if lang and lang.startswith("zh"):
                     self._current_lang = "zh"
+                elif lang and lang.startswith("ja"):
+                    self._current_lang = "ja"
             except Exception:
                 # Fall back to default 'en'
                 pass

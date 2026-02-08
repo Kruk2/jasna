@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
 from jasna.gui.validation import validate_gui_start
 
@@ -20,8 +21,8 @@ def test_validate_gui_start_tvai_missing_env_vars(tmp_path: Path, monkeypatch) -
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
 
     errors = validate_gui_start(settings)
-    assert "TVAI_MODEL_DATA_DIR env var is not set" in errors
-    assert "TVAI_MODEL_DIR env var is not set" in errors
+    assert t("error_tvai_data_dir_not_set") in errors
+    assert t("error_tvai_model_dir_not_set") in errors
 
 
 def test_validate_gui_start_tvai_env_dirs_must_exist(tmp_path: Path, monkeypatch) -> None:
@@ -33,8 +34,9 @@ def test_validate_gui_start_tvai_env_dirs_must_exist(tmp_path: Path, monkeypatch
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
 
     errors = validate_gui_start(settings)
-    assert any(e.startswith("TVAI_MODEL_DATA_DIR does not point to an existing directory:") for e in errors)
-    assert any(e.startswith("TVAI_MODEL_DIR does not point to an existing directory:") for e in errors)
+    assert len(errors) == 2
+    assert str(tmp_path / "missing_data") in errors[0]
+    assert str(tmp_path / "missing_model") in errors[1]
 
 
 def test_validate_gui_start_tvai_ffmpeg_path_must_exist(tmp_path: Path, monkeypatch) -> None:
@@ -47,7 +49,8 @@ def test_validate_gui_start_tvai_ffmpeg_path_must_exist(tmp_path: Path, monkeypa
 
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(tmp_path / "missing_ffmpeg.exe"))
     errors = validate_gui_start(settings)
-    assert any(e.startswith("TVAI ffmpeg not found:") for e in errors)
+    assert len(errors) == 1
+    assert str(tmp_path / "missing_ffmpeg.exe") in errors[0]
 
 
 def test_validate_gui_start_tvai_ok(tmp_path: Path, monkeypatch) -> None:
@@ -63,4 +66,3 @@ def test_validate_gui_start_tvai_ok(tmp_path: Path, monkeypatch) -> None:
 
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
     assert validate_gui_start(settings) == []
-

@@ -24,7 +24,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._checks_passed = True
         self._check_results = {}
         
-        self.title("Jasna - System Check")
+        self.title(t("wizard_window_title"))
         self.resizable(True, False)
         self.configure(fg_color=Colors.BG_MAIN)
 
@@ -63,7 +63,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         
         self._subtitle = ctk.CTkLabel(
             self._header,
-            text=t("wizard_checking") if hasattr(t, '__call__') and t("wizard_checking") != "wizard_checking" else "Checking system requirements...",
+            text=t("wizard_subtitle"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             text_color=Colors.TEXT_SECONDARY,
         )
@@ -78,14 +78,14 @@ class FirstRunWizard(ctk.CTkToplevel):
         
         self._check_labels = {}
         checks = [
-            ("ffmpeg", "FFmpeg"),
-            ("ffprobe", "FFprobe"),
-            ("mkvmerge", "MKVmerge"),
-            ("gpu", "NVIDIA GPU"),
-            ("cuda", "CUDA Runtime"),
+            ("ffmpeg", t("wizard_check_ffmpeg")),
+            ("ffprobe", t("wizard_check_ffprobe")),
+            ("mkvmerge", t("wizard_check_mkvmerge")),
+            ("gpu", t("wizard_check_gpu")),
+            ("cuda", t("wizard_check_cuda")),
         ]
         if os.name == "nt":
-            checks.append(("hags", "Hardware Accelerated GPU Scheduling"))
+            checks.append(("hags", t("wizard_check_hags")))
         
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
@@ -93,7 +93,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             
             status_label = ctk.CTkLabel(
                 row,
-                text="○",  # Loading indicator
+                text="○",
                 font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
                 text_color=Colors.TEXT_MUTED,
                 width=24,
@@ -110,7 +110,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             
             info_label = ctk.CTkLabel(
                 row,
-                text="Checking...",
+                text=t("wizard_checking"),
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
                 text_color=Colors.TEXT_MUTED,
                 justify="right",
@@ -130,7 +130,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         
         self._continue_btn = ctk.CTkButton(
             btn_container,
-            text=t("btn_get_started") if hasattr(t, '__call__') else "Get Started",
+            text=t("btn_get_started"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL, "bold"),
             fg_color=Colors.PRIMARY,
             hover_color=Colors.PRIMARY_HOVER,
@@ -170,7 +170,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._subtitle.configure(text=subtitle_text, text_color=subtitle_color)
 
         for key, (status_label, info_label) in self._check_labels.items():
-            passed, info = self._check_results.get(key, (False, "Not checked"))
+            passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
             status_label.configure(
                 text="✓" if passed else "✕",
                 text_color=Colors.STATUS_COMPLETED if passed else Colors.STATUS_ERROR,
@@ -209,20 +209,20 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._checks_frame.pack(fill="both", expand=True, padx=40, pady=20)
         
         checks = [
-            ("ffmpeg", "FFmpeg"),
-            ("ffprobe", "FFprobe"),
-            ("mkvmerge", "MKVmerge"),
-            ("gpu", "NVIDIA GPU"),
-            ("cuda", "CUDA Runtime"),
+            ("ffmpeg", t("wizard_check_ffmpeg")),
+            ("ffprobe", t("wizard_check_ffprobe")),
+            ("mkvmerge", t("wizard_check_mkvmerge")),
+            ("gpu", t("wizard_check_gpu")),
+            ("cuda", t("wizard_check_cuda")),
         ]
         if os.name == "nt":
-            checks.append(("hags", "Hardware Accelerated GPU Scheduling"))
+            checks.append(("hags", t("wizard_check_hags")))
 
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
             row.pack(fill="x", padx=20, pady=8)
             
-            passed, info = self._check_results.get(key, (False, "Not checked"))
+            passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
             
             status_label = ctk.CTkLabel(
                 row,
@@ -285,7 +285,7 @@ class FirstRunWizard(ctk.CTkToplevel):
     def _check_executable(self, name: str) -> tuple[bool, str]:
         path = os_utils.find_executable(name)
         if not path:
-            return False, "Not found"
+            return False, t("wizard_not_found")
         env = os_utils.get_subprocess_env_for_executable(path)
 
         if name in {"ffmpeg", "ffprobe"}:
@@ -298,14 +298,14 @@ class FirstRunWizard(ctk.CTkToplevel):
                 env=env,
             )
             if completed.returncode != 0:
-                return False, f"Not callable: {path}"
+                return False, t("wizard_not_callable", path=path)
             try:
                 major = os_utils._parse_ffmpeg_major_version((completed.stdout or "") + (completed.stderr or ""))
             except ValueError:
-                return False, f"Found: {path} (could not detect major version)"
+                return False, t("wizard_found_no_major", path=path)
             if major != 8:
-                return False, f"Found: {path} (major={major}, expected=8)"
-            return True, f"Found: {path} (major={major})"
+                return False, t("wizard_found_bad_major", path=path, major=major)
+            return True, t("wizard_found_major", path=path, major=major)
 
         if name == "mkvmerge":
             completed = subprocess.run(
@@ -317,12 +317,12 @@ class FirstRunWizard(ctk.CTkToplevel):
                 env=env,
             )
             if completed.returncode != 0:
-                return False, f"Not callable: {path}"
+                return False, t("wizard_not_callable", path=path)
             first = ((completed.stdout or "") + (completed.stderr or "")).splitlines()
             ver = first[0].strip() if first else "OK"
-            return True, f"Found: {path} ({ver})"
+            return True, t("wizard_found_version", path=path, version=ver)
 
-        return True, f"Found: {path}"
+        return True, t("wizard_found", path=path)
         
     def _check_gpu(self) -> tuple[bool, str]:
         try:
@@ -330,7 +330,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             if torch.cuda.is_available():
                 gpu_name = torch.cuda.get_device_name(0)
                 return True, gpu_name
-            return False, "No CUDA device"
+            return False, t("wizard_no_cuda")
         except Exception as e:
             return False, str(e)
             
@@ -339,8 +339,8 @@ class FirstRunWizard(ctk.CTkToplevel):
             import torch
             if torch.cuda.is_available():
                 version = torch.version.cuda
-                return True, f"CUDA {version}"
-            return False, "Not available"
+                return True, t("wizard_cuda_version", version=version)
+            return False, t("wizard_not_available")
         except Exception as e:
             return False, str(e)
             
