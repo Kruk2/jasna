@@ -95,7 +95,11 @@ class Processor:
     def stop(self):
         self._stop_event.set()
         self._pause_event.set()  # Unpause to allow thread to exit
-        
+
+    def join(self, timeout: float = 5.0):
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=timeout)
+
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
         
