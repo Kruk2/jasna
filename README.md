@@ -44,7 +44,7 @@ Download the latest release package (Windows/Linux).
 
 - **If you downloaded the app (recommended)**:
   - **Windows**: You’re good to go — Jasna ships with everything it needs (`ffmpeg`, `ffprobe`, and `mkvmerge`).
-  - **Linux**: Jasna ships with `ffmpeg` and `ffprobe`. You still need `mkvmerge` available on your system (usually via your package manager). You can also get it by installing MKVToolNix: [downloads](https://mkvtoolnix.download/downloads.html).
+  - **Linux**: You need `ffmpeg`, `ffprobe` (**major version must be 8**), and `mkvmerge` available on your system. Install via your package manager. MKVToolNix: [downloads](https://mkvtoolnix.download/downloads.html).
 
 **First run might be slow because models will be compiled for your hardware (you can copy .engine files from model_weights to a new version!)**
 

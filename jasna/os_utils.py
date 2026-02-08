@@ -53,27 +53,6 @@ def resolve_executable(name: str) -> str:
     return found if found is not None else name
 
 
-def get_subprocess_env_for_executable(executable_path: str) -> dict[str, str] | None:
-    if sys.platform == "win32" or not getattr(sys, "frozen", False):
-        return None
-
-    p = Path(executable_path)
-    tools_dir = Path(sys.executable).parent / "_internal" / "tools"
-    lib_dir = tools_dir / "lib"
-    if not lib_dir.is_dir():
-        return None
-
-    if not p.is_absolute():
-        return None
-
-    if not p.is_relative_to(tools_dir):
-        return None
-
-    env = os.environ.copy()
-    existing = env.get("LD_LIBRARY_PATH", "")
-    env["LD_LIBRARY_PATH"] = f"{lib_dir}:{existing}" if existing else str(lib_dir)
-    return env
-
 
 def get_subprocess_startup_info():
     if os.name != "nt":
@@ -129,14 +108,12 @@ def check_required_executables(disable_ffmpeg_check: bool = False) -> None:
             missing.append(exe)
             continue
         cmd = [exe_path] + list(args)
-        env = get_subprocess_env_for_executable(exe_path)
         try:
             completed = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 check=False,
-                env=env,
             )
         except OSError:
             missing.append(exe)
