@@ -6,6 +6,23 @@ from jasna.bootstrap import sanitize_sys_path_for_local_dev
 if not getattr(sys, "frozen", False):
     sanitize_sys_path_for_local_dev(Path(__file__).resolve().parent)
 
+
+def _preload_native_libs():
+    """Import native GPU libraries before tkinter on Linux.
+
+    On Linux, loading Tcl/Tk (via customtkinter) first introduces shared
+    library conflicts that prevent _python_vali and PyNvVideoCodec native
+    extensions from initializing. Importing them before tkinter avoids this.
+    """
+    if sys.platform != "linux":
+        return
+    for mod in ("python_vali", "PyNvVideoCodec"):
+        try:
+            __import__(mod)
+        except Exception:
+            pass
+
+
 argv0_stem = Path(sys.argv[0]).stem.lower()
 
 if sys.platform == "win32":
@@ -20,6 +37,7 @@ if sys.platform == "win32":
 
         main()
     elif argv0_stem == "jasna-gui":
+        _preload_native_libs()
         from jasna.gui import run_gui
 
         run_gui()
@@ -29,6 +47,7 @@ if sys.platform == "win32":
 
             main()
         else:
+            _preload_native_libs()
             from jasna.gui import run_gui
 
             run_gui()
@@ -38,6 +57,7 @@ else:
 
         main()
     else:
+        _preload_native_libs()
         from jasna.gui import run_gui
 
         run_gui()
