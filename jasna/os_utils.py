@@ -9,6 +9,50 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _bundled_exe_filename(name: str) -> str:
+    if os.name == "nt" and not name.lower().endswith(".exe"):
+        return f"{name}.exe"
+    return name
+
+
+def _find_bundled_executable(name: str) -> Path | None:
+    if not getattr(sys, "frozen", False):
+        return None
+
+    exe = _bundled_exe_filename(name)
+    base = Path(sys.executable).parent
+    internal = base / "_internal"
+
+    if name in {"ffmpeg", "ffprobe"}:
+        p = internal / "tools" / exe
+        return p if p.is_file() else None
+
+    if name == "mkvmerge":
+        root = internal / "mkvtoolnix"
+        direct = root / exe
+        if direct.is_file():
+            return direct
+        if root.is_dir():
+            for candidate in root.rglob(exe):
+                if candidate.is_file():
+                    return candidate
+        return None
+
+    return None
+
+
+def find_executable(name: str) -> str | None:
+    bundled = _find_bundled_executable(name)
+    if bundled is not None:
+        return str(bundled)
+    return shutil.which(name)
+
+
+def resolve_executable(name: str) -> str:
+    found = find_executable(name)
+    return found if found is not None else name
+
+
 def get_subprocess_startup_info():
     if os.name != "nt":
         return None
@@ -51,16 +95,18 @@ def check_required_executables(disable_ffmpeg_check: bool = False) -> None:
     missing: list[str] = []
     wrong_version: list[str] = []
     checks = {
-        "ffprobe": ["ffprobe", "-version"],
-        "ffmpeg": ["ffmpeg", "-version"],
-        "mkvmerge": ["mkvmerge", "--version"],
+        "ffprobe": ["-version"],
+        "ffmpeg": ["-version"],
+        "mkvmerge": ["--version"],
     }
     if disable_ffmpeg_check:
         checks = {k: v for k, v in checks.items() if k != "ffprobe" and k != "ffmpeg"}
-    for exe, cmd in checks.items():
-        if shutil.which(exe) is None:
+    for exe, args in checks.items():
+        exe_path = find_executable(exe)
+        if exe_path is None:
             missing.append(exe)
             continue
+        cmd = [exe_path] + list(args)
         try:
             completed = subprocess.run(
                 cmd,

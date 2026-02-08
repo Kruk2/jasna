@@ -3,6 +3,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+import stat
+import urllib.request
+import zipfile
 
 distpath = "dist_linux" if os.name != "nt" else "dist"
 env = os.environ.copy()
@@ -21,7 +24,32 @@ for name in [
 ]:
     shutil.copy(Path("model_weights") / name, out / "model_weights" / name)
 
+internal = out / "_internal"
+tools_dir = internal / "tools"
+tools_dir.mkdir(parents=True, exist_ok=True)
+
+for tool in ["ffmpeg", "ffprobe"]:
+    tool_path = shutil.which(tool)
+    if tool_path is None:
+        raise FileNotFoundError(f"Could not find {tool!r} in PATH while building.")
+    dst = tools_dir / Path(tool_path).name
+    shutil.copy2(tool_path, dst)
+    if os.name != "nt":
+        os.chmod(dst, os.stat(dst).st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+if os.name == "nt":
+    mkvtoolnix_url = "https://github.com/Kruk2/jasna/releases/download/0.1/mkvtoolnix.zip"
+    zip_path = internal / "mkvtoolnix.zip"
+    mkvtoolnix_dir = internal / "mkvtoolnix"
+    if mkvtoolnix_dir.exists():
+        shutil.rmtree(mkvtoolnix_dir)
+    if zip_path.exists():
+        zip_path.unlink()
+    urllib.request.urlretrieve(mkvtoolnix_url, zip_path)
+    with zipfile.ZipFile(zip_path) as zf:
+        zf.extractall(mkvtoolnix_dir)
+    zip_path.unlink()
+
 if os.name != "nt":
-    internal = out / "_internal"
     for f in (internal / "tensorrt_libs").glob("libnvinfer_builder_resource_win.so.*"):
         f.unlink()
