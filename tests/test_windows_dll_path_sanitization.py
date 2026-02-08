@@ -42,3 +42,25 @@ def test_sanitize_linux_ld_library_path_removes_usr_local_cuda_and_prepends_pref
     assert "/usr/lib/x86_64-linux-gnu" in out
     assert "/opt/other/lib" in out
 
+
+def test_sanitize_linux_ld_library_path_keeps_bundled_nvidia_dirs() -> None:
+    bundled_nvidia_dirs = [
+        "/opt/jasna/_internal/nvidia/cu13/lib",
+        "/opt/jasna/_internal/nvidia/cudnn/lib",
+    ]
+    preferred = ["/opt/jasna/_internal"] + bundled_nvidia_dirs
+    original = ":".join(
+        [
+            "/usr/local/cuda/lib64",
+            "/opt/jasna/_internal/nvidia/cu13/lib",
+            "/opt/jasna/_internal/nvidia/cudnn/lib",
+            "/usr/lib/x86_64-linux-gnu",
+        ]
+    )
+
+    out = sanitize_linux_ld_library_path_for_cuda(original, preferred_dirs=preferred, cuda_roots=["/usr/local/cuda"])
+
+    assert "/usr/local/cuda" not in out
+    for d in bundled_nvidia_dirs:
+        assert d in out
+
