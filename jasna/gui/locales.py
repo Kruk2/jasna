@@ -248,6 +248,18 @@ TRANSLATIONS = {
         "tip_preset_delete": "Delete preset",
         "tip_preset_save": "Save preset",
         "tip_preset_create": "Create new preset",
+
+        # Engine compilation / first run warnings
+        "engine_first_run_title": "First run may be slow",
+        "engine_first_run_body": "Some TensorRT engines are missing and may be compiled for your GPU. This is normal on the first run. The application may appear unresponsive during compilation. Do not close it.",
+        "engine_first_run_missing": "Missing engines:",
+        "engine_name_rfdetr": "RF-DETR (detection)",
+        "engine_name_basicvsrpp": "BasicVSR++ (restoration)",
+        "engine_name_swin2sr": "Swin2SR (secondary)",
+        "engine_basicvsrpp_risky_title": "BasicVSR++ compilation warning",
+        "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT compilation may be risky with your GPU VRAM.\n\nGPU VRAM (approx): {vram_gb} GB\nRequested clip size: {requested_clip}\nApprox safe max: {safe_clip}\n\nContinue with compilation anyway? This can take a long time and may run out of VRAM.",
+        "engine_log_risky_accepted": "User accepted risky BasicVSR++ compilation; will proceed.",
+        "engine_log_risky_declined": "User declined risky BasicVSR++ compilation; TensorRT disabled for this run.",
     },
     
     "zh": {
@@ -430,6 +442,18 @@ TRANSLATIONS = {
         "tip_preset_delete": "删除预设",
         "tip_preset_save": "保存预设",
         "tip_preset_create": "创建新预设",
+
+        # Engine compilation / first run warnings
+        "engine_first_run_title": "首次运行可能较慢",
+        "engine_first_run_body": "检测到部分 TensorRT 引擎缺失，Jasna 可能需要为你的 GPU 进行编译。首次运行出现这种情况是正常的。编译期间应用可能看起来无响应，请不要关闭。",
+        "engine_first_run_missing": "缺失的引擎：",
+        "engine_name_rfdetr": "RF-DETR（检测）",
+        "engine_name_basicvsrpp": "BasicVSR++（修复）",
+        "engine_name_swin2sr": "Swin2SR（二次）",
+        "engine_basicvsrpp_risky_title": "BasicVSR++ 编译警告",
+        "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT 编译可能会因显存不足而存在风险。\n\n显存（约）：{vram_gb} GB\n请求的片段大小：{requested_clip}\n建议安全上限：{safe_clip}\n\n仍要继续编译吗？这可能耗时很长并且可能会因显存不足而失败。",
+        "engine_log_risky_accepted": "用户确认继续进行有风险的 BasicVSR++ 编译，将继续执行。",
+        "engine_log_risky_declined": "用户拒绝进行有风险的 BasicVSR++ 编译，本次运行将禁用 TensorRT。",
     },
     
     "es": {

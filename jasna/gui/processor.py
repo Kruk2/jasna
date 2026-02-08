@@ -54,6 +54,8 @@ class Processor:
         self._settings: AppSettings | None = None
         self._output_folder: str = ""
         self._output_pattern: str = "{original}_restored.mkv"
+        self._disable_basicvsrpp_tensorrt_for_run = False
+        self._allow_unsafe_basicvsrpp_compile_for_run = False
         
     def start(
         self,
@@ -61,6 +63,9 @@ class Processor:
         settings: AppSettings,
         output_folder: str,
         output_pattern: str,
+        *,
+        disable_basicvsrpp_tensorrt: bool,
+        allow_unsafe_basicvsrpp_compile: bool,
     ):
         if self._thread and self._thread.is_alive():
             return
@@ -69,6 +74,8 @@ class Processor:
         self._settings = settings
         self._output_folder = output_folder
         self._output_pattern = output_pattern
+        self._disable_basicvsrpp_tensorrt_for_run = bool(disable_basicvsrpp_tensorrt)
+        self._allow_unsafe_basicvsrpp_compile_for_run = bool(allow_unsafe_basicvsrpp_compile)
         
         self._stop_event.clear()
         self._pause_event.set()
@@ -195,14 +202,19 @@ class Processor:
         
         # Model paths
         restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
-        detection_model_path = Path("model_weights") / "rfdetr-v3.onnx"
+        det_name = str(settings.detection_model).strip()
+        if det_name not in {"rfdetr-v2", "rfdetr-v3"}:
+            det_name = "rfdetr-v3"
+        detection_model_path = Path("model_weights") / f"{det_name}.onnx"
         
+        compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not self._disable_basicvsrpp_tensorrt_for_run)
         use_tensorrt = basicvsrpp_startup_policy(
             restoration_model_path=str(restoration_model_path),
             max_clip_size=settings.max_clip_size,
             device=device,
             fp16=settings.fp16_mode,
-            compile_basicvsrpp=settings.compile_basicvsrpp,
+            compile_basicvsrpp=compile_basicvsrpp,
+            allow_unsafe_clip_length=self._allow_unsafe_basicvsrpp_compile_for_run,
         )
         
         secondary_restorer = None
