@@ -2,8 +2,11 @@
 
 import customtkinter as ctk
 from datetime import datetime
+from pathlib import Path
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
+from jasna.gui.log_export import export_log_entries_txt
+from jasna.gui.log_filter import should_include_log_entry
 
 
 class LogPanel(ctk.CTkFrame):
@@ -49,7 +52,7 @@ class LogPanel(ctk.CTkFrame):
         
         self._filter_dropdown = ctk.CTkOptionMenu(
             toolbar,
-            values=[t("filter_all_levels"), t("filter_errors_only"), t("filter_warnings_plus"), t("filter_info_plus")],
+            values=[t("filter_debug"), t("filter_info"), t("filter_warn"), t("filter_error")],
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
             fg_color=Colors.BG_PANEL,
             button_color=Colors.BG_PANEL,
@@ -62,48 +65,22 @@ class LogPanel(ctk.CTkFrame):
             command=self._on_filter_changed,
         )
         self._filter_dropdown.pack(side="left")
-        self._filter_dropdown.set(t("filter_info_plus"))
-        self._filter_level = "info"  # Default to Info+
+        self._filter_dropdown.set(t("filter_info"))
+        self._filter_level = "info"  # Default to Info
         
         # Right side buttons
-        self._save_btn = ctk.CTkButton(
+        self._export_btn = ctk.CTkButton(
             toolbar,
-            text="💾",
+            text=t("btn_export"),
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            fg_color="transparent",
-            hover_color=Colors.BORDER_LIGHT,
-            text_color=Colors.TEXT_MUTED,
-            width=24,
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            text_color=Colors.TEXT_PRIMARY,
+            width=80,
             height=24,
-            command=self._on_save,
+            command=self._on_export,
         )
-        self._save_btn.pack(side="right", padx=2)
-        
-        self._copy_btn = ctk.CTkButton(
-            toolbar,
-            text="📋",
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            fg_color="transparent",
-            hover_color=Colors.BORDER_LIGHT,
-            text_color=Colors.TEXT_MUTED,
-            width=24,
-            height=24,
-            command=self._on_copy,
-        )
-        self._copy_btn.pack(side="right", padx=2)
-        
-        self._clear_btn = ctk.CTkButton(
-            toolbar,
-            text="🗑",
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            fg_color="transparent",
-            hover_color=Colors.BORDER_LIGHT,
-            text_color=Colors.TEXT_MUTED,
-            width=24,
-            height=24,
-            command=self._on_clear,
-        )
-        self._clear_btn.pack(side="right", padx=2)
+        self._export_btn.pack(side="right", padx=Sizing.PADDING_SMALL)
         
     def _build_log_area(self):
         self._log_text = ctk.CTkTextbox(
@@ -127,24 +104,20 @@ class LogPanel(ctk.CTkFrame):
     def _on_filter_changed(self, value: str):
         # Map translated values to internal filter levels
         filter_map = {
-            t("filter_all_levels"): "all",
-            t("filter_errors_only"): "error",
-            t("filter_warnings_plus"): "warning",
-            t("filter_info_plus"): "info",
+            t("filter_debug"): "debug",
+            t("filter_error"): "error",
+            t("filter_warn"): "warning",
+            t("filter_info"): "info",
         }
-        self._filter_level = filter_map.get(value, "all")
+        self._filter_level = filter_map.get(value, "debug")
         self._refresh_display()
         
     def _refresh_display(self):
         self._log_text.configure(state="normal")
         self._log_text.delete("1.0", "end")
-        
-        level_priority = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
-        filter_priority = {"all": -1, "debug": 0, "info": 1, "warning": 2, "error": 3}
-        min_priority = filter_priority.get(self._filter_level, -1)
-        
+
         for timestamp, level, message in self._entries:
-            if level_priority.get(level, 0) >= min_priority:
+            if should_include_log_entry(level=level, filter_level=self._filter_level):
                 self._insert_entry(timestamp, level, message)
                 
         self._log_text.configure(state="disabled")
@@ -155,40 +128,23 @@ class LogPanel(ctk.CTkFrame):
         self._log_text._textbox.insert("end", level.ljust(8), level)
         self._log_text._textbox.insert("end", message + "\n", "message")
         
-    def _on_save(self):
+    def _on_export(self):
         from tkinter import filedialog
         filepath = filedialog.asksaveasfilename(
-            defaultextension=".log",
-            filetypes=[("Log files", "*.log"), ("Text files", "*.txt")],
+            defaultextension=".txt",
+            filetypes=[("Text files", "*.txt")],
         )
-        if filepath:
-            with open(filepath, "w", encoding="utf-8") as f:
-                for timestamp, level, message in self._entries:
-                    f.write(f"{timestamp} {level.ljust(8)} {message}\n")
-                    
-    def _on_copy(self):
-        text = ""
-        for timestamp, level, message in self._entries:
-            text += f"{timestamp} {level.ljust(8)} {message}\n"
-        self.clipboard_clear()
-        self.clipboard_append(text)
-        
-    def _on_clear(self):
-        self._entries.clear()
-        self._log_text.configure(state="normal")
-        self._log_text.delete("1.0", "end")
-        self._log_text.configure(state="disabled")
+        if not filepath:
+            return
+
+        export_log_entries_txt(Path(filepath), self._entries)
         
     def add_log(self, level: str, message: str):
         timestamp = datetime.now().strftime("%I:%M:%S %p")
         level = level.upper()
         self._entries.append((timestamp, level, message))
-        
-        level_priority = {"DEBUG": 0, "INFO": 1, "WARNING": 2, "ERROR": 3}
-        filter_priority = {"all": -1, "debug": 0, "info": 1, "warning": 2, "error": 3}
-        min_priority = filter_priority.get(self._filter_level, -1)
-        
-        if level_priority.get(level, 0) >= min_priority:
+
+        if should_include_log_entry(level=level, filter_level=self._filter_level):
             self._log_text.configure(state="normal")
             self._insert_entry(timestamp, level, message)
             self._log_text.configure(state="disabled")
