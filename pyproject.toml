@@ -21,6 +21,7 @@ dependencies = [
   "opencv-python",
   "tqdm",
   "customtkinter",
+  "ultralytics",
 ]
 
 [project.scripts]

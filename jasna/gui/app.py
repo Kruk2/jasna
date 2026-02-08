@@ -294,6 +294,8 @@ class JasnaApp(ctk.CTk):
             def _engine_name(key: str) -> str:
                 if key == "rfdetr":
                     return t("engine_name_rfdetr")
+                if key == "yolo":
+                    return t("engine_name_yolo")
                 if key == "basicvsrpp":
                     return t("engine_name_basicvsrpp")
                 if key == "swin2sr":

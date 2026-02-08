@@ -80,7 +80,7 @@ class AppSettings:
     tvai_args: str = "preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
     
     # Detection
-    detection_model: str = "rfdetr-v3"  # rfdetr-v2, rfdetr-v3
+    detection_model: str = "rfdetr-v3"  # rfdetr-v2, rfdetr-v3, lada-yolo-v2, lada-yolo-v4
     detection_score_threshold: float = 0.2
     compile_basicvsrpp: bool = True
     

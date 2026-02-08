@@ -8,8 +8,9 @@ import torch
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
-from jasna.mosaic import RfDetrMosaicDetectionModel
+from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
 from jasna.mosaic import Detections
+from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
@@ -24,6 +25,7 @@ class Pipeline:
         *,
         input_video: Path,
         output_video: Path,
+        detection_model_name: str,
         detection_model_path: Path,
         detection_score_threshold: float,
         restoration_pipeline: RestorationPipeline,
@@ -50,14 +52,25 @@ class Pipeline:
         self.temporal_overlap = int(temporal_overlap)
         self.enable_crossfade = bool(enable_crossfade)
 
-        self.detection_model = RfDetrMosaicDetectionModel(
-            onnx_path=detection_model_path,
-            stream=self.stream,
-            batch_size=self.batch_size,
-            device=self.device,
-            score_threshold=float(detection_score_threshold),
-            fp16=bool(fp16),
-        )
+        det_name = coerce_detection_model_name(detection_model_name)
+        if det_name in RFDETR_MODEL_NAMES:
+            self.detection_model = RfDetrMosaicDetectionModel(
+                onnx_path=detection_model_path,
+                stream=self.stream,
+                batch_size=self.batch_size,
+                device=self.device,
+                score_threshold=float(detection_score_threshold),
+                fp16=bool(fp16),
+            )
+        elif det_name in YOLO_MODEL_NAMES:
+            self.detection_model = YoloMosaicDetectionModel(
+                model_path=detection_model_path,
+                stream=self.stream,
+                batch_size=self.batch_size,
+                device=self.device,
+                score_threshold=float(detection_score_threshold),
+                fp16=bool(fp16),
+            )
         self.restoration_pipeline = restoration_pipeline
         # Progress control for console vs GUI
         self.disable_progress = bool(disable_progress)

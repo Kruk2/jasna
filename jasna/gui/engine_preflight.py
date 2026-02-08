@@ -36,15 +36,16 @@ class EnginePreflightResult:
         return tuple(r for r in self.requirements if not r.exists)
 
 
-def _detection_onnx_path(settings: AppSettings) -> Path:
-    name = str(settings.detection_model).strip()
-    if name not in {"rfdetr-v2", "rfdetr-v3"}:
-        name = "rfdetr-v3"
-    return Path("model_weights") / f"{name}.onnx"
+def _detection_weights_path(settings: AppSettings) -> Path:
+    from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
+
+    return detection_model_weights_path(coerce_detection_model_name(str(settings.detection_model)))
 
 
 def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     from jasna.trt import get_onnx_tensorrt_engine_path
+    from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name
+    from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
     from jasna.restorer.basicvrspp_tenorrt_compilation import (
         SMALL_TRT_CLIP_LENGTH,
         SMALL_TRT_CLIP_LENGTH_TRIGGER,
@@ -57,22 +58,36 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
 
     reqs: list[EngineRequirement] = []
 
-    det_onnx = _detection_onnx_path(settings)
-    det_engine = get_onnx_tensorrt_engine_path(
-        det_onnx,
-        batch_size=int(settings.batch_size),
-        fp16=bool(settings.fp16_mode),
-    )
-    det_exists = det_engine.is_file()
-    reqs.append(
-        EngineRequirement(
-            key="rfdetr",
-            label=f"RF-DETR ({det_onnx.name})",
-            paths=(det_engine,),
-            exists=det_exists,
-            missing_paths=() if det_exists else (det_engine,),
+    det_name = coerce_detection_model_name(str(settings.detection_model))
+    det_weights = _detection_weights_path(settings)
+    if det_name in RFDETR_MODEL_NAMES:
+        det_engine = get_onnx_tensorrt_engine_path(
+            det_weights,
+            batch_size=int(settings.batch_size),
+            fp16=bool(settings.fp16_mode),
         )
-    )
+        det_exists = det_engine.is_file()
+        reqs.append(
+            EngineRequirement(
+                key="rfdetr",
+                label=f"RF-DETR ({det_weights.name})",
+                paths=(det_engine,),
+                exists=det_exists,
+                missing_paths=() if det_exists else (det_engine,),
+            )
+        )
+    elif det_name in YOLO_MODEL_NAMES:
+        det_engine = get_yolo_tensorrt_engine_path(det_weights, fp16=bool(settings.fp16_mode))
+        det_exists = det_engine.is_file()
+        reqs.append(
+            EngineRequirement(
+                key="yolo",
+                label=f"YOLO ({det_weights.name})",
+                paths=(det_engine,),
+                exists=det_exists,
+                missing_paths=() if det_exists else (det_engine,),
+            )
+        )
 
     restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
     basic_missing = False
