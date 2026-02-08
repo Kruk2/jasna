@@ -167,7 +167,7 @@ def compile_mosaic_restoration_model(
                 int(approx_max_clip_length),
                 float(vram_gb),
             )
-        elif interactive and sys.stdin.isatty():
+        elif interactive and sys.stdin is not None and sys.stdin.isatty():
             prompt_lines = [
                 f"Requested TensorRT clip length {int(clip_length)}, but GPU VRAM is ~{vram_gb:.1f} GB.",
                 f"Approx safe max is {approx_max_clip_length} frames (rule of thumb: ~2.5 GB per +30 frames).",
@@ -225,6 +225,7 @@ def basicvsrpp_startup_policy(
     device: torch.device,
     fp16: bool,
     compile_basicvsrpp: bool,
+    interactive: bool = True,
     allow_unsafe_clip_length: bool = False,
 ) -> bool:
     """
@@ -251,7 +252,7 @@ def basicvsrpp_startup_policy(
             device=device,
             fp16=fp16,
             mosaic_restoration_config_path=None,
-            interactive=True,
+            interactive=interactive,
             allow_unsafe_clip_length=bool(allow_unsafe_clip_length),
         )
         return True
