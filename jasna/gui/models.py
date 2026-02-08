@@ -6,10 +6,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable
 
+from jasna import os_utils
+
 
 def get_settings_path() -> Path:
-    """Get path to settings.json in jasna package directory."""
-    return Path(__file__).parent.parent / "settings.json"
+    return os_utils.get_user_config_dir("jasna") / "settings.json"
 
 
 class JobStatus(Enum):
@@ -132,12 +133,17 @@ class PresetManager:
     def _save(self):
         """Save user presets to settings.json."""
         path = get_settings_path()
-        data = {
-            "last_selected": self._last_selected,
-            "user_presets": {
-                name: asdict(preset) for name, preset in self._user_presets.items()
-            }
-        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                data = {}
+
+        data["last_selected"] = self._last_selected
+        data["user_presets"] = {name: asdict(preset) for name, preset in self._user_presets.items()}
         
         try:
             with open(path, "w", encoding="utf-8") as f:

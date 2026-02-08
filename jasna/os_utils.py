@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -126,4 +127,17 @@ def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
         )
         print(msg)
         logger.info("%s", msg)
+
+
+def get_user_config_dir(app_name: str) -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")
+        if base:
+            return Path(base) / app_name
+        return Path.home() / app_name
+
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg:
+        return Path(xdg) / app_name
+    return Path.home() / ".config" / app_name
 
