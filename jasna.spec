@@ -6,6 +6,8 @@ from PyInstaller.utils.hooks import collect_all
 from importlib.util import find_spec
 import os
 
+from jasna.packaging.openssl_libs import filter_out_openssl_binaries, pyinstaller_binaries_for_openssl
+
 def _collect(name: str):
     if find_spec(name) is None:
         return [], [], []
@@ -17,6 +19,15 @@ for pkg in ["torch", "torch_tensorrt", "av", "PyNvVideoCodec", "python_vali", "t
     datas += d
     binaries += b
     hiddenimports += h
+
+if os.name != "nt":
+    binaries = filter_out_openssl_binaries(binaries)
+    openssl_roots = []
+    openssl_env_dir = os.environ.get("OPENSSL_LIB_DIR")
+    if openssl_env_dir:
+        openssl_roots.append(openssl_env_dir)
+    openssl_roots += ["/usr/lib/x86_64-linux-gnu", "/lib/x86_64-linux-gnu", "/usr/lib64", "/lib64"]
+    binaries += pyinstaller_binaries_for_openssl(openssl_roots)
 
 # torch_tensorrt's custom ops are registered by its compiled extension module.
 # `collect_all("torch_tensorrt")` collects `torchtrt.dll` but does not always pick up the `_C*.pyd`.
