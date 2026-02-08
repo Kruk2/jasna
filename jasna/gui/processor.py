@@ -162,7 +162,6 @@ class Processor:
                 self._log("WARNING", f"Skipped {job.filename}: output file already exists")
                 return
             elif file_conflict == "auto_rename":
-                # Find a unique filename with counter suffix
                 output_path = self._get_unique_output_path(output_path)
                 self._log("INFO", f"Renamed output to {output_path.name} to avoid overwrite")
             # "overwrite" - just proceed and let the file be replaced
@@ -343,5 +342,5 @@ class Processor:
             if not new_path.exists():
                 return new_path
             counter += 1
-            if counter > 9999:  # Safety limit
+            if counter > 9999:
                 raise RuntimeError(f"Could not find unique filename after 9999 attempts: {output_path}")

@@ -83,7 +83,7 @@ class StatusPill(ctk.CTkFrame):
         
         self._label = ctk.CTkLabel(
             self,
-            text="IDLE",
+            text=t("status_idle"),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL, "bold"),
             text_color=Colors.TEXT_PRIMARY,
         )
@@ -622,7 +622,7 @@ class PresetDialog(ctk.CTkToplevel):
     def __init__(self, master, on_create: callable, existing_names: list[str], **kwargs):
         super().__init__(master, **kwargs)
         
-        self.title("Create Preset")
+        self.title(t("dialog_create_preset"))
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
         self.transient(master)
@@ -649,7 +649,7 @@ class PresetDialog(ctk.CTkToplevel):
         
         ctk.CTkLabel(
             content,
-            text="Preset Name",
+            text=t("preset_name"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             text_color=Colors.TEXT_SECONDARY,
         ).pack(anchor="w")
@@ -660,7 +660,7 @@ class PresetDialog(ctk.CTkToplevel):
             fg_color=Colors.BG_CARD,
             border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY,
-            placeholder_text="My Custom Preset",
+            placeholder_text=t("preset_placeholder"),
         )
         self._entry.pack(fill="x", pady=(8, 0))
         self._entry.bind("<Return>", lambda e: self._on_ok())
@@ -679,7 +679,7 @@ class PresetDialog(ctk.CTkToplevel):
         
         ctk.CTkButton(
             btn_frame,
-            text="Cancel",
+            text=t("btn_cancel"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
@@ -691,7 +691,7 @@ class PresetDialog(ctk.CTkToplevel):
         
         ctk.CTkButton(
             btn_frame,
-            text="Create",
+            text=t("btn_create_preset"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color=Colors.PRIMARY,
             hover_color=Colors.PRIMARY_HOVER,
@@ -706,10 +706,10 @@ class PresetDialog(ctk.CTkToplevel):
     def _on_ok(self):
         name = self._entry.get().strip()
         if not name:
-            self._error_label.configure(text="Name cannot be empty")
+            self._error_label.configure(text=t("error_name_empty"))
             return
         if name.lower() in self._existing_names:
-            self._error_label.configure(text="Name already exists")
+            self._error_label.configure(text=t("error_name_exists"))
             return
         
         self._on_create(name)
@@ -756,7 +756,7 @@ class ConfirmDialog(ctk.CTkToplevel):
         
         ctk.CTkButton(
             btn_frame,
-            text="Cancel",
+            text=t("btn_cancel"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
@@ -767,7 +767,7 @@ class ConfirmDialog(ctk.CTkToplevel):
         
         ctk.CTkButton(
             btn_frame,
-            text="Delete",
+            text=t("btn_delete_confirm"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color=Colors.STATUS_ERROR,
             hover_color="#dc2626",

@@ -630,7 +630,7 @@ class SettingsPanel(ctk.CTkFrame):
         
     def _browse_tvai_ffmpeg(self):
         filepath = filedialog.askopenfilename(
-            title="Select Topaz Video AI ffmpeg.exe",
+            title=t("dialog_select_tvai_ffmpeg"),
             filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
             initialdir=r"C:\Program Files\Topaz Labs LLC\Topaz Video AI"
         )
@@ -699,7 +699,7 @@ class SettingsPanel(ctk.CTkFrame):
         args_row.pack(fill="x", pady=(4, 0))
         self._widgets["encoder_custom_args"] = ctk.CTkEntry(
             args_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text="e.g. lookahead=32"
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("placeholder_encoder_args")
         )
         self._widgets["encoder_custom_args"].pack(fill="x")
         
@@ -808,7 +808,7 @@ class SettingsPanel(ctk.CTkFrame):
     def _on_reset(self):
         """Reset to saved preset values."""
         self._apply_preset(self._current_preset)
-        self._show_toast("Settings reset", "info")
+        self._show_toast(t("toast_settings_reset"), "info")
         
     def _on_save_preset(self):
         """Save current settings to user preset."""
@@ -820,7 +820,7 @@ class SettingsPanel(ctk.CTkFrame):
             self._saved_preset_settings = AppSettings(**asdict(settings))
             self._is_modified = False
             self._preset_dropdown.set(self._current_preset)
-            self._show_toast(f"Preset '{self._current_preset}' saved", "success")
+            self._show_toast(t("toast_preset_saved", name=self._current_preset), "success")
         
     def _on_create_preset(self):
         """Open dialog to create new preset."""
@@ -837,7 +837,7 @@ class SettingsPanel(ctk.CTkFrame):
                 self._preset_manager.set_last_selected(name)
                 self._update_button_states()
                 self._preset_dropdown.set(name)
-                self._show_toast(f"Preset '{name}' created", "success")
+                self._show_toast(t("toast_preset_created", name=name), "success")
                 
         PresetDialog(self.winfo_toplevel(), on_create, existing)
         
@@ -851,12 +851,12 @@ class SettingsPanel(ctk.CTkFrame):
             if self._preset_manager.delete_preset(name):
                 self._refresh_dropdown()
                 self._apply_preset("Default")
-                self._show_toast(f"Preset '{name}' deleted", "success")
+                self._show_toast(t("toast_preset_deleted", name=name), "success")
                 
         ConfirmDialog(
             self.winfo_toplevel(),
-            "Delete Preset",
-            f"Delete preset '{self._current_preset}'?",
+            t("dialog_delete_preset"),
+            t("confirm_delete", name=self._current_preset),
             on_confirm
         )
         

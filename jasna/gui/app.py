@@ -87,7 +87,7 @@ class JasnaApp(ctk.CTk):
         
         title = ctk.CTkLabel(
             left,
-            text="JASNA GUI",
+            text=t("app_title"),
             font=(Fonts.FAMILY, Fonts.SIZE_TITLE, "bold"),
             text_color=Colors.TEXT_PRIMARY,
         )
@@ -263,12 +263,12 @@ class JasnaApp(ctk.CTk):
     def _on_start(self):
         jobs = self._queue_panel.get_jobs()
         if not jobs:
-            self._log_panel.warning("No files in queue")
+            self._log_panel.warning(t("toast_no_files"))
             return
             
         output_folder = self._queue_panel.get_output_folder()
         if not output_folder:
-            self._show_toast("Please select an output folder before starting", "warning")
+            self._show_toast(t("toast_select_output"), "warning")
             return
             
         settings = self._settings_panel.get_settings()
@@ -278,9 +278,9 @@ class JasnaApp(ctk.CTk):
         if errors:
             from tkinter import messagebox
 
-            msg = "Cannot start processing:\n\n" + "\n".join(f"- {e}" for e in errors)
+            msg = t("error_cannot_start") + "\n\n" + "\n".join(f"- {e}" for e in errors)
             self._log_panel.error(msg)
-            messagebox.showerror("Invalid TVAI configuration", msg)
+            messagebox.showerror(t("error_invalid_tvai"), msg)
             return
 
         disable_basicvsrpp_tensorrt = False
@@ -318,10 +318,10 @@ class JasnaApp(ctk.CTk):
                 )
                 if messagebox.askyesno(t("engine_basicvsrpp_risky_title"), msg):
                     allow_unsafe_basicvsrpp_compile = True
-                    self._log_panel.warning(t("engine_log_risky_accepted"))
+                    self._log_panel.warning("User accepted risky BasicVSR++ compilation; will proceed.")
                 else:
                     disable_basicvsrpp_tensorrt = True
-                    self._log_panel.warning(t("engine_log_risky_declined"))
+                    self._log_panel.warning("User declined risky BasicVSR++ compilation; TensorRT disabled for this run.")
             elif preflight.should_warn_first_run_slow:
                 from tkinter import messagebox
 
@@ -445,11 +445,10 @@ class JasnaApp(ctk.CTk):
                 if code != locale.current_language:
                     locale.set_language(code)
                     self._refresh_ui_text()
-                    # Show restart notice
                     from tkinter import messagebox
                     messagebox.showinfo(
-                        "Language Changed",
-                        "Please restart the application for full language change."
+                        t("dialog_language_changed"),
+                        t("dialog_language_restart"),
                     )
                 break
                 
@@ -467,7 +466,7 @@ class JasnaApp(ctk.CTk):
         
     def _show_about(self):
         dialog = ctk.CTkToplevel(self)
-        dialog.title("About Jasna")
+        dialog.title(t("dialog_about_title"))
         dialog.geometry("400x250")
         dialog.resizable(False, False)
         dialog.configure(fg_color=Colors.BG_MAIN)
@@ -489,28 +488,28 @@ class JasnaApp(ctk.CTk):
         
         ctk.CTkLabel(
             dialog,
-            text=f"Version {__version__}",
+            text=t("dialog_about_version", version=__version__),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             text_color=Colors.TEXT_SECONDARY,
         ).pack()
         
         ctk.CTkLabel(
             dialog,
-            text="JAV mosaic restoration tool",
+            text=t("dialog_about_description"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             text_color=Colors.TEXT_MUTED,
         ).pack(pady=(16, 8))
         
         ctk.CTkLabel(
             dialog,
-            text="Inspired by Lada",
+            text=t("dialog_about_credit"),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             text_color=Colors.TEXT_MUTED,
         ).pack()
         
         ctk.CTkButton(
             dialog,
-            text="Close",
+            text=t("btn_close"),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
             text_color=Colors.TEXT_PRIMARY,
