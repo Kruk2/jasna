@@ -58,8 +58,6 @@ def sanitize_linux_ld_library_path_for_cuda(value: str, *, preferred_dirs: list[
 
         if "/usr/local/cuda" in entry_norm:
             continue
-        if "/nvidia/cuda" in entry_norm:
-            continue
         if any(_is_under_root(entry, r) for r in blocked_roots):
             continue
         keep.append(entry)
@@ -82,10 +80,19 @@ def _iter_top_level_lib_dirs(root: Path) -> list[Path]:
     if torch_lib.is_dir():
         out.append(torch_lib)
 
-    for name in ["tensorrt_libs", "PyNvVideoCodec", "python_vali", "nvidia"]:
+    for name in ["tensorrt_libs", "PyNvVideoCodec", "python_vali"]:
         p = root / name
         if p.is_dir():
             out.append(p)
+
+    nvidia = root / "nvidia"
+    if nvidia.is_dir():
+        out.append(nvidia)
+        for pkg in nvidia.iterdir():
+            if pkg.is_dir():
+                lib = pkg / "lib"
+                if lib.is_dir():
+                    out.append(lib)
 
     return out
 
