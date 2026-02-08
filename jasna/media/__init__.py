@@ -4,7 +4,7 @@ from fractions import Fraction
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import json
 
-from jasna.os_utils import get_subprocess_env_for_executable, get_subprocess_startup_info, resolve_executable
+from jasna.os_utils import get_subprocess_startup_info, resolve_executable
 
 SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
@@ -143,13 +143,11 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         "-show_format",
         path,
     ]
-    env = get_subprocess_env_for_executable(ffprobe)
     p = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         startupinfo=get_subprocess_startup_info(),
-        env=env,
     )
     out, err =  p.communicate()
     if p.returncode != 0:
