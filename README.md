@@ -40,9 +40,11 @@ RTX 5090 + i9 13900k
 | 厚码测试2 | 30 | 01:52 | 00:43 | -01:09 (-61.6%) |
  
 ### Usage
-Go to releases page and download last package. Built for windows/linux on cuda 13.0.\
-Make sure that ```ffmpeg```  ```ffprobe``` ```mkvmerge``` is in your path.\
-You can download mkvmerge [here](https://mkvtoolnix.download/downloads.html).
+Download the latest release package (Windows/Linux).
+
+- **If you downloaded the app (recommended)**:
+  - **Windows**: You’re good to go — Jasna ships with everything it needs (`ffmpeg`, `ffprobe`, and `mkvmerge`).
+  - **Linux**: Jasna ships with `ffmpeg` and `ffprobe`. You still need `mkvmerge` available on your system (usually via your package manager). You can also get it by installing MKVToolNix: [downloads](https://mkvtoolnix.download/downloads.html).
 
 **First run might be slow because models will be compiled for your hardware (you can copy .engine files from model_weights to a new version!)**
 
@@ -82,6 +84,10 @@ Install these libs via ```uv pip install . --no-build-isolation```\
 To build nvidia libs below you need also VS Build Tools 2022 (c++)
 make sure you have cmake and ninja ```uv pip install cmake ninja```\
 and cuda 13.0 in your system.
+
+### Running from source (developer setup)
+- Install `ffmpeg` + `ffprobe` and make sure they are on PATH (**ffmpeg major version must be 8**).
+- Install `mkvmerge` (part of MKVToolNix): [downloads](https://mkvtoolnix.download/downloads.html).
 
 https://codeberg.org/Kruk2/vali
 

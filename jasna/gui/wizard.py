@@ -1,10 +1,18 @@
 """First-run wizard for dependency checking."""
 
 import customtkinter as ctk
-import shutil
+import subprocess
+
+from jasna import os_utils
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.components import BuyMeCoffeeButton
+
+
+_WINDOW_WIDTH = 820
+_WINDOW_HEIGHT = 520
+_INFO_COLUMN_WIDTH = 520
+
 
 class FirstRunWizard(ctk.CTkToplevel):
     """Modal wizard shown on first run to check dependencies."""
@@ -17,8 +25,8 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._check_results = {}
         
         self.title("Jasna - System Check")
-        self.geometry("600x480")
-        self.resizable(False, False)
+        self.geometry(f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}")
+        self.resizable(True, False)
         self.configure(fg_color=Colors.BG_MAIN)
 
         # Avoid using overrideredirect() which can cause grab/focus issues
@@ -43,8 +51,8 @@ class FirstRunWizard(ctk.CTkToplevel):
         
         # Center on parent
         self.update_idletasks()
-        x = master.winfo_x() + (master.winfo_width() - 600) // 2
-        y = master.winfo_y() + (master.winfo_height() - 480) // 2
+        x = master.winfo_x() + (master.winfo_width() - _WINDOW_WIDTH) // 2
+        y = master.winfo_y() + (master.winfo_height() - _WINDOW_HEIGHT) // 2
         self.geometry(f"+{x}+{y}")
         
         # Build UI immediately with loading state
@@ -114,6 +122,10 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text="Checking...",
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
                 text_color=Colors.TEXT_MUTED,
+                width=_INFO_COLUMN_WIDTH,
+                wraplength=_INFO_COLUMN_WIDTH,
+                justify="right",
+                anchor="e",
             )
             info_label.pack(side="right")
             
@@ -233,6 +245,10 @@ class FirstRunWizard(ctk.CTkToplevel):
                 text=info,
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
                 text_color=Colors.TEXT_MUTED,
+                width=_INFO_COLUMN_WIDTH,
+                wraplength=_INFO_COLUMN_WIDTH,
+                justify="right",
+                anchor="e",
             )
             info_label.pack(side="right")
             
@@ -266,10 +282,43 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._checks_passed = all(passed for passed, _ in self._check_results.values())
         
     def _check_executable(self, name: str) -> tuple[bool, str]:
-        path = shutil.which(name)
-        if path:
-            return True, f"Found: {path}"
-        return False, "Not found in PATH"
+        path = os_utils.find_executable(name)
+        if not path:
+            return False, "Not found"
+
+        if name in {"ffmpeg", "ffprobe"}:
+            completed = subprocess.run(
+                [path, "-version"],
+                capture_output=True,
+                text=True,
+                check=False,
+                startupinfo=os_utils.get_subprocess_startup_info(),
+            )
+            if completed.returncode != 0:
+                return False, f"Not callable: {path}"
+            try:
+                major = os_utils._parse_ffmpeg_major_version((completed.stdout or "") + (completed.stderr or ""))
+            except ValueError:
+                return False, f"Found: {path} (could not detect major version)"
+            if major != 8:
+                return False, f"Found: {path} (major={major}, expected=8)"
+            return True, f"Found: {path} (major={major})"
+
+        if name == "mkvmerge":
+            completed = subprocess.run(
+                [path, "--version"],
+                capture_output=True,
+                text=True,
+                check=False,
+                startupinfo=os_utils.get_subprocess_startup_info(),
+            )
+            if completed.returncode != 0:
+                return False, f"Not callable: {path}"
+            first = ((completed.stdout or "") + (completed.stderr or "")).splitlines()
+            ver = first[0].strip() if first else "OK"
+            return True, f"Found: {path} ({ver})"
+
+        return True, f"Found: {path}"
         
     def _check_gpu(self) -> tuple[bool, str]:
         try:
