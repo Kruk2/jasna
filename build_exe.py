@@ -23,6 +23,7 @@ out = Path(distpath) / "jasna"
 for name in [
     "lada_mosaic_restoration_model_generic_v1.2.pth",
     "rfdetr-v3.onnx",
+    "lada_mosaic_detection_model_v4_fast.pt",
 ]:
     shutil.copy(Path("model_weights") / name, out / "model_weights" / name)
 

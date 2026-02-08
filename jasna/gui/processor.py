@@ -205,10 +205,10 @@ class Processor:
         
         # Model paths
         restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
-        det_name = str(settings.detection_model).strip()
-        if det_name not in {"rfdetr-v2", "rfdetr-v3"}:
-            det_name = "rfdetr-v3"
-        detection_model_path = Path("model_weights") / f"{det_name}.onnx"
+        from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
+
+        det_name = coerce_detection_model_name(str(settings.detection_model))
+        detection_model_path = detection_model_weights_path(det_name)
         
         compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not self._disable_basicvsrpp_tensorrt_for_run)
         use_tensorrt = basicvsrpp_startup_policy(
@@ -295,6 +295,7 @@ class Processor:
             pipeline = Pipeline(
                 input_video=input_path,
                 output_video=output_path,
+                detection_model_name=det_name,
                 detection_model_path=detection_model_path,
                 detection_score_threshold=settings.detection_score_threshold,
                 restoration_pipeline=restoration_pipeline,

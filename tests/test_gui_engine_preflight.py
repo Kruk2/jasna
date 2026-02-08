@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from jasna.gui.engine_preflight import run_engine_preflight
@@ -89,4 +90,20 @@ def test_get_onnx_tensorrt_engine_path_matches_compile_return_when_present(monke
 
     out = compile_onnx_to_tensorrt_engine(onnx, batch_size=4, fp16=True)
     assert out == engine
+
+
+def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    settings = AppSettings(detection_model="lada-yolo-v4")
+    res = run_engine_preflight(settings)
+
+    keys = {r.key for r in res.requirements}
+    assert "yolo" in keys
+    assert "rfdetr" not in keys
+
+    yolo_req = next(r for r in res.requirements if r.key == "yolo")
+    suffix = ".fp16.win.engine" if os.name == "nt" else ".fp16.linux.engine"
+    assert yolo_req.paths == (Path("model_weights") / f"lada_mosaic_detection_model_v4_fast{suffix}",)
 
