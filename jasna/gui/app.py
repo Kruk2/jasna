@@ -14,6 +14,7 @@ from jasna.gui.log_panel import LogPanel
 from jasna.gui.wizard import FirstRunWizard
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus
+from jasna.gui.validation import validate_gui_start
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 
 
@@ -230,6 +231,15 @@ class JasnaApp(ctk.CTk):
             
         settings = self._settings_panel.get_settings()
         output_pattern = self._queue_panel.get_output_pattern()
+
+        errors = validate_gui_start(settings)
+        if errors:
+            from tkinter import messagebox
+
+            msg = "Cannot start processing:\n\n" + "\n".join(f"- {e}" for e in errors)
+            self._log_panel.error(msg)
+            messagebox.showerror("Invalid TVAI configuration", msg)
+            return
         
         self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)
         self._control_bar.set_running(True)
