@@ -54,7 +54,9 @@ Tested nvidia drivers: **591.67**
 ### Secondary Restoration Model
 Currently supported:
 - TVAI (windows only). Use _Google_ or buy from [here](https://www.topazlabs.com/topaz-video).\
-  ```--tvai-args``` allows you to customize model and other params. Defaults to iris-3.
+  ```--tvai-args``` allows you to customize model and other params. Defaults to iris-3. Setup these as env variables:
+  <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
+
 - Swin2SR (windows & linux). I think it's heavier in terms of GPU/VRAM load and has worse results than tvai.
 
 ### Max clip + temporal overlap
