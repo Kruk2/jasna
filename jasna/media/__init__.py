@@ -1,10 +1,14 @@
+import json
+import logging
 import subprocess
 from dataclasses import dataclass
 from fractions import Fraction
+
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
-import json
 
 from jasna.os_utils import get_subprocess_startup_info, resolve_executable
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
@@ -149,8 +153,16 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         stderr=subprocess.PIPE,
         startupinfo=get_subprocess_startup_info(),
     )
-    out, err =  p.communicate()
+    out, err = p.communicate()
     if p.returncode != 0:
+        stdout_text = (out or b"").decode(errors="replace")
+        stderr_text = (err or b"").decode(errors="replace")
+        logger.error(
+            "ffprobe failed (exit code %s). stdout:\n%s\nstderr:\n%s",
+            p.returncode,
+            stdout_text,
+            stderr_text,
+        )
         raise Exception(f"error running ffprobe: {err.strip()}. Code: {p.returncode}, cmd: {cmd}")
     json_output = json.loads(out)
     json_video_stream = json_output["streams"][0]
