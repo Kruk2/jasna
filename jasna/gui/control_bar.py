@@ -43,7 +43,7 @@ class _SystemMetric(ctk.CTkFrame):
             self,
             text=str(label).upper(),
             font=(Fonts.FAMILY, 10, "bold"),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
             anchor="w",
         )
         self._label.pack(anchor="w")
@@ -63,7 +63,7 @@ class _SystemMetric(ctk.CTkFrame):
             value_row,
             text="%",
             font=(Fonts.FAMILY, 10),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._unit.pack(side="left", padx=(1, 0), pady=(2, 0))
 
@@ -277,7 +277,7 @@ class ControlBar(ctk.CTkFrame):
             stats_row,
             text="FPS: --",
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._fps_label.pack(side="left")
         
@@ -285,7 +285,7 @@ class ControlBar(ctk.CTkFrame):
             stats_row,
             text="ETA: --",
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._eta_label.pack(side="right")
         
@@ -315,7 +315,7 @@ class ControlBar(ctk.CTkFrame):
             queue_frame,
             text=t("queue_label"),
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         queue_label.pack()
 

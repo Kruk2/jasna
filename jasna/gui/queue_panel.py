@@ -65,7 +65,7 @@ class QueuePanel(ctk.CTkFrame):
             self,
             fg_color="transparent",
             scrollbar_button_color=Colors.BORDER_LIGHT,
-            scrollbar_button_hover_color=Colors.TEXT_MUTED,
+            scrollbar_button_hover_color=Colors.BORDER_LIGHT,
         )
         self._list_frame.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_SMALL)
         
@@ -80,7 +80,7 @@ class QueuePanel(ctk.CTkFrame):
             self._empty_state,
             text=t("queue_empty"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._empty_label.pack(padx=40, pady=60)
         self._empty_state.pack(fill="x", pady=20)
@@ -97,7 +97,7 @@ class QueuePanel(ctk.CTkFrame):
             count_row,
             text=t("items_queued", count=0),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._queue_count.pack(side="left")
         
@@ -132,7 +132,7 @@ class QueuePanel(ctk.CTkFrame):
             footer,
             text=t("output_location"),
             font=(Fonts.FAMILY, Fonts.SIZE_TINY, "bold"),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
             anchor="w",
         )
         output_label.pack(fill="x", pady=(Sizing.PADDING_SMALL, 4))
@@ -334,14 +334,14 @@ class QueuePanel(ctk.CTkFrame):
             job.progress = progress
             
             status_map = {
-                JobStatus.PENDING: (t("job_pending"), "", Colors.TEXT_SECONDARY),
+                JobStatus.PENDING: (t("job_pending"), "", Colors.STATUS_PENDING),
                 JobStatus.PROCESSING: (t("job_processing"), "○", Colors.STATUS_PROCESSING),
                 JobStatus.COMPLETED: (t("job_completed"), "✓", Colors.STATUS_COMPLETED),
                 JobStatus.ERROR: (t("job_error"), "✕", Colors.STATUS_ERROR),
                 JobStatus.PAUSED: (t("job_paused"), "⏸", Colors.STATUS_PAUSED),
                 JobStatus.SKIPPED: (t("job_skipped"), "⊘", Colors.STATUS_CONFLICT),
             }
-            text, icon, color = status_map.get(status, ("", "", Colors.TEXT_SECONDARY))
+            text, icon, color = status_map.get(status, ("", "", Colors.STATUS_PENDING))
             widget.set_status(text, icon, color)
             
             if status == JobStatus.PROCESSING:

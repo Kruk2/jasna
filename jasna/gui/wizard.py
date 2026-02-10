@@ -67,7 +67,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             self._header,
             text=t("wizard_subtitle"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._subtitle.pack(pady=(8, 0))
         
@@ -97,7 +97,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 row,
                 text="○",
                 font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-                text_color=Colors.TEXT_MUTED,
+                text_color=Colors.TEXT_PRIMARY,
                 width=24,
             )
             status_label.pack(side="left")
@@ -114,7 +114,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 row,
                 text=t("wizard_checking"),
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-                text_color=Colors.TEXT_MUTED,
+                text_color=Colors.TEXT_PRIMARY,
                 justify="right",
                 anchor="e",
             )
@@ -247,7 +247,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 row,
                 text=info,
                 font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-                text_color=Colors.TEXT_MUTED,
+                text_color=Colors.TEXT_PRIMARY,
                 justify="right",
                 anchor="e",
             )

@@ -17,9 +17,7 @@ class Colors:
     PRIMARY_DARK = "#3730a3" # Indigo-800
     
     # Text
-    TEXT_PRIMARY = "#e2e8f0"   # Slate-200
-    TEXT_SECONDARY = "#94a3b8" # Slate-400
-    TEXT_MUTED = "#64748b"     # Slate-500
+    TEXT_PRIMARY = "#cbd5e1"   # Slate-300
     
     # Status indicators
     STATUS_PROCESSING = "#34d399" # Emerald-400
