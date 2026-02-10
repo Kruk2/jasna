@@ -8,6 +8,22 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+MIN_GPU_COMPUTE = (7, 5)
+
+
+def check_nvidia_gpu() -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
+    """Return (True, gpu_name) or (False, "no_cuda") or (False, ("compute_too_low", major, minor))."""
+    try:
+        import torch
+    except ImportError:
+        return False, "no_cuda"
+    if not torch.cuda.is_available():
+        return False, "no_cuda"
+    capability = torch.cuda.get_device_capability(0)
+    if capability < MIN_GPU_COMPUTE:
+        return False, ("compute_too_low", capability[0], capability[1])
+    return True, torch.cuda.get_device_name(0)
+
 
 def _bundled_exe_filename(name: str) -> str:
     if os.name == "nt" and not name.lower().endswith(".exe"):

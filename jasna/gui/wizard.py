@@ -338,11 +338,13 @@ class FirstRunWizard(ctk.CTkToplevel):
         
     def _check_gpu(self) -> tuple[bool, str]:
         try:
-            import torch
-            if torch.cuda.is_available():
-                gpu_name = torch.cuda.get_device_name(0)
-                return True, gpu_name
-            return False, t("wizard_no_cuda")
+            ok, result = os_utils.check_nvidia_gpu()
+            if ok:
+                return True, result
+            if result == "no_cuda":
+                return False, t("wizard_no_cuda")
+            _, major, minor = result
+            return False, t("wizard_gpu_compute_too_low", major=major, minor=minor)
         except Exception as e:
             return False, str(e)
             
@@ -351,7 +353,13 @@ class FirstRunWizard(ctk.CTkToplevel):
             import torch
             if torch.cuda.is_available():
                 version = torch.version.cuda
-                return True, t("wizard_cuda_version", version=version)
+                capability = torch.cuda.get_device_capability(0)
+                return True, t(
+                    "wizard_cuda_version_compute",
+                    version=version,
+                    major=capability[0],
+                    minor=capability[1],
+                )
             return False, t("wizard_not_available")
         except Exception as e:
             return False, str(e)
