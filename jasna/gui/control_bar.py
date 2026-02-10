@@ -17,6 +17,16 @@ _COLOR_STOPS = (
 )
 
 
+def _format_duration(seconds: float) -> str:
+    mins, secs = divmod(int(seconds), 60)
+    hours, mins = divmod(mins, 60)
+    if hours:
+        return f"{hours}h {mins}m"
+    if mins:
+        return f"{mins}m {secs}s"
+    return f"{secs}s"
+
+
 def _color_for_percent(pct: int) -> str:
     t = max(0.0, min(1.0, pct / 100.0))
     for i in range(len(_COLOR_STOPS) - 1):
@@ -407,7 +417,13 @@ class ControlBar(ctk.CTkFrame):
             self._eta_label.configure(text="ETA: --")
             
         self._queue_progress.configure(text=f"{queue_current} / {queue_total}")
-        
+
+    def set_completed(self, elapsed_seconds: float):
+        self.set_running(False)
+        text = f"{t('completed_in')} {_format_duration(elapsed_seconds)}"
+        self._fps_label.configure(text=text)
+        self._eta_label.configure(text="")
+
     def reset(self):
         self.set_running(False)
         self.update_progress()

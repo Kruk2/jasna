@@ -4,6 +4,7 @@ import customtkinter as ctk
 import logging
 from pathlib import Path
 import threading
+import time
 
 from jasna import __version__
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -46,6 +47,8 @@ class JasnaApp(ctk.CTk):
         
         self._logs_visible = False
         self._processor: Processor | None = None
+        self._job_start_times: dict[int, float] = {}
+        self._processing_start_time: float = 0.0
 
         self._system_stats_stop = threading.Event()
         self._system_stats_thread: threading.Thread | None = None
@@ -365,8 +368,8 @@ class JasnaApp(ctk.CTk):
         self._log_panel.info(f"Output pattern: {output_pattern}")
         self._log_panel.info(f"Files queued: {len(jobs)}")
 
-        # Start processor with a live reference to the queue so new items
-        # added while processing will be picked up.
+        self._processing_start_time = time.time()
+        self._job_start_times.clear()
         jobs_ref = self._queue_panel.get_jobs_ref()
         self._processor.start(
             jobs_ref,
@@ -411,6 +414,7 @@ class JasnaApp(ctk.CTk):
         )
         
         if update.status == JobStatus.PROCESSING:
+            self._job_start_times.setdefault(update.job_index, time.time())
             filename = jobs[update.job_index].filename if update.job_index < len(jobs) else ""
             self._control_bar.update_progress(
                 filename=filename,
@@ -425,7 +429,10 @@ class JasnaApp(ctk.CTk):
                 self._queue_panel.set_running(True, processing_index=update.job_index)
             except Exception:
                 pass
-        # Update per-item status (include fps and eta)
+        job_elapsed: float | None = None
+        if update.status == JobStatus.COMPLETED:
+            start = self._job_start_times.pop(update.job_index, None)
+            job_elapsed = time.time() - start if start is not None else 0.0
         try:
             self._queue_panel.update_job_status(
                 update.job_index,
@@ -433,6 +440,7 @@ class JasnaApp(ctk.CTk):
                 update.progress / 100.0,
                 update.fps,
                 update.eta_seconds,
+                elapsed_seconds=job_elapsed,
             )
         except Exception:
             pass
@@ -445,7 +453,8 @@ class JasnaApp(ctk.CTk):
         
     def _handle_complete(self):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
-        self._control_bar.reset()
+        elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
+        self._control_bar.set_completed(elapsed_seconds)
         self._update_start_button_state()
         self._log_panel.info("All jobs completed")
         

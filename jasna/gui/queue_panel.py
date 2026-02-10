@@ -348,7 +348,7 @@ class QueuePanel(ctk.CTkFrame):
             self._pattern_entry.delete(0, "end")
             self._pattern_entry.insert(0, pattern)
         
-    def update_job_status(self, index: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0):
+    def update_job_status(self, index: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0, elapsed_seconds: float | None = None):
         if 0 <= index < len(self._job_widgets):
             widget = self._job_widgets[index]
             job = self._jobs[index]
@@ -369,8 +369,12 @@ class QueuePanel(ctk.CTkFrame):
             if status == JobStatus.PROCESSING:
                 widget.set_progress(progress)
                 widget.set_fps_eta(fps=fps, eta_seconds=eta_seconds)
+            elif status == JobStatus.COMPLETED and elapsed_seconds is not None:
+                widget.hide_progress()
+                widget.set_completed(elapsed_seconds)
             else:
                 widget.hide_progress()
+                widget.set_fps_eta(0.0, 0.0)
                 
             # Hide conflict indicator once processing starts
             if status != JobStatus.PENDING:
