@@ -68,3 +68,21 @@ def test_windows_jasna_gui_with_args_still_dispatches_to_gui(monkeypatch) -> Non
             import jasna.__main__  # noqa: F401
             run_gui.assert_called_once()
             main.assert_not_called()
+
+
+def test_spawn_child_does_not_run_dispatch(monkeypatch) -> None:
+    for name in list(sys.modules):
+        if name == "jasna.__main__" or name.startswith("jasna.gui"):
+            del sys.modules[name]
+    from unittest.mock import MagicMock
+
+    monkeypatch.setattr(
+        "multiprocessing.parent_process",
+        lambda: MagicMock(),
+        raising=False,
+    )
+    with patch("jasna.gui.run_gui") as run_gui:
+        with patch("jasna.main.main") as main:
+            import jasna.__main__  # noqa: F401
+            run_gui.assert_not_called()
+            main.assert_not_called()

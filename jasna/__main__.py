@@ -1,3 +1,4 @@
+import multiprocessing
 import sys
 from pathlib import Path
 
@@ -23,24 +24,38 @@ def _preload_native_libs():
             pass
 
 
-argv0_stem = Path(sys.argv[0]).stem.lower()
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
 
-if sys.platform == "win32":
-    if argv0_stem == "jasna-cli":
-        if len(sys.argv) == 1:
-            from jasna.main import build_parser
+if multiprocessing.parent_process() is None:
+    argv0_stem = Path(sys.argv[0]).stem.lower()
 
-            build_parser().print_help()
-            raise SystemExit(0)
+    if sys.platform == "win32":
+        if argv0_stem == "jasna-cli":
+            if len(sys.argv) == 1:
+                from jasna.main import build_parser
 
-        from jasna.main import main
+                build_parser().print_help()
+                raise SystemExit(0)
 
-        main()
-    elif argv0_stem == "jasna-gui":
-        _preload_native_libs()
-        from jasna.gui import run_gui
+            from jasna.main import main
 
-        run_gui()
+            main()
+        elif argv0_stem == "jasna-gui":
+            _preload_native_libs()
+            from jasna.gui import run_gui
+
+            run_gui()
+        else:
+            if len(sys.argv) > 1:
+                from jasna.main import main
+
+                main()
+            else:
+                _preload_native_libs()
+                from jasna.gui import run_gui
+
+                run_gui()
     else:
         if len(sys.argv) > 1:
             from jasna.main import main
@@ -51,13 +66,3 @@ if sys.platform == "win32":
             from jasna.gui import run_gui
 
             run_gui()
-else:
-    if len(sys.argv) > 1:
-        from jasna.main import main
-
-        main()
-    else:
-        _preload_native_libs()
-        from jasna.gui import run_gui
-
-        run_gui()
