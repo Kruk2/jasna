@@ -4,7 +4,22 @@ from types import SimpleNamespace
 import subprocess
 
 from jasna.gui import system_stats
-from jasna.gui.control_bar import _color_for_percent
+from jasna.gui.control_bar import _color_for_percent, _format_duration
+
+
+def test_format_duration_seconds_only() -> None:
+    assert _format_duration(45) == "45s"
+    assert _format_duration(0) == "0s"
+
+
+def test_format_duration_minutes_and_seconds() -> None:
+    assert _format_duration(90) == "1m 30s"
+    assert _format_duration(3599) == "59m 59s"
+
+
+def test_format_duration_hours() -> None:
+    assert _format_duration(3600) == "1h 0m"
+    assert _format_duration(7323) == "2h 2m"
 
 
 def test_color_for_percent_green_at_zero() -> None:

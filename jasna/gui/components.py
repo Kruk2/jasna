@@ -486,6 +486,19 @@ class JobListItem(ctk.CTkFrame):
             self._eta_label.configure(text=f"ETA: {eta_str}")
         else:
             self._eta_label.configure(text="")
+
+    def set_completed(self, elapsed_seconds: float):
+        mins, secs = divmod(int(elapsed_seconds), 60)
+        hours, mins = divmod(mins, 60)
+        if hours:
+            duration_str = f"{hours}h {mins}m"
+        elif mins:
+            duration_str = f"{mins}m {secs}s"
+        else:
+            duration_str = f"{secs}s"
+        text = f"{t('completed_in')} {duration_str}"
+        self._fps_label.configure(text=text)
+        self._eta_label.configure(text="")
         
     def hide_progress(self):
         self._progress.place_forget()
