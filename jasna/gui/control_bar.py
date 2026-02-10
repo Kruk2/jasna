@@ -4,6 +4,7 @@ import customtkinter as ctk
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.system_stats import SystemStats
+from jasna.gui.settings_panel import Tooltip
 
 
 _METRIC_WIDTH = 48
@@ -191,6 +192,7 @@ class ControlBar(ctk.CTkFrame):
         self._on_start: callable = None
         self._on_stop: callable = None
         self._on_toggle_logs: callable = None
+        self._start_disabled_tooltip = None
         
         self._is_running = False
         
@@ -217,6 +219,8 @@ class ControlBar(ctk.CTkFrame):
             command=self._handle_start,
         )
         self._start_btn.pack(side="left")
+        self._start_btn_normal_fg = Colors.PRIMARY
+        self._start_btn_normal_hover = Colors.PRIMARY_HOVER
         
         # Stop button (shown when running)
         self._stop_btn = ctk.CTkButton(
@@ -347,6 +351,23 @@ class ControlBar(ctk.CTkFrame):
         self._on_start = on_start
         self._on_stop = on_stop
         self._on_toggle_logs = on_toggle_logs
+
+    def set_start_enabled(self, enabled: bool, disabled_tooltip: str = ""):
+        if enabled:
+            if self._start_disabled_tooltip is not None:
+                self._start_disabled_tooltip._hide()
+                self._start_btn.unbind("<Enter>")
+                self._start_btn.unbind("<Leave>")
+                self._start_disabled_tooltip = None
+            self._start_btn.configure(state="normal", fg_color=self._start_btn_normal_fg, hover_color=self._start_btn_normal_hover)
+        else:
+            self._start_btn.configure(state="disabled", fg_color=Colors.BORDER_LIGHT, hover_color=Colors.BORDER_LIGHT)
+            if self._start_disabled_tooltip is not None:
+                self._start_disabled_tooltip._hide()
+                self._start_btn.unbind("<Enter>")
+                self._start_btn.unbind("<Leave>")
+            if disabled_tooltip:
+                self._start_disabled_tooltip = Tooltip(self._start_btn, disabled_tooltip)
         
     def set_running(self, running: bool, paused: bool = False):
         self._is_running = running

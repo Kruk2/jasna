@@ -108,6 +108,8 @@ class PresetManager:
     def __init__(self):
         self._user_presets: dict[str, AppSettings] = {}
         self._last_selected: str = "Default"
+        self._last_output_folder: str = ""
+        self._last_output_pattern: str = "{original}_restored.mp4"
         self._load()
         
     def _load(self):
@@ -121,6 +123,8 @@ class PresetManager:
                 data = json.load(f)
             
             self._last_selected = data.get("last_selected", "Default")
+            self._last_output_folder = data.get("last_output_folder", "")
+            self._last_output_pattern = data.get("last_output_pattern", "{original}_restored.mp4")
             
             for name, preset_dict in data.get("user_presets", {}).items():
                 try:
@@ -144,6 +148,8 @@ class PresetManager:
 
         data["last_selected"] = self._last_selected
         data["user_presets"] = {name: asdict(preset) for name, preset in self._user_presets.items()}
+        data["last_output_folder"] = self._last_output_folder
+        data["last_output_pattern"] = self._last_output_pattern
         
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -200,4 +206,18 @@ class PresetManager:
     def set_last_selected(self, name: str):
         """Set last selected preset name."""
         self._last_selected = name
+        self._save()
+
+    def get_last_output_folder(self) -> str:
+        return self._last_output_folder
+
+    def set_last_output_folder(self, path: str):
+        self._last_output_folder = path or ""
+        self._save()
+
+    def get_last_output_pattern(self) -> str:
+        return self._last_output_pattern
+
+    def set_last_output_pattern(self, pattern: str):
+        self._last_output_pattern = pattern or "{original}_restored.mp4"
         self._save()

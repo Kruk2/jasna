@@ -48,3 +48,33 @@ def test_preset_manager_preserves_other_settings_keys(monkeypatch, tmp_path: Pat
 
     data = json.loads(settings_path.read_text(encoding="utf-8"))
     assert data.get("language") == "zh"
+
+
+def test_preset_manager_saves_and_loads_last_output_folder(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    mgr = PresetManager()
+    assert mgr.get_last_output_folder() == ""
+    mgr.set_last_output_folder("/some/output")
+    assert mgr.get_last_output_folder() == "/some/output"
+
+    mgr2 = PresetManager()
+    assert mgr2.get_last_output_folder() == "/some/output"
+
+    data = json.loads(get_settings_path().read_text(encoding="utf-8"))
+    assert data.get("last_output_folder") == "/some/output"
+
+
+def test_preset_manager_saves_and_loads_last_output_pattern(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    mgr = PresetManager()
+    default = mgr.get_last_output_pattern()
+    assert "{original}" in default
+    mgr.set_last_output_pattern("{original}_done.mkv")
+    assert mgr.get_last_output_pattern() == "{original}_done.mkv"
+
+    mgr2 = PresetManager()
+    assert mgr2.get_last_output_pattern() == "{original}_done.mkv"

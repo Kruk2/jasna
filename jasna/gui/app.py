@@ -184,6 +184,12 @@ class JasnaApp(ctk.CTk):
         self._settings_panel = SettingsPanel(body)
         self._settings_panel.pack(side="right", fill="both", expand=True)
         
+        self._queue_panel.set_initial_output(
+            self._settings_panel.get_last_output_folder(),
+            self._settings_panel.get_last_output_pattern(),
+        )
+        self._queue_panel.set_on_output_changed(self._on_output_changed)
+        
     def _build_footer(self):
         # Log panel (bottom, collapsible) - hidden by default
         self._log_panel = LogPanel(self)
@@ -201,6 +207,7 @@ class JasnaApp(ctk.CTk):
             on_stop=self._on_stop,
             on_toggle_logs=self._toggle_logs,
         )
+        self.after(0, self._update_start_button_state)
         
     def _setup_processor(self):
         self._processor = Processor(
@@ -254,6 +261,21 @@ class JasnaApp(ctk.CTk):
     def _on_jobs_changed(self):
         jobs = self._queue_panel.get_jobs()
         self._control_bar.update_progress(queue_total=len(jobs))
+        self._update_start_button_state()
+
+    def _on_output_changed(self, folder: str, pattern: str):
+        self._settings_panel.set_last_output_folder(folder)
+        self._settings_panel.set_last_output_pattern(pattern)
+        
+    def _update_start_button_state(self):
+        jobs = self._queue_panel.get_jobs()
+        output_folder = (self._queue_panel.get_output_folder() or "").strip()
+        can_start = bool(jobs) and bool(output_folder)
+        if can_start:
+            self._control_bar.set_start_enabled(True)
+        else:
+            tooltip = t("toast_select_output") if not output_folder else t("toast_no_files")
+            self._control_bar.set_start_enabled(False, tooltip)
         
     def _show_toast(self, message: str, type_: str = "info"):
         """Show a toast notification."""
@@ -267,12 +289,8 @@ class JasnaApp(ctk.CTk):
             return
             
         output_folder = self._queue_panel.get_output_folder()
-        if not output_folder:
-            self._show_toast(t("toast_select_output"), "warning")
-            return
-            
-        settings = self._settings_panel.get_settings()
         output_pattern = self._queue_panel.get_output_pattern()
+        settings = self._settings_panel.get_settings()
 
         errors = validate_gui_start(settings)
         if errors:
@@ -366,6 +384,7 @@ class JasnaApp(ctk.CTk):
             
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
+        self._update_start_button_state()
         
         # Re-enable settings and output controls
         self._settings_panel.set_enabled(True)
@@ -427,6 +446,7 @@ class JasnaApp(ctk.CTk):
     def _handle_complete(self):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
+        self._update_start_button_state()
         self._log_panel.info("All jobs completed")
         
         # Re-enable settings and output controls

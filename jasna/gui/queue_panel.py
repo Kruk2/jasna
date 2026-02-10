@@ -26,6 +26,7 @@ class QueuePanel(ctk.CTkFrame):
         self._jobs: list[JobItem] = []
         self._job_widgets: list[JobListItem] = []
         self._on_jobs_changed: callable = None
+        self._on_output_changed: callable = None
         
         self._build_toolbar()
         self._build_list_area()
@@ -177,7 +178,12 @@ class QueuePanel(ctk.CTkFrame):
         )
         self._pattern_entry.pack(fill="x", pady=(4, 0))
         self._pattern_entry.insert(0, "{original}_restored.mp4")
-        self._pattern_entry.bind("<KeyRelease>", lambda e: self._refresh_conflicts())
+        self._pattern_entry.bind("<KeyRelease>", self._on_pattern_or_conflicts)
+
+    def _on_pattern_or_conflicts(self, event=None):
+        self._refresh_conflicts()
+        if self._on_output_changed:
+            self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
         
     def _on_add_files(self):
         files = filedialog.askopenfilenames(
@@ -206,7 +212,11 @@ class QueuePanel(ctk.CTkFrame):
             self._output_entry.delete(0, "end")
             self._output_entry.insert(0, folder)
             self._refresh_conflicts()
-            
+            if self._on_jobs_changed:
+                self._on_jobs_changed()
+            if self._on_output_changed:
+                self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
+
     def _on_clear_queue(self):
         self._jobs.clear()
         for w in self._job_widgets:
@@ -280,7 +290,7 @@ class QueuePanel(ctk.CTkFrame):
     def _get_output_path(self, input_path: Path) -> Path | None:
         """Get the output path for a given input file based on current settings."""
         output_folder = self._output_entry.get()
-        pattern = self._pattern_entry.get() or "{original}_restored.mkv"
+        pattern = self._pattern_entry.get() or "{original}_restored.mp4"
         
         if not output_folder:
             # Use same folder as input
@@ -321,10 +331,22 @@ class QueuePanel(ctk.CTkFrame):
         return self._output_entry.get() or ""
         
     def get_output_pattern(self) -> str:
-        return self._pattern_entry.get() or "{original}_restored.mkv"
+        return self._pattern_entry.get() or "{original}_restored.mp4"
         
     def set_on_jobs_changed(self, callback: callable):
         self._on_jobs_changed = callback
+
+    def set_on_output_changed(self, callback: callable):
+        self._on_output_changed = callback
+
+    def set_initial_output(self, folder: str = "", pattern: str = ""):
+        if folder:
+            self._output_entry.configure(state="normal")
+            self._output_entry.delete(0, "end")
+            self._output_entry.insert(0, folder)
+        if pattern:
+            self._pattern_entry.delete(0, "end")
+            self._pattern_entry.insert(0, pattern)
         
     def update_job_status(self, index: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0):
         if 0 <= index < len(self._job_widgets):

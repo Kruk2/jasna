@@ -53,7 +53,7 @@ class Processor:
         self._jobs: list[JobItem] = []
         self._settings: AppSettings | None = None
         self._output_folder: str = ""
-        self._output_pattern: str = "{original}_restored.mkv"
+        self._output_pattern: str = "{original}_restored.mp4"
         self._disable_basicvsrpp_tensorrt_for_run = False
         self._allow_unsafe_basicvsrpp_compile_for_run = False
         

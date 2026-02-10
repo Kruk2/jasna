@@ -182,6 +182,18 @@ class SettingsPanel(ctk.CTkFrame):
         """Refresh dropdown with current presets."""
         self._update_dropdown_values()
         self._preset_dropdown.configure(values=self._dropdown_values)
+
+    def get_last_output_folder(self) -> str:
+        return self._preset_manager.get_last_output_folder()
+
+    def set_last_output_folder(self, path: str):
+        self._preset_manager.set_last_output_folder(path)
+
+    def get_last_output_pattern(self) -> str:
+        return self._preset_manager.get_last_output_pattern()
+
+    def set_last_output_pattern(self, pattern: str):
+        self._preset_manager.set_last_output_pattern(pattern)
         
     def _update_button_states(self):
         """Update button states based on current preset."""
