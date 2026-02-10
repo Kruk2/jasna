@@ -17,6 +17,8 @@ av.logging.set_level(logging.ERROR)
 
 from jasna.os_utils import resolve_executable
 
+logger = logging.getLogger(__name__)
+
 def _parse_hevc_nal_units(data: bytes):
     """Parse HEVC NAL units from Annex B bitstream. Returns list of (nal_type, start, end)."""
     nal_units = []
@@ -96,7 +98,10 @@ def mux_hevc_to_mkv(hevc_path: Path, output_path: Path, pts_list, time_base):
     ]
     result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info())
     if result.returncode != 0:
-        raise RuntimeError(f"mkvmerge failed with code {result.returncode}: {' '.join(cmd)}\n{result.stderr.decode()}")
+        stdout_text = (result.stdout or b"").decode(errors="replace")
+        stderr_text = (result.stderr or b"").decode(errors="replace")
+        logger.error("mkvmerge failed (exit code %s). stdout:\n%s\nstderr:\n%s", result.returncode, stdout_text, stderr_text)
+        raise RuntimeError(f"mkvmerge failed with code {result.returncode}: {' '.join(cmd)}\n{stderr_text}")
     timecodes_path.unlink()
 
 
@@ -143,7 +148,10 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
     cmd.append(str(output_path))
     result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info())
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg failed with code {result.returncode}: {' '.join(cmd)}\n{result.stderr.decode()}")
+        stdout_text = (result.stdout or b"").decode(errors="replace")
+        stderr_text = (result.stderr or b"").decode(errors="replace")
+        logger.error("ffmpeg failed (exit code %s). stdout:\n%s\nstderr:\n%s", result.returncode, stdout_text, stderr_text)
+        raise RuntimeError(f"ffmpeg failed with code {result.returncode}: {' '.join(cmd)}\n{stderr_text}")
 
 
 class NvidiaVideoEncoder:

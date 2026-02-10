@@ -1,16 +1,18 @@
 """First-run wizard for dependency checking."""
 
-import customtkinter as ctk
+import logging
 import os
 import subprocess
 import threading
+
+import customtkinter as ctk
 
 from jasna import os_utils
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.components import BuyMeCoffeeButton
 
-
+logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
 
 
@@ -295,6 +297,13 @@ class FirstRunWizard(ctk.CTkToplevel):
                 startupinfo=os_utils.get_subprocess_startup_info(),
             )
             if completed.returncode != 0:
+                logger.error(
+                    "%s failed (exit code %s). stdout:\n%s\nstderr:\n%s",
+                    name,
+                    completed.returncode,
+                    completed.stdout or "",
+                    completed.stderr or "",
+                )
                 return False, t("wizard_not_callable", path=path)
             try:
                 major = os_utils._parse_ffmpeg_major_version((completed.stdout or "") + (completed.stderr or ""))
@@ -313,6 +322,13 @@ class FirstRunWizard(ctk.CTkToplevel):
                 startupinfo=os_utils.get_subprocess_startup_info(),
             )
             if completed.returncode != 0:
+                logger.error(
+                    "%s failed (exit code %s). stdout:\n%s\nstderr:\n%s",
+                    name,
+                    completed.returncode,
+                    completed.stdout or "",
+                    completed.stderr or "",
+                )
                 return False, t("wizard_not_callable", path=path)
             first = ((completed.stdout or "") + (completed.stderr or "")).splitlines()
             ver = first[0].strip() if first else "OK"

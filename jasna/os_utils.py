@@ -119,6 +119,13 @@ def check_required_executables(disable_ffmpeg_check: bool = False) -> None:
             missing.append(exe)
             continue
         if completed.returncode != 0:
+            logger.error(
+                "%s failed (exit code %s). stdout:\n%s\nstderr:\n%s",
+                exe,
+                completed.returncode,
+                completed.stdout or "",
+                completed.stderr or "",
+            )
             missing.append(exe)
             continue
 

@@ -69,6 +69,28 @@ def test_check_required_executables_skips_ffmpeg_when_disabled(monkeypatch) -> N
     assert calls == [["/fake/mkvmerge", "--version"]]
 
 
+def test_check_required_executables_logs_stdout_stderr_when_exe_fails(monkeypatch, caplog) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda exe: f"/fake/{exe}")
+
+    def fake_run(cmd, **kwargs):
+        exe = os_utils.Path(cmd[0]).name
+        if exe == "ffprobe":
+            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.0.0", "stderr": ""})()
+        if exe == "ffmpeg":
+            return type("R", (), {"returncode": 1, "stdout": "ffmpeg stdout", "stderr": "ffmpeg stderr"})()
+        if exe == "mkvmerge":
+            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+        raise AssertionError(f"Unexpected exe {exe!r}")
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+
+    with caplog.at_level("ERROR"):
+        with pytest.raises(SystemExit):
+            os_utils.check_required_executables()
+
+    assert any("ffmpeg failed" in rec.message and "ffmpeg stdout" in rec.message and "ffmpeg stderr" in rec.message for rec in caplog.records)
+
+
 def test_check_required_executables_errors_on_old_ffmpeg(monkeypatch, capsys) -> None:
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
 

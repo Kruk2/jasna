@@ -259,14 +259,19 @@ class _TvaiFfmpegRestorer:
 
     def _check_alive(self) -> None:
         if self._fatal is not None:
+            stderr_text = b"".join(self._stderr_buf).decode(errors="replace").strip()
+            logger.error("TVAI ffmpeg not healthy: %s. stderr:\n%s", self._fatal, stderr_text)
             raise RuntimeError(f"TVAI ffmpeg is not healthy: {self._fatal}") from self._fatal
         rc = self._proc.poll()
         if rc is not None:
             stderr_text = b"".join(self._stderr_buf).decode(errors="replace").strip()
+            logger.error("TVAI ffmpeg crashed (exit_code=%s). stderr:\n%s", rc, stderr_text)
             raise RuntimeError(f"TVAI ffmpeg crashed (exit_code={rc}). stderr:\n{stderr_text}")
 
     def _check_fatal(self) -> None:
         if self._fatal is not None:
+            stderr_text = b"".join(self._stderr_buf).decode(errors="replace").strip()
+            logger.error("TVAI ffmpeg not healthy: %s. stderr:\n%s", self._fatal, stderr_text)
             raise RuntimeError(f"TVAI ffmpeg is not healthy: {self._fatal}") from self._fatal
 
     def _drain_stdout(self) -> list[np.ndarray]:
@@ -376,6 +381,7 @@ class _TvaiFfmpegRestorer:
 
             if time.perf_counter() >= deadline:
                 stderr_text = b"".join(self._stderr_buf).decode(errors="replace").strip()
+                logger.error("TVAI ffmpeg flush timed out after %.1fs. stderr:\n%s", timeout_s, stderr_text)
                 raise RuntimeError(f"TVAI ffmpeg flush timed out after {timeout_s:.1f}s. stderr:\n{stderr_text}")
 
             with self._out_cond:
