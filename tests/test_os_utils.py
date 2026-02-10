@@ -260,3 +260,67 @@ def test_check_windows_hardware_accelerated_gpu_scheduling_returns_false_when_en
     assert ok is False
     assert "Enabled" in info
 
+
+def test_check_nvidia_gpu_returns_name_when_available_and_compute_ok(monkeypatch) -> None:
+    import types
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            get_device_capability=lambda device: (8, 0),
+            get_device_name=lambda device: "RTX 4090",
+        )
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+    ok, result = os_utils.check_nvidia_gpu()
+    assert ok is True
+    assert result == "RTX 4090"
+
+
+def test_check_nvidia_gpu_returns_no_cuda_when_unavailable(monkeypatch) -> None:
+    import types
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: False)
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+    ok, result = os_utils.check_nvidia_gpu()
+    assert ok is False
+    assert result == "no_cuda"
+
+
+def test_check_nvidia_gpu_returns_compute_too_low_when_below_min(monkeypatch) -> None:
+    import types
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            get_device_capability=lambda device: (6, 1),
+            get_device_name=lambda device: "GTX 1060",
+        )
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+    ok, result = os_utils.check_nvidia_gpu()
+    assert ok is False
+    assert result == ("compute_too_low", 6, 1)
+
+
+def test_check_nvidia_gpu_returns_ok_at_exactly_min_compute(monkeypatch) -> None:
+    import types
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            get_device_capability=lambda device: (7, 5),
+            get_device_name=lambda device: "RTX 2070",
+        )
+    )
+    monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
+    ok, result = os_utils.check_nvidia_gpu()
+    assert ok is True
+    assert result == "RTX 2070"
+
+
+def test_min_gpu_compute_constant() -> None:
+    assert os_utils.MIN_GPU_COMPUTE == (7, 5)
+

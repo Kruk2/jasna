@@ -1,9 +1,14 @@
 import argparse
 import logging
+import sys
 from pathlib import Path
 
 from jasna import __version__
-from jasna.os_utils import check_required_executables, warn_if_windows_hardware_accelerated_gpu_scheduling_enabled
+from jasna.os_utils import (
+    check_nvidia_gpu,
+    check_required_executables,
+    warn_if_windows_hardware_accelerated_gpu_scheduling_enabled,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -182,6 +187,15 @@ def main() -> None:
     args = build_parser().parse_args()
     check_required_executables(disable_ffmpeg_check=args.disable_ffmpeg_check)
     warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
+
+    gpu_ok, gpu_result = check_nvidia_gpu()
+    if not gpu_ok:
+        if gpu_result == "no_cuda":
+            print("Error: No CUDA device. An NVIDIA GPU with compute capability 7.5+ is required.")
+        else:
+            _, major, minor = gpu_result
+            print(f"Error: Compute capability 7.5+ required (GPU: {major}.{minor}).")
+        sys.exit(1)
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
