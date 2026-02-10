@@ -76,7 +76,7 @@ class StatusPill(ctk.CTkFrame):
             text="",
             width=8,
             height=8,
-            fg_color=Colors.TEXT_SECONDARY,
+            fg_color=Colors.STATUS_PENDING,
             corner_radius=4,
         )
         self._indicator.grid(row=0, column=0, padx=(12, 6), pady=8)
@@ -114,7 +114,7 @@ class CollapsibleSection(ctk.CTkFrame):
             self._header,
             text="▼" if expanded else "▶",
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
             width=20,
         )
         self._arrow.pack(side="left", padx=(12, 4), pady=8)
@@ -163,7 +163,7 @@ class SettingRow(ctk.CTkFrame):
             self,
             text=label,
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
             anchor="w",
         )
         self._label.pack(side="left", padx=(0, 8))
@@ -173,7 +173,7 @@ class SettingRow(ctk.CTkFrame):
                 self,
                 text="ⓘ",
                 font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-                text_color=Colors.TEXT_MUTED,
+                text_color=Colors.TEXT_PRIMARY,
                 cursor="hand2",
             )
             self._tooltip_icon.pack(side="left")
@@ -240,7 +240,7 @@ class JobListItem(ctk.CTkFrame):
             top_row,
             text="⋮⋮",
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
             width=20,
             cursor="hand2",
         )
@@ -267,7 +267,7 @@ class JobListItem(ctk.CTkFrame):
             self._info,
             text=f"  •  {duration}" if duration else "",
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
             anchor="w",
         )
         self._duration.pack(side="left")
@@ -291,7 +291,7 @@ class JobListItem(ctk.CTkFrame):
             self._status_frame,
             text=status,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._status_label.pack(side="left")
         
@@ -303,7 +303,7 @@ class JobListItem(ctk.CTkFrame):
             self._stats_frame,
             text="",
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._fps_label.pack(side="left", padx=(0, 8))
 
@@ -311,7 +311,7 @@ class JobListItem(ctk.CTkFrame):
             self._stats_frame,
             text="",
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         self._eta_label.pack(side="left")
         
@@ -334,7 +334,7 @@ class JobListItem(ctk.CTkFrame):
             height=24,
             fg_color="transparent",
             hover_color=Colors.STATUS_ERROR,
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
             command=self._handle_remove,
         )
         # By default items are removable; can be toggled when queue is running
@@ -432,7 +432,7 @@ class JobListItem(ctk.CTkFrame):
         if callable(self._on_drag_end):
             self._on_drag_end(self, event)
             
-    def set_status(self, status: str, icon: str = "", color: str = Colors.TEXT_SECONDARY):
+    def set_status(self, status: str, icon: str = "", color: str = Colors.STATUS_PENDING):
         self._status_label.configure(text=status, text_color=color)
         if icon:
             self._status_icon.configure(text=icon, text_color=color)
@@ -548,7 +548,7 @@ class LogEntry(ctk.CTkFrame):
             self,
             text=timestamp,
             font=(Fonts.FAMILY_MONO, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
             width=80,
             anchor="w",
         )
@@ -558,7 +558,7 @@ class LogEntry(ctk.CTkFrame):
             self,
             text=level,
             font=(Fonts.FAMILY_MONO, Fonts.SIZE_TINY, "bold"),
-            text_color=level_colors.get(level, Colors.TEXT_SECONDARY),
+            text_color=level_colors.get(level, Colors.TEXT_PRIMARY),
             width=60,
             anchor="w",
         )
@@ -651,7 +651,7 @@ class PresetDialog(ctk.CTkToplevel):
             content,
             text=t("preset_name"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
         ).pack(anchor="w")
         
         self._entry = ctk.CTkEntry(
@@ -683,7 +683,7 @@ class PresetDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
             width=90,
             height=36,
             command=self.destroy,
@@ -760,7 +760,7 @@ class ConfirmDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
             width=80,
             command=self.destroy,
         ).pack(side="right", padx=(8, 0))

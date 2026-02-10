@@ -37,7 +37,7 @@ class LogPanel(ctk.CTkFrame):
             toolbar,
             text=t("system_output"),
             font=(Fonts.FAMILY, Fonts.SIZE_TINY, "bold"),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         label.pack(side="left", padx=Sizing.PADDING_MEDIUM)
         
@@ -46,7 +46,7 @@ class LogPanel(ctk.CTkFrame):
             toolbar,
             text="🔽",
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         filter_icon.pack(side="left", padx=(8, 2))
         
@@ -59,7 +59,7 @@ class LogPanel(ctk.CTkFrame):
             button_hover_color=Colors.BORDER_LIGHT,
             dropdown_fg_color=Colors.BG_PANEL,
             dropdown_hover_color=Colors.PRIMARY,
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
             width=100,
             height=24,
             command=self._on_filter_changed,
@@ -98,7 +98,7 @@ class LogPanel(ctk.CTkFrame):
         self._log_text._textbox.tag_config("WARNING", foreground=Colors.LOG_WARNING)
         self._log_text._textbox.tag_config("ERROR", foreground=Colors.LOG_ERROR)
         self._log_text._textbox.tag_config("DEBUG", foreground=Colors.LOG_DEBUG)
-        self._log_text._textbox.tag_config("timestamp", foreground=Colors.TEXT_MUTED)
+        self._log_text._textbox.tag_config("timestamp", foreground=Colors.TEXT_PRIMARY)
         self._log_text._textbox.tag_config("message", foreground=Colors.TEXT_PRIMARY)
         
     def _on_filter_changed(self, value: str):

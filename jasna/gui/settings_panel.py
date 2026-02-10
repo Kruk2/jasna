@@ -88,7 +88,7 @@ class SettingsPanel(ctk.CTkFrame):
             bar,
             text=t("preset"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
         )
         preset_label.pack(side="left", padx=(0, 8))
         
@@ -189,7 +189,7 @@ class SettingsPanel(ctk.CTkFrame):
         
         # Save button: disabled for factory presets
         if is_factory:
-            self._save_btn.configure(state="disabled", text_color=Colors.TEXT_MUTED)
+            self._save_btn.configure(state="disabled", text_color=Colors.TEXT_PRIMARY)
         else:
             self._save_btn.configure(state="normal", text_color=Colors.TEXT_PRIMARY)
         
@@ -248,9 +248,9 @@ class SettingsPanel(ctk.CTkFrame):
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         
-        clip_label = ctk.CTkLabel(row1, text=t("max_clip_size"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        clip_label = ctk.CTkLabel(row1, text=t("max_clip_size"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         clip_label.pack(side="left")
-        clip_tooltip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        clip_tooltip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         clip_tooltip.pack(side="left", padx=4)
         Tooltip(clip_tooltip, get_tooltip("max_clip_size"))
         
@@ -268,9 +268,9 @@ class SettingsPanel(ctk.CTkFrame):
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
         row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         
-        model_label = ctk.CTkLabel(row2, text=t("detection_model"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        model_label = ctk.CTkLabel(row2, text=t("detection_model"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         model_label.pack(side="left")
-        model_tip = ctk.CTkLabel(row2, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        model_tip = ctk.CTkLabel(row2, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         model_tip.pack(side="left", padx=4)
         Tooltip(model_tip, get_tooltip("detection_model"))
         
@@ -288,9 +288,9 @@ class SettingsPanel(ctk.CTkFrame):
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         
-        thresh_label = ctk.CTkLabel(row3, text=t("detection_threshold"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        thresh_label = ctk.CTkLabel(row3, text=t("detection_threshold"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         thresh_label.pack(side="left")
-        thresh_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        thresh_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         thresh_tip.pack(side="left", padx=4)
         Tooltip(thresh_tip, get_tooltip("detection_score_threshold"))
         
@@ -310,9 +310,9 @@ class SettingsPanel(ctk.CTkFrame):
         
         fp16_frame = ctk.CTkFrame(row4, fg_color=Colors.BG_CARD, corner_radius=6)
         fp16_frame.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        fp16_label = ctk.CTkLabel(fp16_frame, text=t("fp16_mode"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        fp16_label = ctk.CTkLabel(fp16_frame, text=t("fp16_mode"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         fp16_label.pack(side="left", padx=12, pady=8)
-        fp16_tip = ctk.CTkLabel(fp16_frame, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        fp16_tip = ctk.CTkLabel(fp16_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         fp16_tip.pack(side="left")
         Tooltip(fp16_tip, get_tooltip("fp16_mode"))
         self._widgets["fp16_mode"] = ctk.CTkSwitch(
@@ -324,9 +324,9 @@ class SettingsPanel(ctk.CTkFrame):
         
         compile_frame = ctk.CTkFrame(row4, fg_color=Colors.BG_CARD, corner_radius=6)
         compile_frame.pack(side="right", fill="x", expand=True, padx=(4, 0))
-        compile_label = ctk.CTkLabel(compile_frame, text=t("compile_basicvsrpp"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        compile_label = ctk.CTkLabel(compile_frame, text=t("compile_basicvsrpp"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         compile_label.pack(side="left", padx=12, pady=8)
-        compile_tip = ctk.CTkLabel(compile_frame, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        compile_tip = ctk.CTkLabel(compile_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         compile_tip.pack(side="left")
         Tooltip(compile_tip, get_tooltip("compile_basicvsrpp"))
         self._widgets["compile_basicvsrpp"] = ctk.CTkSwitch(
@@ -340,9 +340,9 @@ class SettingsPanel(ctk.CTkFrame):
         row5 = ctk.CTkFrame(inner, fg_color="transparent")
         row5.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         
-        conflict_label = ctk.CTkLabel(row5, text=t("file_conflict"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        conflict_label = ctk.CTkLabel(row5, text=t("file_conflict"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         conflict_label.pack(side="left")
-        conflict_tip = ctk.CTkLabel(row5, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        conflict_tip = ctk.CTkLabel(row5, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         conflict_tip.pack(side="left", padx=4)
         Tooltip(conflict_tip, get_tooltip("file_conflict"))
         
@@ -384,9 +384,9 @@ class SettingsPanel(ctk.CTkFrame):
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         
-        overlap_label = ctk.CTkLabel(row1, text=t("temporal_overlap"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        overlap_label = ctk.CTkLabel(row1, text=t("temporal_overlap"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         overlap_label.pack(side="left")
-        overlap_tooltip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        overlap_tooltip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         overlap_tooltip.pack(side="left", padx=4)
         Tooltip(overlap_tooltip, get_tooltip("temporal_overlap"))
         
@@ -406,9 +406,9 @@ class SettingsPanel(ctk.CTkFrame):
         
         crossfade_frame = ctk.CTkFrame(row2, fg_color=Colors.BG_CARD, corner_radius=6)
         crossfade_frame.pack(fill="x")
-        crossfade_label = ctk.CTkLabel(crossfade_frame, text=t("enable_crossfade"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        crossfade_label = ctk.CTkLabel(crossfade_frame, text=t("enable_crossfade"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         crossfade_label.pack(side="left", padx=12, pady=8)
-        crossfade_tip = ctk.CTkLabel(crossfade_frame, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        crossfade_tip = ctk.CTkLabel(crossfade_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         crossfade_tip.pack(side="left")
         Tooltip(crossfade_tip, get_tooltip("enable_crossfade"))
         self._widgets["enable_crossfade"] = ctk.CTkSwitch(
@@ -422,9 +422,9 @@ class SettingsPanel(ctk.CTkFrame):
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         
-        strength_label = ctk.CTkLabel(row3, text=t("denoise_strength"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        strength_label = ctk.CTkLabel(row3, text=t("denoise_strength"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         strength_label.pack(side="left")
-        strength_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        strength_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         strength_tip.pack(side="left", padx=4)
         Tooltip(strength_tip, get_tooltip("denoise_strength"))
         
@@ -451,9 +451,9 @@ class SettingsPanel(ctk.CTkFrame):
         row4 = ctk.CTkFrame(inner, fg_color="transparent")
         row4.pack(fill="x")
         
-        step_label = ctk.CTkLabel(row4, text=t("denoise_step"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        step_label = ctk.CTkLabel(row4, text=t("denoise_step"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         step_label.pack(side="left")
-        step_tip = ctk.CTkLabel(row4, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        step_tip = ctk.CTkLabel(row4, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         step_tip.pack(side="left", padx=4)
         Tooltip(step_tip, get_tooltip("denoise_step"))
         
@@ -518,9 +518,9 @@ class SettingsPanel(ctk.CTkFrame):
         
         swin_batch_row = ctk.CTkFrame(swin_inner, fg_color="transparent")
         swin_batch_row.pack(fill="x", pady=(0, 8))
-        swin_batch_label = ctk.CTkLabel(swin_batch_row, text=t("batch_size"), text_color=Colors.TEXT_SECONDARY)
+        swin_batch_label = ctk.CTkLabel(swin_batch_row, text=t("batch_size"), text_color=Colors.TEXT_PRIMARY)
         swin_batch_label.pack(side="left")
-        swin_batch_tip = ctk.CTkLabel(swin_batch_row, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        swin_batch_tip = ctk.CTkLabel(swin_batch_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         swin_batch_tip.pack(side="left", padx=4)
         Tooltip(swin_batch_tip, get_tooltip("swin2sr_batch_size"))
         self._widgets["swin2sr_batch_size"] = ctk.CTkOptionMenu(
@@ -534,9 +534,9 @@ class SettingsPanel(ctk.CTkFrame):
         
         swin_trt_row = ctk.CTkFrame(swin_inner, fg_color="transparent")
         swin_trt_row.pack(fill="x")
-        swin_trt_label = ctk.CTkLabel(swin_trt_row, text=t("compile_model"), text_color=Colors.TEXT_SECONDARY)
+        swin_trt_label = ctk.CTkLabel(swin_trt_row, text=t("compile_model"), text_color=Colors.TEXT_PRIMARY)
         swin_trt_label.pack(side="left")
-        swin_trt_tip = ctk.CTkLabel(swin_trt_row, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        swin_trt_tip = ctk.CTkLabel(swin_trt_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         swin_trt_tip.pack(side="left", padx=4)
         Tooltip(swin_trt_tip, get_tooltip("swin2sr_compilation"))
         self._widgets["swin2sr_tensorrt"] = ctk.CTkSwitch(
@@ -554,9 +554,9 @@ class SettingsPanel(ctk.CTkFrame):
         # TVAI ffmpeg path
         tvai_path_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_path_row.pack(fill="x", pady=(0, 8))
-        tvai_path_label = ctk.CTkLabel(tvai_path_row, text=t("ffmpeg_path"), text_color=Colors.TEXT_SECONDARY)
+        tvai_path_label = ctk.CTkLabel(tvai_path_row, text=t("ffmpeg_path"), text_color=Colors.TEXT_PRIMARY)
         tvai_path_label.pack(side="left")
-        tvai_path_tip = ctk.CTkLabel(tvai_path_row, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        tvai_path_tip = ctk.CTkLabel(tvai_path_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         tvai_path_tip.pack(side="left", padx=4)
         Tooltip(tvai_path_tip, get_tooltip("tvai_ffmpeg_path"))
         
@@ -579,9 +579,9 @@ class SettingsPanel(ctk.CTkFrame):
         # TVAI model
         tvai_model_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_model_row.pack(fill="x", pady=(0, 8))
-        tvai_model_label = ctk.CTkLabel(tvai_model_row, text=t("model"), text_color=Colors.TEXT_SECONDARY)
+        tvai_model_label = ctk.CTkLabel(tvai_model_row, text=t("model"), text_color=Colors.TEXT_PRIMARY)
         tvai_model_label.pack(side="left")
-        tvai_model_tip = ctk.CTkLabel(tvai_model_row, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        tvai_model_tip = ctk.CTkLabel(tvai_model_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         tvai_model_tip.pack(side="left", padx=4)
         Tooltip(tvai_model_tip, get_tooltip("tvai_model"))
         self._widgets["tvai_model"] = ctk.CTkOptionMenu(
@@ -596,9 +596,9 @@ class SettingsPanel(ctk.CTkFrame):
         # TVAI scale
         tvai_scale_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_scale_row.pack(fill="x", pady=(0, 8))
-        tvai_scale_label = ctk.CTkLabel(tvai_scale_row, text=t("scale"), text_color=Colors.TEXT_SECONDARY)
+        tvai_scale_label = ctk.CTkLabel(tvai_scale_row, text=t("scale"), text_color=Colors.TEXT_PRIMARY)
         tvai_scale_label.pack(side="left")
-        tvai_scale_tip = ctk.CTkLabel(tvai_scale_row, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        tvai_scale_tip = ctk.CTkLabel(tvai_scale_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         tvai_scale_tip.pack(side="left", padx=4)
         Tooltip(tvai_scale_tip, get_tooltip("tvai_scale"))
         self._widgets["tvai_scale"] = ctk.CTkOptionMenu(
@@ -613,9 +613,9 @@ class SettingsPanel(ctk.CTkFrame):
         # TVAI workers
         tvai_workers_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_workers_row.pack(fill="x")
-        tvai_workers_label = ctk.CTkLabel(tvai_workers_row, text=t("workers"), text_color=Colors.TEXT_SECONDARY)
+        tvai_workers_label = ctk.CTkLabel(tvai_workers_row, text=t("workers"), text_color=Colors.TEXT_PRIMARY)
         tvai_workers_label.pack(side="left")
-        tvai_workers_tip = ctk.CTkLabel(tvai_workers_row, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        tvai_workers_tip = ctk.CTkLabel(tvai_workers_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         tvai_workers_tip.pack(side="left", padx=4)
         Tooltip(tvai_workers_tip, get_tooltip("tvai_workers"))
         self._widgets["tvai_workers_val"] = ctk.CTkLabel(tvai_workers_row, text="2", text_color=Colors.TEXT_PRIMARY, width=20)
@@ -651,9 +651,9 @@ class SettingsPanel(ctk.CTkFrame):
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         
-        codec_label = ctk.CTkLabel(row1, text=t("codec"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        codec_label = ctk.CTkLabel(row1, text=t("codec"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         codec_label.pack(side="left")
-        codec_tip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        codec_tip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         codec_tip.pack(side="left", padx=4)
         Tooltip(codec_tip, get_tooltip("codec"))
         self._widgets["codec"] = ctk.CTkOptionMenu(
@@ -669,9 +669,9 @@ class SettingsPanel(ctk.CTkFrame):
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
         row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         
-        cq_label = ctk.CTkLabel(row2, text=t("quality_cq"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        cq_label = ctk.CTkLabel(row2, text=t("quality_cq"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         cq_label.pack(side="left")
-        cq_tip = ctk.CTkLabel(row2, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        cq_tip = ctk.CTkLabel(row2, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         cq_tip.pack(side="left", padx=4)
         Tooltip(cq_tip, get_tooltip("encoder_cq"))
         
@@ -689,9 +689,9 @@ class SettingsPanel(ctk.CTkFrame):
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x")
         
-        args_label = ctk.CTkLabel(row3, text=t("custom_args"), text_color=Colors.TEXT_SECONDARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        args_label = ctk.CTkLabel(row3, text=t("custom_args"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         args_label.pack(side="left", anchor="w")
-        args_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_MUTED, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        args_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         args_tip.pack(side="left", padx=4)
         Tooltip(args_tip, get_tooltip("encoder_custom_args"))
         

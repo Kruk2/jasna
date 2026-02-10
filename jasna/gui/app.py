@@ -97,7 +97,7 @@ class JasnaApp(ctk.CTk):
             left,
             text=f"v{__version__}",
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         )
         version.pack(side="left", pady=(4, 0))
         
@@ -114,7 +114,7 @@ class JasnaApp(ctk.CTk):
             right,
             text="🌐",
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
         )
         lang_label.pack(side="left", padx=(0, 4))
         
@@ -149,7 +149,7 @@ class JasnaApp(ctk.CTk):
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
             width=50,
             command=self._show_help,
         )
@@ -161,7 +161,7 @@ class JasnaApp(ctk.CTk):
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
             width=50,
             command=self._show_about,
         )
@@ -364,7 +364,7 @@ class JasnaApp(ctk.CTk):
             self._processor.stop()
             self._log_panel.info("Processing stopped by user")
             
-        self._status_pill.set_status("IDLE", Colors.TEXT_SECONDARY)
+        self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
         
         # Re-enable settings and output controls
@@ -425,7 +425,7 @@ class JasnaApp(ctk.CTk):
         self.after(0, self._handle_complete)
         
     def _handle_complete(self):
-        self._status_pill.set_status("IDLE", Colors.TEXT_SECONDARY)
+        self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
         self._log_panel.info("All jobs completed")
         
@@ -492,21 +492,21 @@ class JasnaApp(ctk.CTk):
             dialog,
             text=t("dialog_about_version", version=__version__),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_SECONDARY,
+            text_color=Colors.TEXT_PRIMARY,
         ).pack()
         
         ctk.CTkLabel(
             dialog,
             text=t("dialog_about_description"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         ).pack(pady=(16, 8))
         
         ctk.CTkLabel(
             dialog,
             text=t("dialog_about_credit"),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_MUTED,
+            text_color=Colors.TEXT_PRIMARY,
         ).pack()
         
         ctk.CTkButton(
