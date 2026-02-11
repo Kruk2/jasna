@@ -65,6 +65,8 @@ def get_onnx_tensorrt_engine_path(
 
 def compile_onnx_to_tensorrt_engine(
     onnx_path: str | Path,
+    device: torch.device,
+    *,
     batch_size: int | None = None,
     fp16: bool = True,
     optimization_level: int = 3,
@@ -122,7 +124,8 @@ def compile_onnx_to_tensorrt_engine(
             if t.dtype == trt.DataType.FLOAT:
                 t.dtype = trt.DataType.HALF
 
-    engine_bytes = builder.build_serialized_network(network, config)
+    with torch.cuda.device(device):
+        engine_bytes = builder.build_serialized_network(network, config)
     if engine_bytes is None:
         raise ValueError("TensorRT engine build returned None")
 

@@ -41,6 +41,7 @@ class RfDetrMosaicDetectionModel:
 
         self.engine_path = compile_onnx_to_tensorrt_engine(
             self.onnx_path,
+            self.device,
             batch_size=self.batch_size,
             fp16=bool(fp16),
         )

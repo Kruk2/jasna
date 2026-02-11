@@ -112,6 +112,7 @@ class YoloMosaicDetectionModel:
                 batch=self.batch_size,
                 fp16=self.fp16,
                 imgsz=self.imgsz,
+                device=self.device,
             )
 
         if runtime_path.suffix.lower() == ".engine":

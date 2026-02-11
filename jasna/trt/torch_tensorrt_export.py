@@ -43,29 +43,30 @@ def compile_and_save_torchtrt_dynamo(
 ) -> str:
     import torch_tensorrt  # type: ignore[import-not-found]
 
+    device = inputs[0].device
     logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
     with torch_tensorrt.logging.errors():
         print(message)
         logger.info("%s", message)
-        trt_gm = torch_tensorrt.compile(
-            module,
-            ir="dynamo",
-            inputs=inputs,
-            min_block_size=1,
-            workspace_size=int(workspace_size_bytes),
-            enabled_precisions={dtype},
-            use_fp32_acc=False,
-            use_explicit_typing=False,
-            sparse_weights=False,
-            optimization_level=3,
-            hardware_compatible=False,
-            use_python_runtime=False,
-            cache_built_engines=False,
-            reuse_cached_engines=False,
-            truncate_double=True,
-        )
-
-    torch_tensorrt.save(trt_gm, output_path, inputs=inputs)
+        with torch.cuda.device(device):
+            trt_gm = torch_tensorrt.compile(
+                module,
+                ir="dynamo",
+                inputs=inputs,
+                min_block_size=1,
+                workspace_size=int(workspace_size_bytes),
+                enabled_precisions={dtype},
+                use_fp32_acc=False,
+                use_explicit_typing=False,
+                sparse_weights=False,
+                optimization_level=3,
+                hardware_compatible=False,
+                use_python_runtime=False,
+                cache_built_engines=False,
+                reuse_cached_engines=False,
+                truncate_double=True,
+            )
+            torch_tensorrt.save(trt_gm, output_path, inputs=inputs)
     del trt_gm
     return output_path
 

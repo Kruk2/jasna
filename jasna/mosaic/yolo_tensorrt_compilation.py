@@ -4,6 +4,8 @@ import logging
 import warnings
 from pathlib import Path
 
+import torch
+
 
 def get_yolo_tensorrt_engine_path(model_path: str | Path, *, fp16: bool) -> Path:
     model_path = Path(model_path)
@@ -21,6 +23,7 @@ def compile_yolo_to_tensorrt_engine(
     batch: int,
     fp16: bool,
     imgsz: int | tuple[int, int],
+    device: torch.device,
 ) -> Path:
     model_path = Path(model_path)
     if int(batch) <= 0:
@@ -76,7 +79,9 @@ def compile_yolo_to_tensorrt_engine(
     if exported_path.suffix.lower() != ".onnx":
         raise RuntimeError(f"Expected ONNX export, got: {exported_path}")
 
-    out = compile_onnx_to_tensorrt_engine(exported_path, batch_size=None, fp16=bool(fp16))
+    out = compile_onnx_to_tensorrt_engine(
+        exported_path, device, batch_size=None, fp16=bool(fp16)
+    )
     if out != engine_path:
         engine_path.parent.mkdir(parents=True, exist_ok=True)
         out.replace(engine_path)

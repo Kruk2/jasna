@@ -264,92 +264,93 @@ def main() -> None:
     from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
     from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer, _parse_tvai_args_kv
 
-    use_tensorrt = basicvsrpp_startup_policy(
-        restoration_model_path=str(restoration_model_path),
-        max_clip_size=max_clip_size,
-        device=device,
-        fp16=fp16,
-        compile_basicvsrpp=bool(args.compile_basicvsrpp),
-    )
-
-    secondary_name = str(args.secondary_restoration).lower()
-    if secondary_name == "none":
-        secondary_restorer = None
-    elif secondary_name == "swin2sr":
-        swin2sr_batch_size = int(args.swin2sr_batch_size)
-        if swin2sr_batch_size <= 0:
-            raise ValueError("--swin2sr-batch-size must be > 0")
-        secondary_restorer = Swin2srSecondaryRestorer(
+    with torch.cuda.device(device):
+        use_tensorrt = basicvsrpp_startup_policy(
+            restoration_model_path=str(restoration_model_path),
+            max_clip_size=max_clip_size,
             device=device,
             fp16=fp16,
-            batch_size=swin2sr_batch_size,
-            use_tensorrt=bool(args.swin2sr_compilation),
+            compile_basicvsrpp=bool(args.compile_basicvsrpp),
         )
-    elif secondary_name == "tvai":
-        tvai_model = str(args.tvai_model).strip()
-        if tvai_model == "":
-            raise ValueError("--tvai-model must be non-empty")
-        tvai_scale = int(args.tvai_scale)
-        tvai_workers = int(args.tvai_workers)
-        if tvai_workers <= 0:
-            raise ValueError("--tvai-workers must be > 0")
 
-        tvai_args_rest = str(args.tvai_args)
-        tvai_kv = _parse_tvai_args_kv(tvai_args_rest)
-        if "model" in tvai_kv:
-            raise ValueError('Do not pass "model" in --tvai-args; use --tvai-model instead')
-        if "scale" in tvai_kv:
-            raise ValueError('Do not pass "scale" in --tvai-args; use --tvai-scale instead')
-        if ("w" in tvai_kv) or ("h" in tvai_kv):
-            raise ValueError('Do not pass "w" or "h" in --tvai-args; use --tvai-scale instead')
+        secondary_name = str(args.secondary_restoration).lower()
+        if secondary_name == "none":
+            secondary_restorer = None
+        elif secondary_name == "swin2sr":
+            swin2sr_batch_size = int(args.swin2sr_batch_size)
+            if swin2sr_batch_size <= 0:
+                raise ValueError("--swin2sr-batch-size must be > 0")
+            secondary_restorer = Swin2srSecondaryRestorer(
+                device=device,
+                fp16=fp16,
+                batch_size=swin2sr_batch_size,
+                use_tensorrt=bool(args.swin2sr_compilation),
+            )
+        elif secondary_name == "tvai":
+            tvai_model = str(args.tvai_model).strip()
+            if tvai_model == "":
+                raise ValueError("--tvai-model must be non-empty")
+            tvai_scale = int(args.tvai_scale)
+            tvai_workers = int(args.tvai_workers)
+            if tvai_workers <= 0:
+                raise ValueError("--tvai-workers must be > 0")
 
-        tvai_args = f"model={tvai_model}:scale={tvai_scale}"
-        if tvai_args_rest.strip() != "":
-            tvai_args = f"{tvai_args}:{tvai_args_rest}"
-        secondary_restorer = TvaiSecondaryRestorer(
-            device=device,
-            ffmpeg_path=str(args.tvai_ffmpeg_path),
-            tvai_args=tvai_args,
-            max_clip_size=max_clip_size,
-            num_workers=tvai_workers,
+            tvai_args_rest = str(args.tvai_args)
+            tvai_kv = _parse_tvai_args_kv(tvai_args_rest)
+            if "model" in tvai_kv:
+                raise ValueError('Do not pass "model" in --tvai-args; use --tvai-model instead')
+            if "scale" in tvai_kv:
+                raise ValueError('Do not pass "scale" in --tvai-args; use --tvai-scale instead')
+            if ("w" in tvai_kv) or ("h" in tvai_kv):
+                raise ValueError('Do not pass "w" or "h" in --tvai-args; use --tvai-scale instead')
+
+            tvai_args = f"model={tvai_model}:scale={tvai_scale}"
+            if tvai_args_rest.strip() != "":
+                tvai_args = f"{tvai_args}:{tvai_args_rest}"
+            secondary_restorer = TvaiSecondaryRestorer(
+                device=device,
+                ffmpeg_path=str(args.tvai_ffmpeg_path),
+                tvai_args=tvai_args,
+                max_clip_size=max_clip_size,
+                num_workers=tvai_workers,
+            )
+        else:
+            raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
+
+        denoise_strength = DenoiseStrength(str(args.denoise).lower())
+        denoise_step = DenoiseStep(str(args.denoise_step).lower())
+
+        restoration_pipeline = RestorationPipeline(
+            restorer=BasicvsrppMosaicRestorer(
+                checkpoint_path=str(restoration_model_path),
+                device=device,
+                max_clip_size=max_clip_size,
+                use_tensorrt=use_tensorrt,
+                fp16=fp16,
+            ),
+            secondary_restorer=secondary_restorer,
+            denoise_strength=denoise_strength,
+            denoise_step=denoise_step,
         )
-    else:
-        raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
 
-    denoise_strength = DenoiseStrength(str(args.denoise).lower())
-    denoise_step = DenoiseStep(str(args.denoise_step).lower())
-
-    restoration_pipeline = RestorationPipeline(
-        restorer=BasicvsrppMosaicRestorer(
-            checkpoint_path=str(restoration_model_path),
+        stream = torch.cuda.Stream()
+        Pipeline(
+            input_video=input_video,
+            output_video=output_video,
+            detection_model_name=detection_model_name,
+            detection_model_path=detection_model_path,
+            detection_score_threshold=detection_score_threshold,
+            restoration_pipeline=restoration_pipeline,
+            codec=codec,
+            encoder_settings=encoder_settings,
+            stream=stream,
+            batch_size=batch_size,
             device=device,
             max_clip_size=max_clip_size,
-            use_tensorrt=use_tensorrt,
+            temporal_overlap=temporal_overlap,
+            enable_crossfade=bool(args.enable_crossfade),
             fp16=fp16,
-        ),
-        secondary_restorer=secondary_restorer,
-        denoise_strength=denoise_strength,
-        denoise_step=denoise_step,
-    )
-
-    stream = torch.cuda.Stream()
-    Pipeline(
-        input_video=input_video,
-        output_video=output_video,
-        detection_model_name=detection_model_name,
-        detection_model_path=detection_model_path,
-        detection_score_threshold=detection_score_threshold,
-        restoration_pipeline=restoration_pipeline,
-        codec=codec,
-        encoder_settings=encoder_settings,
-        stream=stream,
-        batch_size=batch_size,
-        device=device,
-        max_clip_size=max_clip_size,
-        temporal_overlap=temporal_overlap,
-        enable_crossfade=bool(args.enable_crossfade),
-        fp16=fp16,
-    ).run()
+        ).run()
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ import sys
 import types
 from pathlib import Path
 
+import torch
+
 
 def _touch(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -36,7 +38,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
     from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine, get_yolo_tensorrt_engine_path
     import jasna.trt as jt
 
-    def _fake_compile(onnx_path, batch_size=None, fp16=True, **_kwargs):
+    def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
         engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
         _touch(engine)
         return engine
@@ -44,7 +46,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
     monkeypatch.setattr(jt, "compile_onnx_to_tensorrt_engine", _fake_compile)
 
     expected = get_yolo_tensorrt_engine_path(pt, fp16=True)
-    engine_path = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640)
+    engine_path = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert engine_path == expected
     assert engine_path.is_file()
     assert calls["export"] == 1
@@ -71,6 +73,6 @@ def test_compile_yolo_to_tensorrt_engine_skips_when_present(monkeypatch, tmp_pat
 
     from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
 
-    out = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640)
+    out = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert out == engine
 
