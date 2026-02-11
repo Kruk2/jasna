@@ -42,14 +42,11 @@ if os.name == "nt":
 
     mkvtoolnix_url = "https://github.com/Kruk2/jasna/releases/download/0.1/mkvtoolnix.zip"
     zip_path = internal / "mkvtoolnix.zip"
-    mkvtoolnix_dir = internal / "mkvtoolnix"
-    if mkvtoolnix_dir.exists():
-        shutil.rmtree(mkvtoolnix_dir)
     if zip_path.exists():
         zip_path.unlink()
     urllib.request.urlretrieve(mkvtoolnix_url, zip_path)
     with zipfile.ZipFile(zip_path) as zf:
-        zf.extractall(mkvtoolnix_dir)
+        zf.extractall(internal)
     zip_path.unlink()
 
 if os.name != "nt":
