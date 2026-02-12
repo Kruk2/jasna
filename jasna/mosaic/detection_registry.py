@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v2", "rfdetr-v3"})
+RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v2", "rfdetr-v3", "rfdetr-v4"})
 YOLO_MODEL_NAMES: frozenset[str] = frozenset({"lada-yolo-v2", "lada-yolo-v4"})
 
-DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v3"
+DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v4"
 
 YOLO_MODEL_FILES: dict[str, str] = {
     "lada-yolo-v2": "lada_mosaic_detection_model_v2.pt",
