@@ -150,8 +150,8 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-model",
         type=str,
-        default="rfdetr-v3",
-        choices=["rfdetr-v3", "rfdetr-v2", "lada-yolo-v4", "lada-yolo-v2"],
+        default="rfdetr-v4",
+        choices=["rfdetr-v4", "rfdetr-v3", "rfdetr-v2", "lada-yolo-v4", "lada-yolo-v2"],
         help="Detection model name (default: %(default)s)",
     )
     detection.add_argument(
