@@ -436,6 +436,7 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
         self._worker_task_count: list[int] = [0] * num_workers
         self._closed = False
         self._slots = threading.Semaphore(num_workers)
+        self._worker_needs_prime: list[bool] = [True] * num_workers
 
         for i in range(num_workers):
             w = _TvaiFfmpegRestorer(
@@ -521,6 +522,7 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
                             # Important: do NOT clear remaining padding markers.
                             # They must stay queued so any future TVAI outputs (caused by internal latency)
                             # get consumed as padding and cannot shift alignment for subsequent real frames.
+                            self._worker_needs_prime[worker_idx] = True
                             logger.debug(
                                 "worker %d flush done: real_remaining=%d padding_pushed=%d drained=%d pending_after=%d",
                                 worker_idx,
@@ -531,6 +533,19 @@ class TvaiSecondaryRestorer(Generic[TMeta]):
                             )
                             continue
                         try:
+                            if self._worker_needs_prime[worker_idx]:
+                                self._worker_needs_prime[worker_idx] = False
+                                ks = max(0, task.keep_start)
+                                ke = min(task.frames_256.shape[0], task.keep_end)
+                                if ks < ke:
+                                    prime_frame = task.frames_256[ks:ks+1]
+                                    prime_u8 = prime_frame.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
+                                    prime_hwc = prime_u8.squeeze(0).permute(1, 2, 0).contiguous().cpu()
+                                    prime_bytes = memoryview(prime_hwc.numpy()).cast("B")
+                                    rest._proc.stdin.write(prime_bytes)
+                                    pending.append(None)
+                                    logger.debug("worker %d: wrote priming frame to absorb TVAI first-frame garbage", worker_idx)
+
                             pending.extend(task.meta)
                             drained = rest.restore(
                                 task.frames_256, keep_start=task.keep_start, keep_end=task.keep_end
