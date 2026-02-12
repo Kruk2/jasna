@@ -3,7 +3,6 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-import stat
 import urllib.request
 import zipfile
 
@@ -33,12 +32,13 @@ if os.name == "nt":
     tools_dir = internal / "tools"
     tools_dir.mkdir(parents=True, exist_ok=True)
 
-    for tool in ["ffmpeg", "ffprobe"]:
-        tool_path = shutil.which(tool)
-        if tool_path is None:
-            raise FileNotFoundError(f"Could not find {tool!r} in PATH while building.")
-        dst = tools_dir / Path(tool_path).name
-        shutil.copy2(tool_path, dst)
+    tool_path = Path(r'C:\Program Files\ffmpeg8\bin')
+    for item in tool_path.iterdir():
+        dst = tools_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, dst, dirs_exist_ok=True)
+        else:
+            shutil.copy2(item, dst)
 
     mkvtoolnix_url = "https://github.com/Kruk2/jasna/releases/download/0.1/mkvtoolnix.zip"
     zip_path = internal / "mkvtoolnix.zip"
