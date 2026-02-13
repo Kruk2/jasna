@@ -33,9 +33,12 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
 
     ultra = types.ModuleType("ultralytics")
     ultra.YOLO = _FakeYOLO  # type: ignore[attr-defined]
+    ultra_utils = types.ModuleType("ultralytics.utils")
+    ultra_utils.nms = types.ModuleType("nms")
+    ultra_utils.ops = types.ModuleType("ops")
     monkeypatch.setitem(sys.modules, "ultralytics", ultra)
+    monkeypatch.setitem(sys.modules, "ultralytics.utils", ultra_utils)
 
-    from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine, get_yolo_tensorrt_engine_path
     import jasna.trt as jt
 
     def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
@@ -44,6 +47,8 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
         return engine
 
     monkeypatch.setattr(jt, "compile_onnx_to_tensorrt_engine", _fake_compile)
+
+    from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine, get_yolo_tensorrt_engine_path
 
     expected = get_yolo_tensorrt_engine_path(pt, fp16=True)
     engine_path = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
@@ -58,11 +63,11 @@ def test_compile_yolo_to_tensorrt_engine_skips_when_present(monkeypatch, tmp_pat
 
     pt = Path("model_weights") / "lada_mosaic_detection_model_v4_fast.pt"
     _touch(pt)
-    from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
-    engine = get_yolo_tensorrt_engine_path(pt, fp16=True)
-    _touch(engine)
 
     ultra = types.ModuleType("ultralytics")
+    ultra_utils = types.ModuleType("ultralytics.utils")
+    ultra_utils.nms = types.ModuleType("nms")
+    ultra_utils.ops = types.ModuleType("ops")
 
     class _NeverCalled:
         def __init__(self, *_args, **_kwargs) -> None:
@@ -70,9 +75,12 @@ def test_compile_yolo_to_tensorrt_engine_skips_when_present(monkeypatch, tmp_pat
 
     ultra.YOLO = _NeverCalled  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "ultralytics", ultra)
+    monkeypatch.setitem(sys.modules, "ultralytics.utils", ultra_utils)
 
-    from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
+    from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path, compile_yolo_to_tensorrt_engine
+    engine = get_yolo_tensorrt_engine_path(pt, fp16=True)
+    _touch(engine)
+
 
     out = compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert out == engine
-
