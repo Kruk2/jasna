@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import logging
 import warnings
 from pathlib import Path
@@ -56,6 +58,7 @@ def compile_yolo_to_tensorrt_engine(
     from jasna.trt import compile_onnx_to_tensorrt_engine
 
     model = YOLO(str(model_path), verbose=False, task="segment")
+    null_stream = io.StringIO()
     with warnings.catch_warnings():
         warnings.filterwarnings(
             "ignore",
@@ -63,14 +66,15 @@ def compile_yolo_to_tensorrt_engine(
             category=UserWarning,
             module=r"ultralytics\.engine\.exporter",
         )
-        exported = model.export(
-            format="onnx",
-            imgsz=int(imgsz) if isinstance(imgsz, int) else tuple(int(x) for x in imgsz),
-            dynamic=False,
-            nms=False,
-            batch=int(batch),
-            half=bool(fp16),
-        )
+        with contextlib.redirect_stdout(null_stream), contextlib.redirect_stderr(null_stream):
+            exported = model.export(
+                format="onnx",
+                imgsz=int(imgsz) if isinstance(imgsz, int) else tuple(int(x) for x in imgsz),
+                dynamic=False,
+                nms=False,
+                batch=int(batch),
+                half=bool(fp16),
+            )
     del model
 
     exported_path = Path(str(exported)) if exported is not None else None
@@ -89,4 +93,3 @@ def compile_yolo_to_tensorrt_engine(
     if not engine_path.exists():
         raise FileNotFoundError(str(engine_path))
     return engine_path
-

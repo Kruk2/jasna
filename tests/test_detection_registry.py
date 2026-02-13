@@ -16,3 +16,8 @@ def test_default_detection_model_is_rfdetr_v4() -> None:
 def test_rfdetr_v4_weights_path() -> None:
     assert detection_model_weights_path("rfdetr-v4") == Path("model_weights/rfdetr-v4.onnx")
     assert coerce_detection_model_name("rfdetr-v4") == "rfdetr-v4"
+
+
+def test_lada_yolo_v4_weights_path() -> None:
+    assert detection_model_weights_path("lada-yolo-v4") == Path("model_weights/lada_mosaic_detection_model_v4_fast.pt")
+    assert coerce_detection_model_name("lada-yolo-v4") == "lada-yolo-v4"
