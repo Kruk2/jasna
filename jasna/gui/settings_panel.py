@@ -485,7 +485,14 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["denoise_step"].pack(side="right")
         self._widgets["denoise_step"].set(t("after_primary"))
-        
+
+    def _browse_working_directory(self):
+        dirpath = filedialog.askdirectory(title=t("dialog_select_working_directory"))
+        if dirpath:
+            self._widgets["working_directory"].delete(0, "end")
+            self._widgets["working_directory"].insert(0, dirpath)
+            self._mark_modified()
+
     def _build_secondary_section(self):
         section = CollapsibleSection(self._scroll, t("section_secondary"), expanded=False)
         section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -714,7 +721,31 @@ class SettingsPanel(ctk.CTkFrame):
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("placeholder_encoder_args")
         )
         self._widgets["encoder_custom_args"].pack(fill="x")
-        
+
+        # Working Directory
+        workdir_row = ctk.CTkFrame(inner, fg_color="transparent")
+        workdir_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        workdir_label = ctk.CTkLabel(workdir_row, text=t("working_directory"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        workdir_label.pack(side="left")
+        workdir_tip = ctk.CTkLabel(workdir_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        workdir_tip.pack(side="left", padx=4)
+        Tooltip(workdir_tip, get_tooltip("working_directory"))
+
+        workdir_input_row = ctk.CTkFrame(inner, fg_color="transparent")
+        workdir_input_row.pack(fill="x", pady=(4, 0))
+        self._widgets["working_directory"] = ctk.CTkEntry(
+            workdir_input_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("working_directory_placeholder")
+        )
+        self._widgets["working_directory"].pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        workdir_browse_btn = ctk.CTkButton(
+            workdir_input_row, text="📂", width=32, height=28,
+            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
+            command=self._browse_working_directory
+        )
+        workdir_browse_btn.pack(side="right")
+
     def _on_preset_changed(self, preset_display_name: str):
         # Strip modified indicator if present
         if preset_display_name.endswith(" (Modified)*"):
@@ -804,7 +835,10 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["encoder_cq_val"].configure(text=str(preset.encoder_cq))
         self._widgets["encoder_custom_args"].delete(0, "end")
         self._widgets["encoder_custom_args"].insert(0, preset.encoder_custom_args)
-        
+
+        self._widgets["working_directory"].delete(0, "end")
+        self._widgets["working_directory"].insert(0, getattr(preset, "working_directory", "") or "")
+
         # File conflict setting
         file_conflict_display = {
             "auto_rename": t("file_conflict_auto_rename"),
@@ -948,6 +982,7 @@ class SettingsPanel(ctk.CTkFrame):
             encoder_cq=int(self._widgets["encoder_cq"].get()),
             encoder_custom_args=self._widgets["encoder_custom_args"].get(),
             file_conflict=file_conflict,
+            working_directory=self._widgets["working_directory"].get().strip(),
         )
     
     def set_enabled(self, enabled: bool):

@@ -40,6 +40,7 @@ class Pipeline:
         fp16: bool,
         disable_progress: bool = False,
         progress_callback: callable | None = None,
+        working_directory: Path | None = None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -75,6 +76,7 @@ class Pipeline:
         # Progress control for console vs GUI
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback
+        self.working_directory = working_directory
 
     def run(self) -> None:
         stream = self.stream
@@ -97,6 +99,7 @@ class Pipeline:
                 codec=self.codec,
                 encoder_settings=self.encoder_settings,
                 stream_mode=False,
+                working_directory=self.working_directory,
             ) as encoder,
             torch.inference_mode(),
             torch.cuda.stream(stream),

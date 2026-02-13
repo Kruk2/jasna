@@ -180,6 +180,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help='Encoder settings, as JSON object or comma-separated key=value pairs (e.g. {"cq":22} or cq=22,lookahead=32)',
     )
+    encoding.add_argument(
+        "--working-directory",
+        type=str,
+        default="",
+        help="Directory for encoder temp files (.hevc, temp video). Default: same as output.",
+    )
     return parser
 
 
@@ -334,6 +340,7 @@ def main() -> None:
         )
 
         stream = torch.cuda.Stream()
+        working_directory = Path(args.working_directory) if args.working_directory else None
         Pipeline(
             input_video=input_video,
             output_video=output_video,
@@ -350,6 +357,7 @@ def main() -> None:
             temporal_overlap=temporal_overlap,
             enable_crossfade=bool(args.enable_crossfade),
             fp16=fp16,
+            working_directory=working_directory,
         ).run()
 
 
