@@ -292,6 +292,7 @@ class Processor:
                     total_frames=total,
                 ))
 
+            working_directory = Path(settings.working_directory) if (settings.working_directory or "").strip() else None
             pipeline = Pipeline(
                 input_video=input_path,
                 output_video=output_path,
@@ -310,6 +311,7 @@ class Processor:
                 fp16=settings.fp16_mode,
                 disable_progress=True,
                 progress_callback=progress_callback,
+                working_directory=working_directory,
             )
 
             pipeline.run()

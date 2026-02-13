@@ -76,3 +76,57 @@ def test_cli_creates_stream_on_chosen_device(tmp_path: Path) -> None:
 
     assert any(d == torch.device("cuda:1") for d in device_capture)
     assert pipeline_capture["device"] == torch.device("cuda:1")
+
+
+def test_cli_passes_working_directory_to_pipeline(tmp_path: Path) -> None:
+    input_path = tmp_path / "in.mp4"
+    input_path.touch()
+    output_path = tmp_path / "out.mkv"
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    model_weights = tmp_path / "model_weights"
+    model_weights.mkdir()
+    restoration_path = model_weights / "lada_mosaic_restoration_model_generic_v1.2.pth"
+    restoration_path.touch()
+    detection_path = model_weights / "rfdetr-v3.onnx"
+    detection_path.touch()
+
+    pipeline_capture = {}
+
+    def capture_pipeline(**kwargs):
+        pipeline_capture.update(kwargs)
+        return MagicMock()
+
+    with (
+        patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+        patch("jasna.main.check_required_executables"),
+        patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
+        patch(
+            "jasna.restorer.basicvrspp_tenorrt_compilation.basicvsrpp_startup_policy",
+            return_value=False,
+        ),
+        patch("jasna.pipeline.Pipeline", side_effect=capture_pipeline),
+        patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
+    ):
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "jasna",
+                "--input",
+                str(input_path),
+                "--output",
+                str(output_path),
+                "--working-directory",
+                str(work_dir),
+                "--restoration-model-path",
+                str(restoration_path),
+                "--detection-model-path",
+                str(detection_path),
+            ],
+        ):
+            from jasna.main import main
+
+            main()
+
+    assert pipeline_capture["working_directory"] == work_dir

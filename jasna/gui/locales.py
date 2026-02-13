@@ -45,6 +45,7 @@ def _get_cli_descriptions() -> dict[str, str]:
                 "detection_score_threshold": "detection_score_threshold",
                 "codec": "codec",
                 "encoder_settings": "encoder_custom_args",
+                "working_directory": "working_directory",
             }
             
             dest = action.dest
@@ -143,6 +144,9 @@ TRANSLATIONS = {
         "denoise_high": "High",
         "after_primary": "After Primary",
         "after_secondary": "After Secondary",
+        "working_directory": "Working Directory",
+        "working_directory_placeholder": "Optional, same as output folder",
+        "dialog_select_working_directory": "Select Working Directory",
         
         # Secondary Restoration
         "secondary_none": "None",
@@ -243,6 +247,7 @@ TRANSLATIONS = {
         "tip_codec": "Output video codec (only HEVC supported for now)",
         "tip_encoder_cq": "Constant quality value for encoder (lower = better quality, larger file)",
         "tip_encoder_custom_args": "Encoder settings as comma-separated key=value pairs (e.g. cq=22,lookahead=32)",
+        "tip_working_directory": "Directory for encoder temp files (.hevc, temp video). Use a fast drive for better performance.",
         
         # Preset button tooltips
         "tip_preset_reset": "Reset to saved values",
@@ -383,7 +388,10 @@ TRANSLATIONS = {
         "denoise_high": "高",
         "after_primary": "主修复后",
         "after_secondary": "二次修复后",
-        
+        "working_directory": "工作目录",
+        "working_directory_placeholder": "可选，默认与输出文件夹相同",
+        "dialog_select_working_directory": "选择工作目录",
+
         # Secondary Restoration
         "secondary_none": "无",
         "secondary_swin2sr": "Swin2SR",
@@ -483,7 +491,8 @@ TRANSLATIONS = {
         "tip_codec": "输出视频编解码器（目前仅支持 HEVC）",
         "tip_encoder_cq": "编码器的恒定质量值（越低 = 质量越好，文件越大）",
         "tip_encoder_custom_args": "编码器设置，以逗号分隔的 key=value 对（例如 cq=22,lookahead=32）",
-        
+        "tip_working_directory": "编码器临时文件 (.hevc, temp video) 的目录。使用更快的驱动器可提升性能。",
+
         # Preset button tooltips
         "tip_preset_reset": "重置为保存的值",
         "tip_preset_delete": "删除预设",
@@ -623,6 +632,9 @@ TRANSLATIONS = {
         "denoise_high": "高",
         "after_primary": "一次修復後",
         "after_secondary": "二次修復後",
+        "working_directory": "作業ディレクトリ",
+        "working_directory_placeholder": "オプション。未指定の場合は出力フォルダと同じ",
+        "dialog_select_working_directory": "作業ディレクトリを選択",
 
         # Secondary Restoration
         "secondary_none": "なし",
@@ -723,6 +735,7 @@ TRANSLATIONS = {
         "tip_codec": "出力動画コーデック（現在は HEVC のみ対応）",
         "tip_encoder_cq": "エンコーダーの固定品質値（低い値 = 高品質・大きなファイル）",
         "tip_encoder_custom_args": "エンコーダー設定（カンマ区切りの key=value 形式。例: cq=22,lookahead=32）",
+        "tip_working_directory": "エンコーダーの一時ファイル (.hevc, temp video) のディレクトリ。高速なドライブを使用するとパフォーマンスが向上します。",
 
         # Preset button tooltips
         "tip_preset_reset": "保存済みの値にリセット",

@@ -165,6 +165,7 @@ class NvidiaVideoEncoder:
         codec: str,
         encoder_settings: dict[str, object],
         stream_mode: bool = False,
+        working_directory: Path | None = None,
     ):
         self.metadata = metadata
         self.stream = stream
@@ -172,6 +173,10 @@ class NvidiaVideoEncoder:
         self.file = file
         self.output_path = Path(file)
         self.stream_mode = stream_mode
+
+        temp_dir = Path(working_directory) if working_directory is not None else self.output_path.parent
+        if working_directory is not None:
+            temp_dir.mkdir(parents=True, exist_ok=True)
         bf = 1 if stream_mode else 4 # 1 or 2?
 
         #todo for streaming mode enable tuning low latency, disable qpass
@@ -230,7 +235,7 @@ class NvidiaVideoEncoder:
         if metadata.color_space != AvColorspace.ITU709 and metadata.color_range != AvColorRange.MPEG:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
 
-        self.temp_video_path = self.output_path.with_name(self.output_path.stem + '_temp_video' + self.output_path.suffix)
+        self.temp_video_path = temp_dir / (self.output_path.stem + '_temp_video' + self.output_path.suffix)
 
         if self.stream_mode:
             dst_file = av.open(str(self.temp_video_path), 'w')
@@ -250,7 +255,7 @@ class NvidiaVideoEncoder:
             self.out_stream = out_stream
             self.extradata_set = False
         else:
-            self.hevc_path = self.output_path.with_suffix('.hevc')
+            self.hevc_path = temp_dir / (self.output_path.stem + '.hevc')
             self.raw_hevc = open(self.hevc_path, "wb")
 
     def __enter__(self):
@@ -283,8 +288,8 @@ class NvidiaVideoEncoder:
         else:
             self.raw_hevc.close()
             mux_hevc_to_mkv(self.hevc_path, self.temp_video_path, self.reordered_pts_queue, self.metadata.time_base)
-            remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
             self.hevc_path.unlink()
+            remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
             self.temp_video_path.unlink()
 
         del self.encoder
