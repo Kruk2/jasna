@@ -26,6 +26,10 @@ for name in [
 ]:
     shutil.copy(Path("model_weights") / name, out / "model_weights" / name)
 
+(out / "assets").mkdir(parents=True, exist_ok=True)
+shutil.copy(Path("assets") / "test_clip1.mp4", out / "assets" / "test_clip1_1080p.mp4")
+shutil.copy(Path("assets") / "test_clip1_2160p.mp4", out / "assets" / "test_clip1_2160p.mp4")
+
 internal = out / "_internal"
 
 if os.name == "nt":
