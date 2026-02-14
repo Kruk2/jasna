@@ -1,6 +1,7 @@
 """Background processor for video processing jobs."""
 
 import threading
+import traceback
 import queue
 import time
 from pathlib import Path
@@ -177,12 +178,13 @@ class Processor:
             self._log("INFO", f"Finished processing {job.filename}")
             
         except Exception as e:
+            tb = traceback.format_exc()
             self._progress(ProgressUpdate(
                 job_index=idx,
                 status=JobStatus.ERROR,
                 message=str(e),
             ))
-            self._log("ERROR", f"Failed to process {job.filename}: {e}")
+            self._log("ERROR", f"Failed to process {job.filename}: {e}\n{tb}")
             
     def _run_pipeline(self, job_idx: int, input_path: Path, output_path: Path):
         """Run the actual processing pipeline."""
