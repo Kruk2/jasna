@@ -51,6 +51,10 @@ Download the latest release package (Windows/Linux).
 Remember to have up to date nvidia drivers.\
 Tested nvidia drivers: **591.67**
 
+### Detection Model
+In general it's recommended to pick latest rf-detr.\
+LLada Yolo models are available as they handle 2d animations better.
+
 ### Secondary Restoration Model
 Currently supported:
 - TVAI (windows only). Use _Google_ or buy from [here](https://www.topazlabs.com/topaz-video).\
