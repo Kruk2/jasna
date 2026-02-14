@@ -66,8 +66,8 @@ Currently supported:
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\
 Going above 20 doesn't bring much. The larger overlap the longer processing times but less flickering.\
-Pick highest clip size you can and set overlap to something between 8-20.\
-Some guidance from my limited testing:\
+**Pick highest clip size you can and set overlap to something between 8-20.**\
+Some guidance from my limited testing:
 - 60 clip size + temporal overlap 6
 - 90 clip size + temporal overlap 8
 - 180 clip size + temporal overlap 15 if you can fit the model.
