@@ -53,7 +53,7 @@ Tested nvidia drivers: **591.67**
 
 ### Detection Model
 In general it's recommended to pick latest rf-detr.\
-LLada Yolo models are available as they handle 2d animations better.
+Lada Yolo models are available as they handle 2d animations better.
 
 ### Secondary Restoration Model
 Currently supported:
