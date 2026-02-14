@@ -1,6 +1,15 @@
 import multiprocessing
+import os
 import sys
 from pathlib import Path
+
+_JASNA_MAIN_PID = os.environ.get("JASNA_MAIN_PID")
+if _JASNA_MAIN_PID and str(os.getpid()) != _JASNA_MAIN_PID:
+    if len(sys.argv) < 2 or sys.argv[1] != "--multiprocessing-fork":
+        sys.exit(0)
+if multiprocessing.parent_process() is not None:
+    sys.exit(0)
+os.environ["JASNA_MAIN_PID"] = str(os.getpid())
 
 from jasna.bootstrap import sanitize_sys_path_for_local_dev
 
