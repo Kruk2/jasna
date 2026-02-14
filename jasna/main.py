@@ -14,8 +14,9 @@ from jasna.os_utils import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jasna")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("--input", required=True, type=str, help="Path to input video")
-    parser.add_argument("--output", required=True, type=str, help="Path to output video")
+    parser.add_argument("--benchmark", action="store_true", help="Run benchmarks instead of processing video")
+    parser.add_argument("--input", required=False, type=str, default=None, help="Path to input video")
+    parser.add_argument("--output", required=False, type=str, default=None, help="Path to output video")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument(
@@ -186,11 +187,30 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Directory for encoder temp files (.hevc, temp video). Default: same as output.",
     )
+
+    benchmark_group = parser.add_argument_group("Benchmark")
+    benchmark_group.add_argument(
+        "--benchmark-video",
+        type=str,
+        action="append",
+        default=None,
+        help="Video path for benchmark (can be repeated). Default: test_clip1_1080p.mp4, test_clip1_2160p.mp4",
+    )
     return parser
 
 
 def main() -> None:
-    args = build_parser().parse_args()
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.benchmark:
+        from jasna.benchmark import run_benchmark_cli
+        run_benchmark_cli(args)
+        return
+
+    if args.input is None or args.output is None:
+        parser.error("--input and --output are required when not using --benchmark")
+
     check_required_executables(disable_ffmpeg_check=args.disable_ffmpeg_check)
     warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
 
