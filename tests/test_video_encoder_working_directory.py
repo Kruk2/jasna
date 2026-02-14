@@ -70,6 +70,8 @@ def test_encoder_uses_working_directory_for_temp_paths(tmp_path: Path) -> None:
     call_args = mock_mux.call_args[0]
     assert call_args[0].parent == working_dir
     assert call_args[0].name == "result.hevc"
+    mock_nvc.CreateEncoder.assert_called_once()
+    assert mock_nvc.CreateEncoder.call_args[1]["gpu_id"] == 0
 
 
 def test_encoder_unlinks_hevc_before_remux(tmp_path: Path) -> None:

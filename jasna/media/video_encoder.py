@@ -212,9 +212,11 @@ class NvidiaVideoEncoder:
         if encoder_settings:
             encoder_options.update(encoder_settings)
 
+        gpu_id = self.device.index if self.device.index is not None else 0
         self.encoder = nvc.CreateEncoder(
             width=metadata.video_width,
             height=metadata.video_height,
+            gpu_id=gpu_id,
             cudastream=stream.cuda_stream,
             fmt="P010",
             usecpuinputbuffer=False,
