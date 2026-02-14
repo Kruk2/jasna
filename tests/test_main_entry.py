@@ -1,3 +1,4 @@
+import os
 import sys
 from unittest.mock import patch
 
@@ -83,6 +84,26 @@ def test_spawn_child_does_not_run_dispatch(monkeypatch) -> None:
     )
     with patch("jasna.gui.run_gui") as run_gui:
         with patch("jasna.main.main") as main:
-            import jasna.__main__  # noqa: F401
+            with pytest.raises(SystemExit) as e:
+                import jasna.__main__  # noqa: F401
+            assert e.value.code == 0
+            run_gui.assert_not_called()
+            main.assert_not_called()
+
+
+def test_jasna_main_pid_child_exits_without_dispatch(monkeypatch) -> None:
+    for name in list(sys.modules):
+        if name == "jasna.__main__" or name.startswith("jasna.gui"):
+            del sys.modules[name]
+
+    monkeypatch.setattr(os, "getpid", lambda: 99999)
+    monkeypatch.setenv("JASNA_MAIN_PID", "12345")
+    monkeypatch.setattr(sys, "argv", ["jasna"])
+
+    with patch("jasna.gui.run_gui") as run_gui:
+        with patch("jasna.main.main") as main:
+            with pytest.raises(SystemExit) as e:
+                import jasna.__main__  # noqa: F401
+            assert e.value.code == 0
             run_gui.assert_not_called()
             main.assert_not_called()

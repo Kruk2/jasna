@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import logging
+import os
 import warnings
 from pathlib import Path
 
@@ -53,28 +54,35 @@ def compile_yolo_to_tensorrt_engine(
     print(msg)
     log.info("%s", msg)
 
+    os.environ["YOLO_VERBOSE"] = "False"
     from ultralytics import YOLO
+    from ultralytics.utils import LOGGER as YOLO_LOGGER
 
     from jasna.trt import compile_onnx_to_tensorrt_engine
 
-    model = YOLO(str(model_path), verbose=False, task="segment")
-    null_stream = io.StringIO()
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=r"To copy construct from a tensor, it is recommended to use sourceTensor\.detach\(\)\.clone\(\).*",
-            category=UserWarning,
-            module=r"ultralytics\.engine\.exporter",
-        )
-        with contextlib.redirect_stdout(null_stream), contextlib.redirect_stderr(null_stream):
-            exported = model.export(
-                format="onnx",
-                imgsz=int(imgsz) if isinstance(imgsz, int) else tuple(int(x) for x in imgsz),
-                dynamic=False,
-                nms=False,
-                batch=int(batch),
-                half=bool(fp16),
+    _prev_yolo_level = YOLO_LOGGER.level
+    YOLO_LOGGER.setLevel(logging.ERROR)
+    try:
+        model = YOLO(str(model_path), verbose=False, task="segment")
+        null_stream = io.StringIO()
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"To copy construct from a tensor, it is recommended to use sourceTensor\.detach\(\)\.clone\(\).*",
+                category=UserWarning,
+                module=r"ultralytics\.engine\.exporter",
             )
+            with contextlib.redirect_stdout(null_stream), contextlib.redirect_stderr(null_stream):
+                exported = model.export(
+                    format="onnx",
+                    imgsz=int(imgsz) if isinstance(imgsz, int) else tuple(int(x) for x in imgsz),
+                    dynamic=False,
+                    nms=False,
+                    batch=int(batch),
+                    half=bool(fp16),
+                )
+    finally:
+        YOLO_LOGGER.setLevel(_prev_yolo_level)
     del model
 
     exported_path = Path(str(exported)) if exported is not None else None

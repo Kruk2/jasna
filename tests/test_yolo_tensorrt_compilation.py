@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sys
 import types
 from pathlib import Path
@@ -36,6 +37,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
     ultra_utils = types.ModuleType("ultralytics.utils")
     ultra_utils.nms = types.ModuleType("nms")
     ultra_utils.ops = types.ModuleType("ops")
+    ultra_utils.LOGGER = logging.getLogger("ultralytics")
     monkeypatch.setitem(sys.modules, "ultralytics", ultra)
     monkeypatch.setitem(sys.modules, "ultralytics.utils", ultra_utils)
 
@@ -68,6 +70,7 @@ def test_compile_yolo_to_tensorrt_engine_skips_when_present(monkeypatch, tmp_pat
     ultra_utils = types.ModuleType("ultralytics.utils")
     ultra_utils.nms = types.ModuleType("nms")
     ultra_utils.ops = types.ModuleType("ops")
+    ultra_utils.LOGGER = logging.getLogger("ultralytics")
 
     class _NeverCalled:
         def __init__(self, *_args, **_kwargs) -> None:
