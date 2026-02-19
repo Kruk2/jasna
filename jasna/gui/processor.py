@@ -196,7 +196,6 @@ class Processor:
         from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
         from jasna.restorer.restoration_pipeline import RestorationPipeline
         from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
-        from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer, _parse_tvai_args_kv
         
         settings = self._settings
         device = torch.device("cuda:0")
@@ -236,16 +235,7 @@ class Processor:
                     use_tensorrt=settings.swin2sr_tensorrt,
                 )
             elif settings.secondary_restoration == "tvai":
-                tvai_args = f"model={settings.tvai_model}:scale={settings.tvai_scale}"
-                if settings.tvai_args.strip():
-                    tvai_args = f"{tvai_args}:{settings.tvai_args}"
-                secondary_restorer = TvaiSecondaryRestorer(
-                    device=device,
-                    ffmpeg_path=settings.tvai_ffmpeg_path,
-                    tvai_args=tvai_args,
-                    max_clip_size=settings.max_clip_size,
-                    num_workers=settings.tvai_workers,
-                )
+                raise ValueError("TVAI secondary restorer is not yet implemented in the new pipeline")
 
             denoise_strength = DenoiseStrength(settings.denoise_strength)
             denoise_step = DenoiseStep(settings.denoise_step)
