@@ -63,17 +63,7 @@ class _FakeRestorationPipeline:
         restored = self.restore_clip(clip, frames, keep_start=int(keep_start), keep_end=int(keep_end))
         frame_buffer.blend_clip(clip, restored, keep_start=int(keep_start), keep_end=int(keep_end))
 
-    def flush_secondary(self, *, frame_buffer: FrameBuffer) -> None:
-        del frame_buffer
 
-    def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> None:
-        del frame_buffer, limit
-
-    def flush_track(self, track_id: int) -> None:
-        del track_id
-
-    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
-        del old_track_id, new_track_id
 
 
 def _make_single_det_batch(*, effective_bs: int, batch_size: int, box=(2.0, 2.0, 6.0, 6.0)) -> Detections:

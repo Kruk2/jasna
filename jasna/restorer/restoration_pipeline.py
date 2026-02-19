@@ -1,23 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 import math
 from typing import TYPE_CHECKING
 import numpy as np
 import torch
-
-logger = logging.getLogger(__name__)
 import torch.nn.functional as F
 
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
 from jasna.restorer.restored_clip import RestoredClip
-from jasna.restorer.secondary_restorer import StreamingSecondaryRestorer
+from jasna.restorer.secondary_restorer import SecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 if TYPE_CHECKING:
     from jasna.tracking.frame_buffer import FrameBuffer
+
+logger = logging.getLogger(__name__)
 
 RESTORATION_SIZE = 256
 BORDER_RATIO = 0.06
@@ -35,79 +34,22 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
     return image
 
 
-@dataclass(frozen=True)
-class _PendingBlend:
-    frame_idx: int
-    track_id: int
-    mask_lr: torch.Tensor
-    frame_shape: tuple[int, int]
-    enlarged_bbox: tuple[int, int, int, int]
-    crop_shape: tuple[int, int]
-    pad_offset_256: tuple[int, int]
-    resize_shape_256: tuple[int, int]
-    crossfade_weight: float = 1.0
-
-
-@dataclass(frozen=True)
-class _CompletedFrame:
-    meta: object
-    _frame_u8: torch.Tensor
-
-    def to_frame_u8(self, device: torch.device) -> torch.Tensor:
-        return self._frame_u8 if self._frame_u8.device == device else self._frame_u8.to(device=device)
-
-
-class _PrimaryOnlySecondary:
-    """Pass-through: converts primary float [0,1] output to uint8. Used when no secondary restorer is configured."""
-    name = "none"
-
-    def __init__(self) -> None:
-        self._completed: list[_CompletedFrame] = []
-
-    def submit(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int, meta: list[object], track_id: int = 0) -> None:
-        out_u8 = frames_256[keep_start:keep_end].clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
-        for m, f in zip(meta, torch.unbind(out_u8, 0)):
-            self._completed.append(_CompletedFrame(meta=m, _frame_u8=f))
-
-    def drain_completed(self, *, limit: int | None = None) -> list[_CompletedFrame]:
-        if limit is None or limit >= len(self._completed):
-            out = self._completed
-            self._completed = []
-            return out
-        out = self._completed[:limit]
-        self._completed = self._completed[limit:]
-        return out
-
-    def flush(self, *, timeout_s: float = 300.0) -> None:
-        pass
-
-    def flush_track(self, track_id: int) -> None:
-        pass
-
-    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
-        pass
-
-
 class RestorationPipeline:
     def __init__(
         self,
         restorer: BasicvsrppMosaicRestorer,
         *,
-        secondary_restorer=None,
+        secondary_restorer: SecondaryRestorer | None = None,
         denoise_strength: DenoiseStrength = DenoiseStrength.NONE,
         denoise_step: DenoiseStep = DenoiseStep.AFTER_PRIMARY,
     ) -> None:
         self.restorer = restorer
-        self.secondary_restorer = secondary_restorer  # kept for restore_clip() test compat
+        self.secondary_restorer = secondary_restorer
         self._denoise_strength = denoise_strength
         self._denoise_step = denoise_step
-        if isinstance(secondary_restorer, StreamingSecondaryRestorer):
-            self._secondary: StreamingSecondaryRestorer = secondary_restorer
-        else:
-            self._secondary = _PrimaryOnlySecondary()
         logger.info(
             "RestorationPipeline: secondary=%s denoise=%s denoise_step=%s",
-            self._secondary.name,
+            secondary_restorer.name if secondary_restorer else "none",
             denoise_strength.name,
             denoise_step.name,
         )
@@ -184,6 +126,35 @@ class RestorationPipeline:
 
         return resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes
 
+    def _run_secondary(self, primary_raw: torch.Tensor, keep_start: int, keep_end: int) -> list[torch.Tensor]:
+        if self.secondary_restorer is not None:
+            result = self.secondary_restorer.restore(primary_raw, keep_start=keep_start, keep_end=keep_end)
+            if isinstance(result, torch.Tensor):
+                restored_frames = list(result.unbind(0)) if result.dim() > 3 else [result]
+            else:
+                restored_frames = result
+        else:
+            kept = primary_raw[keep_start:keep_end]
+            restored_frames = list(kept.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0))
+
+        if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
+            batch_u8 = torch.stack(restored_frames, dim=0)
+            batch_u8 = apply_denoise_u8(batch_u8, self._denoise_strength)
+            restored_frames = list(batch_u8.unbind(0))
+
+        return restored_frames
+
+    def _scale_offsets(self, frame_u8: torch.Tensor, pad_offset_256: tuple[int, int], resize_shape_256: tuple[int, int]) -> tuple[tuple[int, int], tuple[int, int]]:
+        out_h = int(frame_u8.shape[1])
+        out_w = int(frame_u8.shape[2])
+        pl, pt = pad_offset_256
+        rh, rw = resize_shape_256
+        x0 = int(round(pl * out_w / RESTORATION_SIZE))
+        x1 = int(round((pl + rw) * out_w / RESTORATION_SIZE))
+        y0 = int(round(pt * out_h / RESTORATION_SIZE))
+        y1 = int(round((pt + rh) * out_h / RESTORATION_SIZE))
+        return (x0, y0), (y1 - y0, x1 - x0)
+
     def restore_and_blend_clip(
         self,
         clip: TrackedClip,
@@ -213,76 +184,33 @@ class RestorationPipeline:
             primary_raw = self._apply_denoise(primary_raw)
 
         frame_h, frame_w = frames[0].shape[1], frames[0].shape[2]
-        meta = [
-            _PendingBlend(
-                frame_idx=clip.start_frame + i,
-                track_id=clip.track_id,
+        restored_frames = self._run_secondary(primary_raw, ks, ke)
+
+        for local_i, i in enumerate(range(ks, ke)):
+            frame_idx = clip.start_frame + i
+            track_id = clip.track_id
+            if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=track_id):
+                continue
+
+            frame_u8 = restored_frames[local_i]
+            pad_offset, resize_shape = self._scale_offsets(frame_u8, pad_offsets[i], resize_shapes[i])
+            cw = crossfade_weights.get(i, 1.0) if crossfade_weights else 1.0
+
+            frame_buffer.blend_restored_frame(
+                frame_idx=frame_idx,
+                track_id=track_id,
+                restored=frame_u8,
                 mask_lr=clip.masks[i],
                 frame_shape=(frame_h, frame_w),
                 enlarged_bbox=enlarged_bboxes[i],
                 crop_shape=crop_shapes[i],
-                pad_offset_256=pad_offsets[i],
-                resize_shape_256=resize_shapes[i],
-                crossfade_weight=crossfade_weights.get(i, 1.0) if crossfade_weights else 1.0,
+                pad_offset=pad_offset,
+                resize_shape=resize_shape,
+                crossfade_weight=cw,
             )
-            for i in range(ks, ke)
-        ]
 
-        self._secondary.submit(primary_raw, keep_start=ks, keep_end=ke, meta=meta, track_id=clip.track_id)
-        self.poll_secondary(frame_buffer=frame_buffer)
-
-    def poll_secondary(self, *, frame_buffer: FrameBuffer, limit: int | None = None) -> int:
-        drained = 0
-        for item in self._secondary.drain_completed(limit=limit):
-            drained += 1
-            meta = item.meta
-            if not frame_buffer.needs_blend(frame_idx=meta.frame_idx, track_id=meta.track_id):
-                continue
-            frame_u8 = item.to_frame_u8(meta.mask_lr.device)
-            if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
-                frame_u8 = apply_denoise_u8(frame_u8, self._denoise_strength)
-
-            out_h = int(frame_u8.shape[1])
-            out_w = int(frame_u8.shape[2])
-            pl, pt = meta.pad_offset_256
-            rh, rw = meta.resize_shape_256
-            x0 = int(round(pl * out_w / RESTORATION_SIZE))
-            x1 = int(round((pl + rw) * out_w / RESTORATION_SIZE))
-            y0 = int(round(pt * out_h / RESTORATION_SIZE))
-            y1 = int(round((pt + rh) * out_h / RESTORATION_SIZE))
-
-            frame_buffer.blend_restored_frame(
-                frame_idx=meta.frame_idx,
-                track_id=meta.track_id,
-                restored=frame_u8,
-                mask_lr=meta.mask_lr,
-                frame_shape=meta.frame_shape,
-                enlarged_bbox=meta.enlarged_bbox,
-                crop_shape=meta.crop_shape,
-                pad_offset=(x0, y0),
-                resize_shape=(y1 - y0, x1 - x0),
-                crossfade_weight=meta.crossfade_weight,
-            )
-            del frame_u8
-
-        if drained > 0:
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
-
-        return drained
-
-    def flush_secondary(self, *, frame_buffer: FrameBuffer) -> None:
-        self._secondary.flush()
-        self.poll_secondary(frame_buffer=frame_buffer)
-
-    def flush_track(self, track_id: int) -> None:
-        """Flush a specific track by pushing padding frames (async, non-blocking)."""
-        self._secondary.flush_track(track_id)
-
-    def transfer_track(self, old_track_id: int, new_track_id: int) -> None:
-        """Transfer worker mapping from old track to continuation without flushing."""
-        if hasattr(self._secondary, 'transfer_track'):
-            self._secondary.transfer_track(old_track_id, new_track_id)
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
     def restore_clip(
         self,
@@ -292,50 +220,19 @@ class RestorationPipeline:
         keep_start: int,
         keep_end: int,
     ) -> RestoredClip:
-        """
-        Synchronous restore that returns a complete RestoredClip.
-        Uses self.secondary_restorer.restore() directly (bypasses the streaming path).
-        """
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
         primary_raw = self.restorer.raw_process(resized_crops)
         if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
             primary_raw = self._apply_denoise(primary_raw)
 
-        if self.secondary_restorer is None:
-            if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
-                primary_raw = self._apply_denoise(primary_raw)
-            restored_frames = list(
-                primary_raw.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0)
-            )
-        else:
-            secondary_out = self.secondary_restorer.restore(primary_raw, keep_start=int(keep_start), keep_end=int(keep_end))
-            if isinstance(secondary_out, list):
-                restored_frames = secondary_out
-            else:
-                restored_frames = list(torch.unbind(secondary_out, 0))
-            if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
-                batch_u8 = torch.stack(restored_frames, dim=0)
-                batch_u8 = apply_denoise_u8(batch_u8, self._denoise_strength)
-                restored_frames = list(batch_u8.unbind(0))
+        restored_frames = self._run_secondary(primary_raw, int(keep_start), int(keep_end))
 
-            scaled_pad_offsets: list[tuple[int, int]] = []
-            scaled_resize_shapes: list[tuple[int, int]] = []
-            for i, frame_u8 in enumerate(restored_frames):
-                out_h = int(frame_u8.shape[1])
-                out_w = int(frame_u8.shape[2])
-                pad_left, pad_top = pad_offsets[i]
-                resize_h, resize_w = resize_shapes[i]
-
-                x0 = int(round((pad_left * out_w) / RESTORATION_SIZE))
-                x1 = int(round(((pad_left + resize_w) * out_w) / RESTORATION_SIZE))
-                y0 = int(round((pad_top * out_h) / RESTORATION_SIZE))
-                y1 = int(round(((pad_top + resize_h) * out_h) / RESTORATION_SIZE))
-
-                scaled_pad_offsets.append((x0, y0))
-                scaled_resize_shapes.append((y1 - y0, x1 - x0))
-
-            pad_offsets = scaled_pad_offsets
-            resize_shapes = scaled_resize_shapes
+        scaled_pad_offsets: list[tuple[int, int]] = []
+        scaled_resize_shapes: list[tuple[int, int]] = []
+        for frame_u8, po, rs in zip(restored_frames, pad_offsets, resize_shapes):
+            pad_offset, resize_shape = self._scale_offsets(frame_u8, po, rs)
+            scaled_pad_offsets.append(pad_offset)
+            scaled_resize_shapes.append(resize_shape)
 
         _, frame_h, frame_w = frames[0].shape
         return RestoredClip(
@@ -344,8 +241,8 @@ class RestorationPipeline:
             frame_shape=(frame_h, frame_w),
             enlarged_bboxes=enlarged_bboxes,
             crop_shapes=crop_shapes,
-            pad_offsets=pad_offsets,
-            resize_shapes=resize_shapes,
+            pad_offsets=scaled_pad_offsets,
+            resize_shapes=scaled_resize_shapes,
         )
 
     def _expand_bbox(

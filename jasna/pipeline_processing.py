@@ -112,16 +112,6 @@ def _process_ended_clips(
         )
         raw_frame_context.pop(clip.track_id, None)
 
-        if ended_clip.split_due_to_max_size:
-            # Transfer worker mapping to continuation so TVAI outputs flow naturally.
-            restoration_pipeline.transfer_track(clip.track_id, ended_clip.continuation_track_id)
-        else:
-            # True end: push padding frames to drain TVAI's ~25 buffered frames.
-            restoration_pipeline.flush_track(clip.track_id)
-        
-        # Poll to drain any ready outputs and reduce frame_buffer growth.
-        restoration_pipeline.poll_secondary(frame_buffer=frame_buffer)
-
 
 def process_frame_batch(
     *,
@@ -168,7 +158,7 @@ def process_frame_batch(
             restoration_pipeline=restoration_pipeline,
             raw_frame_context=raw_frame_context,
         )
-        restoration_pipeline.poll_secondary(frame_buffer=frame_buffer)
+
         ready_frames.extend(frame_buffer.get_ready_frames())
 
     buffered_count = len(frame_buffer.frames)
@@ -203,6 +193,6 @@ def finalize_processing(
         restoration_pipeline=restoration_pipeline,
         raw_frame_context=raw_frame_context,
     )
-    restoration_pipeline.flush_secondary(frame_buffer=frame_buffer)
+
     return frame_buffer.flush()
 

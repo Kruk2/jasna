@@ -288,7 +288,6 @@ def main() -> None:
     from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
-    from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer, _parse_tvai_args_kv
 
     with torch.cuda.device(device):
         use_tensorrt = basicvsrpp_startup_policy(
@@ -313,33 +312,7 @@ def main() -> None:
                 use_tensorrt=bool(args.swin2sr_compilation),
             )
         elif secondary_name == "tvai":
-            tvai_model = str(args.tvai_model).strip()
-            if tvai_model == "":
-                raise ValueError("--tvai-model must be non-empty")
-            tvai_scale = int(args.tvai_scale)
-            tvai_workers = int(args.tvai_workers)
-            if tvai_workers <= 0:
-                raise ValueError("--tvai-workers must be > 0")
-
-            tvai_args_rest = str(args.tvai_args)
-            tvai_kv = _parse_tvai_args_kv(tvai_args_rest)
-            if "model" in tvai_kv:
-                raise ValueError('Do not pass "model" in --tvai-args; use --tvai-model instead')
-            if "scale" in tvai_kv:
-                raise ValueError('Do not pass "scale" in --tvai-args; use --tvai-scale instead')
-            if ("w" in tvai_kv) or ("h" in tvai_kv):
-                raise ValueError('Do not pass "w" or "h" in --tvai-args; use --tvai-scale instead')
-
-            tvai_args = f"model={tvai_model}:scale={tvai_scale}"
-            if tvai_args_rest.strip() != "":
-                tvai_args = f"{tvai_args}:{tvai_args_rest}"
-            secondary_restorer = TvaiSecondaryRestorer(
-                device=device,
-                ffmpeg_path=str(args.tvai_ffmpeg_path),
-                tvai_args=tvai_args,
-                max_clip_size=max_clip_size,
-                num_workers=tvai_workers,
-            )
+            raise ValueError("TVAI secondary restorer is not yet implemented in the new pipeline")
         else:
             raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
 
