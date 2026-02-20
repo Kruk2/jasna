@@ -235,7 +235,14 @@ class Processor:
                     use_tensorrt=settings.swin2sr_tensorrt,
                 )
             elif settings.secondary_restoration == "tvai":
-                raise ValueError("TVAI secondary restorer is not yet implemented in the new pipeline")
+                from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
+                tvai_args_str = f"model={settings.tvai_model}:scale={settings.tvai_scale}:{settings.tvai_args}"
+                secondary_restorer = TvaiSecondaryRestorer(
+                    ffmpeg_path=settings.tvai_ffmpeg_path,
+                    tvai_args=tvai_args_str,
+                    scale=settings.tvai_scale,
+                    num_workers=settings.tvai_workers,
+                )
 
             denoise_strength = DenoiseStrength(settings.denoise_strength)
             denoise_step = DenoiseStep(settings.denoise_step)

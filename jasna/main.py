@@ -312,7 +312,14 @@ def main() -> None:
                 use_tensorrt=bool(args.swin2sr_compilation),
             )
         elif secondary_name == "tvai":
-            raise ValueError("TVAI secondary restorer is not yet implemented in the new pipeline")
+            from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
+            tvai_args_str = f"model={args.tvai_model}:scale={args.tvai_scale}:{args.tvai_args}"
+            secondary_restorer = TvaiSecondaryRestorer(
+                ffmpeg_path=args.tvai_ffmpeg_path,
+                tvai_args=tvai_args_str,
+                scale=int(args.tvai_scale),
+                num_workers=int(args.tvai_workers),
+            )
         else:
             raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
 
