@@ -267,7 +267,6 @@ class Processor:
                 encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
             encoder_settings = validate_encoder_settings(encoder_settings)
 
-            stream = torch.cuda.Stream()
 
             last_update_time = [0.0]
 
@@ -301,7 +300,6 @@ class Processor:
                 restoration_pipeline=restoration_pipeline,
                 codec=settings.codec,
                 encoder_settings=encoder_settings,
-                stream=stream,
                 batch_size=settings.batch_size,
                 device=device,
                 max_clip_size=settings.max_clip_size,
@@ -324,7 +322,6 @@ class Processor:
             del pipeline
             del restoration_pipeline
             del secondary_restorer
-            del stream
 
             _cleanup_torch(torch)
 

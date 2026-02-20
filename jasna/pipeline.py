@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
+from queue import Queue
 
 import torch
 
@@ -11,6 +13,7 @@ from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
 from jasna.mosaic import Detections
 from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name
+from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
@@ -31,7 +34,6 @@ class Pipeline:
         restoration_pipeline: RestorationPipeline,
         codec: str,
         encoder_settings: dict[str, object],
-        stream: torch.cuda.Stream,
         batch_size: int,
         device: torch.device,
         max_clip_size: int,
@@ -46,7 +48,6 @@ class Pipeline:
         self.output_video = output_video
         self.codec = str(codec)
         self.encoder_settings = dict(encoder_settings)
-        self.stream = stream
         self.batch_size = int(batch_size)
         self.device = device
         self.max_clip_size = int(max_clip_size)
@@ -57,7 +58,6 @@ class Pipeline:
         if det_name in RFDETR_MODEL_NAMES:
             self.detection_model = RfDetrMosaicDetectionModel(
                 onnx_path=detection_model_path,
-                stream=self.stream,
                 batch_size=self.batch_size,
                 device=self.device,
                 score_threshold=float(detection_score_threshold),
@@ -66,102 +66,171 @@ class Pipeline:
         elif det_name in YOLO_MODEL_NAMES:
             self.detection_model = YoloMosaicDetectionModel(
                 model_path=detection_model_path,
-                stream=self.stream,
                 batch_size=self.batch_size,
                 device=self.device,
                 score_threshold=float(detection_score_threshold),
                 fp16=bool(fp16),
             )
         self.restoration_pipeline = restoration_pipeline
-        # Progress control for console vs GUI
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback
         self.working_directory = working_directory
 
     def run(self) -> None:
-        stream = self.stream
+        device = self.device
         metadata = get_video_meta_data(str(self.input_video))
 
-        tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
-        frame_buffer = FrameBuffer(device=self.device)
+        clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
+        secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(maxsize=1)
+        encode_queue: Queue[SecondaryRestoreResult | object] = Queue(maxsize=8)
 
-        discard_margin = int(self.temporal_overlap)
-        blend_frames = (self.temporal_overlap // 3) if self.enable_crossfade else 0
-        raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
+        error_holder: list[BaseException] = []
+        frame_buffer = FrameBuffer(device=device)
 
-        with (
-            NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=self.device, stream=stream, metadata=metadata) as reader,
-            NvidiaVideoEncoder(
-                str(self.output_video),
-                device=self.device,
-                stream=stream,
-                metadata=metadata,
-                codec=self.codec,
-                encoder_settings=self.encoder_settings,
-                stream_mode=False,
-                working_directory=self.working_directory,
-            ) as encoder,
-            torch.inference_mode(),
-            torch.cuda.stream(stream),
-        ):
-            pb = Progressbar(
-                total_frames=metadata.num_frames,
-                video_fps=metadata.video_fps,
-                disable=self.disable_progress,
-                callback=self.progress_callback,
-            )
-            pb.init()
-            
-            target_hw = (int(metadata.video_height), int(metadata.video_width))
-            frame_idx = 0
-            log.info(
-                "Processing %s: %d frames @ %s fps, %dx%d",
-                self.input_video.name, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
-            )
-
+        def _decode_detect_thread():
             try:
-                for frames, pts_list in reader.frames():
-                    effective_bs = len(pts_list)
-                    if effective_bs == 0:
-                        continue
+                torch.cuda.set_device(device)
+                tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
+                discard_margin = int(self.temporal_overlap)
+                blend_frames = (self.temporal_overlap // 3) if self.enable_crossfade else 0
+                raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
 
-                    res = process_frame_batch(
-                        frames=frames,
-                        pts_list=[int(p) for p in pts_list],
-                        start_frame_idx=frame_idx,
-                        batch_size=self.batch_size,
-                        target_hw=target_hw,
-                        detections_fn=self.detection_model,
-                        tracker=tracker,
-                        frame_buffer=frame_buffer,
-                        restoration_pipeline=self.restoration_pipeline,
-                        discard_margin=discard_margin,
-                        blend_frames=blend_frames,
-                        raw_frame_context=raw_frame_context,
+                with (
+                    NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=device, metadata=metadata) as reader,
+                    torch.inference_mode(),
+                ):
+                    pb = Progressbar(
+                        total_frames=metadata.num_frames,
+                        video_fps=metadata.video_fps,
+                        disable=self.disable_progress,
+                        callback=self.progress_callback,
                     )
-                    for ready_idx, ready_frame, ready_pts in res.ready_frames:
+                    pb.init()
+                    target_hw = (int(metadata.video_height), int(metadata.video_width))
+                    frame_idx = 0
+                    log.info(
+                        "Processing %s: %d frames @ %s fps, %dx%d",
+                        self.input_video.name, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
+                    )
+
+                    try:
+                        for frames, pts_list in reader.frames():
+                            effective_bs = len(pts_list)
+                            if effective_bs == 0:
+                                continue
+
+                            res = process_frame_batch(
+                                frames=frames,
+                                pts_list=[int(p) for p in pts_list],
+                                start_frame_idx=frame_idx,
+                                batch_size=self.batch_size,
+                                target_hw=target_hw,
+                                detections_fn=self.detection_model,
+                                tracker=tracker,
+                                frame_buffer=frame_buffer,
+                                clip_queue=clip_queue,
+                                discard_margin=discard_margin,
+                                blend_frames=blend_frames,
+                                raw_frame_context=raw_frame_context,
+                            )
+
+                            frame_idx = res.next_frame_idx
+                            pb.update(effective_bs)
+
+                        finalize_processing(
+                            tracker=tracker,
+                            frame_buffer=frame_buffer,
+                            clip_queue=clip_queue,
+                            discard_margin=discard_margin,
+                            blend_frames=blend_frames,
+                            raw_frame_context=raw_frame_context,
+                        )
+                    except Exception:
+                        pb.error = True
+                        raise
+                    finally:
+                        pb.close(ensure_completed_bar=True)
+            except BaseException as e:
+                error_holder.append(e)
+            finally:
+                clip_queue.put(_SENTINEL)
+
+        def _primary_restore_thread():
+            try:
+                torch.cuda.set_device(device)
+                while True:
+                    item = clip_queue.get()
+                    if item is _SENTINEL:
+                        break
+                    clip_item: ClipRestoreItem = item  # type: ignore[assignment]
+                    result = self.restoration_pipeline.prepare_and_run_primary(
+                        clip_item.clip,
+                        clip_item.frames,
+                        clip_item.keep_start,
+                        clip_item.keep_end,
+                        clip_item.crossfade_weights,
+                    )
+                    secondary_queue.put(result)
+            except BaseException as e:
+                error_holder.append(e)
+            finally:
+                secondary_queue.put(_SENTINEL)
+
+        def _secondary_restore_thread():
+            try:
+                torch.cuda.set_device(device)
+                while True:
+                    item = secondary_queue.get()
+                    if item is _SENTINEL:
+                        break
+                    pr: PrimaryRestoreResult = item  # type: ignore[assignment]
+                    result = self.restoration_pipeline.run_secondary_from_primary(pr)
+                    encode_queue.put(result)
+            except BaseException as e:
+                error_holder.append(e)
+            finally:
+                encode_queue.put(_SENTINEL)
+
+        def _encode_thread():
+            try:
+                torch.cuda.set_device(device)
+
+                with NvidiaVideoEncoder(
+                    str(self.output_video),
+                    device=device,
+                    metadata=metadata,
+                    codec=self.codec,
+                    encoder_settings=self.encoder_settings,
+                    stream_mode=False,
+                    working_directory=self.working_directory,
+                ) as encoder:
+                    while True:
+                        item = encode_queue.get()
+                        if item is _SENTINEL:
+                            break
+                        sr: SecondaryRestoreResult = item  # type: ignore[assignment]
+                        self.restoration_pipeline.blend_secondary_result(sr, frame_buffer)
+
+                        for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
+                            encoder.encode(ready_frame, ready_pts)
+                            log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
+
+                    for ready_idx, ready_frame, ready_pts in frame_buffer.flush():
                         encoder.encode(ready_frame, ready_pts)
                         log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
+            except BaseException as e:
+                error_holder.append(e)
 
-                    frame_idx = res.next_frame_idx
-                    pb.update(effective_bs)
+        threads = [
+            threading.Thread(target=_decode_detect_thread, name="DecodeDetect", daemon=True),
+            threading.Thread(target=_primary_restore_thread, name="PrimaryRestore", daemon=True),
+            threading.Thread(target=_secondary_restore_thread, name="SecondaryRestore", daemon=True),
+            threading.Thread(target=_encode_thread, name="Encode", daemon=True),
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
-                remaining_frames = finalize_processing(
-                    tracker=tracker,
-                    frame_buffer=frame_buffer,
-                    restoration_pipeline=self.restoration_pipeline,
-                    discard_margin=discard_margin,
-                    blend_frames=blend_frames,
-                    raw_frame_context=raw_frame_context,
-                )
-                if remaining_frames:
-                    log.debug("encoding %d remaining frame(s)", len(remaining_frames))
-                for ready_idx, ready_frame, ready_pts in remaining_frames:
-                    encoder.encode(ready_frame, ready_pts)
-                    log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
-            except Exception:
-                pb.error = True
-                raise
-            finally:
-                pb.close(ensure_completed_bar=True)
-
+        if error_holder:
+            raise error_holder[0]

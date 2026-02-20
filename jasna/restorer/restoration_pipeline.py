@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
 from jasna.restorer.restored_clip import RestoredClip
@@ -211,6 +212,93 @@ class RestorationPipeline:
 
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+
+    def prepare_and_run_primary(
+        self,
+        clip: TrackedClip,
+        frames: list[torch.Tensor],
+        keep_start: int,
+        keep_end: int,
+        crossfade_weights: dict[int, float] | None,
+    ) -> PrimaryRestoreResult:
+        resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
+        primary_raw = self.restorer.raw_process(resized_crops)
+        if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
+            primary_raw = self._apply_denoise(primary_raw)
+
+        return PrimaryRestoreResult(
+            clip=clip,
+            frames=frames,
+            primary_raw=primary_raw,
+            keep_start=keep_start,
+            keep_end=keep_end,
+            crossfade_weights=crossfade_weights,
+            enlarged_bboxes=enlarged_bboxes,
+            crop_shapes=crop_shapes,
+            pad_offsets=pad_offsets,
+            resize_shapes=resize_shapes,
+        )
+
+    def run_secondary_from_primary(self, pr: PrimaryRestoreResult) -> SecondaryRestoreResult:
+        ks = max(0, pr.keep_start)
+        ke = min(len(pr.frames), pr.keep_end)
+        restored_frames = self._run_secondary(pr.primary_raw, ks, ke)
+
+        return SecondaryRestoreResult(
+            clip=pr.clip,
+            frames=pr.frames,
+            restored_frames=restored_frames,
+            keep_start=pr.keep_start,
+            keep_end=pr.keep_end,
+            crossfade_weights=pr.crossfade_weights,
+            enlarged_bboxes=pr.enlarged_bboxes,
+            crop_shapes=pr.crop_shapes,
+            pad_offsets=pr.pad_offsets,
+            resize_shapes=pr.resize_shapes,
+        )
+
+    def blend_secondary_result(
+        self,
+        sr: SecondaryRestoreResult,
+        frame_buffer: 'FrameBuffer',
+    ) -> None:
+        clip = sr.clip
+        t = len(sr.frames)
+        ks = max(0, sr.keep_start)
+        ke = min(t, sr.keep_end)
+
+        for i, frame_idx in enumerate(clip.frame_indices()):
+            if not (ks <= i < ke):
+                pending = frame_buffer.frames.get(frame_idx)
+                if pending is not None:
+                    pending.pending_clips.discard(clip.track_id)
+
+        if ks >= ke:
+            return
+
+        frame_h, frame_w = sr.frames[0].shape[1], sr.frames[0].shape[2]
+        for local_i, i in enumerate(range(ks, ke)):
+            frame_idx = clip.start_frame + i
+            track_id = clip.track_id
+            if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=track_id):
+                continue
+
+            frame_u8 = sr.restored_frames[local_i]
+            pad_offset, resize_shape = self._scale_offsets(frame_u8, sr.pad_offsets[i], sr.resize_shapes[i])
+            cw = sr.crossfade_weights.get(i, 1.0) if sr.crossfade_weights else 1.0
+
+            frame_buffer.blend_restored_frame(
+                frame_idx=frame_idx,
+                track_id=track_id,
+                restored=frame_u8,
+                mask_lr=clip.masks[i],
+                frame_shape=(frame_h, frame_w),
+                enlarged_bbox=sr.enlarged_bboxes[i],
+                crop_shape=sr.crop_shapes[i],
+                pad_offset=pad_offset,
+                resize_shape=resize_shape,
+                crossfade_weight=cw,
+            )
 
     def restore_clip(
         self,

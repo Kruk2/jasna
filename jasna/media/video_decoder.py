@@ -4,26 +4,26 @@ from jasna.media import VideoMetadata
 from typing import Iterator
 
 class NvidiaVideoReader:
-    def __init__(self, file: str, batch_size: int, device: torch.device, stream: torch.cuda.Stream, metadata: VideoMetadata):
+    def __init__(self, file: str, batch_size: int, device: torch.device, metadata: VideoMetadata):
         self.device = device
         self.file = file
-        self.stream = stream
         self.batch_size = batch_size
         self.metadata = metadata
 
     def __enter__(self):
+        stream = torch.cuda.current_stream(self.device)
         self.decoder = vali.PyDecoder(
             self.file,
             {},
             gpu_id=self.device.index,
-            stream=self.stream.cuda_stream,
+            stream=stream.cuda_stream,
         )
         self.rgb_planar_surface = vali.Surface.Make(
             format=vali.PixelFormat.RGB_PLANAR if self.decoder.Format == vali.PixelFormat.NV12 else vali.PixelFormat.RGB10_PLANAR,
             width=self.decoder.Width,
             height=self.decoder.Height,
             gpu_id=self.device.index)
-        self.py_cvt = vali.PySurfaceConverter(gpu_id=self.device.index, stream=self.stream.cuda_stream)
+        self.py_cvt = vali.PySurfaceConverter(gpu_id=self.device.index, stream=stream.cuda_stream)
         self.decode_surface = vali.Surface.Make(
             format=self.decoder.Format,
             width=self.decoder.Width,
@@ -79,31 +79,30 @@ class NvidiaVideoReader:
         frame_idx = 0
         pkt_data = vali.PacketData()
         eof = False
-        with torch.cuda.stream(self.stream):
-            while True:
-                batch_tensor_nv = torch.empty((self.batch_size, 3, self.decoder.Height, self.decoder.Width), device=self.device, dtype=torch.uint8)
-                pkts = []
-                seek_ctx = None if frame_seek is None else vali.SeekContext(seek_frame=frame_seek)
+        while True:
+            batch_tensor_nv = torch.empty((self.batch_size, 3, self.decoder.Height, self.decoder.Width), device=self.device, dtype=torch.uint8)
+            pkts = []
+            seek_ctx = None if frame_seek is None else vali.SeekContext(seek_frame=frame_seek)
 
-                for i in range(self.batch_size):
-                    success, details = self.decoder.DecodeSingleSurfaceAsync(self.decode_surface, pkt_data, seek_ctx)
-                    if not success:
-                        if details.name == 'END_OF_STREAM':
-                            eof = True
-                            break
-                        raise Exception(details)
+            for i in range(self.batch_size):
+                success, details = self.decoder.DecodeSingleSurfaceAsync(self.decode_surface, pkt_data, seek_ctx)
+                if not success:
+                    if details.name == 'END_OF_STREAM':
+                        eof = True
+                        break
+                    raise Exception(details)
 
-                    self.py_cvt.RunAsync(self.decode_surface, self.rgb_surface, self.cc_ctx)
-                    self.py_cvt.RunAsync(self.rgb_surface, self.rgb_planar_surface)
+                self.py_cvt.RunAsync(self.decode_surface, self.rgb_surface, self.cc_ctx)
+                self.py_cvt.RunAsync(self.rgb_surface, self.rgb_planar_surface)
 
-                    tensor_nv = torch.from_dlpack(self.rgb_planar_surface)
-                    if tensor_nv.dtype == torch.uint16:
-                        frame10 = (tensor_nv.to(torch.int32) >> 6)
-                        tensor_nv = ((frame10 + self._dither2) >> 2).clamp(0, 255).to(torch.uint8)
-                    batch_tensor_nv[i].copy_(tensor_nv)
+                tensor_nv = torch.from_dlpack(self.rgb_planar_surface)
+                if tensor_nv.dtype == torch.uint16:
+                    frame10 = (tensor_nv.to(torch.int32) >> 6)
+                    tensor_nv = ((frame10 + self._dither2) >> 2).clamp(0, 255).to(torch.uint8)
+                batch_tensor_nv[i].copy_(tensor_nv)
 
-                    frame_idx += 1
-                    pkts.append(pkt_data.pts)
-                yield batch_tensor_nv, pkts
-                if eof:
-                    break
+                frame_idx += 1
+                pkts.append(pkt_data.pts)
+            yield batch_tensor_nv, pkts
+            if eof:
+                break

@@ -30,10 +30,8 @@ def _run_single(
     if not model_path.exists():
         raise FileNotFoundError(str(model_path))
 
-    stream = torch.cuda.Stream(device=device)
     detection_model = RfDetrMosaicDetectionModel(
         onnx_path=model_path,
-        stream=stream,
         batch_size=batch_size,
         device=device,
         score_threshold=score_threshold,
@@ -49,11 +47,9 @@ def _run_single(
             str(path),
             batch_size=batch_size,
             device=device,
-            stream=stream,
             metadata=metadata,
         ) as reader,
         torch.inference_mode(),
-        torch.cuda.stream(stream),
     ):
         start = time.perf_counter()
         for frames, pts_list in reader.frames():
