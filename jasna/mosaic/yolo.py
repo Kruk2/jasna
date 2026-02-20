@@ -70,7 +70,6 @@ class YoloMosaicDetectionModel:
         self,
         *,
         model_path: Path,
-        stream: torch.cuda.Stream,
         batch_size: int,
         device: torch.device,
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
@@ -79,7 +78,6 @@ class YoloMosaicDetectionModel:
         fp16: bool = True,
         imgsz: int = DEFAULT_IMGSZ,
     ) -> None:
-        self.stream = stream
         self.model_path = Path(model_path)
         self.batch_size = int(batch_size)
         self.device = device
@@ -118,7 +116,6 @@ class YoloMosaicDetectionModel:
         if runtime_path.suffix.lower() == ".engine":
             self.runner = TrtRunner(
                 runtime_path,
-                stream=self.stream,
                 input_shape=(self.batch_size, 3, self.imgsz, self.imgsz),
                 device=self.device,
             )

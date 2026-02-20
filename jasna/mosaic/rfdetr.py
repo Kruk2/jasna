@@ -23,7 +23,6 @@ class RfDetrMosaicDetectionModel:
         self,
         *,
         onnx_path: Path,
-        stream: torch.cuda.Stream,
         batch_size: int,
         device: torch.device,
         resolution: int = DEFAULT_RESOLUTION,
@@ -32,7 +31,6 @@ class RfDetrMosaicDetectionModel:
         fp16: bool = True,
     ) -> None:
         self.onnx_path = onnx_path
-        self.stream = stream
         self.batch_size = int(batch_size)
         self.device = device
         self.resolution = int(resolution)
@@ -47,7 +45,6 @@ class RfDetrMosaicDetectionModel:
         )
         self.runner = TrtRunner(
             self.engine_path,
-            stream=self.stream,
             input_shape=(self.batch_size, 3, self.resolution, self.resolution),
             device=self.device,
         )

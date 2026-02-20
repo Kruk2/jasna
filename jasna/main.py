@@ -339,7 +339,6 @@ def main() -> None:
             denoise_step=denoise_step,
         )
 
-        stream = torch.cuda.Stream()
         working_directory = Path(args.working_directory) if args.working_directory else None
         Pipeline(
             input_video=input_video,
@@ -350,7 +349,6 @@ def main() -> None:
             restoration_pipeline=restoration_pipeline,
             codec=codec,
             encoder_settings=encoder_settings,
-            stream=stream,
             batch_size=batch_size,
             device=device,
             max_clip_size=max_clip_size,

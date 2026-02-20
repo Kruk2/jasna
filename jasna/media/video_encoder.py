@@ -159,7 +159,6 @@ class NvidiaVideoEncoder:
         self,
         file: str,
         device: torch.device,
-        stream: torch.cuda.Stream,
         metadata: VideoMetadata,
         *,
         codec: str,
@@ -168,7 +167,6 @@ class NvidiaVideoEncoder:
         working_directory: Path | None = None,
     ):
         self.metadata = metadata
-        self.stream = stream
         self.device = device
         self.file = file
         self.output_path = Path(file)
@@ -213,11 +211,12 @@ class NvidiaVideoEncoder:
             encoder_options.update(encoder_settings)
 
         gpu_id = self.device.index if self.device.index is not None else 0
+        self.stream = torch.cuda.Stream(device)
         self.encoder = nvc.CreateEncoder(
             width=metadata.video_width,
             height=metadata.video_height,
             gpu_id=gpu_id,
-            cudastream=stream.cuda_stream,
+            cudastream=self.stream.cuda_stream,
             fmt="P010",
             usecpuinputbuffer=False,
             **encoder_options

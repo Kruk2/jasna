@@ -4,21 +4,21 @@ from jasna.media import VideoMetadata
 from typing import Iterator
 
 class NvidiaVideoReader:
-    def __init__(self, file: str, batch_size: int, device: torch.device, stream: torch.cuda.Stream, metadata: VideoMetadata):
+    def __init__(self, file: str, batch_size: int, device: torch.device, metadata: VideoMetadata):
         self.device = device
         self.file = file
-        self.stream = stream
         self.batch_size = batch_size
         self.metadata = metadata
 
     def __enter__(self):
+        stream = torch.cuda.current_stream(self.device)
         self.decoder = nvc.SimpleDecoder(
             enc_file_path=self.file,
             gpu_id=self.device.index,
             output_color_type=nvc.OutputColorType.RGBP,
             use_device_memory=True,
             decoder_cache_size=self.batch_size,
-            cuda_stream=self.stream.cuda_stream,
+            cuda_stream=stream.cuda_stream,
         )
 
         if self.metadata.is_10bit:
@@ -49,19 +49,18 @@ class NvidiaVideoReader:
 
     def frames(self) -> Iterator[tuple[torch.Tensor, int]]:
         frame_idx = 0
-        with torch.cuda.stream(self.stream):
-            while True:
-                batch_size = min(self.batch_size, self.metadata.num_frames - frame_idx)
-                frames = self.decoder.get_batch_frames(batch_size)
-                if len(frames) == 0:
-                    break
+        while True:
+            batch_size = min(self.batch_size, self.metadata.num_frames - frame_idx)
+            frames = self.decoder.get_batch_frames(batch_size)
+            if len(frames) == 0:
+                break
 
-                positive_pts = [f for f in frames if f.getPTS() >= 0]
-                if len(positive_pts) == 0:
-                    continue
+            positive_pts = [f for f in frames if f.getPTS() >= 0]
+            if len(positive_pts) == 0:
+                continue
 
-                batch_tensor = torch.empty((len(positive_pts), 3, self.metadata.video_height, self.metadata.video_width), device=self.device, dtype=torch.uint8)
-                for i, f in enumerate(positive_pts):
-                    batch_tensor[i] = torch.from_dlpack(f)
-                    frame_idx += 1
-                yield batch_tensor, [f.getPTS() for f in positive_pts]
+            batch_tensor = torch.empty((len(positive_pts), 3, self.metadata.video_height, self.metadata.video_width), device=self.device, dtype=torch.uint8)
+            for i, f in enumerate(positive_pts):
+                batch_tensor[i] = torch.from_dlpack(f)
+                frame_idx += 1
+            yield batch_tensor, [f.getPTS() for f in positive_pts]

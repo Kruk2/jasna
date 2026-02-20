@@ -52,7 +52,6 @@ def test_encoder_uses_working_directory_for_temp_paths(tmp_path: Path) -> None:
             NvidiaVideoEncoder(
                 file=str(output_path),
                 device=torch.device("cuda:0"),
-                stream=torch.cuda.Stream(),
                 metadata=_fake_metadata(),
                 codec="hevc",
                 encoder_settings={},
@@ -115,7 +114,6 @@ def test_encoder_unlinks_hevc_before_remux(tmp_path: Path) -> None:
         with NvidiaVideoEncoder(
             file=str(output_path),
             device=torch.device("cuda:0"),
-            stream=torch.cuda.Stream(),
             metadata=_fake_metadata(),
             codec="hevc",
             encoder_settings={},

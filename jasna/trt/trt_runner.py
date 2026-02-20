@@ -8,12 +8,10 @@ class TrtRunner:
     def __init__(
         self,
         engine_path: Path,
-        stream: torch.cuda.Stream,
         input_shape: tuple[int, int, int, int],
         device: torch.device,
     ) -> None:
         self.engine_path = engine_path
-        self.stream = stream
         self.input_shape = input_shape
         self.device = device
 
@@ -41,6 +39,7 @@ class TrtRunner:
 
     def infer(self, x: torch.Tensor) -> dict[str, "torch.Tensor"]:
         self.context.set_tensor_address(self.input_name, int(x.data_ptr()))
-        self.context.execute_async_v3(self.stream.cuda_stream)
+        stream = torch.cuda.current_stream(self.device)
+        self.context.execute_async_v3(stream.cuda_stream)
         return self.outputs
 
