@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from queue import Queue
+from queue import Empty, Queue
 
 import torch
 
@@ -179,13 +180,18 @@ class Pipeline:
         def _secondary_restore_thread():
             try:
                 torch.cuda.set_device(device)
-                while True:
-                    item = secondary_queue.get()
-                    if item is _SENTINEL:
-                        break
-                    pr: PrimaryRestoreResult = item  # type: ignore[assignment]
-                    result = self.restoration_pipeline.run_secondary_from_primary(pr)
-                    encode_queue.put(result)
+                num_workers = self.restoration_pipeline.secondary_num_workers
+
+                if num_workers > 1:
+                    self._run_pooled_secondary(num_workers, secondary_queue, encode_queue)
+                else:
+                    while True:
+                        item = secondary_queue.get()
+                        if item is _SENTINEL:
+                            break
+                        pr: PrimaryRestoreResult = item  # type: ignore[assignment]
+                        result = self.restoration_pipeline.run_secondary_from_primary(pr)
+                        encode_queue.put(result)
             except BaseException as e:
                 error_holder.append(e)
             finally:
@@ -205,11 +211,14 @@ class Pipeline:
                     working_directory=self.working_directory,
                 ) as encoder:
                     while True:
-                        item = encode_queue.get()
-                        if item is _SENTINEL:
-                            break
-                        sr: SecondaryRestoreResult = item  # type: ignore[assignment]
-                        self.restoration_pipeline.blend_secondary_result(sr, frame_buffer)
+                        try:
+                            item = encode_queue.get(timeout=0.1)
+                            if item is _SENTINEL:
+                                break
+                            sr: SecondaryRestoreResult = item  # type: ignore[assignment]
+                            self.restoration_pipeline.blend_secondary_result(sr, frame_buffer)
+                        except Empty:
+                            pass
 
                         for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
                             encoder.encode(ready_frame, ready_pts)
@@ -234,3 +243,41 @@ class Pipeline:
 
         if error_holder:
             raise error_holder[0]
+
+    def _run_pooled_secondary(
+        self,
+        num_workers: int,
+        secondary_queue: Queue[PrimaryRestoreResult | object],
+        encode_queue: Queue[SecondaryRestoreResult | object],
+    ) -> None:
+        def _worker(pr: PrimaryRestoreResult) -> SecondaryRestoreResult:
+            return self.restoration_pipeline.run_secondary_from_primary(pr)
+
+        with ThreadPoolExecutor(max_workers=num_workers, thread_name_prefix="SecondaryWorker") as pool:
+            pending: dict[int, Future[SecondaryRestoreResult]] = {}
+            next_submit_seq = 0
+            next_drain_seq = 0
+
+            while True:
+                # Block taking new sequences if we reach max in-flight capacity.
+                # We cap at num_workers so all worker slots are full but no extra GPU tensors
+                # pile up in pending. The secondary_queue maxsize=1 provides the 1-ahead buffer.
+                while len(pending) >= num_workers:
+                    encode_queue.put(pending.pop(next_drain_seq).result())
+                    next_drain_seq += 1
+
+                while next_drain_seq in pending and pending[next_drain_seq].done():
+                    encode_queue.put(pending.pop(next_drain_seq).result())
+                    next_drain_seq += 1
+
+                item = secondary_queue.get()
+                if item is _SENTINEL:
+                    break
+                pr: PrimaryRestoreResult = item  # type: ignore[assignment]
+
+                seq = next_submit_seq
+                next_submit_seq += 1
+                pending[seq] = pool.submit(_worker, pr)
+
+            for seq in range(next_drain_seq, next_submit_seq):
+                encode_queue.put(pending.pop(seq).result())

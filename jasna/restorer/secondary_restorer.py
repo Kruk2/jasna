@@ -9,6 +9,10 @@ import torch
 class SecondaryRestorer(Protocol):
     name: str
 
+    @property
+    def num_workers(self) -> int:
+        return 1
+
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         """
         Args:
@@ -17,3 +21,4 @@ class SecondaryRestorer(Protocol):
         Returns:
             List of T' tensors each (C, H, W) uint8, where T' = keep_end - keep_start
         """
+

@@ -7,6 +7,7 @@ from jasna.tensor_utils import pad_batch_with_last
 
 class Swin2srSecondaryRestorer:
     name = "swin2sr"
+    num_workers = 1
 
     def __init__(self, *, device: torch.device, fp16: bool, batch_size: int, use_tensorrt: bool) -> None:
         from pathlib import Path
