@@ -55,6 +55,12 @@ class RestorationPipeline:
             denoise_step.name,
         )
 
+    @property
+    def secondary_num_workers(self) -> int:
+        if self.secondary_restorer is not None:
+            return self.secondary_restorer.num_workers
+        return 1
+
     def _apply_denoise(self, frames: torch.Tensor) -> torch.Tensor:
         return apply_denoise(frames, self._denoise_strength)
 
@@ -243,6 +249,7 @@ class RestorationPipeline:
         ks = max(0, pr.keep_start)
         ke = min(len(pr.frames), pr.keep_end)
         restored_frames = self._run_secondary(pr.primary_raw, ks, ke)
+        del pr.primary_raw
 
         return SecondaryRestoreResult(
             clip=pr.clip,
@@ -283,7 +290,7 @@ class RestorationPipeline:
             if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=track_id):
                 continue
 
-            frame_u8 = sr.restored_frames[local_i]
+            frame_u8 = sr.restored_frames[local_i].to(sr.frames[0].device)
             pad_offset, resize_shape = self._scale_offsets(frame_u8, sr.pad_offsets[i], sr.resize_shapes[i])
             cw = sr.crossfade_weights.get(i, 1.0) if sr.crossfade_weights else 1.0
 
