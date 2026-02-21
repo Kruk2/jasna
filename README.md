@@ -4,7 +4,7 @@
 JAV model restoration tool inspired (and in some places based on) by [Lada](https://codeberg.org/ladaapp/lada).\
 Restoration model (mosaic_restoration_1.2) used in Jasna was trained by ladaapp (the lada author).
 
-Features new mosaic detection model & GPU only pipeline & TVAI support & simple GUI.\
+Features new mosaic detection model & **super fast GPU only pipeline** & TVAI support & simple GUI.\
 Check benchmarks and usage below.
 ![slop_gui](https://github.com/user-attachments/assets/ae5d9b73-ea22-4263-8203-0ff89bbbcc51)
 
@@ -22,23 +22,22 @@ Check benchmarks and usage below.
 - proper VR support
 - ~~TVAI~~ and SeedVR
 - Proper stream that can be played in Stash (and maybe others?)
-- improve performance (this version is very simple)
+- ~~improve performance (this version is very simple)~~
+- improve VRAM usage
 
 ### Benchmark
 RTX 5090 + i9 13900k
-| File | Clip (s) | lada 0.10.1 | jasna 0.3.0 | Δ vs lada (0.3.0) |
-|------|----------|-------------|-------------|-------------------|
-| **ABF-017**<br>(4k 2h 25min) | 60 | **02:56:26** | **01:20:49** | **01:35:37 (-54.2%)** |
-| **HUBLK-063**<br>(1080p 3h 10min) | 180 | **01:34:51** | **44:21** | **-50:30 (-53.2%)** |
-| DASS-570_2m | 180 | 01:08 | 00:34 | -00:34 (-50.0%) |
-| NASK-223_Test | 180 | 03:17 | 01:33 | -01:44 (-52.8%) |
-| test-007 | 180 | 01:21 | 00:39 | -00:42 (-51.9%) |
-| 厚码测试2 | 180 | 01:51 | 01:01 | -00:50 (-45.0%) |
-| DASS-570_2m | 30 | 01:08 | 00:30 | -00:38 (-55.9%) |
-| NASK-223_Test | 30 | 03:12 | 01:18 | -01:54 (-59.4%) |
-| test-007 | 30 | 01:16 | 00:41 | -00:35 (-46.1%) |
-| 厚码测试2 | 30 | 01:52 | 00:43 | -01:09 (-61.6%) |
- 
+| File                           | Clip (s) | lada 0.10.1 | jasna 0.3.0 | Δ vs lada | jasna 0.5.0 | Δ vs lada   |
+| ------------------------------ | -------- | ----------- | ----------- | ----------------- | ----------- | ------------------- |
+| **ABF-017** (4k 2h 25min)      | 60       | 02:56:26    | 01:20:49    | 01:35:37 (-54.2%) | --          | --                  |
+| **HUBLK-063** (1080p 3h 10min) | 180      | 01:34:51    | 44:21       | -50:30 (-53.2%)   | **37:57**   | **-56:54 (-60.0%)** |
+| DASS-570_2m                    | 30       | 01:08       | 00:30       | -00:38 (-55.9%)   | 00:24       | -00:44 (-64.7%)     |
+| NASK-223_Test                  | 30       | 03:12       | 01:18       | -01:54 (-59.4%)   | 01:02       | -02:10 (-67.7%)     |
+| test-007                       | 30       | 01:16       | 00:41       | -00:35 (-46.1%)   | 00:28       | -00:48 (-63.2%)     |
+| 厚码测试2                          | 30       | 01:52       | 00:43       | -01:09 (-61.6%)   | 00:36       | -01:16 (-67.9%)     |
+
+
+
 ### Usage
 Download the latest release package (Windows/Linux).
 
