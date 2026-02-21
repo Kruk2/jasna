@@ -6,6 +6,7 @@ import os
 import subprocess
 import threading
 from pathlib import Path
+from queue import Empty, Queue
 
 import numpy as np
 import torch
@@ -123,8 +124,7 @@ class TvaiSecondaryRestorer:
 
         self._validate_environment()
 
-        self._pool: list[_TvaiWorker] = []
-        self._pool_lock = threading.Lock()
+        self._pool: Queue[_TvaiWorker] = Queue(maxsize=num_workers)
         self._closed = False
 
         logger.info(
@@ -133,7 +133,7 @@ class TvaiSecondaryRestorer:
         )
 
         for _ in range(self.num_workers):
-            self._pool.append(self._spawn_warm_worker())
+            self._pool.put(self._spawn_warm_worker())
 
         atexit.register(self.close)
 
@@ -157,21 +157,17 @@ class TvaiSecondaryRestorer:
         return worker
 
     def _take_worker(self) -> _TvaiWorker:
-        with self._pool_lock:
-            if self._pool:
-                return self._pool.pop()
-        return self._spawn_warm_worker()
+        return self._pool.get()
 
     def _replenish_async(self) -> None:
         def _do() -> None:
             if self._closed:
                 return
             worker = self._spawn_warm_worker()
-            with self._pool_lock:
-                if self._closed:
-                    worker.kill()
-                else:
-                    self._pool.append(worker)
+            if self._closed:
+                worker.kill()
+            else:
+                self._pool.put(worker)
         threading.Thread(target=_do, daemon=True).start()
 
     def _to_numpy_hwc(self, frames: torch.Tensor) -> np.ndarray:
@@ -193,10 +189,18 @@ class TvaiSecondaryRestorer:
         finally:
             self._replenish_async()
 
-    def _to_tensors(self, frames_np: list[np.ndarray], device: torch.device) -> list[torch.Tensor]:
-        return [torch.from_numpy(f).to(device).permute(2, 0, 1) for f in frames_np]
+    def _to_tensors(self, frames_np: list[np.ndarray]) -> list[torch.Tensor]:
+        return [torch.from_numpy(f).permute(2, 0, 1) for f in frames_np]
 
     _restore_call_count = 0
+
+    def restore_numpy(self, frames_hwc: np.ndarray) -> list[np.ndarray]:
+        n = frames_hwc.shape[0]
+        frames_hwc, pad_count = self._pad_to_minimum(frames_hwc)
+        out_np = self._run_worker(frames_hwc)
+        if pad_count > 0:
+            out_np = out_np[:n]
+        return out_np
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         self._restore_call_count += 1
@@ -211,18 +215,17 @@ class TvaiSecondaryRestorer:
         logger.debug("TVAI restore #%d: %d total frames, keep [%d:%d] = %d frames", self._restore_call_count, t, ks, ke, n)
 
         frames_hwc = self._to_numpy_hwc(kept)
-        frames_hwc, pad_count = self._pad_to_minimum(frames_hwc)
-
-        out_np = self._run_worker(frames_hwc)
-        if pad_count > 0:
-            out_np = out_np[:n]
-
-        return self._to_tensors(out_np, frames_256.device)
+        del kept, frames_256
+        out_np = self.restore_numpy(frames_hwc)
+        return self._to_tensors(out_np)
 
     def close(self) -> None:
         self._closed = True
-        with self._pool_lock:
-            workers = list(self._pool)
-            self._pool.clear()
+        workers = []
+        while not self._pool.empty():
+            try:
+                workers.append(self._pool.get_nowait())
+            except Empty:
+                break
         for w in workers:
             w.kill()
