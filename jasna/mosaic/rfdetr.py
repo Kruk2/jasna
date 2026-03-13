@@ -16,7 +16,7 @@ from jasna.mosaic.detections import Detections
 
 class RfDetrMosaicDetectionModel:
     DEFAULT_RESOLUTION = 768
-    DEFAULT_SCORE_THRESHOLD = 0.2
+    DEFAULT_SCORE_THRESHOLD = 0.25
     DEFAULT_MAX_SELECT = 16
 
     def __init__(

@@ -287,14 +287,14 @@ class SettingsPanel(ctk.CTkFrame):
         Tooltip(model_tip, get_tooltip("detection_model"))
         
         self._widgets["detection_model"] = ctk.CTkOptionMenu(
-            row2, values=["rfdetr-v4", "rfdetr-v3", "rfdetr-v2", "lada-yolo-v4", "lada-yolo-v2"],
+            row2, values=["rfdetr-v5"],
             fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
             dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
             width=120, command=lambda v: self._on_setting_change("detection_model", v)
         )
         self._widgets["detection_model"].pack(side="right")
-        self._widgets["detection_model"].set("rfdetr-v4")
+        self._widgets["detection_model"].set("rfdetr-v5")
         
         # Detection Threshold
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -306,7 +306,7 @@ class SettingsPanel(ctk.CTkFrame):
         thresh_tip.pack(side="left", padx=4)
         Tooltip(thresh_tip, get_tooltip("detection_score_threshold"))
         
-        self._widgets["detection_threshold_val"] = ctk.CTkLabel(row3, text="0.2", text_color=Colors.TEXT_PRIMARY, width=40)
+        self._widgets["detection_threshold_val"] = ctk.CTkLabel(row3, text="0.25", text_color=Colors.TEXT_PRIMARY, width=40)
         self._widgets["detection_threshold_val"].pack(side="right")
         self._widgets["detection_score_threshold"] = ctk.CTkSlider(
             row3, from_=0.0, to=1.0, number_of_steps=20,
@@ -314,7 +314,7 @@ class SettingsPanel(ctk.CTkFrame):
             width=160, command=lambda v: self._widgets["detection_threshold_val"].configure(text=f"{v:.2f}")
         )
         self._widgets["detection_score_threshold"].pack(side="right", padx=(0, 8))
-        self._widgets["detection_score_threshold"].set(0.2)
+        self._widgets["detection_score_threshold"].set(0.25)
         
         # Toggles row - FP16 Mode and Compile BasicVSR++
         row4 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -858,9 +858,15 @@ class SettingsPanel(ctk.CTkFrame):
         else:
             self._widgets["compile_basicvsrpp"].deselect()
             
-        self._widgets["detection_model"].set(preset.detection_model)
-        self._widgets["detection_score_threshold"].set(preset.detection_score_threshold)
-        self._widgets["detection_threshold_val"].configure(text=f"{preset.detection_score_threshold:.2f}")
+        det_model = preset.detection_model
+        det_threshold = preset.detection_score_threshold
+        if det_model not in self._widgets["detection_model"].cget("values"):
+            from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
+            det_model = "rfdetr-v5"
+            det_threshold = max(det_threshold, RfDetrMosaicDetectionModel.DEFAULT_SCORE_THRESHOLD)
+        self._widgets["detection_model"].set(det_model)
+        self._widgets["detection_score_threshold"].set(det_threshold)
+        self._widgets["detection_threshold_val"].configure(text=f"{det_threshold:.2f}")
         
         # Map internal values to translated display values
         denoise_strength_display = {
