@@ -174,8 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-model",
         type=str,
-        default="rfdetr-v4",
-        choices=["rfdetr-v4", "rfdetr-v3", "rfdetr-v2", "lada-yolo-v4", "lada-yolo-v2"],
+        default="rfdetr-v5",
         help="Detection model name (default: %(default)s)",
     )
     detection.add_argument(
@@ -187,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-score-threshold",
         type=float,
-        default=0.2,
+        default=0.25,
         help="Detection score threshold (default: %(default)s)",
     )
 

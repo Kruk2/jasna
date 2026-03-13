@@ -8,14 +8,14 @@ from jasna.mosaic.detection_registry import (
 )
 
 
-def test_default_detection_model_is_rfdetr_v4() -> None:
-    assert DEFAULT_DETECTION_MODEL_NAME == "rfdetr-v4"
-    assert "rfdetr-v4" in RFDETR_MODEL_NAMES
+def test_default_detection_model_is_rfdetr_v5() -> None:
+    assert DEFAULT_DETECTION_MODEL_NAME == "rfdetr-v5"
+    assert "rfdetr-v5" in RFDETR_MODEL_NAMES
 
 
-def test_rfdetr_v4_weights_path() -> None:
-    assert detection_model_weights_path("rfdetr-v4") == Path("model_weights/rfdetr-v4.onnx")
-    assert coerce_detection_model_name("rfdetr-v4") == "rfdetr-v4"
+def test_rfdetr_v5_weights_path() -> None:
+    assert detection_model_weights_path("rfdetr-v5") == Path("model_weights/rfdetr-v5.onnx")
+    assert coerce_detection_model_name("rfdetr-v5") == "rfdetr-v5"
 
 
 def test_lada_yolo_v4_weights_path() -> None:

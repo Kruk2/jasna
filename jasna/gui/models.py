@@ -83,8 +83,8 @@ class AppSettings:
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
     
     # Detection
-    detection_model: str = "rfdetr-v4"  # rfdetr-v2, rfdetr-v3, rfdetr-v4, lada-yolo-v2, lada-yolo-v4
-    detection_score_threshold: float = 0.2
+    detection_model: str = "rfdetr-v5"  # rfdetr-v2, rfdetr-v3, rfdetr-v4, rfdetr-v5, lada-yolo-v2, lada-yolo-v4
+    detection_score_threshold: float = 0.25
     compile_basicvsrpp: bool = True
     
     # Encoding
