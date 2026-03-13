@@ -114,6 +114,7 @@ class PresetManager:
         self._last_selected: str = "Default"
         self._last_output_folder: str = ""
         self._last_output_pattern: str = "{original}_restored.mp4"
+        self._system_check_passed_version: str = ""
         self._load()
         
     def _load(self):
@@ -129,6 +130,7 @@ class PresetManager:
             self._last_selected = data.get("last_selected", "Default")
             self._last_output_folder = data.get("last_output_folder", "")
             self._last_output_pattern = data.get("last_output_pattern", "{original}_restored.mp4")
+            self._system_check_passed_version = data.get("system_check_passed_version", "")
             
             for name, preset_dict in data.get("user_presets", {}).items():
                 try:
@@ -154,6 +156,7 @@ class PresetManager:
         data["user_presets"] = {name: asdict(preset) for name, preset in self._user_presets.items()}
         data["last_output_folder"] = self._last_output_folder
         data["last_output_pattern"] = self._last_output_pattern
+        data["system_check_passed_version"] = self._system_check_passed_version
         
         try:
             with open(path, "w", encoding="utf-8") as f:
@@ -224,4 +227,11 @@ class PresetManager:
 
     def set_last_output_pattern(self, pattern: str):
         self._last_output_pattern = pattern or "{original}_restored.mp4"
+        self._save()
+
+    def get_system_check_passed_version(self) -> str:
+        return self._system_check_passed_version
+
+    def set_system_check_passed_version(self, version: str):
+        self._system_check_passed_version = version or ""
         self._save()

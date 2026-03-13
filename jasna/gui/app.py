@@ -15,7 +15,7 @@ from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.wizard import FirstRunWizard
 from jasna.gui.processor import Processor, ProgressUpdate
-from jasna.gui.models import JobStatus
+from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.validation import validate_gui_start
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 from jasna.gui.system_stats import read_system_stats
@@ -49,6 +49,7 @@ class JasnaApp(ctk.CTk):
         self._processor: Processor | None = None
         self._job_start_times: dict[int, float] = {}
         self._processing_start_time: float = 0.0
+        self._preset_manager = PresetManager()
 
         self._system_stats_stop = threading.Event()
         self._system_stats_thread: threading.Thread | None = None
@@ -60,7 +61,8 @@ class JasnaApp(ctk.CTk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         
         if not skip_wizard:
-            self.after(100, self._show_wizard)
+            if self._preset_manager.get_system_check_passed_version() != __version__:
+                self.after(100, self._show_wizard)
             
     def _build_ui(self):
         self._build_header()
@@ -145,6 +147,18 @@ class JasnaApp(ctk.CTk):
         # Buy Me a Coffee button
         self._bmc_btn = BuyMeCoffeeButton(right, compact=False)
         self._bmc_btn.pack(side="left", padx=(0, 12))
+        
+        self._system_check_btn = ctk.CTkButton(
+            right,
+            text=t("btn_system_check"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color="transparent",
+            hover_color=Colors.BG_CARD,
+            text_color=Colors.TEXT_PRIMARY,
+            width=80,
+            command=self._show_wizard,
+        )
+        self._system_check_btn.pack(side="left", padx=(0, 4))
         
         self._help_btn = ctk.CTkButton(
             right,
@@ -257,6 +271,7 @@ class JasnaApp(ctk.CTk):
         
     def _on_wizard_complete(self, all_passed: bool):
         if all_passed:
+            self._preset_manager.set_system_check_passed_version(__version__)
             self._log_panel.info("System check passed - ready to process")
         else:
             self._log_panel.warning("Some dependencies missing - check setup")

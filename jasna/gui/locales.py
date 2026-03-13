@@ -81,6 +81,7 @@ TRANSLATIONS = {
         # Header
         "btn_help": "Help",
         "btn_about": "About",
+        "btn_system_check": "System Check",
         "language": "Language",
         
         # Queue Panel
@@ -333,6 +334,7 @@ TRANSLATIONS = {
         # Header
         "btn_help": "帮助",
         "btn_about": "关于",
+        "btn_system_check": "系统检查",
         "language": "语言",
         
         # Queue Panel
@@ -585,6 +587,7 @@ TRANSLATIONS = {
         # Header
         "btn_help": "ヘルプ",
         "btn_about": "このアプリについて",
+        "btn_system_check": "システムチェック",
         "language": "言語",
 
         # Queue Panel
