@@ -43,6 +43,7 @@ jasna/settings.json
 
 # Cursor
 .cursor/
+.windsurf/
 
 *.onnx
 *.engine

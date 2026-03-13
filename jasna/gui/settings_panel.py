@@ -527,7 +527,14 @@ class SettingsPanel(ctk.CTkFrame):
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed
         )
-        tvai_rb.pack(side="left")
+        tvai_rb.pack(side="left", padx=(0, 16))
+        
+        rtx_rb = ctk.CTkRadioButton(
+            engines_frame, text=f"{t('secondary_rtx_super_res')} ({t('recommended')})", variable=self._widgets["secondary_var"], value="rtx-super-res",
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
+            command=self._on_secondary_changed
+        )
+        rtx_rb.pack(side="left")
         
         # Swin2SR options (hidden by default)
         self._swin_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
@@ -647,6 +654,60 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["tvai_workers"].pack(side="right", padx=(0, 8))
         self._widgets["tvai_workers"].set(2)
         
+        # RTX Super Res options (hidden by default)
+        self._rtx_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
+
+        rtx_inner = ctk.CTkFrame(self._rtx_frame, fg_color="transparent")
+        rtx_inner.pack(fill="x", padx=12, pady=12)
+
+        # RTX quality
+        rtx_quality_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
+        rtx_quality_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(rtx_quality_row, text=t("rtx_quality"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        rtx_quality_tip = ctk.CTkLabel(rtx_quality_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        rtx_quality_tip.pack(side="left", padx=4)
+        Tooltip(rtx_quality_tip, get_tooltip("rtx_quality"))
+        self._widgets["rtx_quality"] = ctk.CTkOptionMenu(
+            rtx_quality_row, values=["Low", "Medium", "High", "Ultra"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=100
+        )
+        self._widgets["rtx_quality"].pack(side="right")
+        self._widgets["rtx_quality"].set("High")
+
+        # RTX denoise
+        rtx_denoise_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
+        rtx_denoise_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(rtx_denoise_row, text=t("rtx_denoise"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        rtx_denoise_tip = ctk.CTkLabel(rtx_denoise_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        rtx_denoise_tip.pack(side="left", padx=4)
+        Tooltip(rtx_denoise_tip, get_tooltip("rtx_denoise"))
+        self._widgets["rtx_denoise"] = ctk.CTkOptionMenu(
+            rtx_denoise_row, values=["None", "Low", "Medium", "High", "Ultra"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=100
+        )
+        self._widgets["rtx_denoise"].pack(side="right")
+        self._widgets["rtx_denoise"].set("Medium")
+
+        # RTX deblur
+        rtx_deblur_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
+        rtx_deblur_row.pack(fill="x")
+        ctk.CTkLabel(rtx_deblur_row, text=t("rtx_deblur"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        rtx_deblur_tip = ctk.CTkLabel(rtx_deblur_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        rtx_deblur_tip.pack(side="left", padx=4)
+        Tooltip(rtx_deblur_tip, get_tooltip("rtx_deblur"))
+        self._widgets["rtx_deblur"] = ctk.CTkOptionMenu(
+            rtx_deblur_row, values=["None", "Low", "Medium", "High", "Ultra"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=100
+        )
+        self._widgets["rtx_deblur"].pack(side="right")
+        self._widgets["rtx_deblur"].set("None")
+
     def _browse_tvai_ffmpeg(self):
         filepath = filedialog.askopenfilename(
             title=t("dialog_select_tvai_ffmpeg"),
@@ -829,6 +890,10 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["tvai_scale"].set(f"{preset.tvai_scale}x")
         self._widgets["tvai_workers"].set(preset.tvai_workers)
         self._widgets["tvai_workers_val"].configure(text=str(preset.tvai_workers))
+
+        self._widgets["rtx_quality"].set(getattr(preset, "rtx_quality", "high").capitalize())
+        self._widgets["rtx_denoise"].set(getattr(preset, "rtx_denoise", "medium").capitalize())
+        self._widgets["rtx_deblur"].set(getattr(preset, "rtx_deblur", "none").capitalize())
         
         self._widgets["codec"].set(preset.codec.upper())
         self._widgets["encoder_cq"].set(preset.encoder_cq)
@@ -927,11 +992,14 @@ class SettingsPanel(ctk.CTkFrame):
         secondary = self._widgets["secondary_var"].get()
         self._swin_frame.pack_forget()
         self._tvai_frame.pack_forget()
+        self._rtx_frame.pack_forget()
         
         if secondary == "swin2sr":
             self._swin_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         elif secondary == "tvai":
             self._tvai_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        elif secondary == "rtx-super-res":
+            self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
             
         self._settings.secondary_restoration = secondary
         
@@ -975,6 +1043,9 @@ class SettingsPanel(ctk.CTkFrame):
             tvai_model=self._widgets["tvai_model"].get(),
             tvai_scale=int(self._widgets["tvai_scale"].get().replace("x", "")),
             tvai_workers=int(self._widgets["tvai_workers"].get()),
+            rtx_quality=self._widgets["rtx_quality"].get().lower(),
+            rtx_denoise=self._widgets["rtx_denoise"].get().lower(),
+            rtx_deblur=self._widgets["rtx_deblur"].get().lower(),
             detection_model=self._widgets["detection_model"].get(),
             detection_score_threshold=float(self._widgets["detection_score_threshold"].get()),
             compile_basicvsrpp=self._widgets["compile_basicvsrpp"].get() == 1,

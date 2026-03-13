@@ -70,7 +70,7 @@ class AppSettings:
     denoise_step: str = "after_primary"  # after_primary, after_secondary
     
     # Secondary restoration
-    secondary_restoration: str = "none"  # none, swin2sr, tvai
+    secondary_restoration: str = "none"  # none, swin2sr, tvai, rtx-super-res
     swin2sr_batch_size: int = 8
     swin2sr_tensorrt: bool = True
     tvai_ffmpeg_path: str = r"C:\Program Files\Topaz Labs LLC\Topaz Video AI\ffmpeg.exe"
@@ -78,6 +78,9 @@ class AppSettings:
     tvai_scale: int = 4
     tvai_workers: int = 2
     tvai_args: str = "preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
+    rtx_quality: str = "high"  # low, medium, high, ultra
+    rtx_denoise: str = "medium"  # none, low, medium, high, ultra
+    rtx_deblur: str = "none"  # none, low, medium, high, ultra
     
     # Detection
     detection_model: str = "rfdetr-v4"  # rfdetr-v2, rfdetr-v3, rfdetr-v4, lada-yolo-v2, lada-yolo-v4

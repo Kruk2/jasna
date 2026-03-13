@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--secondary-restoration",
         type=str,
         default="none",
-        choices=["none", "swin2sr", "tvai"],
+        choices=["none", "swin2sr", "tvai", "rtx-super-res"],
         help='Secondary restoration after primary model (default: %(default)s)',
     )
 
@@ -112,6 +112,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=True,
         action=argparse.BooleanOptionalAction,
         help="Enable Swin2SR TensorRT compilation/usage where supported (default: %(default)s)",
+    )
+
+    rtx = parser.add_argument_group("RTX Super Res")
+    rtx.add_argument(
+        "--rtx-quality",
+        type=str,
+        default="high",
+        choices=["low", "medium", "high", "ultra"],
+        help="RTX Super Res upscale quality (default: %(default)s)",
+    )
+    rtx.add_argument(
+        "--rtx-denoise",
+        type=str,
+        default="medium",
+        choices=["none", "low", "medium", "high", "ultra"],
+        help="RTX Super Res denoise level, none to disable (default: %(default)s)",
+    )
+    rtx.add_argument(
+        "--rtx-deblur",
+        type=str,
+        default="none",
+        choices=["none", "low", "medium", "high", "ultra"],
+        help="RTX Super Res deblur level, none to disable (default: %(default)s)",
     )
 
     tvai = parser.add_argument_group("Topaz Video AI")
@@ -319,6 +342,16 @@ def main() -> None:
                 tvai_args=tvai_args_str,
                 scale=int(args.tvai_scale),
                 num_workers=int(args.tvai_workers),
+            )
+        elif secondary_name == "rtx-super-res":
+            from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
+            rtx_denoise = str(args.rtx_denoise).lower()
+            rtx_deblur = str(args.rtx_deblur).lower()
+            secondary_restorer = RtxSuperresSecondaryRestorer(
+                device=device,
+                quality=str(args.rtx_quality).lower(),
+                denoise=None if rtx_denoise == "none" else rtx_denoise,
+                deblur=None if rtx_deblur == "none" else rtx_deblur,
             )
         else:
             raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
