@@ -243,6 +243,16 @@ class Processor:
                     scale=settings.tvai_scale,
                     num_workers=settings.tvai_workers,
                 )
+            elif settings.secondary_restoration == "rtx-super-res":
+                from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
+                rtx_denoise = settings.rtx_denoise.lower()
+                rtx_deblur = settings.rtx_deblur.lower()
+                secondary_restorer = RtxSuperresSecondaryRestorer(
+                    device=device,
+                    quality=settings.rtx_quality.lower(),
+                    denoise=None if rtx_denoise == "none" else rtx_denoise,
+                    deblur=None if rtx_deblur == "none" else rtx_deblur,
+                )
 
             denoise_strength = DenoiseStrength(settings.denoise_strength)
             denoise_step = DenoiseStep(settings.denoise_step)

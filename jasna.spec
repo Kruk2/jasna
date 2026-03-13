@@ -22,7 +22,7 @@ def _collect(name: str, *, required: bool):
 
 datas, binaries, hiddenimports = [], [], []
 required_pkgs = ["psutil"] + ([] if _build_cli else ["customtkinter"])
-optional_pkgs = ["torch", "torch_tensorrt", "av", "PyNvVideoCodec", "python_vali", "tensorrt", "tensorrt_libs"]
+optional_pkgs = ["torch", "torch_tensorrt", "av", "PyNvVideoCodec", "python_vali", "tensorrt", "tensorrt_libs", "nvvfx"]
 
 for pkg in required_pkgs:
     d, b, h = _collect(pkg, required=True)
