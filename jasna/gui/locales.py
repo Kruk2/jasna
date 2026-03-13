@@ -828,6 +828,258 @@ TRANSLATIONS = {
         "error_tvai_ffmpeg_not_found": "TVAI ffmpeg が見つかりません: {path}",
     },
 
+    "ko": {
+        # App
+        "app_title": "JASNA GUI",
+        "status_idle": "대기 중",
+        "status_processing": "처리 중",
+        "status_paused": "일시 정지",
+        "status_completed": "완료",
+        "status_error": "오류",
+
+        # Header
+        "btn_help": "도움말",
+        "btn_about": "정보",
+        "language": "언어",
+
+        # Queue Panel
+        "btn_add_files": "📁 파일 추가",
+        "queue_empty": "여기에 파일을 드래그 앤 드롭하거나\n위의 버튼을 사용하세요",
+        "items_queued": "{count}개 항목 대기 중",
+        "btn_clear": "🗑 비우기",
+        "btn_clear_completed": "✓ 완료 항목 제거",
+        "output_location": "출력 위치",
+        "output_pattern_placeholder": "{original}_restored.mp4",
+        "same_as_input": "입력과 동일",
+        "select_video_files": "동영상 파일 선택",
+        "select_folder": "폴더 선택",
+        "select_output_folder": "출력 폴더 선택",
+
+        # Job Status
+        "job_pending": "대기 중",
+        "job_processing": "처리 중",
+        "job_completed": "완료",
+        "completed_in": "소요 시간",
+        "job_error": "오류",
+        "job_paused": "일시 정지",
+        "job_skipped": "건너뜀",
+
+        # Settings Panel
+        "preset": "프리셋:",
+        "btn_create": "+",
+        "btn_save": "💾",
+        "btn_delete": "🗑",
+        "btn_reset": "↺",
+
+        # Sections
+        "section_basic": "기본 처리",
+        "section_advanced": "고급 처리",
+        "section_secondary": "2차 복원",
+        "section_encoding": "인코딩",
+
+        # Basic Processing
+        "max_clip_size": "최대 클립 크기",
+        "detection_model": "감지 모델",
+        "detection_threshold": "감지 임계값",
+        "fp16_mode": "FP16 모드",
+        "compile_basicvsrpp": "BasicVSR++ 컴파일",
+        "file_conflict": "파일 충돌",
+        "file_conflict_auto_rename": "자동 이름 변경",
+        "file_conflict_overwrite": "덮어쓰기",
+        "file_conflict_skip": "건너뛰기",
+        "file_conflict_overwrite_warning": "기존 파일이 영구적으로 대체됩니다",
+        "tip_file_conflict": "출력 파일이 이미 존재할 때 수행할 작업",
+        "conflict_tooltip": "출력 파일이 이미 존재합니다",
+        "renamed_output": "출력 파일이 이미 존재합니다. {filename}(으)로 이름이 변경되었습니다",
+
+        # Advanced Processing
+        "temporal_overlap": "시간 오버랩",
+        "enable_crossfade": "크로스페이드 활성화",
+        "denoise_strength": "노이즈 제거 강도",
+        "denoise_step": "노이즈 제거 적용 시점",
+        "denoise_none": "없음",
+        "denoise_low": "낮음",
+        "denoise_medium": "중간",
+        "denoise_high": "높음",
+        "after_primary": "1차 복원 후",
+        "after_secondary": "2차 복원 후",
+        "working_directory": "작업 디렉토리",
+        "working_directory_placeholder": "선택 사항, 출력 폴더와 동일",
+        "dialog_select_working_directory": "작업 디렉토리 선택",
+
+        # Secondary Restoration
+        "secondary_none": "없음",
+        "secondary_swin2sr": "Swin2SR",
+        "secondary_tvai": "Topaz TVAI",
+        "secondary_rtx_super_res": "RTX Super Res",
+        "rtx_quality": "품질",
+        "rtx_denoise": "노이즈 제거",
+        "rtx_deblur": "블러 제거",
+        "recommended": "권장",
+        "batch_size": "배치 크기",
+        "compile_model": "모델 컴파일",
+        "ffmpeg_path": "FFmpeg 경로",
+        "model": "모델",
+        "scale": "스케일",
+        "workers": "워커 수",
+
+        # Encoding
+        "codec": "코덱",
+        "quality_cq": "품질 (CQ)",
+        "custom_args": "사용자 정의 인수",
+
+        # Control Bar
+        "btn_start": "▶ 시작",
+        "btn_pause": "⏸ 일시 정지",
+        "btn_resume": "▶ 재개",
+        "btn_stop": "⏹ 중지",
+        "progress": "진행률",
+        "time_remaining": "남은 시간",
+        "no_file_processing": "처리 중인 파일 없음",
+        "queue_label": "대기열",
+        "logs_btn": ">_ 로그",
+
+        # Log Panel
+        "logs": "로그",
+        "btn_export": "내보내기",
+        "btn_toggle_logs": "로그 ▼",
+        "filter_all": "전체",
+        "filter_debug": "디버그",
+        "filter_info": "정보",
+        "filter_warn": "경고",
+        "filter_error": "오류",
+        "system_output": "시스템 출력",
+        "filter_all_levels": "전체 수준",
+        "filter_errors_only": "오류만",
+        "filter_warnings_plus": "경고 이상",
+        "filter_info_plus": "정보 이상",
+
+        # Wizard
+        "wizard_title": "시스템 점검",
+        "wizard_subtitle": "필수 종속성을 확인하는 중...",
+        "wizard_checking": "확인 중...",
+        "wizard_found": "발견: {path}",
+        "wizard_not_found": "PATH에서 찾을 수 없음",
+        "wizard_all_passed": "✓ 모든 점검을 통과했습니다! 사용할 준비가 되었습니다.",
+        "wizard_some_failed": "⚠ 일부 종속성이 누락되었습니다. README의 설치 안내를 확인하세요.",
+        "btn_get_started": "시작하기",
+        "btn_continue_anyway": "계속 진행",
+        "btn_ok": "확인",
+
+        # Dialogs
+        "dialog_create_preset": "프리셋 만들기",
+        "preset_name": "프리셋 이름",
+        "preset_placeholder": "나만의 프리셋",
+        "error_name_empty": "이름을 입력해야 합니다",
+        "error_name_exists": "이미 존재하는 이름입니다",
+        "btn_create_preset": "만들기",
+        "btn_cancel": "취소",
+        "dialog_delete_preset": "프리셋 삭제",
+        "confirm_delete": "프리셋 '{name}'을(를) 삭제하시겠습니까?",
+        "btn_delete_confirm": "삭제",
+
+        # Toasts
+        "toast_preset_saved": "프리셋 '{name}' 저장됨",
+        "toast_preset_created": "프리셋 '{name}' 생성됨",
+        "toast_preset_deleted": "프리셋 '{name}' 삭제됨",
+        "toast_settings_reset": "설정이 초기화되었습니다",
+        "toast_no_files": "대기열에 파일이 없습니다",
+        "toast_started": "처리가 시작되었습니다",
+        "toast_paused": "처리가 일시 정지되었습니다",
+        "toast_resumed": "처리가 재개되었습니다",
+        "toast_stopped": "처리가 중지되었습니다",
+        # Buy Me a Coffee
+        "bmc_support": "후원",
+
+        # Tooltips
+        "tip_max_clip_size": "추적을 위한 최대 클립 크기",
+        "tip_temporal_overlap": "오버랩+버림 클립 분할의 버림 마진. 각 분할은 2*temporal_overlap 입력 오버랩을 사용하며 각 분할 경계에서 temporal_overlap 프레임을 버립니다",
+        "tip_enable_crossfade": "클립 경계 간 크로스페이드로 이음새의 깜빡임을 줄입니다. 이미 처리되었지만 버려질 프레임을 사용하므로 추가 GPU 비용이 없습니다",
+        "tip_fp16_mode": "지원되는 곳에서 FP16 사용 (복원 + TensorRT). VRAM 사용량을 줄이고 성능이 향상될 수 있습니다",
+        "tip_compile_basicvsrpp": "BasicVSR++를 컴파일하여 큰 성능 향상을 얻습니다 (VRAM 사용량 증가). 큰 클립 크기 사용은 권장하지 않습니다",
+        "tip_denoise_strength": "복원된 영역에 적용되는 공간 노이즈 제거 강도. 노이즈 아티팩트를 줄입니다",
+        "tip_denoise_step": "노이즈 제거 적용 시점: after_primary (2차 복원 전) 또는 after_secondary (블렌딩 직전)",
+        "tip_secondary_restoration": "1차 모델 이후의 2차 복원",
+        "tip_swin2sr_batch_size": "Swin2SR 2차 복원 배치 크기",
+        "tip_swin2sr_compilation": "지원되는 환경에서 Swin2SR TensorRT 컴파일/사용 활성화",
+        "tip_tvai_ffmpeg_path": "Topaz Video AI ffmpeg.exe 경로",
+        "tip_tvai_model": "tvai_up용 Topaz 모델 이름 (예: iris-2, prob-4, iris-3)",
+        "tip_tvai_scale": "Topaz tvai_up 스케일 (1=스케일 없음). 출력 크기는 256*scale",
+        "tip_tvai_workers": "병렬 TVAI ffmpeg 워커 수",
+        "tip_rtx_quality": "RTX Super Res 업스케일 품질 수준",
+        "tip_rtx_denoise": "RTX Super Res 노이즈 제거 수준 (None으로 비활성화)",
+        "tip_rtx_deblur": "RTX Super Res 블러 제거/선명화 수준 (None으로 비활성화)",
+        "tip_detection_model": "감지 모델 버전",
+        "tip_detection_score_threshold": "감지 점수 임계값",
+        "tip_codec": "출력 동영상 코덱 (현재 HEVC만 지원)",
+        "tip_encoder_cq": "인코더 고정 품질 값 (낮을수록 = 높은 품질, 큰 파일)",
+        "tip_encoder_custom_args": "쉼표로 구분된 key=value 쌍의 인코더 설정 (예: cq=22,lookahead=32)",
+        "tip_working_directory": "인코더 임시 파일 (.hevc, temp video) 디렉토리. 빠른 드라이브를 사용하면 성능이 향상됩니다.",
+
+        # Preset button tooltips
+        "tip_preset_reset": "저장된 값으로 초기화",
+        "tip_preset_delete": "프리셋 삭제",
+        "tip_preset_save": "프리셋 저장",
+        "tip_preset_create": "새 프리셋 만들기",
+
+        # Engine compilation / first run warnings
+        "engine_first_run_title": "첫 실행은 느릴 수 있습니다",
+        "engine_first_run_body": "일부 TensorRT 엔진이 누락되어 GPU에 맞게 컴파일될 수 있습니다. 첫 실행 시 이는 정상입니다. 컴파일 중 애플리케이션이 응답하지 않는 것처럼 보일 수 있습니다. 닫지 마세요.",
+        "engine_first_run_missing": "누락된 엔진:",
+        "engine_name_rfdetr": "RF-DETR (감지)",
+        "engine_name_yolo": "YOLO (감지)",
+        "engine_name_basicvsrpp": "BasicVSR++ (복원)",
+        "engine_name_swin2sr": "Swin2SR (2차)",
+        "engine_basicvsrpp_risky_title": "BasicVSR++ 컴파일 경고",
+        "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT 컴파일이 GPU VRAM 부족으로 위험할 수 있습니다.\n\nGPU VRAM (약): {vram_gb} GB\n요청된 클립 크기: {requested_clip}\n안전 추정 최대: {safe_clip}\n\n그래도 컴파일을 계속하시겠습니까? 오래 걸릴 수 있으며 VRAM 부족으로 실패할 수 있습니다.",
+        # About dialog
+        "dialog_about_title": "Jasna 정보",
+        "dialog_about_version": "버전 {version}",
+        "dialog_about_description": "JAV 모자이크 복원 도구",
+        "dialog_about_credit": "Lada에서 영감을 받음",
+        "btn_close": "닫기",
+
+        # Language change dialog
+        "dialog_language_changed": "언어가 변경되었습니다",
+        "dialog_language_restart": "언어 변경을 완전히 적용하려면 애플리케이션을 다시 시작하세요.",
+
+        # App messages
+        "toast_select_output": "시작하기 전에 출력 폴더를 선택하세요",
+        "error_cannot_start": "처리를 시작할 수 없습니다:",
+        "error_invalid_tvai": "잘못된 TVAI 구성",
+
+        # Settings panel
+        "dialog_select_tvai_ffmpeg": "Topaz Video AI ffmpeg.exe 선택",
+        "placeholder_encoder_args": "예: lookahead=32",
+
+        # Wizard check labels
+        "wizard_window_title": "Jasna - 시스템 점검",
+        "wizard_check_ffmpeg": "FFmpeg",
+        "wizard_check_ffprobe": "FFprobe",
+        "wizard_check_mkvmerge": "MKVmerge",
+        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_cuda": "CUDA 런타임",
+        "wizard_check_hags": "하드웨어 가속 GPU 스케줄링",
+        "wizard_not_checked": "확인되지 않음",
+        "wizard_not_callable": "호출 불가: {path}",
+        "wizard_found_version": "발견: {path} ({version})",
+        "wizard_found_no_major": "발견: {path} (주 버전을 감지할 수 없음)",
+        "wizard_found_bad_major": "발견: {path} (major={major}, 예상=8)",
+        "wizard_found_major": "발견: {path} (major={major})",
+        "wizard_no_cuda": "CUDA 장치 없음",
+        "wizard_gpu_compute_too_low": "Compute capability 7.5 이상 필요 (GPU: {major}.{minor})",
+        "wizard_cuda_version": "CUDA {version}",
+        "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
+        "wizard_not_available": "사용 불가",
+
+        # Validation errors
+        "error_tvai_data_dir_not_set": "환경 변수 TVAI_MODEL_DATA_DIR이 설정되지 않았습니다",
+        "error_tvai_model_dir_not_set": "환경 변수 TVAI_MODEL_DIR이 설정되지 않았습니다",
+        "error_tvai_data_dir_missing": "TVAI_MODEL_DATA_DIR이 존재하지 않는 디렉토리를 가리킵니다: {path}",
+        "error_tvai_model_dir_missing": "TVAI_MODEL_DIR이 존재하지 않는 디렉토리를 가리킵니다: {path}",
+        "error_tvai_ffmpeg_not_found": "TVAI ffmpeg를 찾을 수 없습니다: {path}",
+    },
+
 }
 
 
@@ -835,6 +1087,7 @@ LANGUAGE_NAMES = {
     "en": "English",
     "zh": "简体中文",
     "ja": "日本語",
+    "ko": "한국어",
 }
 
 
@@ -875,6 +1128,8 @@ class LocaleManager:
                     self._current_lang = "zh"
                 elif lang and lang.startswith("ja"):
                     self._current_lang = "ja"
+                elif lang and lang.startswith("ko"):
+                    self._current_lang = "ko"
             except Exception:
                 # Fall back to default 'en'
                 pass
