@@ -7,10 +7,8 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-RTX_SUPERRES_SCALE = 4
 RTX_SUPERRES_INPUT_SIZE = 256
-RTX_SUPERRES_OUTPUT_SIZE = RTX_SUPERRES_INPUT_SIZE * RTX_SUPERRES_SCALE
-
+SCALE_CHOICES = [2, 4]
 QUALITY_CHOICES = ["low", "medium", "high", "ultra"]
 DENOISE_CHOICES = ["none", "low", "medium", "high", "ultra"]
 DEBLUR_CHOICES = ["none", "low", "medium", "high", "ultra"]
@@ -50,37 +48,39 @@ class RtxSuperresSecondaryRestorer:
     name = "rtx-super-res"
     num_workers = 1
 
-    def __init__(self, *, device: torch.device, quality: str = "high",
+    def __init__(self, *, device: torch.device, scale: int = 4, quality: str = "high",
                  denoise: Optional[str] = "medium", deblur: Optional[str] = None) -> None:
         from nvvfx import VideoSuperRes
+
+        output_size = RTX_SUPERRES_INPUT_SIZE * scale
 
         self.device = torch.device(device)
         gpu = self.device.index or 0
         self._stream_ptr = torch.cuda.current_stream(self.device).cuda_stream
 
         self._sr = VideoSuperRes(device=gpu, quality=_resolve_quality(quality))
-        self._sr.output_width = RTX_SUPERRES_OUTPUT_SIZE
-        self._sr.output_height = RTX_SUPERRES_OUTPUT_SIZE
+        self._sr.output_width = output_size
+        self._sr.output_height = output_size
         self._sr.load()
 
         self._denoise = None
         if denoise is not None and denoise.lower() != "none":
             self._denoise = VideoSuperRes(device=gpu, quality=_resolve_denoise(denoise))
-            self._denoise.output_width = RTX_SUPERRES_OUTPUT_SIZE
-            self._denoise.output_height = RTX_SUPERRES_OUTPUT_SIZE
+            self._denoise.output_width = output_size
+            self._denoise.output_height = output_size
             self._denoise.load()
 
         self._deblur = None
         if deblur is not None and deblur.lower() != "none":
             self._deblur = VideoSuperRes(device=gpu, quality=_resolve_deblur(deblur))
-            self._deblur.output_width = RTX_SUPERRES_OUTPUT_SIZE
-            self._deblur.output_height = RTX_SUPERRES_OUTPUT_SIZE
+            self._deblur.output_width = output_size
+            self._deblur.output_height = output_size
             self._deblur.load()
 
-        logger.info("RtxSuperresSecondaryRestorer: quality=%s denoise=%s deblur=%s (%dx%d -> %dx%d)",
-                     quality, denoise, deblur,
+        logger.info("RtxSuperresSecondaryRestorer: scale=%dx quality=%s denoise=%s deblur=%s (%dx%d -> %dx%d)",
+                     scale, quality, denoise, deblur,
                      RTX_SUPERRES_INPUT_SIZE, RTX_SUPERRES_INPUT_SIZE,
-                     RTX_SUPERRES_OUTPUT_SIZE, RTX_SUPERRES_OUTPUT_SIZE)
+                     output_size, output_size)
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         t = int(frames_256.shape[0])
@@ -110,6 +110,12 @@ class RtxSuperresSecondaryRestorer:
         return out
 
     def close(self) -> None:
-        self._sr = None
-        self._denoise = None
-        self._deblur = None
+        if self._sr is not None:
+            self._sr.close()
+            self._sr = None
+        if self._denoise is not None:
+            self._denoise.close()
+            self._denoise = None
+        if self._deblur is not None:
+            self._deblur.close()
+            self._deblur = None

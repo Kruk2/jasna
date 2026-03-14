@@ -78,6 +78,7 @@ class AppSettings:
     tvai_scale: int = 4
     tvai_workers: int = 2
     tvai_args: str = "preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1"
+    rtx_scale: int = 4  # 2, 4
     rtx_quality: str = "high"  # low, medium, high, ultra
     rtx_denoise: str = "medium"  # none, low, medium, high, ultra
     rtx_deblur: str = "none"  # none, low, medium, high, ultra

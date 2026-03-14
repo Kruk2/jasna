@@ -660,6 +660,22 @@ class SettingsPanel(ctk.CTkFrame):
         rtx_inner = ctk.CTkFrame(self._rtx_frame, fg_color="transparent")
         rtx_inner.pack(fill="x", padx=12, pady=12)
 
+        # RTX scale
+        rtx_scale_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
+        rtx_scale_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(rtx_scale_row, text=t("rtx_scale"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        rtx_scale_tip = ctk.CTkLabel(rtx_scale_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        rtx_scale_tip.pack(side="left", padx=4)
+        Tooltip(rtx_scale_tip, get_tooltip("rtx_scale"))
+        self._widgets["rtx_scale"] = ctk.CTkOptionMenu(
+            rtx_scale_row, values=["2x", "4x"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["rtx_scale"].pack(side="right")
+        self._widgets["rtx_scale"].set("4x")
+
         # RTX quality
         rtx_quality_row = ctk.CTkFrame(rtx_inner, fg_color="transparent")
         rtx_quality_row.pack(fill="x", pady=(0, 8))
@@ -897,6 +913,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["tvai_workers"].set(preset.tvai_workers)
         self._widgets["tvai_workers_val"].configure(text=str(preset.tvai_workers))
 
+        self._widgets["rtx_scale"].set(f"{getattr(preset, 'rtx_scale', 4)}x")
         self._widgets["rtx_quality"].set(getattr(preset, "rtx_quality", "high").capitalize())
         self._widgets["rtx_denoise"].set(getattr(preset, "rtx_denoise", "medium").capitalize())
         self._widgets["rtx_deblur"].set(getattr(preset, "rtx_deblur", "none").capitalize())
@@ -1049,6 +1066,7 @@ class SettingsPanel(ctk.CTkFrame):
             tvai_model=self._widgets["tvai_model"].get(),
             tvai_scale=int(self._widgets["tvai_scale"].get().replace("x", "")),
             tvai_workers=int(self._widgets["tvai_workers"].get()),
+            rtx_scale=int(self._widgets["rtx_scale"].get().replace("x", "")),
             rtx_quality=self._widgets["rtx_quality"].get().lower(),
             rtx_denoise=self._widgets["rtx_denoise"].get().lower(),
             rtx_deblur=self._widgets["rtx_deblur"].get().lower(),

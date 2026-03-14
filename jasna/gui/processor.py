@@ -249,6 +249,7 @@ class Processor:
                 rtx_deblur = settings.rtx_deblur.lower()
                 secondary_restorer = RtxSuperresSecondaryRestorer(
                     device=device,
+                    scale=settings.rtx_scale,
                     quality=settings.rtx_quality.lower(),
                     denoise=None if rtx_denoise == "none" else rtx_denoise,
                     deblur=None if rtx_deblur == "none" else rtx_deblur,

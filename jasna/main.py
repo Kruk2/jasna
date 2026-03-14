@@ -116,6 +116,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     rtx = parser.add_argument_group("RTX Super Res")
     rtx.add_argument(
+        "--rtx-scale",
+        type=int,
+        default=4,
+        choices=[2, 4],
+        help="RTX Super Res upscale factor (default: %(default)s)",
+    )
+    rtx.add_argument(
         "--rtx-quality",
         type=str,
         default="high",
@@ -348,6 +355,7 @@ def main() -> None:
             rtx_deblur = str(args.rtx_deblur).lower()
             secondary_restorer = RtxSuperresSecondaryRestorer(
                 device=device,
+                scale=int(args.rtx_scale),
                 quality=str(args.rtx_quality).lower(),
                 denoise=None if rtx_denoise == "none" else rtx_denoise,
                 deblur=None if rtx_deblur == "none" else rtx_deblur,
