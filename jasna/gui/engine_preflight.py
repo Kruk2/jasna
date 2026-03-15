@@ -52,8 +52,6 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         _get_approx_max_tensorrt_clip_length,
         get_compiled_mosaic_restoration_model_path_for_clip,
     )
-    from jasna.restorer.swin2sr_tensorrt_compilation import get_compiled_swin2sr_engine_path
-
     device = torch.device("cuda:0")
 
     reqs: list[EngineRequirement] = []
@@ -124,26 +122,6 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
                 paths=tuple(basic_paths),
                 exists=not basic_missing,
                 missing_paths=missing_paths,
-            )
-        )
-
-    swin_missing = False
-    if str(settings.secondary_restoration).lower() == "swin2sr" and bool(settings.swin2sr_tensorrt) and bool(settings.fp16_mode):
-        swin_engine = Path(
-            get_compiled_swin2sr_engine_path(
-                engine_dir=str(Path("model_weights")),
-                batch_size=int(settings.swin2sr_batch_size),
-                fp16=True,
-            )
-        )
-        swin_missing = not swin_engine.is_file()
-        reqs.append(
-            EngineRequirement(
-                key="swin2sr",
-                label="Swin2SR (secondary)",
-                paths=(swin_engine,),
-                exists=not swin_missing,
-                missing_paths=() if not swin_missing else (swin_engine,),
             )
         )
 
