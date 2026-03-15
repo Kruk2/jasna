@@ -269,7 +269,7 @@ def main() -> None:
 
     output_video = Path(args.output)
 
-    from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name, detection_model_weights_path
+    from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name, detection_model_weights_path, precompile_detection_engine
 
     detection_model_name = coerce_detection_model_name(str(args.detection_model))
     detection_model_path = Path(str(args.detection_model_path)) if str(args.detection_model_path).strip() else detection_model_weights_path(detection_model_name)
@@ -325,6 +325,14 @@ def main() -> None:
             device=device,
             fp16=fp16,
             compile_basicvsrpp=bool(args.compile_basicvsrpp),
+        )
+
+        precompile_detection_engine(
+            detection_model_name=detection_model_name,
+            detection_model_path=detection_model_path,
+            batch_size=batch_size,
+            device=device,
+            fp16=fp16,
         )
 
         secondary_name = str(args.secondary_restoration).lower()

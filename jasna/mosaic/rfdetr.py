@@ -14,6 +14,20 @@ from jasna.trt.trt_runner import TrtRunner
 from jasna.mosaic.detections import Detections
 
 
+def compile_rfdetr_engine(
+    onnx_path: Path,
+    device: torch.device,
+    batch_size: int,
+    fp16: bool = True,
+) -> Path:
+    return compile_onnx_to_tensorrt_engine(
+        onnx_path,
+        device,
+        batch_size=int(batch_size),
+        fp16=bool(fp16),
+    )
+
+
 class RfDetrMosaicDetectionModel:
     DEFAULT_RESOLUTION = 768
     DEFAULT_SCORE_THRESHOLD = 0.25
