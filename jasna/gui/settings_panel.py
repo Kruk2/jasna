@@ -531,13 +531,6 @@ class SettingsPanel(ctk.CTkFrame):
         )
         none_rb.pack(side="left", padx=(0, 16))
         
-        swin_rb = ctk.CTkRadioButton(
-            engines_frame, text=t("secondary_swin2sr"), variable=self._widgets["secondary_var"], value="swin2sr",
-            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
-            command=self._on_secondary_changed
-        )
-        swin_rb.pack(side="left", padx=(0, 16))
-        
         tvai_rb = ctk.CTkRadioButton(
             engines_frame, text=t("secondary_tvai"), variable=self._widgets["secondary_var"], value="tvai",
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
@@ -551,41 +544,6 @@ class SettingsPanel(ctk.CTkFrame):
             command=self._on_secondary_changed
         )
         rtx_rb.pack(side="left")
-        
-        # Swin2SR options (hidden by default)
-        self._swin_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
-        
-        swin_inner = ctk.CTkFrame(self._swin_frame, fg_color="transparent")
-        swin_inner.pack(fill="x", padx=12, pady=12)
-        
-        swin_batch_row = ctk.CTkFrame(swin_inner, fg_color="transparent")
-        swin_batch_row.pack(fill="x", pady=(0, 8))
-        swin_batch_label = ctk.CTkLabel(swin_batch_row, text=t("batch_size"), text_color=Colors.TEXT_PRIMARY)
-        swin_batch_label.pack(side="left")
-        swin_batch_tip = ctk.CTkLabel(swin_batch_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        swin_batch_tip.pack(side="left", padx=4)
-        Tooltip(swin_batch_tip, get_tooltip("swin2sr_batch_size"))
-        self._widgets["swin2sr_batch_size"] = ctk.CTkOptionMenu(
-            swin_batch_row, values=["4", "8", "16"],
-            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
-            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
-            text_color=Colors.TEXT_PRIMARY, width=80
-        )
-        self._widgets["swin2sr_batch_size"].pack(side="right")
-        self._widgets["swin2sr_batch_size"].set("8")
-        
-        swin_trt_row = ctk.CTkFrame(swin_inner, fg_color="transparent")
-        swin_trt_row.pack(fill="x")
-        swin_trt_label = ctk.CTkLabel(swin_trt_row, text=t("compile_model"), text_color=Colors.TEXT_PRIMARY)
-        swin_trt_label.pack(side="left")
-        swin_trt_tip = ctk.CTkLabel(swin_trt_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        swin_trt_tip.pack(side="left", padx=4)
-        Tooltip(swin_trt_tip, get_tooltip("swin2sr_compilation"))
-        self._widgets["swin2sr_tensorrt"] = ctk.CTkSwitch(
-            swin_trt_row, text="", fg_color=Colors.BORDER_LIGHT, progress_color=Colors.PRIMARY
-        )
-        self._widgets["swin2sr_tensorrt"].pack(side="right")
-        self._widgets["swin2sr_tensorrt"].select()
         
         # TVAI options (hidden by default)
         self._tvai_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
@@ -916,11 +874,6 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["denoise_step"].set(denoise_step_display.get(preset.denoise_step, t("after_primary")))
         
         self._widgets["secondary_var"].set(preset.secondary_restoration)
-        self._widgets["swin2sr_batch_size"].set(str(preset.swin2sr_batch_size))
-        if preset.swin2sr_tensorrt:
-            self._widgets["swin2sr_tensorrt"].select()
-        else:
-            self._widgets["swin2sr_tensorrt"].deselect()
             
         self._widgets["tvai_ffmpeg_path"].delete(0, "end")
         self._widgets["tvai_ffmpeg_path"].insert(0, preset.tvai_ffmpeg_path)
@@ -1029,13 +982,10 @@ class SettingsPanel(ctk.CTkFrame):
         
     def _on_secondary_changed(self):
         secondary = self._widgets["secondary_var"].get()
-        self._swin_frame.pack_forget()
         self._tvai_frame.pack_forget()
         self._rtx_frame.pack_forget()
         
-        if secondary == "swin2sr":
-            self._swin_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
-        elif secondary == "tvai":
+        if secondary == "tvai":
             self._tvai_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         elif secondary == "rtx-super-res":
             self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
@@ -1076,8 +1026,6 @@ class SettingsPanel(ctk.CTkFrame):
             denoise_strength=denoise_strength,
             denoise_step=denoise_step,
             secondary_restoration=self._widgets["secondary_var"].get(),
-            swin2sr_batch_size=int(self._widgets["swin2sr_batch_size"].get()),
-            swin2sr_tensorrt=self._widgets["swin2sr_tensorrt"].get() == 1,
             tvai_ffmpeg_path=self._widgets["tvai_ffmpeg_path"].get(),
             tvai_model=self._widgets["tvai_model"].get(),
             tvai_scale=int(self._widgets["tvai_scale"].get().replace("x", "")),

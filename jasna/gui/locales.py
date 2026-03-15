@@ -36,8 +36,6 @@ def _get_cli_descriptions() -> dict[str, str]:
                 "denoise": "denoise_strength",
                 "denoise_step": "denoise_step",
                 "secondary_restoration": "secondary_restoration",
-                "swin2sr_batch_size": "swin2sr_batch_size",
-                "swin2sr_compilation": "swin2sr_compilation",
                 "tvai_ffmpeg_path": "tvai_ffmpeg_path",
                 "tvai_model": "tvai_model",
                 "tvai_scale": "tvai_scale",
@@ -151,7 +149,6 @@ TRANSLATIONS = {
         
         # Secondary Restoration
         "secondary_none": "None",
-        "secondary_swin2sr": "Swin2SR",
         "secondary_tvai": "Topaz TVAI",
         "secondary_rtx_super_res": "RTX Super Res",
         "rtx_scale": "Scale",
@@ -243,8 +240,6 @@ TRANSLATIONS = {
         "tip_denoise_strength": "Spatial denoising strength applied to restored crops. Reduces noise artifacts",
         "tip_denoise_step": "When to apply denoising: after_primary (before secondary) or after_secondary (right before blend)",
         "tip_secondary_restoration": "Secondary restoration after primary model",
-        "tip_swin2sr_batch_size": "Batch size for Swin2SR secondary restoration",
-        "tip_swin2sr_compilation": "Enable Swin2SR TensorRT compilation/usage where supported",
         "tip_tvai_ffmpeg_path": "Path to Topaz Video AI ffmpeg.exe",
         "tip_tvai_model": "Topaz model name for tvai_up (e.g. iris-2, prob-4, iris-3)",
         "tip_tvai_scale": "Topaz tvai_up scale (1=no scale). Output size is 256*scale",
@@ -273,7 +268,6 @@ TRANSLATIONS = {
         "engine_name_rfdetr": "RF-DETR (detection)",
         "engine_name_yolo": "YOLO (detection)",
         "engine_name_basicvsrpp": "BasicVSR++ (restoration)",
-        "engine_name_swin2sr": "Swin2SR (secondary)",
         "engine_basicvsrpp_risky_title": "BasicVSR++ compilation warning",
         "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT compilation may be risky with your GPU VRAM.\n\nGPU VRAM (approx): {vram_gb} GB\nRequested clip size: {requested_clip}\nApprox safe max: {safe_clip}\n\nContinue with compilation anyway? This can take a long time and may run out of VRAM.",
         # About dialog
@@ -406,7 +400,6 @@ TRANSLATIONS = {
 
         # Secondary Restoration
         "secondary_none": "无",
-        "secondary_swin2sr": "Swin2SR",
         "secondary_tvai": "Topaz TVAI",
         "secondary_rtx_super_res": "RTX Super Res",
         "rtx_scale": "缩放",
@@ -498,8 +491,6 @@ TRANSLATIONS = {
         "tip_denoise_strength": "应用于修复区域的空间降噪强度。减少噪点伪影",
         "tip_denoise_step": "何时应用降噪：after_primary（二次修复前）或 after_secondary（混合前）",
         "tip_secondary_restoration": "主模型之后的二次修复",
-        "tip_swin2sr_batch_size": "Swin2SR 二次修复的批处理大小",
-        "tip_swin2sr_compilation": "在支持的情况下启用 Swin2SR TensorRT 编译/使用",
         "tip_tvai_ffmpeg_path": "Topaz Video AI ffmpeg.exe 的路径",
         "tip_tvai_model": "tvai_up 的 Topaz 模型名称（例如 iris-2、prob-4、iris-3）",
         "tip_tvai_scale": "Topaz tvai_up 缩放（1=不缩放）。输出大小为 256*scale",
@@ -528,7 +519,6 @@ TRANSLATIONS = {
         "engine_name_rfdetr": "RF-DETR（检测）",
         "engine_name_yolo": "YOLO（检测）",
         "engine_name_basicvsrpp": "BasicVSR++（修复）",
-        "engine_name_swin2sr": "Swin2SR（二次）",
         "engine_basicvsrpp_risky_title": "BasicVSR++ 编译警告",
         "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT 编译可能会因显存不足而存在风险。\n\n显存（约）：{vram_gb} GB\n请求的片段大小：{requested_clip}\n建议安全上限：{safe_clip}\n\n仍要继续编译吗？这可能耗时很长并且可能会因显存不足而失败。",
         # About dialog
@@ -661,7 +651,6 @@ TRANSLATIONS = {
 
         # Secondary Restoration
         "secondary_none": "なし",
-        "secondary_swin2sr": "Swin2SR",
         "secondary_tvai": "Topaz TVAI",
         "secondary_rtx_super_res": "RTX Super Res",
         "rtx_scale": "スケール",
@@ -753,8 +742,6 @@ TRANSLATIONS = {
         "tip_denoise_strength": "修復されたクロップに適用する空間ノイズ除去の強度。ノイズアーティファクトを低減します",
         "tip_denoise_step": "ノイズ除去の適用タイミング: after_primary（二次修復前）または after_secondary（ブレンド直前）",
         "tip_secondary_restoration": "一次モデルの後に行う二次修復",
-        "tip_swin2sr_batch_size": "Swin2SR 二次修復のバッチサイズ",
-        "tip_swin2sr_compilation": "対応環境で Swin2SR TensorRT コンパイル/使用を有効化",
         "tip_tvai_ffmpeg_path": "Topaz Video AI の ffmpeg.exe のパス",
         "tip_tvai_model": "tvai_up の Topaz モデル名（例: iris-2, prob-4, iris-3）",
         "tip_tvai_scale": "Topaz tvai_up のスケール（1=スケールなし）。出力サイズは 256*scale",
@@ -783,7 +770,6 @@ TRANSLATIONS = {
         "engine_name_rfdetr": "RF-DETR（検出）",
         "engine_name_yolo": "YOLO（検出）",
         "engine_name_basicvsrpp": "BasicVSR++（修復）",
-        "engine_name_swin2sr": "Swin2SR（二次）",
         "engine_basicvsrpp_risky_title": "BasicVSR++ コンパイル警告",
         "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT のコンパイルは、GPU の VRAM 不足によりリスクがあります。\n\nGPU VRAM（概算）: {vram_gb} GB\n要求クリップサイズ: {requested_clip}\n推定安全上限: {safe_clip}\n\nこのままコンパイルを続行しますか？長時間かかる可能性があり、VRAM 不足で失敗する場合があります。",
         # About dialog
@@ -915,7 +901,6 @@ TRANSLATIONS = {
 
         # Secondary Restoration
         "secondary_none": "없음",
-        "secondary_swin2sr": "Swin2SR",
         "secondary_tvai": "Topaz TVAI",
         "secondary_rtx_super_res": "RTX Super Res",
         "rtx_quality": "품질",
@@ -1006,8 +991,6 @@ TRANSLATIONS = {
         "tip_denoise_strength": "복원된 영역에 적용되는 공간 노이즈 제거 강도. 노이즈 아티팩트를 줄입니다",
         "tip_denoise_step": "노이즈 제거 적용 시점: after_primary (2차 복원 전) 또는 after_secondary (블렌딩 직전)",
         "tip_secondary_restoration": "1차 모델 이후의 2차 복원",
-        "tip_swin2sr_batch_size": "Swin2SR 2차 복원 배치 크기",
-        "tip_swin2sr_compilation": "지원되는 환경에서 Swin2SR TensorRT 컴파일/사용 활성화",
         "tip_tvai_ffmpeg_path": "Topaz Video AI ffmpeg.exe 경로",
         "tip_tvai_model": "tvai_up용 Topaz 모델 이름 (예: iris-2, prob-4, iris-3)",
         "tip_tvai_scale": "Topaz tvai_up 스케일 (1=스케일 없음). 출력 크기는 256*scale",
@@ -1035,7 +1018,6 @@ TRANSLATIONS = {
         "engine_name_rfdetr": "RF-DETR (감지)",
         "engine_name_yolo": "YOLO (감지)",
         "engine_name_basicvsrpp": "BasicVSR++ (복원)",
-        "engine_name_swin2sr": "Swin2SR (2차)",
         "engine_basicvsrpp_risky_title": "BasicVSR++ 컴파일 경고",
         "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT 컴파일이 GPU VRAM 부족으로 위험할 수 있습니다.\n\nGPU VRAM (약): {vram_gb} GB\n요청된 클립 크기: {requested_clip}\n안전 추정 최대: {safe_clip}\n\n그래도 컴파일을 계속하시겠습니까? 오래 걸릴 수 있으며 VRAM 부족으로 실패할 수 있습니다.",
         # About dialog

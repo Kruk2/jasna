@@ -96,22 +96,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--secondary-restoration",
         type=str,
         default="none",
-        choices=["none", "swin2sr", "tvai", "rtx-super-res"],
+        choices=["none", "tvai", "rtx-super-res"],
         help='Secondary restoration after primary model (default: %(default)s)',
-    )
-
-    swin2sr = parser.add_argument_group("Swin2SR")
-    swin2sr.add_argument(
-        "--swin2sr-batch-size",
-        type=int,
-        default=8,
-        help="Batch size for Swin2SR secondary restoration (default: %(default)s)",
-    )
-    swin2sr.add_argument(
-        "--swin2sr-compilation",
-        default=True,
-        action=argparse.BooleanOptionalAction,
-        help="Enable Swin2SR TensorRT compilation/usage where supported (default: %(default)s)",
     )
 
     rtx = parser.add_argument_group("RTX Super Res")
@@ -316,8 +302,6 @@ def main() -> None:
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
-    from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
-
     with torch.cuda.device(device):
         use_tensorrt = basicvsrpp_startup_policy(
             restoration_model_path=str(restoration_model_path),
@@ -338,16 +322,6 @@ def main() -> None:
         secondary_name = str(args.secondary_restoration).lower()
         if secondary_name == "none":
             secondary_restorer = None
-        elif secondary_name == "swin2sr":
-            swin2sr_batch_size = int(args.swin2sr_batch_size)
-            if swin2sr_batch_size <= 0:
-                raise ValueError("--swin2sr-batch-size must be > 0")
-            secondary_restorer = Swin2srSecondaryRestorer(
-                device=device,
-                fp16=fp16,
-                batch_size=swin2sr_batch_size,
-                use_tensorrt=bool(args.swin2sr_compilation),
-            )
         elif secondary_name == "tvai":
             from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
             tvai_args_str = f"model={args.tvai_model}:scale={args.tvai_scale}:{args.tvai_args}"

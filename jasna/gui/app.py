@@ -338,8 +338,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                     return t("engine_name_yolo")
                 if key == "basicvsrpp":
                     return t("engine_name_basicvsrpp")
-                if key == "swin2sr":
-                    return t("engine_name_swin2sr")
                 return key
 
             missing_lines = "\n".join(f"- {_engine_name(k)}" for k in missing_keys)
