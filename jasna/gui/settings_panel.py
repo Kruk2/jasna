@@ -303,7 +303,7 @@ class SettingsPanel(ctk.CTkFrame):
         Tooltip(model_tip, get_tooltip("detection_model"))
         
         self._widgets["detection_model"] = ctk.CTkOptionMenu(
-            row2, values=["rfdetr-v5"],
+            row2, values=["rfdetr-v5", "lada-yolo-v4", "lada-yolo-v2"],
             fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
             dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
