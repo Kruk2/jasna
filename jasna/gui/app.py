@@ -6,6 +6,8 @@ from pathlib import Path
 import threading
 import time
 
+from tkinterdnd2 import TkinterDnD, DND_FILES
+
 from jasna import __version__
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, Toast
@@ -21,11 +23,12 @@ from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 from jasna.gui.system_stats import read_system_stats
 
 
-class JasnaApp(ctk.CTk):
+class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     """Main application window for Jasna GUI."""
     
     def __init__(self, skip_wizard: bool = False):
         super().__init__()
+        self.TkdndVersion = TkinterDnD._require(self)
         
         self.title("Jasna GUI")
         self.configure(fg_color=Colors.BG_MAIN)
@@ -206,6 +209,7 @@ class JasnaApp(ctk.CTk):
             self._settings_panel.get_last_output_pattern(),
         )
         self._queue_panel.set_on_output_changed(self._on_output_changed)
+        self._queue_panel.enable_file_drop()
         
     def _build_footer(self):
         # Log panel (bottom, collapsible) - hidden by default
