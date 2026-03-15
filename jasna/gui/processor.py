@@ -195,7 +195,6 @@ class Processor:
         from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
         from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
         from jasna.restorer.restoration_pipeline import RestorationPipeline
-        from jasna.restorer.swin2sr_secondary_restorer import Swin2srSecondaryRestorer
         
         settings = self._settings
         device = torch.device("cuda:0")
@@ -235,14 +234,7 @@ class Processor:
         pipeline = None
         stream = None
         try:
-            if settings.secondary_restoration == "swin2sr":
-                secondary_restorer = Swin2srSecondaryRestorer(
-                    device=device,
-                    fp16=settings.fp16_mode,
-                    batch_size=settings.swin2sr_batch_size,
-                    use_tensorrt=settings.swin2sr_tensorrt,
-                )
-            elif settings.secondary_restoration == "tvai":
+            if settings.secondary_restoration == "tvai":
                 from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
                 tvai_args_str = f"model={settings.tvai_model}:scale={settings.tvai_scale}:{settings.tvai_args}"
                 secondary_restorer = TvaiSecondaryRestorer(

@@ -12,7 +12,7 @@ Check benchmarks and usage below.
 ### Differences:
 - **Improved mosaic detection model.**
 - **Temporal overlap which reduces flickering.**
-- **Secondary restoration model (Topaz TVAI and Swin2SR). Improves quality and sharpnes**
+- **Secondary restoration model (Topaz TVAI and RTX Super Res). Improves quality and sharpnes**
 - GPU only processing. Intial tests show that it can be 2x faster. Raw processing for places without mosaic is ~250fps on RTX 5090 <img width="860" height="56" alt="image" src="https://github.com/user-attachments/assets/a80ecaee-e36d-4c91-93e4-8bdd75048ac3" />
 - Accurate color conversions on gpu (input matches output and no banding).
 - Only modern Nvidia gpu is supported.
@@ -63,8 +63,6 @@ Currently supported:
 - TVAI (windows only). Use _Google_ or buy from [here](https://www.topazlabs.com/topaz-video).\
   ```--tvai-args``` allows you to customize model and other params. Defaults to iris-2. Setup these as env variables:
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
-
-- Swin2SR (windows & linux). I think it's heavier in terms of GPU/VRAM load and has worse results than tvai.
 
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\

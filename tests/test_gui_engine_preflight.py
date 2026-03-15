@@ -43,19 +43,6 @@ def test_preflight_no_warning_when_all_expected_engines_exist(monkeypatch, tmp_p
     assert res.missing == ()
 
 
-def test_preflight_includes_swin2sr_only_when_selected_and_fp16(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
-    settings = AppSettings(secondary_restoration="swin2sr", swin2sr_tensorrt=True, fp16_mode=True)
-    res = run_engine_preflight(settings)
-    assert "swin2sr" in {r.key for r in res.requirements}
-
-    settings_no_fp16 = AppSettings(secondary_restoration="swin2sr", swin2sr_tensorrt=True, fp16_mode=False)
-    res2 = run_engine_preflight(settings_no_fp16)
-    assert "swin2sr" not in {r.key for r in res2.requirements}
-
-
 def test_preflight_basicvsrpp_risky_only_when_main_engine_missing(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
