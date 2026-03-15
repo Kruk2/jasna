@@ -4,10 +4,14 @@ import customtkinter as ctk
 from pathlib import Path
 from tkinter import filedialog
 
+from tkinterdnd2 import DND_FILES
+
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import JobItem, JobStatus
 from jasna.gui.components import JobListItem
 from jasna.gui.locales import t
+
+VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
 
 
 class QueuePanel(ctk.CTkFrame):
@@ -200,9 +204,8 @@ class QueuePanel(ctk.CTkFrame):
         folder = filedialog.askdirectory(title=t("select_folder"))
         if folder:
             folder_path = Path(folder)
-            video_exts = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
             for f in folder_path.rglob("*"):
-                if f.suffix.lower() in video_exts:
+                if f.suffix.lower() in VIDEO_EXTENSIONS:
                     self.add_job(f)
                     
     def _on_browse_output(self):
@@ -484,3 +487,37 @@ class QueuePanel(ctk.CTkFrame):
             self._add_folder_btn.configure(state="normal")
             for widget in self._job_widgets:
                 widget.set_removable(True)
+
+    def enable_file_drop(self):
+        """Register the list area as an OS file drop target."""
+        inner = self._list_frame._parent_frame
+        inner.drop_target_register(DND_FILES)
+        inner.dnd_bind("<<Drop>>", self._on_file_drop)
+
+    def _parse_drop_data(self, data: str) -> list[Path]:
+        paths = []
+        i = 0
+        while i < len(data):
+            if data[i] == "{":
+                end = data.index("}", i)
+                paths.append(Path(data[i + 1 : end]))
+                i = end + 2
+            elif data[i] == " ":
+                i += 1
+            else:
+                end = data.find(" ", i)
+                if end == -1:
+                    end = len(data)
+                paths.append(Path(data[i:end]))
+                i = end + 1
+        return paths
+
+    def _on_file_drop(self, event):
+        paths = self._parse_drop_data(event.data)
+        for p in paths:
+            if p.is_dir():
+                for f in p.rglob("*"):
+                    if f.suffix.lower() in VIDEO_EXTENSIONS:
+                        self.add_job(f)
+            elif p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS:
+                self.add_job(p)
