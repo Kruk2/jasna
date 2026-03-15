@@ -56,7 +56,10 @@ In general it's recommended to pick latest rf-detr.\
 Lada Yolo models are available as they handle 2d animations better.
 
 ### Secondary Restoration Model
+Jasna/Lada takes 256x256 pixel crop of mosaic region and restores it still in 256x256 resolution. This causes blurry results when mosaic area was bigger (close ups, 4k video etc).\
+To eleviate that, you can use 2nd restoration model that upscales 256x256 to 512x512 or 1024x0124 which produces cleaner results.
 Currently supported:
+- RTX Super-resolution. Very fast, decent quality, free, zero dependencies - probably recomended unless you know how to use TVAI.
 - TVAI (windows only). Use _Google_ or buy from [here](https://www.topazlabs.com/topaz-video).\
   ```--tvai-args``` allows you to customize model and other params. Defaults to iris-2. Setup these as env variables:
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
