@@ -19,14 +19,27 @@ def get_tooltip(key: str) -> str:
 class Tooltip:
     """Simple tooltip implementation for CustomTkinter widgets."""
     
+    _SHOW_DELAY_MS = 150
+
     def __init__(self, widget, text: str):
         self._widget = widget
         self._text = text
         self._tooltip_window = None
-        widget.bind("<Enter>", self._show)
+        self._after_id = None
+        widget.bind("<Enter>", self._schedule_show)
         widget.bind("<Leave>", self._hide)
         
-    def _show(self, event=None):
+    def _schedule_show(self, event=None):
+        self._cancel_schedule()
+        self._after_id = self._widget.after(self._SHOW_DELAY_MS, self._show)
+
+    def _cancel_schedule(self):
+        if self._after_id is not None:
+            self._widget.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _show(self):
+        self._after_id = None
         if self._tooltip_window:
             return
         x = self._widget.winfo_rootx() + 20
@@ -36,6 +49,7 @@ class Tooltip:
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
         tw.configure(fg_color=Colors.BG_CARD)
+        tw.wm_attributes("-topmost", True)
         
         label = ctk.CTkLabel(
             tw,
@@ -48,8 +62,10 @@ class Tooltip:
             justify="left",
         )
         label.pack(padx=8, pady=6)
+        tw.bind("<Leave>", self._hide)
         
     def _hide(self, event=None):
+        self._cancel_schedule()
         if self._tooltip_window:
             self._tooltip_window.destroy()
             self._tooltip_window = None
