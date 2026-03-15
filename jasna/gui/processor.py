@@ -206,11 +206,11 @@ class Processor:
         
         # Model paths
         restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
-        from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
+        from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, precompile_detection_engine
 
         det_name = coerce_detection_model_name(str(settings.detection_model))
         detection_model_path = detection_model_weights_path(det_name)
-        
+
         compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not self._disable_basicvsrpp_tensorrt_for_run)
         use_tensorrt = basicvsrpp_startup_policy(
             restoration_model_path=str(restoration_model_path),
@@ -220,6 +220,14 @@ class Processor:
             compile_basicvsrpp=compile_basicvsrpp,
             interactive=False,
             allow_unsafe_clip_length=self._allow_unsafe_basicvsrpp_compile_for_run,
+        )
+
+        precompile_detection_engine(
+            detection_model_name=det_name,
+            detection_model_path=detection_model_path,
+            batch_size=settings.batch_size,
+            device=device,
+            fp16=settings.fp16_mode,
         )
         
         secondary_restorer = None
