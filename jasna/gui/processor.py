@@ -56,7 +56,6 @@ class Processor:
         self._output_folder: str = ""
         self._output_pattern: str = "{original}_restored.mp4"
         self._disable_basicvsrpp_tensorrt_for_run = False
-        self._allow_unsafe_basicvsrpp_compile_for_run = False
         
     def start(
         self,
@@ -66,7 +65,6 @@ class Processor:
         output_pattern: str,
         *,
         disable_basicvsrpp_tensorrt: bool,
-        allow_unsafe_basicvsrpp_compile: bool,
     ):
         if self._thread and self._thread.is_alive():
             return
@@ -76,7 +74,6 @@ class Processor:
         self._output_folder = output_folder
         self._output_pattern = output_pattern
         self._disable_basicvsrpp_tensorrt_for_run = bool(disable_basicvsrpp_tensorrt)
-        self._allow_unsafe_basicvsrpp_compile_for_run = bool(allow_unsafe_basicvsrpp_compile)
         
         self._stop_event.clear()
         self._pause_event.set()
@@ -213,12 +210,9 @@ class Processor:
         compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not self._disable_basicvsrpp_tensorrt_for_run)
         use_tensorrt = basicvsrpp_startup_policy(
             restoration_model_path=str(restoration_model_path),
-            max_clip_size=settings.max_clip_size,
             device=device,
             fp16=settings.fp16_mode,
             compile_basicvsrpp=compile_basicvsrpp,
-            interactive=False,
-            allow_unsafe_clip_length=self._allow_unsafe_basicvsrpp_compile_for_run,
         )
 
         precompile_detection_engine(

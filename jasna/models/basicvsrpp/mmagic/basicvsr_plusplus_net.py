@@ -103,6 +103,9 @@ class BasicVSRPlusPlusNet(BaseModule):
         """
 
         n, t, c, h, w = lqs.size()
+        if t == 1:
+            empty = lqs.new_zeros(n, 0, 2, h, w)
+            return empty, empty
         lqs_1 = lqs[:, :-1, :, :, :].reshape(-1, c, h, w)
         lqs_2 = lqs[:, 1:, :, :, :].reshape(-1, c, h, w)
 

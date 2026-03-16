@@ -322,7 +322,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             return
 
         disable_basicvsrpp_tensorrt = False
-        allow_unsafe_basicvsrpp_compile = False
         try:
             from jasna.gui.engine_preflight import run_engine_preflight
 
@@ -338,31 +337,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                     return t("engine_name_basicvsrpp")
                 return key
 
-            missing_lines = "\n".join(f"- {_engine_name(k)}" for k in missing_keys)
-
-            if preflight.basicvsrpp_risk.is_risky:
+            if preflight.should_warn_first_run_slow:
                 from tkinter import messagebox
 
-                r = preflight.basicvsrpp_risk
-                msg = (
-                    t("engine_first_run_body")
-                    + ("\n\n" + t("engine_first_run_missing") + "\n" + missing_lines if missing_lines else "")
-                    + "\n\n"
-                    + t("engine_basicvsrpp_risky_body").format(
-                        vram_gb=f"{r.vram_gb:.1f}",
-                        requested_clip=str(r.requested_clip_length),
-                        safe_clip=str(r.approx_safe_max_clip_length),
-                    )
-                )
-                if messagebox.askyesno(t("engine_basicvsrpp_risky_title"), msg):
-                    allow_unsafe_basicvsrpp_compile = True
-                    self._log_panel.warning("User accepted risky BasicVSR++ compilation; will proceed.")
-                else:
-                    disable_basicvsrpp_tensorrt = True
-                    self._log_panel.warning("User declined risky BasicVSR++ compilation; TensorRT disabled for this run.")
-            elif preflight.should_warn_first_run_slow:
-                from tkinter import messagebox
-
+                missing_lines = "\n".join(f"- {_engine_name(k)}" for k in missing_keys)
                 msg = t("engine_first_run_body")
                 if missing_lines:
                     msg += "\n\n" + t("engine_first_run_missing") + "\n" + missing_lines
@@ -392,7 +370,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             output_folder,
             output_pattern,
             disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
-            allow_unsafe_basicvsrpp_compile=allow_unsafe_basicvsrpp_compile,
         )
                 
     def _on_stop(self):
