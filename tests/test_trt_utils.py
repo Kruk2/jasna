@@ -1,0 +1,234 @@
+import os
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+import tensorrt as trt
+import torch
+
+from jasna.trt import (
+    _engine_io_names,
+    _trt_dtype_to_torch,
+    get_onnx_tensorrt_engine_path,
+    compile_onnx_to_tensorrt_engine,
+)
+
+
+class TestTrtDtypeToTorch:
+    def test_float(self):
+        assert _trt_dtype_to_torch(trt.DataType.FLOAT) == torch.float32
+
+    def test_half(self):
+        assert _trt_dtype_to_torch(trt.DataType.HALF) == torch.float16
+
+    def test_int8(self):
+        assert _trt_dtype_to_torch(trt.DataType.INT8) == torch.int8
+
+    def test_int32(self):
+        assert _trt_dtype_to_torch(trt.DataType.INT32) == torch.int32
+
+    def test_bool(self):
+        assert _trt_dtype_to_torch(trt.DataType.BOOL) == torch.bool
+
+    def test_unsupported_raises(self):
+        with pytest.raises(ValueError, match="Unsupported TensorRT dtype"):
+            _trt_dtype_to_torch(trt.DataType.INT64)
+
+
+class TestGetOnnxTensorrtEnginePath:
+    def test_basic_fp16_windows(self):
+        with patch.object(os, "name", "nt"):
+            result = get_onnx_tensorrt_engine_path("model.onnx", fp16=True)
+            assert result == Path("model.fp16.win.engine")
+
+    def test_basic_fp32_windows(self):
+        with patch.object(os, "name", "nt"):
+            result = get_onnx_tensorrt_engine_path("model.onnx", fp16=False)
+            assert result == Path("model.win.engine")
+
+    def test_with_batch_size(self):
+        with patch.object(os, "name", "nt"):
+            result = get_onnx_tensorrt_engine_path("model.onnx", batch_size=4, fp16=True)
+            assert result == Path("model.bs4.fp16.win.engine")
+
+    def test_batch_size_zero_raises(self):
+        with pytest.raises(ValueError, match="batch_size must be > 0"):
+            get_onnx_tensorrt_engine_path("model.onnx", batch_size=0)
+
+    def test_batch_size_negative_raises(self):
+        with pytest.raises(ValueError, match="batch_size must be > 0"):
+            get_onnx_tensorrt_engine_path("model.onnx", batch_size=-1)
+
+    def test_path_object_input(self):
+        with patch.object(os, "name", "nt"):
+            result = get_onnx_tensorrt_engine_path(Path("dir/model.onnx"), fp16=True)
+            assert result == Path("dir/model.fp16.win.engine")
+
+
+class TestEngineIoNames:
+    def test_num_io_tensors_api(self):
+        engine = MagicMock()
+        engine.num_io_tensors = 3
+        engine.get_tensor_name = lambda i: ["input", "output1", "output2"][i]
+        engine.get_tensor_mode = lambda name: (
+            trt.TensorIOMode.INPUT if name == "input" else trt.TensorIOMode.OUTPUT
+        )
+
+        inputs, outputs = _engine_io_names(engine)
+        assert inputs == ["input"]
+        assert outputs == ["output1", "output2"]
+
+    def test_legacy_bindings_api(self):
+        engine = MagicMock(spec=[])
+        engine.num_bindings = 2
+        engine.get_binding_name = lambda i: ["input", "output"][i]
+        engine.binding_is_input = lambda i: i == 0
+
+        inputs, outputs = _engine_io_names(engine)
+        assert inputs == ["input"]
+        assert outputs == ["output"]
+
+
+def _setup_trt_mocks(tmp_path, *, num_inputs=1, num_outputs=1, dynamic_shape=False, parse_ok=True, build_result=b"engine_bytes"):
+    onnx_path = tmp_path / "model.onnx"
+    onnx_path.write_bytes(b"fake onnx")
+
+    engine_path = get_onnx_tensorrt_engine_path(onnx_path, fp16=True)
+    if engine_path.exists():
+        engine_path.unlink()
+
+    mock_input = MagicMock()
+    mock_input.name = "input"
+    mock_input.shape = (-1, 3, 64, 64) if dynamic_shape else (1, 3, 64, 64)
+    mock_input.dtype = trt.DataType.FLOAT
+
+    mock_output = MagicMock()
+    mock_output.name = "output"
+    mock_output.dtype = trt.DataType.FLOAT
+
+    mock_network = MagicMock()
+    mock_network.num_inputs = num_inputs
+    mock_network.num_outputs = num_outputs
+    mock_network.get_input = MagicMock(return_value=mock_input)
+    mock_network.get_output = MagicMock(return_value=mock_output)
+
+    mock_parser = MagicMock()
+    mock_parser.parse.return_value = parse_ok
+    mock_parser.num_errors = 0 if parse_ok else 1
+    mock_parser.get_error = lambda i: "parse error"
+
+    mock_config = MagicMock()
+    mock_builder = MagicMock()
+    mock_builder.create_network.return_value = mock_network
+    mock_builder.create_builder_config.return_value = mock_config
+    mock_builder.build_serialized_network.return_value = build_result
+
+    return onnx_path, engine_path, mock_builder, mock_parser, mock_config, mock_network
+
+
+class TestCompileOnnxToTensorrtEngine:
+    def test_returns_existing_engine(self, tmp_path):
+        onnx_path = tmp_path / "model.onnx"
+        onnx_path.touch()
+        engine_path = get_onnx_tensorrt_engine_path(onnx_path, fp16=True)
+        engine_path.touch()
+
+        result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+        assert result == engine_path
+
+    def test_missing_onnx_raises(self, tmp_path):
+        onnx_path = tmp_path / "nonexistent.onnx"
+        with pytest.raises(FileNotFoundError):
+            compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+
+    def test_successful_compilation(self, tmp_path):
+        onnx_path, engine_path, mock_builder, mock_parser, mock_config, _ = _setup_trt_mocks(tmp_path)
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+        ):
+            result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+
+        assert result == engine_path
+        assert engine_path.exists()
+        assert engine_path.read_bytes() == b"engine_bytes"
+        mock_config.set_flag.assert_called_once_with(trt.BuilderFlag.FP16)
+
+    def test_parse_failure_raises(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, parse_ok=False)
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+        ):
+            with pytest.raises(ValueError, match="ONNX parse failed"):
+                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+
+    def test_dynamic_shape_raises(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, dynamic_shape=True)
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+        ):
+            with pytest.raises(ValueError, match="dynamic shape"):
+                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+
+    def test_build_returns_none_raises(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, build_result=None)
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+        ):
+            with pytest.raises(ValueError, match="engine build returned None"):
+                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+
+    def test_invalid_optimization_level_raises(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path)
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+        ):
+            with pytest.raises(ValueError, match="optimization_level must be in"):
+                compile_onnx_to_tensorrt_engine(
+                    onnx_path, torch.device("cuda:0"), fp16=True, optimization_level=10
+                )
+
+    def test_fp32_mode_no_fp16_flag(self, tmp_path):
+        onnx_path = tmp_path / "model.onnx"
+        onnx_path.write_bytes(b"fake")
+        engine_path = get_onnx_tensorrt_engine_path(onnx_path, fp16=False)
+        if engine_path.exists():
+            engine_path.unlink()
+
+        mock_network = MagicMock()
+        mock_network.num_inputs = 0
+        mock_network.num_outputs = 0
+        mock_config = MagicMock()
+        mock_parser = MagicMock()
+        mock_parser.parse.return_value = True
+        mock_builder = MagicMock()
+        mock_builder.create_network.return_value = mock_network
+        mock_builder.create_builder_config.return_value = mock_config
+        mock_builder.build_serialized_network.return_value = b"fp32_engine"
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+        ):
+            result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=False)
+
+        mock_config.set_flag.assert_not_called()
+        assert result == engine_path
