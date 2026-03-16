@@ -27,36 +27,21 @@ def flow_warp(x,
     Returns:
         Tensor: Warped image or feature map.
     """
-    if x.size()[-2:] != flow.size()[1:3]:
-        raise ValueError(f'The spatial sizes of input ({x.size()[-2:]}) and '
-                         f'flow ({flow.size()[1:3]}) are not the same.')
-    _, _, h, w = x.size()
-    # create mesh grid
-    device = flow.device
-    # torch.meshgrid has been modified in 1.10.0 (compatibility with previous
-    # versions), and will be further modified in 1.12 (Breaking Change)
-    if 'indexing' in torch.meshgrid.__code__.co_varnames:
-        grid_y, grid_x = torch.meshgrid(
-            torch.arange(0, h, device=device, dtype=x.dtype),
-            torch.arange(0, w, device=device, dtype=x.dtype),
-            indexing='ij')
-    else:
-        grid_y, grid_x = torch.meshgrid(
-            torch.arange(0, h, device=device, dtype=x.dtype),
-            torch.arange(0, w, device=device, dtype=x.dtype))
-    grid = torch.stack((grid_x, grid_y), 2)  # h, w, 2
-    grid.requires_grad_(False)
+    n, c, h, w = x.shape
+    # Identity grid via affine_grid (has a native TRT converter, unlike
+    # the arange+meshgrid approach which produces IR that TRT 2.10 can't
+    # track through downstream cat operations).
+    theta = torch.eye(2, 3, device=x.device, dtype=x.dtype).unsqueeze(0).expand(n, -1, -1)
+    grid = F.affine_grid(theta, (n, c, h, w), align_corners=align_corners)
 
-    grid_flow = grid + flow
-    # scale grid_flow to [-1,1]
-    grid_flow_x = 2.0 * grid_flow[:, :, :, 0] / max(w - 1, 1) - 1.0
-    grid_flow_y = 2.0 * grid_flow[:, :, :, 1] / max(h - 1, 1) - 1.0
-    grid_flow = torch.stack((grid_flow_x, grid_flow_y), dim=3)
-    grid_flow = grid_flow.type(x.type())
-    output = F.grid_sample(
+    # Convert pixel-space flow offsets to normalised [-1, 1] offsets
+    flow_x = flow[..., 0] * (2.0 / max(w - 1, 1))
+    flow_y = flow[..., 1] * (2.0 / max(h - 1, 1))
+    grid_flow = grid + torch.stack((flow_x, flow_y), dim=-1)
+
+    return F.grid_sample(
         x,
         grid_flow,
         mode=interpolation,
         padding_mode=padding_mode,
         align_corners=align_corners)
-    return output
