@@ -44,7 +44,7 @@ def _detection_weights_path(settings: AppSettings) -> Path:
 
 def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     from jasna.trt import get_onnx_tensorrt_engine_path
-    from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name
+    from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
     from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
     from jasna.restorer.basicvrspp_tenorrt_compilation import (
         SMALL_TRT_CLIP_LENGTH,
@@ -58,7 +58,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
     det_weights = _detection_weights_path(settings)
-    if det_name in RFDETR_MODEL_NAMES:
+    if is_rfdetr_model(det_name):
         det_engine = get_onnx_tensorrt_engine_path(
             det_weights,
             batch_size=int(settings.batch_size),
@@ -74,7 +74,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
                 missing_paths=() if det_exists else (det_engine,),
             )
         )
-    elif det_name in YOLO_MODEL_NAMES:
+    elif is_yolo_model(det_name):
         det_engine = get_yolo_tensorrt_engine_path(det_weights, fp16=bool(settings.fp16_mode))
         det_exists = det_engine.is_file()
         reqs.append(

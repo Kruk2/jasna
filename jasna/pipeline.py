@@ -13,7 +13,7 @@ from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
 from jasna.mosaic import Detections
-from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name
+from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
 from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
@@ -56,7 +56,7 @@ class Pipeline:
         self.enable_crossfade = bool(enable_crossfade)
 
         det_name = coerce_detection_model_name(detection_model_name)
-        if det_name in RFDETR_MODEL_NAMES:
+        if is_rfdetr_model(det_name):
             self.detection_model = RfDetrMosaicDetectionModel(
                 onnx_path=detection_model_path,
                 batch_size=self.batch_size,
@@ -64,7 +64,7 @@ class Pipeline:
                 score_threshold=float(detection_score_threshold),
                 fp16=bool(fp16),
             )
-        elif det_name in YOLO_MODEL_NAMES:
+        elif is_yolo_model(det_name):
             self.detection_model = YoloMosaicDetectionModel(
                 model_path=detection_model_path,
                 batch_size=self.batch_size,
