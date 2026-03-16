@@ -29,7 +29,6 @@ def benchmark_basicvsrpp_restoration(
 
     use_tensorrt = basicvsrpp_startup_policy(
         restoration_model_path=str(path),
-        max_clip_size=CLIP_LENGTH,
         device=device,
         fp16=fp16,
         compile_basicvsrpp=compile_basicvsrpp,

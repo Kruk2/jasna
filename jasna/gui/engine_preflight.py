@@ -18,18 +18,9 @@ class EngineRequirement:
 
 
 @dataclass(frozen=True)
-class BasicvsrppRiskCheck:
-    is_risky: bool
-    vram_gb: float
-    approx_safe_max_clip_length: int
-    requested_clip_length: int
-
-
-@dataclass(frozen=True)
 class EnginePreflightResult:
     requirements: tuple[EngineRequirement, ...]
     should_warn_first_run_slow: bool
-    basicvsrpp_risk: BasicvsrppRiskCheck
 
     @property
     def missing(self) -> tuple[EngineRequirement, ...]:
@@ -46,13 +37,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     from jasna.trt import get_onnx_tensorrt_engine_path
     from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
     from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
-    from jasna.restorer.basicvrspp_tenorrt_compilation import (
-        SMALL_TRT_CLIP_LENGTH,
-        SMALL_TRT_CLIP_LENGTH_TRIGGER,
-        _get_approx_max_tensorrt_clip_length,
-        get_compiled_mosaic_restoration_model_path_for_clip,
-    )
-    device = torch.device("cuda:0")
+    from jasna.restorer.basicvsrpp_sub_engines import get_sub_engine_paths
 
     reqs: list[EngineRequirement] = []
 
@@ -88,63 +73,24 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         )
 
     restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
-    basic_missing = False
-    basic_paths: list[Path] = []
-    basic_main_missing = False
     if bool(settings.compile_basicvsrpp):
-        main_engine = Path(
-            get_compiled_mosaic_restoration_model_path_for_clip(
-                checkpoint_path=str(restoration_model_path),
-                clip_length=int(settings.max_clip_size),
-                fp16=bool(settings.fp16_mode),
-            )
-        )
-        basic_paths.append(main_engine)
-        basic_main_missing = not main_engine.is_file()
-        basic_missing = basic_missing or basic_main_missing
-
-        if int(settings.max_clip_size) > int(SMALL_TRT_CLIP_LENGTH_TRIGGER):
-            small_engine = Path(
-                get_compiled_mosaic_restoration_model_path_for_clip(
-                    checkpoint_path=str(restoration_model_path),
-                    clip_length=int(SMALL_TRT_CLIP_LENGTH),
-                    fp16=bool(settings.fp16_mode),
-                )
-            )
-            basic_paths.append(small_engine)
-            basic_missing = basic_missing or (not small_engine.is_file())
-
-        missing_paths = tuple(p for p in basic_paths if not p.is_file())
+        sub_paths = get_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode))
+        all_engine_paths = tuple(Path(p) for p in sub_paths.values())
+        missing_paths = tuple(p for p in all_engine_paths if not p.is_file())
         reqs.append(
             EngineRequirement(
                 key="basicvsrpp",
-                label="BasicVSR++ (restoration)",
-                paths=tuple(basic_paths),
-                exists=not basic_missing,
+                label="BasicVSR++ (restoration sub-engines)",
+                paths=all_engine_paths,
+                exists=len(missing_paths) == 0,
                 missing_paths=missing_paths,
             )
         )
 
     should_warn = any(not r.exists for r in reqs)
 
-    vram_gb, approx_max_clip_length = _get_approx_max_tensorrt_clip_length(device)
-    requested_clip = int(settings.max_clip_size)
-    risky = (
-        bool(settings.compile_basicvsrpp)
-        and bool(basic_main_missing)
-        and bool(settings.fp16_mode)
-        and int(approx_max_clip_length) > 0
-        and requested_clip > int(approx_max_clip_length)
-    )
-
     return EnginePreflightResult(
         requirements=tuple(reqs),
         should_warn_first_run_slow=bool(should_warn),
-        basicvsrpp_risk=BasicvsrppRiskCheck(
-            is_risky=bool(risky),
-            vram_gb=float(vram_gb),
-            approx_safe_max_clip_length=int(approx_max_clip_length),
-            requested_clip_length=requested_clip,
-        ),
     )
 

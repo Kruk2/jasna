@@ -310,7 +310,6 @@ def main() -> None:
     with torch.cuda.device(device):
         use_tensorrt = basicvsrpp_startup_policy(
             restoration_model_path=str(restoration_model_path),
-            max_clip_size=max_clip_size,
             device=device,
             fp16=fp16,
             compile_basicvsrpp=bool(args.compile_basicvsrpp),

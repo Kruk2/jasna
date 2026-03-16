@@ -43,27 +43,24 @@ def test_preflight_no_warning_when_all_expected_engines_exist(monkeypatch, tmp_p
     assert res.missing == ()
 
 
-def test_preflight_basicvsrpp_risky_only_when_main_engine_missing(monkeypatch, tmp_path: Path) -> None:
+def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
 
-    import jasna.restorer.basicvrspp_tenorrt_compilation as br
-
-    def fake_get_approx(_device):
-        return 8.0, 30
-
-    monkeypatch.setattr(br, "_get_approx_max_tensorrt_clip_length", fake_get_approx)
-
     settings = AppSettings(max_clip_size=60, compile_basicvsrpp=True, fp16_mode=True)
     res = run_engine_preflight(settings)
-    assert res.basicvsrpp_risk.is_risky
 
     basic_req = next(r for r in res.requirements if r.key == "basicvsrpp")
-    main_engine = basic_req.paths[0]
-    _touch(main_engine)
+    assert not basic_req.exists
+    assert len(basic_req.missing_paths) == 5
+
+    for p in basic_req.paths:
+        _touch(p)
 
     res2 = run_engine_preflight(settings)
-    assert not res2.basicvsrpp_risk.is_risky
+    basic_req2 = next(r for r in res2.requirements if r.key == "basicvsrpp")
+    assert basic_req2.exists
+    assert len(basic_req2.missing_paths) == 0
 
 
 def test_get_onnx_tensorrt_engine_path_matches_compile_return_when_present(monkeypatch, tmp_path: Path) -> None:
