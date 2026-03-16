@@ -1,6 +1,8 @@
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
+import torch
 
 from jasna.mosaic.detection_registry import (
     DEFAULT_DETECTION_MODEL_NAME,
@@ -11,6 +13,7 @@ from jasna.mosaic.detection_registry import (
     discover_available_detection_models,
     is_rfdetr_model,
     is_yolo_model,
+    precompile_detection_engine,
 )
 
 
@@ -131,3 +134,23 @@ def test_discover_ignores_non_matching_files(tmp_path: Path) -> None:
     (tmp_path / "random.pt").touch()
     result = discover_available_detection_models(tmp_path)
     assert result == ["rfdetr-v5"]
+
+
+# --- precompile_detection_engine ---
+
+def test_precompile_noop_on_cpu() -> None:
+    precompile_detection_engine("rfdetr-v5", Path("m.onnx"), 1, torch.device("cpu"), True)
+
+
+def test_precompile_rfdetr_on_cuda() -> None:
+    with patch("jasna.mosaic.rfdetr.compile_onnx_to_tensorrt_engine") as mock_compile:
+        precompile_detection_engine("rfdetr-v5", Path("m.onnx"), 2, torch.device("cuda:0"), True)
+        mock_compile.assert_called_once_with(Path("m.onnx"), torch.device("cuda:0"), batch_size=2, fp16=True)
+
+
+def test_precompile_yolo_on_cuda() -> None:
+    with (
+        patch("jasna.mosaic.yolo_tensorrt_compilation.compile_yolo_to_tensorrt_engine") as mock_compile,
+    ):
+        precompile_detection_engine("lada-yolo-v4", Path("m.pt"), 4, torch.device("cuda:0"), True)
+        mock_compile.assert_called_once()
