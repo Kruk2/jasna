@@ -10,6 +10,7 @@ from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import JobItem, JobStatus
 from jasna.gui.components import JobListItem
 from jasna.gui.locales import t
+from jasna.gui.settings_panel import Tooltip
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
 
@@ -133,14 +134,19 @@ class QueuePanel(ctk.CTkFrame):
         self._clear_completed_btn.pack(side="right", padx=(0, 6))
         
         # Output location section
+        output_label_row = ctk.CTkFrame(footer, fg_color="transparent")
+        output_label_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 4))
         output_label = ctk.CTkLabel(
-            footer,
+            output_label_row,
             text=t("output_location"),
             font=(Fonts.FAMILY, Fonts.SIZE_TINY, "bold"),
             text_color=Colors.TEXT_PRIMARY,
             anchor="w",
         )
-        output_label.pack(fill="x", pady=(Sizing.PADDING_SMALL, 4))
+        output_label.pack(side="left")
+        output_tip = ctk.CTkLabel(output_label_row, text="\u24d8", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        output_tip.pack(side="left", padx=4)
+        Tooltip(output_tip, t("tip_output_location"))
         
         output_row = ctk.CTkFrame(footer, fg_color="transparent")
         output_row.pack(fill="x")
@@ -171,6 +177,19 @@ class QueuePanel(ctk.CTkFrame):
         self._output_browse_btn.pack(side="right")
         
         # Output pattern
+        pattern_label_row = ctk.CTkFrame(footer, fg_color="transparent")
+        pattern_label_row.pack(fill="x", pady=(4, 2))
+        pattern_label = ctk.CTkLabel(
+            pattern_label_row,
+            text=t("output_pattern"),
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY, "bold"),
+            text_color=Colors.TEXT_PRIMARY,
+            anchor="w",
+        )
+        pattern_label.pack(side="left")
+        pattern_tip = ctk.CTkLabel(pattern_label_row, text="\u24d8", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        pattern_tip.pack(side="left", padx=4)
+        Tooltip(pattern_tip, t("tip_output_pattern"))
         self._pattern_entry = ctk.CTkEntry(
             footer,
             placeholder_text="{original}_restored.mp4",
