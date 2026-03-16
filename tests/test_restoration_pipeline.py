@@ -41,6 +41,7 @@ class _CaptureRestorer:
 
 class _Upscale2xSecondary:
     name = "upscale2x"
+    num_workers = 1
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> torch.Tensor:
         del keep_start, keep_end
@@ -51,6 +52,7 @@ class _Upscale2xSecondary:
 
 class _Upscale2xSecondaryList:
     name = "upscale2x_list"
+    num_workers = 2
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         del keep_start, keep_end
@@ -445,4 +447,215 @@ def test_restore_clip_denoise_step_no_secondary_both_steps_denoise(monkeypatch) 
 
     for a, b in zip(restored_ap.restored_frames, restored_as.restored_frames):
         assert torch.allclose(a.float(), b.float(), atol=1e-5), "No secondary: both steps denoise same output"
+
+
+def test_secondary_num_workers_no_secondary() -> None:
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+    assert pipeline.secondary_num_workers == 1
+
+
+def test_secondary_num_workers_with_secondary() -> None:
+    pipeline = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        secondary_restorer=_Upscale2xSecondaryList(),
+    )
+    assert pipeline.secondary_num_workers == 2
+
+
+def _make_clip_and_frames(monkeypatch, *, t=3, frame_hw=(30, 40)):
+    import jasna.restorer.restoration_pipeline as rp
+    monkeypatch.setattr(rp, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(rp, "MIN_BORDER", 0)
+    monkeypatch.setattr(rp, "MAX_EXPANSION_FACTOR", 0.0)
+
+    torch.manual_seed(42)
+    frames = [torch.randint(0, 256, (3, frame_hw[0], frame_hw[1]), dtype=torch.uint8) for _ in range(t)]
+    bbox = np.array([5.0, 7.0, 25.0, 17.0], dtype=np.float32)
+    mask = torch.zeros((2, 2), dtype=torch.bool)
+    clip = TrackedClip(
+        track_id=0,
+        start_frame=0,
+        mask_resolution=(2, 2),
+        bboxes=[bbox] * t,
+        masks=[mask] * t,
+    )
+    return clip, frames
+
+
+def test_prepare_and_run_primary(monkeypatch) -> None:
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    result = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
+
+    assert result.clip is clip
+    assert result.frames is frames
+    assert result.keep_start == 0
+    assert result.keep_end == 3
+    assert result.crossfade_weights is None
+    assert result.primary_raw.shape[0] == 3
+    assert len(result.enlarged_bboxes) == 3
+    assert len(result.crop_shapes) == 3
+    assert len(result.pad_offsets) == 3
+    assert len(result.resize_shapes) == 3
+
+
+def test_prepare_and_run_primary_with_denoise(monkeypatch) -> None:
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(
+        restorer=_IdentityRestorer(),  # type: ignore[arg-type]
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_PRIMARY,
+    )
+
+    result = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
+    assert result.primary_raw.shape[0] == 3
+
+
+def test_run_secondary_from_primary(monkeypatch) -> None:
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
+    sr = pipeline.run_secondary_from_primary(pr)
+
+    assert sr.clip is clip
+    assert sr.frames is frames
+    assert sr.keep_start == 0
+    assert sr.keep_end == 3
+    assert len(sr.restored_frames) == 3
+    assert sr.enlarged_bboxes == pr.enlarged_bboxes
+    assert sr.crop_shapes == pr.crop_shapes
+    assert sr.pad_offsets == pr.pad_offsets
+    assert sr.resize_shapes == pr.resize_shapes
+    assert not hasattr(pr, 'primary_raw') or pr.primary_raw is None  # deleted
+
+
+def test_run_secondary_from_primary_with_secondary_restorer(monkeypatch) -> None:
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(  # type: ignore[arg-type]
+        restorer=_IdentityRestorer(),
+        secondary_restorer=_Upscale2xSecondary(),
+    )
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
+    sr = pipeline.run_secondary_from_primary(pr)
+
+    assert len(sr.restored_frames) == 3
+    assert sr.restored_frames[0].shape == (3, 512, 512)
+
+
+def test_blend_secondary_result(monkeypatch) -> None:
+    from jasna.tracking.frame_buffer import FrameBuffer
+
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    fb = FrameBuffer(device=torch.device("cpu"))
+    for i in range(3):
+        fb.add_frame(i, pts=i * 100, frame=frames[i], clip_track_ids={0})
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
+    sr = pipeline.run_secondary_from_primary(pr)
+    pipeline.blend_secondary_result(sr, fb)
+
+    for i in range(3):
+        pending = fb.frames[i]
+        assert 0 not in pending.pending_clips
+
+
+def test_blend_secondary_result_with_crossfade(monkeypatch) -> None:
+    from jasna.tracking.frame_buffer import FrameBuffer
+
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    fb = FrameBuffer(device=torch.device("cpu"))
+    for i in range(3):
+        fb.add_frame(i, pts=i * 100, frame=frames[i], clip_track_ids={0})
+
+    crossfade_weights = {0: 0.5, 1: 1.0, 2: 0.5}
+    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, crossfade_weights)
+    sr = pipeline.run_secondary_from_primary(pr)
+    pipeline.blend_secondary_result(sr, fb)
+
+    for i in range(3):
+        pending = fb.frames[i]
+        assert 0 not in pending.pending_clips
+
+
+def test_blend_secondary_result_skips_out_of_range_frames(monkeypatch) -> None:
+    from jasna.tracking.frame_buffer import FrameBuffer
+
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    fb = FrameBuffer(device=torch.device("cpu"))
+    for i in range(3):
+        fb.add_frame(i, pts=i * 100, frame=frames[i], clip_track_ids={0})
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 1, 2, None)
+    sr = pipeline.run_secondary_from_primary(pr)
+    pipeline.blend_secondary_result(sr, fb)
+
+    assert 0 not in fb.frames[0].pending_clips
+    assert 0 not in fb.frames[1].pending_clips
+    assert 0 not in fb.frames[2].pending_clips
+
+
+def test_blend_secondary_result_empty_range(monkeypatch) -> None:
+    """Cover line 284: ks >= ke early return in blend_secondary_result."""
+    from jasna.tracking.frame_buffer import FrameBuffer
+
+    clip, frames = _make_clip_and_frames(monkeypatch, t=3)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    fb = FrameBuffer(device=torch.device("cpu"))
+    for i in range(3):
+        fb.add_frame(i, pts=i * 100, frame=frames[i], clip_track_ids={0})
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 2, 1, None)
+    sr = pipeline.run_secondary_from_primary(pr)
+    pipeline.blend_secondary_result(sr, fb)
+
+    for i in range(3):
+        assert 0 not in fb.frames[i].pending_clips
+
+
+def test_blend_secondary_result_needs_blend_false(monkeypatch) -> None:
+    """Cover line 291: needs_blend returns False, continue."""
+    from jasna.tracking.frame_buffer import FrameBuffer
+
+    clip, frames = _make_clip_and_frames(monkeypatch, t=2)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    fb = FrameBuffer(device=torch.device("cpu"))
+    fb.add_frame(0, pts=0, frame=frames[0], clip_track_ids=set())
+    fb.add_frame(1, pts=1, frame=frames[1], clip_track_ids=set())
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 2, None)
+    sr = pipeline.run_secondary_from_primary(pr)
+    pipeline.blend_secondary_result(sr, fb)
+
+    assert fb.frames[0].blended_frame is fb.frames[0].frame
+    assert fb.frames[1].blended_frame is fb.frames[1].frame
+
+
+def test_restore_and_blend_clip_needs_blend_false(monkeypatch) -> None:
+    """Cover line 200: needs_blend returns False in restore_and_blend_clip."""
+    from jasna.tracking.frame_buffer import FrameBuffer
+
+    clip, frames = _make_clip_and_frames(monkeypatch, t=2)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    fb = FrameBuffer(device=torch.device("cpu"))
+    fb.add_frame(0, pts=0, frame=frames[0], clip_track_ids=set())
+    fb.add_frame(1, pts=1, frame=frames[1], clip_track_ids=set())
+
+    pipeline.restore_and_blend_clip(
+        clip, frames, keep_start=0, keep_end=2, frame_buffer=fb,
+    )
+
+    assert fb.frames[0].blended_frame is fb.frames[0].frame
+    assert fb.frames[1].blended_frame is fb.frames[1].frame
 

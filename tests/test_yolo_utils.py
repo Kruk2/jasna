@@ -31,14 +31,6 @@ class TestMaskHwForFrame:
 
 
 class TestYoloGetEmptyMasks:
-    def _make_model(self):
-        with pytest.raises((FileNotFoundError, RuntimeError, Exception)):
-            YoloMosaicDetectionModel(
-                model_path="nonexistent.pt",
-                batch_size=1,
-                device=torch.device("cpu"),
-            )
-
     def test_empty_masks_shape(self):
         model = object.__new__(YoloMosaicDetectionModel)
         model.device = torch.device("cpu")

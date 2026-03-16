@@ -114,3 +114,105 @@ class TestYoloCall:
 
         assert len(det.boxes_xyxy) == 1
         assert len(det.masks) == 1
+
+
+def _build_yolo_autobackend(*, batch_size=1, imgsz=640):
+    mock_instance = MagicMock()
+    mock_instance.fp16 = False
+    mock_instance.names = {0: "mosaic"}
+    mock_instance.end2end = False
+    mock_instance.stride = torch.tensor([32.0])
+    mock_instance.eval = MagicMock(return_value=mock_instance)
+
+    with patch("ultralytics.nn.autobackend.AutoBackend", return_value=mock_instance, create=True):
+        model = YoloMosaicDetectionModel(
+            model_path=Path("model.pt"),
+            batch_size=batch_size,
+            device=torch.device("cpu"),
+            imgsz=imgsz,
+            fp16=False,
+        )
+    return model, mock_instance
+
+
+class TestYoloAutoBackendInit:
+    def test_autobackend_path(self):
+        model, mock_ab = _build_yolo_autobackend()
+        assert model.runner is None
+        assert model.stride == 32
+        assert model.end2end is False
+        assert model.input_dtype == torch.float32
+        mock_ab.eval.assert_called_once()
+
+    def test_autobackend_stride_list(self):
+        mock_ab = MagicMock()
+        mock_ab.fp16 = False
+        mock_ab.names = {}
+        mock_ab.end2end = False
+        mock_ab.stride = [8, 16, 32]
+        mock_ab.eval = MagicMock(return_value=mock_ab)
+
+        with patch("ultralytics.nn.autobackend.AutoBackend", return_value=mock_ab, create=True):
+            model = YoloMosaicDetectionModel(
+                model_path=Path("model.pt"),
+                batch_size=1,
+                device=torch.device("cpu"),
+                imgsz=640,
+                fp16=False,
+            )
+        assert model.stride == 32
+
+    def test_autobackend_stride_int(self):
+        mock_ab = MagicMock()
+        mock_ab.fp16 = False
+        mock_ab.names = {}
+        mock_ab.end2end = False
+        mock_ab.stride = 16
+        mock_ab.eval = MagicMock(return_value=mock_ab)
+
+        with patch("ultralytics.nn.autobackend.AutoBackend", return_value=mock_ab, create=True):
+            model = YoloMosaicDetectionModel(
+                model_path=Path("model.pt"),
+                batch_size=1,
+                device=torch.device("cpu"),
+                imgsz=640,
+                fp16=False,
+            )
+        assert model.stride == 16
+
+
+class TestYoloAutoBackendCall:
+    def test_call_non_trt(self):
+        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
+
+        pred = torch.zeros(1, 100, 4 + 1 + 32)
+        proto = torch.zeros(1, 32, 160, 160)
+        mock_ab.return_value = (pred, proto)
+
+        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8)
+        det = model(frames, target_hw=(480, 640))
+
+        assert len(det.boxes_xyxy) == 1
+        assert det.boxes_xyxy[0].shape[0] == 0
+
+    def test_protos_transpose_nhwc_to_nchw(self):
+        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
+
+        pred = torch.zeros(1, 100, 4 + 1 + 32)
+        proto = torch.zeros(1, 160, 160, 32)  # NHWC layout, last dim is channel-like
+        mock_ab.return_value = (pred, proto)
+
+        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8)
+        det = model(frames, target_hw=(480, 640))
+        assert len(det.boxes_xyxy) == 1
+
+    def test_pred_raw_transpose_when_shape1_gt_shape2(self):
+        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
+
+        pred = torch.zeros(1, 4 + 1 + 32, 100)  # shape[1] > shape[2], needs transpose
+        proto = torch.zeros(1, 32, 160, 160)
+        mock_ab.return_value = (pred, proto)
+
+        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8)
+        det = model(frames, target_hw=(480, 640))
+        assert len(det.boxes_xyxy) == 1

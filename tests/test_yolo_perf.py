@@ -35,19 +35,3 @@ def test_empty_masks_cache_different_sizes() -> None:
     assert t2.shape == (0, 64, 64)
     assert fake._get_empty_masks(128, 256) is t1
     assert fake._get_empty_masks(64, 64) is t2
-
-
-def test_fused_to_produces_correct_dtype() -> None:
-    x = torch.randint(0, 256, (1, 3, 64, 64), dtype=torch.uint8)
-    target_dtype = torch.float32
-    result = x.to(device="cpu", dtype=target_dtype, non_blocking=False)
-    assert result.dtype == target_dtype
-    assert result.device == x.device
-
-
-def test_inplace_div_matches_out_of_place() -> None:
-    x1 = torch.randint(0, 256, (2, 3, 32, 32), dtype=torch.uint8).float()
-    x2 = x1.clone()
-    expected = x2 / 255.0
-    x1 /= 255.0
-    assert torch.allclose(x1, expected)
