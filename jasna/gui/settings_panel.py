@@ -540,18 +540,20 @@ class SettingsPanel(ctk.CTkFrame):
         none_rb.pack(side="left", padx=(0, 16))
         
         tvai_rb = ctk.CTkRadioButton(
-            engines_frame, text=t("secondary_tvai"), variable=self._widgets["secondary_var"], value="tvai",
+            engines_frame, text=f"{t('secondary_tvai')} ({t('secondary_tvai_hint')})", variable=self._widgets["secondary_var"], value="tvai",
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed
         )
         tvai_rb.pack(side="left", padx=(0, 16))
+        Tooltip(tvai_rb, get_tooltip("secondary_tvai"))
         
         rtx_rb = ctk.CTkRadioButton(
-            engines_frame, text=f"{t('secondary_rtx_super_res')} ({t('recommended')})", variable=self._widgets["secondary_var"], value="rtx-super-res",
+            engines_frame, text=f"{t('secondary_rtx_super_res')} ({t('secondary_rtx_hint')})", variable=self._widgets["secondary_var"], value="rtx-super-res",
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed
         )
         rtx_rb.pack(side="left")
+        Tooltip(rtx_rb, get_tooltip("secondary_rtx"))
         
         # TVAI options (hidden by default)
         self._tvai_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
