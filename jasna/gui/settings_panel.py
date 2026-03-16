@@ -302,15 +302,19 @@ class SettingsPanel(ctk.CTkFrame):
         model_tip.pack(side="left", padx=4)
         Tooltip(model_tip, get_tooltip("detection_model"))
         
+        from jasna.mosaic.detection_registry import DEFAULT_DETECTION_MODEL_NAME, discover_available_detection_models
+        available_models = discover_available_detection_models()
+        if not available_models:
+            available_models = [DEFAULT_DETECTION_MODEL_NAME]
         self._widgets["detection_model"] = ctk.CTkOptionMenu(
-            row2, values=["rfdetr-v5", "lada-yolo-v4", "lada-yolo-v2"],
+            row2, values=available_models,
             fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
             dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
             width=120, command=lambda v: self._on_setting_change("detection_model", v)
         )
         self._widgets["detection_model"].pack(side="right")
-        self._widgets["detection_model"].set("rfdetr-v5")
+        self._widgets["detection_model"].set(available_models[0])
         
         # Detection Threshold
         row3 = ctk.CTkFrame(inner, fg_color="transparent")

@@ -168,7 +168,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--detection-model",
         type=str,
         default="rfdetr-v5",
-        help="Detection model name (default: %(default)s)",
+        help="Detection model name. Available models are discovered from model_weights/ folder (default: %(default)s)",
     )
     detection.add_argument(
         "--detection-model-path",
@@ -255,10 +255,15 @@ def main() -> None:
 
     output_video = Path(args.output)
 
-    from jasna.mosaic.detection_registry import RFDETR_MODEL_NAMES, YOLO_MODEL_NAMES, coerce_detection_model_name, detection_model_weights_path, precompile_detection_engine
+    from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models, precompile_detection_engine
 
     detection_model_name = coerce_detection_model_name(str(args.detection_model))
-    detection_model_path = Path(str(args.detection_model_path)) if str(args.detection_model_path).strip() else detection_model_weights_path(detection_model_name)
+    has_explicit_path = bool(str(args.detection_model_path).strip())
+    if not has_explicit_path:
+        available = discover_available_detection_models()
+        if available and detection_model_name not in available:
+            print(f"Warning: detection model '{detection_model_name}' not found in model_weights/. Available: {', '.join(available)}")
+    detection_model_path = Path(str(args.detection_model_path)) if has_explicit_path else detection_model_weights_path(detection_model_name)
     if not detection_model_path.exists():
         raise FileNotFoundError(str(detection_model_path))
 
