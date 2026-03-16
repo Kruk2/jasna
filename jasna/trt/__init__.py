@@ -70,7 +70,7 @@ def compile_onnx_to_tensorrt_engine(
     batch_size: int | None = None,
     fp16: bool = True,
     optimization_level: int = 3,
-    workspace_gb: int = 20,
+    workspace_gb: int,
 ) -> Path:
     onnx_path = Path(onnx_path)
     engine_path = get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=bool(fp16))

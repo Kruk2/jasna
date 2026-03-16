@@ -17,9 +17,8 @@ def engine_precision_name(*, fp16: bool) -> str:
 
 
 def get_workspace_size_bytes() -> int:
-    import psutil
-
-    return int(psutil.virtual_memory().available * 0.8)
+    free, _total = torch.cuda.mem_get_info()
+    return int(free * 0.95)
 
 
 def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch.nn.Module:
