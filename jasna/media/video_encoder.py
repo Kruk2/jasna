@@ -304,10 +304,21 @@ class NvidiaVideoEncoder:
             try:
                 if item is self._stop_sentinel:
                     return
-                frame, pts = item
-                self._encode_frame(frame, pts)
+                frame, pts, ready_event = item
+                self._handle_encode_item(frame, pts, ready_event)
             finally:
                 self._encode_queue.task_done()
+
+    def _build_encode_item(self, frame: torch.Tensor, pts: int) -> tuple[torch.Tensor, int, torch.cuda.Event]:
+        producer_stream = torch.cuda.current_stream(self.device)
+        ready_event = torch.cuda.Event()
+        producer_stream.record_event(ready_event)
+        return frame, pts, ready_event
+
+    def _handle_encode_item(self, frame: torch.Tensor, pts: int, ready_event: torch.cuda.Event) -> None:
+        self.stream.wait_event(ready_event)
+        frame.record_stream(self.stream)
+        self._encode_frame(frame, pts)
 
     def _mux_packet_pyav(self, data: bytearray, pts: int):
         data_bytes = bytes(data)
@@ -333,7 +344,7 @@ class NvidiaVideoEncoder:
             frame_to_encode = self.frame_buffer.popleft()
             pts_to_assign = heapq.heappop(self.pts_heap)
             self.pts_set.remove(pts_to_assign)
-            self._encode_queue.put((frame_to_encode, pts_to_assign))
+            self._encode_queue.put(self._build_encode_item(frame_to_encode, pts_to_assign))
 
     def _encode_frame(self, frame: torch.Tensor, pts: int):
         self.reordered_pts_queue.append(pts)

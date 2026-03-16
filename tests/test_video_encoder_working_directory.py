@@ -126,3 +126,103 @@ def test_encoder_unlinks_hevc_before_remux(tmp_path: Path) -> None:
     unlink_hevc_idx = call_order.index("unlink_hevc")
     remux_idx = call_order.index("remux")
     assert mux_idx < unlink_hevc_idx < remux_idx
+
+
+class _FakeThread:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def start(self):
+        pass
+
+    def join(self):
+        pass
+
+
+class _FakeCudaStream:
+    def __init__(self):
+        self.cuda_stream = 123
+        self.wait_event = MagicMock()
+
+
+def test_build_encode_item_records_event_on_producer_stream(tmp_path: Path) -> None:
+    output_path = tmp_path / "output" / "result.mkv"
+    output_path.parent.mkdir(parents=True)
+    working_dir = tmp_path / "work"
+    working_dir.mkdir()
+
+    mock_encoder = MagicMock()
+    mock_encoder.EndEncode.return_value = []
+    fake_stream = _FakeCudaStream()
+    fake_producer_stream = MagicMock()
+    fake_event = object()
+
+    with (
+        patch("jasna.media.video_encoder.nvc") as mock_nvc,
+        patch("jasna.media.video_encoder.threading.Thread", _FakeThread),
+        patch("jasna.media.video_encoder.torch.cuda.Stream", return_value=fake_stream),
+        patch("jasna.media.video_encoder.torch.cuda.current_stream", return_value=fake_producer_stream),
+        patch("jasna.media.video_encoder.torch.cuda.Event", return_value=fake_event),
+    ):
+        mock_nvc.CreateEncoder.return_value = mock_encoder
+
+        import torch
+
+        enc = NvidiaVideoEncoder(
+            file=str(output_path),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={},
+            stream_mode=False,
+            working_directory=working_dir,
+        )
+        frame = MagicMock()
+        item = enc._build_encode_item(frame, 123)
+        assert item == (frame, 123, fake_event)
+        fake_producer_stream.record_event.assert_called_once_with(fake_event)
+        enc.raw_hevc.close()
+
+
+def test_encode_worker_waits_for_producer_event(tmp_path: Path) -> None:
+    output_path = tmp_path / "output" / "result.mkv"
+    output_path.parent.mkdir(parents=True)
+    working_dir = tmp_path / "work"
+    working_dir.mkdir()
+
+    mock_encoder = MagicMock()
+    mock_encoder.EndEncode.return_value = []
+    fake_stream = _FakeCudaStream()
+
+    with (
+        patch("jasna.media.video_encoder.nvc") as mock_nvc,
+        patch("jasna.media.video_encoder.threading.Thread", _FakeThread),
+        patch("jasna.media.video_encoder.torch.cuda.Stream", return_value=fake_stream),
+        patch("jasna.media.video_encoder.torch.cuda.set_device"),
+    ):
+        mock_nvc.CreateEncoder.return_value = mock_encoder
+
+        import torch
+
+        enc = NvidiaVideoEncoder(
+            file=str(output_path),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={},
+            stream_mode=False,
+            working_directory=working_dir,
+        )
+        frame = MagicMock()
+        frame.is_cuda = True
+        ready_event = object()
+        enc._encode_frame = MagicMock()
+
+        enc._encode_queue.put((frame, 55, ready_event))
+        enc._encode_queue.put(enc._stop_sentinel)
+        enc._encode_worker()
+
+        fake_stream.wait_event.assert_called_once_with(ready_event)
+        frame.record_stream.assert_called_once_with(fake_stream)
+        enc._encode_frame.assert_called_once_with(frame, 55)
+        enc.raw_hevc.close()
