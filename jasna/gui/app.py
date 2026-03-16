@@ -291,13 +291,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         
     def _update_start_button_state(self):
         jobs = self._queue_panel.get_jobs()
-        output_folder = (self._queue_panel.get_output_folder() or "").strip()
-        can_start = bool(jobs) and bool(output_folder)
+        can_start = bool(jobs)
         if can_start:
             self._control_bar.set_start_enabled(True)
         else:
-            tooltip = t("toast_select_output") if not output_folder else t("toast_no_files")
-            self._control_bar.set_start_enabled(False, tooltip)
+            self._control_bar.set_start_enabled(False, t("toast_no_files"))
         
     def _show_toast(self, message: str, type_: str = "info"):
         """Show a toast notification."""
