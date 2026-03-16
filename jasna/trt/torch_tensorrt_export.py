@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 
 import torch
 
@@ -26,7 +27,8 @@ def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch
     import torch_tensorrt  # noqa: F401
 
     logger.info("Loading TensorRT export from %s", checkpoint_path)
-    with open(checkpoint_path, "rb") as f:
+    with open(checkpoint_path, "rb") as f, warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="doesn't implement method", module="torch._library.fake_class_registry")
         trt_module = torch.export.load(f).module()
         return trt_module.to(device)
 
@@ -65,7 +67,9 @@ def compile_and_save_torchtrt_dynamo(
                 reuse_cached_engines=False,
                 truncate_double=True,
             )
-            torch_tensorrt.save(trt_gm, output_path, inputs=inputs)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="doesn't implement method", module="torch._library.fake_class_registry")
+                torch_tensorrt.save(trt_gm, output_path, inputs=inputs)
     del trt_gm
     return output_path
 
