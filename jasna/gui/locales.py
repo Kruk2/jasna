@@ -285,7 +285,6 @@ TRANSLATIONS = {
         "dialog_language_restart": "Please restart the application for full language change.",
 
         # App messages
-        "toast_select_output": "Please select an output folder before starting",
         "error_cannot_start": "Cannot start processing:",
         "error_invalid_tvai": "Invalid TVAI configuration",
 
@@ -539,7 +538,6 @@ TRANSLATIONS = {
         "dialog_language_restart": "请重启应用程序以完成语言切换。",
 
         # App messages
-        "toast_select_output": "请在开始前选择输出文件夹",
         "error_cannot_start": "无法开始处理：",
         "error_invalid_tvai": "无效的 TVAI 配置",
 
@@ -793,7 +791,6 @@ TRANSLATIONS = {
         "dialog_language_restart": "言語変更を完全に反映するには、アプリケーションを再起動してください。",
 
         # App messages
-        "toast_select_output": "開始前に出力フォルダを選択してください",
         "error_cannot_start": "処理を開始できません:",
         "error_invalid_tvai": "無効な TVAI 設定",
 
@@ -1045,7 +1042,6 @@ TRANSLATIONS = {
         "dialog_language_restart": "언어 변경을 완전히 적용하려면 애플리케이션을 다시 시작하세요.",
 
         # App messages
-        "toast_select_output": "시작하기 전에 출력 폴더를 선택하세요",
         "error_cannot_start": "처리를 시작할 수 없습니다:",
         "error_invalid_tvai": "잘못된 TVAI 구성",
 
@@ -1299,7 +1295,6 @@ TRANSLATIONS = {
         "dialog_language_restart": "กรุณารีสตาร์ทแอปพลิเคชันเพื่อเปลี่ยนภาษาทั้งหมด",
 
         # App messages
-        "toast_select_output": "กรุณาเลือกโฟลเดอร์เอาต์พุตก่อนเริ่ม",
         "error_cannot_start": "ไม่สามารถเริ่มประมวลผล:",
         "error_invalid_tvai": "การกำหนดค่า TVAI ไม่ถูกต้อง",
 
