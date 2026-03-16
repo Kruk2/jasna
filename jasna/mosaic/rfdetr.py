@@ -25,6 +25,7 @@ def compile_rfdetr_engine(
         device,
         batch_size=int(batch_size),
         fp16=bool(fp16),
+        workspace_gb=20,
     )
 
 
@@ -56,6 +57,7 @@ class RfDetrMosaicDetectionModel:
             self.device,
             batch_size=self.batch_size,
             fp16=bool(fp16),
+            workspace_gb=20,
         )
         self.runner = TrtRunner(
             self.engine_path,

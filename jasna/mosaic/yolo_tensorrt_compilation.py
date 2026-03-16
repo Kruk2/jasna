@@ -92,7 +92,7 @@ def compile_yolo_to_tensorrt_engine(
         raise RuntimeError(f"Expected ONNX export, got: {exported_path}")
 
     out = compile_onnx_to_tensorrt_engine(
-        exported_path, device, batch_size=None, fp16=bool(fp16)
+        exported_path, device, batch_size=None, fp16=bool(fp16), workspace_gb=20,
     )
     if out != engine_path:
         engine_path.parent.mkdir(parents=True, exist_ok=True)
