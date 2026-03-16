@@ -420,6 +420,8 @@ class ControlBar(ctk.CTkFrame):
 
     def set_completed(self, elapsed_seconds: float):
         self.set_running(False)
+        self._progress_bar.set(1.0)
+        self._percent_label.configure(text="100%")
         text = f"{t('completed_in')} {_format_duration(elapsed_seconds)}"
         self._fps_label.configure(text=text)
         self._eta_label.configure(text="")
