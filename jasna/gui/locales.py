@@ -1081,6 +1081,260 @@ TRANSLATIONS = {
         "error_tvai_ffmpeg_not_found": "TVAI ffmpeg를 찾을 수 없습니다: {path}",
     },
 
+    "th": {
+        # App
+        "app_title": "JASNA GUI",
+        "status_idle": "พร้อม",
+        "status_processing": "กำลังประมวลผล",
+        "status_paused": "หยุดชั่วคราว",
+        "status_completed": "เสร็จสิ้น",
+        "status_error": "ข้อผิดพลาด",
+
+        # Header
+        "btn_help": "ช่วยเหลือ",
+        "btn_about": "เกี่ยวกับ",
+        "btn_system_check": "ตรวจสอบระบบ",
+        "language": "ภาษา",
+
+        # Queue Panel
+        "btn_add_files": "📁 เพิ่มไฟล์",
+        "queue_empty": "ลากและวางไฟล์ที่นี่\nหรือใช้ปุ่มด้านบน",
+        "items_queued": "{count} รายการในคิว",
+        "btn_clear": "🗑 ล้าง",
+        "btn_clear_completed": "✓ ล้างที่เสร็จแล้ว",
+        "output_location": "ตำแหน่งเอาต์พุต",
+        "output_pattern": "รูปแบบชื่อไฟล์เอาต์พุต",
+        "output_pattern_placeholder": "{original}_restored.mp4",
+        "same_as_input": "เหมือนกับอินพุต",
+        "select_video_files": "เลือกไฟล์วิดีโอ",
+        "select_folder": "เลือกโฟลเดอร์",
+        "select_output_folder": "เลือกโฟลเดอร์เอาต์พุต",
+
+        # Job Status
+        "job_pending": "รอดำเนินการ",
+        "job_processing": "กำลังประมวลผล",
+        "job_completed": "เสร็จสิ้น",
+        "completed_in": "เสร็จใน",
+        "job_error": "ข้อผิดพลาด",
+        "job_paused": "หยุดชั่วคราว",
+        "job_skipped": "ข้าม",
+
+        # Settings Panel
+        "preset": "พรีเซ็ต:",
+        "btn_create": "+",
+        "btn_save": "💾",
+        "btn_delete": "🗑",
+        "btn_reset": "↺",
+
+        # Sections
+        "section_basic": "การประมวลผลพื้นฐาน",
+        "section_advanced": "การประมวลผลขั้นสูง",
+        "section_secondary": "การฟื้นฟูขั้นที่สอง",
+        "section_encoding": "การเข้ารหัส",
+
+        # Basic Processing
+        "max_clip_size": "ขนาดคลิปสูงสุด",
+        "detection_model": "โมเดลตรวจจับ",
+        "detection_threshold": "ค่าความเชื่อมั่นการตรวจจับ",
+        "fp16_mode": "โหมด FP16",
+        "compile_basicvsrpp": "คอมไพล์ BasicVSR++",
+        "file_conflict": "ไฟล์ซ้ำ",
+        "file_conflict_auto_rename": "เปลี่ยนชื่ออัตโนมัติ",
+        "file_conflict_overwrite": "เขียนทับ",
+        "file_conflict_skip": "ข้าม",
+        "file_conflict_overwrite_warning": "ไฟล์ที่มีอยู่จะถูกแทนที่อย่างถาวร",
+        "tip_file_conflict": "เมื่อไฟล์เอาต์พุตมีอยู่แล้วจะทำอย่างไร",
+        "conflict_tooltip": "ไฟล์เอาต์พุตมีอยู่แล้ว",
+        "renamed_output": "ไฟล์เอาต์พุตมีอยู่แล้ว เปลี่ยนชื่อเป็น {filename}",
+
+        # Advanced Processing
+        "temporal_overlap": "เฟรมซ้อนทับ",
+        "enable_crossfade": "เปิดใช้ครอสเฟด",
+        "denoise_strength": "ระดับลดสัญญาณรบกวน",
+        "denoise_step": "ลดสัญญาณรบกวนหลังจาก",
+        "denoise_none": "ไม่มี",
+        "denoise_low": "ต่ำ",
+        "denoise_medium": "ปานกลาง",
+        "denoise_high": "สูง",
+        "after_primary": "หลังขั้นแรก",
+        "after_secondary": "หลังขั้นที่สอง",
+        "working_directory": "ไดเรกทอรีทำงาน",
+        "working_directory_placeholder": "ไม่บังคับ ใช้โฟลเดอร์เอาต์พุตเดียวกัน",
+        "dialog_select_working_directory": "เลือกไดเรกทอรีทำงาน",
+
+        # Secondary Restoration
+        "secondary_none": "ไม่มี",
+        "secondary_tvai": "Topaz TVAI",
+        "secondary_rtx_super_res": "RTX Super Res",
+        "rtx_scale": "อัตราขยาย",
+        "rtx_quality": "คุณภาพ",
+        "rtx_denoise": "ลดสัญญาณรบกวน",
+        "rtx_deblur": "ลดความเบลอ",
+        "recommended": "แนะนำ",
+        "batch_size": "ขนาดแบตช์",
+        "compile_model": "คอมไพล์โมเดล",
+        "ffmpeg_path": "เส้นทาง FFmpeg",
+        "model": "โมเดล",
+        "scale": "อัตราขยาย",
+        "workers": "เวิร์กเกอร์",
+
+        # Encoding
+        "codec": "ตัวแปลงสัญญาณ",
+        "quality_cq": "คุณภาพ (CQ)",
+        "custom_args": "อาร์กิวเมนต์กำหนดเอง",
+
+        # Control Bar
+        "btn_start": "▶ เริ่ม",
+        "btn_pause": "⏸ หยุดชั่วคราว",
+        "btn_resume": "▶ ดำเนินต่อ",
+        "btn_stop": "⏹ หยุด",
+        "progress": "ความคืบหน้า",
+        "time_remaining": "เหลือ",
+        "no_file_processing": "ไม่มีไฟล์กำลังประมวลผล",
+        "queue_label": "คิว",
+        "logs_btn": ">_ บันทึก",
+
+        # Log Panel
+        "logs": "บันทึก",
+        "btn_export": "ส่งออก",
+        "btn_toggle_logs": "บันทึก ▼",
+        "filter_all": "ทั้งหมด",
+        "filter_debug": "Debug",
+        "filter_info": "Info",
+        "filter_warn": "Warn",
+        "filter_error": "Error",
+        "system_output": "เอาต์พุตระบบ",
+        "filter_all_levels": "ทุกระดับ",
+        "filter_errors_only": "เฉพาะข้อผิดพลาด",
+        "filter_warnings_plus": "คำเตือน+",
+        "filter_info_plus": "ข้อมูล+",
+
+        # Wizard
+        "wizard_title": "ตรวจสอบระบบ",
+        "wizard_subtitle": "กำลังตรวจสอบ dependencies ที่จำเป็น...",
+        "wizard_checking": "กำลังตรวจสอบ...",
+        "wizard_found": "พบ: {path}",
+        "wizard_not_found": "ไม่พบใน PATH",
+        "wizard_all_passed": "✓ ผ่านทุกรายการ! พร้อมใช้งานแล้ว",
+        "wizard_some_failed": "⚠ dependencies บางอย่างขาดหายไป ตรวจสอบ README สำหรับคำแนะนำการติดตั้ง",
+        "btn_get_started": "เริ่มต้นใช้งาน",
+        "btn_continue_anyway": "ดำเนินการต่อ",
+        "btn_ok": "ตกลง",
+
+        # Dialogs
+        "dialog_create_preset": "สร้างพรีเซ็ต",
+        "preset_name": "ชื่อพรีเซ็ต",
+        "preset_placeholder": "พรีเซ็ตของฉัน",
+        "error_name_empty": "ชื่อต้องไม่ว่างเปล่า",
+        "error_name_exists": "ชื่อนี้มีอยู่แล้ว",
+        "btn_create_preset": "สร้าง",
+        "btn_cancel": "ยกเลิก",
+        "dialog_delete_preset": "ลบพรีเซ็ต",
+        "confirm_delete": "ลบพรีเซ็ต '{name}'?",
+        "btn_delete_confirm": "ลบ",
+
+        # Toasts
+        "toast_preset_saved": "บันทึกพรีเซ็ต '{name}' แล้ว",
+        "toast_preset_created": "สร้างพรีเซ็ต '{name}' แล้ว",
+        "toast_preset_deleted": "ลบพรีเซ็ต '{name}' แล้ว",
+        "toast_settings_reset": "รีเซ็ตการตั้งค่าแล้ว",
+        "toast_no_files": "ไม่มีไฟล์ในคิว",
+        "toast_started": "เริ่มประมวลผลแล้ว",
+        "toast_paused": "หยุดประมวลผลชั่วคราว",
+        "toast_resumed": "ดำเนินการประมวลผลต่อ",
+        "toast_stopped": "หยุดประมวลผลแล้ว",
+        # Buy Me a Coffee
+        "bmc_support": "สนับสนุน",
+
+        # Tooltips
+        "tip_max_clip_size": "จำนวนเฟรมที่ประมวลผลต่อครั้ง ค่ามากขึ้นอาจให้คุณภาพดีขึ้นแต่ใช้ VRAM มากขึ้น\n\nแนะนำ: 60 ขึ้นไป แม้ต้องปิดการคอมไพล์โมเดลก็ควรใช้ 60 เป็นอย่างน้อย\nแนวทาง: 60 (ปลอดภัย), 90 (สมดุลดี), 180 (คุณภาพสูงสุด ต้องมี VRAM 24 GB+)\nค่าเริ่มต้น: 60",
+        "tip_temporal_overlap": "เฟรมซ้อนทับระหว่างคลิปเพื่อลดการกะพริบที่รอยต่อ\nค่ามาก = การเปลี่ยนผ่านราบรื่นขึ้นแต่ช้าลงเล็กน้อย เกิน 20 แทบไม่ต่างกัน\n\nค่าแนะนำตามขนาดคลิป:\n- คลิป 60 → ซ้อนทับ 6-8\n- คลิป 90 → ซ้อนทับ 8-12\n- คลิป 180 → ซ้อนทับ 15-20\nค่าเริ่มต้น: 8",
+        "tip_enable_crossfade": "ผสานรอยต่อของคลิปให้ราบรื่นเพื่อลดการกะพริบ ใช้เฟรมที่ประมวลผลแล้วจึงไม่มีภาระ GPU เพิ่ม\n\nแนะนำ: เปิดเสมอ\nค่าเริ่มต้น: เปิด",
+        "tip_fp16_mode": "ใช้การคำนวณ half-precision เพื่อลดการใช้ VRAM และมักจะเร็วขึ้น ไม่มีความแตกต่างด้านคุณภาพบน GPU รุ่นใหม่\n\nแนะนำ: เปิดสำหรับ RTX 20-series ขึ้นไป\nค่าเริ่มต้น: เปิด",
+        "tip_compile_basicvsrpp": "คอมไพล์โมเดลฟื้นฟูด้วย TensorRT เพื่อเพิ่มความเร็วอย่างมาก การรันครั้งแรกจะใช้เวลาคอมไพล์ แต่ครั้งต่อ ๆ ไปจะเร็วมาก\n\nใช้ VRAM ประมาณ 2.5 GB ต่อ 30 เฟรมของขนาดคลิป (เช่น คลิป 60 ≈ 5 GB, คลิป 180 ≈ 15 GB)\nหาก VRAM ไม่พอ ให้ปิดตัวเลือกนี้หรือลดขนาดคลิป\n\nแนะนำ: เปิดพร้อมขนาดคลิป 60-90\nค่าเริ่มต้น: เปิด",
+        "tip_denoise_strength": "ลดสัญญาณรบกวนและเม็ดในพื้นที่ที่ฟื้นฟูแล้ว ค่ามาก = ราบรื่นขึ้นแต่อาจสูญเสียรายละเอียด\n\nไม่มี: ไม่ลดสัญญาณรบกวน ต่ำ/ปานกลาง: จุดเริ่มต้นที่ดี สูง: ปรับเรียบอย่างหนัก\nค่าเริ่มต้น: ไม่มี",
+        "tip_denoise_step": "เวลาที่จะลดสัญญาณรบกวนในขั้นตอนการประมวลผล:\n- หลังขั้นแรก: ก่อนการขยาย (การฟื้นฟูขั้นที่สอง) ลดสัญญาณรบกวนที่ 256x256\n- หลังขั้นที่สอง: หลังการขยาย ก่อนเอาต์พุตสุดท้าย ลดสัญญาณรบกวนที่ความละเอียดเต็ม\n\nค่าเริ่มต้น: หลังขั้นแรก",
+        "tip_secondary_restoration": "ขั้นตอนเสริมที่ขยายพื้นที่ฟื้นฟูจาก 256x256 เป็น 512 หรือ 1024 พิกเซล ช่วยเพิ่มความคมชัดโดยเฉพาะสำหรับภาพใกล้และวิดีโอ 4K\n\nRTX Super Res แนะนำ — เร็ว ฟรี ไม่ต้องติดตั้งเพิ่ม\nTopaz TVAI ต้องซื้อและติดตั้งแยกต่างหาก",
+        "tip_tvai_ffmpeg_path": "เส้นทางเต็มไปยัง ffmpeg.exe ที่มาพร้อม Topaz Video AI\n\nตำแหน่งเริ่มต้น:\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video AI\\ffmpeg.exe",
+        "tip_tvai_model": "โมเดล Topaz AI ที่ใช้สำหรับขยาย\n\niris-2: ค่าเริ่มต้นที่ดี คุณภาพสมดุล\niris-3, prob-4, nyx-1: ลองใช้เพื่อดูว่าโมเดลไหนให้ผลลัพธ์ดีที่สุด\nค่าเริ่มต้น: iris-2",
+        "tip_tvai_scale": "อัตราการขยายพื้นที่ฟื้นฟู\n1x = ไม่ขยาย (256px) 2x = 512px 4x = 1024px\nขยายมากขึ้น = คมชัดขึ้นแต่ไฟล์ใหญ่ขึ้นและช้าลง\n\nค่าเริ่มต้น: 4x",
+        "tip_tvai_workers": "จำนวนงานขยาย Topaz ที่ทำงานพร้อมกัน มากขึ้น = เร็วขึ้นแต่ใช้ CPU/GPU มากขึ้น\n\nค่าเริ่มต้น: 2",
+        "tip_rtx_scale": "อัตราการขยายพื้นที่ฟื้นฟู\n2x = 512px 4x = 1024px\nขยายมากขึ้น = คมชัดขึ้นแต่ช้าลง\n\nค่าเริ่มต้น: 4x",
+        "tip_rtx_quality": "คุณภาพการขยาย สูงขึ้น = ผลลัพธ์ดีขึ้นแต่ช้าลง\n\nค่าเริ่มต้น: High",
+        "tip_rtx_denoise": "ลดสัญญาณรบกวนด้วยฮาร์ดแวร์ RTX ตั้งเป็น None เพื่อข้าม\n\nค่าเริ่มต้น: Medium",
+        "tip_rtx_deblur": "เพิ่มความคมชัดส่วนที่เบลอด้วยฮาร์ดแวร์ RTX ตั้งเป็น None เพื่อข้าม\n\nค่าเริ่มต้น: None",
+        "tip_detection_model": "โมเดล AI ที่ใช้ค้นหาพื้นที่ที่ต้องฟื้นฟู\nrfdetr-v5: ล่าสุด แม่นยำที่สุด — แนะนำ\nLada YOLO อาจทำงานได้ดีกว่าสำหรับแอนิเมชัน 2D\n\nค่าเริ่มต้น: rfdetr-v5",
+        "tip_detection_score_threshold": "ความมั่นใจที่ AI ต้องมีก่อนทำเครื่องหมายพื้นที่สำหรับฟื้นฟู\nค่าต่ำ = ตรวจจับมากขึ้น (อาจมีผลบวกปลอม)\nค่าสูง = ตรวจจับน้อยลง (อาจพลาดบางส่วน)\n\nค่าเริ่มต้น: 0.25 (เหมาะกับวิดีโอส่วนใหญ่)",
+        "tip_codec": "รูปแบบวิดีโอเอาต์พุต รองรับเฉพาะ HEVC (H.265)\nHEVC ให้คุณภาพดีเยี่ยมด้วยขนาดไฟล์ที่เล็กลง",
+        "tip_encoder_cq": "ระดับคุณภาพวิดีโอ (Constant Quality) ตัวเลขต่ำ = คุณภาพดีขึ้นแต่ไฟล์ใหญ่ขึ้น\n\n18-22: คุณภาพสูง (แนะนำ)\n22-28: สมดุล\n28+: ไฟล์เล็กลง คุณภาพต่ำลง\nค่าเริ่มต้น: 22",
+        "tip_encoder_custom_args": "พารามิเตอร์ encoder ขั้นสูง ในรูปแบบ key=value คั่นด้วยจุลภาค\nเว้นว่างไว้หากไม่แน่ใจ\n\nตัวอย่าง: lookahead=32",
+        "tip_working_directory": "โฟลเดอร์สำหรับไฟล์ชั่วคราวที่สร้างระหว่างการเข้ารหัส\nใช้ SSD ที่เร็วจะช่วยเพิ่มความเร็ว เว้นว่างเพื่อใช้โฟลเดอร์เอาต์พุต\n\nค่าเริ่มต้น: เหมือนกับโฟลเดอร์เอาต์พุต",
+        "tip_output_location": "โฟลเดอร์ที่ใช้บันทึกวิดีโอที่ประมวลผลแล้ว\nเว้นว่างเพื่อบันทึกไว้ข้างไฟล์ต้นฉบับ",
+        "tip_output_pattern": "รูปแบบชื่อไฟล์เอาต์พุต\nใช้ {original} เป็นตัวแทนชื่อไฟล์อินพุต (ไม่รวมนามสกุล)\n\nตัวอย่าง: {original}_restored.mp4 → my_video_restored.mp4",
+
+        # Preset button tooltips
+        "tip_preset_reset": "รีเซ็ตเป็นค่าที่บันทึกไว้",
+        "tip_preset_delete": "ลบพรีเซ็ต",
+        "tip_preset_save": "บันทึกพรีเซ็ต",
+        "tip_preset_create": "สร้างพรีเซ็ตใหม่",
+
+        # Engine compilation / first run warnings
+        "engine_first_run_title": "การรันครั้งแรกอาจช้า",
+        "engine_first_run_body": "TensorRT engine บางตัวหายไปและอาจถูกคอมไพล์สำหรับ GPU ของคุณ นี่เป็นเรื่องปกติในการรันครั้งแรก แอปพลิเคชันอาจดูเหมือนไม่ตอบสนองระหว่างการคอมไพล์ อย่าปิดมัน",
+        "engine_first_run_missing": "engine ที่หายไป:",
+        "engine_name_rfdetr": "RF-DETR (ตรวจจับ)",
+        "engine_name_yolo": "YOLO (ตรวจจับ)",
+        "engine_name_basicvsrpp": "BasicVSR++ (ฟื้นฟู)",
+        "engine_basicvsrpp_risky_title": "คำเตือนการคอมไพล์ BasicVSR++",
+        "engine_basicvsrpp_risky_body": "การคอมไพล์ BasicVSR++ TensorRT อาจเสี่ยงกับ VRAM ของ GPU คุณ\n\nVRAM ของ GPU (โดยประมาณ): {vram_gb} GB\nขนาดคลิปที่ร้องขอ: {requested_clip}\nขนาดสูงสุดที่ปลอดภัยโดยประมาณ: {safe_clip}\n\nดำเนินการคอมไพล์ต่อหรือไม่? อาจใช้เวลานานและอาจ VRAM ไม่พอ",
+        # About dialog
+        "dialog_about_title": "เกี่ยวกับ Jasna",
+        "dialog_about_version": "เวอร์ชัน {version}",
+        "dialog_about_description": "เครื่องมือฟื้นฟูโมเสก JAV",
+        "dialog_about_credit": "แรงบันดาลใจจาก Lada",
+        "btn_close": "ปิด",
+
+        # Language change dialog
+        "dialog_language_changed": "เปลี่ยนภาษาแล้ว",
+        "dialog_language_restart": "กรุณารีสตาร์ทแอปพลิเคชันเพื่อเปลี่ยนภาษาทั้งหมด",
+
+        # App messages
+        "toast_select_output": "กรุณาเลือกโฟลเดอร์เอาต์พุตก่อนเริ่ม",
+        "error_cannot_start": "ไม่สามารถเริ่มประมวลผล:",
+        "error_invalid_tvai": "การกำหนดค่า TVAI ไม่ถูกต้อง",
+
+        # Settings panel
+        "dialog_select_tvai_ffmpeg": "เลือก Topaz Video AI ffmpeg.exe",
+        "placeholder_encoder_args": "เช่น lookahead=32",
+
+        # Wizard check labels
+        "wizard_window_title": "Jasna - ตรวจสอบระบบ",
+        "wizard_check_ffmpeg": "FFmpeg",
+        "wizard_check_ffprobe": "FFprobe",
+        "wizard_check_mkvmerge": "MKVmerge",
+        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_cuda": "CUDA Runtime",
+        "wizard_check_hags": "Hardware Accelerated GPU Scheduling",
+        "wizard_not_checked": "ยังไม่ได้ตรวจสอบ",
+        "wizard_not_callable": "เรียกใช้ไม่ได้: {path}",
+        "wizard_found_version": "พบ: {path} ({version})",
+        "wizard_found_no_major": "พบ: {path} (ตรวจจับเวอร์ชันหลักไม่ได้)",
+        "wizard_found_bad_major": "พบ: {path} (major={major}, คาดว่า=8)",
+        "wizard_found_major": "พบ: {path} (major={major})",
+        "wizard_no_cuda": "ไม่พบอุปกรณ์ CUDA",
+        "wizard_gpu_compute_too_low": "ต้องการ Compute capability 7.5+ (GPU: {major}.{minor})",
+        "wizard_cuda_version": "CUDA {version}",
+        "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
+        "wizard_not_available": "ไม่พร้อมใช้งาน",
+
+        # Validation errors
+        "error_tvai_data_dir_not_set": "ตัวแปรสภาพแวดล้อม TVAI_MODEL_DATA_DIR ไม่ได้ตั้งค่า",
+        "error_tvai_model_dir_not_set": "ตัวแปรสภาพแวดล้อม TVAI_MODEL_DIR ไม่ได้ตั้งค่า",
+        "error_tvai_data_dir_missing": "TVAI_MODEL_DATA_DIR ชี้ไปยังไดเรกทอรีที่ไม่มีอยู่: {path}",
+        "error_tvai_model_dir_missing": "TVAI_MODEL_DIR ชี้ไปยังไดเรกทอรีที่ไม่มีอยู่: {path}",
+        "error_tvai_ffmpeg_not_found": "ไม่พบ TVAI ffmpeg: {path}",
+    },
+
 }
 
 
@@ -1089,6 +1343,7 @@ LANGUAGE_NAMES = {
     "zh": "简体中文",
     "ja": "日本語",
     "ko": "한국어",
+    "th": "ไทย",
 }
 
 
@@ -1131,6 +1386,8 @@ class LocaleManager:
                     self._current_lang = "ja"
                 elif lang and lang.startswith("ko"):
                     self._current_lang = "ko"
+                elif lang and lang.startswith("th"):
+                    self._current_lang = "th"
             except Exception:
                 # Fall back to default 'en'
                 pass
