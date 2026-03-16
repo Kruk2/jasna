@@ -523,6 +523,10 @@ class SettingsPanel(ctk.CTkFrame):
         
         engines_frame = ctk.CTkFrame(inner, fg_color="transparent")
         engines_frame.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        secondary_tip = ctk.CTkLabel(engines_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        secondary_tip.pack(side="right")
+        Tooltip(secondary_tip, get_tooltip("secondary_restoration"))
         
         none_rb = ctk.CTkRadioButton(
             engines_frame, text=t("secondary_none"), variable=self._widgets["secondary_var"], value="none",
