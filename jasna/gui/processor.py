@@ -164,6 +164,8 @@ class Processor:
                 self._log("INFO", f"Renamed output to {output_path.name} to avoid overwrite")
             # "overwrite" - just proceed and let the file be replaced
         
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
         try:
             self._run_pipeline(idx, input_path, output_path)
             
