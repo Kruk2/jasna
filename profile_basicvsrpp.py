@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import gc
+import statistics
 import time
 from pathlib import Path
 
@@ -30,60 +31,41 @@ def _timed(label: str, fn, *args, **kwargs):
     return result
 
 
-def _print_engine_vram(model_weights_path: str, fp16: bool, device: torch.device, max_clip_size: int) -> None:
-    from jasna.trt.torch_tensorrt_export import load_torchtrt_export
-    paths = get_sub_engine_paths(model_weights_path, fp16, max_clip_size)
-
+def _timed_no_print(fn, *args, **kwargs):
     torch.cuda.synchronize()
-    torch.cuda.empty_cache()
-    gc.collect()
-
-    print(f"\n=== Engine VRAM (driver-level delta) ===")
-    total_delta = 0
-    for name, p in paths.items():
-        torch.cuda.synchronize()
-        free_before, _ = torch.cuda.mem_get_info()
-        engine = load_torchtrt_export(checkpoint_path=p, device=device)
-        torch.cuda.synchronize()
-        free_after, _ = torch.cuda.mem_get_info()
-        delta_mb = (free_before - free_after) / (1024 * 1024)
-        total_delta += delta_mb
-        print(f"  {name:26s} {delta_mb:8.1f} MB")
-        del engine
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-        gc.collect()
-    print(f"  {'TOTAL':26s} {total_delta:8.1f} MB")
-
-
-def profile_split_forward(split, device, dtype, model_weights_path: str, fp16: bool, max_clip_size: int):
-    T = CLIP_LENGTH
-    lqs = torch.randn(1, T, 3, SIZE, SIZE, device=device, dtype=dtype)
-
-    for _ in range(WARMUP):
-        split(lqs)
+    t0 = time.perf_counter()
+    result = fn(*args, **kwargs)
     torch.cuda.synchronize()
+    dt = time.perf_counter() - t0
+    return result, dt
 
-    print(f"\n=== Profiling BasicVSRPlusPlusNetSplit (T={T}) ===")
+
+def _profile_stages_once(
+    split: BasicVSRPlusPlusNetSplit,
+    lqs: torch.Tensor,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> dict[str, float]:
+    stage_ms: dict[str, float] = {}
     n, t, c, h, w = lqs.size()
 
-    # feat_extract
     lqs_flat = lqs.view(-1, c, h, w)
-    feats_ = _timed("feat_extract (TRT)", split._feat_extract_engine, lqs_flat)
+    feats_, dt = _timed_no_print(split._feat_extract_engine, lqs_flat)
+    stage_ms["feat_extract (TRT)"] = dt
     h_f, w_f = feats_.shape[2:]
     feats_ = feats_.view(n, t, -1, h_f, w_f)
 
-    # downsample
-    lqs_ds = _timed("downsample (bicubic)", lambda: F.interpolate(
-        lqs.view(-1, c, h, w), scale_factor=0.25, mode="bicubic"
-    ).view(n, t, c, h // 4, w // 4))
+    lqs_ds, dt = _timed_no_print(
+        lambda: F.interpolate(
+            lqs.view(-1, c, h, w), scale_factor=0.25, mode="bicubic"
+        ).view(n, t, c, h // 4, w // 4),
+    )
+    stage_ms["downsample (bicubic)"] = dt
 
-    # compute_flow (SPyNet)
-    flows_fwd, flows_bwd = _timed("compute_flow (SPyNet)", split.compute_flow, lqs_ds)
+    (flows_fwd, flows_bwd), dt = _timed_no_print(split.compute_flow, lqs_ds)
+    stage_ms["compute_flow (SPyNet)"] = dt
 
-    # propagate - detailed timing
-    feats = {"spatial": [feats_[:, i, :, :, :] for i in range(t)]}
-
+    feats: dict[str, list[torch.Tensor]] = {"spatial": [feats_[:, i, :, :, :] for i in range(t)]}
     total_loop_body = 0.0
     total_precompute = 0.0
 
@@ -134,7 +116,6 @@ def profile_split_forward(split, device, dtype, model_weights_path: str, fp16: b
 
             zero_feat = flows.new_zeros(n2, mid, h2, w2)
             zero_flow = flows.new_zeros(n2, 2, h2, w2)
-
             feat_prop = flows.new_zeros(n2, mid, h2, w2)
 
             for i, idx in enumerate(frame_idx):
@@ -169,13 +150,75 @@ def profile_split_forward(split, device, dtype, model_weights_path: str, fp16: b
             if "backward" in module_name:
                 feats[module_name] = feats[module_name][::-1]
 
-    print(f"  {'propagate/precompute_all':30s} {total_precompute*1000:8.1f} ms")
-    print(f"  {'propagate/loop_body (TRT)':30s} {total_loop_body*1000:8.1f} ms")
+    stage_ms["propagate/precompute_all"] = total_precompute
+    stage_ms["propagate/loop_body (TRT)"] = total_loop_body
 
-    # upsample
-    _timed("upsample (TRT)", split.upsample, lqs, feats)
+    _, dt = _timed_no_print(split.upsample, lqs, feats)
+    stage_ms["upsample (TRT)"] = dt
+    return stage_ms
 
-    # full forward timing
+
+def _print_stage_medians(stage_medians: dict[str, float]) -> None:
+    for label, dt in stage_medians.items():
+        print(f"  {label:30s} {dt*1000:8.1f} ms")
+
+    print(f"\n=== Top stages by median ({RUNS} runs, warmup={WARMUP}) ===")
+    total_stage = sum(stage_medians.values())
+    ranked = sorted(stage_medians.items(), key=lambda item: item[1], reverse=True)
+    for rank, (label, dt) in enumerate(ranked, start=1):
+        pct = 0.0 if total_stage == 0 else (dt / total_stage) * 100.0
+        print(f"  {rank:2d}. {label:30s} {dt*1000:8.1f} ms  ({pct:5.1f}%)")
+
+
+def _print_engine_vram(model_weights_path: str, fp16: bool, device: torch.device, max_clip_size: int) -> None:
+    from jasna.trt.torch_tensorrt_export import load_torchtrt_export
+    paths = get_sub_engine_paths(model_weights_path, fp16, max_clip_size)
+
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    print(f"\n=== Engine VRAM (driver-level delta) ===")
+    total_delta = 0
+    for name, p in paths.items():
+        torch.cuda.synchronize()
+        free_before, _ = torch.cuda.mem_get_info()
+        engine = load_torchtrt_export(checkpoint_path=p, device=device)
+        torch.cuda.synchronize()
+        free_after, _ = torch.cuda.mem_get_info()
+        delta_mb = (free_before - free_after) / (1024 * 1024)
+        total_delta += delta_mb
+        print(f"  {name:26s} {delta_mb:8.1f} MB")
+        del engine
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        gc.collect()
+    print(f"  {'TOTAL':26s} {total_delta:8.1f} MB")
+
+
+def profile_split_forward(split, device, dtype, model_weights_path: str, fp16: bool, max_clip_size: int):
+    T = CLIP_LENGTH
+    lqs = torch.randn(1, T, 3, SIZE, SIZE, device=device, dtype=dtype)
+
+    for _ in range(WARMUP):
+        _profile_stages_once(split, lqs, device, dtype)
+    torch.cuda.synchronize()
+
+    stage_runs: list[dict[str, float]] = []
+    for _ in range(RUNS):
+        stage_runs.append(_profile_stages_once(split, lqs, device, dtype))
+    stage_medians = {
+        label: statistics.median(run[label] for run in stage_runs)
+        for label in stage_runs[0]
+    }
+
+    print(f"\n=== Profiling BasicVSRPlusPlusNetSplit (T={T}) ===")
+    _print_stage_medians(stage_medians)
+
+    for _ in range(WARMUP):
+        split(lqs)
+    torch.cuda.synchronize()
+
     durations = []
     for _ in range(RUNS):
         torch.cuda.synchronize()
@@ -184,7 +227,6 @@ def profile_split_forward(split, device, dtype, model_weights_path: str, fp16: b
         torch.cuda.synchronize()
         durations.append(time.perf_counter() - t0)
 
-    import statistics
     med = statistics.median(durations)
     print(f"\n  {'FULL FORWARD median':30s} {med*1000:8.1f} ms  ({RUNS} runs)")
 
