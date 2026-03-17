@@ -311,6 +311,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         self._feat_extract_engine = feat_extract_engine
         self._deform_offset_engines = deform_offset_engines
 
+
     def compute_flow(self, lqs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         n, t, c, h, w = lqs.size()
         if t == 1:
@@ -370,6 +371,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         grid: torch.Tensor,
     ) -> dict[str, list[torch.Tensor]]:
         n, t, _, h, w = flows.size()
+        mid = self.mid_channels
 
         frame_idx = list(range(0, t + 1))
         flow_idx = list(range(-1, t))
@@ -384,32 +386,60 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
             flows, flow_idx, len(frame_idx), grid,
         )
 
+        scale_x = 2.0 / max(w - 1, 1)
+        scale_y = 2.0 / max(h - 1, 1)
+
+        flows_grid = flows.permute(0, 1, 3, 4, 2).contiguous()
+        flows_grid[..., 0].mul_(scale_x)
+        flows_grid[..., 1].mul_(scale_y)
+        flows_grid.add_(grid.unsqueeze(1))
+
+        acc_grids: dict[int, torch.Tensor] = {}
+        if acc_flows:
+            acc_keys = sorted(acc_flows.keys())
+            acc_batch = torch.cat([acc_flows[k] for k in acc_keys], dim=0)
+            acc_batch_nhwc = acc_batch.permute(0, 2, 3, 1).contiguous()
+            acc_batch_nhwc[..., 0].mul_(scale_x)
+            acc_batch_nhwc[..., 1].mul_(scale_y)
+            acc_batch_nhwc.add_(grid)
+            acc_grids = {
+                k: acc_batch_nhwc[j : j + 1] for j, k in enumerate(acc_keys)
+            }
+
         backbone_engine = self._backbone_engines[module_name]
-        feat_prop = flows.new_zeros(n, self.mid_channels, h, w)
+        doe = self._deform_offset_engines[module_name]
+        da = self.deform_align[module_name]
+        other_keys = [k for k in feats if k not in ["spatial", module_name]]
+
+        zero_feat = flows.new_zeros(n, mid, h, w)
+        zero_flow = flows.new_zeros(n, 2, h, w)
+        zero_cond = zero_feat
+
+        feat_prop = flows.new_zeros(n, mid, h, w)
         for i, idx in enumerate(frame_idx):
             feat_current = feats["spatial"][mapping_idx[idx]]
             if i > 0:
                 flow_n1 = flows[:, flow_idx[i], :, :, :]
-                cond_n1 = self._flow_warp_cached(
-                    feat_prop, flow_n1.permute(0, 2, 3, 1), grid,
+                cond_n1 = F.grid_sample(
+                    feat_prop, flows_grid[:, flow_idx[i]],
+                    mode="bilinear", padding_mode="zeros", align_corners=True,
                 )
-
-                feat_n2 = torch.zeros_like(feat_prop)
-                flow_n2 = torch.zeros_like(flow_n1)
-                cond_n2 = torch.zeros_like(cond_n1)
 
                 if i > 1:
                     feat_n2 = feats[module_name][-2]
                     flow_n2 = acc_flows[i]
-                    cond_n2 = self._flow_warp_cached(
-                        feat_n2, flow_n2.permute(0, 2, 3, 1), grid,
+                    cond_n2 = F.grid_sample(
+                        feat_n2, acc_grids[i],
+                        mode="bilinear", padding_mode="zeros",
+                        align_corners=True,
                     )
+                else:
+                    feat_n2 = zero_feat
+                    flow_n2 = zero_flow
+                    cond_n2 = zero_cond
 
                 cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
-                offset, mask = self._deform_offset_engines[module_name](
-                    cond, flow_n1, flow_n2,
-                )
-                da = self.deform_align[module_name]
+                offset, mask = doe(cond, flow_n1, flow_n2)
                 feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
                 feat_prop = torchvision.ops.deform_conv2d(
                     feat_prop, offset, da.weight, da.bias,
@@ -417,9 +447,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
                 )
 
             feat = [feat_current] + [
-                feats[k][idx]
-                for k in feats
-                if k not in ["spatial", module_name]
+                feats[k][idx] for k in other_keys
             ] + [feat_prop]
 
             feat = torch.cat(feat, dim=1)

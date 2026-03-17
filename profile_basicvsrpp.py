@@ -61,7 +61,7 @@ def profile_split_forward(split, device, dtype):
     total_deform_offset = 0.0
     total_deform_conv = 0.0
     total_backbone = 0.0
-    total_flow_warp = 0.0
+    total_grid_sample = 0.0
     total_precompute = 0.0
 
     grid = BasicVSRPlusPlusNetSplit._make_identity_grid(h_f, w_f, device, dtype)
@@ -73,6 +73,7 @@ def profile_split_forward(split, device, dtype):
             flows = flows_bwd if direction == "backward" else flows_fwd
 
             n2, t2, _, h2, w2 = flows.size()
+            mid = split.mid_channels
             frame_idx = list(range(0, t2 + 1))
             flow_idx = list(range(-1, t2))
             mapping_idx = list(range(0, len(feats["spatial"])))
@@ -86,11 +87,34 @@ def profile_split_forward(split, device, dtype):
             acc_flows = split._precompute_accumulated_flows(
                 flows, flow_idx, len(frame_idx), grid,
             )
+            scale_x = 2.0 / max(w2 - 1, 1)
+            scale_y = 2.0 / max(h2 - 1, 1)
+            flows_grid = flows.permute(0, 1, 3, 4, 2).contiguous()
+            flows_grid[..., 0].mul_(scale_x)
+            flows_grid[..., 1].mul_(scale_y)
+            flows_grid.add_(grid.unsqueeze(1))
+            acc_grids = {}
+            if acc_flows:
+                acc_keys = sorted(acc_flows.keys())
+                acc_batch = torch.cat([acc_flows[k] for k in acc_keys], dim=0)
+                acc_nhwc = acc_batch.permute(0, 2, 3, 1).contiguous()
+                acc_nhwc[..., 0].mul_(scale_x)
+                acc_nhwc[..., 1].mul_(scale_y)
+                acc_nhwc.add_(grid)
+                acc_grids = {k: acc_nhwc[j : j + 1] for j, k in enumerate(acc_keys)}
             torch.cuda.synchronize()
             total_precompute += time.perf_counter() - tp0
 
             backbone_engine = split._backbone_engines[module_name]
-            feat_prop = flows.new_zeros(n2, split.mid_channels, h2, w2)
+            doe = split._deform_offset_engines[module_name]
+            da = split.deform_align[module_name]
+            other_keys = [k for k in feats if k not in ["spatial", module_name]]
+
+            zero_feat = flows.new_zeros(n2, mid, h2, w2)
+            zero_flow = flows.new_zeros(n2, 2, h2, w2)
+            zero_cond = zero_feat
+
+            feat_prop = flows.new_zeros(n2, mid, h2, w2)
 
             for i, idx in enumerate(frame_idx):
                 feat_current = feats["spatial"][mapping_idx[idx]]
@@ -99,34 +123,35 @@ def profile_split_forward(split, device, dtype):
 
                     torch.cuda.synchronize()
                     tw0 = time.perf_counter()
-                    cond_n1 = split._flow_warp_cached(
-                        feat_prop, flow_n1.permute(0, 2, 3, 1), grid,
+                    cond_n1 = F.grid_sample(
+                        feat_prop, flows_grid[:, flow_idx[i]],
+                        mode="bilinear", padding_mode="zeros", align_corners=True,
                     )
-                    feat_n2 = torch.zeros_like(feat_prop)
-                    flow_n2 = torch.zeros_like(flow_n1)
-                    cond_n2 = torch.zeros_like(cond_n1)
                     if i > 1:
                         feat_n2 = feats[module_name][-2]
                         flow_n2 = acc_flows[i]
-                        cond_n2 = split._flow_warp_cached(
-                            feat_n2, flow_n2.permute(0, 2, 3, 1), grid,
+                        cond_n2 = F.grid_sample(
+                            feat_n2, acc_grids[i],
+                            mode="bilinear", padding_mode="zeros",
+                            align_corners=True,
                         )
+                    else:
+                        feat_n2 = zero_feat
+                        flow_n2 = zero_flow
+                        cond_n2 = zero_cond
                     torch.cuda.synchronize()
-                    total_flow_warp += time.perf_counter() - tw0
+                    total_grid_sample += time.perf_counter() - tw0
 
                     cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
 
                     torch.cuda.synchronize()
                     tdo0 = time.perf_counter()
-                    offset, mask = split._deform_offset_engines[module_name](
-                        cond, flow_n1, flow_n2,
-                    )
+                    offset, mask = doe(cond, flow_n1, flow_n2)
                     torch.cuda.synchronize()
                     total_deform_offset += time.perf_counter() - tdo0
 
                     torch.cuda.synchronize()
                     tdc0 = time.perf_counter()
-                    da = split.deform_align[module_name]
                     feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
                     feat_prop = torchvision.ops.deform_conv2d(
                         feat_prop, offset, da.weight, da.bias,
@@ -138,7 +163,7 @@ def profile_split_forward(split, device, dtype):
                 torch.cuda.synchronize()
                 tb0 = time.perf_counter()
                 feat = [feat_current] + [
-                    feats[k][idx] for k in feats if k not in ["spatial", module_name]
+                    feats[k][idx] for k in other_keys
                 ] + [feat_prop]
                 feat = torch.cat(feat, dim=1)
                 feat_prop = feat_prop + backbone_engine(feat)
@@ -150,8 +175,8 @@ def profile_split_forward(split, device, dtype):
             if "backward" in module_name:
                 feats[module_name] = feats[module_name][::-1]
 
-    print(f"  {'propagate/precompute_flows':30s} {total_precompute*1000:8.1f} ms")
-    print(f"  {'propagate/flow_warp':30s} {total_flow_warp*1000:8.1f} ms")
+    print(f"  {'propagate/precompute_all':30s} {total_precompute*1000:8.1f} ms")
+    print(f"  {'propagate/grid_sample':30s} {total_grid_sample*1000:8.1f} ms")
     print(f"  {'propagate/deform_offset (TRT)':30s} {total_deform_offset*1000:8.1f} ms")
     print(f"  {'propagate/deform_conv2d':30s} {total_deform_conv*1000:8.1f} ms")
     print(f"  {'propagate/backbone (TRT)':30s} {total_backbone*1000:8.1f} ms")
