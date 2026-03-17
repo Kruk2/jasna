@@ -239,7 +239,7 @@ TRANSLATIONS = {
         "tip_temporal_overlap": "Overlap between processed clips to reduce flickering at boundaries.\nHigher = smoother transitions but slightly slower. Going above 20 has little benefit.\n\nRecommended values based on clip size:\n- Clip 60 → overlap 6-8\n- Clip 90 → overlap 8-12\n- Clip 180 → overlap 15-20\nDefault: 8",
         "tip_enable_crossfade": "Smoothly blends clip boundaries to reduce flickering. Reuses already-processed frames so there is zero extra GPU cost.\n\nRecommended: Always ON.\nDefault: ON",
         "tip_fp16_mode": "Uses half-precision math to reduce VRAM usage and often run faster. No visible quality loss on modern GPUs.\n\nRecommended: ON for RTX 20-series and newer.\nDefault: ON",
-        "tip_compile_basicvsrpp": "Compiles the restoration model with TensorRT for a big speed boost. First run takes extra time to compile, but all later runs are much faster.\n\nUses ~2.5 GB VRAM per 30 frames of clip size (e.g. clip 60 ≈ 5 GB, clip 180 ≈ 15 GB).\nIf you run out of VRAM, disable this or lower clip size.\n\nRecommended: ON with clip size 60-90.\nDefault: ON",
+        "tip_compile_basicvsrpp": "Compiles the restoration model into TensorRT sub-engines for a big speed boost (~2-3x faster).\nFirst compilation takes 15-60 minutes. Close all other applications (including browsers) and avoid using the PC during compilation.\nEngines are cached and reused on subsequent runs.\n\nEngine VRAM: ~1.9 GB (clip 60), ~5.4 GB (clip 180).\nPeak VRAM during processing: ~7.6 GB (clip 60), ~14.7 GB (clip 180).\nWithout compilation: ~6 GB (clip 60), ~10.4 GB (clip 180).\n\nIf you run out of VRAM, disable this or lower clip size.\n\nRecommended: ON with clip size 60-90.\nDefault: ON",
         "tip_denoise_strength": "Reduces noise and grain in restored areas. Higher = smoother but may lose fine detail.\n\nNone: no denoising. Low/Medium: good starting point. High: heavy smoothing.\nDefault: None",
         "tip_denoise_step": "When to apply denoising in the pipeline:\n- After Primary: before upscaling (secondary restoration). Denoises at 256x256.\n- After Secondary: after upscaling, right before final output. Denoises at full resolution.\n\nDefault: After Primary",
         "tip_secondary_restoration": "Optional second pass that upscales restored areas from 256x256 to 512 or 1024 pixels. Improves sharpness, especially for close-ups and 4K video.\n\nRTX Super Res is recommended — fast, free, no extra setup.\nTopaz TVAI requires a separate purchase and install.",
@@ -270,13 +270,13 @@ TRANSLATIONS = {
 
         # Engine compilation / first run warnings
         "engine_first_run_title": "First run may be slow",
-        "engine_first_run_body": "Some TensorRT engines are missing and may be compiled for your GPU. This is normal on the first run. The application may appear unresponsive during compilation. Do not close it.",
+        "engine_first_run_body": "Some TensorRT engines need to be compiled for your GPU. This is normal on the first run and can take 15-60 minutes.\n\nClose all other applications (browsers, games, etc.) and do not use the PC during compilation. The application may appear unresponsive — do not close it.\n\nEngines are cached and reused on all future runs.",
         "engine_first_run_missing": "Missing engines:",
         "engine_name_rfdetr": "RF-DETR (detection)",
         "engine_name_yolo": "YOLO (detection)",
         "engine_name_basicvsrpp": "BasicVSR++ (restoration)",
         "engine_basicvsrpp_risky_title": "BasicVSR++ compilation warning",
-        "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT compilation may be risky with your GPU VRAM.\n\nGPU VRAM (approx): {vram_gb} GB\nRequested clip size: {requested_clip}\nApprox safe max: {safe_clip}\n\nContinue with compilation anyway? This can take a long time and may run out of VRAM.",
+        "engine_basicvsrpp_risky_body": "BasicVSR++ TensorRT compilation may be risky with your GPU VRAM.\n\nGPU VRAM (approx): {vram_gb} GB\nRequested clip size: {requested_clip}\nApprox safe max: {safe_clip}\n\nEngine VRAM: ~1.9 GB (clip 60), ~5.4 GB (clip 180).\nPeak VRAM during processing: ~7.6 GB (clip 60), ~14.7 GB (clip 180).\n\nCompilation takes 15-60 minutes and may run out of VRAM.\nClose all other applications (including browsers) and do not use the PC during compilation.\nContinue anyway?",
         # About dialog
         "dialog_about_title": "About Jasna",
         "dialog_about_version": "Version {version}",

@@ -33,7 +33,7 @@ def compile_mosaic_restoration_model(
     max_clip_size: int = 60,
     optimization_level: int = 5,
 ) -> bool:
-    """Compile BasicVSR++ sub-engines (backbone × 4 + upsample × 1).
+    """Compile BasicVSR++ into 6 TensorRT sub-engines (loop_body × 4 + preprocess + upsample).
 
     Returns True if all sub-engines exist after this call.
     """

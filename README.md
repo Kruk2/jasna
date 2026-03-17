@@ -46,7 +46,9 @@ Download the latest release package (Windows/Linux).
   - **Windows**: You’re good to go — Jasna ships with everything it needs (`ffmpeg`, `ffprobe`, and `mkvmerge`).
   - **Linux**: You need `ffmpeg`, `ffprobe` (**major version must be 8**), and `mkvmerge` available on your system. Install via your package manager. MKVToolNix: [downloads](https://mkvtoolnix.download/downloads.html).
 
-**First run might be slow because models will be compiled for your hardware (you can copy .engine files from model_weights to a new version!)**
+**First run will be slow** — TensorRT engines are compiled for your GPU. This takes **15-60 minutes**.\
+Close all other applications (including browsers) and do not use the PC during compilation.\
+Engines are cached in the `model_weights` folder and reused on all future runs (you can copy engine files & folders to a new version).
 
 Remember to have up to date nvidia drivers.\
 Tested nvidia drivers: **591.67**
@@ -76,10 +78,16 @@ Some guidance from my limited testing:
 Using clip size below 60 might look ok, depends on video but prefer using 60 even if it means disabling model compilation.
 ```--enable-crossfade``` should probably be always enabled as it reduces flickering .
 
-### Restoration model compilation.
-Read [#6](https://github.com/Kruk2/jasna/issues/6) for more details.\
-Compiled model takes a lot of vram. Rough estimate is around 2.5GB VRAM per 30 frames in clip size. If you plan to use 180 clip size you have to have 24gb vram+ (180/30 * 2.5).\
-You can opt out from compiled model at the cost of performance.\
+### Restoration model compilation
+The restoration model is compiled into TensorRT sub-engines.\
+First compilation takes **15-60 minutes** — close all other applications (including browsers) and avoid using the PC.\
+Engines are cached and reused automatically. You can opt out from compilation at the cost of performance.
+
+| | Clip 60 | Clip 180 |
+|---|---|---|
+| **Engine VRAM** | ~1.9 GB | ~5.4 GB |
+| **Peak VRAM (compiled)** | ~7.6 GB | ~14.7 GB |
+| **Peak VRAM (no compilation)** | ~6 GB | ~10.4 GB |
 
 ### Disclaimer
 Jasna is in early development and the main goal is to improve: restoration quality, mosaic detection, speed & vram consumption (in this order).

@@ -290,7 +290,7 @@ def compile_basicvsrpp_sub_engines(
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
-            message=f"Compiling loop_body sub-engine [{direction}] (grid_sample+deform_align+backbone, prefix={prefix_channels}ch)",
+            message=f"Compiling sub-engine {i + 1}/6: loop_body [{direction}]",
             optimization_level=optimization_level,
         )
         del wrapper, inp_fp, inp_g1, inp_fn2, inp_g2, inp_fc, inp_f1, inp_f2, inp_bp
@@ -316,7 +316,7 @@ def compile_basicvsrpp_sub_engines(
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
-            message=f"Compiling preprocess sub-engine (feat_extract+downsample+spynet, batch=2..{max_clip_size})",
+            message=f"Compiling sub-engine 5/6: preprocess (batch=3..{max_clip_size})",
             device=device,
             optimization_level=optimization_level,
         )
@@ -348,7 +348,7 @@ def compile_basicvsrpp_sub_engines(
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
-            message=f"Compiling upsample sub-engine ({in_ch}→3 ch, batch=1..{max_clip_size})",
+            message=f"Compiling sub-engine 6/6: upsample (batch=1..{max_clip_size})",
             device=device,
             optimization_level=optimization_level,
         )

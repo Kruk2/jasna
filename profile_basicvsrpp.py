@@ -15,7 +15,7 @@ from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.basicvsrpp_sub_engines import BasicVSRPlusPlusNetSplit, get_sub_engine_paths
 
 
-CLIP_LENGTH = 60
+CLIP_LENGTH = 180
 SIZE = 256
 WARMUP = 3
 RUNS = 100

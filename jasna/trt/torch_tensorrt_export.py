@@ -151,7 +151,7 @@ def _save_with_dynamic_shapes(
         )
         torch.export.save(ep, output_path)
     except RuntimeError:
-        logger.warning(
+        logger.debug(
             "torch.export.export failed (multi-subgraph dynamic shapes); "
             "falling back to torch.save for %s", output_path,
         )
