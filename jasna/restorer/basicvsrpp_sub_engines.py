@@ -102,6 +102,103 @@ class _UpsampleWrapper(nn.Module):
         return self.conv_last(x)
 
 
+class _SPyNetWrapper(nn.Module):
+    """Flattened SPyNet that explicitly unrolls the 6-level pyramid.
+
+    The original SPyNet uses Python lists and a for-loop to build the image
+    pyramid and process each level. torch_tensorrt can't compile that as a
+    single graph – it splits into multiple sub-graphs whose dynamic shapes
+    break ``torch.export.export`` at save time.
+
+    This wrapper hard-codes the 6 levels so the entire forward is a single
+    traceable graph.  Valid only for inputs whose spatial size is already a
+    multiple of 32 (true for our 64×64 downsampled frames).
+    """
+
+    def __init__(self, spynet: nn.Module):
+        super().__init__()
+        self.register_buffer("mean", spynet.mean.clone())
+        self.register_buffer("std", spynet.std.clone())
+        self.bm0 = spynet.basic_module[0]
+        self.bm1 = spynet.basic_module[1]
+        self.bm2 = spynet.basic_module[2]
+        self.bm3 = spynet.basic_module[3]
+        self.bm4 = spynet.basic_module[4]
+        self.bm5 = spynet.basic_module[5]
+
+    @staticmethod
+    def _warp_border(x: torch.Tensor, flow: torch.Tensor) -> torch.Tensor:
+        n, c, h, w = x.shape
+        theta = torch.eye(2, 3, device=x.device, dtype=x.dtype).unsqueeze(0).expand(n, -1, -1)
+        grid = F.affine_grid(theta, (n, c, h, w), align_corners=True)
+        flow_perm = flow.permute(0, 2, 3, 1)
+        flow_x = flow_perm[..., 0] * (2.0 / max(w - 1, 1))
+        flow_y = flow_perm[..., 1] * (2.0 / max(h - 1, 1))
+        return F.grid_sample(
+            x, grid + torch.stack((flow_x, flow_y), dim=-1),
+            mode="bilinear", padding_mode="border", align_corners=True,
+        )
+
+    def _level(self, bm: nn.Module, ref_l: torch.Tensor, supp_l: torch.Tensor, flow: torch.Tensor) -> torch.Tensor:
+        flow_up = F.interpolate(flow, scale_factor=2, mode="bilinear", align_corners=True) * 2.0
+        warped = self._warp_border(supp_l, flow_up)
+        return flow_up + bm(torch.cat([ref_l, warped, flow_up], dim=1))
+
+    def forward(self, ref: torch.Tensor, supp: torch.Tensor) -> torch.Tensor:
+        n = ref.shape[0]
+        h, w = ref.shape[2:]
+
+        r0 = (ref - self.mean) / self.std
+        s0 = (supp - self.mean) / self.std
+
+        r1 = F.avg_pool2d(r0, 2, 2, count_include_pad=False)
+        s1 = F.avg_pool2d(s0, 2, 2, count_include_pad=False)
+        r2 = F.avg_pool2d(r1, 2, 2, count_include_pad=False)
+        s2 = F.avg_pool2d(s1, 2, 2, count_include_pad=False)
+        r3 = F.avg_pool2d(r2, 2, 2, count_include_pad=False)
+        s3 = F.avg_pool2d(s2, 2, 2, count_include_pad=False)
+        r4 = F.avg_pool2d(r3, 2, 2, count_include_pad=False)
+        s4 = F.avg_pool2d(s3, 2, 2, count_include_pad=False)
+        r5 = F.avg_pool2d(r4, 2, 2, count_include_pad=False)
+        s5 = F.avg_pool2d(s4, 2, 2, count_include_pad=False)
+
+        flow = ref.new_zeros(n, 2, h // 32, w // 32)
+        warped = self._warp_border(s5, flow)
+        flow = flow + self.bm0(torch.cat([r5, warped, flow], dim=1))
+
+        flow = self._level(self.bm1, r4, s4, flow)
+        flow = self._level(self.bm2, r3, s3, flow)
+        flow = self._level(self.bm3, r2, s2, flow)
+        flow = self._level(self.bm4, r1, s1, flow)
+        flow = self._level(self.bm5, r0, s0, flow)
+
+        return flow
+
+
+class _PreprocessWrapper(nn.Module):
+    """Fuses feat_extract + bicubic downsample + bidirectional SPyNet flow.
+
+    Single engine call replaces three separate stages, eliminating
+    kernel-launch overhead between feat_extract, interpolate, and SPyNet.
+    Input: (T, 3, H, W)  where H=W=INPUT_SIZE
+    Output: (feats, flows_fwd, flows_bwd)
+    """
+
+    def __init__(self, feat_extract: nn.Module, spynet: nn.Module):
+        super().__init__()
+        self.feat_extract = feat_extract
+        self.spynet = _SPyNetWrapper(spynet)
+
+    def forward(self, lqs_flat: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        feats = self.feat_extract(lqs_flat)
+        lqs_ds = F.interpolate(lqs_flat, scale_factor=0.25, mode="bicubic")
+        lqs_1 = lqs_ds[:-1]
+        lqs_2 = lqs_ds[1:]
+        flows_bwd = self.spynet(lqs_1, lqs_2)
+        flows_fwd = self.spynet(lqs_2, lqs_1)
+        return feats, flows_fwd, flows_bwd
+
+
 def _sub_engine_dir(model_weights_path: str) -> str:
     stem = os.path.splitext(os.path.basename(model_weights_path))[0]
     return os.path.join(os.path.dirname(model_weights_path), f"{stem}_sub_engines")
@@ -119,10 +216,10 @@ def _upsample_engine_path(engine_dir: str, fp16: bool, max_clip_size: int) -> st
     return os.path.join(engine_dir, f"upsample_dyn_b{max_clip_size}.trt_{prec}{suf}.engine")
 
 
-def _feat_extract_engine_path(engine_dir: str, fp16: bool, max_clip_size: int) -> str:
+def _preprocess_engine_path(engine_dir: str, fp16: bool, max_clip_size: int) -> str:
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
-    return os.path.join(engine_dir, f"feat_extract_dyn_b{max_clip_size}.trt_{prec}{suf}.engine")
+    return os.path.join(engine_dir, f"preprocess_b{max_clip_size}.trt_{prec}{suf}.engine")
 
 
 def get_sub_engine_paths(model_weights_path: str, fp16: bool, max_clip_size: int = 60) -> dict[str, str]:
@@ -130,8 +227,8 @@ def get_sub_engine_paths(model_weights_path: str, fp16: bool, max_clip_size: int
     paths: dict[str, str] = {}
     for d in DIRECTIONS:
         paths[f"loop_body_{d}"] = _loop_body_engine_path(engine_dir, d, fp16)
+    paths["preprocess"] = _preprocess_engine_path(engine_dir, fp16, max_clip_size)
     paths["upsample"] = _upsample_engine_path(engine_dir, fp16, max_clip_size)
-    paths["feat_extract"] = _feat_extract_engine_path(engine_dir, fp16, max_clip_size)
     return paths
 
 
@@ -198,6 +295,33 @@ def compile_basicvsrpp_sub_engines(
         )
         del wrapper, inp_fp, inp_g1, inp_fn2, inp_g2, inp_fc, inp_f1, inp_f2, inp_bp
 
+    # ── preprocess engine (feat_extract + downsample + bidirectional SPyNet, dynamic batch) ──
+    path = _preprocess_engine_path(engine_dir, fp16, max_clip_size)
+    paths["preprocess"] = path
+    if os.path.isfile(path):
+        logger.info("Sub-engine already exists: %s", path)
+    else:
+        wrapper = _PreprocessWrapper(
+            generator.feat_extract, generator.spynet,
+        ).to(device=device, dtype=dtype).eval()
+        dyn_input = torch_tensorrt.Input(
+            min_shape=[3, 3, INPUT_SIZE, INPUT_SIZE],
+            opt_shape=[max_clip_size, 3, INPUT_SIZE, INPUT_SIZE],
+            max_shape=[max_clip_size, 3, INPUT_SIZE, INPUT_SIZE],
+            dtype=dtype,
+        )
+        compile_and_save_torchtrt_dynamo(
+            module=wrapper,
+            inputs=[dyn_input],
+            output_path=path,
+            dtype=dtype,
+            workspace_size_bytes=workspace_size,
+            message=f"Compiling preprocess sub-engine (feat_extract+downsample+spynet, batch=2..{max_clip_size})",
+            device=device,
+            optimization_level=optimization_level,
+        )
+        del wrapper
+
     # ── upsample engine (dynamic batch – called once for all frames) ──
     path = _upsample_engine_path(engine_dir, fp16, max_clip_size)
     paths["upsample"] = path
@@ -224,36 +348,11 @@ def compile_basicvsrpp_sub_engines(
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
-            message=f"Compiling upsample sub-engine ({in_ch}\u21923 ch, batch=1..{max_clip_size})",
+            message=f"Compiling upsample sub-engine ({in_ch}→3 ch, batch=1..{max_clip_size})",
             device=device,
             optimization_level=optimization_level,
         )
         del wrapper
-
-    # ── feat_extract engine (dynamic batch) ──
-    path = _feat_extract_engine_path(engine_dir, fp16, max_clip_size)
-    paths["feat_extract"] = path
-    if os.path.isfile(path):
-        logger.info("Sub-engine already exists: %s", path)
-    else:
-        feat_extract = generator.feat_extract.to(device=device, dtype=dtype).eval()
-        fe_input = torch_tensorrt.Input(
-            min_shape=[1, 3, INPUT_SIZE, INPUT_SIZE],
-            opt_shape=[max_clip_size, 3, INPUT_SIZE, INPUT_SIZE],
-            max_shape=[max_clip_size, 3, INPUT_SIZE, INPUT_SIZE],
-            dtype=dtype,
-        )
-        compile_and_save_torchtrt_dynamo(
-            module=feat_extract,
-            inputs=[fe_input],
-            output_path=path,
-            dtype=dtype,
-            workspace_size_bytes=workspace_size,
-            message=f"Compiling feat_extract sub-engine (3\u2192{mid} ch, batch=1..{max_clip_size})",
-            device=device,
-            optimization_level=optimization_level,
-        )
-        del feat_extract
 
     gc.collect()
     if device.type == "cuda":
@@ -267,7 +366,7 @@ def load_sub_engines(
     fp16: bool,
     max_clip_size: int = 60,
 ) -> tuple[dict[str, nn.Module], nn.Module, nn.Module] | None:
-    """Returns ``(loop_body_engines, upsample, feat_extract)`` or *None*."""
+    """Returns ``(loop_body_engines, preprocess, upsample)`` or *None*."""
     paths = get_sub_engine_paths(model_weights_path, fp16, max_clip_size)
     if not all(os.path.isfile(p) for p in paths.values()):
         return None
@@ -277,13 +376,13 @@ def load_sub_engines(
         loop_body_engines[d] = load_torchtrt_export(
             checkpoint_path=paths[f"loop_body_{d}"], device=device,
         )
+    preprocess_engine = load_torchtrt_export(
+        checkpoint_path=paths["preprocess"], device=device,
+    )
     upsample_engine = load_torchtrt_export(
         checkpoint_path=paths["upsample"], device=device,
     )
-    feat_extract_engine = load_torchtrt_export(
-        checkpoint_path=paths["feat_extract"], device=device,
-    )
-    return loop_body_engines, upsample_engine, feat_extract_engine
+    return loop_body_engines, preprocess_engine, upsample_engine
 
 
 class BasicVSRPlusPlusNetSplit(nn.Module):
@@ -291,29 +390,16 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         self,
         generator: nn.Module,
         loop_body_engines: dict[str, nn.Module],
+        preprocess_engine: nn.Module,
         upsample_engine: nn.Module,
-        feat_extract_engine: nn.Module,
     ):
         super().__init__()
-        self.spynet = generator.spynet
         self.mid_channels = generator.mid_channels
         self.backbone = generator.backbone
 
         self._loop_body_engines = loop_body_engines
+        self._preprocess_engine = preprocess_engine
         self._upsample_engine = upsample_engine
-        self._feat_extract_engine = feat_extract_engine
-
-
-    def compute_flow(self, lqs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        n, t, c, h, w = lqs.size()
-        if t == 1:
-            empty = lqs.new_zeros(n, 0, 2, h, w)
-            return empty, empty
-        lqs_1 = lqs[:, :-1, :, :, :].reshape(-1, c, h, w)
-        lqs_2 = lqs[:, 1:, :, :, :].reshape(-1, c, h, w)
-        flows_backward = self.spynet(lqs_1, lqs_2).view(n, t - 1, 2, h, w)
-        flows_forward = self.spynet(lqs_2, lqs_1).view(n, t - 1, 2, h, w)
-        return flows_forward, flows_backward
 
     @staticmethod
     def _make_identity_grid(
@@ -355,22 +441,24 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         acc = fn1_batch + warped
         return {i: acc[j : j + 1] for j, i in enumerate(indices)}
 
-    def propagate(
+    def _precompute_flow_data(
         self,
-        feats: dict[str, list[torch.Tensor]],
         flows: torch.Tensor,
-        module_name: str,
+        direction: str,
         grid: torch.Tensor,
-    ) -> dict[str, list[torch.Tensor]]:
+    ) -> tuple[
+        list[int], list[int],
+        dict[int, torch.Tensor], torch.Tensor, dict[int, torch.Tensor],
+    ]:
+        """Precompute acc_flows, flows_grid, acc_grids for a flow direction.
+
+        Returns (frame_idx, flow_idx, acc_flows, flows_grid, acc_grids).
+        """
         n, t, _, h, w = flows.size()
-        mid = self.mid_channels
 
         frame_idx = list(range(0, t + 1))
         flow_idx = list(range(-1, t))
-        mapping_idx = list(range(0, len(feats["spatial"])))
-        mapping_idx += mapping_idx[::-1]
-
-        if "backward" in module_name:
+        if direction == "backward":
             frame_idx = frame_idx[::-1]
             flow_idx = frame_idx
 
@@ -397,6 +485,26 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
             acc_grids = {
                 k: acc_batch_nhwc[j : j + 1] for j, k in enumerate(acc_keys)
             }
+
+        return frame_idx, flow_idx, acc_flows, flows_grid, acc_grids
+
+    def propagate(
+        self,
+        feats: dict[str, list[torch.Tensor]],
+        flows: torch.Tensor,
+        module_name: str,
+        grid: torch.Tensor,
+        frame_idx: list[int],
+        flow_idx: list[int],
+        acc_flows: dict[int, torch.Tensor],
+        flows_grid: torch.Tensor,
+        acc_grids: dict[int, torch.Tensor],
+    ) -> dict[str, list[torch.Tensor]]:
+        n, t, _, h, w = flows.size()
+        mid = self.mid_channels
+
+        mapping_idx = list(range(0, len(feats["spatial"])))
+        mapping_idx += mapping_idx[::-1]
 
         lbe = self._loop_body_engines[module_name]
         backbone_pt = self.backbone[module_name]
@@ -454,28 +562,51 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         out_batch = out_batch + lqs.squeeze(0)
         return out_batch.unsqueeze(0)
 
+    _PREPROCESS_MIN_BATCH = 3
+
     def forward(self, lqs: torch.Tensor) -> torch.Tensor:
         n, t, c, h, w = lqs.size()
 
-        lqs_downsample = F.interpolate(
-            lqs.view(-1, c, h, w), scale_factor=0.25, mode="bicubic"
-        ).view(n, t, c, h // 4, w // 4)
+        lqs_flat = lqs.view(-1, c, h, w)
+        padded = t < self._PREPROCESS_MIN_BATCH
+        if padded:
+            pad_count = self._PREPROCESS_MIN_BATCH - t
+            lqs_flat = torch.cat(
+                [lqs_flat, lqs_flat[-1:].expand(pad_count, -1, -1, -1)], dim=0,
+            )
+            t_engine = self._PREPROCESS_MIN_BATCH
+        else:
+            t_engine = t
+
+        feats_, flows_fwd, flows_bwd = self._preprocess_engine(lqs_flat)
+        h_f, w_f = feats_.shape[2:]
+
+        feats_ = feats_[:t]
+        flows_fwd = flows_fwd[:t - 1] if t > 1 else flows_fwd[:0]
+        flows_bwd = flows_bwd[:t - 1] if t > 1 else flows_bwd[:0]
+
+        feats_ = feats_.view(n, t, -1, h_f, w_f)
 
         feats: dict[str, list[torch.Tensor]] = {}
-        feats_ = self._feat_extract_engine(lqs.view(-1, c, h, w))
-        h_f, w_f = feats_.shape[2:]
-        feats_ = feats_.view(n, t, -1, h_f, w_f)
         feats["spatial"] = [feats_[:, i, :, :, :] for i in range(0, t)]
 
-        flows_forward, flows_backward = self.compute_flow(lqs_downsample)
+        flows_forward = flows_fwd.view(n, max(t - 1, 0), 2, h // 4, w // 4)
+        flows_backward = flows_bwd.view(n, max(t - 1, 0), 2, h // 4, w // 4)
 
         grid = self._make_identity_grid(h_f, w_f, lqs.device, lqs.dtype)
+
+        flow_data: dict[str, tuple] = {}
+        for direction in ["backward", "forward"]:
+            flows = flows_backward if direction == "backward" else flows_forward
+            flow_data[direction] = self._precompute_flow_data(flows, direction, grid)
+
         for iter_ in [1, 2]:
             for direction in ["backward", "forward"]:
                 module = f"{direction}_{iter_}"
                 feats[module] = []
                 flows = flows_backward if direction == "backward" else flows_forward
-                feats = self.propagate(feats, flows, module, grid)
+                fi, fli, af, fg, ag = flow_data[direction]
+                feats = self.propagate(feats, flows, module, grid, fi, fli, af, fg, ag)
 
         return self.upsample(lqs, feats)
 
@@ -490,9 +621,9 @@ def create_split_forward(
     result = load_sub_engines(model_weights_path, device, fp16, max_clip_size)
     if result is None:
         return None
-    loop_body_engines, upsample_engine, feat_extract_engine = result
+    loop_body_engines, preprocess_engine, upsample_engine = result
     generator = _get_inference_generator(model)
     split = BasicVSRPlusPlusNetSplit(
-        generator, loop_body_engines, upsample_engine, feat_extract_engine,
+        generator, loop_body_engines, preprocess_engine, upsample_engine,
     )
     return split
