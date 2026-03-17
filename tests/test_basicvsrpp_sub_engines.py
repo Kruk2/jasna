@@ -11,8 +11,7 @@ from jasna.restorer.basicvsrpp_sub_engines import (
     DIRECTIONS,
     FEATURE_SIZE,
     BasicVSRPlusPlusNetSplit,
-    _BackboneWrapper,
-    _DeformAlignWrapper,
+    _PropagateBodyWrapper,
     _UpsampleWrapper,
     _get_inference_generator,
     _sub_engine_dir,
@@ -29,12 +28,11 @@ def test_sub_engine_dir_uses_stem() -> None:
     assert result.startswith(r"C:\weights")
 
 
-def test_get_sub_engine_paths_returns_10_paths() -> None:
+def test_get_sub_engine_paths_returns_6_paths() -> None:
     paths = get_sub_engine_paths("model_weights/model.pth", fp16=True)
-    assert len(paths) == 10
+    assert len(paths) == 6
     for d in DIRECTIONS:
-        assert f"backbone_{d}" in paths
-        assert f"deform_align_{d}" in paths
+        assert f"loop_body_{d}" in paths
     assert "upsample" in paths
     assert "feat_extract" in paths
     for p in paths.values():
@@ -77,14 +75,26 @@ def test_load_sub_engines_returns_none_when_missing(tmp_path: Path) -> None:
     assert result is None
 
 
-def test_backbone_wrapper_forward_shape() -> None:
-    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import ResidualBlocksWithInputConv
+def test_propagate_body_wrapper_forward_shape() -> None:
+    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
-    backbone = ResidualBlocksWithInputConv(128, 64, 3)
-    wrapper = _BackboneWrapper(backbone)
-    x = torch.randn(1, 128, FEATURE_SIZE, FEATURE_SIZE)
-    out = wrapper(x)
-    assert out.shape == (1, 64, FEATURE_SIZE, FEATURE_SIZE)
+    torch.manual_seed(0)
+    net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
+    net.eval()
+    mid = net.mid_channels
+    d = "backward_1"
+    wrapper = _PropagateBodyWrapper(net.deform_align[d], net.backbone[d])
+    fp = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
+    g1 = torch.randn(1, FEATURE_SIZE, FEATURE_SIZE, 2)
+    fn2 = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
+    g2 = torch.randn(1, FEATURE_SIZE, FEATURE_SIZE, 2)
+    fc = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
+    f1 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE)
+    f2 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE)
+    bp = torch.randn(1, mid, FEATURE_SIZE, FEATURE_SIZE)
+    with torch.inference_mode():
+        out = wrapper(fp, g1, fn2, g2, fc, f1, f2, bp)
+    assert out.shape == (1, mid, FEATURE_SIZE, FEATURE_SIZE)
 
 
 def test_upsample_wrapper_forward_shape() -> None:
@@ -128,8 +138,6 @@ def test_split_forward_matches_pytorch_forward() -> None:
     net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
     net.eval()
 
-    backbone_engines = {d: net.backbone[d] for d in DIRECTIONS}
-
     class _UpsamplePassthrough(nn.Module):
         def __init__(self, parent: BasicVSRPlusPlusNet):
             super().__init__()
@@ -144,14 +152,14 @@ def test_split_forward_matches_pytorch_forward() -> None:
 
     upsample_engine = _UpsamplePassthrough(net)
 
-    deform_align_engines = {
-        d: _DeformAlignWrapper(net.deform_align[d]) for d in DIRECTIONS
+    loop_body_engines = {
+        d: _PropagateBodyWrapper(net.deform_align[d], net.backbone[d])
+        for d in DIRECTIONS
     }
 
     split = BasicVSRPlusPlusNetSplit(
-        net, backbone_engines, upsample_engine,
+        net, loop_body_engines, upsample_engine,
         feat_extract_engine=net.feat_extract,
-        deform_align_engines=deform_align_engines,
     )
     split.eval()
 

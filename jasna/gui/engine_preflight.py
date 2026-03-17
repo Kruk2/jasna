@@ -74,7 +74,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
 
     restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
     if bool(settings.compile_basicvsrpp):
-        sub_paths = get_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode))
+        sub_paths = get_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode), int(settings.max_clip_size))
         all_engine_paths = tuple(Path(p) for p in sub_paths.values())
         missing_paths = tuple(p for p in all_engine_paths if not p.is_file())
         reqs.append(

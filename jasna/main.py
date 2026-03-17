@@ -205,6 +205,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     benchmark_group = parser.add_argument_group("Benchmark")
     benchmark_group.add_argument(
+        "--benchmark-filter",
+        type=str,
+        default=None,
+        help="Only run benchmarks whose name contains this string (e.g. 'basicvsrpp')",
+    )
+    benchmark_group.add_argument(
         "--benchmark-video",
         type=str,
         action="append",
@@ -313,6 +319,7 @@ def main() -> None:
             device=device,
             fp16=fp16,
             compile_basicvsrpp=bool(args.compile_basicvsrpp),
+            max_clip_size=max_clip_size,
         )
 
         precompile_detection_engine(

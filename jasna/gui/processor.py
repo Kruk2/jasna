@@ -213,6 +213,7 @@ class Processor:
             device=device,
             fp16=settings.fp16_mode,
             compile_basicvsrpp=compile_basicvsrpp,
+            max_clip_size=int(settings.max_clip_size),
         )
 
         precompile_detection_engine(

@@ -46,6 +46,7 @@ def compile_and_save_torchtrt_dynamo(
     workspace_size_bytes: int,
     message: str,
     device: torch.device | None = None,
+    optimization_level: int = 3,
 ) -> str:
     """Compile a module to TensorRT and save the result.
 
@@ -74,7 +75,7 @@ def compile_and_save_torchtrt_dynamo(
                 use_fp32_acc=False,
                 use_explicit_typing=False,
                 sparse_weights=False,
-                optimization_level=3,
+                optimization_level=int(optimization_level),
                 hardware_compatible=False,
                 use_python_runtime=False,
                 cache_built_engines=False,
