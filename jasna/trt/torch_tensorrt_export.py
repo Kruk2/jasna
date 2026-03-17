@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 
 import torch
 
@@ -30,9 +31,20 @@ def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch
     prev_level = fake_reg_logger.level
     fake_reg_logger.setLevel(logging.ERROR)
     try:
-        with open(checkpoint_path, "rb") as f:
-            trt_module = torch.export.load(f).module()
-            return trt_module.to(device)
+        export_logger = logging.getLogger("torch.export")
+        prev_export_level = export_logger.level
+        export_logger.setLevel(logging.ERROR)
+        try:
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*PytorchStreamReader.*")
+                try:
+                    with open(checkpoint_path, "rb") as f:
+                        trt_module = torch.export.load(f).module()
+                except Exception:
+                    trt_module = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        finally:
+            export_logger.setLevel(prev_export_level)
+        return trt_module.to(device)
     finally:
         fake_reg_logger.setLevel(prev_level)
 
@@ -62,7 +74,6 @@ def compile_and_save_torchtrt_dynamo(
 
     logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
     with torch_tensorrt.logging.errors():
-        print(message)
         logger.info("%s", message)
         with torch.cuda.device(device):
             trt_gm = torch_tensorrt.compile(
@@ -131,11 +142,18 @@ def _save_with_dynamic_shapes(
             sample_args.append(inp)
             dyn_shapes.append(None)
 
-    ep = torch.export.export(
-        trt_gm,
-        tuple(sample_args),
-        dynamic_shapes=tuple(dyn_shapes),
-        strict=False,
-    )
-    torch.export.save(ep, output_path)
+    try:
+        ep = torch.export.export(
+            trt_gm,
+            tuple(sample_args),
+            dynamic_shapes=tuple(dyn_shapes),
+            strict=False,
+        )
+        torch.export.save(ep, output_path)
+    except RuntimeError:
+        logger.warning(
+            "torch.export.export failed (multi-subgraph dynamic shapes); "
+            "falling back to torch.save for %s", output_path,
+        )
+        torch.save(trt_gm, output_path)
 

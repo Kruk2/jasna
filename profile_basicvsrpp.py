@@ -50,20 +50,12 @@ def _profile_stages_once(
     n, t, c, h, w = lqs.size()
 
     lqs_flat = lqs.view(-1, c, h, w)
-    feats_, dt = _timed_no_print(split._feat_extract_engine, lqs_flat)
-    stage_ms["feat_extract (TRT)"] = dt
+    (feats_, flows_fwd, flows_bwd), dt = _timed_no_print(split._preprocess_engine, lqs_flat)
+    stage_ms["preprocess (TRT)"] = dt
     h_f, w_f = feats_.shape[2:]
     feats_ = feats_.view(n, t, -1, h_f, w_f)
-
-    lqs_ds, dt = _timed_no_print(
-        lambda: F.interpolate(
-            lqs.view(-1, c, h, w), scale_factor=0.25, mode="bicubic"
-        ).view(n, t, c, h // 4, w // 4),
-    )
-    stage_ms["downsample (bicubic)"] = dt
-
-    (flows_fwd, flows_bwd), dt = _timed_no_print(split.compute_flow, lqs_ds)
-    stage_ms["compute_flow (SPyNet)"] = dt
+    flows_fwd = flows_fwd.view(n, t - 1, 2, h // 4, w // 4)
+    flows_bwd = flows_bwd.view(n, t - 1, 2, h // 4, w // 4)
 
     feats: dict[str, list[torch.Tensor]] = {"spatial": [feats_[:, i, :, :, :] for i in range(t)]}
     total_loop_body = 0.0
@@ -71,44 +63,26 @@ def _profile_stages_once(
 
     grid = BasicVSRPlusPlusNetSplit._make_identity_grid(h_f, w_f, device, dtype)
 
+    flow_data: dict[str, tuple] = {}
+    for direction in ["backward", "forward"]:
+        flows = flows_bwd if direction == "backward" else flows_fwd
+        torch.cuda.synchronize()
+        tp0 = time.perf_counter()
+        flow_data[direction] = split._precompute_flow_data(flows, direction, grid)
+        torch.cuda.synchronize()
+        total_precompute += time.perf_counter() - tp0
+
     for iter_ in [1, 2]:
         for direction in ["backward", "forward"]:
             module_name = f"{direction}_{iter_}"
             feats[module_name] = []
             flows = flows_bwd if direction == "backward" else flows_fwd
+            frame_idx, flow_idx, acc_flows, flows_grid, acc_grids = flow_data[direction]
 
             n2, t2, _, h2, w2 = flows.size()
             mid = split.mid_channels
-            frame_idx = list(range(0, t2 + 1))
-            flow_idx = list(range(-1, t2))
             mapping_idx = list(range(0, len(feats["spatial"])))
             mapping_idx += mapping_idx[::-1]
-            if "backward" in module_name:
-                frame_idx = frame_idx[::-1]
-                flow_idx = frame_idx
-
-            torch.cuda.synchronize()
-            tp0 = time.perf_counter()
-            acc_flows = split._precompute_accumulated_flows(
-                flows, flow_idx, len(frame_idx), grid,
-            )
-            scale_x = 2.0 / max(w2 - 1, 1)
-            scale_y = 2.0 / max(h2 - 1, 1)
-            flows_grid = flows.permute(0, 1, 3, 4, 2).contiguous()
-            flows_grid[..., 0].mul_(scale_x)
-            flows_grid[..., 1].mul_(scale_y)
-            flows_grid.add_(grid.unsqueeze(1))
-            acc_grids = {}
-            if acc_flows:
-                acc_keys = sorted(acc_flows.keys())
-                acc_batch = torch.cat([acc_flows[k] for k in acc_keys], dim=0)
-                acc_nhwc = acc_batch.permute(0, 2, 3, 1).contiguous()
-                acc_nhwc[..., 0].mul_(scale_x)
-                acc_nhwc[..., 1].mul_(scale_y)
-                acc_nhwc.add_(grid)
-                acc_grids = {k: acc_nhwc[j : j + 1] for j, k in enumerate(acc_keys)}
-            torch.cuda.synchronize()
-            total_precompute += time.perf_counter() - tp0
 
             lbe = split._loop_body_engines[module_name]
             backbone_pt = split.backbone[module_name]
