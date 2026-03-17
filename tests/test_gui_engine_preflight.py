@@ -52,7 +52,7 @@ def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) ->
 
     basic_req = next(r for r in res.requirements if r.key == "basicvsrpp")
     assert not basic_req.exists
-    assert len(basic_req.missing_paths) == 5
+    assert len(basic_req.missing_paths) == 10
 
     for p in basic_req.paths:
         _touch(p)
@@ -74,7 +74,7 @@ def test_get_onnx_tensorrt_engine_path_matches_compile_return_when_present(monke
     engine = get_onnx_tensorrt_engine_path(onnx, batch_size=4, fp16=True)
     _touch(engine)
 
-    out = compile_onnx_to_tensorrt_engine(onnx, torch.device("cuda:0"), batch_size=4, fp16=True)
+    out = compile_onnx_to_tensorrt_engine(onnx, torch.device("cuda:0"), batch_size=4, fp16=True, workspace_gb=20)
     assert out == engine
 
 
