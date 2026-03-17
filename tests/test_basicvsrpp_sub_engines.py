@@ -12,6 +12,7 @@ from jasna.restorer.basicvsrpp_sub_engines import (
     FEATURE_SIZE,
     BasicVSRPlusPlusNetSplit,
     _BackboneWrapper,
+    _DeformOffsetWrapper,
     _UpsampleWrapper,
     _get_inference_generator,
     _sub_engine_dir,
@@ -28,12 +29,14 @@ def test_sub_engine_dir_uses_stem() -> None:
     assert result.startswith(r"C:\weights")
 
 
-def test_get_sub_engine_paths_returns_5_paths() -> None:
+def test_get_sub_engine_paths_returns_10_paths() -> None:
     paths = get_sub_engine_paths("model_weights/model.pth", fp16=True)
-    assert len(paths) == 5
+    assert len(paths) == 10
     for d in DIRECTIONS:
         assert f"backbone_{d}" in paths
+        assert f"deform_offset_{d}" in paths
     assert "upsample" in paths
+    assert "feat_extract" in paths
     for p in paths.values():
         assert p.endswith(".engine")
         assert "fp16" in p
@@ -141,7 +144,16 @@ def test_split_forward_matches_pytorch_forward() -> None:
 
     upsample_engine = _UpsamplePassthrough(net)
 
-    split = BasicVSRPlusPlusNetSplit(net, backbone_engines, upsample_engine)
+    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import SecondOrderDeformableAlignment
+    deform_offset_engines = {
+        d: _DeformOffsetWrapper(net.deform_align[d]) for d in DIRECTIONS
+    }
+
+    split = BasicVSRPlusPlusNetSplit(
+        net, backbone_engines, upsample_engine,
+        feat_extract_engine=net.feat_extract,
+        deform_offset_engines=deform_offset_engines,
+    )
     split.eval()
 
     T = 3
