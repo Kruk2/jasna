@@ -7,8 +7,8 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision
 
-from jasna.models.basicvsrpp.mmagic.flow_warp import flow_warp
 from jasna.trt.torch_tensorrt_export import (
     compile_and_save_torchtrt_dynamo,
     engine_precision_name,
@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 DIRECTIONS = ["backward_1", "forward_1", "backward_2", "forward_2"]
 FEATURE_SIZE = 64
+INPUT_SIZE = 256
+MAX_DYNAMIC_BATCH = 180
+OPT_DYNAMIC_BATCH = 60
 
 
 class _BackboneWrapper(nn.Module):
@@ -30,6 +33,35 @@ class _BackboneWrapper(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.backbone(x)
+
+
+class _DeformOffsetWrapper(nn.Module):
+    """Wraps the offset+mask computation of SecondOrderDeformableAlignment.
+
+    Everything except ``deform_conv2d`` is standard ops and TRT-compilable.
+    """
+
+    def __init__(self, deform_align: nn.Module):
+        super().__init__()
+        self.conv_offset = deform_align.conv_offset
+        self._max_res = int(deform_align.max_residue_magnitude)
+        self._flow_rep = int(deform_align.deform_groups * 3 * 3 // 2)
+
+    def forward(
+        self, extra_feat: torch.Tensor, flow_1: torch.Tensor, flow_2: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        x = torch.cat([extra_feat, flow_1, flow_2], dim=1)
+        out = self.conv_offset(x)
+        o1, o2, mask = torch.chunk(out, 3, dim=1)
+
+        offset = self._max_res * torch.tanh(torch.cat((o1, o2), dim=1))
+        offset_1, offset_2 = torch.chunk(offset, 2, dim=1)
+        offset_1 = offset_1 + flow_1.flip(1).repeat(1, self._flow_rep, 1, 1)
+        offset_2 = offset_2 + flow_2.flip(1).repeat(1, self._flow_rep, 1, 1)
+        offset = torch.cat([offset_1, offset_2], dim=1)
+
+        mask = torch.sigmoid(mask)
+        return offset, mask
 
 
 class _UpsampleWrapper(nn.Module):
@@ -71,7 +103,19 @@ def _backbone_engine_path(engine_dir: str, direction: str, fp16: bool) -> str:
 def _upsample_engine_path(engine_dir: str, fp16: bool) -> str:
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
-    return os.path.join(engine_dir, f"upsample.trt_{prec}{suf}.engine")
+    return os.path.join(engine_dir, f"upsample_dyn.trt_{prec}{suf}.engine")
+
+
+def _feat_extract_engine_path(engine_dir: str, fp16: bool) -> str:
+    prec = engine_precision_name(fp16=fp16)
+    suf = engine_system_suffix()
+    return os.path.join(engine_dir, f"feat_extract_dyn.trt_{prec}{suf}.engine")
+
+
+def _deform_offset_engine_path(engine_dir: str, direction: str, fp16: bool) -> str:
+    prec = engine_precision_name(fp16=fp16)
+    suf = engine_system_suffix()
+    return os.path.join(engine_dir, f"deform_offset_{direction}.trt_{prec}{suf}.engine")
 
 
 def get_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict[str, str]:
@@ -79,7 +123,9 @@ def get_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict[str, str]:
     paths: dict[str, str] = {}
     for d in DIRECTIONS:
         paths[f"backbone_{d}"] = _backbone_engine_path(engine_dir, d, fp16)
+        paths[f"deform_offset_{d}"] = _deform_offset_engine_path(engine_dir, d, fp16)
     paths["upsample"] = _upsample_engine_path(engine_dir, fp16)
+    paths["feat_extract"] = _feat_extract_engine_path(engine_dir, fp16)
     return paths
 
 
@@ -99,6 +145,8 @@ def compile_basicvsrpp_sub_engines(
     fp16: bool,
     model_weights_path: str,
 ) -> dict[str, str]:
+    import torch_tensorrt  # type: ignore[import-not-found]
+
     dtype = torch.float16 if fp16 else torch.float32
     engine_dir = _sub_engine_dir(model_weights_path)
     os.makedirs(engine_dir, exist_ok=True)
@@ -109,6 +157,7 @@ def compile_basicvsrpp_sub_engines(
 
     paths: dict[str, str] = {}
 
+    # ── backbone engines (static batch=1, per-frame sequential) ──
     for i, direction in enumerate(DIRECTIONS):
         path = _backbone_engine_path(engine_dir, direction, fp16)
         paths[f"backbone_{direction}"] = path
@@ -129,11 +178,38 @@ def compile_basicvsrpp_sub_engines(
         )
         del wrapper, inp
 
+    # ── deform_offset engines (static batch=1, per-frame sequential) ──
+    cond_channels = 3 * mid
+    for direction in DIRECTIONS:
+        path = _deform_offset_engine_path(engine_dir, direction, fp16)
+        paths[f"deform_offset_{direction}"] = path
+        if os.path.isfile(path):
+            logger.info("Sub-engine already exists: %s", path)
+            continue
+
+        wrapper = _DeformOffsetWrapper(
+            generator.deform_align[direction],
+        ).to(device=device, dtype=dtype).eval()
+        inp_cond = torch.randn(1, cond_channels, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
+        inp_f1 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
+        inp_f2 = torch.randn(1, 2, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
+        compile_and_save_torchtrt_dynamo(
+            module=wrapper,
+            inputs=[inp_cond, inp_f1, inp_f2],
+            output_path=path,
+            dtype=dtype,
+            workspace_size_bytes=workspace_size,
+            message=f"Compiling deform_offset sub-engine [{direction}] ({cond_channels}+4 ch → offset+mask)",
+        )
+        del wrapper, inp_cond, inp_f1, inp_f2
+
+    # ── upsample engine (dynamic batch – called once for all frames) ──
     path = _upsample_engine_path(engine_dir, fp16)
     paths["upsample"] = path
     if os.path.isfile(path):
         logger.info("Sub-engine already exists: %s", path)
     else:
+        in_ch = 5 * mid
         wrapper = _UpsampleWrapper(
             generator.reconstruction,
             generator.upsample1,
@@ -141,16 +217,46 @@ def compile_basicvsrpp_sub_engines(
             generator.conv_hr,
             generator.conv_last,
         ).to(device=device, dtype=dtype).eval()
-        inp = torch.randn(1, 5 * mid, FEATURE_SIZE, FEATURE_SIZE, dtype=dtype, device=device)
+        dyn_input = torch_tensorrt.Input(
+            min_shape=[1, in_ch, FEATURE_SIZE, FEATURE_SIZE],
+            opt_shape=[OPT_DYNAMIC_BATCH, in_ch, FEATURE_SIZE, FEATURE_SIZE],
+            max_shape=[MAX_DYNAMIC_BATCH, in_ch, FEATURE_SIZE, FEATURE_SIZE],
+            dtype=dtype,
+        )
         compile_and_save_torchtrt_dynamo(
             module=wrapper,
-            inputs=[inp],
+            inputs=[dyn_input],
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
-            message=f"Compiling upsample sub-engine ({5 * mid}\u21923 ch)",
+            message=f"Compiling upsample sub-engine ({in_ch}\u21923 ch, dynamic batch)",
+            device=device,
         )
-        del wrapper, inp
+        del wrapper
+
+    # ── feat_extract engine (dynamic batch) ──
+    path = _feat_extract_engine_path(engine_dir, fp16)
+    paths["feat_extract"] = path
+    if os.path.isfile(path):
+        logger.info("Sub-engine already exists: %s", path)
+    else:
+        feat_extract = generator.feat_extract.to(device=device, dtype=dtype).eval()
+        fe_input = torch_tensorrt.Input(
+            min_shape=[1, 3, INPUT_SIZE, INPUT_SIZE],
+            opt_shape=[OPT_DYNAMIC_BATCH, 3, INPUT_SIZE, INPUT_SIZE],
+            max_shape=[MAX_DYNAMIC_BATCH, 3, INPUT_SIZE, INPUT_SIZE],
+            dtype=dtype,
+        )
+        compile_and_save_torchtrt_dynamo(
+            module=feat_extract,
+            inputs=[fe_input],
+            output_path=path,
+            dtype=dtype,
+            workspace_size_bytes=workspace_size,
+            message=f"Compiling feat_extract sub-engine (3\u2192{mid} ch, dynamic batch)",
+            device=device,
+        )
+        del feat_extract
 
     gc.collect()
     if device.type == "cuda":
@@ -162,20 +268,28 @@ def load_sub_engines(
     model_weights_path: str,
     device: torch.device,
     fp16: bool,
-) -> tuple[dict[str, nn.Module], nn.Module] | None:
+) -> tuple[dict[str, nn.Module], nn.Module, nn.Module, dict[str, nn.Module]] | None:
+    """Returns ``(backbone_engines, upsample, feat_extract, deform_offset_engines)`` or *None*."""
     paths = get_sub_engine_paths(model_weights_path, fp16)
     if not all(os.path.isfile(p) for p in paths.values()):
         return None
 
     backbone_engines: dict[str, nn.Module] = {}
+    deform_offset_engines: dict[str, nn.Module] = {}
     for d in DIRECTIONS:
         backbone_engines[d] = load_torchtrt_export(
             checkpoint_path=paths[f"backbone_{d}"], device=device,
         )
+        deform_offset_engines[d] = load_torchtrt_export(
+            checkpoint_path=paths[f"deform_offset_{d}"], device=device,
+        )
     upsample_engine = load_torchtrt_export(
         checkpoint_path=paths["upsample"], device=device,
     )
-    return backbone_engines, upsample_engine
+    feat_extract_engine = load_torchtrt_export(
+        checkpoint_path=paths["feat_extract"], device=device,
+    )
+    return backbone_engines, upsample_engine, feat_extract_engine, deform_offset_engines
 
 
 class BasicVSRPlusPlusNetSplit(nn.Module):
@@ -184,15 +298,18 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         generator: nn.Module,
         backbone_engines: dict[str, nn.Module],
         upsample_engine: nn.Module,
+        feat_extract_engine: nn.Module,
+        deform_offset_engines: dict[str, nn.Module],
     ):
         super().__init__()
-        self.feat_extract = generator.feat_extract
         self.spynet = generator.spynet
         self.deform_align = generator.deform_align
         self.mid_channels = generator.mid_channels
 
         self._backbone_engines = backbone_engines
         self._upsample_engine = upsample_engine
+        self._feat_extract_engine = feat_extract_engine
+        self._deform_offset_engines = deform_offset_engines
 
     def compute_flow(self, lqs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         n, t, c, h, w = lqs.size()
@@ -205,11 +322,52 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         flows_forward = self.spynet(lqs_2, lqs_1).view(n, t - 1, 2, h, w)
         return flows_forward, flows_backward
 
+    @staticmethod
+    def _make_identity_grid(
+        h: int, w: int, device: torch.device, dtype: torch.dtype,
+    ) -> torch.Tensor:
+        theta = torch.eye(2, 3, device=device, dtype=dtype).unsqueeze(0)
+        return F.affine_grid(theta, (1, 1, h, w), align_corners=True)
+
+    @staticmethod
+    def _flow_warp_cached(
+        x: torch.Tensor, flow: torch.Tensor, grid: torch.Tensor,
+    ) -> torch.Tensor:
+        n, _, h, w = x.shape
+        g = grid.expand(n, -1, -1, -1) if n > 1 else grid
+        flow_x = flow[..., 0] * (2.0 / max(w - 1, 1))
+        flow_y = flow[..., 1] * (2.0 / max(h - 1, 1))
+        return F.grid_sample(
+            x, g + torch.stack((flow_x, flow_y), dim=-1),
+            mode="bilinear", padding_mode="zeros", align_corners=True,
+        )
+
+    def _precompute_accumulated_flows(
+        self,
+        flows: torch.Tensor,
+        flow_idx: list[int],
+        frame_count: int,
+        grid: torch.Tensor,
+    ) -> dict[int, torch.Tensor]:
+        if frame_count <= 2:
+            return {}
+        indices = list(range(2, frame_count))
+        fn1_list = [flows[:, flow_idx[i], :, :, :] for i in indices]
+        fn2_list = [flows[:, flow_idx[i - 1], :, :, :] for i in indices]
+        fn1_batch = torch.cat(fn1_list, dim=0)
+        fn2_batch = torch.cat(fn2_list, dim=0)
+        warped = self._flow_warp_cached(
+            fn2_batch, fn1_batch.permute(0, 2, 3, 1), grid,
+        )
+        acc = fn1_batch + warped
+        return {i: acc[j : j + 1] for j, i in enumerate(indices)}
+
     def propagate(
         self,
         feats: dict[str, list[torch.Tensor]],
         flows: torch.Tensor,
         module_name: str,
+        grid: torch.Tensor,
     ) -> dict[str, list[torch.Tensor]]:
         n, t, _, h, w = flows.size()
 
@@ -222,13 +380,19 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
             frame_idx = frame_idx[::-1]
             flow_idx = frame_idx
 
+        acc_flows = self._precompute_accumulated_flows(
+            flows, flow_idx, len(frame_idx), grid,
+        )
+
         backbone_engine = self._backbone_engines[module_name]
         feat_prop = flows.new_zeros(n, self.mid_channels, h, w)
         for i, idx in enumerate(frame_idx):
             feat_current = feats["spatial"][mapping_idx[idx]]
             if i > 0:
                 flow_n1 = flows[:, flow_idx[i], :, :, :]
-                cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
+                cond_n1 = self._flow_warp_cached(
+                    feat_prop, flow_n1.permute(0, 2, 3, 1), grid,
+                )
 
                 feat_n2 = torch.zeros_like(feat_prop)
                 flow_n2 = torch.zeros_like(flow_n1)
@@ -236,16 +400,20 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
 
                 if i > 1:
                     feat_n2 = feats[module_name][-2]
-                    flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
-                    flow_n2 = flow_n1 + flow_warp(
-                        flow_n2, flow_n1.permute(0, 2, 3, 1)
+                    flow_n2 = acc_flows[i]
+                    cond_n2 = self._flow_warp_cached(
+                        feat_n2, flow_n2.permute(0, 2, 3, 1), grid,
                     )
-                    cond_n2 = flow_warp(feat_n2, flow_n2.permute(0, 2, 3, 1))
 
                 cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
+                offset, mask = self._deform_offset_engines[module_name](
+                    cond, flow_n1, flow_n2,
+                )
+                da = self.deform_align[module_name]
                 feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
-                feat_prop = self.deform_align[module_name](
-                    feat_prop, cond, flow_n1, flow_n2
+                feat_prop = torchvision.ops.deform_conv2d(
+                    feat_prop, offset, da.weight, da.bias,
+                    da.stride, da.padding, da.dilation, mask,
                 )
 
             feat = [feat_current] + [
@@ -266,22 +434,20 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
     def upsample(
         self, lqs: torch.Tensor, feats: dict[str, list[torch.Tensor]]
     ) -> torch.Tensor:
-        outputs: list[torch.Tensor] = []
-        num_outputs = len(feats["spatial"])
-
-        mapping_idx = list(range(0, num_outputs))
+        t = lqs.size(1)
+        mapping_idx = list(range(0, len(feats["spatial"])))
         mapping_idx += mapping_idx[::-1]
 
-        for i in range(0, lqs.size(1)):
+        hr_list: list[torch.Tensor] = []
+        for i in range(t):
             hr = [feats[k].pop(0) for k in feats if k != "spatial"]
             hr.insert(0, feats["spatial"][mapping_idx[i]])
-            hr = torch.cat(hr, dim=1)
+            hr_list.append(torch.cat(hr, dim=1))
 
-            hr = self._upsample_engine(hr)
-            hr += lqs[:, i, :, :, :]
-            outputs.append(hr)
-
-        return torch.stack(outputs, dim=1)
+        hr_batch = torch.cat(hr_list, dim=0)
+        out_batch = self._upsample_engine(hr_batch)
+        out_batch = out_batch + lqs.squeeze(0)
+        return out_batch.unsqueeze(0)
 
     def forward(self, lqs: torch.Tensor) -> torch.Tensor:
         n, t, c, h, w = lqs.size()
@@ -291,19 +457,20 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         ).view(n, t, c, h // 4, w // 4)
 
         feats: dict[str, list[torch.Tensor]] = {}
-        feats_ = self.feat_extract(lqs.view(-1, c, h, w))
+        feats_ = self._feat_extract_engine(lqs.view(-1, c, h, w))
         h_f, w_f = feats_.shape[2:]
         feats_ = feats_.view(n, t, -1, h_f, w_f)
         feats["spatial"] = [feats_[:, i, :, :, :] for i in range(0, t)]
 
         flows_forward, flows_backward = self.compute_flow(lqs_downsample)
 
+        grid = self._make_identity_grid(h_f, w_f, lqs.device, lqs.dtype)
         for iter_ in [1, 2]:
             for direction in ["backward", "forward"]:
                 module = f"{direction}_{iter_}"
                 feats[module] = []
                 flows = flows_backward if direction == "backward" else flows_forward
-                feats = self.propagate(feats, flows, module)
+                feats = self.propagate(feats, flows, module, grid)
 
         return self.upsample(lqs, feats)
 
@@ -317,7 +484,10 @@ def create_split_forward(
     result = load_sub_engines(model_weights_path, device, fp16)
     if result is None:
         return None
-    backbone_engines, upsample_engine = result
+    backbone_engines, upsample_engine, feat_extract_engine, deform_offset_engines = result
     generator = _get_inference_generator(model)
-    split = BasicVSRPlusPlusNetSplit(generator, backbone_engines, upsample_engine)
+    split = BasicVSRPlusPlusNetSplit(
+        generator, backbone_engines, upsample_engine, feat_extract_engine,
+        deform_offset_engines,
+    )
     return split
