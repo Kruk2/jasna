@@ -9,10 +9,10 @@ description = "Jasna"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-  "torch==2.10.0",
-  "torchvision==0.25.0",
-  "tensorrt==10.14.1.48.post1",
-  "torch-tensorrt==2.10.0",
+  "torch==2.9.1",
+  "torchvision==0.24.1",
+  "tensorrt==10.13.3.9.post1",
+  "torch-tensorrt==2.9.0",
   "av>=16.1.0",
   "numpy",
   "psutil",
@@ -23,7 +23,6 @@ dependencies = [
   "customtkinter",
   "tkinterdnd2",
   "ultralytics",
-  "nvidia-vfx==0.1.0.1",
 ]
 
 [project.scripts]
@@ -34,7 +33,6 @@ dev = [
   "pyinstaller>=6.0",
   "pytest",
   "pytest-cov",
-  "scikit-build",
 ]
 
 [tool.setuptools]
