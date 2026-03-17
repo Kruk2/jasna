@@ -32,12 +32,22 @@ def run_benchmarks(
     detection_score_threshold: float = 0.2,
     restoration_model_path: Path | None = None,
     compile_basicvsrpp: bool = True,
+    benchmark_filter: str | None = None,
 ) -> None:
     results: dict[str, dict[str, tuple[float, float]]] = {}
     videos_to_run = [p for p in benchmark_videos if p.resolve().exists()]
 
+    fns = BENCHMARKS
+    if benchmark_filter:
+        fns = [fn for fn in fns if benchmark_filter in fn.__name__]
+        if not fns:
+            print(f"No benchmarks matching filter '{benchmark_filter}'. Available:")
+            for fn in BENCHMARKS:
+                print(f"  {fn.__name__}")
+            return
+
     with torch.cuda.device(device):
-        for benchmark_fn in BENCHMARKS:
+        for benchmark_fn in fns:
             table_rows = benchmark_fn(
                 device=device,
                 batch_size=batch_size,
@@ -107,4 +117,5 @@ def run_benchmark_cli(args: Namespace) -> None:
         detection_score_threshold=float(args.detection_score_threshold),
         restoration_model_path=Path(args.restoration_model_path),
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
+        benchmark_filter=getattr(args, 'benchmark_filter', None),
     )

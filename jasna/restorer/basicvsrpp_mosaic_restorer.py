@@ -38,6 +38,7 @@ class BasicvsrppMosaicRestorer:
                 model_weights_path=checkpoint_path,
                 device=self.device,
                 fp16=fp16,
+                max_clip_size=self.max_clip_size,
             )
             if self._split_forward is not None:
                 logger.info("BasicVSR++ using TRT sub-engines (fp16=%s)", fp16)

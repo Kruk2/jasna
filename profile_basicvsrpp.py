@@ -1,6 +1,7 @@
 """Profile BasicVSR++ split forward to find actual bottleneck."""
 from __future__ import annotations
 
+import gc
 import time
 from pathlib import Path
 
@@ -10,14 +11,14 @@ import torchvision
 
 from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-from jasna.restorer.basicvsrpp_sub_engines import BasicVSRPlusPlusNetSplit
+from jasna.restorer.basicvsrpp_sub_engines import BasicVSRPlusPlusNetSplit, get_sub_engine_paths
 from jasna.trt.trt_runner import TrtRunner
 
 
 CLIP_LENGTH = 60
 SIZE = 256
 WARMUP = 3
-RUNS = 10
+RUNS = 100
 
 
 def _timed(label: str, fn, *args, **kwargs):
@@ -30,7 +31,33 @@ def _timed(label: str, fn, *args, **kwargs):
     return result
 
 
-def profile_split_forward(split, device, dtype):
+def _print_engine_vram(model_weights_path: str, fp16: bool, device: torch.device, max_clip_size: int) -> None:
+    from jasna.trt.torch_tensorrt_export import load_torchtrt_export
+    paths = get_sub_engine_paths(model_weights_path, fp16, max_clip_size)
+
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+    gc.collect()
+
+    print(f"\n=== Engine VRAM (driver-level delta) ===")
+    total_delta = 0
+    for name, p in paths.items():
+        torch.cuda.synchronize()
+        free_before, _ = torch.cuda.mem_get_info()
+        engine = load_torchtrt_export(checkpoint_path=p, device=device)
+        torch.cuda.synchronize()
+        free_after, _ = torch.cuda.mem_get_info()
+        delta_mb = (free_before - free_after) / (1024 * 1024)
+        total_delta += delta_mb
+        print(f"  {name:26s} {delta_mb:8.1f} MB")
+        del engine
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+        gc.collect()
+    print(f"  {'TOTAL':26s} {total_delta:8.1f} MB")
+
+
+def profile_split_forward(split, device, dtype, model_weights_path: str, fp16: bool, max_clip_size: int):
     T = CLIP_LENGTH
     lqs = torch.randn(1, T, 3, SIZE, SIZE, device=device, dtype=dtype)
 
@@ -58,9 +85,7 @@ def profile_split_forward(split, device, dtype):
     # propagate - detailed timing
     feats = {"spatial": [feats_[:, i, :, :, :] for i in range(t)]}
 
-    total_deform_align = 0.0
-    total_backbone = 0.0
-    total_grid_sample = 0.0
+    total_loop_body = 0.0
     total_precompute = 0.0
 
     grid = BasicVSRPlusPlusNetSplit._make_identity_grid(h_f, w_f, device, dtype)
@@ -104,69 +129,49 @@ def profile_split_forward(split, device, dtype):
             torch.cuda.synchronize()
             total_precompute += time.perf_counter() - tp0
 
-            backbone_engine = split._backbone_engines[module_name]
-            dae = split._deform_align_engines[module_name]
+            lbe = split._loop_body_engines[module_name]
+            backbone_pt = split.backbone[module_name]
             other_keys = [k for k in feats if k not in ["spatial", module_name]]
 
             zero_feat = flows.new_zeros(n2, mid, h2, w2)
             zero_flow = flows.new_zeros(n2, 2, h2, w2)
-            zero_cond = zero_feat
 
             feat_prop = flows.new_zeros(n2, mid, h2, w2)
 
             for i, idx in enumerate(frame_idx):
                 feat_current = feats["spatial"][mapping_idx[idx]]
+                backbone_prefix = torch.cat(
+                    [feat_current] + [feats[k][idx] for k in other_keys],
+                    dim=1,
+                )
                 if i > 0:
                     flow_n1 = flows[:, flow_idx[i], :, :, :]
+                    g_n1 = flows_grid[:, flow_idx[i]]
 
-                    torch.cuda.synchronize()
-                    tw0 = time.perf_counter()
-                    cond_n1 = F.grid_sample(
-                        feat_prop, flows_grid[:, flow_idx[i]],
-                        mode="bilinear", padding_mode="zeros", align_corners=True,
-                    )
                     if i > 1:
                         feat_n2 = feats[module_name][-2]
                         flow_n2 = acc_flows[i]
-                        cond_n2 = F.grid_sample(
-                            feat_n2, acc_grids[i],
-                            mode="bilinear", padding_mode="zeros",
-                            align_corners=True,
-                        )
+                        g_n2 = acc_grids[i]
                     else:
                         feat_n2 = zero_feat
                         flow_n2 = zero_flow
-                        cond_n2 = zero_cond
-                    torch.cuda.synchronize()
-                    total_grid_sample += time.perf_counter() - tw0
-
-                    cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
+                        g_n2 = grid
 
                     torch.cuda.synchronize()
-                    tda0 = time.perf_counter()
-                    feat_prop = dae(cond, flow_n1, flow_n2, feat_prop, feat_n2)
+                    tlb0 = time.perf_counter()
+                    feat_prop = lbe(feat_prop, g_n1, feat_n2, g_n2, feat_current, flow_n1, flow_n2, backbone_prefix)
                     torch.cuda.synchronize()
-                    total_deform_align += time.perf_counter() - tda0
-
-                torch.cuda.synchronize()
-                tb0 = time.perf_counter()
-                feat = [feat_current] + [
-                    feats[k][idx] for k in other_keys
-                ] + [feat_prop]
-                feat = torch.cat(feat, dim=1)
-                feat_prop = feat_prop + backbone_engine(feat)
-                torch.cuda.synchronize()
-                total_backbone += time.perf_counter() - tb0
-
+                    total_loop_body += time.perf_counter() - tlb0
+                else:
+                    feat = torch.cat([backbone_prefix, feat_prop], dim=1)
+                    feat_prop = feat_prop + backbone_pt(feat)
                 feats[module_name].append(feat_prop)
 
             if "backward" in module_name:
                 feats[module_name] = feats[module_name][::-1]
 
     print(f"  {'propagate/precompute_all':30s} {total_precompute*1000:8.1f} ms")
-    print(f"  {'propagate/grid_sample':30s} {total_grid_sample*1000:8.1f} ms")
-    print(f"  {'propagate/deform_align (TRT)':30s} {total_deform_align*1000:8.1f} ms")
-    print(f"  {'propagate/backbone (TRT)':30s} {total_backbone*1000:8.1f} ms")
+    print(f"  {'propagate/loop_body (TRT)':30s} {total_loop_body*1000:8.1f} ms")
 
     # upsample
     _timed("upsample (TRT)", split.upsample, lqs, feats)
@@ -183,6 +188,8 @@ def profile_split_forward(split, device, dtype):
     import statistics
     med = statistics.median(durations)
     print(f"\n  {'FULL FORWARD median':30s} {med*1000:8.1f} ms  ({RUNS} runs)")
+
+    _print_engine_vram(model_weights_path, fp16, device, max_clip_size)
 
 
 def profile_monolithic_engine(engine_path: str, device: torch.device, dtype: torch.dtype):
@@ -217,14 +224,18 @@ def main():
     fp16 = True
     dtype = torch.float16
 
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python profile_basicvsrpp.py <model_weights_path> [monolithic_engine_path]")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("model_weights_path")
+    parser.add_argument("monolithic_engine_path", nargs="?")
+    parser.add_argument("--opt-level", type=int, default=5)
+    args = parser.parse_args()
 
-    path = Path(sys.argv[1]).resolve()
+    path = Path(args.model_weights_path).resolve()
     use_trt = basicvsrpp_startup_policy(
-        restoration_model_path=str(path), device=device, fp16=fp16, compile_basicvsrpp=True,
+        restoration_model_path=str(path), device=device, fp16=fp16,
+        compile_basicvsrpp=True, max_clip_size=CLIP_LENGTH,
+        optimization_level=args.opt_level,
     )
     restorer = BasicvsrppMosaicRestorer(
         checkpoint_path=str(path), device=device, max_clip_size=CLIP_LENGTH,
@@ -233,13 +244,13 @@ def main():
 
     if restorer._split_forward is not None:
         with torch.inference_mode():
-            profile_split_forward(restorer._split_forward, device, dtype)
+            profile_split_forward(restorer._split_forward, device, dtype, str(path), fp16, CLIP_LENGTH)
     else:
         print("No split forward available (engines missing?)")
 
-    if len(sys.argv) >= 3:
+    if args.monolithic_engine_path:
         with torch.inference_mode():
-            profile_monolithic_engine(sys.argv[2], device, dtype)
+            profile_monolithic_engine(args.monolithic_engine_path, device, dtype)
 
 
 if __name__ == "__main__":

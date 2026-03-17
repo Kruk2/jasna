@@ -52,7 +52,7 @@ def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) ->
 
     basic_req = next(r for r in res.requirements if r.key == "basicvsrpp")
     assert not basic_req.exists
-    assert len(basic_req.missing_paths) == 10
+    assert len(basic_req.missing_paths) == 6
 
     for p in basic_req.paths:
         _touch(p)
