@@ -58,8 +58,7 @@ def profile_split_forward(split, device, dtype):
     # propagate - detailed timing
     feats = {"spatial": [feats_[:, i, :, :, :] for i in range(t)]}
 
-    total_deform_offset = 0.0
-    total_deform_conv = 0.0
+    total_deform_align = 0.0
     total_backbone = 0.0
     total_grid_sample = 0.0
     total_precompute = 0.0
@@ -106,8 +105,7 @@ def profile_split_forward(split, device, dtype):
             total_precompute += time.perf_counter() - tp0
 
             backbone_engine = split._backbone_engines[module_name]
-            doe = split._deform_offset_engines[module_name]
-            da = split.deform_align[module_name]
+            dae = split._deform_align_engines[module_name]
             other_keys = [k for k in feats if k not in ["spatial", module_name]]
 
             zero_feat = flows.new_zeros(n2, mid, h2, w2)
@@ -145,20 +143,10 @@ def profile_split_forward(split, device, dtype):
                     cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
 
                     torch.cuda.synchronize()
-                    tdo0 = time.perf_counter()
-                    offset, mask = doe(cond, flow_n1, flow_n2)
+                    tda0 = time.perf_counter()
+                    feat_prop = dae(cond, flow_n1, flow_n2, feat_prop, feat_n2)
                     torch.cuda.synchronize()
-                    total_deform_offset += time.perf_counter() - tdo0
-
-                    torch.cuda.synchronize()
-                    tdc0 = time.perf_counter()
-                    feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
-                    feat_prop = torchvision.ops.deform_conv2d(
-                        feat_prop, offset, da.weight, da.bias,
-                        da.stride, da.padding, da.dilation, mask,
-                    )
-                    torch.cuda.synchronize()
-                    total_deform_conv += time.perf_counter() - tdc0
+                    total_deform_align += time.perf_counter() - tda0
 
                 torch.cuda.synchronize()
                 tb0 = time.perf_counter()
@@ -177,8 +165,7 @@ def profile_split_forward(split, device, dtype):
 
     print(f"  {'propagate/precompute_all':30s} {total_precompute*1000:8.1f} ms")
     print(f"  {'propagate/grid_sample':30s} {total_grid_sample*1000:8.1f} ms")
-    print(f"  {'propagate/deform_offset (TRT)':30s} {total_deform_offset*1000:8.1f} ms")
-    print(f"  {'propagate/deform_conv2d':30s} {total_deform_conv*1000:8.1f} ms")
+    print(f"  {'propagate/deform_align (TRT)':30s} {total_deform_align*1000:8.1f} ms")
     print(f"  {'propagate/backbone (TRT)':30s} {total_backbone*1000:8.1f} ms")
 
     # upsample
