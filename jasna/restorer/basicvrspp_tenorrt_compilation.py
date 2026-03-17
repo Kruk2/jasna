@@ -49,7 +49,6 @@ def compile_mosaic_restoration_model(
     vram_gb = get_gpu_vram_gb(device)
     if vram_gb < 4:
         msg = "Skipping TRT compilation: GPU VRAM < 4 GB."
-        print(msg)
         logger.info("%s", msg)
         return False
 
@@ -58,7 +57,6 @@ def compile_mosaic_restoration_model(
             "Skipping TRT compilation: FP32 is not recommended for TensorRT. "
             "Consider using FP16 instead."
         )
-        print(msg)
         logger.info("%s", msg)
         return False
 
