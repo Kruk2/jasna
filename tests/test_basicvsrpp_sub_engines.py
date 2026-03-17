@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
 import torch
 import torch.nn as nn
 
@@ -11,7 +12,9 @@ from jasna.restorer.basicvsrpp_sub_engines import (
     DIRECTIONS,
     FEATURE_SIZE,
     BasicVSRPlusPlusNetSplit,
+    _PreprocessWrapper,
     _PropagateBodyWrapper,
+    _SPyNetWrapper,
     _UpsampleWrapper,
     _get_inference_generator,
     _sub_engine_dir,
@@ -33,8 +36,8 @@ def test_get_sub_engine_paths_returns_6_paths() -> None:
     assert len(paths) == 6
     for d in DIRECTIONS:
         assert f"loop_body_{d}" in paths
+    assert "preprocess" in paths
     assert "upsample" in paths
-    assert "feat_extract" in paths
     for p in paths.values():
         assert p.endswith(".engine")
         assert "fp16" in p
@@ -129,17 +132,33 @@ def test_get_inference_generator_falls_back_to_generator() -> None:
     assert _get_inference_generator(model) is model.generator
 
 
-def test_split_forward_matches_pytorch_forward() -> None:
-    """Verify that BasicVSRPlusPlusNetSplit produces the same output as the
-    original BasicVSRPlusPlusNet when using PyTorch modules as 'engines'."""
+def test_spynet_wrapper_matches_original() -> None:
     from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
     torch.manual_seed(42)
     net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
     net.eval()
 
+    wrapper = _SPyNetWrapper(net.spynet)
+    wrapper.eval()
+
+    ref_img = torch.randn(4, 3, 64, 64)
+    supp_img = torch.randn(4, 3, 64, 64)
+
+    with torch.inference_mode():
+        orig = net.spynet(ref_img, supp_img)
+        wrap = wrapper(ref_img, supp_img)
+
+    assert orig.shape == wrap.shape
+    assert torch.allclose(orig, wrap, atol=1e-5, rtol=1e-5), \
+        f"max diff: {(orig - wrap).abs().max().item()}"
+
+
+def _build_split_from_net(net):
+    """Build a BasicVSRPlusPlusNetSplit using PyTorch modules as engines."""
+
     class _UpsamplePassthrough(nn.Module):
-        def __init__(self, parent: BasicVSRPlusPlusNet):
+        def __init__(self, parent):
             super().__init__()
             self.parent = parent
 
@@ -150,20 +169,29 @@ def test_split_forward_matches_pytorch_forward() -> None:
             x = self.parent.lrelu(self.parent.conv_hr(x))
             return self.parent.conv_last(x)
 
-    upsample_engine = _UpsamplePassthrough(net)
-
-    loop_body_engines = {
-        d: _PropagateBodyWrapper(net.deform_align[d], net.backbone[d])
-        for d in DIRECTIONS
-    }
-
-    split = BasicVSRPlusPlusNetSplit(
-        net, loop_body_engines, upsample_engine,
-        feat_extract_engine=net.feat_extract,
+    return BasicVSRPlusPlusNetSplit(
+        net,
+        {d: _PropagateBodyWrapper(net.deform_align[d], net.backbone[d]) for d in DIRECTIONS},
+        _PreprocessWrapper(net.feat_extract, net.spynet),
+        _UpsamplePassthrough(net),
     )
+
+
+@pytest.mark.parametrize("T", [1, 2, 3, 60])
+def test_split_forward_matches_pytorch_forward(T: int) -> None:
+    """Verify that BasicVSRPlusPlusNetSplit produces the same output as the
+    original BasicVSRPlusPlusNet.  T=1 and T=2 exercise the short-clip
+    padding path (preprocess engine min batch = 3)."""
+    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
+
+    torch.manual_seed(42)
+    net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None)
+    net.eval()
+
+    split = _build_split_from_net(net)
     split.eval()
 
-    T = 3
+    torch.manual_seed(7)
     lqs = torch.randn(1, T, 3, 256, 256)
 
     with torch.inference_mode():
@@ -172,4 +200,4 @@ def test_split_forward_matches_pytorch_forward() -> None:
 
     assert ref.shape == out.shape
     assert torch.allclose(ref, out, atol=1e-5, rtol=1e-5), \
-        f"max diff: {(ref - out).abs().max().item()}"
+        f"T={T} max diff: {(ref - out).abs().max().item()}"
