@@ -12,7 +12,6 @@ import torchvision
 from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.basicvsrpp_sub_engines import BasicVSRPlusPlusNetSplit, get_sub_engine_paths
-from jasna.trt.trt_runner import TrtRunner
 
 
 CLIP_LENGTH = 60
@@ -192,33 +191,6 @@ def profile_split_forward(split, device, dtype, model_weights_path: str, fp16: b
     _print_engine_vram(model_weights_path, fp16, device, max_clip_size)
 
 
-def profile_monolithic_engine(engine_path: str, device: torch.device, dtype: torch.dtype):
-    T = CLIP_LENGTH
-    runner = TrtRunner(
-        engine_path=Path(engine_path),
-        input_shape=(1, T, 3, SIZE, SIZE),
-        device=device,
-    )
-    x = torch.randn(1, T, 3, SIZE, SIZE, device=device, dtype=dtype)
-
-    for _ in range(WARMUP):
-        runner.infer(x)
-    torch.cuda.synchronize()
-
-    print(f"\n=== Profiling Monolithic TRT Engine (T={T}) ===")
-    durations = []
-    for _ in range(RUNS):
-        torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        runner.infer(x)
-        torch.cuda.synchronize()
-        durations.append(time.perf_counter() - t0)
-
-    import statistics
-    med = statistics.median(durations)
-    print(f"  {'MONOLITHIC FORWARD median':30s} {med*1000:8.1f} ms  ({RUNS} runs)")
-
-
 def main():
     device = torch.device("cuda:0")
     fp16 = True
@@ -227,7 +199,6 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("model_weights_path")
-    parser.add_argument("monolithic_engine_path", nargs="?")
     parser.add_argument("--opt-level", type=int, default=5)
     args = parser.parse_args()
 
@@ -247,10 +218,6 @@ def main():
             profile_split_forward(restorer._split_forward, device, dtype, str(path), fp16, CLIP_LENGTH)
     else:
         print("No split forward available (engines missing?)")
-
-    if args.monolithic_engine_path:
-        with torch.inference_mode():
-            profile_monolithic_engine(args.monolithic_engine_path, device, dtype)
 
 
 if __name__ == "__main__":
