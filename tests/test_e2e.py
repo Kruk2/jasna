@@ -284,7 +284,7 @@ class TestFullPipelineE2E:
         pipeline.detection_model = det_spy
 
         primary_spy = _MethodSpy(rp, "prepare_and_run_primary")
-        secondary_spy = _MethodSpy(rp, "run_secondary_from_primary")
+        secondary_spy = _MethodSpy(rp, "build_secondary_result")
 
         return pipeline, output, det_spy, primary_spy, secondary_spy
 

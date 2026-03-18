@@ -1,11 +1,9 @@
 from pathlib import Path
-from queue import Queue
 from unittest.mock import MagicMock, patch
 
 import torch
 
 from jasna.pipeline import Pipeline
-from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 
 
 def _make_pipeline(**overrides):
@@ -103,47 +101,3 @@ class TestPipelineInit:
         assert p.progress_callback is cb
 
 
-class TestRunPooledSecondary:
-    def test_processes_items_in_order(self):
-        rest_pipeline = MagicMock()
-
-        results = []
-        for i in range(3):
-            sr = MagicMock(spec=SecondaryRestoreResult)
-            sr.seq = i
-            results.append(sr)
-
-        def fake_secondary(pr):
-            return results[pr.seq]
-
-        rest_pipeline.run_secondary_from_primary = fake_secondary
-
-        p = _make_pipeline(restoration_pipeline=rest_pipeline)
-
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-
-        for i in range(3):
-            pr = MagicMock(spec=PrimaryRestoreResult)
-            pr.seq = i
-            secondary_queue.put(pr)
-        secondary_queue.put(_SENTINEL)
-
-        p._run_pooled_secondary(2, secondary_queue, encode_queue)
-
-        collected = []
-        while not encode_queue.empty():
-            collected.append(encode_queue.get())
-        assert len(collected) == 3
-        assert [c.seq for c in collected] == [0, 1, 2]
-
-    def test_empty_queue(self):
-        p = _make_pipeline()
-
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        secondary_queue.put(_SENTINEL)
-
-        p._run_pooled_secondary(2, secondary_queue, encode_queue)
-
-        assert encode_queue.empty()

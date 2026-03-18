@@ -11,7 +11,7 @@ from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
 from jasna.restorer.restored_clip import RestoredClip
-from jasna.restorer.secondary_restorer import SecondaryRestorer
+from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer, SecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 if TYPE_CHECKING:
@@ -33,6 +33,20 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
         image = F.pad(image, tuple(possible_paddings), mode='reflect')
         paddings_arr = paddings_arr - possible_paddings
     return image
+
+
+class _IdentitySecondaryRestorer:
+    name = "identity"
+    num_workers = 1
+
+    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
+        t = frames_256.shape[0]
+        ks = max(0, keep_start)
+        ke = min(t, keep_end)
+        if ks >= ke:
+            return []
+        kept = frames_256[ks:ke]
+        return list(kept.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0))
 
 
 class RestorationPipeline:
@@ -60,6 +74,9 @@ class RestorationPipeline:
         if self.secondary_restorer is not None:
             return self.secondary_restorer.num_workers
         return 1
+
+    def identity_secondary_restorer(self) -> _IdentitySecondaryRestorer:
+        return _IdentitySecondaryRestorer()
 
     def _apply_denoise(self, frames: torch.Tensor) -> torch.Tensor:
         return apply_denoise(frames, self._denoise_strength)
@@ -134,7 +151,17 @@ class RestorationPipeline:
         return resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes
 
     def _run_secondary(self, primary_raw: torch.Tensor, keep_start: int, keep_end: int) -> list[torch.Tensor]:
-        if self.secondary_restorer is not None:
+        if isinstance(self.secondary_restorer, AsyncSecondaryRestorer):
+            restorer = self.secondary_restorer
+            seq = restorer.push_clip(primary_raw, keep_start, keep_end)
+            restorer.flush_all()
+            for completed_seq, frames in restorer.pop_completed():
+                if completed_seq == seq:
+                    restored_frames = frames
+                    break
+            else:
+                restored_frames = []
+        elif self.secondary_restorer is not None:
             result = self.secondary_restorer.restore(primary_raw, keep_start=keep_start, keep_end=keep_end)
             if isinstance(result, torch.Tensor):
                 restored_frames = list(result.unbind(0)) if result.dim() > 3 else [result]
@@ -245,27 +272,6 @@ class RestorationPipeline:
             crop_shapes=crop_shapes,
             pad_offsets=pad_offsets,
             resize_shapes=resize_shapes,
-        )
-
-    def run_secondary_from_primary(self, pr: PrimaryRestoreResult) -> SecondaryRestoreResult:
-        ks = max(0, pr.keep_start)
-        ke = min(pr.frame_count, pr.keep_end)
-        restored_frames = self._run_secondary(pr.primary_raw, ks, ke)
-        del pr.primary_raw
-
-        return SecondaryRestoreResult(
-            clip=pr.clip,
-            frame_count=pr.frame_count,
-            frame_shape=pr.frame_shape,
-            frame_device=pr.frame_device,
-            restored_frames=restored_frames,
-            keep_start=pr.keep_start,
-            keep_end=pr.keep_end,
-            crossfade_weights=pr.crossfade_weights,
-            enlarged_bboxes=pr.enlarged_bboxes,
-            crop_shapes=pr.crop_shapes,
-            pad_offsets=pr.pad_offsets,
-            resize_shapes=pr.resize_shapes,
         )
 
     def build_secondary_result(

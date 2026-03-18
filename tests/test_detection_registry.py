@@ -145,7 +145,7 @@ def test_precompile_noop_on_cpu() -> None:
 def test_precompile_rfdetr_on_cuda() -> None:
     with patch("jasna.mosaic.rfdetr.compile_onnx_to_tensorrt_engine") as mock_compile:
         precompile_detection_engine("rfdetr-v5", Path("m.onnx"), 2, torch.device("cuda:0"), True)
-        mock_compile.assert_called_once_with(Path("m.onnx"), torch.device("cuda:0"), batch_size=2, fp16=True)
+        mock_compile.assert_called_once_with(Path("m.onnx"), torch.device("cuda:0"), batch_size=2, fp16=True, workspace_gb=20)
 
 
 def test_precompile_yolo_on_cuda() -> None:

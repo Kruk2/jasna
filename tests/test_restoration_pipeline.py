@@ -514,39 +514,12 @@ def test_prepare_and_run_primary_with_denoise(monkeypatch) -> None:
     assert result.primary_raw.shape[0] == 3
 
 
-def test_run_secondary_from_primary(monkeypatch) -> None:
-    clip, frames = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
-    sr = pipeline.run_secondary_from_primary(pr)
-
-    assert sr.clip is clip
-    assert sr.frame_count == 3
-    assert sr.frame_shape == (30, 40)
-    assert sr.frame_device == frames[0].device
-    assert sr.keep_start == 0
-    assert sr.keep_end == 3
-    assert len(sr.restored_frames) == 3
-    assert sr.enlarged_bboxes == pr.enlarged_bboxes
-    assert sr.crop_shapes == pr.crop_shapes
-    assert sr.pad_offsets == pr.pad_offsets
-    assert sr.resize_shapes == pr.resize_shapes
-    assert not hasattr(pr, 'primary_raw') or pr.primary_raw is None  # deleted
-
-
-def test_run_secondary_from_primary_with_secondary_restorer(monkeypatch) -> None:
-    clip, frames = _make_clip_and_frames(monkeypatch)
-    pipeline = RestorationPipeline(  # type: ignore[arg-type]
-        restorer=_IdentityRestorer(),
-        secondary_restorer=_Upscale2xSecondary(),
-    )
-
-    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
-    sr = pipeline.run_secondary_from_primary(pr)
-
-    assert len(sr.restored_frames) == 3
-    assert sr.restored_frames[0].shape == (3, 512, 512)
+def _build_sr(pipeline, pr):
+    ks = max(0, pr.keep_start)
+    ke = min(pr.frame_count, pr.keep_end)
+    restored_frames = pipeline._run_secondary(pr.primary_raw, ks, ke)
+    del pr.primary_raw
+    return pipeline.build_secondary_result(pr, restored_frames)
 
 
 def test_blend_secondary_result(monkeypatch) -> None:
@@ -560,7 +533,7 @@ def test_blend_secondary_result(monkeypatch) -> None:
         fb.add_frame(i, pts=i * 100, frame=frames[i], clip_track_ids={0})
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
-    sr = pipeline.run_secondary_from_primary(pr)
+    sr = _build_sr(pipeline, pr)
     pipeline.blend_secondary_result(sr, fb)
 
     for i in range(3):
@@ -580,7 +553,7 @@ def test_blend_secondary_result_with_crossfade(monkeypatch) -> None:
 
     crossfade_weights = {0: 0.5, 1: 1.0, 2: 0.5}
     pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, crossfade_weights)
-    sr = pipeline.run_secondary_from_primary(pr)
+    sr = _build_sr(pipeline, pr)
     pipeline.blend_secondary_result(sr, fb)
 
     for i in range(3):
@@ -599,7 +572,7 @@ def test_blend_secondary_result_skips_out_of_range_frames(monkeypatch) -> None:
         fb.add_frame(i, pts=i * 100, frame=frames[i], clip_track_ids={0})
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 1, 2, None)
-    sr = pipeline.run_secondary_from_primary(pr)
+    sr = _build_sr(pipeline, pr)
     pipeline.blend_secondary_result(sr, fb)
 
     assert 0 not in fb.frames[0].pending_clips
@@ -619,7 +592,7 @@ def test_blend_secondary_result_empty_range(monkeypatch) -> None:
         fb.add_frame(i, pts=i * 100, frame=frames[i], clip_track_ids={0})
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 2, 1, None)
-    sr = pipeline.run_secondary_from_primary(pr)
+    sr = _build_sr(pipeline, pr)
     pipeline.blend_secondary_result(sr, fb)
 
     for i in range(3):
@@ -638,7 +611,7 @@ def test_blend_secondary_result_needs_blend_false(monkeypatch) -> None:
     fb.add_frame(1, pts=1, frame=frames[1], clip_track_ids=set())
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 0, 2, None)
-    sr = pipeline.run_secondary_from_primary(pr)
+    sr = _build_sr(pipeline, pr)
     pipeline.blend_secondary_result(sr, fb)
 
     assert fb.frames[0].blended_frame is fb.frames[0].frame

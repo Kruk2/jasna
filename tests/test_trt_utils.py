@@ -133,13 +133,13 @@ class TestCompileOnnxToTensorrtEngine:
         engine_path = get_onnx_tensorrt_engine_path(onnx_path, fp16=True)
         engine_path.touch()
 
-        result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+        result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
         assert result == engine_path
 
     def test_missing_onnx_raises(self, tmp_path):
         onnx_path = tmp_path / "nonexistent.onnx"
         with pytest.raises(FileNotFoundError):
-            compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+            compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
 
     def test_successful_compilation(self, tmp_path):
         onnx_path, engine_path, mock_builder, mock_parser, mock_config, _ = _setup_trt_mocks(tmp_path)
@@ -150,7 +150,7 @@ class TestCompileOnnxToTensorrtEngine:
             patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
             patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
-            result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+            result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
 
         assert result == engine_path
         assert engine_path.exists()
@@ -166,7 +166,7 @@ class TestCompileOnnxToTensorrtEngine:
             patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(ValueError, match="ONNX parse failed"):
-                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
 
     def test_dynamic_shape_raises(self, tmp_path):
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, dynamic_shape=True)
@@ -177,7 +177,7 @@ class TestCompileOnnxToTensorrtEngine:
             patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(ValueError, match="dynamic shape"):
-                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
 
     def test_build_returns_none_raises(self, tmp_path):
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, build_result=None)
@@ -189,7 +189,7 @@ class TestCompileOnnxToTensorrtEngine:
             patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             with pytest.raises(ValueError, match="engine build returned None"):
-                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True)
+                compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
 
     def test_invalid_optimization_level_raises(self, tmp_path):
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path)
@@ -201,7 +201,7 @@ class TestCompileOnnxToTensorrtEngine:
         ):
             with pytest.raises(ValueError, match="optimization_level must be in"):
                 compile_onnx_to_tensorrt_engine(
-                    onnx_path, torch.device("cuda:0"), fp16=True, optimization_level=10
+                    onnx_path, torch.device("cuda:0"), fp16=True, optimization_level=10, workspace_gb=20
                 )
 
     def test_fp32_mode_no_fp16_flag(self, tmp_path):
@@ -228,7 +228,7 @@ class TestCompileOnnxToTensorrtEngine:
             patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
             patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
-            result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=False)
+            result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=False, workspace_gb=20)
 
         mock_config.set_flag.assert_not_called()
         assert result == engine_path

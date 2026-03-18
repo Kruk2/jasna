@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -19,6 +18,7 @@ from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, Secondar
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
+from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer, SecondaryRestorerAdapter
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
 
 log = logging.getLogger(__name__)
@@ -194,12 +194,7 @@ class Pipeline:
         def _secondary_restore_thread():
             try:
                 torch.cuda.set_device(device)
-                restorer = self.restoration_pipeline.secondary_restorer
-                if restorer is not None and hasattr(restorer, 'push_clip'):
-                    self._run_async_secondary(secondary_queue, encode_queue)
-                else:
-                    num_workers = self.restoration_pipeline.secondary_num_workers
-                    self._run_pooled_secondary(num_workers, secondary_queue, encode_queue)
+                self._run_secondary_loop(secondary_queue, encode_queue)
             except BaseException as e:
                 error_holder.append(e)
             finally:
@@ -252,15 +247,19 @@ class Pipeline:
         if error_holder:
             raise error_holder[0]
 
-    _ASYNC_WAIT_SECONDS = 0.01
-
-    def _run_async_secondary(
+    def _run_secondary_loop(
         self,
         secondary_queue: Queue[PrimaryRestoreResult | object],
         encode_queue: Queue[SecondaryRestoreResult | object],
     ) -> None:
-        restorer = self.restoration_pipeline.secondary_restorer
         rp = self.restoration_pipeline
+        raw_restorer = rp.secondary_restorer
+        if isinstance(raw_restorer, AsyncSecondaryRestorer):
+            restorer = raw_restorer
+        elif raw_restorer is not None:
+            restorer = SecondaryRestorerAdapter(raw_restorer)
+        else:
+            restorer = SecondaryRestorerAdapter(rp.identity_secondary_restorer())
         pending_prs: dict[int, PrimaryRestoreResult] = {}
 
         def _drain_completed() -> int:
@@ -305,64 +304,4 @@ class Pipeline:
             pending_prs[seq] = pr
 
         if pending_prs:
-            log.warning("TVAI async: %d clips still pending after flush", len(pending_prs))
-
-    def _run_pooled_secondary(
-        self,
-        num_workers: int,
-        secondary_queue: Queue[PrimaryRestoreResult | object],
-        encode_queue: Queue[SecondaryRestoreResult | object],
-    ) -> None:
-        def _worker(pr: PrimaryRestoreResult) -> SecondaryRestoreResult:
-            return self.restoration_pipeline.run_secondary_from_primary(pr)
-
-        with ThreadPoolExecutor(max_workers=num_workers, thread_name_prefix="SecondaryWorker") as pool:
-            pending: dict[int, Future[SecondaryRestoreResult]] = {}
-            next_submit_seq = 0
-            next_drain_seq = 0
-            first_error: BaseException | None = None
-
-            def _drain_seq(seq: int) -> None:
-                nonlocal first_error
-
-                fut = pending.pop(seq)
-                if first_error is not None:
-                    fut.cancel()
-                    return
-                try:
-                    encode_queue.put(fut.result())
-                except BaseException as exc:
-                    first_error = exc
-                    log.error("Pooled secondary failed, draining remaining work", exc_info=True)
-
-            while True:
-                # Block taking new sequences if we reach max in-flight capacity.
-                # We cap at num_workers so all worker slots are full but no extra GPU tensors
-                # pile up in pending. The secondary_queue maxsize=1 provides the 1-ahead buffer.
-                while len(pending) >= num_workers:
-                    _drain_seq(next_drain_seq)
-                    next_drain_seq += 1
-
-                while next_drain_seq in pending and pending[next_drain_seq].done():
-                    _drain_seq(next_drain_seq)
-                    next_drain_seq += 1
-
-                item = secondary_queue.get()
-                if item is _SENTINEL:
-                    break
-                if item is _SECONDARY_FLUSH:
-                    continue
-                if first_error is not None:
-                    continue
-                pr: PrimaryRestoreResult = item  # type: ignore[assignment]
-
-                seq = next_submit_seq
-                next_submit_seq += 1
-                pending[seq] = pool.submit(_worker, pr)
-
-            for seq in range(next_drain_seq, next_submit_seq):
-                if seq in pending:
-                    _drain_seq(seq)
-
-            if first_error is not None:
-                raise first_error
+            log.warning("secondary loop: %d clips still pending after flush", len(pending_prs))

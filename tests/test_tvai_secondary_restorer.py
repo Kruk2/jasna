@@ -7,7 +7,7 @@ from collections import deque
 from io import BytesIO
 from pathlib import Path
 from queue import Queue
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -18,7 +18,6 @@ from jasna.restorer.tvai_secondary_restorer import (
     _TvaiWorker,
     TvaiSecondaryRestorer,
     TVAI_MIN_FRAMES,
-    WRITE_BATCH_SIZE,
 )
 
 
@@ -81,26 +80,6 @@ class TestTvaiWorker:
         worker.push_frames(frames)
 
         assert worker._proc.stdin.write.call_count == 1
-
-    def test_read_frames_from_queue(self):
-        worker = _TvaiWorker.__new__(_TvaiWorker)
-        worker._proc = MagicMock()
-        worker._output = Queue()
-        frame = np.zeros((256, 256, 3), dtype=np.uint8)
-        worker._output.put(frame)
-        worker._output.put(frame)
-
-        results = worker.read_frames(2, timeout=1.0)
-        assert len(results) == 2
-
-    def test_read_frames_timeout_returns_partial(self):
-        worker = _TvaiWorker.__new__(_TvaiWorker)
-        worker._proc = MagicMock()
-        worker._output = Queue()
-        worker._output.put(np.zeros((256, 256, 3), dtype=np.uint8))
-
-        results = worker.read_frames(3, timeout=0.05)
-        assert len(results) == 1
 
     def test_flush_returns_remaining(self):
         worker = _TvaiWorker.__new__(_TvaiWorker)
@@ -254,22 +233,6 @@ class TestTvaiSecondaryRestorerInit:
             )
 
 
-class TestTvaiPadToMinimum:
-    def test_no_padding_needed(self):
-        restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        frames = np.zeros((TVAI_MIN_FRAMES, 256, 256, 3), dtype=np.uint8)
-        result, pad = restorer._pad_to_minimum(frames)
-        assert pad == 0
-        assert result is frames
-
-    def test_padding_added(self):
-        restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        frames = np.zeros((2, 256, 256, 3), dtype=np.uint8)
-        result, pad = restorer._pad_to_minimum(frames)
-        assert pad == TVAI_MIN_FRAMES - 2
-        assert result.shape[0] == TVAI_MIN_FRAMES
-
-
 def _make_restorer(num_workers=1):
     restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
     restorer.num_workers = num_workers
@@ -293,82 +256,6 @@ def _make_restorer(num_workers=1):
     return restorer
 
 
-class TestTvaiRunWorker:
-    def test_push_and_read(self):
-        restorer = _make_restorer()
-        w = restorer._workers[0]
-        expected = [np.zeros((256, 256, 3), dtype=np.uint8)] * 5
-        w.read_frames.return_value = expected
-
-        frames = np.zeros((5, 256, 256, 3), dtype=np.uint8)
-        result = restorer._run_worker(frames)
-
-        assert result is expected
-        w.push_frames.assert_called_once()
-        w.read_frames.assert_called_once_with(5)
-        w.flush.assert_not_called()
-
-    def test_flush_on_partial_read(self):
-        restorer = _make_restorer()
-        w = restorer._workers[0]
-        w.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)] * 3
-        w.flush.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)] * 2
-
-        frames = np.zeros((5, 256, 256, 3), dtype=np.uint8)
-        result = restorer._run_worker(frames)
-
-        assert len(result) == 5
-        w.flush.assert_called_once()
-        w.restart.assert_called_once()
-
-    def test_raises_when_not_enough_after_flush(self):
-        restorer = _make_restorer()
-        w = restorer._workers[0]
-        w.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
-        w.flush.return_value = []
-
-        frames = np.zeros((5, 256, 256, 3), dtype=np.uint8)
-        with pytest.raises(RuntimeError, match="expected 5 output frames, got 1"):
-            restorer._run_worker(frames)
-
-    def test_dead_worker_restarted(self):
-        restorer = _make_restorer()
-        w = restorer._workers[0]
-        w.alive = False
-        expected = [np.zeros((256, 256, 3), dtype=np.uint8)]
-        w.read_frames.return_value = expected
-
-        frames = np.zeros((1, 256, 256, 3), dtype=np.uint8)
-        result = restorer._run_worker(frames)
-
-        assert result is expected
-        w.restart.assert_called_once()
-
-    def test_sync_both_go_to_least_pending(self):
-        restorer = _make_restorer(num_workers=2)
-        w0, w1 = restorer._workers
-        w0.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
-        w1.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
-
-        frames = np.zeros((1, 256, 256, 3), dtype=np.uint8)
-        restorer._run_worker(frames)
-        restorer._run_worker(frames)
-
-        assert w0.push_frames.call_count == 2
-
-    def test_worker_reused_across_calls(self):
-        restorer = _make_restorer()
-        w = restorer._workers[0]
-        w.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
-
-        frames = np.zeros((1, 256, 256, 3), dtype=np.uint8)
-        restorer._run_worker(frames)
-        restorer._run_worker(frames)
-
-        assert w.push_frames.call_count == 2
-        w.restart.assert_not_called()
-
-
 class TestTvaiAsyncApi:
     def test_push_clip_empty_range(self):
         restorer = _make_restorer()
@@ -384,8 +271,7 @@ class TestTvaiAsyncApi:
         assert seq == 0
         assert len(restorer._worker_pending_clips[0]) == 1
         clip = restorer._worker_pending_clips[0][0]
-        assert clip.real_count == 3
-        assert clip.total_pushed == 3
+        assert clip.frame_count == 3
         restorer._workers[0].push_frames.assert_called_once()
 
     def test_pop_completed_returns_empty_when_no_output(self):
@@ -581,21 +467,3 @@ class TestTvaiToTensors:
         assert result[0].dtype == torch.uint8
 
 
-class TestTvaiRestore:
-    def test_restore_empty_keep_range(self):
-        restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        frames = torch.rand((5, 3, 256, 256))
-        result = restorer.restore(frames, keep_start=3, keep_end=3)
-        assert result == []
-
-    def test_restore_full_flow(self):
-        restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-
-        out_frames = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
-
-        with patch.object(TvaiSecondaryRestorer, "_run_worker", return_value=out_frames):
-            frames = torch.rand((5, 3, 256, 256))
-            result = restorer.restore(frames, keep_start=1, keep_end=4)
-
-        assert len(result) == 3
-        assert result[0].shape == (3, 256, 256)

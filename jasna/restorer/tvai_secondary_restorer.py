@@ -48,8 +48,7 @@ def _parse_tvai_args_kv(args: str) -> dict[str, str]:
 class _PendingClip:
     seq: int
     worker_idx: int
-    real_count: int
-    total_pushed: int
+    frame_count: int
 
 
 class _TvaiWorker:
@@ -126,16 +125,6 @@ class _TvaiWorker:
         for offset in range(0, len(data), batch_bytes):
             self._proc.stdin.write(data[offset:offset + batch_bytes])
         self._proc.stdin.flush()
-
-    def read_frames(self, n: int, timeout: float = READ_TIMEOUT) -> list[np.ndarray]:
-        results: list[np.ndarray] = []
-        for _ in range(n):
-            try:
-                results.append(self._output.get(timeout=timeout))
-            except Empty:
-                break
-        logger.debug("TVAI worker pid=%s: read %d/%d frames", self._proc.pid, len(results), n)
-        return results
 
     def read_available(self) -> list[np.ndarray]:
         results: list[np.ndarray] = []
@@ -243,66 +232,13 @@ class TvaiSecondaryRestorer:
         if not Path(self.ffmpeg_path).is_file():
             raise FileNotFoundError(f"TVAI ffmpeg not found: {self.ffmpeg_path!r}")
 
-    def _get_worker_index(self, frame_count: int = 0) -> int:
-        with self._assign_lock:
-            idx = min(range(self.num_workers), key=lambda i: self._worker_pending_frames[i])
-            self._worker_pending_frames[idx] += frame_count
-        return idx
-
     def _to_numpy_hwc(self, frames: torch.Tensor) -> np.ndarray:
         frames_u8 = frames.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
         return frames_u8.permute(0, 2, 3, 1).contiguous().cpu().numpy()
 
-    def _pad_to_minimum(self, frames_hwc: np.ndarray) -> tuple[np.ndarray, int]:
-        n = frames_hwc.shape[0]
-        if n >= TVAI_MIN_FRAMES:
-            return frames_hwc, 0
-        pad_count = TVAI_MIN_FRAMES - n
-        padding = np.repeat(frames_hwc[-1:], pad_count, axis=0)
-        return np.concatenate([frames_hwc, padding], axis=0), pad_count
-
-    def _run_worker(self, frames_hwc: np.ndarray) -> list[np.ndarray]:
-        n = frames_hwc.shape[0]
-        idx = self._get_worker_index(n)
-        worker = self._workers[idx]
-        lock = self._worker_locks[idx]
-
-        with lock:
-            if not worker.alive:
-                worker.restart()
-            prefetched: list[np.ndarray] = []
-            self._push_with_background_drain(idx, frames_hwc, prefetched)
-            if prefetched:
-                results = prefetched
-                if len(results) < n:
-                    results.extend(worker.read_frames(n - len(results)))
-            else:
-                results = worker.read_frames(n)
-
-            if len(results) < n:
-                logger.debug(
-                    "TVAI worker %d: got %d/%d, flushing to get remaining",
-                    idx, len(results), n,
-                )
-                remaining = worker.flush()
-                results.extend(remaining[:n - len(results)])
-                worker.restart()
-
-            if len(results) < n:
-                raise RuntimeError(f"TVAI worker {idx}: expected {n} output frames, got {len(results)}")
-
-            with self._assign_lock:
-                self._worker_pending_frames[idx] -= n
-            return results
-
-    def _push_with_background_drain(
-        self,
-        worker_idx: int,
-        frames_hwc: np.ndarray,
-        target: list[np.ndarray] | None = None,
-    ) -> None:
+    def _push_with_background_drain(self, worker_idx: int, frames_hwc: np.ndarray) -> None:
         worker = self._workers[worker_idx]
-        out_target = self._worker_output_buf[worker_idx] if target is None else target
+        out_target = self._worker_output_buf[worker_idx]
         stop = threading.Event()
 
         def _drain_loop() -> None:
@@ -326,30 +262,6 @@ class TvaiSecondaryRestorer:
 
     def _to_tensors(self, frames_np: list[np.ndarray]) -> list[torch.Tensor]:
         return [torch.from_numpy(f).permute(2, 0, 1) for f in frames_np]
-
-    def restore_numpy(self, frames_hwc: np.ndarray) -> list[np.ndarray]:
-        n = frames_hwc.shape[0]
-        frames_hwc, pad_count = self._pad_to_minimum(frames_hwc)
-        out_np = self._run_worker(frames_hwc)
-        if pad_count > 0:
-            out_np = out_np[:n]
-        return out_np
-
-    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
-        t = frames_256.shape[0]
-        ks = max(0, keep_start)
-        ke = min(t, keep_end)
-        if ks >= ke:
-            return []
-
-        kept = frames_256[ks:ke]
-        n = kept.shape[0]
-        logger.debug("TVAI restore: %d total frames, keep [%d:%d] = %d frames", t, ks, ke, n)
-
-        frames_hwc = self._to_numpy_hwc(kept)
-        del kept, frames_256
-        out_np = self.restore_numpy(frames_hwc)
-        return self._to_tensors(out_np)
 
     def push_clip(self, frames_256: torch.Tensor, keep_start: int, keep_end: int) -> int:
         seq = self._next_seq
@@ -379,7 +291,7 @@ class TvaiSecondaryRestorer:
             self._push_with_background_drain(idx, frames_hwc)
         self._worker_last_frame[idx] = frames_hwc[-1]
 
-        self._worker_pending_clips[idx].append(_PendingClip(seq=seq, worker_idx=idx, real_count=n, total_pushed=n))
+        self._worker_pending_clips[idx].append(_PendingClip(seq=seq, worker_idx=idx, frame_count=n))
         logger.debug("TVAI push_clip seq=%d: %d frames -> worker %d", seq, n, idx)
         return seq
 
@@ -398,12 +310,12 @@ class TvaiSecondaryRestorer:
 
         for idx, pending in enumerate(self._worker_pending_clips):
             buf = self._worker_output_buf[idx]
-            while pending and len(buf) >= pending[0].total_pushed:
+            while pending and len(buf) >= pending[0].frame_count:
                 clip = pending.popleft()
-                real_frames = buf[:clip.real_count]
-                del buf[:clip.total_pushed]
+                real_frames = buf[:clip.frame_count]
+                del buf[:clip.frame_count]
                 with self._assign_lock:
-                    self._worker_pending_frames[idx] -= clip.total_pushed
+                    self._worker_pending_frames[idx] -= clip.frame_count
                 completed.append((clip.seq, self._to_tensors(real_frames)))
 
         if len(completed) > 1:
@@ -435,7 +347,7 @@ class TvaiSecondaryRestorer:
                 remaining = worker.flush()
                 self._worker_output_buf[idx].extend(remaining)
                 if pad_count > 0:
-                    self._worker_output_buf[idx] = self._worker_output_buf[idx][:pending]
+                    del self._worker_output_buf[idx][pending:]
                 worker.restart()
 
     def close(self) -> None:

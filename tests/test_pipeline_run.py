@@ -11,6 +11,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 from jasna.media import VideoMetadata
 from jasna.pipeline import Pipeline
 from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SECONDARY_FLUSH, _SENTINEL
+from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 
@@ -152,7 +153,13 @@ class TestPipelineRun:
             pad_offsets=[(126, 126)] * 2,
             resize_shapes=[(4, 4)] * 2,
         )
-        p.restoration_pipeline.run_secondary_from_primary.return_value = sr_result
+        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.side_effect = [[], [(0, restored)], []]
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.return_value = sr_result
 
         def fake_blend(sr, fb):
             for i in range(2):
@@ -174,8 +181,7 @@ class TestPipelineRun:
             p.run()
 
         p.restoration_pipeline.prepare_and_run_primary.assert_called_once()
-        p.restoration_pipeline.run_secondary_from_primary.assert_called_once()
-        p.restoration_pipeline.blend_secondary_result.assert_called_once()
+        p.restoration_pipeline.build_secondary_result.assert_called_once()
         assert mock_encoder.encode.call_count == 2
 
     def test_run_processes_frames(self):
@@ -194,10 +200,12 @@ class TestPipelineRun:
         from jasna.pipeline_processing import BatchProcessResult
         batch_result = BatchProcessResult(next_frame_idx=2)
 
-        def fake_secondary(pr):
-            return MagicMock(spec=SecondaryRestoreResult)
-
-        p.restoration_pipeline.run_secondary_from_primary = fake_secondary
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.return_value = []
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.return_value = MagicMock(spec=SecondaryRestoreResult)
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
@@ -314,7 +322,12 @@ class TestPipelineRun:
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
         )
         p.restoration_pipeline.prepare_and_run_primary.return_value = pr_result
-        p.restoration_pipeline.run_secondary_from_primary.side_effect = RuntimeError("secondary boom")
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.side_effect = [[], [(0, [])], []]
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.side_effect = RuntimeError("secondary boom")
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
@@ -328,159 +341,8 @@ class TestPipelineRun:
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()
 
-    def test_run_pooled_secondary(self):
-        """Cover lines 186, 283: pooled secondary path with num_workers > 1."""
-        with (
-            patch("jasna.pipeline.RfDetrMosaicDetectionModel"),
-            patch("jasna.pipeline.YoloMosaicDetectionModel"),
-        ):
-            rest_pipeline = MagicMock()
-            rest_pipeline.secondary_restorer = None
-            rest_pipeline.secondary_num_workers = 2
-            p = Pipeline(
-                input_video=Path("in.mp4"), output_video=Path("out.mkv"),
-                detection_model_name="rfdetr-v5", detection_model_path=Path("model.onnx"),
-                detection_score_threshold=0.25, restoration_pipeline=rest_pipeline,
-                codec="hevc", encoder_settings={}, batch_size=2,
-                device=torch.device("cuda:0"), max_clip_size=60, temporal_overlap=8,
-                fp16=True, disable_progress=True,
-            )
-
-        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.return_value = iter([(frames_t, [0, 1])])
-
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        clip = TrackedClip(
-            track_id=42, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-
-        from jasna.pipeline_processing import BatchProcessResult
-
-        def fake_process_batch(**kwargs):
-            fb = kwargs["frame_buffer"]
-            cq = kwargs["clip_queue"]
-            fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={42})
-            fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={42})
-            cq.put(ClipRestoreItem(clip=clip, frames=[frames_t[0], frames_t[1]], keep_start=0, keep_end=2, crossfade_weights=None))
-            return BatchProcessResult(next_frame_idx=2)
-
-        pr_result = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
-            primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-        rest_pipeline.prepare_and_run_primary.return_value = pr_result
-
-        sr_result = SecondaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
-            restored_frames=[torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2,
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-        rest_pipeline.run_secondary_from_primary.return_value = sr_result
-
-        def fake_blend(sr, fb):
-            for i in range(2):
-                pending = fb.frames.get(i)
-                if pending:
-                    pending.pending_clips.discard(42)
-
-        rest_pipeline.blend_secondary_result.side_effect = fake_blend
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
-            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-        ):
-            p.run()
-
-        rest_pipeline.run_secondary_from_primary.assert_called_once()
-        assert mock_encoder.encode.call_count == 2
-
-    def test_run_pooled_secondary_error_drains_queue(self):
-        with (
-            patch("jasna.pipeline.RfDetrMosaicDetectionModel"),
-            patch("jasna.pipeline.YoloMosaicDetectionModel"),
-        ):
-            rest_pipeline = MagicMock()
-            rest_pipeline.secondary_num_workers = 2
-            p = Pipeline(
-                input_video=Path("in.mp4"),
-                output_video=Path("out.mkv"),
-                detection_model_name="rfdetr-v5",
-                detection_model_path=Path("model.onnx"),
-                detection_score_threshold=0.25,
-                restoration_pipeline=rest_pipeline,
-                codec="hevc",
-                encoder_settings={},
-                batch_size=2,
-                device=torch.device("cuda:0"),
-                max_clip_size=60,
-                temporal_overlap=8,
-                fp16=True,
-                disable_progress=True,
-            )
-
-        clip = TrackedClip(
-            track_id=7,
-            start_frame=0,
-            mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            clip=clip,
-            frame_count=2,
-            frame_shape=(8, 8),
-            frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0,
-            keep_end=2,
-            crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2,
-            crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2,
-            resize_shapes=[(4, 4)] * 2,
-        )
-
-        secondary_queue: Queue[PrimaryRestoreResult | object] = Queue()
-        encode_queue: Queue[SecondaryRestoreResult | object] = Queue()
-        secondary_queue.put(pr)
-        secondary_queue.put(pr)
-        secondary_queue.put(_SENTINEL)
-
-        calls = {"n": 0}
-
-        def fail_first(_):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise RuntimeError("secondary boom")
-            return MagicMock(spec=SecondaryRestoreResult)
-
-        rest_pipeline.run_secondary_from_primary.side_effect = fail_first
-
-        with pytest.raises(RuntimeError, match="secondary boom"):
-            p._run_pooled_secondary(2, secondary_queue, encode_queue)
-
-        assert secondary_queue.empty()
-
-    def test_run_async_secondary(self):
-        """Cover _run_async_secondary: push_clip → flush → pop_completed → build_secondary_result."""
+    def test_run_secondary_loop(self):
+        """Cover _run_secondary_loop: push_clip → flush → pop_completed → build_secondary_result."""
         p = _make_pipeline()
 
         clip = TrackedClip(
@@ -505,7 +367,7 @@ class TestPipelineRun:
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        restorer = MagicMock()
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.side_effect = [[], [(0, restored)], []]
@@ -518,15 +380,15 @@ class TestPipelineRun:
         secondary_queue.put(pr)
         secondary_queue.put(_SENTINEL)
 
-        p._run_async_secondary(secondary_queue, encode_queue)
+        p._run_secondary_loop(secondary_queue, encode_queue)
 
         restorer.push_clip.assert_called_once()
         assert not encode_queue.empty()
         result = encode_queue.get()
         assert result is sr_result
 
-    def test_run_async_secondary_gap_no_forced_flush(self):
-        """Async secondary no longer forces timeout-driven gap flushes while waiting."""
+    def test_run_secondary_loop_gap_no_forced_flush(self):
+        """Secondary loop no longer forces timeout-driven gap flushes while waiting."""
         p = _make_pipeline()
 
         clip = TrackedClip(
@@ -553,7 +415,7 @@ class TestPipelineRun:
 
         pop_results = iter([[], [], [(0, restored)]])
 
-        restorer = MagicMock()
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.side_effect = lambda: next(pop_results, [])
@@ -574,13 +436,13 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_async_secondary(secondary_queue, encode_queue)
+        p._run_secondary_loop(secondary_queue, encode_queue)
         t.join(timeout=3)
 
         restorer.flush_all.assert_not_called()
         assert not encode_queue.empty()
 
-    def test_run_async_secondary_detection_gap_drain_signal(self):
+    def test_run_secondary_loop_detection_gap_drain_signal(self):
         """Detection-gap signal drains completed clips without flushing workers."""
         p = _make_pipeline()
 
@@ -606,7 +468,7 @@ class TestPipelineRun:
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        restorer = MagicMock()
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.side_effect = [[], [], [(0, restored)], []]
@@ -620,14 +482,14 @@ class TestPipelineRun:
         secondary_queue.put(_SECONDARY_FLUSH)
         secondary_queue.put(_SENTINEL)
 
-        p._run_async_secondary(secondary_queue, encode_queue)
+        p._run_secondary_loop(secondary_queue, encode_queue)
 
         restorer.flush_all.assert_not_called()
         assert not encode_queue.empty()
         result = encode_queue.get()
         assert result is sr_result
 
-    def test_run_async_secondary_detection_gap_drain_releases_completed(self):
+    def test_run_secondary_loop_detection_gap_drain_releases_completed(self):
         """Completed clip is drained on detection-gap signal without flushing workers."""
         p = _make_pipeline()
 
@@ -653,7 +515,7 @@ class TestPipelineRun:
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        restorer = MagicMock()
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.side_effect = [[], [], [(0, restored)], []]
@@ -667,7 +529,7 @@ class TestPipelineRun:
         secondary_queue.put(_SECONDARY_FLUSH)
         secondary_queue.put(_SENTINEL)
 
-        p._run_async_secondary(secondary_queue, encode_queue)
+        p._run_secondary_loop(secondary_queue, encode_queue)
 
         restorer.flush_all.assert_not_called()
         assert not encode_queue.empty()
@@ -675,7 +537,7 @@ class TestPipelineRun:
         assert result is sr_result
         assert len(result.restored_frames) == 180
 
-    def test_run_async_secondary_self_priming_prevents_deadlock(self):
+    def test_run_secondary_loop_self_priming_prevents_deadlock(self):
         """3 clips on 2 workers: clip 2 primes clip 0's buffered tail, preventing deadlock."""
         p = _make_pipeline()
 
@@ -712,7 +574,7 @@ class TestPipelineRun:
                 return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 50)]
             return []
 
-        restorer = MagicMock()
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.side_effect = mock_push_clip
         restorer.pop_completed.side_effect = mock_pop_completed
@@ -732,13 +594,13 @@ class TestPipelineRun:
         secondary_queue.put(pr2)
         secondary_queue.put(_SENTINEL)
 
-        p._run_async_secondary(secondary_queue, encode_queue)
+        p._run_secondary_loop(secondary_queue, encode_queue)
 
         assert restorer.push_clip.call_count == 3
         assert not encode_queue.empty()
         restorer.flush_all.assert_called_once()
 
-    def test_run_async_secondary_tiny_and_large_clip_no_deadlock(self):
+    def test_run_secondary_loop_tiny_and_large_clip_no_deadlock(self):
         """Reproduces original deadlock: 1-frame + 170-frame clips on 2 workers.
 
         With max_pending=num_workers+1=3, the 3rd clip primes worker 0,
@@ -779,7 +641,7 @@ class TestPipelineRun:
                 return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 1)]
             return []
 
-        restorer = MagicMock()
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.side_effect = mock_push_clip
         restorer.pop_completed.side_effect = mock_pop_completed
@@ -799,7 +661,7 @@ class TestPipelineRun:
         secondary_queue.put(pr_next)
         secondary_queue.put(_SENTINEL)
 
-        p._run_async_secondary(secondary_queue, encode_queue)
+        p._run_secondary_loop(secondary_queue, encode_queue)
 
         assert restorer.push_clip.call_count == 3
         assert not encode_queue.empty()
