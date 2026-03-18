@@ -4,7 +4,7 @@ import torch
 from queue import Queue
 
 from jasna.mosaic.detections import Detections
-from jasna.pipeline_items import ClipRestoreItem, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, _SECONDARY_FLUSH, _SENTINEL
 from jasna.restorer.restored_clip import RestoredClip
 from jasna.tracking.clip_tracker import ClipTracker, TrackedClip
 from jasna.tracking.frame_buffer import FrameBuffer
@@ -72,12 +72,107 @@ def _drain_queue(clip_queue: Queue, frame_buffer: FrameBuffer, pipeline) -> None
         item = clip_queue.get_nowait()
         if item is _SENTINEL:
             break
+        if item is _SECONDARY_FLUSH:
+            continue
         ci: ClipRestoreItem = item  # type: ignore[assignment]
         pipeline.restore_and_blend_clip(
             ci.clip, ci.frames,
             keep_start=ci.keep_start, keep_end=ci.keep_end,
             frame_buffer=frame_buffer, crossfade_weights=ci.crossfade_weights,
         )
+
+
+def _make_empty_det_batch(*, batch_size: int) -> Detections:
+    return Detections(
+        boxes_xyxy=[np.zeros((0, 4), dtype=np.float32) for _ in range(batch_size)],
+        masks=[torch.zeros((0, 8, 8), dtype=torch.bool) for _ in range(batch_size)],
+    )
+
+
+def test_process_batch_triggers_secondary_flush_after_gap() -> None:
+    batch_size = 1
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0)
+    fb = FrameBuffer(device=torch.device("cpu"))
+    clip_queue: Queue[ClipRestoreItem | object] = Queue()
+    raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
+    frames = torch.zeros((1, 3, 8, 8), dtype=torch.uint8)
+
+    streak = 0
+    for i in range(5):
+        res = process_frame_batch(
+            frames=frames,
+            pts_list=[i],
+            start_frame_idx=i,
+            batch_size=batch_size,
+            target_hw=(8, 8),
+            detections_fn=lambda _x, *, target_hw: _make_empty_det_batch(batch_size=batch_size),
+            tracker=tracker,
+            frame_buffer=fb,
+            clip_queue=clip_queue,
+            discard_margin=0,
+            blend_frames=0,
+            raw_frame_context=raw_frame_context,
+            no_track_streak=streak,
+            secondary_flush_gap_frames=5,
+        )
+        streak = res.no_track_streak
+        if i < 4:
+            assert res.should_flush_secondary is False
+        else:
+            assert res.should_flush_secondary is True
+
+
+def test_process_batch_gap_flush_resets_after_detection() -> None:
+    batch_size = 1
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0)
+    fb = FrameBuffer(device=torch.device("cpu"))
+    clip_queue: Queue[ClipRestoreItem | object] = Queue()
+    raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
+    frames = torch.zeros((1, 3, 8, 8), dtype=torch.uint8)
+
+    empty_fn = lambda _x, *, target_hw: _make_empty_det_batch(batch_size=batch_size)
+    det_fn = lambda _x, *, target_hw: _make_single_det_batch(effective_bs=batch_size, batch_size=batch_size)
+
+    streak = 0
+    for i in range(3):
+        res = process_frame_batch(
+            frames=frames,
+            pts_list=[i],
+            start_frame_idx=i,
+            batch_size=batch_size,
+            target_hw=(8, 8),
+            detections_fn=empty_fn,
+            tracker=tracker,
+            frame_buffer=fb,
+            clip_queue=clip_queue,
+            discard_margin=0,
+            blend_frames=0,
+            raw_frame_context=raw_frame_context,
+            no_track_streak=streak,
+            secondary_flush_gap_frames=5,
+        )
+        streak = res.no_track_streak
+        assert res.should_flush_secondary is False
+    assert streak == 3
+
+    res = process_frame_batch(
+        frames=frames,
+        pts_list=[3],
+        start_frame_idx=3,
+        batch_size=batch_size,
+        target_hw=(8, 8),
+        detections_fn=det_fn,
+        tracker=tracker,
+        frame_buffer=fb,
+        clip_queue=clip_queue,
+        discard_margin=0,
+        blend_frames=0,
+        raw_frame_context=raw_frame_context,
+        no_track_streak=streak,
+        secondary_flush_gap_frames=5,
+    )
+    assert res.no_track_streak == 0
+    assert res.should_flush_secondary is False
 
 
 def _make_single_det_batch(*, effective_bs: int, batch_size: int, box=(2.0, 2.0, 6.0, 6.0)) -> Detections:

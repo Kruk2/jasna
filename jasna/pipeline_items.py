@@ -8,6 +8,7 @@ from jasna.tracking.clip_tracker import TrackedClip
 
 
 _SENTINEL = object()
+_SECONDARY_FLUSH = object()
 
 
 @dataclass
@@ -22,7 +23,9 @@ class ClipRestoreItem:
 @dataclass
 class _RestoreResultBase:
     clip: TrackedClip
-    frames: list[torch.Tensor]
+    frame_count: int
+    frame_shape: tuple[int, int]
+    frame_device: torch.device
     keep_start: int
     keep_end: int
     crossfade_weights: dict[int, float] | None

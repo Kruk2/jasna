@@ -489,7 +489,9 @@ def test_prepare_and_run_primary(monkeypatch) -> None:
     result = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
 
     assert result.clip is clip
-    assert result.frames is frames
+    assert result.frame_count == 3
+    assert result.frame_shape == (30, 40)
+    assert result.frame_device == frames[0].device
     assert result.keep_start == 0
     assert result.keep_end == 3
     assert result.crossfade_weights is None
@@ -520,7 +522,9 @@ def test_run_secondary_from_primary(monkeypatch) -> None:
     sr = pipeline.run_secondary_from_primary(pr)
 
     assert sr.clip is clip
-    assert sr.frames is frames
+    assert sr.frame_count == 3
+    assert sr.frame_shape == (30, 40)
+    assert sr.frame_device == frames[0].device
     assert sr.keep_start == 0
     assert sr.keep_end == 3
     assert len(sr.restored_frames) == 3
@@ -650,7 +654,9 @@ def test_build_secondary_result(monkeypatch) -> None:
     sr = pipeline.build_secondary_result(pr, restored_frames)
 
     assert sr.clip is clip
-    assert sr.frames is frames
+    assert sr.frame_count == 3
+    assert sr.frame_shape == (30, 40)
+    assert sr.frame_device == frames[0].device
     assert sr.restored_frames is restored_frames
     assert sr.keep_start == 0
     assert sr.keep_end == 3

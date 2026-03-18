@@ -234,7 +234,9 @@ class RestorationPipeline:
 
         return PrimaryRestoreResult(
             clip=clip,
-            frames=frames,
+            frame_count=len(frames),
+            frame_shape=(int(frames[0].shape[1]), int(frames[0].shape[2])),
+            frame_device=frames[0].device,
             primary_raw=primary_raw,
             keep_start=keep_start,
             keep_end=keep_end,
@@ -247,13 +249,15 @@ class RestorationPipeline:
 
     def run_secondary_from_primary(self, pr: PrimaryRestoreResult) -> SecondaryRestoreResult:
         ks = max(0, pr.keep_start)
-        ke = min(len(pr.frames), pr.keep_end)
+        ke = min(pr.frame_count, pr.keep_end)
         restored_frames = self._run_secondary(pr.primary_raw, ks, ke)
         del pr.primary_raw
 
         return SecondaryRestoreResult(
             clip=pr.clip,
-            frames=pr.frames,
+            frame_count=pr.frame_count,
+            frame_shape=pr.frame_shape,
+            frame_device=pr.frame_device,
             restored_frames=restored_frames,
             keep_start=pr.keep_start,
             keep_end=pr.keep_end,
@@ -276,7 +280,9 @@ class RestorationPipeline:
 
         return SecondaryRestoreResult(
             clip=pr.clip,
-            frames=pr.frames,
+            frame_count=pr.frame_count,
+            frame_shape=pr.frame_shape,
+            frame_device=pr.frame_device,
             restored_frames=restored_frames,
             keep_start=pr.keep_start,
             keep_end=pr.keep_end,
@@ -293,7 +299,7 @@ class RestorationPipeline:
         frame_buffer: 'FrameBuffer',
     ) -> None:
         clip = sr.clip
-        t = len(sr.frames)
+        t = sr.frame_count
         ks = max(0, sr.keep_start)
         ke = min(t, sr.keep_end)
 
@@ -306,14 +312,14 @@ class RestorationPipeline:
         if ks >= ke:
             return
 
-        frame_h, frame_w = sr.frames[0].shape[1], sr.frames[0].shape[2]
+        frame_h, frame_w = sr.frame_shape
         for local_i, i in enumerate(range(ks, ke)):
             frame_idx = clip.start_frame + i
             track_id = clip.track_id
             if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=track_id):
                 continue
 
-            frame_u8 = sr.restored_frames[local_i].to(sr.frames[0].device)
+            frame_u8 = sr.restored_frames[local_i].to(sr.frame_device)
             pad_offset, resize_shape = self._scale_offsets(frame_u8, sr.pad_offsets[i], sr.resize_shapes[i])
             cw = sr.crossfade_weights.get(i, 1.0) if sr.crossfade_weights else 1.0
 

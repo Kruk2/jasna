@@ -338,7 +338,7 @@ class TestFullPipelineE2E:
             pipeline, output, det_spy, primary_spy, secondary_spy = self._build(
                 tmp_path, secondary_restorer=tvai,
             )
-            tvai_restore_spy = _MethodSpy(tvai, "restore")
+            push_clip_spy = _MethodSpy(tvai, "push_clip")
             pipeline.run()
         finally:
             tvai.close()
@@ -347,8 +347,7 @@ class TestFullPipelineE2E:
 
         assert det_spy.total_detections > 0
         assert primary_spy.call_count > 0
-        assert secondary_spy.call_count == primary_spy.call_count
-        assert tvai_restore_spy.call_count == primary_spy.call_count
+        assert push_clip_spy.call_count == primary_spy.call_count
 
     @REQUIRES_NVVFX
     def test_rtx_superres_secondary(self, tmp_path):

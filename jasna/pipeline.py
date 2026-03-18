@@ -15,7 +15,7 @@ from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
 from jasna.mosaic import Detections
 from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
-from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SECONDARY_FLUSH, _SENTINEL
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
@@ -25,6 +25,9 @@ log = logging.getLogger(__name__)
 
 
 class Pipeline:
+    _SECONDARY_QUEUE_MAXSIZE = 2
+    _SECONDARY_FLUSH_GAP_FRAMES = 5
+
     def __init__(
         self,
         *,
@@ -81,10 +84,11 @@ class Pipeline:
     def run(self) -> None:
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
+        secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
 
         clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
-        secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(maxsize=1)
-        encode_queue: Queue[SecondaryRestoreResult | object] = Queue(maxsize=8)
+        secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(maxsize=self._SECONDARY_QUEUE_MAXSIZE)
+        encode_queue: Queue[SecondaryRestoreResult | object] = Queue(maxsize=secondary_workers + 1)
 
         error_holder: list[BaseException] = []
         frame_buffer = FrameBuffer(device=device)
@@ -96,6 +100,7 @@ class Pipeline:
                 discard_margin = int(self.temporal_overlap)
                 blend_frames = (self.temporal_overlap // 3) if self.enable_crossfade else 0
                 raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
+                no_track_streak = 0
 
                 with (
                     NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=device, metadata=metadata) as reader,
@@ -134,9 +139,14 @@ class Pipeline:
                                 discard_margin=discard_margin,
                                 blend_frames=blend_frames,
                                 raw_frame_context=raw_frame_context,
+                                no_track_streak=no_track_streak,
+                                secondary_flush_gap_frames=self._SECONDARY_FLUSH_GAP_FRAMES,
                             )
 
                             frame_idx = res.next_frame_idx
+                            no_track_streak = res.no_track_streak
+                            if res.should_flush_secondary:
+                                clip_queue.put(_SECONDARY_FLUSH)
                             pb.update(effective_bs)
 
                         finalize_processing(
@@ -164,6 +174,9 @@ class Pipeline:
                     item = clip_queue.get()
                     if item is _SENTINEL:
                         break
+                    if item is _SECONDARY_FLUSH:
+                        secondary_queue.put(_SECONDARY_FLUSH)
+                        continue
                     clip_item: ClipRestoreItem = item  # type: ignore[assignment]
                     result = self.restoration_pipeline.prepare_and_run_primary(
                         clip_item.clip,
@@ -239,7 +252,7 @@ class Pipeline:
         if error_holder:
             raise error_holder[0]
 
-    _FLUSH_GAP_SECONDS = 2.0
+    _ASYNC_WAIT_SECONDS = 0.01
 
     def _run_async_secondary(
         self,
@@ -249,12 +262,22 @@ class Pipeline:
         restorer = self.restoration_pipeline.secondary_restorer
         rp = self.restoration_pipeline
         pending_prs: dict[int, PrimaryRestoreResult] = {}
-        last_push_time = time.monotonic()
 
-        def _drain_completed():
+        def _drain_completed() -> int:
+            drained = 0
             for seq, restored_frames in restorer.pop_completed():
                 pr = pending_prs.pop(seq)
                 encode_queue.put(rp.build_secondary_result(pr, restored_frames))
+                drained += 1
+            if drained:
+                log.debug(
+                    "TVAI async: drained=%d pending=%d secondary_q=%d encode_q=%d",
+                    drained,
+                    len(pending_prs),
+                    secondary_queue.qsize(),
+                    encode_queue.qsize(),
+                )
+            return drained
 
         while True:
             _drain_completed()
@@ -262,10 +285,6 @@ class Pipeline:
             try:
                 item = secondary_queue.get(timeout=0.5)
             except Empty:
-                if pending_prs and (time.monotonic() - last_push_time) > self._FLUSH_GAP_SECONDS:
-                    log.info("TVAI async: gap detected (%d pending), flushing workers", len(pending_prs))
-                    restorer.flush_all()
-                    _drain_completed()
                 continue
 
             if item is _SENTINEL:
@@ -274,11 +293,16 @@ class Pipeline:
                     _drain_completed()
                 break
 
+            if item is _SECONDARY_FLUSH:
+                if pending_prs:
+                    log.debug("TVAI async: detection-gap drain (pending=%d)", len(pending_prs))
+                    _drain_completed()
+                continue
+
             pr: PrimaryRestoreResult = item  # type: ignore[assignment]
             seq = restorer.push_clip(pr.primary_raw, pr.keep_start, pr.keep_end)
             del pr.primary_raw
             pending_prs[seq] = pr
-            last_push_time = time.monotonic()
 
         if pending_prs:
             log.warning("TVAI async: %d clips still pending after flush", len(pending_prs))
@@ -326,6 +350,8 @@ class Pipeline:
                 item = secondary_queue.get()
                 if item is _SENTINEL:
                     break
+                if item is _SECONDARY_FLUSH:
+                    continue
                 if first_error is not None:
                     continue
                 pr: PrimaryRestoreResult = item  # type: ignore[assignment]
