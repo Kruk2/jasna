@@ -62,9 +62,11 @@ Jasna/Lada takes 256x256 pixel crop of mosaic region and restores it still in 25
 To eleviate that, you can use 2nd restoration model that upscales 256x256 to 512x512 or 1024x1024 which produces cleaner results.
 Currently supported:
 - **RTX Super-resolution** (fast, may flicker). Very fast, free, zero dependencies. In some videos it may produce a flickering effect — test on a short clip first.
-- **TVAI** (best quality, slowest). Requires [Topaz Video AI](https://www.topazlabs.com/topaz-video) (paid, Windows only). Recommended model: **iris-2**.\
-  ```--tvai-args``` allows you to customize model and other params. Defaults to iris-2. Setup these as env variables:
-  <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
+- **TVAI** (best quality, slowest). Requires [Topaz Video](https://www.topazlabs.com/topaz-video) (paid, Windows only). Recommended model: **iris-2**.\
+  ```--tvai-args``` allows you to customize model and other params. Defaults to iris-2.\
+  Setup these as env variables for "Topaz Video AI":\
+  <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />\
+   "Topaz Video" (different product), has different folder so adjust. Jasna defaults to "Topaz Video" ffmpeg path.
 
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\
