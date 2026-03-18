@@ -264,6 +264,29 @@ class RestorationPipeline:
             resize_shapes=pr.resize_shapes,
         )
 
+    def build_secondary_result(
+        self,
+        pr: PrimaryRestoreResult,
+        restored_frames: list[torch.Tensor],
+    ) -> SecondaryRestoreResult:
+        if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
+            batch_u8 = torch.stack(restored_frames, dim=0)
+            batch_u8 = apply_denoise_u8(batch_u8, self._denoise_strength)
+            restored_frames = list(batch_u8.unbind(0))
+
+        return SecondaryRestoreResult(
+            clip=pr.clip,
+            frames=pr.frames,
+            restored_frames=restored_frames,
+            keep_start=pr.keep_start,
+            keep_end=pr.keep_end,
+            crossfade_weights=pr.crossfade_weights,
+            enlarged_bboxes=pr.enlarged_bboxes,
+            crop_shapes=pr.crop_shapes,
+            pad_offsets=pr.pad_offsets,
+            resize_shapes=pr.resize_shapes,
+        )
+
     def blend_secondary_result(
         self,
         sr: SecondaryRestoreResult,

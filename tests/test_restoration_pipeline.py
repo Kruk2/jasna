@@ -641,6 +641,38 @@ def test_blend_secondary_result_needs_blend_false(monkeypatch) -> None:
     assert fb.frames[1].blended_frame is fb.frames[1].frame
 
 
+def test_build_secondary_result(monkeypatch) -> None:
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
+    restored_frames = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8) for _ in range(3)]
+    sr = pipeline.build_secondary_result(pr, restored_frames)
+
+    assert sr.clip is clip
+    assert sr.frames is frames
+    assert sr.restored_frames is restored_frames
+    assert sr.keep_start == 0
+    assert sr.keep_end == 3
+    assert sr.enlarged_bboxes == pr.enlarged_bboxes
+
+
+def test_build_secondary_result_with_denoise(monkeypatch) -> None:
+    clip, frames = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(
+        restorer=_IdentityRestorer(),  # type: ignore[arg-type]
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_SECONDARY,
+    )
+
+    pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
+    restored_frames = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8) for _ in range(3)]
+    sr = pipeline.build_secondary_result(pr, restored_frames)
+
+    assert len(sr.restored_frames) == 3
+    assert sr.restored_frames[0].dtype == torch.uint8
+
+
 def test_restore_and_blend_clip_needs_blend_false(monkeypatch) -> None:
     """Cover line 200: needs_blend returns False in restore_and_blend_clip."""
     from jasna.tracking.frame_buffer import FrameBuffer

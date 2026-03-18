@@ -1,8 +1,12 @@
-"""Tests for jasna.restorer.tvai_secondary_restorer covering parsing, validation, worker errors, and close."""
+"""Tests for jasna.restorer.tvai_secondary_restorer covering parsing, validation, worker lifecycle, and close."""
 from __future__ import annotations
 
 import os
+import threading
+from collections import deque
+from io import BytesIO
 from pathlib import Path
+from queue import Queue
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -14,6 +18,7 @@ from jasna.restorer.tvai_secondary_restorer import (
     _TvaiWorker,
     TvaiSecondaryRestorer,
     TVAI_MIN_FRAMES,
+    WRITE_BATCH_SIZE,
 )
 
 
@@ -56,79 +61,121 @@ class TestParseTvaiArgsKv:
 
 
 class TestTvaiWorker:
-    def test_restore_frames_ffmpeg_crash(self):
-        mock_proc = MagicMock()
-        mock_proc.pid = 999
-        mock_proc.communicate.return_value = (b"", b"some error")
-        mock_proc.returncode = 1
-
+    def test_push_frames_writes_in_batches(self):
         worker = _TvaiWorker.__new__(_TvaiWorker)
-        worker._proc = mock_proc
-        worker.out_w = 256
-        worker.out_h = 256
         worker._in_frame_bytes = 256 * 256 * 3
-        worker._out_frame_bytes = 256 * 256 * 3
+        worker._proc = MagicMock()
 
-        frames = np.zeros((2, 256, 256, 3), dtype=np.uint8)
-        with pytest.raises(RuntimeError, match="crashed"):
-            worker.restore_frames(frames)
+        frames = np.zeros((6, 256, 256, 3), dtype=np.uint8)
+        worker.push_frames(frames)
 
-    def test_restore_frames_not_enough_output(self):
-        out_frame_bytes = 256 * 256 * 3
-        mock_proc = MagicMock()
-        mock_proc.pid = 999
-        mock_proc.communicate.return_value = (bytes(out_frame_bytes), b"")
-        mock_proc.returncode = 0
+        assert worker._proc.stdin.write.call_count == 2
+        assert worker._proc.stdin.flush.call_count == 2
 
+    def test_push_frames_single_batch(self):
         worker = _TvaiWorker.__new__(_TvaiWorker)
-        worker._proc = mock_proc
-        worker.out_w = 256
-        worker.out_h = 256
         worker._in_frame_bytes = 256 * 256 * 3
-        worker._out_frame_bytes = out_frame_bytes
+        worker._proc = MagicMock()
 
-        frames = np.zeros((2, 256, 256, 3), dtype=np.uint8)
-        with pytest.raises(RuntimeError, match="expected 3 output frames, got 1"):
-            worker.restore_frames(frames)
+        frames = np.zeros((3, 256, 256, 3), dtype=np.uint8)
+        worker.push_frames(frames)
 
-    def test_restore_frames_stderr_logged(self):
-        out_frame_bytes = 256 * 256 * 3
-        n_input = 1
-        stdout = bytes(out_frame_bytes * (1 + n_input))
-        mock_proc = MagicMock()
-        mock_proc.pid = 999
-        mock_proc.communicate.return_value = (stdout, b"some warning")
-        mock_proc.returncode = 0
+        assert worker._proc.stdin.write.call_count == 1
 
+    def test_read_frames_from_queue(self):
         worker = _TvaiWorker.__new__(_TvaiWorker)
-        worker._proc = mock_proc
-        worker.out_w = 256
-        worker.out_h = 256
-        worker._in_frame_bytes = 256 * 256 * 3
-        worker._out_frame_bytes = out_frame_bytes
+        worker._proc = MagicMock()
+        worker._output = Queue()
+        frame = np.zeros((256, 256, 3), dtype=np.uint8)
+        worker._output.put(frame)
+        worker._output.put(frame)
 
-        frames = np.zeros((n_input, 256, 256, 3), dtype=np.uint8)
-        result = worker.restore_frames(frames)
-        assert len(result) == 1
-        assert result[0].shape == (256, 256, 3)
+        results = worker.read_frames(2, timeout=1.0)
+        assert len(results) == 2
+
+    def test_read_frames_timeout_returns_partial(self):
+        worker = _TvaiWorker.__new__(_TvaiWorker)
+        worker._proc = MagicMock()
+        worker._output = Queue()
+        worker._output.put(np.zeros((256, 256, 3), dtype=np.uint8))
+
+        results = worker.read_frames(3, timeout=0.05)
+        assert len(results) == 1
+
+    def test_flush_returns_remaining(self):
+        worker = _TvaiWorker.__new__(_TvaiWorker)
+        worker._proc = MagicMock()
+        worker._reader = MagicMock()
+        worker._output = Queue()
+        frame = np.zeros((256, 256, 3), dtype=np.uint8)
+        worker._output.put(frame)
+        worker._output.put(frame)
+
+        remaining = worker.flush()
+        assert len(remaining) == 2
+        worker._proc.stdin.close.assert_called_once()
+        worker._reader.join.assert_called_once()
+
+    def test_alive_true(self):
+        worker = _TvaiWorker.__new__(_TvaiWorker)
+        worker._proc = MagicMock()
+        worker._proc.poll.return_value = None
+        assert worker.alive is True
+
+    def test_alive_false(self):
+        worker = _TvaiWorker.__new__(_TvaiWorker)
+        worker._proc = MagicMock()
+        worker._proc.poll.return_value = 1
+        assert worker.alive is False
 
     def test_kill_when_running(self):
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = None
-
         worker = _TvaiWorker.__new__(_TvaiWorker)
-        worker._proc = mock_proc
+        worker._proc = MagicMock()
+        worker._proc.poll.return_value = None
         worker.kill()
-        mock_proc.kill.assert_called_once()
+        worker._proc.kill.assert_called_once()
 
     def test_kill_when_already_dead(self):
-        mock_proc = MagicMock()
-        mock_proc.poll.return_value = 0
-
         worker = _TvaiWorker.__new__(_TvaiWorker)
-        worker._proc = mock_proc
+        worker._proc = MagicMock()
+        worker._proc.poll.return_value = 0
         worker.kill()
-        mock_proc.kill.assert_not_called()
+        worker._proc.kill.assert_not_called()
+
+    def test_reader_loop_puts_all_frames(self):
+        worker = _TvaiWorker.__new__(_TvaiWorker)
+        worker.out_w = 256
+        worker.out_h = 256
+        worker._out_frame_bytes = 256 * 256 * 3
+        worker._output = Queue()
+
+        frame_data = bytes(worker._out_frame_bytes)
+        mock_proc = MagicMock()
+        mock_proc.stdout = BytesIO(frame_data * 3)
+        mock_proc.stderr.read.return_value = b""
+        mock_proc.wait.return_value = 0
+        worker._proc = mock_proc
+
+        worker._reader_loop()
+
+        assert worker._output.qsize() == 3
+
+    def test_reader_loop_handles_crash(self):
+        worker = _TvaiWorker.__new__(_TvaiWorker)
+        worker.out_w = 256
+        worker.out_h = 256
+        worker._out_frame_bytes = 256 * 256 * 3
+        worker._output = Queue()
+        worker._intentional_kill = False
+
+        mock_proc = MagicMock()
+        mock_proc.stdout = BytesIO(b"")
+        mock_proc.stderr.read.return_value = b"crash info"
+        mock_proc.wait.return_value = -1
+        worker._proc = mock_proc
+
+        worker._reader_loop()
+        assert worker._output.qsize() == 0
 
 
 class TestTvaiValidateEnvironment:
@@ -198,13 +245,12 @@ class TestTvaiSecondaryRestorerInit:
         ffmpeg.write_bytes(b"")
 
         with pytest.raises(ValueError, match="Invalid tvai scale"):
-            with patch.object(TvaiSecondaryRestorer, "_spawn_warm_worker"):
-                TvaiSecondaryRestorer(
-                    ffmpeg_path=str(ffmpeg),
-                    tvai_args="model=iris-2",
-                    scale=3,
-                    num_workers=1,
-                )
+            TvaiSecondaryRestorer(
+                ffmpeg_path=str(ffmpeg),
+                tvai_args="model=iris-2",
+                scale=3,
+                num_workers=1,
+            )
 
 
 class TestTvaiPadToMinimum:
@@ -223,47 +269,354 @@ class TestTvaiPadToMinimum:
         assert result.shape[0] == TVAI_MIN_FRAMES
 
 
-class TestTvaiReplenishClosed:
-    def test_replenish_when_closed_returns_early(self):
-        restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        restorer._closed = True
-        restorer._pool = MagicMock()
+def _make_restorer(num_workers=1):
+    restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
+    restorer.num_workers = num_workers
+    workers = []
+    for _ in range(num_workers):
+        w = MagicMock()
+        w.alive = True
+        w._proc.pid = 100
+        workers.append(w)
+    restorer._workers = workers
+    restorer._worker_locks = [threading.Lock() for _ in range(num_workers)]
+    restorer._worker_pending_frames = [0] * num_workers
+    restorer._assign_lock = threading.Lock()
+    restorer._next_seq = 0
+    restorer._pending_clips = deque()
+    restorer._worker_output_buf = [[] for _ in range(num_workers)]
+    restorer._worker_last_frame = [None] * num_workers
+    return restorer
 
-        with patch.object(TvaiSecondaryRestorer, "_spawn_warm_worker") as mock_spawn:
-            restorer._replenish_async()
-            import time
-            time.sleep(0.1)
-            mock_spawn.assert_not_called()
+
+class TestTvaiRunWorker:
+    def test_push_and_read(self):
+        restorer = _make_restorer()
+        w = restorer._workers[0]
+        expected = [np.zeros((256, 256, 3), dtype=np.uint8)] * 5
+        w.read_frames.return_value = expected
+
+        frames = np.zeros((5, 256, 256, 3), dtype=np.uint8)
+        result = restorer._run_worker(frames)
+
+        assert result is expected
+        w.push_frames.assert_called_once()
+        w.read_frames.assert_called_once_with(5)
+        w.flush.assert_not_called()
+
+    def test_flush_on_partial_read(self):
+        restorer = _make_restorer()
+        w = restorer._workers[0]
+        w.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)] * 3
+        w.flush.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)] * 2
+
+        frames = np.zeros((5, 256, 256, 3), dtype=np.uint8)
+        result = restorer._run_worker(frames)
+
+        assert len(result) == 5
+        w.flush.assert_called_once()
+        w.restart.assert_called_once()
+
+    def test_raises_when_not_enough_after_flush(self):
+        restorer = _make_restorer()
+        w = restorer._workers[0]
+        w.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
+        w.flush.return_value = []
+
+        frames = np.zeros((5, 256, 256, 3), dtype=np.uint8)
+        with pytest.raises(RuntimeError, match="expected 5 output frames, got 1"):
+            restorer._run_worker(frames)
+
+    def test_dead_worker_restarted(self):
+        restorer = _make_restorer()
+        w = restorer._workers[0]
+        w.alive = False
+        expected = [np.zeros((256, 256, 3), dtype=np.uint8)]
+        w.read_frames.return_value = expected
+
+        frames = np.zeros((1, 256, 256, 3), dtype=np.uint8)
+        result = restorer._run_worker(frames)
+
+        assert result is expected
+        w.restart.assert_called_once()
+
+    def test_sync_both_go_to_least_pending(self):
+        restorer = _make_restorer(num_workers=2)
+        w0, w1 = restorer._workers
+        w0.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
+        w1.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
+
+        frames = np.zeros((1, 256, 256, 3), dtype=np.uint8)
+        restorer._run_worker(frames)
+        restorer._run_worker(frames)
+
+        assert w0.push_frames.call_count == 2
+
+    def test_worker_reused_across_calls(self):
+        restorer = _make_restorer()
+        w = restorer._workers[0]
+        w.read_frames.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)]
+
+        frames = np.zeros((1, 256, 256, 3), dtype=np.uint8)
+        restorer._run_worker(frames)
+        restorer._run_worker(frames)
+
+        assert w.push_frames.call_count == 2
+        w.restart.assert_not_called()
+
+
+class TestTvaiAsyncApi:
+    def test_push_clip_empty_range(self):
+        restorer = _make_restorer()
+        seq = restorer.push_clip(torch.rand((5, 3, 256, 256)), keep_start=3, keep_end=3)
+        assert seq == 0
+        assert len(restorer._pending_clips) == 1
+        assert restorer._pending_clips[0].real_count == 0
+        restorer._workers[0].push_frames.assert_not_called()
+
+    def test_push_clip_pushes_to_worker(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        frames = torch.rand((5, 3, 256, 256))
+        seq = restorer.push_clip(frames, keep_start=1, keep_end=4)
+        assert seq == 0
+        assert len(restorer._pending_clips) == 1
+        clip = restorer._pending_clips[0]
+        assert clip.real_count == 3
+        assert clip.total_pushed == 3
+        restorer._workers[0].push_frames.assert_called_once()
+
+    def test_push_clip_no_padding_when_enough_frames(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        frames = torch.rand((7, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=7)
+        clip = restorer._pending_clips[0]
+        assert clip.real_count == 7
+        assert clip.total_pushed == 7
+
+    def test_pop_completed_returns_empty_when_no_output(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        restorer._workers[0].read_available.return_value = []
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        completed = restorer.pop_completed()
+        assert completed == []
+
+    def test_pop_completed_returns_clip_when_output_ready(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        out_frames = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
+        restorer._workers[0].read_available.return_value = out_frames
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        completed = restorer.pop_completed()
+        assert len(completed) == 1
+        seq, result = completed[0]
+        assert seq == 0
+        assert len(result) == 5
+
+    def test_pop_completed_strips_padding(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        out_frames = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
+        restorer._workers[0].read_available.return_value = out_frames
+        frames = torch.rand((2, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=2)
+        completed = restorer.pop_completed()
+        assert len(completed) == 1
+        _, result = completed[0]
+        assert len(result) == 2
+
+    def test_pop_completed_empty_range_clip(self):
+        restorer = _make_restorer()
+        restorer.push_clip(torch.rand((5, 3, 256, 256)), keep_start=3, keep_end=3)
+        restorer._workers[0].read_available.return_value = []
+        completed = restorer.pop_completed()
+        assert len(completed) == 1
+        assert completed[0] == (0, [])
+
+    def test_pop_completed_preserves_order(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        restorer._workers[0].read_available.return_value = []
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        completed = restorer.pop_completed()
+        assert completed == []
+
+        restorer._workers[0].read_available.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)] * (TVAI_MIN_FRAMES * 2)
+        completed = restorer.pop_completed()
+        assert len(completed) == 2
+        assert completed[0][0] == 0
+        assert completed[1][0] == 1
+
+    def test_pop_completed_blocks_on_first_incomplete(self):
+        restorer = _make_restorer(num_workers=2)
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+
+        restorer._workers[0].read_available.return_value = []
+        restorer._workers[1].read_available.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
+        completed = restorer.pop_completed()
+        assert completed == []
+
+    def test_flush_all_workers_alive_after_return(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        remaining = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
+        w = restorer._workers[0]
+
+        def flush_kills_worker():
+            w.alive = False
+            return remaining
+
+        def restart_revives_worker():
+            w.alive = True
+
+        w.flush.side_effect = flush_kills_worker
+        w.restart.side_effect = restart_revives_worker
+
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        restorer.flush_all()
+
+        assert w.alive is True
+        assert len(restorer._worker_output_buf[0]) == TVAI_MIN_FRAMES
+        assert restorer._worker_pending_frames[0] == 5
+
+        w.restart.reset_mock()
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        w.restart.assert_not_called()
+
+    def test_flush_all_skips_idle_workers(self):
+        restorer = _make_restorer(num_workers=2)
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        remaining = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
+        restorer._workers[0].flush.return_value = remaining
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        restorer.flush_all()
+        restorer._workers[0].flush.assert_called_once()
+        restorer._workers[1].flush.assert_not_called()
+
+    def test_flush_pads_at_flush_time(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        w = restorer._workers[0]
+        w.flush.return_value = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
+        w.read_available.return_value = []
+
+        frames = torch.rand((2, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=2)
+        assert restorer._worker_pending_frames[0] == 2
+
+        restorer.flush_all()
+        w.push_frames.assert_called()
+        pad_call_args = w.push_frames.call_args_list[-1][0][0]
+        assert pad_call_args.shape[0] == 3
+
+        assert len(restorer._worker_output_buf[0]) == 2
+
+        completed = restorer.pop_completed()
+        assert len(completed) == 1
+        assert len(completed[0][1]) == 2
+
+    def test_flush_no_padding_when_enough_frames(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        remaining = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
+        restorer._workers[0].flush.return_value = remaining
+        restorer._workers[0].read_available.return_value = []
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        restorer.flush_all()
+        assert restorer._workers[0].push_frames.call_count == 1
+        completed = restorer.pop_completed()
+        assert len(completed) == 1
+        assert len(completed[0][1]) == 5
+
+    def test_push_clip_least_pending(self):
+        restorer = _make_restorer(num_workers=2)
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        assert restorer._pending_clips[0].worker_idx == 0
+        assert restorer._pending_clips[1].worker_idx == 1
+
+    def test_push_clip_least_pending_unequal_load(self):
+        restorer = _make_restorer(num_workers=2)
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        big = torch.rand((20, 3, 256, 256))
+        small = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(big, keep_start=0, keep_end=20)
+        restorer.push_clip(small, keep_start=0, keep_end=5)
+        restorer.push_clip(small, keep_start=0, keep_end=5)
+        assert restorer._pending_clips[0].worker_idx == 0
+        assert restorer._pending_clips[1].worker_idx == 1
+        assert restorer._pending_clips[2].worker_idx == 1
+
+    def test_push_clip_restarts_dead_worker(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        restorer._workers[0].alive = False
+        frames = torch.rand((5, 3, 256, 256))
+        restorer.push_clip(frames, keep_start=0, keep_end=5)
+        restorer._workers[0].restart.assert_called_once()
+
+    def test_sequence_numbers_increment(self):
+        restorer = _make_restorer()
+        restorer.scale = 1
+        restorer.out_w = 256
+        restorer.out_h = 256
+        frames = torch.rand((5, 3, 256, 256))
+        s0 = restorer.push_clip(frames, keep_start=0, keep_end=5)
+        s1 = restorer.push_clip(frames, keep_start=0, keep_end=5)
+        s2 = restorer.push_clip(frames, keep_start=3, keep_end=3)
+        assert s0 == 0
+        assert s1 == 1
+        assert s2 == 2
 
 
 class TestTvaiClose:
-    def test_close_kills_workers(self):
-        from queue import Queue
-
-        restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        restorer._closed = False
-        restorer._pool = Queue(maxsize=2)
-
-        w1 = MagicMock()
-        w2 = MagicMock()
-        restorer._pool.put(w1)
-        restorer._pool.put(w2)
-
+    def test_close_kills_all_workers(self):
+        restorer = _make_restorer(num_workers=2)
         restorer.close()
-
-        assert restorer._closed is True
-        w1.kill.assert_called_once()
-        w2.kill.assert_called_once()
-
-    def test_close_empty_pool(self):
-        from queue import Queue
-
-        restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
-        restorer._closed = False
-        restorer._pool = Queue(maxsize=1)
-
-        restorer.close()
-        assert restorer._closed is True
+        for w in restorer._workers:
+            w.kill.assert_called_once()
 
 
 class TestTvaiToNumpyHwc:
@@ -296,19 +649,10 @@ class TestTvaiRestore:
     def test_restore_full_flow(self):
         restorer = TvaiSecondaryRestorer.__new__(TvaiSecondaryRestorer)
         restorer._restore_call_count = 0
-        restorer.scale = 1
-        restorer.out_w = 256
-        restorer.out_h = 256
 
-        mock_worker = MagicMock()
-        out_frames = [np.zeros((256, 256, 3), dtype=np.uint8)] * 3
-        mock_worker.restore_frames.return_value = out_frames
+        out_frames = [np.zeros((256, 256, 3), dtype=np.uint8)] * TVAI_MIN_FRAMES
 
-        restorer._pool = MagicMock()
-        restorer._pool.get.return_value = mock_worker
-        restorer._closed = False
-
-        with patch.object(TvaiSecondaryRestorer, "_spawn_warm_worker", return_value=MagicMock()):
+        with patch.object(TvaiSecondaryRestorer, "_run_worker", return_value=out_frames):
             frames = torch.rand((5, 3, 256, 256))
             result = restorer.restore(frames, keep_start=1, keep_end=4)
 
