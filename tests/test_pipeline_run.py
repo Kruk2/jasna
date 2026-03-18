@@ -10,7 +10,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 from jasna.media import VideoMetadata
 from jasna.pipeline import Pipeline
-from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SECONDARY_FLUSH, _SENTINEL
 from jasna.tracking.clip_tracker import TrackedClip
 
 
@@ -124,7 +124,9 @@ class TestPipelineRun:
 
         pr_result = PrimaryRestoreResult(
             clip=clip,
-            frames=[frames_t[0], frames_t[1]],
+            frame_count=2,
+            frame_shape=(8, 8),
+            frame_device=frames_t[0].device,
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0,
             keep_end=2,
@@ -138,7 +140,9 @@ class TestPipelineRun:
 
         sr_result = SecondaryRestoreResult(
             clip=clip,
-            frames=[frames_t[0], frames_t[1]],
+            frame_count=2,
+            frame_shape=(8, 8),
+            frame_device=frames_t[0].device,
             restored_frames=[torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2,
             keep_start=0,
             keep_end=2,
@@ -303,7 +307,7 @@ class TestPipelineRun:
             return BatchProcessResult(next_frame_idx=2)
 
         pr_result = PrimaryRestoreResult(
-            clip=clip, frames=[frames_t[0], frames_t[1]],
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
@@ -369,7 +373,7 @@ class TestPipelineRun:
             return BatchProcessResult(next_frame_idx=2)
 
         pr_result = PrimaryRestoreResult(
-            clip=clip, frames=[frames_t[0], frames_t[1]],
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
@@ -378,7 +382,7 @@ class TestPipelineRun:
         rest_pipeline.prepare_and_run_primary.return_value = pr_result
 
         sr_result = SecondaryRestoreResult(
-            clip=clip, frames=[frames_t[0], frames_t[1]],
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
             restored_frames=[torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2,
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
@@ -441,7 +445,9 @@ class TestPipelineRun:
         )
         pr = PrimaryRestoreResult(
             clip=clip,
-            frames=[torch.zeros((3, 8, 8), dtype=torch.uint8)] * 2,
+            frame_count=2,
+            frame_shape=(8, 8),
+            frame_device=torch.device("cpu"),
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0,
             keep_end=2,
@@ -483,7 +489,7 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frames=[torch.zeros((3, 8, 8), dtype=torch.uint8)] * 2,
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
@@ -492,7 +498,7 @@ class TestPipelineRun:
 
         restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
         sr_result = SecondaryRestoreResult(
-            clip=clip, frames=pr.frames,
+            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
             restored_frames=restored,
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
@@ -500,6 +506,7 @@ class TestPipelineRun:
         )
 
         restorer = MagicMock()
+        restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.side_effect = [[], [(0, restored)], []]
         restorer.flush_all.return_value = None
@@ -518,10 +525,9 @@ class TestPipelineRun:
         result = encode_queue.get()
         assert result is sr_result
 
-    def test_run_async_secondary_gap_flush(self):
-        """Cover gap-based flush in _run_async_secondary when no new clips arrive."""
+    def test_run_async_secondary_gap_no_forced_flush(self):
+        """Async secondary no longer forces timeout-driven gap flushes while waiting."""
         p = _make_pipeline()
-        p._FLUSH_GAP_SECONDS = 0.0
 
         clip = TrackedClip(
             track_id=1, start_frame=0, mask_resolution=(2, 2),
@@ -529,7 +535,7 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frames=[torch.zeros((3, 8, 8), dtype=torch.uint8)] * 2,
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
@@ -538,7 +544,7 @@ class TestPipelineRun:
 
         restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
         sr_result = SecondaryRestoreResult(
-            clip=clip, frames=pr.frames,
+            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
             restored_frames=restored,
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
@@ -548,6 +554,7 @@ class TestPipelineRun:
         pop_results = iter([[], [], [(0, restored)]])
 
         restorer = MagicMock()
+        restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.side_effect = lambda: next(pop_results, [])
         restorer.flush_all.return_value = None
@@ -570,8 +577,235 @@ class TestPipelineRun:
         p._run_async_secondary(secondary_queue, encode_queue)
         t.join(timeout=3)
 
-        restorer.flush_all.assert_called()
+        restorer.flush_all.assert_not_called()
         assert not encode_queue.empty()
+
+    def test_run_async_secondary_detection_gap_drain_signal(self):
+        """Detection-gap signal drains completed clips without flushing workers."""
+        p = _make_pipeline()
+
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+        )
+        pr = PrimaryRestoreResult(
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            primary_raw=torch.zeros((2, 3, 256, 256)),
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
+            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
+        )
+
+        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
+        sr_result = SecondaryRestoreResult(
+            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            restored_frames=restored,
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
+            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
+        )
+
+        restorer = MagicMock()
+        restorer.num_workers = 2
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.side_effect = [[], [], [(0, restored)], []]
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.return_value = sr_result
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        secondary_queue.put(pr)
+        secondary_queue.put(_SECONDARY_FLUSH)
+        secondary_queue.put(_SENTINEL)
+
+        p._run_async_secondary(secondary_queue, encode_queue)
+
+        restorer.flush_all.assert_not_called()
+        assert not encode_queue.empty()
+        result = encode_queue.get()
+        assert result is sr_result
+
+    def test_run_async_secondary_detection_gap_drain_releases_completed(self):
+        """Completed clip is drained on detection-gap signal without flushing workers."""
+        p = _make_pipeline()
+
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 180,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 180,
+        )
+        pr = PrimaryRestoreResult(
+            clip=clip, frame_count=180, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            primary_raw=torch.zeros((180, 3, 256, 256)),
+            keep_start=0, keep_end=180, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * 180, crop_shapes=[(4, 4)] * 180,
+            pad_offsets=[(126, 126)] * 180, resize_shapes=[(4, 4)] * 180,
+        )
+
+        restored = [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 180
+        sr_result = SecondaryRestoreResult(
+            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            restored_frames=restored,
+            keep_start=0, keep_end=180, crossfade_weights=None,
+            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
+            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
+        )
+
+        restorer = MagicMock()
+        restorer.num_workers = 2
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.side_effect = [[], [], [(0, restored)], []]
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.return_value = sr_result
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        secondary_queue.put(pr)
+        secondary_queue.put(_SECONDARY_FLUSH)
+        secondary_queue.put(_SENTINEL)
+
+        p._run_async_secondary(secondary_queue, encode_queue)
+
+        restorer.flush_all.assert_not_called()
+        assert not encode_queue.empty()
+        result = encode_queue.get()
+        assert result is sr_result
+        assert len(result.restored_frames) == 180
+
+    def test_run_async_secondary_self_priming_prevents_deadlock(self):
+        """3 clips on 2 workers: clip 2 primes clip 0's buffered tail, preventing deadlock."""
+        p = _make_pipeline()
+
+        def _make_pr(track_id, n_frames):
+            clip = TrackedClip(
+                track_id=track_id, start_frame=0, mask_resolution=(2, 2),
+                bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
+                masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
+            )
+            return PrimaryRestoreResult(
+                clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+                primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+                keep_start=0, keep_end=n_frames, crossfade_weights=None,
+                enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
+                pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
+            )
+
+        pr0 = _make_pr(1, 50)
+        pr1 = _make_pr(2, 60)
+        pr2 = _make_pr(3, 40)
+
+        push_count = 0
+        completed_seqs: set[int] = set()
+
+        def mock_push_clip(frames, keep_start, keep_end):
+            nonlocal push_count
+            seq = push_count
+            push_count += 1
+            return seq
+
+        def mock_pop_completed():
+            if push_count >= 3 and 0 not in completed_seqs:
+                completed_seqs.add(0)
+                return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 50)]
+            return []
+
+        restorer = MagicMock()
+        restorer.num_workers = 2
+        restorer.push_clip.side_effect = mock_push_clip
+        restorer.pop_completed.side_effect = mock_pop_completed
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
+            clip=pr.clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
+            crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
+            crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
+        )
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        secondary_queue.put(pr0)
+        secondary_queue.put(pr1)
+        secondary_queue.put(pr2)
+        secondary_queue.put(_SENTINEL)
+
+        p._run_async_secondary(secondary_queue, encode_queue)
+
+        assert restorer.push_clip.call_count == 3
+        assert not encode_queue.empty()
+        restorer.flush_all.assert_called_once()
+
+    def test_run_async_secondary_tiny_and_large_clip_no_deadlock(self):
+        """Reproduces original deadlock: 1-frame + 170-frame clips on 2 workers.
+
+        With max_pending=num_workers+1=3, the 3rd clip primes worker 0,
+        releasing the tiny clip's buffered tail.
+        """
+        p = _make_pipeline()
+
+        def _make_pr(track_id, n_frames):
+            clip = TrackedClip(
+                track_id=track_id, start_frame=0, mask_resolution=(2, 2),
+                bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
+                masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
+            )
+            return PrimaryRestoreResult(
+                clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+                primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+                keep_start=0, keep_end=n_frames, crossfade_weights=None,
+                enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
+                pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
+            )
+
+        pr_tiny = _make_pr(1, 1)
+        pr_large = _make_pr(2, 170)
+        pr_next = _make_pr(3, 80)
+
+        push_count = 0
+        completed_seqs: set[int] = set()
+
+        def mock_push_clip(frames, keep_start, keep_end):
+            nonlocal push_count
+            seq = push_count
+            push_count += 1
+            return seq
+
+        def mock_pop_completed():
+            if push_count >= 3 and 0 not in completed_seqs:
+                completed_seqs.add(0)
+                return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 1)]
+            return []
+
+        restorer = MagicMock()
+        restorer.num_workers = 2
+        restorer.push_clip.side_effect = mock_push_clip
+        restorer.pop_completed.side_effect = mock_pop_completed
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
+            clip=pr.clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
+            crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
+            crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
+        )
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        secondary_queue.put(pr_tiny)
+        secondary_queue.put(pr_large)
+        secondary_queue.put(pr_next)
+        secondary_queue.put(_SENTINEL)
+
+        p._run_async_secondary(secondary_queue, encode_queue)
+
+        assert restorer.push_clip.call_count == 3
+        assert not encode_queue.empty()
+        first_result = encode_queue.get()
+        assert first_result.frame_count == 1
+        restorer.flush_all.assert_called_once()
 
     def test_run_with_progress_callback(self):
         cb = MagicMock()
@@ -581,6 +815,7 @@ class TestPipelineRun:
         ):
             rest_pipeline = MagicMock()
             rest_pipeline.secondary_num_workers = 1
+            rest_pipeline.secondary_restorer.num_workers = 2
             p = Pipeline(
                 input_video=Path("in.mp4"),
                 output_video=Path("out.mkv"),

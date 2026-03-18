@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class BatchProcessResult:
     next_frame_idx: int
+    no_track_streak: int = 0
+    should_flush_secondary: bool = False
 
 
 def _process_ended_clips(
@@ -126,15 +128,20 @@ def process_frame_batch(
     discard_margin: int,
     blend_frames: int = 0,
     raw_frame_context: dict[int, dict[int, torch.Tensor]],
+    no_track_streak: int = 0,
+    secondary_flush_gap_frames: int = 5,
 ) -> BatchProcessResult:
     effective_bs = len(pts_list)
     if effective_bs == 0:
-        return BatchProcessResult(next_frame_idx=int(start_frame_idx))
+        return BatchProcessResult(next_frame_idx=int(start_frame_idx), no_track_streak=int(no_track_streak))
 
     frames_eff = frames[:effective_bs]
     frames_in = pad_batch_with_last(frames_eff, batch_size=int(batch_size))
 
     detections: Detections = detections_fn(frames_in, target_hw=target_hw)
+    gap_threshold = int(secondary_flush_gap_frames)
+    streak = int(no_track_streak)
+    should_flush_secondary = False
 
     for i in range(effective_bs):
         current_frame_idx = int(start_frame_idx) + i
@@ -147,6 +154,13 @@ def process_frame_batch(
         ended_clips, active_track_ids = tracker.update(current_frame_idx, valid_boxes, valid_masks)
         frame_buffer.add_frame(current_frame_idx, pts, frame, active_track_ids)
 
+        if len(active_track_ids) == 0:
+            streak += 1
+            if gap_threshold > 0 and streak == gap_threshold:
+                should_flush_secondary = True
+        else:
+            streak = 0
+
         _process_ended_clips(
             ended_clips=ended_clips,
             discard_margin=int(discard_margin),
@@ -157,7 +171,11 @@ def process_frame_batch(
             raw_frame_context=raw_frame_context,
         )
 
-    return BatchProcessResult(next_frame_idx=int(start_frame_idx) + effective_bs)
+    return BatchProcessResult(
+        next_frame_idx=int(start_frame_idx) + effective_bs,
+        no_track_streak=streak,
+        should_flush_secondary=should_flush_secondary,
+    )
 
 
 def finalize_processing(
