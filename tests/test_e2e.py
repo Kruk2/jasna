@@ -20,7 +20,7 @@ RESTORATION_MODEL_PTH = Path("model_weights/lada_mosaic_restoration_model_generi
 RESTORATION_ENGINE_CLIP10 = Path("model_weights/lada_mosaic_restoration_model_generic_v1.2_clip10.trt_fp16.win.engine")
 RFDETR_ONNX = Path("model_weights/rfdetr-v5.onnx")
 
-TVAI_FFMPEG_PATH = os.environ.get("TVAI_FFMPEG_PATH", r"C:\Program Files\Topaz Labs LLC\Topaz Video AI\ffmpeg.exe")
+TVAI_FFMPEG_PATH = os.environ.get("TVAI_FFMPEG_PATH", r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe")
 
 def _tvai_available() -> bool:
     return (

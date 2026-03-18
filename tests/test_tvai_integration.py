@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import torch
 
-TVAI_FFMPEG_PATH = os.environ.get("TVAI_FFMPEG_PATH", r"C:\Program Files\Topaz Labs LLC\Topaz Video AI\ffmpeg.exe")
+TVAI_FFMPEG_PATH = os.environ.get("TVAI_FFMPEG_PATH", r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe")
 
 _skip_reason = None
 if not os.environ.get("TVAI_MODEL_DATA_DIR"):
@@ -39,18 +39,28 @@ def _make_color_frames(n: int, color: tuple[float, float, float] = (0.5, 0.3, 0.
     return frames
 
 
+def _push_and_flush(restorer, frames: torch.Tensor, keep_start: int, keep_end: int) -> list[torch.Tensor]:
+    seq = restorer.push_clip(frames, keep_start=keep_start, keep_end=keep_end)
+    restorer.flush_all()
+    completed = restorer.pop_completed()
+    for s, result in completed:
+        if s == seq:
+            return result
+    return []
+
+
 class TestTvaiSingleFrame:
     def test_single_frame_returns_one_frame(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(1)
-        result = restorer.restore(frames, keep_start=0, keep_end=1)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=1)
         restorer.close()
         assert len(result) == 1
 
     def test_single_frame_shape(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(1)
-        result = restorer.restore(frames, keep_start=0, keep_end=1)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=1)
         restorer.close()
         assert result[0].shape == (3, 256, 256)
         assert result[0].dtype == torch.uint8
@@ -60,21 +70,21 @@ class TestTvaiPaddingDiscard:
     def test_padding_stripped_for_2_frames(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(2)
-        result = restorer.restore(frames, keep_start=0, keep_end=2)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=2)
         restorer.close()
         assert len(result) == 2
 
     def test_padding_stripped_for_4_frames(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(4)
-        result = restorer.restore(frames, keep_start=0, keep_end=4)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=4)
         restorer.close()
         assert len(result) == 4
 
     def test_no_padding_for_5_frames(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(5)
-        result = restorer.restore(frames, keep_start=0, keep_end=5)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=5)
         restorer.close()
         assert len(result) == 5
 
@@ -83,7 +93,7 @@ class TestTvaiOutputQuality:
     def test_not_black(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(5, color=(0.6, 0.4, 0.5))
-        result = restorer.restore(frames, keep_start=0, keep_end=5)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=5)
         restorer.close()
 
         for i, frame in enumerate(result):
@@ -93,7 +103,7 @@ class TestTvaiOutputQuality:
     def test_no_green_line_artifacts(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(5, color=(0.5, 0.5, 0.5))
-        result = restorer.restore(frames, keep_start=0, keep_end=5)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=5)
         restorer.close()
 
         for i, frame in enumerate(result):
@@ -105,7 +115,7 @@ class TestTvaiOutputQuality:
         restorer = _make_restorer()
         color = (0.6, 0.3, 0.8)
         frames = _make_color_frames(5, color=color)
-        result = restorer.restore(frames, keep_start=0, keep_end=5)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=5)
         restorer.close()
 
         for i, frame in enumerate(result):
@@ -122,14 +132,14 @@ class TestTvaiWorkerRecycling:
         restorer = _make_restorer(num_workers=1)
         for call_idx in range(3):
             frames = _make_color_frames(5)
-            result = restorer.restore(frames, keep_start=0, keep_end=5)
+            result = _push_and_flush(restorer, frames, keep_start=0, keep_end=5)
             assert len(result) == 5, f"Call {call_idx}: expected 5 frames, got {len(result)}"
         restorer.close()
 
     def test_keep_start_keep_end_slicing(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(10)
-        result = restorer.restore(frames, keep_start=2, keep_end=7)
+        result = _push_and_flush(restorer, frames, keep_start=2, keep_end=7)
         restorer.close()
         assert len(result) == 5
 
@@ -138,13 +148,13 @@ class TestTvaiEdgeCases:
     def test_empty_returns_empty(self) -> None:
         restorer = _make_restorer()
         frames = torch.zeros((0, 3, 256, 256), dtype=torch.float32)
-        result = restorer.restore(frames, keep_start=0, keep_end=0)
+        result = _push_and_flush(restorer, frames, keep_start=0, keep_end=0)
         restorer.close()
         assert result == []
 
     def test_keep_range_empty_returns_empty(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(5)
-        result = restorer.restore(frames, keep_start=3, keep_end=3)
+        result = _push_and_flush(restorer, frames, keep_start=3, keep_end=3)
         restorer.close()
         assert result == []

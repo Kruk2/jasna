@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from queue import Empty, Queue
@@ -180,18 +181,12 @@ class Pipeline:
         def _secondary_restore_thread():
             try:
                 torch.cuda.set_device(device)
-                num_workers = self.restoration_pipeline.secondary_num_workers
-
-                if num_workers > 1:
-                    self._run_pooled_secondary(num_workers, secondary_queue, encode_queue)
+                restorer = self.restoration_pipeline.secondary_restorer
+                if restorer is not None and hasattr(restorer, 'push_clip'):
+                    self._run_async_secondary(secondary_queue, encode_queue)
                 else:
-                    while True:
-                        item = secondary_queue.get()
-                        if item is _SENTINEL:
-                            break
-                        pr: PrimaryRestoreResult = item  # type: ignore[assignment]
-                        result = self.restoration_pipeline.run_secondary_from_primary(pr)
-                        encode_queue.put(result)
+                    num_workers = self.restoration_pipeline.secondary_num_workers
+                    self._run_pooled_secondary(num_workers, secondary_queue, encode_queue)
             except BaseException as e:
                 error_holder.append(e)
             finally:
@@ -222,11 +217,11 @@ class Pipeline:
 
                         for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
                             encoder.encode(ready_frame, ready_pts)
-                            log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
+                            #log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
 
                     for ready_idx, ready_frame, ready_pts in frame_buffer.flush():
                         encoder.encode(ready_frame, ready_pts)
-                        log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
+                        #log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
             except BaseException as e:
                 error_holder.append(e)
 
@@ -244,6 +239,50 @@ class Pipeline:
         if error_holder:
             raise error_holder[0]
 
+    _FLUSH_GAP_SECONDS = 2.0
+
+    def _run_async_secondary(
+        self,
+        secondary_queue: Queue[PrimaryRestoreResult | object],
+        encode_queue: Queue[SecondaryRestoreResult | object],
+    ) -> None:
+        restorer = self.restoration_pipeline.secondary_restorer
+        rp = self.restoration_pipeline
+        pending_prs: dict[int, PrimaryRestoreResult] = {}
+        last_push_time = time.monotonic()
+
+        def _drain_completed():
+            for seq, restored_frames in restorer.pop_completed():
+                pr = pending_prs.pop(seq)
+                encode_queue.put(rp.build_secondary_result(pr, restored_frames))
+
+        while True:
+            _drain_completed()
+
+            try:
+                item = secondary_queue.get(timeout=0.5)
+            except Empty:
+                if pending_prs and (time.monotonic() - last_push_time) > self._FLUSH_GAP_SECONDS:
+                    log.info("TVAI async: gap detected (%d pending), flushing workers", len(pending_prs))
+                    restorer.flush_all()
+                    _drain_completed()
+                continue
+
+            if item is _SENTINEL:
+                if pending_prs:
+                    restorer.flush_all()
+                    _drain_completed()
+                break
+
+            pr: PrimaryRestoreResult = item  # type: ignore[assignment]
+            seq = restorer.push_clip(pr.primary_raw, pr.keep_start, pr.keep_end)
+            del pr.primary_raw
+            pending_prs[seq] = pr
+            last_push_time = time.monotonic()
+
+        if pending_prs:
+            log.warning("TVAI async: %d clips still pending after flush", len(pending_prs))
+
     def _run_pooled_secondary(
         self,
         num_workers: int,
@@ -257,22 +296,38 @@ class Pipeline:
             pending: dict[int, Future[SecondaryRestoreResult]] = {}
             next_submit_seq = 0
             next_drain_seq = 0
+            first_error: BaseException | None = None
+
+            def _drain_seq(seq: int) -> None:
+                nonlocal first_error
+
+                fut = pending.pop(seq)
+                if first_error is not None:
+                    fut.cancel()
+                    return
+                try:
+                    encode_queue.put(fut.result())
+                except BaseException as exc:
+                    first_error = exc
+                    log.error("Pooled secondary failed, draining remaining work", exc_info=True)
 
             while True:
                 # Block taking new sequences if we reach max in-flight capacity.
                 # We cap at num_workers so all worker slots are full but no extra GPU tensors
                 # pile up in pending. The secondary_queue maxsize=1 provides the 1-ahead buffer.
                 while len(pending) >= num_workers:
-                    encode_queue.put(pending.pop(next_drain_seq).result())
+                    _drain_seq(next_drain_seq)
                     next_drain_seq += 1
 
                 while next_drain_seq in pending and pending[next_drain_seq].done():
-                    encode_queue.put(pending.pop(next_drain_seq).result())
+                    _drain_seq(next_drain_seq)
                     next_drain_seq += 1
 
                 item = secondary_queue.get()
                 if item is _SENTINEL:
                     break
+                if first_error is not None:
+                    continue
                 pr: PrimaryRestoreResult = item  # type: ignore[assignment]
 
                 seq = next_submit_seq
@@ -280,4 +335,8 @@ class Pipeline:
                 pending[seq] = pool.submit(_worker, pr)
 
             for seq in range(next_drain_seq, next_submit_seq):
-                encode_queue.put(pending.pop(seq).result())
+                if seq in pending:
+                    _drain_seq(seq)
+
+            if first_error is not None:
+                raise first_error

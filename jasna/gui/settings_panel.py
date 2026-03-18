@@ -577,7 +577,7 @@ class SettingsPanel(ctk.CTkFrame):
             text_color=Colors.TEXT_PRIMARY
         )
         self._widgets["tvai_ffmpeg_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
-        self._widgets["tvai_ffmpeg_path"].insert(0, r"C:\Program Files\Topaz Labs LLC\Topaz Video AI\ffmpeg.exe")
+        self._widgets["tvai_ffmpeg_path"].insert(0, r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe")
         
         tvai_browse_btn = ctk.CTkButton(
             tvai_path_input_row, text="📂", width=32, height=28,
@@ -712,7 +712,7 @@ class SettingsPanel(ctk.CTkFrame):
         filepath = filedialog.askopenfilename(
             title=t("dialog_select_tvai_ffmpeg"),
             filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
-            initialdir=r"C:\Program Files\Topaz Labs LLC\Topaz Video AI"
+            initialdir=r"C:\Program Files\Topaz Labs LLC\Topaz Video"
         )
         if filepath:
             self._widgets["tvai_ffmpeg_path"].delete(0, "end")

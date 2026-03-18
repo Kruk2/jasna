@@ -134,7 +134,7 @@ def build_parser() -> argparse.ArgumentParser:
     tvai.add_argument(
         "--tvai-ffmpeg-path",
         type=str,
-        default="C:\\Program Files\\Topaz Labs LLC\\Topaz Video AI\\ffmpeg.exe",
+        default="C:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
         help="Path to Topaz Video AI ffmpeg.exe (default: %(default)s)",
     )
     tvai.add_argument(

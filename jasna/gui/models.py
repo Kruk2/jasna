@@ -71,7 +71,7 @@ class AppSettings:
     
     # Secondary restoration
     secondary_restoration: str = "none"  # none, tvai, rtx-super-res
-    tvai_ffmpeg_path: str = r"C:\Program Files\Topaz Labs LLC\Topaz Video AI\ffmpeg.exe"
+    tvai_ffmpeg_path: str = r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe"
     tvai_model: str = "iris-2"
     tvai_scale: int = 4
     tvai_workers: int = 2
