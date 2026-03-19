@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 class Pipeline:
     _SECONDARY_QUEUE_MAXSIZE = 2
+    _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
 
     def __init__(
         self,
@@ -78,10 +79,18 @@ class Pipeline:
         self.progress_callback = progress_callback
         self.working_directory = working_directory
 
+    def _wait_for_decode_fb_drain(self, drained_event: threading.Event) -> None:
+        drained_event.wait(timeout=self._DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS)
+        drained_event.clear()
+
     def run(self) -> None:
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
+        decode_fb_low_watermark = int(self.max_clip_size)
+        decode_fb_high_watermark = int(self.max_clip_size) * 3 + int(self.batch_size)
+        if decode_fb_high_watermark <= decode_fb_low_watermark:
+            decode_fb_high_watermark = decode_fb_low_watermark + 1
 
         clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
         secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(maxsize=self._SECONDARY_QUEUE_MAXSIZE)
@@ -89,6 +98,7 @@ class Pipeline:
 
         error_holder: list[BaseException] = []
         frame_buffer = FrameBuffer(device=device)
+        fb_drained_event = threading.Event()
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
             frame_buffer=frame_buffer,
@@ -128,6 +138,24 @@ class Pipeline:
                             effective_bs = len(pts_list)
                             if effective_bs == 0:
                                 continue
+
+                            if len(frame_buffer.frames) >= decode_fb_high_watermark:
+                                log.debug(
+                                    "[decode] fb backpressure enter fb=%d hwm=%d lwm=%d",
+                                    len(frame_buffer.frames),
+                                    decode_fb_high_watermark,
+                                    decode_fb_low_watermark,
+                                )
+                                while len(frame_buffer.frames) > decode_fb_low_watermark:
+                                    if error_holder:
+                                        raise error_holder[0]
+                                    self._wait_for_decode_fb_drain(fb_drained_event)
+                                log.debug(
+                                    "[decode] fb backpressure exit fb=%d hwm=%d lwm=%d",
+                                    len(frame_buffer.frames),
+                                    decode_fb_high_watermark,
+                                    decode_fb_low_watermark,
+                                )
 
                             batch_start = frame_idx
 
@@ -251,6 +279,8 @@ class Pipeline:
                             encoder.encode(ready_frame, ready_pts)
                             encoded_count += 1
                             #log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
+                        if encoded_count > 0:
+                            fb_drained_event.set()
                         if encoded_count > 0:
                             debug_memory.snapshot("encode", f"encoded={encoded_count}")
 
