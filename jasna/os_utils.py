@@ -177,12 +177,15 @@ def check_required_executables(disable_ffmpeg_check: bool = False) -> None:
 
 
 def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
-    ok, _ = check_windows_hardware_accelerated_gpu_scheduling()
+    ok, info = check_windows_hardware_accelerated_gpu_scheduling()
     if not ok:
-        msg = (
-            "Warning: Windows 'Hardware-accelerated GPU scheduling' is enabled. "
-            "This will make Jasna slower and might add artifacts to the output video."
-        )
+        if "Enabled" in info:
+            msg = (
+                "Warning: Windows 'Hardware-accelerated GPU scheduling' is enabled. "
+                "This will make Jasna slower and might add artifacts to the output video."
+            )
+        else:
+            msg = f"Warning: Could not determine Windows 'Hardware-accelerated GPU scheduling' status: {info}"
         print(msg)
         logger.info("%s", msg)
 
@@ -198,8 +201,8 @@ def check_windows_hardware_accelerated_gpu_scheduling() -> tuple[bool, str]:
             winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
         ) as key:
             mode, _ = winreg.QueryValueEx(key, "HwSchMode")
-    except OSError:
-        return True, "Not detected"
+    except OSError as e:
+        return False, str(e)
 
     if int(mode) == 2:
         return False, "Enabled (recommended OFF: can slow Jasna and add artifacts)"

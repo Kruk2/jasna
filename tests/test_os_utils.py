@@ -261,6 +261,37 @@ def test_check_windows_hardware_accelerated_gpu_scheduling_returns_false_when_en
     assert "Enabled" in info
 
 
+def test_check_windows_hardware_accelerated_gpu_scheduling_returns_false_with_oserror(monkeypatch) -> None:
+    class _Winreg:
+        HKEY_LOCAL_MACHINE = object()
+
+        @staticmethod
+        def OpenKey(root, path):
+            raise OSError("registry read failed")
+
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
+
+    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
+    assert ok is False
+    assert info == "registry read failed"
+
+
+def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_error_when_status_unknown(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setattr(
+        os_utils,
+        "check_windows_hardware_accelerated_gpu_scheduling",
+        lambda: (False, "registry read failed"),
+    )
+
+    os_utils.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
+    out = capsys.readouterr().out
+    assert "Could not determine" in out
+    assert "registry read failed" in out
+
+
 def test_check_nvidia_gpu_returns_name_when_available_and_compute_ok(monkeypatch) -> None:
     import types
 
