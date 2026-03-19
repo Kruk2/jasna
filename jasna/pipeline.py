@@ -12,6 +12,7 @@ from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
 from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
+from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
@@ -88,6 +89,13 @@ class Pipeline:
 
         error_holder: list[BaseException] = []
         frame_buffer = FrameBuffer(device=device)
+        debug_memory = PipelineDebugMemoryLogger(
+            logger=log,
+            frame_buffer=frame_buffer,
+            clip_queue=clip_queue,
+            secondary_queue=secondary_queue,
+            encode_queue=encode_queue,
+        )
 
         def _decode_detect_thread():
             try:
@@ -121,6 +129,8 @@ class Pipeline:
                             if effective_bs == 0:
                                 continue
 
+                            batch_start = frame_idx
+
                             res = process_frame_batch(
                                 frames=frames,
                                 pts_list=[int(p) for p in pts_list],
@@ -137,6 +147,10 @@ class Pipeline:
                             )
 
                             frame_idx = res.next_frame_idx
+                            debug_memory.snapshot(
+                                "decode",
+                                f"frame_start={batch_start} batch={effective_bs}",
+                            )
                             pb.update(effective_bs)
 
                         finalize_processing(
@@ -147,6 +161,7 @@ class Pipeline:
                             blend_frames=blend_frames,
                             raw_frame_context=raw_frame_context,
                         )
+                        debug_memory.snapshot("decode", "finalized")
                     except Exception:
                         pb.error = True
                         raise
@@ -173,6 +188,10 @@ class Pipeline:
                         clip_item.crossfade_weights,
                     )
                     secondary_queue.put(result)
+                    debug_memory.snapshot(
+                        "primary",
+                        f"clip={clip_item.clip.track_id} frames={len(clip_item.frames)}",
+                    )
             except BaseException as e:
                 error_holder.append(e)
             finally:
@@ -194,6 +213,10 @@ class Pipeline:
                     del pr.primary_raw
                     sr = self.restoration_pipeline.build_secondary_result(pr, restored_frames)
                     encode_queue.put(sr)
+                    debug_memory.snapshot(
+                        "secondary",
+                        f"clip={pr.clip.track_id} frames={sr.frame_count}",
+                    )
             except BaseException as e:
                 error_holder.append(e)
             finally:
@@ -213,18 +236,23 @@ class Pipeline:
                     working_directory=self.working_directory,
                 ) as encoder:
                     while True:
+                        encoded_count = 0
                         try:
                             item = encode_queue.get(timeout=0.1)
                             if item is _SENTINEL:
                                 break
                             sr: SecondaryRestoreResult = item  # type: ignore[assignment]
                             self.restoration_pipeline.blend_secondary_result(sr, frame_buffer)
+                            debug_memory.snapshot("encode", f"clip={sr.clip.track_id} blended")
                         except Empty:
                             pass
 
                         for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
                             encoder.encode(ready_frame, ready_pts)
+                            encoded_count += 1
                             #log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
+                        if encoded_count > 0:
+                            debug_memory.snapshot("encode", f"encoded={encoded_count}")
 
                     for ready_idx, ready_frame, ready_pts in frame_buffer.flush():
                         encoder.encode(ready_frame, ready_pts)

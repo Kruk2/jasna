@@ -15,6 +15,7 @@ from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
+from jasna.gui.log_filter import runtime_log_level_for_filter
 from jasna.gui.wizard import FirstRunWizard
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, PresetManager
@@ -562,7 +563,7 @@ def run_gui():
     import os
     # Set up basic logging - will be connected to GUI after app creation
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format='%(message)s',
         handlers=[logging.StreamHandler()]  # Temporary console output
     )
@@ -576,13 +577,19 @@ def run_gui():
     # Set up root logger to capture all logs
     root_logger = logging.getLogger()
     root_logger.handlers = [gui_handler]
-    root_logger.setLevel(logging.DEBUG)
     
     # Also capture jasna-specific logger
     jasna_logger = logging.getLogger("jasna")
     jasna_logger.handlers = [gui_handler]
-    jasna_logger.setLevel(logging.DEBUG)
     jasna_logger.propagate = False
+
+    def _apply_runtime_log_level(filter_level: str) -> None:
+        runtime_level = runtime_log_level_for_filter(filter_level=filter_level)
+        root_logger.setLevel(runtime_level)
+        jasna_logger.setLevel(runtime_level)
+
+    app._log_panel.set_filter_changed_callback(_apply_runtime_log_level)
+    _apply_runtime_log_level(app._log_panel.get_filter_level())
     
     app.mainloop()
 

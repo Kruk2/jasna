@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from jasna.gui.log_filter import should_include_log_entry
+import logging
+
+from jasna.gui.log_filter import runtime_log_level_for_filter, should_include_log_entry
 
 
 def test_should_include_log_entry_respects_filter_level() -> None:
@@ -18,4 +20,11 @@ def test_should_include_log_entry_respects_filter_level() -> None:
 
     assert not should_include_log_entry(level="WARNING", filter_level="error")
     assert should_include_log_entry(level="ERROR", filter_level="error")
+
+
+def test_runtime_log_level_for_filter_only_enables_debug_on_debug_filter() -> None:
+    assert runtime_log_level_for_filter(filter_level="debug") == logging.DEBUG
+    assert runtime_log_level_for_filter(filter_level="info") == logging.INFO
+    assert runtime_log_level_for_filter(filter_level="warning") == logging.INFO
+    assert runtime_log_level_for_filter(filter_level="error") == logging.INFO
 

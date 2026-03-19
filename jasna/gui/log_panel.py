@@ -1,5 +1,6 @@
 """Log panel - collapsible bottom section for processing logs."""
 
+from collections.abc import Callable
 import customtkinter as ctk
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ class LogPanel(ctk.CTkFrame):
         
         self._entries: list[tuple[str, str, str]] = []  # (timestamp, level, message)
         self._filter_level = "all"
+        self._filter_changed_callback: Callable[[str], None] | None = None
         
         self._build_toolbar()
         self._build_log_area()
@@ -110,7 +112,15 @@ class LogPanel(ctk.CTkFrame):
             t("filter_info"): "info",
         }
         self._filter_level = filter_map.get(value, "debug")
+        if self._filter_changed_callback is not None:
+            self._filter_changed_callback(self._filter_level)
         self._refresh_display()
+
+    def set_filter_changed_callback(self, callback: Callable[[str], None] | None) -> None:
+        self._filter_changed_callback = callback
+
+    def get_filter_level(self) -> str:
+        return self._filter_level
         
     def _refresh_display(self):
         self._log_text.configure(state="normal")
