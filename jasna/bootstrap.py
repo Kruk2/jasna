@@ -5,6 +5,14 @@ import sys
 from pathlib import Path
 
 
+def limit_aten_threads() -> None:
+    import torch
+
+    logical = os.cpu_count() or 4
+    cap = min(8, max(1, logical // 2))
+    torch.set_num_threads(cap)
+
+
 def sanitize_sys_path_for_local_dev(package_dir: Path) -> None:
     package_dir = package_dir.resolve()
     repo_root = package_dir.parent.resolve()

@@ -229,6 +229,7 @@ def _run_real_pipeline_batches(
 
     class _ConstantRestorer:
         dtype = torch.float32
+        device = torch.device("cpu")
         def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
             stacked = []
             for f in crops:
@@ -432,6 +433,7 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
 
     class _AlternatingRestorer:
         dtype = torch.float32
+        device = torch.device("cpu")
         def __init__(self) -> None:
             self._call_count = 0
         def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:

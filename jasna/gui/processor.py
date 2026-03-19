@@ -31,6 +31,7 @@ def _cleanup_torch(torch_mod) -> None:
         torch_mod.cuda.synchronize()
         torch_mod.cuda.empty_cache()
         torch_mod.cuda.ipc_collect()
+        torch_mod.cuda.reset_peak_memory_stats()
 
 
 class Processor:
@@ -178,12 +179,19 @@ class Processor:
             
         except Exception as e:
             tb = traceback.format_exc()
+            e.__traceback__ = None
             self._progress(ProgressUpdate(
                 job_index=idx,
                 status=JobStatus.ERROR,
                 message=str(e),
             ))
             self._log("ERROR", f"Failed to process {job.filename}: {e}\n{tb}")
+
+        try:
+            import torch
+            _cleanup_torch(torch)
+        except Exception:
+            pass
             
     def _run_pipeline(self, job_idx: int, input_path: Path, output_path: Path):
         """Run the actual processing pipeline."""

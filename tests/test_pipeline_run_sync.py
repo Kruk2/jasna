@@ -82,6 +82,7 @@ class TestPipelineRunSync:
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             p.run()
 
@@ -131,12 +132,45 @@ class TestPipelineRunSync:
             patch("jasna.pipeline.finalize_processing"),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
             patch.object(p, "_wait_for_decode_fb_drain", side_effect=RuntimeError("decode stalled")),
         ):
             with pytest.raises(RuntimeError, match="decode stalled"):
                 p.run()
 
         assert call_count == 4
+
+    def test_should_offload_frames_true_when_free_below_headroom(self):
+        p = _make_pipeline()
+        p._VRAM_FREE_HEADROOM_BYTES = 1024 ** 3
+        p._VRAM_LIMIT_OVERRIDE_GB = None
+        free = 512 * 1024**2
+        with patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(free, 24 * 1024**3)):
+            should, used, threshold = p._should_offload_frames()
+            assert should is True
+
+    def test_should_offload_frames_false_when_free_above_headroom(self):
+        p = _make_pipeline()
+        p._VRAM_FREE_HEADROOM_BYTES = 1024 ** 3
+        p._VRAM_LIMIT_OVERRIDE_GB = None
+        free = 2 * 1024**3
+        with patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(free, 24 * 1024**3)):
+            should, used, threshold = p._should_offload_frames()
+            assert should is False
+
+    def test_should_offload_frames_with_vram_limit_override(self):
+        p = _make_pipeline()
+        p._VRAM_FREE_HEADROOM_BYTES = 1024 ** 3
+        p._VRAM_LIMIT_OVERRIDE_GB = 10.0
+        total = 24 * 1024**3
+        used_over = int(9.5 * 1024**3)
+        with patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(total - used_over, total)):
+            should, used, threshold = p._should_offload_frames()
+            assert should is True
+        used_under = int(8 * 1024**3)
+        with patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(total - used_under, total)):
+            should, used, threshold = p._should_offload_frames()
+            assert should is False
 
     def test_run_full_thread_flow(self):
         p = _make_pipeline()
@@ -214,6 +248,7 @@ class TestPipelineRunSync:
                 pending = fb.frames.get(i)
                 if pending:
                     pending.pending_clips.discard(42)
+                    yield
 
         p.restoration_pipeline.blend_secondary_result.side_effect = fake_blend
 
@@ -225,6 +260,7 @@ class TestPipelineRunSync:
             patch("jasna.pipeline.finalize_processing"),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             p.run()
 
@@ -274,6 +310,7 @@ class TestPipelineRunSync:
             patch("jasna.pipeline.finalize_processing"),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             with pytest.raises(RuntimeError, match="primary boom"):
                 p.run()
@@ -334,6 +371,7 @@ class TestPipelineRunSync:
             patch("jasna.pipeline.finalize_processing"),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()

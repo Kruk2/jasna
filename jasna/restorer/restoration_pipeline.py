@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 import numpy as np
 import torch
@@ -16,6 +17,8 @@ from jasna.tracking.clip_tracker import TrackedClip
 
 if TYPE_CHECKING:
     from jasna.tracking.frame_buffer import FrameBuffer
+
+from jasna.tensor_utils import to_device as _to_device
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +114,11 @@ class RestorationPipeline:
             x1_exp, y1_exp, x2_exp, y2_exp = self._expand_bbox(x1, y1, x2, y2, frame_h, frame_w)
             enlarged_bboxes.append((x1_exp, y1_exp, x2_exp, y2_exp))
 
-            crop = frame[:, y1_exp:y2_exp, x1_exp:x2_exp]
+            if frame.device.type == "cpu":
+                np_crop = np.ascontiguousarray(frame.numpy()[:, y1_exp:y2_exp, x1_exp:x2_exp])
+                crop = torch.from_numpy(np_crop)
+            else:
+                crop = frame[:, y1_exp:y2_exp, x1_exp:x2_exp]
             crop_shapes.append((int(crop.shape[1]), int(crop.shape[2])))
             crops.append(crop)
 
@@ -132,18 +139,18 @@ class RestorationPipeline:
             new_w = int(crop_w * scale_w)
             resize_shapes.append((new_h, new_w))
 
+            pad_top = (RESTORATION_SIZE - new_h) // 2
+            pad_left = (RESTORATION_SIZE - new_w) // 2
+            pad_bottom = RESTORATION_SIZE - new_h - pad_top
+            pad_right = RESTORATION_SIZE - new_w - pad_left
+            pad_offsets.append((pad_left, pad_top))
+
             resized = F.interpolate(
                 crop.unsqueeze(0).float(),
                 size=(new_h, new_w),
                 mode="bilinear",
                 align_corners=False,
             ).squeeze(0)
-
-            pad_top = (RESTORATION_SIZE - new_h) // 2
-            pad_left = (RESTORATION_SIZE - new_w) // 2
-            pad_bottom = RESTORATION_SIZE - new_h - pad_top
-            pad_right = RESTORATION_SIZE - new_w - pad_left
-            pad_offsets.append((pad_left, pad_top))
 
             padded = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
             resized_crops.append(padded.to(crop.dtype).permute(1, 2, 0))
@@ -293,7 +300,7 @@ class RestorationPipeline:
         self,
         sr: SecondaryRestoreResult,
         frame_buffer: 'FrameBuffer',
-    ) -> None:
+    ) -> Iterator[int]:
         clip = sr.clip
         t = sr.frame_count
         ks = max(0, sr.keep_start)
@@ -315,7 +322,7 @@ class RestorationPipeline:
             if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=track_id):
                 continue
 
-            frame_u8 = sr.restored_frames[local_i].to(sr.frame_device)
+            frame_u8 = sr.restored_frames[local_i]
             pad_offset, resize_shape = self._scale_offsets(frame_u8, sr.pad_offsets[i], sr.resize_shapes[i])
             cw = sr.crossfade_weights.get(i, 1.0) if sr.crossfade_weights else 1.0
 
@@ -331,6 +338,7 @@ class RestorationPipeline:
                 resize_shape=resize_shape,
                 crossfade_weight=cw,
             )
+            yield frame_idx
 
     def restore_clip(
         self,

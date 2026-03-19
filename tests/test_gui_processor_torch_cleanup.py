@@ -24,11 +24,15 @@ def test_cleanup_torch_calls_cuda_hooks_when_available():
         def ipc_collect() -> None:
             calls.append("ipc_collect")
 
+        @staticmethod
+        def reset_peak_memory_stats() -> None:
+            calls.append("reset_peak_memory_stats")
+
     fake_torch = types.SimpleNamespace(cuda=_Cuda)
 
     _cleanup_torch(fake_torch)
 
-    assert calls == ["is_available", "synchronize", "empty_cache", "ipc_collect"]
+    assert calls == ["is_available", "synchronize", "empty_cache", "ipc_collect", "reset_peak_memory_stats"]
 
 
 def test_cleanup_torch_noops_when_cuda_unavailable():

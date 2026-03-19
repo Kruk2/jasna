@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import logging
 import threading
 from pathlib import Path
@@ -25,6 +26,8 @@ log = logging.getLogger(__name__)
 class Pipeline:
     _SECONDARY_QUEUE_MAXSIZE = 2
     _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
+    _VRAM_FREE_HEADROOM_BYTES = 750 * 1024 ** 2
+    _VRAM_LIMIT_OVERRIDE_GB: float | None = None
 
     def __init__(
         self,
@@ -82,6 +85,16 @@ class Pipeline:
     def _wait_for_decode_fb_drain(self, drained_event: threading.Event) -> None:
         drained_event.wait(timeout=self._DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS)
         drained_event.clear()
+
+    def _should_offload_frames(self) -> tuple[bool, int, int]:
+        free, total = torch.cuda.mem_get_info(self.device)
+        used = total - free
+        if self._VRAM_LIMIT_OVERRIDE_GB is not None:
+            cap = int(self._VRAM_LIMIT_OVERRIDE_GB * (1024 ** 3))
+            threshold = cap - self._VRAM_FREE_HEADROOM_BYTES
+            return used > threshold, used, threshold
+        threshold = total - self._VRAM_FREE_HEADROOM_BYTES
+        return used > threshold, used, threshold
 
     def run(self) -> None:
         device = self.device
@@ -175,6 +188,7 @@ class Pipeline:
                             )
 
                             frame_idx = res.next_frame_idx
+
                             debug_memory.snapshot(
                                 "decode",
                                 f"frame_start={batch_start} batch={effective_bs}",
@@ -270,7 +284,10 @@ class Pipeline:
                             if item is _SENTINEL:
                                 break
                             sr: SecondaryRestoreResult = item  # type: ignore[assignment]
-                            self.restoration_pipeline.blend_secondary_result(sr, frame_buffer)
+                            for blended_idx in self.restoration_pipeline.blend_secondary_result(sr, frame_buffer):
+                                for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
+                                    encoder.encode(ready_frame, ready_pts)
+                                    encoded_count += 1
                             debug_memory.snapshot("encode", f"clip={sr.clip.track_id} blended")
                         except Empty:
                             pass
@@ -278,28 +295,60 @@ class Pipeline:
                         for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
                             encoder.encode(ready_frame, ready_pts)
                             encoded_count += 1
-                            #log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
                         if encoded_count > 0:
                             fb_drained_event.set()
-                        if encoded_count > 0:
-                            debug_memory.snapshot("encode", f"encoded={encoded_count}")
 
                     for ready_idx, ready_frame, ready_pts in frame_buffer.flush():
                         encoder.encode(ready_frame, ready_pts)
                         #log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
             except BaseException as e:
+                log.exception("[encode] thread crashed")
                 error_holder.append(e)
+
+        stop_offload = threading.Event()
+
+        def _vram_offload_thread():
+            while not stop_offload.is_set():
+                over_limit, used, threshold = self._should_offload_frames()
+                if over_limit:
+                    offloaded = frame_buffer.offload_gpu_frames()
+                    if offloaded > 0:
+                        torch.cuda.empty_cache()
+                        continue
+                headroom = threshold - used
+                if headroom > 2 * (1024 ** 3):
+                    stop_offload.wait(timeout=1.0)
+                else:
+                    stop_offload.wait(timeout=0.05)
 
         threads = [
             threading.Thread(target=_decode_detect_thread, name="DecodeDetect", daemon=True),
             threading.Thread(target=_primary_restore_thread, name="PrimaryRestore", daemon=True),
             threading.Thread(target=_secondary_restore_thread, name="SecondaryRestore", daemon=True),
             threading.Thread(target=_encode_thread, name="Encode", daemon=True),
+            threading.Thread(target=_vram_offload_thread, name="VramOffload", daemon=True),
         ]
         for t in threads:
             t.start()
-        for t in threads:
+        for t in threads[:4]:
             t.join()
+        stop_offload.set()
+        threads[4].join(timeout=1)
 
-        if error_holder:
-            raise error_holder[0]
+        frame_buffer.frames.clear()
+        frame_buffer._gpu_pinned.clear()
+        del frame_buffer
+
+        err = error_holder[0] if error_holder else None
+        if err is not None:
+            err.__traceback__ = None
+
+        del clip_queue, secondary_queue, encode_queue
+        del error_holder, threads
+        gc.collect()
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
+        torch.cuda.reset_peak_memory_stats(self.device)
+
+        if err is not None:
+            raise err

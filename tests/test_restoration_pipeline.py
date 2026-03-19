@@ -10,6 +10,7 @@ from jasna.tracking.clip_tracker import TrackedClip
 
 class _IdentityRestorer:
     dtype = torch.float32
+    device = torch.device("cpu")
 
     def restore(self, crops: list[torch.Tensor]) -> list[torch.Tensor]:
         return crops
@@ -23,6 +24,7 @@ class _IdentityRestorer:
 
 class _CaptureRestorer:
     dtype = torch.float32
+    device = torch.device("cpu")
 
     def __init__(self) -> None:
         self.captured: list[torch.Tensor] | None = None
@@ -534,7 +536,7 @@ def test_blend_secondary_result(monkeypatch) -> None:
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
     sr = _build_sr(pipeline, pr)
-    pipeline.blend_secondary_result(sr, fb)
+    list(pipeline.blend_secondary_result(sr, fb))
 
     for i in range(3):
         pending = fb.frames[i]
@@ -554,7 +556,7 @@ def test_blend_secondary_result_with_crossfade(monkeypatch) -> None:
     crossfade_weights = {0: 0.5, 1: 1.0, 2: 0.5}
     pr = pipeline.prepare_and_run_primary(clip, frames, 0, 3, crossfade_weights)
     sr = _build_sr(pipeline, pr)
-    pipeline.blend_secondary_result(sr, fb)
+    list(pipeline.blend_secondary_result(sr, fb))
 
     for i in range(3):
         pending = fb.frames[i]
@@ -573,7 +575,7 @@ def test_blend_secondary_result_skips_out_of_range_frames(monkeypatch) -> None:
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 1, 2, None)
     sr = _build_sr(pipeline, pr)
-    pipeline.blend_secondary_result(sr, fb)
+    list(pipeline.blend_secondary_result(sr, fb))
 
     assert 0 not in fb.frames[0].pending_clips
     assert 0 not in fb.frames[1].pending_clips
@@ -593,7 +595,7 @@ def test_blend_secondary_result_empty_range(monkeypatch) -> None:
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 2, 1, None)
     sr = _build_sr(pipeline, pr)
-    pipeline.blend_secondary_result(sr, fb)
+    list(pipeline.blend_secondary_result(sr, fb))
 
     for i in range(3):
         assert 0 not in fb.frames[i].pending_clips
@@ -612,7 +614,7 @@ def test_blend_secondary_result_needs_blend_false(monkeypatch) -> None:
 
     pr = pipeline.prepare_and_run_primary(clip, frames, 0, 2, None)
     sr = _build_sr(pipeline, pr)
-    pipeline.blend_secondary_result(sr, fb)
+    list(pipeline.blend_secondary_result(sr, fb))
 
     assert fb.frames[0].blended_frame is fb.frames[0].frame
     assert fb.frames[1].blended_frame is fb.frames[1].frame
