@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import pytest
+
+pytest.skip("legacy TVAI integration tests removed", allow_module_level=True)
+
 import os
 from pathlib import Path
 
 import numpy as np
-import pytest
 import torch
 
 TVAI_FFMPEG_PATH = os.environ.get("TVAI_FFMPEG_PATH", r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe")

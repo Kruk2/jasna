@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from pathlib import Path
 from queue import Empty, Queue
 
@@ -12,13 +11,11 @@ from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
-from jasna.mosaic import Detections
 from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
-from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SECONDARY_FLUSH, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
-from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer, SecondaryRestorerAdapter
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
 
 log = logging.getLogger(__name__)
@@ -26,7 +23,6 @@ log = logging.getLogger(__name__)
 
 class Pipeline:
     _SECONDARY_QUEUE_MAXSIZE = 2
-    _SECONDARY_FLUSH_GAP_FRAMES = 5
 
     def __init__(
         self,
@@ -100,7 +96,6 @@ class Pipeline:
                 discard_margin = int(self.temporal_overlap)
                 blend_frames = (self.temporal_overlap // 3) if self.enable_crossfade else 0
                 raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
-                no_track_streak = 0
 
                 with (
                     NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=device, metadata=metadata) as reader,
@@ -139,14 +134,9 @@ class Pipeline:
                                 discard_margin=discard_margin,
                                 blend_frames=blend_frames,
                                 raw_frame_context=raw_frame_context,
-                                no_track_streak=no_track_streak,
-                                secondary_flush_gap_frames=self._SECONDARY_FLUSH_GAP_FRAMES,
                             )
 
                             frame_idx = res.next_frame_idx
-                            no_track_streak = res.no_track_streak
-                            if res.should_flush_secondary:
-                                clip_queue.put(_SECONDARY_FLUSH)
                             pb.update(effective_bs)
 
                         finalize_processing(
@@ -174,9 +164,6 @@ class Pipeline:
                     item = clip_queue.get()
                     if item is _SENTINEL:
                         break
-                    if item is _SECONDARY_FLUSH:
-                        secondary_queue.put(_SECONDARY_FLUSH)
-                        continue
                     clip_item: ClipRestoreItem = item  # type: ignore[assignment]
                     result = self.restoration_pipeline.prepare_and_run_primary(
                         clip_item.clip,
@@ -194,7 +181,19 @@ class Pipeline:
         def _secondary_restore_thread():
             try:
                 torch.cuda.set_device(device)
-                self._run_secondary_loop(secondary_queue, encode_queue)
+                while True:
+                    item = secondary_queue.get()
+                    if item is _SENTINEL:
+                        break
+                    pr: PrimaryRestoreResult = item  # type: ignore[assignment]
+                    restored_frames = self.restoration_pipeline._run_secondary(
+                        pr.primary_raw,
+                        pr.keep_start,
+                        pr.keep_end,
+                    )
+                    del pr.primary_raw
+                    sr = self.restoration_pipeline.build_secondary_result(pr, restored_frames)
+                    encode_queue.put(sr)
             except BaseException as e:
                 error_holder.append(e)
             finally:
@@ -246,62 +245,3 @@ class Pipeline:
 
         if error_holder:
             raise error_holder[0]
-
-    def _run_secondary_loop(
-        self,
-        secondary_queue: Queue[PrimaryRestoreResult | object],
-        encode_queue: Queue[SecondaryRestoreResult | object],
-    ) -> None:
-        rp = self.restoration_pipeline
-        raw_restorer = rp.secondary_restorer
-        if isinstance(raw_restorer, AsyncSecondaryRestorer):
-            restorer = raw_restorer
-        elif raw_restorer is not None:
-            restorer = SecondaryRestorerAdapter(raw_restorer)
-        else:
-            restorer = SecondaryRestorerAdapter(rp.identity_secondary_restorer())
-        pending_prs: dict[int, PrimaryRestoreResult] = {}
-
-        def _drain_completed() -> int:
-            drained = 0
-            for seq, restored_frames in restorer.pop_completed():
-                pr = pending_prs.pop(seq)
-                encode_queue.put(rp.build_secondary_result(pr, restored_frames))
-                drained += 1
-            if drained:
-                log.debug(
-                    "TVAI async: drained=%d pending=%d secondary_q=%d encode_q=%d",
-                    drained,
-                    len(pending_prs),
-                    secondary_queue.qsize(),
-                    encode_queue.qsize(),
-                )
-            return drained
-
-        while True:
-            _drain_completed()
-
-            try:
-                item = secondary_queue.get(timeout=0.5)
-            except Empty:
-                continue
-
-            if item is _SENTINEL:
-                if pending_prs:
-                    restorer.flush_all()
-                    _drain_completed()
-                break
-
-            if item is _SECONDARY_FLUSH:
-                if pending_prs:
-                    log.debug("TVAI async: detection-gap drain (pending=%d)", len(pending_prs))
-                    _drain_completed()
-                continue
-
-            pr: PrimaryRestoreResult = item  # type: ignore[assignment]
-            seq = restorer.push_clip(pr.primary_raw, pr.keep_start, pr.keep_end)
-            del pr.primary_raw
-            pending_prs[seq] = pr
-
-        if pending_prs:
-            log.warning("secondary loop: %d clips still pending after flush", len(pending_prs))

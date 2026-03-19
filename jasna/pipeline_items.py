@@ -8,7 +8,6 @@ from jasna.tracking.clip_tracker import TrackedClip
 
 
 _SENTINEL = object()
-_SECONDARY_FLUSH = object()
 
 
 @dataclass

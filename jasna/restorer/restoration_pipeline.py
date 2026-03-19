@@ -11,7 +11,7 @@ from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
 from jasna.restorer.restored_clip import RestoredClip
-from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer, SecondaryRestorer
+from jasna.restorer.secondary_restorer import SecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 if TYPE_CHECKING:
@@ -151,17 +151,7 @@ class RestorationPipeline:
         return resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes
 
     def _run_secondary(self, primary_raw: torch.Tensor, keep_start: int, keep_end: int) -> list[torch.Tensor]:
-        if isinstance(self.secondary_restorer, AsyncSecondaryRestorer):
-            restorer = self.secondary_restorer
-            seq = restorer.push_clip(primary_raw, keep_start, keep_end)
-            restorer.flush_all()
-            for completed_seq, frames in restorer.pop_completed():
-                if completed_seq == seq:
-                    restored_frames = frames
-                    break
-            else:
-                restored_frames = []
-        elif self.secondary_restorer is not None:
+        if self.secondary_restorer is not None:
             result = self.secondary_restorer.restore(primary_raw, keep_start=keep_start, keep_end=keep_end)
             if isinstance(result, torch.Tensor):
                 restored_frames = list(result.unbind(0)) if result.dim() > 3 else [result]

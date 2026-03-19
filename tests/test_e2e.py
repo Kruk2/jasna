@@ -1,7 +1,6 @@
 """End-to-end tests using the real test clip assets/test_clip1_1080p.mp4."""
 from __future__ import annotations
 
-import os
 import threading
 from fractions import Fraction
 from pathlib import Path
@@ -20,17 +19,6 @@ RESTORATION_MODEL_PTH = Path("model_weights/lada_mosaic_restoration_model_generi
 RESTORATION_ENGINE_CLIP10 = Path("model_weights/lada_mosaic_restoration_model_generic_v1.2_clip10.trt_fp16.win.engine")
 RFDETR_ONNX = Path("model_weights/rfdetr-v5.onnx")
 
-TVAI_FFMPEG_PATH = os.environ.get("TVAI_FFMPEG_PATH", r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe")
-
-def _tvai_available() -> bool:
-    return (
-        bool(os.environ.get("TVAI_MODEL_DATA_DIR"))
-        and bool(os.environ.get("TVAI_MODEL_DIR"))
-        and Path(os.environ.get("TVAI_MODEL_DATA_DIR", "")).is_dir()
-        and Path(os.environ.get("TVAI_MODEL_DIR", "")).is_dir()
-        and Path(TVAI_FFMPEG_PATH).is_file()
-    )
-
 def _nvvfx_available() -> bool:
     try:
         import nvvfx  # noqa: F401
@@ -38,7 +26,6 @@ def _nvvfx_available() -> bool:
     except ImportError:
         return False
 
-REQUIRES_TVAI = pytest.mark.skipif(not _tvai_available(), reason="TVAI environment not available")
 REQUIRES_NVVFX = pytest.mark.skipif(not _nvvfx_available(), reason="nvvfx (RTX Video Effects) not available")
 REQUIRES_RFDETR = pytest.mark.skipif(not RFDETR_ONNX.exists(), reason="rfdetr-v5 ONNX not found")
 REQUIRES_RESTORER = pytest.mark.skipif(
@@ -324,31 +311,6 @@ class TestFullPipelineE2E:
         assert primary_spy.call_count > 0, "at least one clip should be restored"
         assert secondary_spy.call_count == primary_spy.call_count
 
-    @REQUIRES_TVAI
-    def test_tvai_secondary(self, tmp_path):
-        from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
-
-        tvai = TvaiSecondaryRestorer(
-            ffmpeg_path=TVAI_FFMPEG_PATH,
-            tvai_args="model=iris-2:scale=1",
-            scale=1,
-            num_workers=1,
-        )
-        try:
-            pipeline, output, det_spy, primary_spy, secondary_spy = self._build(
-                tmp_path, secondary_restorer=tvai,
-            )
-            push_clip_spy = _MethodSpy(tvai, "push_clip")
-            pipeline.run()
-        finally:
-            tvai.close()
-
-        self._assert_output_video(output)
-
-        assert det_spy.total_detections > 0
-        assert primary_spy.call_count > 0
-        assert push_clip_spy.call_count == primary_spy.call_count
-
     @REQUIRES_NVVFX
     def test_rtx_superres_secondary(self, tmp_path):
         from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
@@ -414,43 +376,6 @@ def _make_synthetic_clip(n: int, h: int, w: int, device: torch.device):
         bboxes=[bbox] * n,
         masks=[mask] * n,
     )
-
-
-# ---------------------------------------------------------------------------
-# RestorationPipeline E2E with TVAI secondary
-# ---------------------------------------------------------------------------
-
-@REQUIRES_TEST_CLIP
-@REQUIRES_CUDA
-@REQUIRES_RESTORER
-@REQUIRES_TVAI
-class TestRestorationPipelineTvaiE2E:
-    def test_restore_clip(self):
-        from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
-        from jasna.restorer.restoration_pipeline import RestorationPipeline
-
-        device = torch.device("cuda:0")
-        frames = _decode_frames(device)
-        n = len(frames)
-        h, w = frames[0].shape[1], frames[0].shape[2]
-        clip = _make_synthetic_clip(n, h, w, device)
-
-        restorer = _make_restorer(device)
-        tvai = TvaiSecondaryRestorer(
-            ffmpeg_path=TVAI_FFMPEG_PATH, tvai_args="model=iris-2:scale=1",
-            scale=1, num_workers=1,
-        )
-        try:
-            pipeline = RestorationPipeline(restorer=restorer, secondary_restorer=tvai)
-            result = pipeline.restore_clip(clip, frames, keep_start=0, keep_end=n)
-
-            assert len(result.restored_frames) == n
-            for f in result.restored_frames:
-                assert f.dtype == torch.uint8
-                assert f.dim() == 3
-            assert result.frame_shape == (h, w)
-        finally:
-            tvai.close()
 
 
 # ---------------------------------------------------------------------------
