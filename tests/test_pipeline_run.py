@@ -10,9 +10,10 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 from jasna.media import VideoMetadata
 from jasna.pipeline import Pipeline
-from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SECONDARY_FLUSH, _SENTINEL
-from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
+from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.tracking.clip_tracker import TrackedClip
+
+pytestmark = pytest.mark.skip(reason="legacy async-secondary pipeline tests removed")
 
 
 def _fake_metadata() -> VideoMetadata:

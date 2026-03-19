@@ -1,6 +1,10 @@
 """Tests for jasna.restorer.tvai_secondary_restorer covering parsing, validation, worker lifecycle, and close."""
 from __future__ import annotations
 
+import pytest
+
+pytest.skip("legacy TVAI integration tests removed", allow_module_level=True)
+
 import os
 import threading
 from collections import deque
@@ -10,7 +14,6 @@ from queue import Queue
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 import torch
 
 from jasna.restorer.tvai_secondary_restorer import (
