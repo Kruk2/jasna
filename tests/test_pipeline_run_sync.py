@@ -87,6 +87,57 @@ class TestPipelineRunSync:
 
         mock_encoder.encode.assert_not_called()
 
+    def test_run_decode_backpressure_stalls_on_frame_buffer_high_watermark(self):
+        p = _make_pipeline()
+        p.max_clip_size = 2
+        p.temporal_overlap = 0
+
+        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
+        mock_reader = MagicMock()
+        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
+        mock_reader.__exit__ = MagicMock(return_value=False)
+        mock_reader.frames.return_value = iter([
+            (frames_t, [0, 1]),
+            (frames_t, [2, 3]),
+            (frames_t, [4, 5]),
+            (frames_t, [6, 7]),
+            (frames_t, [8, 9]),
+        ])
+
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        from jasna.pipeline_processing import BatchProcessResult
+
+        call_count = 0
+
+        def fake_process_batch(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            fb = kwargs["frame_buffer"]
+            frames = kwargs["frames"]
+            pts_list = kwargs["pts_list"]
+            start_idx = kwargs["start_frame_idx"]
+            for i, pts in enumerate(pts_list):
+                fb.add_frame(start_idx + i, pts=int(pts), frame=frames[i], clip_track_ids={999})
+            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list))
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
+            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline.finalize_processing"),
+            patch("jasna.pipeline.torch.cuda.set_device"),
+            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch.object(p, "_wait_for_decode_fb_drain", side_effect=RuntimeError("decode stalled")),
+        ):
+            with pytest.raises(RuntimeError, match="decode stalled"):
+                p.run()
+
+        assert call_count == 4
+
     def test_run_full_thread_flow(self):
         p = _make_pipeline()
 
