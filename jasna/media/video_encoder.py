@@ -306,6 +306,9 @@ class NvidiaVideoEncoder:
                     return
                 frame, pts, ready_event = item
                 self._handle_encode_item(frame, pts, ready_event)
+            except Exception:
+                logger.exception("[encoder-worker] crashed")
+                raise
             finally:
                 self._encode_queue.task_done()
 

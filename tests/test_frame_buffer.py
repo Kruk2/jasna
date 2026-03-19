@@ -39,7 +39,7 @@ def test_frame_buffer_ready_when_no_pending_clips() -> None:
     frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=111, frame=frame, clip_track_ids=set())
 
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert ready == [(0, frame, 111)]
 
 
@@ -54,7 +54,7 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
 
     frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=123, frame=frame, clip_track_ids={7})
-    assert fb.get_ready_frames() == []
+    assert list(fb.get_ready_frames()) == []
 
     clip = _FakeClip(track_id=7, frame_idxs=[0])
 
@@ -74,7 +74,7 @@ def test_frame_buffer_waits_until_clips_blended_then_outputs_ready() -> None:
     )
 
     fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
 
     assert len(captured) == 1
     assert captured[0].shape == (crop_h, crop_w)
@@ -132,7 +132,7 @@ def test_frame_buffer_blend_clip_unpads_from_larger_restored_frame_then_resizes_
     )
 
     fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 1
     _, blended, _ = ready[0]
     assert torch.all(blended[:, y1:y2, x1:x2] == 200)
@@ -150,7 +150,7 @@ def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
     fb.add_frame(frame_idx=0, pts=10, frame=frame0, clip_track_ids=set())
     fb.add_frame(frame_idx=1, pts=11, frame=frame1, clip_track_ids={7})
 
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert ready == [(0, frame0, 10)]
 
     clip = _FakeClip(track_id=7, frame_idxs=[1])
@@ -170,7 +170,7 @@ def test_frame_buffer_get_ready_frames_stops_at_first_pending() -> None:
     )
 
     fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 1
     assert ready[0][0] == 1
 
@@ -183,7 +183,7 @@ def test_frame_buffer_flush_returns_remaining_in_order() -> None:
     fb.add_frame(frame_idx=0, pts=10, frame=f0, clip_track_ids={1})
     fb.add_frame(frame_idx=2, pts=30, frame=f2, clip_track_ids=set())
 
-    remaining = fb.flush()
+    remaining = list(fb.flush())
     assert [x[0] for x in remaining] == [0, 2]
     assert remaining[0][2] == 10
     assert remaining[1][2] == 30
@@ -235,7 +235,7 @@ def test_frame_buffer_uses_blend_mask_value() -> None:
     )
 
     fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 1
     _, blended, _ = ready[0]
     assert torch.all(blended[:, y1:y2, x1:x2] == 0)
@@ -268,7 +268,7 @@ def test_frame_buffer_blend_clip_skips_frames_where_clip_is_not_pending() -> Non
     )
 
     fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
-    assert fb.get_ready_frames() == []
+    assert list(fb.get_ready_frames()) == []
 
 
 def test_blend_restored_frame_crossfade_weight_scales_blend() -> None:
@@ -318,7 +318,7 @@ def test_blend_restored_frame_crossfade_weight_scales_blend() -> None:
     blended = fb.frames[0].blended_frame
     assert torch.all(blended[:, y1:y2, x1:x2] == 150)
 
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 1
 
 
@@ -477,9 +477,252 @@ def test_frame_buffer_blend_clip_discards_frames_outside_keep_range() -> None:
 
     fb.blend_clip(clip, restored_clip, keep_start=1, keep_end=2)
 
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert [r[0] for r in ready] == [0, 1]
     out0 = ready[0][1]
     out1 = ready[1][1]
     assert torch.all(out0[:, y1:y2, x1:x2] == 0)
     assert torch.all(out1[:, y1:y2, x1:x2] == 200)
+
+
+def test_offload_gpu_frames_noop_on_cpu() -> None:
+    device = torch.device("cpu")
+    fb = FrameBuffer(device=device)
+
+    fb.add_frame(frame_idx=0, pts=10, frame=torch.zeros((3, 8, 8), dtype=torch.uint8), clip_track_ids={1})
+    fb.add_frame(frame_idx=1, pts=20, frame=torch.zeros((3, 8, 8), dtype=torch.uint8), clip_track_ids={1})
+
+    assert fb.offload_gpu_frames() == 0
+
+    assert fb.frames[0].frame.device.type == "cpu"
+    assert fb.frames[1].frame.device.type == "cpu"
+
+
+def test_offload_gpu_frames_sweeps_all_frames() -> None:
+    device = torch.device("cpu")
+    fb = FrameBuffer(
+        device=device,
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+
+    fb.add_frame(frame_idx=0, pts=10, frame=torch.zeros((3, 8, 8), dtype=torch.uint8), clip_track_ids={1, 2})
+    fb.add_frame(frame_idx=1, pts=20, frame=torch.zeros((3, 8, 8), dtype=torch.uint8), clip_track_ids={1})
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+    fb.blend_restored_frame(
+        frame_idx=0, track_id=1,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=mask, frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+    )
+
+    assert fb.frames[0].blended_frame is not fb.frames[0].frame
+    assert fb.frames[1].blended_frame is fb.frames[1].frame
+
+    count = fb.offload_gpu_frames()
+    assert count == 0
+
+    for pending in fb.frames.values():
+        assert pending.frame.device.type == "cpu"
+        assert pending.blended_frame.device.type == "cpu"
+
+
+def test_offload_gpu_frames_preserves_identity() -> None:
+    device = torch.device("cpu")
+    fb = FrameBuffer(device=device)
+
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
+
+    pending = fb.frames[0]
+    assert pending.blended_frame is pending.frame
+
+    count = fb.offload_gpu_frames()
+    assert count == 0
+
+    pending = fb.frames[0]
+    assert pending.blended_frame is pending.frame
+
+
+def test_offload_gpu_frames_separate_blended_frame() -> None:
+    device = torch.device("cpu")
+    fb = FrameBuffer(
+        device=device,
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1, 2})
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+
+    fb.blend_restored_frame(
+        frame_idx=0, track_id=1,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=mask, frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+    )
+
+    pending = fb.frames[0]
+    assert pending.blended_frame is not pending.frame
+
+    count = fb.offload_gpu_frames()
+    assert count == 0
+
+    pending = fb.frames[0]
+    assert pending.blended_frame is not pending.frame
+    assert pending.frame.device.type == "cpu"
+    assert pending.blended_frame.device.type == "cpu"
+
+
+def test_get_frame_returns_tensor_as_is_after_offload() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids=set())
+
+    fb.offload_gpu_frames()
+    result = fb.get_frame(0)
+    assert result is not None
+    assert result.device.type == "cpu"
+
+
+def test_blend_clip_works_after_offload() -> None:
+    fb = FrameBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=123, frame=frame, clip_track_ids={7})
+
+    fb.offload_gpu_frames()
+
+    clip = _FakeClip(track_id=7, frame_idxs=[0])
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    restored = torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8)
+    mask = torch.ones((8, 8), dtype=torch.bool)
+
+    restored_clip = _FakeRestoredClip(
+        restored_frames=[restored],
+        pad_offsets=[(0, 0)],
+        resize_shapes=[(crop_h, crop_w)],
+        crop_shapes=[(crop_h, crop_w)],
+        enlarged_bboxes=[(x1, y1, x2, y2)],
+        masks=[mask],
+        frame_shape=(8, 8),
+    )
+
+    fb.blend_clip(clip, restored_clip, keep_start=0, keep_end=1)
+    ready = list(fb.get_ready_frames())
+    assert len(ready) == 1
+    _, blended, pts = ready[0]
+    assert pts == 123
+    assert blended.device == torch.device("cpu")
+    assert torch.all(blended[:, y1:y2, x1:x2] == 200)
+
+
+def test_get_ready_frames_returns_on_device_after_offload() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids=set())
+
+    fb.offload_gpu_frames()
+    ready = list(fb.get_ready_frames())
+    assert len(ready) == 1
+    assert ready[0][1].device == torch.device("cpu")
+
+
+def test_flush_returns_on_device_after_offload() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
+
+    fb.offload_gpu_frames()
+    remaining = list(fb.flush())
+    assert len(remaining) == 1
+    assert remaining[0][1].device == torch.device("cpu")
+
+
+def test_gpu_pinned_prevents_offload() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
+    fb.add_frame(frame_idx=1, pts=20, frame=torch.zeros((3, 4, 4), dtype=torch.uint8), clip_track_ids=set())
+
+    fb._gpu_pinned.add(0)
+    fb.offload_gpu_frames()
+    assert 0 in fb._gpu_pinned
+    fb._gpu_pinned.discard(0)
+
+
+def test_ensure_on_device_pins_frame() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
+
+    pending = fb.frames[0]
+    fb._ensure_on_device(pending)
+    assert 0 in fb._gpu_pinned
+
+
+def test_blend_restored_frame_stays_pinned_when_complete() -> None:
+    fb = FrameBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    fb.blend_restored_frame(
+        frame_idx=0, track_id=1,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=torch.ones((8, 8), dtype=torch.bool),
+        frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+    )
+    assert 0 in fb._gpu_pinned
+
+
+def test_blend_restored_frame_unpins_when_pending_clips_remain() -> None:
+    fb = FrameBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
+    )
+    frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1, 2})
+
+    x1, y1, x2, y2 = (2, 2, 6, 6)
+    crop_h, crop_w = (y2 - y1, x2 - x1)
+    fb.blend_restored_frame(
+        frame_idx=0, track_id=1,
+        restored=torch.full((3, crop_h, crop_w), 200, dtype=torch.uint8),
+        mask_lr=torch.ones((8, 8), dtype=torch.bool),
+        frame_shape=(8, 8),
+        enlarged_bbox=(x1, y1, x2, y2),
+        crop_shape=(crop_h, crop_w),
+        pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
+    )
+    assert 0 not in fb._gpu_pinned
+    assert 2 in fb.frames[0].pending_clips
+
+
+def test_get_ready_frames_unpins_after_yield() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
+    fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids=set())
+
+    list(fb.get_ready_frames())
+    assert 0 not in fb._gpu_pinned

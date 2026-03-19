@@ -11,6 +11,7 @@ from jasna.tracking.frame_buffer import FrameBuffer
 class _ConstantRestorer:
     """Fills all pixels with a constant float value, ignoring input."""
     dtype = torch.float32
+    device = torch.device("cpu")
 
     def __init__(self, value: float) -> None:
         self._value = value
@@ -45,11 +46,11 @@ def test_restore_and_blend_clip_blends_single_frame(monkeypatch) -> None:
     clip = TrackedClip(track_id=1, start_frame=0, mask_resolution=(4, 4), bboxes=[bbox], masks=[mask])
 
     fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
-    assert fb.get_ready_frames() == []
+    assert list(fb.get_ready_frames()) == []
 
     pipeline.restore_and_blend_clip(clip, [frame], keep_start=0, keep_end=1, frame_buffer=fb)
 
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 1
     _, blended, pts = ready[0]
     assert pts == 10
@@ -78,7 +79,7 @@ def test_restore_and_blend_clip_discards_pending_outside_keep_range(monkeypatch)
 
     pipeline.restore_and_blend_clip(clip, frames, keep_start=1, keep_end=2, frame_buffer=fb)
 
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 3
     assert torch.all(ready[0][1] == 0)
     assert torch.all(ready[1][1][:, 2:6, 2:6] == 255)
@@ -90,6 +91,7 @@ def test_restore_and_blend_clip_noop_when_keep_range_empty(monkeypatch) -> None:
 
     class _NeverCalledRestorer:
         dtype = torch.float32
+        device = torch.device("cpu")
 
         def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
             raise AssertionError("raw_process should not be called")
@@ -106,7 +108,7 @@ def test_restore_and_blend_clip_noop_when_keep_range_empty(monkeypatch) -> None:
     pipeline.restore_and_blend_clip(clip, [frame], keep_start=5, keep_end=5, frame_buffer=fb)
 
     assert 1 not in fb.frames[0].pending_clips
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 1
 
 
@@ -128,7 +130,7 @@ def test_restore_and_blend_clip_passes_crossfade_weights(monkeypatch) -> None:
         crossfade_weights={0: 0.5},
     )
 
-    ready = fb.get_ready_frames()
+    ready = list(fb.get_ready_frames())
     assert len(ready) == 1
     _, blended, _ = ready[0]
     # 0 + (255 - 0) * 0.5 = 127.5 -> 128

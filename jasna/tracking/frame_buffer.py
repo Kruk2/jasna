@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import logging
+import threading
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 
 import torch
@@ -10,6 +12,10 @@ from jasna.restorer.restored_clip import RestoredClip
 from jasna.tracking.clip_tracker import TrackedClip
 from jasna.tracking.blending import create_blend_mask
 
+from jasna.tensor_utils import to_device as _to_device
+
+_log = logging.getLogger(__name__)
+
 @dataclass
 class PendingFrame:
     frame_idx: int
@@ -17,6 +23,7 @@ class PendingFrame:
     frame: torch.Tensor
     blended_frame: torch.Tensor
     pending_clips: set[int] = field(default_factory=set)
+    device_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class FrameBuffer:
@@ -30,6 +37,43 @@ class FrameBuffer:
         self.frames: dict[int, PendingFrame] = {}
         self.next_encode_idx: int = 0
         self.blend_mask_fn = blend_mask_fn
+        self._gpu_pinned: set[int] = set()
+
+    def _ensure_on_device(self, pending: PendingFrame) -> None:
+        self._gpu_pinned.add(pending.frame_idx)
+        if pending.frame.device != self.device:
+            gpu_frame = _to_device(pending.frame, self.device)
+            if pending.blended_frame is pending.frame:
+                pending.frame = gpu_frame
+                pending.blended_frame = gpu_frame
+            else:
+                pending.blended_frame = _to_device(pending.blended_frame, self.device)
+                pending.frame = gpu_frame
+
+    def offload_gpu_frames(self) -> int:
+        count = 0
+        for idx in list(self.frames):
+            if idx in self._gpu_pinned:
+                continue
+            pending = self.frames.get(idx)
+            if pending is None:
+                continue
+            with pending.device_lock:
+                if idx in self._gpu_pinned:
+                    continue
+                if pending.frame.device.type == "cpu":
+                    continue
+                cpu_frame = pending.frame.cpu()
+                if pending.blended_frame is pending.frame:
+                    pending.frame = cpu_frame
+                    pending.blended_frame = cpu_frame
+                else:
+                    pending.blended_frame = pending.blended_frame.cpu()
+                    pending.frame = cpu_frame
+                count += 1
+        if count > 0:
+            _log.debug("[fb] offloaded %d gpu frames to cpu", count)
+        return count
 
     def add_frame(
         self, frame_idx: int, pts: int, frame: torch.Tensor, clip_track_ids: set[int]
@@ -86,15 +130,17 @@ class FrameBuffer:
                 pending.pending_clips.discard(clip.track_id)
                 continue
 
+            with pending.device_lock:
+                self._ensure_on_device(pending)
+                if pending.blended_frame is pending.frame:
+                    pending.blended_frame = pending.frame.clone()
+                blended = pending.blended_frame
+
             restored = restored_clip.restored_frames[i]
             pad_left, pad_top = restored_clip.pad_offsets[i]
             resize_h, resize_w = restored_clip.resize_shapes[i]
             crop_h, crop_w = restored_clip.crop_shapes[i]
             x1, y1, x2, y2 = restored_clip.enlarged_bboxes[i]
-
-            if pending.blended_frame is pending.frame:
-                pending.blended_frame = pending.frame.clone()
-            blended = pending.blended_frame
 
             unpadded = restored[:, pad_top:pad_top + resize_h, pad_left:pad_left + resize_w]
 
@@ -120,6 +166,8 @@ class FrameBuffer:
             blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
 
             pending.pending_clips.discard(clip.track_id)
+            if pending.pending_clips:
+                self._gpu_pinned.discard(frame_idx)
 
     def blend_restored_frame(
         self,
@@ -141,14 +189,20 @@ class FrameBuffer:
         if int(track_id) not in pending.pending_clips:
             return
 
+        with pending.device_lock:
+            self._ensure_on_device(pending)
+            if pending.blended_frame is pending.frame:
+                pending.blended_frame = pending.frame.clone()
+            blended = pending.blended_frame
+            device = pending.frame.device
+
         x1, y1, x2, y2 = enlarged_bbox
         crop_h, crop_w = crop_shape
         pad_left, pad_top = pad_offset
         resize_h, resize_w = resize_shape
 
-        if pending.blended_frame is pending.frame:
-            pending.blended_frame = pending.frame.clone()
-        blended = pending.blended_frame
+        restored = restored.to(device)
+        mask_lr = mask_lr.to(device)
 
         unpadded = restored[:, pad_top:pad_top + resize_h, pad_left:pad_left + resize_w]
         resized_back = F.interpolate(
@@ -160,8 +214,8 @@ class FrameBuffer:
 
         frame_h, frame_w = frame_shape
         hm, wm = mask_lr.shape
-        y_idx = (torch.arange(y1, y2, device=mask_lr.device) * hm) // frame_h
-        x_idx = (torch.arange(x1, x2, device=mask_lr.device) * wm) // frame_w
+        y_idx = (torch.arange(y1, y2, device=device) * hm) // frame_h
+        x_idx = (torch.arange(x1, x2, device=device) * wm) // frame_w
         crop_mask = mask_lr.float().index_select(0, y_idx).index_select(1, x_idx)
         blend_mask = self.blend_mask_fn(crop_mask)
 
@@ -177,24 +231,27 @@ class FrameBuffer:
             blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
 
         pending.pending_clips.discard(int(track_id))
+        if pending.pending_clips:
+            self._gpu_pinned.discard(int(frame_idx))
 
-    def get_ready_frames(self) -> list[tuple[int, torch.Tensor, int]]:
-        ready: list[tuple[int, torch.Tensor, int]] = []
-
+    def get_ready_frames(self) -> Iterator[tuple[int, torch.Tensor, int]]:
         while self.next_encode_idx in self.frames:
             pending = self.frames[self.next_encode_idx]
             if pending.pending_clips:
                 break
-            ready.append((pending.frame_idx, pending.blended_frame, pending.pts))
+            with pending.device_lock:
+                self._ensure_on_device(pending)
+                result = (pending.frame_idx, pending.blended_frame, pending.pts)
             del self.frames[self.next_encode_idx]
+            self._gpu_pinned.discard(self.next_encode_idx)
             self.next_encode_idx += 1
+            yield result
 
-        return ready
-
-    def flush(self) -> list[tuple[int, torch.Tensor, int]]:
-        remaining: list[tuple[int, torch.Tensor, int]] = []
+    def flush(self) -> Iterator[tuple[int, torch.Tensor, int]]:
         for frame_idx in sorted(self.frames.keys()):
-            pending = self.frames[frame_idx]
-            remaining.append((pending.frame_idx, pending.blended_frame, pending.pts))
-        self.frames.clear()
-        return remaining
+            pending = self.frames.pop(frame_idx)
+            with pending.device_lock:
+                self._ensure_on_device(pending)
+                result = (pending.frame_idx, pending.blended_frame, pending.pts)
+            self._gpu_pinned.discard(frame_idx)
+            yield result
