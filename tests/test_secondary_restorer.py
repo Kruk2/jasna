@@ -1,8 +1,7 @@
-"""Tests for secondary restorer helpers and TVAI disabled shell."""
+"""Tests for secondary restorer helpers."""
 from __future__ import annotations
 
 import torch
-import pytest
 
 from jasna.restorer.restoration_pipeline import _IdentitySecondaryRestorer
 from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
@@ -28,17 +27,7 @@ class TestIdentitySecondaryRestorer:
         assert restorer.num_workers == 1
 
 
-class TestTvaiSecondaryRestorerDisabled:
-    def test_restore_raises_not_implemented(self):
-        restorer = TvaiSecondaryRestorer(
-            ffmpeg_path="ffmpeg.exe",
-            tvai_args="model=iris-2:scale=1",
-            scale=1,
-            num_workers=2,
-        )
-        with pytest.raises(NotImplementedError, match="disabled"):
-            restorer.restore(torch.rand((2, 3, 256, 256)), keep_start=0, keep_end=2)
-
+class TestTvaiSecondaryRestorerConfig:
     def test_constructor_keeps_config(self):
         restorer = TvaiSecondaryRestorer(
             ffmpeg_path="ffmpeg.exe",
@@ -52,14 +41,13 @@ class TestTvaiSecondaryRestorerDisabled:
         assert restorer.scale == 1
         assert restorer.num_workers == 2
 
-    def test_build_ffmpeg_cmd_keeps_basic_tvai_args_logic(self):
+    def test_build_ffmpeg_cmd(self):
         restorer = TvaiSecondaryRestorer(
             ffmpeg_path="ffmpeg.exe",
             tvai_args="model=iris-2:scale=4:w=256:h=256:noise=0",
             scale=2,
             num_workers=2,
         )
-
         assert restorer.tvai_filter_args == "model=iris-2:scale=2:noise=0"
         cmd = restorer.build_ffmpeg_cmd()
         assert cmd[0] == "ffmpeg.exe"
