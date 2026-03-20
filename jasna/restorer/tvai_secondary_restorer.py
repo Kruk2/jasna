@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -111,12 +112,12 @@ class _TvaiWorker:
             if data is None:
                 self._write_queue.task_done()
                 break
-            stdin.write(data)
+            stdin.write(memoryview(data))
             stdin.flush()
             self._write_queue.task_done()
 
     def push_frames(self, frames_hwc: np.ndarray) -> None:
-        self._write_queue.put(frames_hwc.tobytes())
+        self._write_queue.put(np.ascontiguousarray(frames_hwc))
 
     def drain_writes(self) -> None:
         self._write_queue.join()
@@ -183,6 +184,7 @@ class TvaiSecondaryRestorer:
     name = "tvai"
     prefers_cpu_input = True
     _INPUT_SIZE = 256
+    _FLUSH_COOLDOWN_SECONDS = 1.5
 
     def __init__(self, *, ffmpeg_path: str, tvai_args: str, scale: int, num_workers: int) -> None:
         self.ffmpeg_path = str(ffmpeg_path)
@@ -210,6 +212,7 @@ class TvaiSecondaryRestorer:
         self._next_worker_idx = 0
         self._workers: list[_TvaiWorker] = []
         self._worker_segments: list[deque[_Segment]] = []
+        self._worker_last_push_time: list[float] = []
         self._completed: dict[int, list[np.ndarray]] = {}
 
     @property
@@ -244,6 +247,7 @@ class TvaiSecondaryRestorer:
             w.start()
             self._workers.append(w)
             self._worker_segments.append(deque())
+            self._worker_last_push_time.append(0.0)
         self._started = True
 
     def build_ffmpeg_cmd(self) -> list[str]:
@@ -282,7 +286,11 @@ class TvaiSecondaryRestorer:
 
     @staticmethod
     def _to_tensors(frames_np: list[np.ndarray]) -> list[torch.Tensor]:
-        return [torch.from_numpy(np.ascontiguousarray(f.transpose(2, 0, 1))) for f in frames_np]
+        if not frames_np:
+            return []
+        batch = np.stack(frames_np)
+        batch = np.ascontiguousarray(batch.transpose(0, 3, 1, 2))
+        return list(torch.from_numpy(batch).unbind(0))
 
     def push_clip(
         self,
@@ -322,6 +330,7 @@ class TvaiSecondaryRestorer:
         if pad_count > 0:
             self._worker_segments[wi].append(_FillerSegment(remaining=pad_count))
         self._workers[wi].push_frames(frames_hwc)
+        self._worker_last_push_time[wi] = time.monotonic()
         logger.debug("TVAI push seq=%d frames=%d pad=%d -> worker %d", seq, n, pad_count, wi)
         return seq
 
@@ -366,12 +375,15 @@ class TvaiSecondaryRestorer:
             (TVAI_PIPELINE_DELAY, self._INPUT_SIZE, self._INPUT_SIZE, 3),
             dtype=np.uint8,
         )
+        now = time.monotonic()
         for wi in range(len(self._workers)):
             segs = self._worker_segments[wi]
             has_real = any(isinstance(s, _ClipSegment) for s in segs)
             if not has_real:
                 continue
             if segs and isinstance(segs[-1], _FillerSegment) and segs[-1].is_flush:
+                continue
+            if now - self._worker_last_push_time[wi] < self._FLUSH_COOLDOWN_SECONDS:
                 continue
             self._workers[wi].push_frames(filler)
             segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY, is_flush=True))
@@ -427,5 +439,6 @@ class TvaiSecondaryRestorer:
             w.kill()
         self._workers.clear()
         self._worker_segments.clear()
+        self._worker_last_push_time.clear()
         self._completed.clear()
         self._started = False
