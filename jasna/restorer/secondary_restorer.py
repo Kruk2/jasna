@@ -45,8 +45,12 @@ class AsyncSecondaryRestorer(Protocol):
         """True if any clips are still being processed."""
         ...
 
-    def flush_pending(self) -> None:
-        """Push filler frames to unstick latency-buffered output."""
+    def flush_pending(self, target_seqs: set[int] | None = None) -> None:
+        """Push filler frames to unstick latency-buffered output.
+
+        If *target_seqs* is given, only flush workers that hold one of
+        those clip sequences.  Otherwise flush all workers with pending clips.
+        """
         ...
 
     def flush_all(self) -> None:

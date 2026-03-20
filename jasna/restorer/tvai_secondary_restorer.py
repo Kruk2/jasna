@@ -363,7 +363,7 @@ class TvaiSecondaryRestorer:
             for s in segs
         )
 
-    def flush_pending(self) -> None:
+    def flush_pending(self, target_seqs: set[int] | None = None) -> None:
         if not self._started:
             return
         filler = np.zeros(
@@ -372,14 +372,17 @@ class TvaiSecondaryRestorer:
         )
         for wi in range(len(self._workers)):
             segs = self._worker_segments[wi]
-            has_real = any(isinstance(s, _ClipSegment) for s in segs)
-            if not has_real:
+            if target_seqs is None:
+                has_target = any(isinstance(s, _ClipSegment) for s in segs)
+            else:
+                has_target = any(isinstance(s, _ClipSegment) and s.seq in target_seqs for s in segs)
+            if not has_target:
                 continue
             if segs and isinstance(segs[-1], _FillerSegment) and segs[-1].is_flush:
                 continue
             self._workers[wi].push_frames(filler)
             segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY, is_flush=True))
-            logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d", TVAI_PIPELINE_DELAY, wi)
+            logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", TVAI_PIPELINE_DELAY, wi, target_seqs)
 
     def flush_all(self) -> None:
         if not self._started:

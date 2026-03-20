@@ -404,6 +404,37 @@ class TestFlushPending:
         r = _make_restorer()
         r.flush_pending()
 
+    def test_target_seqs_flushes_only_matching_worker(self):
+        r = _make_restorer(num_workers=3)
+        workers = _setup_mock_workers(r)
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
+        r._worker_segments[1].append(_ClipSegment(seq=1, expected=5))
+        r._worker_segments[2].append(_ClipSegment(seq=2, expected=5))
+        r.flush_pending(target_seqs={1})
+        workers[0].push_frames.assert_not_called()
+        workers[1].push_frames.assert_called_once()
+        workers[2].push_frames.assert_not_called()
+
+    def test_target_seqs_flushes_multiple_matching_workers(self):
+        r = _make_restorer(num_workers=3)
+        workers = _setup_mock_workers(r)
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
+        r._worker_segments[1].append(_ClipSegment(seq=1, expected=5))
+        r._worker_segments[2].append(_ClipSegment(seq=2, expected=5))
+        r.flush_pending(target_seqs={0, 2})
+        workers[0].push_frames.assert_called_once()
+        workers[1].push_frames.assert_not_called()
+        workers[2].push_frames.assert_called_once()
+
+    def test_target_seqs_none_flushes_all(self):
+        r = _make_restorer(num_workers=2)
+        workers = _setup_mock_workers(r)
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
+        r._worker_segments[1].append(_ClipSegment(seq=1, expected=5))
+        r.flush_pending(target_seqs=None)
+        workers[0].push_frames.assert_called_once()
+        workers[1].push_frames.assert_called_once()
+
 
 class TestFlushAll:
     def test_drains_and_restarts_workers(self):

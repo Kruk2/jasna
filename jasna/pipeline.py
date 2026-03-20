@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 class Pipeline:
     _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
-    _VRAM_FREE_HEADROOM_BYTES = 750 * 1024 ** 2
+    _VRAM_FREE_HEADROOM_BYTES = 1024 * 1024 ** 2
     _VRAM_LIMIT_OVERRIDE_GB: float | None = None
 
     def __init__(
@@ -101,6 +101,18 @@ class Pipeline:
 
     _ASYNC_POLL_TIMEOUT = 0.05
 
+    @staticmethod
+    def _earliest_blocking_seqs(pending_prs: dict[int, PrimaryRestoreResult]) -> set[int] | None:
+        if not pending_prs:
+            return None
+        earliest_frame = min(
+            pr.clip.start_frame + pr.keep_start for pr in pending_prs.values()
+        )
+        return {
+            seq for seq, pr in pending_prs.items()
+            if pr.clip.start_frame + pr.keep_start <= earliest_frame <= pr.clip.start_frame + pr.keep_end - 1
+        }
+
     def _run_secondary_loop(
         self,
         secondary_queue: Queue,
@@ -108,7 +120,8 @@ class Pipeline:
         debug_memory: PipelineDebugMemoryLogger | None = None,
         clip_queue: Queue | None = None,
         primary_idle_event: threading.Event | None = None,
-    ) -> None:
+        decode_backpressure_event: threading.Event | None = None,
+    ) -> tuple[int, float]:
         restorer: AsyncSecondaryRestorer = self.restoration_pipeline.secondary_restorer  # type: ignore[assignment]
         pending_prs: dict[int, PrimaryRestoreResult] = {}
 
@@ -132,9 +145,17 @@ class Pipeline:
         def _pipeline_starved() -> bool:
             if primary_idle_event is None or clip_queue is None:
                 return False
-            return primary_idle_event.is_set() and clip_queue.qsize() == 0
+            if not primary_idle_event.is_set() or clip_queue.qsize() != 0:
+                return False
+            if decode_backpressure_event is not None and not decode_backpressure_event.is_set():
+                return False
+            return True
 
+        starvation_count = 0
+        starvation_seconds = 0.0
+        starvation_start: float | None = None
         done = False
+        flushed_since_last_push = False
         while not done:
             try:
                 item = secondary_queue.get(timeout=self._ASYNC_POLL_TIMEOUT)
@@ -142,6 +163,9 @@ class Pipeline:
                     done = True
                 else:
                     pr = item  # type: ignore[assignment]
+                    if starvation_start is not None:
+                        starvation_seconds += time.monotonic() - starvation_start
+                        starvation_start = None
                     t0 = time.monotonic()
                     seq = restorer.push_clip(
                         pr.primary_raw,
@@ -151,26 +175,35 @@ class Pipeline:
                     push_ms = (time.monotonic() - t0) * 1000
                     del pr.primary_raw
                     pending_prs[seq] = pr
+                    flushed_since_last_push = False
                     if push_ms > 50:
                         logger.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_ms)
             except Empty:
                 if not done and _pipeline_starved() and restorer.has_pending:
-                    logger.debug("[secondary] pipeline-starved flush")
-                    restorer.flush_pending()
+                    if starvation_start is None:
+                        starvation_start = time.monotonic()
+                    if not flushed_since_last_push:
+                        target_seqs = self._earliest_blocking_seqs(pending_prs)
+                        logger.debug("[secondary] pipeline-starved flush target_seqs=%s", target_seqs)
+                        restorer.flush_pending(target_seqs=target_seqs)
+                        starvation_count += 1
+                        flushed_since_last_push = True
 
-            _forward_completed()
+            if _forward_completed() > 0:
+                flushed_since_last_push = False
 
+        if starvation_start is not None:
+            starvation_seconds += time.monotonic() - starvation_start
         restorer.flush_all()
         _forward_completed()
+        return starvation_count, starvation_seconds
 
     def run(self) -> None:
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
-        decode_fb_low_watermark = int(self.max_clip_size)
-        decode_fb_high_watermark = int(self.max_clip_size) * 3 + int(self.batch_size)
-        if decode_fb_high_watermark <= decode_fb_low_watermark:
-            decode_fb_high_watermark = decode_fb_low_watermark + 1
+        decode_bp_gap_threshold = int(self.max_clip_size * 1.2)
+        decode_bp_fb_cap = int(self.max_clip_size * 12)
 
         clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
         secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(
@@ -182,6 +215,7 @@ class Pipeline:
         frame_buffer = FrameBuffer(device=device)
         fb_drained_event = threading.Event()
         primary_idle_event = threading.Event()
+        decode_backpressure_event = threading.Event()
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
             frame_buffer=frame_buffer,
@@ -191,6 +225,7 @@ class Pipeline:
         )
 
         def _decode_detect_thread():
+            nonlocal peak_fb_size, bp_stall_count, bp_stall_seconds
             try:
                 torch.cuda.set_device(device)
                 tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
@@ -211,6 +246,7 @@ class Pipeline:
                     pb.init()
                     target_hw = (int(metadata.video_height), int(metadata.video_width))
                     frame_idx = 0
+                    frames_since_last_clip_emit = 0
                     log.info(
                         "Processing %s: %d frames @ %s fps, %dx%d",
                         self.input_video.name, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
@@ -222,22 +258,32 @@ class Pipeline:
                             if effective_bs == 0:
                                 continue
 
-                            if len(frame_buffer.frames) >= decode_fb_high_watermark:
+                            fb_size = len(frame_buffer.frames)
+                            peak_fb_size = max(peak_fb_size, fb_size)
+                            gap_triggered = frames_since_last_clip_emit >= decode_bp_gap_threshold
+                            cap_triggered = fb_size > decode_bp_fb_cap
+                            if gap_triggered or cap_triggered:
+                                reason = "gap" if gap_triggered else "fb_cap"
                                 log.debug(
-                                    "[decode] fb backpressure enter fb=%d hwm=%d lwm=%d",
-                                    len(frame_buffer.frames),
-                                    decode_fb_high_watermark,
-                                    decode_fb_low_watermark,
+                                    "[decode] %s backpressure enter gap=%d fb=%d cap=%d",
+                                    reason,
+                                    frames_since_last_clip_emit,
+                                    fb_size,
+                                    decode_bp_fb_cap,
                                 )
-                                while len(frame_buffer.frames) > decode_fb_low_watermark:
+                                t_bp = time.monotonic()
+                                decode_backpressure_event.set()
+                                while len(frame_buffer.frames) > decode_bp_gap_threshold:
                                     if error_holder:
                                         raise error_holder[0]
                                     self._wait_for_decode_fb_drain(fb_drained_event)
+                                decode_backpressure_event.clear()
+                                bp_stall_seconds += time.monotonic() - t_bp
+                                bp_stall_count += 1
+                                frames_since_last_clip_emit = 0
                                 log.debug(
-                                    "[decode] fb backpressure exit fb=%d hwm=%d lwm=%d",
+                                    "[decode] backpressure exit fb=%d",
                                     len(frame_buffer.frames),
-                                    decode_fb_high_watermark,
-                                    decode_fb_low_watermark,
                                 )
 
                             batch_start = frame_idx
@@ -258,10 +304,14 @@ class Pipeline:
                             )
 
                             frame_idx = res.next_frame_idx
+                            if res.clips_emitted > 0:
+                                frames_since_last_clip_emit = 0
+                            else:
+                                frames_since_last_clip_emit += effective_bs
 
                             debug_memory.snapshot(
                                 "decode",
-                                f"frame_start={batch_start} batch={effective_bs}",
+                                f"frame_start={batch_start} batch={effective_bs} gap={frames_since_last_clip_emit}",
                             )
                             pb.update(effective_bs)
 
@@ -341,10 +391,13 @@ class Pipeline:
             finally:
                 encode_queue.put(_SENTINEL)
 
+        starvation_stats: tuple[int, float] = (0, 0.0)
+
         def _async_secondary_restore_thread():
+            nonlocal starvation_stats
             try:
                 torch.cuda.set_device(device)
-                self._run_secondary_loop(secondary_queue, encode_queue, debug_memory, clip_queue, primary_idle_event)
+                starvation_stats = self._run_secondary_loop(secondary_queue, encode_queue, debug_memory, clip_queue, primary_idle_event, decode_backpressure_event)
             except BaseException as e:
                 log.exception("[secondary-async] thread crashed")
                 error_holder.append(e)
@@ -397,6 +450,9 @@ class Pipeline:
         vram_sum = 0
         vram_samples = 0
         offload_count = 0
+        peak_fb_size = 0
+        bp_stall_count = 0
+        bp_stall_seconds = 0.0
 
         def _vram_offload_thread():
             nonlocal vram_max, vram_sum, vram_samples, offload_count
@@ -445,6 +501,12 @@ class Pipeline:
                 "VRAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples), offloaded frames: %d",
                 vram_max / (1024 ** 2), vram_avg / (1024 ** 2), vram_samples, offload_count,
             )
+        log.info("Frame buffer — peak: %d frames", peak_fb_size)
+        if bp_stall_count > 0:
+            log.info("Decode backpressure — stalls: %d, total: %.1fs", bp_stall_count, bp_stall_seconds)
+        s_count, s_secs = starvation_stats
+        if s_count > 0:
+            log.info("Pipeline starvation — flushes: %d, total: %.1fs", s_count, s_secs)
 
         frame_buffer.frames.clear()
         frame_buffer._gpu_pinned.clear()

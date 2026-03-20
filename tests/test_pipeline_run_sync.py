@@ -90,7 +90,7 @@ class TestPipelineRunSync:
 
         mock_encoder.encode.assert_not_called()
 
-    def test_run_decode_backpressure_stalls_on_frame_buffer_high_watermark(self):
+    def test_run_decode_gap_backpressure_stalls_when_no_clips_emitted(self):
         p = _make_pipeline()
         p.max_clip_size = 2
         p.temporal_overlap = 0
@@ -124,7 +124,7 @@ class TestPipelineRunSync:
             start_idx = kwargs["start_frame_idx"]
             for i, pts in enumerate(pts_list):
                 fb.add_frame(start_idx + i, pts=int(pts), frame=frames[i], clip_track_ids={999})
-            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list))
+            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list), clips_emitted=0)
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
@@ -140,7 +140,112 @@ class TestPipelineRunSync:
             with pytest.raises(RuntimeError, match="decode stalled"):
                 p.run()
 
-        assert call_count == 4
+        assert call_count == 2
+
+    def test_run_decode_gap_backpressure_resets_on_clip_emit(self):
+        p = _make_pipeline()
+        p.max_clip_size = 4
+        p.temporal_overlap = 0
+
+        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
+        mock_reader = MagicMock()
+        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
+        mock_reader.__exit__ = MagicMock(return_value=False)
+        mock_reader.frames.return_value = iter([
+            (frames_t, [0, 1]),
+            (frames_t, [2, 3]),
+            (frames_t, [4, 5]),
+            (frames_t, [6, 7]),
+            (frames_t, [8, 9]),
+        ])
+
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        from jasna.pipeline_processing import BatchProcessResult
+
+        call_count = 0
+
+        def fake_process_batch(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            fb = kwargs["frame_buffer"]
+            frames = kwargs["frames"]
+            pts_list = kwargs["pts_list"]
+            start_idx = kwargs["start_frame_idx"]
+            for i, pts in enumerate(pts_list):
+                fb.add_frame(start_idx + i, pts=int(pts), frame=frames[i], clip_track_ids={999})
+            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list), clips_emitted=1)
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
+            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline.finalize_processing"),
+            patch("jasna.pipeline.torch.cuda.set_device"),
+            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
+            patch.object(p, "_wait_for_decode_fb_drain", side_effect=RuntimeError("decode stalled")),
+        ):
+            p.run()
+
+        assert call_count == 5
+
+    def test_run_decode_fb_cap_backpressure_stalls_despite_clip_emissions(self):
+        """fb_cap triggers backpressure even when gap resets on every batch.
+
+        max_clip_size=2 → fb_cap = 2*8 = 16.  Each batch adds 2 frames and
+        emits a clip (resetting gap), so gap never fires.  After 9 batches
+        fb=18 > 16, triggering fb_cap backpressure.
+        """
+        p = _make_pipeline()
+        p.max_clip_size = 2
+        p.temporal_overlap = 0
+
+        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
+        mock_reader = MagicMock()
+        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
+        mock_reader.__exit__ = MagicMock(return_value=False)
+        mock_reader.frames.return_value = iter(
+            [(frames_t, [i * 2, i * 2 + 1]) for i in range(10)]
+        )
+
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        from jasna.pipeline_processing import BatchProcessResult
+
+        call_count = 0
+
+        def fake_process_batch(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            fb = kwargs["frame_buffer"]
+            frames = kwargs["frames"]
+            pts_list = kwargs["pts_list"]
+            start_idx = kwargs["start_frame_idx"]
+            for i, pts in enumerate(pts_list):
+                fb.add_frame(start_idx + i, pts=int(pts), frame=frames[i], clip_track_ids={999})
+            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list), clips_emitted=1)
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
+            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline.finalize_processing"),
+            patch("jasna.pipeline.torch.cuda.set_device"),
+            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
+            patch.object(p, "_wait_for_decode_fb_drain", side_effect=RuntimeError("decode stalled")),
+        ):
+            with pytest.raises(RuntimeError, match="decode stalled"):
+                p.run()
+
+        assert call_count == 9
 
     def test_should_offload_frames_true_when_free_below_headroom(self):
         p = _make_pipeline()
@@ -209,7 +314,7 @@ class TestPipelineRunSync:
                 keep_end=2,
                 crossfade_weights=None,
             ))
-            return BatchProcessResult(next_frame_idx=2)
+            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
             clip=clip,
@@ -300,7 +405,7 @@ class TestPipelineRunSync:
             fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={1})
             fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={1})
             cq.put(ClipRestoreItem(clip=clip, frames=[frames_t[0], frames_t[1]], keep_start=0, keep_end=2, crossfade_weights=None))
-            return BatchProcessResult(next_frame_idx=2)
+            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         p.restoration_pipeline.prepare_and_run_primary.side_effect = RuntimeError("primary boom")
 
@@ -346,7 +451,7 @@ class TestPipelineRunSync:
             fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={1})
             fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={1})
             cq.put(ClipRestoreItem(clip=clip, frames=[frames_t[0], frames_t[1]], keep_start=0, keep_end=2, crossfade_weights=None))
-            return BatchProcessResult(next_frame_idx=2)
+            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
             clip=clip,

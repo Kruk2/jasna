@@ -123,7 +123,7 @@ class TestPipelineRun:
                 keep_end=2,
                 crossfade_weights=None,
             ))
-            return BatchProcessResult(next_frame_idx=2)
+            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
             clip=clip,
@@ -201,7 +201,7 @@ class TestPipelineRun:
         mock_encoder.__exit__ = MagicMock(return_value=False)
 
         from jasna.pipeline_processing import BatchProcessResult
-        batch_result = BatchProcessResult(next_frame_idx=2)
+        batch_result = BatchProcessResult(next_frame_idx=2, clips_emitted=0)
 
         restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.push_clip.return_value = 0
@@ -271,7 +271,7 @@ class TestPipelineRun:
             fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={1})
             fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={1})
             cq.put(ClipRestoreItem(clip=clip, frames=[frames_t[0], frames_t[1]], keep_start=0, keep_end=2, crossfade_weights=None))
-            return BatchProcessResult(next_frame_idx=2)
+            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         p.restoration_pipeline.prepare_and_run_primary.side_effect = RuntimeError("primary boom")
 
@@ -315,7 +315,7 @@ class TestPipelineRun:
             fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={1})
             fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={1})
             cq.put(ClipRestoreItem(clip=clip, frames=[frames_t[0], frames_t[1]], keep_start=0, keep_end=2, crossfade_weights=None))
-            return BatchProcessResult(next_frame_idx=2)
+            return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
             clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
@@ -421,6 +421,8 @@ class TestPipelineRun:
         encode_queue: Queue = Queue()
         cq: Queue = Queue()
         primary_idle = threading.Event()
+        bp = threading.Event()
+        bp.set()
         secondary_queue.put(pr)
 
         def put_sentinel_later():
@@ -431,7 +433,56 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        t.join(timeout=3)
+
+        restorer.flush_pending.assert_not_called()
+        restorer.flush_all.assert_called_once()
+
+    def test_run_secondary_loop_no_flush_without_backpressure(self):
+        """No flush_pending when primary idle but decode is not in backpressure."""
+        import threading
+        p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.01
+
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+        )
+        pr = PrimaryRestoreResult(
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            primary_raw=torch.zeros((2, 3, 256, 256)),
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
+            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
+        )
+
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.num_workers = 2
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.return_value = []
+        restorer.has_pending = True
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        cq: Queue = Queue()
+        primary_idle = threading.Event()
+        primary_idle.set()
+        bp = threading.Event()
+        secondary_queue.put(pr)
+
+        def put_sentinel_later():
+            import time
+            time.sleep(0.15)
+            secondary_queue.put(_SENTINEL)
+
+        t = threading.Thread(target=put_sentinel_later, daemon=True)
+        t.start()
+
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
         t.join(timeout=3)
 
         restorer.flush_pending.assert_not_called()
@@ -485,8 +536,58 @@ class TestPipelineRun:
         result = encode_queue.get()
         assert result is sr_result
 
+    def test_run_secondary_loop_flush_called_once_per_starvation(self):
+        """flush_pending called only once while starved, even if has_pending stays true."""
+        import threading
+        p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.01
+
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+        )
+        pr = PrimaryRestoreResult(
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            primary_raw=torch.zeros((2, 3, 256, 256)),
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
+            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
+        )
+
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.num_workers = 2
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.return_value = []
+        restorer.has_pending = True
+        restorer.flush_all.return_value = None
+        restorer.flush_pending.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        cq: Queue = Queue()
+        primary_idle = threading.Event()
+        primary_idle.set()
+        bp = threading.Event()
+        bp.set()
+        secondary_queue.put(pr)
+
+        def put_sentinel_later():
+            import time
+            time.sleep(0.2)
+            secondary_queue.put(_SENTINEL)
+
+        t = threading.Thread(target=put_sentinel_later, daemon=True)
+        t.start()
+
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        t.join(timeout=3)
+
+        restorer.flush_pending.assert_called_once_with(target_seqs={0})
+
     def test_run_secondary_loop_pipeline_starved_triggers_flush(self):
-        """flush_pending when primary is idle and clip_queue is empty (pipeline starved)."""
+        """flush_pending when primary idle, decode backpressure active, clip_queue empty."""
         import threading
         p = _make_pipeline()
 
@@ -529,7 +630,7 @@ class TestPipelineRun:
         restorer.has_pending = True
         restorer.flush_all.return_value = None
 
-        def on_flush_pending():
+        def on_flush_pending(target_seqs=None):
             nonlocal flush_pending_called
             flush_pending_called = True
             restorer.has_pending = False
@@ -543,6 +644,8 @@ class TestPipelineRun:
         cq: Queue = Queue()
         primary_idle = threading.Event()
         primary_idle.set()
+        bp = threading.Event()
+        bp.set()
         secondary_queue.put(pr)
 
         def put_sentinel_later():
@@ -553,10 +656,10 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
         t.join(timeout=3)
 
-        restorer.flush_pending.assert_called()
+        restorer.flush_pending.assert_called_with(target_seqs={0})
         restorer.flush_all.assert_called_once()
         assert not encode_queue.empty()
 
@@ -738,3 +841,147 @@ class TestPipelineRun:
             patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             p.run()
+
+
+    def test_run_secondary_loop_reflush_after_forwarding(self):
+        """After flushing worker 1 and forwarding its results, flush fires again for worker 0."""
+        import threading
+        p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.01
+
+        def _make_pr(track_id, start_frame, n_frames):
+            clip = TrackedClip(
+                track_id=track_id, start_frame=start_frame, mask_resolution=(2, 2),
+                bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
+                masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
+            )
+            return PrimaryRestoreResult(
+                clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+                primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+                keep_start=0, keep_end=n_frames, crossfade_weights=None,
+                enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
+                pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
+            )
+
+        pr0 = _make_pr(track_id=0, start_frame=0, n_frames=180)
+        pr1 = _make_pr(track_id=1, start_frame=180, n_frames=180)
+
+        push_count = 0
+        flush_calls: list[set[int] | None] = []
+        returned_seqs: set[int] = set()
+
+        def mock_push(frames, keep_start, keep_end):
+            nonlocal push_count
+            seq = push_count
+            push_count += 1
+            return seq
+
+        def mock_flush(target_seqs=None):
+            flush_calls.append(target_seqs)
+
+        def mock_pop():
+            if len(flush_calls) >= 1 and 0 not in returned_seqs:
+                returned_seqs.add(0)
+                return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 180)]
+            if len(flush_calls) >= 2 and 1 not in returned_seqs:
+                returned_seqs.add(1)
+                return [(1, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 180)]
+            return []
+
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.num_workers = 2
+        restorer.push_clip.side_effect = mock_push
+        restorer.pop_completed.side_effect = mock_pop
+        restorer.flush_pending.side_effect = mock_flush
+        restorer.flush_all.return_value = None
+
+        @property
+        def _has_pending(self):
+            return len(returned_seqs) < push_count
+
+        type(restorer).has_pending = property(lambda self: len(returned_seqs) < push_count)
+
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
+            clip=pr.clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
+            crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
+            crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
+        )
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        cq: Queue = Queue()
+        primary_idle = threading.Event()
+        primary_idle.set()
+        bp = threading.Event()
+        bp.set()
+
+        secondary_queue.put(pr0)
+        secondary_queue.put(pr1)
+
+        def put_sentinel_later():
+            import time
+            time.sleep(0.5)
+            secondary_queue.put(_SENTINEL)
+
+        t = threading.Thread(target=put_sentinel_later, daemon=True)
+        t.start()
+
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        t.join(timeout=3)
+
+        assert len(flush_calls) == 2, f"Expected 2 flush calls, got {len(flush_calls)}: {flush_calls}"
+        assert flush_calls[0] == {0}
+        assert flush_calls[1] == {1}
+        assert encode_queue.qsize() == 2
+
+
+class TestEarliestBlockingSeqs:
+    def _make_pr(self, start_frame, n_frames, keep_start=0, keep_end=None):
+        if keep_end is None:
+            keep_end = n_frames
+        clip = TrackedClip(
+            track_id=start_frame, start_frame=start_frame, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
+        )
+        return PrimaryRestoreResult(
+            clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+            keep_start=keep_start, keep_end=keep_end, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
+            pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
+        )
+
+    def test_empty_returns_none(self):
+        assert Pipeline._earliest_blocking_seqs({}) is None
+
+    def test_single_clip(self):
+        pr = self._make_pr(start_frame=100, n_frames=180)
+        result = Pipeline._earliest_blocking_seqs({0: pr})
+        assert result == {0}
+
+    def test_two_clips_same_start_frame(self):
+        pr0 = self._make_pr(start_frame=100, n_frames=180)
+        pr1 = self._make_pr(start_frame=100, n_frames=180)
+        result = Pipeline._earliest_blocking_seqs({0: pr0, 1: pr1})
+        assert result == {0, 1}
+
+    def test_non_overlapping_clips_returns_earliest_only(self):
+        pr0 = self._make_pr(start_frame=0, n_frames=180)
+        pr1 = self._make_pr(start_frame=200, n_frames=180)
+        result = Pipeline._earliest_blocking_seqs({0: pr0, 1: pr1})
+        assert result == {0}
+
+    def test_overlapping_clips_different_starts(self):
+        pr0 = self._make_pr(start_frame=0, n_frames=180)
+        pr1 = self._make_pr(start_frame=50, n_frames=180)
+        result = Pipeline._earliest_blocking_seqs({0: pr0, 1: pr1})
+        assert result == {0}
+
+    def test_keep_start_shifts_earliest_frame(self):
+        pr0 = self._make_pr(start_frame=0, n_frames=180, keep_start=20, keep_end=180)
+        pr1 = self._make_pr(start_frame=10, n_frames=180, keep_start=0, keep_end=180)
+        result = Pipeline._earliest_blocking_seqs({0: pr0, 1: pr1})
+        assert result == {1}

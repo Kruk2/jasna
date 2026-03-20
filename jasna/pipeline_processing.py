@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class BatchProcessResult:
     next_frame_idx: int
+    clips_emitted: int
 
 
 def _process_ended_clips(
@@ -129,13 +130,14 @@ def process_frame_batch(
 ) -> BatchProcessResult:
     effective_bs = len(pts_list)
     if effective_bs == 0:
-        return BatchProcessResult(next_frame_idx=int(start_frame_idx))
+        return BatchProcessResult(next_frame_idx=int(start_frame_idx), clips_emitted=0)
 
     frames_eff = frames[:effective_bs]
     frames_in = pad_batch_with_last(frames_eff, batch_size=int(batch_size))
 
     detections: Detections = detections_fn(frames_in, target_hw=target_hw)
 
+    clips_emitted = 0
     for i in range(effective_bs):
         current_frame_idx = int(start_frame_idx) + i
         pts = int(pts_list[i])
@@ -146,6 +148,7 @@ def process_frame_batch(
 
         ended_clips, active_track_ids = tracker.update(current_frame_idx, valid_boxes, valid_masks)
         frame_buffer.add_frame(current_frame_idx, pts, frame, active_track_ids)
+        clips_emitted += len(ended_clips)
 
         _process_ended_clips(
             ended_clips=ended_clips,
@@ -159,6 +162,7 @@ def process_frame_batch(
 
     return BatchProcessResult(
         next_frame_idx=int(start_frame_idx) + effective_bs,
+        clips_emitted=clips_emitted,
     )
 
 
