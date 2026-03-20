@@ -280,9 +280,9 @@ class TvaiSecondaryRestorer:
 
     @staticmethod
     def _to_numpy_hwc(frames_nchw: np.ndarray) -> np.ndarray:
-        x = np.clip(frames_nchw, 0.0, 1.0)
-        x = np.round(x * 255.0).clip(0, 255).astype(np.uint8)
-        return np.ascontiguousarray(x.transpose(0, 2, 3, 1))
+        x = frames_nchw * np.float32(255.0)
+        np.clip(x, 0, 255, out=x)
+        return np.ascontiguousarray(x.astype(np.uint8).transpose(0, 2, 3, 1))
 
     @staticmethod
     def _to_tensors(frames_np: list[np.ndarray]) -> list[torch.Tensor]:
