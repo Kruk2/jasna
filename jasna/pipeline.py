@@ -99,7 +99,6 @@ class Pipeline:
         threshold = total - self._VRAM_FREE_HEADROOM_BYTES
         return used > threshold, used, threshold
 
-    _ASYNC_FLUSH_TIMEOUT = 0.1
     _ASYNC_POLL_TIMEOUT = 0.05
 
     def _run_secondary_loop(
@@ -107,10 +106,11 @@ class Pipeline:
         secondary_queue: Queue,
         encode_queue: Queue,
         debug_memory: PipelineDebugMemoryLogger | None = None,
+        clip_queue: Queue | None = None,
+        primary_idle_event: threading.Event | None = None,
     ) -> None:
         restorer: AsyncSecondaryRestorer = self.restoration_pipeline.secondary_restorer  # type: ignore[assignment]
         pending_prs: dict[int, PrimaryRestoreResult] = {}
-        idle_seconds = 0.0
 
         def _forward_completed() -> int:
             forwarded = 0
@@ -129,6 +129,11 @@ class Pipeline:
                 forwarded += 1
             return forwarded
 
+        def _pipeline_starved() -> bool:
+            if primary_idle_event is None or clip_queue is None:
+                return False
+            return primary_idle_event.is_set() and clip_queue.qsize() == 0
+
         done = False
         while not done:
             try:
@@ -146,17 +151,14 @@ class Pipeline:
                     push_ms = (time.monotonic() - t0) * 1000
                     del pr.primary_raw
                     pending_prs[seq] = pr
-                    idle_seconds = 0.0
                     if push_ms > 50:
                         logger.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_ms)
             except Empty:
-                idle_seconds += self._ASYNC_POLL_TIMEOUT
+                if not done and _pipeline_starved() and restorer.has_pending:
+                    logger.debug("[secondary] pipeline-starved flush")
+                    restorer.flush_pending()
 
             _forward_completed()
-
-            if not done and idle_seconds >= self._ASYNC_FLUSH_TIMEOUT and restorer.has_pending:
-                restorer.flush_pending()
-                idle_seconds = 0.0
 
         restorer.flush_all()
         _forward_completed()
@@ -179,6 +181,7 @@ class Pipeline:
         error_holder: list[BaseException] = []
         frame_buffer = FrameBuffer(device=device)
         fb_drained_event = threading.Event()
+        primary_idle_event = threading.Event()
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
             frame_buffer=frame_buffer,
@@ -208,7 +211,6 @@ class Pipeline:
                     pb.init()
                     target_hw = (int(metadata.video_height), int(metadata.video_width))
                     frame_idx = 0
-                    gap_frames = 0
                     log.info(
                         "Processing %s: %d frames @ %s fps, %dx%d",
                         self.input_video.name, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
@@ -257,13 +259,6 @@ class Pipeline:
 
                             frame_idx = res.next_frame_idx
 
-                            if tracker.active_clips:
-                                if gap_frames > 0:
-                                    logger.debug("[decode] detection gap ended after %d frames", gap_frames)
-                                    gap_frames = 0
-                            else:
-                                gap_frames += effective_bs
-
                             debug_memory.snapshot(
                                 "decode",
                                 f"frame_start={batch_start} batch={effective_bs}",
@@ -294,7 +289,9 @@ class Pipeline:
             try:
                 torch.cuda.set_device(device)
                 while True:
+                    primary_idle_event.set()
                     item = clip_queue.get()
+                    primary_idle_event.clear()
                     if item is _SENTINEL:
                         break
                     clip_item: ClipRestoreItem = item  # type: ignore[assignment]
@@ -347,7 +344,7 @@ class Pipeline:
         def _async_secondary_restore_thread():
             try:
                 torch.cuda.set_device(device)
-                self._run_secondary_loop(secondary_queue, encode_queue, debug_memory)
+                self._run_secondary_loop(secondary_queue, encode_queue, debug_memory, clip_queue, primary_idle_event)
             except BaseException as e:
                 log.exception("[secondary-async] thread crashed")
                 error_holder.append(e)

@@ -1,7 +1,6 @@
 """Tests for jasna.restorer.tvai_secondary_restorer — persistent worker design."""
 from __future__ import annotations
 
-import time
 from collections import deque
 from unittest.mock import MagicMock, patch, PropertyMock
 
@@ -183,7 +182,6 @@ def _setup_mock_workers(r, num_workers=None):
         w.drain_available.return_value = []
         w.close_stdin_and_drain.return_value = []
     r._worker_segments = [deque() for _ in range(n)]
-    r._worker_last_push_time = [0.0] * n
     r._started = True
     return r._workers
 
@@ -401,28 +399,6 @@ class TestFlushPending:
         r._worker_segments[0].pop()
         r.flush_pending()
         assert workers[0].push_frames.call_count == 2
-
-    def test_skips_worker_within_cooldown(self):
-        r = _make_restorer(num_workers=2)
-        workers = _setup_mock_workers(r)
-        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
-        r._worker_segments[1].append(_ClipSegment(seq=1, expected=5))
-        r._worker_last_push_time[0] = time.monotonic()
-        r._worker_last_push_time[1] = 0.0
-        r.flush_pending()
-        workers[0].push_frames.assert_not_called()
-        assert workers[1].push_frames.call_count == 1
-
-    def test_flushes_after_cooldown_expires(self):
-        r = _make_restorer(num_workers=1)
-        workers = _setup_mock_workers(r)
-        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
-        r._worker_last_push_time[0] = time.monotonic()
-        r.flush_pending()
-        workers[0].push_frames.assert_not_called()
-        r._worker_last_push_time[0] = time.monotonic() - r._FLUSH_COOLDOWN_PER_WORKER * r.num_workers - 0.1
-        r.flush_pending()
-        assert workers[0].push_frames.call_count == 1
 
     def test_noop_when_not_started(self):
         r = _make_restorer()
