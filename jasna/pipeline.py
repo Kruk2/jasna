@@ -3,10 +3,13 @@ from __future__ import annotations
 import gc
 import logging
 import threading
+import time
 from pathlib import Path
 from queue import Empty, Queue
 
 import torch
+
+logger = logging.getLogger(__name__)
 
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
@@ -134,14 +137,18 @@ class Pipeline:
                     done = True
                 else:
                     pr = item  # type: ignore[assignment]
+                    t0 = time.monotonic()
                     seq = restorer.push_clip(
                         pr.primary_raw,
                         keep_start=pr.keep_start,
                         keep_end=pr.keep_end,
                     )
+                    push_ms = (time.monotonic() - t0) * 1000
                     del pr.primary_raw
                     pending_prs[seq] = pr
                     idle_seconds = 0.0
+                    if push_ms > 50:
+                        logger.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_ms)
             except Empty:
                 idle_seconds += self._ASYNC_POLL_TIMEOUT
 
