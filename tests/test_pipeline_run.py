@@ -390,11 +390,105 @@ class TestPipelineRun:
         result = encode_queue.get()
         assert result is sr_result
 
-    def test_run_secondary_loop_idle_gap_triggers_flush_pending(self):
-        """Idle timeout triggers flush_pending when has_pending is True."""
+    def test_run_secondary_loop_no_flush_when_primary_busy(self):
+        """No flush_pending when secondary_queue is empty but primary is busy (not idle)."""
+        import threading
         p = _make_pipeline()
         p._ASYNC_POLL_TIMEOUT = 0.01
-        p._ASYNC_FLUSH_TIMEOUT = 0.03
+
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+        )
+        pr = PrimaryRestoreResult(
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            primary_raw=torch.zeros((2, 3, 256, 256)),
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
+            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
+        )
+
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.num_workers = 2
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.return_value = []
+        restorer.has_pending = True
+        restorer.flush_all.return_value = None
+        p.restoration_pipeline.secondary_restorer = restorer
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        cq: Queue = Queue()
+        primary_idle = threading.Event()
+        secondary_queue.put(pr)
+
+        def put_sentinel_later():
+            import time
+            time.sleep(0.15)
+            secondary_queue.put(_SENTINEL)
+
+        t = threading.Thread(target=put_sentinel_later, daemon=True)
+        t.start()
+
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
+        t.join(timeout=3)
+
+        restorer.flush_pending.assert_not_called()
+        restorer.flush_all.assert_called_once()
+
+    def test_run_secondary_loop_no_gap_flush_when_items_arrive(self):
+        """No flush_pending when clips arrive without gaps."""
+        p = _make_pipeline()
+
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+        )
+        pr = PrimaryRestoreResult(
+            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            primary_raw=torch.zeros((2, 3, 256, 256)),
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
+            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
+        )
+
+        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
+        sr_result = SecondaryRestoreResult(
+            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            restored_frames=restored,
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
+            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
+        )
+
+        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer.num_workers = 2
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.side_effect = [[], [(0, restored)], []]
+        restorer.flush_all.return_value = None
+        restorer.has_pending = True
+        p.restoration_pipeline.secondary_restorer = restorer
+        p.restoration_pipeline.build_secondary_result.return_value = sr_result
+
+        secondary_queue: Queue = Queue()
+        encode_queue: Queue = Queue()
+        secondary_queue.put(pr)
+        secondary_queue.put(_SENTINEL)
+
+        p._run_secondary_loop(secondary_queue, encode_queue)
+
+        restorer.flush_pending.assert_not_called()
+        restorer.flush_all.assert_called_once()
+        assert not encode_queue.empty()
+        result = encode_queue.get()
+        assert result is sr_result
+
+    def test_run_secondary_loop_pipeline_starved_triggers_flush(self):
+        """flush_pending when primary is idle and clip_queue is empty (pipeline starved)."""
+        import threading
+        p = _make_pipeline()
 
         clip = TrackedClip(
             track_id=1, start_frame=0, mask_resolution=(2, 2),
@@ -446,9 +540,11 @@ class TestPipelineRun:
 
         secondary_queue: Queue = Queue()
         encode_queue: Queue = Queue()
+        cq: Queue = Queue()
+        primary_idle = threading.Event()
+        primary_idle.set()
         secondary_queue.put(pr)
 
-        import threading
         def put_sentinel_later():
             import time
             time.sleep(0.3)
@@ -457,60 +553,12 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
         t.join(timeout=3)
 
         restorer.flush_pending.assert_called()
         restorer.flush_all.assert_called_once()
         assert not encode_queue.empty()
-
-    def test_run_secondary_loop_no_gap_flush_when_items_arrive(self):
-        """No flush_pending when clips arrive without gaps."""
-        p = _make_pipeline()
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
-        )
-        pr = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
-            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
-        )
-
-        restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
-        sr_result = SecondaryRestoreResult(
-            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=restored,
-            keep_start=0, keep_end=2, crossfade_weights=None,
-            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
-            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = [[], [(0, restored)], []]
-        restorer.flush_all.return_value = None
-        restorer.has_pending = True
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.return_value = sr_result
-
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        secondary_queue.put(pr)
-        secondary_queue.put(_SENTINEL)
-
-        p._run_secondary_loop(secondary_queue, encode_queue)
-
-        restorer.flush_pending.assert_not_called()
-        restorer.flush_all.assert_called_once()
-        assert not encode_queue.empty()
-        result = encode_queue.get()
-        assert result is sr_result
 
     def test_run_secondary_loop_self_priming_prevents_deadlock(self):
         """3 clips on 2 workers: clip 2 primes clip 0's buffered tail, preventing deadlock."""
