@@ -5,7 +5,6 @@ import os
 import subprocess
 import threading
 from collections import deque
-from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from queue import Queue, Empty
@@ -62,7 +61,9 @@ class _TvaiWorker:
         self._out_size = out_size
         self._proc: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
+        self._writer: threading.Thread | None = None
         self._frame_queue: Queue[np.ndarray | None] = Queue()
+        self._write_queue: Queue[bytes | None] = Queue()
         self._error: BaseException | None = None
 
     @property
@@ -72,6 +73,7 @@ class _TvaiWorker:
     def start(self) -> None:
         self._error = None
         self._frame_queue = Queue()
+        self._write_queue = Queue()
         self._proc = subprocess.Popen(
             self._cmd,
             stdin=subprocess.PIPE,
@@ -80,6 +82,8 @@ class _TvaiWorker:
         )
         self._reader = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader.start()
+        self._writer = threading.Thread(target=self._writer_loop, daemon=True)
+        self._writer.start()
 
     def _reader_loop(self) -> None:
         assert self._proc is not None
@@ -99,10 +103,23 @@ class _TvaiWorker:
         finally:
             self._frame_queue.put(None)
 
-    def push_frames(self, frames_hwc: np.ndarray) -> None:
+    def _writer_loop(self) -> None:
         assert self._proc is not None and self._proc.stdin is not None
-        self._proc.stdin.write(frames_hwc.tobytes())
-        self._proc.stdin.flush()
+        stdin = self._proc.stdin
+        while True:
+            data = self._write_queue.get()
+            if data is None:
+                self._write_queue.task_done()
+                break
+            stdin.write(data)
+            stdin.flush()
+            self._write_queue.task_done()
+
+    def push_frames(self, frames_hwc: np.ndarray) -> None:
+        self._write_queue.put(frames_hwc.tobytes())
+
+    def drain_writes(self) -> None:
+        self._write_queue.join()
 
     def drain_available(self) -> list[np.ndarray]:
         frames: list[np.ndarray] = []
@@ -117,6 +134,11 @@ class _TvaiWorker:
         return frames
 
     def close_stdin_and_drain(self, timeout: float = 30.0) -> list[np.ndarray]:
+        self.drain_writes()
+        self._write_queue.put(None)
+        if self._writer is not None:
+            self._writer.join(timeout=timeout)
+            self._writer = None
         if self._proc is not None and self._proc.stdin is not None:
             try:
                 self._proc.stdin.close()
@@ -144,6 +166,10 @@ class _TvaiWorker:
                 pass
             self._proc.wait(timeout=5)
             self._proc = None
+        if self._writer is not None:
+            self._write_queue.put(None)
+            self._writer.join(timeout=5)
+            self._writer = None
         if self._reader is not None:
             self._reader.join(timeout=5)
             self._reader = None
@@ -155,6 +181,7 @@ class _TvaiWorker:
 
 class TvaiSecondaryRestorer:
     name = "tvai"
+    prefers_cpu_input = True
     _INPUT_SIZE = 256
 
     def __init__(self, *, ffmpeg_path: str, tvai_args: str, scale: int, num_workers: int) -> None:
@@ -184,8 +211,10 @@ class TvaiSecondaryRestorer:
         self._workers: list[_TvaiWorker] = []
         self._worker_segments: list[deque[_Segment]] = []
         self._completed: dict[int, list[np.ndarray]] = {}
-        self._push_pool: ThreadPoolExecutor | None = None
-        self._push_futures: list[Future | None] = []
+
+    @property
+    def preferred_queue_size(self) -> int:
+        return self.num_workers * 2
 
     def _validate_environment(self) -> None:
         data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")
@@ -215,8 +244,6 @@ class TvaiSecondaryRestorer:
             w.start()
             self._workers.append(w)
             self._worker_segments.append(deque())
-        self._push_pool = ThreadPoolExecutor(max_workers=self.num_workers)
-        self._push_futures = [None] * self.num_workers
         self._started = True
 
     def build_ffmpeg_cmd(self) -> list[str]:
@@ -257,16 +284,6 @@ class TvaiSecondaryRestorer:
     def _to_tensors(frames_np: list[np.ndarray]) -> list[torch.Tensor]:
         return [torch.from_numpy(np.ascontiguousarray(f.transpose(2, 0, 1))) for f in frames_np]
 
-    def _wait_push(self, wi: int) -> None:
-        f = self._push_futures[wi]
-        if f is not None:
-            f.result()
-            self._push_futures[wi] = None
-
-    def _wait_all_pushes(self) -> None:
-        for wi in range(len(self._push_futures)):
-            self._wait_push(wi)
-
     def push_clip(
         self,
         frames_256: torch.Tensor,
@@ -304,8 +321,7 @@ class TvaiSecondaryRestorer:
         self._worker_segments[wi].append(_ClipSegment(seq=seq, expected=n))
         if pad_count > 0:
             self._worker_segments[wi].append(_FillerSegment(remaining=pad_count))
-        self._wait_push(wi)
-        self._push_futures[wi] = self._push_pool.submit(self._workers[wi].push_frames, frames_hwc)
+        self._workers[wi].push_frames(frames_hwc)
         logger.debug("TVAI push seq=%d frames=%d pad=%d -> worker %d", seq, n, pad_count, wi)
         return seq
 
@@ -357,15 +373,13 @@ class TvaiSecondaryRestorer:
                 continue
             if segs and isinstance(segs[-1], _FillerSegment) and segs[-1].is_flush:
                 continue
-            self._wait_push(wi)
-            self._push_futures[wi] = self._push_pool.submit(self._workers[wi].push_frames, filler)
+            self._workers[wi].push_frames(filler)
             segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY, is_flush=True))
             logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d", TVAI_PIPELINE_DELAY, wi)
 
     def flush_all(self) -> None:
         if not self._started:
             return
-        self._wait_all_pushes()
         for wi in range(len(self._workers)):
             remaining = self._workers[wi].close_stdin_and_drain()
             segments = self._worker_segments[wi]
@@ -414,8 +428,4 @@ class TvaiSecondaryRestorer:
         self._workers.clear()
         self._worker_segments.clear()
         self._completed.clear()
-        if self._push_pool is not None:
-            self._push_pool.shutdown(wait=False)
-            self._push_pool = None
-        self._push_futures.clear()
         self._started = False

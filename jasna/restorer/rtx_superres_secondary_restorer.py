@@ -47,6 +47,8 @@ def _resolve_deblur(name: str):
 class RtxSuperresSecondaryRestorer:
     name = "rtx-super-res"
     num_workers = 1
+    preferred_queue_size = 2
+    prefers_cpu_input = False
 
     def __init__(self, *, device: torch.device, scale: int = 4, quality: str = "high",
                  denoise: Optional[str] = "medium", deblur: Optional[str] = None) -> None:

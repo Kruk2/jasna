@@ -41,6 +41,8 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
 class _IdentitySecondaryRestorer:
     name = "identity"
     num_workers = 1
+    preferred_queue_size = 2
+    prefers_cpu_input = False
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         t = frames_256.shape[0]
@@ -77,6 +79,18 @@ class RestorationPipeline:
         if self.secondary_restorer is not None:
             return self.secondary_restorer.num_workers
         return 1
+
+    @property
+    def secondary_preferred_queue_size(self) -> int:
+        if self.secondary_restorer is not None:
+            return int(getattr(self.secondary_restorer, "preferred_queue_size", 2))
+        return 2
+
+    @property
+    def secondary_prefers_cpu_input(self) -> bool:
+        if self.secondary_restorer is not None:
+            return bool(getattr(self.secondary_restorer, "prefers_cpu_input", False))
+        return False
 
     def identity_secondary_restorer(self) -> _IdentitySecondaryRestorer:
         return _IdentitySecondaryRestorer()

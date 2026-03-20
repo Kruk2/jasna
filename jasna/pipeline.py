@@ -25,7 +25,6 @@ log = logging.getLogger(__name__)
 
 
 class Pipeline:
-    _SECONDARY_QUEUE_MAXSIZE = 2
     _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
     _VRAM_FREE_HEADROOM_BYTES = 750 * 1024 ** 2
     _VRAM_LIMIT_OVERRIDE_GB: float | None = None
@@ -165,7 +164,9 @@ class Pipeline:
             decode_fb_high_watermark = decode_fb_low_watermark + 1
 
         clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
-        secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(maxsize=self._SECONDARY_QUEUE_MAXSIZE)
+        secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(
+            maxsize=self.restoration_pipeline.secondary_preferred_queue_size,
+        )
         encode_queue: Queue[SecondaryRestoreResult | object] = Queue(maxsize=secondary_workers + 1)
 
         error_holder: list[BaseException] = []
@@ -289,6 +290,8 @@ class Pipeline:
                         clip_item.keep_end,
                         clip_item.crossfade_weights,
                     )
+                    if self.restoration_pipeline.secondary_prefers_cpu_input:
+                        result.primary_raw = result.primary_raw.cpu()
                     secondary_queue.put(result)
                     debug_memory.snapshot(
                         "primary",
