@@ -208,6 +208,7 @@ class Pipeline:
                     pb.init()
                     target_hw = (int(metadata.video_height), int(metadata.video_width))
                     frame_idx = 0
+                    gap_frames = 0
                     log.info(
                         "Processing %s: %d frames @ %s fps, %dx%d",
                         self.input_video.name, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
@@ -255,6 +256,13 @@ class Pipeline:
                             )
 
                             frame_idx = res.next_frame_idx
+
+                            if tracker.active_clips:
+                                if gap_frames > 0:
+                                    logger.debug("[decode] detection gap ended after %d frames", gap_frames)
+                                    gap_frames = 0
+                            else:
+                                gap_frames += effective_bs
 
                             debug_memory.snapshot(
                                 "decode",
