@@ -304,6 +304,7 @@ TRANSLATIONS = {
         "wizard_check_gpu": "NVIDIA GPU",
         "wizard_check_cuda": "CUDA Runtime",
         "wizard_check_hags": "Hardware Accelerated GPU Scheduling",
+        "wizard_check_sysmem": "CUDA Sysmem Fallback Policy",
         "wizard_not_checked": "Not checked",
         "wizard_not_callable": "Not callable: {path}",
         "wizard_found_version": "Found: {path} ({version})",
@@ -315,6 +316,8 @@ TRANSLATIONS = {
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "Not available",
+        "wizard_hags_how_to_fix": "How to fix",
+        "wizard_sysmem_how_to_fix": "How to fix",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "TVAI_MODEL_DATA_DIR env var is not set",
@@ -561,6 +564,7 @@ TRANSLATIONS = {
         "wizard_check_gpu": "NVIDIA GPU",
         "wizard_check_cuda": "CUDA 运行时",
         "wizard_check_hags": "硬件加速 GPU 调度",
+        "wizard_check_sysmem": "CUDA 系统内存回退策略",
         "wizard_not_checked": "未检查",
         "wizard_not_callable": "无法调用：{path}",
         "wizard_found_version": "已找到：{path}（{version}）",
@@ -572,6 +576,8 @@ TRANSLATIONS = {
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}，计算能力 {major}.{minor}",
         "wizard_not_available": "不可用",
+        "wizard_hags_how_to_fix": "如何修复",
+        "wizard_sysmem_how_to_fix": "如何修复",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "环境变量 TVAI_MODEL_DATA_DIR 未设置",
@@ -818,6 +824,7 @@ TRANSLATIONS = {
         "wizard_check_gpu": "NVIDIA GPU",
         "wizard_check_cuda": "CUDA ランタイム",
         "wizard_check_hags": "ハードウェアアクセラレータによる GPU スケジューリング",
+        "wizard_check_sysmem": "CUDA システムメモリフォールバックポリシー",
         "wizard_not_checked": "未確認",
         "wizard_not_callable": "実行不可: {path}",
         "wizard_found_version": "検出: {path}（{version}）",
@@ -829,6 +836,8 @@ TRANSLATIONS = {
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}、compute {major}.{minor}",
         "wizard_not_available": "利用不可",
+        "wizard_hags_how_to_fix": "修正方法",
+        "wizard_sysmem_how_to_fix": "修正方法",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "環境変数 TVAI_MODEL_DATA_DIR が設定されていません",
@@ -1073,6 +1082,7 @@ TRANSLATIONS = {
         "wizard_check_gpu": "NVIDIA GPU",
         "wizard_check_cuda": "CUDA 런타임",
         "wizard_check_hags": "하드웨어 가속 GPU 스케줄링",
+        "wizard_check_sysmem": "CUDA 시스템 메모리 폴백 정책",
         "wizard_not_checked": "확인되지 않음",
         "wizard_not_callable": "호출 불가: {path}",
         "wizard_found_version": "발견: {path} ({version})",
@@ -1084,6 +1094,8 @@ TRANSLATIONS = {
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "사용 불가",
+        "wizard_hags_how_to_fix": "해결 방법",
+        "wizard_sysmem_how_to_fix": "해결 방법",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "환경 변수 TVAI_MODEL_DATA_DIR이 설정되지 않았습니다",
@@ -1328,8 +1340,9 @@ TRANSLATIONS = {
         "wizard_check_ffprobe": "FFprobe",
         "wizard_check_mkvmerge": "MKVmerge",
         "wizard_check_gpu": "NVIDIA GPU",
-        "wizard_check_cuda": "CUDA Runtime",
-        "wizard_check_hags": "Hardware Accelerated GPU Scheduling",
+        "wizard_check_cuda": "CUDA รันไทม์",
+        "wizard_check_hags": "การจัดตารางเวลา GPU แบบเร่งด้วยฮาร์ดแวร์",
+        "wizard_check_sysmem": "นโยบายการใช้หน่วยความจำระบบสำรอง CUDA",
         "wizard_not_checked": "ยังไม่ได้ตรวจสอบ",
         "wizard_not_callable": "เรียกใช้ไม่ได้: {path}",
         "wizard_found_version": "พบ: {path} ({version})",
@@ -1341,6 +1354,8 @@ TRANSLATIONS = {
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "ไม่พร้อมใช้งาน",
+        "wizard_hags_how_to_fix": "วิธีแก้ไข",
+        "wizard_sysmem_how_to_fix": "วิธีแก้ไข",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "ตัวแปรสภาพแวดล้อม TVAI_MODEL_DATA_DIR ไม่ได้ตั้งค่า",

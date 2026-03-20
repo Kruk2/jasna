@@ -209,6 +209,49 @@ def check_windows_hardware_accelerated_gpu_scheduling() -> tuple[bool, str]:
     return True, "Off"
 
 
+_CUDA_SYSMEM_FALLBACK_POLICY_ID = 0x10ECECC9
+_PREFER_NO_SYSMEM_FALLBACK = 1
+_PREFER_SYSMEM_FALLBACK = 2
+
+
+def _read_drs_setting(setting_id: int) -> int | None:
+    import struct
+
+    drs_path = os.path.join(
+        os.environ.get("ProgramData", r"C:\ProgramData"),
+        "NVIDIA Corporation",
+        "Drs",
+        "nvdrsdb0.bin",
+    )
+    with open(drs_path, "rb") as f:
+        data = f.read()
+    target = struct.pack("<I", setting_id)
+    pos = data.find(target)
+    if pos < 0:
+        return None
+    # DRS binary record: ID(4) + type_flags(4) + value(4) + ...
+    value_offset = pos + 8
+    if value_offset + 4 > len(data):
+        return None
+    return struct.unpack("<I", data[value_offset : value_offset + 4])[0]
+
+
+def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
+    if sys.platform != "win32":
+        return True, "N/A"
+
+    try:
+        value = _read_drs_setting(_CUDA_SYSMEM_FALLBACK_POLICY_ID)
+    except OSError as e:
+        return False, str(e)
+
+    if value == _PREFER_NO_SYSMEM_FALLBACK:
+        return True, "Prefer No Sysmem Fallback"
+    if value == _PREFER_SYSMEM_FALLBACK:
+        return False, "Prefer Sysmem Fallback (recommended: Prefer No Sysmem Fallback)"
+    return False, "Driver Default (recommended: Prefer No Sysmem Fallback)"
+
+
 def get_user_config_dir(app_name: str) -> Path:
     if sys.platform == "win32":
         base = os.environ.get("APPDATA") or os.environ.get("LOCALAPPDATA")

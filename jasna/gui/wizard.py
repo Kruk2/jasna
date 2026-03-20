@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import threading
+import webbrowser
 
 import customtkinter as ctk
 
@@ -14,6 +15,11 @@ from jasna.gui.components import BuyMeCoffeeButton
 
 logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
+
+_HELP_URLS = {
+    "hags": "https://www.youtube.com/watch?v=r6bhe2o7IkQ",
+    "sysmem": "https://docs.cognex.com/deep-learning_420/web/EN/deep-learning/Content/Topics/optimization/gpu-disable-shared.htm?TocPath=Optimization%20Guidelines%7CNVIDIA%C2%AE%20GPU%20Guidelines%7C_____6",
+}
 
 
 class FirstRunWizard(ctk.CTkToplevel):
@@ -88,6 +94,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         ]
         if os.name == "nt":
             checks.append(("hags", t("wizard_check_hags")))
+            checks.append(("sysmem", t("wizard_check_sysmem")))
         
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
@@ -119,8 +126,20 @@ class FirstRunWizard(ctk.CTkToplevel):
                 anchor="e",
             )
             info_label.pack(side="right", fill="x", expand=True)
-            
-            self._check_labels[key] = (status_label, info_label)
+
+            help_label = None
+            if key in _HELP_URLS:
+                help_label = ctk.CTkLabel(
+                    row,
+                    text=t(f"wizard_{key}_how_to_fix"),
+                    font=(Fonts.FAMILY, Fonts.SIZE_SMALL, "underline"),
+                    text_color=Colors.PRIMARY,
+                    cursor="hand2",
+                )
+                url = _HELP_URLS[key]
+                help_label.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+
+            self._check_labels[key] = (status_label, info_label, help_label)
             
         # Footer with disabled button during checking
         self._footer = ctk.CTkFrame(self, fg_color="transparent")
@@ -171,13 +190,18 @@ class FirstRunWizard(ctk.CTkToplevel):
         subtitle_color = Colors.STATUS_COMPLETED if self._checks_passed else Colors.STATUS_PAUSED
         self._subtitle.configure(text=subtitle_text, text_color=subtitle_color)
 
-        for key, (status_label, info_label) in self._check_labels.items():
+        for key, (status_label, info_label, help_label) in self._check_labels.items():
             passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
             status_label.configure(
                 text="✓" if passed else "✕",
                 text_color=Colors.STATUS_COMPLETED if passed else Colors.STATUS_ERROR,
             )
             info_label.configure(text=info)
+            if help_label is not None:
+                if passed:
+                    help_label.pack_forget()
+                else:
+                    help_label.pack(side="right", padx=(0, 8))
 
         btn_text = t("btn_get_started") if self._checks_passed else t("btn_continue_anyway")
         self._continue_btn.configure(text=btn_text, state="normal")
@@ -219,6 +243,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         ]
         if os.name == "nt":
             checks.append(("hags", t("wizard_check_hags")))
+            checks.append(("sysmem", t("wizard_check_sysmem")))
 
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
@@ -252,7 +277,19 @@ class FirstRunWizard(ctk.CTkToplevel):
                 anchor="e",
             )
             info_label.pack(side="right", fill="x", expand=True)
-            
+
+            if key in _HELP_URLS and not passed:
+                help_link = ctk.CTkLabel(
+                    row,
+                    text=t(f"wizard_{key}_how_to_fix"),
+                    font=(Fonts.FAMILY, Fonts.SIZE_SMALL, "underline"),
+                    text_color=Colors.PRIMARY,
+                    cursor="hand2",
+                )
+                url = _HELP_URLS[key]
+                help_link.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
+                help_link.pack(side="right", padx=(0, 8))
+
         # Footer with OK button (enabled since checks are done)
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", padx=40, pady=(20, 40))
@@ -280,6 +317,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._check_results["cuda"] = self._check_cuda()
         if os.name == "nt":
             self._check_results["hags"] = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
+            self._check_results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
         
         # Determine overall pass
         self._checks_passed = all(passed for passed, _ in self._check_results.values())
