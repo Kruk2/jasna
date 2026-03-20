@@ -292,6 +292,67 @@ def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_erro
     assert "registry read failed" in out
 
 
+def test_check_sysmem_fallback_returns_true_when_prefer_no_sysmem(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(
+        os_utils, "_read_drs_setting", lambda setting_id: os_utils._PREFER_NO_SYSMEM_FALLBACK
+    )
+
+    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+    assert ok is True
+    assert "Prefer No Sysmem Fallback" in info
+
+
+def test_check_sysmem_fallback_returns_false_when_driver_default(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(os_utils, "_read_drs_setting", lambda setting_id: 0)
+
+    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+    assert ok is False
+    assert "Driver Default" in info
+
+
+def test_check_sysmem_fallback_returns_false_when_prefer_sysmem(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(
+        os_utils, "_read_drs_setting", lambda setting_id: os_utils._PREFER_SYSMEM_FALLBACK
+    )
+
+    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+    assert ok is False
+    assert "Prefer Sysmem Fallback" in info
+
+
+def test_check_sysmem_fallback_returns_false_when_setting_not_found(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(os_utils, "_read_drs_setting", lambda setting_id: None)
+
+    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+    assert ok is False
+    assert "Driver Default" in info
+
+
+def test_check_sysmem_fallback_returns_false_on_oserror(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+
+    def _raise(setting_id):
+        raise OSError("nvdrsdb0.bin not found")
+
+    monkeypatch.setattr(os_utils, "_read_drs_setting", _raise)
+
+    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+    assert ok is False
+    assert "nvdrsdb0.bin not found" in info
+
+
+def test_check_sysmem_fallback_returns_na_on_non_windows(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
+
+    ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+    assert ok is True
+    assert info == "N/A"
+
+
 def test_check_nvidia_gpu_returns_name_when_available_and_compute_ok(monkeypatch) -> None:
     import types
 
