@@ -42,6 +42,8 @@ def _make_pipeline():
         rest_pipeline = MagicMock()
         rest_pipeline.secondary_restorer = None
         rest_pipeline.secondary_num_workers = 1
+        rest_pipeline.secondary_preferred_queue_size = 2
+        rest_pipeline.secondary_prefers_cpu_input = False
         p = Pipeline(
             input_video=Path("in.mp4"),
             output_video=Path("out.mkv"),
@@ -650,6 +652,8 @@ class TestPipelineRun:
         ):
             rest_pipeline = MagicMock()
             rest_pipeline.secondary_num_workers = 1
+            rest_pipeline.secondary_preferred_queue_size = 2
+            rest_pipeline.secondary_prefers_cpu_input = False
             rest_pipeline.secondary_restorer.num_workers = 2
             p = Pipeline(
                 input_video=Path("in.mp4"),

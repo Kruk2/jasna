@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from collections import deque
-from concurrent.futures import Future as _Future
 from unittest.mock import MagicMock, patch, PropertyMock
 
 import numpy as np
@@ -176,19 +175,6 @@ def _make_frame(out_size=256):
     return np.zeros((out_size, out_size, 3), dtype=np.uint8)
 
 
-class _ImmediateExecutor:
-    def submit(self, fn, *args):
-        f = _Future()
-        try:
-            f.set_result(fn(*args))
-        except BaseException as e:
-            f.set_exception(e)
-        return f
-
-    def shutdown(self, *, wait=False):
-        pass
-
-
 def _setup_mock_workers(r, num_workers=None):
     n = num_workers or r.num_workers
     r._workers = [MagicMock(spec=_TvaiWorker) for _ in range(n)]
@@ -196,8 +182,6 @@ def _setup_mock_workers(r, num_workers=None):
         w.drain_available.return_value = []
         w.close_stdin_and_drain.return_value = []
     r._worker_segments = [deque() for _ in range(n)]
-    r._push_pool = _ImmediateExecutor()
-    r._push_futures = [None] * n
     r._started = True
     return r._workers
 
