@@ -420,7 +420,7 @@ class TestFlushPending:
         r._worker_last_push_time[0] = time.monotonic()
         r.flush_pending()
         workers[0].push_frames.assert_not_called()
-        r._worker_last_push_time[0] = time.monotonic() - r._FLUSH_COOLDOWN_SECONDS - 0.1
+        r._worker_last_push_time[0] = time.monotonic() - r._FLUSH_COOLDOWN_PER_WORKER * r.num_workers - 0.1
         r.flush_pending()
         assert workers[0].push_frames.call_count == 1
 

@@ -184,7 +184,7 @@ class TvaiSecondaryRestorer:
     name = "tvai"
     prefers_cpu_input = True
     _INPUT_SIZE = 256
-    _FLUSH_COOLDOWN_SECONDS = 1.5
+    _FLUSH_COOLDOWN_PER_WORKER = 1.5
 
     def __init__(self, *, ffmpeg_path: str, tvai_args: str, scale: int, num_workers: int) -> None:
         self.ffmpeg_path = str(ffmpeg_path)
@@ -383,7 +383,7 @@ class TvaiSecondaryRestorer:
                 continue
             if segs and isinstance(segs[-1], _FillerSegment) and segs[-1].is_flush:
                 continue
-            if now - self._worker_last_push_time[wi] < self._FLUSH_COOLDOWN_SECONDS:
+            if now - self._worker_last_push_time[wi] < self._FLUSH_COOLDOWN_PER_WORKER * len(self._workers):
                 continue
             self._workers[wi].push_frames(filler)
             segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY, is_flush=True))
