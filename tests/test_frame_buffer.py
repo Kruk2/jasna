@@ -674,7 +674,7 @@ def test_ensure_on_device_pins_frame() -> None:
     assert 0 in fb._gpu_pinned
 
 
-def test_blend_restored_frame_stays_pinned_when_complete() -> None:
+def test_blend_restored_frame_unpins_when_complete() -> None:
     fb = FrameBuffer(
         device=torch.device("cpu"),
         blend_mask_fn=lambda crop: torch.ones_like(crop.squeeze(), dtype=torch.float32),
@@ -693,7 +693,7 @@ def test_blend_restored_frame_stays_pinned_when_complete() -> None:
         crop_shape=(crop_h, crop_w),
         pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
     )
-    assert 0 in fb._gpu_pinned
+    assert 0 not in fb._gpu_pinned
 
 
 def test_blend_restored_frame_unpins_when_pending_clips_remain() -> None:

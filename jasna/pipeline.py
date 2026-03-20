@@ -210,6 +210,7 @@ class Pipeline:
                     finally:
                         pb.close(ensure_completed_bar=True)
             except BaseException as e:
+                log.exception("[decode] thread crashed")
                 error_holder.append(e)
             finally:
                 clip_queue.put(_SENTINEL)
@@ -235,6 +236,7 @@ class Pipeline:
                         f"clip={clip_item.clip.track_id} frames={len(clip_item.frames)}",
                     )
             except BaseException as e:
+                log.exception("[primary] thread crashed")
                 error_holder.append(e)
             finally:
                 secondary_queue.put(_SENTINEL)
@@ -260,6 +262,7 @@ class Pipeline:
                         f"clip={pr.clip.track_id} frames={sr.frame_count}",
                     )
             except BaseException as e:
+                log.exception("[secondary] thread crashed")
                 error_holder.append(e)
             finally:
                 encode_queue.put(_SENTINEL)
@@ -306,20 +309,30 @@ class Pipeline:
                 error_holder.append(e)
 
         stop_offload = threading.Event()
+        vram_max = 0
+        vram_sum = 0
+        vram_samples = 0
 
         def _vram_offload_thread():
-            while not stop_offload.is_set():
-                over_limit, used, threshold = self._should_offload_frames()
-                if over_limit:
-                    offloaded = frame_buffer.offload_gpu_frames()
-                    if offloaded > 0:
-                        torch.cuda.empty_cache()
-                        continue
-                headroom = threshold - used
-                if headroom > 2 * (1024 ** 3):
-                    stop_offload.wait(timeout=1.0)
-                else:
-                    stop_offload.wait(timeout=0.05)
+            nonlocal vram_max, vram_sum, vram_samples
+            try:
+                while not stop_offload.is_set():
+                    over_limit, used, threshold = self._should_offload_frames()
+                    vram_max = max(vram_max, used)
+                    vram_sum += used
+                    vram_samples += 1
+                    if over_limit:
+                        offloaded = frame_buffer.offload_gpu_frames()
+                        if offloaded > 0:
+                            torch.cuda.empty_cache()
+                            continue
+                    headroom = threshold - used
+                    if headroom > 2 * (1024 ** 3):
+                        stop_offload.wait(timeout=0.2)
+                    else:
+                        stop_offload.wait(timeout=0.05)
+            except BaseException:
+                log.exception("[offload] thread crashed")
 
         threads = [
             threading.Thread(target=_decode_detect_thread, name="DecodeDetect", daemon=True),
@@ -334,6 +347,13 @@ class Pipeline:
             t.join()
         stop_offload.set()
         threads[4].join(timeout=1)
+
+        if vram_samples > 0:
+            vram_avg = vram_sum / vram_samples
+            log.info(
+                "VRAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples)",
+                vram_max / (1024 ** 2), vram_avg / (1024 ** 2), vram_samples,
+            )
 
         frame_buffer.frames.clear()
         frame_buffer._gpu_pinned.clear()
