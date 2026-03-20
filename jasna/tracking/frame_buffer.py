@@ -166,8 +166,10 @@ class FrameBuffer:
             blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
 
             pending.pending_clips.discard(clip.track_id)
-            if pending.pending_clips:
-                self._gpu_pinned.discard(frame_idx)
+            # Always unpin after blend; get_ready_frames re-pins when encoding.
+            # This lets the offload thread reclaim VRAM from frames that are
+            # done blending but stuck behind a not-yet-ready head frame.
+            self._gpu_pinned.discard(frame_idx)
 
     def blend_restored_frame(
         self,
@@ -231,8 +233,7 @@ class FrameBuffer:
             blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
 
         pending.pending_clips.discard(int(track_id))
-        if pending.pending_clips:
-            self._gpu_pinned.discard(int(frame_idx))
+        self._gpu_pinned.discard(int(frame_idx))
 
     def get_ready_frames(self) -> Iterator[tuple[int, torch.Tensor, int]]:
         while self.next_encode_idx in self.frames:
