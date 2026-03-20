@@ -23,7 +23,12 @@ Check benchmarks and usage below.
 - ~~TVAI~~ and SeedVR
 - Proper stream that can be played in Stash (and maybe others?)
 - ~~improve performance (this version is very simple)~~
-- improve VRAM usage
+- ~~improve VRAM usage~~
+
+### VRAM Management
+Jasna automatically manages VRAM. When your GPU runs low on VRAM, frames waiting in the processing queue are temporarily moved to system RAM and moved back when needed. This happens in the background and requires no configuration.
+
+If you still run into out-of-memory errors, reduce the **clip size** (e.g. from 180 to 60) or disable model compilation — both lower peak VRAM significantly (see table below).
 
 ### Benchmark
 RTX 5090 + i9 13900k
@@ -85,11 +90,12 @@ The restoration model is compiled into TensorRT sub-engines.\
 First compilation takes **15-60 minutes** — close all other applications (including browsers) and avoid using the PC.\
 Engines are cached and reused automatically. You can opt out from compilation at the cost of performance.
 
+The table below shows how much VRAM the **compiled engines alone** occupy (not total processing VRAM):
+
 | | Clip 60 | Clip 180 |
 |---|---|---|
-| **Engine VRAM** | ~1.9 GB | ~5.4 GB |
-| **Peak VRAM (compiled)** | ~7.6 GB | ~14.7 GB |
-| **Peak VRAM (no compilation)** | ~6 GB | ~10.4 GB |
+| **Engine VRAM (compiled)** | ~1.9 GB | ~5.4 GB |
+| **Engine VRAM (no compilation)** | ~1.2 GB | ~1.2 GB |
 
 ### Disclaimer
 Jasna is in early development and the main goal is to improve: restoration quality, mosaic detection, speed & vram consumption (in this order).
