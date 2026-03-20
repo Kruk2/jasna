@@ -243,9 +243,9 @@ TRANSLATIONS = {
         "tip_denoise_strength": "Reduces noise and grain in restored areas. Higher = smoother but may lose fine detail.\n\nNone: no denoising. Low/Medium: good starting point. High: heavy smoothing.\nDefault: None",
         "tip_denoise_step": "When to apply denoising in the pipeline:\n- After Primary: before upscaling (secondary restoration). Denoises at 256x256.\n- After Secondary: after upscaling, right before final output. Denoises at full resolution.\n\nDefault: After Primary",
         "tip_secondary_restoration": "Optional second pass that upscales restored areas from 256x256 to 512 or 1024 pixels. Improves sharpness, especially for close-ups and 4K video.\n\nRTX Super Res is recommended — fast, free, no extra setup.\nTopaz TVAI requires a separate purchase and install.",
-        "tip_secondary_tvai": "Best quality but slowest. Requires Topaz Video AI installed separately (paid).\nRecommended model: iris-2.",
+        "tip_secondary_tvai": "Best quality but slowest. Requires Topaz Video installed separately (paid).\nRecommended model: iris-2.",
         "tip_secondary_rtx": "Very fast and free. In some videos may produce a flickering effect — test on a short clip first.",
-        "tip_tvai_ffmpeg_path": "Full path to the ffmpeg.exe bundled with Topaz Video AI.\n\nDefault location:\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
+        "tip_tvai_ffmpeg_path": "Full path to the ffmpeg.exe bundled with Topaz Video.\n\nDefault location:\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
         "tip_tvai_model": "Which Topaz AI model to use for upscaling.\n\niris-2: good default, balanced quality.\niris-3, prob-4, nyx-1: experiment to see which looks best for your videos.\nDefault: iris-2",
         "tip_tvai_scale": "How much to enlarge the restored area.\n1x = no enlargement (256px). 2x = 512px. 4x = 1024px.\nHigher scale = sharper result but larger file and slower.\n\nDefault: 4x",
         "tip_tvai_workers": "How many Topaz upscale tasks run in parallel. More = faster overall but uses more CPU/GPU.\n\nDefault: 2",
@@ -293,7 +293,7 @@ TRANSLATIONS = {
         "error_invalid_tvai": "Invalid TVAI configuration",
 
         # Settings panel
-        "dialog_select_tvai_ffmpeg": "Select Topaz Video AI ffmpeg.exe",
+        "dialog_select_tvai_ffmpeg": "Select Topaz Video ffmpeg.exe",
         "placeholder_encoder_args": "e.g. lookahead=32",
 
         # Wizard check labels
@@ -500,9 +500,9 @@ TRANSLATIONS = {
         "tip_denoise_strength": "降低修复区域的噪点和颗粒感。强度越高画面越平滑，但可能丢失细节。\n\n无：不降噪。低/中：推荐起步值。高：强力平滑。\n默认值：无",
         "tip_denoise_step": "降噪在处理流程中的应用时机：\n- 主修复后：在放大（二次修复）之前降噪，在 256x256 分辨率下处理。\n- 二次修复后：在放大之后、最终输出之前降噪，在完整分辨率下处理。\n\n默认值：主修复后",
         "tip_secondary_restoration": "可选的第二步处理，将修复区域从 256x256 放大到 512 或 1024 像素。可提升清晰度，特别是近景和 4K 视频。\n\nRTX Super Res 推荐使用 — 速度快、免费、无需额外配置。\nTopaz TVAI 需要单独购买和安装。",
-        "tip_secondary_tvai": "质量最好但速度最慢。需要单独安装 Topaz Video AI（付费）。\n推荐模型：iris-2。",
+        "tip_secondary_tvai": "质量最好但速度最慢。需要单独安装 Topaz Video（付费）。\n推荐模型：iris-2。",
         "tip_secondary_rtx": "速度非常快且免费。某些视频可能出现闪烁 — 建议先用短片段测试。",
-        "tip_tvai_ffmpeg_path": "Topaz Video AI 自带的 ffmpeg.exe 完整路径。\n\n默认位置：\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
+        "tip_tvai_ffmpeg_path": "Topaz Video 自带的 ffmpeg.exe 完整路径。\n\n默认位置：\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
         "tip_tvai_model": "用于放大的 Topaz AI 模型。\n\niris-2：推荐默认值，质量均衡。\niris-3、prob-4、nyx-1：可尝试不同模型看哪个效果最好。\n默认值：iris-2",
         "tip_tvai_scale": "修复区域的放大倍数。\n1x = 不放大（256px）。2x = 512px。4x = 1024px。\n倍数越高越清晰，但文件更大、速度更慢。\n\n默认值：4x",
         "tip_tvai_workers": "同时运行的 Topaz 放大任务数。越多越快，但占用更多 CPU/GPU 资源。\n\n默认值：2",
@@ -550,7 +550,7 @@ TRANSLATIONS = {
         "error_invalid_tvai": "无效的 TVAI 配置",
 
         # Settings panel
-        "dialog_select_tvai_ffmpeg": "选择 Topaz Video AI ffmpeg.exe",
+        "dialog_select_tvai_ffmpeg": "选择 Topaz Video ffmpeg.exe",
         "placeholder_encoder_args": "例如 lookahead=32",
 
         # Wizard check labels
@@ -757,9 +757,9 @@ TRANSLATIONS = {
         "tip_denoise_strength": "修復された部分のノイズや粒子を低減します。高いほど滑らかになりますが、細部が失われることがあります。\n\nなし：ノイズ除去なし。低/中：まずこちらをお試しください。高：強力な平滑化。\nデフォルト：なし",
         "tip_denoise_step": "ノイズ除去を適用するタイミング：\n- 一次修復後：アップスケール（二次修復）前に適用。256x256 の解像度で処理。\n- 二次修復後：アップスケール後、最終出力の直前に適用。フル解像度で処理。\n\nデフォルト：一次修復後",
         "tip_secondary_restoration": "修復された領域を 256x256 から 512 または 1024 ピクセルに拡大するオプションの追加処理です。アップ時や 4K 動画で鮮明さが向上します。\n\nRTX Super Res がおすすめ — 高速、無料、追加設定不要。\nTopaz TVAI は別途購入とインストールが必要です。",
-        "tip_secondary_tvai": "最高品質ですが最も遅いです。Topaz Video AI の別途インストールが必要です（有料）。\n推奨モデル：iris-2。",
+        "tip_secondary_tvai": "最高品質ですが最も遅いです。Topaz Video の別途インストールが必要です（有料）。\n推奨モデル：iris-2。",
         "tip_secondary_rtx": "非常に高速で無料です。一部の動画でちらつきが発生する場合があります — まず短いクリップでテストしてください。",
-        "tip_tvai_ffmpeg_path": "Topaz Video AI に付属の ffmpeg.exe のフルパス。\n\nデフォルトの場所：\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
+        "tip_tvai_ffmpeg_path": "Topaz Video に付属の ffmpeg.exe のフルパス。\n\nデフォルトの場所：\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
         "tip_tvai_model": "アップスケールに使用する Topaz AI モデル。\n\niris-2：おすすめのデフォルト、バランスの良い品質。\niris-3、prob-4、nyx-1：動画に合う最適なモデルを試してみてください。\nデフォルト：iris-2",
         "tip_tvai_scale": "修復領域の拡大倍率。\n1x = 拡大なし（256px）。2x = 512px。4x = 1024px。\n高倍率ほど鮮明ですが、ファイルが大きく処理が遅くなります。\n\nデフォルト：4x",
         "tip_tvai_workers": "同時に実行する Topaz アップスケールタスクの数。多いほど速くなりますが、CPU/GPU の負荷が増します。\n\nデフォルト：2",
@@ -807,7 +807,7 @@ TRANSLATIONS = {
         "error_invalid_tvai": "無効な TVAI 設定",
 
         # Settings panel
-        "dialog_select_tvai_ffmpeg": "Topaz Video AI の ffmpeg.exe を選択",
+        "dialog_select_tvai_ffmpeg": "Topaz Video の ffmpeg.exe を選択",
         "placeholder_encoder_args": "例: lookahead=32",
 
         # Wizard check labels
@@ -1012,9 +1012,9 @@ TRANSLATIONS = {
         "tip_denoise_strength": "복원된 영역의 노이즈와 입자를 줄여줍니다. 높을수록 부드럽지만 세부 디테일이 줄어들 수 있습니다.\n\n없음: 노이즈 제거 안 함. 낮음/중간: 좋은 시작점. 높음: 강력한 평활화.\n기본값: 없음",
         "tip_denoise_step": "노이즈 제거를 적용하는 시점:\n- 1차 복원 후: 업스케일링(2차 복원) 전에 적용. 256x256 해상도에서 처리.\n- 2차 복원 후: 업스케일링 후, 최종 출력 직전에 적용. 전체 해상도에서 처리.\n\n기본값: 1차 복원 후",
         "tip_secondary_restoration": "복원된 영역을 256x256에서 512 또는 1024 픽셀로 확대하는 선택적 추가 처리입니다. 클로즈업이나 4K 영상에서 선명도가 향상됩니다.\n\nRTX Super Res 권장 — 빠르고, 무료이며, 추가 설정이 필요 없습니다.\nTopaz TVAI는 별도 구매 및 설치가 필요합니다.",
-        "tip_secondary_tvai": "최고 품질이지만 가장 느립니다. Topaz Video AI 별도 설치 필요 (유료).\n권장 모델: iris-2.",
+        "tip_secondary_tvai": "최고 품질이지만 가장 느립니다. Topaz Video 별도 설치 필요 (유료).\n권장 모델: iris-2.",
         "tip_secondary_rtx": "매우 빠르고 무료입니다. 일부 영상에서 깜빡임이 발생할 수 있습니다 — 짧은 클립으로 먼저 테스트하세요.",
-        "tip_tvai_ffmpeg_path": "Topaz Video AI에 포함된 ffmpeg.exe의 전체 경로.\n\n기본 위치:\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
+        "tip_tvai_ffmpeg_path": "Topaz Video에 포함된 ffmpeg.exe의 전체 경로.\n\n기본 위치:\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
         "tip_tvai_model": "업스케일에 사용할 Topaz AI 모델.\n\niris-2: 권장 기본값, 균형 잡힌 품질.\niris-3, prob-4, nyx-1: 여러 모델을 시도해서 가장 좋은 결과를 찾아보세요.\n기본값: iris-2",
         "tip_tvai_scale": "복원 영역의 확대 배율.\n1x = 확대 없음 (256px). 2x = 512px. 4x = 1024px.\n높을수록 선명하지만 파일이 크고 느려집니다.\n\n기본값: 4x",
         "tip_tvai_workers": "동시에 실행할 Topaz 업스케일 작업 수. 많을수록 빠르지만 CPU/GPU 사용량이 증가합니다.\n\n기본값: 2",
@@ -1062,7 +1062,7 @@ TRANSLATIONS = {
         "error_invalid_tvai": "잘못된 TVAI 구성",
 
         # Settings panel
-        "dialog_select_tvai_ffmpeg": "Topaz Video AI ffmpeg.exe 선택",
+        "dialog_select_tvai_ffmpeg": "Topaz Video ffmpeg.exe 선택",
         "placeholder_encoder_args": "예: lookahead=32",
 
         # Wizard check labels
@@ -1269,9 +1269,9 @@ TRANSLATIONS = {
         "tip_denoise_strength": "ลดสัญญาณรบกวนและเม็ดในพื้นที่ที่ฟื้นฟูแล้ว ค่ามาก = ราบรื่นขึ้นแต่อาจสูญเสียรายละเอียด\n\nไม่มี: ไม่ลดสัญญาณรบกวน ต่ำ/ปานกลาง: จุดเริ่มต้นที่ดี สูง: ปรับเรียบอย่างหนัก\nค่าเริ่มต้น: ไม่มี",
         "tip_denoise_step": "เวลาที่จะลดสัญญาณรบกวนในขั้นตอนการประมวลผล:\n- หลังขั้นแรก: ก่อนการขยาย (การฟื้นฟูขั้นที่สอง) ลดสัญญาณรบกวนที่ 256x256\n- หลังขั้นที่สอง: หลังการขยาย ก่อนเอาต์พุตสุดท้าย ลดสัญญาณรบกวนที่ความละเอียดเต็ม\n\nค่าเริ่มต้น: หลังขั้นแรก",
         "tip_secondary_restoration": "ขั้นตอนเสริมที่ขยายพื้นที่ฟื้นฟูจาก 256x256 เป็น 512 หรือ 1024 พิกเซล ช่วยเพิ่มความคมชัดโดยเฉพาะสำหรับภาพใกล้และวิดีโอ 4K\n\nRTX Super Res แนะนำ — เร็ว ฟรี ไม่ต้องติดตั้งเพิ่ม\nTopaz TVAI ต้องซื้อและติดตั้งแยกต่างหาก",
-        "tip_secondary_tvai": "คุณภาพดีที่สุดแต่ช้าที่สุด ต้องติดตั้ง Topaz Video AI แยกต่างหาก (เสียเงิน)\nโมเดลแนะนำ: iris-2",
+        "tip_secondary_tvai": "คุณภาพดีที่สุดแต่ช้าที่สุด ต้องติดตั้ง Topaz Video แยกต่างหาก (เสียเงิน)\nโมเดลแนะนำ: iris-2",
         "tip_secondary_rtx": "เร็วมากและฟรี บางวิดีโออาจมีการกะพริบ — ทดสอบกับคลิปสั้น ๆ ก่อน",
-        "tip_tvai_ffmpeg_path": "เส้นทางเต็มไปยัง ffmpeg.exe ที่มาพร้อม Topaz Video AI\n\nตำแหน่งเริ่มต้น:\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
+        "tip_tvai_ffmpeg_path": "เส้นทางเต็มไปยัง ffmpeg.exe ที่มาพร้อม Topaz Video\n\nตำแหน่งเริ่มต้น:\nC:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
         "tip_tvai_model": "โมเดล Topaz AI ที่ใช้สำหรับขยาย\n\niris-2: ค่าเริ่มต้นที่ดี คุณภาพสมดุล\niris-3, prob-4, nyx-1: ลองใช้เพื่อดูว่าโมเดลไหนให้ผลลัพธ์ดีที่สุด\nค่าเริ่มต้น: iris-2",
         "tip_tvai_scale": "อัตราการขยายพื้นที่ฟื้นฟู\n1x = ไม่ขยาย (256px) 2x = 512px 4x = 1024px\nขยายมากขึ้น = คมชัดขึ้นแต่ไฟล์ใหญ่ขึ้นและช้าลง\n\nค่าเริ่มต้น: 4x",
         "tip_tvai_workers": "จำนวนงานขยาย Topaz ที่ทำงานพร้อมกัน มากขึ้น = เร็วขึ้นแต่ใช้ CPU/GPU มากขึ้น\n\nค่าเริ่มต้น: 2",
@@ -1319,7 +1319,7 @@ TRANSLATIONS = {
         "error_invalid_tvai": "การกำหนดค่า TVAI ไม่ถูกต้อง",
 
         # Settings panel
-        "dialog_select_tvai_ffmpeg": "เลือก Topaz Video AI ffmpeg.exe",
+        "dialog_select_tvai_ffmpeg": "เลือก Topaz Video ffmpeg.exe",
         "placeholder_encoder_args": "เช่น lookahead=32",
 
         # Wizard check labels

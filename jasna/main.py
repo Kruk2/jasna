@@ -130,12 +130,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="RTX Super Res deblur level, none to disable (default: %(default)s)",
     )
 
-    tvai = parser.add_argument_group("Topaz Video AI")
+    tvai = parser.add_argument_group("Topaz Video")
     tvai.add_argument(
         "--tvai-ffmpeg-path",
         type=str,
         default="C:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
-        help="Path to Topaz Video AI ffmpeg.exe (default: %(default)s)",
+        help="Path to Topaz Video ffmpeg.exe (default: %(default)s)",
     )
     tvai.add_argument(
         "--tvai-model",
