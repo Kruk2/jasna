@@ -18,6 +18,7 @@ from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, Secondar
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
+from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
 
 log = logging.getLogger(__name__)
@@ -95,6 +96,64 @@ class Pipeline:
             return used > threshold, used, threshold
         threshold = total - self._VRAM_FREE_HEADROOM_BYTES
         return used > threshold, used, threshold
+
+    _ASYNC_FLUSH_TIMEOUT = 0.1
+    _ASYNC_POLL_TIMEOUT = 0.05
+
+    def _run_secondary_loop(
+        self,
+        secondary_queue: Queue,
+        encode_queue: Queue,
+        debug_memory: PipelineDebugMemoryLogger | None = None,
+    ) -> None:
+        restorer: AsyncSecondaryRestorer = self.restoration_pipeline.secondary_restorer  # type: ignore[assignment]
+        pending_prs: dict[int, PrimaryRestoreResult] = {}
+        idle_seconds = 0.0
+
+        def _forward_completed() -> int:
+            forwarded = 0
+            for seq, frames_np in restorer.pop_completed():
+                pr = pending_prs.pop(seq)
+                tensors = restorer._to_tensors(frames_np)
+                if pr.frame_device.type != "cpu" and tensors:
+                    tensors = list(torch.stack(tensors).to(pr.frame_device, non_blocking=True).unbind(0))
+                sr = self.restoration_pipeline.build_secondary_result(pr, tensors)
+                encode_queue.put(sr)
+                if debug_memory is not None:
+                    debug_memory.snapshot(
+                        "secondary",
+                        f"clip={pr.clip.track_id} frames={sr.frame_count}",
+                    )
+                forwarded += 1
+            return forwarded
+
+        done = False
+        while not done:
+            try:
+                item = secondary_queue.get(timeout=self._ASYNC_POLL_TIMEOUT)
+                if item is _SENTINEL:
+                    done = True
+                else:
+                    pr = item  # type: ignore[assignment]
+                    seq = restorer.push_clip(
+                        pr.primary_raw,
+                        keep_start=pr.keep_start,
+                        keep_end=pr.keep_end,
+                    )
+                    del pr.primary_raw
+                    pending_prs[seq] = pr
+                    idle_seconds = 0.0
+            except Empty:
+                idle_seconds += self._ASYNC_POLL_TIMEOUT
+
+            _forward_completed()
+
+            if not done and idle_seconds >= self._ASYNC_FLUSH_TIMEOUT and restorer.has_pending:
+                restorer.flush_pending()
+                idle_seconds = 0.0
+
+        restorer.flush_all()
+        _forward_completed()
 
     def run(self) -> None:
         device = self.device
@@ -267,6 +326,16 @@ class Pipeline:
             finally:
                 encode_queue.put(_SENTINEL)
 
+        def _async_secondary_restore_thread():
+            try:
+                torch.cuda.set_device(device)
+                self._run_secondary_loop(secondary_queue, encode_queue, debug_memory)
+            except BaseException as e:
+                log.exception("[secondary-async] thread crashed")
+                error_holder.append(e)
+            finally:
+                encode_queue.put(_SENTINEL)
+
         def _encode_thread():
             try:
                 torch.cuda.set_device(device)
@@ -312,9 +381,10 @@ class Pipeline:
         vram_max = 0
         vram_sum = 0
         vram_samples = 0
+        offload_count = 0
 
         def _vram_offload_thread():
-            nonlocal vram_max, vram_sum, vram_samples
+            nonlocal vram_max, vram_sum, vram_samples, offload_count
             try:
                 while not stop_offload.is_set():
                     over_limit, used, threshold = self._should_offload_frames()
@@ -324,6 +394,7 @@ class Pipeline:
                     if over_limit:
                         offloaded = frame_buffer.offload_gpu_frames()
                         if offloaded > 0:
+                            offload_count += offloaded
                             torch.cuda.empty_cache()
                             continue
                     headroom = threshold - used
@@ -334,10 +405,15 @@ class Pipeline:
             except BaseException:
                 log.exception("[offload] thread crashed")
 
+        use_async_secondary = isinstance(self.restoration_pipeline.secondary_restorer, AsyncSecondaryRestorer)
+        secondary_fn = _async_secondary_restore_thread if use_async_secondary else _secondary_restore_thread
+        if use_async_secondary:
+            log.info("Using async secondary restore path")
+
         threads = [
             threading.Thread(target=_decode_detect_thread, name="DecodeDetect", daemon=True),
             threading.Thread(target=_primary_restore_thread, name="PrimaryRestore", daemon=True),
-            threading.Thread(target=_secondary_restore_thread, name="SecondaryRestore", daemon=True),
+            threading.Thread(target=secondary_fn, name="SecondaryRestore", daemon=True),
             threading.Thread(target=_encode_thread, name="Encode", daemon=True),
             threading.Thread(target=_vram_offload_thread, name="VramOffload", daemon=True),
         ]
@@ -351,8 +427,8 @@ class Pipeline:
         if vram_samples > 0:
             vram_avg = vram_sum / vram_samples
             log.info(
-                "VRAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples)",
-                vram_max / (1024 ** 2), vram_avg / (1024 ** 2), vram_samples,
+                "VRAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples), offloaded frames: %d",
+                vram_max / (1024 ** 2), vram_avg / (1024 ** 2), vram_samples, offload_count,
             )
 
         frame_buffer.frames.clear()

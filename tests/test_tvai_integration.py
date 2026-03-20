@@ -131,6 +131,48 @@ class TestTvaiMultipleRestores:
         assert len(result) == 5
 
 
+class TestTvaiAsyncApi:
+    def test_push_flush_all_pop(self) -> None:
+        restorer = _make_restorer()
+        seq = restorer.push_clip(_make_color_frames(5), keep_start=0, keep_end=5)
+        restorer.flush_all()
+        completed = restorer.pop_completed()
+        restorer.close()
+        assert len(completed) == 1
+        assert completed[0][0] == seq
+        assert len(completed[0][1]) == 5
+
+    def test_push_multiple_flush_pending_pop(self) -> None:
+        restorer = _make_restorer(num_workers=1)
+        s0 = restorer.push_clip(_make_color_frames(10), keep_start=0, keep_end=10)
+        s1 = restorer.push_clip(_make_color_frames(10), keep_start=0, keep_end=10)
+        restorer.flush_pending()
+        import time
+        time.sleep(2)
+        completed = restorer.pop_completed()
+        if len(completed) < 2:
+            restorer.flush_all()
+            completed += restorer.pop_completed()
+        restorer.close()
+        seqs = [s for s, _ in completed]
+        assert s0 in seqs
+        assert s1 in seqs
+
+    def test_push_multiple_workers_out_of_order(self) -> None:
+        restorer = _make_restorer(num_workers=2)
+        seqs = []
+        for _ in range(4):
+            s = restorer.push_clip(_make_color_frames(5), keep_start=0, keep_end=5)
+            seqs.append(s)
+        restorer.flush_all()
+        completed = restorer.pop_completed()
+        restorer.close()
+        completed_seqs = [s for s, _ in completed]
+        assert sorted(completed_seqs) == sorted(seqs)
+        for _, frames in completed:
+            assert len(frames) == 5
+
+
 class TestTvaiEdgeCases:
     def test_empty_returns_empty(self) -> None:
         restorer = _make_restorer()

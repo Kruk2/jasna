@@ -11,9 +11,8 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 from jasna.media import VideoMetadata
 from jasna.pipeline import Pipeline
 from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
+from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
-
-pytestmark = pytest.mark.skip(reason="legacy async-secondary pipeline tests removed")
 
 
 def _fake_metadata() -> VideoMetadata:
@@ -167,6 +166,7 @@ class TestPipelineRun:
                 pending = fb.frames.get(i)
                 if pending:
                     pending.pending_clips.discard(42)
+                yield i
 
         p.restoration_pipeline.blend_secondary_result.side_effect = fake_blend
 
@@ -388,9 +388,11 @@ class TestPipelineRun:
         result = encode_queue.get()
         assert result is sr_result
 
-    def test_run_secondary_loop_gap_no_forced_flush(self):
-        """Secondary loop no longer forces timeout-driven gap flushes while waiting."""
+    def test_run_secondary_loop_idle_gap_triggers_flush_pending(self):
+        """Idle timeout triggers flush_pending when has_pending is True."""
         p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.01
+        p._ASYNC_FLUSH_TIMEOUT = 0.03
 
         clip = TrackedClip(
             track_id=1, start_frame=0, mask_resolution=(2, 2),
@@ -414,13 +416,29 @@ class TestPipelineRun:
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        pop_results = iter([[], [], [(0, restored)]])
+        flush_pending_called = False
+        result_returned = False
+
+        def mock_pop():
+            nonlocal flush_pending_called, result_returned
+            if flush_pending_called and not result_returned:
+                result_returned = True
+                return [(0, restored)]
+            return []
 
         restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = lambda: next(pop_results, [])
+        restorer.pop_completed.side_effect = mock_pop
+        restorer.has_pending = True
         restorer.flush_all.return_value = None
+
+        def on_flush_pending():
+            nonlocal flush_pending_called
+            flush_pending_called = True
+            restorer.has_pending = False
+
+        restorer.flush_pending.side_effect = on_flush_pending
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
 
@@ -431,7 +449,7 @@ class TestPipelineRun:
         import threading
         def put_sentinel_later():
             import time
-            time.sleep(1.5)
+            time.sleep(0.3)
             secondary_queue.put(_SENTINEL)
 
         t = threading.Thread(target=put_sentinel_later, daemon=True)
@@ -440,11 +458,12 @@ class TestPipelineRun:
         p._run_secondary_loop(secondary_queue, encode_queue)
         t.join(timeout=3)
 
-        restorer.flush_all.assert_not_called()
+        restorer.flush_pending.assert_called()
+        restorer.flush_all.assert_called_once()
         assert not encode_queue.empty()
 
-    def test_run_secondary_loop_detection_gap_drain_signal(self):
-        """Detection-gap signal drains completed clips without flushing workers."""
+    def test_run_secondary_loop_no_gap_flush_when_items_arrive(self):
+        """No flush_pending when clips arrive without gaps."""
         p = _make_pipeline()
 
         clip = TrackedClip(
@@ -472,71 +491,24 @@ class TestPipelineRun:
         restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = [[], [], [(0, restored)], []]
+        restorer.pop_completed.side_effect = [[], [(0, restored)], []]
         restorer.flush_all.return_value = None
+        restorer.has_pending = True
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
 
         secondary_queue: Queue = Queue()
         encode_queue: Queue = Queue()
         secondary_queue.put(pr)
-        secondary_queue.put(_SECONDARY_FLUSH)
         secondary_queue.put(_SENTINEL)
 
         p._run_secondary_loop(secondary_queue, encode_queue)
 
-        restorer.flush_all.assert_not_called()
+        restorer.flush_pending.assert_not_called()
+        restorer.flush_all.assert_called_once()
         assert not encode_queue.empty()
         result = encode_queue.get()
         assert result is sr_result
-
-    def test_run_secondary_loop_detection_gap_drain_releases_completed(self):
-        """Completed clip is drained on detection-gap signal without flushing workers."""
-        p = _make_pipeline()
-
-        clip = TrackedClip(
-            track_id=1, start_frame=0, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 180,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 180,
-        )
-        pr = PrimaryRestoreResult(
-            clip=clip, frame_count=180, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((180, 3, 256, 256)),
-            keep_start=0, keep_end=180, crossfade_weights=None,
-            enlarged_bboxes=[(1, 1, 5, 5)] * 180, crop_shapes=[(4, 4)] * 180,
-            pad_offsets=[(126, 126)] * 180, resize_shapes=[(4, 4)] * 180,
-        )
-
-        restored = [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 180
-        sr_result = SecondaryRestoreResult(
-            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=restored,
-            keep_start=0, keep_end=180, crossfade_weights=None,
-            enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
-            pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
-        )
-
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
-        restorer.num_workers = 2
-        restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = [[], [], [(0, restored)], []]
-        restorer.flush_all.return_value = None
-        p.restoration_pipeline.secondary_restorer = restorer
-        p.restoration_pipeline.build_secondary_result.return_value = sr_result
-
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        secondary_queue.put(pr)
-        secondary_queue.put(_SECONDARY_FLUSH)
-        secondary_queue.put(_SENTINEL)
-
-        p._run_secondary_loop(secondary_queue, encode_queue)
-
-        restorer.flush_all.assert_not_called()
-        assert not encode_queue.empty()
-        result = encode_queue.get()
-        assert result is sr_result
-        assert len(result.restored_frames) == 180
 
     def test_run_secondary_loop_self_priming_prevents_deadlock(self):
         """3 clips on 2 workers: clip 2 primes clip 0's buffered tail, preventing deadlock."""

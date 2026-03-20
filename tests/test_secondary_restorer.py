@@ -4,6 +4,7 @@ from __future__ import annotations
 import torch
 
 from jasna.restorer.restoration_pipeline import _IdentitySecondaryRestorer
+from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
 
 
@@ -52,3 +53,12 @@ class TestTvaiSecondaryRestorerConfig:
         cmd = restorer.build_ffmpeg_cmd()
         assert cmd[0] == "ffmpeg.exe"
         assert "tvai_up=model=iris-2:scale=2:noise=0" in cmd
+
+    def test_implements_async_protocol(self):
+        restorer = TvaiSecondaryRestorer(
+            ffmpeg_path="ffmpeg.exe",
+            tvai_args="model=iris-2:scale=1",
+            scale=1,
+            num_workers=1,
+        )
+        assert isinstance(restorer, AsyncSecondaryRestorer)
