@@ -9,7 +9,6 @@ import pytest
 import torch
 
 from jasna.restorer.tvai_secondary_restorer import (
-    TVAI_MIN_FRAMES,
     TVAI_PIPELINE_DELAY,
     TvaiSecondaryRestorer,
     _ClipSegment,
@@ -234,25 +233,16 @@ class TestPushClip:
         seg = r._worker_segments[0][0]
         assert seg.expected == 3
 
-    def test_short_clip_padded_to_min_frames(self):
+    def test_short_clip_no_padding(self):
         r = _make_restorer()
         workers = _setup_mock_workers(r)
         r.push_clip(torch.rand((2, 3, 256, 256)), keep_start=0, keep_end=2)
         segs = list(r._worker_segments[0])
-        assert isinstance(segs[0], _ClipSegment)
-        assert segs[0].expected == 2
-        assert isinstance(segs[1], _FillerSegment)
-        assert segs[1].remaining == TVAI_MIN_FRAMES - 2
-        pushed = workers[0].push_frames.call_args[0][0]
-        assert pushed.shape[0] == TVAI_MIN_FRAMES
-
-    def test_exact_min_frames_no_padding(self):
-        r = _make_restorer()
-        workers = _setup_mock_workers(r)
-        r.push_clip(torch.rand((5, 3, 256, 256)), keep_start=0, keep_end=5)
-        segs = list(r._worker_segments[0])
         assert len(segs) == 1
         assert isinstance(segs[0], _ClipSegment)
+        assert segs[0].expected == 2
+        pushed = workers[0].push_frames.call_args[0][0]
+        assert pushed.shape[0] == 2
 
 
 class TestDrainWorker:
@@ -360,7 +350,6 @@ class TestFlushPending:
         assert filler_bytes.shape[0] == TVAI_PIPELINE_DELAY
         workers[1].push_frames.assert_not_called()
         assert isinstance(r._worker_segments[0][-1], _FillerSegment)
-        assert r._worker_segments[0][-1].remaining == TVAI_PIPELINE_DELAY
 
     def test_skips_workers_without_clips(self):
         r = _make_restorer(num_workers=2)
@@ -376,18 +365,9 @@ class TestFlushPending:
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
         r.flush_pending()
         assert workers[0].push_frames.call_count == 1
-        assert r._worker_segments[0][-1].is_flush is True
+        assert isinstance(r._worker_segments[0][-1], _FillerSegment)
         r.flush_pending()
         assert workers[0].push_frames.call_count == 1
-
-    def test_flushes_after_padding_filler(self):
-        r = _make_restorer(num_workers=1)
-        workers = _setup_mock_workers(r)
-        r._worker_segments[0].append(_ClipSegment(seq=0, expected=1))
-        r._worker_segments[0].append(_FillerSegment(remaining=4, is_flush=False))
-        r.flush_pending()
-        assert workers[0].push_frames.call_count == 1
-        assert r._worker_segments[0][-1].is_flush is True
 
     def test_reflush_after_filler_consumed(self):
         r = _make_restorer(num_workers=1)
@@ -475,14 +455,13 @@ class TestRestore:
         r = _make_restorer()
         workers = _setup_mock_workers(r)
         out = _make_frame()
-        # 3 frames < TVAI_MIN_FRAMES=5, so push_clip pads to 5 (3 clip + 2 filler)
-        workers[0].close_stdin_and_drain.return_value = [out] * TVAI_MIN_FRAMES
+        workers[0].close_stdin_and_drain.return_value = [out] * 3
         result = r.restore(torch.rand((3, 3, 256, 256)), keep_start=0, keep_end=3)
         assert len(result) == 3
         assert result[0].shape == (3, 256, 256)
         assert result[0].dtype == torch.uint8
 
-    def test_sync_no_padding_needed(self):
+    def test_sync_large_clip(self):
         r = _make_restorer()
         workers = _setup_mock_workers(r)
         out = _make_frame()

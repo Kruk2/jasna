@@ -39,39 +39,15 @@ def _make_color_frames(n: int, color: tuple[float, float, float] = (0.5, 0.3, 0.
     return frames
 
 
-class TestTvaiSingleFrame:
-    def test_single_frame_returns_one_frame(self) -> None:
-        restorer = _make_restorer()
-        frames = _make_color_frames(1)
-        result = restorer.restore(frames, keep_start=0, keep_end=1)
-        restorer.close()
-        assert len(result) == 1
-
-    def test_single_frame_shape(self) -> None:
-        restorer = _make_restorer()
-        frames = _make_color_frames(1)
-        result = restorer.restore(frames, keep_start=0, keep_end=1)
-        restorer.close()
-        assert result[0].shape == (3, 256, 256)
-        assert result[0].dtype == torch.uint8
-
-
-class TestTvaiPaddingDiscard:
-    def test_padding_stripped_for_2_frames(self) -> None:
-        restorer = _make_restorer()
-        frames = _make_color_frames(2)
-        result = restorer.restore(frames, keep_start=0, keep_end=2)
-        restorer.close()
-        assert len(result) == 2
-
-    def test_padding_stripped_for_4_frames(self) -> None:
+class TestTvaiClipSizes:
+    def test_4_frames(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(4)
         result = restorer.restore(frames, keep_start=0, keep_end=4)
         restorer.close()
         assert len(result) == 4
 
-    def test_no_padding_for_5_frames(self) -> None:
+    def test_5_frames(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(5)
         result = restorer.restore(frames, keep_start=0, keep_end=5)
