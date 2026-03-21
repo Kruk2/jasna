@@ -491,7 +491,7 @@ class Pipeline:
         use_async_secondary = isinstance(self.restoration_pipeline.secondary_restorer, AsyncSecondaryRestorer)
         secondary_fn = _async_secondary_restore_thread if use_async_secondary else _secondary_restore_thread
         if use_async_secondary:
-            log.info("Using async secondary restore path")
+            log.debug("Using async secondary restore path")
 
         threads = [
             threading.Thread(target=_decode_detect_thread, name="DecodeDetect", daemon=True),
