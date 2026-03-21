@@ -121,14 +121,18 @@ class Pipeline:
         clip_queue: Queue | None = None,
         primary_idle_event: threading.Event | None = None,
         decode_backpressure_event: threading.Event | None = None,
-    ) -> tuple[int, float]:
+        max_secondary_in_flight_frames: int = 720,
+    ) -> tuple[int, float, float]:
         restorer: AsyncSecondaryRestorer = self.restoration_pipeline.secondary_restorer  # type: ignore[assignment]
         pending_prs: dict[int, PrimaryRestoreResult] = {}
+        in_flight_frames = 0
 
         def _forward_completed() -> int:
+            nonlocal in_flight_frames
             forwarded = 0
             for seq, frames_np in restorer.pop_completed():
                 pr = pending_prs.pop(seq)
+                in_flight_frames -= pr.keep_end - pr.keep_start
                 tensors = restorer._to_tensors(frames_np)
                 if pr.frame_device.type != "cpu" and tensors:
                     tensors = list(torch.stack(tensors).to(pr.frame_device, non_blocking=True).unbind(0))
@@ -154,6 +158,7 @@ class Pipeline:
         starvation_count = 0
         starvation_seconds = 0.0
         starvation_start: float | None = None
+        in_flight_wait_seconds = 0.0
         done = False
         flushed_since_last_push = False
         while not done:
@@ -166,6 +171,18 @@ class Pipeline:
                     if starvation_start is not None:
                         starvation_seconds += time.monotonic() - starvation_start
                         starvation_start = None
+                    clip_frames = pr.keep_end - pr.keep_start
+                    t_wait = time.monotonic()
+                    if in_flight_frames + clip_frames > max_secondary_in_flight_frames:
+                        logger.debug("[secondary] in-flight frame cap reached (%d+%d > %d), waiting", in_flight_frames, clip_frames, max_secondary_in_flight_frames)
+                    while in_flight_frames + clip_frames > max_secondary_in_flight_frames:
+                        _forward_completed()
+                        if in_flight_frames + clip_frames > max_secondary_in_flight_frames:
+                            if time.monotonic() - t_wait > 30:
+                                logger.warning("[secondary] in-flight wait exceeded 30s, forcing push (in_flight=%d, clip=%d, cap=%d)", in_flight_frames, clip_frames, max_secondary_in_flight_frames)
+                                break
+                            time.sleep(self._ASYNC_POLL_TIMEOUT)
+                    in_flight_wait_seconds += time.monotonic() - t_wait
                     t0 = time.monotonic()
                     seq = restorer.push_clip(
                         pr.primary_raw,
@@ -174,6 +191,7 @@ class Pipeline:
                     )
                     push_ms = (time.monotonic() - t0) * 1000
                     del pr.primary_raw
+                    in_flight_frames += clip_frames
                     pending_prs[seq] = pr
                     flushed_since_last_push = False
                     if push_ms > 50:
@@ -196,14 +214,13 @@ class Pipeline:
             starvation_seconds += time.monotonic() - starvation_start
         restorer.flush_all()
         _forward_completed()
-        return starvation_count, starvation_seconds
+        return starvation_count, starvation_seconds, in_flight_wait_seconds
 
     def run(self) -> None:
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
         decode_bp_gap_threshold = int(self.max_clip_size * 1.2)
-        decode_bp_fb_cap = int(self.max_clip_size * 12)
 
         clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
         secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(
@@ -260,16 +277,11 @@ class Pipeline:
 
                             fb_size = len(frame_buffer.frames)
                             peak_fb_size = max(peak_fb_size, fb_size)
-                            gap_triggered = frames_since_last_clip_emit >= decode_bp_gap_threshold
-                            cap_triggered = fb_size > decode_bp_fb_cap
-                            if gap_triggered or cap_triggered:
-                                reason = "gap" if gap_triggered else "fb_cap"
+                            if frames_since_last_clip_emit >= decode_bp_gap_threshold:
                                 log.debug(
-                                    "[decode] %s backpressure enter gap=%d fb=%d cap=%d",
-                                    reason,
+                                    "[decode] gap backpressure enter gap=%d fb=%d",
                                     frames_since_last_clip_emit,
                                     fb_size,
-                                    decode_bp_fb_cap,
                                 )
                                 t_bp = time.monotonic()
                                 decode_backpressure_event.set()
@@ -391,13 +403,13 @@ class Pipeline:
             finally:
                 encode_queue.put(_SENTINEL)
 
-        starvation_stats: tuple[int, float] = (0, 0.0)
+        starvation_stats: tuple[int, float, float] = (0, 0.0, 0.0)
 
         def _async_secondary_restore_thread():
             nonlocal starvation_stats
             try:
                 torch.cuda.set_device(device)
-                starvation_stats = self._run_secondary_loop(secondary_queue, encode_queue, debug_memory, clip_queue, primary_idle_event, decode_backpressure_event)
+                starvation_stats = self._run_secondary_loop(secondary_queue, encode_queue, debug_memory, clip_queue, primary_idle_event, decode_backpressure_event, max_secondary_in_flight_frames=self.max_clip_size * (secondary_workers + 2))
             except BaseException as e:
                 log.exception("[secondary-async] thread crashed")
                 error_holder.append(e)
@@ -504,9 +516,11 @@ class Pipeline:
         log.info("Frame buffer — peak: %d frames", peak_fb_size)
         if bp_stall_count > 0:
             log.info("Decode backpressure — stalls: %d, total: %.1fs", bp_stall_count, bp_stall_seconds)
-        s_count, s_secs = starvation_stats
+        s_count, s_secs, in_flight_wait = starvation_stats
         if s_count > 0:
             log.info("Pipeline starvation — flushes: %d, total: %.1fs", s_count, s_secs)
+        if in_flight_wait > 0.1:
+            log.info("Secondary in-flight wait — total: %.1fs", in_flight_wait)
 
         frame_buffer.frames.clear()
         frame_buffer._gpu_pinned.clear()
