@@ -53,7 +53,13 @@ def load_model(config: str | dict | None, checkpoint_path: str, device: torch.de
         raise Exception("unsupported value for 'config', Must be either a file path to a config file or a dict definition of the model")
     model = MODELS.build(config)
     assert isinstance(model, BasicVSRPlusPlusGan) or isinstance(model, BasicVSR), "Unknown model config. Must be either stage1 (BasicVSR) or stage2 (BasicVSRPlusPlusGan)"
-    load_checkpoint(model, checkpoint_path, map_location='cpu', logger=logger)
+    _mmengine_logger = logging.getLogger("mmengine")
+    _prev_level = _mmengine_logger.level
+    _mmengine_logger.setLevel(logging.WARNING)
+    try:
+        load_checkpoint(model, checkpoint_path, map_location='cpu', logger=logger)
+    finally:
+        _mmengine_logger.setLevel(_prev_level)
     model.cfg = config
     model = model.to(device).eval()
     if fp16:
