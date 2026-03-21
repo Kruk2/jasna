@@ -228,6 +228,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             on_start=self._on_start,
             on_stop=self._on_stop,
             on_toggle_logs=self._toggle_logs,
+            on_pause=self._on_pause,
         )
         self.after(0, self._update_start_button_state)
         
@@ -386,6 +387,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._settings_panel.set_enabled(True)
         self._queue_panel.set_output_enabled(True)
         
+    def _on_pause(self):
+        if self._processor:
+            self._processor.pause()
+            paused = self._processor.is_paused()
+            self._control_bar.set_running(True, paused=paused)
+            status_text = "PAUSED" if paused else "PROCESSING"
+            status_color = Colors.STATUS_PAUSED if paused else Colors.STATUS_PROCESSING
+            self._status_pill.set_status(status_text, status_color)
+            action = "paused" if paused else "resumed"
+            self._log_panel.info(f"Processing {action} by user")
+        
     def _toggle_logs(self):
         self._logs_visible = not self._logs_visible
         if self._logs_visible:
@@ -446,7 +458,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         
     def _handle_complete(self):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
-        elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
+        # Use processor's real processing time that excludes pause durations
+        if self._processor and hasattr(self._processor, 'get_real_processing_time'):
+            elapsed_seconds = self._processor.get_real_processing_time()
+        else:
+            # Fallback to wall clock time if processor method is not available
+            elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
         self._control_bar.set_completed(elapsed_seconds)
         self._update_start_button_state()
         self._log_panel.info("All jobs completed")
