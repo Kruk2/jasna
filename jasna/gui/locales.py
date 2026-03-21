@@ -235,7 +235,7 @@ TRANSLATIONS = {
         "bmc_support": "Support",
         
         # Tooltips
-        "tip_max_clip_size": "How many frames are processed at once. Larger values can improve quality but use more VRAM.\n\nRecommended: 60 or higher. Use 60 even if it means disabling model compilation.\nGuidance: 60 (safe), 90 (good balance), 180 (best quality, needs 24 GB+ VRAM).\nDefault: 60",
+        "tip_max_clip_size": "How many frames are processed at once. Larger values can improve quality but use more VRAM.\n\nRecommended: 60 or higher. Use 60 even if it means disabling model compilation.\nGuidance: 60 (safe), 90 (good balance), 180 (best quality, needs 12 GB+ VRAM with Compile BasicVSR++ enabled, less with it disabled).\n4K videos use more VRAM — a lower clip size may produce similar quality but process much faster.\nDefault: 90",
         "tip_temporal_overlap": "Overlap between processed clips to reduce flickering at boundaries.\nHigher = smoother transitions but slightly slower. Going above 20 has little benefit.\n\nRecommended values based on clip size:\n- Clip 60 → overlap 6-8\n- Clip 90 → overlap 8-12\n- Clip 180 → overlap 15-20\nDefault: 8",
         "tip_enable_crossfade": "Smoothly blends clip boundaries to reduce flickering. Reuses already-processed frames so there is zero extra GPU cost.\n\nRecommended: Always ON.\nDefault: ON",
         "tip_fp16_mode": "Uses half-precision math to reduce VRAM usage and often run faster. No visible quality loss on modern GPUs.\n\nRecommended: ON for RTX 20-series and newer.\nDefault: ON",
@@ -495,7 +495,7 @@ TRANSLATIONS = {
         "bmc_support": "支持",
         
         # Tooltips
-        "tip_max_clip_size": "一次处理多少帧画面。数值越大，效果可能越好，但占用更多显存。\n\n建议：60 或更高。即使需要关闭模型编译，也建议至少使用 60。\n参考：60（安全）、90（平衡）、180（最佳质量，需要 24GB+ 显存）。\n默认值：60",
+        "tip_max_clip_size": "一次处理多少帧画面。数值越大，效果可能越好，但占用更多显存。\n\n建议：60 或更高。即使需要关闭模型编译，也建议至少使用 60。\n参考：60（安全）、90（平衡）、180（最佳质量，开启「Compile BasicVSR++」时需要 12GB+ 显存，关闭则更少）。\n4K 视频占用更多显存——较小的片段大小可能产生类似的质量，但处理速度快得多。\n默认值：90",
         "tip_temporal_overlap": "处理片段之间的重叠帧数，用于减少拼接处的闪烁。\n数值越高过渡越平滑，但速度稍慢。超过 20 效果提升不明显。\n\n根据片段大小推荐：\n- 片段 60 → 重叠 6-8\n- 片段 90 → 重叠 8-12\n- 片段 180 → 重叠 15-20\n默认值：8",
         "tip_enable_crossfade": "在片段边界处进行平滑过渡，减少画面闪烁。使用已处理的帧，不会增加任何额外 GPU 开销。\n\n建议：始终开启。\n默认值：开启",
         "tip_fp16_mode": "使用半精度计算来减少显存占用，通常还能提升速度。在现代显卡上几乎无画质损失。\n\n建议：RTX 20 系列及以上显卡开启。\n默认值：开启",
@@ -755,7 +755,7 @@ TRANSLATIONS = {
         "bmc_support": "応援する",
 
         # Tooltips
-        "tip_max_clip_size": "一度に処理するフレーム数です。大きいほど品質が向上する可能性がありますが、VRAM を多く使います。\n\n推奨：60 以上。モデルコンパイルを無効にしてでも 60 は維持しましょう。\n目安：60（安全）、90（バランス良）、180（最高品質、24GB 以上の VRAM が必要）。\nデフォルト：60",
+        "tip_max_clip_size": "一度に処理するフレーム数です。大きいほど品質が向上する可能性がありますが、VRAM を多く使います。\n\n推奨：60 以上。モデルコンパイルを無効にしてでも 60 は維持しましょう。\n目安：60（安全）、90（バランス良）、180（最高品質、Compile BasicVSR++ 有効時 12GB 以上の VRAM が必要、無効なら少なめ）。\n4K 動画は VRAM を多く使います。クリップサイズを下げても同等の品質で大幅に高速化できます。\nデフォルト：90",
         "tip_temporal_overlap": "処理クリップ間の重なりフレーム数で、つなぎ目のちらつきを軽減します。\n大きいほど滑らかですがやや遅くなります。20 を超えても効果はほとんど変わりません。\n\nクリップサイズ別の推奨値：\n- クリップ 60 → オーバーラップ 6-8\n- クリップ 90 → オーバーラップ 8-12\n- クリップ 180 → オーバーラップ 15-20\nデフォルト：8",
         "tip_enable_crossfade": "クリップの境目を滑らかにつなぎ、ちらつきを軽減します。処理済みフレームを再利用するため、追加の GPU 負荷はゼロです。\n\n推奨：常に ON。\nデフォルト：ON",
         "tip_fp16_mode": "半精度計算で VRAM 使用量を削減し、速度も向上することが多いです。最新の GPU では画質の劣化はほぼありません。\n\n推奨：RTX 20 シリーズ以降で ON。\nデフォルト：ON",
@@ -1013,7 +1013,7 @@ TRANSLATIONS = {
         "bmc_support": "후원",
 
         # Tooltips
-        "tip_max_clip_size": "한 번에 처리할 프레임 수입니다. 클수록 품질이 좋아질 수 있지만 VRAM을 더 많이 사용합니다.\n\n권장: 60 이상. 모델 컴파일을 끄더라도 최소 60을 유지하세요.\n참고: 60 (안전), 90 (균형), 180 (최고 품질, 24GB+ VRAM 필요).\n기본값: 60",
+        "tip_max_clip_size": "한 번에 처리할 프레임 수입니다. 클수록 품질이 좋아질 수 있지만 VRAM을 더 많이 사용합니다.\n\n권장: 60 이상. 모델 컴파일을 끄더라도 최소 60을 유지하세요.\n참고: 60 (안전), 90 (균형), 180 (최고 품질, Compile BasicVSR++ 활성화 시 12GB+ VRAM 필요, 비활성화 시 더 적음).\n4K 영상은 VRAM을 더 많이 사용합니다. 클립 크기를 낮춰도 비슷한 품질로 훨씬 빠르게 처리할 수 있습니다.\n기본값: 90",
         "tip_temporal_overlap": "처리 클립 간 겹치는 프레임 수로, 경계의 깜빡임을 줄여줍니다.\n높을수록 부드럽지만 약간 느려집니다. 20을 넘으면 효과 차이가 거의 없습니다.\n\n클립 크기별 권장값:\n- 클립 60 → 오버랩 6-8\n- 클립 90 → 오버랩 8-12\n- 클립 180 → 오버랩 15-20\n기본값: 8",
         "tip_enable_crossfade": "클립 경계를 부드럽게 연결하여 깜빡임을 줄여줍니다. 이미 처리된 프레임을 재활용하므로 추가 GPU 부담이 전혀 없습니다.\n\n권장: 항상 켜기.\n기본값: 켜기",
         "tip_fp16_mode": "반정밀도 계산으로 VRAM 사용량을 줄이고 속도도 빨라지는 경우가 많습니다. 최신 GPU에서 화질 차이는 거의 없습니다.\n\n권장: RTX 20 시리즈 이상에서 켜기.\n기본값: 켜기",
@@ -1273,7 +1273,7 @@ TRANSLATIONS = {
         "bmc_support": "สนับสนุน",
 
         # Tooltips
-        "tip_max_clip_size": "จำนวนเฟรมที่ประมวลผลต่อครั้ง ค่ามากขึ้นอาจให้คุณภาพดีขึ้นแต่ใช้ VRAM มากขึ้น\n\nแนะนำ: 60 ขึ้นไป แม้ต้องปิดการคอมไพล์โมเดลก็ควรใช้ 60 เป็นอย่างน้อย\nแนวทาง: 60 (ปลอดภัย), 90 (สมดุลดี), 180 (คุณภาพสูงสุด ต้องมี VRAM 24 GB+)\nค่าเริ่มต้น: 60",
+        "tip_max_clip_size": "จำนวนเฟรมที่ประมวลผลต่อครั้ง ค่ามากขึ้นอาจให้คุณภาพดีขึ้นแต่ใช้ VRAM มากขึ้น\n\nแนะนำ: 60 ขึ้นไป แม้ต้องปิดการคอมไพล์โมเดลก็ควรใช้ 60 เป็นอย่างน้อย\nแนวทาง: 60 (ปลอดภัย), 90 (สมดุลดี), 180 (คุณภาพสูงสุด ต้องมี VRAM 12 GB+ เมื่อเปิด Compile BasicVSR++ น้อยกว่าถ้าปิด)\nวิดีโอ 4K ใช้ VRAM มากขึ้น — ขนาดคลิปที่เล็กกว่าอาจให้คุณภาพใกล้เคียงแต่ประมวลผลเร็วกว่ามาก\nค่าเริ่มต้น: 90",
         "tip_temporal_overlap": "เฟรมซ้อนทับระหว่างคลิปเพื่อลดการกะพริบที่รอยต่อ\nค่ามาก = การเปลี่ยนผ่านราบรื่นขึ้นแต่ช้าลงเล็กน้อย เกิน 20 แทบไม่ต่างกัน\n\nค่าแนะนำตามขนาดคลิป:\n- คลิป 60 → ซ้อนทับ 6-8\n- คลิป 90 → ซ้อนทับ 8-12\n- คลิป 180 → ซ้อนทับ 15-20\nค่าเริ่มต้น: 8",
         "tip_enable_crossfade": "ผสานรอยต่อของคลิปให้ราบรื่นเพื่อลดการกะพริบ ใช้เฟรมที่ประมวลผลแล้วจึงไม่มีภาระ GPU เพิ่ม\n\nแนะนำ: เปิดเสมอ\nค่าเริ่มต้น: เปิด",
         "tip_fp16_mode": "ใช้การคำนวณ half-precision เพื่อลดการใช้ VRAM และมักจะเร็วขึ้น ไม่มีความแตกต่างด้านคุณภาพบน GPU รุ่นใหม่\n\nแนะนำ: เปิดสำหรับ RTX 20-series ขึ้นไป\nค่าเริ่มต้น: เปิด",

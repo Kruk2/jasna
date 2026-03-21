@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     restoration.add_argument(
         "--max-clip-size",
         type=int,
-        default=60,
+        default=90,
         help="Maximum clip size for tracking (default: %(default)s)",
     )
     restoration.add_argument(

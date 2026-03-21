@@ -282,7 +282,7 @@ class SettingsPanel(ctk.CTkFrame):
         clip_tooltip.pack(side="left", padx=4)
         Tooltip(clip_tooltip, get_tooltip("max_clip_size"))
         
-        self._widgets["max_clip_size_val"] = ctk.CTkLabel(row1, text="60", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL), width=40)
+        self._widgets["max_clip_size_val"] = ctk.CTkLabel(row1, text="90", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL), width=40)
         self._widgets["max_clip_size_val"].pack(side="right")
         self._widgets["max_clip_size"] = ctk.CTkSlider(
             row1, from_=10, to=180, number_of_steps=17,
@@ -290,7 +290,7 @@ class SettingsPanel(ctk.CTkFrame):
             width=200, command=lambda v: self._on_slider_change("max_clip_size", int(v))
         )
         self._widgets["max_clip_size"].pack(side="right", padx=(0, 8))
-        self._widgets["max_clip_size"].set(60)
+        self._widgets["max_clip_size"].set(90)
         
         # Detection Model
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
