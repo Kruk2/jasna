@@ -6,6 +6,7 @@ from pathlib import Path
 from jasna.media import VideoMetadata
 from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
 from jasna.os_utils import get_subprocess_startup_info
+from jasna.media.audio_utils import audio_codec_args
 import av
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import heapq
@@ -133,7 +134,7 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
         "-c:v",
         "copy",
         "-c:a",
-        "copy",
+        *audio_codec_args(metadata.video_file, output_path),
         "-color_primaries",
         ffmpeg_colorspace,
         "-color_trc",
@@ -146,6 +147,7 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
     if output_path.suffix.lower() in {'.mp4', '.mov'}:
         cmd += ['-movflags', '+faststart']
     cmd.append(str(output_path))
+    logger.debug("[remux] cmd: %s", ' '.join(cmd))
     result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info())
     if result.returncode != 0:
         stdout_text = (result.stdout or b"").decode(errors="replace")

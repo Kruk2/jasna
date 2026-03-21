@@ -26,7 +26,7 @@ def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch
     logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
     import torch_tensorrt  # noqa: F401
 
-    logger.info("Loading TensorRT export from %s", checkpoint_path)
+    logger.debug("Loading TensorRT export from %s", checkpoint_path)
     fake_reg_logger = logging.getLogger("torch._library.fake_class_registry")
     prev_level = fake_reg_logger.level
     fake_reg_logger.setLevel(logging.ERROR)
