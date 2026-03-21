@@ -79,7 +79,9 @@ Going above 20 doesn't bring much. The larger overlap the longer processing time
 Some guidance from my limited testing:
 - 60 clip size + temporal overlap 6
 - 90 clip size + temporal overlap 8
-- 180 clip size + temporal overlap 15 if you can fit the model.
+- 180 clip size + temporal overlap 15 (needs 12 GB+ VRAM with Compile BasicVSR++ enabled, less with it disabled).
+
+4K videos use more VRAM — a lower clip size may produce similar quality but process much faster. Experiment a bit.
 
 Using clip size below 60 might look ok, depends on video but prefer using 60 even if it means disabling model compilation.
 ```--enable-crossfade``` should probably be always enabled as it reduces flickering .

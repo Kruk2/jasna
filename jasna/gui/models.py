@@ -60,7 +60,7 @@ class ProcessingState:
 class AppSettings:
     # Basic processing
     batch_size: int = 4
-    max_clip_size: int = 60
+    max_clip_size: int = 90
     temporal_overlap: int = 8
     enable_crossfade: bool = True
     fp16_mode: bool = True
