@@ -14,7 +14,6 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-TVAI_MIN_FRAMES = 5
 TVAI_PIPELINE_DELAY = 20
 
 
@@ -48,7 +47,6 @@ class _ClipSegment:
 @dataclass
 class _FillerSegment:
     remaining: int
-    is_flush: bool = False
 
 
 _Segment = _ClipSegment | _FillerSegment
@@ -316,17 +314,9 @@ class TvaiSecondaryRestorer:
         wi = self._next_worker_idx % self.num_workers
         self._next_worker_idx += 1
 
-        pad_count = 0
-        if n < TVAI_MIN_FRAMES:
-            pad_count = TVAI_MIN_FRAMES - n
-            padding = np.repeat(frames_hwc[-1:], pad_count, axis=0)
-            frames_hwc = np.concatenate([frames_hwc, padding], axis=0)
-
         self._worker_segments[wi].append(_ClipSegment(seq=seq, expected=n))
-        if pad_count > 0:
-            self._worker_segments[wi].append(_FillerSegment(remaining=pad_count))
         self._workers[wi].push_frames(frames_hwc)
-        logger.debug("TVAI push seq=%d frames=%d pad=%d -> worker %d", seq, n, pad_count, wi)
+        logger.debug("TVAI push seq=%d frames=%d -> worker %d", seq, n, wi)
         return seq
 
     def _drain_worker(self, wi: int) -> None:
@@ -378,10 +368,10 @@ class TvaiSecondaryRestorer:
                 has_target = any(isinstance(s, _ClipSegment) and s.seq in target_seqs for s in segs)
             if not has_target:
                 continue
-            if segs and isinstance(segs[-1], _FillerSegment) and segs[-1].is_flush:
+            if segs and isinstance(segs[-1], _FillerSegment):
                 continue
             self._workers[wi].push_frames(filler)
-            segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY, is_flush=True))
+            segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
             logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", TVAI_PIPELINE_DELAY, wi, target_seqs)
 
     def flush_all(self) -> None:
