@@ -428,3 +428,4 @@ class TestPipelineRunSync:
         ):
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()
+
