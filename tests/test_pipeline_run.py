@@ -16,6 +16,20 @@ from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
 
+def _mock_async_restorer(**kwargs) -> MagicMock:
+    m = MagicMock(spec=AsyncSecondaryRestorer, **kwargs)
+    def _real_to_tensors(frames_np):
+        if not frames_np:
+            return torch.empty(0)
+        if isinstance(frames_np[0], np.ndarray):
+            batch = np.stack(frames_np)
+            batch = np.ascontiguousarray(batch.transpose(0, 3, 1, 2))
+            return torch.from_numpy(batch)
+        return torch.stack(frames_np)
+    m._to_tensors.side_effect = _real_to_tensors
+    return m
+
+
 def _fake_metadata() -> VideoMetadata:
     return VideoMetadata(
         video_file="fake_input.mkv",
@@ -157,7 +171,7 @@ class TestPipelineRun:
             resize_shapes=[(4, 4)] * 2,
         )
         restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.push_clip.return_value = 0
         _pop_done = set()
         def _pop_full():
@@ -210,7 +224,7 @@ class TestPipelineRun:
         from jasna.pipeline_processing import BatchProcessResult
         batch_result = BatchProcessResult(next_frame_idx=2, clips_emitted=0)
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.push_clip.return_value = 0
         restorer.pop_completed.return_value = []
         restorer.flush_all.return_value = None
@@ -332,7 +346,7 @@ class TestPipelineRun:
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
         )
         p.restoration_pipeline.prepare_and_run_primary.return_value = pr_result
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.push_clip.return_value = 0
         _pop_done_err = set()
         def _pop_err():
@@ -383,7 +397,7 @@ class TestPipelineRun:
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         _pop_done = set()
@@ -430,7 +444,7 @@ class TestPipelineRun:
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
         )
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.return_value = []
@@ -477,7 +491,7 @@ class TestPipelineRun:
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
         )
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.return_value = []
@@ -532,7 +546,7 @@ class TestPipelineRun:
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         _pop_done = set()
@@ -581,7 +595,7 @@ class TestPipelineRun:
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
         )
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.return_value = []
@@ -649,7 +663,7 @@ class TestPipelineRun:
                 return [(0, restored)]
             return []
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
         restorer.pop_completed.side_effect = mock_pop
@@ -725,7 +739,7 @@ class TestPipelineRun:
                 return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 50)]
             return []
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.side_effect = mock_push_clip
         restorer.pop_completed.side_effect = mock_pop_completed
@@ -793,7 +807,7 @@ class TestPipelineRun:
                 return [(0, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 1)]
             return []
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.side_effect = mock_push_clip
         restorer.pop_completed.side_effect = mock_pop_completed
@@ -915,7 +929,7 @@ class TestPipelineRun:
                 return [(1, [torch.zeros((3, 8, 8), dtype=torch.uint8)] * 180)]
             return []
 
-        restorer = MagicMock(spec=AsyncSecondaryRestorer)
+        restorer = _mock_async_restorer()
         restorer.num_workers = 2
         restorer.push_clip.side_effect = mock_push
         restorer.pop_completed.side_effect = mock_pop

@@ -511,8 +511,11 @@ class Pipeline:
         ram_stall_count = 0
         ram_stall_seconds = 0.0
 
+        _EMPTY_CACHE_COOLDOWN = 2.0
+
         def _vram_offload_thread():
             nonlocal vram_max, vram_sum, vram_samples, offload_count, ram_max, ram_sum, ram_samples
+            last_empty_cache = 0.0
             try:
                 while not stop_offload.is_set():
                     over_limit, used, threshold = self._should_offload_frames()
@@ -531,7 +534,10 @@ class Pipeline:
                         offloaded = frame_buffer.offload_gpu_frames(excess)
                         if offloaded > 0:
                             offload_count += offloaded
-                            torch.cuda.empty_cache()
+                            now = time.monotonic()
+                            if now - last_empty_cache >= _EMPTY_CACHE_COOLDOWN:
+                                torch.cuda.empty_cache()
+                                last_empty_cache = now
                             continue
 
                     try:

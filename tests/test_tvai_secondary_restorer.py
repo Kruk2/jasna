@@ -159,9 +159,8 @@ class TestTvaiToTensors:
     def test_conversion(self):
         frames = [np.zeros((256, 256, 3), dtype=np.uint8), np.ones((256, 256, 3), dtype=np.uint8)]
         result = TvaiSecondaryRestorer._to_tensors(frames)
-        assert len(result) == 2
-        assert result[0].shape == (3, 256, 256)
-        assert result[0].dtype == torch.uint8
+        assert result.shape == (2, 3, 256, 256)
+        assert result.dtype == torch.uint8
 
 
 def _make_restorer(scale=1, num_workers=1):
