@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 import threading
 import time
 from pathlib import Path
 from queue import Empty, Queue
 
+import psutil
 import torch
 
 logger = logging.getLogger(__name__)
@@ -462,20 +464,32 @@ class Pipeline:
         vram_sum = 0
         vram_samples = 0
         offload_count = 0
+        ram_max = 0
+        ram_sum = 0
+        ram_samples = 0
+        _process = psutil.Process(os.getpid())
         peak_fb_size = 0
         bp_stall_count = 0
         bp_stall_seconds = 0.0
 
         def _vram_offload_thread():
-            nonlocal vram_max, vram_sum, vram_samples, offload_count
+            nonlocal vram_max, vram_sum, vram_samples, offload_count, ram_max, ram_sum, ram_samples
             try:
                 while not stop_offload.is_set():
                     over_limit, used, threshold = self._should_offload_frames()
                     vram_max = max(vram_max, used)
                     vram_sum += used
                     vram_samples += 1
+                    try:
+                        rss = _process.memory_info().rss
+                        ram_max = max(ram_max, rss)
+                        ram_sum += rss
+                        ram_samples += 1
+                    except Exception:
+                        pass
                     if over_limit:
-                        offloaded = frame_buffer.offload_gpu_frames()
+                        excess = int((used - threshold) * 1.2)
+                        offloaded = frame_buffer.offload_gpu_frames(excess)
                         if offloaded > 0:
                             offload_count += offloaded
                             torch.cuda.empty_cache()
@@ -512,6 +526,12 @@ class Pipeline:
             log.info(
                 "VRAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples), offloaded frames: %d",
                 vram_max / (1024 ** 2), vram_avg / (1024 ** 2), vram_samples, offload_count,
+            )
+        if ram_samples > 0:
+            ram_avg = ram_sum / ram_samples
+            log.info(
+                "RAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples)",
+                ram_max / (1024 ** 2), ram_avg / (1024 ** 2), ram_samples,
             )
         log.info("Frame buffer — peak: %d frames", peak_fb_size)
         if bp_stall_count > 0:

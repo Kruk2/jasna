@@ -492,7 +492,7 @@ def test_offload_gpu_frames_noop_on_cpu() -> None:
     fb.add_frame(frame_idx=0, pts=10, frame=torch.zeros((3, 8, 8), dtype=torch.uint8), clip_track_ids={1})
     fb.add_frame(frame_idx=1, pts=20, frame=torch.zeros((3, 8, 8), dtype=torch.uint8), clip_track_ids={1})
 
-    assert fb.offload_gpu_frames() == 0
+    assert fb.offload_gpu_frames(1024) == 0
 
     assert fb.frames[0].frame.device.type == "cpu"
     assert fb.frames[1].frame.device.type == "cpu"
@@ -523,7 +523,7 @@ def test_offload_gpu_frames_sweeps_all_frames() -> None:
     assert fb.frames[0].blended_frame is not fb.frames[0].frame
     assert fb.frames[1].blended_frame is fb.frames[1].frame
 
-    count = fb.offload_gpu_frames()
+    count = fb.offload_gpu_frames(1024)
     assert count == 0
 
     for pending in fb.frames.values():
@@ -541,7 +541,7 @@ def test_offload_gpu_frames_preserves_identity() -> None:
     pending = fb.frames[0]
     assert pending.blended_frame is pending.frame
 
-    count = fb.offload_gpu_frames()
+    count = fb.offload_gpu_frames(1024)
     assert count == 0
 
     pending = fb.frames[0]
@@ -574,7 +574,7 @@ def test_offload_gpu_frames_separate_blended_frame() -> None:
     pending = fb.frames[0]
     assert pending.blended_frame is not pending.frame
 
-    count = fb.offload_gpu_frames()
+    count = fb.offload_gpu_frames(1024)
     assert count == 0
 
     pending = fb.frames[0]
@@ -588,7 +588,7 @@ def test_get_frame_returns_tensor_as_is_after_offload() -> None:
     frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids=set())
 
-    fb.offload_gpu_frames()
+    fb.offload_gpu_frames(1024)
     result = fb.get_frame(0)
     assert result is not None
     assert result.device.type == "cpu"
@@ -603,7 +603,7 @@ def test_blend_clip_works_after_offload() -> None:
     frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=123, frame=frame, clip_track_ids={7})
 
-    fb.offload_gpu_frames()
+    fb.offload_gpu_frames(1024)
 
     clip = _FakeClip(track_id=7, frame_idxs=[0])
     x1, y1, x2, y2 = (2, 2, 6, 6)
@@ -635,7 +635,7 @@ def test_get_ready_frames_returns_on_device_after_offload() -> None:
     frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids=set())
 
-    fb.offload_gpu_frames()
+    fb.offload_gpu_frames(1024)
     ready = list(fb.get_ready_frames())
     assert len(ready) == 1
     assert ready[0][1].device == torch.device("cpu")
@@ -646,7 +646,7 @@ def test_flush_returns_on_device_after_offload() -> None:
     frame = torch.zeros((3, 4, 4), dtype=torch.uint8)
     fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
 
-    fb.offload_gpu_frames()
+    fb.offload_gpu_frames(1024)
     remaining = list(fb.flush())
     assert len(remaining) == 1
     assert remaining[0][1].device == torch.device("cpu")
@@ -659,7 +659,7 @@ def test_gpu_pinned_prevents_offload() -> None:
     fb.add_frame(frame_idx=1, pts=20, frame=torch.zeros((3, 4, 4), dtype=torch.uint8), clip_track_ids=set())
 
     fb._gpu_pinned.add(0)
-    fb.offload_gpu_frames()
+    fb.offload_gpu_frames(1024)
     assert 0 in fb._gpu_pinned
     fb._gpu_pinned.discard(0)
 
@@ -717,6 +717,75 @@ def test_blend_restored_frame_unpins_when_pending_clips_remain() -> None:
     )
     assert 0 not in fb._gpu_pinned
     assert 2 in fb.frames[0].pending_clips
+
+
+class _FakeGpuTensor:
+    """Wraps a real CPU tensor but reports device as cuda. .cpu() returns the unwrapped tensor."""
+
+    def __init__(self, real: torch.Tensor) -> None:
+        self._real = real
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", 0)
+
+    def nelement(self) -> int:
+        return self._real.nelement()
+
+    def element_size(self) -> int:
+        return self._real.element_size()
+
+    def cpu(self) -> torch.Tensor:
+        return self._real
+
+
+def test_offload_gpu_frames_stops_after_bytes_to_free_reached() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+
+    frame_shape = (3, 64, 64)
+    frame_bytes = 3 * 64 * 64 * 1  # uint8
+    for i in range(5):
+        fake = _FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8))
+        fb.add_frame(frame_idx=i, pts=i * 10, frame=fake, clip_track_ids={1})
+
+    count = fb.offload_gpu_frames(frame_bytes * 2)
+    assert count == 2
+
+    gpu_remaining = sum(1 for i in range(5) if isinstance(fb.frames[i].frame, _FakeGpuTensor))
+    assert gpu_remaining == 3
+
+
+def test_offload_gpu_frames_offloads_all_when_bytes_to_free_exceeds_total() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+
+    frame_shape = (3, 64, 64)
+    for i in range(3):
+        fake = _FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8))
+        fb.add_frame(frame_idx=i, pts=i * 10, frame=fake, clip_track_ids={1})
+
+    count = fb.offload_gpu_frames(999_999_999)
+    assert count == 3
+
+    gpu_remaining = sum(1 for i in range(3) if isinstance(fb.frames[i].frame, _FakeGpuTensor))
+    assert gpu_remaining == 0
+
+
+def test_offload_gpu_frames_counts_both_frame_and_blended_bytes() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+
+    real_frame = torch.zeros((3, 8, 8), dtype=torch.uint8)
+    real_blended = torch.ones((3, 8, 8), dtype=torch.uint8)
+    fake_frame = _FakeGpuTensor(real_frame)
+    fake_blended = _FakeGpuTensor(real_blended)
+
+    fb.add_frame(frame_idx=0, pts=10, frame=fake_frame, clip_track_ids={1})
+    fb.frames[0].blended_frame = fake_blended
+
+    one_frame_bytes = real_frame.nelement() * real_frame.element_size()
+    count = fb.offload_gpu_frames(one_frame_bytes)
+    assert count == 1
+    assert not isinstance(fb.frames[0].frame, _FakeGpuTensor)
+    assert not isinstance(fb.frames[0].blended_frame, _FakeGpuTensor)
 
 
 def test_get_ready_frames_unpins_after_yield() -> None:

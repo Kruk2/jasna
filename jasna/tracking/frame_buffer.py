@@ -50,9 +50,12 @@ class FrameBuffer:
                 pending.blended_frame = _to_device(pending.blended_frame, self.device)
                 pending.frame = gpu_frame
 
-    def offload_gpu_frames(self) -> int:
+    def offload_gpu_frames(self, bytes_to_free: int) -> int:
         count = 0
+        freed = 0
         for idx in list(self.frames):
+            if freed >= bytes_to_free:
+                break
             if idx in self._gpu_pinned:
                 continue
             pending = self.frames.get(idx)
@@ -63,16 +66,19 @@ class FrameBuffer:
                     continue
                 if pending.frame.device.type == "cpu":
                     continue
+                frame_bytes = pending.frame.nelement() * pending.frame.element_size()
                 cpu_frame = pending.frame.cpu()
                 if pending.blended_frame is pending.frame:
                     pending.frame = cpu_frame
                     pending.blended_frame = cpu_frame
+                    freed += frame_bytes
                 else:
+                    freed += frame_bytes + pending.blended_frame.nelement() * pending.blended_frame.element_size()
                     pending.blended_frame = pending.blended_frame.cpu()
                     pending.frame = cpu_frame
                 count += 1
         if count > 0:
-            _log.debug("[fb] offloaded %d gpu frames to cpu", count)
+            _log.debug("[fb] offloaded %d gpu frames to cpu (freed ~%.1f MiB)", count, freed / (1024 ** 2))
         return count
 
     def add_frame(
