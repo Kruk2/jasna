@@ -61,5 +61,5 @@ class AsyncSecondaryRestorer(Protocol):
         ...
 
     @staticmethod
-    def _to_tensors(frames_np: list[np.ndarray]) -> list[torch.Tensor]:
+    def _to_tensors(frames_np: list[np.ndarray]) -> torch.Tensor:
         ...

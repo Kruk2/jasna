@@ -172,9 +172,10 @@ class Pipeline:
             forwarded = 0
             for seq, frames_np in restorer.pop_completed():
                 pr = pending_prs.pop(seq)
-                tensors = restorer._to_tensors(frames_np)
-                if pr.frame_device.type != "cpu" and tensors:
-                    tensors = list(torch.stack(tensors).to(pr.frame_device, non_blocking=True).unbind(0))
+                batch = restorer._to_tensors(frames_np)
+                if batch.numel() > 0 and pr.frame_device.type != "cpu":
+                    batch = batch.to(pr.frame_device, non_blocking=True)
+                tensors = list(batch.unbind(0)) if batch.numel() > 0 else []
                 sr = self.restoration_pipeline.build_secondary_result(pr, tensors)
                 encode_queue.put(sr, frame_count=sr.frame_count)
                 if debug_memory is not None:

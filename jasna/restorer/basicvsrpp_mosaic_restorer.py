@@ -3,7 +3,6 @@ import logging
 import torch
 
 logger = logging.getLogger(__name__)
-import torch.nn.functional as F
 from torch import Tensor
 
 from jasna.models.basicvsrpp.inference import load_model
@@ -57,12 +56,7 @@ class BasicvsrppMosaicRestorer:
             (T, C, 256, 256) float tensor in [0, 1]
         """
         with torch.inference_mode():
-            resized = []
-            for frame in video:
-                f = frame.permute(2, 0, 1).unsqueeze(0).to(device=self.device, dtype=self.input_dtype).div_(255.0)
-                f = F.interpolate(f, size=(INFERENCE_SIZE, INFERENCE_SIZE), mode="bilinear", align_corners=False)
-                resized.append(f.squeeze(0))
-            stacked = torch.stack(resized, dim=0)
+            stacked = torch.stack(video).permute(0, 3, 1, 2).to(device=self.device, dtype=self.input_dtype).div_(255.0)
 
             if self._split_forward is not None:
                 result = self._split_forward(stacked.unsqueeze(0))
