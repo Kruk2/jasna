@@ -158,7 +158,13 @@ class TestPipelineRun:
         restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
         restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = [[], [(0, restored)], []]
+        _pop_done = set()
+        def _pop_full():
+            if restorer.push_clip.called and 0 not in _pop_done:
+                _pop_done.add(0)
+                return [(0, restored)]
+            return []
+        restorer.pop_completed.side_effect = _pop_full
         restorer.flush_all.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
@@ -327,7 +333,13 @@ class TestPipelineRun:
         p.restoration_pipeline.prepare_and_run_primary.return_value = pr_result
         restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = [[], [(0, [])], []]
+        _pop_done_err = set()
+        def _pop_err():
+            if restorer.push_clip.called and 0 not in _pop_done_err:
+                _pop_done_err.add(0)
+                return [(0, [])]
+            return []
+        restorer.pop_completed.side_effect = _pop_err
         restorer.flush_all.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.side_effect = RuntimeError("secondary boom")
@@ -373,7 +385,13 @@ class TestPipelineRun:
         restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = [[], [(0, restored)], []]
+        _pop_done = set()
+        def _pop():
+            if restorer.push_clip.called and 0 not in _pop_done:
+                _pop_done.add(0)
+                return [(0, restored)]
+            return []
+        restorer.pop_completed.side_effect = _pop
         restorer.flush_all.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
@@ -383,6 +401,7 @@ class TestPipelineRun:
         secondary_queue.put(pr)
         secondary_queue.put(_SENTINEL)
 
+        p._ASYNC_POLL_TIMEOUT = 0.001
         p._run_secondary_loop(secondary_queue, encode_queue)
 
         restorer.push_clip.assert_called_once()
@@ -395,6 +414,7 @@ class TestPipelineRun:
         import threading
         p = _make_pipeline()
         p._ASYNC_POLL_TIMEOUT = 0.01
+        p._FLUSH_DELAY = 0.05
 
         clip = TrackedClip(
             track_id=1, start_frame=0, mask_resolution=(2, 2),
@@ -421,8 +441,6 @@ class TestPipelineRun:
         encode_queue: Queue = Queue()
         cq: Queue = Queue()
         primary_idle = threading.Event()
-        bp = threading.Event()
-        bp.set()
         secondary_queue.put(pr)
 
         def put_sentinel_later():
@@ -433,14 +451,14 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
         t.join(timeout=3)
 
         restorer.flush_pending.assert_not_called()
         restorer.flush_all.assert_called_once()
 
-    def test_run_secondary_loop_no_flush_without_backpressure(self):
-        """No flush_pending when primary idle but decode is not in backpressure."""
+    def test_run_secondary_loop_no_flush_short_gap(self):
+        """No flush_pending when gap is shorter than FLUSH_DELAY."""
         import threading
         p = _make_pipeline()
         p._ASYNC_POLL_TIMEOUT = 0.01
@@ -471,7 +489,6 @@ class TestPipelineRun:
         cq: Queue = Queue()
         primary_idle = threading.Event()
         primary_idle.set()
-        bp = threading.Event()
         secondary_queue.put(pr)
 
         def put_sentinel_later():
@@ -482,7 +499,7 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
         t.join(timeout=3)
 
         restorer.flush_pending.assert_not_called()
@@ -517,7 +534,13 @@ class TestPipelineRun:
         restorer = MagicMock(spec=AsyncSecondaryRestorer)
         restorer.num_workers = 2
         restorer.push_clip.return_value = 0
-        restorer.pop_completed.side_effect = [[], [(0, restored)], []]
+        _pop_done = set()
+        def _pop():
+            if restorer.push_clip.called and 0 not in _pop_done:
+                _pop_done.add(0)
+                return [(0, restored)]
+            return []
+        restorer.pop_completed.side_effect = _pop
         restorer.flush_all.return_value = None
         restorer.has_pending = True
         p.restoration_pipeline.secondary_restorer = restorer
@@ -528,6 +551,7 @@ class TestPipelineRun:
         secondary_queue.put(pr)
         secondary_queue.put(_SENTINEL)
 
+        p._ASYNC_POLL_TIMEOUT = 0.001
         p._run_secondary_loop(secondary_queue, encode_queue)
 
         restorer.flush_pending.assert_not_called()
@@ -541,6 +565,7 @@ class TestPipelineRun:
         import threading
         p = _make_pipeline()
         p._ASYNC_POLL_TIMEOUT = 0.01
+        p._FLUSH_DELAY = 0.05
 
         clip = TrackedClip(
             track_id=1, start_frame=0, mask_resolution=(2, 2),
@@ -569,8 +594,6 @@ class TestPipelineRun:
         cq: Queue = Queue()
         primary_idle = threading.Event()
         primary_idle.set()
-        bp = threading.Event()
-        bp.set()
         secondary_queue.put(pr)
 
         def put_sentinel_later():
@@ -581,15 +604,17 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
         t.join(timeout=3)
 
         restorer.flush_pending.assert_called_once_with(target_seqs={0})
 
     def test_run_secondary_loop_pipeline_starved_triggers_flush(self):
-        """flush_pending when primary idle, decode backpressure active, clip_queue empty."""
+        """flush_pending when primary idle, clip_queue empty, and FLUSH_DELAY elapsed."""
         import threading
         p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.01
+        p._FLUSH_DELAY = 0.05
 
         clip = TrackedClip(
             track_id=1, start_frame=0, mask_resolution=(2, 2),
@@ -644,8 +669,6 @@ class TestPipelineRun:
         cq: Queue = Queue()
         primary_idle = threading.Event()
         primary_idle.set()
-        bp = threading.Event()
-        bp.set()
         secondary_queue.put(pr)
 
         def put_sentinel_later():
@@ -656,7 +679,7 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
         t.join(timeout=3)
 
         restorer.flush_pending.assert_called_with(target_seqs={0})
@@ -666,6 +689,7 @@ class TestPipelineRun:
     def test_run_secondary_loop_self_priming_prevents_deadlock(self):
         """3 clips on 2 workers: clip 2 primes clip 0's buffered tail, preventing deadlock."""
         p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.001
 
         def _make_pr(track_id, n_frames):
             clip = TrackedClip(
@@ -729,10 +753,11 @@ class TestPipelineRun:
     def test_run_secondary_loop_tiny_and_large_clip_no_deadlock(self):
         """Reproduces original deadlock: 1-frame + 170-frame clips on 2 workers.
 
-        With max_pending=num_workers+1=3, the 3rd clip primes worker 0,
-        releasing the tiny clip's buffered tail.
+        With pusher thread, all 3 clips are pushed without blocking.
+        The 3rd clip primes worker 0, releasing the tiny clip's buffered tail.
         """
         p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.001
 
         def _make_pr(track_id, n_frames):
             clip = TrackedClip(
@@ -844,10 +869,11 @@ class TestPipelineRun:
 
 
     def test_run_secondary_loop_reflush_after_forwarding(self):
-        """After flushing worker 1 and forwarding its results, flush fires again for worker 0."""
+        """After flushing worker 0 and forwarding its results, flush fires again for worker 1."""
         import threading
         p = _make_pipeline()
         p._ASYNC_POLL_TIMEOUT = 0.01
+        p._FLUSH_DELAY = 0.05
 
         def _make_pr(track_id, start_frame, n_frames):
             clip = TrackedClip(
@@ -914,8 +940,6 @@ class TestPipelineRun:
         cq: Queue = Queue()
         primary_idle = threading.Event()
         primary_idle.set()
-        bp = threading.Event()
-        bp.set()
 
         secondary_queue.put(pr0)
         secondary_queue.put(pr1)
@@ -928,7 +952,7 @@ class TestPipelineRun:
         t = threading.Thread(target=put_sentinel_later, daemon=True)
         t.start()
 
-        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle, decode_backpressure_event=bp)
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
         t.join(timeout=3)
 
         assert len(flush_calls) == 2, f"Expected 2 flush calls, got {len(flush_calls)}: {flush_calls}"

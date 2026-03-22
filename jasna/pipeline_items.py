@@ -42,3 +42,12 @@ class PrimaryRestoreResult(_RestoreResultBase):
 @dataclass
 class SecondaryRestoreResult(_RestoreResultBase):
     restored_frames: list[torch.Tensor]
+
+
+@dataclass
+class SecondaryLoopStats:
+    starvation_flushes: int = 0
+    starvation_seconds: float = 0.0
+    pusher_stall_seconds: float = 0.0
+    clips_pushed: int = 0
+    clips_popped: int = 0
