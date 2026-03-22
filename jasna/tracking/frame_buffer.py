@@ -167,9 +167,8 @@ class FrameBuffer:
             blend_mask = self.blend_mask_fn(crop_mask)
 
             original_crop = blended[:, y1:y2, x1:x2].float()
-
-            blended_crop = original_crop + (resized_back - original_crop) * blend_mask.unsqueeze(0)
-            blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
+            original_crop.lerp_(resized_back, blend_mask.unsqueeze(0)).round_().clamp_(0, 255)
+            blended[:, y1:y2, x1:x2] = original_crop.to(blended.dtype)
 
             pending.pending_clips.discard(clip.track_id)
             # Always unpin after blend; get_ready_frames re-pins when encoding.
@@ -232,11 +231,12 @@ class FrameBuffer:
             original_crop = pending.frame[:, y1:y2, x1:x2].float()
             delta = (resized_back - original_crop) * blend_mask.unsqueeze(0)
             current = blended[:, y1:y2, x1:x2].float()
-            blended[:, y1:y2, x1:x2] = (current + delta).round().clamp(0, 255).to(blended.dtype)
+            current.add_(delta).round_().clamp_(0, 255)
+            blended[:, y1:y2, x1:x2] = current.to(blended.dtype)
         else:
             original_crop = blended[:, y1:y2, x1:x2].float()
-            blended_crop = original_crop + (resized_back - original_crop) * blend_mask.unsqueeze(0)
-            blended[:, y1:y2, x1:x2] = blended_crop.round().clamp(0, 255).to(blended.dtype)
+            original_crop.lerp_(resized_back, blend_mask.unsqueeze(0)).round_().clamp_(0, 255)
+            blended[:, y1:y2, x1:x2] = original_crop.to(blended.dtype)
 
         pending.pending_clips.discard(int(track_id))
         self._gpu_pinned.discard(int(frame_idx))

@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import logging
 
 logger = logging.getLogger(__name__)
@@ -23,12 +24,9 @@ def _chw_rgb_to_p010_bt709_limited_fallback(img_chw: torch.Tensor) -> torch.Tens
     # Clamp and shift left by 6 for P010 (10-bit in upper bits of 16-bit)
     Y = (Yf.round().clamp(64, 940) * 64).to(torch.int16)
 
-    # Subsample UV (4:2:0)
-    U00, U01, U10, U11 = Uf[0::2, 0::2], Uf[0::2, 1::2], Uf[1::2, 0::2], Uf[1::2, 1::2]
-    V00, V01, V10, V11 = Vf[0::2, 0::2], Vf[0::2, 1::2], Vf[1::2, 0::2], Vf[1::2, 1::2]
-
-    U_ds = (((U00 + U01 + U10 + U11) * 0.25).round().clamp(64, 960) * 64).to(torch.int16)
-    V_ds = (((V00 + V01 + V10 + V11) * 0.25).round().clamp(64, 960) * 64).to(torch.int16)
+    # Subsample UV (4:2:0) via avg_pool2d
+    U_ds = (F.avg_pool2d(Uf.unsqueeze(0).unsqueeze(0), 2).squeeze(0).squeeze(0).round().clamp(64, 960) * 64).to(torch.int16)
+    V_ds = (F.avg_pool2d(Vf.unsqueeze(0).unsqueeze(0), 2).squeeze(0).squeeze(0).round().clamp(64, 960) * 64).to(torch.int16)
 
     # Interleave U and V
     uv = torch.stack((U_ds, V_ds), dim=-1).reshape(U_ds.shape[0], -1)

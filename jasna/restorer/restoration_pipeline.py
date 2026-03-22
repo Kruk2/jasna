@@ -254,9 +254,6 @@ class RestorationPipeline:
                 crossfade_weight=cw,
             )
 
-        torch.cuda.empty_cache()
-        torch.cuda.ipc_collect()
-
     def prepare_and_run_primary(
         self,
         clip: TrackedClip,

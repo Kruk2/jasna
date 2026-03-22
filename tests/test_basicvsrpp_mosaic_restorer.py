@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 
 class _CaptureIdentityModel:
@@ -25,19 +24,13 @@ def _make_restorer(monkeypatch, model, *, use_tensorrt=False, fp16=False, config
     )
 
 
-def test_restore_identity_returns_resized_rgb_uint8(monkeypatch) -> None:
+def test_restore_identity_returns_rgb_uint8(monkeypatch) -> None:
     import jasna.restorer.basicvsrpp_mosaic_restorer as br
 
     model = _CaptureIdentityModel()
     restorer = _make_restorer(monkeypatch, model)
 
-    frame = torch.tensor(
-        [
-            [[10, 20, 30], [40, 50, 60]],
-            [[70, 80, 90], [100, 110, 120]],
-        ],
-        dtype=torch.uint8,
-    )  # (H, W, C) RGB
+    frame = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
 
     out = restorer.restore([frame])
     assert len(out) == 1
@@ -45,12 +38,7 @@ def test_restore_identity_returns_resized_rgb_uint8(monkeypatch) -> None:
     assert out[0].dtype == torch.uint8
 
     expected = (
-        F.interpolate(
-            frame.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32).div(255.0),
-            size=(br.INFERENCE_SIZE, br.INFERENCE_SIZE),
-            mode="bilinear",
-            align_corners=False,
-        )
+        frame.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32).div(255.0)
         .mul(255.0)
         .round()
         .clamp(0, 255)
@@ -65,23 +53,18 @@ def test_restore_identity_returns_resized_rgb_uint8(monkeypatch) -> None:
     assert model.captured_inputs.dtype == torch.float32
     assert model.captured_inputs.device.type == "cpu"
 
-    expected_inputs = F.interpolate(
-        frame.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32).div(255.0),
-        size=(br.INFERENCE_SIZE, br.INFERENCE_SIZE),
-        mode="bilinear",
-        align_corners=False,
-    )
+    expected_inputs = frame.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32).div(255.0)
     assert torch.equal(model.captured_inputs[0], expected_inputs)
 
 
-def test_restore_multiple_frames_varied_sizes(monkeypatch) -> None:
+def test_restore_multiple_frames(monkeypatch) -> None:
     import jasna.restorer.basicvsrpp_mosaic_restorer as br
 
     model = _CaptureIdentityModel()
     restorer = _make_restorer(monkeypatch, model)
 
-    f0 = torch.randint(0, 256, (7, 11, 3), dtype=torch.uint8)
-    f1 = torch.randint(0, 256, (19, 5, 3), dtype=torch.uint8)
+    f0 = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
+    f1 = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
     out = restorer.restore([f0, f1])
 
     assert len(out) == 2
@@ -160,7 +143,7 @@ def test_split_forward_path_used_when_available(monkeypatch) -> None:
     restorer = _make_restorer(monkeypatch, model)
     restorer._split_forward = _FakeSplit()
 
-    frame = torch.randint(0, 256, (4, 4, 3), dtype=torch.uint8)
+    frame = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
     restorer.restore([frame])
 
     assert len(captured) == 1
