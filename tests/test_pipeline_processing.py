@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 
-from queue import Queue
+from jasna.frame_queue import FrameQueue
 
 from jasna.mosaic.detections import Detections
 from jasna.pipeline_items import ClipRestoreItem, _SENTINEL
@@ -67,9 +67,9 @@ class _FakeRestorationPipeline:
         frame_buffer.blend_clip(clip, restored, keep_start=int(keep_start), keep_end=int(keep_end))
 
 
-def _drain_queue(clip_queue: Queue, frame_buffer: FrameBuffer, pipeline) -> None:
+def _drain_queue(clip_queue: FrameQueue, frame_buffer: FrameBuffer, pipeline) -> None:
     while not clip_queue.empty():
-        item = clip_queue.get_nowait()
+        item = clip_queue.get(timeout=0)
         if item is _SENTINEL:
             break
         ci: ClipRestoreItem = item  # type: ignore[assignment]
@@ -110,7 +110,7 @@ def _run_batches(
 ) -> list[tuple[int, torch.Tensor, int]]:
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
     fb = FrameBuffer(device=torch.device("cpu"))
-    clip_queue: Queue[ClipRestoreItem | object] = Queue()
+    clip_queue = FrameQueue(max_frames=9999)
     raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
 
     frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
@@ -243,7 +243,7 @@ def _run_real_pipeline_batches(
     pipeline = RestorationPipeline(restorer=_ConstantRestorer())  # type: ignore[arg-type]
     fb = FrameBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=temporal_overlap, iou_threshold=0.0)
-    clip_queue: Queue[ClipRestoreItem | object] = Queue()
+    clip_queue = FrameQueue(max_frames=9999)
 
     bbox = np.array([2.0, 2.0, 6.0, 6.0], dtype=np.float32)
 
@@ -320,7 +320,7 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
     max_clip_size = 10
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
     fb = FrameBuffer(device=torch.device("cpu"))
-    clip_queue: Queue[ClipRestoreItem | object] = Queue()
+    clip_queue = FrameQueue(max_frames=9999)
 
     captured: list[tuple[int, int, dict[int, float] | None]] = []
 
@@ -465,7 +465,7 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
         p = RestorationPipeline(restorer=_AlternatingRestorer())  # type: ignore[arg-type]
         fb = FrameBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
         t = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
-        q: Queue[ClipRestoreItem | object] = Queue()
+        q = FrameQueue(max_frames=9999)
         ctx: dict[int, dict[int, torch.Tensor]] = {}
         fi = 0
         for pts in range(15):
@@ -554,7 +554,7 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
     max_clip_size = 6
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
     fb = FrameBuffer(device=torch.device("cpu"))
-    clip_queue: Queue[ClipRestoreItem | object] = Queue()
+    clip_queue = FrameQueue(max_frames=9999)
 
     captured_weights: list[dict[int, float] | None] = []
 

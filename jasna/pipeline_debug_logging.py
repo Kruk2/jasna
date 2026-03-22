@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import logging
-from queue import Queue
 
+from jasna.frame_queue import FrameQueue
 from jasna.tracking.frame_buffer import FrameBuffer
 
 
@@ -12,9 +12,9 @@ class PipelineDebugMemoryLogger:
         *,
         logger: logging.Logger,
         frame_buffer: FrameBuffer,
-        clip_queue: Queue[object],
-        secondary_queue: Queue[object],
-        encode_queue: Queue[object],
+        clip_queue: FrameQueue,
+        secondary_queue: FrameQueue,
+        encode_queue: FrameQueue,
     ) -> None:
         self.logger = logger
         self.frame_buffer = frame_buffer

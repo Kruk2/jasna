@@ -1,7 +1,8 @@
 from fractions import Fraction
 from pathlib import Path
-from queue import Queue
 from unittest.mock import MagicMock, patch, call
+
+from jasna.frame_queue import FrameQueue
 
 import numpy as np
 import torch
@@ -396,8 +397,8 @@ class TestPipelineRun:
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
         secondary_queue.put(pr)
         secondary_queue.put(_SENTINEL)
 
@@ -437,9 +438,9 @@ class TestPipelineRun:
         restorer.flush_all.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        cq: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
+        cq= FrameQueue(max_frames=9999)
         primary_idle = threading.Event()
         secondary_queue.put(pr)
 
@@ -484,9 +485,9 @@ class TestPipelineRun:
         restorer.flush_all.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        cq: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
+        cq= FrameQueue(max_frames=9999)
         primary_idle = threading.Event()
         primary_idle.set()
         secondary_queue.put(pr)
@@ -546,8 +547,8 @@ class TestPipelineRun:
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
         secondary_queue.put(pr)
         secondary_queue.put(_SENTINEL)
 
@@ -589,9 +590,9 @@ class TestPipelineRun:
         restorer.flush_pending.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        cq: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
+        cq= FrameQueue(max_frames=9999)
         primary_idle = threading.Event()
         primary_idle.set()
         secondary_queue.put(pr)
@@ -664,9 +665,9 @@ class TestPipelineRun:
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        cq: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
+        cq= FrameQueue(max_frames=9999)
         primary_idle = threading.Event()
         primary_idle.set()
         secondary_queue.put(pr)
@@ -737,8 +738,8 @@ class TestPipelineRun:
             crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
         secondary_queue.put(pr0)
         secondary_queue.put(pr1)
         secondary_queue.put(pr2)
@@ -805,8 +806,8 @@ class TestPipelineRun:
             crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
         secondary_queue.put(pr_tiny)
         secondary_queue.put(pr_large)
         secondary_queue.put(pr_next)
@@ -935,9 +936,9 @@ class TestPipelineRun:
             crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
 
-        secondary_queue: Queue = Queue()
-        encode_queue: Queue = Queue()
-        cq: Queue = Queue()
+        secondary_queue= FrameQueue(max_frames=9999)
+        encode_queue= FrameQueue(max_frames=9999)
+        cq= FrameQueue(max_frames=9999)
         primary_idle = threading.Event()
         primary_idle.set()
 

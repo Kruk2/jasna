@@ -10,6 +10,8 @@ from pathlib import Path
 from queue import Queue, Empty
 
 import numpy as np
+
+from jasna.frame_queue import FrameQueue
 import torch
 
 logger = logging.getLogger(__name__)
@@ -53,15 +55,16 @@ _Segment = _ClipSegment | _FillerSegment
 
 
 class _TvaiWorker:
-    def __init__(self, cmd: list[str], out_frame_bytes: int, out_size: int) -> None:
+    def __init__(self, cmd: list[str], out_frame_bytes: int, out_size: int, max_write_frames: int) -> None:
         self._cmd = cmd
         self._out_frame_bytes = out_frame_bytes
         self._out_size = out_size
+        self._max_write_frames = max_write_frames
         self._proc: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
         self._writer: threading.Thread | None = None
         self._frame_queue: Queue[np.ndarray | None] = Queue()
-        self._write_queue: Queue[bytes | None] = Queue()
+        self._write_queue = FrameQueue(max_write_frames)
         self._error: BaseException | None = None
 
     @property
@@ -71,7 +74,7 @@ class _TvaiWorker:
     def start(self) -> None:
         self._error = None
         self._frame_queue = Queue()
-        self._write_queue = Queue(maxsize=2)
+        self._write_queue = FrameQueue(self._max_write_frames)
         self._proc = subprocess.Popen(
             self._cmd,
             stdin=subprocess.PIPE,
@@ -124,7 +127,8 @@ class _TvaiWorker:
 
     def push_frames(self, frames_hwc: np.ndarray) -> None:
         self.check_error()
-        self._write_queue.put(np.ascontiguousarray(frames_hwc))
+        data = np.ascontiguousarray(frames_hwc)
+        self._write_queue.put(data, frame_count=data.shape[0])
 
     def drain_writes(self) -> None:
         self.check_error()
@@ -195,7 +199,7 @@ class TvaiSecondaryRestorer:
     prefers_cpu_input = True
     _INPUT_SIZE = 256
 
-    def __init__(self, *, ffmpeg_path: str, tvai_args: str, scale: int, num_workers: int) -> None:
+    def __init__(self, *, ffmpeg_path: str, tvai_args: str, scale: int, num_workers: int, max_clip_size: int = 180) -> None:
         self.ffmpeg_path = str(ffmpeg_path)
         self.tvai_args = str(tvai_args)
         self.scale = int(scale)
@@ -217,8 +221,8 @@ class TvaiSecondaryRestorer:
         self._out_frame_bytes = self._out_size * self._out_size * 3
         self._validated = False
         self._started = False
+        self._max_clip_size = max_clip_size
         self._next_seq = 0
-        self._next_worker_idx = 0
         self._workers: list[_TvaiWorker] = []
         self._worker_segments: list[deque[_Segment]] = []
         self._completed: dict[int, list[np.ndarray]] = {}
@@ -251,8 +255,9 @@ class TvaiSecondaryRestorer:
             self._validate_environment()
             self._validated = True
         cmd = self.build_ffmpeg_cmd()
+        max_write_frames = self._max_clip_size * 2
         for _ in range(self.num_workers):
-            w = _TvaiWorker(cmd, self._out_frame_bytes, self._out_size)
+            w = _TvaiWorker(cmd, self._out_frame_bytes, self._out_size, max_write_frames)
             w.start()
             self._workers.append(w)
             self._worker_segments.append(deque())
@@ -300,6 +305,18 @@ class TvaiSecondaryRestorer:
         batch = np.ascontiguousarray(batch.transpose(0, 3, 1, 2))
         return list(torch.from_numpy(batch).unbind(0))
 
+    def _pending_frames(self, wi: int) -> int:
+        total = 0
+        for seg in self._worker_segments[wi]:
+            if isinstance(seg, _ClipSegment):
+                total += seg.expected - len(seg.collected)
+            elif isinstance(seg, _FillerSegment):
+                total += seg.remaining
+        return total
+
+    def _least_pending_worker(self) -> int:
+        return min(range(self.num_workers), key=self._pending_frames)
+
     def push_clip(
         self,
         frames_256: torch.Tensor,
@@ -326,8 +343,7 @@ class TvaiSecondaryRestorer:
             seq = self._next_seq
             self._next_seq += 1
 
-            wi = self._next_worker_idx % self.num_workers
-            self._next_worker_idx += 1
+            wi = self._least_pending_worker()
 
             self._worker_segments[wi].append(_ClipSegment(seq=seq, expected=n))
             self._workers[wi].push_frames(frames_hwc)

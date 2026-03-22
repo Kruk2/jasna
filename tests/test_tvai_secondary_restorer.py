@@ -205,18 +205,38 @@ class TestPushClip:
         assert segs[0].seq == 0
         assert segs[0].expected == 5
 
-    def test_round_robin_assignment(self):
+    def test_least_pending_frames_assignment(self):
+        r = _make_restorer(num_workers=2)
+        workers = _setup_mock_workers(r)
+        # Push a large clip (170 frames) — goes to worker 0 (both at 0 pending)
+        r.push_clip(torch.rand((170, 3, 256, 256)), keep_start=0, keep_end=170)
+        assert workers[0].push_frames.call_count == 1
+        assert workers[1].push_frames.call_count == 0
+
+        # Push a small clip (1 frame) — goes to worker 1 (0 pending < 170 pending)
+        r.push_clip(torch.rand((1, 3, 256, 256)), keep_start=0, keep_end=1)
+        assert workers[0].push_frames.call_count == 1
+        assert workers[1].push_frames.call_count == 1
+
+        # Push another small clip — still worker 1 (1 pending < 170 pending)
+        r.push_clip(torch.rand((1, 3, 256, 256)), keep_start=0, keep_end=1)
+        assert workers[0].push_frames.call_count == 1
+        assert workers[1].push_frames.call_count == 2
+
+        segs_0 = [s for s in r._worker_segments[0] if isinstance(s, _ClipSegment)]
+        segs_1 = [s for s in r._worker_segments[1] if isinstance(s, _ClipSegment)]
+        assert sum(s.expected for s in segs_0) == 170
+        assert sum(s.expected for s in segs_1) == 2
+
+    def test_equal_pending_uses_lower_index(self):
         r = _make_restorer(num_workers=2)
         workers = _setup_mock_workers(r)
         r.push_clip(torch.rand((6, 3, 256, 256)), keep_start=0, keep_end=6)
-        r.push_clip(torch.rand((7, 3, 256, 256)), keep_start=0, keep_end=7)
-        r.push_clip(torch.rand((8, 3, 256, 256)), keep_start=0, keep_end=8)
+        r.push_clip(torch.rand((6, 3, 256, 256)), keep_start=0, keep_end=6)
+        # Both workers have 6 pending, next clip goes to worker 0 (min picks lowest index)
+        r.push_clip(torch.rand((6, 3, 256, 256)), keep_start=0, keep_end=6)
         assert workers[0].push_frames.call_count == 2
         assert workers[1].push_frames.call_count == 1
-        clip_segs_0 = [s for s in r._worker_segments[0] if isinstance(s, _ClipSegment)]
-        clip_segs_1 = [s for s in r._worker_segments[1] if isinstance(s, _ClipSegment)]
-        assert len(clip_segs_0) == 2
-        assert len(clip_segs_1) == 1
 
     def test_seq_increments(self):
         r = _make_restorer()
