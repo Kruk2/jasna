@@ -18,6 +18,7 @@ htmlcov/
 .tox/
 .nox/
 
+project-details.mdc
 log.txt
 build/
 dist/
