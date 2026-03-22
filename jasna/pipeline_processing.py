@@ -103,13 +103,14 @@ def _process_ended_clips(
             else:
                 crossfade_weights.update(parent_weights)
 
-        clip_queue.put(ClipRestoreItem(
+        item = ClipRestoreItem(
             clip=clip,
             frames=frames_for_clip,
             keep_start=int(keep_start),
             keep_end=int(keep_end),
             crossfade_weights=crossfade_weights,
-        ))
+        )
+        clip_queue.put(item, frame_count=int(keep_end) - int(keep_start))
         raw_frame_context.pop(clip.track_id, None)
 
 

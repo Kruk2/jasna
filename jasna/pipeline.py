@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from queue import Empty, Queue
 
+from jasna.frame_queue import FrameQueue
+
 import psutil
 import torch
 
@@ -119,10 +121,10 @@ class Pipeline:
 
     def _run_secondary_loop(
         self,
-        secondary_queue: Queue,
-        encode_queue: Queue,
+        secondary_queue: FrameQueue,
+        encode_queue: FrameQueue,
         debug_memory: PipelineDebugMemoryLogger | None = None,
-        clip_queue: Queue | None = None,
+        clip_queue: FrameQueue | None = None,
         primary_idle_event: threading.Event | None = None,
     ) -> SecondaryLoopStats:
         restorer: AsyncSecondaryRestorer = self.restoration_pipeline.secondary_restorer  # type: ignore[assignment]
@@ -173,7 +175,7 @@ class Pipeline:
                 if pr.frame_device.type != "cpu" and tensors:
                     tensors = list(torch.stack(tensors).to(pr.frame_device, non_blocking=True).unbind(0))
                 sr = self.restoration_pipeline.build_secondary_result(pr, tensors)
-                encode_queue.put(sr)
+                encode_queue.put(sr, frame_count=sr.frame_count)
                 if debug_memory is not None:
                     debug_memory.snapshot(
                         "secondary",
@@ -248,11 +250,9 @@ class Pipeline:
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
         decode_bp_gap_threshold = int(self.max_clip_size * 1.2)
 
-        clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
-        secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(
-            maxsize=secondary_workers,
-        )
-        encode_queue: Queue[SecondaryRestoreResult | object] = Queue(maxsize=1)
+        clip_queue = FrameQueue(max_frames=self.max_clip_size)
+        secondary_queue = FrameQueue(max_frames=self.max_clip_size * secondary_workers)
+        encode_queue = FrameQueue(max_frames=self.max_clip_size)
 
         error_holder: list[BaseException] = []
         frame_buffer = FrameBuffer(device=device)
@@ -392,7 +392,7 @@ class Pipeline:
                     )
                     if self.restoration_pipeline.secondary_prefers_cpu_input:
                         result.primary_raw = result.primary_raw.cpu()
-                    secondary_queue.put(result)
+                    secondary_queue.put(result, frame_count=result.keep_end - result.keep_start)
                     debug_memory.snapshot(
                         "primary",
                         f"clip={clip_item.clip.track_id} frames={len(clip_item.frames)}",
@@ -418,7 +418,7 @@ class Pipeline:
                     )
                     del pr.primary_raw
                     sr = self.restoration_pipeline.build_secondary_result(pr, restored_frames)
-                    encode_queue.put(sr)
+                    encode_queue.put(sr, frame_count=sr.frame_count)
                     debug_memory.snapshot(
                         "secondary",
                         f"clip={pr.clip.track_id} frames={sr.frame_count}",
