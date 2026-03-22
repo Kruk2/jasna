@@ -129,6 +129,20 @@ def test_restore_fails_on_invalid_frame_rank(monkeypatch) -> None:
         restorer.restore([frame_hw])
 
 
+def test_raw_process_produces_contiguous_nchw_input(monkeypatch) -> None:
+    import jasna.restorer.basicvsrpp_mosaic_restorer as br
+
+    model = _CaptureIdentityModel()
+    restorer = _make_restorer(monkeypatch, model)
+
+    frames = [torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8) for _ in range(3)]
+    restorer.raw_process(frames)
+
+    assert model.captured_inputs is not None
+    inp = model.captured_inputs.squeeze(0)
+    assert inp.is_contiguous(), f"model input must be contiguous NCHW, got stride {inp.stride()}"
+
+
 def test_split_forward_path_used_when_available(monkeypatch) -> None:
     import jasna.restorer.basicvsrpp_mosaic_restorer as br
 
