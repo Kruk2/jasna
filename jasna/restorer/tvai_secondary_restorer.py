@@ -294,16 +294,17 @@ class TvaiSecondaryRestorer:
     @staticmethod
     def _to_numpy_hwc(frames_nchw: np.ndarray) -> np.ndarray:
         x = frames_nchw * np.float32(255.0)
+        np.nan_to_num(x, nan=0.0, copy=False)
         np.clip(x, 0, 255, out=x)
-        return np.ascontiguousarray(x.astype(np.uint8).transpose(0, 2, 3, 1))
+        return np.ascontiguousarray(x.transpose(0, 2, 3, 1), dtype=np.uint8)
 
     @staticmethod
-    def _to_tensors(frames_np: list[np.ndarray]) -> list[torch.Tensor]:
+    def _to_tensors(frames_np: list[np.ndarray]) -> torch.Tensor:
         if not frames_np:
-            return []
+            return torch.empty(0)
         batch = np.stack(frames_np)
         batch = np.ascontiguousarray(batch.transpose(0, 3, 1, 2))
-        return list(torch.from_numpy(batch).unbind(0))
+        return torch.from_numpy(batch)
 
     def _pending_frames(self, wi: int) -> int:
         total = 0
@@ -446,10 +447,12 @@ class TvaiSecondaryRestorer:
             if s == seq:
                 result_np = frames
                 break
-        tensors = self._to_tensors(result_np)
-        if device.type != "cpu" and tensors:
-            return list(torch.stack(tensors).to(device, non_blocking=True).unbind(0))
-        return tensors
+        batch = self._to_tensors(result_np)
+        if batch.numel() == 0:
+            return []
+        if device.type != "cpu":
+            batch = batch.to(device, non_blocking=True)
+        return list(batch.unbind(0))
 
     def close(self) -> None:
         for w in self._workers:
