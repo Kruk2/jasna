@@ -19,7 +19,7 @@ from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
 from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
-from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryLoopStats, SecondaryRestoreResult, _SENTINEL
 from jasna.progressbar import Progressbar
 from jasna.tracking import ClipTracker, FrameBuffer
 from jasna.restorer import RestorationPipeline
@@ -115,6 +115,8 @@ class Pipeline:
             if pr.clip.start_frame + pr.keep_start <= earliest_frame <= pr.clip.start_frame + pr.keep_end - 1
         }
 
+    _FLUSH_DELAY = 2.0
+
     def _run_secondary_loop(
         self,
         secondary_queue: Queue,
@@ -122,19 +124,51 @@ class Pipeline:
         debug_memory: PipelineDebugMemoryLogger | None = None,
         clip_queue: Queue | None = None,
         primary_idle_event: threading.Event | None = None,
-        decode_backpressure_event: threading.Event | None = None,
-        max_secondary_in_flight_frames: int = 720,
-    ) -> tuple[int, float, float]:
+    ) -> SecondaryLoopStats:
         restorer: AsyncSecondaryRestorer = self.restoration_pipeline.secondary_restorer  # type: ignore[assignment]
         pending_prs: dict[int, PrimaryRestoreResult] = {}
-        in_flight_frames = 0
+        push_done = threading.Event()
+        pusher_error: list[BaseException] = []
+        last_push_time = time.monotonic()
+        flushed_since_last_push = False
+        pusher_stall_seconds = 0.0
+        clips_pushed = 0
+
+        def _pusher():
+            nonlocal last_push_time, flushed_since_last_push, pusher_stall_seconds, clips_pushed
+            try:
+                while True:
+                    item = secondary_queue.get()
+                    if item is _SENTINEL:
+                        break
+                    pr: PrimaryRestoreResult = item  # type: ignore[assignment]
+                    t0 = time.monotonic()
+                    seq = restorer.push_clip(
+                        pr.primary_raw,
+                        keep_start=pr.keep_start,
+                        keep_end=pr.keep_end,
+                    )
+                    push_elapsed = time.monotonic() - t0
+                    pusher_stall_seconds += push_elapsed
+                    clips_pushed += 1
+                    del pr.primary_raw
+                    pending_prs[seq] = pr
+                    last_push_time = time.monotonic()
+                    flushed_since_last_push = False
+                    if push_elapsed > 0.05:
+                        logger.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_elapsed * 1000)
+            except BaseException as e:
+                pusher_error.append(e)
+            finally:
+                push_done.set()
+
+        clips_popped = 0
 
         def _forward_completed() -> int:
-            nonlocal in_flight_frames
+            nonlocal clips_popped
             forwarded = 0
             for seq, frames_np in restorer.pop_completed():
                 pr = pending_prs.pop(seq)
-                in_flight_frames -= pr.keep_end - pr.keep_start
                 tensors = restorer._to_tensors(frames_np)
                 if pr.frame_device.type != "cpu" and tensors:
                     tensors = list(torch.stack(tensors).to(pr.frame_device, non_blocking=True).unbind(0))
@@ -146,77 +180,67 @@ class Pipeline:
                         f"clip={pr.clip.track_id} frames={sr.frame_count}",
                     )
                 forwarded += 1
+                clips_popped += 1
             return forwarded
 
-        def _pipeline_starved() -> bool:
+        def _no_clips_incoming() -> bool:
             if primary_idle_event is None or clip_queue is None:
                 return False
-            if not primary_idle_event.is_set() or clip_queue.qsize() != 0:
-                return False
-            if decode_backpressure_event is not None and not decode_backpressure_event.is_set():
-                return False
-            return True
+            return primary_idle_event.is_set() and clip_queue.qsize() == 0
+
+        pusher_thread = threading.Thread(target=_pusher, daemon=True)
+        pusher_thread.start()
 
         starvation_count = 0
         starvation_seconds = 0.0
         starvation_start: float | None = None
-        in_flight_wait_seconds = 0.0
-        done = False
-        flushed_since_last_push = False
-        while not done:
-            try:
-                item = secondary_queue.get(timeout=self._ASYNC_POLL_TIMEOUT)
-                if item is _SENTINEL:
-                    done = True
-                else:
-                    pr = item  # type: ignore[assignment]
-                    if starvation_start is not None:
-                        starvation_seconds += time.monotonic() - starvation_start
-                        starvation_start = None
-                    clip_frames = pr.keep_end - pr.keep_start
-                    t_wait = time.monotonic()
-                    if in_flight_frames + clip_frames > max_secondary_in_flight_frames:
-                        logger.debug("[secondary] in-flight frame cap reached (%d+%d > %d), waiting", in_flight_frames, clip_frames, max_secondary_in_flight_frames)
-                    while in_flight_frames + clip_frames > max_secondary_in_flight_frames:
-                        _forward_completed()
-                        if in_flight_frames + clip_frames > max_secondary_in_flight_frames:
-                            if time.monotonic() - t_wait > 30:
-                                logger.warning("[secondary] in-flight wait exceeded 30s, forcing push (in_flight=%d, clip=%d, cap=%d)", in_flight_frames, clip_frames, max_secondary_in_flight_frames)
-                                break
-                            time.sleep(self._ASYNC_POLL_TIMEOUT)
-                    in_flight_wait_seconds += time.monotonic() - t_wait
-                    t0 = time.monotonic()
-                    seq = restorer.push_clip(
-                        pr.primary_raw,
-                        keep_start=pr.keep_start,
-                        keep_end=pr.keep_end,
-                    )
-                    push_ms = (time.monotonic() - t0) * 1000
-                    del pr.primary_raw
-                    in_flight_frames += clip_frames
-                    pending_prs[seq] = pr
-                    flushed_since_last_push = False
-                    if push_ms > 50:
-                        logger.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_ms)
-            except Empty:
-                if not done and _pipeline_starved() and restorer.has_pending:
-                    if starvation_start is None:
-                        starvation_start = time.monotonic()
-                    if not flushed_since_last_push:
-                        target_seqs = self._earliest_blocking_seqs(pending_prs)
-                        logger.debug("[secondary] pipeline-starved flush target_seqs=%s", target_seqs)
-                        restorer.flush_pending(target_seqs=target_seqs)
-                        starvation_count += 1
-                        flushed_since_last_push = True
+
+        while not push_done.is_set():
+            if pusher_error:
+                raise pusher_error[0]
 
             if _forward_completed() > 0:
+                if starvation_start is not None:
+                    starvation_seconds += time.monotonic() - starvation_start
+                    starvation_start = None
                 flushed_since_last_push = False
+                continue
+
+            if (
+                restorer.has_pending
+                and _no_clips_incoming()
+                and not flushed_since_last_push
+                and time.monotonic() - last_push_time > self._FLUSH_DELAY
+            ):
+                if starvation_start is None:
+                    starvation_start = time.monotonic()
+                target_seqs = self._earliest_blocking_seqs(dict(pending_prs))
+                logger.debug("[secondary] starvation flush target_seqs=%s", target_seqs)
+                restorer.flush_pending(target_seqs=target_seqs)
+                starvation_count += 1
+                flushed_since_last_push = True
+
+            time.sleep(self._ASYNC_POLL_TIMEOUT)
 
         if starvation_start is not None:
             starvation_seconds += time.monotonic() - starvation_start
+        pusher_thread.join()
+        if pusher_error:
+            raise pusher_error[0]
         restorer.flush_all()
-        _forward_completed()
-        return starvation_count, starvation_seconds, in_flight_wait_seconds
+        for _ in range(100):
+            if not pending_prs:
+                break
+            _forward_completed()
+            if pending_prs:
+                time.sleep(self._ASYNC_POLL_TIMEOUT)
+        return SecondaryLoopStats(
+            starvation_flushes=starvation_count,
+            starvation_seconds=starvation_seconds,
+            pusher_stall_seconds=pusher_stall_seconds,
+            clips_pushed=clips_pushed,
+            clips_popped=clips_popped,
+        )
 
     def run(self) -> None:
         device = self.device
@@ -226,9 +250,9 @@ class Pipeline:
 
         clip_queue: Queue[ClipRestoreItem | object] = Queue(maxsize=1)
         secondary_queue: Queue[PrimaryRestoreResult | object] = Queue(
-            maxsize=self.restoration_pipeline.secondary_preferred_queue_size,
+            maxsize=secondary_workers,
         )
-        encode_queue: Queue[SecondaryRestoreResult | object] = Queue(maxsize=secondary_workers + 1)
+        encode_queue: Queue[SecondaryRestoreResult | object] = Queue(maxsize=1)
 
         error_holder: list[BaseException] = []
         frame_buffer = FrameBuffer(device=device)
@@ -405,13 +429,13 @@ class Pipeline:
             finally:
                 encode_queue.put(_SENTINEL)
 
-        starvation_stats: tuple[int, float, float] = (0, 0.0, 0.0)
+        starvation_stats = SecondaryLoopStats()
 
         def _async_secondary_restore_thread():
             nonlocal starvation_stats
             try:
                 torch.cuda.set_device(device)
-                starvation_stats = self._run_secondary_loop(secondary_queue, encode_queue, debug_memory, clip_queue, primary_idle_event, decode_backpressure_event, max_secondary_in_flight_frames=self.max_clip_size * (secondary_workers + 2))
+                starvation_stats = self._run_secondary_loop(secondary_queue, encode_queue, debug_memory, clip_queue, primary_idle_event)
             except BaseException as e:
                 log.exception("[secondary-async] thread crashed")
                 error_holder.append(e)
@@ -536,11 +560,12 @@ class Pipeline:
         log.info("Frame buffer — peak: %d frames", peak_fb_size)
         if bp_stall_count > 0:
             log.info("Decode backpressure — stalls: %d, total: %.1fs", bp_stall_count, bp_stall_seconds)
-        s_count, s_secs, in_flight_wait = starvation_stats
-        if s_count > 0:
-            log.info("Pipeline starvation — flushes: %d, total: %.1fs", s_count, s_secs)
-        if in_flight_wait > 0.1:
-            log.info("Secondary in-flight wait — total: %.1fs", in_flight_wait)
+        ss = starvation_stats
+        if ss.clips_pushed > 0 or ss.clips_popped > 0:
+            log.info(
+                "Secondary — clips: %d pushed / %d popped, pusher stall: %.1fs, starvation flushes: %d (%.1fs)",
+                ss.clips_pushed, ss.clips_popped, ss.pusher_stall_seconds, ss.starvation_flushes, ss.starvation_seconds,
+            )
 
         frame_buffer.frames.clear()
         frame_buffer._gpu_pinned.clear()

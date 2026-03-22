@@ -71,7 +71,7 @@ class _TvaiWorker:
     def start(self) -> None:
         self._error = None
         self._frame_queue = Queue()
-        self._write_queue = Queue()
+        self._write_queue = Queue(maxsize=1)
         self._proc = subprocess.Popen(
             self._cmd,
             stdin=subprocess.PIPE,
@@ -104,22 +104,34 @@ class _TvaiWorker:
     def _writer_loop(self) -> None:
         assert self._proc is not None and self._proc.stdin is not None
         stdin = self._proc.stdin
-        while True:
-            data = self._write_queue.get()
-            if data is None:
+        try:
+            while True:
+                data = self._write_queue.get()
+                if data is None:
+                    self._write_queue.task_done()
+                    break
+                stdin.write(memoryview(data))
+                stdin.flush()
                 self._write_queue.task_done()
-                break
-            stdin.write(memoryview(data))
-            stdin.flush()
-            self._write_queue.task_done()
+        except Exception as e:
+            self._error = e
+
+    def check_error(self) -> None:
+        if self._error is not None:
+            e = self._error
+            self._error = None
+            raise RuntimeError("TVAI worker thread crashed") from e
 
     def push_frames(self, frames_hwc: np.ndarray) -> None:
+        self.check_error()
         self._write_queue.put(np.ascontiguousarray(frames_hwc))
 
     def drain_writes(self) -> None:
+        self.check_error()
         self._write_queue.join()
 
     def drain_available(self) -> list[np.ndarray]:
+        self.check_error()
         frames: list[np.ndarray] = []
         while True:
             try:
@@ -132,6 +144,7 @@ class _TvaiWorker:
         return frames
 
     def close_stdin_and_drain(self, timeout: float = 30.0) -> list[np.ndarray]:
+        self.check_error()
         self.drain_writes()
         self._write_queue.put(None)
         if self._writer is not None:
@@ -209,10 +222,11 @@ class TvaiSecondaryRestorer:
         self._workers: list[_TvaiWorker] = []
         self._worker_segments: list[deque[_Segment]] = []
         self._completed: dict[int, list[np.ndarray]] = {}
+        self._push_lock = threading.Lock()
 
     @property
     def preferred_queue_size(self) -> int:
-        return self.num_workers * 2
+        return 2
 
     def _validate_environment(self) -> None:
         data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")
@@ -308,14 +322,15 @@ class TvaiSecondaryRestorer:
         frames_hwc = self._to_numpy_hwc(kept_np)
         n = len(frames_hwc)
 
-        seq = self._next_seq
-        self._next_seq += 1
+        with self._push_lock:
+            seq = self._next_seq
+            self._next_seq += 1
 
-        wi = self._next_worker_idx % self.num_workers
-        self._next_worker_idx += 1
+            wi = self._next_worker_idx % self.num_workers
+            self._next_worker_idx += 1
 
-        self._worker_segments[wi].append(_ClipSegment(seq=seq, expected=n))
-        self._workers[wi].push_frames(frames_hwc)
+            self._worker_segments[wi].append(_ClipSegment(seq=seq, expected=n))
+            self._workers[wi].push_frames(frames_hwc)
         logger.debug("TVAI push seq=%d frames=%d -> worker %d", seq, n, wi)
         return seq
 
@@ -360,19 +375,20 @@ class TvaiSecondaryRestorer:
             (TVAI_PIPELINE_DELAY, self._INPUT_SIZE, self._INPUT_SIZE, 3),
             dtype=np.uint8,
         )
-        for wi in range(len(self._workers)):
-            segs = self._worker_segments[wi]
-            if target_seqs is None:
-                has_target = any(isinstance(s, _ClipSegment) for s in segs)
-            else:
-                has_target = any(isinstance(s, _ClipSegment) and s.seq in target_seqs for s in segs)
-            if not has_target:
-                continue
-            if segs and isinstance(segs[-1], _FillerSegment):
-                continue
-            self._workers[wi].push_frames(filler)
-            segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
-            logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", TVAI_PIPELINE_DELAY, wi, target_seqs)
+        with self._push_lock:
+            for wi in range(len(self._workers)):
+                segs = self._worker_segments[wi]
+                if target_seqs is None:
+                    has_target = any(isinstance(s, _ClipSegment) for s in segs)
+                else:
+                    has_target = any(isinstance(s, _ClipSegment) and s.seq in target_seqs for s in segs)
+                if not has_target:
+                    continue
+                if segs and isinstance(segs[-1], _FillerSegment):
+                    continue
+                self._workers[wi].push_frames(filler)
+                segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
+                logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", TVAI_PIPELINE_DELAY, wi, target_seqs)
 
     def flush_all(self) -> None:
         if not self._started:
