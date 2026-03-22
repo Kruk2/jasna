@@ -71,7 +71,7 @@ class _TvaiWorker:
     def start(self) -> None:
         self._error = None
         self._frame_queue = Queue()
-        self._write_queue = Queue(maxsize=1)
+        self._write_queue = Queue(maxsize=2)
         self._proc = subprocess.Popen(
             self._cmd,
             stdin=subprocess.PIPE,
