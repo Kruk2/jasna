@@ -35,6 +35,7 @@ class Pipeline:
     _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
     _VRAM_FREE_HEADROOM_BYTES = 1024 * 1024 ** 2
     _VRAM_LIMIT_OVERRIDE_GB: float | None = None
+    _RAM_PRESSURE_PERCENT = 94.0
 
     def __init__(
         self,
@@ -259,6 +260,7 @@ class Pipeline:
         fb_drained_event = threading.Event()
         primary_idle_event = threading.Event()
         decode_backpressure_event = threading.Event()
+        ram_pressure = threading.Event()
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
             frame_buffer=frame_buffer,
@@ -268,7 +270,7 @@ class Pipeline:
         )
 
         def _decode_detect_thread():
-            nonlocal peak_fb_size, bp_stall_count, bp_stall_seconds
+            nonlocal peak_fb_size, bp_stall_count, bp_stall_seconds, ram_stall_count, ram_stall_seconds
             try:
                 torch.cuda.set_device(device)
                 tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
@@ -303,6 +305,16 @@ class Pipeline:
 
                             fb_size = len(frame_buffer.frames)
                             peak_fb_size = max(peak_fb_size, fb_size)
+
+                            if ram_pressure.is_set():
+                                t_ram = time.monotonic()
+                                while ram_pressure.is_set():
+                                    if error_holder:
+                                        raise error_holder[0]
+                                    time.sleep(0.05)
+                                ram_stall_seconds += time.monotonic() - t_ram
+                                ram_stall_count += 1
+
                             if frames_since_last_clip_emit >= decode_bp_gap_threshold:
                                 log.debug(
                                     "[decode] gap backpressure enter gap=%d fb=%d",
@@ -495,6 +507,8 @@ class Pipeline:
         peak_fb_size = 0
         bp_stall_count = 0
         bp_stall_seconds = 0.0
+        ram_stall_count = 0
+        ram_stall_seconds = 0.0
 
         def _vram_offload_thread():
             nonlocal vram_max, vram_sum, vram_samples, offload_count, ram_max, ram_sum, ram_samples
@@ -518,6 +532,16 @@ class Pipeline:
                             offload_count += offloaded
                             torch.cuda.empty_cache()
                             continue
+
+                    try:
+                        ram_pct = psutil.virtual_memory().percent
+                        if ram_pct >= self._RAM_PRESSURE_PERCENT:
+                            ram_pressure.set()
+                        else:
+                            ram_pressure.clear()
+                    except Exception:
+                        pass
+
                     headroom = threshold - used
                     if headroom > 2 * (1024 ** 3):
                         stop_offload.wait(timeout=0.2)
@@ -560,6 +584,8 @@ class Pipeline:
         log.info("Frame buffer — peak: %d frames", peak_fb_size)
         if bp_stall_count > 0:
             log.info("Decode backpressure — stalls: %d, total: %.1fs", bp_stall_count, bp_stall_seconds)
+        if ram_stall_count > 0:
+            log.info("Decode RAM stall — stalls: %d, total: %.1fs", ram_stall_count, ram_stall_seconds)
         ss = starvation_stats
         if ss.clips_pushed > 0 or ss.clips_popped > 0:
             log.info(
