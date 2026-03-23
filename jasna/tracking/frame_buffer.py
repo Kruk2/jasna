@@ -37,10 +37,31 @@ class FrameBuffer:
         self.frames: dict[int, PendingFrame] = {}
         self.next_encode_idx: int = 0
         self.blend_mask_fn = blend_mask_fn
-        self._gpu_pinned: set[int] = set()
+        self._pin_count: dict[int, int] = {}
+        self._pin_lock = threading.Lock()
+
+    def _pin(self, idx: int) -> None:
+        with self._pin_lock:
+            self._pin_count[idx] = self._pin_count.get(idx, 0) + 1
+
+    def _unpin(self, idx: int) -> None:
+        with self._pin_lock:
+            c = self._pin_count.get(idx, 0) - 1
+            if c <= 0:
+                self._pin_count.pop(idx, None)
+            else:
+                self._pin_count[idx] = c
+
+    def _is_pinned(self, idx: int) -> bool:
+        with self._pin_lock:
+            return self._pin_count.get(idx, 0) > 0
+
+    def _clear_pin(self, idx: int) -> None:
+        with self._pin_lock:
+            self._pin_count.pop(idx, None)
 
     def _ensure_on_device(self, pending: PendingFrame) -> None:
-        self._gpu_pinned.add(pending.frame_idx)
+        self._pin(pending.frame_idx)
         if pending.frame.device != self.device:
             gpu_frame = _to_device(pending.frame, self.device)
             if pending.blended_frame is pending.frame:
@@ -50,33 +71,74 @@ class FrameBuffer:
                 pending.blended_frame = _to_device(pending.blended_frame, self.device)
                 pending.frame = gpu_frame
 
+    def pin_frames(self, frame_indices: list[int]) -> None:
+        for fi in frame_indices:
+            pending = self.frames.get(fi)
+            if pending is None:
+                continue
+            with pending.device_lock:
+                self._ensure_on_device(pending)
+
+    def unpin_frames(self, frame_indices: list[int]) -> None:
+        for fi in frame_indices:
+            if self._is_pinned(fi):
+                self._unpin(fi)
+
+    def _offload_frame(self, pending: PendingFrame) -> int:
+        if pending.frame.device.type == "cpu":
+            return 0
+        frame_bytes = pending.frame.nelement() * pending.frame.element_size()
+        cpu_frame = pending.frame.cpu()
+        if pending.blended_frame is pending.frame:
+            pending.frame = cpu_frame
+            pending.blended_frame = cpu_frame
+            return frame_bytes
+        else:
+            blended_bytes = pending.blended_frame.nelement() * pending.blended_frame.element_size()
+            pending.blended_frame = pending.blended_frame.cpu()
+            pending.frame = cpu_frame
+            return frame_bytes + blended_bytes
+
     def offload_gpu_frames(self, bytes_to_free: int) -> int:
         count = 0
         freed = 0
-        for idx in list(self.frames):
+        # Pass 1: no pending_clips, descending (newest first — oldest stay on GPU for encode)
+        for idx in reversed(list(self.frames)):
             if freed >= bytes_to_free:
                 break
-            if idx in self._gpu_pinned:
+            if self._is_pinned(idx):
                 continue
             pending = self.frames.get(idx)
             if pending is None:
                 continue
+            if pending.pending_clips:
+                continue
             with pending.device_lock:
-                if idx in self._gpu_pinned:
+                if self._is_pinned(idx):
                     continue
-                if pending.frame.device.type == "cpu":
+                got = self._offload_frame(pending)
+                if got > 0:
+                    freed += got
+                    count += 1
+        # Pass 2: with pending_clips, descending (newest first — oldest close to blend stay on GPU)
+        if freed < bytes_to_free:
+            for idx in reversed(list(self.frames)):
+                if freed >= bytes_to_free:
+                    break
+                if self._is_pinned(idx):
                     continue
-                frame_bytes = pending.frame.nelement() * pending.frame.element_size()
-                cpu_frame = pending.frame.cpu()
-                if pending.blended_frame is pending.frame:
-                    pending.frame = cpu_frame
-                    pending.blended_frame = cpu_frame
-                    freed += frame_bytes
-                else:
-                    freed += frame_bytes + pending.blended_frame.nelement() * pending.blended_frame.element_size()
-                    pending.blended_frame = pending.blended_frame.cpu()
-                    pending.frame = cpu_frame
-                count += 1
+                pending = self.frames.get(idx)
+                if pending is None:
+                    continue
+                if not pending.pending_clips:
+                    continue
+                with pending.device_lock:
+                    if self._is_pinned(idx):
+                        continue
+                    got = self._offload_frame(pending)
+                    if got > 0:
+                        freed += got
+                        count += 1
         if count > 0:
             _log.debug("[fb] offloaded %d gpu frames to cpu (freed ~%.1f MiB)", count, freed / (1024 ** 2))
         return count
@@ -171,10 +233,7 @@ class FrameBuffer:
             blended[:, y1:y2, x1:x2] = original_crop.to(blended.dtype)
 
             pending.pending_clips.discard(clip.track_id)
-            # Always unpin after blend; get_ready_frames re-pins when encoding.
-            # This lets the offload thread reclaim VRAM from frames that are
-            # done blending but stuck behind a not-yet-ready head frame.
-            self._gpu_pinned.discard(frame_idx)
+            self._unpin(frame_idx)
 
     def blend_restored_frame(
         self,
@@ -239,7 +298,7 @@ class FrameBuffer:
             blended[:, y1:y2, x1:x2] = original_crop.to(blended.dtype)
 
         pending.pending_clips.discard(int(track_id))
-        self._gpu_pinned.discard(int(frame_idx))
+        self._unpin(int(frame_idx))
 
     def get_ready_frames(self) -> Iterator[tuple[int, torch.Tensor, int]]:
         while self.next_encode_idx in self.frames:
@@ -250,7 +309,7 @@ class FrameBuffer:
                 self._ensure_on_device(pending)
                 result = (pending.frame_idx, pending.blended_frame, pending.pts)
             del self.frames[self.next_encode_idx]
-            self._gpu_pinned.discard(self.next_encode_idx)
+            self._clear_pin(self.next_encode_idx)
             self.next_encode_idx += 1
             yield result
 
@@ -260,5 +319,5 @@ class FrameBuffer:
             with pending.device_lock:
                 self._ensure_on_device(pending)
                 result = (pending.frame_idx, pending.blended_frame, pending.pts)
-            self._gpu_pinned.discard(frame_idx)
+            self._clear_pin(frame_idx)
             yield result

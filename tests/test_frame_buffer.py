@@ -658,10 +658,10 @@ def test_gpu_pinned_prevents_offload() -> None:
     fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids={1})
     fb.add_frame(frame_idx=1, pts=20, frame=torch.zeros((3, 4, 4), dtype=torch.uint8), clip_track_ids=set())
 
-    fb._gpu_pinned.add(0)
+    fb._pin(0)
     fb.offload_gpu_frames(1024)
-    assert 0 in fb._gpu_pinned
-    fb._gpu_pinned.discard(0)
+    assert fb._is_pinned(0)
+    fb._unpin(0)
 
 
 def test_ensure_on_device_pins_frame() -> None:
@@ -671,7 +671,7 @@ def test_ensure_on_device_pins_frame() -> None:
 
     pending = fb.frames[0]
     fb._ensure_on_device(pending)
-    assert 0 in fb._gpu_pinned
+    assert fb._is_pinned(0)
 
 
 def test_blend_restored_frame_unpins_when_complete() -> None:
@@ -693,7 +693,7 @@ def test_blend_restored_frame_unpins_when_complete() -> None:
         crop_shape=(crop_h, crop_w),
         pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
     )
-    assert 0 not in fb._gpu_pinned
+    assert not fb._is_pinned(0)
 
 
 def test_blend_restored_frame_unpins_when_pending_clips_remain() -> None:
@@ -715,7 +715,7 @@ def test_blend_restored_frame_unpins_when_pending_clips_remain() -> None:
         crop_shape=(crop_h, crop_w),
         pad_offset=(0, 0), resize_shape=(crop_h, crop_w),
     )
-    assert 0 not in fb._gpu_pinned
+    assert not fb._is_pinned(0)
     assert 2 in fb.frames[0].pending_clips
 
 
@@ -794,4 +794,95 @@ def test_get_ready_frames_unpins_after_yield() -> None:
     fb.add_frame(frame_idx=0, pts=10, frame=frame, clip_track_ids=set())
 
     list(fb.get_ready_frames())
-    assert 0 not in fb._gpu_pinned
+    assert not fb._is_pinned(0)
+
+
+def test_pin_frames_prevents_offload() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    for i in range(3):
+        fb.add_frame(frame_idx=i, pts=i * 10, frame=torch.zeros((3, 4, 4), dtype=torch.uint8), clip_track_ids={1})
+
+    fb.pin_frames([0, 1])
+    assert fb._is_pinned(0)
+    assert fb._is_pinned(1)
+    assert not fb._is_pinned(2)
+
+
+def test_unpin_frames_allows_offload() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    fb.add_frame(frame_idx=0, pts=10, frame=torch.zeros((3, 4, 4), dtype=torch.uint8), clip_track_ids={1})
+    fb.pin_frames([0])
+    assert fb._is_pinned(0)
+    fb.unpin_frames([0])
+    assert not fb._is_pinned(0)
+
+
+def test_pin_ref_counting_overlapping_clips() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    fb.add_frame(frame_idx=5, pts=50, frame=torch.zeros((3, 4, 4), dtype=torch.uint8), clip_track_ids={1, 2})
+
+    fb.pin_frames([5])
+    fb.pin_frames([5])
+    assert fb._pin_count[5] == 2
+
+    fb.unpin_frames([5])
+    assert fb._is_pinned(5)
+
+    fb.unpin_frames([5])
+    assert not fb._is_pinned(5)
+
+
+def test_offload_prefers_no_pending_clips_first() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame_shape = (3, 64, 64)
+    frame_bytes = 3 * 64 * 64
+
+    fb.add_frame(frame_idx=0, pts=10, frame=_FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8)), clip_track_ids={1})
+    fb.add_frame(frame_idx=1, pts=20, frame=_FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8)), clip_track_ids=set())
+    fb.add_frame(frame_idx=2, pts=30, frame=_FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8)), clip_track_ids={2})
+
+    count = fb.offload_gpu_frames(frame_bytes)
+    assert count == 1
+    assert isinstance(fb.frames[0].frame, _FakeGpuTensor)
+    assert not isinstance(fb.frames[1].frame, _FakeGpuTensor)
+    assert isinstance(fb.frames[2].frame, _FakeGpuTensor)
+
+
+def test_offload_pass2_newest_pending_first() -> None:
+    fb = FrameBuffer(device=torch.device("cpu"))
+    frame_shape = (3, 64, 64)
+    frame_bytes = 3 * 64 * 64
+
+    fb.add_frame(frame_idx=0, pts=10, frame=_FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8)), clip_track_ids={1})
+    fb.add_frame(frame_idx=1, pts=20, frame=_FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8)), clip_track_ids={1})
+    fb.add_frame(frame_idx=2, pts=30, frame=_FakeGpuTensor(torch.zeros(frame_shape, dtype=torch.uint8)), clip_track_ids={1})
+
+    count = fb.offload_gpu_frames(frame_bytes)
+    assert count == 1
+    assert isinstance(fb.frames[0].frame, _FakeGpuTensor)
+    assert isinstance(fb.frames[1].frame, _FakeGpuTensor)
+    assert not isinstance(fb.frames[2].frame, _FakeGpuTensor)
+
+
+def test_pin_count_thread_safety() -> None:
+    import threading
+    fb = FrameBuffer(device=torch.device("cpu"))
+    fb.add_frame(frame_idx=0, pts=10, frame=torch.zeros((3, 4, 4), dtype=torch.uint8), clip_track_ids=set())
+
+    iterations = 10000
+    barrier = threading.Barrier(2)
+
+    def pin_unpin_loop():
+        barrier.wait()
+        for _ in range(iterations):
+            fb._pin(0)
+            fb._unpin(0)
+
+    t1 = threading.Thread(target=pin_unpin_loop)
+    t2 = threading.Thread(target=pin_unpin_loop)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert fb._pin_count.get(0, 0) == 0

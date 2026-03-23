@@ -265,7 +265,7 @@ class RestorationPipeline:
         restored_frames = sr.restored_frames
         masks = sr.masks
 
-        if restored_frames and restored_frames[0].device != target_device:
+        if restored_frames and any(f.device != target_device for f in restored_frames):
             stacked = torch.stack(restored_frames)
             stacked = _to_device(stacked, target_device)
             restored_frames = list(stacked.unbind(0))
