@@ -612,7 +612,7 @@ class TestPipelineRun:
         restorer.pop_completed.return_value = []
         restorer.has_pending = True
         restorer.flush_all.return_value = None
-        restorer.flush_pending.return_value = None
+        restorer.flush_pending.return_value = True
         p.restoration_pipeline.secondary_restorer = restorer
 
         secondary_queue= FrameQueue(max_frames=9999)
@@ -687,6 +687,7 @@ class TestPipelineRun:
             nonlocal flush_pending_called
             flush_pending_called = True
             restorer.has_pending = False
+            return True
 
         restorer.flush_pending.side_effect = on_flush_pending
         p.restoration_pipeline.secondary_restorer = restorer
@@ -925,6 +926,7 @@ class TestPipelineRun:
 
         def mock_flush(target_seqs=None):
             flush_calls.append(target_seqs)
+            return True
 
         def mock_pop():
             if len(flush_calls) >= 1 and 0 not in returned_seqs:

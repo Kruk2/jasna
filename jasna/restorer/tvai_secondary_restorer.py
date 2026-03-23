@@ -63,6 +63,7 @@ class _TvaiWorker:
         self._proc: subprocess.Popen | None = None
         self._reader: threading.Thread | None = None
         self._writer: threading.Thread | None = None
+        self._stderr_reader: threading.Thread | None = None
         self._frame_queue: Queue[np.ndarray | None] = Queue()
         self._write_queue = FrameQueue(max_write_frames)
         self._error: BaseException | None = None
@@ -85,6 +86,8 @@ class _TvaiWorker:
         self._reader.start()
         self._writer = threading.Thread(target=self._writer_loop, daemon=True)
         self._writer.start()
+        self._stderr_reader = threading.Thread(target=self._stderr_loop, daemon=True)
+        self._stderr_reader.start()
 
     def _reader_loop(self) -> None:
         assert self._proc is not None
@@ -103,6 +106,19 @@ class _TvaiWorker:
             self._error = e
         finally:
             self._frame_queue.put(None)
+
+    def _stderr_loop(self) -> None:
+        assert self._proc is not None
+        stderr = self._proc.stderr
+        if stderr is None:
+            return
+        try:
+            for line in stderr:
+                msg = line.decode("utf-8", errors="replace").rstrip()
+                if msg:
+                    logger.debug("TVAI ffmpeg stderr: %s", msg)
+        except Exception:
+            pass
 
     def _writer_loop(self) -> None:
         assert self._proc is not None and self._proc.stdin is not None
@@ -161,6 +177,9 @@ class _TvaiWorker:
                 pass
         if self._reader is not None:
             self._reader.join(timeout=timeout)
+        if self._stderr_reader is not None:
+            self._stderr_reader.join(timeout=timeout)
+            self._stderr_reader = None
 
         frames: list[np.ndarray] = []
         while True:
@@ -188,6 +207,9 @@ class _TvaiWorker:
         if self._reader is not None:
             self._reader.join(timeout=5)
             self._reader = None
+        if self._stderr_reader is not None:
+            self._stderr_reader.join(timeout=5)
+            self._stderr_reader = None
 
     def restart(self) -> None:
         self.kill()
@@ -226,7 +248,8 @@ class TvaiSecondaryRestorer:
         self._workers: list[_TvaiWorker] = []
         self._worker_segments: list[deque[_Segment]] = []
         self._completed: dict[int, list[np.ndarray]] = {}
-        self._push_lock = threading.Lock()
+        self._seq_lock = threading.Lock()
+        self._worker_locks: list[threading.Lock] = []
 
     @property
     def preferred_queue_size(self) -> int:
@@ -261,6 +284,7 @@ class TvaiSecondaryRestorer:
             w.start()
             self._workers.append(w)
             self._worker_segments.append(deque())
+            self._worker_locks.append(threading.Lock())
         self._started = True
 
     def build_ffmpeg_cmd(self) -> list[str]:
@@ -308,7 +332,7 @@ class TvaiSecondaryRestorer:
 
     def _pending_frames(self, wi: int) -> int:
         total = 0
-        for seg in self._worker_segments[wi]:
+        for seg in list(self._worker_segments[wi]):
             if isinstance(seg, _ClipSegment):
                 total += seg.expected - len(seg.collected)
             elif isinstance(seg, _FillerSegment):
@@ -340,12 +364,12 @@ class TvaiSecondaryRestorer:
         frames_hwc = self._to_numpy_hwc(kept_np)
         n = len(frames_hwc)
 
-        with self._push_lock:
+        with self._seq_lock:
             seq = self._next_seq
             self._next_seq += 1
-
             wi = self._least_pending_worker()
 
+        with self._worker_locks[wi]:
             self._worker_segments[wi].append(_ClipSegment(seq=seq, expected=n))
             self._workers[wi].push_frames(frames_hwc)
         logger.debug("TVAI push seq=%d frames=%d -> worker %d", seq, n, wi)
@@ -353,6 +377,8 @@ class TvaiSecondaryRestorer:
 
     def _drain_worker(self, wi: int) -> None:
         frames = self._workers[wi].drain_available()
+        if not frames:
+            return
         segments = self._worker_segments[wi]
         for frame in frames:
             if not segments:
@@ -371,7 +397,8 @@ class TvaiSecondaryRestorer:
 
     def pop_completed(self) -> list[tuple[int, list[np.ndarray]]]:
         for wi in range(len(self._workers)):
-            self._drain_worker(wi)
+            with self._worker_locks[wi]:
+                self._drain_worker(wi)
         result: list[tuple[int, list[np.ndarray]]] = []
         for seq in sorted(self._completed.keys()):
             result.append((seq, self._completed.pop(seq)))
@@ -382,18 +409,21 @@ class TvaiSecondaryRestorer:
         return any(
             isinstance(s, _ClipSegment)
             for segs in self._worker_segments
-            for s in segs
+            for s in list(segs)
         )
 
-    def flush_pending(self, target_seqs: set[int] | None = None) -> None:
+    def flush_pending(self, target_seqs: set[int] | None = None) -> bool:
         if not self._started:
-            return
+            return False
         filler = np.zeros(
             (TVAI_PIPELINE_DELAY, self._INPUT_SIZE, self._INPUT_SIZE, 3),
             dtype=np.uint8,
         )
-        with self._push_lock:
-            for wi in range(len(self._workers)):
+        flushed = False
+        for wi in range(len(self._workers)):
+            if not self._worker_locks[wi].acquire(blocking=False):
+                continue
+            try:
                 segs = self._worker_segments[wi]
                 if target_seqs is None:
                     has_target = any(isinstance(s, _ClipSegment) for s in segs)
@@ -405,13 +435,18 @@ class TvaiSecondaryRestorer:
                     continue
                 self._workers[wi].push_frames(filler)
                 segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
+                flushed = True
                 logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", TVAI_PIPELINE_DELAY, wi, target_seqs)
+            finally:
+                self._worker_locks[wi].release()
+        return flushed
 
     def flush_all(self) -> None:
         if not self._started:
             return
         for wi in range(len(self._workers)):
-            remaining = self._workers[wi].close_stdin_and_drain()
+            with self._worker_locks[wi]:
+                remaining = self._workers[wi].close_stdin_and_drain()
             segments = self._worker_segments[wi]
             for frame in remaining:
                 if not segments:
@@ -459,5 +494,6 @@ class TvaiSecondaryRestorer:
             w.kill()
         self._workers.clear()
         self._worker_segments.clear()
+        self._worker_locks.clear()
         self._completed.clear()
         self._started = False
