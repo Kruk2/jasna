@@ -21,10 +21,12 @@ class ClipRestoreItem:
 
 @dataclass
 class _RestoreResultBase:
-    clip: TrackedClip
+    track_id: int
+    start_frame: int
     frame_count: int
     frame_shape: tuple[int, int]
     frame_device: torch.device
+    masks: list[torch.Tensor]
     keep_start: int
     keep_end: int
     crossfade_weights: dict[int, float] | None
@@ -42,6 +44,7 @@ class PrimaryRestoreResult(_RestoreResultBase):
 @dataclass
 class SecondaryRestoreResult(_RestoreResultBase):
     restored_frames: list[torch.Tensor]
+    clip_keep_offset: int = 0
 
 
 @dataclass

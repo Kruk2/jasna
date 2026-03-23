@@ -490,7 +490,8 @@ def test_prepare_and_run_primary(monkeypatch) -> None:
 
     result = pipeline.prepare_and_run_primary(clip, frames, 0, 3, None)
 
-    assert result.clip is clip
+    assert result.track_id == clip.track_id
+    assert result.start_frame == clip.start_frame
     assert result.frame_count == 3
     assert result.frame_shape == (30, 40)
     assert result.frame_device == frames[0].device
@@ -628,7 +629,8 @@ def test_build_secondary_result(monkeypatch) -> None:
     restored_frames = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8) for _ in range(3)]
     sr = pipeline.build_secondary_result(pr, restored_frames)
 
-    assert sr.clip is clip
+    assert sr.track_id == clip.track_id
+    assert sr.start_frame == clip.start_frame
     assert sr.frame_count == 3
     assert sr.frame_shape == (30, 40)
     assert sr.frame_device == frames[0].device
@@ -654,21 +656,4 @@ def test_build_secondary_result_with_denoise(monkeypatch) -> None:
     assert sr.restored_frames[0].dtype == torch.uint8
 
 
-def test_restore_and_blend_clip_needs_blend_false(monkeypatch) -> None:
-    """Cover line 200: needs_blend returns False in restore_and_blend_clip."""
-    from jasna.tracking.frame_buffer import FrameBuffer
-
-    clip, frames = _make_clip_and_frames(monkeypatch, t=2)
-    pipeline = RestorationPipeline(restorer=_IdentityRestorer())  # type: ignore[arg-type]
-
-    fb = FrameBuffer(device=torch.device("cpu"))
-    fb.add_frame(0, pts=0, frame=frames[0], clip_track_ids=set())
-    fb.add_frame(1, pts=1, frame=frames[1], clip_track_ids=set())
-
-    pipeline.restore_and_blend_clip(
-        clip, frames, keep_start=0, keep_end=2, frame_buffer=fb,
-    )
-
-    assert fb.frames[0].blended_frame is fb.frames[0].frame
-    assert fb.frames[1].blended_frame is fb.frames[1].frame
 

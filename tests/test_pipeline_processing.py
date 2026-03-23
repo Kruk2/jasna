@@ -1,3 +1,5 @@
+from functools import partial
+
 import numpy as np
 import torch
 
@@ -53,31 +55,25 @@ class _FakeRestorationPipeline:
             resize_shapes=resize_shapes,
         )
 
-    def restore_and_blend_clip(
-        self,
-        clip: TrackedClip,
-        frames: list[torch.Tensor],
-        *,
-        keep_start: int,
-        keep_end: int,
-        frame_buffer: FrameBuffer,
-        crossfade_weights: dict[int, float] | None = None,
-    ) -> None:
-        restored = self.restore_clip(clip, frames, keep_start=int(keep_start), keep_end=int(keep_end))
-        frame_buffer.blend_clip(clip, restored, keep_start=int(keep_start), keep_end=int(keep_end))
+    def process_clip_item(self, ci: ClipRestoreItem, frame_buffer: FrameBuffer) -> None:
+        restored = self.restore_clip(ci.clip, ci.frames, keep_start=ci.keep_start, keep_end=ci.keep_end)
+        frame_buffer.blend_clip(ci.clip, restored, keep_start=ci.keep_start, keep_end=ci.keep_end)
 
 
-def _drain_queue(clip_queue: FrameQueue, frame_buffer: FrameBuffer, pipeline) -> None:
+def _process_clip_real(pipeline, ci: ClipRestoreItem, frame_buffer: FrameBuffer) -> None:
+    pr = pipeline.prepare_and_run_primary(ci.clip, ci.frames, ci.keep_start, ci.keep_end, ci.crossfade_weights)
+    restored = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
+    sr = pipeline.build_secondary_result(pr, restored)
+    for _ in pipeline.blend_secondary_result(sr, frame_buffer):
+        pass
+
+
+def _drain_queue(clip_queue: FrameQueue, frame_buffer: FrameBuffer, process_fn) -> None:
     while not clip_queue.empty():
         item = clip_queue.get(timeout=0)
         if item is _SENTINEL:
             break
-        ci: ClipRestoreItem = item  # type: ignore[assignment]
-        pipeline.restore_and_blend_clip(
-            ci.clip, ci.frames,
-            keep_start=ci.keep_start, keep_end=ci.keep_end,
-            frame_buffer=frame_buffer, crossfade_weights=ci.crossfade_weights,
-        )
+        process_fn(item, frame_buffer)
 
 
 def _make_empty_det_batch(*, batch_size: int) -> Detections:
@@ -106,7 +102,7 @@ def _run_batches(
     discard_margin: int,
     blend_frames: int = 0,
     detections_fn,
-    pipeline,
+    process_fn,
 ) -> list[tuple[int, torch.Tensor, int]]:
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
     fb = FrameBuffer(device=torch.device("cpu"))
@@ -124,7 +120,7 @@ def _run_batches(
             discard_margin=discard_margin, blend_frames=blend_frames,
             raw_frame_context=raw_frame_context,
         )
-        _drain_queue(clip_queue, fb, pipeline)
+        _drain_queue(clip_queue, fb, process_fn)
         frame_idx = res.next_frame_idx
 
     finalize_processing(
@@ -132,7 +128,7 @@ def _run_batches(
         discard_margin=discard_margin, blend_frames=blend_frames,
         raw_frame_context=raw_frame_context,
     )
-    _drain_queue(clip_queue, fb, pipeline)
+    _drain_queue(clip_queue, fb, process_fn)
 
     ready = list(fb.get_ready_frames())
     ready.extend(fb.flush())
@@ -150,7 +146,7 @@ def test_process_batch_and_finalize_overlap_discard_delays_tail_until_continuati
     out = _run_batches(
         pts_lists=[[0, 1], [2, 3], [4, 5]],
         batch_size=batch_size, max_clip_size=6, discard_margin=discard_margin,
-        detections_fn=detections_fn, pipeline=rest,
+        detections_fn=detections_fn, process_fn=rest.process_clip_item,
     )
     assert [x[0] for x in out] == [0, 1, 2, 3, 4, 5]
 
@@ -167,7 +163,7 @@ def test_process_batch_with_crossfade_outputs_all_frames_in_order() -> None:
     out = _run_batches(
         pts_lists=[[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]],
         batch_size=batch_size, max_clip_size=6, discard_margin=discard_margin,
-        blend_frames=blend_frames, detections_fn=detections_fn, pipeline=rest,
+        blend_frames=blend_frames, detections_fn=detections_fn, process_fn=rest.process_clip_item,
     )
     out_indices = [x[0] for x in out]
     assert out_indices == list(range(10)), f"expected frames 0-9, got {out_indices}"
@@ -184,7 +180,7 @@ def test_process_batch_without_discard_encodes_all_frames() -> None:
     out = _run_batches(
         pts_lists=[[0, 1], [2, 3]],
         batch_size=batch_size, max_clip_size=4, discard_margin=discard_margin,
-        detections_fn=detections_fn, pipeline=rest,
+        detections_fn=detections_fn, process_fn=rest.process_clip_item,
     )
     assert [x[0] for x in out] == [0, 1, 2, 3]
 
@@ -202,7 +198,7 @@ def test_zero_overlap_split_blends_all_frames_including_boundary() -> None:
     out = _run_batches(
         pts_lists=[[pts] for pts in range(5)],
         batch_size=batch_size, max_clip_size=max_clip_size, discard_margin=discard_margin,
-        detections_fn=detections_fn, pipeline=rest,
+        detections_fn=detections_fn, process_fn=rest.process_clip_item,
     )
     out_indices = [x[0] for x in out]
     assert out_indices == list(range(5)), f"expected frames 0-4, got {out_indices}"
@@ -266,7 +262,7 @@ def _run_real_pipeline_batches(
             discard_margin=temporal_overlap, blend_frames=blend_frames,
             raw_frame_context=raw_frame_context,
         )
-        _drain_queue(clip_queue, fb, pipeline)
+        _drain_queue(clip_queue, fb, partial(_process_clip_real, pipeline))
         frame_idx = res.next_frame_idx
 
     finalize_processing(
@@ -274,7 +270,7 @@ def _run_real_pipeline_batches(
         discard_margin=temporal_overlap, blend_frames=blend_frames,
         raw_frame_context=raw_frame_context,
     )
-    _drain_queue(clip_queue, fb, pipeline)
+    _drain_queue(clip_queue, fb, partial(_process_clip_real, pipeline))
 
     ready = list(fb.get_ready_frames())
     ready.extend(fb.flush())
@@ -325,19 +321,9 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
     captured: list[tuple[int, int, dict[int, float] | None]] = []
 
     class _CapturePipeline(_FakeRestorationPipeline):
-        def restore_and_blend_clip(
-            self,
-            clip: TrackedClip,
-            frames: list[torch.Tensor],
-            *,
-            keep_start: int,
-            keep_end: int,
-            frame_buffer: FrameBuffer,
-            crossfade_weights: dict[int, float] | None = None,
-        ) -> None:
-            captured.append((clip.start_frame, clip.frame_count, crossfade_weights))
-            restored = self.restore_clip(clip, frames, keep_start=int(keep_start), keep_end=int(keep_end))
-            frame_buffer.blend_clip(clip, restored, keep_start=int(keep_start), keep_end=int(keep_end))
+        def process_clip_item(self, ci: ClipRestoreItem, frame_buffer: FrameBuffer) -> None:
+            captured.append((ci.clip.start_frame, ci.clip.frame_count, ci.crossfade_weights))
+            super().process_clip_item(ci, frame_buffer)
 
     rest = _CapturePipeline()
 
@@ -355,7 +341,7 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
             discard_margin=discard_margin, blend_frames=blend_frames,
             raw_frame_context=raw_frame_context,
         )
-        _drain_queue(clip_queue, fb, rest)
+        _drain_queue(clip_queue, fb, rest.process_clip_item)
         frame_idx = res.next_frame_idx
 
     finalize_processing(
@@ -363,7 +349,7 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
         discard_margin=discard_margin, blend_frames=blend_frames,
         raw_frame_context=raw_frame_context,
     )
-    _drain_queue(clip_queue, fb, rest)
+    _drain_queue(clip_queue, fb, rest.process_clip_item)
 
     assert len(captured) >= 3
 
@@ -476,13 +462,13 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
                 clip_queue=q, discard_margin=discard_margin, blend_frames=bf,
                 raw_frame_context=ctx,
             )
-            _drain_queue(q, fb, p)
+            _drain_queue(q, fb, partial(_process_clip_real, p))
             fi = res.next_frame_idx
         finalize_processing(
             tracker=t, frame_buffer=fb, clip_queue=q,
             discard_margin=discard_margin, blend_frames=bf, raw_frame_context=ctx,
         )
-        _drain_queue(q, fb, p)
+        _drain_queue(q, fb, partial(_process_clip_real, p))
         ready = list(fb.get_ready_frames())
         ready.extend(fb.flush())
         return {idx: blended for idx, blended, _ in ready}
@@ -559,19 +545,9 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
     captured_weights: list[dict[int, float] | None] = []
 
     class _CapturePipeline(_FakeRestorationPipeline):
-        def restore_and_blend_clip(
-            self,
-            clip: TrackedClip,
-            frames: list[torch.Tensor],
-            *,
-            keep_start: int,
-            keep_end: int,
-            frame_buffer: FrameBuffer,
-            crossfade_weights: dict[int, float] | None = None,
-        ) -> None:
-            captured_weights.append(crossfade_weights)
-            restored = self.restore_clip(clip, frames, keep_start=int(keep_start), keep_end=int(keep_end))
-            frame_buffer.blend_clip(clip, restored, keep_start=int(keep_start), keep_end=int(keep_end))
+        def process_clip_item(self, ci: ClipRestoreItem, frame_buffer: FrameBuffer) -> None:
+            captured_weights.append(ci.crossfade_weights)
+            super().process_clip_item(ci, frame_buffer)
 
     rest = _CapturePipeline()
 
@@ -589,7 +565,7 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
             discard_margin=discard_margin, blend_frames=blend_frames,
             raw_frame_context=raw_frame_context,
         )
-        _drain_queue(clip_queue, fb, rest)
+        _drain_queue(clip_queue, fb, rest.process_clip_item)
         frame_idx = res.next_frame_idx
 
     finalize_processing(
@@ -597,7 +573,7 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
         discard_margin=discard_margin, blend_frames=blend_frames,
         raw_frame_context=raw_frame_context,
     )
-    _drain_queue(clip_queue, fb, rest)
+    _drain_queue(clip_queue, fb, rest.process_clip_item)
 
     first_weights = captured_weights[0]
     assert first_weights is not None, "split clip should have parent crossfade weights"

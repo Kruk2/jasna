@@ -38,22 +38,6 @@ def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int])
     return image
 
 
-class _IdentitySecondaryRestorer:
-    name = "identity"
-    num_workers = 1
-    preferred_queue_size = 2
-    prefers_cpu_input = False
-
-    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
-        t = frames_256.shape[0]
-        ks = max(0, keep_start)
-        ke = min(t, keep_end)
-        if ks >= ke:
-            return []
-        kept = frames_256[ks:ke]
-        return list(kept.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0))
-
-
 class RestorationPipeline:
     def __init__(
         self,
@@ -91,9 +75,6 @@ class RestorationPipeline:
         if self.secondary_restorer is not None:
             return bool(getattr(self.secondary_restorer, "prefers_cpu_input", False))
         return False
-
-    def identity_secondary_restorer(self) -> _IdentitySecondaryRestorer:
-        return _IdentitySecondaryRestorer()
 
     def _apply_denoise(self, frames: torch.Tensor) -> torch.Tensor:
         return apply_denoise(frames, self._denoise_strength)
@@ -200,60 +181,6 @@ class RestorationPipeline:
         y1 = int(round((pt + rh) * out_h / RESTORATION_SIZE))
         return (x0, y0), (y1 - y0, x1 - x0)
 
-    def restore_and_blend_clip(
-        self,
-        clip: TrackedClip,
-        frames: list[torch.Tensor],
-        *,
-        keep_start: int,
-        keep_end: int,
-        frame_buffer: FrameBuffer,
-        crossfade_weights: dict[int, float] | None = None,
-    ) -> None:
-        t = len(frames)
-        ks = max(0, keep_start)
-        ke = min(t, keep_end)
-
-        for i, frame_idx in enumerate(clip.frame_indices()):
-            if not (ks <= i < ke):
-                pending = frame_buffer.frames.get(frame_idx)
-                if pending is not None:
-                    pending.pending_clips.discard(clip.track_id)
-
-        if ks >= ke:
-            return
-
-        resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
-        primary_raw = self.restorer.raw_process(resized_crops)
-        if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
-            primary_raw = self._apply_denoise(primary_raw)
-
-        frame_h, frame_w = frames[0].shape[1], frames[0].shape[2]
-        restored_frames = self._run_secondary(primary_raw, ks, ke)
-
-        for local_i, i in enumerate(range(ks, ke)):
-            frame_idx = clip.start_frame + i
-            track_id = clip.track_id
-            if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=track_id):
-                continue
-
-            frame_u8 = restored_frames[local_i]
-            pad_offset, resize_shape = self._scale_offsets(frame_u8, pad_offsets[i], resize_shapes[i])
-            cw = crossfade_weights.get(i, 1.0) if crossfade_weights else 1.0
-
-            frame_buffer.blend_restored_frame(
-                frame_idx=frame_idx,
-                track_id=track_id,
-                restored=frame_u8,
-                mask_lr=clip.masks[i],
-                frame_shape=(frame_h, frame_w),
-                enlarged_bbox=enlarged_bboxes[i],
-                crop_shape=crop_shapes[i],
-                pad_offset=pad_offset,
-                resize_shape=resize_shape,
-                crossfade_weight=cw,
-            )
-
     def prepare_and_run_primary(
         self,
         clip: TrackedClip,
@@ -268,10 +195,12 @@ class RestorationPipeline:
             primary_raw = self._apply_denoise(primary_raw)
 
         return PrimaryRestoreResult(
-            clip=clip,
+            track_id=clip.track_id,
+            start_frame=clip.start_frame,
             frame_count=len(frames),
             frame_shape=(int(frames[0].shape[1]), int(frames[0].shape[2])),
             frame_device=frames[0].device,
+            masks=clip.masks,
             primary_raw=primary_raw,
             keep_start=keep_start,
             keep_end=keep_end,
@@ -292,19 +221,26 @@ class RestorationPipeline:
             batch_u8 = apply_denoise_u8(batch_u8, self._denoise_strength)
             restored_frames = list(batch_u8.unbind(0))
 
+        ks = max(0, pr.keep_start)
+        ke = min(pr.frame_count, pr.keep_end)
+        kept_count = ke - ks
+
         return SecondaryRestoreResult(
-            clip=pr.clip,
+            track_id=pr.track_id,
+            start_frame=pr.start_frame,
             frame_count=pr.frame_count,
             frame_shape=pr.frame_shape,
             frame_device=pr.frame_device,
+            masks=pr.masks[ks:ke],
             restored_frames=restored_frames,
-            keep_start=pr.keep_start,
-            keep_end=pr.keep_end,
+            keep_start=0,
+            keep_end=kept_count,
             crossfade_weights=pr.crossfade_weights,
-            enlarged_bboxes=pr.enlarged_bboxes,
-            crop_shapes=pr.crop_shapes,
-            pad_offsets=pr.pad_offsets,
-            resize_shapes=pr.resize_shapes,
+            enlarged_bboxes=pr.enlarged_bboxes[ks:ke],
+            crop_shapes=pr.crop_shapes[ks:ke],
+            pad_offsets=pr.pad_offsets[ks:ke],
+            resize_shapes=pr.resize_shapes[ks:ke],
+            clip_keep_offset=ks,
         )
 
     def blend_secondary_result(
@@ -312,39 +248,55 @@ class RestorationPipeline:
         sr: SecondaryRestoreResult,
         frame_buffer: 'FrameBuffer',
     ) -> Iterator[int]:
-        clip = sr.clip
-        t = sr.frame_count
-        ks = max(0, sr.keep_start)
-        ke = min(t, sr.keep_end)
+        kept_count = sr.keep_end
+        clip_offset = sr.clip_keep_offset
 
-        for i, frame_idx in enumerate(clip.frame_indices()):
-            if not (ks <= i < ke):
+        for i in range(sr.frame_count):
+            frame_idx = sr.start_frame + i
+            if not (clip_offset <= i < clip_offset + kept_count):
                 pending = frame_buffer.frames.get(frame_idx)
                 if pending is not None:
-                    pending.pending_clips.discard(clip.track_id)
+                    pending.pending_clips.discard(sr.track_id)
 
-        if ks >= ke:
+        if kept_count <= 0:
             return
 
+        target_device = frame_buffer.device
+        restored_frames = sr.restored_frames
+        masks = sr.masks
+
+        if restored_frames and restored_frames[0].device != target_device:
+            stacked = torch.stack(restored_frames)
+            stacked = _to_device(stacked, target_device)
+            restored_frames = list(stacked.unbind(0))
+
+        needs_mask_transfer = any(
+            m.device != target_device for m in masks
+        )
+        if needs_mask_transfer:
+            stacked_masks = torch.stack(masks)
+            stacked_masks = _to_device(stacked_masks, target_device)
+            masks = list(stacked_masks.unbind(0))
+
         frame_h, frame_w = sr.frame_shape
-        for local_i, i in enumerate(range(ks, ke)):
-            frame_idx = clip.start_frame + i
-            track_id = clip.track_id
-            if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=track_id):
+        for local_i in range(kept_count):
+            i_clip = clip_offset + local_i
+            frame_idx = sr.start_frame + i_clip
+            if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=sr.track_id):
                 continue
 
-            frame_u8 = sr.restored_frames[local_i]
-            pad_offset, resize_shape = self._scale_offsets(frame_u8, sr.pad_offsets[i], sr.resize_shapes[i])
-            cw = sr.crossfade_weights.get(i, 1.0) if sr.crossfade_weights else 1.0
+            frame_u8 = restored_frames[local_i]
+            pad_offset, resize_shape = self._scale_offsets(frame_u8, sr.pad_offsets[local_i], sr.resize_shapes[local_i])
+            cw = sr.crossfade_weights.get(i_clip, 1.0) if sr.crossfade_weights else 1.0
 
             frame_buffer.blend_restored_frame(
                 frame_idx=frame_idx,
-                track_id=track_id,
+                track_id=sr.track_id,
                 restored=frame_u8,
-                mask_lr=clip.masks[i],
+                mask_lr=masks[local_i],
                 frame_shape=(frame_h, frame_w),
-                enlarged_bbox=sr.enlarged_bboxes[i],
-                crop_shape=sr.crop_shapes[i],
+                enlarged_bbox=sr.enlarged_bboxes[local_i],
+                crop_shape=sr.crop_shapes[local_i],
                 pad_offset=pad_offset,
                 resize_shape=resize_shape,
                 crossfade_weight=cw,

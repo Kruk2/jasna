@@ -1,38 +1,56 @@
 import torch
 import torch.nn.functional as F
-import logging
 
-logger = logging.getLogger(__name__)
+# BT.709 limited-range RGB→YUV coefficients fused with scale+offset.
+# Row 0: Y  = 64 + 876 * (0.2126*R + 0.7152*G + 0.0722*B)
+# Row 1: U  = 512 + 896 * (-0.114572*R - 0.385428*G + 0.5*B)
+# Row 2: V  = 512 + 896 * (0.5*R - 0.454153*G - 0.045847*B)
+_YUV_MATRIX = torch.tensor([
+    [876.0 * 0.2126,    876.0 * 0.7152,    876.0 * 0.0722],
+    [896.0 * -0.114572, 896.0 * -0.385428, 896.0 * 0.500000],
+    [896.0 * 0.500000,  896.0 * -0.454153, 896.0 * -0.045847],
+], dtype=torch.float32)
+_YUV_OFFSET = torch.tensor([64.0, 512.0, 512.0], dtype=torch.float32)
 
-def _chw_rgb_to_p010_bt709_limited_fallback(img_chw: torch.Tensor) -> torch.Tensor:
-    """Pure PyTorch fallback implementation."""
-    C, H, W = img_chw.shape
-    assert C == 3 and H % 2 == 0 and W % 2 == 0
-    
-    if img_chw.dtype not in (torch.float32, torch.float16, torch.bfloat16):
-        img_chw = img_chw.float() / 255.0
-    
-    R = img_chw[0].float()
-    G = img_chw[1].float()
-    B = img_chw[2].float()
+_cache: dict[torch.device, tuple[torch.Tensor, torch.Tensor]] = {}
 
-    # 10-bit BT.709 limited range: Y: 64-940, U/V: 64-960
-    Yf = 64.0 + 876.0 * (0.2126 * R + 0.7152 * G + 0.0722 * B)
-    Uf = 512.0 + 896.0 * (-0.114572 * R - 0.385428 * G + 0.500000 * B)
-    Vf = 512.0 + 896.0 * (0.500000 * R - 0.454153 * G - 0.045847 * B)
 
-    # Clamp and shift left by 6 for P010 (10-bit in upper bits of 16-bit)
-    Y = (Yf.round().clamp(64, 940) * 64).to(torch.int16)
-
-    # Subsample UV (4:2:0) via avg_pool2d
-    U_ds = (F.avg_pool2d(Uf.unsqueeze(0).unsqueeze(0), 2).squeeze(0).squeeze(0).round().clamp(64, 960) * 64).to(torch.int16)
-    V_ds = (F.avg_pool2d(Vf.unsqueeze(0).unsqueeze(0), 2).squeeze(0).squeeze(0).round().clamp(64, 960) * 64).to(torch.int16)
-
-    # Interleave U and V
-    uv = torch.stack((U_ds, V_ds), dim=-1).reshape(U_ds.shape[0], -1)
-
-    return torch.cat([Y, uv], dim=0).contiguous()
+def _get_coeffs(device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    cached = _cache.get(device)
+    if cached is not None:
+        return cached
+    mat = _YUV_MATRIX.to(device=device)
+    off = _YUV_OFFSET.to(device=device)
+    _cache[device] = (mat, off)
+    return mat, off
 
 
 def chw_rgb_to_p010_bt709_limited(img_chw: torch.Tensor) -> torch.Tensor:
-    return _chw_rgb_to_p010_bt709_limited_fallback(img_chw)
+    C, H, W = img_chw.shape
+
+    if img_chw.dtype not in (torch.float32, torch.float16, torch.bfloat16):
+        rgb = img_chw.float().div_(255.0)
+    else:
+        rgb = img_chw.float()
+
+    mat, off = _get_coeffs(rgb.device)
+
+    # (3, H*W) matmul → (3, H*W) → (3, H, W): produces Y, U, V planes
+    yuv = mat.mm(rgb.reshape(3, -1)).reshape(3, H, W)
+    yuv[0].add_(off[0])
+    yuv[1].add_(off[1])
+    yuv[2].add_(off[2])
+
+    # Y plane: clamp to limited range, shift left 6 bits for P010
+    Y = yuv[0].round_().clamp_(64, 940).mul_(64).to(torch.int16)
+
+    # UV planes: subsample 4:2:0 via avg_pool2d on both channels at once
+    uv_full = yuv[1:3].unsqueeze(0)  # (1, 2, H, W)
+    uv_ds = F.avg_pool2d(uv_full, 2).squeeze(0)  # (2, H/2, W/2)
+    uv_ds.round_().clamp_(64, 960).mul_(64)
+    uv_i16 = uv_ds.to(torch.int16)
+
+    # Interleave U and V: (H/2, W) with alternating U, V
+    uv_interleaved = uv_i16.permute(1, 2, 0).reshape(H // 2, W)
+
+    return torch.cat([Y, uv_interleaved], dim=0).contiguous()

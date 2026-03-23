@@ -13,8 +13,6 @@ from jasna.frame_queue import FrameQueue
 import psutil
 import torch
 
-logger = logging.getLogger(__name__)
-
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
@@ -111,11 +109,11 @@ class Pipeline:
         if not pending_prs:
             return None
         earliest_frame = min(
-            pr.clip.start_frame + pr.keep_start for pr in pending_prs.values()
+            pr.start_frame + pr.keep_start for pr in pending_prs.values()
         )
         return {
             seq for seq, pr in pending_prs.items()
-            if pr.clip.start_frame + pr.keep_start <= earliest_frame <= pr.clip.start_frame + pr.keep_end - 1
+            if pr.start_frame + pr.keep_start <= earliest_frame <= pr.start_frame + pr.keep_end - 1
         }
 
     _FLUSH_DELAY = 2.0
@@ -159,7 +157,7 @@ class Pipeline:
                     last_push_time = time.monotonic()
                     flushed_since_last_push = False
                     if push_elapsed > 0.05:
-                        logger.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_elapsed * 1000)
+                        log.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_elapsed * 1000)
             except BaseException as e:
                 pusher_error.append(e)
             finally:
@@ -177,11 +175,11 @@ class Pipeline:
                     batch = batch.to(pr.frame_device, non_blocking=True)
                 tensors = list(batch.unbind(0)) if batch.numel() > 0 else []
                 sr = self.restoration_pipeline.build_secondary_result(pr, tensors)
-                encode_queue.put(sr, frame_count=sr.frame_count)
+                encode_queue.put(sr, frame_count=sr.keep_end)
                 if debug_memory is not None:
                     debug_memory.snapshot(
                         "secondary",
-                        f"clip={pr.clip.track_id} frames={sr.frame_count}",
+                        f"clip={pr.track_id} frames={sr.frame_count}",
                     )
                 forwarded += 1
                 clips_popped += 1
@@ -219,7 +217,7 @@ class Pipeline:
                 if starvation_start is None:
                     starvation_start = time.monotonic()
                 target_seqs = self._earliest_blocking_seqs(dict(pending_prs))
-                logger.debug("[secondary] starvation flush target_seqs=%s", target_seqs)
+                log.debug("[secondary] starvation flush target_seqs=%s", target_seqs)
                 restorer.flush_pending(target_seqs=target_seqs)
                 starvation_count += 1
                 flushed_since_last_push = True
@@ -431,10 +429,10 @@ class Pipeline:
                     )
                     del pr.primary_raw
                     sr = self.restoration_pipeline.build_secondary_result(pr, restored_frames)
-                    encode_queue.put(sr, frame_count=sr.frame_count)
+                    encode_queue.put(sr, frame_count=sr.keep_end)
                     debug_memory.snapshot(
                         "secondary",
-                        f"clip={pr.clip.track_id} frames={sr.frame_count}",
+                        f"clip={pr.track_id} frames={sr.frame_count}",
                     )
             except BaseException as e:
                 log.exception("[secondary] thread crashed")
@@ -479,7 +477,7 @@ class Pipeline:
                                 for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
                                     encoder.encode(ready_frame, ready_pts)
                                     encoded_count += 1
-                            debug_memory.snapshot("encode", f"clip={sr.clip.track_id} blended")
+                            debug_memory.snapshot("encode", f"clip={sr.track_id} blended")
                         except Empty:
                             pass
 
