@@ -141,10 +141,12 @@ class TestPipelineRun:
             return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
-            clip=clip,
+            track_id=clip.track_id,
+            start_frame=clip.start_frame,
             frame_count=2,
             frame_shape=(8, 8),
             frame_device=frames_t[0].device,
+            masks=clip.masks,
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0,
             keep_end=2,
@@ -157,10 +159,12 @@ class TestPipelineRun:
         p.restoration_pipeline.prepare_and_run_primary.return_value = pr_result
 
         sr_result = SecondaryRestoreResult(
-            clip=clip,
+            track_id=clip.track_id,
+            start_frame=clip.start_frame,
             frame_count=2,
             frame_shape=(8, 8),
             frame_device=frames_t[0].device,
+            masks=clip.masks,
             restored_frames=[torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2,
             keep_start=0,
             keep_end=2,
@@ -339,8 +343,8 @@ class TestPipelineRun:
             return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
-            primary_raw=torch.zeros((2, 3, 256, 256)),
+            track_id=clip.track_id, start_frame=clip.start_frame, frame_count=2, frame_shape=(8, 8), frame_device=frames_t[0].device,
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
@@ -381,8 +385,9 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
+            track_id=clip.track_id, start_frame=clip.start_frame,
+            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
@@ -390,8 +395,9 @@ class TestPipelineRun:
 
         restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
         sr_result = SecondaryRestoreResult(
-            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=restored,
+            track_id=pr.track_id, start_frame=pr.start_frame,
+            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            masks=pr.masks, restored_frames=restored,
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
@@ -437,8 +443,9 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
+            track_id=clip.track_id, start_frame=clip.start_frame,
+            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
@@ -484,8 +491,9 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
+            track_id=clip.track_id, start_frame=clip.start_frame,
+            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
@@ -530,8 +538,9 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
+            track_id=clip.track_id, start_frame=clip.start_frame,
+            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
@@ -539,8 +548,9 @@ class TestPipelineRun:
 
         restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
         sr_result = SecondaryRestoreResult(
-            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=restored,
+            track_id=pr.track_id, start_frame=pr.start_frame,
+            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            masks=pr.masks, restored_frames=restored,
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
@@ -588,8 +598,9 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
+            track_id=clip.track_id, start_frame=clip.start_frame,
+            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
@@ -637,8 +648,9 @@ class TestPipelineRun:
             masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
         )
         pr = PrimaryRestoreResult(
-            clip=clip, frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((2, 3, 256, 256)),
+            track_id=clip.track_id, start_frame=clip.start_frame,
+            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
             pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
@@ -646,8 +658,9 @@ class TestPipelineRun:
 
         restored = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
         sr_result = SecondaryRestoreResult(
-            clip=clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=restored,
+            track_id=pr.track_id, start_frame=pr.start_frame,
+            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            masks=pr.masks, restored_frames=restored,
             keep_start=0, keep_end=2, crossfade_weights=None,
             enlarged_bboxes=pr.enlarged_bboxes, crop_shapes=pr.crop_shapes,
             pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
@@ -707,14 +720,11 @@ class TestPipelineRun:
         p._ASYNC_POLL_TIMEOUT = 0.001
 
         def _make_pr(track_id, n_frames):
-            clip = TrackedClip(
-                track_id=track_id, start_frame=0, mask_resolution=(2, 2),
-                bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
-                masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
-            )
+            masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
             return PrimaryRestoreResult(
-                clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-                primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+                track_id=track_id, start_frame=0,
+                frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+                masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
                 keep_start=0, keep_end=n_frames, crossfade_weights=None,
                 enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
                 pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
@@ -746,8 +756,9 @@ class TestPipelineRun:
         restorer.flush_all.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
-            clip=pr.clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
+            track_id=pr.track_id, start_frame=pr.start_frame,
+            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            masks=pr.masks, restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
             crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
             crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
@@ -775,14 +786,11 @@ class TestPipelineRun:
         p._ASYNC_POLL_TIMEOUT = 0.001
 
         def _make_pr(track_id, n_frames):
-            clip = TrackedClip(
-                track_id=track_id, start_frame=0, mask_resolution=(2, 2),
-                bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
-                masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
-            )
+            masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
             return PrimaryRestoreResult(
-                clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-                primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+                track_id=track_id, start_frame=0,
+                frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+                masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
                 keep_start=0, keep_end=n_frames, crossfade_weights=None,
                 enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
                 pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
@@ -814,8 +822,9 @@ class TestPipelineRun:
         restorer.flush_all.return_value = None
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
-            clip=pr.clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
+            track_id=pr.track_id, start_frame=pr.start_frame,
+            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            masks=pr.masks, restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
             crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
             crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
@@ -891,14 +900,11 @@ class TestPipelineRun:
         p._FLUSH_DELAY = 0.05
 
         def _make_pr(track_id, start_frame, n_frames):
-            clip = TrackedClip(
-                track_id=track_id, start_frame=start_frame, mask_resolution=(2, 2),
-                bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
-                masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
-            )
+            masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
             return PrimaryRestoreResult(
-                clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-                primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+                track_id=track_id, start_frame=start_frame,
+                frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+                masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
                 keep_start=0, keep_end=n_frames, crossfade_weights=None,
                 enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
                 pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,
@@ -944,8 +950,9 @@ class TestPipelineRun:
 
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.side_effect = lambda pr, frames: SecondaryRestoreResult(
-            clip=pr.clip, frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
-            restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
+            track_id=pr.track_id, start_frame=pr.start_frame,
+            frame_count=pr.frame_count, frame_shape=pr.frame_shape, frame_device=pr.frame_device,
+            masks=pr.masks, restored_frames=frames, keep_start=pr.keep_start, keep_end=pr.keep_end,
             crossfade_weights=None, enlarged_bboxes=pr.enlarged_bboxes,
             crop_shapes=pr.crop_shapes, pad_offsets=pr.pad_offsets, resize_shapes=pr.resize_shapes,
         )
@@ -980,14 +987,11 @@ class TestEarliestBlockingSeqs:
     def _make_pr(self, start_frame, n_frames, keep_start=0, keep_end=None):
         if keep_end is None:
             keep_end = n_frames
-        clip = TrackedClip(
-            track_id=start_frame, start_frame=start_frame, mask_resolution=(2, 2),
-            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * n_frames,
-            masks=[torch.zeros((2, 2), dtype=torch.bool)] * n_frames,
-        )
+        masks = [torch.zeros((2, 2), dtype=torch.bool)] * n_frames
         return PrimaryRestoreResult(
-            clip=clip, frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
-            primary_raw=torch.zeros((n_frames, 3, 256, 256)),
+            track_id=start_frame, start_frame=start_frame,
+            frame_count=n_frames, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=masks, primary_raw=torch.zeros((n_frames, 3, 256, 256)),
             keep_start=keep_start, keep_end=keep_end, crossfade_weights=None,
             enlarged_bboxes=[(1, 1, 5, 5)] * n_frames, crop_shapes=[(4, 4)] * n_frames,
             pad_offsets=[(126, 126)] * n_frames, resize_shapes=[(4, 4)] * n_frames,

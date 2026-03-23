@@ -263,10 +263,12 @@ class TestPipelineRunSync:
             return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
-            clip=clip,
+            track_id=clip.track_id,
+            start_frame=clip.start_frame,
             frame_count=2,
             frame_shape=(8, 8),
             frame_device=frames_t[0].device,
+            masks=clip.masks,
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0,
             keep_end=2,
@@ -280,10 +282,12 @@ class TestPipelineRunSync:
 
         restored_frames = [torch.randint(0, 255, (3, 256, 256), dtype=torch.uint8)] * 2
         sr_result = SecondaryRestoreResult(
-            clip=clip,
+            track_id=clip.track_id,
+            start_frame=clip.start_frame,
             frame_count=2,
             frame_shape=(8, 8),
             frame_device=frames_t[0].device,
+            masks=clip.masks,
             restored_frames=restored_frames,
             keep_start=0,
             keep_end=2,
@@ -400,10 +404,12 @@ class TestPipelineRunSync:
             return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
-            clip=clip,
+            track_id=clip.track_id,
+            start_frame=clip.start_frame,
             frame_count=2,
             frame_shape=(8, 8),
             frame_device=frames_t[0].device,
+            masks=clip.masks,
             primary_raw=torch.zeros((2, 3, 256, 256)),
             keep_start=0,
             keep_end=2,
