@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 class Pipeline:
     _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
     _VRAM_FREE_HEADROOM_BYTES = 1024 * 1024 ** 2
-    _VRAM_LIMIT_OVERRIDE_GB: float | None = None
+    _VRAM_LIMIT_OVERRIDE_GB: float | None = 12
     _RAM_PRESSURE_PERCENT = 94.0
 
     def __init__(
@@ -292,7 +292,6 @@ class Pipeline:
                 tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
                 discard_margin = int(self.temporal_overlap)
                 blend_frames = (self.temporal_overlap // 3) if self.enable_crossfade else 0
-                raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
 
                 with (
                     NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=device, metadata=metadata) as reader,
@@ -366,7 +365,6 @@ class Pipeline:
                                 clip_queue=clip_queue,
                                 discard_margin=discard_margin,
                                 blend_frames=blend_frames,
-                                raw_frame_context=raw_frame_context,
                             )
 
                             frame_idx = res.next_frame_idx
@@ -387,7 +385,6 @@ class Pipeline:
                             clip_queue=clip_queue,
                             discard_margin=discard_margin,
                             blend_frames=blend_frames,
-                            raw_frame_context=raw_frame_context,
                         )
                         debug_memory.snapshot("decode", "finalized")
                     except Exception:
@@ -418,6 +415,7 @@ class Pipeline:
                         clip_item.keep_end,
                         clip_item.crossfade_weights,
                     )
+                    frame_buffer.unpin_frames(clip_item.clip.frame_indices())
                     if self.restoration_pipeline.secondary_prefers_cpu_input:
                         result.primary_raw = result.primary_raw.cpu()
                     secondary_queue.put(result, frame_count=result.keep_end - result.keep_start)
@@ -616,7 +614,7 @@ class Pipeline:
             )
 
         frame_buffer.frames.clear()
-        frame_buffer._gpu_pinned.clear()
+        frame_buffer._pin_count.clear()
         del frame_buffer
 
         err = error_holder[0] if error_holder else None

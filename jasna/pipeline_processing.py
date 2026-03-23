@@ -30,7 +30,6 @@ def _process_ended_clips(
     max_clip_size: int,
     frame_buffer: FrameBuffer,
     clip_queue: Queue[ClipRestoreItem | object],
-    raw_frame_context: dict[int, dict[int, torch.Tensor]],
 ) -> None:
     bf = min(int(blend_frames), int(discard_margin)) if discard_margin > 0 else 0
     if bf > 0 and discard_margin > 0:
@@ -39,12 +38,10 @@ def _process_ended_clips(
 
     for ended_clip in ended_clips:
         clip = ended_clip.clip
-        ctx = raw_frame_context.get(clip.track_id, {})
+        frame_buffer.pin_frames(clip.frame_indices())
         frames_for_clip: list[torch.Tensor] = []
         for fi in clip.frame_indices():
             f = frame_buffer.get_frame(fi)
-            if f is None:
-                f = ctx.get(fi)
             if f is None:
                 raise RuntimeError(f"missing frame {fi} for clip {clip.track_id}")
             frames_for_clip.append(f)
@@ -57,25 +54,13 @@ def _process_ended_clips(
             overlap_indices, tail_indices = compute_overlap_and_tail_indices(
                 end_frame=clip.end_frame, discard_margin=discard_margin
             )
-            child_ctx: dict[int, torch.Tensor] = {}
-            for fi in overlap_indices:
-                f = frame_buffer.get_frame(fi)
-                if f is None:
-                    f = ctx.get(fi)
-                if f is None:
-                    raise RuntimeError(f"missing overlap frame {fi} for continuation clip {child_id}")
-                child_ctx[fi] = f
-            raw_frame_context[child_id] = child_ctx
+            frame_buffer.add_pending_clip(overlap_indices, child_id)
 
             if bf > 0:
-                seam_frame = clip.end_frame - discard_margin + 1
-                child_pending_indices = list(range(seam_frame - bf, clip.end_frame + 1))
-                frame_buffer.add_pending_clip(child_pending_indices, child_id)
-                non_crossfade_tail = list(range(seam_frame + bf, clip.end_frame + 1))
+                non_crossfade_tail = list(range(clip.end_frame - discard_margin + 1 + bf, clip.end_frame + 1))
                 if non_crossfade_tail:
                     frame_buffer.remove_pending_clip(non_crossfade_tail, clip.track_id)
             else:
-                frame_buffer.add_pending_clip(tail_indices, child_id)
                 frame_buffer.remove_pending_clip(tail_indices, clip.track_id)
 
         keep_start, keep_end = compute_keep_range(
@@ -111,7 +96,6 @@ def _process_ended_clips(
             crossfade_weights=crossfade_weights,
         )
         clip_queue.put(item, frame_count=int(keep_end) - int(keep_start))
-        raw_frame_context.pop(clip.track_id, None)
 
 
 def process_frame_batch(
@@ -127,7 +111,6 @@ def process_frame_batch(
     clip_queue: Queue[ClipRestoreItem | object],
     discard_margin: int,
     blend_frames: int = 0,
-    raw_frame_context: dict[int, dict[int, torch.Tensor]],
 ) -> BatchProcessResult:
     effective_bs = len(pts_list)
     if effective_bs == 0:
@@ -158,7 +141,6 @@ def process_frame_batch(
             max_clip_size=tracker.max_clip_size,
             frame_buffer=frame_buffer,
             clip_queue=clip_queue,
-            raw_frame_context=raw_frame_context,
         )
 
     return BatchProcessResult(
@@ -174,7 +156,6 @@ def finalize_processing(
     clip_queue: Queue[ClipRestoreItem | object],
     discard_margin: int,
     blend_frames: int = 0,
-    raw_frame_context: dict[int, dict[int, torch.Tensor]],
 ) -> None:
     ended_clips = tracker.flush()
     _process_ended_clips(
@@ -184,5 +165,4 @@ def finalize_processing(
         max_clip_size=tracker.max_clip_size,
         frame_buffer=frame_buffer,
         clip_queue=clip_queue,
-        raw_frame_context=raw_frame_context,
     )

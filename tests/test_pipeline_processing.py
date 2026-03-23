@@ -107,8 +107,6 @@ def _run_batches(
     tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
     fb = FrameBuffer(device=torch.device("cpu"))
     clip_queue = FrameQueue(max_frames=9999)
-    raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
-
     frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
     frame_idx = 0
 
@@ -118,7 +116,6 @@ def _run_batches(
             batch_size=batch_size, target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
             discard_margin=discard_margin, blend_frames=blend_frames,
-            raw_frame_context=raw_frame_context,
         )
         _drain_queue(clip_queue, fb, process_fn)
         frame_idx = res.next_frame_idx
@@ -126,7 +123,6 @@ def _run_batches(
     finalize_processing(
         tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
         discard_margin=discard_margin, blend_frames=blend_frames,
-        raw_frame_context=raw_frame_context,
     )
     _drain_queue(clip_queue, fb, process_fn)
 
@@ -250,7 +246,6 @@ def _run_real_pipeline_batches(
             masks=[torch.ones((1, 8, 8), dtype=torch.bool) for _ in range(bs)],
         )
 
-    raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
     frame_idx = 0
 
     for pts in range(num_frames):
@@ -260,7 +255,6 @@ def _run_real_pipeline_batches(
             batch_size=1, target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
             discard_margin=temporal_overlap, blend_frames=blend_frames,
-            raw_frame_context=raw_frame_context,
         )
         _drain_queue(clip_queue, fb, partial(_process_clip_real, pipeline))
         frame_idx = res.next_frame_idx
@@ -268,7 +262,6 @@ def _run_real_pipeline_batches(
     finalize_processing(
         tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
         discard_margin=temporal_overlap, blend_frames=blend_frames,
-        raw_frame_context=raw_frame_context,
     )
     _drain_queue(clip_queue, fb, partial(_process_clip_real, pipeline))
 
@@ -332,14 +325,12 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
 
     frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
     frame_idx = 0
-    raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
     for pts in range(25):
         res = process_frame_batch(
             frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
             batch_size=batch_size, target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
             discard_margin=discard_margin, blend_frames=blend_frames,
-            raw_frame_context=raw_frame_context,
         )
         _drain_queue(clip_queue, fb, rest.process_clip_item)
         frame_idx = res.next_frame_idx
@@ -347,7 +338,6 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
     finalize_processing(
         tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
         discard_margin=discard_margin, blend_frames=blend_frames,
-        raw_frame_context=raw_frame_context,
     )
     _drain_queue(clip_queue, fb, rest.process_clip_item)
 
@@ -452,7 +442,6 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
         fb = FrameBuffer(device=torch.device("cpu"), blend_mask_fn=_ones_blend_mask)
         t = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=discard_margin, iou_threshold=0.0)
         q = FrameQueue(max_frames=9999)
-        ctx: dict[int, dict[int, torch.Tensor]] = {}
         fi = 0
         for pts in range(15):
             res = process_frame_batch(
@@ -460,13 +449,12 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
                 pts_list=[pts], start_frame_idx=fi, batch_size=1, target_hw=(8, 8),
                 detections_fn=detections_fn, tracker=t, frame_buffer=fb,
                 clip_queue=q, discard_margin=discard_margin, blend_frames=bf,
-                raw_frame_context=ctx,
             )
             _drain_queue(q, fb, partial(_process_clip_real, p))
             fi = res.next_frame_idx
         finalize_processing(
             tracker=t, frame_buffer=fb, clip_queue=q,
-            discard_margin=discard_margin, blend_frames=bf, raw_frame_context=ctx,
+            discard_margin=discard_margin, blend_frames=bf,
         )
         _drain_queue(q, fb, partial(_process_clip_real, p))
         ready = list(fb.get_ready_frames())
@@ -556,14 +544,12 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
 
     frames = torch.zeros((batch_size, 3, 8, 8), dtype=torch.uint8)
     frame_idx = 0
-    raw_frame_context: dict[int, dict[int, torch.Tensor]] = {}
     for pts in range(10):
         res = process_frame_batch(
             frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
             batch_size=batch_size, target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
             discard_margin=discard_margin, blend_frames=blend_frames,
-            raw_frame_context=raw_frame_context,
         )
         _drain_queue(clip_queue, fb, rest.process_clip_item)
         frame_idx = res.next_frame_idx
@@ -571,7 +557,6 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
     finalize_processing(
         tracker=tracker, frame_buffer=fb, clip_queue=clip_queue,
         discard_margin=discard_margin, blend_frames=blend_frames,
-        raw_frame_context=raw_frame_context,
     )
     _drain_queue(clip_queue, fb, rest.process_clip_item)
 
