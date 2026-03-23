@@ -117,6 +117,7 @@ class Pipeline:
         }
 
     _FLUSH_DELAY = 2.0
+    _HARD_STALL_TIMEOUT = 10.0
 
     def _run_secondary_loop(
         self,
@@ -196,6 +197,8 @@ class Pipeline:
         starvation_count = 0
         starvation_seconds = 0.0
         starvation_start: float | None = None
+        last_forward_time = time.monotonic()
+        hard_stall_logged = False
 
         while not push_done.is_set():
             if pusher_error:
@@ -206,6 +209,8 @@ class Pipeline:
                     starvation_seconds += time.monotonic() - starvation_start
                     starvation_start = None
                 flushed_since_last_push = False
+                last_forward_time = time.monotonic()
+                hard_stall_logged = False
                 continue
 
             if (
@@ -218,9 +223,21 @@ class Pipeline:
                     starvation_start = time.monotonic()
                 target_seqs = self._earliest_blocking_seqs(dict(pending_prs))
                 log.debug("[secondary] starvation flush target_seqs=%s", target_seqs)
-                restorer.flush_pending(target_seqs=target_seqs)
+                if restorer.flush_pending(target_seqs=target_seqs):
+                    flushed_since_last_push = True
                 starvation_count += 1
-                flushed_since_last_push = True
+
+            if (
+                not hard_stall_logged
+                and pending_prs
+                and time.monotonic() - last_forward_time > self._HARD_STALL_TIMEOUT
+            ):
+                log.warning(
+                    "[secondary] hard stall: no clips forwarded for %.0fs, pending=%d",
+                    time.monotonic() - last_forward_time,
+                    len(pending_prs),
+                )
+                hard_stall_logged = True
 
             time.sleep(self._ASYNC_POLL_TIMEOUT)
 

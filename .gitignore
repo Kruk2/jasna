@@ -19,7 +19,7 @@ htmlcov/
 .nox/
 
 project-details.mdc
-log.txt
+log*.txt
 build/
 dist/
 dist-old/

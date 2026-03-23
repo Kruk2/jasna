@@ -1,6 +1,7 @@
 """Tests for jasna.restorer.tvai_secondary_restorer — persistent worker design."""
 from __future__ import annotations
 
+import threading
 from collections import deque
 from unittest.mock import MagicMock, patch, PropertyMock
 
@@ -180,6 +181,7 @@ def _setup_mock_workers(r, num_workers=None):
         w.drain_available.return_value = []
         w.close_stdin_and_drain.return_value = []
     r._worker_segments = [deque() for _ in range(n)]
+    r._worker_locks = [threading.Lock() for _ in range(n)]
     r._started = True
     return r._workers
 
@@ -502,3 +504,40 @@ class TestClose:
     def test_noop_when_not_started(self):
         r = _make_restorer()
         r.close()
+
+
+class TestPushClipFlushDeadlock:
+    def test_push_clip_does_not_block_flush_pending(self):
+        r = _make_restorer(num_workers=2)
+        workers = _setup_mock_workers(r)
+
+        push_blocked = threading.Event()
+
+        def blocking_push(frames):
+            push_blocked.set()
+            threading.Event().wait(timeout=10)
+
+        workers[0].push_frames.side_effect = blocking_push
+        workers[1].push_frames.side_effect = lambda f: None
+
+        r._worker_segments[1].append(_ClipSegment(seq=99, expected=5))
+
+        push_thread = threading.Thread(
+            target=r.push_clip,
+            args=(torch.rand((3, 3, 256, 256)),),
+            kwargs={"keep_start": 0, "keep_end": 3},
+            daemon=True,
+        )
+        push_thread.start()
+        assert push_blocked.wait(timeout=5), "push_clip never called push_frames"
+
+        flush_done = threading.Event()
+
+        def try_flush():
+            r.flush_pending(target_seqs={99})
+            flush_done.set()
+
+        flush_thread = threading.Thread(target=try_flush, daemon=True)
+        flush_thread.start()
+
+        assert flush_done.wait(timeout=3), "flush_pending deadlocked on _push_lock held by push_clip"
