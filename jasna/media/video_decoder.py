@@ -79,8 +79,8 @@ class NvidiaVideoReader:
         frame_idx = 0
         pkt_data = vali.PacketData()
         eof = False
-        with torch.cuda.stream(self.stream):
-            while True:
+        while True:
+            with torch.cuda.stream(self.stream):
                 batch_tensor_nv = torch.empty((self.batch_size, 3, self.decoder.Height, self.decoder.Width), device=self.device, dtype=torch.uint8)
                 pkts: list[int] = []
                 seek_ctx = None if frame_seek is None else vali.SeekContext(seek_frame=frame_seek)
@@ -105,6 +105,6 @@ class NvidiaVideoReader:
                     frame_idx += 1
                     pkts.append(pkt_data.pts)
                 self.stream.synchronize()
-                yield batch_tensor_nv, pkts
-                if eof:
-                    break
+            yield batch_tensor_nv, pkts
+            if eof:
+                break
