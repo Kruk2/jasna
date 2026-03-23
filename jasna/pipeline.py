@@ -32,7 +32,9 @@ log = logging.getLogger(__name__)
 class Pipeline:
     _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
     _VRAM_FREE_HEADROOM_BYTES = 1024 * 1024 ** 2
-    _VRAM_LIMIT_OVERRIDE_GB: float | None = 12
+    _VRAM_LIMIT_OVERRIDE_GB: float | None = None
+    _VRAM_PRESSURE_HYSTERESIS_BYTES = 512 * 1024 ** 2
+    _VRAM_BP_MAX_WAIT_SECONDS = 5.0
     _RAM_PRESSURE_PERCENT = 94.0
 
     def __init__(
@@ -277,6 +279,7 @@ class Pipeline:
         primary_idle_event = threading.Event()
         decode_backpressure_event = threading.Event()
         ram_pressure = threading.Event()
+        vram_pressure = threading.Event()
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
             frame_buffer=frame_buffer,
@@ -285,8 +288,11 @@ class Pipeline:
             encode_queue=encode_queue,
         )
 
+        def _primary_starving() -> bool:
+            return primary_idle_event.is_set() and clip_queue.empty()
+
         def _decode_detect_thread():
-            nonlocal peak_fb_size, bp_stall_count, bp_stall_seconds, ram_stall_count, ram_stall_seconds
+            nonlocal peak_fb_size, bp_stall_count, bp_stall_seconds, ram_stall_count, ram_stall_seconds, vram_bp_stall_count, vram_bp_stall_seconds
             try:
                 torch.cuda.set_device(device)
                 tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
@@ -350,6 +356,21 @@ class Pipeline:
                                     "[decode] backpressure exit fb=%d",
                                     len(frame_buffer.frames),
                                 )
+
+                            if vram_pressure.is_set() and not _primary_starving():
+                                t_vram = time.monotonic()
+                                deadline = t_vram + self._VRAM_BP_MAX_WAIT_SECONDS
+                                while vram_pressure.is_set() and not _primary_starving():
+                                    if error_holder:
+                                        raise error_holder[0]
+                                    if time.monotonic() >= deadline:
+                                        log.debug("[decode] VRAM backpressure fail-open after %.1fs", self._VRAM_BP_MAX_WAIT_SECONDS)
+                                        break
+                                    time.sleep(0.05)
+                                elapsed = time.monotonic() - t_vram
+                                if elapsed > 0.1:
+                                    vram_bp_stall_seconds += elapsed
+                                    vram_bp_stall_count += 1
 
                             batch_start = frame_idx
 
@@ -523,6 +544,8 @@ class Pipeline:
         bp_stall_seconds = 0.0
         ram_stall_count = 0
         ram_stall_seconds = 0.0
+        vram_bp_stall_count = 0
+        vram_bp_stall_seconds = 0.0
 
         _EMPTY_CACHE_COOLDOWN = 2.0
 
@@ -542,9 +565,11 @@ class Pipeline:
                         ram_samples += 1
                     except Exception:
                         pass
+                    soft_threshold = threshold - self._VRAM_PRESSURE_HYSTERESIS_BYTES
                     if over_limit:
-                        excess = int((used - threshold) * 1.2)
-                        offloaded = frame_buffer.offload_gpu_frames(excess)
+                        vram_pressure.set()
+                        bytes_to_free = int((used - threshold) * 1.2)
+                        offloaded = frame_buffer.offload_gpu_frames(bytes_to_free)
                         if offloaded > 0:
                             offload_count += offloaded
                             now = time.monotonic()
@@ -552,6 +577,8 @@ class Pipeline:
                                 torch.cuda.empty_cache()
                                 last_empty_cache = now
                             continue
+                    elif used < soft_threshold:
+                        vram_pressure.clear()
 
                     try:
                         ram_pct = psutil.virtual_memory().percent
@@ -606,6 +633,8 @@ class Pipeline:
             log.info("Decode backpressure — stalls: %d, total: %.1fs", bp_stall_count, bp_stall_seconds)
         if ram_stall_count > 0:
             log.info("Decode RAM stall — stalls: %d, total: %.1fs", ram_stall_count, ram_stall_seconds)
+        if vram_bp_stall_count > 0:
+            log.info("VRAM decode backpressure — stalls: %d, total: %.1fs", vram_bp_stall_count, vram_bp_stall_seconds)
         ss = starvation_stats
         if ss.clips_pushed > 0 or ss.clips_popped > 0:
             log.info(

@@ -234,6 +234,8 @@ class FrameBuffer:
 
             pending.pending_clips.discard(clip.track_id)
             self._unpin(frame_idx)
+            if not pending.pending_clips:
+                self._pin(frame_idx)
 
     def blend_restored_frame(
         self,
@@ -299,6 +301,8 @@ class FrameBuffer:
 
         pending.pending_clips.discard(int(track_id))
         self._unpin(int(frame_idx))
+        if not pending.pending_clips:
+            self._pin(int(frame_idx))
 
     def get_ready_frames(self) -> Iterator[tuple[int, torch.Tensor, int]]:
         while self.next_encode_idx in self.frames:
