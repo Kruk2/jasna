@@ -1,3 +1,4 @@
+import threading
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -7,6 +8,7 @@ import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from jasna.frame_queue import FrameQueue
 from jasna.media import VideoMetadata
 from jasna.pipeline import Pipeline
 from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult
@@ -434,4 +436,154 @@ class TestPipelineRunSync:
         ):
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()
+
+
+class TestVramBackpressure:
+    def test_primary_starving_predicate(self):
+        primary_idle = threading.Event()
+        q = FrameQueue(max_frames=100)
+
+        assert not (primary_idle.is_set() and q.empty())
+
+        primary_idle.set()
+        assert primary_idle.is_set() and q.empty()
+
+        q.put("item", frame_count=1)
+        assert not (primary_idle.is_set() and q.empty())
+
+        q.get()
+        primary_idle.clear()
+        assert not (primary_idle.is_set() and q.empty())
+
+    def test_offload_bytes_to_free_uses_minimal_excess(self):
+        used = 10 * 1024 ** 3
+        threshold = 9 * 1024 ** 3
+        excess = used - threshold
+
+        bytes_to_free = int(excess * 1.2)
+        assert bytes_to_free == int((used - threshold) * 1.2)
+        assert bytes_to_free < used - threshold + 512 * 1024 ** 2
+
+    def test_hysteresis_band_no_clear_between_soft_and_hard(self):
+        p = _make_pipeline()
+        p._VRAM_FREE_HEADROOM_BYTES = 1024 ** 3
+        p._VRAM_LIMIT_OVERRIDE_GB = 10.0
+        p._VRAM_PRESSURE_HYSTERESIS_BYTES = 512 * 1024 ** 2
+        total = 24 * 1024 ** 3
+
+        with patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(total - int(10.5 * 1024 ** 3), total)):
+            over, used, threshold = p._should_offload_frames()
+            assert over is True
+            soft = threshold - p._VRAM_PRESSURE_HYSTERESIS_BYTES
+
+        used_in_band = threshold - 256 * 1024 ** 2
+        assert used_in_band > soft
+        assert used_in_band < threshold
+
+        used_below_soft = soft - 100 * 1024 ** 2
+        assert used_below_soft < soft
+
+    def test_vram_backpressure_no_deadlock_with_tight_vram(self):
+        p = _make_pipeline()
+        p._VRAM_LIMIT_OVERRIDE_GB = 2.0
+        p._VRAM_FREE_HEADROOM_BYTES = 512 * 1024 ** 2
+        p._VRAM_PRESSURE_HYSTERESIS_BYTES = 256 * 1024 ** 2
+        p._VRAM_BP_MAX_WAIT_SECONDS = 0.1
+
+        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
+        mock_reader = MagicMock()
+        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
+        mock_reader.__exit__ = MagicMock(return_value=False)
+        mock_reader.frames.return_value = iter([
+            (frames_t, [0, 1]),
+            (frames_t, [2, 3]),
+        ])
+
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        from jasna.pipeline_processing import BatchProcessResult
+
+        call_count = 0
+
+        def fake_process_batch(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            fb = kwargs["frame_buffer"]
+            frames = kwargs["frames"]
+            pts_list = kwargs["pts_list"]
+            start_idx = kwargs["start_frame_idx"]
+            for i, pts in enumerate(pts_list):
+                fb.add_frame(start_idx + i, pts=int(pts), frame=frames[i], clip_track_ids=set())
+            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list), clips_emitted=0)
+
+        total = 24 * 1024 ** 3
+        tight_free = 200 * 1024 ** 2
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
+            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline.finalize_processing"),
+            patch("jasna.pipeline.torch.cuda.set_device"),
+            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(tight_free, total)),
+        ):
+            p.run()
+
+        assert call_count == 2
+
+    def test_vram_starvation_escape_when_primary_idle(self):
+        p = _make_pipeline()
+        p._VRAM_LIMIT_OVERRIDE_GB = 2.0
+        p._VRAM_FREE_HEADROOM_BYTES = 512 * 1024 ** 2
+        p._VRAM_PRESSURE_HYSTERESIS_BYTES = 256 * 1024 ** 2
+        p._VRAM_BP_MAX_WAIT_SECONDS = 30.0
+
+        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
+        mock_reader = MagicMock()
+        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
+        mock_reader.__exit__ = MagicMock(return_value=False)
+        mock_reader.frames.return_value = iter([
+            (frames_t, [0, 1]),
+            (frames_t, [2, 3]),
+        ])
+
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        from jasna.pipeline_processing import BatchProcessResult
+
+        call_count = 0
+
+        def fake_process_batch(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            fb = kwargs["frame_buffer"]
+            frames = kwargs["frames"]
+            pts_list = kwargs["pts_list"]
+            start_idx = kwargs["start_frame_idx"]
+            for i, pts in enumerate(pts_list):
+                fb.add_frame(start_idx + i, pts=int(pts), frame=frames[i], clip_track_ids=set())
+            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list), clips_emitted=0)
+
+        total = 24 * 1024 ** 3
+        tight_free = 200 * 1024 ** 2
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
+            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline.finalize_processing"),
+            patch("jasna.pipeline.torch.cuda.set_device"),
+            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(tight_free, total)),
+        ):
+            p.run()
+
+        assert call_count == 2
 
