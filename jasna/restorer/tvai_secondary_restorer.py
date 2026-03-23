@@ -375,10 +375,7 @@ class TvaiSecondaryRestorer:
         logger.debug("TVAI push seq=%d frames=%d -> worker %d", seq, n, wi)
         return seq
 
-    def _drain_worker(self, wi: int) -> None:
-        frames = self._workers[wi].drain_available()
-        if not frames:
-            return
+    def _process_drained_frames(self, wi: int, frames: list[np.ndarray]) -> None:
         segments = self._worker_segments[wi]
         for frame in frames:
             if not segments:
@@ -397,8 +394,10 @@ class TvaiSecondaryRestorer:
 
     def pop_completed(self) -> list[tuple[int, list[np.ndarray]]]:
         for wi in range(len(self._workers)):
-            with self._worker_locks[wi]:
-                self._drain_worker(wi)
+            frames = self._workers[wi].drain_available()
+            if frames:
+                with self._worker_locks[wi]:
+                    self._process_drained_frames(wi, frames)
         result: list[tuple[int, list[np.ndarray]]] = []
         for seq in sorted(self._completed.keys()):
             result.append((seq, self._completed.pop(seq)))

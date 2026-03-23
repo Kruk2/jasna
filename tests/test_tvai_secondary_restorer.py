@@ -272,8 +272,7 @@ class TestDrainWorker:
         workers = _setup_mock_workers(r)
         out = _make_frame()
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=2))
-        workers[0].drain_available.return_value = [out, out]
-        r._drain_worker(0)
+        r._process_drained_frames(0, [out, out])
         assert 0 in r._completed
         assert len(r._completed[0]) == 2
 
@@ -283,8 +282,7 @@ class TestDrainWorker:
         out = _make_frame()
         r._worker_segments[0].append(_FillerSegment(remaining=2))
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=1))
-        workers[0].drain_available.return_value = [out, out, out]
-        r._drain_worker(0)
+        r._process_drained_frames(0, [out, out, out])
         assert 0 in r._completed
         assert len(r._completed[0]) == 1
         assert len(r._worker_segments[0]) == 0
@@ -294,8 +292,7 @@ class TestDrainWorker:
         workers = _setup_mock_workers(r)
         out = _make_frame()
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
-        workers[0].drain_available.return_value = [out, out]
-        r._drain_worker(0)
+        r._process_drained_frames(0, [out, out])
         assert 0 not in r._completed
         assert r._worker_segments[0][0].collected == [out, out]
 
@@ -305,8 +302,7 @@ class TestDrainWorker:
         out = _make_frame()
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=2))
         r._worker_segments[0].append(_ClipSegment(seq=1, expected=1))
-        workers[0].drain_available.return_value = [out, out, out]
-        r._drain_worker(0)
+        r._process_drained_frames(0, [out, out, out])
         assert 0 in r._completed
         assert 1 in r._completed
         assert len(r._completed[0]) == 2
