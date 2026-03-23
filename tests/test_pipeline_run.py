@@ -2,6 +2,7 @@ from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
 
+from jasna.crop_buffer import RawCrop
 from jasna.frame_queue import FrameQueue
 
 import numpy as np
@@ -11,7 +12,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 from jasna.media import VideoMetadata
 from jasna.pipeline import Pipeline
-from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
@@ -57,7 +58,6 @@ def _make_pipeline():
         rest_pipeline = MagicMock()
         rest_pipeline.secondary_restorer = None
         rest_pipeline.secondary_num_workers = 1
-        rest_pipeline.secondary_preferred_queue_size = 2
         rest_pipeline.secondary_prefers_cpu_input = False
         p = Pipeline(
             input_video=Path("in.mp4"),
@@ -78,14 +78,30 @@ def _make_pipeline():
     return p
 
 
+def _make_two_readers(frames_batches: list[tuple[torch.Tensor, list[int]]]):
+    def _make_reader(batches):
+        r = MagicMock()
+        r.__enter__ = MagicMock(return_value=r)
+        r.__exit__ = MagicMock(return_value=False)
+        r.frames.return_value = iter(batches)
+        return r
+
+    flat_frames = []
+    for batch, pts in frames_batches:
+        for i in range(len(pts)):
+            flat_frames.append(batch[i])
+
+    reader1 = _make_reader(list(frames_batches))
+    reader2 = _make_reader([(torch.stack(flat_frames), list(range(len(flat_frames))))] if flat_frames else [])
+    readers = iter([reader1, reader2])
+    return MagicMock(side_effect=lambda *a, **kw: next(readers)), reader1, reader2
+
+
 class TestPipelineRun:
     def test_run_no_frames(self):
         p = _make_pipeline()
 
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.return_value = iter([])
+        reader_cls, _, _ = _make_two_readers([])
 
         mock_encoder = MagicMock()
         mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
@@ -93,7 +109,7 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
@@ -107,10 +123,8 @@ class TestPipelineRun:
         p = _make_pipeline()
 
         frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.return_value = iter([(frames_t, [0, 1])])
+        batches = [(frames_t, [0, 1])]
+        reader_cls, _, _ = _make_two_readers(batches)
 
         mock_encoder = MagicMock()
         mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
@@ -127,13 +141,22 @@ class TestPipelineRun:
         from jasna.pipeline_processing import BatchProcessResult
 
         def fake_process_batch(**kwargs):
-            fb = kwargs["frame_buffer"]
+            bb = kwargs["blend_buffer"]
+            mq = kwargs["metadata_queue"]
             cq = kwargs["clip_queue"]
-            fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={42})
-            fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={42})
+            frames = kwargs["frames"]
+            bb.register_frame(0, {42})
+            bb.register_frame(1, {42})
+            mq.put(FrameMeta(frame_idx=0, pts=0))
+            mq.put(FrameMeta(frame_idx=1, pts=1))
+            raw_crops = [
+                RawCrop(crop=frames[i][:, 1:5, 1:5].clone(), enlarged_bbox=(1, 1, 5, 5), crop_shape=(4, 4))
+                for i in range(2)
+            ]
             cq.put(ClipRestoreItem(
                 clip=clip,
-                frames=[frames_t[0], frames_t[1]],
+                raw_crops=raw_crops,
+                frame_shape=(8, 8),
                 keep_start=0,
                 keep_end=2,
                 crossfade_weights=None,
@@ -188,18 +211,9 @@ class TestPipelineRun:
         p.restoration_pipeline.secondary_restorer = restorer
         p.restoration_pipeline.build_secondary_result.return_value = sr_result
 
-        def fake_blend(sr, fb):
-            for i in range(2):
-                pending = fb.frames.get(i)
-                if pending:
-                    pending.pending_clips.discard(42)
-                yield i
-
-        p.restoration_pipeline.blend_secondary_result.side_effect = fake_blend
-
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
             patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
             patch("jasna.pipeline.finalize_processing"),
@@ -216,17 +230,24 @@ class TestPipelineRun:
         p = _make_pipeline()
 
         frames = torch.zeros((2, 3, 8, 8), dtype=torch.uint8)
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.return_value = iter([(frames, [0, 1])])
+        batches = [(frames, [0, 1])]
+        reader_cls, _, _ = _make_two_readers(batches)
 
         mock_encoder = MagicMock()
         mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
         mock_encoder.__exit__ = MagicMock(return_value=False)
 
         from jasna.pipeline_processing import BatchProcessResult
-        batch_result = BatchProcessResult(next_frame_idx=2, clips_emitted=0)
+
+        def fake_process_batch(**kwargs):
+            bb = kwargs["blend_buffer"]
+            mq = kwargs["metadata_queue"]
+            pts_list = kwargs["pts_list"]
+            start_idx = kwargs["start_frame_idx"]
+            for i, pts in enumerate(pts_list):
+                bb.register_frame(start_idx + i, set())
+                mq.put(FrameMeta(frame_idx=start_idx + i, pts=int(pts)))
+            return BatchProcessResult(next_frame_idx=start_idx + len(pts_list), clips_emitted=0)
 
         restorer = _mock_async_restorer()
         restorer.push_clip.return_value = 0
@@ -237,9 +258,9 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", return_value=batch_result),
+            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
             patch("jasna.pipeline.finalize_processing"),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
@@ -249,10 +270,19 @@ class TestPipelineRun:
     def test_run_propagates_decode_error(self):
         p = _make_pipeline()
 
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.side_effect = RuntimeError("decode boom")
+        def _make_reader_with_error():
+            r1 = MagicMock()
+            r1.__enter__ = MagicMock(return_value=r1)
+            r1.__exit__ = MagicMock(return_value=False)
+            r1.frames.side_effect = RuntimeError("decode boom")
+            r2 = MagicMock()
+            r2.__enter__ = MagicMock(return_value=r2)
+            r2.__exit__ = MagicMock(return_value=False)
+            r2.frames.return_value = iter([])
+            readers = iter([r1, r2])
+            return MagicMock(side_effect=lambda *a, **kw: next(readers))
+
+        reader_cls = _make_reader_with_error()
 
         mock_encoder = MagicMock()
         mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
@@ -260,7 +290,7 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
@@ -273,10 +303,8 @@ class TestPipelineRun:
         p = _make_pipeline()
 
         frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.return_value = iter([(frames_t, [0, 1])])
+        batches = [(frames_t, [0, 1])]
+        reader_cls, _, _ = _make_two_readers(batches)
 
         mock_encoder = MagicMock()
         mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
@@ -291,18 +319,26 @@ class TestPipelineRun:
         from jasna.pipeline_processing import BatchProcessResult
 
         def fake_process_batch(**kwargs):
-            fb = kwargs["frame_buffer"]
+            bb = kwargs["blend_buffer"]
+            mq = kwargs["metadata_queue"]
             cq = kwargs["clip_queue"]
-            fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={1})
-            fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={1})
-            cq.put(ClipRestoreItem(clip=clip, frames=[frames_t[0], frames_t[1]], keep_start=0, keep_end=2, crossfade_weights=None))
+            frames = kwargs["frames"]
+            bb.register_frame(0, {1})
+            bb.register_frame(1, {1})
+            mq.put(FrameMeta(frame_idx=0, pts=0))
+            mq.put(FrameMeta(frame_idx=1, pts=1))
+            raw_crops = [
+                RawCrop(crop=frames[i][:, 1:5, 1:5].clone(), enlarged_bbox=(1, 1, 5, 5), crop_shape=(4, 4))
+                for i in range(2)
+            ]
+            cq.put(ClipRestoreItem(clip=clip, raw_crops=raw_crops, frame_shape=(8, 8), keep_start=0, keep_end=2, crossfade_weights=None))
             return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         p.restoration_pipeline.prepare_and_run_primary.side_effect = RuntimeError("primary boom")
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
             patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
             patch("jasna.pipeline.finalize_processing"),
@@ -317,10 +353,8 @@ class TestPipelineRun:
         p = _make_pipeline()
 
         frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.return_value = iter([(frames_t, [0, 1])])
+        batches = [(frames_t, [0, 1])]
+        reader_cls, _, _ = _make_two_readers(batches)
 
         mock_encoder = MagicMock()
         mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
@@ -335,11 +369,19 @@ class TestPipelineRun:
         from jasna.pipeline_processing import BatchProcessResult
 
         def fake_process_batch(**kwargs):
-            fb = kwargs["frame_buffer"]
+            bb = kwargs["blend_buffer"]
+            mq = kwargs["metadata_queue"]
             cq = kwargs["clip_queue"]
-            fb.add_frame(0, pts=0, frame=frames_t[0], clip_track_ids={1})
-            fb.add_frame(1, pts=1, frame=frames_t[1], clip_track_ids={1})
-            cq.put(ClipRestoreItem(clip=clip, frames=[frames_t[0], frames_t[1]], keep_start=0, keep_end=2, crossfade_weights=None))
+            frames = kwargs["frames"]
+            bb.register_frame(0, {1})
+            bb.register_frame(1, {1})
+            mq.put(FrameMeta(frame_idx=0, pts=0))
+            mq.put(FrameMeta(frame_idx=1, pts=1))
+            raw_crops = [
+                RawCrop(crop=frames[i][:, 1:5, 1:5].clone(), enlarged_bbox=(1, 1, 5, 5), crop_shape=(4, 4))
+                for i in range(2)
+            ]
+            cq.put(ClipRestoreItem(clip=clip, raw_crops=raw_crops, frame_shape=(8, 8), keep_start=0, keep_end=2, crossfade_weights=None))
             return BatchProcessResult(next_frame_idx=2, clips_emitted=1)
 
         pr_result = PrimaryRestoreResult(
@@ -365,7 +407,7 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
             patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
             patch("jasna.pipeline.finalize_processing"),
@@ -853,7 +895,6 @@ class TestPipelineRun:
         ):
             rest_pipeline = MagicMock()
             rest_pipeline.secondary_num_workers = 1
-            rest_pipeline.secondary_preferred_queue_size = 2
             rest_pipeline.secondary_prefers_cpu_input = False
             rest_pipeline.secondary_restorer.num_workers = 2
             p = Pipeline(
@@ -874,10 +915,7 @@ class TestPipelineRun:
                 progress_callback=cb,
             )
 
-        mock_reader = MagicMock()
-        mock_reader.__enter__ = MagicMock(return_value=mock_reader)
-        mock_reader.__exit__ = MagicMock(return_value=False)
-        mock_reader.frames.return_value = iter([])
+        reader_cls, _, _ = _make_two_readers([])
 
         mock_encoder = MagicMock()
         mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
@@ -885,7 +923,7 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", return_value=mock_reader),
+            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
             patch("jasna.pipeline.torch.cuda.set_device"),
             patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),

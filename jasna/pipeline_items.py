@@ -4,16 +4,24 @@ from dataclasses import dataclass
 
 import torch
 
+from jasna.crop_buffer import RawCrop
 from jasna.tracking.clip_tracker import TrackedClip
 
 
 _SENTINEL = object()
 
 
+@dataclass(frozen=True)
+class FrameMeta:
+    frame_idx: int
+    pts: int
+
+
 @dataclass
 class ClipRestoreItem:
     clip: TrackedClip
-    frames: list[torch.Tensor]
+    raw_crops: list[RawCrop]
+    frame_shape: tuple[int, int]
     keep_start: int
     keep_end: int
     crossfade_weights: dict[int, float] | None

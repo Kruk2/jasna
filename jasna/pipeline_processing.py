@@ -6,12 +6,13 @@ from queue import Queue
 
 import torch
 
+from jasna.blend_buffer import BlendBuffer
+from jasna.crop_buffer import CropBuffer, RawCrop, extract_crop
 from jasna.mosaic.detections import Detections
-from jasna.pipeline_items import ClipRestoreItem
+from jasna.pipeline_items import ClipRestoreItem, FrameMeta
 from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
 from jasna.tensor_utils import pad_batch_with_last
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip
-from jasna.tracking.frame_buffer import FrameBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +29,10 @@ def _process_ended_clips(
     discard_margin: int,
     blend_frames: int,
     max_clip_size: int,
-    frame_buffer: FrameBuffer,
+    blend_buffer: BlendBuffer,
+    crop_buffers: dict[int, CropBuffer],
     clip_queue: Queue[ClipRestoreItem | object],
+    frame_shape: tuple[int, int],
 ) -> None:
     bf = min(int(blend_frames), int(discard_margin)) if discard_margin > 0 else 0
     if bf > 0 and discard_margin > 0:
@@ -38,30 +41,31 @@ def _process_ended_clips(
 
     for ended_clip in ended_clips:
         clip = ended_clip.clip
-        frame_buffer.pin_frames(clip.frame_indices())
-        frames_for_clip: list[torch.Tensor] = []
-        for fi in clip.frame_indices():
-            f = frame_buffer.get_frame(fi)
-            if f is None:
-                raise RuntimeError(f"missing frame {fi} for clip {clip.track_id}")
-            frames_for_clip.append(f)
+        crop_buf = crop_buffers.pop(clip.track_id, None)
+        if crop_buf is None:
+            raise RuntimeError(f"missing CropBuffer for clip {clip.track_id}")
 
         if ended_clip.split_due_to_max_size and discard_margin > 0:
             child_id = ended_clip.continuation_track_id
             if child_id is None:
                 raise RuntimeError("split clip is missing continuation_track_id")
 
+            overlap_len = 2 * int(discard_margin)
+            crop_buffers[child_id] = crop_buf.split_overlap(
+                overlap_len, child_id, clip.end_frame - overlap_len + 1,
+            )
+
             overlap_indices, tail_indices = compute_overlap_and_tail_indices(
                 end_frame=clip.end_frame, discard_margin=discard_margin
             )
-            frame_buffer.add_pending_clip(overlap_indices, child_id)
+            blend_buffer.add_pending_clip(overlap_indices, child_id)
 
             if bf > 0:
                 non_crossfade_tail = list(range(clip.end_frame - discard_margin + 1 + bf, clip.end_frame + 1))
                 if non_crossfade_tail:
-                    frame_buffer.remove_pending_clip(non_crossfade_tail, clip.track_id)
+                    blend_buffer.remove_pending_clip(non_crossfade_tail, clip.track_id)
             else:
-                frame_buffer.remove_pending_clip(tail_indices, clip.track_id)
+                blend_buffer.remove_pending_clip(tail_indices, clip.track_id)
 
         keep_start, keep_end = compute_keep_range(
             frame_count=clip.frame_count,
@@ -90,7 +94,8 @@ def _process_ended_clips(
 
         item = ClipRestoreItem(
             clip=clip,
-            frames=frames_for_clip,
+            raw_crops=crop_buf.crops,
+            frame_shape=frame_shape,
             keep_start=int(keep_start),
             keep_end=int(keep_end),
             crossfade_weights=crossfade_weights,
@@ -107,8 +112,10 @@ def process_frame_batch(
     target_hw: tuple[int, int],
     detections_fn,
     tracker: ClipTracker,
-    frame_buffer: FrameBuffer,
+    blend_buffer: BlendBuffer,
+    crop_buffers: dict[int, CropBuffer],
     clip_queue: Queue[ClipRestoreItem | object],
+    metadata_queue: Queue[FrameMeta | object],
     discard_margin: int,
     blend_frames: int = 0,
 ) -> BatchProcessResult:
@@ -120,6 +127,7 @@ def process_frame_batch(
     frames_in = pad_batch_with_last(frames_eff, batch_size=int(batch_size))
 
     detections: Detections = detections_fn(frames_in, target_hw=target_hw)
+    _, frame_h, frame_w = frames_eff[0].shape
 
     clips_emitted = 0
     for i in range(effective_bs):
@@ -131,7 +139,27 @@ def process_frame_batch(
         valid_masks = detections.masks[i]
 
         ended_clips, active_track_ids = tracker.update(current_frame_idx, valid_boxes, valid_masks)
-        frame_buffer.add_frame(current_frame_idx, pts, frame, active_track_ids)
+
+        blend_buffer.register_frame(current_frame_idx, active_track_ids)
+        metadata_queue.put(FrameMeta(frame_idx=current_frame_idx, pts=pts))
+
+        for track_id in active_track_ids:
+            clip = tracker.active_clips.get(track_id)
+            if clip is None:
+                continue
+            if track_id not in crop_buffers:
+                crop_buffers[track_id] = CropBuffer(track_id=track_id, start_frame=clip.start_frame)
+            raw_crop = extract_crop(frame, clip.bboxes[-1], frame_h, frame_w)
+            crop_buffers[track_id].add(raw_crop)
+
+        for ec in ended_clips:
+            tid = ec.clip.track_id
+            if tid not in crop_buffers:
+                crop_buffers[tid] = CropBuffer(track_id=tid, start_frame=ec.clip.start_frame)
+            if crop_buffers[tid].frame_count < ec.clip.frame_count:
+                raw_crop = extract_crop(frame, ec.clip.bboxes[-1], frame_h, frame_w)
+                crop_buffers[tid].add(raw_crop)
+
         clips_emitted += len(ended_clips)
 
         _process_ended_clips(
@@ -139,8 +167,10 @@ def process_frame_batch(
             discard_margin=int(discard_margin),
             blend_frames=int(blend_frames),
             max_clip_size=tracker.max_clip_size,
-            frame_buffer=frame_buffer,
+            blend_buffer=blend_buffer,
+            crop_buffers=crop_buffers,
             clip_queue=clip_queue,
+            frame_shape=(frame_h, frame_w),
         )
 
     return BatchProcessResult(
@@ -152,8 +182,10 @@ def process_frame_batch(
 def finalize_processing(
     *,
     tracker: ClipTracker,
-    frame_buffer: FrameBuffer,
+    blend_buffer: BlendBuffer,
+    crop_buffers: dict[int, CropBuffer],
     clip_queue: Queue[ClipRestoreItem | object],
+    frame_shape: tuple[int, int],
     discard_margin: int,
     blend_frames: int = 0,
 ) -> None:
@@ -163,6 +195,8 @@ def finalize_processing(
         discard_margin=int(discard_margin),
         blend_frames=int(blend_frames),
         max_clip_size=tracker.max_clip_size,
-        frame_buffer=frame_buffer,
+        blend_buffer=blend_buffer,
+        crop_buffers=crop_buffers,
         clip_queue=clip_queue,
+        frame_shape=frame_shape,
     )
