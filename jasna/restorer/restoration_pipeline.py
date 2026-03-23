@@ -2,40 +2,20 @@ from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Iterator
-from typing import TYPE_CHECKING
-import numpy as np
-import torch
-import torch.nn.functional as F
 
+import torch
+
+from jasna.crop_buffer import (
+    RawCrop,
+    prepare_crops_for_restoration,
+)
 from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
-from jasna.restorer.restored_clip import RestoredClip
 from jasna.restorer.secondary_restorer import SecondaryRestorer
 from jasna.tracking.clip_tracker import TrackedClip
 
-if TYPE_CHECKING:
-    from jasna.tracking.frame_buffer import FrameBuffer
-
-from jasna.tensor_utils import to_device as _to_device
-
 logger = logging.getLogger(__name__)
-
-RESTORATION_SIZE = 256
-BORDER_RATIO = 0.06
-MIN_BORDER = 20
-MAX_EXPANSION_FACTOR = 1.0
-
-
-def _torch_pad_reflect(image: torch.Tensor, paddings: tuple[int, int, int, int]) -> torch.Tensor:
-    paddings_arr = np.array(paddings, dtype=int)
-    while np.any(paddings_arr):
-        image_limits = np.repeat(np.array(image.shape[::-1][:len(paddings_arr)//2]), 2) - 1
-        possible_paddings = np.minimum(paddings_arr, image_limits)
-        image = F.pad(image, tuple(possible_paddings), mode='reflect')
-        paddings_arr = paddings_arr - possible_paddings
-    return image
 
 
 class RestorationPipeline:
@@ -65,12 +45,6 @@ class RestorationPipeline:
         return 1
 
     @property
-    def secondary_preferred_queue_size(self) -> int:
-        if self.secondary_restorer is not None:
-            return int(getattr(self.secondary_restorer, "preferred_queue_size", 2))
-        return 2
-
-    @property
     def secondary_prefers_cpu_input(self) -> bool:
         if self.secondary_restorer is not None:
             return bool(getattr(self.secondary_restorer, "prefers_cpu_input", False))
@@ -79,10 +53,9 @@ class RestorationPipeline:
     def _apply_denoise(self, frames: torch.Tensor) -> torch.Tensor:
         return apply_denoise(frames, self._denoise_strength)
 
-    def _prepare_clip_inputs(
+    def _prepare_from_raw_crops(
         self,
-        clip: TrackedClip,
-        frames: list[torch.Tensor],
+        raw_crops: list[RawCrop],
     ) -> tuple[
         list[torch.Tensor],
         list[tuple[int, int, int, int]],
@@ -90,66 +63,9 @@ class RestorationPipeline:
         list[tuple[int, int]],
         list[tuple[int, int]],
     ]:
-        crops: list[torch.Tensor] = []
-        enlarged_bboxes: list[tuple[int, int, int, int]] = []
-        crop_shapes: list[tuple[int, int]] = []
-
-        for i, frame in enumerate(frames):
-            _, frame_h, frame_w = frame.shape
-            bbox = clip.bboxes[i]
-            x1 = int(np.floor(bbox[0]))
-            y1 = int(np.floor(bbox[1]))
-            x2 = int(np.ceil(bbox[2]))
-            y2 = int(np.ceil(bbox[3]))
-            x1 = max(0, min(x1, frame_w))
-            y1 = max(0, min(y1, frame_h))
-            x2 = max(0, min(x2, frame_w))
-            y2 = max(0, min(y2, frame_h))
-
-            x1_exp, y1_exp, x2_exp, y2_exp = self._expand_bbox(x1, y1, x2, y2, frame_h, frame_w)
-            enlarged_bboxes.append((x1_exp, y1_exp, x2_exp, y2_exp))
-
-            if frame.device.type == "cpu":
-                np_crop = np.ascontiguousarray(frame.numpy()[:, y1_exp:y2_exp, x1_exp:x2_exp])
-                crop = torch.from_numpy(np_crop)
-            else:
-                crop = frame[:, y1_exp:y2_exp, x1_exp:x2_exp]
-            crop_shapes.append((int(crop.shape[1]), int(crop.shape[2])))
-            crops.append(crop)
-
-        max_h = max(s[0] for s in crop_shapes)
-        max_w = max(s[1] for s in crop_shapes)
-
-        scale_h = RESTORATION_SIZE / max_h
-        scale_w = RESTORATION_SIZE / max_w
-        if scale_h > 1.0 and scale_w > 1.0:
-            scale_h = scale_w = 1.0
-
-        resized_crops: list[torch.Tensor] = []
-        resize_shapes: list[tuple[int, int]] = []
-        pad_offsets: list[tuple[int, int]] = []
-
-        for crop, (crop_h, crop_w) in zip(crops, crop_shapes):
-            new_h = int(crop_h * scale_h)
-            new_w = int(crop_w * scale_w)
-            resize_shapes.append((new_h, new_w))
-
-            pad_top = (RESTORATION_SIZE - new_h) // 2
-            pad_left = (RESTORATION_SIZE - new_w) // 2
-            pad_bottom = RESTORATION_SIZE - new_h - pad_top
-            pad_right = RESTORATION_SIZE - new_w - pad_left
-            pad_offsets.append((pad_left, pad_top))
-
-            resized = F.interpolate(
-                crop.unsqueeze(0).float(),
-                size=(new_h, new_w),
-                mode="bilinear",
-                align_corners=False,
-            ).squeeze(0)
-
-            padded = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
-            resized_crops.append(padded.to(crop.dtype).permute(1, 2, 0))
-
+        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(raw_crops)
+        enlarged_bboxes = [c.enlarged_bbox for c in raw_crops]
+        crop_shapes = [c.crop_shape for c in raw_crops]
         return resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes
 
     def _run_secondary(self, primary_raw: torch.Tensor, keep_start: int, keep_end: int) -> list[torch.Tensor]:
@@ -170,26 +86,16 @@ class RestorationPipeline:
 
         return restored_frames
 
-    def _scale_offsets(self, frame_u8: torch.Tensor, pad_offset_256: tuple[int, int], resize_shape_256: tuple[int, int]) -> tuple[tuple[int, int], tuple[int, int]]:
-        out_h = int(frame_u8.shape[1])
-        out_w = int(frame_u8.shape[2])
-        pl, pt = pad_offset_256
-        rh, rw = resize_shape_256
-        x0 = int(round(pl * out_w / RESTORATION_SIZE))
-        x1 = int(round((pl + rw) * out_w / RESTORATION_SIZE))
-        y0 = int(round(pt * out_h / RESTORATION_SIZE))
-        y1 = int(round((pt + rh) * out_h / RESTORATION_SIZE))
-        return (x0, y0), (y1 - y0, x1 - x0)
-
     def prepare_and_run_primary(
         self,
         clip: TrackedClip,
-        frames: list[torch.Tensor],
+        raw_crops: list[RawCrop],
+        frame_shape: tuple[int, int],
         keep_start: int,
         keep_end: int,
         crossfade_weights: dict[int, float] | None,
     ) -> PrimaryRestoreResult:
-        resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
+        resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_from_raw_crops(raw_crops)
         primary_raw = self.restorer.raw_process(resized_crops)
         if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
             primary_raw = self._apply_denoise(primary_raw)
@@ -197,9 +103,9 @@ class RestorationPipeline:
         return PrimaryRestoreResult(
             track_id=clip.track_id,
             start_frame=clip.start_frame,
-            frame_count=len(frames),
-            frame_shape=(int(frames[0].shape[1]), int(frames[0].shape[2])),
-            frame_device=frames[0].device,
+            frame_count=len(raw_crops),
+            frame_shape=frame_shape,
+            frame_device=raw_crops[0].crop.device,
             masks=clip.masks,
             primary_raw=primary_raw,
             keep_start=keep_start,
@@ -242,153 +148,3 @@ class RestorationPipeline:
             resize_shapes=pr.resize_shapes[ks:ke],
             clip_keep_offset=ks,
         )
-
-    def blend_secondary_result(
-        self,
-        sr: SecondaryRestoreResult,
-        frame_buffer: 'FrameBuffer',
-    ) -> Iterator[int]:
-        kept_count = sr.keep_end
-        clip_offset = sr.clip_keep_offset
-
-        for i in range(sr.frame_count):
-            frame_idx = sr.start_frame + i
-            if not (clip_offset <= i < clip_offset + kept_count):
-                pending = frame_buffer.frames.get(frame_idx)
-                if pending is not None:
-                    pending.pending_clips.discard(sr.track_id)
-
-        if kept_count <= 0:
-            return
-
-        target_device = frame_buffer.device
-        restored_frames = sr.restored_frames
-        masks = sr.masks
-
-        if restored_frames and any(f.device != target_device for f in restored_frames):
-            stacked = torch.stack(restored_frames)
-            stacked = _to_device(stacked, target_device)
-            restored_frames = list(stacked.unbind(0))
-
-        needs_mask_transfer = any(
-            m.device != target_device for m in masks
-        )
-        if needs_mask_transfer:
-            stacked_masks = torch.stack(masks)
-            stacked_masks = _to_device(stacked_masks, target_device)
-            masks = list(stacked_masks.unbind(0))
-
-        frame_h, frame_w = sr.frame_shape
-        for local_i in range(kept_count):
-            i_clip = clip_offset + local_i
-            frame_idx = sr.start_frame + i_clip
-            if not frame_buffer.needs_blend(frame_idx=frame_idx, track_id=sr.track_id):
-                continue
-
-            frame_u8 = restored_frames[local_i]
-            pad_offset, resize_shape = self._scale_offsets(frame_u8, sr.pad_offsets[local_i], sr.resize_shapes[local_i])
-            cw = sr.crossfade_weights.get(i_clip, 1.0) if sr.crossfade_weights else 1.0
-
-            frame_buffer.blend_restored_frame(
-                frame_idx=frame_idx,
-                track_id=sr.track_id,
-                restored=frame_u8,
-                mask_lr=masks[local_i],
-                frame_shape=(frame_h, frame_w),
-                enlarged_bbox=sr.enlarged_bboxes[local_i],
-                crop_shape=sr.crop_shapes[local_i],
-                pad_offset=pad_offset,
-                resize_shape=resize_shape,
-                crossfade_weight=cw,
-            )
-            yield frame_idx
-
-    def restore_clip(
-        self,
-        clip: TrackedClip,
-        frames: list[torch.Tensor],
-        *,
-        keep_start: int,
-        keep_end: int,
-    ) -> RestoredClip:
-        resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_clip_inputs(clip, frames)
-        primary_raw = self.restorer.raw_process(resized_crops)
-        if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
-            primary_raw = self._apply_denoise(primary_raw)
-
-        restored_frames = self._run_secondary(primary_raw, int(keep_start), int(keep_end))
-
-        scaled_pad_offsets: list[tuple[int, int]] = []
-        scaled_resize_shapes: list[tuple[int, int]] = []
-        for frame_u8, po, rs in zip(restored_frames, pad_offsets, resize_shapes):
-            pad_offset, resize_shape = self._scale_offsets(frame_u8, po, rs)
-            scaled_pad_offsets.append(pad_offset)
-            scaled_resize_shapes.append(resize_shape)
-
-        _, frame_h, frame_w = frames[0].shape
-        return RestoredClip(
-            restored_frames=restored_frames,
-            masks=clip.masks,
-            frame_shape=(frame_h, frame_w),
-            enlarged_bboxes=enlarged_bboxes,
-            crop_shapes=crop_shapes,
-            pad_offsets=scaled_pad_offsets,
-            resize_shapes=scaled_resize_shapes,
-        )
-
-    def _expand_bbox(
-        self, x1: int, y1: int, x2: int, y2: int, frame_h: int, frame_w: int
-    ) -> tuple[int, int, int, int]:
-        w = x2 - x1
-        h = y2 - y1
-
-        border = max(MIN_BORDER, int(max(w, h) * BORDER_RATIO)) if BORDER_RATIO > 0.0 else 0
-        x1_exp = max(0, x1 - border)
-        y1_exp = max(0, y1 - border)
-        x2_exp = min(frame_w, x2 + border)
-        y2_exp = min(frame_h, y2 + border)
-
-        w = x2_exp - x1_exp
-        h = y2_exp - y1_exp
-        down_scale_factor = min(RESTORATION_SIZE / w, RESTORATION_SIZE / h) if w > 0 and h > 0 else 1.0
-        if down_scale_factor > 1.0:
-            down_scale_factor = 1.0
-
-        missing_w = int((RESTORATION_SIZE - (w * down_scale_factor)) / down_scale_factor) if down_scale_factor > 0 else 0
-        missing_h = int((RESTORATION_SIZE - (h * down_scale_factor)) / down_scale_factor) if down_scale_factor > 0 else 0
-
-        available_w_l = x1_exp
-        available_w_r = frame_w - x2_exp
-        available_h_t = y1_exp
-        available_h_b = frame_h - y2_exp
-
-        budget_w = int(MAX_EXPANSION_FACTOR * w)
-        budget_h = int(MAX_EXPANSION_FACTOR * h)
-
-        expand_w_lr = min(available_w_l, available_w_r, missing_w // 2, budget_w)
-        expand_w_l = min(available_w_l - expand_w_lr, missing_w - expand_w_lr * 2, budget_w - expand_w_lr)
-        expand_w_r = min(
-            available_w_r - expand_w_lr,
-            missing_w - expand_w_lr * 2 - expand_w_l,
-            budget_w - expand_w_lr - expand_w_l,
-        )
-
-        expand_h_tb = min(available_h_t, available_h_b, missing_h // 2, budget_h)
-        expand_h_t = min(available_h_t - expand_h_tb, missing_h - expand_h_tb * 2, budget_h - expand_h_tb)
-        expand_h_b = min(
-            available_h_b - expand_h_tb,
-            missing_h - expand_h_tb * 2 - expand_h_t,
-            budget_h - expand_h_tb - expand_h_t,
-        )
-
-        x1_exp = x1_exp - math.floor(expand_w_lr / 2) - expand_w_l
-        x2_exp = x2_exp + math.ceil(expand_w_lr / 2) + expand_w_r
-        y1_exp = y1_exp - math.floor(expand_h_tb / 2) - expand_h_t
-        y2_exp = y2_exp + math.ceil(expand_h_tb / 2) + expand_h_b
-
-        x1_exp = max(0, min(int(x1_exp), frame_w))
-        x2_exp = max(0, min(int(x2_exp), frame_w))
-        y1_exp = max(0, min(int(y1_exp), frame_h))
-        y2_exp = max(0, min(int(y2_exp), frame_h))
-
-        return x1_exp, y1_exp, x2_exp, y2_exp

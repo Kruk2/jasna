@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from queue import Empty, Queue
 
+from jasna.blend_buffer import BlendBuffer
+from jasna.crop_buffer import CropBuffer
 from jasna.frame_queue import FrameQueue
 
 import psutil
@@ -19,9 +21,9 @@ from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
 from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
-from jasna.pipeline_items import ClipRestoreItem, PrimaryRestoreResult, SecondaryLoopStats, SecondaryRestoreResult, _SENTINEL
+from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, SecondaryRestoreResult, _SENTINEL
 from jasna.progressbar import Progressbar
-from jasna.tracking import ClipTracker, FrameBuffer
+from jasna.tracking import ClipTracker
 from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
@@ -30,13 +32,6 @@ log = logging.getLogger(__name__)
 
 
 class Pipeline:
-    _DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS = 0.05
-    _VRAM_FREE_HEADROOM_BYTES = 1024 * 1024 ** 2
-    _VRAM_LIMIT_OVERRIDE_GB: float | None = None
-    _VRAM_PRESSURE_HYSTERESIS_BYTES = 512 * 1024 ** 2
-    _VRAM_BP_MAX_WAIT_SECONDS = 5.0
-    _RAM_PRESSURE_PERCENT = 94.0
-
     def __init__(
         self,
         *,
@@ -89,20 +84,6 @@ class Pipeline:
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback
         self.working_directory = working_directory
-
-    def _wait_for_decode_fb_drain(self, drained_event: threading.Event) -> None:
-        drained_event.wait(timeout=self._DECODE_FB_STALL_WAIT_TIMEOUT_SECONDS)
-        drained_event.clear()
-
-    def _should_offload_frames(self) -> tuple[bool, int, int]:
-        free, total = torch.cuda.mem_get_info(self.device)
-        used = total - free
-        if self._VRAM_LIMIT_OVERRIDE_GB is not None:
-            cap = int(self._VRAM_LIMIT_OVERRIDE_GB * (1024 ** 3))
-            threshold = cap - self._VRAM_FREE_HEADROOM_BYTES
-            return used > threshold, used, threshold
-        threshold = total - self._VRAM_FREE_HEADROOM_BYTES
-        return used > threshold, used, threshold
 
     _ASYNC_POLL_TIMEOUT = 0.05
 
@@ -267,32 +248,27 @@ class Pipeline:
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
-        decode_bp_gap_threshold = int(self.max_clip_size * 1.2)
 
         clip_queue = FrameQueue(max_frames=self.max_clip_size)
         secondary_queue = FrameQueue(max_frames=self.max_clip_size * secondary_workers)
         encode_queue = FrameQueue(max_frames=self.max_clip_size)
+        metadata_queue: Queue[FrameMeta | object] = Queue(maxsize=self.max_clip_size * 5)
 
         error_holder: list[BaseException] = []
-        frame_buffer = FrameBuffer(device=device)
-        fb_drained_event = threading.Event()
+        blend_buffer = BlendBuffer(device=device)
+        crop_buffers: dict[int, CropBuffer] = {}
         primary_idle_event = threading.Event()
-        decode_backpressure_event = threading.Event()
-        ram_pressure = threading.Event()
-        vram_pressure = threading.Event()
+        frame_shape: list[tuple[int, int]] = []
+
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
-            frame_buffer=frame_buffer,
+            blend_buffer=blend_buffer,
             clip_queue=clip_queue,
             secondary_queue=secondary_queue,
             encode_queue=encode_queue,
         )
 
-        def _primary_starving() -> bool:
-            return primary_idle_event.is_set() and clip_queue.empty()
-
         def _decode_detect_thread():
-            nonlocal peak_fb_size, bp_stall_count, bp_stall_seconds, ram_stall_count, ram_stall_seconds, vram_bp_stall_count, vram_bp_stall_seconds
             try:
                 torch.cuda.set_device(device)
                 tracker = ClipTracker(max_clip_size=self.max_clip_size, temporal_overlap=int(self.temporal_overlap))
@@ -312,7 +288,6 @@ class Pipeline:
                     pb.init()
                     target_hw = (int(metadata.video_height), int(metadata.video_width))
                     frame_idx = 0
-                    frames_since_last_clip_emit = 0
                     log.info(
                         "Processing %s: %d frames @ %s fps, %dx%d",
                         self.input_video.name, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
@@ -324,53 +299,12 @@ class Pipeline:
                             if effective_bs == 0:
                                 continue
 
-                            fb_size = len(frame_buffer.frames)
-                            peak_fb_size = max(peak_fb_size, fb_size)
+                            if not frame_shape:
+                                _, fh, fw = frames[0].shape
+                                frame_shape.append((int(fh), int(fw)))
 
-                            if ram_pressure.is_set():
-                                t_ram = time.monotonic()
-                                while ram_pressure.is_set():
-                                    if error_holder:
-                                        raise error_holder[0]
-                                    time.sleep(0.05)
-                                ram_stall_seconds += time.monotonic() - t_ram
-                                ram_stall_count += 1
-
-                            if frames_since_last_clip_emit >= decode_bp_gap_threshold:
-                                log.debug(
-                                    "[decode] gap backpressure enter gap=%d fb=%d",
-                                    frames_since_last_clip_emit,
-                                    fb_size,
-                                )
-                                t_bp = time.monotonic()
-                                decode_backpressure_event.set()
-                                while len(frame_buffer.frames) > decode_bp_gap_threshold:
-                                    if error_holder:
-                                        raise error_holder[0]
-                                    self._wait_for_decode_fb_drain(fb_drained_event)
-                                decode_backpressure_event.clear()
-                                bp_stall_seconds += time.monotonic() - t_bp
-                                bp_stall_count += 1
-                                frames_since_last_clip_emit = 0
-                                log.debug(
-                                    "[decode] backpressure exit fb=%d",
-                                    len(frame_buffer.frames),
-                                )
-
-                            if vram_pressure.is_set() and not _primary_starving():
-                                t_vram = time.monotonic()
-                                deadline = t_vram + self._VRAM_BP_MAX_WAIT_SECONDS
-                                while vram_pressure.is_set() and not _primary_starving():
-                                    if error_holder:
-                                        raise error_holder[0]
-                                    if time.monotonic() >= deadline:
-                                        log.debug("[decode] VRAM backpressure fail-open after %.1fs", self._VRAM_BP_MAX_WAIT_SECONDS)
-                                        break
-                                    time.sleep(0.05)
-                                elapsed = time.monotonic() - t_vram
-                                if elapsed > 0.1:
-                                    vram_bp_stall_seconds += elapsed
-                                    vram_bp_stall_count += 1
+                            if error_holder:
+                                raise error_holder[0]
 
                             batch_start = frame_idx
 
@@ -382,28 +316,28 @@ class Pipeline:
                                 target_hw=target_hw,
                                 detections_fn=self.detection_model,
                                 tracker=tracker,
-                                frame_buffer=frame_buffer,
+                                blend_buffer=blend_buffer,
+                                crop_buffers=crop_buffers,
                                 clip_queue=clip_queue,
+                                metadata_queue=metadata_queue,
                                 discard_margin=discard_margin,
                                 blend_frames=blend_frames,
                             )
 
                             frame_idx = res.next_frame_idx
-                            if res.clips_emitted > 0:
-                                frames_since_last_clip_emit = 0
-                            else:
-                                frames_since_last_clip_emit += effective_bs
-
                             debug_memory.snapshot(
                                 "decode",
-                                f"frame_start={batch_start} batch={effective_bs} gap={frames_since_last_clip_emit}",
+                                f"frame_start={batch_start} batch={effective_bs}",
                             )
                             pb.update(effective_bs)
 
+                        fs = frame_shape[0] if frame_shape else (int(metadata.video_height), int(metadata.video_width))
                         finalize_processing(
                             tracker=tracker,
-                            frame_buffer=frame_buffer,
+                            blend_buffer=blend_buffer,
+                            crop_buffers=crop_buffers,
                             clip_queue=clip_queue,
+                            frame_shape=fs,
                             discard_margin=discard_margin,
                             blend_frames=blend_frames,
                         )
@@ -418,6 +352,7 @@ class Pipeline:
                 error_holder.append(e)
             finally:
                 clip_queue.put(_SENTINEL)
+                metadata_queue.put(_SENTINEL)
 
         def _primary_restore_thread():
             try:
@@ -431,18 +366,18 @@ class Pipeline:
                     clip_item: ClipRestoreItem = item  # type: ignore[assignment]
                     result = self.restoration_pipeline.prepare_and_run_primary(
                         clip_item.clip,
-                        clip_item.frames,
+                        clip_item.raw_crops,
+                        clip_item.frame_shape,
                         clip_item.keep_start,
                         clip_item.keep_end,
                         clip_item.crossfade_weights,
                     )
-                    frame_buffer.unpin_frames(clip_item.clip.frame_indices())
                     if self.restoration_pipeline.secondary_prefers_cpu_input:
                         result.primary_raw = result.primary_raw.cpu()
                     secondary_queue.put(result, frame_count=result.keep_end - result.keep_start)
                     debug_memory.snapshot(
                         "primary",
-                        f"clip={clip_item.clip.track_id} frames={len(clip_item.frames)}",
+                        f"clip={clip_item.clip.track_id} frames={len(clip_item.raw_crops)}",
                     )
             except BaseException as e:
                 log.exception("[primary] thread crashed")
@@ -489,113 +424,71 @@ class Pipeline:
             finally:
                 encode_queue.put(_SENTINEL)
 
-        def _encode_thread():
+        def _blend_encode_thread():
             try:
                 torch.cuda.set_device(device)
 
-                with NvidiaVideoEncoder(
-                    str(self.output_video),
-                    device=device,
-                    metadata=metadata,
-                    codec=self.codec,
-                    encoder_settings=self.encoder_settings,
-                    stream_mode=False,
-                    working_directory=self.working_directory,
-                ) as encoder:
+                def _flat_frames(rdr: NvidiaVideoReader):
+                    for batch, pts in rdr.frames():
+                        for i in range(len(pts)):
+                            yield batch[i]
+
+                with (
+                    NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=device, metadata=metadata) as reader2,
+                    NvidiaVideoEncoder(
+                        str(self.output_video),
+                        device=device,
+                        metadata=metadata,
+                        codec=self.codec,
+                        encoder_settings=self.encoder_settings,
+                        stream_mode=False,
+                        working_directory=self.working_directory,
+                    ) as encoder,
+                ):
+                    frame_gen = _flat_frames(reader2)
+
+                    secondary_done = False
+
                     while True:
-                        encoded_count = 0
-                        try:
-                            item = encode_queue.get(timeout=0.1)
-                            if item is _SENTINEL:
+                        meta_item = metadata_queue.get()
+                        if meta_item is _SENTINEL:
+                            break
+                        meta: FrameMeta = meta_item  # type: ignore[assignment]
+                        original_frame = next(frame_gen)
+
+                        while not secondary_done:
+                            try:
+                                sr_item = encode_queue.get_nowait()
+                                if sr_item is _SENTINEL:
+                                    secondary_done = True
+                                else:
+                                    blend_buffer.add_result(sr_item)
+                            except Empty:
                                 break
-                            sr: SecondaryRestoreResult = item  # type: ignore[assignment]
-                            for blended_idx in self.restoration_pipeline.blend_secondary_result(sr, frame_buffer):
-                                for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
-                                    encoder.encode(ready_frame, ready_pts)
-                                    encoded_count += 1
-                            debug_memory.snapshot("encode", f"clip={sr.track_id} blended")
-                        except Empty:
-                            pass
 
-                        for ready_idx, ready_frame, ready_pts in frame_buffer.get_ready_frames():
-                            encoder.encode(ready_frame, ready_pts)
-                            encoded_count += 1
-                        if encoded_count > 0:
-                            fb_drained_event.set()
+                        while not blend_buffer.is_frame_ready(meta.frame_idx):
+                            if error_holder:
+                                raise error_holder[0]
+                            if secondary_done:
+                                log.error("[blend-encode] frame %d not ready but secondary is done", meta.frame_idx)
+                                break
+                            try:
+                                sr_item = encode_queue.get(timeout=0.1)
+                                if sr_item is _SENTINEL:
+                                    secondary_done = True
+                                    continue
+                                blend_buffer.add_result(sr_item)
+                            except Empty:
+                                pass
 
-                    for ready_idx, ready_frame, ready_pts in frame_buffer.flush():
-                        encoder.encode(ready_frame, ready_pts)
-                        #log.debug("frame %d encoded (pts=%d)", ready_idx, ready_pts)
+                        blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
+                        encoder.encode(blended, meta.pts)
+
             except BaseException as e:
-                log.exception("[encode] thread crashed")
+                log.exception("[blend-encode] thread crashed")
                 error_holder.append(e)
 
-        stop_offload = threading.Event()
-        vram_max = 0
-        vram_sum = 0
-        vram_samples = 0
-        offload_count = 0
-        ram_max = 0
-        ram_sum = 0
-        ram_samples = 0
         _process = psutil.Process(os.getpid())
-        peak_fb_size = 0
-        bp_stall_count = 0
-        bp_stall_seconds = 0.0
-        ram_stall_count = 0
-        ram_stall_seconds = 0.0
-        vram_bp_stall_count = 0
-        vram_bp_stall_seconds = 0.0
-
-        _EMPTY_CACHE_COOLDOWN = 2.0
-
-        def _vram_offload_thread():
-            nonlocal vram_max, vram_sum, vram_samples, offload_count, ram_max, ram_sum, ram_samples
-            last_empty_cache = 0.0
-            try:
-                while not stop_offload.is_set():
-                    over_limit, used, threshold = self._should_offload_frames()
-                    vram_max = max(vram_max, used)
-                    vram_sum += used
-                    vram_samples += 1
-                    try:
-                        rss = _process.memory_info().rss
-                        ram_max = max(ram_max, rss)
-                        ram_sum += rss
-                        ram_samples += 1
-                    except Exception:
-                        pass
-                    soft_threshold = threshold - self._VRAM_PRESSURE_HYSTERESIS_BYTES
-                    if over_limit:
-                        vram_pressure.set()
-                        bytes_to_free = int((used - threshold) * 1.2)
-                        offloaded = frame_buffer.offload_gpu_frames(bytes_to_free)
-                        if offloaded > 0:
-                            offload_count += offloaded
-                            now = time.monotonic()
-                            if now - last_empty_cache >= _EMPTY_CACHE_COOLDOWN:
-                                torch.cuda.empty_cache()
-                                last_empty_cache = now
-                            continue
-                    elif used < soft_threshold:
-                        vram_pressure.clear()
-
-                    try:
-                        ram_pct = psutil.virtual_memory().percent
-                        if ram_pct >= self._RAM_PRESSURE_PERCENT:
-                            ram_pressure.set()
-                        else:
-                            ram_pressure.clear()
-                    except Exception:
-                        pass
-
-                    headroom = threshold - used
-                    if headroom > 2 * (1024 ** 3):
-                        stop_offload.wait(timeout=0.2)
-                    else:
-                        stop_offload.wait(timeout=0.05)
-            except BaseException:
-                log.exception("[offload] thread crashed")
 
         use_async_secondary = isinstance(self.restoration_pipeline.secondary_restorer, AsyncSecondaryRestorer)
         secondary_fn = _async_secondary_restore_thread if use_async_secondary else _secondary_restore_thread
@@ -606,35 +499,25 @@ class Pipeline:
             threading.Thread(target=_decode_detect_thread, name="DecodeDetect", daemon=True),
             threading.Thread(target=_primary_restore_thread, name="PrimaryRestore", daemon=True),
             threading.Thread(target=secondary_fn, name="SecondaryRestore", daemon=True),
-            threading.Thread(target=_encode_thread, name="Encode", daemon=True),
-            threading.Thread(target=_vram_offload_thread, name="VramOffload", daemon=True),
+            threading.Thread(target=_blend_encode_thread, name="BlendEncode", daemon=True),
         ]
         for t in threads:
             t.start()
-        for t in threads[:4]:
+        for t in threads:
             t.join()
-        stop_offload.set()
-        threads[4].join(timeout=1)
 
-        if vram_samples > 0:
-            vram_avg = vram_sum / vram_samples
-            log.info(
-                "VRAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples), offloaded frames: %d",
-                vram_max / (1024 ** 2), vram_avg / (1024 ** 2), vram_samples, offload_count,
-            )
-        if ram_samples > 0:
-            ram_avg = ram_sum / ram_samples
-            log.info(
-                "RAM usage — max: %.1f MiB, avg: %.1f MiB (%d samples)",
-                ram_max / (1024 ** 2), ram_avg / (1024 ** 2), ram_samples,
-            )
-        log.info("Frame buffer — peak: %d frames", peak_fb_size)
-        if bp_stall_count > 0:
-            log.info("Decode backpressure — stalls: %d, total: %.1fs", bp_stall_count, bp_stall_seconds)
-        if ram_stall_count > 0:
-            log.info("Decode RAM stall — stalls: %d, total: %.1fs", ram_stall_count, ram_stall_seconds)
-        if vram_bp_stall_count > 0:
-            log.info("VRAM decode backpressure — stalls: %d, total: %.1fs", vram_bp_stall_count, vram_bp_stall_seconds)
+        try:
+            free, total = torch.cuda.mem_get_info(device)
+            vram_used = total - free
+            log.info("VRAM usage at end — %.1f MiB", vram_used / (1024 ** 2))
+        except Exception:
+            pass
+        try:
+            rss = _process.memory_info().rss
+            log.info("RAM usage at end — %.1f MiB", rss / (1024 ** 2))
+        except Exception:
+            pass
+
         ss = starvation_stats
         if ss.clips_pushed > 0 or ss.clips_popped > 0:
             log.info(
@@ -642,15 +525,12 @@ class Pipeline:
                 ss.clips_pushed, ss.clips_popped, ss.pusher_stall_seconds, ss.starvation_flushes, ss.starvation_seconds,
             )
 
-        frame_buffer.frames.clear()
-        frame_buffer._pin_count.clear()
-        del frame_buffer
-
         err = error_holder[0] if error_holder else None
         if err is not None:
             err.__traceback__ = None
 
-        del clip_queue, secondary_queue, encode_queue
+        del clip_queue, secondary_queue, encode_queue, metadata_queue
+        del blend_buffer, crop_buffers
         del error_holder, threads
         gc.collect()
         torch.cuda.empty_cache()

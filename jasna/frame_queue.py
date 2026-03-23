@@ -35,6 +35,15 @@ class FrameQueue:
             self._cond.notify_all()
             return item
 
+    def get_nowait(self) -> Any:
+        with self._cond:
+            if not self._deque:
+                raise Empty
+            item, frame_count = self._deque.popleft()
+            self._current_frames -= frame_count
+            self._cond.notify_all()
+            return item
+
     def task_done(self) -> None:
         with self._cond:
             self._unfinished_tasks -= 1

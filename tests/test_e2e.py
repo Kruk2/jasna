@@ -505,12 +505,16 @@ class TestRestorationPipelineRtxE2E:
         )
         try:
             pipeline = RestorationPipeline(restorer=restorer, secondary_restorer=rtx)
-            result = pipeline.restore_clip(clip, frames, keep_start=0, keep_end=n)
+            from jasna.crop_buffer import extract_crop
+            raw_crops = [extract_crop(f, clip.bboxes[i], h, w) for i, f in enumerate(frames)]
+            pr = pipeline.prepare_and_run_primary(clip, raw_crops, (h, w), keep_start=0, keep_end=n, crossfade_weights=None)
+            restored_frames = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
+            sr = pipeline.build_secondary_result(pr, restored_frames)
 
-            assert len(result.restored_frames) == n
-            for f in result.restored_frames:
+            assert sr.keep_end == n
+            for f in sr.restored_frames:
                 assert f.dtype == torch.uint8
                 assert f.dim() == 3
-            assert result.frame_shape == (h, w)
+            assert sr.frame_shape == (h, w)
         finally:
             rtx.close()

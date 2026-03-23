@@ -13,11 +13,10 @@ import threading
 import numpy as np
 import torch
 
-from jasna.restorer.restoration_pipeline import RestorationPipeline
+from jasna.crop_buffer import extract_crop, prepare_crops_for_restoration
 from jasna.tensor_utils import to_device
 from jasna.tracking.clip_tracker import TrackedClip
-from jasna.tracking.frame_buffer import FrameBuffer
-import jasna.restorer.restoration_pipeline as rp
+import jasna.crop_buffer as cb
 
 
 class _CpuSliceTracer:
@@ -51,9 +50,9 @@ class _CpuSliceTracer:
 
 
 def _no_expansion(monkeypatch):
-    monkeypatch.setattr(rp, "BORDER_RATIO", 0.0)
-    monkeypatch.setattr(rp, "MIN_BORDER", 0)
-    monkeypatch.setattr(rp, "MAX_EXPANSION_FACTOR", 0.0)
+    monkeypatch.setattr(cb, "BORDER_RATIO", 0.0)
+    monkeypatch.setattr(cb, "MIN_BORDER", 0)
+    monkeypatch.setattr(cb, "MAX_EXPANSION_FACTOR", 0.0)
 
 
 class _ConstantRestorer:
@@ -70,49 +69,41 @@ class _ConstantRestorer:
         return torch.stack(stacked, dim=0)
 
 
-def test_prepare_clip_inputs_uses_numpy_slicing_for_cpu_frames(monkeypatch) -> None:
-    """When frame is on CPU, _prepare_clip_inputs must use numpy for slicing
-    instead of torch __getitem__, and must not call .contiguous() on CPU tensors."""
+def test_extract_crop_and_prepare_uses_no_cpu_dispatch(monkeypatch) -> None:
+    """extract_crop + prepare_crops_for_restoration must not trigger torch CPU
+    __getitem__/contiguous on CPU tensors."""
     _no_expansion(monkeypatch)
-
-    restorer = _ConstantRestorer(0.5)
-    pipeline = RestorationPipeline(restorer=restorer)  # type: ignore[arg-type]
 
     frame = torch.randint(0, 255, (3, 64, 64), dtype=torch.uint8)
     bbox = np.array([10.0, 10.0, 50.0, 50.0], dtype=np.float32)
-    mask = torch.ones((8, 8), dtype=torch.bool)
-    clip = TrackedClip(track_id=0, start_frame=0, mask_resolution=(8, 8),
-                       bboxes=[bbox], masks=[mask])
 
     tracer = _CpuSliceTracer()
     tracer.install()
     try:
-        pipeline._prepare_clip_inputs(clip, [frame])
+        raw_crop = extract_crop(frame, bbox, 64, 64)
+        prepare_crops_for_restoration([raw_crop])
     finally:
         tracer.uninstall()
 
     assert tracer.calls == [], (
-        f"CPU tensor __getitem__/contiguous detected in _prepare_clip_inputs: {tracer.calls}"
+        f"CPU tensor __getitem__/contiguous detected in extract_crop/prepare: {tracer.calls}"
     )
 
 
-def test_ensure_on_device_no_cpu_dispatch() -> None:
-    """_ensure_on_device uses to_device (empty+copy_) which dispatches through
-    the destination device, not the CPU source."""
-    fb = FrameBuffer(device=torch.device("cpu"))
+def test_to_device_no_cpu_dispatch() -> None:
+    """to_device uses empty+copy_ which dispatches through the destination
+    device, not the CPU source."""
     frame = torch.randint(0, 255, (3, 64, 64), dtype=torch.uint8)
-    fb.add_frame(0, pts=0, frame=frame, clip_track_ids=set())
-    pending = fb.frames[0]
 
     tracer = _CpuSliceTracer()
     tracer.install()
     try:
-        fb._ensure_on_device(pending)
+        to_device(frame, torch.device("cpu"))
     finally:
         tracer.uninstall()
 
     assert tracer.calls == [], (
-        f"CPU tensor __getitem__/contiguous detected in _ensure_on_device: {tracer.calls}"
+        f"CPU tensor __getitem__/contiguous detected in to_device: {tracer.calls}"
     )
 
 

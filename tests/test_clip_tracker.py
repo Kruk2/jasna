@@ -284,6 +284,32 @@ def test_split_with_zero_overlap_keeps_track_id_in_active_for_split_frame() -> N
     assert 0 in active
 
 
+def test_tracked_clip_frame_indices() -> None:
+    from jasna.tracking.clip_tracker import TrackedClip
+    bbox = np.array([0, 0, 10, 10], dtype=np.float32)
+    mask = torch.zeros((4, 4), dtype=torch.bool)
+    clip = TrackedClip(track_id=0, start_frame=5, mask_resolution=(4, 4),
+                       bboxes=[bbox, bbox, bbox], masks=[mask, mask, mask])
+    assert clip.frame_indices() == [5, 6, 7]
+
+
+def test_compute_iou_matrix_empty_boxes() -> None:
+    from jasna.tracking.clip_tracker import compute_iou_matrix
+    empty = np.zeros((0, 4), dtype=np.float32)
+    boxes = np.array([[0, 0, 10, 10]], dtype=np.float32)
+    assert compute_iou_matrix(empty, boxes).shape == (0, 1)
+    assert compute_iou_matrix(boxes, empty).shape == (1, 0)
+
+
+def test_merge_overlapping_boxes_empty() -> None:
+    from jasna.tracking.clip_tracker import merge_overlapping_boxes
+    empty_boxes = np.zeros((0, 4), dtype=np.float32)
+    empty_masks = torch.zeros((0, 4, 4), dtype=torch.bool)
+    out_b, out_m = merge_overlapping_boxes(empty_boxes, empty_masks, iou_threshold=0.5)
+    assert out_b.shape == (0, 4)
+    assert out_m.shape == (0, 4, 4)
+
+
 # negative overlap raises
 def test_negative_temporal_overlap_raises() -> None:
     with pytest.raises(ValueError):
