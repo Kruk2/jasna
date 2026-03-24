@@ -100,6 +100,7 @@ class Pipeline:
         }
 
     _FLUSH_DELAY = 2.0
+    _FLUSH_RETRY_TIMEOUT = 5.0
 
     def _run_secondary_loop(
         self,
@@ -115,6 +116,7 @@ class Pipeline:
         pusher_error: list[BaseException] = []
         last_push_time = time.monotonic()
         flushed_since_last_push = False
+        last_flush_time = 0.0
         pusher_stall_seconds = 0.0
         clips_pushed = 0
 
@@ -191,19 +193,32 @@ class Pipeline:
                 flushed_since_last_push = False
                 continue
 
+            now = time.monotonic()
             if (
                 restorer.has_pending
                 and _no_clips_incoming()
                 and not flushed_since_last_push
-                and time.monotonic() - last_push_time > self._FLUSH_DELAY
+                and now - last_push_time > self._FLUSH_DELAY
             ):
                 if starvation_start is None:
-                    starvation_start = time.monotonic()
+                    starvation_start = now
                 target_seqs = self._earliest_blocking_seqs(dict(pending_prs))
                 log.debug("[secondary] starvation flush target_seqs=%s", target_seqs)
                 if restorer.flush_pending(target_seqs=target_seqs):
                     flushed_since_last_push = True
+                    last_flush_time = now
                 starvation_count += 1
+            elif (
+                flushed_since_last_push
+                and restorer.has_pending
+                and _no_clips_incoming()
+                and now - last_flush_time > self._FLUSH_RETRY_TIMEOUT
+            ):
+                log.warning(
+                    "[secondary] flush retry: no clips forwarded for %.0fs after flush, pending=%d",
+                    now - last_flush_time, len(pending_prs),
+                )
+                flushed_since_last_push = False
 
             time.sleep(self._ASYNC_POLL_TIMEOUT)
 
