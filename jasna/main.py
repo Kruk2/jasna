@@ -96,7 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--secondary-restoration",
         type=str,
         default="none",
-        choices=["none", "tvai", "rtx-super-res"],
+        choices=["none", "unet-4x", "tvai", "rtx-super-res"],
         help='Secondary restoration after primary model (default: %(default)s)',
     )
 
@@ -342,6 +342,9 @@ def main() -> None:
                 scale=int(args.tvai_scale),
                 num_workers=int(args.tvai_workers),
             )
+        elif secondary_name == "unet-4x":
+            from jasna.restorer.unet4x_secondary_restorer import Unet4xSecondaryRestorer
+            secondary_restorer = Unet4xSecondaryRestorer(device=device, fp16=fp16)
         elif secondary_name == "rtx-super-res":
             from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
             rtx_denoise = str(args.rtx_denoise).lower()
