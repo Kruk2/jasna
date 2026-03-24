@@ -41,6 +41,11 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"^torch_tensorrt\.dynamo\._exporter$",
 )
+warnings.filterwarnings(
+    "ignore",
+    message=r"^NOTE: Redirects are currently not supported in Windows or MacOs\..*",
+    module=r"^torch\.distributed\.elastic\.multiprocessing\.redirects$",
+)
 
 
 class _SuppressTorchTensorRTNoises(logging.Filter):

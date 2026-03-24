@@ -154,6 +154,7 @@ class CropBuffer:
 
 def prepare_crops_for_restoration(
     raw_crops: list[RawCrop],
+    device: torch.device,
     restoration_size: int = RESTORATION_SIZE,
 ) -> tuple[list[torch.Tensor], list[tuple[int, int]], list[tuple[int, int]]]:
     crop_shapes = [c.crop_shape for c in raw_crops]
@@ -170,6 +171,8 @@ def prepare_crops_for_restoration(
     pad_offsets: list[tuple[int, int]] = []
 
     for raw_crop in raw_crops:
+        if raw_crop.crop.device != device:
+            raw_crop.crop = raw_crop.crop.to(device, non_blocking=True)
         crop_h, crop_w = raw_crop.crop_shape
         new_h = int(crop_h * scale_h)
         new_w = int(crop_w * scale_w)

@@ -431,11 +431,7 @@ class TvaiSecondaryRestorer:
                 if not has_target:
                     continue
                 if segs and isinstance(segs[-1], _FillerSegment):
-                    if segs[-1].remaining == TVAI_PIPELINE_DELAY:
-                        segs.pop()
-                        logger.debug("TVAI flush_pending: removed unconsumed filler from worker %d", wi)
-                    else:
-                        continue
+                    continue
                 self._workers[wi].push_frames(filler)
                 segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
                 flushed = True

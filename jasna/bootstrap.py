@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import os
 import sys
+import warnings
 from pathlib import Path
+
+warnings.filterwarnings("ignore", message=r".*isinstance\(treespec, LeafSpec\).*", category=FutureWarning)
 
 
 def limit_aten_threads() -> None:

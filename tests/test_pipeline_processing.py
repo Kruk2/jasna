@@ -16,7 +16,7 @@ from jasna.pipeline_processing import process_frame_batch, finalize_processing
 
 class _FakeRestorationPipeline:
     def process_clip_item(self, ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
-        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(ci.raw_crops)
+        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(ci.raw_crops, device=torch.device("cpu"))
         enlarged_bboxes = [c.enlarged_bbox for c in ci.raw_crops]
         crop_shapes = [c.crop_shape for c in ci.raw_crops]
 

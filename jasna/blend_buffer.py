@@ -64,6 +64,10 @@ class BlendBuffer:
             last_frame = start + clip_offset + kept_count - 1
             self._result_last_frame[sr.track_id] = last_frame
 
+    def offloadable_results(self) -> list[SecondaryRestoreResult]:
+        with self._lock:
+            return list(self._results.values())
+
     def is_frame_ready(self, frame_idx: int) -> bool:
         with self._lock:
             pending = self.pending_map.get(frame_idx)
