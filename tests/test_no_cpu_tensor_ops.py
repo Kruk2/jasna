@@ -81,7 +81,7 @@ def test_extract_crop_and_prepare_uses_no_cpu_dispatch(monkeypatch) -> None:
     tracer.install()
     try:
         raw_crop = extract_crop(frame, bbox, 64, 64)
-        prepare_crops_for_restoration([raw_crop])
+        prepare_crops_for_restoration([raw_crop], device=torch.device("cpu"))
     finally:
         tracer.uninstall()
 

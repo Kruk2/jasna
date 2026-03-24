@@ -27,6 +27,7 @@ from jasna.tracking import ClipTracker
 from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
+from jasna.vram_offloader import VramOffloader
 
 log = logging.getLogger(__name__)
 
@@ -255,8 +256,16 @@ class Pipeline:
         error_holder: list[BaseException] = []
         blend_buffer = BlendBuffer(device=device)
         crop_buffers: dict[int, CropBuffer] = {}
+        crop_lock = threading.Lock()
         primary_idle_event = threading.Event()
         frame_shape: list[tuple[int, int]] = []
+
+        vram_offloader = VramOffloader(
+            device=device,
+            blend_buffer=blend_buffer,
+            crop_buffers=crop_buffers,
+            crop_lock=crop_lock,
+        )
 
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
@@ -499,10 +508,12 @@ class Pipeline:
             threading.Thread(target=secondary_fn, name="SecondaryRestore", daemon=True),
             threading.Thread(target=_blend_encode_thread, name="BlendEncode", daemon=True),
         ]
+        vram_offloader.start()
         for t in threads:
             t.start()
         for t in threads:
             t.join()
+        vram_offloader.stop()
 
         try:
             free, total = torch.cuda.mem_get_info(device)
