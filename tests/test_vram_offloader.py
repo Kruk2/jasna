@@ -91,7 +91,7 @@ class TestVramOffloaderOffload:
             blend_buffer=bb,
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=1000,
+            vram_limit=0.001,
             safetynet=0,
         )
         offloader._offload_device_type = "cpu"
@@ -111,7 +111,7 @@ class TestVramOffloaderOffload:
             blend_buffer=bb,
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=1000,
+            vram_limit=0.001,
             safetynet=0,
         )
         # device_type stays "cuda" (default) so CPU tensors are not considered on-device
@@ -134,7 +134,7 @@ class TestVramOffloaderOffload:
             blend_buffer=bb,
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=1000,
+            vram_limit=0.001,
             safetynet=0,
         )
         offloader._offload_device_type = "cpu"
@@ -162,7 +162,7 @@ class TestVramOffloaderOffload:
             blend_buffer=bb,
             crop_buffers=crop_buffers,
             crop_lock=crop_lock,
-            vram_limit=1000,
+            vram_limit=0.001,
             safetynet=0,
         )
 
@@ -181,7 +181,7 @@ class TestVramOffloaderOffload:
             blend_buffer=bb,
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=1000,
+            vram_limit=0.001,
             safetynet=0,
         )
         offloader._offload_device_type = "cpu"
@@ -198,10 +198,10 @@ class TestVramOffloaderThreshold:
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=2_000_000_000,
+            vram_limit=2.0,
             safetynet=750_000_000,
         )
-        assert offloader._threshold == 1_250_000_000
+        assert offloader._threshold == int(2.0 * 1024 * 1024 * 1024) - 750_000_000
 
     def test_safetynet_zero(self):
         offloader = VramOffloader(
@@ -209,10 +209,10 @@ class TestVramOffloaderThreshold:
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=1_000_000,
+            vram_limit=1.0,
             safetynet=0,
         )
-        assert offloader._threshold == 1_000_000
+        assert offloader._threshold == 1 * 1024 * 1024 * 1024
 
 
 class TestVramOffloaderLifecycle:
@@ -222,7 +222,7 @@ class TestVramOffloaderLifecycle:
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=1000,
+            vram_limit=0.001,
             safetynet=0,
         )
         offloader.start()
@@ -230,7 +230,7 @@ class TestVramOffloaderLifecycle:
         offloader.stop()
         assert not offloader._thread.is_alive()
 
-    @patch("jasna.vram_offloader.torch.cuda.mem_get_info", return_value=(0, 2000))
+    @patch("jasna.vram_offloader.torch.cuda.mem_get_info", return_value=(0, 2_000_000))
     @patch("jasna.vram_offloader.torch.cuda.empty_cache")
     def test_run_loop_triggers_offload_and_empty_cache(self, mock_empty_cache, mock_mem_info):
         bb = BlendBuffer(device=torch.device("cpu"))
@@ -243,7 +243,7 @@ class TestVramOffloaderLifecycle:
             blend_buffer=bb,
             crop_buffers={},
             crop_lock=threading.Lock(),
-            vram_limit=1000,
+            vram_limit=0.001,
             safetynet=0,
         )
         offloader._offload_device_type = "cpu"

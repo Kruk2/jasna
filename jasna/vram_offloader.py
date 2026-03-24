@@ -11,7 +11,7 @@ from jasna.crop_buffer import CropBuffer
 
 _log = logging.getLogger(__name__)
 
-VRAM_LIMIT: int | None = None
+VRAM_LIMIT: float | None = None
 VRAM_SAFETYNET: int = 750 * 1024 * 1024
 
 _POLL_INTERVAL = 0.1
@@ -62,7 +62,7 @@ class VramOffloader:
         blend_buffer: BlendBuffer,
         crop_buffers: dict[int, CropBuffer],
         crop_lock: threading.Lock,
-        vram_limit: int | None = VRAM_LIMIT,
+        vram_limit: float | None = VRAM_LIMIT,
         safetynet: int = VRAM_SAFETYNET,
     ) -> None:
         self._device = device
@@ -71,7 +71,7 @@ class VramOffloader:
         self._crop_lock = crop_lock
 
         if vram_limit is not None:
-            gpu_total = vram_limit
+            gpu_total = int(vram_limit * 1024 * 1024 * 1024)
         else:
             gpu_total = torch.cuda.get_device_properties(device).total_memory
         self._threshold = max(0, gpu_total - safetynet)
