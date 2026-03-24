@@ -248,6 +248,9 @@ class Processor:
                     scale=settings.tvai_scale,
                     num_workers=settings.tvai_workers,
                 )
+            elif settings.secondary_restoration == "unet-4x":
+                from jasna.restorer.unet4x_secondary_restorer import Unet4xSecondaryRestorer
+                secondary_restorer = Unet4xSecondaryRestorer(device=device, fp16=settings.fp16_mode)
             elif settings.secondary_restoration == "rtx-super-res":
                 from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
                 rtx_denoise = settings.rtx_denoise.lower()

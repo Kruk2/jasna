@@ -61,10 +61,11 @@ class RfDetrMosaicDetectionModel:
         )
         self.runner = TrtRunner(
             self.engine_path,
-            input_shape=(self.batch_size, 3, self.resolution, self.resolution),
+            input_shapes=[(self.batch_size, 3, self.resolution, self.resolution)],
             device=self.device,
         )
-        self.input_dtype = self.runner.input_dtype
+        self._input_name = self.runner.input_names[0]
+        self.input_dtype = self.runner.input_dtypes[self._input_name]
 
         self.boxes_out = next(
             k for k in self.runner.output_names if self.runner.outputs[k].ndim == 3 and self.runner.outputs[k].shape[-1] == 4
@@ -126,7 +127,7 @@ class RfDetrMosaicDetectionModel:
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)
-        outs = self.runner.infer(x)
+        outs = self.runner.infer({self._input_name: x})
         boxes_list, masks_list = self._postprocess(
             pred_boxes=outs[self.boxes_out],
             pred_logits=outs[self.logits_out],
