@@ -542,7 +542,7 @@ class SettingsPanel(ctk.CTkFrame):
         from jasna.restorer.unet4x_secondary_restorer import UNET4X_ONNX_PATH
         unet4x_available = UNET4X_ONNX_PATH.exists()
         unet4x_rb = ctk.CTkRadioButton(
-            engines_frame, text=f"{t('secondary_unet_4x')} ({t('secondary_unet_4x_hint')}) — {t('recommended')}",
+            engines_frame, text=t('secondary_unet_4x'),
             variable=self._widgets["secondary_var"], value="unet-4x",
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed,
