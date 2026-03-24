@@ -34,7 +34,7 @@ If you still run into out-of-memory errors, reduce the **clip size** (e.g. from 
 RTX 5090 + i9 13900k
 | File | Clip (s) | lada 0.10.1 | jasna 0.3.0 | jasna 0.5.0 |
 |---|---|---|---|---|
-| **ABF-017** (4k, 2h 25min) | 60 | 02:56:26 | 01:20:49 (2.2× faster) | -- |
+| **ABF-017** (4k, 2h 25min) | 60 | 02:56:26 | 01:20:49 (2.2× faster) | 01:10:00 (2.5× faster) |
 | **HUBLK-063** (1080p, 3h 10min) | 180 | 01:34:51 | 44:21 (2.1× faster) | 37:57 (2.5× faster) |
 | **DASS-570_2m** | 30 | 01:08 | 00:30 (2.3× faster) | 00:24 (2.8× faster) |
 | **NASK-223_Test** | 30 | 03:12 | 01:18 (2.5× faster) | 01:02 (3.1× faster) |
