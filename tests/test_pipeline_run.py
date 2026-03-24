@@ -633,6 +633,7 @@ class TestPipelineRun:
         p = _make_pipeline()
         p._ASYNC_POLL_TIMEOUT = 0.01
         p._FLUSH_DELAY = 0.05
+        p._FLUSH_RETRY_TIMEOUT = 999
 
         clip = TrackedClip(
             track_id=1, start_frame=0, mask_resolution=(2, 2),
@@ -676,6 +677,59 @@ class TestPipelineRun:
         t.join(timeout=3)
 
         restorer.flush_pending.assert_called_once_with(target_seqs={0})
+
+    def test_run_secondary_loop_flush_retry_after_timeout(self):
+        """flush_pending retried after _FLUSH_RETRY_TIMEOUT if first flush didn't unstick."""
+        import threading
+        p = _make_pipeline()
+        p._ASYNC_POLL_TIMEOUT = 0.01
+        p._FLUSH_DELAY = 0.02
+        p._FLUSH_RETRY_TIMEOUT = 0.08
+
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+        )
+        pr = PrimaryRestoreResult(
+            track_id=clip.track_id, start_frame=clip.start_frame,
+            frame_count=2, frame_shape=(8, 8), frame_device=torch.device("cpu"),
+            masks=clip.masks, primary_raw=torch.zeros((2, 3, 256, 256)),
+            keep_start=0, keep_end=2, crossfade_weights=None,
+            enlarged_bboxes=[(1, 1, 5, 5)] * 2, crop_shapes=[(4, 4)] * 2,
+            pad_offsets=[(126, 126)] * 2, resize_shapes=[(4, 4)] * 2,
+        )
+
+        restorer = _mock_async_restorer()
+        restorer.num_workers = 2
+        restorer.push_clip.return_value = 0
+        restorer.pop_completed.return_value = []
+        restorer.has_pending = True
+        restorer.flush_all.return_value = None
+        restorer.flush_pending.return_value = True
+        p.restoration_pipeline.secondary_restorer = restorer
+
+        secondary_queue = FrameQueue(max_frames=9999)
+        encode_queue = FrameQueue(max_frames=9999)
+        cq = FrameQueue(max_frames=9999)
+        primary_idle = threading.Event()
+        primary_idle.set()
+        secondary_queue.put(pr)
+
+        def put_sentinel_later():
+            import time
+            time.sleep(0.4)
+            secondary_queue.put(_SENTINEL)
+
+        t = threading.Thread(target=put_sentinel_later, daemon=True)
+        t.start()
+
+        p._run_secondary_loop(secondary_queue, encode_queue, clip_queue=cq, primary_idle_event=primary_idle)
+        t.join(timeout=3)
+
+        assert restorer.flush_pending.call_count >= 2, (
+            f"Expected flush retry but flush_pending called {restorer.flush_pending.call_count} time(s)"
+        )
 
     def test_run_secondary_loop_pipeline_starved_triggers_flush(self):
         """flush_pending when primary idle, clip_queue empty, and FLUSH_DELAY elapsed."""

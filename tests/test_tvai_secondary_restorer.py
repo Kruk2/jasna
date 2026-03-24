@@ -376,15 +376,28 @@ class TestFlushPending:
         workers[0].push_frames.assert_not_called()
         workers[1].push_frames.assert_not_called()
 
-    def test_skips_worker_already_flushed(self):
+    def test_skips_worker_with_partially_consumed_filler(self):
         r = _make_restorer(num_workers=2)
         workers = _setup_mock_workers(r)
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
         r.flush_pending()
         assert workers[0].push_frames.call_count == 1
         assert isinstance(r._worker_segments[0][-1], _FillerSegment)
+        r._worker_segments[0][-1].remaining = TVAI_PIPELINE_DELAY - 3
         r.flush_pending()
         assert workers[0].push_frames.call_count == 1
+
+    def test_reflush_replaces_unconsumed_filler(self):
+        r = _make_restorer(num_workers=1)
+        workers = _setup_mock_workers(r)
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
+        r.flush_pending()
+        assert workers[0].push_frames.call_count == 1
+        assert isinstance(r._worker_segments[0][-1], _FillerSegment)
+        assert r._worker_segments[0][-1].remaining == TVAI_PIPELINE_DELAY
+        r.flush_pending()
+        assert workers[0].push_frames.call_count == 2
+        assert len([s for s in r._worker_segments[0] if isinstance(s, _FillerSegment)]) == 1
 
     def test_reflush_after_filler_consumed(self):
         r = _make_restorer(num_workers=1)
