@@ -538,7 +538,19 @@ class SettingsPanel(ctk.CTkFrame):
             command=self._on_secondary_changed
         )
         none_rb.pack(side="left", padx=(0, 16))
-        
+
+        from jasna.restorer.unet4x_secondary_restorer import UNET4X_ONNX_PATH
+        unet4x_available = UNET4X_ONNX_PATH.exists()
+        unet4x_rb = ctk.CTkRadioButton(
+            engines_frame, text=f"{t('secondary_unet_4x')} ({t('secondary_unet_4x_hint')}) — {t('recommended')}",
+            variable=self._widgets["secondary_var"], value="unet-4x",
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
+            command=self._on_secondary_changed,
+            state="normal" if unet4x_available else "disabled",
+        )
+        unet4x_rb.pack(side="left", padx=(0, 16))
+        Tooltip(unet4x_rb, get_tooltip("secondary_unet_4x"))
+
         tvai_rb = ctk.CTkRadioButton(
             engines_frame, text=f"{t('secondary_tvai')} ({t('secondary_tvai_hint')})", variable=self._widgets["secondary_var"], value="tvai",
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,

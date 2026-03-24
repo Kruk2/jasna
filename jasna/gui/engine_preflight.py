@@ -87,6 +87,20 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             )
         )
 
+    if settings.secondary_restoration == "unet-4x":
+        from jasna.restorer.unet4x_secondary_restorer import UNET4X_ONNX_PATH, get_unet4x_engine_path
+        unet_engine = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=bool(settings.fp16_mode))
+        unet_exists = unet_engine.is_file()
+        reqs.append(
+            EngineRequirement(
+                key="unet_4x",
+                label="UNet 4x (secondary restoration)",
+                paths=(unet_engine,),
+                exists=unet_exists,
+                missing_paths=() if unet_exists else (unet_engine,),
+            )
+        )
+
     should_warn = any(not r.exists for r in reqs)
 
     return EnginePreflightResult(

@@ -69,7 +69,7 @@ def compile_onnx_to_tensorrt_engine(
     *,
     batch_size: int | None = None,
     fp16: bool = True,
-    optimization_level: int = 3,
+    optimization_level: int = 5,
     workspace_gb: int,
 ) -> Path:
     onnx_path = Path(onnx_path)
@@ -108,15 +108,24 @@ def compile_onnx_to_tensorrt_engine(
     if fp16:
         config.set_flag(trt.BuilderFlag.FP16)
 
+    needs_profile = False
+    profile = builder.create_optimization_profile()
     for i in range(network.num_inputs):
         t = network.get_input(i)
-        if any(int(d) < 0 for d in t.shape):
-            raise ValueError(
-                f"ONNX input '{t.name}' has dynamic shape {tuple(int(d) for d in t.shape)}; "
-                "export with fixed shapes (no dynamic batching) to build a static engine."
-            )
+        shape = tuple(int(d) for d in t.shape)
+        if any(d < 0 for d in shape):
+            if batch_size is None:
+                raise ValueError(
+                    f"ONNX input '{t.name}' has dynamic shape {shape}; "
+                    "provide batch_size to fix dynamic dimensions."
+                )
+            fixed = tuple(batch_size if d < 0 else d for d in shape)
+            profile.set_shape(t.name, min=fixed, opt=fixed, max=fixed)
+            needs_profile = True
         if fp16 and t.dtype == trt.DataType.FLOAT:
             t.dtype = trt.DataType.HALF
+    if needs_profile:
+        config.add_optimization_profile(profile)
 
     if fp16:
         for i in range(network.num_outputs):

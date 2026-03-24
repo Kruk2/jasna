@@ -70,7 +70,7 @@ class AppSettings:
     denoise_step: str = "after_primary"  # after_primary, after_secondary
     
     # Secondary restoration
-    secondary_restoration: str = "none"  # none, tvai, rtx-super-res
+    secondary_restoration: str = "none"  # none, unet-4x, tvai, rtx-super-res
     tvai_ffmpeg_path: str = r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe"
     tvai_model: str = "iris-2"
     tvai_scale: int = 4

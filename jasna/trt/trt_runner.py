@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 from pathlib import Path
 import tensorrt as trt
@@ -8,11 +10,10 @@ class TrtRunner:
     def __init__(
         self,
         engine_path: Path,
-        input_shape: tuple[int, int, int, int],
+        input_shapes: dict[str, tuple[int, ...]] | list[tuple[int, ...]],
         device: torch.device,
     ) -> None:
         self.engine_path = engine_path
-        self.input_shape = input_shape
         self.device = device
 
         self.logger = trt.Logger(trt.ILogger.Severity(trt.Logger.ERROR))
@@ -24,9 +25,14 @@ class TrtRunner:
         if self.context is None:
             raise RuntimeError("Failed to create TensorRT execution context")
         self.input_names, self.output_names = _engine_io_names(self.engine)
-        self.input_name = self.input_names[0]
-        self.context.set_input_shape(self.input_name, self.input_shape)
-        self.input_dtype = _trt_dtype_to_torch(self.engine.get_tensor_dtype(self.input_name))
+
+        if isinstance(input_shapes, list):
+            input_shapes = dict(zip(self.input_names, input_shapes))
+
+        self.input_dtypes: dict[str, torch.dtype] = {}
+        for name in self.input_names:
+            self.context.set_input_shape(name, input_shapes[name])
+            self.input_dtypes[name] = _trt_dtype_to_torch(self.engine.get_tensor_dtype(name))
 
         dev = torch.device(self.device)
         self.outputs: dict[str, torch.Tensor] = {}
@@ -37,8 +43,9 @@ class TrtRunner:
             self.outputs[name] = t
             self.context.set_tensor_address(name, int(t.data_ptr()))
 
-    def infer(self, x: torch.Tensor) -> dict[str, "torch.Tensor"]:
-        self.context.set_tensor_address(self.input_name, int(x.data_ptr()))
+    def infer(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        for name, tensor in inputs.items():
+            self.context.set_tensor_address(name, int(tensor.data_ptr()))
         stream = torch.cuda.current_stream(self.device)
         self.context.execute_async_v3(stream.cuda_stream)
         return self.outputs
