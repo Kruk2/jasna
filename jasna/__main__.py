@@ -3,6 +3,9 @@ import os
 import sys
 from pathlib import Path
 
+if sys.platform == "win32":
+    os.environ.setdefault("OMP_WAIT_POLICY", "passive")
+
 _JASNA_MAIN_PID = os.environ.get("JASNA_MAIN_PID")
 if _JASNA_MAIN_PID and str(os.getpid()) != _JASNA_MAIN_PID:
     if len(sys.argv) < 2 or sys.argv[1] != "--multiprocessing-fork":
@@ -11,12 +14,10 @@ if multiprocessing.parent_process() is not None:
     sys.exit(0)
 os.environ["JASNA_MAIN_PID"] = str(os.getpid())
 
-from jasna.bootstrap import limit_aten_threads, sanitize_sys_path_for_local_dev
+from jasna.bootstrap import sanitize_sys_path_for_local_dev
 
 if not getattr(sys, "frozen", False):
     sanitize_sys_path_for_local_dev(Path(__file__).resolve().parent)
-
-limit_aten_threads()
 
 
 def _preload_native_libs():

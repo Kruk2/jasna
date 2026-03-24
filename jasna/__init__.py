@@ -41,10 +41,13 @@ warnings.filterwarnings(
     category=UserWarning,
     module=r"^torch_tensorrt\.dynamo\._exporter$",
 )
-warnings.filterwarnings(
-    "ignore",
-    message=r"^NOTE: Redirects are currently not supported in Windows or MacOs\..*",
-    module=r"^torch\.distributed\.elastic\.multiprocessing\.redirects$",
+class _SuppressRedirectsWarning(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "Redirects are currently not supported" not in record.getMessage()
+
+
+logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").addFilter(
+    _SuppressRedirectsWarning()
 )
 
 
