@@ -7,17 +7,7 @@ import os
 import warnings
 from pathlib import Path
 
-import torch
-
-
-def get_yolo_tensorrt_engine_path(model_path: str | Path, *, fp16: bool) -> Path:
-    model_path = Path(model_path)
-    if model_path.suffix.lower() != ".pt":
-        raise ValueError(f"Expected a .pt YOLO checkpoint, got: {model_path}")
-    from jasna.trt import get_onnx_tensorrt_engine_path
-
-    onnx_path = model_path.with_suffix(".onnx")
-    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=None, fp16=bool(fp16))
+from jasna.engine_paths import get_yolo_tensorrt_engine_path  # noqa: F401
 
 
 def compile_yolo_to_tensorrt_engine(

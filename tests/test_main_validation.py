@@ -31,8 +31,7 @@ def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detec
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
         patch("jasna.main.check_required_executables"),
         patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
-        patch("jasna.mosaic.detection_registry.precompile_detection_engine"),
-        patch("jasna.restorer.basicvrspp_tenorrt_compilation.basicvsrpp_startup_policy", return_value=False),
+        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
     ):

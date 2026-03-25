@@ -8,6 +8,13 @@ import pytest
 from jasna.mosaic.yolo import YoloMosaicDetectionModel
 
 
+def _mock_engine_path():
+    p = MagicMock()
+    p.exists.return_value = True
+    p.suffix = ".engine"
+    return p
+
+
 def _build_yolo_model(*, batch_size=2, imgsz=640):
     mock_runner = MagicMock()
     mock_runner.input_dtype = torch.float32
@@ -18,7 +25,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
     mock_runner.outputs = {"pred": pred, "proto": proto}
 
     with (
-        patch("jasna.mosaic.yolo.compile_yolo_to_tensorrt_engine", return_value=Path("model.engine")),
+        patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=_mock_engine_path()),
         patch("jasna.mosaic.yolo.TrtRunner", return_value=mock_runner),
     ):
         model = YoloMosaicDetectionModel(
@@ -41,9 +48,10 @@ class TestYoloInit:
     def test_trt_runner_called_with_input_shapes(self):
         mock_runner_cls = MagicMock()
         mock_runner_cls.return_value.input_dtype = torch.float32
+        engine = _mock_engine_path()
 
         with (
-            patch("jasna.mosaic.yolo.compile_yolo_to_tensorrt_engine", return_value=Path("model.engine")),
+            patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=engine),
             patch("jasna.mosaic.yolo.TrtRunner", mock_runner_cls),
         ):
             YoloMosaicDetectionModel(
@@ -54,7 +62,7 @@ class TestYoloInit:
             )
 
         mock_runner_cls.assert_called_once_with(
-            Path("model.engine"),
+            engine,
             input_shapes=(2, 3, 640, 640),
             device=torch.device("cuda:0"),
         )
@@ -62,7 +70,7 @@ class TestYoloInit:
     def test_score_threshold_out_of_range(self):
         with pytest.raises(ValueError, match="score_threshold"):
             with (
-                patch("jasna.mosaic.yolo.compile_yolo_to_tensorrt_engine"),
+                patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path"),
                 patch("jasna.mosaic.yolo.TrtRunner"),
             ):
                 YoloMosaicDetectionModel(
@@ -75,7 +83,7 @@ class TestYoloInit:
     def test_iou_threshold_out_of_range(self):
         with pytest.raises(ValueError, match="iou_threshold"):
             with (
-                patch("jasna.mosaic.yolo.compile_yolo_to_tensorrt_engine"),
+                patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path"),
                 patch("jasna.mosaic.yolo.TrtRunner"),
             ):
                 YoloMosaicDetectionModel(
@@ -88,7 +96,7 @@ class TestYoloInit:
     def test_max_det_zero_raises(self):
         with pytest.raises(ValueError, match="max_det"):
             with (
-                patch("jasna.mosaic.yolo.compile_yolo_to_tensorrt_engine"),
+                patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path"),
                 patch("jasna.mosaic.yolo.TrtRunner"),
             ):
                 YoloMosaicDetectionModel(

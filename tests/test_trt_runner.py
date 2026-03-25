@@ -37,7 +37,7 @@ def _build_runner(tmp_path, *, num_outputs=1):
     ):
         runner = TrtRunner(
             engine_path=engine_path,
-            input_shape=(1, 3, 64, 64),
+            input_shapes={"input": (1, 3, 64, 64)},
             device=torch.device("cuda:0"),
         )
     return runner, mock_context
@@ -46,10 +46,10 @@ def _build_runner(tmp_path, *, num_outputs=1):
 class TestTrtRunnerInit:
     def test_basic_init(self, tmp_path):
         runner, ctx = _build_runner(tmp_path)
-        assert runner.input_name == "input"
+        assert runner.input_names == ["input"]
         assert len(runner.output_names) == 1
         assert "output_0" in runner.outputs
-        assert runner.input_dtype == torch.float32
+        assert runner.input_dtypes["input"] == torch.float32
 
     def test_multiple_outputs(self, tmp_path):
         runner, ctx = _build_runner(tmp_path, num_outputs=3)
@@ -68,7 +68,7 @@ class TestTrtRunnerInit:
             patch("jasna.trt.trt_runner.trt.Runtime", return_value=mock_runtime),
         ):
             with pytest.raises(RuntimeError, match="Failed to deserialize"):
-                TrtRunner(engine_path=engine_path, input_shape=(1, 3, 64, 64), device=torch.device("cuda:0"))
+                TrtRunner(engine_path=engine_path, input_shapes={"input": (1, 3, 64, 64)}, device=torch.device("cuda:0"))
 
     def test_context_creation_failure_raises(self, tmp_path):
         engine_path = tmp_path / "bad.engine"
@@ -85,14 +85,14 @@ class TestTrtRunnerInit:
             patch("jasna.trt.trt_runner.trt.Runtime", return_value=mock_runtime),
         ):
             with pytest.raises(RuntimeError, match="Failed to create TensorRT execution context"):
-                TrtRunner(engine_path=engine_path, input_shape=(1, 3, 64, 64), device=torch.device("cuda:0"))
+                TrtRunner(engine_path=engine_path, input_shapes={"input": (1, 3, 64, 64)}, device=torch.device("cuda:0"))
 
 
 class TestTrtRunnerInfer:
     def test_infer_sets_address_and_executes(self, tmp_path):
         runner, ctx = _build_runner(tmp_path)
         x = torch.randn(1, 3, 64, 64, device="cuda:0")
-        result = runner.infer(x)
+        result = runner.infer({"input": x})
         ctx.set_tensor_address.assert_called()
         ctx.execute_async_v3.assert_called_once()
         assert result is runner.outputs
@@ -100,6 +100,6 @@ class TestTrtRunnerInfer:
     def test_infer_returns_output_dict(self, tmp_path):
         runner, ctx = _build_runner(tmp_path, num_outputs=2)
         x = torch.randn(1, 3, 64, 64, device="cuda:0")
-        result = runner.infer(x)
+        result = runner.infer({"input": x})
         assert "output_0" in result
         assert "output_1" in result

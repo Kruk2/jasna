@@ -37,10 +37,12 @@ def _make_fake_runner(device: torch.device, dtype: torch.dtype):
 
 
 @pytest.fixture
-def restorer():
+def restorer(tmp_path: Path):
     device = torch.device("cpu")
+    fake_engine = tmp_path / "fake_engine.trt"
+    fake_engine.write_text("x")
     with (
-        patch("jasna.restorer.unet4x_secondary_restorer.compile_unet4x_engine", return_value=Path("fake_engine.trt")),
+        patch("jasna.restorer.unet4x_secondary_restorer.get_unet4x_engine_path", return_value=fake_engine),
         patch("jasna.restorer.unet4x_secondary_restorer.TrtRunner", return_value=_make_fake_runner(device, torch.float32)),
     ):
         r = Unet4xSecondaryRestorer(device=device, fp16=False)

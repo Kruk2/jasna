@@ -46,23 +46,7 @@ def _trt_dtype_to_torch(trt_dtype: trt.DataType) -> torch.dtype:
     raise ValueError(f"Unsupported TensorRT dtype: {trt_dtype}")
 
 
-def get_onnx_tensorrt_engine_path(
-    onnx_path: str | Path,
-    *,
-    batch_size: int | None = None,
-    fp16: bool = True,
-) -> Path:
-    onnx_path = Path(onnx_path)
-    suffix = ""
-    if batch_size is not None:
-        batch_size = int(batch_size)
-        if batch_size <= 0:
-            raise ValueError(f"batch_size must be > 0, got {batch_size}")
-        suffix += f".bs{batch_size}"
-    suffix += ".fp16" if bool(fp16) else ""
-    suffix += ".win" if os.name == "nt" else ".linux"
-    suffix += ".engine"
-    return onnx_path.with_suffix(suffix)
+from jasna.engine_paths import get_onnx_tensorrt_engine_path  # noqa: E402
 
 
 def compile_onnx_to_tensorrt_engine(

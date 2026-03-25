@@ -6,13 +6,11 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from jasna.trt import compile_onnx_to_tensorrt_engine, get_onnx_tensorrt_engine_path
+from jasna.engine_paths import UNET4X_BATCH_SIZE, UNET4X_ONNX_PATH, get_unet4x_engine_path  # noqa: F401
 from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
 
-UNET4X_ONNX_PATH = Path("model_weights") / "unet-4x.onnx"
-UNET4X_BATCH_SIZE = 4
 UNET4X_INPUT_SIZE = 256
 UNET4X_OUTPUT_SIZE = 1024
 
@@ -22,6 +20,7 @@ def compile_unet4x_engine(
     device: torch.device,
     fp16: bool = True,
 ) -> Path:
+    from jasna.trt import compile_onnx_to_tensorrt_engine
     return compile_onnx_to_tensorrt_engine(
         onnx_path,
         device,
@@ -29,10 +28,6 @@ def compile_unet4x_engine(
         fp16=bool(fp16),
         workspace_gb=20,
     )
-
-
-def get_unet4x_engine_path(onnx_path: Path, fp16: bool = True) -> Path:
-    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=UNET4X_BATCH_SIZE, fp16=fp16)
 
 
 class Unet4xSecondaryRestorer:
@@ -46,7 +41,12 @@ class Unet4xSecondaryRestorer:
         self.fp16 = bool(fp16)
         self._dtype = torch.float16 if self.fp16 else torch.float32
 
-        self.engine_path = compile_unet4x_engine(UNET4X_ONNX_PATH, self.device, fp16=self.fp16)
+        self.engine_path = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16)
+        if not self.engine_path.exists():
+            raise FileNotFoundError(
+                f"Unet4x engine not found: {self.engine_path}. "
+                "Run engine compilation first via ensure_engines_compiled()."
+            )
         self.runner = TrtRunner(
             self.engine_path,
             input_shapes={

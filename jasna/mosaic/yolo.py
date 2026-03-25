@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from ultralytics.utils import nms, ops
 
 from jasna.mosaic.detections import Detections
-from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
+from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
 from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
@@ -105,13 +105,12 @@ class YoloMosaicDetectionModel:
 
         runtime_path = self.model_path
         if self.device.type == "cuda":
-            runtime_path = compile_yolo_to_tensorrt_engine(
-                self.model_path,
-                batch=self.batch_size,
-                fp16=self.fp16,
-                imgsz=self.imgsz,
-                device=self.device,
-            )
+            runtime_path = get_yolo_tensorrt_engine_path(self.model_path, fp16=self.fp16)
+            if not runtime_path.exists():
+                raise FileNotFoundError(
+                    f"YOLO engine not found: {runtime_path}. "
+                    "Run engine compilation first via ensure_engines_compiled()."
+                )
 
         if runtime_path.suffix.lower() == ".engine":
             self.runner = TrtRunner(

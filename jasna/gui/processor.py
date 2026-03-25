@@ -196,9 +196,9 @@ class Processor:
     def _run_pipeline(self, job_idx: int, input_path: Path, output_path: Path):
         """Run the actual processing pipeline."""
         import torch
+        from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.media import get_video_meta_data, parse_encoder_settings, validate_encoder_settings
         from jasna.pipeline import Pipeline
-        from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
         from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
         from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
         from jasna.restorer.restoration_pipeline import RestorationPipeline
@@ -212,27 +212,28 @@ class Processor:
         
         # Model paths
         restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
-        from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, precompile_detection_engine
+        from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
 
         det_name = coerce_detection_model_name(str(settings.detection_model))
         detection_model_path = detection_model_weights_path(det_name)
 
         compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not self._disable_basicvsrpp_tensorrt_for_run)
-        use_tensorrt = basicvsrpp_startup_policy(
-            restoration_model_path=str(restoration_model_path),
-            device=device,
-            fp16=settings.fp16_mode,
-            compile_basicvsrpp=compile_basicvsrpp,
-            max_clip_size=int(settings.max_clip_size),
+        compile_result = ensure_engines_compiled(
+            EngineCompilationRequest(
+                device=str(device),
+                fp16=settings.fp16_mode,
+                basicvsrpp=compile_basicvsrpp,
+                basicvsrpp_model_path=str(restoration_model_path),
+                basicvsrpp_max_clip_size=int(settings.max_clip_size),
+                detection=True,
+                detection_model_name=det_name,
+                detection_model_path=str(detection_model_path),
+                detection_batch_size=settings.batch_size,
+                unet4x=(settings.secondary_restoration == "unet-4x"),
+            ),
+            log_callback=lambda msg: self._log("INFO", msg),
         )
-
-        precompile_detection_engine(
-            detection_model_name=det_name,
-            detection_model_path=detection_model_path,
-            batch_size=settings.batch_size,
-            device=device,
-            fp16=settings.fp16_mode,
-        )
+        use_tensorrt = compile_result.use_basicvsrpp_tensorrt
         
         secondary_restorer = None
         restoration_pipeline = None

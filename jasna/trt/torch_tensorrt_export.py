@@ -9,12 +9,7 @@ import torch
 logger = logging.getLogger(__name__)
 
 
-def engine_system_suffix() -> str:
-    return ".win" if os.name == "nt" else ".linux"
-
-
-def engine_precision_name(*, fp16: bool) -> str:
-    return "fp16" if bool(fp16) else "fp32"
+from jasna.engine_paths import engine_precision_name, engine_system_suffix  # noqa: E402, F401
 
 
 def get_workspace_size_bytes() -> int:

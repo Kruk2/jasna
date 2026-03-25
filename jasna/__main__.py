@@ -6,6 +6,11 @@ from pathlib import Path
 if sys.platform == "win32":
     os.environ.setdefault("OMP_WAIT_POLICY", "passive")
 
+if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
+    from jasna.engine_compiler import EngineCompilationRequest, _subprocess_compile
+    _subprocess_compile(EngineCompilationRequest.from_json(sys.argv[2]))
+    sys.exit(0)
+
 _JASNA_MAIN_PID = os.environ.get("JASNA_MAIN_PID")
 if _JASNA_MAIN_PID and str(os.getpid()) != _JASNA_MAIN_PID:
     if len(sys.argv) < 2 or sys.argv[1] != "--multiprocessing-fork":

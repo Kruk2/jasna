@@ -145,8 +145,11 @@ def _build_rfdetr_model():
         "pred_masks": torch.zeros(1, 100, 8, 8),
     }
 
+    engine_path = MagicMock()
+    engine_path.exists.return_value = True
+
     with (
-        patch("jasna.mosaic.rfdetr.compile_onnx_to_tensorrt_engine", return_value=Path("model.engine")),
+        patch("jasna.mosaic.rfdetr.get_onnx_tensorrt_engine_path", return_value=engine_path),
         patch("jasna.mosaic.rfdetr.TrtRunner", return_value=mock_runner),
     ):
         model = RfDetrMosaicDetectionModel(
@@ -204,7 +207,7 @@ class TestRfDetrCall:
 
 class TestCompileRfdetrEngine:
     def test_delegates_to_compile_onnx(self):
-        with patch("jasna.mosaic.rfdetr.compile_onnx_to_tensorrt_engine", return_value=Path("out.engine")) as mock_compile:
+        with patch("jasna.trt.compile_onnx_to_tensorrt_engine", return_value=Path("out.engine")) as mock_compile:
             result = compile_rfdetr_engine(Path("model.onnx"), torch.device("cuda:0"), batch_size=4, fp16=True)
             mock_compile.assert_called_once_with(Path("model.onnx"), torch.device("cuda:0"), batch_size=4, fp16=True, workspace_gb=20)
             assert result == Path("out.engine")

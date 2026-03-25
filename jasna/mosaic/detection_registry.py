@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import torch
-
 RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v2", "rfdetr-v3", "rfdetr-v4", "rfdetr-v5"})
 YOLO_MODEL_NAMES: frozenset[str] = frozenset({"lada-yolo-v2", "lada-yolo-v4"})
 

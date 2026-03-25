@@ -9,17 +9,23 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision
 
-from jasna.trt.torch_tensorrt_export import (
-    compile_and_save_torchtrt_dynamo,
+from jasna.engine_paths import (
+    BASICVSRPP_DIRECTIONS as DIRECTIONS,
+    _basicvsrpp_sub_engine_dir as _sub_engine_dir,
     engine_precision_name,
     engine_system_suffix,
+    get_basicvsrpp_sub_engine_paths as get_sub_engine_paths,
+    all_basicvsrpp_sub_engines_exist as all_sub_engines_exist,
+)
+from jasna.trt.torch_tensorrt_export import (
+    compile_and_save_torchtrt_dynamo,
     get_workspace_size_bytes,
     load_torchtrt_export,
 )
 
 logger = logging.getLogger(__name__)
 
-DIRECTIONS = ["backward_1", "forward_1", "backward_2", "forward_2"]
+# DIRECTIONS imported from engine_paths
 FEATURE_SIZE = 64
 INPUT_SIZE = 256
 MAX_DYNAMIC_BATCH = 180
@@ -199,11 +205,6 @@ class _PreprocessWrapper(nn.Module):
         return feats, flows_fwd, flows_bwd
 
 
-def _sub_engine_dir(model_weights_path: str) -> str:
-    stem = os.path.splitext(os.path.basename(model_weights_path))[0]
-    return os.path.join(os.path.dirname(model_weights_path), f"{stem}_sub_engines")
-
-
 def _loop_body_engine_path(engine_dir: str, direction: str, fp16: bool) -> str:
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
@@ -220,20 +221,6 @@ def _preprocess_engine_path(engine_dir: str, fp16: bool, max_clip_size: int) -> 
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
     return os.path.join(engine_dir, f"preprocess_b{max_clip_size}.trt_{prec}{suf}.engine")
-
-
-def get_sub_engine_paths(model_weights_path: str, fp16: bool, max_clip_size: int = 60) -> dict[str, str]:
-    engine_dir = _sub_engine_dir(model_weights_path)
-    paths: dict[str, str] = {}
-    for d in DIRECTIONS:
-        paths[f"loop_body_{d}"] = _loop_body_engine_path(engine_dir, d, fp16)
-    paths["preprocess"] = _preprocess_engine_path(engine_dir, fp16, max_clip_size)
-    paths["upsample"] = _upsample_engine_path(engine_dir, fp16, max_clip_size)
-    return paths
-
-
-def all_sub_engines_exist(model_weights_path: str, fp16: bool, max_clip_size: int = 60) -> bool:
-    return all(os.path.isfile(p) for p in get_sub_engine_paths(model_weights_path, fp16, max_clip_size).values())
 
 
 def _get_inference_generator(model: nn.Module) -> nn.Module:

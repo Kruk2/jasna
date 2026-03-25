@@ -41,11 +41,7 @@ def test_cli_creates_stream_on_chosen_device(tmp_path: Path) -> None:
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
         patch("jasna.main.check_required_executables"),
         patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
-        patch("jasna.mosaic.detection_registry.precompile_detection_engine"),
-        patch(
-            "jasna.restorer.basicvrspp_tenorrt_compilation.basicvsrpp_startup_policy",
-            return_value=False,
-        ),
+        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", side_effect=capture_pipeline),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
     ):
@@ -102,11 +98,7 @@ def test_cli_passes_working_directory_to_pipeline(tmp_path: Path) -> None:
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
         patch("jasna.main.check_required_executables"),
         patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
-        patch("jasna.mosaic.detection_registry.precompile_detection_engine"),
-        patch(
-            "jasna.restorer.basicvrspp_tenorrt_compilation.basicvsrpp_startup_policy",
-            return_value=False,
-        ),
+        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", side_effect=capture_pipeline),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
     ):

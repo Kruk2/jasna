@@ -9,7 +9,7 @@ import torch
 logger = logging.getLogger(__name__)
 from torch.nn import functional as F
 
-from jasna.trt import compile_onnx_to_tensorrt_engine
+from jasna.engine_paths import get_onnx_tensorrt_engine_path
 from jasna.trt.trt_runner import TrtRunner
 from jasna.mosaic.detections import Detections
 
@@ -20,6 +20,7 @@ def compile_rfdetr_engine(
     batch_size: int,
     fp16: bool = True,
 ) -> Path:
+    from jasna.trt import compile_onnx_to_tensorrt_engine
     return compile_onnx_to_tensorrt_engine(
         onnx_path,
         device,
@@ -52,13 +53,14 @@ class RfDetrMosaicDetectionModel:
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
 
-        self.engine_path = compile_onnx_to_tensorrt_engine(
-            self.onnx_path,
-            self.device,
-            batch_size=self.batch_size,
-            fp16=bool(fp16),
-            workspace_gb=20,
+        self.engine_path = get_onnx_tensorrt_engine_path(
+            self.onnx_path, batch_size=self.batch_size, fp16=bool(fp16),
         )
+        if not self.engine_path.exists():
+            raise FileNotFoundError(
+                f"RF-DETR engine not found: {self.engine_path}. "
+                "Run engine compilation first via ensure_engines_compiled()."
+            )
         self.runner = TrtRunner(
             self.engine_path,
             input_shapes=[(self.batch_size, 3, self.resolution, self.resolution)],

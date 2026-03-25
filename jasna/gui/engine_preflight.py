@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
-
 from jasna.gui.models import AppSettings
 
 
@@ -34,10 +32,13 @@ def _detection_weights_path(settings: AppSettings) -> Path:
 
 
 def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
-    from jasna.trt import get_onnx_tensorrt_engine_path
+    from jasna.engine_paths import (
+        get_basicvsrpp_sub_engine_paths,
+        get_onnx_tensorrt_engine_path,
+        get_unet4x_engine_path,
+        get_yolo_tensorrt_engine_path,
+    )
     from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
-    from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
-    from jasna.restorer.basicvsrpp_sub_engines import get_sub_engine_paths
 
     reqs: list[EngineRequirement] = []
 
@@ -74,7 +75,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
 
     restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
     if bool(settings.compile_basicvsrpp):
-        sub_paths = get_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode), int(settings.max_clip_size))
+        sub_paths = get_basicvsrpp_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode), int(settings.max_clip_size))
         all_engine_paths = tuple(Path(p) for p in sub_paths.values())
         missing_paths = tuple(p for p in all_engine_paths if not p.is_file())
         reqs.append(
@@ -88,8 +89,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         )
 
     if settings.secondary_restoration == "unet-4x":
-        from jasna.restorer.unet4x_secondary_restorer import UNET4X_ONNX_PATH, get_unet4x_engine_path
-        unet_engine = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=bool(settings.fp16_mode))
+        unet_engine = get_unet4x_engine_path(fp16=bool(settings.fp16_mode))
         unet_exists = unet_engine.is_file()
         reqs.append(
             EngineRequirement(

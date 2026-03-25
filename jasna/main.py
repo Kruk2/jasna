@@ -261,7 +261,7 @@ def main() -> None:
 
     output_video = Path(args.output)
 
-    from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models, precompile_detection_engine
+    from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models
 
     detection_model_name = coerce_detection_model_name(str(args.detection_model))
     has_explicit_path = bool(str(args.detection_model_path).strip())
@@ -309,28 +309,28 @@ def main() -> None:
     if restoration_model_name != "basicvsrpp":
         raise ValueError(f"Unsupported restoration model: {restoration_model_name}")
 
-    from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
+    from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
+
+    secondary_name = str(args.secondary_restoration).lower()
+
+    compile_result = ensure_engines_compiled(EngineCompilationRequest(
+        device=str(device),
+        fp16=fp16,
+        basicvsrpp=bool(args.compile_basicvsrpp),
+        basicvsrpp_model_path=str(restoration_model_path),
+        basicvsrpp_max_clip_size=max_clip_size,
+        detection=True,
+        detection_model_name=detection_model_name,
+        detection_model_path=str(detection_model_path),
+        detection_batch_size=batch_size,
+        unet4x=(secondary_name == "unet-4x"),
+    ))
+    use_tensorrt = compile_result.use_basicvsrpp_tensorrt
+
     with torch.cuda.device(device):
-        use_tensorrt = basicvsrpp_startup_policy(
-            restoration_model_path=str(restoration_model_path),
-            device=device,
-            fp16=fp16,
-            compile_basicvsrpp=bool(args.compile_basicvsrpp),
-            max_clip_size=max_clip_size,
-        )
-
-        precompile_detection_engine(
-            detection_model_name=detection_model_name,
-            detection_model_path=detection_model_path,
-            batch_size=batch_size,
-            device=device,
-            fp16=fp16,
-        )
-
-        secondary_name = str(args.secondary_restoration).lower()
         if secondary_name == "none":
             secondary_restorer = None
         elif secondary_name == "tvai":
