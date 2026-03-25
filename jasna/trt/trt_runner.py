@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from pathlib import Path
 import tensorrt as trt
-from jasna.trt import _engine_io_names, _trt_dtype_to_torch, _TRT_LOGGER
+from jasna.trt import _engine_io_names, _trt_dtype_to_torch, get_trt_logger, suppress_trt_logger_warnings
 
 
 class TrtRunner:
@@ -16,8 +16,9 @@ class TrtRunner:
         self.engine_path = engine_path
         self.device = device
 
-        self.runtime = trt.Runtime(_TRT_LOGGER)
-        self.engine = self.runtime.deserialize_cuda_engine(self.engine_path.read_bytes())
+        with suppress_trt_logger_warnings():
+            self.runtime = trt.Runtime(get_trt_logger())
+            self.engine = self.runtime.deserialize_cuda_engine(self.engine_path.read_bytes())
         if self.engine is None:
             raise RuntimeError(f"Failed to deserialize TensorRT engine: {self.engine_path}")
         self.context = self.engine.create_execution_context()
@@ -42,10 +43,14 @@ class TrtRunner:
             self.outputs[name] = t
             self.context.set_tensor_address(name, int(t.data_ptr()))
 
+        self._stream = torch.cuda.Stream(device=dev)
+
     def infer(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         for name, tensor in inputs.items():
             self.context.set_tensor_address(name, int(tensor.data_ptr()))
-        stream = torch.cuda.current_stream(self.device)
-        self.context.execute_async_v3(stream.cuda_stream)
+        current = torch.cuda.current_stream(self.device)
+        self._stream.wait_stream(current)
+        self.context.execute_async_v3(self._stream.cuda_stream)
+        current.wait_stream(self._stream)
         return self.outputs
 

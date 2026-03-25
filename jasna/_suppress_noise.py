@@ -70,6 +70,8 @@ def install() -> None:
                 return False
             if "Expect archive file to be a file ending in .pt2" in msg:
                 return False
+            if "The logger passed into create" in msg and "differs from one already registered" in msg:
+                return False
             return True
 
     _trt_filter = _SuppressTorchTensorRTNoises()
@@ -77,3 +79,5 @@ def install() -> None:
     logging.getLogger("torch_tensorrt.dynamo").addFilter(_trt_filter)
     logging.getLogger("torch_tensorrt.dynamo.conversion.aten_ops_converters").addFilter(_trt_filter)
     logging.getLogger("torch.export.pt2_archive._package").addFilter(_trt_filter)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(_trt_filter)

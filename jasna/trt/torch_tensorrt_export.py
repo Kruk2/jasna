@@ -18,6 +18,8 @@ def get_workspace_size_bytes() -> int:
 
 
 def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch.nn.Module:
+    from jasna.trt import suppress_trt_logger_warnings
+
     logging.getLogger("torch_tensorrt").setLevel(logging.ERROR)
     import torch_tensorrt  # noqa: F401
 
@@ -30,7 +32,7 @@ def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch
         prev_export_level = export_logger.level
         export_logger.setLevel(logging.ERROR)
         try:
-            with warnings.catch_warnings():
+            with warnings.catch_warnings(), suppress_trt_logger_warnings():
                 warnings.filterwarnings("ignore", message=".*PytorchStreamReader.*")
                 try:
                     with open(checkpoint_path, "rb") as f:

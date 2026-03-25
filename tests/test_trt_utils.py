@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -8,10 +9,93 @@ import torch
 
 from jasna.trt import (
     _engine_io_names,
+    _TRT_LOGGER,
     _trt_dtype_to_torch,
     get_onnx_tensorrt_engine_path,
+    get_trt_logger,
+    suppress_trt_logger_warnings,
     compile_onnx_to_tensorrt_engine,
 )
+
+
+class TestGetTrtLogger:
+    def test_returns_fallback_when_torch_tensorrt_not_imported(self):
+        with patch.dict("sys.modules", {"torch_tensorrt": None}):
+            assert get_trt_logger() is _TRT_LOGGER
+
+    def test_returns_torch_tensorrt_logger_when_available(self):
+        sentinel = MagicMock()
+        mock_torchtrt = MagicMock()
+        mock_torchtrt.logging.TRT_LOGGER = sentinel
+        with patch.dict("sys.modules", {"torch_tensorrt": mock_torchtrt}):
+            assert get_trt_logger() is sentinel
+
+
+class TestSuppressTrtLoggerWarnings:
+    def _run_with_real_stderr(self, fn):
+        """Run fn with real stderr so suppress_trt_logger_warnings can use fileno()."""
+        real_stderr = sys.__stderr__
+        old = sys.stderr
+        sys.stderr = real_stderr
+        try:
+            return fn()
+        finally:
+            sys.stderr = old
+
+    def test_filters_logger_mismatch_warning(self):
+        leaked = []
+
+        def go():
+            saved_fd = os.dup(2)
+            r, w = os.pipe()
+            os.dup2(w, 2)
+            os.close(w)
+            try:
+                with suppress_trt_logger_warnings():
+                    os.write(2, b"WARNING The logger passed into createInferRuntime differs from one already registered\n")
+            finally:
+                os.dup2(saved_fd, 2)
+                os.close(saved_fd)
+                while True:
+                    chunk = os.read(r, 4096)
+                    if not chunk:
+                        break
+                    leaked.append(chunk)
+                os.close(r)
+
+        self._run_with_real_stderr(go)
+        assert b"createInferRuntime" not in b"".join(leaked)
+
+    def test_preserves_errors(self):
+        leaked = []
+
+        def go():
+            saved_fd = os.dup(2)
+            r, w = os.pipe()
+            os.dup2(w, 2)
+            os.close(w)
+            try:
+                with suppress_trt_logger_warnings():
+                    os.write(2, b"WARNING The logger passed into createInferRuntime differs from one already registered\n")
+                    os.write(2, b"REAL ERROR happened\n")
+            finally:
+                os.dup2(saved_fd, 2)
+                os.close(saved_fd)
+                while True:
+                    chunk = os.read(r, 4096)
+                    if not chunk:
+                        break
+                    leaked.append(chunk)
+                os.close(r)
+
+        self._run_with_real_stderr(go)
+        output = b"".join(leaked)
+        assert b"REAL ERROR happened" in output
+        assert b"createInferRuntime" not in output
+
+    def test_noop_when_fileno_unavailable(self):
+        with suppress_trt_logger_warnings():
+            pass
 
 
 class TestTrtDtypeToTorch:
