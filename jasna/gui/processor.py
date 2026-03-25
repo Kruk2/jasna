@@ -195,6 +195,8 @@ class Processor:
             
     def _run_pipeline(self, job_idx: int, input_path: Path, output_path: Path):
         """Run the actual processing pipeline."""
+        from jasna._suppress_noise import install as _install_noise_filters
+        _install_noise_filters()
         import torch
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.media import get_video_meta_data, parse_encoder_settings, validate_encoder_settings

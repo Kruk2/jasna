@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from jasna.engine_paths import UNET4X_BATCH_SIZE, UNET4X_ONNX_PATH, get_unet4x_engine_path  # noqa: F401
+from jasna.engine_paths import UNET4X_BATCH_SIZE, UNET4X_ONNX_PATH, get_unet4x_engine_path
 from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)

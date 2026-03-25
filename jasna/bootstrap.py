@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 import sys
-import warnings
 from pathlib import Path
-
-warnings.filterwarnings("ignore", message=r".*isinstance\(treespec, LeafSpec\).*", category=FutureWarning)
 
 
 def sanitize_sys_path_for_local_dev(package_dir: Path) -> None:
+    import warnings
+    warnings.filterwarnings("ignore", message=r".*isinstance\(treespec, LeafSpec\).*", category=FutureWarning)
+
     package_dir = package_dir.resolve()
     repo_root = package_dir.parent.resolve()
 

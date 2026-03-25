@@ -75,8 +75,9 @@ def test_read_gpu_vram_parses_first_device(monkeypatch) -> None:
 
 
 def test_read_cpu_ram_uses_psutil(monkeypatch) -> None:
-    monkeypatch.setattr(system_stats.psutil, "cpu_percent", lambda interval=None: 23.4)
-    monkeypatch.setattr(system_stats.psutil, "virtual_memory", lambda: SimpleNamespace(percent=45.6))
+    import psutil
+    monkeypatch.setattr(psutil, "cpu_percent", lambda interval=None: 23.4)
+    monkeypatch.setattr(psutil, "virtual_memory", lambda: SimpleNamespace(percent=45.6))
 
     cpu, ram = system_stats.read_cpu_ram()
     assert cpu == 23

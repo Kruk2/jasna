@@ -134,6 +134,8 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
     warnings.filterwarnings("ignore")
     _logging.disable(_logging.WARNING)
 
+    from jasna._suppress_noise import install as _install_noise_filters
+    _install_noise_filters()
     import torch
 
     device = torch.device(req.device)

@@ -250,6 +250,8 @@ def main() -> None:
         datefmt="%H:%M:%S",
     )
 
+    from jasna._suppress_noise import install as _install_noise_filters
+    _install_noise_filters()
     import torch
 
     from jasna.pipeline import Pipeline

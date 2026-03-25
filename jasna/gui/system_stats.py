@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import subprocess
 
-import psutil
-
 from jasna import os_utils
 
 
@@ -75,6 +73,7 @@ def read_gpu_vram() -> tuple[int | None, int | None]:
 
 
 def read_cpu_ram() -> tuple[int, int]:
+    import psutil
     cpu_util = _clamp_pct(psutil.cpu_percent(interval=None))
     ram_util = _clamp_pct(psutil.virtual_memory().percent)
     return cpu_util, ram_util

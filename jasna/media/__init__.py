@@ -1,12 +1,16 @@
+from __future__ import annotations
+
 import json
 import logging
 import subprocess
 from dataclasses import dataclass
 from fractions import Fraction
-
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
+from typing import TYPE_CHECKING
 
 from jasna.os_utils import get_subprocess_startup_info, resolve_executable
+
+if TYPE_CHECKING:
+    from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +138,7 @@ def is_stream_10bit(json_video_stream: dict) -> bool:
     return any(marker in pix_fmt for marker in ten_bit_markers)
 
 def get_video_meta_data(path: str) -> VideoMetadata:
+    from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
     ffprobe = resolve_executable("ffprobe")
     cmd = [
         ffprobe,

@@ -14,6 +14,8 @@ MIN_GPU_COMPUTE = (7, 5)
 def check_nvidia_gpu() -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
     """Return (True, gpu_name) or (False, "no_cuda") or (False, ("compute_too_low", major, minor))."""
     try:
+        from jasna._suppress_noise import install as _install_noise_filters
+        _install_noise_filters()
         import torch
     except ImportError:
         return False, "no_cuda"
