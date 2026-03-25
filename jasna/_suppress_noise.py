@@ -72,6 +72,8 @@ def install() -> None:
                 return False
             if "The logger passed into create" in msg and "differs from one already registered" in msg:
                 return False
+            if "Using default stream in enqueueV3()" in msg:
+                return False
             return True
 
     _trt_filter = _SuppressTorchTensorRTNoises()
@@ -79,5 +81,6 @@ def install() -> None:
     logging.getLogger("torch_tensorrt.dynamo").addFilter(_trt_filter)
     logging.getLogger("torch_tensorrt.dynamo.conversion.aten_ops_converters").addFilter(_trt_filter)
     logging.getLogger("torch.export.pt2_archive._package").addFilter(_trt_filter)
+    logging.getLogger("tensorrt").addFilter(_trt_filter)
     for handler in logging.getLogger().handlers:
         handler.addFilter(_trt_filter)
