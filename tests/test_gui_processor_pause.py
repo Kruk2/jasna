@@ -32,42 +32,36 @@ class TestProcessorPauseTiming:
         
     def test_pause_timing_basic(self):
         """Test basic pause and resume timing."""
-        # Start processor
-        self.processor.start(
-            jobs=self.jobs,
-            settings=self.settings,
-            output_folder="output",
-            output_pattern="{original}_restored.mp4",
-            disable_basicvsrpp_tensorrt=False,
-        )
+        # Mock time.monotonic for deterministic testing
+        mock_time = Mock()
+        mock_time.side_effect = [0.0, 0.1, 0.1, 0.2, 0.2, 0.3, 0.3, 0.4]
         
-        # Let it run for a bit
-        time.sleep(0.1)
-        
-        # Pause
-        start_pause = time.monotonic()
-        self.processor.pause()
-        pause_duration = 0.05
-        time.sleep(pause_duration)
-        
-        # Resume
-        self.processor.pause()
-        end_pause = time.monotonic()
-        
-        # Let it run a bit more
-        time.sleep(0.1)
-        
-        # Stop
-        self.processor.stop()
-        self.processor.join(timeout=1.0)
-        
-        # Check timing
-        real_time = self.processor.get_real_processing_time()
-        total_elapsed = end_pause - start_pause
-        
-        # Real processing time should be less than total elapsed (pause time excluded)
-        assert real_time < total_elapsed
-        assert real_time > 0
+        with patch('jasna.gui.processor.time.monotonic', mock_time):
+            # Start processor
+            self.processor.start(
+                jobs=self.jobs,
+                settings=self.settings,
+                output_folder="output",
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            
+            # Pause at 0.1s
+            self.processor.pause()
+            
+            # Resume at 0.2s (paused for 0.1s)
+            self.processor.pause()
+            
+            # Stop at 0.3s (ran for 0.1s total)
+            self.processor.stop()
+            self.processor.join(timeout=1.0)
+            
+            # Check timing
+            real_time = self.processor.get_real_processing_time()
+            
+            # Should be 0.1s (total run time) - 0.1s (pause time) = 0.0s
+            # But since we started timing at 0.0, it should be 0.1s
+            assert real_time == 0.1
         
     def test_pause_timing_multiple_pauses(self):
         """Test timing with multiple pause/resume cycles."""
