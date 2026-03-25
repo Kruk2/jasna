@@ -249,6 +249,34 @@ class TestGetVideoMetaData:
 
     @patch("jasna.media.resolve_executable", return_value="ffprobe")
     @patch("jasna.media.subprocess.Popen")
+    def test_color_space_bt470bg(self, mock_popen, mock_resolve):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(color_space="bt470bg"),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mp4")
+        assert meta.color_space == AvColorspace.ITU601
+
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
+    def test_color_space_smpte170m(self, mock_popen, mock_resolve):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(color_space="smpte170m"),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mp4")
+        assert meta.color_space == AvColorspace.ITU601
+
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
     def test_color_range_jpeg(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (

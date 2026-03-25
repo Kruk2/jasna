@@ -15,7 +15,7 @@ from jasna.frame_queue import FrameQueue
 import psutil
 import torch
 
-from jasna.media import get_video_meta_data
+from jasna.media import UnsupportedColorspaceError, get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
@@ -252,8 +252,13 @@ class Pipeline:
         )
 
     def run(self) -> None:
+        from av.video.reformatter import Colorspace as AvColorspace
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
+        if metadata.color_space != AvColorspace.ITU709:
+            raise UnsupportedColorspaceError(
+                f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. Only BT.709 is supported."
+            )
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
 
         clip_queue = FrameQueue(max_frames=self.max_clip_size)

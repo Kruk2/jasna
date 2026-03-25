@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from jasna.gui.models import JobItem, JobStatus, AppSettings
+from jasna.media import UnsupportedColorspaceError
 
 
 @dataclass
@@ -176,7 +177,16 @@ class Processor:
                 progress=100.0,
             ))
             self._log("INFO", f"Finished processing {job.filename}")
-            
+
+        except UnsupportedColorspaceError as e:
+            e.__traceback__ = None
+            self._progress(ProgressUpdate(
+                job_index=idx,
+                status=JobStatus.SKIPPED,
+                message=str(e),
+            ))
+            self._log("WARNING", f"Skipped {job.filename}: {e}")
+
         except Exception as e:
             tb = traceback.format_exc()
             e.__traceback__ = None

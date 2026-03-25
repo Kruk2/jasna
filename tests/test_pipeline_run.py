@@ -97,6 +97,30 @@ def _make_two_readers(frames_batches: list[tuple[torch.Tensor, list[int]]]):
     return MagicMock(side_effect=lambda *a, **kw: next(readers)), reader1, reader2
 
 
+class TestPipelineColorspaceCheck:
+    @patch("jasna.pipeline.get_video_meta_data")
+    def test_run_raises_on_bt601_colorspace(self, mock_meta):
+        meta = _fake_metadata()
+        meta.color_space = AvColorspace.ITU601
+        mock_meta.return_value = meta
+        p = _make_pipeline()
+
+        from jasna.media import UnsupportedColorspaceError
+        with pytest.raises(UnsupportedColorspaceError, match="Only BT.709 is supported"):
+            p.run()
+
+    @patch("jasna.pipeline.get_video_meta_data")
+    def test_run_raises_on_smpte240m_colorspace(self, mock_meta):
+        meta = _fake_metadata()
+        meta.color_space = AvColorspace.SMPTE240M
+        mock_meta.return_value = meta
+        p = _make_pipeline()
+
+        from jasna.media import UnsupportedColorspaceError
+        with pytest.raises(UnsupportedColorspaceError, match="Only BT.709 is supported"):
+            p.run()
+
+
 class TestPipelineRun:
     def test_run_no_frames(self):
         p = _make_pipeline()

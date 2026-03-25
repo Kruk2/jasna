@@ -93,6 +93,10 @@ def validate_encoder_settings(settings: dict[str, object]) -> dict[str, object]:
     return settings
 
 
+class UnsupportedColorspaceError(Exception):
+    pass
+
+
 @dataclass
 class VideoMetadata:
     video_file: str
@@ -186,7 +190,9 @@ def get_video_meta_data(path: str) -> VideoMetadata:
 
     start_pts = json_video_stream.get('start_pts')
     color_range = AvColorRange.MPEG if 'color_range' not in json_video_stream or json_video_stream['color_range'] == 'tv' else AvColorRange.JPEG if json_video_stream['color_range'] == 'jpeg' else AvColorRange.MPEG
-    color_space = AvColorspace.ITU709 if 'color_space' not in json_video_stream or json_video_stream['color_space'] == 'bt709' else AvColorspace.ITU601 if json_video_stream['color_space'] == 'bt601' else AvColorspace.ITU709
+    _cs = json_video_stream.get('color_space', '')
+    color_space = AvColorspace.ITU601 if _cs in ('bt601', 'bt470bg', 'smpte170m') else AvColorspace.ITU709
+
 
     num_frames = int(json_video_stream.get('nb_frames', 0))
     if num_frames == 0:

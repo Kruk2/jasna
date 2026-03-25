@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from jasna import __version__
+from jasna.media import UnsupportedColorspaceError
 from jasna.os_utils import (
     check_nvidia_gpu,
     check_required_executables,
@@ -397,6 +398,9 @@ def main() -> None:
         )
         try:
             pipeline.run()
+        except UnsupportedColorspaceError as e:
+            print(f"Error: {e}")
+            sys.exit(1)
         finally:
             pipeline.close()
             restoration_pipeline.restorer.close()
