@@ -38,6 +38,27 @@ class TestYoloInit:
         assert model.runner is runner
         assert model.stride == 32
 
+    def test_trt_runner_called_with_input_shapes(self):
+        mock_runner_cls = MagicMock()
+        mock_runner_cls.return_value.input_dtype = torch.float32
+
+        with (
+            patch("jasna.mosaic.yolo.compile_yolo_to_tensorrt_engine", return_value=Path("model.engine")),
+            patch("jasna.mosaic.yolo.TrtRunner", mock_runner_cls),
+        ):
+            YoloMosaicDetectionModel(
+                model_path=Path("model.pt"),
+                batch_size=2,
+                device=torch.device("cuda:0"),
+                imgsz=640,
+            )
+
+        mock_runner_cls.assert_called_once_with(
+            Path("model.engine"),
+            input_shapes=(2, 3, 640, 640),
+            device=torch.device("cuda:0"),
+        )
+
     def test_score_threshold_out_of_range(self):
         with pytest.raises(ValueError, match="score_threshold"):
             with (
