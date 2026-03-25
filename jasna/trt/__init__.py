@@ -1,13 +1,57 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import logging
 import os
+import re
+import sys
 from pathlib import Path
 
 import tensorrt as trt
 import torch
 
 _TRT_LOGGER = trt.Logger(trt.Logger.ERROR)
+
+_TRT_LOGGER_MISMATCH_RE = re.compile(
+    r"WARNING.*The logger passed into create\w+ differs from one already registered"
+)
+
+
+def get_trt_logger() -> trt.ILogger:
+    torchtrt = sys.modules.get("torch_tensorrt")
+    if torchtrt is not None:
+        return torchtrt.logging.TRT_LOGGER
+    return _TRT_LOGGER
+
+
+@contextlib.contextmanager
+def suppress_trt_logger_warnings():
+    try:
+        stderr_fd = sys.stderr.fileno()
+    except (AttributeError, io.UnsupportedOperation):
+        yield
+        return
+
+    saved_fd = os.dup(stderr_fd)
+    read_fd, write_fd = os.pipe()
+    os.dup2(write_fd, stderr_fd)
+    os.close(write_fd)
+    try:
+        yield
+    finally:
+        os.dup2(saved_fd, stderr_fd)
+        captured = b""
+        while True:
+            chunk = os.read(read_fd, 4096)
+            if not chunk:
+                break
+            captured += chunk
+        os.close(read_fd)
+        for line in captured.decode("utf-8", errors="replace").splitlines():
+            if line and not _TRT_LOGGER_MISMATCH_RE.search(line):
+                os.write(saved_fd, (line + "\n").encode("utf-8", errors="replace"))
+        os.close(saved_fd)
 
 
 def _engine_io_names(engine: trt.ICudaEngine) -> tuple[list[str], list[str]]:
@@ -74,10 +118,11 @@ def compile_onnx_to_tensorrt_engine(
     print(msg)
     log.info("%s", msg)
 
-    builder = trt.Builder(_TRT_LOGGER)
+    logger = get_trt_logger()
+    builder = trt.Builder(logger)
     explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(explicit_batch)
-    parser = trt.OnnxParser(network, _TRT_LOGGER)
+    parser = trt.OnnxParser(network, logger)
 
     onnx_bytes = onnx_path.read_bytes()
     if not parser.parse(onnx_bytes):
