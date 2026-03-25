@@ -51,6 +51,10 @@ class FirstRunWizard(ctk.CTkToplevel):
         h = self.winfo_reqheight()
         x = master.winfo_x() + (master.winfo_width() - w) // 2
         y = master.winfo_y() + (master.winfo_height() - h) // 2
+        screen_w = self.winfo_screenwidth()
+        screen_h = self.winfo_screenheight()
+        x = max(0, min(x, screen_w - w))
+        y = max(0, min(y, screen_h - h))
         self.geometry(f"{w}x{h}+{x}+{y}")
         
         self.after(50, self._start_checks_in_background)
