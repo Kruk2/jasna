@@ -116,7 +116,7 @@ class YoloMosaicDetectionModel:
         if runtime_path.suffix.lower() == ".engine":
             self.runner = TrtRunner(
                 runtime_path,
-                input_shape=(self.batch_size, 3, self.imgsz, self.imgsz),
+                input_shapes=(self.batch_size, 3, self.imgsz, self.imgsz),
                 device=self.device,
             )
             self.input_dtype = self.runner.input_dtype
