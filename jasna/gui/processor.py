@@ -94,11 +94,9 @@ class Processor:
     def pause(self):
         if self._pause_event.is_set():
             self._pause_event.clear()
-            # Start tracking pause time
             self._pause_start_time = time.monotonic()
         else:
             self._pause_event.set()
-            # Calculate and add pause duration to total
             if self._pause_start_time is not None:
                 pause_duration = time.monotonic() - self._pause_start_time
                 self._total_pause_time += pause_duration
@@ -315,7 +313,7 @@ class Processor:
                     return total_elapsed - self._total_pause_time
 
             def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
-                nonlocal last_update_time, pause_start_time
+                nonlocal last_update_time
                 
                 current_time = time.monotonic()
                 if current_time - last_update_time < 0.1:
@@ -326,38 +324,16 @@ class Processor:
                 if self._stop_event.is_set():
                     raise InterruptedError("Processing stopped")
 
-                # Update pause tracking
-                if self.is_paused():
-                    if pause_start_time is None:
-                        pause_start_time = current_time
-                else:
-                    if pause_start_time is not None:
-                        # Resume: add the pause duration to total pause time
-                        pause_duration = current_time - pause_start_time
-                        self._total_pause_time += pause_duration
-                        pause_start_time = None
-
                 # Calculate real processing time for this job
                 real_time = get_real_processing_time()
                 
-                # Calculate real FPS and ETA using real processing time
-                if real_time > 0 and frames_done > 0:
-                    real_fps = frames_done / real_time
-                    remaining_frames = total - frames_done
-                    if real_fps > 0:
-                        real_eta = remaining_frames / real_fps
-                    else:
-                        real_eta = 0.0
-                else:
-                    real_fps = fps
-                    real_eta = eta_seconds
-
+                # Use pipeline's smoothed values directly since they already exclude pause time
                 self._progress(ProgressUpdate(
                     job_index=job_idx,
                     status=JobStatus.PROCESSING,
                     progress=progress_pct,
-                    fps=real_fps,
-                    eta_seconds=real_eta,
+                    fps=fps,
+                    eta_seconds=eta_seconds,
                     frames_processed=frames_done,
                     total_frames=total,
                 ))
