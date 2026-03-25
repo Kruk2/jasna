@@ -335,15 +335,25 @@ class Processor:
 
             pipeline.run()
         finally:
+            if pipeline is not None:
+                pipeline.close()
+            if restoration_pipeline is not None:
+                restoration_pipeline.restorer.close()
             if secondary_restorer is not None and hasattr(secondary_restorer, "close"):
-                try:
-                    secondary_restorer.close()
-                except Exception as e:
-                    self._log("WARNING", f"Cleanup warning: failed to close secondary restorer: {e}")
+                secondary_restorer.close()
 
             del pipeline
             del restoration_pipeline
             del secondary_restorer
+
+            import gc
+            for _ in range(3):
+                gc.collect()
+
+            from jasna.tracking.blending import _KERNEL_CACHE
+            _KERNEL_CACHE.clear()
+            from jasna.media.rgb_to_p010 import _cache as _p010_cache
+            _p010_cache.clear()
 
             _cleanup_torch(torch)
 

@@ -128,4 +128,6 @@ class Unet4xSecondaryRestorer:
         return list(kept_nchw.unbind(0))
 
     def close(self) -> None:
-        self.runner = None
+        if self.runner is not None:
+            self.runner.close()
+            self.runner = None

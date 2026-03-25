@@ -144,6 +144,13 @@ class YoloMosaicDetectionModel:
         self._empty_masks_cache: dict[tuple[int, int], torch.Tensor] = {}
         logger.info("YOLO detection model loaded: %s (batch_size=%d)", runtime_path, self.batch_size)
 
+    def close(self) -> None:
+        if self.runner is not None:
+            self.runner.close()
+            self.runner = None
+        self.model = None
+        self._empty_masks_cache.clear()
+
     def _get_empty_masks(self, mask_h: int, mask_w: int) -> torch.Tensor:
         key = (mask_h, mask_w)
         t = self._empty_masks_cache.get(key)
