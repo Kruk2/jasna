@@ -43,21 +43,15 @@ class TrtRunner:
             self.outputs[name] = t
             self.context.set_tensor_address(name, int(t.data_ptr()))
 
-        self._stream = torch.cuda.Stream(device=dev)
-
     def close(self) -> None:
         self.outputs.clear()
         self.context = None
         self.engine = None
         self.runtime = None
-        self._stream = None
 
     def infer(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         for name, tensor in inputs.items():
             self.context.set_tensor_address(name, int(tensor.data_ptr()))
-        current = torch.cuda.current_stream(self.device)
-        self._stream.wait_stream(current)
-        self.context.execute_async_v3(self._stream.cuda_stream)
-        current.wait_stream(self._stream)
+        self.context.execute_async_v3(torch.cuda.current_stream(self.device).cuda_stream)
         return self.outputs
 

@@ -84,7 +84,7 @@ class VramOffloader:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="VramOffloader", daemon=True)
         self._last_encode_time: list[float] | None = None
-        self._stall_warned = False
+        self._last_stall_warn_time: float = 0.0
         self._pipeline_queues: dict[str, object] | None = None
         self._metadata_queue: object | None = None
 
@@ -143,17 +143,18 @@ class VramOffloader:
         hb = self._last_encode_time
         if hb is None:
             return
-        elapsed = time.monotonic() - hb[0]
+        now = time.monotonic()
+        elapsed = now - hb[0]
         if elapsed > STALL_WARN_SECONDS:
-            if not self._stall_warned:
+            if now - self._last_stall_warn_time >= STALL_WARN_SECONDS:
                 _log.warning(
                     "[vram-offloader] encode stall detected: no frame encoded for %.0fs",
                     elapsed,
                 )
                 self._dump_stall_diagnostics(elapsed)
-                self._stall_warned = True
+                self._last_stall_warn_time = now
         else:
-            self._stall_warned = False
+            self._last_stall_warn_time = 0.0
 
     def _dump_stall_diagnostics(self, elapsed: float) -> None:
         lines: list[str] = [f"=== ENCODE STALL DIAGNOSTICS (stalled {elapsed:.0f}s) ==="]
