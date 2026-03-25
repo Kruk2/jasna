@@ -6,6 +6,8 @@ from pathlib import Path
 if sys.platform == "win32":
     os.environ.setdefault("OMP_WAIT_POLICY", "passive")
 
+os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+
 if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
     from jasna.engine_compiler import EngineCompilationRequest, _subprocess_compile
     _subprocess_compile(EngineCompilationRequest.from_json(sys.argv[2]))
