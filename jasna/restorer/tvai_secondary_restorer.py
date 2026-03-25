@@ -12,6 +12,7 @@ from queue import Queue, Empty
 import numpy as np
 
 from jasna.frame_queue import FrameQueue
+from jasna.os_utils import get_subprocess_startup_info
 import torch
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class _TvaiWorker:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            startupinfo=get_subprocess_startup_info(),
         )
         self._reader = threading.Thread(target=self._reader_loop, daemon=True)
         self._reader.start()
