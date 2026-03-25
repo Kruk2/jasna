@@ -268,7 +268,7 @@ class TestEncodeStallDetection:
             safetynet=0,
         )
         offloader._check_encode_stall()
-        assert not offloader._stall_warned
+        assert offloader._last_stall_warn_time == 0.0
 
     def test_no_warning_when_recent(self):
         import time
@@ -283,7 +283,7 @@ class TestEncodeStallDetection:
         hb = [time.monotonic()]
         offloader.set_encode_heartbeat(hb)
         offloader._check_encode_stall()
-        assert not offloader._stall_warned
+        assert offloader._last_stall_warn_time == 0.0
 
     def test_warns_when_stale(self):
         import time
@@ -299,9 +299,9 @@ class TestEncodeStallDetection:
         hb = [time.monotonic() - STALL_WARN_SECONDS - 1.0]
         offloader.set_encode_heartbeat(hb)
         offloader._check_encode_stall()
-        assert offloader._stall_warned
+        assert offloader._last_stall_warn_time > 0.0
 
-    def test_warns_only_once(self):
+    def test_does_not_rewarn_within_interval(self):
         import time
         from jasna.vram_offloader import STALL_WARN_SECONDS
         offloader = VramOffloader(
@@ -315,11 +315,10 @@ class TestEncodeStallDetection:
         hb = [time.monotonic() - STALL_WARN_SECONDS - 1.0]
         offloader.set_encode_heartbeat(hb)
         offloader._check_encode_stall()
-        assert offloader._stall_warned
-        offloader._stall_warned = False  # reset manually
-        offloader._stall_warned = True   # simulate already warned
+        first_warn = offloader._last_stall_warn_time
+        assert first_warn > 0.0
         offloader._check_encode_stall()
-        assert offloader._stall_warned
+        assert offloader._last_stall_warn_time == first_warn
 
     def test_resets_after_fresh_heartbeat(self):
         import time
@@ -335,10 +334,10 @@ class TestEncodeStallDetection:
         hb = [time.monotonic() - STALL_WARN_SECONDS - 1.0]
         offloader.set_encode_heartbeat(hb)
         offloader._check_encode_stall()
-        assert offloader._stall_warned
+        assert offloader._last_stall_warn_time > 0.0
         hb[0] = time.monotonic()
         offloader._check_encode_stall()
-        assert not offloader._stall_warned
+        assert offloader._last_stall_warn_time == 0.0
 
 
 class TestPrepareCropsJitGuard:
