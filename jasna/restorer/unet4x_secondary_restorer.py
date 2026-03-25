@@ -118,7 +118,7 @@ class Unet4xSecondaryRestorer:
                 "lr_init": lr_prev,
             })
 
-            result_nhwc[start : start + UNET4X_BATCH_SIZE] = outs["or_outputs"].squeeze(1)
+            result_nhwc[start : start + UNET4X_BATCH_SIZE] = outs["all_color_outputs"].squeeze(1)
             hr_prev = outs["hr_final"].clone()
             lr_prev = batch[-1:, 0].contiguous()  # (1, 256, 256, 3)
 

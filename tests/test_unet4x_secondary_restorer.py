@@ -18,7 +18,7 @@ from jasna.restorer.unet4x_secondary_restorer import (
 def _make_fake_runner(device: torch.device, dtype: torch.dtype):
     runner = MagicMock()
     runner.input_names = ["frames_stack", "hr_init", "lr_init"]
-    runner.output_names = ["or_outputs", "hr_final"]
+    runner.output_names = ["all_color_outputs", "hr_final"]
     runner.input_dtypes = {
         "frames_stack": dtype,
         "hr_init": dtype,
@@ -28,7 +28,7 @@ def _make_fake_runner(device: torch.device, dtype: torch.dtype):
     def fake_infer(inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         bs = inputs["frames_stack"].shape[0]
         return {
-            "or_outputs": torch.rand(bs, 1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=dtype, device=device),
+            "all_color_outputs": torch.rand(bs, 1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=dtype, device=device),
             "hr_final": torch.rand(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=dtype, device=device),
         }
 

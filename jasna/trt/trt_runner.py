@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 from pathlib import Path
 import tensorrt as trt
-from jasna.trt import _engine_io_names, _trt_dtype_to_torch
+from jasna.trt import _engine_io_names, _trt_dtype_to_torch, _TRT_LOGGER
 
 
 class TrtRunner:
@@ -16,8 +16,7 @@ class TrtRunner:
         self.engine_path = engine_path
         self.device = device
 
-        self.logger = trt.Logger(trt.ILogger.Severity(trt.Logger.ERROR))
-        self.runtime = trt.Runtime(self.logger)
+        self.runtime = trt.Runtime(_TRT_LOGGER)
         self.engine = self.runtime.deserialize_cuda_engine(self.engine_path.read_bytes())
         if self.engine is None:
             raise RuntimeError(f"Failed to deserialize TensorRT engine: {self.engine_path}")
