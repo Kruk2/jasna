@@ -7,6 +7,8 @@ from pathlib import Path
 import tensorrt as trt
 import torch
 
+_TRT_LOGGER = trt.Logger(trt.Logger.ERROR)
+
 
 def _engine_io_names(engine: trt.ICudaEngine) -> tuple[list[str], list[str]]:
     input_names: list[str] = []
@@ -88,11 +90,10 @@ def compile_onnx_to_tensorrt_engine(
     print(msg)
     log.info("%s", msg)
 
-    logger = trt.Logger(trt.Logger.ERROR)
-    builder = trt.Builder(logger)
+    builder = trt.Builder(_TRT_LOGGER)
     explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(explicit_batch)
-    parser = trt.OnnxParser(network, logger)
+    parser = trt.OnnxParser(network, _TRT_LOGGER)
 
     onnx_bytes = onnx_path.read_bytes()
     if not parser.parse(onnx_bytes):
