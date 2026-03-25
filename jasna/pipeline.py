@@ -18,7 +18,8 @@ import torch
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
-from jasna.mosaic import RfDetrMosaicDetectionModel, YoloMosaicDetectionModel
+from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
+from jasna.mosaic.yolo import YoloMosaicDetectionModel
 from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, SecondaryRestoreResult, _SENTINEL

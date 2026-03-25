@@ -16,12 +16,9 @@ from jasna.gui.settings_panel import SettingsPanel
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
-from jasna.gui.wizard import FirstRunWizard
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, PresetManager
-from jasna.gui.validation import validate_gui_start
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
-from jasna.gui.system_stats import read_system_stats
 
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
@@ -245,6 +242,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._system_stats_stop.clear()
 
         def _loop():
+            from jasna.gui.system_stats import read_system_stats
             while not self._system_stats_stop.is_set():
                 stats = read_system_stats()
                 try:
@@ -272,6 +270,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self.destroy()
         
     def _show_wizard(self):
+        from jasna.gui.wizard import FirstRunWizard
         FirstRunWizard(self, on_complete=self._on_wizard_complete)
         
     def _on_wizard_complete(self, all_passed: bool):
@@ -313,6 +312,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         output_pattern = self._queue_panel.get_output_pattern()
         settings = self._settings_panel.get_settings()
 
+        from jasna.gui.validation import validate_gui_start
         errors = validate_gui_start(settings)
         if errors:
             from tkinter import messagebox

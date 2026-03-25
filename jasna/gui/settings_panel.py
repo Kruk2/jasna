@@ -539,7 +539,7 @@ class SettingsPanel(ctk.CTkFrame):
         )
         none_rb.pack(side="left", padx=(0, 16))
 
-        from jasna.restorer.unet4x_secondary_restorer import UNET4X_ONNX_PATH
+        from jasna.engine_paths import UNET4X_ONNX_PATH
         unet4x_available = UNET4X_ONNX_PATH.exists()
         unet4x_rb = ctk.CTkRadioButton(
             engines_frame, text=t('secondary_unet_4x'),
