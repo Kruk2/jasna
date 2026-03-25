@@ -1,5 +1,6 @@
 """Data models for GUI state management."""
 
+import itertools
 import json
 from dataclasses import dataclass, field, asdict
 from enum import Enum
@@ -22,9 +23,13 @@ class JobStatus(Enum):
     SKIPPED = "skipped"
 
 
+_job_id_counter = itertools.count(1)
+
+
 @dataclass
 class JobItem:
     path: Path
+    id: int = field(default_factory=lambda: next(_job_id_counter))
     status: JobStatus = JobStatus.PENDING
     duration_seconds: float | None = None
     progress: float = 0.0

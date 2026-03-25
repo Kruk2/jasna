@@ -32,6 +32,7 @@ class QueuePanel(ctk.CTkFrame):
         self._job_widgets: list[JobListItem] = []
         self._on_jobs_changed: callable = None
         self._on_output_changed: callable = None
+        self._processing_job_id: int | None = None
         
         self._build_toolbar()
         self._build_list_area()
@@ -370,37 +371,45 @@ class QueuePanel(ctk.CTkFrame):
             self._pattern_entry.delete(0, "end")
             self._pattern_entry.insert(0, pattern)
         
-    def update_job_status(self, index: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0, elapsed_seconds: float | None = None):
-        if 0 <= index < len(self._job_widgets):
-            widget = self._job_widgets[index]
-            job = self._jobs[index]
-            job.status = status
-            job.progress = progress
+    def _find_job_index_by_id(self, job_id: int) -> int | None:
+        for i, job in enumerate(self._jobs):
+            if job.id == job_id:
+                return i
+        return None
+
+    def update_job_status(self, job_id: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0, elapsed_seconds: float | None = None):
+        idx = self._find_job_index_by_id(job_id)
+        if idx is None:
+            return
+        widget = self._job_widgets[idx]
+        job = self._jobs[idx]
+        job.status = status
+        job.progress = progress
+        
+        status_map = {
+            JobStatus.PENDING: (t("job_pending"), "", Colors.STATUS_PENDING),
+            JobStatus.PROCESSING: (t("job_processing"), "○", Colors.STATUS_PROCESSING),
+            JobStatus.COMPLETED: (t("job_completed"), "✓", Colors.STATUS_COMPLETED),
+            JobStatus.ERROR: (t("job_error"), "✕", Colors.STATUS_ERROR),
+            JobStatus.PAUSED: (t("job_paused"), "⏸", Colors.STATUS_PAUSED),
+            JobStatus.SKIPPED: (t("job_skipped"), "⊘", Colors.STATUS_CONFLICT),
+        }
+        text, icon, color = status_map.get(status, ("", "", Colors.STATUS_PENDING))
+        widget.set_status(text, icon, color)
+        
+        if status == JobStatus.PROCESSING:
+            widget.set_progress(progress)
+            widget.set_fps_eta(fps=fps, eta_seconds=eta_seconds)
+        elif status == JobStatus.COMPLETED and elapsed_seconds is not None:
+            widget.hide_progress()
+            widget.set_completed(elapsed_seconds)
+        else:
+            widget.hide_progress()
+            widget.set_fps_eta(0.0, 0.0)
             
-            status_map = {
-                JobStatus.PENDING: (t("job_pending"), "", Colors.STATUS_PENDING),
-                JobStatus.PROCESSING: (t("job_processing"), "○", Colors.STATUS_PROCESSING),
-                JobStatus.COMPLETED: (t("job_completed"), "✓", Colors.STATUS_COMPLETED),
-                JobStatus.ERROR: (t("job_error"), "✕", Colors.STATUS_ERROR),
-                JobStatus.PAUSED: (t("job_paused"), "⏸", Colors.STATUS_PAUSED),
-                JobStatus.SKIPPED: (t("job_skipped"), "⊘", Colors.STATUS_CONFLICT),
-            }
-            text, icon, color = status_map.get(status, ("", "", Colors.STATUS_PENDING))
-            widget.set_status(text, icon, color)
-            
-            if status == JobStatus.PROCESSING:
-                widget.set_progress(progress)
-                widget.set_fps_eta(fps=fps, eta_seconds=eta_seconds)
-            elif status == JobStatus.COMPLETED and elapsed_seconds is not None:
-                widget.hide_progress()
-                widget.set_completed(elapsed_seconds)
-            else:
-                widget.hide_progress()
-                widget.set_fps_eta(0.0, 0.0)
-                
-            # Hide conflict indicator once processing starts
-            if status != JobStatus.PENDING:
-                widget.set_conflict(False)
+        # Hide conflict indicator once processing starts
+        if status != JobStatus.PENDING:
+            widget.set_conflict(False)
                 
     def _refresh_conflicts(self):
         """Re-check all jobs for output file conflicts."""
@@ -419,7 +428,18 @@ class QueuePanel(ctk.CTkFrame):
         self._clear_completed_btn.configure(state=state)
 
     # --- Drag & reorder support ---
+    def _is_processing_widget(self, widget: 'JobListItem') -> bool:
+        if self._processing_job_id is None:
+            return False
+        try:
+            idx = self._job_widgets.index(widget)
+        except ValueError:
+            return False
+        return idx < len(self._jobs) and self._jobs[idx].id == self._processing_job_id
+
     def _on_widget_drag_start(self, widget: 'JobListItem', event):
+        if self._is_processing_widget(widget):
+            return
         try:
             widget.lift()
         except Exception:
@@ -430,6 +450,8 @@ class QueuePanel(ctk.CTkFrame):
             pass
 
     def _on_widget_drag_move(self, widget: 'JobListItem', event):
+        if self._is_processing_widget(widget):
+            return
         # Compute pointer y relative to list frame and determine new index
         lf = self._list_frame
         try:
@@ -477,13 +499,14 @@ class QueuePanel(ctk.CTkFrame):
         if self._on_jobs_changed:
             self._on_jobs_changed()
 
-    def set_running(self, running: bool, processing_index: int | None = None):
+    def set_running(self, running: bool, processing_job_id: int | None = None):
         """Set queue running state.
 
         When running=True the panel is visually dimmed and controls are
         disabled except the add buttons and removing jobs (except the
         currently processing item which is protected).
         """
+        self._processing_job_id = processing_job_id if running else None
         if running:
             # Disable controls we don't want interactive while running
             self._clear_btn.configure(state="disabled")
@@ -493,9 +516,9 @@ class QueuePanel(ctk.CTkFrame):
             # Allow adding files/folders
             self._add_files_btn.configure(state="normal")
             self._add_folder_btn.configure(state="normal")
-            # Per-item removability: protect processing index
+            processing_idx = self._find_job_index_by_id(processing_job_id) if processing_job_id is not None else None
             for i, widget in enumerate(self._job_widgets):
-                widget.set_removable(i != processing_index)
+                widget.set_removable(i != processing_idx)
         else:
             # Restore normal appearance and enable controls
             self._clear_btn.configure(state="normal")
