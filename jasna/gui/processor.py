@@ -14,7 +14,7 @@ from jasna.media import UnsupportedColorspaceError
 
 @dataclass
 class ProgressUpdate:
-    job_index: int
+    job_id: int
     status: JobStatus
     progress: float = 0.0
     fps: float = 0.0
@@ -111,29 +111,38 @@ class Processor:
         if self._on_progress:
             self._on_progress(update)
             
+    def _next_pending_job(self) -> JobItem | None:
+        for job in self._jobs:
+            if job.status == JobStatus.PENDING:
+                return job
+        return None
+
     def _run(self):
         self._log("INFO", "Processing started")
         
-        for idx, job in enumerate(self._jobs):
-            if self._stop_event.is_set():
-                self._log("INFO", "Processing stopped by user")
-                break
-                
-            self._pause_event.wait()  # Block if paused
-            
+        while not self._stop_event.is_set():
+            self._pause_event.wait()
             if self._stop_event.is_set():
                 break
-                
-            self._process_job(idx, job)
-            
-        self._log("INFO", "Processing completed")
+
+            job = self._next_pending_job()
+            if job is None:
+                break
+
+            self._process_job(job)
+
+        if self._stop_event.is_set():
+            self._log("INFO", "Processing stopped by user")
+        else:
+            self._log("INFO", "Processing completed")
         if self._on_complete:
             self._on_complete()
             
-    def _process_job(self, idx: int, job: JobItem):
+    def _process_job(self, job: JobItem):
+        job.status = JobStatus.PROCESSING
         self._log("INFO", f"Started processing {job.filename}")
         self._progress(ProgressUpdate(
-            job_index=idx,
+            job_id=job.id,
             status=JobStatus.PROCESSING,
             message=f"Starting {job.filename}",
         ))
@@ -154,8 +163,9 @@ class Processor:
         
         if output_path.exists():
             if file_conflict == "skip":
+                job.status = JobStatus.SKIPPED
                 self._progress(ProgressUpdate(
-                    job_index=idx,
+                    job_id=job.id,
                     status=JobStatus.SKIPPED,
                     message=f"Output file already exists: {output_path.name}",
                 ))
@@ -169,10 +179,11 @@ class Processor:
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            self._run_pipeline(idx, input_path, output_path)
+            self._run_pipeline(job.id, input_path, output_path)
             
+            job.status = JobStatus.COMPLETED
             self._progress(ProgressUpdate(
-                job_index=idx,
+                job_id=job.id,
                 status=JobStatus.COMPLETED,
                 progress=100.0,
             ))
@@ -180,8 +191,9 @@ class Processor:
 
         except UnsupportedColorspaceError as e:
             e.__traceback__ = None
+            job.status = JobStatus.SKIPPED
             self._progress(ProgressUpdate(
-                job_index=idx,
+                job_id=job.id,
                 status=JobStatus.SKIPPED,
                 message=str(e),
             ))
@@ -190,8 +202,9 @@ class Processor:
         except Exception as e:
             tb = traceback.format_exc()
             e.__traceback__ = None
+            job.status = JobStatus.ERROR
             self._progress(ProgressUpdate(
-                job_index=idx,
+                job_id=job.id,
                 status=JobStatus.ERROR,
                 message=str(e),
             ))
@@ -203,7 +216,7 @@ class Processor:
         except Exception:
             pass
             
-    def _run_pipeline(self, job_idx: int, input_path: Path, output_path: Path):
+    def _run_pipeline(self, job_id: int, input_path: Path, output_path: Path):
         """Run the actual processing pipeline."""
         from jasna._suppress_noise import install as _install_noise_filters
         _install_noise_filters()
@@ -313,7 +326,7 @@ class Processor:
                     raise InterruptedError("Processing stopped")
 
                 self._progress(ProgressUpdate(
-                    job_index=job_idx,
+                    job_id=job_id,
                     status=JobStatus.PROCESSING,
                     progress=progress_pct,
                     fps=fps,

@@ -399,36 +399,37 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         
     def _handle_progress(self, update: ProgressUpdate):
         jobs = self._queue_panel.get_jobs()
-        
-        self._queue_panel.update_job_status(
-            update.job_index,
-            update.status,
-            update.progress / 100.0,
-        )
+        job_id = update.job_id
         
         if update.status == JobStatus.PROCESSING:
-            self._job_start_times.setdefault(update.job_index, time.time())
-            filename = jobs[update.job_index].filename if update.job_index < len(jobs) else ""
+            self._job_start_times.setdefault(job_id, time.time())
+            # Resolve current queue position for control bar display
+            filename = ""
+            queue_current = 0
+            for i, j in enumerate(jobs):
+                if j.id == job_id:
+                    filename = j.filename
+                    queue_current = i + 1
+                    break
             self._control_bar.update_progress(
                 filename=filename,
                 percent=update.progress,
                 fps=update.fps,
                 eta_seconds=update.eta_seconds,
-                queue_current=update.job_index + 1,
+                queue_current=queue_current,
                 queue_total=len(jobs),
             )
-            # Mark queue as running and protect the processing job from removal
             try:
-                self._queue_panel.set_running(True, processing_index=update.job_index)
+                self._queue_panel.set_running(True, processing_job_id=job_id)
             except Exception:
                 pass
         job_elapsed: float | None = None
         if update.status == JobStatus.COMPLETED:
-            start = self._job_start_times.pop(update.job_index, None)
+            start = self._job_start_times.pop(job_id, None)
             job_elapsed = time.time() - start if start is not None else 0.0
         try:
             self._queue_panel.update_job_status(
-                update.job_index,
+                job_id,
                 update.status,
                 update.progress / 100.0,
                 update.fps,
