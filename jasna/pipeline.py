@@ -87,6 +87,13 @@ class Pipeline:
         self.progress_callback = progress_callback
         self.working_directory = working_directory
 
+    def close(self) -> None:
+        if hasattr(self, "detection_model") and self.detection_model is not None:
+            if hasattr(self.detection_model, "close"):
+                self.detection_model.close()
+            self.detection_model = None
+        self.restoration_pipeline = None
+
     _ASYNC_POLL_TIMEOUT = 0.05
 
     @staticmethod

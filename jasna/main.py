@@ -378,7 +378,7 @@ def main() -> None:
         )
 
         working_directory = Path(args.working_directory) if args.working_directory else None
-        Pipeline(
+        pipeline = Pipeline(
             input_video=input_video,
             output_video=output_video,
             detection_model_name=detection_model_name,
@@ -394,7 +394,14 @@ def main() -> None:
             enable_crossfade=bool(args.enable_crossfade),
             fp16=fp16,
             working_directory=working_directory,
-        ).run()
+        )
+        try:
+            pipeline.run()
+        finally:
+            pipeline.close()
+            restoration_pipeline.restorer.close()
+            if secondary_restorer is not None and hasattr(secondary_restorer, "close"):
+                secondary_restorer.close()
 
 
 if __name__ == "__main__":

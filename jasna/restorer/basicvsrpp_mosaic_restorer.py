@@ -48,6 +48,12 @@ class BasicvsrppMosaicRestorer:
             self.model = load_model(config, checkpoint_path, self.device, fp16)
             logger.info("BasicVSR++ loaded from checkpoint: %s (fp16=%s)", checkpoint_path, fp16)
 
+    def close(self) -> None:
+        if self._split_forward is not None:
+            self._split_forward.close()
+            self._split_forward = None
+        self.model = None
+
     def raw_process(self, video: list[Tensor]) -> torch.Tensor:
         """
         Args:

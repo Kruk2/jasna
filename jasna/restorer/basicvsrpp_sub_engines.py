@@ -372,6 +372,27 @@ def load_sub_engines(
     return loop_body_engines, preprocess_engine, upsample_engine
 
 
+def _release_torchtrt_module(module: nn.Module) -> None:
+    for submod in module.modules():
+        has_engine = hasattr(submod, "engine") and submod.engine is not None
+        has_context = hasattr(submod, "context") and submod.context is not None
+        if has_engine or has_context:
+            submod.context = None
+            submod.engine = None
+            if hasattr(submod, "_input_buffers"):
+                submod._input_buffers.clear()
+            if hasattr(submod, "_output_buffers"):
+                submod._output_buffers.clear()
+            if hasattr(submod, "cudagraph"):
+                submod.cudagraph = None
+            if hasattr(submod, "_engine_stream"):
+                submod._engine_stream = None
+            if hasattr(submod, "_caller_stream"):
+                submod._caller_stream = None
+            if hasattr(submod, "serialized_engine"):
+                submod.serialized_engine = None
+
+
 class BasicVSRPlusPlusNetSplit(nn.Module):
     def __init__(
         self,
@@ -387,6 +408,25 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         self._loop_body_engines = loop_body_engines
         self._preprocess_engine = preprocess_engine
         self._upsample_engine = upsample_engine
+
+    def close(self) -> None:
+        engines = []
+        if self._loop_body_engines is not None:
+            engines.extend(self._loop_body_engines.values())
+        if self._preprocess_engine is not None:
+            engines.append(self._preprocess_engine)
+        if self._upsample_engine is not None:
+            engines.append(self._upsample_engine)
+        for eng in engines:
+            _release_torchtrt_module(eng)
+
+        self._loop_body_engines = None
+        self._preprocess_engine = None
+        self._upsample_engine = None
+        self.backbone = None
+        self._modules.clear()
+        self._parameters.clear()
+        self._buffers.clear()
 
     @staticmethod
     def _make_identity_grid(

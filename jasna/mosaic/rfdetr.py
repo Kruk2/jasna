@@ -76,6 +76,11 @@ class RfDetrMosaicDetectionModel:
         self.logits_out = next(k for k in self.runner.output_names if k not in {self.boxes_out, self.masks_out})
         logger.info("RF-DETR detection model loaded: %s (batch_size=%d)", self.engine_path, self.batch_size)
 
+    def close(self) -> None:
+        if self.runner is not None:
+            self.runner.close()
+            self.runner = None
+
     def _preprocess(self, frames_uint8_bchw: torch.Tensor) -> torch.Tensor:
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype).div_(255.0)
         x = F.interpolate(x, size=(self.resolution, self.resolution), mode="bilinear", align_corners=False)
