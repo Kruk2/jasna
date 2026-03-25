@@ -273,12 +273,15 @@ class Pipeline:
         primary_idle_event = threading.Event()
         frame_shape: list[tuple[int, int]] = []
 
+        encode_heartbeat: list[float] = [time.monotonic()]
         vram_offloader = VramOffloader(
             device=device,
             blend_buffer=blend_buffer,
             crop_buffers=crop_buffers,
             crop_lock=crop_lock,
         )
+        vram_offloader.set_encode_heartbeat(encode_heartbeat)
+        vram_offloader.set_pipeline_queues(clip_queue, secondary_queue, encode_queue, metadata_queue)
 
         debug_memory = PipelineDebugMemoryLogger(
             logger=log,
@@ -469,13 +472,8 @@ class Pipeline:
 
                     secondary_done = False
 
-                    while True:
-                        meta_item = metadata_queue.get()
-                        if meta_item is _SENTINEL:
-                            break
-                        meta: FrameMeta = meta_item  # type: ignore[assignment]
-                        original_frame = next(frame_gen)
-
+                    def _drain_encode_queue():
+                        nonlocal secondary_done
                         while not secondary_done:
                             try:
                                 sr_item = encode_queue.get_nowait()
@@ -485,6 +483,17 @@ class Pipeline:
                                     blend_buffer.add_result(sr_item)
                             except Empty:
                                 break
+
+                    while True:
+                        _drain_encode_queue()
+                        try:
+                            meta_item = metadata_queue.get(timeout=0.05)
+                        except Empty:
+                            continue
+                        if meta_item is _SENTINEL:
+                            break
+                        meta: FrameMeta = meta_item  # type: ignore[assignment]
+                        original_frame = next(frame_gen)
 
                         while not blend_buffer.is_frame_ready(meta.frame_idx):
                             if error_holder:
@@ -503,6 +512,7 @@ class Pipeline:
 
                         blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
                         encoder.encode(blended, meta.pts)
+                        encode_heartbeat[0] = time.monotonic()
 
             except BaseException as e:
                 log.exception("[blend-encode] thread crashed")

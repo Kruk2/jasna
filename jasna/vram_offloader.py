@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
+import traceback
 
 import torch
 
@@ -16,6 +18,7 @@ VRAM_SAFETYNET: int = 750 * 1024 * 1024
 
 _POLL_INTERVAL = 0.1
 _MIB = 1024 * 1024
+STALL_WARN_SECONDS = 30.0
 
 
 class VramStats:
@@ -80,6 +83,10 @@ class VramOffloader:
         self.stats = VramStats()
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="VramOffloader", daemon=True)
+        self._last_encode_time: list[float] | None = None
+        self._stall_warned = False
+        self._pipeline_queues: dict[str, object] | None = None
+        self._metadata_queue: object | None = None
 
         _log.info(
             "VramOffloader: threshold=%d MiB (total=%d MiB, safetynet=%d MiB)",
@@ -87,6 +94,23 @@ class VramOffloader:
             gpu_total // _MIB,
             safetynet // _MIB,
         )
+
+    def set_encode_heartbeat(self, shared_time: list[float]) -> None:
+        self._last_encode_time = shared_time
+
+    def set_pipeline_queues(
+        self,
+        clip_queue: object,
+        secondary_queue: object,
+        encode_queue: object,
+        metadata_queue: object,
+    ) -> None:
+        self._pipeline_queues = {
+            "clip_queue": clip_queue,
+            "secondary_queue": secondary_queue,
+            "encode_queue": encode_queue,
+        }
+        self._metadata_queue = metadata_queue
 
     def start(self) -> None:
         self._thread.start()
@@ -113,6 +137,106 @@ class VramOffloader:
                         used / _MIB,
                         self._threshold / _MIB,
                     )
+            self._check_encode_stall()
+
+    def _check_encode_stall(self) -> None:
+        hb = self._last_encode_time
+        if hb is None:
+            return
+        elapsed = time.monotonic() - hb[0]
+        if elapsed > STALL_WARN_SECONDS:
+            if not self._stall_warned:
+                _log.warning(
+                    "[vram-offloader] encode stall detected: no frame encoded for %.0fs",
+                    elapsed,
+                )
+                self._dump_stall_diagnostics(elapsed)
+                self._stall_warned = True
+        else:
+            self._stall_warned = False
+
+    def _dump_stall_diagnostics(self, elapsed: float) -> None:
+        lines: list[str] = [f"=== ENCODE STALL DIAGNOSTICS (stalled {elapsed:.0f}s) ==="]
+
+        # Queue sizes and frame counts
+        if self._pipeline_queues:
+            for name, q in self._pipeline_queues.items():
+                try:
+                    lines.append(
+                        f"  {name}: items={q.qsize()} frames={q.current_frames} max_frames={q._max_frames}"
+                    )
+                except Exception:
+                    lines.append(f"  {name}: <error reading>")
+        if self._metadata_queue is not None:
+            try:
+                lines.append(
+                    f"  metadata_queue: items~={self._metadata_queue.qsize()} maxsize={self._metadata_queue.maxsize}"
+                )
+            except Exception:
+                lines.append("  metadata_queue: <error reading>")
+
+        # Blend buffer state
+        try:
+            bb = self._blend_buffer
+            with bb._lock:
+                pending_count = len(bb.pending_map)
+                results_count = len(bb._results)
+                result_track_ids = list(bb._results.keys())
+                earliest_pending = min(bb.pending_map.keys()) if bb.pending_map else None
+                latest_pending = max(bb.pending_map.keys()) if bb.pending_map else None
+                waiting_frames = [
+                    (fidx, tids)
+                    for fidx, tids in sorted(bb.pending_map.items())
+                    if not all(tid in bb._results for tid in tids)
+                ][:5]
+            lines.append(
+                f"  blend_buffer: pending_frames={pending_count} results={results_count}"
+                f" result_track_ids={result_track_ids}"
+            )
+            if earliest_pending is not None:
+                lines.append(f"  blend_buffer: frame_range=[{earliest_pending}..{latest_pending}]")
+            if waiting_frames:
+                for fidx, tids in waiting_frames:
+                    missing = [t for t in tids if t not in (bb._results if hasattr(bb, '_results') else {})]
+                    lines.append(f"  blend_buffer: frame {fidx} waiting for tracks {missing}")
+        except Exception as e:
+            lines.append(f"  blend_buffer: <error: {e}>")
+
+        # Crop buffers
+        try:
+            with self._crop_lock:
+                crop_ids = list(self._crop_buffers.keys())
+                crop_sizes = {k: v.frame_count for k, v in self._crop_buffers.items()}
+            lines.append(f"  crop_buffers: track_ids={crop_ids} sizes={crop_sizes}")
+        except Exception:
+            pass
+
+        # VRAM
+        try:
+            free, total = torch.cuda.mem_get_info(self._device)
+            alloc = torch.cuda.memory_allocated(self._device)
+            reserved = torch.cuda.memory_reserved(self._device)
+            lines.append(
+                f"  VRAM: used={((total - free) / _MIB):.0f} MiB"
+                f" allocated={alloc / _MIB:.0f} MiB"
+                f" reserved={reserved / _MIB:.0f} MiB"
+                f" free={free / _MIB:.0f} MiB"
+            )
+        except Exception:
+            pass
+
+        # Thread stack traces
+        lines.append("  --- Thread stacks ---")
+        thread_names = {t.ident: t.name for t in threading.enumerate()}
+        for tid, frame in sys._current_frames().items():
+            name = thread_names.get(tid, f"Thread-{tid}")
+            if name == "VramOffloader":
+                continue
+            tb = "".join(traceback.format_stack(frame))
+            lines.append(f"  [{name}]\n{tb}")
+
+        lines.append("=== END STALL DIAGNOSTICS ===")
+        _log.warning("\n".join(lines))
 
     def _offload(self, bytes_to_free: int) -> int:
         freed = 0
