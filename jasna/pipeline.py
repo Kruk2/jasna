@@ -514,6 +514,8 @@ class Pipeline:
                         encoder.encode(blended, meta.pts)
                         encode_heartbeat[0] = time.monotonic()
 
+                    vram_offloader.pause_stall_check()
+
             except BaseException as e:
                 log.exception("[blend-encode] thread crashed")
                 error_holder.append(e)
