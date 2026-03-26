@@ -19,7 +19,8 @@ Copy the console output or describe what didn't work.
 1. Jasna command line that was used:
 jasna --input "D:/video.mp4" [other params]
 OR 
-GUI screenshot
+GUI screenshot with all settings
+1. MediaInfo for video that failed
 1. [optional] JAV Code with timestamp: 
 
 **Desktop (please complete the following information):**
