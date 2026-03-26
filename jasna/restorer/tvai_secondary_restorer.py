@@ -433,9 +433,10 @@ class TvaiSecondaryRestorer:
                 if not has_target:
                     continue
                 if segs and isinstance(segs[-1], _FillerSegment):
-                    continue
+                    segs[-1].remaining += TVAI_PIPELINE_DELAY
+                else:
+                    segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
                 self._workers[wi].push_frames(filler)
-                segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
                 flushed = True
                 logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", TVAI_PIPELINE_DELAY, wi, target_seqs)
             finally:

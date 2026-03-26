@@ -376,27 +376,29 @@ class TestFlushPending:
         workers[0].push_frames.assert_not_called()
         workers[1].push_frames.assert_not_called()
 
-    def test_skips_worker_with_partially_consumed_filler(self):
-        r = _make_restorer(num_workers=2)
-        workers = _setup_mock_workers(r)
-        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
-        r.flush_pending()
-        assert workers[0].push_frames.call_count == 1
-        assert isinstance(r._worker_segments[0][-1], _FillerSegment)
-        r._worker_segments[0][-1].remaining = TVAI_PIPELINE_DELAY - 3
-        r.flush_pending()
-        assert workers[0].push_frames.call_count == 1
-
-    def test_skips_worker_with_unconsumed_filler(self):
+    def test_reflush_extends_existing_filler(self):
         r = _make_restorer(num_workers=1)
         workers = _setup_mock_workers(r)
         r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
         r.flush_pending()
         assert workers[0].push_frames.call_count == 1
-        assert isinstance(r._worker_segments[0][-1], _FillerSegment)
-        assert r._worker_segments[0][-1].remaining == TVAI_PIPELINE_DELAY
+        filler = r._worker_segments[0][-1]
+        assert isinstance(filler, _FillerSegment)
+        assert filler.remaining == TVAI_PIPELINE_DELAY
         r.flush_pending()
-        assert workers[0].push_frames.call_count == 1
+        assert workers[0].push_frames.call_count == 2
+        assert filler.remaining == TVAI_PIPELINE_DELAY * 2
+
+    def test_reflush_extends_partially_consumed_filler(self):
+        r = _make_restorer(num_workers=1)
+        workers = _setup_mock_workers(r)
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
+        r.flush_pending()
+        filler = r._worker_segments[0][-1]
+        filler.remaining = 3
+        r.flush_pending()
+        assert workers[0].push_frames.call_count == 2
+        assert filler.remaining == 3 + TVAI_PIPELINE_DELAY
 
     def test_reflush_after_filler_consumed(self):
         r = _make_restorer(num_workers=1)
@@ -512,6 +514,68 @@ class TestClose:
     def test_noop_when_not_started(self):
         r = _make_restorer()
         r.close()
+
+
+class TestReflushCompletesClip:
+    def test_clip_completes_after_multiple_flush_rounds(self):
+        """Regression test: if TVAI_PIPELINE_DELAY is insufficient to flush
+        all clip frames, repeated flush_pending calls must push more fillers
+        until the clip eventually completes."""
+        r = _make_restorer(num_workers=1)
+        workers = _setup_mock_workers(r)
+        out = _make_frame()
+        clip_frames = 30
+        actual_delay = TVAI_PIPELINE_DELAY + 10
+
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=clip_frames))
+
+        r.flush_pending()
+        assert workers[0].push_frames.call_count == 1
+
+        produced_after_first_flush = clip_frames - (actual_delay - TVAI_PIPELINE_DELAY)
+        r._process_drained_frames(0, [out] * produced_after_first_flush)
+        assert 0 not in r._completed
+        seg = r._worker_segments[0][0]
+        assert isinstance(seg, _ClipSegment)
+        assert len(seg.collected) == produced_after_first_flush
+
+        filler_seg = r._worker_segments[0][-1]
+        filler_consumed = TVAI_PIPELINE_DELAY - (actual_delay - TVAI_PIPELINE_DELAY)
+        filler_seg.remaining = TVAI_PIPELINE_DELAY - filler_consumed
+
+        assert r.flush_pending()
+        assert workers[0].push_frames.call_count == 2
+
+        remaining_clip = clip_frames - produced_after_first_flush
+        r._process_drained_frames(0, [out] * remaining_clip)
+        assert 0 in r._completed
+        assert len(r._completed[0]) == clip_frames
+
+        leftover_filler = r._worker_segments[0][0]
+        assert isinstance(leftover_filler, _FillerSegment)
+        assert leftover_filler.remaining == filler_seg.remaining
+
+    def test_filler_frames_not_mixed_into_clip(self):
+        """Verify that filler output frames are correctly counted against
+        the _FillerSegment and never leak into the clip's collected list."""
+        r = _make_restorer(num_workers=1)
+        workers = _setup_mock_workers(r)
+        clip_out = _make_frame()
+        clip_frames = 5
+
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=clip_frames))
+        r.flush_pending()
+
+        r._process_drained_frames(0, [clip_out] * clip_frames)
+        assert 0 in r._completed
+        assert len(r._completed[0]) == clip_frames
+
+        filler_seg = r._worker_segments[0][0]
+        assert isinstance(filler_seg, _FillerSegment)
+        filler_out = _make_frame()
+        r._process_drained_frames(0, [filler_out] * TVAI_PIPELINE_DELAY)
+        assert len(r._worker_segments[0]) == 0
+        assert len(r._completed[0]) == clip_frames
 
 
 class TestPushClipFlushDeadlock:
