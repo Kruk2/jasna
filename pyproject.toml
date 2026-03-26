@@ -42,5 +42,6 @@ packages = ["jasna", "jasna.gui", "jasna.mosaic", "jasna.restorer", "jasna.trt"]
 testpaths = ["tests"]
 filterwarnings = [
   "ignore:'maxsplit' is passed as positional argument:DeprecationWarning:mmengine\\.utils\\.misc",
+  "ignore:`torch\\.jit\\.script` is deprecated:DeprecationWarning",
 ]
 
