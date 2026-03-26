@@ -85,6 +85,7 @@ class VramOffloader:
         self._thread = threading.Thread(target=self._run, name="VramOffloader", daemon=True)
         self._last_encode_time: list[float] | None = None
         self._last_stall_warn_time: float = 0.0
+        self._stall_check_paused = False
         self._pipeline_queues: dict[str, object] | None = None
         self._metadata_queue: object | None = None
 
@@ -139,9 +140,12 @@ class VramOffloader:
                     )
             self._check_encode_stall()
 
+    def pause_stall_check(self) -> None:
+        self._stall_check_paused = True
+
     def _check_encode_stall(self) -> None:
         hb = self._last_encode_time
-        if hb is None:
+        if hb is None or self._stall_check_paused:
             return
         now = time.monotonic()
         elapsed = now - hb[0]
