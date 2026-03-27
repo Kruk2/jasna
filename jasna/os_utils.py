@@ -183,7 +183,7 @@ def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
     if not ok:
         if "Enabled" in info:
             msg = (
-                "Warning: Windows 'Hardware-accelerated GPU scheduling' is enabled. "
+                "Warning: ' is enabled. "
                 "This will make Jasna slower and might add artifacts to the output video."
             )
         else:
@@ -204,8 +204,7 @@ def check_windows_hardware_accelerated_gpu_scheduling() -> tuple[bool, str]:
         ) as key:
             mode, _ = winreg.QueryValueEx(key, "HwSchMode")
     except OSError as e:
-        # Handle case where registry key or value doesn't exist
-        if e.errno == 2:  # ERROR_FILE_NOT_FOUND
+        if e.errno == 2:
             return True, "Not configured (default: Off)"
         return False, str(e)
 
