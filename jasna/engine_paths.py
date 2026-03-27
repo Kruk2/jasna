@@ -41,13 +41,12 @@ def get_yolo_tensorrt_engine_path(model_path: str | Path, *, fp16: bool) -> Path
 
 
 UNET4X_ONNX_PATH = Path("model_weights") / "unet-4x.onnx"
-UNET4X_BATCH_SIZE = 4
 
 
 def get_unet4x_engine_path(onnx_path: str | Path | None = None, fp16: bool = True) -> Path:
     if onnx_path is None:
         onnx_path = UNET4X_ONNX_PATH
-    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=UNET4X_BATCH_SIZE, fp16=fp16)
+    return get_onnx_tensorrt_engine_path(onnx_path, batch_size=None, fp16=fp16)
 
 
 BASICVSRPP_DIRECTIONS = ("backward_1", "forward_1", "backward_2", "forward_2")
