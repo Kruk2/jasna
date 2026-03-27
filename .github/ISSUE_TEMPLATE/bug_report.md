@@ -20,7 +20,7 @@ Copy the console output or describe what didn't work.
 jasna --input "D:/video.mp4" [other params]
 OR 
 GUI screenshot with all settings
-1. MediaInfo for video that failed
+1. [optional if not related to video] MediaInfo for video that failed
 1. [optional] JAV Code with timestamp: 
 
 **Desktop (please complete the following information):**
@@ -30,3 +30,4 @@ GUI screenshot with all settings
  - GPU [e.g. RTX 4090]
 - Nvidia Driver version: xxx.yy
  - CPU
+-  [if using tvai]: TVAI version, model name, confirmation that environment variables for TVAI are setup: [e.g. version 7.3.3, iris-2, and screenshot showing TVAI environment variables.
