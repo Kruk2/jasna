@@ -55,8 +55,8 @@ Download the latest release package (Windows/Linux).
 Close all other applications (including browsers) and do not use the PC during compilation.\
 Engines are cached in the `model_weights` folder and reused on all future runs (you can copy engine files & folders to a new version).
 
-Remember to have up to date nvidia drivers.\
-Tested nvidia drivers: **591.67**
+**Remember to have up to date nvidia drivers.**\
+Tested nvidia drivers: **591.67** (but anything from 59x family should be ok and it's minimum required).
 
 ### Detection Model
 In general it's recommended to pick latest rf-detr.\
