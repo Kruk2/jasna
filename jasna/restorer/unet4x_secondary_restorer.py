@@ -6,13 +6,34 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from jasna.engine_paths import UNET4X_BATCH_SIZE, UNET4X_ONNX_PATH, get_unet4x_engine_path
+from jasna.engine_paths import UNET4X_ONNX_PATH, get_unet4x_engine_path
 from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
 
 UNET4X_INPUT_SIZE = 256
 UNET4X_OUTPUT_SIZE = 1024
+UNET4X_HR_PREV_SIZE = 1152
+UNET4X_COLOR_BLEND = 0.80
+
+
+def rgb_color_transfer(
+    ai_rgb: torch.Tensor,
+    ref_rgb: torch.Tensor,
+    blend: float = UNET4X_COLOR_BLEND,
+    out: torch.Tensor | None = None,
+) -> torch.Tensor:
+    ai_mean = ai_rgb.mean(dim=(-3, -2), keepdim=True)
+    ai_std = ai_rgb.std(dim=(-3, -2), keepdim=True).clamp_(min=1e-8)
+    ref_mean = ref_rgb.mean(dim=(-3, -2), keepdim=True)
+    ref_std = ref_rgb.std(dim=(-3, -2), keepdim=True)
+    transferred = (ai_rgb - ai_mean) / ai_std * ref_std + ref_mean
+    result = torch.lerp(ai_rgb, transferred, blend)
+    result.clamp_(0.0, 1.0)
+    if out is not None:
+        out.copy_(result)
+        return out
+    return result
 
 
 def compile_unet4x_engine(
@@ -24,7 +45,7 @@ def compile_unet4x_engine(
     return compile_onnx_to_tensorrt_engine(
         onnx_path,
         device,
-        batch_size=UNET4X_BATCH_SIZE,
+        batch_size=None,
         fp16=bool(fp16),
         workspace_gb=20,
     )
@@ -50,32 +71,64 @@ class Unet4xSecondaryRestorer:
         self.runner = TrtRunner(
             self.engine_path,
             input_shapes={
-                "frames_stack": (UNET4X_BATCH_SIZE, 1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
-                "hr_init": (1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3),
-                "lr_init": (1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
+                "lr_prev": (1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
+                "lr_curr": (1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
+                "hr_prev": (1, UNET4X_HR_PREV_SIZE, UNET4X_HR_PREV_SIZE, 3),
             },
             device=self.device,
         )
         logger.info(
-            "Unet4xSecondaryRestorer loaded: %s (batch=%d, %dx%d -> %dx%d)",
-            self.engine_path, UNET4X_BATCH_SIZE,
+            "Unet4xSecondaryRestorer loaded: %s (%dx%d -> %dx%d)",
+            self.engine_path,
             UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE,
             UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE,
         )
 
+        self._stream = torch.cuda.current_stream(self.device)
+
+        self._g_lr_prev = torch.zeros(1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3, dtype=self._dtype, device=self.device)
+        self._g_lr_curr = torch.zeros(1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3, dtype=self._dtype, device=self.device)
+        self._g_hr_prev = torch.zeros(1, UNET4X_HR_PREV_SIZE, UNET4X_HR_PREV_SIZE, 3, dtype=self._dtype, device=self.device)
+        self._g_ref_up = torch.empty(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=torch.float32, device=self.device)
+        self._g_result = torch.empty(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=torch.float32, device=self.device)
+
+        self.runner.context.set_tensor_address("lr_prev", self._g_lr_prev.data_ptr())
+        self.runner.context.set_tensor_address("lr_curr", self._g_lr_curr.data_ptr())
+        self.runner.context.set_tensor_address("hr_prev", self._g_hr_prev.data_ptr())
+
     def _to_nhwc(self, frames_nchw: torch.Tensor) -> torch.Tensor:
         return frames_nchw.permute(0, 2, 3, 1).contiguous()
 
-    def _init_temporal_state(self, first_frame_nhwc: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        frame = first_frame_nhwc.unsqueeze(0)  # (1, H, W, 3)
-        lr_init = frame
-        hr_init = F.interpolate(
-            frame.permute(0, 3, 1, 2),  # (1, 3, 256, 256)
+    def _infer(self) -> None:
+        self.runner.context.execute_async_v3(self._stream.cuda_stream)
+
+    def _advance_temporal(self) -> None:
+        self._infer()
+        self._g_hr_prev.copy_(self.runner.outputs["hr_prev_out"])
+        self._g_lr_prev.copy_(self._g_lr_curr)
+
+    def _color_transfer_into_result(self) -> None:
+        ai_rgb = self.runner.outputs["hr_display"].float().clamp_(0.0, 1.0)
+        ref_up_nchw = F.interpolate(
+            self._g_lr_curr.float().permute(0, 3, 1, 2),
             size=(UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE),
+            mode="bicubic",
+            align_corners=False,
+        )
+        self._g_ref_up.copy_(ref_up_nchw.permute(0, 2, 3, 1)).clamp_(0.0, 1.0)
+        rgb_color_transfer(ai_rgb, self._g_ref_up, out=self._g_result)
+
+    def _bootstrap(self, first_frame_nhwc: torch.Tensor) -> None:
+        self._g_lr_prev.copy_(first_frame_nhwc.unsqueeze(0))
+        self._g_lr_curr.copy_(first_frame_nhwc.unsqueeze(0))
+        hr_init_nchw = F.interpolate(
+            first_frame_nhwc.unsqueeze(0).float().permute(0, 3, 1, 2),
+            size=(UNET4X_HR_PREV_SIZE, UNET4X_HR_PREV_SIZE),
             mode="bilinear",
             align_corners=False,
-        ).permute(0, 2, 3, 1).contiguous()  # (1, 1024, 1024, 3)
-        return hr_init, lr_init
+        )
+        self._g_hr_prev.copy_(hr_init_nchw.permute(0, 2, 3, 1).to(dtype=self._dtype))
+        self._advance_temporal()
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         T = int(frames_256.shape[0])
@@ -88,43 +141,29 @@ class Unet4xSecondaryRestorer:
             return []
 
         frames = frames_256.to(device=self.device, dtype=self._dtype)
-        frames_nhwc = self._to_nhwc(frames)  # (T, 256, 256, 3)
+        frames_nhwc = self._to_nhwc(frames)
 
-        pad_count = (UNET4X_BATCH_SIZE - T % UNET4X_BATCH_SIZE) % UNET4X_BATCH_SIZE
-        if pad_count > 0:
-            padding = torch.zeros(
-                pad_count, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3,
-                dtype=self._dtype, device=self.device,
-            )
-            frames_nhwc = torch.cat([frames_nhwc, padding], dim=0)
+        if ks > 0:
+            ctx = ks - 1
+            self._bootstrap(frames_nhwc[ctx])
+            self._g_lr_curr.copy_(frames_nhwc[ctx : ctx + 1])
+            self._advance_temporal()
+        else:
+            self._bootstrap(frames_nhwc[0])
 
-        total = frames_nhwc.shape[0]
-        num_batches = total // UNET4X_BATCH_SIZE
-        result_nhwc = torch.empty(
-            total, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3,
-            dtype=self._dtype, device=self.device,
-        )
+        kept_count = ke - ks
+        result = torch.empty(kept_count, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=torch.float32, device=self.device)
 
-        hr_prev, lr_prev = self._init_temporal_state(frames_nhwc[0])
+        for i in range(ks, ke):
+            self._g_lr_curr.copy_(frames_nhwc[i : i + 1])
+            if i == 0:
+                self._g_lr_prev.copy_(frames_nhwc[0:1])
 
-        for i in range(num_batches):
-            start = i * UNET4X_BATCH_SIZE
-            batch = frames_nhwc[start : start + UNET4X_BATCH_SIZE]  # (4, 256, 256, 3)
-            batch = batch.unsqueeze(1).contiguous()  # (4, 1, 256, 256, 3)
+            self._advance_temporal()
+            self._color_transfer_into_result()
+            result[i - ks].copy_(self._g_result[0])
 
-            outs = self.runner.infer({
-                "frames_stack": batch,
-                "hr_init": hr_prev,
-                "lr_init": lr_prev,
-            })
-
-            result_nhwc[start : start + UNET4X_BATCH_SIZE] = outs["all_color_outputs"].squeeze(1)
-            hr_prev = outs["hr_final"].clone()
-            lr_prev = batch[-1:, 0].contiguous()  # (1, 256, 256, 3)
-
-        kept = result_nhwc[ks:ke]  # (T', 1024, 1024, 3)
-
-        kept_nchw = kept.permute(0, 3, 1, 2).float().clamp_(0, 1).mul_(255.0).round_().to(dtype=torch.uint8)
+        kept_nchw = result.permute(0, 3, 1, 2).clamp_(0, 1).mul_(255.0).to(dtype=torch.uint8)
         return list(kept_nchw.unbind(0))
 
     def close(self) -> None:
