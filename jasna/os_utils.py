@@ -204,6 +204,9 @@ def check_windows_hardware_accelerated_gpu_scheduling() -> tuple[bool, str]:
         ) as key:
             mode, _ = winreg.QueryValueEx(key, "HwSchMode")
     except OSError as e:
+        # Handle case where registry key or value doesn't exist
+        if e.errno == 2:  # ERROR_FILE_NOT_FOUND
+            return True, "Not configured (default: Off)"
         return False, str(e)
 
     if int(mode) == 2:
