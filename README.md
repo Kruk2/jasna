@@ -57,6 +57,7 @@ Engines are cached in the `model_weights` folder and reused on all future runs (
 
 **Remember to have up to date nvidia drivers.**\
 Tested nvidia drivers: **591.67** (but anything from 59x family should be ok and it's minimum required).
+**Jasna requires GPU with minimum compute capability: 7.5**
 
 ### Detection Model
 In general it's recommended to pick latest rf-detr.\
