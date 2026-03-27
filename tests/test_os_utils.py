@@ -277,6 +277,22 @@ def test_check_windows_hardware_accelerated_gpu_scheduling_returns_false_with_os
     assert info == "registry read failed"
 
 
+def test_check_windows_hardware_accelerated_gpu_scheduling_returns_true_when_key_not_found(monkeypatch) -> None:
+    class _Winreg:
+        HKEY_LOCAL_MACHINE = object()
+
+        @staticmethod
+        def OpenKey(root, path):
+            raise OSError(2, "The system cannot find the file specified")
+
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
+
+    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
+    assert ok is True
+    assert info == "Not configured (default: Off)"
+
+
 def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_error_when_status_unknown(
     monkeypatch, capsys
 ) -> None:
