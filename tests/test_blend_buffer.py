@@ -44,7 +44,7 @@ def _make_sr(
     )
 
 
-def _identity_blend_mask(crop_mask: torch.Tensor) -> torch.Tensor:
+def _identity_blend_mask(crop_mask: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:
     return crop_mask
 
 

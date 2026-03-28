@@ -19,7 +19,7 @@ class BlendBuffer:
     def __init__(
         self,
         device: torch.device,
-        blend_mask_fn: Callable[[torch.Tensor], torch.Tensor] = create_blend_mask,
+        blend_mask_fn: Callable[[torch.Tensor, int], torch.Tensor] = create_blend_mask,
     ):
         self.device = device
         self.blend_mask_fn = blend_mask_fn
@@ -141,7 +141,7 @@ class BlendBuffer:
         y_idx = (torch.arange(y1, y2, device=device) * hm) // frame_h
         x_idx = (torch.arange(x1, x2, device=device) * wm) // frame_w
         crop_mask = mask_lr.float().index_select(0, y_idx).index_select(1, x_idx)
-        blend_mask = self.blend_mask_fn(crop_mask)
+        blend_mask = self.blend_mask_fn(crop_mask, frame_h)
 
         if cw < 1.0:
             blend_mask = blend_mask * cw

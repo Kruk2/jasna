@@ -232,7 +232,7 @@ def _run_real_pipeline_batches(
                 stacked.append(torch.full(f.permute(2, 0, 1).shape, restored_float, dtype=torch.float32))
             return torch.stack(stacked, dim=0)
 
-    def _ones_blend_mask(crop: torch.Tensor) -> torch.Tensor:
+    def _ones_blend_mask(crop: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:
         return torch.ones_like(crop.squeeze(), dtype=torch.float32)
 
     from jasna.restorer.restoration_pipeline import RestorationPipeline
@@ -441,7 +441,7 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
                 stacked.append(torch.full(f.permute(2, 0, 1).shape, val, dtype=torch.float32))
             return torch.stack(stacked, dim=0)
 
-    def _ones_blend_mask(crop: torch.Tensor) -> torch.Tensor:
+    def _ones_blend_mask(crop: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:
         return torch.ones_like(crop.squeeze(), dtype=torch.float32)
 
     from jasna.restorer.restoration_pipeline import RestorationPipeline
