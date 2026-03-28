@@ -4,25 +4,26 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jasna"
-version = "0.5.0-alpha13"
+version = "0.5.0"
 description = "Jasna"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-  "torch==2.9.1",
-  "torchvision==0.24.1",
-  "tensorrt==10.13.3.9.post1",
-  "torch-tensorrt==2.9.0",
+  "torch==2.10.0+cu130",
+  "torchvision==0.25.0+cu130",
+  "tensorrt==10.14.1.48.post1",
+  "torch-tensorrt==2.10.0",
   "av>=16.1.0",
   "numpy",
   "psutil",
-  "transformers>=5",
+  "transformers<5",
   "mmengine==0.10.7",
   "opencv-python",
   "tqdm",
   "customtkinter",
   "tkinterdnd2",
   "ultralytics",
+  "nvidia-vfx",
 ]
 
 [project.scripts]
@@ -33,6 +34,9 @@ dev = [
   "pyinstaller>=6.0",
   "pytest",
   "pytest-cov",
+  "scikit-build",
+  "cmake",
+  "ninja",
 ]
 
 [tool.setuptools]
