@@ -64,6 +64,43 @@ def _generate_vod_playlist(
     return "\n".join(lines), segment_count
 
 
+def _build_live_playlist(
+    segments_dir: Path,
+    segment_duration: float,
+    segment_count: int,
+    start: int,
+    finished: bool,
+) -> str:
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        f"#EXT-X-TARGETDURATION:{math.ceil(segment_duration)}",
+        "#EXT-X-PLAYLIST-TYPE:EVENT",
+        f"#EXT-X-MEDIA-SEQUENCE:{start}",
+    ]
+    last_seg_dur = None
+    if segment_count > 1:
+        total_full = (segment_count - 1) * segment_duration
+        last_seg_dur = max(0.1, segment_count * segment_duration - total_full)
+        if abs(last_seg_dur - segment_duration) < 0.01:
+            last_seg_dur = None
+
+    i = start
+    while i < segment_count:
+        seg = segments_dir / f"seg_{i:05d}.ts"
+        if not seg.exists():
+            break
+        dur = segment_duration if (last_seg_dur is None or i < segment_count - 1) else last_seg_dur
+        lines.append(f"#EXTINF:{dur:.3f},")
+        lines.append(f"seg_{i:05d}.ts")
+        i += 1
+
+    if finished and i >= segment_count:
+        lines.append("#EXT-X-ENDLIST")
+    lines.append("")
+    return "\n".join(lines)
+
+
 class _StreamRequestHandler(SimpleHTTPRequestHandler):
 
     def __init__(self, *args, server_state: HlsStreamingServer, **kwargs):
@@ -105,7 +142,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             seg_num = self._parse_segment_number(seg_name)
             if seg_num is not None:
                 self._state.notify_segment_requested(seg_num)
-            if seg_path.exists():
+            if seg_path.exists() and seg_path.stat().st_size > 0:
                 self._serve_file(seg_path)
                 return
 
@@ -118,14 +155,19 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
 
             deadline = time.monotonic() + 30.0
             while time.monotonic() < deadline:
-                if seg_path.exists():
-                    time.sleep(0.1)
+                try:
+                    sz = seg_path.stat().st_size
+                except OSError:
+                    sz = -1
+                if sz > 0:
+                    log.debug("[stream-server] serving %s (%d bytes, waited %.1fs)",
+                              seg_name, sz, 30.0 - (deadline - time.monotonic()))
                     self._serve_file(seg_path)
                     return
-                if self._state.needs_seek(seg_num):
-                    break
                 time.sleep(0.2)
 
+            log.warning("[stream-server] timeout waiting for %s (exists=%s)",
+                        seg_name, seg_path.exists())
             self.send_error(404)
             return
 
@@ -163,11 +205,11 @@ class HlsStreamingServer:
         self.port = int(port)
 
         self.segments_dir = Path(tempfile.mkdtemp(prefix="jasna_hls_"))
-        self.playlist_text, self.segment_count = _generate_vod_playlist(
+        self._vod_playlist, self.segment_count = _generate_vod_playlist(
             total_duration=metadata.duration,
             segment_duration=self.segment_duration,
         )
-        (self.segments_dir / "stream.m3u8").write_text(self.playlist_text)
+        self._finished = False
 
         self._seek_lock = threading.Lock()
         self.seek_requested = threading.Event()
@@ -181,6 +223,13 @@ class HlsStreamingServer:
 
         self._httpd: HTTPServer | None = None
         self._thread: threading.Thread | None = None
+
+    @property
+    def playlist_text(self) -> str:
+        return self._vod_playlist
+
+    def mark_finished(self) -> None:
+        self._finished = True
 
     @property
     def url(self) -> str:
@@ -228,7 +277,8 @@ class HlsStreamingServer:
                     current_segment, self._highest_requested_segment, max_ahead,
                 )
             while (
-                current_segment > self._highest_requested_segment + max_ahead
+                self._highest_requested_segment >= 0
+                and current_segment > self._highest_requested_segment + max_ahead
                 and not cancel_event.is_set()
             ):
                 self._demand_lock.wait(timeout=0.5)
