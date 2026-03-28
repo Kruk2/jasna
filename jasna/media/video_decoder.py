@@ -84,9 +84,11 @@ class NvidiaVideoReader:
                 batch_tensor_nv = torch.empty((self.batch_size, 3, self.decoder.Height, self.decoder.Width), device=self.device, dtype=torch.uint8)
                 pkts: list[int] = []
                 seek_ctx = None if frame_seek is None else vali.SeekContext(seek_frame=frame_seek)
+                frame_seek = None
 
                 for i in range(self.batch_size):
                     success, details = self.decoder.DecodeSingleSurfaceAsync(self.decode_surface, pkt_data, seek_ctx)
+                    seek_ctx = None
                     if not success:
                         if details.name == 'END_OF_STREAM':
                             eof = True

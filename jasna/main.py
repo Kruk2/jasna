@@ -189,6 +189,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Detection score threshold (default: %(default)s)",
     )
 
+    streaming = parser.add_argument_group("Streaming")
+    streaming.add_argument(
+        "--stream",
+        action="store_true",
+        help="Enable HLS streaming mode (no file output). Serves processed video via HTTP for playback in VLC/browser.",
+    )
+    streaming.add_argument(
+        "--stream-port",
+        type=int,
+        default=8765,
+        help="HTTP port for HLS streaming server (default: %(default)s)",
+    )
+    streaming.add_argument(
+        "--stream-segment-duration",
+        type=float,
+        default=4.0,
+        help="HLS segment duration in seconds (default: %(default)s)",
+    )
+
     encoding = parser.add_argument_group("Encoding")
     encoding.add_argument(
         "--codec",
@@ -235,8 +254,12 @@ def main() -> None:
         run_benchmark_cli(args)
         return
 
-    if args.input is None or args.output is None:
-        parser.error("--input and --output are required when not using --benchmark")
+    is_streaming = bool(args.stream)
+
+    if args.input is None:
+        parser.error("--input is required when not using --benchmark")
+    if args.output is None and not is_streaming:
+        parser.error("--output is required when not using --benchmark or --stream")
 
     check_required_executables(disable_ffmpeg_check=args.disable_ffmpeg_check)
     warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
@@ -267,7 +290,7 @@ def main() -> None:
     if not input_video.exists():
         raise FileNotFoundError(str(input_video))
 
-    output_video = Path(args.output)
+    output_video = Path(args.output) if args.output else input_video.with_stem(input_video.stem + "_stream")
 
     from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models
 
@@ -403,7 +426,13 @@ def main() -> None:
             working_directory=working_directory,
         )
         try:
-            pipeline.run()
+            if is_streaming:
+                pipeline.run_streaming(
+                    port=int(args.stream_port),
+                    segment_duration=float(args.stream_segment_duration),
+                )
+            else:
+                pipeline.run()
         except UnsupportedColorspaceError as e:
             print(f"Error: {e}")
             sys.exit(1)
