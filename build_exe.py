@@ -54,5 +54,5 @@ if os.name == "nt":
     zip_path.unlink()
 
 if os.name != "nt":
-    for f in (internal / "tensorrt_libs").glob("libnvinfer_builder_resource_win.so.*"):
+    for f in (internal / "tensorrt_libs").glob("*_win*"):
         f.unlink()
