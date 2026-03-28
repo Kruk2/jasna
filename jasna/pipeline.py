@@ -30,7 +30,7 @@ from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
 from jasna.vram_offloader import VramOffloader
 from jasna.streaming import HlsStreamingServer
-from jasna.streaming_encoder import HlsEncoder
+from jasna.streaming_encoder import StreamingEncoder
 
 log = logging.getLogger(__name__)
 
@@ -583,17 +583,6 @@ class Pipeline:
         if err is not None:
             raise err
 
-    _STREAMING_ENCODER_OVERRIDES = {
-        'tuning_info': 'low_latency',
-        'lookahead': 0,
-        'lookahead_level': 0,
-        'temporalaq': 0,
-        'bf': 0,
-        'bref': 0,
-        'rc': 'vbr',
-        'cq': 28,
-    }
-
     def run_streaming(
         self,
         port: int = 8765,
@@ -612,16 +601,13 @@ class Pipeline:
             segment_duration=segment_duration,
             port=port,
         )
-        hls_encoder = HlsEncoder(
+        streaming_encoder = StreamingEncoder(
             segments_dir=hls_server.segments_dir,
             segment_duration=segment_duration,
-            fps=metadata.video_fps,
+            metadata=metadata,
+            source_video=str(self.input_video),
+            device=device,
         )
-
-        gop_frames = max(1, int(metadata.video_fps * segment_duration))
-        streaming_settings = dict(self.encoder_settings)
-        streaming_settings.update(self._STREAMING_ENCODER_OVERRIDES)
-        streaming_settings['gop'] = gop_frames
 
         url = hls_server.start()
         print(f"HLS stream: {url}")
@@ -632,11 +618,10 @@ class Pipeline:
                 device=device,
                 metadata=metadata,
                 hls_server=hls_server,
-                hls_encoder=hls_encoder,
-                streaming_settings=streaming_settings,
+                streaming_encoder=streaming_encoder,
             )
         finally:
-            hls_encoder.stop()
+            streaming_encoder.stop()
             hls_server.stop()
             gc.collect()
             torch.cuda.empty_cache()
@@ -649,8 +634,7 @@ class Pipeline:
         device: torch.device,
         metadata,
         hls_server: HlsStreamingServer,
-        hls_encoder: HlsEncoder,
-        streaming_settings: dict[str, object],
+        streaming_encoder: StreamingEncoder,
     ) -> None:
         start_segment = 0
 
@@ -660,15 +644,14 @@ class Pipeline:
 
             seek_t0 = time.monotonic()
             hls_server.reset_demand(start_segment)
-            hls_encoder.flush_and_restart(start_number=start_segment) if start_segment > 0 else hls_encoder.start(start_number=0)
+            streaming_encoder.flush_and_restart(start_number=start_segment) if start_segment > 0 else streaming_encoder.start(start_number=0)
 
             cancel_event = threading.Event()
             seek_result = self._run_streaming_pass(
                 device=device,
                 metadata=metadata,
                 hls_server=hls_server,
-                hls_encoder=hls_encoder,
-                streaming_settings=streaming_settings,
+                streaming_encoder=streaming_encoder,
                 start_frame=start_frame,
                 cancel_event=cancel_event,
             )
@@ -676,7 +659,8 @@ class Pipeline:
             log.info("[stream] pass teardown took %.2fs", time.monotonic() - seek_t0)
 
             if seek_result is None:
-                hls_encoder.stop()
+                streaming_encoder.stop()
+                hls_server.mark_finished()
                 log.info("[stream] pass finished, all segments produced — waiting for seek requests")
                 while True:
                     target = hls_server.consume_seek()
@@ -695,8 +679,7 @@ class Pipeline:
         device: torch.device,
         metadata,
         hls_server: HlsStreamingServer,
-        hls_encoder: HlsEncoder,
-        streaming_settings: dict[str, object],
+        streaming_encoder: StreamingEncoder,
         start_frame: int,
         cancel_event: threading.Event,
     ) -> int | None:
@@ -872,21 +855,8 @@ class Pipeline:
                             yield batch[i]
 
                 t_enc_init = time.monotonic()
-                log.debug("[stream-blend-encode] creating encoder (settings=%s)", streaming_settings)
-                with (
-                    NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=device, metadata=metadata) as reader2,
-                    NvidiaVideoEncoder(
-                        str(self.input_video),
-                        device=device,
-                        metadata=metadata,
-                        codec=self.codec,
-                        encoder_settings=streaming_settings,
-                        stream_mode=False,
-                        bitstream_sink=hls_encoder.write,
-                        bitstream_only=True,
-                    ) as encoder,
-                ):
-                    log.debug("[stream-blend-encode] reader+encoder init: %.2fs", time.monotonic() - t_enc_init)
+                with NvidiaVideoReader(str(self.input_video), batch_size=self.batch_size, device=device, metadata=metadata) as reader2:
+                    log.debug("[stream-blend-encode] reader init: %.2fs", time.monotonic() - t_enc_init)
                     frame_gen = _flat_frames(reader2)
                     secondary_done = False
                     frames_encoded = 0
@@ -937,7 +907,7 @@ class Pipeline:
                                 pass
 
                         blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
-                        encoder.encode(blended, meta.pts)
+                        streaming_encoder.write_frame(blended, meta.pts)
                         frames_encoded += 1
                         if frames_encoded == 1:
                             log.debug("[stream-blend-encode] first frame encoded: %.2fs since thread start", time.monotonic() - t_enc_init)
