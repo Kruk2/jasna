@@ -115,10 +115,11 @@ class YoloMosaicDetectionModel:
         if runtime_path.suffix.lower() == ".engine":
             self.runner = TrtRunner(
                 runtime_path,
-                input_shapes=(self.batch_size, 3, self.imgsz, self.imgsz),
+                input_shapes=[(self.batch_size, 3, self.imgsz, self.imgsz)],
                 device=self.device,
             )
-            self.input_dtype = self.runner.input_dtype
+            self._input_name = self.runner.input_names[0]
+            self.input_dtype = self.runner.input_dtypes[self._input_name]
         else:
             from ultralytics.nn.autobackend import AutoBackend
 
@@ -170,7 +171,7 @@ class YoloMosaicDetectionModel:
 
         with torch.inference_mode():
             if self.runner is not None:
-                outs = self.runner.infer(x)
+                outs = self.runner.infer({self._input_name: x})
                 pred = next(t for t in outs.values() if t.ndim == 3)
                 proto = next(t for t in outs.values() if t.ndim == 4)
                 raw = (pred, proto)

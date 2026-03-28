@@ -17,12 +17,14 @@ def _mock_engine_path():
 
 def _build_yolo_model(*, batch_size=2, imgsz=640):
     mock_runner = MagicMock()
-    mock_runner.input_dtype = torch.float32
+    mock_runner.input_names = ["images"]
+    mock_runner.input_dtypes = {"images": torch.float32}
 
     pred = torch.zeros(batch_size, 4 + 1 + 32, 100)
     proto = torch.zeros(batch_size, 32, imgsz // 4, imgsz // 4)
-    mock_runner.infer.return_value = {"pred": pred, "proto": proto}
-    mock_runner.outputs = {"pred": pred, "proto": proto}
+    outs = {"pred": pred, "proto": proto}
+    mock_runner.infer.return_value = outs
+    mock_runner.outputs = outs
 
     with (
         patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=_mock_engine_path()),
@@ -47,7 +49,8 @@ class TestYoloInit:
 
     def test_trt_runner_called_with_input_shapes(self):
         mock_runner_cls = MagicMock()
-        mock_runner_cls.return_value.input_dtype = torch.float32
+        mock_runner_cls.return_value.input_names = ["images"]
+        mock_runner_cls.return_value.input_dtypes = {"images": torch.float32}
         engine = _mock_engine_path()
 
         with (
@@ -63,7 +66,7 @@ class TestYoloInit:
 
         mock_runner_cls.assert_called_once_with(
             engine,
-            input_shapes=(2, 3, 640, 640),
+            input_shapes=[(2, 3, 640, 640)],
             device=torch.device("cuda:0"),
         )
 
