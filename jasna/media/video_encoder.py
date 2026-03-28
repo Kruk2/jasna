@@ -169,16 +169,12 @@ class NvidiaVideoEncoder:
         encoder_settings: dict[str, object],
         stream_mode: bool = False,
         working_directory: Path | None = None,
-        bitstream_sink: callable | None = None,
-        bitstream_only: bool = False,
     ):
         self.metadata = metadata
         self.device = device
         self.file = file
         self.output_path = Path(file)
         self.stream_mode = stream_mode
-        self.bitstream_sink = bitstream_sink
-        self.bitstream_only = bitstream_only
 
         temp_dir = Path(working_directory) if working_directory is not None else self.output_path.parent
         if working_directory is not None:
@@ -244,29 +240,28 @@ class NvidiaVideoEncoder:
         if metadata.color_space != AvColorspace.ITU709 and metadata.color_range != AvColorRange.MPEG:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
 
-        if not self.bitstream_only:
-            self.temp_video_path = temp_dir / (self.output_path.stem + '_temp_video' + self.output_path.suffix)
+        self.temp_video_path = temp_dir / (self.output_path.stem + '_temp_video' + self.output_path.suffix)
 
-            if self.stream_mode:
-                dst_file = av.open(str(self.temp_video_path), 'w')
-                out_stream = dst_file.add_stream('hevc', rate=metadata.video_fps_exact)
-                out_stream.width = metadata.video_width
-                out_stream.height = metadata.video_height
-                out_stream.time_base = metadata.time_base
-                out_stream.color_range = metadata.color_range
-                out_stream.colorspace = metadata.color_space
-                out_stream.codec_context.width = metadata.video_width
-                out_stream.codec_context.height = metadata.video_height
-                out_stream.codec_context.time_base = metadata.time_base
-                out_stream.codec_context.color_range = metadata.color_range
-                out_stream.codec_context.colorspace = metadata.color_space
-                out_stream.options.update({'x265-params': 'log_level=error'})
-                self.dst_file = dst_file
-                self.out_stream = out_stream
-                self.extradata_set = False
-            else:
-                self.hevc_path = temp_dir / (self.output_path.stem + '.hevc')
-                self.raw_hevc = open(self.hevc_path, "wb")
+        if self.stream_mode:
+            dst_file = av.open(str(self.temp_video_path), 'w')
+            out_stream = dst_file.add_stream('hevc', rate=metadata.video_fps_exact)
+            out_stream.width = metadata.video_width
+            out_stream.height = metadata.video_height
+            out_stream.time_base = metadata.time_base
+            out_stream.color_range = metadata.color_range
+            out_stream.colorspace = metadata.color_space
+            out_stream.codec_context.width = metadata.video_width
+            out_stream.codec_context.height = metadata.video_height
+            out_stream.codec_context.time_base = metadata.time_base
+            out_stream.codec_context.color_range = metadata.color_range
+            out_stream.codec_context.colorspace = metadata.color_space
+            out_stream.options.update({'x265-params': 'log_level=error'})
+            self.dst_file = dst_file
+            self.out_stream = out_stream
+            self.extradata_set = False
+        else:
+            self.hevc_path = temp_dir / (self.output_path.stem + '.hevc')
+            self.raw_hevc = open(self.hevc_path, "wb")
 
     def __enter__(self):
         return self
@@ -285,26 +280,22 @@ class NvidiaVideoEncoder:
             if len(bitstream) == 0:
                 break
             data = bytearray(bitstream)
-            if self.bitstream_sink is not None:
-                self.bitstream_sink(bytes(data))
-            if not self.bitstream_only:
-                if self.stream_mode:
-                    pts = self.reordered_pts_queue.popleft()
-                    self._mux_packet_pyav(data, pts)
-                else:
-                    self.raw_hevc.write(data)
-
-        if not self.bitstream_only:
             if self.stream_mode:
-                self.dst_file.close()
-                remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
-                self.temp_video_path.unlink()
+                pts = self.reordered_pts_queue.popleft()
+                self._mux_packet_pyav(data, pts)
             else:
-                self.raw_hevc.close()
-                mux_hevc_to_mkv(self.hevc_path, self.temp_video_path, self.reordered_pts_queue, self.metadata.time_base)
-                self.hevc_path.unlink()
-                remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
-                self.temp_video_path.unlink()
+                self.raw_hevc.write(data)
+
+        if self.stream_mode:
+            self.dst_file.close()
+            remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
+            self.temp_video_path.unlink()
+        else:
+            self.raw_hevc.close()
+            mux_hevc_to_mkv(self.hevc_path, self.temp_video_path, self.reordered_pts_queue, self.metadata.time_base)
+            self.hevc_path.unlink()
+            remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
+            self.temp_video_path.unlink()
 
         del self.encoder
 
@@ -371,14 +362,11 @@ class NvidiaVideoEncoder:
 
         if len(bitstream) > 0:
             data = bytearray(bitstream)
-            if self.bitstream_sink is not None:
-                self.bitstream_sink(bytes(data))
-            if not self.bitstream_only:
-                if self.stream_mode:
-                    pts = self.reordered_pts_queue.popleft()
-                    self._mux_packet_pyav(data, pts)
-                else:
-                    self.raw_hevc.write(data)
+            if self.stream_mode:
+                pts = self.reordered_pts_queue.popleft()
+                self._mux_packet_pyav(data, pts)
+            else:
+                self.raw_hevc.write(data)
 
     def encode(self, frame: torch.Tensor, pts: int):
         while pts in self.pts_set:

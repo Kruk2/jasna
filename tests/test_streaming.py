@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jasna.streaming import HlsStreamingServer, _generate_vod_playlist
+from jasna.streaming import HlsStreamingServer, _build_live_playlist, _generate_vod_playlist
 
 
 def _make_metadata(duration: float = 60.0, fps: float = 30.0, num_frames: int = 1800):
@@ -66,12 +66,56 @@ class TestGenerateVodPlaylist:
         assert extinf_lines[2] == "#EXTINF:2.000,"
 
 
+class TestBuildLivePlaylist:
+    def test_empty_when_no_segments(self, tmp_path):
+        text = _build_live_playlist(tmp_path, 4.0, segment_count=5, start=0, finished=False)
+        assert "#EXT-X-PLAYLIST-TYPE:EVENT" in text
+        assert "seg_" not in text
+        assert "#EXT-X-ENDLIST" not in text
+
+    def test_lists_existing_segments(self, tmp_path):
+        (tmp_path / "seg_00000.ts").write_bytes(b"\x00")
+        (tmp_path / "seg_00001.ts").write_bytes(b"\x00")
+        text = _build_live_playlist(tmp_path, 4.0, segment_count=5, start=0, finished=False)
+        assert "seg_00000.ts" in text
+        assert "seg_00001.ts" in text
+        assert "seg_00002.ts" not in text
+        assert "#EXT-X-ENDLIST" not in text
+
+    def test_stops_at_gap(self, tmp_path):
+        (tmp_path / "seg_00000.ts").write_bytes(b"\x00")
+        (tmp_path / "seg_00002.ts").write_bytes(b"\x00")
+        text = _build_live_playlist(tmp_path, 4.0, segment_count=5, start=0, finished=False)
+        assert "seg_00000.ts" in text
+        assert "seg_00002.ts" not in text
+
+    def test_endlist_when_finished(self, tmp_path):
+        for i in range(3):
+            (tmp_path / f"seg_{i:05d}.ts").write_bytes(b"\x00")
+        text = _build_live_playlist(tmp_path, 4.0, segment_count=3, start=0, finished=True)
+        assert "#EXT-X-ENDLIST" in text
+
+    def test_no_endlist_when_not_finished(self, tmp_path):
+        for i in range(3):
+            (tmp_path / f"seg_{i:05d}.ts").write_bytes(b"\x00")
+        text = _build_live_playlist(tmp_path, 4.0, segment_count=3, start=0, finished=False)
+        assert "#EXT-X-ENDLIST" not in text
+
+    def test_start_offset(self, tmp_path):
+        (tmp_path / "seg_00003.ts").write_bytes(b"\x00")
+        (tmp_path / "seg_00004.ts").write_bytes(b"\x00")
+        text = _build_live_playlist(tmp_path, 4.0, segment_count=10, start=3, finished=False)
+        assert "#EXT-X-MEDIA-SEQUENCE:3" in text
+        assert "seg_00003.ts" in text
+        assert "seg_00004.ts" in text
+        assert "seg_00000.ts" not in text
+
+
 class TestHlsStreamingServer:
     def test_init_creates_segments_dir(self):
         meta = _make_metadata(duration=20.0)
         server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
         assert server.segments_dir.exists()
-        assert (server.segments_dir / "stream.m3u8").exists()
         server._cleanup_segments()
 
     def test_segment_count(self):
@@ -161,6 +205,7 @@ class TestDemandFlowControl:
         meta = _make_metadata(duration=60.0, fps=30.0)
         server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
         cancel = threading.Event()
+        server.notify_segment_requested(0)
         blocked = threading.Event()
         unblocked = threading.Event()
 
@@ -185,6 +230,7 @@ class TestDemandFlowControl:
         meta = _make_metadata(duration=60.0, fps=30.0)
         server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
         cancel = threading.Event()
+        server.notify_segment_requested(0)
         done = threading.Event()
 
         def _waiter():
@@ -202,29 +248,13 @@ class TestDemandFlowControl:
         server._cleanup_segments()
 
     def test_initial_buffer_without_player(self):
-        """With no player requests (highest=-1), pipeline can produce max_ahead-1 segments."""
+        """With no player requests (highest=-1), pipeline runs freely."""
         meta = _make_metadata(duration=60.0, fps=30.0)
         server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
         cancel = threading.Event()
         server.wait_for_demand(current_segment=0, max_ahead=3, cancel_event=cancel)
-        server.wait_for_demand(current_segment=1, max_ahead=3, cancel_event=cancel)
-        server.wait_for_demand(current_segment=2, max_ahead=3, cancel_event=cancel)
-
-        blocked = threading.Event()
-        unblocked = threading.Event()
-
-        def _waiter():
-            blocked.set()
-            server.wait_for_demand(current_segment=3, max_ahead=3, cancel_event=cancel)
-            unblocked.set()
-
-        t = threading.Thread(target=_waiter)
-        t.start()
-        blocked.wait(timeout=2.0)
-        time.sleep(0.2)
-        assert not unblocked.is_set()
-        cancel.set()
-        t.join(timeout=2.0)
+        server.wait_for_demand(current_segment=10, max_ahead=3, cancel_event=cancel)
+        server.wait_for_demand(current_segment=50, max_ahead=3, cancel_event=cancel)
         server._cleanup_segments()
 
     def test_reset_demand_default(self):
@@ -280,39 +310,144 @@ class TestDemandFlowControl:
         server._cleanup_segments()
 
 
-class TestHlsEncoder:
-    def test_start_and_stop(self, tmp_path):
-        from jasna.streaming_encoder import HlsEncoder
-        encoder = HlsEncoder(segments_dir=tmp_path, segment_duration=4.0, fps=29.97)
-        encoder.start(start_number=0)
-        assert encoder._proc is not None
-        encoder.stop()
-
-    def test_write_bytes(self, tmp_path):
-        from jasna.streaming_encoder import HlsEncoder
-        encoder = HlsEncoder(segments_dir=tmp_path, segment_duration=4.0, fps=29.97)
-        encoder.start(start_number=0)
-        encoder.write(b"\x00" * 100)
-        encoder.stop()
-
-    def test_flush_and_restart(self, tmp_path):
-        from jasna.streaming_encoder import HlsEncoder
-        encoder = HlsEncoder(segments_dir=tmp_path, segment_duration=4.0, fps=29.97)
-        encoder.start(start_number=0)
-        encoder.write(b"\x00" * 50)
-        encoder.flush_and_restart(start_number=5)
-        assert encoder._proc is not None
-        encoder.stop()
+def _make_rgb_frame(width=64, height=64):
+    """Create a random RGB torch tensor in CHW format."""
+    import torch
+    return torch.randint(0, 255, (3, height, width), dtype=torch.uint8)
 
 
-class TestVideoEncoderBitstreamOnly:
-    def test_bitstream_only_flag_accepted(self):
-        """Verify bitstream_only parameter is accepted by NvidiaVideoEncoder constructor signature."""
-        import inspect
-        from jasna.media.video_encoder import NvidiaVideoEncoder
-        sig = inspect.signature(NvidiaVideoEncoder.__init__)
-        assert "bitstream_only" in sig.parameters
-        assert "bitstream_sink" in sig.parameters
+def _mock_ffmpeg_process():
+    import io
+    proc = MagicMock()
+    proc.stdin = MagicMock()
+    proc.stdin.closed = False
+    proc.stderr = io.BytesIO(b"")
+    proc.returncode = 0
+    proc.wait.return_value = 0
+    return proc
+
+
+class TestStreamingEncoder:
+    def _make_encoder(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        return StreamingEncoder(
+            segments_dir=tmp_path,
+            segment_duration=4.0,
+            metadata=meta,
+            source_video="nonexistent.mp4",
+        )
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_start_and_stop(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        assert enc._started
+        assert enc._process is not None
+        enc.stop()
+        assert not enc._started
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_ffmpeg_cmd_contains_nvenc(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert 'h264_nvenc' in cmd
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_write_frame_sends_bytes(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        mock_popen.return_value = proc
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        enc.write_frame(_make_rgb_frame(), pts=0)
+        time.sleep(0.3)
+        enc.stop()
+        assert proc.stdin.write.called
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_start_number_in_cmd(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=5)
+        cmd = mock_popen.call_args[0][0]
+        idx = cmd.index('-start_number')
+        assert cmd[idx + 1] == '5'
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_flush_and_restart(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        enc.flush_and_restart(start_number=5)
+        assert enc._started
+        assert mock_popen.call_count == 2
+        cmd = mock_popen.call_args[0][0]
+        idx = cmd.index('-start_number')
+        assert cmd[idx + 1] == '5'
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_no_audio_when_source_missing(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert '-c:a' not in cmd
+        enc.stop()
+
+    def test_write_before_start_is_noop(self, tmp_path):
+        enc = self._make_encoder(tmp_path)
+        enc.write_frame(_make_rgb_frame(), pts=0)
+        assert enc._process is None
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    @patch('jasna.streaming_encoder.os.path.isfile', return_value=True)
+    def test_audio_copy_when_source_exists(self, mock_isfile, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.source_video = "existing.mp4"
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert '-c:a' in cmd
+        assert 'copy' in cmd
+        assert 'existing.mp4' in cmd
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    @patch('jasna.streaming_encoder.os.path.isfile', return_value=True)
+    def test_audio_seek_on_restart(self, mock_isfile, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.source_video = "existing.mp4"
+        enc.start(start_number=3)
+        cmd = mock_popen.call_args[0][0]
+        ss_idx = cmd.index('-ss')
+        assert float(cmd[ss_idx + 1]) == pytest.approx(12.0)
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_output_ts_offset_on_seek(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=5)
+        cmd = mock_popen.call_args[0][0]
+        idx = cmd.index('-output_ts_offset')
+        assert float(cmd[idx + 1]) == pytest.approx(20.0)
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_no_ts_offset_at_start(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert '-output_ts_offset' not in cmd
+        enc.stop()
 
 
 class TestMainParserStreamingArgs:
