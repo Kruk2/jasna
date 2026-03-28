@@ -91,6 +91,18 @@ def test_spawn_child_does_not_run_dispatch(monkeypatch) -> None:
             main.assert_not_called()
 
 
+def test_no_progress_flag_defaults_false() -> None:
+    from jasna.main import build_parser
+    args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4"])
+    assert args.no_progress is False
+
+
+def test_no_progress_flag_set() -> None:
+    from jasna.main import build_parser
+    args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4", "--no-progress"])
+    assert args.no_progress is True
+
+
 def test_jasna_main_pid_child_exits_without_dispatch(monkeypatch) -> None:
     for name in list(sys.modules):
         if name == "jasna.__main__" or name.startswith("jasna.gui"):

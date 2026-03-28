@@ -38,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip checking for ffmpeg/ffprobe in PATH and their version.",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the progress bar.",
+    )
 
     restoration = parser.add_argument_group("Restoration")
     restoration.add_argument(
@@ -394,6 +399,7 @@ def main() -> None:
             temporal_overlap=temporal_overlap,
             enable_crossfade=bool(args.enable_crossfade),
             fp16=fp16,
+            disable_progress=args.no_progress,
             working_directory=working_directory,
         )
         try:
