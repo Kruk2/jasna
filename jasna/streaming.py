@@ -327,7 +327,8 @@ class HlsStreamingServer:
         self._video_selected.set()
 
     def wait_for_video(self) -> Path:
-        self._video_selected.wait()
+        while not self._video_selected.wait(timeout=0.5):
+            pass
         self._video_selected.clear()
         return self._pending_video
 
