@@ -49,11 +49,12 @@ class TestSeekBehavior:
         """Seek to mid-video then read 5 batches."""
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 2
+        seek_ts = seek_frame / metadata.video_fps
         with NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
             t0 = time.monotonic()
             frames_read = 0
             first_batch_time = None
-            for batch, pts in reader.frames(frame_seek=seek_frame):
+            for batch, pts in reader.frames(seek_ts=seek_ts):
                 if first_batch_time is None:
                     first_batch_time = time.monotonic() - t0
                 frames_read += len(pts)
@@ -69,9 +70,10 @@ class TestSeekBehavior:
         """After a seek, PTS values should be sequential (not repeating)."""
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 3
+        seek_ts = seek_frame / metadata.video_fps
         all_pts = []
         with NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
-            for batch, pts in reader.frames(frame_seek=seek_frame):
+            for batch, pts in reader.frames(seek_ts=seek_ts):
                 all_pts.extend(pts)
                 if len(all_pts) >= 72:
                     break
@@ -94,8 +96,9 @@ class TestSeekBehavior:
             frames2 = 0
             pts1 = []
             pts2 = []
-            gen1 = r1.frames(frame_seek=seek_frame)
-            gen2 = r2.frames(frame_seek=seek_frame)
+            seek_ts = seek_frame / metadata.video_fps
+            gen1 = r1.frames(seek_ts=seek_ts)
+            gen2 = r2.frames(seek_ts=seek_ts)
             for _ in range(3):
                 b1, p1 = next(gen1)
                 pts1.extend(p1)
@@ -112,9 +115,10 @@ class TestSeekBehavior:
         """Verify that batch 2+ after a seek continues forward, not re-seeking."""
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 2
+        seek_ts = seek_frame / metadata.video_fps
         batch_times = []
         with NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
-            for batch, pts in reader.frames(frame_seek=seek_frame):
+            for batch, pts in reader.frames(seek_ts=seek_ts):
                 batch_times.append(time.monotonic())
                 if len(batch_times) >= 5:
                     break
