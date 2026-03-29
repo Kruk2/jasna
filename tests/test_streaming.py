@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import math
 import threading
 import time
+import urllib.request
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -738,3 +740,362 @@ class TestMainParserStreamingArgs:
         args = parser.parse_args(["--stream"])
         assert args.stream is True
         assert args.input is None
+
+    def test_no_browser_flag_default_false(self):
+        from jasna.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["--stream"])
+        assert args.no_browser is False
+
+    def test_no_browser_flag_set(self):
+        from jasna.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["--stream", "--no-browser"])
+        assert args.no_browser is True
+
+
+def _start_server_on_free_port(server: HlsStreamingServer) -> int:
+    server.port = 0
+    server.start()
+    return server._httpd.server_address[1]
+
+
+def _get(port: int, path: str) -> tuple[int, dict | str, dict]:
+    req = urllib.request.Request(f"http://localhost:{port}{path}")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            headers = {k.lower(): v for k, v in resp.getheaders()}
+            body = resp.read().decode()
+            try:
+                body = json.loads(body)
+            except json.JSONDecodeError:
+                pass
+            return resp.status, body, headers
+    except urllib.error.HTTPError as e:
+        headers = {k.lower(): v for k, v in e.headers.items()}
+        return e.code, e.read().decode(), headers
+
+
+def _post(port: int, path: str, body: dict | None = None, timeout: float = 35.0) -> tuple[int, dict | str, dict]:
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(
+        f"http://localhost:{port}{path}",
+        method="POST",
+        data=data,
+        headers={"Content-Type": "application/json"} if data else {},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            headers = {k.lower(): v for k, v in resp.getheaders()}
+            raw = resp.read().decode()
+            try:
+                return resp.status, json.loads(raw), headers
+            except json.JSONDecodeError:
+                return resp.status, raw, headers
+    except urllib.error.HTTPError as e:
+        headers = {k.lower(): v for k, v in e.headers.items()}
+        raw = e.read().decode()
+        try:
+            return e.code, json.loads(raw), headers
+        except json.JSONDecodeError:
+            return e.code, raw, headers
+
+
+def _options(port: int, path: str) -> tuple[int, dict]:
+    req = urllib.request.Request(f"http://localhost:{port}{path}", method="OPTIONS")
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        headers = {k.lower(): v for k, v in resp.getheaders()}
+        return resp.status, headers
+
+
+class TestHttpCors:
+    def test_cors_on_get_root(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            status, _body, headers = _get(port, "/")
+            assert status == 200
+            assert headers["access-control-allow-origin"] == "*"
+            assert "GET" in headers["access-control-allow-methods"]
+        finally:
+            server.stop()
+
+    def test_cors_on_json_response(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            status, body, headers = _get(port, "/status")
+            assert status == 200
+            assert headers["access-control-allow-origin"] == "*"
+        finally:
+            server.stop()
+
+    def test_options_preflight(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            status, headers = _options(port, "/open")
+            assert status == 204
+            assert headers["access-control-allow-origin"] == "*"
+            assert "Content-Type" in headers["access-control-allow-headers"]
+        finally:
+            server.stop()
+
+
+class TestHttpManifestTrimming:
+    def test_manifest_trimmed_on_start(self):
+        meta = _make_metadata(duration=120.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(meta)
+        try:
+            status, body, _ = _get(port, "/stream.m3u8?start=40.0")
+            assert status == 200
+            assert "#EXT-X-MEDIA-SEQUENCE:10" in body
+            assert "seg_00010.ts" in body
+            assert "seg_00009.ts" not in body
+            assert "seg_00000.ts" not in body
+        finally:
+            server.stop()
+
+    def test_manifest_full_when_no_start(self):
+        meta = _make_metadata(duration=60.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(meta)
+        try:
+            status, body, _ = _get(port, "/stream.m3u8")
+            assert status == 200
+            assert "#EXT-X-MEDIA-SEQUENCE:0" in body
+            assert "seg_00000.ts" in body
+        finally:
+            server.stop()
+
+    def test_manifest_full_when_start_zero(self):
+        meta = _make_metadata(duration=60.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(meta)
+        try:
+            status, body, _ = _get(port, "/stream.m3u8?start=0")
+            assert status == 200
+            assert "#EXT-X-MEDIA-SEQUENCE:0" in body
+            assert "seg_00000.ts" in body
+        finally:
+            server.stop()
+
+
+class TestHttpStatusEndpoint:
+    def test_status_not_streaming(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            status, body, _ = _get(port, "/status")
+            assert status == 200
+            assert body == {"streaming": False}
+        finally:
+            server.stop()
+
+    def test_status_streaming(self):
+        meta = _make_metadata(duration=20.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server._current_video_path = Path("/some/video.mp4")
+        server.load_video(meta)
+        try:
+            status, body, _ = _get(port, "/status")
+            assert status == 200
+            assert body["streaming"] is True
+            assert body["path"] == str(Path("/some/video.mp4"))
+        finally:
+            server.stop()
+
+
+class TestHttpStopEndpoint:
+    def test_post_stop(self):
+        meta = _make_metadata(duration=20.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(meta)
+        try:
+            assert server.is_loaded
+            status, body, _ = _post(port, "/stop")
+            assert status == 200
+            assert body["ok"] is True
+            assert not server.is_loaded
+        finally:
+            server.stop()
+
+    def test_api_stop_alias(self):
+        meta = _make_metadata(duration=20.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(meta)
+        try:
+            status, body, _ = _post(port, "/api/stop")
+            assert status == 200
+            assert body["ok"] is True
+        finally:
+            server.stop()
+
+
+class TestHttpOpenEndpoint:
+    def test_open_file_not_found(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            status, body, _ = _post(port, "/open", {"path": "/nonexistent/file.mp4"})
+            assert status == 400
+            assert "error" in body
+        finally:
+            server.stop()
+
+    def test_open_blocks_until_first_segment(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            result = [None, None]
+            handler_entered = threading.Event()
+            orig_wait = server.wait_until_first_segment
+            def _wait_with_signal(timeout=30.0):
+                handler_entered.set()
+                return orig_wait(timeout=timeout)
+            server.wait_until_first_segment = _wait_with_signal
+
+            def _caller():
+                s, b, _ = _post(port, "/open", {"path": str(video_file)})
+                result[0] = s
+                result[1] = b
+
+            t = threading.Thread(target=_caller)
+            t.start()
+            handler_entered.wait(timeout=5.0)
+            assert t.is_alive()
+
+            server._first_segment_ready.set()
+            t.join(timeout=10.0)
+            assert not t.is_alive()
+            assert result[0] == 200
+            assert result[1]["status"] == "ready"
+        finally:
+            server.stop()
+
+    def test_open_timeout(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            from unittest.mock import patch as _p
+            with _p.object(server, "wait_until_first_segment", return_value=False):
+                status, body, _ = _post(port, "/open", {"path": str(video_file)})
+            assert status == 500
+            assert "error" in body
+        finally:
+            server.stop()
+
+    def test_same_video_seek_returns_immediately(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+
+        meta = _make_metadata(duration=120.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server._current_video_path = Path(str(video_file))
+        server.load_video(meta)
+        try:
+            status, body, _ = _post(port, "/open", {"path": str(video_file), "start": 40.0})
+            assert status == 200
+            assert body["status"] == "ready"
+            assert server.seek_requested.is_set()
+            assert server.seek_target_segment == 10
+        finally:
+            server.stop()
+
+    def test_same_video_no_start_returns_immediately(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+
+        meta = _make_metadata(duration=60.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server._current_video_path = Path(str(video_file))
+        server.load_video(meta)
+        try:
+            status, body, _ = _post(port, "/open", {"path": str(video_file)})
+            assert status == 200
+            assert body["status"] == "ready"
+            assert not server.seek_requested.is_set()
+        finally:
+            server.stop()
+
+    def test_same_video_does_not_call_select_video(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+
+        meta = _make_metadata(duration=120.0)
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server._current_video_path = Path(str(video_file))
+        server.load_video(meta)
+        try:
+            assert server.is_loaded
+            _post(port, "/open", {"path": str(video_file), "start": 20.0})
+            assert server.is_loaded
+        finally:
+            server.stop()
+
+    def test_api_load_alias_returns_immediately(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            status, body, _ = _post(port, "/api/load", {"path": str(video_file)})
+            assert status == 200
+            assert body["ok"] is True
+            assert "filename" in body
+        finally:
+            server.stop()
+
+
+class TestWaitUntilFirstSegment:
+    def test_returns_true_when_set(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server._first_segment_ready.set()
+        assert server.wait_until_first_segment(timeout=0.1) is True
+
+    def test_returns_false_on_timeout(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        assert server.wait_until_first_segment(timeout=0.05) is False
+
+    def test_update_production_sets_first_segment_ready(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        meta = _make_metadata(duration=20.0)
+        server.load_video(meta)
+        assert not server._first_segment_ready.is_set()
+        server.update_production(0)
+        assert server._first_segment_ready.is_set()
+        server._cleanup_segments()
+
+    def test_select_video_clears_first_segment_ready(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server._first_segment_ready.set()
+        server.select_video(Path("new.mp4"))
+        assert not server._first_segment_ready.is_set()
+
+
+class TestCurrentVideoPath:
+    def test_select_video_sets_current_path(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.select_video(Path("/a/b.mp4"))
+        assert server._current_video_path == Path("/a/b.mp4")
+
+    def test_initial_current_path_is_none(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        assert server._current_video_path is None

@@ -11,8 +11,9 @@ import threading
 import time
 from functools import partial
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-from socketserver import ThreadingMixIn
 from pathlib import Path
+from socketserver import ThreadingMixIn
+from urllib.parse import parse_qs, urlparse
 
 from jasna.media import VideoMetadata
 
@@ -66,11 +67,10 @@ async function browse(){
 async function loadVideo(p){
   if(!p)return;
   document.getElementById('status').textContent='Preparing stream...';
-  try{var r=await fetch('/api/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});
+  try{var r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});
   var d=await r.json();
   if(d.error){document.getElementById('status').textContent=d.error;return}
-  document.getElementById('fname').textContent=d.filename;
-  while(true){try{var r2=await fetch('/stream.m3u8');if(r2.ok)break}catch(e){}await new Promise(function(r){setTimeout(r,1000)})}
+  document.getElementById('fname').textContent=p.split(/[\\/]/).pop();
   showPlayer()}
   catch(e){document.getElementById('status').textContent='Error: '+e.message}}
 function showPlayer(){
@@ -85,7 +85,7 @@ function startHls(){
   if(Hls.isSupported()){hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30});hls.loadSource('/stream.m3u8');hls.attachMedia(v)}
   else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src='/stream.m3u8'}}
 async function changeVideo(){
-  await fetch('/api/stop',{method:'POST'});
+  await fetch('/stop',{method:'POST'});
   if(hls){hls.destroy();hls=null}
   document.getElementById('v').removeAttribute('src');
   document.getElementById('player').style.display='none';
@@ -98,20 +98,22 @@ async function changeVideo(){
 def _generate_vod_playlist(
     total_duration: float,
     segment_duration: float,
+    start_segment: int = 0,
 ) -> tuple[str, int]:
     segment_count = max(1, math.ceil(total_duration / segment_duration))
     last_seg_duration = total_duration - (segment_count - 1) * segment_duration
     if last_seg_duration <= 0:
         last_seg_duration = segment_duration
 
+    first = max(0, min(start_segment, segment_count - 1))
     lines = [
         "#EXTM3U",
         "#EXT-X-VERSION:3",
         f"#EXT-X-TARGETDURATION:{math.ceil(segment_duration)}",
         "#EXT-X-PLAYLIST-TYPE:VOD",
-        "#EXT-X-MEDIA-SEQUENCE:0",
+        f"#EXT-X-MEDIA-SEQUENCE:{first}",
     ]
-    for i in range(segment_count):
+    for i in range(first, segment_count):
         dur = segment_duration if i < segment_count - 1 else last_seg_duration
         lines.append(f"#EXTINF:{dur:.3f},")
         lines.append(f"seg_{i:05d}.ts")
@@ -125,6 +127,16 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, server_state: HlsStreamingServer, **kwargs):
         self._state = server_state
         super().__init__(*args, **kwargs)
+
+    def end_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        super().end_headers()
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.end_headers()
 
     def do_GET(self):
         try:
@@ -151,11 +163,25 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(data)
             return
 
+        if path == "/status":
+            streaming = self._state.is_loaded
+            resp: dict = {"streaming": streaming}
+            if streaming and self._state._current_video_path is not None:
+                resp["path"] = str(self._state._current_video_path)
+            self._send_json(resp)
+            return
+
         if path == "/stream.m3u8":
             if not self._state.is_loaded:
                 self.send_error(404)
                 return
-            data = self._state.playlist_text.encode()
+            start_seconds = self._parse_query_float("start")
+            if start_seconds > 0:
+                start_seg = int(start_seconds / self._state.segment_duration)
+                playlist = self._state.playlist_text_from(start_seg)
+            else:
+                playlist = self._state.playlist_text
+            data = playlist.encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/vnd.apple.mpegurl")
             self.send_header("Content-Length", str(len(data)))
@@ -215,27 +241,46 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             self._send_json({"path": selected})
             return
 
-        if path == "/api/stop":
+        if path in ("/api/stop", "/stop"):
             self._state.stop_current()
             self._send_json({"ok": True})
             return
 
-        if path == "/api/load":
+        if path in ("/api/load", "/open"):
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length > 0 else {}
             video_path = str(body.get("path", "")).strip()
             if not video_path or not Path(video_path).is_file():
-                self._send_json({"error": "File not found"})
+                self._send_json({"error": "File not found"}, status=400)
                 return
-            self._state.select_video(Path(video_path))
-            self._send_json({"ok": True, "filename": Path(video_path).name})
+            start = float(body.get("start", 0))
+            same_video = (
+                self._state.is_loaded
+                and self._state._current_video_path == Path(video_path)
+            )
+            if path == "/open":
+                if same_video:
+                    if start > 0:
+                        target_seg = int(start / self._state.segment_duration)
+                        self._state.request_seek(target_seg)
+                    self._send_json({"status": "ready"})
+                else:
+                    self._state.select_video(Path(video_path))
+                    ok = self._state.wait_until_first_segment(timeout=30.0)
+                    if ok:
+                        self._send_json({"status": "ready"})
+                    else:
+                        self._send_json({"error": "Timed out waiting for stream to be ready"}, status=500)
+            else:
+                self._state.select_video(Path(video_path))
+                self._send_json({"ok": True, "filename": Path(video_path).name})
             return
 
         self.send_error(404)
 
-    def _send_json(self, obj: dict):
+    def _send_json(self, obj: dict, status: int = 200):
         data = json.dumps(obj).encode()
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -270,6 +315,13 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _parse_query_float(self, key: str) -> float:
+        qs = parse_qs(urlparse(self.path).query)
+        try:
+            return float(qs[key][0])
+        except (KeyError, IndexError, ValueError):
+            return 0.0
+
     @staticmethod
     def _parse_segment_number(name: str) -> int | None:
         try:
@@ -298,8 +350,10 @@ class HlsStreamingServer:
         self._finished = False
 
         self._pending_video: Path | None = None
+        self._current_video_path: Path | None = None
         self._video_selected = threading.Event()
         self.video_change = threading.Event()
+        self._first_segment_ready = threading.Event()
 
         self._seek_lock = threading.Lock()
         self.seek_requested = threading.Event()
@@ -327,6 +381,8 @@ class HlsStreamingServer:
 
     def select_video(self, path: Path) -> None:
         self._pending_video = path
+        self._current_video_path = path
+        self._first_segment_ready.clear()
         if self.metadata is not None:
             self.stop_current()
         self._video_selected.set()
@@ -371,8 +427,17 @@ class HlsStreamingServer:
     def playlist_text(self) -> str:
         return self._vod_playlist
 
+    def playlist_text_from(self, start_segment: int) -> str:
+        if start_segment <= 0 or self.metadata is None:
+            return self._vod_playlist
+        text, _ = _generate_vod_playlist(self.metadata.duration, self.segment_duration, start_segment)
+        return text
+
     def mark_finished(self) -> None:
         self._finished = True
+
+    def wait_until_first_segment(self, timeout: float = 30.0) -> bool:
+        return self._first_segment_ready.wait(timeout=timeout)
 
     @property
     def url(self) -> str:
@@ -451,6 +516,8 @@ class HlsStreamingServer:
         with self._demand_lock:
             if segment > self._produced_segment:
                 self._produced_segment = segment
+        if not self._first_segment_ready.is_set():
+            self._first_segment_ready.set()
 
     def needs_seek(self, segment: int) -> bool:
         with self._demand_lock:
@@ -459,6 +526,7 @@ class HlsStreamingServer:
             if segment > self._produced_segment + _FORWARD_SEEK_THRESHOLD:
                 return True
             return False
+
 
     def reset_demand(self, start_segment: int = 0) -> None:
         with self._demand_lock:
