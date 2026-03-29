@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import atexit
 import json
 import logging
 import math
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -284,6 +286,7 @@ class HlsStreamingServer:
         self,
         segment_duration: float = 4.0,
         port: int = 8765,
+        max_segments_ahead: int = 3,
     ):
         self.segment_duration = float(segment_duration)
         self.port = int(port)
@@ -302,6 +305,8 @@ class HlsStreamingServer:
         self.seek_requested = threading.Event()
         self.seek_target_segment: int = -1
         self._last_seek_time: float = 0.0
+
+        self._max_segments_kept: int = 2 * max_segments_ahead
 
         self._demand_lock = threading.Condition()
         self._highest_requested_segment: int = -1
@@ -336,6 +341,7 @@ class HlsStreamingServer:
         self.metadata = metadata
         if self.segments_dir is None:
             self.segments_dir = Path(tempfile.mkdtemp(prefix="jasna_hls_"))
+            atexit.register(shutil.rmtree, str(self.segments_dir), True)
         self._vod_playlist, self.segment_count = _generate_vod_playlist(
             total_duration=metadata.duration,
             segment_duration=self.segment_duration,
@@ -403,6 +409,21 @@ class HlsStreamingServer:
                 self._highest_requested_segment = segment_index
                 log.debug("[stream-server] player requested segment %d", segment_index)
             self._demand_lock.notify_all()
+        self._evict_old_segments(segment_index)
+
+    def _evict_old_segments(self, player_segment: int) -> None:
+        if self.segments_dir is None:
+            return
+        min_keep = player_segment - self._max_segments_kept
+        if min_keep <= 0:
+            return
+        for f in self.segments_dir.glob("seg_*.ts"):
+            try:
+                num = int(f.stem.split("_", 1)[1])
+            except (ValueError, IndexError):
+                continue
+            if num < min_keep:
+                f.unlink(missing_ok=True)
 
     def wait_for_demand(
         self,

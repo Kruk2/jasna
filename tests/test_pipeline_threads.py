@@ -792,7 +792,7 @@ class TestRunStreaming:
 
             run_streaming(mock_pipeline, port=8765, segment_duration=4.0)
 
-            mock_server_cls.assert_called_once_with(segment_duration=4.0, port=8765)
+            mock_server_cls.assert_called_once_with(segment_duration=4.0, port=8765, max_segments_ahead=3)
             server_inst.load_video.assert_called_once_with(meta)
             server_inst.start.assert_called_once()
             mock_loop.assert_called_once()

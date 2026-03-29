@@ -290,6 +290,26 @@ class TestDemandFlowControl:
         server.update_production(55)
         assert server.needs_seek(10)
 
+    def test_evicts_old_segments(self, tmp_path):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.segments_dir = tmp_path
+        server._max_segments_kept = 3
+        for i in range(15):
+            (tmp_path / f"seg_{i:05d}.ts").write_bytes(b"data")
+        server.notify_segment_requested(12)
+        kept = sorted(f.name for f in tmp_path.glob("seg_*.ts"))
+        assert all(f"seg_{i:05d}.ts" in kept for i in range(9, 15))
+        assert all(f"seg_{i:05d}.ts" not in kept for i in range(0, 9))
+
+    def test_eviction_skips_when_player_near_start(self, tmp_path):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.segments_dir = tmp_path
+        server._max_segments_kept = 6
+        for i in range(5):
+            (tmp_path / f"seg_{i:05d}.ts").write_bytes(b"data")
+        server.notify_segment_requested(3)
+        assert len(list(tmp_path.glob("seg_*.ts"))) == 5
+
     def test_notify_tracks_highest(self):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.notify_segment_requested(2)
