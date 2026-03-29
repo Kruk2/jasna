@@ -21,7 +21,7 @@ Check benchmarks and usage below.
 ### TODO:
 - proper VR support
 - ~~TVAI~~ and SeedVR
-- Proper stream that can be played in Stash (and maybe others?)
+- ~~Proper stream that can be played in Stash (and maybe others?)~~
 - ~~improve performance (this version is very simple)~~
 - ~~improve VRAM usage~~
 
@@ -98,6 +98,27 @@ The table below shows how much VRAM the **compiled engines alone** occupy (not t
 |---|---|---|
 | **Engine VRAM (compiled)** | ~1.9 GB | ~5.4 GB |
 | **Engine VRAM (no compilation)** | ~1.2 GB | ~1.2 GB |
+
+### Streaming
+
+Watch restored videos on-the-fly without having to process the entire file first.
+
+**Browser player (built-in)**\
+Run jasna with `--stream` flag (CLI only for now). A browser window opens with an HLS player. Pick a video file and start watching. Seeking is supported.
+```
+jasna --stream
+```
+
+**Stash integration**\
+Use Jasna directly inside [Stash](https://github.com/stashapp/stash) — play any scene and it gets processed through Jasna on-the-fly. Stash launches Jasna automatically. A custom Stash fork with Jasna support is available:\
+👉 **[Stash v0.30.1-jasna](https://github.com/Kruk2/stash/releases/tag/v0.30.1-jasna)**
+
+Setup:
+1. Download the Stash fork from the link above.
+2. Set environment variables before starting Stash:
+   - `JASNA_CLI_PATH` — full path to `jasna-cli.exe`
+   - `JASNA_WORKING_DIR` — full path to the folder where `jasna-cli.exe` is located
+3. Start Stash and play any scene — Jasna processes it as you watch. Seeking works.
 
 ### Disclaimer
 Jasna is in early development and the main goal is to improve: restoration quality, mosaic detection, speed & vram consumption (in this order).
