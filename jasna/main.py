@@ -207,6 +207,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=4.0,
         help="HLS segment duration in seconds (default: %(default)s)",
     )
+    streaming.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not open a browser window when starting streaming mode.",
+    )
 
     encoding = parser.add_argument_group("Encoding")
     encoding.add_argument(
@@ -438,8 +443,9 @@ def main() -> None:
                     port=int(args.stream_port),
                 )
                 hls_server.start()
-                import webbrowser
-                webbrowser.open(f"http://localhost:{args.stream_port}/")
+                if not args.no_browser:
+                    import webbrowser
+                    webbrowser.open(f"http://localhost:{args.stream_port}/")
                 try:
                     while True:
                         video_path = hls_server.wait_for_video()
@@ -458,8 +464,9 @@ def main() -> None:
                     hls_server.stop()
             elif is_streaming:
                 pipeline = _make_pipeline(input_video)
-                import webbrowser
-                webbrowser.open(f"http://localhost:{args.stream_port}/")
+                if not args.no_browser:
+                    import webbrowser
+                    webbrowser.open(f"http://localhost:{args.stream_port}/")
                 pipeline.run_streaming(
                     port=int(args.stream_port),
                     segment_duration=float(args.stream_segment_duration),
