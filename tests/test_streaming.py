@@ -438,6 +438,252 @@ class TestStreamingEncoder:
         enc.stop()
 
 
+class TestStreamingEncoderGpuIdx:
+    def test_cuda_device_extracts_gpu_index(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        import torch
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path,
+            segment_duration=4.0,
+            metadata=meta,
+            source_video="nonexistent.mp4",
+            device=torch.device("cuda:2"),
+        )
+        assert enc._gpu_index == 2
+
+    def test_cuda_device_no_index_defaults_zero(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        import torch
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path,
+            segment_duration=4.0,
+            metadata=meta,
+            source_video="nonexistent.mp4",
+            device=torch.device("cuda"),
+        )
+        assert enc._gpu_index == 0
+
+
+class TestStreamingEncoderWriteFrame:
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_write_non_chw_frame(self, mock_popen, tmp_path):
+        import torch
+        proc = _mock_ffmpeg_process()
+        mock_popen.return_value = proc
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        hwc_frame = torch.randint(0, 255, (64, 64, 3), dtype=torch.uint8)
+        enc.write_frame(hwc_frame, pts=0)
+        time.sleep(0.3)
+        enc.stop()
+        assert proc.stdin.write.called
+
+
+class TestStreamingEncoderCleanup:
+    def test_cleanup_segments_removes_ts_and_m3u8(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        (tmp_path / "seg_00000.ts").write_bytes(b"data")
+        (tmp_path / "seg_00001.ts").write_bytes(b"data")
+        (tmp_path / "_hls_internal.m3u8").write_text("playlist")
+        (tmp_path / "other.txt").write_text("keep")
+
+        enc._cleanup_segments()
+
+        assert not (tmp_path / "seg_00000.ts").exists()
+        assert not (tmp_path / "seg_00001.ts").exists()
+        assert not (tmp_path / "_hls_internal.m3u8").exists()
+        assert (tmp_path / "other.txt").exists()
+
+
+class TestStreamingEncoderLifecycle:
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_stop_when_writer_not_alive(self, mock_popen, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc._writer_thread = MagicMock()
+        enc._writer_thread.is_alive.return_value = False
+        enc._stop_writer(drain=False)
+        assert enc._writer_thread is None
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_close_ffmpeg_stdin_oserror(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        proc.stdin.close.side_effect = OSError("broken")
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        enc._close_ffmpeg()
+        assert enc._process is None
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_close_ffmpeg_timeout_kills(self, mock_popen, tmp_path):
+        import subprocess as sp
+        proc = _mock_ffmpeg_process()
+        proc.wait.side_effect = [sp.TimeoutExpired("ffmpeg", 10), None]
+        proc.returncode = -9
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        enc._close_ffmpeg()
+        proc.kill.assert_called_once()
+        assert enc._process is None
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_close_ffmpeg_nonzero_exit_code(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        proc.returncode = 1
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        enc._close_ffmpeg()
+        assert enc._process is None
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_kill_ffmpeg(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        enc._kill_ffmpeg()
+        proc.kill.assert_called_once()
+        assert enc._process is None
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_kill_ffmpeg_stdin_oserror(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        proc.stdin.close.side_effect = OSError("broken")
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        enc._kill_ffmpeg()
+        proc.kill.assert_called_once()
+        assert enc._process is None
+
+    def test_kill_ffmpeg_when_no_process(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc._kill_ffmpeg()
+
+    def test_close_ffmpeg_when_no_process(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc._close_ffmpeg()
+
+
+class TestStreamingEncoderDrainStderr:
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_drain_reads_lines(self, mock_popen, tmp_path):
+        import io
+        proc = _mock_ffmpeg_process()
+        proc.stderr = io.BytesIO(b"warning line 1\nwarning line 2\n")
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc._process = proc
+        enc._drain_stderr()
+
+    def test_drain_no_process(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc._process = None
+        enc._drain_stderr()
+
+
+class TestStreamingEncoderWriterLoop:
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_writer_loop_broken_pipe(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        proc.stdin.write.side_effect = BrokenPipeError("broken")
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc._process = proc
+        enc._write_queue.put(b"some data")
+        enc._writer_loop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_writer_loop_no_process(self, mock_popen, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc._process = None
+        enc._write_queue.put(b"data")
+        enc._write_queue.put(enc._stop_sentinel)
+        enc._writer_loop()
+
+
 class TestMainParserStreamingArgs:
     def test_stream_flag_present(self):
         from jasna.main import build_parser
