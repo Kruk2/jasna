@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jasna.streaming import HlsStreamingServer, _build_live_playlist, _generate_vod_playlist
+from jasna.streaming import HlsStreamingServer, _generate_vod_playlist
 
 
 def _make_metadata(duration: float = 60.0, fps: float = 30.0, num_frames: int = 1800):
@@ -64,51 +64,6 @@ class TestGenerateVodPlaylist:
         assert extinf_lines[0] == "#EXTINF:4.000,"
         assert extinf_lines[1] == "#EXTINF:4.000,"
         assert extinf_lines[2] == "#EXTINF:2.000,"
-
-
-class TestBuildLivePlaylist:
-    def test_empty_when_no_segments(self, tmp_path):
-        text = _build_live_playlist(tmp_path, 4.0, segment_count=5, start=0, finished=False)
-        assert "#EXT-X-PLAYLIST-TYPE:EVENT" in text
-        assert "seg_" not in text
-        assert "#EXT-X-ENDLIST" not in text
-
-    def test_lists_existing_segments(self, tmp_path):
-        (tmp_path / "seg_00000.ts").write_bytes(b"\x00")
-        (tmp_path / "seg_00001.ts").write_bytes(b"\x00")
-        text = _build_live_playlist(tmp_path, 4.0, segment_count=5, start=0, finished=False)
-        assert "seg_00000.ts" in text
-        assert "seg_00001.ts" in text
-        assert "seg_00002.ts" not in text
-        assert "#EXT-X-ENDLIST" not in text
-
-    def test_stops_at_gap(self, tmp_path):
-        (tmp_path / "seg_00000.ts").write_bytes(b"\x00")
-        (tmp_path / "seg_00002.ts").write_bytes(b"\x00")
-        text = _build_live_playlist(tmp_path, 4.0, segment_count=5, start=0, finished=False)
-        assert "seg_00000.ts" in text
-        assert "seg_00002.ts" not in text
-
-    def test_endlist_when_finished(self, tmp_path):
-        for i in range(3):
-            (tmp_path / f"seg_{i:05d}.ts").write_bytes(b"\x00")
-        text = _build_live_playlist(tmp_path, 4.0, segment_count=3, start=0, finished=True)
-        assert "#EXT-X-ENDLIST" in text
-
-    def test_no_endlist_when_not_finished(self, tmp_path):
-        for i in range(3):
-            (tmp_path / f"seg_{i:05d}.ts").write_bytes(b"\x00")
-        text = _build_live_playlist(tmp_path, 4.0, segment_count=3, start=0, finished=False)
-        assert "#EXT-X-ENDLIST" not in text
-
-    def test_start_offset(self, tmp_path):
-        (tmp_path / "seg_00003.ts").write_bytes(b"\x00")
-        (tmp_path / "seg_00004.ts").write_bytes(b"\x00")
-        text = _build_live_playlist(tmp_path, 4.0, segment_count=10, start=3, finished=False)
-        assert "#EXT-X-MEDIA-SEQUENCE:3" in text
-        assert "seg_00003.ts" in text
-        assert "seg_00004.ts" in text
-        assert "seg_00000.ts" not in text
 
 
 class TestHlsStreamingServer:
