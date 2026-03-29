@@ -77,6 +77,7 @@ def run_streaming(
         hls_server = HlsStreamingServer(
             segment_duration=segment_duration,
             port=port,
+            max_segments_ahead=_MAX_SEGMENTS_AHEAD,
         )
         hls_server.load_video(metadata)
         url = hls_server.start()
