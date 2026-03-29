@@ -119,10 +119,15 @@ class StreamingEncoder:
 
         cmd += [
             '-c:v', 'h264_nvenc',
-            '-preset', 'p1',
-            '-tune', 'ull',
+            '-preset', 'p4',
+            '-tune', 'll',
             '-rc', 'vbr',
-            '-cq', '28',
+            '-cq', '19',
+            '-bf', '0',
+            '-profile:v', 'high',
+            '-spatial-aq', '1',
+            '-temporal-aq', '1',
+            '-rc-lookahead', '8',
             '-gpu', str(self._gpu_index),
             '-g', str(self._gop_size),
             '-pix_fmt', 'yuv420p',
