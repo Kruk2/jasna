@@ -1,4 +1,4 @@
-**English** | [中文](README.zh.md) | [日本語](README.ja.md)
+[**English**](README.md) | [中文](README.zh.md) | [日本語](README.ja.md)
 
 # Jasna
 ### 🚀 如果你想支持这个项目，请 [请我喝杯咖啡](https://buymeacoffee.com/kruk2) 🚀
