@@ -416,7 +416,7 @@ def main() -> None:
         def _make_pipeline(vid_input: Path) -> Pipeline:
             return Pipeline(
                 input_video=vid_input,
-                output_video=vid_input.with_stem(vid_input.stem + "_out"),
+                output_video=output_video or vid_input.with_stem(vid_input.stem + "_out"),
                 detection_model_name=detection_model_name,
                 detection_model_path=detection_model_path,
                 detection_score_threshold=detection_score_threshold,
