@@ -288,7 +288,7 @@ def _run_streaming_pass(
             seek_target = target
             cancel_event.set()
             break
-        time.sleep(0.1)
+        hls_server.seek_requested.wait(timeout=0.1)
 
     log.debug("[stream] monitoring loop exited, waiting for threads to join (seek_target=%s)", seek_target)
     alive = [(t.name, t.is_alive()) for t in threads]
@@ -308,7 +308,7 @@ def _run_streaming_pass(
     for t in threads:
         while t.is_alive():
             _drain_all_queues()
-            t.join(timeout=0.1)
+            t.join(timeout=0.02)
         log.debug("[stream] %s joined in %.2fs", t.name, time.monotonic() - t_join)
     log.debug("[stream] all threads joined in %.2fs", time.monotonic() - t_join)
     vram_offloader.stop()

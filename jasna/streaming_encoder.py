@@ -75,8 +75,8 @@ class StreamingEncoder:
 
     def flush_and_restart(self, start_number: int) -> None:
         self._started = False
-        self._stop_writer(drain=True)
         self._kill_ffmpeg()
+        self._stop_writer(drain=False)
         self._cleanup_segments()
         self.start(start_number=start_number)
 
