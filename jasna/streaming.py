@@ -34,8 +34,8 @@ _PAGE_HTML = """\
   .btn:hover{opacity:.85}.btn:disabled{opacity:.4;cursor:default}
   .ba{background:#2563eb;color:#fff}.bd{background:#2a2a2a;color:#ccc}
   #status{font-size:13px;color:#888;min-height:20px}
-  #player{display:none;flex-direction:column;flex:1}
-  #player video{flex:1;background:#000;min-height:0}
+  #player{display:none;flex-direction:column;flex:1;overflow:hidden}
+  #player video{flex:1;width:100%;background:#000;min-height:0;object-fit:contain}
   .tb{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#141414;border-bottom:1px solid #222}
   .tb .name{flex:1;font-size:13px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
@@ -116,43 +116,6 @@ def _generate_vod_playlist(
     lines.append("#EXT-X-ENDLIST")
     lines.append("")
     return "\n".join(lines), segment_count
-
-
-def _build_live_playlist(
-    segments_dir: Path,
-    segment_duration: float,
-    segment_count: int,
-    start: int,
-    finished: bool,
-) -> str:
-    lines = [
-        "#EXTM3U",
-        "#EXT-X-VERSION:3",
-        f"#EXT-X-TARGETDURATION:{math.ceil(segment_duration)}",
-        "#EXT-X-PLAYLIST-TYPE:EVENT",
-        f"#EXT-X-MEDIA-SEQUENCE:{start}",
-    ]
-    last_seg_dur = None
-    if segment_count > 1:
-        total_full = (segment_count - 1) * segment_duration
-        last_seg_dur = max(0.1, segment_count * segment_duration - total_full)
-        if abs(last_seg_dur - segment_duration) < 0.01:
-            last_seg_dur = None
-
-    i = start
-    while i < segment_count:
-        seg = segments_dir / f"seg_{i:05d}.ts"
-        if not seg.exists():
-            break
-        dur = segment_duration if (last_seg_dur is None or i < segment_count - 1) else last_seg_dur
-        lines.append(f"#EXTINF:{dur:.3f},")
-        lines.append(f"seg_{i:05d}.ts")
-        i += 1
-
-    if finished and i >= segment_count:
-        lines.append("#EXT-X-ENDLIST")
-    lines.append("")
-    return "\n".join(lines)
 
 
 class _StreamRequestHandler(SimpleHTTPRequestHandler):

@@ -133,10 +133,10 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             p.run()
 
@@ -237,12 +237,12 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             p.run()
 
@@ -282,12 +282,12 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             p.run()
 
@@ -314,10 +314,10 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             with pytest.raises(RuntimeError, match="decode boom"):
                 p.run()
@@ -362,12 +362,12 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             with pytest.raises(RuntimeError, match="primary boom"):
                 p.run()
@@ -431,12 +431,12 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()
@@ -1001,10 +1001,10 @@ class TestPipelineRun:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             p.run()
 

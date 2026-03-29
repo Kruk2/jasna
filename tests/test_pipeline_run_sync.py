@@ -97,10 +97,10 @@ class TestPipelineRunSync:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=_mock_inference_mode()),
             patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             p.run()
@@ -191,12 +191,12 @@ class TestPipelineRunSync:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=_mock_inference_mode()),
             patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             p.run()
@@ -247,12 +247,12 @@ class TestPipelineRunSync:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=_mock_inference_mode()),
             patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             with pytest.raises(RuntimeError, match="primary boom"):
@@ -316,12 +316,12 @@ class TestPipelineRunSync:
 
         with (
             patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
             patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline.process_frame_batch", side_effect=fake_process_batch),
-            patch("jasna.pipeline.finalize_processing"),
-            patch("jasna.pipeline.torch.cuda.set_device"),
-            patch("jasna.pipeline.torch.inference_mode", return_value=_mock_inference_mode()),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=_mock_inference_mode()),
             patch("jasna.pipeline.torch.cuda.mem_get_info", return_value=(8 * 1024**3, 24 * 1024**3)),
         ):
             with pytest.raises(RuntimeError, match="secondary boom"):
