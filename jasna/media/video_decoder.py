@@ -75,7 +75,7 @@ class NvidiaVideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         del self.decoder
 
-    def frames(self, frame_seek: int|None=None) -> Iterator[tuple[torch.Tensor, int]]:
+    def frames(self, seek_ts: float|None=None) -> Iterator[tuple[torch.Tensor, int]]:
         frame_idx = 0
         pkt_data = vali.PacketData()
         eof = False
@@ -83,8 +83,8 @@ class NvidiaVideoReader:
             with torch.cuda.stream(self.stream):
                 batch_tensor_nv = torch.empty((self.batch_size, 3, self.decoder.Height, self.decoder.Width), device=self.device, dtype=torch.uint8)
                 pkts: list[int] = []
-                seek_ctx = None if frame_seek is None else vali.SeekContext(seek_frame=frame_seek)
-                frame_seek = None
+                seek_ctx = vali.SeekContext(seek_ts=seek_ts) if seek_ts is not None else None
+                seek_ts = None
 
                 for i in range(self.batch_size):
                     success, details = self.decoder.DecodeSingleSurfaceAsync(self.decode_surface, pkt_data, seek_ctx)

@@ -256,8 +256,8 @@ def main() -> None:
 
     is_streaming = bool(args.stream)
 
-    if args.input is None:
-        parser.error("--input is required when not using --benchmark")
+    if args.input is None and not is_streaming:
+        parser.error("--input is required when not using --benchmark or --stream")
     if args.output is None and not is_streaming:
         parser.error("--output is required when not using --benchmark or --stream")
 
@@ -286,11 +286,11 @@ def main() -> None:
     from jasna.pipeline import Pipeline
     from jasna.media import parse_encoder_settings, validate_encoder_settings
 
-    input_video = Path(args.input)
-    if not input_video.exists():
+    input_video = Path(args.input) if args.input else None
+    if input_video is not None and not input_video.exists():
         raise FileNotFoundError(str(input_video))
 
-    output_video = Path(args.output) if args.output else input_video.with_stem(input_video.stem + "_stream")
+    output_video = Path(args.output) if args.output else (input_video.with_stem(input_video.stem + "_out") if input_video else None)
 
     from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models
 
@@ -407,37 +407,72 @@ def main() -> None:
         )
 
         working_directory = Path(args.working_directory) if args.working_directory else None
-        pipeline = Pipeline(
-            input_video=input_video,
-            output_video=output_video,
-            detection_model_name=detection_model_name,
-            detection_model_path=detection_model_path,
-            detection_score_threshold=detection_score_threshold,
-            restoration_pipeline=restoration_pipeline,
-            codec=codec,
-            encoder_settings=encoder_settings,
-            batch_size=batch_size,
-            device=device,
-            max_clip_size=max_clip_size,
-            temporal_overlap=temporal_overlap,
-            enable_crossfade=bool(args.enable_crossfade),
-            fp16=fp16,
-            disable_progress=args.no_progress,
-            working_directory=working_directory,
-        )
+
+        def _make_pipeline(vid_input: Path) -> Pipeline:
+            return Pipeline(
+                input_video=vid_input,
+                output_video=vid_input.with_stem(vid_input.stem + "_out"),
+                detection_model_name=detection_model_name,
+                detection_model_path=detection_model_path,
+                detection_score_threshold=detection_score_threshold,
+                restoration_pipeline=restoration_pipeline,
+                codec=codec,
+                encoder_settings=encoder_settings,
+                batch_size=batch_size,
+                device=device,
+                max_clip_size=max_clip_size,
+                temporal_overlap=temporal_overlap,
+                enable_crossfade=bool(args.enable_crossfade),
+                fp16=fp16,
+                disable_progress=args.no_progress,
+                working_directory=working_directory,
+            )
+
+        pipeline: Pipeline | None = None
         try:
-            if is_streaming:
+            if is_streaming and input_video is None:
+                from jasna.streaming import HlsStreamingServer
+                pipeline = _make_pipeline(Path("__streaming__"))
+                hls_server = HlsStreamingServer(
+                    segment_duration=float(args.stream_segment_duration),
+                    port=int(args.stream_port),
+                )
+                hls_server.start()
+                import webbrowser
+                webbrowser.open(f"http://localhost:{args.stream_port}/")
+                try:
+                    while True:
+                        video_path = hls_server.wait_for_video()
+                        pipeline.input_video = video_path
+                        try:
+                            pipeline.run_streaming(
+                                hls_server=hls_server,
+                                segment_duration=float(args.stream_segment_duration),
+                            )
+                        except UnsupportedColorspaceError as e:
+                            print(f"Error: {e}")
+                        hls_server.unload_video()
+                except KeyboardInterrupt:
+                    pass
+                finally:
+                    hls_server.stop()
+            elif is_streaming:
+                pipeline = _make_pipeline(input_video)
+                import webbrowser
+                webbrowser.open(f"http://localhost:{args.stream_port}/")
                 pipeline.run_streaming(
                     port=int(args.stream_port),
                     segment_duration=float(args.stream_segment_duration),
                 )
             else:
+                pipeline = _make_pipeline(input_video)
                 pipeline.run()
         except UnsupportedColorspaceError as e:
             print(f"Error: {e}")
             sys.exit(1)
         finally:
-            pipeline.close()
+            if pipeline is not None:
+                pipeline.close()
             restoration_pipeline.restorer.close()
             if secondary_restorer is not None and hasattr(secondary_restorer, "close"):
                 secondary_restorer.close()

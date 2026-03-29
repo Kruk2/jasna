@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -17,24 +18,77 @@ log = logging.getLogger(__name__)
 
 _FORWARD_SEEK_THRESHOLD = 5
 
-_HLS_PLAYER_HTML = """\
+_PAGE_HTML = """\
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Jasna Stream</title>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 <style>
-  body { margin:0; background:#111; display:flex; justify-content:center; align-items:center; height:100vh; }
-  video { max-width:100%; max-height:100vh; }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0a;color:#e0e0e0;height:100vh;display:flex;flex-direction:column}
+  #picker{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px}
+  #picker h1{font-size:28px;font-weight:300;letter-spacing:2px;color:#fff}
+  .irow{display:flex;gap:8px;width:min(600px,90vw)}
+  .irow input{flex:1;padding:10px 14px;border-radius:8px;border:1px solid #333;background:#181818;color:#e0e0e0;font-size:14px;outline:none}
+  .irow input:focus{border-color:#4a8eff}
+  .btn{padding:10px 20px;border-radius:8px;border:none;cursor:pointer;font-size:14px;font-weight:500;transition:opacity .15s}
+  .btn:hover{opacity:.85}.btn:disabled{opacity:.4;cursor:default}
+  .ba{background:#2563eb;color:#fff}.bd{background:#2a2a2a;color:#ccc}
+  #status{font-size:13px;color:#888;min-height:20px}
+  #player{display:none;flex-direction:column;flex:1}
+  #player video{flex:1;background:#000;min-height:0}
+  .tb{display:flex;align-items:center;gap:12px;padding:10px 16px;background:#141414;border-bottom:1px solid #222}
+  .tb .name{flex:1;font-size:13px;color:#999;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style></head><body>
-<video id="v" controls autoplay></video>
+<div id="picker">
+  <h1>JASNA</h1>
+  <div class="irow">
+    <input id="pi" type="text" placeholder="Video file path..." autocomplete="off"/>
+    <button class="btn ba" onclick="browse()">Browse</button>
+  </div>
+  <div id="status"></div>
+</div>
+<div id="player">
+  <div class="tb">
+    <span class="name" id="fname"></span>
+    <button class="btn bd" onclick="changeVideo()">Change Video</button>
+  </div>
+  <video id="v" controls autoplay></video>
+</div>
 <script>
-  var video = document.getElementById('v');
-  if (Hls.isSupported()) {
-    var hls = new Hls({maxBufferLength: 10, maxMaxBufferLength: 30});
-    hls.loadSource('/stream.m3u8');
-    hls.attachMedia(video);
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = '/stream.m3u8';
-  }
+var hls=null,loaded=false,pi=document.getElementById('pi');
+pi.addEventListener('keydown',function(e){if(e.key==='Enter'&&pi.value.trim())loadVideo(pi.value.trim())});
+async function browse(){
+  try{var r=await fetch('/api/browse',{method:'POST'});var d=await r.json();
+  if(d.path){pi.value=d.path;loadVideo(d.path)}}
+  catch(e){document.getElementById('status').textContent='Browse failed: '+e.message}}
+async function loadVideo(p){
+  if(!p)return;
+  document.getElementById('status').textContent='Preparing stream...';
+  try{var r=await fetch('/api/load',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:p})});
+  var d=await r.json();
+  if(d.error){document.getElementById('status').textContent=d.error;return}
+  document.getElementById('fname').textContent=d.filename;
+  while(true){try{var r2=await fetch('/stream.m3u8');if(r2.ok)break}catch(e){}await new Promise(function(r){setTimeout(r,1000)})}
+  showPlayer()}
+  catch(e){document.getElementById('status').textContent='Error: '+e.message}}
+function showPlayer(){
+  loaded=true;
+  document.getElementById('picker').style.display='none';
+  document.getElementById('player').style.display='flex';
+  document.getElementById('status').textContent='';
+  startHls()}
+function startHls(){
+  var v=document.getElementById('v');
+  if(hls){hls.destroy();hls=null}
+  if(Hls.isSupported()){hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30});hls.loadSource('/stream.m3u8');hls.attachMedia(v)}
+  else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src='/stream.m3u8'}}
+async function changeVideo(){
+  await fetch('/api/stop',{method:'POST'});
+  if(hls){hls.destroy();hls=null}
+  document.getElementById('v').removeAttribute('src');
+  document.getElementById('player').style.display='none';
+  document.getElementById('picker').style.display='flex';
+  loaded=false}
 </script></body></html>
 """
 
@@ -113,11 +167,17 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
             pass
 
+    def do_POST(self):
+        try:
+            self._handle_post()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
+
     def _handle_get(self):
         path = self.path.split("?")[0]
 
         if path == "/":
-            data = _HLS_PLAYER_HTML.encode()
+            data = _PAGE_HTML.encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(data)))
@@ -127,6 +187,9 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             return
 
         if path == "/stream.m3u8":
+            if not self._state.is_loaded:
+                self.send_error(404)
+                return
             data = self._state.playlist_text.encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/vnd.apple.mpegurl")
@@ -137,6 +200,9 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             return
 
         if path.startswith("/seg_") and path.endswith(".ts"):
+            if not self._state.is_loaded:
+                self.send_error(404)
+                return
             seg_name = path.lstrip("/")
             seg_path = self._state.segments_dir / seg_name
             seg_num = self._parse_segment_number(seg_name)
@@ -155,6 +221,9 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
 
             deadline = time.monotonic() + 30.0
             while time.monotonic() < deadline:
+                if not self._state.is_loaded:
+                    self.send_error(404)
+                    return
                 try:
                     sz = seg_path.stat().st_size
                 except OSError:
@@ -172,6 +241,60 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             return
 
         self.send_error(404)
+
+    def _handle_post(self):
+        path = self.path.split("?")[0]
+
+        if path == "/api/browse":
+            selected = self._open_file_dialog()
+            self._send_json({"path": selected})
+            return
+
+        if path == "/api/stop":
+            self._state.stop_current()
+            self._send_json({"ok": True})
+            return
+
+        if path == "/api/load":
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length)) if length > 0 else {}
+            video_path = str(body.get("path", "")).strip()
+            if not video_path or not Path(video_path).is_file():
+                self._send_json({"error": "File not found"})
+                return
+            self._state.select_video(Path(video_path))
+            self._send_json({"ok": True, "filename": Path(video_path).name})
+            return
+
+        self.send_error(404)
+
+    def _send_json(self, obj: dict):
+        data = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _open_file_dialog() -> str | None:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            path = filedialog.askopenfilename(
+                title="Select Video",
+                filetypes=[
+                    ("Video files", "*.mp4 *.mkv *.avi *.mov *.wmv *.webm *.flv *.ts"),
+                    ("All files", "*.*"),
+                ],
+            )
+            root.destroy()
+            return path if path else None
+        except Exception:
+            return None
 
     def _serve_file(self, path: Path):
         data = path.read_bytes()
@@ -196,20 +319,21 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
 class HlsStreamingServer:
     def __init__(
         self,
-        metadata: VideoMetadata,
         segment_duration: float = 4.0,
         port: int = 8765,
     ):
-        self.metadata = metadata
         self.segment_duration = float(segment_duration)
         self.port = int(port)
 
-        self.segments_dir = Path(tempfile.mkdtemp(prefix="jasna_hls_"))
-        self._vod_playlist, self.segment_count = _generate_vod_playlist(
-            total_duration=metadata.duration,
-            segment_duration=self.segment_duration,
-        )
+        self.metadata: VideoMetadata | None = None
+        self.segments_dir: Path | None = None
+        self.segment_count: int = 0
+        self._vod_playlist: str = ""
         self._finished = False
+
+        self._pending_video: Path | None = None
+        self._video_selected = threading.Event()
+        self.video_change = threading.Event()
 
         self._seek_lock = threading.Lock()
         self.seek_requested = threading.Event()
@@ -225,6 +349,55 @@ class HlsStreamingServer:
         self._thread: threading.Thread | None = None
 
     @property
+    def is_loaded(self) -> bool:
+        return self.metadata is not None
+
+    def stop_current(self) -> None:
+        self.metadata = None
+        self._vod_playlist = ""
+        self.video_change.set()
+
+    def select_video(self, path: Path) -> None:
+        self._pending_video = path
+        if self.metadata is not None:
+            self.stop_current()
+        self._video_selected.set()
+
+    def wait_for_video(self) -> Path:
+        self._video_selected.wait()
+        self._video_selected.clear()
+        return self._pending_video
+
+    def load_video(self, metadata: VideoMetadata) -> None:
+        self.metadata = metadata
+        if self.segments_dir is None:
+            self.segments_dir = Path(tempfile.mkdtemp(prefix="jasna_hls_"))
+        self._vod_playlist, self.segment_count = _generate_vod_playlist(
+            total_duration=metadata.duration,
+            segment_duration=self.segment_duration,
+        )
+        self._finished = False
+        self.video_change.clear()
+        self.seek_requested.clear()
+        self.seek_target_segment = -1
+        with self._demand_lock:
+            self._highest_requested_segment = -1
+            self._current_pass_start = 0
+            self._produced_segment = -1
+
+    def unload_video(self) -> None:
+        self.metadata = None
+        self._vod_playlist = ""
+        self.segment_count = 0
+        self._finished = False
+        self.video_change.clear()
+        if self.segments_dir:
+            for f in self.segments_dir.glob("*.ts"):
+                f.unlink(missing_ok=True)
+            for f in self.segments_dir.glob("*.m3u8"):
+                f.unlink(missing_ok=True)
+
+    @property
     def playlist_text(self) -> str:
         return self._vod_playlist
 
@@ -234,6 +407,9 @@ class HlsStreamingServer:
     @property
     def url(self) -> str:
         return f"http://localhost:{self.port}/stream.m3u8"
+
+    def segment_start_time(self, segment_index: int) -> float:
+        return segment_index * self.segment_duration
 
     def segment_start_frame(self, segment_index: int) -> int:
         fps = self.metadata.video_fps
@@ -271,7 +447,10 @@ class HlsStreamingServer:
         cancel_event: threading.Event,
     ) -> None:
         with self._demand_lock:
-            if current_segment > self._highest_requested_segment + max_ahead:
+            if (
+                self._highest_requested_segment >= 0
+                and current_segment > self._highest_requested_segment + max_ahead
+            ):
                 log.debug(
                     "[stream-server] pausing pipeline at segment %d (player at %d, max_ahead=%d)",
                     current_segment, self._highest_requested_segment, max_ahead,

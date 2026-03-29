@@ -98,6 +98,12 @@ class StreamingEncoder:
 
         cmd: list[str] = [self._ffmpeg, '-y', '-hide_banner', '-loglevel', 'warning']
 
+        has_source = self.source_video and os.path.isfile(self.source_video)
+        if has_source:
+            if seek_time > 0:
+                cmd += ['-ss', f'{seek_time:.3f}']
+            cmd += ['-i', self.source_video]
+
         cmd += [
             '-f', 'rawvideo',
             '-pix_fmt', 'rgb24',
@@ -106,12 +112,8 @@ class StreamingEncoder:
             '-i', 'pipe:0',
         ]
 
-        has_source = self.source_video and os.path.isfile(self.source_video)
         if has_source:
-            if seek_time > 0:
-                cmd += ['-ss', f'{seek_time:.3f}']
-            cmd += ['-i', self.source_video]
-            cmd += ['-map', '0:v:0', '-map', '1:a:0?']
+            cmd += ['-map', '1:v:0', '-map', '0:a:0?']
         else:
             cmd += ['-map', '0:v:0']
 

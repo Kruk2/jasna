@@ -112,21 +112,30 @@ class TestBuildLivePlaylist:
 
 
 class TestHlsStreamingServer:
-    def test_init_creates_segments_dir(self):
+    def test_init_no_segments_dir(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        assert server.segments_dir is None
+        assert not server.is_loaded
+
+    def test_load_video_creates_segments_dir(self):
         meta = _make_metadata(duration=20.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
         assert server.segments_dir.exists()
+        assert server.is_loaded
         server._cleanup_segments()
 
     def test_segment_count(self):
         meta = _make_metadata(duration=20.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
         assert server.segment_count == 5
         server._cleanup_segments()
 
     def test_segment_start_frame(self):
         meta = _make_metadata(duration=20.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
         assert server.segment_start_frame(0) == 0
         assert server.segment_start_frame(1) == 120
         assert server.segment_start_frame(2) == 240
@@ -134,14 +143,13 @@ class TestHlsStreamingServer:
 
     def test_frames_per_segment(self):
         meta = _make_metadata(duration=20.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
         assert server.frames_per_segment() == 120
         server._cleanup_segments()
 
     def test_seek_request_and_consume(self):
-        meta = _make_metadata(duration=20.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
-
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         assert server.consume_seek() is None
 
         server.request_seek(3)
@@ -153,12 +161,9 @@ class TestHlsStreamingServer:
         assert not server.seek_requested.is_set()
 
         assert server.consume_seek() is None
-        server._cleanup_segments()
 
     def test_multiple_seeks_last_wins(self):
-        meta = _make_metadata(duration=20.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
-
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.request_seek(1)
         server.request_seek(3)
         server.request_seek(2)
@@ -166,17 +171,13 @@ class TestHlsStreamingServer:
         server._last_seek_time = 0.0
         target = server.consume_seek()
         assert target == 2
-        server._cleanup_segments()
 
     def test_url_property(self):
-        meta = _make_metadata(duration=20.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=9999)
+        server = HlsStreamingServer(segment_duration=4.0, port=9999)
         assert server.url == "http://localhost:9999/stream.m3u8"
-        server._cleanup_segments()
 
     def test_start_and_stop(self):
-        meta = _make_metadata(duration=20.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.start()
         assert server._thread is not None
         assert server._thread.is_alive()
@@ -185,25 +186,74 @@ class TestHlsStreamingServer:
 
     def test_cleanup_removes_dir(self):
         meta = _make_metadata(duration=20.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
         seg_dir = server.segments_dir
         assert seg_dir.exists()
         server.stop()
         assert not seg_dir.exists()
 
+    def test_select_and_wait_for_video(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        result = [None]
+        def _waiter():
+            result[0] = server.wait_for_video()
+        t = threading.Thread(target=_waiter)
+        t.start()
+        time.sleep(0.1)
+        server.select_video(Path("test.mp4"))
+        t.join(timeout=2.0)
+        assert result[0] == Path("test.mp4")
+        assert not server.video_change.is_set()
+
+    def test_select_video_while_loaded_triggers_change(self):
+        meta = _make_metadata(duration=20.0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
+        server.select_video(Path("other.mp4"))
+        assert server.video_change.is_set()
+        assert not server.is_loaded
+        server._cleanup_segments()
+
+    def test_stop_current_clears_metadata(self):
+        meta = _make_metadata(duration=20.0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
+        assert server.is_loaded
+        server.stop_current()
+        assert not server.is_loaded
+        assert server.video_change.is_set()
+        server._cleanup_segments()
+
+    def test_unload_video_clears_state(self):
+        meta = _make_metadata(duration=20.0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(meta)
+        assert server.is_loaded
+        server.unload_video()
+        assert not server.is_loaded
+        assert server.segment_count == 0
+
+    def test_load_video_resets_seek_state(self):
+        meta = _make_metadata(duration=20.0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.request_seek(5)
+        server.video_change.set()
+        server.load_video(meta)
+        assert not server.seek_requested.is_set()
+        assert not server.video_change.is_set()
+        server._cleanup_segments()
+
 
 class TestDemandFlowControl:
     def test_wait_for_demand_proceeds_when_within_buffer(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         cancel = threading.Event()
         server.notify_segment_requested(0)
         server.wait_for_demand(current_segment=2, max_ahead=3, cancel_event=cancel)
-        server._cleanup_segments()
 
     def test_wait_for_demand_blocks_when_too_far_ahead(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         cancel = threading.Event()
         server.notify_segment_requested(0)
         blocked = threading.Event()
@@ -224,11 +274,9 @@ class TestDemandFlowControl:
         unblocked.wait(timeout=2.0)
         assert unblocked.is_set()
         t.join(timeout=2.0)
-        server._cleanup_segments()
 
     def test_wait_for_demand_unblocks_on_cancel(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         cancel = threading.Event()
         server.notify_segment_requested(0)
         done = threading.Event()
@@ -245,69 +293,54 @@ class TestDemandFlowControl:
         done.wait(timeout=2.0)
         assert done.is_set()
         t.join(timeout=2.0)
-        server._cleanup_segments()
 
     def test_initial_buffer_without_player(self):
         """With no player requests (highest=-1), pipeline runs freely."""
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         cancel = threading.Event()
         server.wait_for_demand(current_segment=0, max_ahead=3, cancel_event=cancel)
         server.wait_for_demand(current_segment=10, max_ahead=3, cancel_event=cancel)
         server.wait_for_demand(current_segment=50, max_ahead=3, cancel_event=cancel)
-        server._cleanup_segments()
 
     def test_reset_demand_default(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.notify_segment_requested(5)
         server.reset_demand()
         assert server._highest_requested_segment == -1
-        server._cleanup_segments()
 
     def test_reset_demand_with_start_segment(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         cancel = threading.Event()
         server.reset_demand(start_segment=100)
         assert server._highest_requested_segment == 99
         server.wait_for_demand(current_segment=100, max_ahead=3, cancel_event=cancel)
         server.wait_for_demand(current_segment=102, max_ahead=3, cancel_event=cancel)
-        server._cleanup_segments()
 
     def test_forward_seek_triggered_when_far_ahead(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.reset_demand(start_segment=0)
         server.update_production(3)
         assert not server.needs_seek(5)
         assert server.needs_seek(50)
-        server._cleanup_segments()
 
     def test_no_forward_seek_when_production_close(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.reset_demand(start_segment=0)
         server.update_production(10)
         assert not server.needs_seek(14)
-        server._cleanup_segments()
 
     def test_backward_seek_always_triggers(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.reset_demand(start_segment=50)
         server.update_production(55)
         assert server.needs_seek(10)
-        server._cleanup_segments()
 
     def test_notify_tracks_highest(self):
-        meta = _make_metadata(duration=60.0, fps=30.0)
-        server = HlsStreamingServer(metadata=meta, segment_duration=4.0, port=0)
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.notify_segment_requested(2)
         server.notify_segment_requested(5)
         server.notify_segment_requested(3)
         assert server._highest_requested_segment == 5
-        server._cleanup_segments()
 
 
 def _make_rgb_frame(width=64, height=64):
@@ -477,3 +510,10 @@ class TestMainParserStreamingArgs:
         args = parser.parse_args(["--input", "test.mp4", "--stream"])
         assert args.output is None
         assert args.stream is True
+
+    def test_stream_without_input(self):
+        from jasna.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(["--stream"])
+        assert args.stream is True
+        assert args.input is None

@@ -587,6 +587,7 @@ class Pipeline:
         self,
         port: int = 8765,
         segment_duration: float = 4.0,
+        hls_server: HlsStreamingServer | None = None,
     ) -> None:
         from av.video.reformatter import Colorspace as AvColorspace
         device = self.device
@@ -596,11 +597,19 @@ class Pipeline:
                 f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. Only BT.709 is supported."
             )
 
-        hls_server = HlsStreamingServer(
-            metadata=metadata,
-            segment_duration=segment_duration,
-            port=port,
-        )
+        own_server = hls_server is None
+        if own_server:
+            hls_server = HlsStreamingServer(
+                segment_duration=segment_duration,
+                port=port,
+            )
+            hls_server.load_video(metadata)
+            url = hls_server.start()
+            print(f"HLS stream: {url}")
+            print(f"Browser:    http://localhost:{port}/")
+        else:
+            hls_server.load_video(metadata)
+
         streaming_encoder = StreamingEncoder(
             segments_dir=hls_server.segments_dir,
             segment_duration=segment_duration,
@@ -608,10 +617,6 @@ class Pipeline:
             source_video=str(self.input_video),
             device=device,
         )
-
-        url = hls_server.start()
-        print(f"HLS stream: {url}")
-        print(f"Browser:    http://localhost:{port}/")
 
         try:
             self._streaming_loop(
@@ -622,7 +627,8 @@ class Pipeline:
             )
         finally:
             streaming_encoder.stop()
-            hls_server.stop()
+            if own_server:
+                hls_server.stop()
             gc.collect()
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
@@ -639,11 +645,14 @@ class Pipeline:
         start_segment = 0
 
         while True:
+            start_time = hls_server.segment_start_time(start_segment)
             start_frame = hls_server.segment_start_frame(start_segment)
-            log.info("[stream] starting pass from segment %d (frame %d)", start_segment, start_frame)
+            log.info("[stream] starting pass from segment %d (frame %d, t=%.1fs)", start_segment, start_frame, start_time)
 
             seek_t0 = time.monotonic()
             hls_server.reset_demand(start_segment)
+            if start_segment > 0:
+                hls_server.notify_segment_requested(start_segment)
             streaming_encoder.flush_and_restart(start_number=start_segment) if start_segment > 0 else streaming_encoder.start(start_number=0)
 
             cancel_event = threading.Event()
@@ -652,25 +661,34 @@ class Pipeline:
                 metadata=metadata,
                 hls_server=hls_server,
                 streaming_encoder=streaming_encoder,
+                start_segment=start_segment,
                 start_frame=start_frame,
+                start_time=start_time,
                 cancel_event=cancel_event,
             )
 
             log.info("[stream] pass teardown took %.2fs", time.monotonic() - seek_t0)
+
+            if hls_server.video_change.is_set():
+                log.info("[stream] video change requested, exiting streaming loop")
+                return
 
             if seek_result is None:
                 streaming_encoder.stop()
                 hls_server.mark_finished()
                 log.info("[stream] pass finished, all segments produced — waiting for seek requests")
                 while True:
+                    if hls_server.video_change.is_set():
+                        log.info("[stream] video change requested, exiting streaming loop")
+                        return
                     target = hls_server.consume_seek()
                     if target is not None:
-                        log.info("[stream] seek to segment %d (frame %d)", target, hls_server.segment_start_frame(target))
+                        log.info("[stream] seek to segment %d (t=%.1fs)", target, hls_server.segment_start_time(target))
                         start_segment = target
                         break
                     time.sleep(0.1)
             else:
-                log.info("[stream] seek to segment %d (frame %d)", seek_result, hls_server.segment_start_frame(seek_result))
+                log.info("[stream] seek to segment %d (t=%.1fs)", seek_result, hls_server.segment_start_time(seek_result))
                 start_segment = seek_result
 
     def _run_streaming_pass(
@@ -680,7 +698,9 @@ class Pipeline:
         metadata,
         hls_server: HlsStreamingServer,
         streaming_encoder: StreamingEncoder,
+        start_segment: int,
         start_frame: int,
+        start_time: float,
         cancel_event: threading.Event,
     ) -> int | None:
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
@@ -705,7 +725,7 @@ class Pipeline:
         )
         vram_offloader.set_pipeline_queues(clip_queue, secondary_queue, encode_queue, metadata_queue)
 
-        frame_seek = start_frame if start_frame > 0 else None
+        seek_ts = start_time if start_time > 0 else None
 
         def _decode_detect_thread():
             log.debug("[stream-decode] thread started")
@@ -725,7 +745,7 @@ class Pipeline:
                     frame_idx = start_frame or 0
                     first_batch = True
 
-                    for frames, pts_list in reader.frames(frame_seek=frame_seek):
+                    for frames, pts_list in reader.frames(seek_ts=seek_ts):
                         if first_batch:
                             log.debug("[stream-decode] first batch (seek+decode): %.2fs", time.monotonic() - t_reader)
                             first_batch = False
@@ -850,7 +870,7 @@ class Pipeline:
                 torch.cuda.set_device(device)
 
                 def _flat_frames(rdr: NvidiaVideoReader):
-                    for batch, pts in rdr.frames(frame_seek=frame_seek):
+                    for batch, pts in rdr.frames(seek_ts=seek_ts):
                         for i in range(len(pts)):
                             yield batch[i]
 
@@ -861,8 +881,7 @@ class Pipeline:
                     secondary_done = False
                     frames_encoded = 0
                     frames_per_seg = hls_server.frames_per_segment()
-                    base_frame = start_frame or 0
-                    start_seg = base_frame // frames_per_seg
+                    start_seg = start_segment
 
                     def _drain_encode_queue():
                         nonlocal secondary_done
@@ -940,6 +959,10 @@ class Pipeline:
 
         seek_target: int | None = None
         while any(t.is_alive() for t in threads):
+            if hls_server.video_change.is_set():
+                log.info("[stream] video change detected, cancelling current pass")
+                cancel_event.set()
+                break
             target = hls_server.consume_seek()
             if target is not None:
                 log.info("[stream] seek requested to segment %d, cancelling current pass", target)
