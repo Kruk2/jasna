@@ -47,9 +47,13 @@ def install() -> None:
         module=r"^torch_tensorrt\.dynamo\._exporter$",
     )
 
-    logging.getLogger("torch_tensorrt.dynamo.conversion.converter_utils").setLevel(logging.ERROR)
-    logging.getLogger("torch_tensorrt.dynamo.conversion.aten_ops_converters").setLevel(logging.ERROR)
     logging.getLogger("torch.export.pt2_archive._package").setLevel(logging.ERROR)
+    for _name in (
+        "torch_tensorrt",
+        "torch_tensorrt._utils",
+        "torch_tensorrt [TensorRT Conversion Context]",
+    ):
+        logging.getLogger(_name).setLevel(logging.ERROR)
 
     class _SuppressRedirectsWarning(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
@@ -58,29 +62,3 @@ def install() -> None:
     logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").addFilter(
         _SuppressRedirectsWarning()
     )
-
-    class _SuppressTorchTensorRTNoises(logging.Filter):
-        def filter(self, record: logging.LogRecord) -> bool:
-            msg = record.getMessage()
-            if "Unable to import quantization op." in msg:
-                return False
-            if "Unable to import quantize op." in msg:
-                return False
-            if "TensorRT-LLM is not installed." in msg:
-                return False
-            if "Expect archive file to be a file ending in .pt2" in msg:
-                return False
-            if "The logger passed into create" in msg and "differs from one already registered" in msg:
-                return False
-            if "Using default stream in enqueueV3()" in msg:
-                return False
-            return True
-
-    _trt_filter = _SuppressTorchTensorRTNoises()
-    logging.getLogger("torch_tensorrt").addFilter(_trt_filter)
-    logging.getLogger("torch_tensorrt.dynamo").addFilter(_trt_filter)
-    logging.getLogger("torch_tensorrt.dynamo.conversion.aten_ops_converters").addFilter(_trt_filter)
-    logging.getLogger("torch.export.pt2_archive._package").addFilter(_trt_filter)
-    logging.getLogger("tensorrt").addFilter(_trt_filter)
-    for handler in logging.getLogger().handlers:
-        handler.addFilter(_trt_filter)
