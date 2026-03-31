@@ -219,7 +219,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="hevc",
         choices=["h264", "hevc", "av1"],
-        help='Output video codec: h264 (8-bit), hevc (10-bit), av1 (8-bit) (default: %(default)s)',
+        help='Output video codec: h264 (8-bit), hevc (10-bit), av1 (10-bit) (default: %(default)s)',
     )
     encoding.add_argument(
         "--working-directory",
