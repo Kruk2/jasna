@@ -183,7 +183,7 @@ class NvidiaVideoEncoder:
             fmt = 'P010'
         elif codec == 'av1':
             profile = 'main'
-            fmt = 'NV12'
+            fmt = 'P010'
         else:
             profile = 'main'
             fmt = 'NV12'
@@ -377,7 +377,7 @@ class NvidiaVideoEncoder:
         self.reordered_pts_queue.append(pts)
 
         with torch.cuda.stream(self.stream):
-            if self._codec == 'hevc':
+            if self._codec == 'hevc' or self._codec == 'av1':
                 yuv = chw_rgb_to_p010_bt709_limited(frame)
             else:
                 yuv = chw_rgb_to_nv12_bt709_limited(frame)
