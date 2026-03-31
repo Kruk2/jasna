@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class StreamingEncoder:
-    """Encodes RGB frames to HLS MPEGTS segments via ffmpeg (h264_nvenc/hevc_nvenc/av1_nvenc) + audio copy."""
+    """Encodes RGB frames to HLS MPEGTS segments via ffmpeg (h264_nvenc) + audio copy."""
 
     def __init__(
         self,
@@ -25,17 +25,11 @@ class StreamingEncoder:
         metadata: VideoMetadata,
         source_video: str,
         device: torch.device | None = None,
-        codec: str = "h264",
-        encoder_cq: int = 22,
-        encoder_custom_args: str = "",
     ):
         self.segments_dir = Path(segments_dir)
         self.segment_duration = float(segment_duration)
         self.metadata = metadata
         self.source_video = source_video
-        self._codec = codec.lower()
-        self._encoder_cq = encoder_cq
-        self._encoder_custom_args = encoder_custom_args
 
         self._width = metadata.video_width
         self._height = metadata.video_height
@@ -123,54 +117,21 @@ class StreamingEncoder:
         else:
             cmd += ['-map', '0:v:0']
 
-        # Map codec names to ffmpeg encoder names
-        codec_map = {
-            "h264": "h264_nvenc",
-            "hevc": "hevc_nvenc",
-            "av1": "av1_nvenc",
-        }
-        encoder = codec_map.get(self._codec, "h264_nvenc")
-
-        # Build encoder command based on codec
         cmd += [
-            '-c:v', encoder,
+            '-c:v', 'h264_nvenc',
             '-preset', 'p4',
+            '-tune', 'll',
             '-rc', 'vbr',
-            '-cq', str(self._encoder_cq),
+            '-cq', '19',
+            '-bf', '0',
+            '-profile:v', 'high',
+            '-spatial-aq', '1',
+            '-temporal-aq', '1',
+            '-rc-lookahead', '8',
             '-gpu', str(self._gpu_index),
             '-g', str(self._gop_size),
             '-pix_fmt', 'yuv420p',
         ]
-
-        # Add codec-specific options
-        if self._codec in ("h264", "hevc"):
-            cmd += [
-                '-tune', 'll',
-                '-bf', '0',
-                '-spatial-aq', '1',
-                '-temporal-aq', '1',
-                '-rc-lookahead', '8',
-            ]
-            if self._codec == "h264":
-                cmd += ['-profile:v', 'high']
-            elif self._codec == "hevc":
-                cmd += ['-profile:v', 'main']
-        elif self._codec == "av1":
-            # AV1-specific settings based on PyNvVideoCodec docs
-            cmd += [
-                '-bf', '0',
-                '-spatial-aq', '1',
-                '-temporal-aq', '1',
-            ]
-
-        # Add custom encoder args if provided
-        if self._encoder_custom_args:
-            # Parse custom args as key=value pairs
-            for arg in self._encoder_custom_args.split(','):
-                arg = arg.strip()
-                if '=' in arg:
-                    key, value = arg.split('=', 1)
-                    cmd += [f'-{key.strip()}', value.strip()]
 
         if has_source:
             cmd += ['-c:a', 'copy']
