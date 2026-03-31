@@ -188,7 +188,6 @@ class NvidiaVideoEncoder:
             profile = 'main'
             fmt = 'NV12'
 
-        # Base encoder options
         encoder_options = {
             'codec': codec,
             'preset': 'P5',
@@ -197,9 +196,7 @@ class NvidiaVideoEncoder:
             'fps': float(metadata.video_fps_exact),
         }
 
-        # Add codec-specific options
         if codec == 'hevc':
-            # HEVC: preserve original settings for 10-bit encoding
             encoder_options.update({
                 'tuning_info': 'high_quality',
                 'bitrate': 10000000,
@@ -218,7 +215,6 @@ class NvidiaVideoEncoder:
                 'bref': 2 if not stream_mode else 0,
             })
         elif codec == 'h264':
-            # H.264: 8-bit encoding with high profile
             encoder_options.update({
                 'tuning_info': 'high_quality',
                 'bitrate': 10000000,
@@ -226,7 +222,6 @@ class NvidiaVideoEncoder:
                 'bf': bf,
             })
         elif codec == 'av1':
-            # AV1: minimal options for maximum compatibility
             encoder_options.update({
                 'bitrate': 10000000,
                 'maxbitrate': 20000000,
