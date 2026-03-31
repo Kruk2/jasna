@@ -199,12 +199,14 @@ class NvidiaVideoEncoder:
         if codec == 'hevc':
             encoder_options.update({
                 'tuning_info': 'high_quality',
-                'bitrate': 10000000,
-                'maxbitrate': 20000000,
-                'vbvinit': 10000000,
-                'vbvbufsize': 20000000,
+                'cq': 25,
+                'qmin': 17,
+                'qmax': 34,
                 'nonrefp': 1,
                 'gop': 250,
+                'maxbitrate': 0,
+                'vbvinit': 0,
+                'vbvbufsize': 0,
                 'temporalaq': 1,
                 'lookahead': 32,
                 'lookahead_level': 1,
