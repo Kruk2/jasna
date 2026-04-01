@@ -82,6 +82,7 @@ def compile_and_save_torchtrt_dynamo(
     has_dynamic = any(isinstance(inp, torch_tensorrt.Input) for inp in inputs)
     if device is None:
         device = inputs[0].device
+    print(message)
     logger.info("%s", message)
     with torch.cuda.device(device):
         trt_gm = torch_tensorrt.compile(

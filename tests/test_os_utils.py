@@ -206,91 +206,36 @@ def test_find_executable_finds_bundled_mkvmerge_recursive(monkeypatch, tmp_path)
 
 
 def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_when_enabled(monkeypatch, capsys) -> None:
-    class _Key:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    class _Winreg:
-        HKEY_LOCAL_MACHINE = object()
-
-        @staticmethod
-        def OpenKey(root, path):
-            return _Key()
-
-        @staticmethod
-        def QueryValueEx(key, name):
-            assert name == "HwSchMode"
-            return (2, None)
-
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
+    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: (False, "Enabled (recommended OFF: can slow Jasna and add artifacts)"))
 
     os_utils.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
     out = capsys.readouterr().out
     assert "Hardware-accelerated GPU scheduling" in out
 
 
-def test_check_windows_hardware_accelerated_gpu_scheduling_returns_false_when_enabled(monkeypatch) -> None:
-    class _Key:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    class _Winreg:
-        HKEY_LOCAL_MACHINE = object()
-
-        @staticmethod
-        def OpenKey(root, path):
-            return _Key()
-
-        @staticmethod
-        def QueryValueEx(key, name):
-            assert name == "HwSchMode"
-            return (2, None)
-
+def test_check_hags_returns_true_when_off(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
+    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: (True, "Off"))
+    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
+    assert ok is True
+    assert info == "Off"
 
+
+def test_check_hags_returns_false_when_enabled(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: (False, "Enabled (recommended OFF: can slow Jasna and add artifacts)"))
     ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
     assert ok is False
     assert "Enabled" in info
 
 
-def test_check_windows_hardware_accelerated_gpu_scheduling_returns_false_with_oserror(monkeypatch) -> None:
-    class _Winreg:
-        HKEY_LOCAL_MACHINE = object()
-
-        @staticmethod
-        def OpenKey(root, path):
-            raise OSError("registry read failed")
-
+def test_check_hags_fails_when_api_unavailable(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
-
+    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: None)
     ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
     assert ok is False
-    assert info == "registry read failed"
-
-
-def test_check_windows_hardware_accelerated_gpu_scheduling_returns_true_when_key_not_found(monkeypatch) -> None:
-    class _Winreg:
-        HKEY_LOCAL_MACHINE = object()
-
-        @staticmethod
-        def OpenKey(root, path):
-            raise OSError(2, "The system cannot find the file specified")
-
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setitem(os_utils.sys.modules, "winreg", _Winreg)
-
-    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
-    assert ok is True
-    assert info == "Not configured (default: Off)"
+    assert "Could not query" in info
 
 
 def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_error_when_status_unknown(
@@ -299,13 +244,13 @@ def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_erro
     monkeypatch.setattr(
         os_utils,
         "check_windows_hardware_accelerated_gpu_scheduling",
-        lambda: (False, "registry read failed"),
+        lambda: (False, "D3DKMT API unavailable"),
     )
 
     os_utils.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
     out = capsys.readouterr().out
     assert "Could not determine" in out
-    assert "registry read failed" in out
+    assert "D3DKMT API unavailable" in out
 
 
 def test_check_sysmem_fallback_returns_true_when_prefer_no_sysmem(monkeypatch) -> None:
@@ -431,4 +376,109 @@ def test_check_nvidia_gpu_returns_ok_at_exactly_min_compute(monkeypatch) -> None
 
 def test_min_gpu_compute_constant() -> None:
     assert os_utils.MIN_GPU_COMPUTE == (7, 5)
+
+
+def test_check_gpu_driver_version_passes_when_590(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+
+    def fake_run(cmd, **kwargs):
+        return type("R", (), {"returncode": 0, "stdout": "590.18\n", "stderr": ""})()
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+    ok, info = os_utils.check_gpu_driver_version()
+    assert ok is True
+    assert info == "590.18"
+
+
+def test_check_gpu_driver_version_passes_when_600(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+
+    def fake_run(cmd, **kwargs):
+        return type("R", (), {"returncode": 0, "stdout": "600.01\n", "stderr": ""})()
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+    ok, info = os_utils.check_gpu_driver_version()
+    assert ok is True
+    assert info == "600.01"
+
+
+def test_check_gpu_driver_version_fails_when_old(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+
+    def fake_run(cmd, **kwargs):
+        return type("R", (), {"returncode": 0, "stdout": "566.36\n", "stderr": ""})()
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+    ok, info = os_utils.check_gpu_driver_version()
+    assert ok is False
+    assert "566.36" in info
+    assert "590" in info
+
+
+def test_check_gpu_driver_version_fails_when_nvidia_smi_not_found(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: None)
+    ok, info = os_utils.check_gpu_driver_version()
+    assert ok is False
+    assert "not found" in info
+
+
+def test_check_gpu_driver_version_fails_when_nvidia_smi_errors(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+
+    def fake_run(cmd, **kwargs):
+        return type("R", (), {"returncode": 1, "stdout": "", "stderr": ""})()
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+    ok, info = os_utils.check_gpu_driver_version()
+    assert ok is False
+    assert "exited with code" in info
+
+
+def test_check_gpu_driver_version_fails_on_oserror(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+
+    def fake_run(cmd, **kwargs):
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+    ok, info = os_utils.check_gpu_driver_version()
+    assert ok is False
+    assert "permission denied" in info
+
+
+def test_check_gpu_driver_version_fails_on_unparseable_output(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+
+    def fake_run(cmd, **kwargs):
+        return type("R", (), {"returncode": 0, "stdout": "garbage\n", "stderr": ""})()
+
+    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
+    ok, info = os_utils.check_gpu_driver_version()
+    assert ok is False
+    assert "Could not parse" in info
+
+
+def test_check_ascii_install_path_passes_for_ascii(monkeypatch, tmp_path) -> None:
+    ascii_path = tmp_path / "jasna"
+    ascii_path.mkdir()
+    monkeypatch.setattr(os_utils, "__file__", str(ascii_path / "os_utils.py"))
+    ok, info = os_utils.check_ascii_install_path()
+    assert ok is True
+
+
+def test_check_ascii_install_path_fails_for_non_ascii(monkeypatch, tmp_path) -> None:
+    non_ascii_path = tmp_path / "プロジェクト"
+    non_ascii_path.mkdir()
+    monkeypatch.setattr(os_utils, "__file__", str(non_ascii_path / "os_utils.py"))
+    ok, info = os_utils.check_ascii_install_path()
+    assert ok is False
+    assert "プロジェクト" in info
+
+
+def test_check_ascii_install_path_uses_executable_when_frozen(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
+    exe_path = tmp_path / "jasna.exe"
+    monkeypatch.setattr(os_utils.sys, "executable", str(exe_path), raising=False)
+    ok, info = os_utils.check_ascii_install_path()
+    assert ok is True
 

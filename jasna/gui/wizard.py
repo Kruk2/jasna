@@ -21,6 +21,8 @@ _HELP_URLS = {
     "sysmem": "https://docs.cognex.com/deep-learning_420/web/EN/deep-learning/Content/Topics/optimization/gpu-disable-shared.htm?TocPath=Optimization%20Guidelines%7CNVIDIA%C2%AE%20GPU%20Guidelines%7C_____6",
 }
 
+_WARNING_ONLY_CHECKS = {"sysmem"}
+
 
 class FirstRunWizard(ctk.CTkToplevel):
     """Modal wizard shown on first run to check dependencies."""
@@ -30,6 +32,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         
         self._on_complete = on_complete
         self._checks_passed = True
+        self._has_required_failure = False
         self._check_results = {}
         
         self.title(t("wizard_window_title"))
@@ -90,11 +93,13 @@ class FirstRunWizard(ctk.CTkToplevel):
         
         self._check_labels = {}
         checks = [
+            ("ascii_path", t("wizard_check_ascii_path")),
             ("ffmpeg", t("wizard_check_ffmpeg")),
             ("ffprobe", t("wizard_check_ffprobe")),
             ("mkvmerge", t("wizard_check_mkvmerge")),
             ("gpu", t("wizard_check_gpu")),
             ("cuda", t("wizard_check_cuda")),
+            ("driver", t("wizard_check_driver")),
         ]
         if os.name == "nt":
             checks.append(("hags", t("wizard_check_hags")))
@@ -190,16 +195,26 @@ class FirstRunWizard(ctk.CTkToplevel):
         if not self.winfo_exists():
             return
 
-        subtitle_text = t("wizard_all_passed") if self._checks_passed else t("wizard_some_failed")
-        subtitle_color = Colors.STATUS_COMPLETED if self._checks_passed else Colors.STATUS_PAUSED
+        if self._checks_passed:
+            subtitle_text = t("wizard_all_passed")
+            subtitle_color = Colors.STATUS_COMPLETED
+        elif self._has_required_failure:
+            subtitle_text = t("wizard_required_failed")
+            subtitle_color = Colors.STATUS_ERROR
+        else:
+            subtitle_text = t("wizard_warnings_only")
+            subtitle_color = Colors.STATUS_PAUSED
         self._subtitle.configure(text=subtitle_text, text_color=subtitle_color)
 
         for key, (status_label, info_label, help_label) in self._check_labels.items():
             passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
-            status_label.configure(
-                text="✓" if passed else "✕",
-                text_color=Colors.STATUS_COMPLETED if passed else Colors.STATUS_ERROR,
-            )
+            if passed:
+                icon, color = "✓", Colors.STATUS_COMPLETED
+            elif key in _WARNING_ONLY_CHECKS:
+                icon, color = "⚠", Colors.STATUS_PAUSED
+            else:
+                icon, color = "✕", Colors.STATUS_ERROR
+            status_label.configure(text=icon, text_color=color)
             info_label.configure(text=info)
             if help_label is not None:
                 if passed:
@@ -207,8 +222,12 @@ class FirstRunWizard(ctk.CTkToplevel):
                 else:
                     help_label.pack(side="right", padx=(0, 8))
 
-        btn_text = t("btn_get_started") if self._checks_passed else t("btn_continue_anyway")
-        self._continue_btn.configure(text=btn_text, state="normal")
+        if self._has_required_failure:
+            self._continue_btn.configure(text=t("btn_exit"), state="normal", command=self._on_exit)
+        elif self._checks_passed:
+            self._continue_btn.configure(text=t("btn_get_started"), state="normal")
+        else:
+            self._continue_btn.configure(text=t("btn_get_started"), state="normal")
         
     def _build_ui(self):
         # Header
@@ -239,11 +258,13 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._checks_frame.pack(fill="both", expand=True, padx=40, pady=20)
         
         checks = [
+            ("ascii_path", t("wizard_check_ascii_path")),
             ("ffmpeg", t("wizard_check_ffmpeg")),
             ("ffprobe", t("wizard_check_ffprobe")),
             ("mkvmerge", t("wizard_check_mkvmerge")),
             ("gpu", t("wizard_check_gpu")),
             ("cuda", t("wizard_check_cuda")),
+            ("driver", t("wizard_check_driver")),
         ]
         if os.name == "nt":
             checks.append(("hags", t("wizard_check_hags")))
@@ -314,16 +335,21 @@ class FirstRunWizard(ctk.CTkToplevel):
         
     def _run_checks_blocking(self):
         """Run all dependency checks (blocking)."""
+        self._check_results["ascii_path"] = os_utils.check_ascii_install_path()
         self._check_results["ffmpeg"] = self._check_executable("ffmpeg")
         self._check_results["ffprobe"] = self._check_executable("ffprobe")
         self._check_results["mkvmerge"] = self._check_executable("mkvmerge")
         self._check_results["gpu"] = self._check_gpu()
         self._check_results["cuda"] = self._check_cuda()
+        self._check_results["driver"] = os_utils.check_gpu_driver_version()
         if os.name == "nt":
             self._check_results["hags"] = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
             self._check_results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
         
-        # Determine overall pass
+        self._has_required_failure = any(
+            not passed and key not in _WARNING_ONLY_CHECKS
+            for key, (passed, _) in self._check_results.items()
+        )
         self._checks_passed = all(passed for passed, _ in self._check_results.values())
         
     def _check_executable(self, name: str) -> tuple[bool, str]:
@@ -406,8 +432,14 @@ class FirstRunWizard(ctk.CTkToplevel):
         except Exception as e:
             return False, str(e)
             
+    def _on_exit(self):
+        self.grab_release()
+        self.destroy()
+        if self._on_complete:
+            self._on_complete(False, False)
+
     def _on_continue(self):
         self.grab_release()
         self.destroy()
         if self._on_complete:
-            self._on_complete(self._checks_passed)
+            self._on_complete(True, self._checks_passed)

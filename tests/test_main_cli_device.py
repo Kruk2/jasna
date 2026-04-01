@@ -38,9 +38,12 @@ def test_cli_creates_stream_on_chosen_device(tmp_path: Path) -> None:
         return mock
 
     with (
+        patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+        patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
         patch("jasna.main.check_required_executables"),
-        patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
+        patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
+        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", side_effect=capture_pipeline),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
@@ -95,9 +98,12 @@ def test_cli_passes_working_directory_to_pipeline(tmp_path: Path) -> None:
         return MagicMock()
 
     with (
+        patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+        patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
         patch("jasna.main.check_required_executables"),
-        patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
+        patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
+        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", side_effect=capture_pipeline),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),

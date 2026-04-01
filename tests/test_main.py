@@ -48,9 +48,12 @@ def _main_patches(pipeline_side_effect=None):
         mock_pipeline_cls.return_value = MagicMock()
 
     with (
+        patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+        patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
         patch("jasna.main.check_required_executables"),
-        patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
+        patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
+        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", mock_pipeline_cls),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
@@ -571,9 +574,12 @@ class TestCleanup:
             return pipeline_mock
 
         with (
+            patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
             patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+            patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
             patch("jasna.main.check_required_executables"),
-            patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
+            patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
+            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
             patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
             patch("jasna.pipeline.Pipeline", side_effect=make_pipeline),
             patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", return_value=restorer_mock),
@@ -676,9 +682,12 @@ class TestEngineCompilation:
         mock_unet = MagicMock()
 
         with (
+            patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
             patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+            patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
             patch("jasna.main.check_required_executables"),
-            patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
+            patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
+            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
             patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)) as mock_compile,
             patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
             patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
@@ -695,9 +704,12 @@ class TestEngineCompilation:
         inp, out, rest, det = _make_model_files(tmp_path)
 
         with (
+            patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
             patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+            patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
             patch("jasna.main.check_required_executables"),
-            patch("jasna.main.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled"),
+            patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
+            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
             patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)) as mock_compile,
             patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
             patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
