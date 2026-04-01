@@ -9,6 +9,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MIN_GPU_COMPUTE = (7, 5)
+MIN_DRIVER_VERSION = 590
 
 
 def check_nvidia_gpu() -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
@@ -192,25 +193,116 @@ def warn_if_windows_hardware_accelerated_gpu_scheduling_enabled() -> None:
         logger.info("%s", msg)
 
 
+def _check_hags_d3dkmt() -> tuple[bool, str] | None:
+    """Query the actual runtime HAGS state via D3DKMTQueryAdapterInfo.
+
+    Returns (ok, info) or None if the API is unavailable.
+    """
+    import ctypes
+    import ctypes.wintypes as wt
+
+    try:
+        gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
+    except OSError:
+        return None
+
+    class _LUID(ctypes.Structure):
+        _fields_ = [("LowPart", wt.DWORD), ("HighPart", wt.LONG)]
+
+    # D3DKMT_HANDLE is UINT, not a pointer
+    class _AI(ctypes.Structure):
+        _fields_ = [
+            ("hAdapter", wt.UINT),
+            ("AdapterLuid", _LUID),
+            ("NumOfSources", wt.ULONG),
+            ("bPrecisePresentRegionsPreferred", wt.BOOL),
+        ]
+
+    class _EA2(ctypes.Structure):
+        _fields_ = [("NumAdapters", wt.ULONG), ("pAdapters", ctypes.c_void_p)]
+
+    class _QAI(ctypes.Structure):
+        _fields_ = [
+            ("hAdapter", wt.UINT),
+            ("Type", wt.UINT),
+            ("pPrivateDriverData", ctypes.c_void_p),
+            ("PrivateDriverDataSize", wt.UINT),
+        ]
+
+    class _CLOSE(ctypes.Structure):
+        _fields_ = [("hAdapter", wt.UINT)]
+
+    _KMTQAITYPE_ADAPTERTYPE = 15
+    _KMTQAITYPE_WDDM_2_7_CAPS = 70
+    _ADAPTER_TYPE_RENDER = 0x1
+    _ADAPTER_TYPE_SOFTWARE = 0x4
+
+    try:
+        enum_fn = gdi32.D3DKMTEnumAdapters2
+        enum_fn.restype = ctypes.c_long
+        enum_fn.argtypes = [ctypes.c_void_p]
+        query_fn = gdi32.D3DKMTQueryAdapterInfo
+        query_fn.restype = ctypes.c_long
+        query_fn.argtypes = [ctypes.c_void_p]
+        close_fn = gdi32.D3DKMTCloseAdapter
+        close_fn.restype = ctypes.c_long
+        close_fn.argtypes = [ctypes.c_void_p]
+    except AttributeError:
+        return None
+
+    ea = _EA2(NumAdapters=0, pAdapters=None)
+    status = enum_fn(ctypes.byref(ea))
+    if status != 0 or ea.NumAdapters == 0:
+        logger.debug("D3DKMTEnumAdapters2 count call: status=0x%08X, n=%d", status & 0xFFFFFFFF, ea.NumAdapters)
+        return None
+    adapters = (_AI * ea.NumAdapters)()
+    ea.pAdapters = ctypes.cast(adapters, ctypes.c_void_p)
+    status = enum_fn(ctypes.byref(ea))
+    if status != 0 or ea.NumAdapters == 0:
+        return None
+
+    for i in range(ea.NumAdapters):
+        handle = adapters[i].hAdapter
+        atype = wt.UINT(0)
+        qai = _QAI(
+            hAdapter=handle,
+            Type=_KMTQAITYPE_ADAPTERTYPE,
+            pPrivateDriverData=ctypes.cast(ctypes.pointer(atype), ctypes.c_void_p),
+            PrivateDriverDataSize=ctypes.sizeof(atype),
+        )
+        if query_fn(ctypes.byref(qai)) != 0:
+            continue
+        if not (atype.value & _ADAPTER_TYPE_RENDER) or (atype.value & _ADAPTER_TYPE_SOFTWARE):
+            continue
+
+        caps = wt.UINT(0)
+        qai = _QAI(
+            hAdapter=handle,
+            Type=_KMTQAITYPE_WDDM_2_7_CAPS,
+            pPrivateDriverData=ctypes.cast(ctypes.pointer(caps), ctypes.c_void_p),
+            PrivateDriverDataSize=ctypes.sizeof(caps),
+        )
+        status = query_fn(ctypes.byref(qai))
+        close_fn(ctypes.byref(_CLOSE(hAdapter=handle)))
+        if status != 0:
+            logger.debug("D3DKMTQueryAdapterInfo WDDM_2_7_CAPS: status=0x%08X", status & 0xFFFFFFFF)
+            return None
+
+        if bool(caps.value & 0x2):
+            return False, "Enabled (recommended OFF: can slow Jasna and add artifacts)"
+        return True, "Off"
+
+    return None
+
+
 def check_windows_hardware_accelerated_gpu_scheduling() -> tuple[bool, str]:
     if sys.platform != "win32":
         return True, "N/A"
 
-    try:
-        import winreg
-
-        with winreg.OpenKey(
-            winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\GraphicsDrivers"
-        ) as key:
-            mode, _ = winreg.QueryValueEx(key, "HwSchMode")
-    except OSError as e:
-        if e.errno == 2:
-            return True, "Not configured (default: Off)"
-        return False, str(e)
-
-    if int(mode) == 2:
-        return False, "Enabled (recommended OFF: can slow Jasna and add artifacts)"
-    return True, "Off"
+    result = _check_hags_d3dkmt()
+    if result is not None:
+        return result
+    return False, "Could not query runtime HAGS state (D3DKMT API unavailable or no hardware GPU found)"
 
 
 _CUDA_SYSMEM_FALLBACK_POLICY_ID = 0x10ECECC9
@@ -254,6 +346,45 @@ def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
     if value == _PREFER_SYSMEM_FALLBACK:
         return False, "Prefer Sysmem Fallback (recommended: Prefer No Sysmem Fallback)"
     return False, "Driver Default (recommended: Prefer No Sysmem Fallback)"
+
+
+def check_gpu_driver_version() -> tuple[bool, str]:
+    nvidia_smi = find_executable("nvidia-smi")
+    if not nvidia_smi:
+        return False, "nvidia-smi not found"
+    try:
+        result = subprocess.run(
+            [nvidia_smi, "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            check=False,
+            startupinfo=get_subprocess_startup_info(),
+        )
+    except OSError as e:
+        return False, str(e)
+    if result.returncode != 0:
+        return False, f"nvidia-smi exited with code {result.returncode}"
+    version_str = result.stdout.strip().split("\n")[0].strip()
+    m = re.match(r"(\d+)\.(\d+)", version_str)
+    if not m:
+        return False, f"Could not parse driver version: {version_str!r}"
+    major = int(m.group(1))
+    if major < MIN_DRIVER_VERSION:
+        return False, f"{version_str} (requires {MIN_DRIVER_VERSION}+)"
+    return True, version_str
+
+
+def check_ascii_install_path() -> tuple[bool, str]:
+    if getattr(sys, "frozen", False):
+        install_path = Path(sys.executable).parent
+    else:
+        install_path = Path(__file__).resolve().parent
+    path_str = str(install_path)
+    try:
+        path_str.encode("ascii")
+    except UnicodeEncodeError:
+        return False, path_str
+    return True, path_str
 
 
 def get_user_config_dir(app_name: str) -> Path:

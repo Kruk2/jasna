@@ -273,12 +273,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         from jasna.gui.wizard import FirstRunWizard
         FirstRunWizard(self, on_complete=self._on_wizard_complete)
         
-    def _on_wizard_complete(self, all_passed: bool):
+    def _on_wizard_complete(self, can_continue: bool, all_passed: bool = False):
+        if not can_continue:
+            self._log_panel.error(t("wizard_log_blocked"))
+            self._on_close()
+            return
         if all_passed:
             self._preset_manager.set_system_check_passed_version(__version__)
-            self._log_panel.info("System check passed - ready to process")
-        else:
-            self._log_panel.warning("Some dependencies missing - check setup")
+        self._log_panel.info(t("wizard_log_ready"))
             
     def _on_jobs_changed(self):
         jobs = self._queue_panel.get_jobs()

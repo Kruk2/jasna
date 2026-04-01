@@ -87,6 +87,7 @@ def ensure_engines_compiled(
     if not (need_basicvsrpp or need_detection or need_unet4x):
         return result
 
+    print("Compiling TensorRT engines (this may take several minutes)...")
     logger.info("Spawning engine compilation subprocess...")
     if log_callback:
         log_callback("Compiling TensorRT engines (this may take several minutes)...")
@@ -114,6 +115,7 @@ def ensure_engines_compiled(
                 log_callback(line)
                 logger.debug("[compiler] %s", line)
             else:
+                print(line)
                 logger.info("[compiler] %s", line)
     returncode = proc.wait(timeout=_TIMEOUT_SECONDS)
 
