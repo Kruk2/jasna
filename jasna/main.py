@@ -6,9 +6,12 @@ from pathlib import Path
 from jasna import __version__
 from jasna.media import UnsupportedColorspaceError
 from jasna.os_utils import (
+    check_ascii_install_path,
+    check_gpu_driver_version,
     check_nvidia_gpu,
     check_required_executables,
-    warn_if_windows_hardware_accelerated_gpu_scheduling_enabled,
+    check_windows_hardware_accelerated_gpu_scheduling,
+    check_windows_nvidia_sysmem_fallback_policy,
 )
 
 
@@ -266,8 +269,13 @@ def main() -> None:
     if args.output is None and not is_streaming:
         parser.error("--output is required when not using --benchmark or --stream")
 
+    path_ok, path_info = check_ascii_install_path()
+    if not path_ok:
+        print(f"Error: Jasna must be installed in a path with ASCII characters only.")
+        print(f"Current path: {path_info}")
+        sys.exit(1)
+
     check_required_executables(disable_ffmpeg_check=args.disable_ffmpeg_check)
-    warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
 
     gpu_ok, gpu_result = check_nvidia_gpu()
     if not gpu_ok:
@@ -277,6 +285,23 @@ def main() -> None:
             _, major, minor = gpu_result
             print(f"Error: Compute capability 7.5+ required (GPU: {major}.{minor}).")
         sys.exit(1)
+
+    driver_ok, driver_info = check_gpu_driver_version()
+    if not driver_ok:
+        print(f"Error: GPU driver version check failed: {driver_info}")
+        print("Please update your NVIDIA driver to version 590 or newer.")
+        sys.exit(1)
+
+    if sys.platform == "win32":
+        hags_ok, hags_info = check_windows_hardware_accelerated_gpu_scheduling()
+        if not hags_ok:
+            print(f"Error: Hardware Accelerated GPU Scheduling check failed: {hags_info}")
+            print("Disable HAGS in Windows Settings > System > Display > Graphics > Change default graphics settings.")
+            sys.exit(1)
+
+        sysmem_ok, sysmem_info = check_windows_nvidia_sysmem_fallback_policy()
+        if not sysmem_ok:
+            print(f"Warning: CUDA Sysmem Fallback Policy: {sysmem_info}")
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
