@@ -59,6 +59,11 @@ class Processor:
         self._output_pattern: str = "{original}_restored.mp4"
         self._disable_basicvsrpp_tensorrt_for_run = False
         
+        # Pause-aware timing tracking for ETA and FPS calculations
+        self._real_processing_start_time: float | None = None
+        self._total_pause_time: float = 0.0
+        self._pause_start_time: float | None = None
+        
     def start(
         self,
         jobs: list[JobItem],
@@ -77,6 +82,11 @@ class Processor:
         self._output_pattern = output_pattern
         self._disable_basicvsrpp_tensorrt_for_run = bool(disable_basicvsrpp_tensorrt)
         
+        # Reset timing tracking for new job
+        self._real_processing_start_time = time.monotonic()
+        self._total_pause_time = 0.0
+        self._pause_start_time = None
+        
         self._stop_event.clear()
         self._pause_event.set()
         
@@ -86,11 +96,24 @@ class Processor:
     def pause(self):
         if self._pause_event.is_set():
             self._pause_event.clear()
+            self._pause_start_time = time.monotonic()
         else:
             self._pause_event.set()
+            if self._pause_start_time is not None:
+                pause_duration = time.monotonic() - self._pause_start_time
+                self._total_pause_time += pause_duration
+                self._pause_start_time = None
             
     def is_paused(self) -> bool:
         return not self._pause_event.is_set()
+        
+    def get_real_processing_time(self) -> float:
+        """Get the actual processing time excluding pause duration."""
+        if self._real_processing_start_time is None:
+            return 0.0
+        current_time = time.monotonic()
+        total_elapsed = current_time - self._real_processing_start_time
+        return total_elapsed - self._total_pause_time
         
     def stop(self):
         self._stop_event.set()
@@ -313,18 +336,37 @@ class Processor:
             encoder_settings = validate_encoder_settings(encoder_settings)
 
 
-            last_update_time = [0.0]
+            # Initialize timing variables for this job
+            job_start_time = time.monotonic()
+            last_update_time = 0.0
+            pause_start_time = None
+
+            def get_real_processing_time():
+                current_time = time.monotonic()
+                total_elapsed = current_time - job_start_time
+                # Subtract any current pause duration if paused
+                if pause_start_time is not None:
+                    current_pause_duration = current_time - pause_start_time
+                    return total_elapsed - self._total_pause_time - current_pause_duration
+                else:
+                    return total_elapsed - self._total_pause_time
 
             def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
-                current_time = time.time()
-                if current_time - last_update_time[0] < 0.1:
+                nonlocal last_update_time
+                
+                current_time = time.monotonic()
+                if current_time - last_update_time < 0.1:
                     return
-                last_update_time[0] = current_time
+                last_update_time = current_time
 
                 self._pause_event.wait()
                 if self._stop_event.is_set():
                     raise InterruptedError("Processing stopped")
 
+                # Calculate real processing time for this job
+                real_time = get_real_processing_time()
+                
+                # Use pipeline's smoothed values directly since they already exclude pause time
                 self._progress(ProgressUpdate(
                     job_id=job_id,
                     status=JobStatus.PROCESSING,

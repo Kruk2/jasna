@@ -1,6 +1,7 @@
 """Control bar - bottom playback controls and progress display."""
 
 import customtkinter as ctk
+from PIL import Image, ImageDraw
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.system_stats import SystemStats
@@ -15,6 +16,73 @@ _COLOR_STOPS = (
     (0.5, (251, 191, 36)),   # amber-400
     (1.0, (251, 113, 133)),  # rose-400
 )
+
+
+def _create_icon(size: int, color: str, shape: str) -> ctk.CTkImage:
+    """Create a custom icon with perfect alignment."""
+    # Create base image
+    img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Parse color
+    if color.startswith('#'):
+        r = int(color[1:3], 16)
+        g = int(color[3:5], 16)
+        b = int(color[5:7], 16)
+    else:
+        # Default to white if color parsing fails
+        r, g, b = 255, 255, 255
+    
+    # Calculate padding and symbol size for perfect centering
+    padding = size // 8  # Reduced padding for larger symbols
+    symbol_size = size - (padding * 2)
+    
+    if shape == "play":
+        # Draw play triangle
+        center_x = size // 2
+        center_y = size // 2
+        half_width = symbol_size // 3
+        half_height = symbol_size // 2
+        
+        points = [
+            (center_x - half_width, center_y - half_height),
+            (center_x - half_width, center_y + half_height),
+            (center_x + half_width * 2, center_y)
+        ]
+        draw.polygon(points, fill=(r, g, b, 255))
+        
+    elif shape == "stop":
+        # Draw stop square - make it larger
+        x0 = padding
+        y0 = padding
+        x1 = size - padding
+        y1 = size - padding
+        draw.rectangle([x0, y0, x1, y1], fill=(r, g, b, 255))
+        
+    elif shape == "pause":
+        # Draw pause bars - make them larger with more space
+        bar_width = symbol_size // 4  # Wider bars
+        gap = symbol_size // 6  # Larger gap
+        total_width = (bar_width * 2) + gap
+        
+        # Center the pause symbol
+        start_x = (size - total_width) // 2
+        
+        # Left bar
+        x0 = start_x
+        y0 = padding
+        x1 = x0 + bar_width
+        y1 = size - padding
+        draw.rectangle([x0, y0, x1, y1], fill=(r, g, b, 255))
+        
+        # Right bar
+        x0 = start_x + bar_width + gap
+        y0 = padding
+        x1 = x0 + bar_width
+        y1 = size - padding
+        draw.rectangle([x0, y0, x1, y1], fill=(r, g, b, 255))
+    
+    return ctk.CTkImage(light_image=img, dark_image=img, size=(size, size))
 
 
 def _format_duration(seconds: float) -> str:
@@ -202,6 +270,7 @@ class ControlBar(ctk.CTkFrame):
         self._on_start: callable = None
         self._on_stop: callable = None
         self._on_toggle_logs: callable = None
+        self._on_pause: callable = None
         self._start_disabled_tooltip = None
         
         self._is_running = False
@@ -211,21 +280,24 @@ class ControlBar(ctk.CTkFrame):
         self._build_stats()
         
     def _build_controls(self):
-        controls = ctk.CTkFrame(self, fg_color="transparent", width=100)
+        controls = ctk.CTkFrame(self, fg_color="transparent", width=120)
         controls.pack(side="left", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
         controls.pack_propagate(False)
         
+        # Create custom icons for perfect alignment
+        icon_size = 24  # Slightly smaller than button to allow padding
+        
         # Start button (shown when idle)
+        start_icon = _create_icon(icon_size, Colors.TEXT_PRIMARY, "play")
         self._start_btn = ctk.CTkButton(
             controls,
-            text="▶",
-            font=(Fonts.FAMILY, 20),
+            text="",
+            image=start_icon,
             fg_color=Colors.PRIMARY,
             hover_color=Colors.PRIMARY_HOVER,
-            text_color=Colors.TEXT_PRIMARY,
-            width=48,
-            height=48,
-            corner_radius=24,
+            width=30,
+            height=30,
+            corner_radius=20,
             command=self._handle_start,
         )
         self._start_btn.pack(side="left")
@@ -233,17 +305,31 @@ class ControlBar(ctk.CTkFrame):
         self._start_btn_normal_hover = Colors.PRIMARY_HOVER
         
         # Stop button (shown when running)
+        stop_icon = _create_icon(icon_size, Colors.TEXT_PRIMARY, "stop")
         self._stop_btn = ctk.CTkButton(
             controls,
-            text="■",
-            font=(Fonts.FAMILY, 20),
+            text="",
+            image=stop_icon,
             fg_color=Colors.STATUS_ERROR,
             hover_color="#b91c1c",
-            text_color=Colors.TEXT_PRIMARY,
-            width=48,
-            height=48,
-            corner_radius=24,
+            width=30,
+            height=30,
+            corner_radius=20,
             command=self._handle_stop,
+        )
+        
+        # Pause button (shown when running)
+        pause_icon = _create_icon(icon_size, Colors.TEXT_PRIMARY, "pause")
+        self._pause_btn = ctk.CTkButton(
+            controls,
+            text="",
+            image=pause_icon,
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            width=30,
+            height=30,
+            corner_radius=20,
+            command=self._handle_pause,
         )
         
     def _build_progress(self):
@@ -258,7 +344,7 @@ class ControlBar(ctk.CTkFrame):
             text_color=Colors.TEXT_PRIMARY,
             anchor="w",
         )
-        self._filename_label.pack(fill="x")
+        self._filename_label.pack(fill="x", padx=(12, 0))
         
         # Progress bar row
         bar_row = ctk.CTkFrame(progress_area, fg_color="transparent")
@@ -271,7 +357,7 @@ class ControlBar(ctk.CTkFrame):
             progress_color=Colors.PRIMARY,
             corner_radius=4,
         )
-        self._progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 12))
+        self._progress_bar.pack(side="left", fill="x", expand=True, padx=(12, 12))
         self._progress_bar.set(0)
         
         self._percent_label = ctk.CTkLabel(
@@ -357,10 +443,15 @@ class ControlBar(ctk.CTkFrame):
         if self._on_toggle_logs:
             self._on_toggle_logs()
             
-    def set_callbacks(self, on_start=None, on_stop=None, on_toggle_logs=None):
+    def _handle_pause(self):
+        if self._on_pause:
+            self._on_pause()
+            
+    def set_callbacks(self, on_start=None, on_stop=None, on_toggle_logs=None, on_pause=None):
         self._on_start = on_start
         self._on_stop = on_stop
         self._on_toggle_logs = on_toggle_logs
+        self._on_pause = on_pause
 
     def set_start_enabled(self, enabled: bool, disabled_tooltip: str = ""):
         if enabled:
@@ -383,11 +474,28 @@ class ControlBar(ctk.CTkFrame):
         self._is_running = running
         
         if running:
-            self._start_btn.pack_forget()
-            self._stop_btn.pack(side="left")
+            if self._start_btn.winfo_ismapped():
+                self._start_btn.pack_forget()
+            if not self._stop_btn.winfo_ismapped():
+                self._stop_btn.pack(side="left")
+            if not self._pause_btn.winfo_ismapped():
+                self._pause_btn.pack(side="left", padx=(6, 0))
+            # Update pause button icon based on paused state
+            if paused:
+                # Show play icon when paused
+                play_icon = _create_icon(24, Colors.TEXT_PRIMARY, "play")
+                self._pause_btn.configure(image=play_icon)
+            else:
+                # Show pause icon when running
+                pause_icon = _create_icon(24, Colors.TEXT_PRIMARY, "pause")
+                self._pause_btn.configure(image=pause_icon)
         else:
-            self._stop_btn.pack_forget()
-            self._start_btn.pack(side="left")
+            if self._stop_btn.winfo_ismapped():
+                self._stop_btn.pack_forget()
+            if self._pause_btn.winfo_ismapped():
+                self._pause_btn.pack_forget()
+            if not self._start_btn.winfo_ismapped():
+                self._start_btn.pack(side="left")
             
     def update_progress(
         self,
