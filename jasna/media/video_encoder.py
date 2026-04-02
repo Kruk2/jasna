@@ -6,7 +6,7 @@ import logging
 import PyNvVideoCodec as nvc
 from pathlib import Path
 from jasna.media import VideoMetadata
-from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
+from jasna.media.rgb_to_p010 import chw_rgb_to_nv12_bt709_limited, chw_rgb_to_p010_bt709_limited
 from jasna.os_utils import get_subprocess_startup_info
 from jasna.media.audio_utils import audio_codec_args
 import av
@@ -29,7 +29,6 @@ def _parse_hevc_nal_units(data: bytes):
     n = len(data)
     
     while i < n - 3:
-        # Find start code (0x000001 or 0x00000001)
         if data[i:i+3] == b'\x00\x00\x01':
             start = i + 3
             sc_len = 3
@@ -40,7 +39,6 @@ def _parse_hevc_nal_units(data: bytes):
             i += 1
             continue
         
-        # Find next start code
         end = start
         while end < n - 3:
             if data[end:end+3] == b'\x00\x00\x01' or (end < n - 4 and data[end:end+4] == b'\x00\x00\x00\x01'):
@@ -50,7 +48,6 @@ def _parse_hevc_nal_units(data: bytes):
             end = n
         
         if start < n:
-            # HEVC NAL unit type is bits 1-6 of first byte
             nal_type = (data[start] >> 1) & 0x3F
             nal_units.append((nal_type, i, end))
         
@@ -61,7 +58,6 @@ def _parse_hevc_nal_units(data: bytes):
 
 def _is_hevc_keyframe(data: bytes) -> bool:
     """Check if HEVC bitstream contains an IDR or CRA frame."""
-    # HEVC NAL types for keyframes: IDR_W_RADL=19, IDR_N_LP=20, CRA_NUT=21, BLA types=16-18
     keyframe_types = {16, 17, 18, 19, 20, 21}
     for nal_type, _, _ in _parse_hevc_nal_units(data):
         if nal_type in keyframe_types:
@@ -71,13 +67,11 @@ def _is_hevc_keyframe(data: bytes) -> bool:
 
 def _extract_hevc_extradata(data: bytes) -> bytes:
     """Extract VPS, SPS, PPS NAL units for codec extradata."""
-    # VPS=32, SPS=33, PPS=34
     param_types = {32, 33, 34}
     extradata_parts = []
     
     for nal_type, start, end in _parse_hevc_nal_units(data):
         if nal_type in param_types:
-            # Include the start code
             extradata_parts.append(data[start-4:end] if data[start-4:start] == b'\x00\x00\x00\x01' else b'\x00\x00\x00\x01' + data[start:end])
     
     return b''.join(extradata_parts)
@@ -179,37 +173,61 @@ class NvidiaVideoEncoder:
         temp_dir = Path(working_directory) if working_directory is not None else self.output_path.parent
         if working_directory is not None:
             temp_dir.mkdir(parents=True, exist_ok=True)
-        bf = 1 if stream_mode else 4 # 1 or 2?
+        bf = 1 if stream_mode else 4
 
-        #todo for streaming mode enable tuning low latency, disable qpass
+        if codec == 'h264':
+            profile = 'high'
+            fmt = 'NV12'
+        elif codec == 'hevc':
+            profile = 'main10'
+            fmt = 'P010'
+        elif codec == 'av1':
+            profile = 'main'
+            fmt = 'P010'
+        else:
+            profile = 'main'
+            fmt = 'NV12'
+
         encoder_options = {
             'codec': codec,
             'preset': 'P5',
-            'tuning_info': 'high_quality',
-            'profile': 'main10',
+            'profile': profile,
             'rc': 'vbr',
-            "cq": 25,
-            "qmin": 17,
-            "qmax": 34,
-            # 'rc': 'constqp',
-            # 'constqp': 21,
-            'nonrefp': 1,
-            # 'multipass': 'qres', # lower psnr
-            'gop': 250,
             'fps': float(metadata.video_fps_exact),
-            "maxbitrate": 0,
-            # "maxbitrate": 153600,
-            "vbvinit": 0,
-            "vbvbufsize": 0,
-            'temporalaq': 1,
-            'lookahead': 32,
-            'lookahead_level': 1,
-            'aq': 8,
-            "initqp": 17,
-            'bf': bf,
-            'tflevel': 0,
-            "bref": 2 if not stream_mode else 0,
         }
+
+        if codec == 'hevc':
+            encoder_options.update({
+                'tuning_info': 'high_quality',
+                'cq': 25,
+                'qmin': 17,
+                'qmax': 34,
+                'nonrefp': 1,
+                'gop': 250,
+                'maxbitrate': 0,
+                'vbvinit': 0,
+                'vbvbufsize': 0,
+                'temporalaq': 1,
+                'lookahead': 32,
+                'lookahead_level': 1,
+                'aq': 8,
+                'initqp': 17,
+                'bf': bf,
+                'tflevel': 0,
+                'bref': 2 if not stream_mode else 0,
+            })
+        elif codec == 'h264':
+            encoder_options.update({
+                'tuning_info': 'high_quality',
+                'bitrate': 10000000,
+                'maxbitrate': 20000000,
+                'bf': bf,
+            })
+        elif codec == 'av1':
+            encoder_options.update({
+                'bitrate': 10000000,
+                'maxbitrate': 20000000,
+            })
 
         if encoder_settings:
             encoder_options.update(encoder_settings)
@@ -221,10 +239,12 @@ class NvidiaVideoEncoder:
             height=metadata.video_height,
             gpu_id=gpu_id,
             cudastream=self.stream.cuda_stream,
-            fmt="P010",
+            fmt=fmt,
             usecpuinputbuffer=False,
             **encoder_options
         )
+        
+        self._codec = codec
 
         self.BUFFER_MAX_SIZE = 8
         self.pts_heap = []
@@ -357,8 +377,11 @@ class NvidiaVideoEncoder:
         self.reordered_pts_queue.append(pts)
 
         with torch.cuda.stream(self.stream):
-            p010 = chw_rgb_to_p010_bt709_limited(frame)
-            bitstream = self.encoder.Encode(p010)
+            if self._codec == 'hevc' or self._codec == 'av1':
+                yuv = chw_rgb_to_p010_bt709_limited(frame)
+            else:
+                yuv = chw_rgb_to_nv12_bt709_limited(frame)
+            bitstream = self.encoder.Encode(yuv)
 
         if len(bitstream) > 0:
             data = bytearray(bitstream)

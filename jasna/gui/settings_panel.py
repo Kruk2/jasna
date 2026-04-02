@@ -749,10 +749,11 @@ class SettingsPanel(ctk.CTkFrame):
         codec_tip.pack(side="left", padx=4)
         Tooltip(codec_tip, get_tooltip("codec"))
         self._widgets["codec"] = ctk.CTkOptionMenu(
-            row1, values=["HEVC"],
+            row1, values=["H.264", "HEVC", "AV1"],
             fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY, width=100
+            text_color=Colors.TEXT_PRIMARY, width=100,
+            command=lambda v: self._on_codec_changed(v)
         )
         self._widgets["codec"].pack(side="right")
         self._widgets["codec"].set("HEVC")
@@ -770,7 +771,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["encoder_cq_val"] = ctk.CTkLabel(row2, text="22", text_color=Colors.TEXT_PRIMARY, width=30)
         self._widgets["encoder_cq_val"].pack(side="right")
         self._widgets["encoder_cq"] = ctk.CTkSlider(
-            row2, from_=15, to=35, number_of_steps=20,
+            row2, from_=15, to=41, number_of_steps=26,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
             width=160, command=lambda v: self._widgets["encoder_cq_val"].configure(text=str(int(v)))
         )
@@ -1002,6 +1003,10 @@ class SettingsPanel(ctk.CTkFrame):
     def _on_toggle_change(self, key: str):
         self._mark_modified()
         
+    def _on_codec_changed(self, codec: str):
+        """Handle codec selection change."""
+        self._mark_modified()
+        
     def _on_secondary_changed(self):
         secondary = self._widgets["secondary_var"].get()
         self._tvai_frame.pack_forget()
@@ -1039,6 +1044,11 @@ class SettingsPanel(ctk.CTkFrame):
         }
         denoise_strength = denoise_strength_map.get(self._widgets["denoise_strength"].get(), "none")
         
+        # Convert codec name - remove dots for PyNvVideoCodec compatibility
+        codec_value = self._widgets["codec"].get().lower()
+        if codec_value == "h.264":
+            codec_value = "h264"
+        
         return AppSettings(
             batch_size=4,  # Fixed default value
             max_clip_size=int(self._widgets["max_clip_size"].get()),
@@ -1059,7 +1069,7 @@ class SettingsPanel(ctk.CTkFrame):
             detection_model=self._widgets["detection_model"].get(),
             detection_score_threshold=float(self._widgets["detection_score_threshold"].get()),
             compile_basicvsrpp=self._widgets["compile_basicvsrpp"].get() == 1,
-            codec=self._widgets["codec"].get().lower(),
+            codec=codec_value,
             encoder_cq=int(self._widgets["encoder_cq"].get()),
             encoder_custom_args=self._widgets["encoder_custom_args"].get(),
             file_conflict=file_conflict,
