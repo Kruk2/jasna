@@ -10,6 +10,12 @@ from typing import Callable
 from jasna import os_utils
 
 
+class PostExportAction(Enum):
+    NONE = "none"
+    SHUTDOWN = "shutdown"
+    CUSTOM_COMMAND = "custom_command"
+
+
 def get_settings_path() -> Path:
     return os_utils.get_user_config_dir("jasna") / "settings.json"
 
@@ -95,6 +101,10 @@ class AppSettings:
     codec: str = "hevc"
     encoder_cq: int = 22
     encoder_custom_args: str = ""
+    
+    # Post-export action
+    post_export_action: str = "none"  # none, shutdown, custom_command
+    post_export_custom_command: str = ""
     
     # Output
     output_same_as_input: bool = True

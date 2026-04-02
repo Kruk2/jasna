@@ -262,6 +262,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._build_advanced_section()
         self._build_secondary_section()
         self._build_encoding_section()
+        self._build_post_export_section()
         
     def _build_basic_section(self):
         section = CollapsibleSection(self._scroll, t("section_basic"), expanded=True)
@@ -819,6 +820,72 @@ class SettingsPanel(ctk.CTkFrame):
         )
         workdir_browse_btn.pack(side="right")
 
+    def _build_post_export_section(self):
+        section = CollapsibleSection(self._scroll, t("section_post_export"), expanded=False)
+        section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        content = section.content
+        content.configure(corner_radius=Sizing.BORDER_RADIUS)
+        
+        inner = ctk.CTkFrame(content, fg_color="transparent")
+        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+        
+        # Post-export action dropdown
+        row1 = ctk.CTkFrame(inner, fg_color="transparent")
+        row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        
+        action_label = ctk.CTkLabel(row1, text=t("post_export_action"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        action_label.pack(side="left")
+        action_tip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        action_tip.pack(side="left", padx=4)
+        Tooltip(action_tip, get_tooltip("post_export_action"))
+        
+        # Store mapping from display to internal values
+        self._post_export_action_values = {
+            t("post_export_none"): "none",
+            t("post_export_shutdown"): "shutdown",
+            t("post_export_custom_command"): "custom_command",
+        }
+        action_options = list(self._post_export_action_values.keys())
+        
+        self._widgets["post_export_action"] = ctk.CTkOptionMenu(
+            row1, values=action_options,
+            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            width=160, command=self._on_post_export_action_changed
+        )
+        self._widgets["post_export_action"].pack(side="right")
+        self._widgets["post_export_action"].set(t("post_export_none"))
+        
+        # Custom command entry (hidden by default)
+        self._post_export_command_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
+        
+        command_inner = ctk.CTkFrame(self._post_export_command_frame, fg_color="transparent")
+        command_inner.pack(fill="x", padx=12, pady=12)
+        
+        command_label = ctk.CTkLabel(command_inner, text=t("post_export_custom_command_label"), text_color=Colors.TEXT_PRIMARY)
+        command_label.pack(side="left")
+        command_tip = ctk.CTkLabel(command_inner, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        command_tip.pack(side="left", padx=4)
+        Tooltip(command_tip, get_tooltip("post_export_custom_command"))
+        
+        command_input_row = ctk.CTkFrame(command_inner, fg_color="transparent")
+        command_input_row.pack(fill="x", pady=(8, 0))
+        self._widgets["post_export_custom_command"] = ctk.CTkEntry(
+            command_input_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("post_export_custom_command_placeholder")
+        )
+        self._widgets["post_export_custom_command"].pack(fill="x")
+
+    def _on_post_export_action_changed(self, value: str):
+        """Handle post-export action setting change."""
+        # Show/hide custom command input
+        if value == t("post_export_custom_command"):
+            self._post_export_command_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        else:
+            self._post_export_command_frame.pack_forget()
+        self._mark_modified()
+
     def _on_preset_changed(self, preset_display_name: str):
         # Strip modified indicator if present
         if preset_display_name.endswith(" (Modified)*"):
@@ -917,6 +984,19 @@ class SettingsPanel(ctk.CTkFrame):
 
         self._widgets["working_directory"].delete(0, "end")
         self._widgets["working_directory"].insert(0, getattr(preset, "working_directory", "") or "")
+        self._widgets["working_directory"].delete(0, "end")
+        self._widgets["working_directory"].insert(0, getattr(preset, "working_directory", "") or "")
+
+        # Post-export action
+        post_export_display = {
+            "none": t("post_export_none"),
+            "shutdown": t("post_export_shutdown"),
+            "custom_command": t("post_export_custom_command"),
+        }
+        self._widgets["post_export_action"].set(post_export_display.get(preset.post_export_action, t("post_export_none")))
+        self._widgets["post_export_custom_command"].delete(0, "end")
+        self._widgets["post_export_custom_command"].insert(0, getattr(preset, "post_export_custom_command", "") or "")
+        self._on_post_export_action_changed(self._widgets["post_export_action"].get())
 
         # File conflict setting
         file_conflict_display = {
@@ -1023,6 +1103,14 @@ class SettingsPanel(ctk.CTkFrame):
         }
         file_conflict = file_conflict_map.get(self._widgets["file_conflict"].get(), "auto_rename")
         
+        # Map translated post-export action value back to internal value
+        post_export_action_map = {
+            t("post_export_none"): "none",
+            t("post_export_shutdown"): "shutdown",
+            t("post_export_custom_command"): "custom_command",
+        }
+        post_export_action = post_export_action_map.get(self._widgets["post_export_action"].get(), "none")
+        
         # Map translated denoise_step value back to internal value
         denoise_step_map = {
             t("after_primary"): "after_primary",
@@ -1062,6 +1150,8 @@ class SettingsPanel(ctk.CTkFrame):
             codec=self._widgets["codec"].get().lower(),
             encoder_cq=int(self._widgets["encoder_cq"].get()),
             encoder_custom_args=self._widgets["encoder_custom_args"].get(),
+            post_export_action=post_export_action,
+            post_export_custom_command=self._widgets["post_export_custom_command"].get(),
             file_conflict=file_conflict,
             working_directory=self._widgets["working_directory"].get().strip(),
         )

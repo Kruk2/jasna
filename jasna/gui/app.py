@@ -233,6 +233,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             on_progress=self._on_processor_progress,
             on_log=self._on_processor_log,
             on_complete=self._on_processor_complete,
+            on_shutdown_requested=self._on_shutdown_requested,
         )
 
     def _start_system_stats_poller(self):
@@ -462,6 +463,31 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._queue_panel.set_running(False)
         except Exception:
             pass
+
+    def _on_shutdown_requested(self):
+        """Handle shutdown request from post-export action."""
+        import tkinter.messagebox as messagebox
+        import subprocess
+        
+        self._log_panel.info("Shutdown requested - showing confirmation dialog")
+        
+        # Show confirmation dialog with 30 second timeout
+        result = messagebox.askyesno(
+            "Shutdown System",
+            "Processing completed. The system will shutdown in 30 seconds.\n\nDo you want to shutdown now?",
+            icon="warning"
+        )
+        
+        if result:
+            self._log_panel.info("User confirmed shutdown - initiating system shutdown")
+            try:
+                # Windows shutdown command
+                subprocess.Popen(["shutdown", "/s", "/t", "0"], shell=True)
+            except Exception as e:
+                self._log_panel.error(f"Failed to initiate shutdown: {e}")
+                messagebox.showerror("Shutdown Failed", f"Failed to initiate shutdown: {e}")
+        else:
+            self._log_panel.info("User cancelled shutdown")
         
     def _on_language_changed(self, lang_name: str):
         """Handle language selection change."""

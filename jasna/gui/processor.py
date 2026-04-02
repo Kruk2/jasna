@@ -1,5 +1,7 @@
 """Background processor for video processing jobs."""
 
+import logging
+import subprocess
 import threading
 import traceback
 import queue
@@ -8,8 +10,10 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Callable
 
-from jasna.gui.models import JobItem, JobStatus, AppSettings
+from jasna.gui.models import JobItem, JobStatus, AppSettings, PostExportAction
 from jasna.media import UnsupportedColorspaceError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -43,10 +47,12 @@ class Processor:
         on_progress: Callable[[ProgressUpdate], None] = None,
         on_log: Callable[[str, str], None] = None,
         on_complete: Callable[[], None] = None,
+        on_shutdown_requested: Callable[[], None] = None,
     ):
         self._on_progress = on_progress
         self._on_log = on_log
         self._on_complete = on_complete
+        self._on_shutdown_requested = on_shutdown_requested
         
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -135,6 +141,7 @@ class Processor:
             self._log("INFO", "Processing stopped by user")
         else:
             self._log("INFO", "Processing completed")
+            self._execute_post_export_action()
         if self._on_complete:
             self._on_complete()
             
@@ -398,3 +405,24 @@ class Processor:
             counter += 1
             if counter > 9999:
                 raise RuntimeError(f"Could not find unique filename after 9999 attempts: {output_path}")
+
+    def _execute_post_export_action(self):
+        """Execute post-export action if configured."""
+        if not self._settings:
+            return
+            
+        action = self._settings.post_export_action
+        if action == PostExportAction.NONE.value:
+            return
+        elif action == PostExportAction.SHUTDOWN.value:
+            logger.info("Post-export action: Shutdown requested")
+            if self._on_shutdown_requested:
+                self._on_shutdown_requested()
+        elif action == PostExportAction.CUSTOM_COMMAND.value:
+            command = self._settings.post_export_custom_command.strip()
+            if command:
+                logger.info(f"Post-export action: Executing custom command: {command}")
+                try:
+                    subprocess.Popen(command, shell=True)
+                except Exception as e:
+                    logger.error(f"Failed to execute custom command '{command}': {e}")

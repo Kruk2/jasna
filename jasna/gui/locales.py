@@ -173,6 +173,15 @@ TRANSLATIONS = {
         "quality_cq": "Quality (CQ)",
         "custom_args": "Custom Args",
         
+        # Post-Export Action
+        "section_post_export": "Post-Export Action",
+        "post_export_action": "Action",
+        "post_export_none": "None",
+        "post_export_shutdown": "Shutdown PC",
+        "post_export_custom_command": "Custom Command",
+        "post_export_custom_command_label": "Command",
+        "post_export_custom_command_placeholder": "e.g. notepad.exe",
+        
         # Control Bar
         "btn_start": "▶ Start",
         "btn_pause": "⏸ Pause",
@@ -242,6 +251,8 @@ TRANSLATIONS = {
         "bmc_support": "Support",
         
         # Tooltips
+        "tip_post_export_action": "Action to perform after all jobs complete:\n- None: Do nothing\n- Shutdown PC: Shut down the computer (with 30-second confirmation)\n- Custom Command: Run a custom command\nDefault: None",
+        "tip_post_export_custom_command": "Command to execute when Custom Command is selected.\nCan be any executable or script.\nExample: notepad.exe",
         "tip_max_clip_size": "How many frames are processed at once. Larger values can improve quality but use more VRAM.\n\nRecommended: 60 or higher. Use 60 even if it means disabling model compilation.\nGuidance: 60 (safe), 90 (good balance), 180 (best quality, needs 12 GB+ VRAM with Compile BasicVSR++ enabled, less with it disabled).\n4K videos use more VRAM — a lower clip size may produce similar quality but process much faster.\nDefault: 90",
         "tip_temporal_overlap": "Overlap between processed clips to reduce flickering at boundaries.\nHigher = smoother transitions but slightly slower. Going above 20 has little benefit.\n\nRecommended values based on clip size:\n- Clip 60 → overlap 6-8\n- Clip 90 → overlap 8-12\n- Clip 180 → overlap 15-20\nDefault: 8",
         "tip_enable_crossfade": "Smoothly blends clip boundaries to reduce flickering. Reuses already-processed frames so there is zero extra GPU cost.\n\nRecommended: Always ON.\nDefault: ON",
@@ -445,6 +456,15 @@ TRANSLATIONS = {
         "quality_cq": "质量 (CQ)",
         "custom_args": "自定义参数",
         
+        # Post-Export Action
+        "section_post_export": "导出后操作",
+        "post_export_action": "操作",
+        "post_export_none": "无",
+        "post_export_shutdown": "关机",
+        "post_export_custom_command": "自定义命令",
+        "post_export_custom_command_label": "命令",
+        "post_export_custom_command_placeholder": "例如 notepad.exe",
+        
         # Control Bar
         "btn_start": "▶ 开始",
         "btn_pause": "⏸ 暂停",
@@ -514,6 +534,8 @@ TRANSLATIONS = {
         "bmc_support": "支持",
         
         # Tooltips
+        "tip_post_export_action": "所有任务完成后的操作：\n- 无：不执行任何操作\n- 关机：关闭计算机（有 30 秒确认时间）\n- 自定义命令：运行自定义命令\n默认值：无",
+        "tip_post_export_custom_command": "选择自定义命令时要执行的命令。\n可以是任何可执行文件或脚本。\n示例：notepad.exe",
         "tip_max_clip_size": "一次处理多少帧画面。数值越大，效果可能越好，但占用更多显存。\n\n建议：60 或更高。即使需要关闭模型编译，也建议至少使用 60。\n参考：60（安全）、90（平衡）、180（最佳质量，开启「Compile BasicVSR++」时需要 12GB+ 显存，关闭则更少）。\n4K 视频占用更多显存——较小的片段大小可能产生类似的质量，但处理速度快得多。\n默认值：90",
         "tip_temporal_overlap": "处理片段之间的重叠帧数，用于减少拼接处的闪烁。\n数值越高过渡越平滑，但速度稍慢。超过 20 效果提升不明显。\n\n根据片段大小推荐：\n- 片段 60 → 重叠 6-8\n- 片段 90 → 重叠 8-12\n- 片段 180 → 重叠 15-20\n默认值：8",
         "tip_enable_crossfade": "在片段边界处进行平滑过渡，减少画面闪烁。使用已处理的帧，不会增加任何额外 GPU 开销。\n\n建议：始终开启。\n默认值：开启",
@@ -717,6 +739,15 @@ TRANSLATIONS = {
         "quality_cq": "品質 (CQ)",
         "custom_args": "カスタム引数",
 
+        # Post-Export Action
+        "section_post_export": "エクスポート後のアクション",
+        "post_export_action": "アクション",
+        "post_export_none": "なし",
+        "post_export_shutdown": "PC をシャットダウン",
+        "post_export_custom_command": "カスタムコマンド",
+        "post_export_custom_command_label": "コマンド",
+        "post_export_custom_command_placeholder": "例: notepad.exe",
+
         # Control Bar
         "btn_start": "▶ 開始",
         "btn_pause": "⏸ 一時停止",
@@ -786,6 +817,8 @@ TRANSLATIONS = {
         "bmc_support": "応援する",
 
         # Tooltips
+        "tip_post_export_action": "すべてのジョブ完了後のアクション：\n- なし：何もしない\n- PC をシャットダウン：コンピュータをシャットダウン（30秒の確認あり）\n- カスタムコマンド：カスタムコマンドを実行\nデフォルト：なし",
+        "tip_post_export_custom_command": "カスタムコマンド選択時に実行するコマンド。\n任意の実行可能ファイルやスクリプトが使用できます。\n例：notepad.exe",
         "tip_max_clip_size": "一度に処理するフレーム数です。大きいほど品質が向上する可能性がありますが、VRAM を多く使います。\n\n推奨：60 以上。モデルコンパイルを無効にしてでも 60 は維持しましょう。\n目安：60（安全）、90（バランス良）、180（最高品質、Compile BasicVSR++ 有効時 12GB 以上の VRAM が必要、無効なら少なめ）。\n4K 動画は VRAM を多く使います。クリップサイズを下げても同等の品質で大幅に高速化できます。\nデフォルト：90",
         "tip_temporal_overlap": "処理クリップ間の重なりフレーム数で、つなぎ目のちらつきを軽減します。\n大きいほど滑らかですがやや遅くなります。20 を超えても効果はほとんど変わりません。\n\nクリップサイズ別の推奨値：\n- クリップ 60 → オーバーラップ 6-8\n- クリップ 90 → オーバーラップ 8-12\n- クリップ 180 → オーバーラップ 15-20\nデフォルト：8",
         "tip_enable_crossfade": "クリップの境目を滑らかにつなぎ、ちらつきを軽減します。処理済みフレームを再利用するため、追加の GPU 負荷はゼロです。\n\n推奨：常に ON。\nデフォルト：ON",
@@ -987,6 +1020,15 @@ TRANSLATIONS = {
         "quality_cq": "품질 (CQ)",
         "custom_args": "사용자 정의 인수",
 
+        # Post-Export Action
+        "section_post_export": "내보내기 후 작업",
+        "post_export_action": "작업",
+        "post_export_none": "없음",
+        "post_export_shutdown": "PC 종료",
+        "post_export_custom_command": "사용자 정의 명령",
+        "post_export_custom_command_label": "명령",
+        "post_export_custom_command_placeholder": "예: notepad.exe",
+
         # Control Bar
         "btn_start": "▶ 시작",
         "btn_pause": "⏸ 일시 정지",
@@ -1056,6 +1098,8 @@ TRANSLATIONS = {
         "bmc_support": "후원",
 
         # Tooltips
+        "tip_post_export_action": "모든 작업 완료 후 수행할 작업:\n- 없음: 아무것도 하지 않음\n- PC 종료: 컴퓨터 종료 (30초 확인 시간 있음)\n- 사용자 정의 명령: 사용자 정의 명령 실행\n기본값: 없음",
+        "tip_post_export_custom_command": "사용자 정의 명령 선택 시 실행할 명령.\n모든 실행 파일이나 스크립트를 사용할 수 있습니다.\n예: notepad.exe",
         "tip_max_clip_size": "한 번에 처리할 프레임 수입니다. 클수록 품질이 좋아질 수 있지만 VRAM을 더 많이 사용합니다.\n\n권장: 60 이상. 모델 컴파일을 끄더라도 최소 60을 유지하세요.\n참고: 60 (안전), 90 (균형), 180 (최고 품질, Compile BasicVSR++ 활성화 시 12GB+ VRAM 필요, 비활성화 시 더 적음).\n4K 영상은 VRAM을 더 많이 사용합니다. 클립 크기를 낮춰도 비슷한 품질로 훨씬 빠르게 처리할 수 있습니다.\n기본값: 90",
         "tip_temporal_overlap": "처리 클립 간 겹치는 프레임 수로, 경계의 깜빡임을 줄여줍니다.\n높을수록 부드럽지만 약간 느려집니다. 20을 넘으면 효과 차이가 거의 없습니다.\n\n클립 크기별 권장값:\n- 클립 60 → 오버랩 6-8\n- 클립 90 → 오버랩 8-12\n- 클립 180 → 오버랩 15-20\n기본값: 8",
         "tip_enable_crossfade": "클립 경계를 부드럽게 연결하여 깜빡임을 줄여줍니다. 이미 처리된 프레임을 재활용하므로 추가 GPU 부담이 전혀 없습니다.\n\n권장: 항상 켜기.\n기본값: 켜기",
@@ -1259,6 +1303,15 @@ TRANSLATIONS = {
         "quality_cq": "คุณภาพ (CQ)",
         "custom_args": "อาร์กิวเมนต์กำหนดเอง",
 
+        # Post-Export Action
+        "section_post_export": "การดำเนินการหลังส่งออก",
+        "post_export_action": "การดำเนินการ",
+        "post_export_none": "ไม่มี",
+        "post_export_shutdown": "ปิดเครื่อง PC",
+        "post_export_custom_command": "คำสั่งกำหนดเอง",
+        "post_export_custom_command_label": "คำสั่ง",
+        "post_export_custom_command_placeholder": "เช่น notepad.exe",
+
         # Control Bar
         "btn_start": "▶ เริ่ม",
         "btn_pause": "⏸ หยุดชั่วคราว",
@@ -1328,6 +1381,8 @@ TRANSLATIONS = {
         "bmc_support": "สนับสนุน",
 
         # Tooltips
+        "tip_post_export_action": "การดำเนินการหลังจากงานทั้งหมดเสร็จสิ้น:\n- ไม่มี: ไม่ทำอะไร\n- ปิดเครื่อง PC: ปิดเครื่องคอมพิวเตอร์ (มีเวลา confirm 30 วินาที)\n- คำสั่งกำหนดเอง: รันคำสั่งที่กำหนดเอง\nค่าเริ่มต้น: ไม่มี",
+        "tip_post_export_custom_command": "คำสั่งที่จะรันเมื่อเลือกคำสั่งกำหนดเอง\nสามารถใช้ไฟล์ executable หรือสคริปต์ใดก็ได้\nตัวอย่าง: notepad.exe",
         "tip_max_clip_size": "จำนวนเฟรมที่ประมวลผลต่อครั้ง ค่ามากขึ้นอาจให้คุณภาพดีขึ้นแต่ใช้ VRAM มากขึ้น\n\nแนะนำ: 60 ขึ้นไป แม้ต้องปิดการคอมไพล์โมเดลก็ควรใช้ 60 เป็นอย่างน้อย\nแนวทาง: 60 (ปลอดภัย), 90 (สมดุลดี), 180 (คุณภาพสูงสุด ต้องมี VRAM 12 GB+ เมื่อเปิด Compile BasicVSR++ น้อยกว่าถ้าปิด)\nวิดีโอ 4K ใช้ VRAM มากขึ้น — ขนาดคลิปที่เล็กกว่าอาจให้คุณภาพใกล้เคียงแต่ประมวลผลเร็วกว่ามาก\nค่าเริ่มต้น: 90",
         "tip_temporal_overlap": "เฟรมซ้อนทับระหว่างคลิปเพื่อลดการกะพริบที่รอยต่อ\nค่ามาก = การเปลี่ยนผ่านราบรื่นขึ้นแต่ช้าลงเล็กน้อย เกิน 20 แทบไม่ต่างกัน\n\nค่าแนะนำตามขนาดคลิป:\n- คลิป 60 → ซ้อนทับ 6-8\n- คลิป 90 → ซ้อนทับ 8-12\n- คลิป 180 → ซ้อนทับ 15-20\nค่าเริ่มต้น: 8",
         "tip_enable_crossfade": "ผสานรอยต่อของคลิปให้ราบรื่นเพื่อลดการกะพริบ ใช้เฟรมที่ประมวลผลแล้วจึงไม่มีภาระ GPU เพิ่ม\n\nแนะนำ: เปิดเสมอ\nค่าเริ่มต้น: เปิด",
