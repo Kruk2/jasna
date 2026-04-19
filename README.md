@@ -130,7 +130,7 @@ I do this to dedicate more time on important features and if you want to help Pu
 ## Building
 Install these libs via ```uv pip install . --no-build-isolation```\
 To build nvidia libs below you need also VS Build Tools 2022 (c++)
-make sure you have cmake and ninja ```uv pip install cmake ninja```\
+make sure you have cmake, ninja, wheel-stub ```uv pip install cmake ninja wheel-stub```\
 and cuda 13.0 in your system.
 
 ### Running from source (developer setup)
