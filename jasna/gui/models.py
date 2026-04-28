@@ -95,6 +95,7 @@ class AppSettings:
     codec: str = "hevc"
     encoder_cq: int = 22
     encoder_custom_args: str = ""
+    lut_path: str = ""
     
     # Output
     output_same_as_input: bool = True

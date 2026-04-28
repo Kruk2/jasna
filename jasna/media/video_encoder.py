@@ -6,6 +6,7 @@ import logging
 import PyNvVideoCodec as nvc
 from pathlib import Path
 from jasna.media import VideoMetadata
+from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
 from jasna.os_utils import get_subprocess_startup_info
 from jasna.media.audio_utils import audio_codec_args
@@ -169,12 +170,18 @@ class NvidiaVideoEncoder:
         encoder_settings: dict[str, object],
         stream_mode: bool = False,
         working_directory: Path | None = None,
+        lut_path: str | Path | None = None,
     ):
         self.metadata = metadata
         self.device = device
         self.file = file
         self.output_path = Path(file)
         self.stream_mode = stream_mode
+
+        self._lut_applier: GpuLutApplier | None = None
+        if lut_path:
+            lut = parse_cube_file(lut_path)
+            self._lut_applier = GpuLutApplier(lut, device)
 
         temp_dir = Path(working_directory) if working_directory is not None else self.output_path.parent
         if working_directory is not None:
@@ -357,6 +364,8 @@ class NvidiaVideoEncoder:
         self.reordered_pts_queue.append(pts)
 
         with torch.cuda.stream(self.stream):
+            if self._lut_applier is not None:
+                frame = self._lut_applier.apply(frame)
             p010 = chw_rgb_to_p010_bt709_limited(frame)
             bitstream = self.encoder.Encode(p010)
 

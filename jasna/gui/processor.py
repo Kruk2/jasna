@@ -337,6 +337,7 @@ class Processor:
                 ))
 
             working_directory = Path(settings.working_directory) if (settings.working_directory or "").strip() else None
+            lut_path = (getattr(settings, "lut_path", "") or "").strip() or None
             pipeline = Pipeline(
                 input_video=input_path,
                 output_video=output_path,
@@ -355,6 +356,7 @@ class Processor:
                 disable_progress=True,
                 progress_callback=progress_callback,
                 working_directory=working_directory,
+                lut_path=lut_path,
             )
 
             pipeline.run()

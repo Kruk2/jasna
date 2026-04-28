@@ -819,6 +819,39 @@ class SettingsPanel(ctk.CTkFrame):
         )
         workdir_browse_btn.pack(side="right")
 
+        # LUT (color correction)
+        lut_row = ctk.CTkFrame(inner, fg_color="transparent")
+        lut_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        lut_label = ctk.CTkLabel(lut_row, text=t("lut_path"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        lut_label.pack(side="left")
+        lut_tip = ctk.CTkLabel(lut_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        lut_tip.pack(side="left", padx=4)
+        Tooltip(lut_tip, get_tooltip("lut_path"))
+
+        lut_input_row = ctk.CTkFrame(inner, fg_color="transparent")
+        lut_input_row.pack(fill="x", pady=(4, 0))
+        self._widgets["lut_path"] = ctk.CTkEntry(
+            lut_input_row, fg_color=Colors.BG_CARD, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("lut_path_placeholder"),
+        )
+        self._widgets["lut_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        lut_browse_btn = ctk.CTkButton(
+            lut_input_row, text="📂", width=32, height=28,
+            fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
+            command=self._browse_lut_path,
+        )
+        lut_browse_btn.pack(side="right")
+
+    def _browse_lut_path(self):
+        filepath = filedialog.askopenfilename(
+            title=t("dialog_select_lut"),
+            filetypes=[("Cube LUT", "*.cube"), ("All files", "*.*")],
+        )
+        if filepath:
+            self._widgets["lut_path"].delete(0, "end")
+            self._widgets["lut_path"].insert(0, filepath)
+
     def _on_preset_changed(self, preset_display_name: str):
         # Strip modified indicator if present
         if preset_display_name.endswith(" (Modified)*"):
@@ -917,6 +950,9 @@ class SettingsPanel(ctk.CTkFrame):
 
         self._widgets["working_directory"].delete(0, "end")
         self._widgets["working_directory"].insert(0, getattr(preset, "working_directory", "") or "")
+
+        self._widgets["lut_path"].delete(0, "end")
+        self._widgets["lut_path"].insert(0, getattr(preset, "lut_path", "") or "")
 
         # File conflict setting
         file_conflict_display = {
@@ -1064,6 +1100,7 @@ class SettingsPanel(ctk.CTkFrame):
             encoder_custom_args=self._widgets["encoder_custom_args"].get(),
             file_conflict=file_conflict,
             working_directory=self._widgets["working_directory"].get().strip(),
+            lut_path=self._widgets["lut_path"].get().strip(),
         )
     
     def set_enabled(self, enabled: bool):

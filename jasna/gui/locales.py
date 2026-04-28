@@ -147,6 +147,10 @@ TRANSLATIONS = {
         "working_directory": "Working Directory",
         "working_directory_placeholder": "Optional, same as output folder",
         "dialog_select_working_directory": "Select Working Directory",
+        "lut_path": "Color LUT (.cube)",
+        "lut_path_placeholder": "Optional, path to a .cube LUT file",
+        "dialog_select_lut": "Select Color LUT (.cube)",
+        "tip_lut_path": "Optional .cube color LUT applied on GPU just before encoding.\nSupports both 1D and 3D LUTs (e.g. exported from Adobe Premiere or DaVinci Resolve).\nUseful for fixing raised blacks, white balance, etc. without an extra encoding pass.",
         
         # Secondary Restoration
         "secondary_none": "None",
@@ -419,6 +423,10 @@ TRANSLATIONS = {
         "working_directory": "工作目录",
         "working_directory_placeholder": "可选，默认与输出文件夹相同",
         "dialog_select_working_directory": "选择工作目录",
+        "lut_path": "色彩 LUT (.cube)",
+        "lut_path_placeholder": "可选，.cube LUT 文件路径",
+        "dialog_select_lut": "选择色彩 LUT (.cube)",
+        "tip_lut_path": "可选的 .cube 色彩 LUT，在编码前由 GPU 应用。\n支持 1D 和 3D LUT（例如 Adobe Premiere 或 DaVinci Resolve 导出的文件）。\n可在不重新编码的情况下修正黑色抬升、白平衡等问题。",
 
         # Secondary Restoration
         "secondary_none": "无",
@@ -691,6 +699,10 @@ TRANSLATIONS = {
         "working_directory": "作業ディレクトリ",
         "working_directory_placeholder": "オプション。未指定の場合は出力フォルダと同じ",
         "dialog_select_working_directory": "作業ディレクトリを選択",
+        "lut_path": "カラー LUT (.cube)",
+        "lut_path_placeholder": "オプション。.cube LUT ファイルのパス",
+        "dialog_select_lut": "カラー LUT (.cube) を選択",
+        "tip_lut_path": "オプションの .cube カラー LUT。エンコード直前に GPU で適用されます。\n1D / 3D LUT 両方に対応（Adobe Premiere や DaVinci Resolve からのエクスポートなど）。\n再エンコードせずに黒浮きやホワイトバランスなどを補正できます。",
 
         # Secondary Restoration
         "secondary_none": "なし",
@@ -962,6 +974,10 @@ TRANSLATIONS = {
         "working_directory": "작업 디렉토리",
         "working_directory_placeholder": "선택 사항, 출력 폴더와 동일",
         "dialog_select_working_directory": "작업 디렉토리 선택",
+        "lut_path": "컬러 LUT (.cube)",
+        "lut_path_placeholder": "선택 사항, .cube LUT 파일 경로",
+        "dialog_select_lut": "컬러 LUT (.cube) 선택",
+        "tip_lut_path": "선택적인 .cube 컬러 LUT. 인코딩 직전에 GPU에서 적용됩니다.\n1D 및 3D LUT 모두 지원합니다 (예: Adobe Premiere, DaVinci Resolve 내보내기).\n재인코딩 없이 검정 들뜸, 화이트 밸런스 등을 보정할 수 있습니다.",
 
         # Secondary Restoration
         "secondary_none": "없음",
@@ -1233,6 +1249,10 @@ TRANSLATIONS = {
         "working_directory": "ไดเรกทอรีทำงาน",
         "working_directory_placeholder": "ไม่บังคับ ใช้โฟลเดอร์เอาต์พุตเดียวกัน",
         "dialog_select_working_directory": "เลือกไดเรกทอรีทำงาน",
+        "lut_path": "คัลเลอร์ LUT (.cube)",
+        "lut_path_placeholder": "ไม่บังคับ พาธไปยังไฟล์ .cube LUT",
+        "dialog_select_lut": "เลือกคัลเลอร์ LUT (.cube)",
+        "tip_lut_path": "ไฟล์ .cube LUT แบบเลือกได้ ใช้บน GPU ก่อนการเข้ารหัสวิดีโอ\nรองรับทั้ง LUT แบบ 1D และ 3D (เช่น ที่ส่งออกจาก Adobe Premiere หรือ DaVinci Resolve)\nช่วยแก้สีดำที่ลอย ไวต์บาลานซ์ ฯลฯ โดยไม่ต้องเข้ารหัสซ้ำ",
 
         # Secondary Restoration
         "secondary_none": "ไม่มี",

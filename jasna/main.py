@@ -236,6 +236,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Directory for encoder temp files (.hevc, temp video). Default: same as output.",
     )
+    encoding.add_argument(
+        "--lut",
+        type=str,
+        default="",
+        help="Path to a .cube color LUT (1D or 3D) applied on GPU before encoding.",
+    )
 
     benchmark_group = parser.add_argument_group("Benchmark")
     benchmark_group.add_argument(
@@ -439,6 +445,11 @@ def main() -> None:
 
         working_directory = Path(args.working_directory) if args.working_directory else None
 
+        lut_arg = str(args.lut).strip()
+        if lut_arg and not Path(lut_arg).exists():
+            raise FileNotFoundError(lut_arg)
+        lut_path = lut_arg or None
+
         def _make_pipeline(vid_input: Path) -> Pipeline:
             return Pipeline(
                 input_video=vid_input,
@@ -457,6 +468,7 @@ def main() -> None:
                 fp16=fp16,
                 disable_progress=args.no_progress,
                 working_directory=working_directory,
+                lut_path=lut_path,
             )
 
         pipeline: Pipeline | None = None
