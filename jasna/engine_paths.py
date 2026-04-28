@@ -2,7 +2,20 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+
+def model_weights_dir() -> Path:
+    """Resolve the ``model_weights`` directory.
+
+    When running as a frozen executable (PyInstaller), models are bundled next
+    to the executable. In a dev / source checkout we fall back to a CWD-relative
+    path so existing dev workflows keep working.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "model_weights"
+    return Path("model_weights")
 
 
 def engine_system_suffix() -> str:
@@ -40,7 +53,7 @@ def get_yolo_tensorrt_engine_path(model_path: str | Path, *, fp16: bool) -> Path
     return get_onnx_tensorrt_engine_path(onnx_path, batch_size=None, fp16=bool(fp16))
 
 
-UNET4X_ONNX_PATH = Path("model_weights") / "unet-4x.onnx"
+UNET4X_ONNX_PATH = model_weights_dir() / "unet-4x.onnx"
 
 
 def get_unet4x_engine_path(onnx_path: str | Path | None = None, fp16: bool = True) -> Path:
