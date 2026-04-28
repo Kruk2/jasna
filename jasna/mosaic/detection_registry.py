@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from jasna.engine_paths import model_weights_dir
+
 RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v2", "rfdetr-v3", "rfdetr-v4", "rfdetr-v5"})
 YOLO_MODEL_NAMES: frozenset[str] = frozenset({"lada-yolo-v2", "lada-yolo-v4"})
 
@@ -24,15 +26,16 @@ def is_yolo_model(name: str) -> bool:
     return name in YOLO_MODEL_NAMES
 
 
-def discover_available_detection_models(model_weights_dir: Path = Path("model_weights")) -> list[str]:
+def discover_available_detection_models(weights_dir: Path | None = None) -> list[str]:
+    weights_dir = weights_dir if weights_dir is not None else model_weights_dir()
     rfdetr_names: list[str] = []
     yolo_names: list[str] = []
-    if model_weights_dir.is_dir():
-        for f in model_weights_dir.iterdir():
+    if weights_dir.is_dir():
+        for f in weights_dir.iterdir():
             if f.suffix == ".onnx" and is_rfdetr_model(f.stem):
                 rfdetr_names.append(f.stem)
         yolo_files_reverse = {v: k for k, v in YOLO_MODEL_FILES.items()}
-        for f in model_weights_dir.iterdir():
+        for f in weights_dir.iterdir():
             if f.name in yolo_files_reverse:
                 yolo_names.append(yolo_files_reverse[f.name])
     rfdetr_names.sort(reverse=True)
@@ -49,11 +52,12 @@ def coerce_detection_model_name(name: str) -> str:
 
 def detection_model_weights_path(name: str) -> Path:
     name = coerce_detection_model_name(name)
+    base = model_weights_dir()
     if is_rfdetr_model(name):
-        return Path("model_weights") / f"{name}.onnx"
+        return base / f"{name}.onnx"
     if is_yolo_model(name):
-        return Path("model_weights") / YOLO_MODEL_FILES[name]
-    return Path("model_weights") / f"{DEFAULT_DETECTION_MODEL_NAME}.onnx"
+        return base / YOLO_MODEL_FILES[name]
+    return base / f"{DEFAULT_DETECTION_MODEL_NAME}.onnx"
 
 
 def precompile_detection_engine(

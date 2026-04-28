@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from jasna import __version__
+from jasna.engine_paths import model_weights_dir
 from jasna.media import UnsupportedColorspaceError
 from jasna.os_utils import (
     check_ascii_install_path,
@@ -58,7 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     restoration.add_argument(
         "--restoration-model-path",
         type=str,
-        default=str(Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"),
+        default=str(model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth"),
         help="Path to restoration model (default: %(default)s)",
     )
     restoration.add_argument(

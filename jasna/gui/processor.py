@@ -236,7 +236,8 @@ class Processor:
         total_frames = metadata.num_frames
         
         # Model paths
-        restoration_model_path = Path("model_weights") / "lada_mosaic_restoration_model_generic_v1.2.pth"
+        from jasna.engine_paths import model_weights_dir
+        restoration_model_path = model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth"
         from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
 
         det_name = coerce_detection_model_name(str(settings.detection_model))
