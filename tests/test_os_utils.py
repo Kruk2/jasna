@@ -434,6 +434,35 @@ def test_check_gpu_driver_version_fails_when_nvidia_smi_not_found(monkeypatch) -
     assert "not found" in info
 
 
+def test_find_executable_falls_back_to_common_location_when_not_on_path(monkeypatch, tmp_path) -> None:
+    fake_smi = tmp_path / "nvidia-smi"
+    fake_smi.write_text("")
+
+    monkeypatch.setattr(os_utils.shutil, "which", lambda name: None)
+    monkeypatch.setitem(os_utils._COMMON_EXECUTABLE_LOCATIONS, "nvidia-smi", (str(fake_smi),))
+
+    assert os_utils.find_executable("nvidia-smi") == str(fake_smi)
+
+
+def test_find_executable_returns_none_when_neither_path_nor_common(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.shutil, "which", lambda name: None)
+    monkeypatch.setitem(os_utils._COMMON_EXECUTABLE_LOCATIONS, "nvidia-smi", ("/nope/nvidia-smi",))
+
+    assert os_utils.find_executable("nvidia-smi") is None
+
+
+def test_find_executable_prefers_path_over_common_locations(monkeypatch, tmp_path) -> None:
+    on_path = tmp_path / "from-path"
+    on_path.write_text("")
+    fallback = tmp_path / "fallback"
+    fallback.write_text("")
+
+    monkeypatch.setattr(os_utils.shutil, "which", lambda name: str(on_path))
+    monkeypatch.setitem(os_utils._COMMON_EXECUTABLE_LOCATIONS, "nvidia-smi", (str(fallback),))
+
+    assert os_utils.find_executable("nvidia-smi") == str(on_path)
+
+
 def test_check_gpu_driver_version_fails_when_nvidia_smi_errors(monkeypatch) -> None:
     monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
 

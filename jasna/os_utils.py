@@ -60,11 +60,35 @@ def _find_bundled_executable(name: str) -> Path | None:
     return None
 
 
+_COMMON_EXECUTABLE_LOCATIONS: dict[str, tuple[str, ...]] = {
+    "nvidia-smi": (
+        # Windows
+        r"C:\Windows\System32\nvidia-smi.exe",
+        r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+        # Linux / WSL
+        "/usr/bin/nvidia-smi",
+        "/usr/local/bin/nvidia-smi",
+        "/usr/local/nvidia/bin/nvidia-smi",
+        "/usr/lib/wsl/lib/nvidia-smi",
+    ),
+}
+
+
+def _find_in_common_locations(name: str) -> str | None:
+    for candidate in _COMMON_EXECUTABLE_LOCATIONS.get(name, ()):
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
 def find_executable(name: str) -> str | None:
     bundled = _find_bundled_executable(name)
     if bundled is not None:
         return str(bundled)
-    return shutil.which(name)
+    found = shutil.which(name)
+    if found is not None:
+        return found
+    return _find_in_common_locations(name)
 
 
 def resolve_executable(name: str) -> str:
