@@ -74,6 +74,7 @@ class Pipeline:
         disable_progress: bool = False,
         progress_callback: callable | None = None,
         working_directory: Path | None = None,
+        lut_path: str | Path | None = None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -106,6 +107,7 @@ class Pipeline:
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback
         self.working_directory = working_directory
+        self.lut_path = lut_path
 
     def close(self) -> None:
         if hasattr(self, "detection_model") and self.detection_model is not None:
@@ -326,6 +328,7 @@ class Pipeline:
             encoder_settings=self.encoder_settings,
             stream_mode=False,
             working_directory=self.working_directory,
+            lut_path=self.lut_path,
         )
         frame_writer = _OfflineFrameWriter(encoder_ctx, encode_heartbeat)
 
