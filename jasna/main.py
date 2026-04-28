@@ -289,7 +289,7 @@ def main() -> None:
     driver_ok, driver_info = check_gpu_driver_version()
     if not driver_ok:
         print(f"Error: GPU driver version check failed: {driver_info}")
-        print("Please update your NVIDIA driver to version 590 or newer.")
+        print("Please update your NVIDIA driver to version 580 or newer.")
         sys.exit(1)
 
     if sys.platform == "win32":

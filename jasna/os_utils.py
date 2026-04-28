@@ -9,7 +9,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MIN_GPU_COMPUTE = (7, 5)
-MIN_DRIVER_VERSION = 590
+MIN_DRIVER_VERSION = 580
 
 
 def check_nvidia_gpu() -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
