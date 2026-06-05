@@ -48,6 +48,9 @@ jasna/settings.json
 .cursor/
 .windsurf/
 
+# Claude
+CLAUDE.md
+
 /test.py
 *.onnx
 *.engine

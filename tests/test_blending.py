@@ -1,7 +1,21 @@
 import pytest
 import torch
+import torch.nn.functional as F
 
-from jasna.tracking.blending import create_blend_mask
+from jasna.tracking.blending import _box_blur, create_blend_mask
+
+
+@pytest.mark.parametrize("kernel_size", [5, 61, 121])
+def test_box_blur_matches_dense_reference(kernel_size: int) -> None:
+    torch.manual_seed(0)
+    x = torch.rand((128, 96))
+
+    pad = kernel_size // 2
+    kernel = torch.ones((1, 1, kernel_size, kernel_size)) / (kernel_size ** 2)
+    x4d = F.pad(x.unsqueeze(0).unsqueeze(0), (pad, pad, pad, pad), mode="reflect")
+    dense = F.conv2d(x4d, kernel).squeeze(0).squeeze(0)
+
+    assert torch.allclose(_box_blur(x, kernel_size), dense, atol=1e-4)
 
 
 def test_create_blend_mask_all_ones_stays_ones() -> None:
