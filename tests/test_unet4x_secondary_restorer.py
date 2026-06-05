@@ -9,9 +9,7 @@ import torch
 from jasna.restorer.unet4x_secondary_restorer import (
     UNET4X_INPUT_SIZE,
     UNET4X_OUTPUT_SIZE,
-    UNET4X_HR_PREV_SIZE,
     Unet4xSecondaryRestorer,
-    rgb_color_transfer,
     get_unet4x_engine_path,
 )
 
@@ -19,8 +17,7 @@ from jasna.restorer.unet4x_secondary_restorer import (
 def _make_fake_runner(device: torch.device, dtype: torch.dtype):
     runner = MagicMock()
     runner.outputs = {
-        "hr_prev_out": torch.rand(1, UNET4X_HR_PREV_SIZE, UNET4X_HR_PREV_SIZE, 3, dtype=dtype, device=device),
-        "hr_display": torch.rand(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=dtype, device=device),
+        "out": torch.rand(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=dtype, device=device),
     }
     return runner
 
@@ -95,31 +92,6 @@ class TestUnet4xSecondaryRestorer:
         assert len(result) == 1
         assert result[0].shape == (3, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE)
         assert result[0].dtype == torch.uint8
-
-
-class TestRgbColorTransfer:
-    def test_output_shape_and_range(self):
-        ai = torch.rand(1, 64, 64, 3)
-        ref = torch.rand(1, 64, 64, 3)
-        result = rgb_color_transfer(ai, ref)
-        assert result.shape == ai.shape
-        assert result.min() >= 0.0
-        assert result.max() <= 1.0
-
-    def test_identity_when_blend_zero(self):
-        ai = torch.rand(1, 32, 32, 3).clamp(0.01, 0.99)
-        ref = torch.rand(1, 32, 32, 3)
-        result = rgb_color_transfer(ai, ref, blend=0.0)
-        torch.testing.assert_close(result, ai, atol=1e-4, rtol=1e-4)
-
-    def test_out_parameter(self):
-        ai = torch.rand(1, 16, 16, 3)
-        ref = torch.rand(1, 16, 16, 3)
-        buf = torch.empty_like(ai)
-        ret = rgb_color_transfer(ai, ref, out=buf)
-        assert ret is buf
-        assert buf.min() >= 0.0
-        assert buf.max() <= 1.0
 
 
 class TestGetUnet4xEnginePath:
