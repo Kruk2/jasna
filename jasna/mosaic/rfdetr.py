@@ -100,13 +100,8 @@ class RfDetrMosaicDetectionModel:
     ) -> tuple[list[np.ndarray], list[torch.Tensor]]:
         b, q, c = pred_logits.shape
         prob = pred_logits.sigmoid()
-        topk_values, topk_indexes = torch.topk(prob.view(b, -1), q, dim=1)
-        keep = topk_values > score_threshold
-        topk_values = topk_values.masked_fill(~keep, float("-inf"))
-
         k = min(max_select, q)
-        topk_values, sel = torch.topk(topk_values, k, dim=1)
-        topk_indexes = topk_indexes.gather(1, sel)
+        topk_values, topk_indexes = torch.topk(prob.view(b, -1), k, dim=1)
         topk_boxes = topk_indexes // c
 
         x_c, y_c, w, h = pred_boxes.unbind(-1)

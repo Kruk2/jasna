@@ -155,6 +155,7 @@ class CropBuffer:
 def prepare_crops_for_restoration(
     raw_crops: list[RawCrop],
     device: torch.device,
+    dtype: torch.dtype,
     restoration_size: int = RESTORATION_SIZE,
 ) -> tuple[list[torch.Tensor], list[tuple[int, int]], list[tuple[int, int]]]:
     crop_shapes = [c.crop_shape for c in raw_crops]
@@ -185,13 +186,13 @@ def prepare_crops_for_restoration(
         pad_offsets.append((pad_left, pad_top))
 
         resized = F.interpolate(
-            raw_crop.crop.unsqueeze(0).float(),
+            raw_crop.crop.unsqueeze(0).to(dtype),
             size=(new_h, new_w),
             mode="bilinear",
             align_corners=False,
         ).squeeze(0)
 
         padded = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
-        resized_crops.append(padded.to(raw_crop.crop.dtype).permute(1, 2, 0))
+        resized_crops.append(padded)
 
     return resized_crops, pad_offsets, resize_shapes

@@ -88,12 +88,12 @@ class Unet4xSecondaryRestorer:
         self._g_lr_prev.copy_(first_frame_nhwc.unsqueeze(0))
         self._g_lr_curr.copy_(first_frame_nhwc.unsqueeze(0))
         hr_init_nchw = F.interpolate(
-            first_frame_nhwc.unsqueeze(0).float().permute(0, 3, 1, 2),
+            first_frame_nhwc.unsqueeze(0).permute(0, 3, 1, 2),
             size=(UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE),
             mode="bilinear",
             align_corners=False,
         )
-        self._g_hr_prev.copy_(hr_init_nchw.permute(0, 2, 3, 1).to(dtype=self._dtype))
+        self._g_hr_prev.copy_(hr_init_nchw.permute(0, 2, 3, 1))
         self._advance_temporal()
 
     def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
@@ -128,7 +128,7 @@ class Unet4xSecondaryRestorer:
             self._advance_temporal()
             result[i - ks].copy_(self._g_hr_prev[0])
 
-        kept_nchw = result.float().permute(0, 3, 1, 2).clamp_(0, 1).mul_(255.0).to(dtype=torch.uint8)
+        kept_nchw = result.permute(0, 3, 1, 2).clamp_(0, 1).mul_(255.0).to(dtype=torch.uint8)
         return list(kept_nchw.unbind(0))
 
     def close(self) -> None:

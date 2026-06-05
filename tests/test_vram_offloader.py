@@ -344,7 +344,7 @@ class TestPrepareCropsJitGuard:
     def test_cpu_crops_stay_on_cpu_device(self):
         crop = torch.randint(0, 255, (3, 40, 40), dtype=torch.uint8)
         raw = RawCrop(crop=crop, enlarged_bbox=(0, 0, 40, 40), crop_shape=(40, 40))
-        result, _, _ = prepare_crops_for_restoration([raw], device=torch.device("cpu"))
+        result, _, _ = prepare_crops_for_restoration([raw], device=torch.device("cpu"), dtype=torch.float32)
         assert len(result) == 1
         assert result[0].device.type == "cpu"
 

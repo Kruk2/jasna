@@ -135,7 +135,7 @@ def test_raw_process_produces_contiguous_nchw_input(monkeypatch) -> None:
     model = _CaptureIdentityModel()
     restorer = _make_restorer(monkeypatch, model)
 
-    frames = [torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8) for _ in range(3)]
+    frames = [torch.randint(0, 256, (3, br.INFERENCE_SIZE, br.INFERENCE_SIZE), dtype=torch.uint8) for _ in range(3)]
     restorer.raw_process(frames)
 
     assert model.captured_inputs is not None

@@ -57,12 +57,12 @@ class BasicvsrppMosaicRestorer:
     def raw_process(self, video: list[Tensor]) -> torch.Tensor:
         """
         Args:
-            video: list of (H, W, C) uint8 tensors in RGB format
+            video: list of (C, H, W) tensors in RGB format, [0, 255]
         Returns:
             (T, C, 256, 256) float tensor in [0, 1]
         """
         with torch.inference_mode():
-            stacked = torch.stack(video).permute(0, 3, 1, 2).to(device=self.device, dtype=self.input_dtype, memory_format=torch.contiguous_format).div_(255.0)
+            stacked = torch.stack(video).to(device=self.device, dtype=self.input_dtype, memory_format=torch.contiguous_format).div_(255.0)
 
             if self._split_forward is not None:
                 result = self._split_forward(stacked.unsqueeze(0))
@@ -77,6 +77,6 @@ class BasicvsrppMosaicRestorer:
         Returns:
             list of (256, 256, C) uint8 tensors in RGB format
         """
-        result = self.raw_process(video)
+        result = self.raw_process([frame.permute(2, 0, 1) for frame in video])
         result = result.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).permute(0, 2, 3, 1)
         return list(torch.unbind(result, 0))

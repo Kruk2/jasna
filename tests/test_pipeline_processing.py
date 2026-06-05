@@ -16,13 +16,13 @@ from jasna.pipeline_processing import process_frame_batch, finalize_processing
 
 class _FakeRestorationPipeline:
     def process_clip_item(self, ci: ClipRestoreItem, blend_buffer: BlendBuffer) -> None:
-        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(ci.raw_crops, device=torch.device("cpu"))
+        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(ci.raw_crops, device=torch.device("cpu"), dtype=torch.float32)
         enlarged_bboxes = [c.enlarged_bbox for c in ci.raw_crops]
         crop_shapes = [c.crop_shape for c in ci.raw_crops]
 
         frame_h, frame_w = ci.frame_shape
         n = len(ci.raw_crops)
-        restored_frames = [torch.full((3, rc.shape[0], rc.shape[1]), 200, dtype=torch.uint8) for rc in resized_crops]
+        restored_frames = [torch.full((3, rc.shape[1], rc.shape[2]), 200, dtype=torch.uint8) for rc in resized_crops]
         masks = [torch.ones((frame_h, frame_w), dtype=torch.bool) for _ in range(n)]
 
         ks = max(0, ci.keep_start)
@@ -225,11 +225,12 @@ def _run_real_pipeline_batches(
 
     class _ConstantRestorer:
         dtype = torch.float32
+        input_dtype = torch.float32
         device = torch.device("cpu")
         def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
             stacked = []
             for f in crops:
-                stacked.append(torch.full(f.permute(2, 0, 1).shape, restored_float, dtype=torch.float32))
+                stacked.append(torch.full(f.shape, restored_float, dtype=torch.float32))
             return torch.stack(stacked, dim=0)
 
     def _ones_blend_mask(crop: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:
@@ -430,6 +431,7 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
 
     class _AlternatingRestorer:
         dtype = torch.float32
+        input_dtype = torch.float32
         device = torch.device("cpu")
         def __init__(self) -> None:
             self._call_count = 0
@@ -438,7 +440,7 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
             val = 0.3 if self._call_count % 2 == 1 else 0.7
             stacked = []
             for f in crops:
-                stacked.append(torch.full(f.permute(2, 0, 1).shape, val, dtype=torch.float32))
+                stacked.append(torch.full(f.shape, val, dtype=torch.float32))
             return torch.stack(stacked, dim=0)
 
     def _ones_blend_mask(crop: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:

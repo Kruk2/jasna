@@ -60,6 +60,7 @@ def _make_raw_crops(frames: list[torch.Tensor], clip: TrackedClip) -> list[RawCr
 
 class _IdentityRestorer:
     dtype = torch.float32
+    input_dtype = torch.float32
     device = torch.device("cpu")
 
     def restore(self, crops: list[torch.Tensor]) -> list[torch.Tensor]:
@@ -68,12 +69,13 @@ class _IdentityRestorer:
     def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
         stacked = []
         for f in crops:
-            stacked.append(f.permute(2, 0, 1).to(dtype=torch.float32).div(255.0))
+            stacked.append(f.to(dtype=torch.float32).div(255.0))
         return torch.stack(stacked, dim=0)
 
 
 class _CaptureRestorer:
     dtype = torch.float32
+    input_dtype = torch.float32
     device = torch.device("cpu")
 
     def __init__(self) -> None:
@@ -87,7 +89,7 @@ class _CaptureRestorer:
         self.captured = crops
         stacked = []
         for f in crops:
-            stacked.append(f.permute(2, 0, 1).to(dtype=torch.float32).div(255.0))
+            stacked.append(f.to(dtype=torch.float32).div(255.0))
         return torch.stack(stacked, dim=0)
 
 
@@ -190,8 +192,8 @@ def test_restore_clip_does_not_upscale_small_crops(monkeypatch) -> None:
 
     assert restorer.captured is not None
     assert len(restorer.captured) == 1
-    assert restorer.captured[0].shape == (256, 256, 3)
-    assert restorer.captured[0].dtype == torch.uint8
+    assert restorer.captured[0].shape == (3, 256, 256)
+    assert restorer.captured[0].dtype == torch.float32
 
     crop = frame[:, 7:17, 5:25]
     resized = crop.unsqueeze(0).to(dtype=torch.float32)
@@ -200,7 +202,7 @@ def test_restore_clip_does_not_upscale_small_crops(monkeypatch) -> None:
     pad_left, pad_top = restored.pad_offsets[0]
     pad_bottom = 256 - 10 - pad_top
     pad_right = 256 - 20 - pad_left
-    expected = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom)).to(torch.uint8).permute(1, 2, 0)
+    expected = _torch_pad_reflect(resized, (pad_left, pad_right, pad_top, pad_bottom))
     assert torch.equal(restorer.captured[0], expected)
 
 
