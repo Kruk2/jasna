@@ -63,7 +63,9 @@ class RestorationPipeline:
         list[tuple[int, int]],
         list[tuple[int, int]],
     ]:
-        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(raw_crops, self.restorer.device)
+        resized_crops, pad_offsets, resize_shapes = prepare_crops_for_restoration(
+            raw_crops, self.restorer.device, self.restorer.input_dtype
+        )
         enlarged_bboxes = [c.enlarged_bbox for c in raw_crops]
         crop_shapes = [c.crop_shape for c in raw_crops]
         return resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes

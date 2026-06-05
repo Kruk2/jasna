@@ -65,7 +65,7 @@ class _ConstantRestorer:
     def raw_process(self, crops: list[torch.Tensor]) -> torch.Tensor:
         stacked = []
         for f in crops:
-            stacked.append(torch.full(f.permute(2, 0, 1).shape, self._value, dtype=torch.float32))
+            stacked.append(torch.full(f.shape, self._value, dtype=torch.float32))
         return torch.stack(stacked, dim=0)
 
 
@@ -81,7 +81,7 @@ def test_extract_crop_and_prepare_uses_no_cpu_dispatch(monkeypatch) -> None:
     tracer.install()
     try:
         raw_crop = extract_crop(frame, bbox, 64, 64)
-        prepare_crops_for_restoration([raw_crop], device=torch.device("cpu"))
+        prepare_crops_for_restoration([raw_crop], device=torch.device("cpu"), dtype=torch.float32)
     finally:
         tracer.uninstall()
 
