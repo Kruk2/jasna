@@ -3,27 +3,21 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 
-_KERNEL_CACHE: dict[tuple[str, torch.dtype, int], tuple[torch.Tensor, torch.Tensor]] = {}
+_KERNEL_CACHE: dict[tuple[str, torch.dtype, int], torch.Tensor] = {}
 
 BLEND_DILATION_RATIO = 0.028
 BLEND_FALLOFF_RATIO = 0.028
 
 
 def _box_blur(x: torch.Tensor, kernel_size: int) -> torch.Tensor:
-    # Separable box blur: a uniform KxK kernel = 1xK then Kx1, cost O(K^2) -> O(2K).
     cache_key = (str(x.device), x.dtype, kernel_size)
-    kernels = _KERNEL_CACHE.get(cache_key)
-    if kernels is None:
-        kernel_h = torch.ones((1, 1, 1, kernel_size), device=x.device, dtype=x.dtype) / kernel_size
-        kernel_v = torch.ones((1, 1, kernel_size, 1), device=x.device, dtype=x.dtype) / kernel_size
-        kernels = (kernel_h, kernel_v)
-        _KERNEL_CACHE[cache_key] = kernels
-    kernel_h, kernel_v = kernels
+    kernel = _KERNEL_CACHE.get(cache_key)
+    if kernel is None:
+        kernel = torch.ones((1, 1, kernel_size, kernel_size), device=x.device, dtype=x.dtype) / (kernel_size ** 2)
+        _KERNEL_CACHE[cache_key] = kernel
     pad = kernel_size // 2
     x4d = F.pad(x.unsqueeze(0).unsqueeze(0), (pad, pad, pad, pad), mode="reflect")
-    x4d = F.conv2d(x4d, kernel_h)
-    x4d = F.conv2d(x4d, kernel_v)
-    return x4d.squeeze(0).squeeze(0)
+    return F.conv2d(x4d, kernel).squeeze(0).squeeze(0)
 
 
 def _make_odd(n: int) -> int:
