@@ -5,27 +5,39 @@ import torch.nn.functional as F
 # Row 0: Y  = 64 + 876 * (0.2126*R + 0.7152*G + 0.0722*B)
 # Row 1: U  = 512 + 896 * (-0.114572*R - 0.385428*G + 0.5*B)
 # Row 2: V  = 512 + 896 * (0.5*R - 0.454153*G - 0.045847*B)
-_YUV_MATRIX = torch.tensor([
+_YUV_MATRIX_BT709 = torch.tensor([
     [876.0 * 0.2126,    876.0 * 0.7152,    876.0 * 0.0722],
     [896.0 * -0.114572, 896.0 * -0.385428, 896.0 * 0.500000],
     [896.0 * 0.500000,  896.0 * -0.454153, 896.0 * -0.045847],
 ], dtype=torch.float32)
+
+# BT.601 limited-range RGB→YUV coefficients fused with scale+offset.
+# Row 0: Y  = 64 + 876 * (0.299*R + 0.587*G + 0.114*B)
+# Row 1: U  = 512 + 896 * (-0.168736*R - 0.331264*G + 0.5*B)
+# Row 2: V  = 512 + 896 * (0.5*R - 0.418688*G - 0.081312*B)
+_YUV_MATRIX_BT601 = torch.tensor([
+    [876.0 * 0.299000,  876.0 * 0.587000,  876.0 * 0.114000],
+    [896.0 * -0.168736, 896.0 * -0.331264, 896.0 * 0.500000],
+    [896.0 * 0.500000,  896.0 * -0.418688, 896.0 * -0.081312],
+], dtype=torch.float32)
+
 _YUV_OFFSET = torch.tensor([64.0, 512.0, 512.0], dtype=torch.float32)
 
-_cache: dict[torch.device, tuple[torch.Tensor, torch.Tensor]] = {}
+_cache: dict[tuple[str, torch.device], tuple[torch.Tensor, torch.Tensor]] = {}
 
 
-def _get_coeffs(device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
-    cached = _cache.get(device)
+def _get_coeffs(name: str, matrix: torch.Tensor, device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    key = (name, device)
+    cached = _cache.get(key)
     if cached is not None:
         return cached
-    mat = _YUV_MATRIX.to(device=device)
+    mat = matrix.to(device=device)
     off = _YUV_OFFSET.to(device=device)
-    _cache[device] = (mat, off)
+    _cache[key] = (mat, off)
     return mat, off
 
 
-def chw_rgb_to_p010_bt709_limited(img_chw: torch.Tensor) -> torch.Tensor:
+def _chw_rgb_to_p010_limited(img_chw: torch.Tensor, name: str, matrix: torch.Tensor) -> torch.Tensor:
     C, H, W = img_chw.shape
 
     if img_chw.dtype not in (torch.float32, torch.float16, torch.bfloat16):
@@ -33,7 +45,7 @@ def chw_rgb_to_p010_bt709_limited(img_chw: torch.Tensor) -> torch.Tensor:
     else:
         rgb = img_chw.float()
 
-    mat, off = _get_coeffs(rgb.device)
+    mat, off = _get_coeffs(name, matrix, rgb.device)
 
     # (3, H*W) matmul → (3, H*W) → (3, H, W): produces Y, U, V planes
     yuv = mat.mm(rgb.reshape(3, -1)).reshape(3, H, W)
@@ -54,3 +66,11 @@ def chw_rgb_to_p010_bt709_limited(img_chw: torch.Tensor) -> torch.Tensor:
     uv_interleaved = uv_i16.permute(1, 2, 0).reshape(H // 2, W)
 
     return torch.cat([Y, uv_interleaved], dim=0).contiguous()
+
+
+def chw_rgb_to_p010_bt709_limited(img_chw: torch.Tensor) -> torch.Tensor:
+    return _chw_rgb_to_p010_limited(img_chw, "bt709", _YUV_MATRIX_BT709)
+
+
+def chw_rgb_to_p010_bt601_limited(img_chw: torch.Tensor) -> torch.Tensor:
+    return _chw_rgb_to_p010_limited(img_chw, "bt601", _YUV_MATRIX_BT601)

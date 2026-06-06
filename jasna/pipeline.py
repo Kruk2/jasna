@@ -277,9 +277,9 @@ class Pipeline:
         from av.video.reformatter import Colorspace as AvColorspace
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
-        if metadata.color_space != AvColorspace.ITU709:
+        if metadata.color_space not in (AvColorspace.ITU709, AvColorspace.ITU601):
             raise UnsupportedColorspaceError(
-                f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. Only BT.709 is supported."
+                f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. Only BT.709 and BT.601 are supported."
             )
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
 
