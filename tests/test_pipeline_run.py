@@ -98,16 +98,26 @@ def _make_two_readers(frames_batches: list[tuple[torch.Tensor, list[int]]]):
 
 
 class TestPipelineColorspaceCheck:
-    @patch("jasna.pipeline.get_video_meta_data")
-    def test_run_raises_on_bt601_colorspace(self, mock_meta):
+    def test_run_accepts_bt601_colorspace(self):
         meta = _fake_metadata()
         meta.color_space = AvColorspace.ITU601
-        mock_meta.return_value = meta
         p = _make_pipeline()
 
-        from jasna.media import UnsupportedColorspaceError
-        with pytest.raises(UnsupportedColorspaceError, match="Only BT.709 is supported"):
+        reader_cls, _, _ = _make_two_readers([])
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=meta),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+        ):
             p.run()
+
+        mock_encoder.encode.assert_not_called()
 
     @patch("jasna.pipeline.get_video_meta_data")
     def test_run_raises_on_smpte240m_colorspace(self, mock_meta):
@@ -117,7 +127,7 @@ class TestPipelineColorspaceCheck:
         p = _make_pipeline()
 
         from jasna.media import UnsupportedColorspaceError
-        with pytest.raises(UnsupportedColorspaceError, match="Only BT.709 is supported"):
+        with pytest.raises(UnsupportedColorspaceError, match="Only BT.709 and BT.601 are supported"):
             p.run()
 
 
