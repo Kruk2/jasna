@@ -75,13 +75,6 @@ class NvidiaVideoReader:
     def __exit__(self, exc_type, exc_value, traceback):
         del self.decoder
 
-    def _handoff(self, batch_tensor: torch.Tensor) -> None:
-        done_event = torch.cuda.Event()
-        self.stream.record_event(done_event)
-        consumer_stream = torch.cuda.current_stream(self.device)
-        consumer_stream.wait_event(done_event)
-        batch_tensor.record_stream(consumer_stream)
-
     def frames(self, seek_ts: float|None=None) -> Iterator[tuple[torch.Tensor, int]]:
         frame_idx = 0
         pkt_data = vali.PacketData()
@@ -113,7 +106,7 @@ class NvidiaVideoReader:
 
                     frame_idx += 1
                     pkts.append(pkt_data.pts)
-            self._handoff(batch_tensor_nv)
+                self.stream.synchronize()
             yield batch_tensor_nv, pkts
             if eof:
                 break
