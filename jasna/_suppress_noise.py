@@ -62,3 +62,28 @@ def install() -> None:
     logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").addFilter(
         _SuppressRedirectsWarning()
     )
+
+    # torch._logging resets logger levels when torch is imported, so a level
+    # change here would not stick; a filter on the source logger does.
+    class _SuppressDeserializedSymbolWarning(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            return "did not appear in the graph that was deserialized" not in record.getMessage()
+
+    logging.getLogger("torch._export.serde.serialize").addFilter(
+        _SuppressDeserializedSymbolWarning()
+    )
+
+    # tensorrt.plugin logs an "experimental" warning through TensorRT's C++
+    # logger at import time (triggered by torch_tensorrt). It bypasses the
+    # logging/warnings machinery, so the only way to mute it is to filter the
+    # message in trt.Logger.log before the module is imported.
+    import tensorrt as trt
+
+    _original_trt_log = trt.Logger.log
+
+    def _trt_log_without_plugin_experimental(self, severity, msg):
+        if "tensorrt.plugin module is experimental" in str(msg):
+            return
+        return _original_trt_log(self, severity, msg)
+
+    trt.Logger.log = _trt_log_without_plugin_experimental
