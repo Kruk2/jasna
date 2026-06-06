@@ -195,6 +195,11 @@ class TestRemuxWithAudioAndMetadata:
         assert "bt709" in cmd
         assert "tv" in cmd
         assert "-movflags" not in cmd
+        assert "-bsf:v" in cmd
+        assert cmd[cmd.index("-bsf:v") + 1] == (
+            "hevc_metadata=colour_primaries=1:transfer_characteristics=1"
+            ":matrix_coefficients=1:video_full_range_flag=0"
+        )
 
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
     @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
@@ -213,6 +218,32 @@ class TestRemuxWithAudioAndMetadata:
         cmd = mock_run.call_args[0][0]
         assert "smpte170m" in cmd
         assert "pc" in cmd
+        assert cmd[cmd.index("-bsf:v") + 1] == (
+            "hevc_metadata=colour_primaries=6:transfer_characteristics=6"
+            ":matrix_coefficients=6:video_full_range_flag=1"
+        )
+
+    @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
+    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
+    @patch("jasna.media.video_encoder.subprocess.run")
+    def test_success_bt601_mpeg_rewrites_vui(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
+        video_input = tmp_path / "temp.mkv"
+        video_input.touch()
+        output_path = tmp_path / "output.mkv"
+
+        mock_run.return_value = MagicMock(returncode=0)
+        meta = _fake_metadata(color_space=AvColorspace.ITU601, color_range=AvColorRange.MPEG)
+
+        remux_with_audio_and_metadata(video_input, output_path, meta)
+
+        cmd = mock_run.call_args[0][0]
+        assert "smpte170m" in cmd
+        assert "tv" in cmd
+        assert cmd[cmd.index("-bsf:v") + 1] == (
+            "hevc_metadata=colour_primaries=6:transfer_characteristics=6"
+            ":matrix_coefficients=6:video_full_range_flag=0"
+        )
 
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
     @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)

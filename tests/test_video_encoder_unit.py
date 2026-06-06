@@ -146,6 +146,40 @@ class TestColorValidation:
                 )
 
 
+class TestColorspaceConverterSelection:
+    def _make_encoder_with_metadata(self, tmp_path, metadata):
+        output_path = tmp_path / "output" / "result.mkv"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with (
+            patch("jasna.media.video_encoder.nvc") as mock_nvc,
+            patch("jasna.media.video_encoder.threading.Thread", _FakeThread),
+            patch("jasna.media.video_encoder.torch.cuda.Stream", _FakeCudaStream),
+        ):
+            mock_nvc.CreateEncoder.return_value = MagicMock(EndEncode=MagicMock(return_value=[]))
+            import torch
+            enc = NvidiaVideoEncoder(
+                file=str(output_path),
+                device=torch.device("cuda:0"),
+                metadata=metadata,
+                codec="hevc",
+                encoder_settings={},
+                stream_mode=False,
+            )
+        return enc
+
+    def test_bt709_selects_bt709_converter(self, tmp_path):
+        from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
+        enc = self._make_encoder_with_metadata(tmp_path, _fake_metadata(color_space=AvColorspace.ITU709))
+        assert enc._to_p010 is chw_rgb_to_p010_bt709_limited
+        enc.raw_hevc.close()
+
+    def test_bt601_selects_bt601_converter(self, tmp_path):
+        from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt601_limited
+        enc = self._make_encoder_with_metadata(tmp_path, _fake_metadata(color_space=AvColorspace.ITU601))
+        assert enc._to_p010 is chw_rgb_to_p010_bt601_limited
+        enc.raw_hevc.close()
+
+
 class TestEncode:
     def test_encode_pushes_to_buffer_and_heap(self, tmp_path):
         enc, _ = _make_encoder(tmp_path)

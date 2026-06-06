@@ -7,7 +7,7 @@ import PyNvVideoCodec as nvc
 from pathlib import Path
 from jasna.media import VideoMetadata
 from jasna.media.lut import GpuLutApplier, parse_cube_file
-from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
+from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited, chw_rgb_to_p010_bt601_limited
 from jasna.os_utils import get_subprocess_startup_info
 from jasna.media.audio_utils import audio_codec_args
 import av
@@ -118,8 +118,25 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
         AvColorRange.MPEG: 'tv',
         AvColorRange.JPEG: 'pc',
     }
+    # ITU-T H.273 / ISO 23091-2 code points for the HEVC VUI.
+    vui_code_map = {
+        AvColorspace.ITU709: 1,
+        AvColorspace.ITU601: 6,  # SMPTE 170M
+    }
     ffmpeg_colorspace = colorspace_map.get(metadata.color_space, 'bt709')
     ffmpeg_color_range = color_range_map.get(metadata.color_range, 'tv')
+    vui_code = vui_code_map.get(metadata.color_space, 1)
+    full_range_flag = 1 if metadata.color_range == AvColorRange.JPEG else 0
+
+    # NVENC bakes a BT.709 description into the HEVC bitstream VUI regardless of
+    # the source. Rewrite the VUI in-place (no re-encode) so the bitstream agrees
+    # with the container color tags set below.
+    hevc_metadata_bsf = (
+        f"hevc_metadata=colour_primaries={vui_code}"
+        f":transfer_characteristics={vui_code}"
+        f":matrix_coefficients={vui_code}"
+        f":video_full_range_flag={full_range_flag}"
+    )
 
     cmd = [
         resolve_executable("ffmpeg"),
@@ -136,6 +153,8 @@ def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata
         "1",
         "-c:v",
         "copy",
+        "-bsf:v",
+        hevc_metadata_bsf,
         "-c:a",
         *audio_codec_args(metadata.video_file, output_path),
         "-color_primaries",
@@ -244,8 +263,14 @@ class NvidiaVideoEncoder:
         self._encode_thread = threading.Thread(target=self._encode_worker, name="NvidiaVideoEncoderWorker", daemon=True)
         self._encode_thread.start()
 
-        if metadata.color_space != AvColorspace.ITU709 and metadata.color_range != AvColorRange.MPEG:
+        if metadata.color_space not in (AvColorspace.ITU709, AvColorspace.ITU601) or metadata.color_range != AvColorRange.MPEG:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
+
+        self._to_p010 = (
+            chw_rgb_to_p010_bt601_limited
+            if metadata.color_space == AvColorspace.ITU601
+            else chw_rgb_to_p010_bt709_limited
+        )
 
         self.temp_video_path = temp_dir / (self.output_path.stem + '_temp_video' + self.output_path.suffix)
 
@@ -366,7 +391,7 @@ class NvidiaVideoEncoder:
         with torch.cuda.stream(self.stream):
             if self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
-            p010 = chw_rgb_to_p010_bt709_limited(frame)
+            p010 = self._to_p010(frame)
             bitstream = self.encoder.Encode(p010)
 
         if len(bitstream) > 0:
