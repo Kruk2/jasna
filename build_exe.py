@@ -8,6 +8,15 @@ import zipfile
 
 distpath = "dist_linux" if os.name != "nt" else "dist"
 env = os.environ.copy()
+if os.name != "nt":
+    # PyInstaller resolves DT_NEEDED sonames (e.g. libexpat.so.1) via ldd/ldconfig and
+    # dedupes bundled libs by basename. Binaries without a conda rpath fall through to
+    # the system copy, so the system libexpat can win over the env's and end up bundled
+    # older than the expat this env's pyexpat was compiled against (missing symbols like
+    # XML_SetAllocTrackerActivationThreshold). LD_LIBRARY_PATH is the first search path
+    # PyInstaller checks, so pointing it at the env makes every dependency resolve there.
+    lib_dir = os.path.join(sys.prefix, "lib")
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(p for p in (lib_dir, env.get("LD_LIBRARY_PATH", "")) if p)
 subprocess.run([sys.executable, "-m", "PyInstaller", "--distpath", distpath, "jasna.spec"], check=True, env=env)
 if os.name == "nt":
     env["BUILD_CLI"] = "1"
