@@ -24,6 +24,7 @@ dependencies = [
   "tkinterdnd2",
   "ultralytics",
   "nvidia-vfx",
+  "onnx",
 ]
 
 [project.scripts]
