@@ -17,7 +17,6 @@ logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
 
 _HELP_URLS = {
-    "hags": "https://www.youtube.com/watch?v=r6bhe2o7IkQ",
     "sysmem": "https://docs.cognex.com/deep-learning_420/web/EN/deep-learning/Content/Topics/optimization/gpu-disable-shared.htm?TocPath=Optimization%20Guidelines%7CNVIDIA%C2%AE%20GPU%20Guidelines%7C_____6",
 }
 
@@ -102,7 +101,6 @@ class FirstRunWizard(ctk.CTkToplevel):
             ("driver", t("wizard_check_driver")),
         ]
         if os.name == "nt":
-            checks.append(("hags", t("wizard_check_hags")))
             checks.append(("sysmem", t("wizard_check_sysmem")))
         
         for key, label in checks:
@@ -267,7 +265,6 @@ class FirstRunWizard(ctk.CTkToplevel):
             ("driver", t("wizard_check_driver")),
         ]
         if os.name == "nt":
-            checks.append(("hags", t("wizard_check_hags")))
             checks.append(("sysmem", t("wizard_check_sysmem")))
 
         for key, label in checks:
@@ -343,7 +340,6 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._check_results["cuda"] = self._check_cuda()
         self._check_results["driver"] = os_utils.check_gpu_driver_version()
         if os.name == "nt":
-            self._check_results["hags"] = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
             self._check_results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
         
         self._has_required_failure = any(

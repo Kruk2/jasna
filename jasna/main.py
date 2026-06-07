@@ -11,7 +11,6 @@ from jasna.os_utils import (
     check_gpu_driver_version,
     check_nvidia_gpu,
     check_required_executables,
-    check_windows_hardware_accelerated_gpu_scheduling,
     check_windows_nvidia_sysmem_fallback_policy,
 )
 
@@ -300,12 +299,6 @@ def main() -> None:
         sys.exit(1)
 
     if sys.platform == "win32":
-        hags_ok, hags_info = check_windows_hardware_accelerated_gpu_scheduling()
-        if not hags_ok:
-            print(f"Error: Hardware Accelerated GPU Scheduling check failed: {hags_info}")
-            print("Disable HAGS in Windows Settings > System > Display > Graphics > Change default graphics settings.")
-            sys.exit(1)
-
         sysmem_ok, sysmem_info = check_windows_nvidia_sysmem_fallback_policy()
         if not sysmem_ok:
             print(f"Warning: CUDA Sysmem Fallback Policy: {sysmem_info}")

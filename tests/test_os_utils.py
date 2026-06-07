@@ -205,54 +205,6 @@ def test_find_executable_finds_bundled_mkvmerge_recursive(monkeypatch, tmp_path)
     assert os_utils.find_executable("mkvmerge") == str(mkvmerge)
 
 
-def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_when_enabled(monkeypatch, capsys) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: (False, "Enabled (recommended OFF: can slow Jasna and add artifacts)"))
-
-    os_utils.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
-    out = capsys.readouterr().out
-    assert "Hardware-accelerated GPU scheduling" in out
-
-
-def test_check_hags_returns_true_when_off(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: (True, "Off"))
-    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
-    assert ok is True
-    assert info == "Off"
-
-
-def test_check_hags_returns_false_when_enabled(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: (False, "Enabled (recommended OFF: can slow Jasna and add artifacts)"))
-    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
-    assert ok is False
-    assert "Enabled" in info
-
-
-def test_check_hags_fails_when_api_unavailable(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setattr(os_utils, "_check_hags_d3dkmt", lambda: None)
-    ok, info = os_utils.check_windows_hardware_accelerated_gpu_scheduling()
-    assert ok is False
-    assert "Could not query" in info
-
-
-def test_warn_if_windows_hardware_accelerated_gpu_scheduling_enabled_prints_error_when_status_unknown(
-    monkeypatch, capsys
-) -> None:
-    monkeypatch.setattr(
-        os_utils,
-        "check_windows_hardware_accelerated_gpu_scheduling",
-        lambda: (False, "D3DKMT API unavailable"),
-    )
-
-    os_utils.warn_if_windows_hardware_accelerated_gpu_scheduling_enabled()
-    out = capsys.readouterr().out
-    assert "Could not determine" in out
-    assert "D3DKMT API unavailable" in out
-
-
 def test_check_sysmem_fallback_returns_true_when_prefer_no_sysmem(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setattr(

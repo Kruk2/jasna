@@ -31,9 +31,7 @@ def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detec
         patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
         patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
-        patch("jasna.main.check_required_executables"),
-        patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
-        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
+        patch("jasna.main.check_required_executables"),        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
@@ -92,9 +90,7 @@ class TestMainValidation:
         with (
             patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
             patch("jasna.main.check_nvidia_gpu", return_value=(False, "no_cuda")),
-            patch("jasna.main.check_required_executables"),
-            patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
-            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
+            patch("jasna.main.check_required_executables"),            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         ):
             with patch.object(sys, "argv", [
                 "jasna", "--input", str(input_path), "--output", str(output_path),
@@ -112,9 +108,7 @@ class TestMainValidation:
         with (
             patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
             patch("jasna.main.check_nvidia_gpu", return_value=(False, ("GPU", 5, 0))),
-            patch("jasna.main.check_required_executables"),
-            patch("jasna.main.check_windows_hardware_accelerated_gpu_scheduling", return_value=(True, "Off")),
-            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
+            patch("jasna.main.check_required_executables"),            patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         ):
             with patch.object(sys, "argv", [
                 "jasna", "--input", str(input_path), "--output", str(output_path),
