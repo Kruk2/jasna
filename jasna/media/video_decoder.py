@@ -1,7 +1,27 @@
+import ctypes
+import sys
 import torch
 import python_vali as vali
 from jasna.media import VideoMetadata
 from typing import Iterator
+
+_libcuda: ctypes.CDLL | None = None
+
+
+def _cuda_driver() -> ctypes.CDLL:
+    global _libcuda
+    if _libcuda is None:
+        _libcuda = ctypes.CDLL("nvcuda.dll" if sys.platform == "win32" else "libcuda.so.1")
+    return _libcuda
+
+
+def _create_blocking_cuda_stream() -> int:
+    handle = ctypes.c_void_p()
+    rc = _cuda_driver().cuStreamCreate(ctypes.byref(handle), ctypes.c_uint(0))
+    if rc != 0:
+        raise RuntimeError(f"cuStreamCreate failed (CUDA error {rc})")
+    return handle.value
+
 
 class NvidiaVideoReader:
     def __init__(self, file: str, batch_size: int, device: torch.device, metadata: VideoMetadata):
@@ -11,7 +31,8 @@ class NvidiaVideoReader:
         self.metadata = metadata
 
     def __enter__(self):
-        self.stream = torch.cuda.Stream(self.device)
+        self._raw_stream = _create_blocking_cuda_stream()
+        self.stream = torch.cuda.ExternalStream(self._raw_stream, device=self.device)
         self.decoder = vali.PyDecoder(
             self.file,
             {},
@@ -74,6 +95,7 @@ class NvidiaVideoReader:
 
     def __exit__(self, exc_type, exc_value, traceback):
         del self.decoder
+        _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
 
     def frames(self, seek_ts: float|None=None) -> Iterator[tuple[torch.Tensor, int]]:
         frame_idx = 0
