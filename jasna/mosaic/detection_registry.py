@@ -47,7 +47,8 @@ def coerce_detection_model_name(name: str) -> str:
     name = str(name).strip().lower()
     if is_rfdetr_model(name) or is_yolo_model(name):
         return name
-    return DEFAULT_DETECTION_MODEL_NAME
+    valid = sorted(RFDETR_MODEL_NAMES | YOLO_MODEL_NAMES)
+    raise ValueError(f"Unknown detection model '{name}'. Valid names: {', '.join(valid)}")
 
 
 def detection_model_weights_path(name: str) -> Path:

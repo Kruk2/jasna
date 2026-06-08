@@ -73,9 +73,16 @@ def test_coerce_yolo() -> None:
     assert coerce_detection_model_name("lada-yolo-v4") == "lada-yolo-v4"
 
 
-def test_coerce_garbage_falls_back_to_default() -> None:
-    assert coerce_detection_model_name("nonsense") == DEFAULT_DETECTION_MODEL_NAME
-    assert coerce_detection_model_name("") == DEFAULT_DETECTION_MODEL_NAME
+def test_coerce_garbage_raises() -> None:
+    with pytest.raises(ValueError, match="Unknown detection model 'nonsense'"):
+        coerce_detection_model_name("nonsense")
+    with pytest.raises(ValueError):
+        coerce_detection_model_name("")
+
+
+def test_coerce_yolo_typo_raises_lists_valid_names() -> None:
+    with pytest.raises(ValueError, match="lada-yolo-v4"):
+        coerce_detection_model_name("yolo-v4")
 
 
 # --- detection_model_weights_path for dynamic rfdetr ---
