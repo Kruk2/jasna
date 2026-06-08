@@ -52,6 +52,10 @@ def compile_yolo_to_tensorrt_engine(
 
     _prev_yolo_level = YOLO_LOGGER.level
     YOLO_LOGGER.setLevel(logging.ERROR)
+    # Ultralytics' ONNX export forces a CPU export by setting CUDA_VISIBLE_DEVICES=""
+    # and never restores it. That hides every GPU from the subsequent in-process
+    # TensorRT builder, which then fails with CUDA error 100 (cudaErrorNoDevice).
+    _prev_cuda_visible = os.environ.get("CUDA_VISIBLE_DEVICES")
     try:
         model = YOLO(str(model_path), verbose=False, task="segment")
         null_stream = io.StringIO()
@@ -73,6 +77,10 @@ def compile_yolo_to_tensorrt_engine(
                 )
     finally:
         YOLO_LOGGER.setLevel(_prev_yolo_level)
+        if _prev_cuda_visible is None:
+            os.environ.pop("CUDA_VISIBLE_DEVICES", None)
+        else:
+            os.environ["CUDA_VISIBLE_DEVICES"] = _prev_cuda_visible
     del model
 
     exported_path = Path(str(exported)) if exported is not None else None
