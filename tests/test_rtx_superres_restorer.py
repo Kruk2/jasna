@@ -1,7 +1,12 @@
 """Tests for jasna.restorer.rtx_superres_secondary_restorer covering init, restore, and close."""
 from __future__ import annotations
 
+import ast
+import ctypes
+import inspect
+import os
 import sys
+from pathlib import Path
 from types import ModuleType
 from unittest.mock import MagicMock, patch
 
@@ -69,6 +74,56 @@ def _make_restorer(*, scale=4, quality="high", denoise="medium", deblur=None):
             denoise=denoise,
             deblur=deblur,
         )
+
+
+class TestTensorrtLoadOrder:
+    """nvvfx bundles its own libnvinfer under the same SONAME as the pip tensorrt
+    our BasicVSR++ engines are serialized against, and loads it with RTLD_GLOBAL.
+    The pip runtime must claim the global symbol scope *before* nvvfx loads, so
+    the module preloads it at import and only ever imports nvvfx lazily (inside
+    functions). If that order breaks, BasicVSR++ engine deserialization fails
+    with a TensorRT serialization-version mismatch.
+    """
+
+    def _module_tree(self):
+        import jasna.restorer.rtx_superres_secondary_restorer as mod
+        source = Path(inspect.getfile(mod)).read_text(encoding="utf-8")
+        return ast.parse(source)
+
+    def test_preload_called_at_module_level(self):
+        tree = self._module_tree()
+        top_level_calls = [
+            node.value.func.id
+            for node in tree.body
+            if isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+        ]
+        assert "_preload_tensorrt_runtime" in top_level_calls
+
+    def test_nvvfx_only_imported_lazily(self):
+        tree = self._module_tree()
+        # No nvvfx import may appear at module top level.
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "nvvfx"
+            if isinstance(node, ast.Import):
+                assert all(alias.name != "nvvfx" for alias in node.names)
+
+    def test_preload_loads_tensorrt_libnvinfer_globally(self):
+        import jasna.restorer.rtx_superres_secondary_restorer as mod
+        # Importing the module runs the preload; the pip tensorrt libnvinfer
+        # must then be resolvable in the process-global symbol scope.
+        if sys.platform == "win32":
+            pytest.skip("RTLD_GLOBAL symbol-scope check is POSIX-specific")
+        mod._preload_tensorrt_runtime()
+        get_version = ctypes.CDLL(None).getInferLibVersion
+        get_version.restype = ctypes.c_int
+        import tensorrt_libs
+        libs_dir = os.path.dirname(tensorrt_libs.__file__)
+        expected = ctypes.CDLL(os.path.join(libs_dir, "libnvinfer.so.10")).getInferLibVersion
+        expected.restype = ctypes.c_int
+        assert get_version() == expected()
 
 
 class TestResolveHelpers:

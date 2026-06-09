@@ -1,11 +1,42 @@
 from __future__ import annotations
 
+import ctypes
 import logging
+import os
+import sys
 from typing import Optional
 
 import torch
 
 logger = logging.getLogger(__name__)
+
+
+def _preload_tensorrt_runtime() -> None:
+    """Pin the pip ``tensorrt`` runtime before nvvfx loads its bundled copy.
+
+    nvvfx (NVIDIA Maxine) ships its own TensorRT and loads ``libnvinfer.so.10``
+    with ``RTLD_GLOBAL``. Our BasicVSR++ engines are serialized against the pip
+    ``tensorrt`` (a different version), and TRT engines are version-locked. If
+    nvvfx loads first, its TensorRT symbols win global symbol resolution,
+    torch_tensorrt binds to them, and BasicVSR++ engine deserialization fails
+    with a serialization-version mismatch. Loading the pip libs into the global
+    scope first makes torch_tensorrt bind to the matching runtime; nvvfx then
+    happily reuses it.
+    """
+    import tensorrt_libs
+
+    libs_dir = os.path.dirname(tensorrt_libs.__file__)
+    if sys.platform == "win32":
+        names = ["nvinfer_10.dll", "nvinfer_plugin_10.dll"]
+        for name in names:
+            ctypes.WinDLL(os.path.join(libs_dir, name))
+    else:
+        names = ["libnvinfer.so.10", "libnvinfer_plugin.so.10"]
+        for name in names:
+            ctypes.CDLL(os.path.join(libs_dir, name), mode=ctypes.RTLD_GLOBAL)
+
+
+_preload_tensorrt_runtime()
 
 RTX_SUPERRES_INPUT_SIZE = 256
 SCALE_CHOICES = [2, 4]
