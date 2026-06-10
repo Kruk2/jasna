@@ -10,6 +10,7 @@ __pycache__/
 *.pdb
 *.so
 
+.serena/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
