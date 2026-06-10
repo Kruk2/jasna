@@ -40,6 +40,13 @@ def _make_color_frames(n: int, color: tuple[float, float, float] = (0.5, 0.3, 0.
 
 
 class TestTvaiClipSizes:
+    def test_single_frame(self) -> None:
+        restorer = _make_restorer()
+        frames = _make_color_frames(1)
+        result = restorer.restore(frames, keep_start=0, keep_end=1)
+        restorer.close()
+        assert len(result) == 1
+
     def test_4_frames(self) -> None:
         restorer = _make_restorer()
         frames = _make_color_frames(4)

@@ -18,6 +18,7 @@ import torch
 logger = logging.getLogger(__name__)
 
 TVAI_PIPELINE_DELAY = 20
+TVAI_MIN_STREAM_FRAMES_TO_EMIT = 8
 
 
 def _parse_tvai_args_kv(args: str) -> dict[str, str]:
@@ -68,6 +69,7 @@ class _TvaiWorker:
         self._frame_queue: Queue[np.ndarray | None] = Queue()
         self._write_queue = FrameQueue(max_write_frames)
         self._error: BaseException | None = None
+        self.frames_pushed = 0
 
     @property
     def alive(self) -> bool:
@@ -77,6 +79,7 @@ class _TvaiWorker:
         self._error = None
         self._frame_queue = Queue()
         self._write_queue = FrameQueue(self._max_write_frames)
+        self.frames_pushed = 0
         self._proc = subprocess.Popen(
             self._cmd,
             stdin=subprocess.PIPE,
@@ -146,6 +149,7 @@ class _TvaiWorker:
     def push_frames(self, frames_hwc: np.ndarray) -> None:
         self.check_error()
         data = np.ascontiguousarray(frames_hwc)
+        self.frames_pushed += data.shape[0]
         self._write_queue.put(data, frame_count=data.shape[0])
 
     def drain_writes(self) -> None:
@@ -443,11 +447,25 @@ class TvaiSecondaryRestorer:
                 self._worker_locks[wi].release()
         return flushed
 
+    def _has_pending_clips(self, wi: int) -> bool:
+        return any(isinstance(s, _ClipSegment) for s in self._worker_segments[wi])
+
+    def _pad_stream_too_short_for_tvai_to_emit(self, wi: int) -> None:
+        worker = self._workers[wi]
+        deficit = TVAI_MIN_STREAM_FRAMES_TO_EMIT - worker.frames_pushed
+        if deficit <= 0 or not self._has_pending_clips(wi):
+            return
+        filler = np.zeros((deficit, self._INPUT_SIZE, self._INPUT_SIZE, 3), dtype=np.uint8)
+        self._worker_segments[wi].append(_FillerSegment(remaining=deficit))
+        worker.push_frames(filler)
+        logger.debug("TVAI flush_all: padded worker %d with %d filler frames (stream too short)", wi, deficit)
+
     def flush_all(self) -> None:
         if not self._started:
             return
         for wi in range(len(self._workers)):
             with self._worker_locks[wi]:
+                self._pad_stream_too_short_for_tvai_to_emit(wi)
                 remaining = self._workers[wi].close_stdin_and_drain()
             segments = self._worker_segments[wi]
             for frame in remaining:

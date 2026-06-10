@@ -10,6 +10,7 @@ import pytest
 import torch
 
 from jasna.restorer.tvai_secondary_restorer import (
+    TVAI_MIN_STREAM_FRAMES_TO_EMIT,
     TVAI_PIPELINE_DELAY,
     TvaiSecondaryRestorer,
     _ClipSegment,
@@ -180,6 +181,7 @@ def _setup_mock_workers(r, num_workers=None):
     for w in r._workers:
         w.drain_available.return_value = []
         w.close_stdin_and_drain.return_value = []
+        w.frames_pushed = 1000
     r._worker_segments = [deque() for _ in range(n)]
     r._worker_locks = [threading.Lock() for _ in range(n)]
     r._started = True
@@ -474,6 +476,39 @@ class TestFlushAll:
     def test_noop_when_not_started(self):
         r = _make_restorer()
         r.flush_all()
+
+    def test_short_stream_padded_before_close(self):
+        r = _make_restorer()
+        workers = _setup_mock_workers(r)
+        out = _make_frame()
+        workers[0].frames_pushed = 1
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=1))
+        workers[0].close_stdin_and_drain.return_value = [out] * TVAI_MIN_STREAM_FRAMES_TO_EMIT
+        r.flush_all()
+        workers[0].push_frames.assert_called_once()
+        filler = workers[0].push_frames.call_args[0][0]
+        assert filler.shape[0] == TVAI_MIN_STREAM_FRAMES_TO_EMIT - 1
+        assert 0 in r._completed
+        assert len(r._completed[0]) == 1
+
+    def test_long_stream_not_padded(self):
+        r = _make_restorer()
+        workers = _setup_mock_workers(r)
+        out = _make_frame()
+        workers[0].frames_pushed = TVAI_MIN_STREAM_FRAMES_TO_EMIT
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=1))
+        workers[0].close_stdin_and_drain.return_value = [out]
+        r.flush_all()
+        workers[0].push_frames.assert_not_called()
+        assert len(r._completed[0]) == 1
+
+    def test_short_stream_without_clips_not_padded(self):
+        r = _make_restorer()
+        workers = _setup_mock_workers(r)
+        workers[0].frames_pushed = 1
+        r._worker_segments[0].append(_FillerSegment(remaining=1))
+        r.flush_all()
+        workers[0].push_frames.assert_not_called()
 
 
 class TestRestore:
