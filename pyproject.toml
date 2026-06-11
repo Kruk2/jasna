@@ -16,7 +16,7 @@ dependencies = [
   "av>=16.1.0",
   "numpy",
   "psutil",
-  "transformers<5",
+  "transformers>5",
   "mmengine==0.10.7",
   "opencv-python",
   "tqdm",
