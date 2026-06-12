@@ -26,7 +26,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     
     def __init__(self, skip_wizard: bool = False):
         super().__init__()
-        self.TkdndVersion = TkinterDnD._require(self)
+        try:
+            self.TkdndVersion = TkinterDnD._require(self)
+        except RuntimeError:
+            # tkdnd native lib may fail to load (e.g. uv-managed python bundles
+            # Tcl/Tk 9 while tkinterdnd2 ships a Tcl 8.x binary) - run without drag&drop
+            self.TkdndVersion = None
         
         self.title("Jasna GUI")
         self.configure(fg_color=Colors.BG_MAIN)
@@ -207,7 +212,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._settings_panel.get_last_output_pattern(),
         )
         self._queue_panel.set_on_output_changed(self._on_output_changed)
-        self._queue_panel.enable_file_drop()
+        if self.TkdndVersion is not None:
+            self._queue_panel.enable_file_drop()
         
     def _build_footer(self):
         # Log panel (bottom, collapsible) - hidden by default
