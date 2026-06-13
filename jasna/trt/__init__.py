@@ -56,38 +56,21 @@ def _trt_dtype_to_torch(trt_dtype: trt.DataType) -> torch.dtype:
 from jasna.engine_paths import get_onnx_tensorrt_engine_path  # noqa: E402
 
 
-def compile_onnx_to_tensorrt_engine(
-    onnx_path: str | Path,
+def _build_serialized_engine(
+    onnx_bytes: bytes,
     device: torch.device,
     *,
-    batch_size: int | None = None,
-    fp16: bool = True,
-    optimization_level: int = 5,
+    batch_size: int | None,
+    fp16: bool,
+    optimization_level: int,
     workspace_gb: int,
-) -> Path:
-    onnx_path = Path(onnx_path)
-    engine_path = get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=bool(fp16))
-
-    if engine_path.exists():
-        return engine_path
-
-    if not onnx_path.exists():
-        raise FileNotFoundError(str(onnx_path))
-    log = logging.getLogger(__name__)
-    msg = (
-        f"Compiling TensorRT engine for {onnx_path} (this can take a few minutes). "
-        f"Output: {engine_path}"
-    )
-    print(msg)
-    log.info("%s", msg)
-
+) -> bytes:
     logger = get_trt_logger()
     builder = trt.Builder(logger)
     explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
     network = builder.create_network(explicit_batch)
     parser = trt.OnnxParser(network, logger)
 
-    onnx_bytes = onnx_path.read_bytes()
     if not parser.parse(onnx_bytes):
         errors = [parser.get_error(i) for i in range(parser.num_errors)]
         raise ValueError("TensorRT ONNX parse failed:\n" + "\n".join(str(e) for e in errors))
@@ -130,8 +113,79 @@ def compile_onnx_to_tensorrt_engine(
         engine_bytes = builder.build_serialized_network(network, config)
     if engine_bytes is None:
         raise ValueError("TensorRT engine build returned None")
+    return bytes(engine_bytes)
+
+
+def compile_onnx_to_tensorrt_engine(
+    onnx_path: str | Path,
+    device: torch.device,
+    *,
+    batch_size: int | None = None,
+    fp16: bool = True,
+    optimization_level: int = 5,
+    workspace_gb: int,
+) -> Path:
+    onnx_path = Path(onnx_path)
+    engine_path = get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=bool(fp16))
+
+    if engine_path.exists():
+        return engine_path
+
+    if not onnx_path.exists():
+        raise FileNotFoundError(str(onnx_path))
+    log = logging.getLogger(__name__)
+    msg = (
+        f"Compiling TensorRT engine for {onnx_path} (this can take a few minutes). "
+        f"Output: {engine_path}"
+    )
+    print(msg)
+    log.info("%s", msg)
+
+    engine_bytes = _build_serialized_engine(
+        onnx_path.read_bytes(),
+        device,
+        batch_size=batch_size,
+        fp16=bool(fp16),
+        optimization_level=optimization_level,
+        workspace_gb=workspace_gb,
+    )
 
     engine_path.parent.mkdir(parents=True, exist_ok=True)
     engine_path.write_bytes(engine_bytes)
+    return engine_path
+
+
+def compile_onnx_bytes_to_encrypted_engine(
+    onnx_bytes: bytes,
+    model_id: str,
+    engine_path: Path,
+    device: torch.device,
+    *,
+    batch_size: int | None = None,
+    fp16: bool = True,
+    optimization_level: int = 5,
+    workspace_gb: int,
+) -> Path:
+    from jasna.protection import protected_model
+
+    if engine_path.exists():
+        return engine_path
+
+    log = logging.getLogger(__name__)
+    msg = f"Compiling encrypted TensorRT engine for '{model_id}'. Output: {engine_path}"
+    print(msg)
+    log.info("%s", msg)
+
+    engine_bytes = _build_serialized_engine(
+        onnx_bytes,
+        device,
+        batch_size=batch_size,
+        fp16=bool(fp16),
+        optimization_level=optimization_level,
+        workspace_gb=workspace_gb,
+    )
+    encrypted = protected_model.encrypt_engine_bytes(model_id, engine_bytes)
+    engine_path.parent.mkdir(parents=True, exist_ok=True)
+    engine_path.write_bytes(encrypted)
     return engine_path
 

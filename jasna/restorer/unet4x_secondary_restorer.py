@@ -6,28 +6,62 @@ from pathlib import Path
 import torch
 from torch.nn import functional as F
 
-from jasna.engine_paths import UNET4X_ONNX_PATH, get_unet4x_engine_path
+from jasna._frozen import is_frozen
+from jasna.engine_paths import (
+    UNET4X_ONNX_ENC_PATH,
+    UNET4X_ONNX_PATH,
+    get_unet4x_encrypted_engine_path,
+    get_unet4x_engine_path,
+)
 from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
 
 UNET4X_INPUT_SIZE = 256
 UNET4X_OUTPUT_SIZE = 1024
+UNET4X_MODEL_ID = "unet-4x"
+
+UNET4X_INPUT_SHAPES = {
+    "lr_prev": (1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
+    "lr_curr": (1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
+    "hr_prev": (1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3),
+}
+
+
+def use_plaintext_unet4x() -> bool:
+    return UNET4X_ONNX_PATH.exists() and not is_frozen()
 
 
 def compile_unet4x_engine(
-    onnx_path: Path,
     device: torch.device,
     fp16: bool = True,
 ) -> Path:
-    from jasna.trt import compile_onnx_to_tensorrt_engine
-    return compile_onnx_to_tensorrt_engine(
-        onnx_path,
-        device,
-        batch_size=None,
-        fp16=bool(fp16),
-        workspace_gb=20,
-    )
+    if use_plaintext_unet4x():
+        from jasna.trt import compile_onnx_to_tensorrt_engine
+        return compile_onnx_to_tensorrt_engine(
+            UNET4X_ONNX_PATH, device, batch_size=None, fp16=bool(fp16), workspace_gb=20,
+        )
+
+    from jasna.protection import protected_model
+    from jasna.trt import compile_onnx_bytes_to_encrypted_engine
+
+    engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16))
+    if engine_path.exists():
+        return engine_path
+
+    onnx_bytes = protected_model.decrypt_model_bytes(UNET4X_MODEL_ID, UNET4X_ONNX_ENC_PATH)
+    try:
+        return compile_onnx_bytes_to_encrypted_engine(
+            onnx_bytes,
+            UNET4X_MODEL_ID,
+            engine_path,
+            device,
+            batch_size=None,
+            fp16=bool(fp16),
+            workspace_gb=20,
+        )
+    finally:
+        del onnx_bytes
 
 
 class Unet4xSecondaryRestorer:
@@ -41,21 +75,32 @@ class Unet4xSecondaryRestorer:
         self.fp16 = bool(fp16)
         self._dtype = torch.float16 if self.fp16 else torch.float32
 
-        self.engine_path = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16)
-        if not self.engine_path.exists():
-            raise FileNotFoundError(
-                f"Unet4x engine not found: {self.engine_path}. "
-                "Run engine compilation first via ensure_engines_compiled()."
+        if use_plaintext_unet4x():
+            self.engine_path = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16)
+            if not self.engine_path.exists():
+                raise FileNotFoundError(
+                    f"Unet4x engine not found: {self.engine_path}. "
+                    "Run engine compilation first via ensure_engines_compiled()."
+                )
+            self.runner = TrtRunner(
+                self.engine_path, input_shapes=UNET4X_INPUT_SHAPES, device=self.device,
             )
-        self.runner = TrtRunner(
-            self.engine_path,
-            input_shapes={
-                "lr_prev": (1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
-                "lr_curr": (1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3),
-                "hr_prev": (1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3),
-            },
-            device=self.device,
-        )
+        else:
+            self.engine_path = get_unet4x_encrypted_engine_path(fp16=self.fp16)
+            if not self.engine_path.exists():
+                raise FileNotFoundError(
+                    f"Unet4x engine not found: {self.engine_path}. "
+                    "Run engine compilation first via ensure_engines_compiled()."
+                )
+            from jasna.protection import protected_model
+            engine_bytes = protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, self.engine_path.read_bytes())
+            try:
+                self.runner = TrtRunner.from_engine_bytes(
+                    engine_bytes, input_shapes=UNET4X_INPUT_SHAPES, device=self.device,
+                    source=str(self.engine_path),
+                )
+            finally:
+                del engine_bytes
         logger.info(
             "Unet4xSecondaryRestorer loaded: %s (%dx%d -> %dx%d)",
             self.engine_path,

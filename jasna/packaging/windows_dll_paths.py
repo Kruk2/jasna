@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+from jasna._frozen import is_frozen
+
 
 _WINDOWS_PATHSEP = ";"
 _ADDED_DLL_DIR_HANDLES: list[object] = []
@@ -94,7 +96,7 @@ def _iter_top_level_lib_dirs(root: Path) -> list[Path]:
 
 
 def configure_windows_dll_search_paths() -> None:
-    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+    if sys.platform != "win32" or not is_frozen():
         return
 
     app_dir = Path(sys.executable).resolve().parent

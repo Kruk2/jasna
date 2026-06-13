@@ -10,6 +10,8 @@ import typing
 from dataclasses import dataclass
 from pathlib import Path
 
+from jasna._frozen import is_frozen
+
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 30 * 60
@@ -60,8 +62,14 @@ def _detection_engine_exists(detection_model_name: str, detection_model_path: st
 
 
 def _unet4x_engine_exists(fp16: bool) -> bool:
-    from jasna.engine_paths import get_unet4x_engine_path
-    return get_unet4x_engine_path(fp16=fp16).exists()  # uses default UNET4X_ONNX_PATH
+    from jasna.engine_paths import (
+        get_unet4x_encrypted_engine_path,
+        get_unet4x_engine_path,
+        unet4x_plaintext_available,
+    )
+    if unet4x_plaintext_available():
+        return get_unet4x_engine_path(fp16=fp16).exists()
+    return get_unet4x_encrypted_engine_path(fp16=fp16).exists()
 
 
 def ensure_engines_compiled(
@@ -78,6 +86,12 @@ def ensure_engines_compiled(
     )
     need_unet4x = req.unet4x and not _unet4x_engine_exists(req.fp16)
 
+    if need_unet4x:
+        from jasna.engine_paths import unet4x_plaintext_available
+        from jasna.protection import license_store
+        if not unet4x_plaintext_available() and not license_store.is_licensed():
+            raise RuntimeError("unet-4x is a supporter feature. Enter your license to enable it.")
+
     if req.basicvsrpp:
         if not req.fp16:
             result.use_basicvsrpp_tensorrt = False
@@ -92,7 +106,7 @@ def ensure_engines_compiled(
     if log_callback:
         log_callback("Compiling TensorRT engines (this may take several minutes)...")
 
-    if getattr(sys, "frozen", False):
+    if is_frozen():
         cmd = [sys.executable, "--compile-engines", req.to_json()]
     else:
         cmd = [sys.executable, "-m", "jasna.engine_compiler", req.to_json()]
@@ -140,6 +154,12 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
     _install_noise_filters()
     import torch
 
+    # The compile subprocess imports torch_tensorrt (-> torch._inductor) directly, without
+    # going through jasna.pipeline, so the source-introspection shims aren't installed yet.
+    # In the compiled (Nuitka) binary that introspection raises; patch before any such import.
+    from jasna._frozen import patch_frozen_torch
+    patch_frozen_torch()
+
     device = torch.device(req.device)
 
     if req.basicvsrpp and req.fp16 and not _basicvsrpp_engines_exist(
@@ -170,10 +190,9 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
         print("Detection engine compiled.")
 
     if req.unet4x and not _unet4x_engine_exists(req.fp16):
-        from jasna.engine_paths import UNET4X_ONNX_PATH
         from jasna.restorer.unet4x_secondary_restorer import compile_unet4x_engine
         print("Compiling Unet4x engine...")
-        compile_unet4x_engine(UNET4X_ONNX_PATH, device, fp16=req.fp16)
+        compile_unet4x_engine(device, fp16=req.fp16)
         print("Unet4x engine compiled.")
 
 

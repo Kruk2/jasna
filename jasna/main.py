@@ -109,6 +109,20 @@ def build_parser() -> argparse.ArgumentParser:
         help='Secondary restoration after primary model (default: %(default)s)',
     )
 
+    license_group = parser.add_argument_group("License")
+    license_group.add_argument(
+        "--license-email",
+        type=str,
+        default="",
+        help="Supporter email tied to your license key (enables unet-4x).",
+    )
+    license_group.add_argument(
+        "--license-key",
+        type=str,
+        default="",
+        help="License key issued for your supporter email.",
+    )
+
     rtx = parser.add_argument_group("RTX Super Res")
     rtx.add_argument(
         "--rtx-scale",
@@ -376,6 +390,10 @@ def main() -> None:
     from jasna.restorer.restoration_pipeline import RestorationPipeline
 
     secondary_name = str(args.secondary_restoration).lower()
+
+    if args.license_email and args.license_key:
+        from jasna.protection import license_store
+        license_store.set_license(args.license_email, args.license_key)
 
     compile_result = ensure_engines_compiled(EngineCompilationRequest(
         device=str(device),

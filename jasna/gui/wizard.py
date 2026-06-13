@@ -39,6 +39,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self.configure(fg_color=Colors.BG_MAIN)
 
         self.transient(master)
+        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", lambda: None)
         self.lift()
@@ -358,7 +359,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 capture_output=True,
                 text=True,
                 check=False,
-                startupinfo=os_utils.get_subprocess_startup_info(),
+                **os_utils.subprocess_no_window_kwargs(),
             )
             if completed.returncode != 0:
                 logger.error(
@@ -383,7 +384,7 @@ class FirstRunWizard(ctk.CTkToplevel):
                 capture_output=True,
                 text=True,
                 check=False,
-                startupinfo=os_utils.get_subprocess_startup_info(),
+                **os_utils.subprocess_no_window_kwargs(),
             )
             if completed.returncode != 0:
                 logger.error(

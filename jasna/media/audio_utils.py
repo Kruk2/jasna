@@ -3,7 +3,7 @@ import logging
 import subprocess
 from pathlib import Path
 
-from jasna.os_utils import get_subprocess_startup_info, resolve_executable
+from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ def probe_audio_codec(video_file: str) -> str | None:
         "-show_streams",
         video_file,
     ]
-    result = subprocess.run(cmd, capture_output=True, startupinfo=get_subprocess_startup_info())
+    result = subprocess.run(cmd, capture_output=True, **subprocess_no_window_kwargs())
     if result.returncode != 0:
         return None
     data = json.loads(result.stdout)

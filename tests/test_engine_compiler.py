@@ -9,6 +9,7 @@ import pytest
 from jasna.engine_compiler import (
     EngineCompilationRequest,
     _detection_engine_exists,
+    _subprocess_compile,
     _unet4x_engine_exists,
     ensure_engines_compiled,
 )
@@ -101,7 +102,8 @@ def test_ensure_subprocess_failure_raises(monkeypatch) -> None:
 
 def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
     monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
-    fake_sys = type("FakeSys", (), {"executable": "C:/app/jasna.exe", "frozen": True})()
+    monkeypatch.setattr("jasna.engine_compiler.is_frozen", lambda: True)
+    fake_sys = type("FakeSys", (), {"executable": "C:/app/jasna.exe"})()
     monkeypatch.setattr("jasna.engine_compiler.sys", fake_sys)
 
     popen_calls = []
@@ -132,6 +134,16 @@ def test_ensure_create_no_window_on_windows(monkeypatch) -> None:
     assert popen_kwargs.get("creationflags") == subprocess.CREATE_NO_WINDOW
 
 
+def test_subprocess_compile_patches_frozen_torch(monkeypatch) -> None:
+    # In the compiled binary the compile subprocess imports torch_tensorrt -> torch._inductor
+    # directly; without patch_frozen_torch the source-introspection raises. An empty request
+    # compiles nothing, so this only exercises the early import-torch + patch path.
+    called = []
+    monkeypatch.setattr("jasna._frozen.patch_frozen_torch", lambda: called.append(True))
+    _subprocess_compile(EngineCompilationRequest(device="cpu", fp16=False))
+    assert called, "patch_frozen_torch must run before any torch_tensorrt/_inductor import"
+
+
 def test_detection_engine_exists_rfdetr(tmp_path: Path) -> None:
     onnx_path = tmp_path / "model.onnx"
     onnx_path.write_text("x")
@@ -144,8 +156,9 @@ def test_detection_engine_exists_rfdetr(tmp_path: Path) -> None:
     assert _detection_engine_exists("rfdetr-v5", str(onnx_path), 4, True) is True
 
 
-def test_unet4x_engine_exists(monkeypatch, tmp_path: Path) -> None:
+def test_unet4x_engine_exists_plaintext(monkeypatch, tmp_path: Path) -> None:
     onnx_path = tmp_path / "unet-4x.onnx"
+    onnx_path.write_bytes(b"onnx")
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", onnx_path)
     assert _unet4x_engine_exists(fp16=True) is False
 
@@ -153,4 +166,15 @@ def test_unet4x_engine_exists(monkeypatch, tmp_path: Path) -> None:
     engine = get_unet4x_engine_path(onnx_path, fp16=True)
     engine.parent.mkdir(parents=True, exist_ok=True)
     engine.write_text("x")
+    assert _unet4x_engine_exists(fp16=True) is True
+
+
+def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
+    onnx_path = tmp_path / "unet-4x.onnx"  # absent → encrypted branch
+    monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", onnx_path)
+    enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
+    monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+
+    assert _unet4x_engine_exists(fp16=True) is False
+    enc_engine.write_text("x")
     assert _unet4x_engine_exists(fp16=True) is True

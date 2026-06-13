@@ -21,9 +21,11 @@ if multiprocessing.parent_process() is not None:
     sys.exit(0)
 os.environ["JASNA_MAIN_PID"] = str(os.getpid())
 
+from jasna._frozen import is_frozen
 from jasna.bootstrap import sanitize_sys_path_for_local_dev
+from jasna.os_utils import drop_console_window
 
-if not getattr(sys, "frozen", False):
+if not is_frozen():
     sanitize_sys_path_for_local_dev(Path(__file__).resolve().parent)
 
 
@@ -61,6 +63,7 @@ if multiprocessing.parent_process() is None:
 
             main()
         elif argv0_stem == "jasna-gui":
+            drop_console_window()
             _preload_native_libs()
             from jasna.gui import run_gui
 
@@ -71,6 +74,7 @@ if multiprocessing.parent_process() is None:
 
                 main()
             else:
+                drop_console_window()
                 _preload_native_libs()
                 from jasna.gui import run_gui
 
