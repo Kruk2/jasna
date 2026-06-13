@@ -165,6 +165,53 @@ def test_get_subprocess_startup_info_non_nt_returns_none(monkeypatch) -> None:
     assert os_utils.get_subprocess_startup_info() is None
 
 
+def test_drop_console_window_non_win_is_noop(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
+    os_utils.drop_console_window()  # must not touch ctypes/raise off Windows
+
+
+def test_drop_console_window_win_calls_freeconsole(monkeypatch) -> None:
+    import ctypes
+
+    calls = {"free": 0}
+
+    class _Kernel32:
+        def FreeConsole(self) -> None:
+            calls["free"] += 1
+
+    class _Windll:
+        kernel32 = _Kernel32()
+
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(ctypes, "windll", _Windll(), raising=False)
+
+    os_utils.drop_console_window()
+
+    assert calls["free"] == 1
+
+
+def test_subprocess_no_window_kwargs_non_nt_is_empty(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.os, "name", "posix", raising=False)
+    assert os_utils.subprocess_no_window_kwargs() == {}
+
+
+def test_subprocess_no_window_kwargs_nt_sets_create_no_window(monkeypatch) -> None:
+    class _StartupInfo:
+        def __init__(self) -> None:
+            self.dwFlags = 0
+
+    monkeypatch.setattr(os_utils.os, "name", "nt", raising=False)
+    monkeypatch.setattr(os_utils.subprocess, "STARTUPINFO", _StartupInfo, raising=False)
+    monkeypatch.setattr(os_utils.subprocess, "STARTF_USESHOWWINDOW", 1 << 0, raising=False)
+    monkeypatch.setattr(os_utils.subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+
+    kwargs = os_utils.subprocess_no_window_kwargs()
+
+    assert kwargs["creationflags"] == 0x08000000
+    assert kwargs["startupinfo"] is not None
+    assert kwargs["startupinfo"].dwFlags & (1 << 0)
+
+
 def test_get_subprocess_startup_info_nt_sets_startf_flag(monkeypatch) -> None:
     class _StartupInfo:
         def __init__(self) -> None:

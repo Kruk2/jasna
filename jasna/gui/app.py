@@ -10,9 +10,10 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 
 from jasna import __version__
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, Toast
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, Toast, LicenseDialog
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
+from jasna.engine_paths import UNET4X_ONNX_ENC_PATH
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
@@ -153,7 +154,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # Buy Me a Coffee button
         self._bmc_btn = BuyMeCoffeeButton(right, compact=False)
         self._bmc_btn.pack(side="left", padx=(0, 12))
-        
+
+        # Supporter license chip — only shown when the gated (encrypted) model ships.
+        if UNET4X_ONNX_ENC_PATH.exists():
+            self._license_chip = ctk.CTkButton(
+                right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+                fg_color="transparent", hover_color=Colors.BG_CARD,
+                width=130, command=self._open_license_dialog,
+            )
+            self._license_chip.pack(side="left", padx=(0, 12))
+            self._refresh_license_chip()
+
         self._system_check_btn = ctk.CTkButton(
             right,
             text=t("btn_system_check"),
@@ -275,10 +286,21 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._stop_system_stats_poller()
             self.destroy()
         
+    def _refresh_license_chip(self):
+        from jasna.protection import license_store
+        licensed = license_store.is_licensed()
+        self._license_chip.configure(
+            text=t("license_chip_active") if licensed else t("license_chip_inactive"),
+            text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_PAUSED,
+        )
+
+    def _open_license_dialog(self):
+        LicenseDialog(self, on_activated=self._refresh_license_chip)
+
     def _show_wizard(self):
         from jasna.gui.wizard import FirstRunWizard
         FirstRunWizard(self, on_complete=self._on_wizard_complete)
-        
+
     def _on_wizard_complete(self, can_continue: bool, all_passed: bool = False):
         if not can_continue:
             self._log_panel.error(t("wizard_log_blocked"))
@@ -504,6 +526,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         dialog.resizable(False, False)
         dialog.configure(fg_color=Colors.BG_MAIN)
         dialog.transient(self)
+        dialog.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
         dialog.grab_set()
         
         # Center on parent

@@ -19,6 +19,8 @@ def _mute_torch_tensorrt() -> None:
         return
     _torchtrt_muted = True
     import tensorrt as trt
+    from jasna._frozen import patch_frozen_torch
+    patch_frozen_torch()
     import torch_tensorrt
     torch_tensorrt.logging._LOGGER.setLevel(logging.ERROR)
     torch_tensorrt.logging._LOGGER.handlers.clear()

@@ -539,8 +539,8 @@ class SettingsPanel(ctk.CTkFrame):
         )
         none_rb.pack(side="left", padx=(0, 16))
 
-        from jasna.engine_paths import UNET4X_ONNX_PATH
-        unet4x_available = UNET4X_ONNX_PATH.exists()
+        from jasna.engine_paths import UNET4X_ONNX_ENC_PATH, UNET4X_ONNX_PATH
+        unet4x_available = UNET4X_ONNX_PATH.exists() or UNET4X_ONNX_ENC_PATH.exists()
         unet4x_rb = ctk.CTkRadioButton(
             engines_frame, text=f"{t('secondary_unet_4x')} ({t('secondary_unet_4x_hint')})",
             variable=self._widgets["secondary_var"], value="unet-4x",
@@ -550,6 +550,7 @@ class SettingsPanel(ctk.CTkFrame):
         )
         unet4x_rb.pack(side="left", padx=(0, 16))
         Tooltip(unet4x_rb, get_tooltip("secondary_unet_4x"))
+        self._unet4x_rb = unet4x_rb
 
         tvai_rb = ctk.CTkRadioButton(
             engines_frame, text=f"{t('secondary_tvai')} ({t('secondary_tvai_hint')})", variable=self._widgets["secondary_var"], value="tvai",
@@ -566,7 +567,7 @@ class SettingsPanel(ctk.CTkFrame):
         )
         rtx_rb.pack(side="left")
         Tooltip(rtx_rb, get_tooltip("secondary_rtx"))
-        
+
         # TVAI options (hidden by default)
         self._tvai_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
         

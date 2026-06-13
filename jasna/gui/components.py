@@ -58,6 +58,93 @@ class BuyMeCoffeeButton(ctk.CTkButton):
         webbrowser.open(BMC_URL)
 
 
+class LicenseDialog(ctk.CTkToplevel):
+    """Modal popup to enter the supporter email + license key. Persisted by
+    license_store (in the user config dir); on success calls on_activated so the
+    header chip can refresh."""
+
+    def __init__(self, master, on_activated):
+        super().__init__(master)
+        self._on_activated = on_activated
+
+        self.title(t("supporter_title"))
+        self.resizable(False, False)
+        self.configure(fg_color=Colors.BG_MAIN)
+        self.transient(master)
+        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
+        self.grab_set()
+        self.lift()
+        self.focus_force()
+
+        outer = ctk.CTkFrame(self, fg_color="transparent")
+        outer.pack(fill="both", expand=True, padx=24, pady=24)
+
+        ctk.CTkLabel(
+            outer, text=t("supporter_title"),
+            font=(Fonts.FAMILY, Fonts.SIZE_HEADING, "bold"), text_color=Colors.TEXT_PRIMARY,
+        ).pack(anchor="w", pady=(0, 6))
+        ctk.CTkLabel(
+            outer, text=t("supporter_blurb"), text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+        ).pack(anchor="w", pady=(0, 2))
+        ctk.CTkLabel(
+            outer, text=t("supporter_perks"), text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(
+            outer, text=t("license_crypto_info"), text_color=Colors.STATUS_PENDING,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+
+        self._email = ctk.CTkEntry(
+            outer, width=340, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_email_placeholder"),
+        )
+        self._email.pack(fill="x", pady=(0, 6))
+        self._key = ctk.CTkEntry(
+            outer, width=340, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_key_placeholder"),
+        )
+        self._key.pack(fill="x", pady=(0, 10))
+
+        action = ctk.CTkFrame(outer, fg_color="transparent")
+        action.pack(fill="x")
+        ctk.CTkButton(
+            action, text=t("license_activate"), width=110,
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
+            command=self._activate,
+        ).pack(side="left")
+        self._status = ctk.CTkLabel(action, text="", text_color=Colors.TEXT_PRIMARY)
+        self._status.pack(side="left", padx=10)
+
+        from jasna.protection import license_store
+        stored = license_store.load_license()
+        if stored:
+            self._email.insert(0, stored[0])
+            self._key.insert(0, stored[1])
+            if license_store.is_licensed():
+                self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+
+        self.update_idletasks()
+        w = max(388, self.winfo_reqwidth())
+        h = self.winfo_reqheight()
+        x = master.winfo_x() + (master.winfo_width() - w) // 2
+        y = master.winfo_y() + (master.winfo_height() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _activate(self):
+        from jasna.protection import ProtectionError, license_store
+        email = self._email.get().strip()
+        key = self._key.get().strip()
+        try:
+            license_store.set_license(email, key)
+        except ProtectionError as exc:
+            self._status.configure(text=str(exc), text_color=Colors.STATUS_ERROR)
+            return
+        self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+        self._on_activated()
+
+
 class StatusPill(ctk.CTkFrame):
     """Status indicator pill shown in header."""
     
@@ -639,6 +726,7 @@ class PresetDialog(ctk.CTkToplevel):
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
         self.transient(master)
+        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
         self.grab_set()
         
         self._on_create = on_create
@@ -739,6 +827,7 @@ class ConfirmDialog(ctk.CTkToplevel):
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
         self.transient(master)
+        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
         self.grab_set()
         
         self._on_confirm = on_confirm

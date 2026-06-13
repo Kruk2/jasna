@@ -6,6 +6,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from jasna._frozen import is_frozen
+
 logger = logging.getLogger(__name__)
 
 MIN_GPU_COMPUTE = (7, 5)
@@ -35,7 +37,7 @@ def _bundled_exe_filename(name: str) -> str:
 
 
 def _find_bundled_executable(name: str) -> Path | None:
-    if not getattr(sys, "frozen", False):
+    if not is_frozen():
         return None
 
     exe = _bundled_exe_filename(name)
@@ -103,6 +105,31 @@ def get_subprocess_startup_info():
     startup_info = subprocess.STARTUPINFO()
     startup_info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
     return startup_info
+
+
+def drop_console_window() -> None:
+    """Detach the console on a GUI launch (Windows). The binary is built console-subsystem
+    (`--windows-console-mode=force`) so the CLI blocks cmd and stdout/stderr work; for a
+    GUI/double-click launch we don't want that console window, so release it. No-op off Windows."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    ctypes.windll.kernel32.FreeConsole()
+
+
+def subprocess_no_window_kwargs() -> dict:
+    """Popen/run kwargs that suppress a child's console window on Windows.
+
+    The GUI drops its own console (FreeConsole), so a console-subsystem child like
+    ffmpeg/ffprobe/mkvmerge would otherwise pop its own cmd window. We capture their output
+    via pipes, so they never need an inherited console. No-op (empty) off Windows."""
+    if os.name != "nt":
+        return {}
+    return {
+        "startupinfo": get_subprocess_startup_info(),
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
 
 
 def _parse_ffmpeg_major_version(version_output: str) -> int:
@@ -256,7 +283,7 @@ def check_gpu_driver_version() -> tuple[bool, str]:
             capture_output=True,
             text=True,
             check=False,
-            startupinfo=get_subprocess_startup_info(),
+            **subprocess_no_window_kwargs(),
         )
     except OSError as e:
         return False, str(e)
@@ -273,7 +300,7 @@ def check_gpu_driver_version() -> tuple[bool, str]:
 
 
 def check_ascii_install_path() -> tuple[bool, str]:
-    if getattr(sys, "frozen", False):
+    if is_frozen():
         install_path = Path(sys.executable).parent
     else:
         install_path = Path(__file__).resolve().parent

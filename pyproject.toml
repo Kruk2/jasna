@@ -25,6 +25,7 @@ dependencies = [
   "ultralytics",
   "nvidia-vfx",
   "onnx",
+  "cryptography>=42",
 ]
 
 [project.scripts]
@@ -33,6 +34,7 @@ jasna = "jasna.main:main"
 [project.optional-dependencies]
 dev = [
   "pyinstaller>=6.0",
+  "nuitka>=2.4",
   "pytest",
   "pytest-cov",
   "scikit-build",
