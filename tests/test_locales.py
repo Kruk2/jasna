@@ -54,3 +54,23 @@ def test_format_placeholders_match(lang: str) -> None:
     assert not mismatches, (
         f"Format placeholder mismatch between en and {lang}:\n" + "\n".join(mismatches)
     )
+
+
+_LICENSE_KEYS = {
+    "supporter_title",
+    "supporter_blurb",
+    "supporter_perks",
+    "license_email_placeholder",
+    "license_key_placeholder",
+    "license_activate",
+    "license_active",
+    "license_crypto_info",
+    "license_chip_inactive",
+    "license_chip_active",
+}
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_all_languages_define_license_keys(lang: str) -> None:
+    missing = _LICENSE_KEYS - TRANSLATIONS[lang].keys()
+    assert not missing, f"{lang} missing license keys: {sorted(missing)}"

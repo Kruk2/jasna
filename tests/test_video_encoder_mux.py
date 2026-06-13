@@ -37,7 +37,7 @@ def _fake_metadata(**overrides) -> VideoMetadata:
 
 
 class TestMuxHevcToMkv:
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="mkvmerge")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_success_writes_timecodes_and_cleans_up(self, mock_run, mock_resolve, mock_si, tmp_path):
@@ -58,7 +58,7 @@ class TestMuxHevcToMkv:
         timecodes_path = output_path.with_suffix('.txt')
         assert not timecodes_path.exists()
 
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="mkvmerge")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_failure_raises_runtime_error(self, mock_run, mock_resolve, mock_si, tmp_path):
@@ -71,7 +71,7 @@ class TestMuxHevcToMkv:
         with pytest.raises(RuntimeError, match="mkvmerge failed"):
             mux_hevc_to_mkv(hevc_path, output_path, [0, 1001], Fraction(1, 24000))
 
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="mkvmerge")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_timecodes_file_content(self, mock_run, mock_resolve, mock_si, tmp_path):
@@ -131,7 +131,7 @@ class TestNeedsAudioReencode:
 
 
 class TestProbeAudioCodec:
-    @patch("jasna.media.audio_utils.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.audio_utils.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.audio_utils.resolve_executable", return_value="ffprobe")
     @patch("jasna.media.audio_utils.subprocess.run")
     def test_returns_codec_name(self, mock_run, _resolve, _si):
@@ -142,7 +142,7 @@ class TestProbeAudioCodec:
         )
         assert probe_audio_codec("input.wmv") == "wmav2"
 
-    @patch("jasna.media.audio_utils.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.audio_utils.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.audio_utils.resolve_executable", return_value="ffprobe")
     @patch("jasna.media.audio_utils.subprocess.run")
     def test_no_audio_stream(self, mock_run, _resolve, _si):
@@ -153,7 +153,7 @@ class TestProbeAudioCodec:
         )
         assert probe_audio_codec("input.mp4") is None
 
-    @patch("jasna.media.audio_utils.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.audio_utils.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.audio_utils.resolve_executable", return_value="ffprobe")
     @patch("jasna.media.audio_utils.subprocess.run")
     def test_ffprobe_failure(self, mock_run, _resolve, _si):
@@ -177,7 +177,7 @@ class TestAudioCodecArgs:
 
 class TestRemuxWithAudioAndMetadata:
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_success_bt709_mpeg(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
@@ -202,7 +202,7 @@ class TestRemuxWithAudioAndMetadata:
         )
 
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_success_bt601_jpeg(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
@@ -224,7 +224,7 @@ class TestRemuxWithAudioAndMetadata:
         )
 
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_success_bt601_mpeg_rewrites_vui(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
@@ -246,7 +246,7 @@ class TestRemuxWithAudioAndMetadata:
         )
 
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_mp4_output_adds_faststart(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
@@ -264,7 +264,7 @@ class TestRemuxWithAudioAndMetadata:
         assert "+faststart" in cmd
 
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_failure_raises_runtime_error(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
@@ -279,7 +279,7 @@ class TestRemuxWithAudioAndMetadata:
             remux_with_audio_and_metadata(video_input, output_path, meta)
 
     @patch("jasna.media.video_encoder.audio_codec_args", return_value=["aac", "-b:a", "256k"])
-    @patch("jasna.media.video_encoder.get_subprocess_startup_info", return_value=None)
+    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
     @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
     @patch("jasna.media.video_encoder.subprocess.run")
     def test_reencode_args_in_ffmpeg_cmd(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):

@@ -25,6 +25,8 @@ build/
 dist/
 dist-old/
 dist_linux/
+dist_nuitka/
+dist_nuitka_win/
 *.egg-info/
 .eggs/
 

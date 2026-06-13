@@ -5,15 +5,17 @@ import os
 import sys
 from pathlib import Path
 
+from jasna._frozen import is_frozen
+
 
 def model_weights_dir() -> Path:
     """Resolve the ``model_weights`` directory.
 
-    When running as a frozen executable (PyInstaller), models are bundled next
-    to the executable. In a dev / source checkout we fall back to a CWD-relative
-    path so existing dev workflows keep working.
+    When running as a frozen executable, models are bundled next to the executable.
+    In a dev / source checkout we fall back to a CWD-relative path so existing dev
+    workflows keep working.
     """
-    if getattr(sys, "frozen", False):
+    if is_frozen():
         return Path(sys.executable).parent / "model_weights"
     return Path("model_weights")
 
@@ -54,12 +56,22 @@ def get_yolo_tensorrt_engine_path(model_path: str | Path, *, fp16: bool) -> Path
 
 
 UNET4X_ONNX_PATH = model_weights_dir() / "unet-4x.onnx"
+UNET4X_ONNX_ENC_PATH = model_weights_dir() / "unet-4x.onnx.enc"
 
 
 def get_unet4x_engine_path(onnx_path: str | Path | None = None, fp16: bool = True) -> Path:
     if onnx_path is None:
         onnx_path = UNET4X_ONNX_PATH
     return get_onnx_tensorrt_engine_path(onnx_path, batch_size=None, fp16=fp16)
+
+
+def get_unet4x_encrypted_engine_path(fp16: bool = True) -> Path:
+    plain = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=fp16)
+    return plain.parent / (plain.name + ".enc")
+
+
+def unet4x_plaintext_available() -> bool:
+    return UNET4X_ONNX_PATH.exists() and not is_frozen()
 
 
 BASICVSRPP_DIRECTIONS = ("backward_1", "forward_1", "backward_2", "forward_2")
