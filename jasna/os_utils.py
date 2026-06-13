@@ -41,15 +41,16 @@ def _find_bundled_executable(name: str) -> Path | None:
         return None
 
     exe = _bundled_exe_filename(name)
+    # Nuitka standalone has no _internal/ (a PyInstaller-ism); bundled tools sit at the
+    # dist root next to the binary, alongside model_weights/ and assets/.
     base = Path(sys.executable).parent
-    internal = base / "_internal"
 
     if name in {"ffmpeg", "ffprobe"}:
-        p = internal / "tools" / exe
+        p = base / "tools" / exe
         return p if p.is_file() else None
 
     if name == "mkvmerge":
-        root = internal / "mkvtoolnix"
+        root = base / "mkvtoolnix"
         direct = root / exe
         if direct.is_file():
             return direct
@@ -108,10 +109,11 @@ def get_subprocess_startup_info():
 
 
 def drop_console_window() -> None:
-    """Detach the console on a GUI launch (Windows). The binary is built console-subsystem
-    (`--windows-console-mode=force`) so the CLI blocks cmd and stdout/stderr work; for a
-    GUI/double-click launch we don't want that console window, so release it. No-op off Windows."""
-    if sys.platform != "win32":
+    """Detach the console on a frozen GUI launch (Windows). The frozen binary is built
+    console-subsystem (`--windows-console-mode=force`) so the CLI blocks cmd and stdout/stderr
+    work; for a GUI/double-click launch we don't want that console window, so release it.
+    No-op off Windows and in dev, where the console is the developer's own terminal."""
+    if sys.platform != "win32" or not is_frozen():
         return
     import ctypes
 
