@@ -99,18 +99,11 @@ def configure_windows_dll_search_paths() -> None:
     if sys.platform != "win32" or not is_frozen():
         return
 
+    # Nuitka standalone keeps every lib at the dist root next to the binary — no
+    # PyInstaller _internal/ subdir and no _MEIPASS.
     app_dir = Path(sys.executable).resolve().parent
-    meipass = Path(getattr(sys, "_MEIPASS", str(app_dir)))
 
-    candidates: list[Path] = []
-    for base in [meipass, app_dir / "_internal", app_dir]:
-        if base.is_dir():
-            candidates.append(base)
-
-    preferred_dirs: list[str] = []
-    for base in candidates:
-        for p in _iter_top_level_lib_dirs(base):
-            preferred_dirs.append(str(p))
+    preferred_dirs: list[str] = [str(p) for p in _iter_top_level_lib_dirs(app_dir)]
 
     cuda_roots: list[str] = []
     for key in ["CUDA_PATH", "CUDA_HOME"]:
