@@ -14,12 +14,34 @@ class TrtRunner:
         device: torch.device,
     ) -> None:
         self.engine_path = engine_path
+        self._setup(engine_path.read_bytes(), input_shapes, device, str(engine_path))
+
+    @classmethod
+    def from_engine_bytes(
+        cls,
+        engine_bytes: bytes,
+        input_shapes: dict[str, tuple[int, ...]] | list[tuple[int, ...]],
+        device: torch.device,
+        source: str = "<memory>",
+    ) -> "TrtRunner":
+        self = cls.__new__(cls)
+        self.engine_path = None
+        self._setup(engine_bytes, input_shapes, device, source)
+        return self
+
+    def _setup(
+        self,
+        engine_bytes: bytes,
+        input_shapes: dict[str, tuple[int, ...]] | list[tuple[int, ...]],
+        device: torch.device,
+        source: str,
+    ) -> None:
         self.device = device
 
         self.runtime = trt.Runtime(get_trt_logger())
-        self.engine = self.runtime.deserialize_cuda_engine(self.engine_path.read_bytes())
+        self.engine = self.runtime.deserialize_cuda_engine(engine_bytes)
         if self.engine is None:
-            raise RuntimeError(f"Failed to deserialize TensorRT engine: {self.engine_path}")
+            raise RuntimeError(f"Failed to deserialize TensorRT engine: {source}")
         self.context = self.engine.create_execution_context()
         if self.context is None:
             raise RuntimeError("Failed to create TensorRT execution context")

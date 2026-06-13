@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
-from jasna.os_utils import get_subprocess_startup_info, resolve_executable
+from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
 if TYPE_CHECKING:
     from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
@@ -160,7 +160,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        startupinfo=get_subprocess_startup_info(),
+        **subprocess_no_window_kwargs(),
     )
     out, err = p.communicate()
     if p.returncode != 0:
