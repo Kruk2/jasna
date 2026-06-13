@@ -33,7 +33,6 @@ jasna = "jasna.main:main"
 
 [project.optional-dependencies]
 dev = [
-  "pyinstaller>=6.0",
   "nuitka>=2.4",
   "pytest",
   "pytest-cov",

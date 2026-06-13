@@ -170,7 +170,28 @@ def test_drop_console_window_non_win_is_noop(monkeypatch) -> None:
     os_utils.drop_console_window()  # must not touch ctypes/raise off Windows
 
 
-def test_drop_console_window_win_calls_freeconsole(monkeypatch) -> None:
+def test_drop_console_window_dev_win_is_noop(monkeypatch) -> None:
+    # In dev (not frozen) the console is the developer's terminal — must not detach it.
+    import ctypes
+
+    calls = {"free": 0}
+
+    class _Windll:
+        class kernel32:
+            @staticmethod
+            def FreeConsole() -> None:
+                calls["free"] += 1
+
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: False)
+    monkeypatch.setattr(ctypes, "windll", _Windll(), raising=False)
+
+    os_utils.drop_console_window()
+
+    assert calls["free"] == 0
+
+
+def test_drop_console_window_frozen_win_calls_freeconsole(monkeypatch) -> None:
     import ctypes
 
     calls = {"free": 0}
@@ -183,6 +204,7 @@ def test_drop_console_window_win_calls_freeconsole(monkeypatch) -> None:
         kernel32 = _Kernel32()
 
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
     monkeypatch.setattr(ctypes, "windll", _Windll(), raising=False)
 
     os_utils.drop_console_window()
@@ -227,12 +249,13 @@ def test_get_subprocess_startup_info_nt_sets_startf_flag(monkeypatch) -> None:
 
 
 def test_find_executable_prefers_bundled_when_frozen(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(os_utils.os, "name", "nt", raising=False)
+    # Nuitka dist has no _internal/; bundled tools sit at the dist root (tools/).
     monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna.exe"), raising=False)
+    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: None)
+    monkeypatch.setattr(os_utils, "_bundled_exe_filename", lambda name: name)
 
-    ffmpeg = tmp_path / "_internal" / "tools" / "ffmpeg.exe"
+    ffmpeg = tmp_path / "tools" / "ffmpeg"
     ffmpeg.parent.mkdir(parents=True, exist_ok=True)
     ffmpeg.write_bytes(b"")
 
@@ -240,12 +263,12 @@ def test_find_executable_prefers_bundled_when_frozen(monkeypatch, tmp_path) -> N
 
 
 def test_find_executable_finds_bundled_mkvmerge_recursive(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(os_utils.os, "name", "nt", raising=False)
     monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna.exe"), raising=False)
+    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: None)
+    monkeypatch.setattr(os_utils, "_bundled_exe_filename", lambda name: name)
 
-    mkvmerge = tmp_path / "_internal" / "mkvtoolnix" / "nested" / "mkvmerge.exe"
+    mkvmerge = tmp_path / "mkvtoolnix" / "nested" / "mkvmerge"
     mkvmerge.parent.mkdir(parents=True, exist_ok=True)
     mkvmerge.write_bytes(b"")
 
