@@ -10,6 +10,7 @@ __pycache__/
 *.pdb
 *.so
 
+.agents/
 .serena/
 .pytest_cache/
 .mypy_cache/
@@ -22,6 +23,7 @@ htmlcov/
 project-details.mdc
 log*.txt
 build/
+skills-lock.json
 dist/
 dist-old/
 dist_linux/
