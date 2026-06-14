@@ -10,6 +10,19 @@ import warnings
 _installed = False
 
 
+def _add_message_drop_filter(logger_name: str, *needles: str) -> None:
+    """Drop any record on ``logger_name`` whose message contains one of ``needles``.
+    Filtering on the source logger (not a handler) muting works regardless of which
+    handler/formatter is upstream and survives torch._logging resetting logger levels."""
+
+    class _Drop(logging.Filter):
+        def filter(self, record: logging.LogRecord) -> bool:
+            message = record.getMessage()
+            return not any(n in message for n in needles)
+
+    logging.getLogger(logger_name).addFilter(_Drop())
+
+
 def install() -> None:
     global _installed
     if _installed:
@@ -72,6 +85,14 @@ def install() -> None:
     logging.getLogger("torch._export.serde.serialize").addFilter(
         _SuppressDeserializedSymbolWarning()
     )
+
+    # torch_tensorrt logs the CUDA/TRT-LLM-plugin note at ERROR level (so the level bump
+    # above can't mute it), and torch's flop_counter logs "triton not found" through
+    # torch's own glog handler. Both are harmless for jasna — drop them by message.
+    _add_message_drop_filter(
+        "torch_tensorrt._utils", "is not currently supported for TRT-LLM plugins"
+    )
+    _add_message_drop_filter("torch.utils.flop_counter", "triton not found")
 
     # tensorrt.plugin logs an "experimental" warning through TensorRT's C++
     # logger at import time (triggered by torch_tensorrt). It bypasses the

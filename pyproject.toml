@@ -17,6 +17,7 @@ dependencies = [
   "numpy",
   "psutil",
   "transformers>5",
+  "diffusers",
   "mmengine==0.10.7",
   "opencv-python",
   "tqdm",
