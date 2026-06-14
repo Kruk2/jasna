@@ -29,6 +29,49 @@ def test_deserialized_symbol_warning_is_filtered() -> None:
     assert logger.filter(kept)
 
 
+def test_torch_tensorrt_cuda_plugin_error_is_filtered() -> None:
+    install()
+    logger = logging.getLogger("torch_tensorrt._utils")
+
+    suppressed = logger.makeRecord(
+        logger.name,
+        logging.ERROR,
+        "f",
+        1,
+        "CUDA 13 is not currently supported for TRT-LLM plugins. "
+        "Please install pytorch with CUDA 12.x support",
+        (),
+        None,
+    )
+    kept = logger.makeRecord(
+        logger.name, logging.ERROR, "f", 1, "a genuine conversion failure", (), None
+    )
+
+    assert not logger.filter(suppressed)
+    assert logger.filter(kept)
+
+
+def test_flop_counter_triton_warning_is_filtered() -> None:
+    install()
+    logger = logging.getLogger("torch.utils.flop_counter")
+
+    suppressed = logger.makeRecord(
+        logger.name,
+        logging.WARNING,
+        "f",
+        1,
+        "triton not found; flop counting will not work for triton kernels",
+        (),
+        None,
+    )
+    kept = logger.makeRecord(
+        logger.name, logging.WARNING, "f", 1, "some other flop message", (), None
+    )
+
+    assert not logger.filter(suppressed)
+    assert logger.filter(kept)
+
+
 def test_tensorrt_plugin_experimental_warning_is_muted(monkeypatch) -> None:
     # TensorRT's C++ logger writes to the original stderr handle and bypasses
     # Python capture, so assert the patch's behaviour directly: the experimental
