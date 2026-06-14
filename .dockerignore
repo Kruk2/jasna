@@ -1,0 +1,6 @@
+# Default-deny build context. Only what the env/wheels images need enters the context
+*
+!pyproject.toml
+!README.md
+!patches
+!jasna/protection/keytool/wheels
