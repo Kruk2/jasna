@@ -58,6 +58,11 @@ def get_yolo_tensorrt_engine_path(model_path: str | Path, *, fp16: bool) -> Path
 UNET4X_ONNX_PATH = model_weights_dir() / "unet-4x.onnx"
 UNET4X_ONNX_ENC_PATH = model_weights_dir() / "unet-4x.onnx.enc"
 
+SD15_HF_REPO = "Kruk2/sd-15-jav"
+SD15_DIR = model_weights_dir() / "sd-15-jav"
+SD15_CKPT_PATH = SD15_DIR / "sd15-200000.ckpt"
+SD15_CKPT_ENC_PATH = SD15_DIR / "sd15-200000.ckpt.enc"
+
 
 def get_unet4x_engine_path(onnx_path: str | Path | None = None, fp16: bool = True) -> Path:
     if onnx_path is None:

@@ -18,6 +18,8 @@ dependencies = [
   "psutil",
   "transformers>5",
   "diffusers",
+  "accelerate",
+  "huggingface-hub",
   "mmengine==0.10.7",
   "opencv-python",
   "tqdm",
