@@ -101,10 +101,14 @@ def ensure_engines_compiled(
     if not (need_basicvsrpp or need_detection or need_unet4x):
         return result
 
-    print("Compiling TensorRT engines (this may take several minutes)...")
     logger.info("Spawning engine compilation subprocess...")
+    start_msg = "Compiling TensorRT engines (this may take several minutes)..."
+    # The frozen GUI drops its console (FreeConsole), leaving stdout invalid — an
+    # unconditional print() there raises WinError 6. Print only on the CLI (no callback).
     if log_callback:
-        log_callback("Compiling TensorRT engines (this may take several minutes)...")
+        log_callback(start_msg)
+    else:
+        print(start_msg)
 
     if is_frozen():
         cmd = [sys.executable, "--compile-engines", req.to_json()]
@@ -112,6 +116,7 @@ def ensure_engines_compiled(
         cmd = [sys.executable, "-m", "jasna.engine_compiler", req.to_json()]
 
     kwargs: dict = {
+        "stdin": subprocess.DEVNULL,  # don't inherit the GUI's detached (invalid) stdin
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
         "text": True,

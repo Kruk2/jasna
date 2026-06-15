@@ -1,6 +1,22 @@
+import sys
+
 import pytest
 
 from jasna import os_utils
+
+
+def test_redirect_std_streams_to_null_discards_writes(monkeypatch) -> None:
+    # After FreeConsole the console handles are invalid; writes to the real streams raise
+    # WinError 6. The redirect must make stray print()/writes no-ops, not crash.
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "stderr", sys.stderr)
+    monkeypatch.setattr(sys, "stdin", sys.stdin)
+
+    os_utils._redirect_std_streams_to_null()
+
+    print("discarded")            # must not raise
+    sys.stderr.write("discarded")  # must not raise
+    assert sys.stdin.read() == ""
 
 
 def test_parse_ffmpeg_major_version_parses_plain_semver() -> None:

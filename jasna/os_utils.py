@@ -108,6 +108,17 @@ def get_subprocess_startup_info():
     return startup_info
 
 
+def _redirect_std_streams_to_null() -> None:
+    """Point sys.stdout/stderr/stdin at os.devnull. After FreeConsole the inherited
+    console handles are invalid, so any later write to the real streams — a stray
+    `print()` or a logging StreamHandler — raises `OSError: [WinError 6] The handle is
+    invalid`. Discard those writes instead of crashing."""
+    null_w = open(os.devnull, "w")
+    sys.stdout = null_w
+    sys.stderr = null_w
+    sys.stdin = open(os.devnull, "r")
+
+
 def drop_console_window() -> None:
     """Detach the console on a frozen GUI launch (Windows). The frozen binary is built
     console-subsystem (`--windows-console-mode=force`) so the CLI blocks cmd and stdout/stderr
@@ -118,6 +129,7 @@ def drop_console_window() -> None:
     import ctypes
 
     ctypes.windll.kernel32.FreeConsole()
+    _redirect_std_streams_to_null()
 
 
 def subprocess_no_window_kwargs() -> dict:

@@ -44,8 +44,13 @@ def _make_sr(
     )
 
 
-def _identity_blend_mask(crop_mask: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:
-    return crop_mask
+def _identity_blend_mask(
+    mask_lr: torch.Tensor,
+    bbox_xyxy: tuple[int, int, int, int],
+    frame_shape: tuple[int, int],
+) -> torch.Tensor:
+    x1, y1, x2, y2 = bbox_xyxy
+    return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
 
 
 class TestBlendBufferReadiness:

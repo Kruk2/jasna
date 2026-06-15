@@ -122,6 +122,9 @@ def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
 def test_ensure_create_no_window_on_windows(monkeypatch) -> None:
     monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
     monkeypatch.setattr("jasna.engine_compiler.os.name", "nt")
+    # CREATE_NO_WINDOW is a Windows-only subprocess attribute; inject it so the nt branch
+    # is exercisable on a Linux test host.
+    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
 
     popen_kwargs = {}
     monkeypatch.setattr(
@@ -132,6 +135,37 @@ def test_ensure_create_no_window_on_windows(monkeypatch) -> None:
     req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
     ensure_engines_compiled(req)
     assert popen_kwargs.get("creationflags") == subprocess.CREATE_NO_WINDOW
+
+
+def test_ensure_does_not_print_when_log_callback_given(monkeypatch) -> None:
+    # The frozen GUI drops its console (FreeConsole), so stdout is invalid — an
+    # unconditional print() would raise WinError 6. With a log_callback (GUI path), the
+    # progress message must go to the callback and never to print().
+    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
+    monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *a, **kw: _mock_proc(["Done.\n"]))
+    printed: list = []
+    monkeypatch.setattr("jasna.engine_compiler.print", lambda *a, **kw: printed.append(a), raising=False)
+
+    log_messages: list = []
+    req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
+    ensure_engines_compiled(req, log_callback=log_messages.append)
+
+    assert printed == []
+    assert any("Compiling" in m for m in log_messages)
+
+
+def test_ensure_popen_stdin_is_devnull(monkeypatch) -> None:
+    # The detached GUI's stdin handle is invalid; the child must not inherit it.
+    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
+    popen_kwargs: dict = {}
+    monkeypatch.setattr(
+        "jasna.engine_compiler.subprocess.Popen",
+        lambda cmd, **kw: (popen_kwargs.update(kw), _mock_proc([]))[1],
+    )
+
+    req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
+    ensure_engines_compiled(req)
+    assert popen_kwargs.get("stdin") == subprocess.DEVNULL
 
 
 def test_subprocess_compile_patches_frozen_torch(monkeypatch) -> None:
