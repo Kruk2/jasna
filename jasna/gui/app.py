@@ -112,11 +112,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             text_color=Colors.TEXT_PRIMARY,
         )
         version.pack(side="left", pady=(4, 0))
-        
-        # Center: Status pill
-        self._status_pill = StatusPill(header)
-        self._status_pill.place(relx=0.5, rely=0.5, anchor="center")
-        
+
+        # Status pill, left-aligned next to the version (the right side holds the
+        # license/support chips, which used to overlap a centered pill).
+        self._status_pill = StatusPill(left)
+        self._status_pill.pack(side="left", padx=(12, 0))
+
         # Right: Language, Help and About
         right = ctk.CTkFrame(header, fg_color="transparent")
         right.pack(side="right", padx=Sizing.PADDING_MEDIUM)

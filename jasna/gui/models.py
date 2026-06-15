@@ -91,6 +91,13 @@ class AppSettings:
     detection_score_threshold: float = 0.25
     compile_basicvsrpp: bool = True
     
+    # Image restoration (SD 1.5 inpaint; used only for still-image inputs)
+    image_restore_steps: int = 25
+    image_restore_strength: float = 0.6
+    image_restore_freeu: bool = True
+    image_restore_seed: int = 0
+    image_restore_variants: int = 1
+
     # Encoding
     codec: str = "hevc"
     encoder_cq: int = 22
