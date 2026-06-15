@@ -12,7 +12,7 @@ from jasna.gui.components import JobListItem
 from jasna.gui.locales import t
 from jasna.gui.settings_panel import Tooltip
 
-VIDEO_EXTENSIONS = {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
+from jasna.media.media_files import IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, VIDEO_EXTENSIONS
 
 
 class QueuePanel(ctk.CTkFrame):
@@ -213,19 +213,22 @@ class QueuePanel(ctk.CTkFrame):
         files = filedialog.askopenfilenames(
             title=t("select_video_files"),
             filetypes=[
+                ("Media files", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm "
+                                "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"),
                 ("Video files", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm"),
+                ("Image files", "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"),
                 ("All files", "*.*"),
             ]
         )
         for f in files:
             self.add_job(Path(f))
-            
+
     def _on_add_folder(self):
         folder = filedialog.askdirectory(title=t("select_folder"))
         if folder:
             folder_path = Path(folder)
             for f in folder_path.rglob("*"):
-                if f.suffix.lower() in VIDEO_EXTENSIONS:
+                if f.suffix.lower() in MEDIA_EXTENSIONS:
                     self.add_job(f)
                     
     def _on_browse_output(self):
@@ -559,7 +562,7 @@ class QueuePanel(ctk.CTkFrame):
         for p in paths:
             if p.is_dir():
                 for f in p.rglob("*"):
-                    if f.suffix.lower() in VIDEO_EXTENSIONS:
+                    if f.suffix.lower() in MEDIA_EXTENSIONS:
                         self.add_job(f)
-            elif p.is_file() and p.suffix.lower() in VIDEO_EXTENSIONS:
+            elif p.is_file() and p.suffix.lower() in MEDIA_EXTENSIONS:
                 self.add_job(p)
