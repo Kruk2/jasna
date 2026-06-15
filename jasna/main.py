@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="basicvsrpp",
         choices=["basicvsrpp"],
-        help='Restoration model name (only "basicvsrpp" supported for now)',
+        help='Restoration model for video input (only "basicvsrpp" supported for now).',
     )
     restoration.add_argument(
         "--restoration-model-path",
@@ -107,6 +107,45 @@ def build_parser() -> argparse.ArgumentParser:
         default="none",
         choices=["none", "unet-4x", "tvai", "rtx-super-res"],
         help='Secondary restoration after primary model (default: %(default)s)',
+    )
+
+    sd15 = parser.add_argument_group("SD 1.5 image restoration")
+    sd15.add_argument(
+        "--image-restoration-model-name",
+        type=str,
+        default="sd-15-jav",
+        choices=["sd-15-jav"],
+        help="Restoration model for still-image input (image-only). Images auto-route here; no need to set --restoration-model-name.",
+    )
+    sd15.add_argument(
+        "--sd15-steps",
+        type=int,
+        default=25,
+        help="SD15 inpaint diffusion steps (default: %(default)s)",
+    )
+    sd15.add_argument(
+        "--sd15-strength",
+        type=float,
+        default=0.6,
+        help="SDEdit denoise strength, clamped to <= 0.7 (default: %(default)s)",
+    )
+    sd15.add_argument(
+        "--sd15-freeu",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="Apply FreeU (s1=0.9, s2=0.2, b1=1.2, b2=1.4) to the SD15 UNet (default: %(default)s)",
+    )
+    sd15.add_argument(
+        "--sd15-seed",
+        type=int,
+        default=0,
+        help="Base seed for SD15 inpaint (default: %(default)s)",
+    )
+    sd15.add_argument(
+        "--sd15-variants",
+        type=int,
+        default=1,
+        help="Generate N stochastic variants with seeds seed..seed+N-1 (default: %(default)s)",
     )
 
     license_group = parser.add_argument_group("License")
@@ -336,6 +375,39 @@ def main() -> None:
 
     output_video = Path(args.output) if args.output else (input_video.with_stem(input_video.stem + "_out") if input_video else None)
 
+    from jasna.media.image_io import is_image_path
+    input_is_image = input_video is not None and is_image_path(input_video)
+    input_is_dir = input_video is not None and input_video.is_dir()
+
+    folder_videos: list[Path] = []
+    folder_output_dir: Path | None = None
+    if input_is_dir:
+        if is_streaming:
+            parser.error("--stream does not support folder input")
+        from jasna.media.media_files import classify_folder
+        folder_images, folder_videos = classify_folder(input_video)
+        if not folder_images and not folder_videos:
+            parser.error(f"No image or video files found in folder: {input_video}")
+        if output_video is None:
+            parser.error("--output (a folder) is required when --input is a folder")
+        folder_output_dir = output_video
+        if folder_output_dir.exists() and not folder_output_dir.is_dir():
+            parser.error(f"--output must be a folder when --input is a folder (got existing file: {folder_output_dir})")
+        folder_output_dir.mkdir(parents=True, exist_ok=True)
+        # Images first, then videos.
+        if folder_images:
+            from jasna.image_restore import run_image_restoration_folder
+            run_image_restoration_folder(args, folder_images, folder_output_dir)
+        if not folder_videos:
+            return
+
+    if input_is_image:
+        if is_streaming:
+            parser.error("Image input does not support --stream")
+        from jasna.image_restore import run_image_restoration
+        run_image_restoration(args)
+        return
+
     from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models
 
     detection_model_name = coerce_detection_model_name(str(args.detection_model))
@@ -461,10 +533,10 @@ def main() -> None:
             raise FileNotFoundError(lut_arg)
         lut_path = lut_arg or None
 
-        def _make_pipeline(vid_input: Path) -> Pipeline:
+        def _make_pipeline(vid_input: Path, out_path: Path) -> Pipeline:
             return Pipeline(
                 input_video=vid_input,
-                output_video=output_video or vid_input.with_stem(vid_input.stem + "_out"),
+                output_video=out_path,
                 detection_model_name=detection_model_name,
                 detection_model_path=detection_model_path,
                 detection_score_threshold=detection_score_threshold,
@@ -482,11 +554,18 @@ def main() -> None:
                 lut_path=lut_path,
             )
 
+        video_inputs = folder_videos if input_is_dir else ([input_video] if input_video is not None else [])
+
+        def _video_output_path(vid: Path) -> Path:
+            if input_is_dir:
+                return folder_output_dir / f"{vid.stem}_out{vid.suffix}"
+            return output_video or vid.with_stem(vid.stem + "_out")
+
         pipeline: Pipeline | None = None
         try:
             if is_streaming and input_video is None:
                 from jasna.streaming import HlsStreamingServer
-                pipeline = _make_pipeline(Path("__streaming__"))
+                pipeline = _make_pipeline(Path("__streaming__"), Path("__streaming___out__"))
                 hls_server = HlsStreamingServer(
                     segment_duration=float(args.stream_segment_duration),
                     port=int(args.stream_port),
@@ -512,7 +591,7 @@ def main() -> None:
                 finally:
                     hls_server.stop()
             elif is_streaming:
-                pipeline = _make_pipeline(input_video)
+                pipeline = _make_pipeline(input_video, _video_output_path(input_video))
                 if not args.no_browser:
                     import webbrowser
                     webbrowser.open(f"http://localhost:{args.stream_port}/")
@@ -521,8 +600,18 @@ def main() -> None:
                     segment_duration=float(args.stream_segment_duration),
                 )
             else:
-                pipeline = _make_pipeline(input_video)
-                pipeline.run()
+                for vid in video_inputs:
+                    pipeline = _make_pipeline(vid, _video_output_path(vid))
+                    try:
+                        pipeline.run()
+                    except UnsupportedColorspaceError as e:
+                        # In a folder batch, skip the bad file and keep going.
+                        print(f"Error processing {vid.name}: {e}")
+                        if not input_is_dir:
+                            sys.exit(1)
+                    finally:
+                        pipeline.close()
+                        pipeline = None
         except UnsupportedColorspaceError as e:
             print(f"Error: {e}")
             sys.exit(1)
