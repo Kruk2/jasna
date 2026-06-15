@@ -15,6 +15,7 @@ from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
+from jasna.pipeline_timing import LoopTimer
 from jasna.progressbar import Progressbar
 from jasna.restorer import RestorationPipeline
 from jasna.tracking import ClipTracker
@@ -48,6 +49,7 @@ def decode_detect_loop(
     progress: Progressbar | None = None,
     debug_memory: PipelineDebugMemoryLogger | None = None,
 ) -> None:
+    timer = LoopTimer("decode-detect")
     try:
         torch.cuda.set_device(device)
         tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=temporal_overlap)
@@ -69,7 +71,7 @@ def decode_detect_loop(
             )
 
             try:
-                for frames, pts_list in reader.frames(seek_ts=seek_ts):
+                for frames, pts_list in timer.timed_iter(reader.frames(seek_ts=seek_ts), "decode"):
                     if first_batch:
                         first_batch = False
                     if cancel_event is not None and cancel_event.is_set():
@@ -87,21 +89,22 @@ def decode_detect_loop(
 
                     batch_start = frame_idx
 
-                    res = process_frame_batch(
-                        frames=frames,
-                        pts_list=[int(p) for p in pts_list],
-                        start_frame_idx=frame_idx,
-                        batch_size=batch_size,
-                        target_hw=target_hw,
-                        detections_fn=detection_model,
-                        tracker=tracker,
-                        blend_buffer=blend_buffer,
-                        crop_buffers=crop_buffers,
-                        clip_queue=clip_queue,
-                        metadata_queue=metadata_queue,
-                        discard_margin=discard_margin,
-                        blend_frames=blend_frames,
-                    )
+                    with timer.measure("detect-track"):
+                        res = process_frame_batch(
+                            frames=frames,
+                            pts_list=[int(p) for p in pts_list],
+                            start_frame_idx=frame_idx,
+                            batch_size=batch_size,
+                            target_hw=target_hw,
+                            detections_fn=detection_model,
+                            tracker=tracker,
+                            blend_buffer=blend_buffer,
+                            crop_buffers=crop_buffers,
+                            clip_queue=clip_queue,
+                            metadata_queue=metadata_queue,
+                            discard_margin=discard_margin,
+                            blend_frames=blend_frames,
+                        )
 
                     frame_idx = res.next_frame_idx
                     if debug_memory is not None:
@@ -134,6 +137,7 @@ def decode_detect_loop(
             log.exception("[decode] thread crashed")
             error_holder.append(e)
     finally:
+        log.info(timer.summary())
         log.debug("[decode] thread exiting")
         clip_queue.put(_SENTINEL)
         metadata_queue.put(_SENTINEL)
@@ -150,6 +154,7 @@ def primary_restore_loop(
     cancel_event: threading.Event | None = None,
     debug_memory: PipelineDebugMemoryLogger | None = None,
 ) -> None:
+    timer = LoopTimer("primary")
     try:
         torch.cuda.set_device(device)
         log.debug("[primary] thread starting")
@@ -159,26 +164,30 @@ def primary_restore_loop(
             primary_idle_event.set()
             if cancel_event is not None:
                 try:
-                    item = clip_queue.get(timeout=0.1)
+                    with timer.measure("queue-wait"):
+                        item = clip_queue.get(timeout=0.1)
                 except Empty:
                     continue
             else:
-                item = clip_queue.get()
+                with timer.measure("queue-wait"):
+                    item = clip_queue.get()
             primary_idle_event.clear()
             if item is _SENTINEL:
                 break
             clip_item: ClipRestoreItem = item
-            result = restoration_pipeline.prepare_and_run_primary(
-                clip_item.clip,
-                clip_item.raw_crops,
-                clip_item.frame_shape,
-                clip_item.keep_start,
-                clip_item.keep_end,
-                clip_item.crossfade_weights,
-            )
-            if restoration_pipeline.secondary_prefers_cpu_input:
-                result.primary_raw = result.primary_raw.cpu()
-            secondary_queue.put(result, frame_count=result.keep_end - result.keep_start)
+            with timer.measure("restore"):
+                result = restoration_pipeline.prepare_and_run_primary(
+                    clip_item.clip,
+                    clip_item.raw_crops,
+                    clip_item.frame_shape,
+                    clip_item.keep_start,
+                    clip_item.keep_end,
+                    clip_item.crossfade_weights,
+                )
+                if restoration_pipeline.secondary_prefers_cpu_input:
+                    result.primary_raw = result.primary_raw.cpu()
+            with timer.measure("queue-put"):
+                secondary_queue.put(result, frame_count=result.keep_end - result.keep_start)
             if debug_memory is not None:
                 debug_memory.snapshot(
                     "primary",
@@ -189,6 +198,7 @@ def primary_restore_loop(
             log.exception("[primary] thread crashed")
             error_holder.append(e)
     finally:
+        log.info(timer.summary())
         log.debug("[primary] thread exiting")
         secondary_queue.put(_SENTINEL)
 
@@ -203,6 +213,7 @@ def secondary_restore_loop(
     cancel_event: threading.Event | None = None,
     debug_memory: PipelineDebugMemoryLogger | None = None,
 ) -> None:
+    timer = LoopTimer("secondary")
     try:
         torch.cuda.set_device(device)
         log.debug("[secondary] thread starting")
@@ -211,22 +222,26 @@ def secondary_restore_loop(
                 break
             if cancel_event is not None:
                 try:
-                    item = secondary_queue.get(timeout=0.1)
+                    with timer.measure("queue-wait"):
+                        item = secondary_queue.get(timeout=0.1)
                 except Empty:
                     continue
             else:
-                item = secondary_queue.get()
+                with timer.measure("queue-wait"):
+                    item = secondary_queue.get()
             if item is _SENTINEL:
                 break
             pr: PrimaryRestoreResult = item
-            restored_frames = restoration_pipeline._run_secondary(
-                pr.primary_raw,
-                pr.keep_start,
-                pr.keep_end,
-            )
-            del pr.primary_raw
-            sr = restoration_pipeline.build_secondary_result(pr, restored_frames)
-            encode_queue.put(sr, frame_count=sr.keep_end)
+            with timer.measure("restore"):
+                restored_frames = restoration_pipeline._run_secondary(
+                    pr.primary_raw,
+                    pr.keep_start,
+                    pr.keep_end,
+                )
+                del pr.primary_raw
+                sr = restoration_pipeline.build_secondary_result(pr, restored_frames)
+            with timer.measure("queue-put"):
+                encode_queue.put(sr, frame_count=sr.keep_end)
             if debug_memory is not None:
                 debug_memory.snapshot(
                     "secondary",
@@ -237,6 +252,7 @@ def secondary_restore_loop(
             log.exception("[secondary] thread crashed")
             error_holder.append(e)
     finally:
+        log.info(timer.summary())
         log.debug("[secondary] thread exiting")
         encode_queue.put(_SENTINEL)
 
@@ -256,6 +272,7 @@ def blend_encode_loop(
     seek_ts: float | None = None,
     vram_offloader=None,
 ) -> None:
+    timer = LoopTimer("blend-encode")
     try:
         torch.cuda.set_device(device)
 
@@ -286,35 +303,40 @@ def blend_encode_loop(
                     break
                 _drain_encode_queue()
                 try:
-                    meta_item = metadata_queue.get(timeout=0.1 if cancel_event is not None else 0.05)
+                    with timer.measure("queue-wait"):
+                        meta_item = metadata_queue.get(timeout=0.1 if cancel_event is not None else 0.05)
                 except Empty:
                     continue
                 if meta_item is _SENTINEL:
                     break
                 meta: FrameMeta = meta_item
-                original_frame = next(frame_gen)
+                with timer.measure("decode"):
+                    original_frame = next(frame_gen)
 
-                while not blend_buffer.is_frame_ready(meta.frame_idx):
-                    if cancel_event is not None and cancel_event.is_set():
-                        break
-                    if error_holder:
-                        raise error_holder[0]
-                    if secondary_done:
-                        log.error("[blend-encode] frame %d not ready but secondary is done", meta.frame_idx)
-                        break
-                    try:
-                        sr_item = encode_queue.get(timeout=0.1)
-                        if sr_item is _SENTINEL:
-                            secondary_done = True
-                            continue
-                        blend_buffer.add_result(sr_item)
-                    except Empty:
-                        pass
+                with timer.measure("result-wait"):
+                    while not blend_buffer.is_frame_ready(meta.frame_idx):
+                        if cancel_event is not None and cancel_event.is_set():
+                            break
+                        if error_holder:
+                            raise error_holder[0]
+                        if secondary_done:
+                            log.error("[blend-encode] frame %d not ready but secondary is done", meta.frame_idx)
+                            break
+                        try:
+                            sr_item = encode_queue.get(timeout=0.1)
+                            if sr_item is _SENTINEL:
+                                secondary_done = True
+                                continue
+                            blend_buffer.add_result(sr_item)
+                        except Empty:
+                            pass
 
-                blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
-                frame_writer.write(blended, meta.pts)
-                frames_encoded += 1
-                frame_writer.after_write(frames_encoded)
+                with timer.measure("blend"):
+                    blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
+                with timer.measure("write"):
+                    frame_writer.write(blended, meta.pts)
+                    frames_encoded += 1
+                    frame_writer.after_write(frames_encoded)
 
             if vram_offloader is not None:
                 vram_offloader.pause_stall_check()
@@ -323,6 +345,8 @@ def blend_encode_loop(
         if cancel_event is None or not cancel_event.is_set():
             log.exception("[blend-encode] thread crashed")
             error_holder.append(e)
+    finally:
+        log.info(timer.summary())
 
 
 def _estimate_start_frame(metadata, seek_ts: float) -> int:

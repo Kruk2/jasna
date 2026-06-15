@@ -1,6 +1,7 @@
 """Tests for pipeline_threads.py shared thread functions and related frame writers."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from fractions import Fraction
@@ -308,6 +309,26 @@ class TestPrimaryRestoreLoop:
         item = secondary_queue.get()
         assert item is not _SENTINEL
         assert item.primary_raw.device.type == "cpu"
+
+    def test_logs_timing_summary(self, caplog):
+        clip_queue = FrameQueue(max_frames=999)
+        secondary_queue = FrameQueue(max_frames=999)
+        clip_queue.put(_SENTINEL)
+
+        with (
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            caplog.at_level(logging.INFO, logger="jasna.pipeline_threads"),
+        ):
+            primary_restore_loop(
+                device=torch.device("cpu"),
+                restoration_pipeline=MagicMock(),
+                clip_queue=clip_queue,
+                secondary_queue=secondary_queue,
+                error_holder=[],
+                primary_idle_event=threading.Event(),
+            )
+
+        assert "[timing] primary" in caplog.text
 
 
 # ---------------------------------------------------------------------------

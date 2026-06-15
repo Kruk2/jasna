@@ -233,8 +233,13 @@ def _run_real_pipeline_batches(
                 stacked.append(torch.full(f.shape, restored_float, dtype=torch.float32))
             return torch.stack(stacked, dim=0)
 
-    def _ones_blend_mask(crop: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:
-        return torch.ones_like(crop.squeeze(), dtype=torch.float32)
+    def _ones_blend_mask(
+        mask_lr: torch.Tensor,
+        bbox_xyxy: tuple[int, int, int, int],
+        frame_shape: tuple[int, int],
+    ) -> torch.Tensor:
+        x1, y1, x2, y2 = bbox_xyxy
+        return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
 
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     pipeline = RestorationPipeline(restorer=_ConstantRestorer())  # type: ignore[arg-type]
@@ -443,8 +448,13 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
                 stacked.append(torch.full(f.shape, val, dtype=torch.float32))
             return torch.stack(stacked, dim=0)
 
-    def _ones_blend_mask(crop: torch.Tensor, frame_height: int = 1080) -> torch.Tensor:
-        return torch.ones_like(crop.squeeze(), dtype=torch.float32)
+    def _ones_blend_mask(
+        mask_lr: torch.Tensor,
+        bbox_xyxy: tuple[int, int, int, int],
+        frame_shape: tuple[int, int],
+    ) -> torch.Tensor:
+        x1, y1, x2, y2 = bbox_xyxy
+        return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
 
     from jasna.restorer.restoration_pipeline import RestorationPipeline
 

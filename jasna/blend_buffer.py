@@ -10,7 +10,7 @@ import torch.nn.functional as F
 
 from jasna.crop_buffer import scale_offsets
 from jasna.pipeline_items import SecondaryRestoreResult
-from jasna.tracking.blending import create_blend_mask
+from jasna.tracking.blending import create_bbox_blend_mask
 
 _log = logging.getLogger(__name__)
 
@@ -19,7 +19,9 @@ class BlendBuffer:
     def __init__(
         self,
         device: torch.device,
-        blend_mask_fn: Callable[[torch.Tensor, int], torch.Tensor] = create_blend_mask,
+        blend_mask_fn: Callable[
+            [torch.Tensor, tuple[int, int, int, int], tuple[int, int]], torch.Tensor
+        ] = create_bbox_blend_mask,
     ):
         self.device = device
         self.blend_mask_fn = blend_mask_fn
@@ -136,12 +138,7 @@ class BlendBuffer:
             align_corners=False,
         ).squeeze(0)
 
-        frame_h, frame_w = sr.frame_shape
-        hm, wm = mask_lr.shape
-        y_idx = (torch.arange(y1, y2, device=device) * hm) // frame_h
-        x_idx = (torch.arange(x1, x2, device=device) * wm) // frame_w
-        crop_mask = mask_lr.float().index_select(0, y_idx).index_select(1, x_idx)
-        blend_mask = self.blend_mask_fn(crop_mask, frame_h)
+        blend_mask = self.blend_mask_fn(mask_lr, (x1, y1, x2, y2), sr.frame_shape)
 
         if cw < 1.0:
             blend_mask = blend_mask * cw
