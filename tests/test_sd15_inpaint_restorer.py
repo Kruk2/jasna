@@ -31,7 +31,7 @@ class TestCheckpointPathSelection:
         with (
             patch.object(sd15, "is_frozen", return_value=False),
             patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_path") as mock_decrypt,
+            patch("jasna.protection.protected_model.decrypt_model_to_bytes") as mock_decrypt,
         ):
             assert use_plaintext_sd15(tmp_path) is True
             _read_checkpoint(tmp_path)
@@ -43,12 +43,12 @@ class TestCheckpointPathSelection:
         with (
             patch.object(sd15, "is_frozen", return_value=False),
             patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_path") as mock_decrypt,
+            patch("jasna.protection.protected_model.decrypt_model_to_bytes", return_value=b"x") as mock_decrypt,
         ):
             assert use_plaintext_sd15(tmp_path) is False
             _read_checkpoint(tmp_path)
             mock_decrypt.assert_called_once()
-            # decrypt target (temp file) is what torch.load reads, not the .enc itself.
+            # decrypted bytes are loaded from an in-memory buffer, never written to disk.
             assert mock_load.call_count == 1
 
     def test_frozen_ignores_plaintext(self, tmp_path: Path):

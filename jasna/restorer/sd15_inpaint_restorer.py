@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import io
 import json
 import logging
-import tempfile
 from contextlib import nullcontext
 from pathlib import Path
 
@@ -31,8 +31,7 @@ def _read_checkpoint(model_dir: Path) -> dict:
     """Return the (pruned) fine-tune checkpoint dict.
 
     Dev / source checkouts with a plaintext ``sd15-200000.ckpt`` load it
-    directly (no license). Otherwise the ``.enc`` is decrypted with the
-    license-derived master key (shared with unet-4x, distinct subkey).
+    directly; otherwise the packaged checkpoint is loaded in memory.
     """
     if use_plaintext_sd15(model_dir):
         return torch.load(str(model_dir / SD15_CKPT_PATH.name), map_location="cpu", weights_only=True)
@@ -40,13 +39,11 @@ def _read_checkpoint(model_dir: Path) -> dict:
     from jasna.protection import protected_model
 
     enc_path = model_dir / SD15_CKPT_ENC_PATH.name
-    with tempfile.NamedTemporaryFile(suffix=".cpkt", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
+    data = protected_model.decrypt_model_to_bytes(Sd15InpaintRestorer.MODEL_ID, enc_path)
     try:
-        protected_model.decrypt_model_to_path(Sd15InpaintRestorer.MODEL_ID, enc_path, tmp_path)
-        return torch.load(str(tmp_path), map_location="cpu", weights_only=True)
+        return torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
     finally:
-        tmp_path.unlink(missing_ok=True)
+        del data
 
 
 class Sd15InpaintRestorer:
