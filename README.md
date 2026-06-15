@@ -95,6 +95,8 @@ Currently supported:
 For **still images** Jasna can use a fine-tuned Stable Diffusion 1.5 inpaint model instead of the
 video pipeline. It detects mosaics, inpaints each region at 512×512 and blends the result back.
 
+For examples on restorations you can checkout SLS discord.
+
 - CLI: `jasna --input photo.png --output out.png` — image inputs **auto-route** to the SD 1.5 model,
   no flag needed. The image model is selected with `--image-restoration-model-name` (default and only
   value: `sd-15-jav`); `--restoration-model-name` stays video-only. Knobs: `--sd15-steps`,
@@ -112,9 +114,7 @@ video pipeline. It detects mosaics, inpaints each region at 512×512 and blends 
   [Supporting the project](#supporting-the-project)).
 - It's **experimental**: results vary by scene, but on the right image it can look genuinely good.
   Try a few `--sd15-variants` (different seeds) and keep the best one.
-- Expect around **4 GB of VRAM** during inference (a bit more on large 4K images). Loading the model
-  also needs roughly **7–8 GB of system RAM** for a moment — the checkpoint is read in full before the
-  model moves onto the GPU in fp16.
+- Expect around **7 GB of VRAM** during inference (a bit more on large 4K images).
 
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\
