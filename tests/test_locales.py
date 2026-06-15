@@ -70,7 +70,38 @@ _LICENSE_KEYS = {
 }
 
 
+_IMAGE_RESTORE_TOOLTIP_KEYS = {
+    "tip_image_restore_steps",
+    "tip_image_restore_strength",
+    "tip_image_restore_variants",
+    "tip_image_restore_seed",
+    "tip_image_restore_freeu",
+}
+
+
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
 def test_all_languages_define_license_keys(lang: str) -> None:
     missing = _LICENSE_KEYS - TRANSLATIONS[lang].keys()
     assert not missing, f"{lang} missing license keys: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_all_languages_define_image_restore_tooltips(lang: str) -> None:
+    missing = _IMAGE_RESTORE_TOOLTIP_KEYS - TRANSLATIONS[lang].keys()
+    assert not missing, f"{lang} missing image restore tooltip keys: {sorted(missing)}"
+
+
+def test_english_activation_copy_uses_app_activation_language() -> None:
+    en = TRANSLATIONS["en"]
+    assert en["supporter_title"] == "Activate Jasna"
+    assert en["license_chip_inactive"] == "Activate Jasna"
+    assert en["secondary_unet_4x_hint"] == "activate to use"
+    assert "supporter" not in en["supporter_title"].lower()
+    assert "license" not in en["supporter_title"].lower()
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_activation_benefits_include_sd15_image_restoration(lang: str) -> None:
+    perks = TRANSLATIONS[lang]["supporter_perks"]
+    assert "UNet 4x" in perks
+    assert "SD 1.5" in perks

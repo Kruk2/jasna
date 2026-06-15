@@ -820,7 +820,10 @@ class SettingsPanel(ctk.CTkFrame):
         seed_frame = ctk.CTkFrame(row_last, fg_color=Colors.BG_CARD, corner_radius=6)
         seed_frame.pack(side="left", fill="x", expand=True, padx=(0, 4))
         seed_label = ctk.CTkLabel(seed_frame, text=t("image_restore_seed"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        seed_label.pack(side="left", padx=12, pady=8)
+        seed_label.pack(side="left", padx=(12, 4), pady=8)
+        seed_tip = ctk.CTkLabel(seed_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        seed_tip.pack(side="left")
+        Tooltip(seed_tip, get_tooltip("image_restore_seed"))
         self._widgets["image_restore_seed"] = ctk.CTkEntry(
             seed_frame, width=70, fg_color=Colors.BG_PANEL, text_color=Colors.TEXT_PRIMARY, border_color=Colors.BORDER_LIGHT,
         )

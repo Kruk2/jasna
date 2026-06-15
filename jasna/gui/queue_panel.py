@@ -12,7 +12,7 @@ from jasna.gui.components import JobListItem
 from jasna.gui.locales import t
 from jasna.gui.settings_panel import Tooltip
 
-from jasna.media.media_files import IMAGE_EXTENSIONS, MEDIA_EXTENSIONS, VIDEO_EXTENSIONS
+from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order
 
 
 class QueuePanel(ctk.CTkFrame):
@@ -227,9 +227,8 @@ class QueuePanel(ctk.CTkFrame):
         folder = filedialog.askdirectory(title=t("select_folder"))
         if folder:
             folder_path = Path(folder)
-            for f in folder_path.rglob("*"):
-                if f.suffix.lower() in MEDIA_EXTENSIONS:
-                    self.add_job(f)
+            for f in folder_media_in_processing_order(folder_path):
+                self.add_job(f)
                     
     def _on_browse_output(self):
         folder = filedialog.askdirectory(title=t("select_output_folder"))
@@ -561,8 +560,7 @@ class QueuePanel(ctk.CTkFrame):
         paths = self._parse_drop_data(event.data)
         for p in paths:
             if p.is_dir():
-                for f in p.rglob("*"):
-                    if f.suffix.lower() in MEDIA_EXTENSIONS:
-                        self.add_job(f)
+                for f in folder_media_in_processing_order(p):
+                    self.add_job(f)
             elif p.is_file() and p.suffix.lower() in MEDIA_EXTENSIONS:
                 self.add_job(p)

@@ -31,6 +31,20 @@ def classify_folder(folder: str | Path) -> tuple[list[Path], list[Path]]:
     return images, videos
 
 
+def folder_media_in_processing_order(folder: str | Path) -> list[Path]:
+    """Return recursive media files grouped by model type: images first, then videos."""
+    folder = Path(folder)
+
+    def sort_key(path: Path) -> tuple[int, str]:
+        relative = path.relative_to(folder)
+        return len(relative.parts), relative.as_posix().casefold()
+
+    entries = sorted((p for p in folder.rglob("*") if p.is_file()), key=sort_key)
+    images = [p for p in entries if is_image(p)]
+    videos = [p for p in entries if is_video(p)]
+    return images + videos
+
+
 def folder_output_path(output_dir: str | Path, input_path: str | Path) -> Path:
     """Per-file output path for folder batches: ``<output_dir>/<stem>_out<ext>``."""
     input_path = Path(input_path)

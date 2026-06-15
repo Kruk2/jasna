@@ -5,6 +5,7 @@ from pathlib import Path
 from jasna.media.media_files import (
     classify_folder,
     folder_output_path,
+    folder_media_in_processing_order,
     is_image,
     is_video,
 )
@@ -32,6 +33,29 @@ class TestClassifyFolder:
     def test_empty_folder(self, tmp_path: Path):
         images, videos = classify_folder(tmp_path)
         assert images == [] and videos == []
+
+
+class TestFolderMediaInProcessingOrder:
+    def test_recurses_and_groups_images_before_videos(self, tmp_path: Path):
+        nested = tmp_path / "nested"
+        nested.mkdir()
+        for name in [
+            "clip_b.mp4",
+            "photo_a.png",
+            "nested/clip_a.webm",
+            "nested/photo_b.JPG",
+            "notes.txt",
+        ]:
+            (tmp_path / name).write_bytes(b"x")
+
+        ordered = folder_media_in_processing_order(tmp_path)
+
+        assert [p.relative_to(tmp_path).as_posix() for p in ordered] == [
+            "photo_a.png",
+            "nested/photo_b.JPG",
+            "clip_b.mp4",
+            "nested/clip_a.webm",
+        ]
 
 
 class TestFolderOutputPath:
