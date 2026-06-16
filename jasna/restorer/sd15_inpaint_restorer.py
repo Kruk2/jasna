@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import json
 import logging
 from contextlib import nullcontext
@@ -39,11 +38,11 @@ def _read_checkpoint(model_dir: Path) -> dict:
     from jasna.protection import protected_model
 
     enc_path = model_dir / SD15_CKPT_ENC_PATH.name
-    data = protected_model.decrypt_model_to_bytes(Sd15InpaintRestorer.MODEL_ID, enc_path)
+    data = protected_model.decrypt_model_to_buffer(Sd15InpaintRestorer.MODEL_ID, enc_path)
     try:
-        return torch.load(io.BytesIO(data), map_location="cpu", weights_only=True)
+        return torch.load(data, map_location="cpu", weights_only=True)
     finally:
-        del data
+        data.close()
 
 
 class Sd15InpaintRestorer:

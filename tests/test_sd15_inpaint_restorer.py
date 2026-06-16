@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -31,7 +32,7 @@ class TestCheckpointPathSelection:
         with (
             patch.object(sd15, "is_frozen", return_value=False),
             patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_bytes") as mock_decrypt,
+            patch("jasna.protection.protected_model.decrypt_model_to_buffer") as mock_decrypt,
         ):
             assert use_plaintext_sd15(tmp_path) is True
             _read_checkpoint(tmp_path)
@@ -43,7 +44,7 @@ class TestCheckpointPathSelection:
         with (
             patch.object(sd15, "is_frozen", return_value=False),
             patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_bytes", return_value=b"x") as mock_decrypt,
+            patch("jasna.protection.protected_model.decrypt_model_to_buffer", return_value=io.BytesIO(b"x")) as mock_decrypt,
         ):
             assert use_plaintext_sd15(tmp_path) is False
             _read_checkpoint(tmp_path)
