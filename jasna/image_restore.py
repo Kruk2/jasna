@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
@@ -15,6 +16,27 @@ SD15_RESTORATION_SIZE = 512
 SD15_IOU_THRESHOLD = 0.5
 SD15_EXPAND_PIXELS = 20
 SD15_MAX_STRENGTH = 0.7
+
+
+@dataclass
+class PreparedImageRestoreGroup:
+    mosaic_01: torch.Tensor
+    mask_01: torch.Tensor
+    crop_bbox: tuple[int, int, int, int]
+    content_h: int
+    content_w: int
+    group_mask: np.ndarray
+
+
+@dataclass
+class PreparedImageRestore:
+    img_chw_u8: np.ndarray
+    img_rgb: np.ndarray
+    groups: list[PreparedImageRestoreGroup]
+
+    @property
+    def has_detections(self) -> bool:
+        return bool(self.groups)
 
 
 def clamp_strength(strength: float) -> float:
@@ -86,6 +108,88 @@ def _build_group_mask(masks: torch.Tensor, indices: list[int], h: int, w: int, d
     return acc
 
 
+def prepare_image_restore(
+    img_chw_u8: np.ndarray,
+    detector,
+    *,
+    device: torch.device,
+    fp16: bool,
+    iou_threshold: float = SD15_IOU_THRESHOLD,
+    expand_pixels: int = SD15_EXPAND_PIXELS,
+    restoration_size: int = SD15_RESTORATION_SIZE,
+) -> PreparedImageRestore:
+    from jasna.sd15_crop_utils import compute_crop_bbox, crop_and_resize_np
+
+    _, h, w = img_chw_u8.shape
+    dtype = torch.float16 if fp16 else torch.float32
+
+    frame_cpu = torch.from_numpy(img_chw_u8)
+    batch = frame_cpu.unsqueeze(0).expand(detector.batch_size, -1, -1, -1).contiguous()
+    detections = detector(batch, target_hw=(h, w))
+    boxes = detections.boxes_xyxy[0]
+    masks = detections.masks[0]
+    img_rgb = np.ascontiguousarray(img_chw_u8.transpose(1, 2, 0))  # HWC RGB
+
+    if len(boxes) == 0:
+        logger.info("No mosaics detected; writing input unchanged")
+        return PreparedImageRestore(img_chw_u8=img_chw_u8.copy(), img_rgb=img_rgb, groups=[])
+
+    groups = []
+    for indices in group_boxes_by_iou(boxes, iou_threshold):
+        group_mask = _build_group_mask(masks, indices, h, w, expand_pixels)
+        merged = _union_bbox(boxes, indices)
+        crop_bbox = compute_crop_bbox(merged, w, h, restoration_size)
+        crop_rgb, content_h, content_w = crop_and_resize_np(img_rgb, crop_bbox, restoration_size)
+        crop_mask, _, _ = crop_and_resize_np(group_mask, crop_bbox, restoration_size)
+        mosaic_01 = torch.from_numpy(crop_rgb).permute(2, 0, 1).unsqueeze(0).to(device=device, dtype=dtype) / 255.0
+        mask_01 = torch.from_numpy(crop_mask).unsqueeze(0).unsqueeze(0).to(device=device, dtype=dtype) / 255.0
+        groups.append(PreparedImageRestoreGroup(
+            mosaic_01=mosaic_01,
+            mask_01=mask_01,
+            crop_bbox=tuple(int(v) for v in crop_bbox),
+            content_h=int(content_h),
+            content_w=int(content_w),
+            group_mask=group_mask,
+        ))
+    return PreparedImageRestore(img_chw_u8=img_chw_u8.copy(), img_rgb=img_rgb, groups=groups)
+
+
+def render_prepared_image(
+    prepared: PreparedImageRestore,
+    restorer,
+    *,
+    steps: int,
+    strength: float,
+    seed: int,
+    freeu: dict | None,
+) -> np.ndarray:
+    from jasna.sd15_crop_utils import paste_back
+
+    if not prepared.groups:
+        return prepared.img_chw_u8.copy()
+
+    result = prepared.img_rgb.copy()
+    for group in prepared.groups:
+        restored = restorer.restore_crop(
+            group.mosaic_01, group.mask_01, steps=steps, strength=strength, seed=seed, freeu=freeu,
+        )
+        restored_rgb = restored.permute(1, 2, 0).cpu().numpy()  # (512, 512, 3) RGB uint8
+        paste_back(result, restored_rgb, group.crop_bbox, group.content_h, group.content_w, group.group_mask)
+    return np.ascontiguousarray(result.transpose(2, 0, 1))
+
+
+def mask_overlay_rgb_chw(prepared: PreparedImageRestore, alpha: float = 0.45) -> np.ndarray:
+    overlay = prepared.img_rgb.copy().astype(np.float32)
+    mask = np.zeros(prepared.img_rgb.shape[:2], dtype=bool)
+    for group in prepared.groups:
+        mask |= group.group_mask > 0
+    if mask.any():
+        overlay[mask, 0] = overlay[mask, 0] * (1.0 - alpha) + 255.0 * alpha
+        overlay[mask, 1] = overlay[mask, 1] * (1.0 - alpha)
+        overlay[mask, 2] = overlay[mask, 2] * (1.0 - alpha)
+    return np.ascontiguousarray(overlay.clip(0, 255).round().astype(np.uint8).transpose(2, 0, 1))
+
+
 def restore_image(
     img_chw_u8: np.ndarray,
     detector,
@@ -110,44 +214,19 @@ def restore_image(
 
     Returns one ``(3, H, W)`` uint8 RGB array per variant. Zero detections ->
     copies of the input unchanged."""
-    from jasna.sd15_crop_utils import compute_crop_bbox, crop_and_resize_np, paste_back
-
-    _, h, w = img_chw_u8.shape
-    dtype = torch.float16 if fp16 else torch.float32
-
-    frame_cpu = torch.from_numpy(img_chw_u8)
-    batch = frame_cpu.unsqueeze(0).expand(detector.batch_size, -1, -1, -1).contiguous()
-    detections = detector(batch, target_hw=(h, w))
-    boxes = detections.boxes_xyxy[0]
-    masks = detections.masks[0]
-
-    if len(boxes) == 0:
-        logger.info("No mosaics detected; writing input unchanged")
-        return [img_chw_u8.copy() for _ in range(num_variants)]
-
-    img_rgb = np.ascontiguousarray(img_chw_u8.transpose(1, 2, 0))  # HWC RGB
-
-    group_data = []
-    for indices in group_boxes_by_iou(boxes, iou_threshold):
-        group_mask = _build_group_mask(masks, indices, h, w, expand_pixels)
-        merged = _union_bbox(boxes, indices)
-        crop_bbox = compute_crop_bbox(merged, w, h, restoration_size)
-        crop_rgb, content_h, content_w = crop_and_resize_np(img_rgb, crop_bbox, restoration_size)
-        crop_mask, _, _ = crop_and_resize_np(group_mask, crop_bbox, restoration_size)
-        mosaic_01 = torch.from_numpy(crop_rgb).permute(2, 0, 1).unsqueeze(0).to(device=device, dtype=dtype) / 255.0
-        mask_01 = torch.from_numpy(crop_mask).unsqueeze(0).unsqueeze(0).to(device=device, dtype=dtype) / 255.0
-        group_data.append((mosaic_01, mask_01, crop_bbox, content_h, content_w, group_mask))
+    prepared = prepare_image_restore(
+        img_chw_u8, detector,
+        device=device, fp16=fp16,
+        iou_threshold=iou_threshold,
+        expand_pixels=expand_pixels,
+        restoration_size=restoration_size,
+    )
 
     outputs: list[np.ndarray] = []
     for v in range(num_variants):
-        result = img_rgb.copy()
-        for mosaic_01, mask_01, crop_bbox, content_h, content_w, group_mask in group_data:
-            restored = restorer.restore_crop(
-                mosaic_01, mask_01, steps=steps, strength=strength, seed=seed + v, freeu=freeu,
-            )
-            restored_rgb = restored.permute(1, 2, 0).cpu().numpy()  # (512, 512, 3) RGB uint8
-            paste_back(result, restored_rgb, crop_bbox, content_h, content_w, group_mask)
-        outputs.append(np.ascontiguousarray(result.transpose(2, 0, 1)))
+        outputs.append(render_prepared_image(
+            prepared, restorer, steps=steps, strength=strength, seed=seed + v, freeu=freeu,
+        ))
     return outputs
 
 

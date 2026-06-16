@@ -221,6 +221,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # Right: Settings panel
         self._settings_panel = SettingsPanel(body)
         self._settings_panel.pack(side="right", fill="both", expand=True)
+        self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
         
         self._queue_panel.set_initial_output(
             self._settings_panel.get_last_output_folder(),
@@ -322,6 +323,30 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _on_output_changed(self, folder: str, pattern: str):
         self._settings_panel.set_last_output_folder(folder)
         self._settings_panel.set_last_output_pattern(pattern)
+
+    def _open_interactive_image_restore(self):
+        from tkinter import filedialog
+
+        files = filedialog.askopenfilenames(
+            title=t("interactive_select_images"),
+            filetypes=[
+                ("Image files", "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"),
+                ("All files", "*.*"),
+            ],
+        )
+        if not files:
+            return
+
+        from jasna.gui.interactive_image_restore import InteractiveImageRestoreDialog
+
+        InteractiveImageRestoreDialog(
+            self,
+            [Path(f) for f in files],
+            self._settings_panel.get_settings(),
+            self._queue_panel.get_output_folder(),
+            self._queue_panel.get_output_pattern(),
+            on_log=lambda level, message: self._log_panel.add_log(level, message),
+        )
         
     def _update_start_button_state(self):
         jobs = self._queue_panel.get_jobs()

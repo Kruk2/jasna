@@ -22,6 +22,7 @@ dependencies = [
   "huggingface-hub",
   "mmengine==0.10.7",
   "opencv-python",
+  "Pillow",
   "tqdm",
   "customtkinter",
   "tkinterdnd2",
@@ -53,4 +54,3 @@ filterwarnings = [
   "ignore:'maxsplit' is passed as positional argument:DeprecationWarning:mmengine\\.utils\\.misc",
   "ignore:`torch\\.jit\\.script` is deprecated:DeprecationWarning",
 ]
-
