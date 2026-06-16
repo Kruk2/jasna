@@ -33,9 +33,9 @@ def _detection_weights_path(settings: AppSettings) -> Path:
 
 def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     from jasna.engine_paths import (
+        expected_unet4x_engine_path,
         get_basicvsrpp_sub_engine_paths,
         get_onnx_tensorrt_engine_path,
-        get_unet4x_engine_path,
         get_yolo_tensorrt_engine_path,
         model_weights_dir,
     )
@@ -90,7 +90,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         )
 
     if settings.secondary_restoration == "unet-4x":
-        unet_engine = get_unet4x_engine_path(fp16=bool(settings.fp16_mode))
+        unet_engine = expected_unet4x_engine_path(fp16=bool(settings.fp16_mode))
         unet_exists = unet_engine.is_file()
         reqs.append(
             EngineRequirement(

@@ -78,6 +78,30 @@ def test_get_onnx_tensorrt_engine_path_matches_compile_return_when_present(monke
     assert out == engine
 
 
+def test_preflight_unet4x_encrypted_engine_satisfies(monkeypatch, tmp_path: Path) -> None:
+    """Frozen builds ship the encrypted unet-4x engine (.enc); preflight must accept it
+    instead of always looking for the plaintext engine and warning about compilation."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    import jasna.engine_paths as ep
+    monkeypatch.setattr(ep, "unet4x_plaintext_available", lambda: False)
+
+    settings = AppSettings(secondary_restoration="unet-4x", fp16_mode=True)
+
+    res = run_engine_preflight(settings)
+    unet_req = next(r for r in res.requirements if r.key == "unet_4x")
+    assert not unet_req.exists
+
+    enc_engine = ep.get_unet4x_encrypted_engine_path(fp16=True)
+    _touch(enc_engine)
+
+    res2 = run_engine_preflight(settings)
+    unet_req2 = next(r for r in res2.requirements if r.key == "unet_4x")
+    assert unet_req2.exists
+    assert unet_req2.paths == (enc_engine,)
+
+
 def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
