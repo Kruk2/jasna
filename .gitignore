@@ -62,3 +62,4 @@ CLAUDE.md
 *.pt
 *.pth
 model_weights/
+dist_windows/
