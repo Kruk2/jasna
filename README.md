@@ -90,6 +90,16 @@ Currently supported:
   Setup these as env variables for "Topaz Video":\
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
 
+VRAM + time usage:
+| Secondary type           |         CAWD 1080p |       KV-109 1080p |
+| ------------------------ | -----------------: | -----------------: |
+| No secondary             | 22s / 10.0 GB VRAM | 11s / 10.7 GB VRAM |
+| unet-4x                  | 29s / 12.5 GB VRAM | 14s / 12.6 GB VRAM |
+| RTX Super-Res            | 25s / 11.7 GB VRAM | 13s / 11.4 GB VRAM |
+| TVAI (2 workers, Iris-2) | 52s / 12.1 GB VRAM | 24s / 12.4 GB VRAM |
+
+Restoration examples on [SLS discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260)
+
 ### Image restoration (SD 1.5)
 For **still images** Jasna can use a fine-tuned Stable Diffusion 1.5 inpaint model instead of the
 video pipeline. It detects mosaics, inpaints each region at 512×512 and blends the result back.
