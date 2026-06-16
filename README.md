@@ -85,9 +85,9 @@ Lada Yolo models are available as they handle 2d animations better.
 Jasna/Lada takes 256x256 pixel crop of mosaic region and restores it still in 256x256 resolution. This causes blurry results when mosaic area was bigger (close ups, 4k video etc).\
 To eleviate that, you can use 2nd restoration model that upscales 256x256 to 512x512 or 1024x1024 which produces cleaner results.
 Currently supported:
-- **unet-4x** (supporter model). Trained on an in-domain (JAV) dataset and visually quite close to TVAI iris-2, but runs locally with no extra setup. If you run into quality issues, please open a [GitHub issue](https://github.com/Kruk2/jasna/issues). Unlock it with a supporter key — see [Supporting the project](#supporting-the-project).
+- **unet-4x** (supporter model, much faster than TVAI and similar quality). Trained on an in-domain (JAV) dataset and visually quite close to TVAI iris-2, but runs locally with no extra setup. If you run into quality issues, please open a [GitHub issue](https://github.com/Kruk2/jasna/issues). Unlock it with a supporter key — see [Supporting the project](#supporting-the-project).
 - **RTX Super-resolution** (very fast, ok quality). Very fast, free, zero dependencies. In some videos it may produce a flickering effect — test on a short clip first. Place jasna in folder with english only characters.
-- **TVAI** (best quality, slowest). Requires [Topaz Video](https://www.topazlabs.com/topaz-video) (paid, Windows only). Recommended model: **iris-2**.\
+- **TVAI** (better than RTX super resolution, comparable to unet-4x, very slow). Requires [Topaz Video](https://www.topazlabs.com/topaz-video) (paid, Windows only). Recommended model: **iris-2**.\
   ```--tvai-args``` allows you to customize model and other params. Defaults to iris-2.\
   Setup these as env variables for "Topaz Video":\
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
