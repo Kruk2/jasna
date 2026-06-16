@@ -106,7 +106,7 @@ Restoration examples on [SLS discord](https://discord.com/channels/1196376491815
 For **still images** Jasna can use a fine-tuned Stable Diffusion 1.5 inpaint model instead of the
 video pipeline. It detects mosaics, inpaints each region at 512×512 and blends the result back.
 
-For examples on restorations you can checkout [SLS discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1492139124348420106).
+For examples on restorations you can checkout [SLS discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1492139124348420106) and [here](https://discord.com/channels/1196376491815092265/1199059436199759943/1516571355317800990).
 
 - CLI: `jasna --input photo.png --output out.png` — image inputs **auto-route** to the SD 1.5 model,
   no flag needed. The image model is selected with `--image-restoration-model-name` (default and only
