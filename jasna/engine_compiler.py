@@ -62,8 +62,25 @@ def _detection_engine_exists(detection_model_name: str, detection_model_path: st
 
 
 def _unet4x_engine_exists(fp16: bool) -> bool:
-    from jasna.engine_paths import expected_unet4x_engine_path
-    return expected_unet4x_engine_path(fp16=fp16).exists()
+    from jasna.engine_paths import (
+        expected_unet4x_engine_path,
+        get_unet4x_encrypted_engine_path,
+        unet4x_plaintext_available,
+    )
+
+    if unet4x_plaintext_available():
+        return expected_unet4x_engine_path(fp16=fp16).exists()
+
+    engine_path = get_unet4x_encrypted_engine_path(fp16=fp16)
+    if not engine_path.exists():
+        return False
+
+    from jasna.protection import ProtectionError, protected_model
+    try:
+        protected_model.decrypt_engine_bytes("unet-4x", engine_path.read_bytes())
+    except ProtectionError:
+        return False
+    return True
 
 
 def ensure_engines_compiled(

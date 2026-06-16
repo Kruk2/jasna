@@ -13,6 +13,7 @@ from jasna.engine_paths import (
     get_unet4x_encrypted_engine_path,
     get_unet4x_engine_path,
 )
+from jasna.protection import ProtectionError
 from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,13 @@ def compile_unet4x_engine(
 
     engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16))
     if engine_path.exists():
-        return engine_path
+        try:
+            protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, engine_path.read_bytes())
+        except ProtectionError:
+            logger.warning("Discarding stale encrypted Unet4x engine: %s", engine_path)
+            engine_path.unlink(missing_ok=True)
+        else:
+            return engine_path
 
     onnx_bytes = protected_model.decrypt_model_bytes(UNET4X_MODEL_ID, UNET4X_ONNX_ENC_PATH)
     try:
@@ -62,6 +69,21 @@ def compile_unet4x_engine(
         )
     finally:
         del onnx_bytes
+
+
+def encrypted_unet4x_engine_is_usable(fp16: bool = True) -> bool:
+    if use_plaintext_unet4x():
+        return get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=bool(fp16)).exists()
+    engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16))
+    if not engine_path.exists():
+        return False
+
+    from jasna.protection import protected_model
+    try:
+        protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, engine_path.read_bytes())
+    except ProtectionError:
+        return False
+    return True
 
 
 class Unet4xSecondaryRestorer:
@@ -93,7 +115,13 @@ class Unet4xSecondaryRestorer:
                     "Run engine compilation first via ensure_engines_compiled()."
                 )
             from jasna.protection import protected_model
-            engine_bytes = protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, self.engine_path.read_bytes())
+            try:
+                engine_bytes = protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, self.engine_path.read_bytes())
+            except ProtectionError:
+                logger.warning("Encrypted Unet4x engine is stale; recompiling: %s", self.engine_path)
+                self.engine_path.unlink(missing_ok=True)
+                self.engine_path = compile_unet4x_engine(self.device, fp16=self.fp16)
+                engine_bytes = protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, self.engine_path.read_bytes())
             try:
                 self.runner = TrtRunner.from_engine_bytes(
                     engine_bytes, input_shapes=UNET4X_INPUT_SHAPES, device=self.device,
