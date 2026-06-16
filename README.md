@@ -61,7 +61,9 @@ How to get a key:
    - **[Buy me a coffee](https://buymeacoffee.com/kruk2)** (also handles **crypto**) — email me at **myprotonmailkekw@proton.me** from the address/handle you used, and I'll send your key. The key is tied to that email.
 
 ### Usage
-Download the latest release package (Windows/Linux).
+Download the latest release package (Windows/Linux).\
+Unzip the release and double click on jasna.exe (Windows) or on jasna file (Linux). This will open console.\
+You can also use it as command line program.
 
 - **If you downloaded the app (recommended)**:
   - **Windows**: You’re good to go — Jasna ships with everything it needs (`ffmpeg`, `ffprobe`, and `mkvmerge`).
