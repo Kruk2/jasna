@@ -54,13 +54,15 @@ RTX 5090 + i9 13900k
 - **SD 1.5 画像復元**（実験的な静止画モデル）。
 
 キーの入手方法:
-1. **合計 15 ドル以上**を支援する——回数や時期は問いません。
+1. **合計 15 USD 以上**を支援する——回数や時期は問いません。
 2. キーの受け取り方は、どこで支援したかによって異なります:
    - **[Unifans](https://app.unifans.io/c/kruk2)** — 私から直接キーをメッセージで送ります。もし私が忘れていたら、つついてください。
    - **[コーヒーをおごる](https://buymeacoffee.com/kruk2)**（**暗号通貨**にも対応）— 支援に使ったアドレス／ハンドルから **myprotonmailkekw@proton.me** にメールしてください。キーをお送りします。キーはそのメールアドレスに紐付きます。
 
 ### 使い方
-最新のリリースパッケージ（Windows/Linux）をダウンロードしてください。
+最新のリリースパッケージ（Windows/Linux）をダウンロードしてください。\
+リリースを展開し、Windows では jasna.exe、Linux では jasna ファイルをダブルクリックしてください。コンソールが開きます。\
+コマンドラインプログラムとして使うこともできます。
 
 - **アプリをダウンロードした場合（推奨）**:
   - **Windows**: そのまま使えます — Jasna には必要なもの（`ffmpeg`、`ffprobe`、`mkvmerge`）がすべて含まれています。
@@ -88,6 +90,16 @@ Jasna/Lada はモザイク領域の 256×256 ピクセルクロップを取得�
   ```--tvai-args``` でモデルやその他のパラメータをカスタマイズできます。デフォルトは iris-2 です。\
   "Topaz Video" の環境変数を設定してください:\
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
+
+VRAM + 処理時間:
+| セカンダリ種別 | CAWD 1080p | K109 1080p |
+|---|---:|---:|
+| セカンダリなし | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
+| unet-4x | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
+| RTX Super-Res | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
+| TVAI（2 workers, Iris-2） | 52秒 / 12.1 GB VRAM | 24秒 / 12.4 GB VRAM |
+
+復元例は SLS discord をご覧ください。
 
 ### 画像復元（SD 1.5）
 **静止画**に対して、Jasna は動画パイプラインの代わりにファインチューニングした Stable Diffusion 1.5 inpaint モデルを使用できます。モザイクを検出し、各領域を 512×512 で inpaint して結果を元画像に合成します。

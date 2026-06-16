@@ -54,13 +54,15 @@ RTX 5090 + i9 13900k
 - **SD 1.5 图像修复**（实验性静态图像模型）。
 
 如何获取密钥：
-1. 累计贡献 **15 美元或以上**——不限次数、任何时间均可。
+1. 累计贡献 **15 USD 或以上**——不限次数、任何时间均可。
 2. 如何拿到密钥取决于你在哪里贡献：
    - **[Unifans](https://app.unifans.io/c/kruk2)**——我会直接把密钥私信给你。如果我忘了，戳我一下。
    - **[请我喝杯咖啡](https://buymeacoffee.com/kruk2)**（也支持**加密货币**）——用你贡献时使用的邮箱/账号发邮件到 **myprotonmailkekw@proton.me**，我会把密钥发给你。密钥与该邮箱绑定。
 
 ### 使用方法
-下载最新的发行包（Windows/Linux）。
+下载最新的发行包（Windows/Linux）。\
+解压发行包，然后双击 jasna.exe（Windows）或 jasna 文件（Linux）。这会打开控制台。\
+你也可以把它作为命令行程序使用。
 
 - **如果你下载了应用程序（推荐）**：
   - **Windows**：开箱即用——Jasna 已包含所需的一切（`ffmpeg`、`ffprobe` 和 `mkvmerge`）。
@@ -88,6 +90,16 @@ Jasna/Lada 提取马赛克区域的 256×256 像素裁切并以 256×256 分辨�
   ```--tvai-args``` 允许你自定义模型和其他参数。默认为 iris-2。\
   为 "Topaz Video" 设置以下环境变量：\
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
+
+VRAM + 处理时间：
+| 二级类型 | CAWD 1080p | K109 1080p |
+|---|---:|---:|
+| 无二级修复 | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
+| unet-4x | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
+| RTX Super-Res | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
+| TVAI（2 workers, Iris-2） | 52秒 / 12.1 GB VRAM | 24秒 / 12.4 GB VRAM |
+
+修复示例可在 SLS discord 查看。
 
 ### 图像修复（SD 1.5）
 对于**静态图像**，Jasna 可以使用微调过的 Stable Diffusion 1.5 inpaint 模型，而不是视频流水线。它会检测马赛克，在 512×512 下对每个区域进行 inpaint，再把结果混合回原图。
