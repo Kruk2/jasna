@@ -79,6 +79,15 @@ def unet4x_plaintext_available() -> bool:
     return UNET4X_ONNX_PATH.exists() and not is_frozen()
 
 
+def expected_unet4x_engine_path(fp16: bool = True) -> Path:
+    """The unet-4x engine file that should exist on disk for this build: the plaintext
+    engine in source/dev, the encrypted engine in frozen builds. Single source of truth
+    for "is unet-4x already compiled?" used by both the compiler and the GUI preflight."""
+    if unet4x_plaintext_available():
+        return get_unet4x_engine_path(fp16=fp16)
+    return get_unet4x_encrypted_engine_path(fp16=fp16)
+
+
 BASICVSRPP_DIRECTIONS = ("backward_1", "forward_1", "backward_2", "forward_2")
 
 
