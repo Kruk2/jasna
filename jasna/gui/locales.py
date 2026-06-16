@@ -271,8 +271,9 @@ TRANSLATIONS = {
         "toast_paused": "Processing paused",
         "toast_resumed": "Processing resumed",
         "toast_stopped": "Processing stopped",
-        # Buy Me a Coffee
+        # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "Support",
+        "unifans_support": "Unifans",
         
         # Tooltips
         "tip_max_clip_size": "How many frames are processed at once. Larger values can improve quality but use more VRAM.\n\nRecommended: 60 or higher. Use 60 even if it means disabling model compilation.\nGuidance: 60 (safe), 90 (good balance), 180 (best quality, needs 12 GB+ VRAM with Compile BasicVSR++ enabled, less with it disabled).\n4K videos use more VRAM — a lower clip size may produce similar quality but process much faster.\nDefault: 90",
@@ -574,8 +575,9 @@ TRANSLATIONS = {
         "toast_paused": "处理已暂停",
         "toast_resumed": "处理已继续",
         "toast_stopped": "处理已停止",
-        # Buy Me a Coffee
+        # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "支持",
+        "unifans_support": "Unifans",
         
         # Tooltips
         "tip_max_clip_size": "一次处理多少帧画面。数值越大，效果可能越好，但占用更多显存。\n\n建议：60 或更高。即使需要关闭模型编译，也建议至少使用 60。\n参考：60（安全）、90（平衡）、180（最佳质量，开启「Compile BasicVSR++」时需要 12GB+ 显存，关闭则更少）。\n4K 视频占用更多显存——较小的片段大小可能产生类似的质量，但处理速度快得多。\n默认值：90",
@@ -877,8 +879,9 @@ TRANSLATIONS = {
         "toast_paused": "処理を一時停止しました",
         "toast_resumed": "処理を再開しました",
         "toast_stopped": "処理を停止しました",
-        # Buy Me a Coffee
+        # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "応援する",
+        "unifans_support": "Unifans",
 
         # Tooltips
         "tip_max_clip_size": "一度に処理するフレーム数です。大きいほど品質が向上する可能性がありますが、VRAM を多く使います。\n\n推奨：60 以上。モデルコンパイルを無効にしてでも 60 は維持しましょう。\n目安：60（安全）、90（バランス良）、180（最高品質、Compile BasicVSR++ 有効時 12GB 以上の VRAM が必要、無効なら少なめ）。\n4K 動画は VRAM を多く使います。クリップサイズを下げても同等の品質で大幅に高速化できます。\nデフォルト：90",
@@ -1178,8 +1181,9 @@ TRANSLATIONS = {
         "toast_paused": "처리가 일시 정지되었습니다",
         "toast_resumed": "처리가 재개되었습니다",
         "toast_stopped": "처리가 중지되었습니다",
-        # Buy Me a Coffee
+        # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "후원",
+        "unifans_support": "Unifans",
 
         # Tooltips
         "tip_max_clip_size": "한 번에 처리할 프레임 수입니다. 클수록 품질이 좋아질 수 있지만 VRAM을 더 많이 사용합니다.\n\n권장: 60 이상. 모델 컴파일을 끄더라도 최소 60을 유지하세요.\n참고: 60 (안전), 90 (균형), 180 (최고 품질, Compile BasicVSR++ 활성화 시 12GB+ VRAM 필요, 비활성화 시 더 적음).\n4K 영상은 VRAM을 더 많이 사용합니다. 클립 크기를 낮춰도 비슷한 품질로 훨씬 빠르게 처리할 수 있습니다.\n기본값: 90",
@@ -1481,8 +1485,9 @@ TRANSLATIONS = {
         "toast_paused": "หยุดประมวลผลชั่วคราว",
         "toast_resumed": "ดำเนินการประมวลผลต่อ",
         "toast_stopped": "หยุดประมวลผลแล้ว",
-        # Buy Me a Coffee
+        # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "สนับสนุน",
+        "unifans_support": "Unifans",
 
         # Tooltips
         "tip_max_clip_size": "จำนวนเฟรมที่ประมวลผลต่อครั้ง ค่ามากขึ้นอาจให้คุณภาพดีขึ้นแต่ใช้ VRAM มากขึ้น\n\nแนะนำ: 60 ขึ้นไป แม้ต้องปิดการคอมไพล์โมเดลก็ควรใช้ 60 เป็นอย่างน้อย\nแนวทาง: 60 (ปลอดภัย), 90 (สมดุลดี), 180 (คุณภาพสูงสุด ต้องมี VRAM 12 GB+ เมื่อเปิด Compile BasicVSR++ น้อยกว่าถ้าปิด)\nวิดีโอ 4K ใช้ VRAM มากขึ้น — ขนาดคลิปที่เล็กกว่าอาจให้คุณภาพใกล้เคียงแต่ประมวลผลเร็วกว่ามาก\nค่าเริ่มต้น: 90",

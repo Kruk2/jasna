@@ -10,7 +10,7 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 
 from jasna import __version__
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, Toast, LicenseDialog
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.engine_paths import UNET4X_ONNX_ENC_PATH
@@ -152,9 +152,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._lang_dropdown.pack(side="left", padx=(0, 12))
         self._lang_dropdown.set(current_lang_name)
         
-        # Buy Me a Coffee button
+        # Support buttons — back the project on Buy Me a Coffee or Unifans
         self._bmc_btn = BuyMeCoffeeButton(right, compact=False)
-        self._bmc_btn.pack(side="left", padx=(0, 12))
+        self._bmc_btn.pack(side="left", padx=(0, 8))
+
+        self._unifans_btn = UnifansButton(right, compact=False)
+        self._unifans_btn.pack(side="left", padx=(0, 12))
 
         # Supporter license chip — only shown when the gated (encrypted) model ships.
         if UNET4X_ONNX_ENC_PATH.exists():

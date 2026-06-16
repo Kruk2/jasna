@@ -6,56 +6,72 @@ from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 
 
-# Buy Me a Coffee URL
+# Support page URLs — two ways to back the project
 BMC_URL = "https://buymeacoffee.com/Kruk2"
+UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
 
-class BuyMeCoffeeButton(ctk.CTkButton):
-    """Buy Me a Coffee button with brand styling and hover animation."""
-    
-    def __init__(self, master, compact: bool = False, **kwargs):
-        # Keep the rocket emoji present; translate the support text
-        if compact:
-            text = "☕ 🚀"
-            width = 40
-        else:
-            label = t("bmc_support")
-            text = f"☕ {label} 🚀"
-            width = 100
-        
+class _SupportButton(ctk.CTkButton):
+    """Brand-styled button that opens a support page and scales 1.05x on hover."""
+
+    def __init__(self, master, text: str, url: str, fg_color: str, text_color: str, width: int, **kwargs):
         super().__init__(
             master,
             text=text,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL, "bold"),
-            fg_color=Colors.BMC_YELLOW,
-            hover_color=Colors.BMC_YELLOW,  # Keep same, we scale on hover
-            text_color=Colors.BMC_TEXT,
+            fg_color=fg_color,
+            hover_color=fg_color,  # Keep same, we scale on hover
+            text_color=text_color,
             corner_radius=6,
             height=28,
             width=width,
-            command=self._open_bmc,
+            command=lambda: webbrowser.open(url),
             **kwargs
         )
-        
+
         self._original_width = width
         self._original_height = 28
-        
-        # Bind hover events for scale effect
+
         self.bind("<Enter>", self._on_enter)
         self.bind("<Leave>", self._on_leave)
-        
+
     def _on_enter(self, event=None):
-        # Scale up 1.05x on hover
-        new_width = int(self._original_width * 1.05)
-        new_height = int(self._original_height * 1.05)
-        self.configure(width=new_width, height=new_height)
-        
+        self.configure(
+            width=int(self._original_width * 1.05),
+            height=int(self._original_height * 1.05),
+        )
+
     def _on_leave(self, event=None):
-        # Restore original size
         self.configure(width=self._original_width, height=self._original_height)
-        
-    def _open_bmc(self):
-        webbrowser.open(BMC_URL)
+
+
+class BuyMeCoffeeButton(_SupportButton):
+    """Buy Me a Coffee button with brand styling and hover animation."""
+
+    def __init__(self, master, compact: bool = False, **kwargs):
+        # Keep the rocket emoji present; translate the support text
+        if compact:
+            text, width = "☕ 🚀", 40
+        else:
+            text, width = f"☕ {t('bmc_support')} 🚀", 100
+        super().__init__(
+            master, text=text, url=BMC_URL,
+            fg_color=Colors.BMC_YELLOW, text_color=Colors.BMC_TEXT, width=width, **kwargs,
+        )
+
+
+class UnifansButton(_SupportButton):
+    """Unifans button — the other way to support the project, shown next to Buy Me a Coffee."""
+
+    def __init__(self, master, compact: bool = False, **kwargs):
+        if compact:
+            text, width = "💜", 40
+        else:
+            text, width = f"💜 {t('unifans_support')}", 110
+        super().__init__(
+            master, text=text, url=UNIFANS_URL,
+            fg_color=Colors.UNIFANS_PURPLE, text_color=Colors.UNIFANS_TEXT, width=width, **kwargs,
+        )
 
 
 class LicenseDialog(ctk.CTkToplevel):

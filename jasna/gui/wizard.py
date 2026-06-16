@@ -11,7 +11,7 @@ import customtkinter as ctk
 from jasna import os_utils
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
-from jasna.gui.components import BuyMeCoffeeButton
+from jasna.gui.components import BuyMeCoffeeButton, UnifansButton
 
 logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
@@ -170,12 +170,18 @@ class FirstRunWizard(ctk.CTkToplevel):
         )
         self._continue_btn.pack(side="left", padx=(0, 12))
         
-        # Buy Me a Coffee button - secondary action
+        # Support the project — Buy Me a Coffee or Unifans
         self._bmc_btn = BuyMeCoffeeButton(btn_container, compact=False)
         self._bmc_btn.configure(height=48, width=140)
         self._bmc_btn._original_height = 48
         self._bmc_btn._original_width = 140
         self._bmc_btn.pack(side="left")
+
+        self._unifans_btn = UnifansButton(btn_container, compact=False)
+        self._unifans_btn.configure(height=48, width=150)
+        self._unifans_btn._original_height = 48
+        self._unifans_btn._original_width = 150
+        self._unifans_btn.pack(side="left", padx=(12, 0))
         
     def _start_checks_in_background(self) -> None:
         self._checks_thread = threading.Thread(target=self._run_checks_blocking, daemon=True)

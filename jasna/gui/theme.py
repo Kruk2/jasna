@@ -38,6 +38,10 @@ class Colors:
     BMC_YELLOW = "#FFDD00"        # Official Brand Color
     BMC_TEXT = "#0f172a"          # Slate-900 (dark text on yellow)
 
+    # Unifans branding
+    UNIFANS_PURPLE = "#8B5CF6"    # Violet-500
+    UNIFANS_TEXT = "#FFFFFF"      # White text on violet
+
 
 class Fonts:
     # Primary: Segoe UI (Windows system font, no embedding needed for PyInstaller)

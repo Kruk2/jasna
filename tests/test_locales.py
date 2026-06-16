@@ -91,6 +91,14 @@ def test_all_languages_define_image_restore_tooltips(lang: str) -> None:
     assert not missing, f"{lang} missing image restore tooltip keys: {sorted(missing)}"
 
 
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_all_languages_define_support_button_labels(lang: str) -> None:
+    translations = TRANSLATIONS[lang]
+    assert translations["bmc_support"].strip()
+    # Unifans is a brand name — kept verbatim across every locale.
+    assert translations["unifans_support"] == "Unifans"
+
+
 def test_english_activation_copy_uses_app_activation_language() -> None:
     en = TRANSLATIONS["en"]
     assert en["supporter_title"] == "Activate Jasna"
