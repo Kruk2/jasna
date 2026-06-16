@@ -89,6 +89,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._is_modified = False
         self._applying_preset = False  # Flag to prevent modification tracking during apply
         self._widgets: dict = {}
+        self._on_interactive_image_restore: callable | None = None
         
         self._build_preset_bar()
         self._build_scrollable()
@@ -759,6 +760,18 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["image_restore_download_btn"].pack(side="right")
 
+        row_interactive = ctk.CTkFrame(inner, fg_color="transparent")
+        row_interactive.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        self._widgets["image_restore_interactive_btn"] = ctk.CTkButton(
+            row_interactive,
+            text=t("image_restore_interactive"),
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            text_color=Colors.TEXT_PRIMARY,
+            command=self._open_interactive_image_restore,
+        )
+        self._widgets["image_restore_interactive_btn"].pack(fill="x")
+
         # Steps slider (5-60, step 5)
         row_steps = ctk.CTkFrame(inner, fg_color="transparent")
         row_steps.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -896,6 +909,13 @@ class SettingsPanel(ctk.CTkFrame):
             btn.after(0, done)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def set_on_interactive_image_restore(self, callback: callable):
+        self._on_interactive_image_restore = callback
+
+    def _open_interactive_image_restore(self):
+        if self._on_interactive_image_restore:
+            self._on_interactive_image_restore()
 
     def _build_encoding_section(self):
         section = CollapsibleSection(self._scroll, t("section_encoding"), expanded=False)

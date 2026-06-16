@@ -9,6 +9,9 @@ import torch
 from jasna.image_restore import (
     clamp_strength,
     group_boxes_by_iou,
+    mask_overlay_rgb_chw,
+    prepare_image_restore,
+    render_prepared_image,
     restore_image,
     variant_output_paths,
 )
@@ -106,3 +109,51 @@ class TestRestoreImage:
         # dominates: output must differ from the all-zero input.
         assert outs[0].max() > 0
         assert int(outs[0][0].max()) == 200
+
+
+class TestPreparedImageRestore:
+    def test_prepare_detects_once_and_render_reuses_prepared_data(self):
+        img = np.zeros((3, 64, 64), dtype=np.uint8)
+        boxes = np.array([[10, 10, 40, 40]], dtype=np.float32)
+        masks = torch.ones(1, 8, 8, dtype=torch.bool)
+        detector = _FakeDetector(boxes, masks)
+        restorer = _FakeRestorer(fill=180)
+
+        prepared = prepare_image_restore(img, detector, device=torch.device("cpu"), fp16=False)
+        assert detector.calls == 1
+        assert prepared.has_detections
+
+        out_a = render_prepared_image(prepared, restorer, steps=5, strength=0.6, seed=7, freeu=None)
+        out_b = render_prepared_image(prepared, restorer, steps=5, strength=0.6, seed=8, freeu=None)
+
+        assert detector.calls == 1
+        assert restorer.seeds == [7, 8]
+        assert int(out_a[0].max()) == 180
+        assert int(out_b[0].max()) == 180
+
+    def test_zero_detection_prepared_render_returns_copy(self):
+        img = np.random.randint(0, 256, (3, 64, 64), dtype=np.uint8)
+        detector = _FakeDetector(np.zeros((0, 4), np.float32), torch.zeros(0, 8, 8, dtype=torch.bool))
+        restorer = _FakeRestorer()
+
+        prepared = prepare_image_restore(img, detector, device=torch.device("cpu"), fp16=False)
+        out = render_prepared_image(prepared, restorer, steps=5, strength=0.6, seed=7, freeu=None)
+
+        assert not prepared.has_detections
+        assert np.array_equal(out, img)
+        assert out is not img
+        assert restorer.seeds == []
+
+    def test_mask_overlay_tints_detected_area_red(self):
+        img = np.zeros((3, 64, 64), dtype=np.uint8)
+        boxes = np.array([[10, 10, 40, 40]], dtype=np.float32)
+        masks = torch.ones(1, 8, 8, dtype=torch.bool)
+        detector = _FakeDetector(boxes, masks)
+
+        prepared = prepare_image_restore(img, detector, device=torch.device("cpu"), fp16=False)
+        overlay = mask_overlay_rgb_chw(prepared)
+
+        assert overlay.shape == img.shape
+        assert overlay[0].max() > 0
+        assert overlay[1].max() == 0
+        assert overlay[2].max() == 0
