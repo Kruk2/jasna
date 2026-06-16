@@ -120,12 +120,13 @@ For examples on restorations you can checkout [SLS discord](https://discord.com/
 - The model is **not bundled** (~6.9 GB). It lives in `model_weights/sd-15-jav/`. Either drop the
   bundle there yourself, or let Jasna fetch it from
   [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) — it asks before
-  downloading (CLI prompt, or the **Download model** button in the GUI). The checkpoint is encrypted —
-  you need a supporter key to use it (same key as unet-4x — see
-  [Supporting the project](#supporting-the-project)).
+  downloading (CLI prompt, or the **Download model** button in the GUI). The checkpoint is avilable only for supporters at the moment — same key as unet-4x — see
+  [Supporting the project](#supporting-the-project).
 - It's **experimental**: results vary by scene, but on the right image it can look genuinely good.
   Try a few `--sd15-variants` (different seeds) and keep the best one.
 - Expect around **7 GB of VRAM** during inference (a bit more on large 4K images).
+
+**If you can't download model using GUI run it through CLI or download manually from hugging-face**
 
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\
