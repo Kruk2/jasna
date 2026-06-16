@@ -84,9 +84,9 @@ Lada Yolo 模型可用，因为它们更擅长处理 2D 动画。
 Jasna/Lada 提取马赛克区域的 256×256 像素裁切并以 256×256 分辨率修复。当马赛克区域较大时（特写、4K 视频等），结果会模糊。\
 为缓解此问题，可以使用第二个修复模型将 256×256 放大到 512×512 或 1024×1024，以获得更清晰的结果。
 目前支持：
-- **unet-4x**（支持者模型）。在领域内（JAV）数据集上训练，视觉效果相当接近 TVAI iris-2，但可在本地运行，无需额外设置。如果遇到画质问题，请提交 [GitHub issue](https://github.com/Kruk2/jasna/issues)。使用支持者密钥解锁——见[支持本项目](#支持本项目)。
+- **unet-4x**（支持者模型，比 TVAI 快很多，画质相近）。在领域内（JAV）数据集上训练，视觉效果相当接近 TVAI iris-2，但可在本地运行，无需额外设置。如果遇到画质问题，请提交 [GitHub issue](https://github.com/Kruk2/jasna/issues)。使用支持者密钥解锁——见[支持本项目](#支持本项目)。
 - **RTX Super-resolution**（非常快，画质尚可）。非常快，免费，零依赖。某些视频中可能产生闪烁效果——请先在短片段上测试。将 Jasna 放在仅含英文字符的文件夹中。
-- **TVAI**（最佳画质，最慢）。需要 [Topaz Video](https://www.topazlabs.com/topaz-video)（付费，仅限 Windows）。推荐模型：**iris-2**。\
+- **TVAI**（优于 RTX Super Resolution，接近 unet-4x，非常慢）。需要 [Topaz Video](https://www.topazlabs.com/topaz-video)（付费，仅限 Windows）。推荐模型：**iris-2**。\
   ```--tvai-args``` 允许你自定义模型和其他参数。默认为 iris-2。\
   为 "Topaz Video" 设置以下环境变量：\
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
@@ -104,12 +104,12 @@ VRAM + 处理时间：
 ### 图像修复（SD 1.5）
 对于**静态图像**，Jasna 可以使用微调过的 Stable Diffusion 1.5 inpaint 模型，而不是视频流水线。它会检测马赛克，在 512×512 下对每个区域进行 inpaint，再把结果混合回原图。
 
-修复示例可以查看 [SLS discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1492139124348420106)。
+修复示例可以查看 [SLS discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1492139124348420106) 和[这里](https://discord.com/channels/1196376491815092265/1199059436199759943/1516571355317800990)。
 
 - CLI：`jasna --input photo.png --output out.png`——图像输入会**自动路由**到 SD 1.5 模型，无需任何标志。图像模型通过 `--image-restoration-model-name` 选择（默认且唯一的值：`sd-15-jav`）；`--restoration-model-name` 仅用于视频。可调参数：`--sd15-steps`、`--sd15-strength`（≤ 0.7）、`--sd15-freeu/--no-sd15-freeu`、`--sd15-seed`、`--sd15-variants N`。
 - GUI：只需把图像加入队列——图像任务会自动路由到 SD 1.5 模型。在 **Image Restoration**（图像修复）设置区进行调节。
 - 文件夹输入（CLI）：`--input <文件夹> --output <文件夹>` 会处理文件夹中的每个媒体文件——**先图像，后视频**——将 `<name>_out<ext>` 写入输出文件夹（此时 `--output` 必须是文件夹）。GUI 队列本身就可以自由混合图像和视频。
-- 该模型**未随程序打包**（约 6.9 GB），位于 `model_weights/sd-15-jav/`。你可以自己把模型包放进去，或让 Jasna 从 [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 下载——下载前会先询问（CLI 提示，或 GUI 中的 **Download model** 按钮）。检查点是加密的——需要支持者密钥才能使用（与 unet-4x 相同的密钥——见[支持本项目](#支持本项目)）。
+- 该模型**未随程序打包**（约 6.9 GB），位于 `model_weights/sd-15-jav/`。你可以自己把模型包放进去，或让 Jasna 从 [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 下载——下载前会先询问（CLI 提示，或 GUI 中的 **Download model** 按钮）。目前 checkpoint 仅面向支持者提供——与 unet-4x 使用同一个密钥——见[支持本项目](#支持本项目)。
 - 它是**实验性的**：效果因场景而异，但在合适的图像上可以看起来相当不错。尝试几个 `--sd15-variants`（不同的种子），保留最好的那个。
 - 推理期间大约需要 **7 GB 显存**（较大的 4K 图像会再多一些）。
 

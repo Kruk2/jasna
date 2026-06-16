@@ -84,9 +84,9 @@ Lada Yolo モデルは 2D アニメーションの処理に優れているため
 Jasna/Lada はモザイク領域の 256×256 ピクセルクロップを取得し、256×256 解像度のまま復元します。そのため、モザイク領域が大きい場合（クローズアップ、4K 動画など）はぼやけた結果になります。\
 これを緩和するために、256×256 を 512×512 または 1024×1024 にアップスケールする 2 番目の復元モデルを使用できます。
 現在サポート:
-- **unet-4x**（支援者モデル）。ドメイン内（JAV）データセットで訓練され、視覚的に TVAI iris-2 にかなり近いですが、追加セットアップなしでローカルに動作します。画質に問題があれば [GitHub issue](https://github.com/Kruk2/jasna/issues) を立ててください。支援者キーで解除します——[プロジェクトを支援する](#プロジェクトを支援する)を参照。
+- **unet-4x**（支援者モデル、TVAI よりかなり高速で同程度の品質）。ドメイン内（JAV）データセットで訓練され、視覚的に TVAI iris-2 にかなり近いですが、追加セットアップなしでローカルに動作します。画質に問題があれば [GitHub issue](https://github.com/Kruk2/jasna/issues) を立ててください。支援者キーで解除します——[プロジェクトを支援する](#プロジェクトを支援する)を参照。
 - **RTX Super-resolution**（非常に高速、まあまあの品質）。非常に高速、無料、依存関係ゼロ。一部の動画ではフリッカーが発生する場合があります — まず短いクリップでテストしてください。Jasna を英語のみの文字のフォルダに配置してください。
-- **TVAI**（最高品質、最も遅い）。[Topaz Video](https://www.topazlabs.com/topaz-video)（有料、Windows のみ）が必要です。推奨モデル: **iris-2**。\
+- **TVAI**（RTX Super Resolution より高品質、unet-4x と同程度、非常に遅い）。[Topaz Video](https://www.topazlabs.com/topaz-video)（有料、Windows のみ）が必要です。推奨モデル: **iris-2**。\
   ```--tvai-args``` でモデルやその他のパラメータをカスタマイズできます。デフォルトは iris-2 です。\
   "Topaz Video" の環境変数を設定してください:\
   <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
@@ -104,12 +104,12 @@ VRAM + 処理時間:
 ### 画像復元（SD 1.5）
 **静止画**に対して、Jasna は動画パイプラインの代わりにファインチューニングした Stable Diffusion 1.5 inpaint モデルを使用できます。モザイクを検出し、各領域を 512×512 で inpaint して結果を元画像に合成します。
 
-復元の例は [SLS discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1492139124348420106) をご覧ください。
+復元の例は [SLS discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1492139124348420106) と[こちら](https://discord.com/channels/1196376491815092265/1199059436199759943/1516571355317800990)をご覧ください。
 
 - CLI: `jasna --input photo.png --output out.png` — 画像入力は **自動的に** SD 1.5 モデルにルーティングされ、フラグは不要です。画像モデルは `--image-restoration-model-name` で選択します（デフォルトかつ唯一の値: `sd-15-jav`）。`--restoration-model-name` は動画専用のままです。調整項目: `--sd15-steps`、`--sd15-strength`（≤ 0.7）、`--sd15-freeu/--no-sd15-freeu`、`--sd15-seed`、`--sd15-variants N`。
 - GUI: 画像をキューに追加するだけ — 画像ジョブは自動的に SD 1.5 モデルにルーティングされます。**Image Restoration**（画像復元）設定セクションで調整できます。
 - フォルダ入力（CLI）: `--input <フォルダ> --output <フォルダ>` はフォルダ内のすべてのメディアファイルを処理します——**先に画像、次に動画**——`<name>_out<ext>` を出力フォルダに書き込みます（この場合 `--output` はフォルダである必要があります）。GUI キューはすでに画像と動画を自由に混在できます。
-- モデルは**同梱されていません**（約 6.9 GB）。`model_weights/sd-15-jav/` に置かれます。自分でバンドルをそこに置くか、Jasna に [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) から取得させてください——ダウンロード前に確認します（CLI のプロンプト、または GUI の **Download model** ボタン）。チェックポイントは暗号化されています——使用するには支援者キーが必要です（unet-4x と同じキー——[プロジェクトを支援する](#プロジェクトを支援する)を参照）。
+- モデルは**同梱されていません**（約 6.9 GB）。`model_weights/sd-15-jav/` に置かれます。自分でバンドルをそこに置くか、Jasna に [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) から取得させてください——ダウンロード前に確認します（CLI のプロンプト、または GUI の **Download model** ボタン）。checkpoint は現時点では支援者のみ利用できます——unet-4x と同じキーです——[プロジェクトを支援する](#プロジェクトを支援する)を参照してください。
 - これは**実験的**です: 結果はシーンによって異なりますが、適切な画像では本当に良く見えることがあります。いくつかの `--sd15-variants`（異なるシード）を試して、最も良いものを残してください。
 - 推論中は約 **7 GB の VRAM** を見込んでください（大きな 4K 画像ではもう少し多くなります）。
 

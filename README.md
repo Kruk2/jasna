@@ -126,8 +126,6 @@ For examples on restorations you can checkout [SLS discord](https://discord.com/
   Try a few `--sd15-variants` (different seeds) and keep the best one.
 - Expect around **7 GB of VRAM** during inference (a bit more on large 4K images).
 
-**If you can't download model using GUI run it through CLI or download manually from hugging-face**
-
 ### Max clip + temporal overlap
 Main goal for the temporal overlap is to reduce flickering on the edges of clips.\
 Going above 20 doesn't bring much. The larger overlap the longer processing times but less flickering.\
