@@ -754,7 +754,7 @@ class SettingsPanel(ctk.CTkFrame):
         dl_label = ctk.CTkLabel(row_dl, text=t("image_restore_model"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
         dl_label.pack(side="left")
         self._widgets["image_restore_download_btn"] = ctk.CTkButton(
-            row_dl, text=t("image_restore_download"), width=140,
+            row_dl, text=t("image_restore_download"), width=160,
             fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
             command=self._on_download_sd15,
         )
@@ -890,11 +890,28 @@ class SettingsPanel(ctk.CTkFrame):
 
         btn = self._widgets["image_restore_download_btn"]
         btn.configure(state="disabled", text=t("image_restore_downloading"))
+        progress_lock = threading.Lock()
+        last_percent = -1
+
+        def progress(downloaded: int, total: int | None):
+            nonlocal last_percent
+            if not total:
+                return
+            percent = max(0, min(100, int(downloaded * 100 / total)))
+            with progress_lock:
+                if percent == last_percent:
+                    return
+                last_percent = percent
+
+            def update_button():
+                btn.configure(text=f"{t('image_restore_downloading')} {percent}%")
+
+            btn.after(0, update_button)
 
         def worker():
             error = None
             try:
-                download_sd15_bundle(SD15_DIR, SD15_HF_REPO)
+                download_sd15_bundle(SD15_DIR, SD15_HF_REPO, progress_callback=progress)
             except Exception as exc:  # surface failure to the user
                 error = str(exc)
 

@@ -54,3 +54,30 @@ class TestEnsureBundle:
             dl.ensure_sd15_bundle(target)
             mock_dl.assert_called_once()
             assert dl.bundle_present(target)
+
+
+class TestDownloadBundle:
+    def test_without_callback_uses_default_hf_progress(self, tmp_path: Path):
+        with patch("huggingface_hub.snapshot_download") as mock_snapshot:
+            dl.download_sd15_bundle(tmp_path)
+
+        kwargs = mock_snapshot.call_args.kwargs
+        assert kwargs["local_dir"] == str(tmp_path)
+        assert "tqdm_class" not in kwargs
+
+    def test_callback_uses_silent_byte_progress_class(self, tmp_path: Path):
+        events: list[tuple[int, int | None]] = []
+
+        with patch("huggingface_hub.snapshot_download") as mock_snapshot:
+            dl.download_sd15_bundle(tmp_path, progress_callback=lambda done, total: events.append((done, total)))
+
+        progress_cls = mock_snapshot.call_args.kwargs["tqdm_class"]
+        byte_bar = progress_cls(total=100, initial=10, unit="B")
+        byte_bar.update(15)
+        byte_bar.total += 25
+        byte_bar.refresh()
+
+        file_bar = progress_cls([1, 2], total=2)
+
+        assert list(file_bar) == [1, 2]
+        assert events == [(10, 100), (25, 100), (25, 125)]

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import logging
+import threading
+from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
+from typing import Any
 
 from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH, SD15_HF_REPO
 
@@ -19,11 +22,94 @@ def bundle_present(model_dir: Path) -> bool:
     return ckpt_ok and (model_dir / "unet" / "config.json").exists()
 
 
-def download_sd15_bundle(model_dir: Path, repo_id: str = SD15_HF_REPO) -> None:
+DownloadProgressCallback = Callable[[int, int | None], None]
+
+
+def _progress_tqdm_class(progress_callback: DownloadProgressCallback):
+    """Build a silent tqdm-compatible class for Hugging Face download progress."""
+
+    class CallbackTqdm:
+        _lock = threading.RLock()
+
+        def __init__(
+            self,
+            iterable: Iterable[Any] | None = None,
+            *,
+            total: int | float | None = None,
+            initial: int | float = 0,
+            unit: str | None = None,
+            **_: Any,
+        ) -> None:
+            self.iterable = iterable
+            self.total = total
+            self.n = initial
+            self._emit_bytes = unit == "B"
+            if self._emit_bytes:
+                self._emit()
+
+        @classmethod
+        def get_lock(cls):
+            return cls._lock
+
+        @classmethod
+        def set_lock(cls, lock) -> None:
+            cls._lock = lock
+
+        def __iter__(self) -> Iterator[Any]:
+            if self.iterable is None:
+                return
+            for item in self.iterable:
+                yield item
+                if not self._emit_bytes:
+                    self.update(1)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback) -> None:
+            self.close()
+
+        def update(self, n: int | float | None = 1) -> None:
+            self.n += 1 if n is None else n
+            if self._emit_bytes:
+                self._emit()
+
+        def refresh(self, *args: Any, **kwargs: Any) -> bool:
+            if self._emit_bytes:
+                self._emit()
+            return True
+
+        def close(self) -> None:
+            pass
+
+        def clear(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def display(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def set_description(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def _emit(self) -> None:
+            total = None if self.total is None else max(0, int(self.total))
+            progress_callback(max(0, int(self.n)), total)
+
+    return CallbackTqdm
+
+
+def download_sd15_bundle(
+    model_dir: Path,
+    repo_id: str = SD15_HF_REPO,
+    progress_callback: DownloadProgressCallback | None = None,
+) -> None:
     from huggingface_hub import snapshot_download
 
     logger.info("Downloading SD15 bundle %s -> %s", repo_id, model_dir)
-    snapshot_download(repo_id=repo_id, repo_type="model", local_dir=str(model_dir))
+    kwargs: dict[str, Any] = {"repo_id": repo_id, "repo_type": "model", "local_dir": str(model_dir)}
+    if progress_callback is not None:
+        kwargs["tqdm_class"] = _progress_tqdm_class(progress_callback)
+    snapshot_download(**kwargs)
 
 
 def ensure_sd15_bundle(model_dir: Path, repo_id: str = SD15_HF_REPO) -> None:
