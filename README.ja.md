@@ -72,11 +72,19 @@ jasna --input input.mp4 --output output.mkv
 jasna --input photo.png --output restored.png
 ```
 
-フォルダ入力では、`--input` と `--output` の両方がフォルダである必要があります。Jasna は画像を先に、その後で動画を処理し、出力フォルダに `<name>_out<ext>` を書き込みます。
+フォルダ入力では、`--input` と `--output` の両方がフォルダである必要があります。Jasna は画像を先に、その後で動画を処理し、全体の `[current/total]` ファイルカウンターを表示します。デフォルトでは出力フォルダに `<name>_out<ext>` を書き込みます。
 
 ```bash
 jasna --input input_folder --output output_folder
 ```
+
+フォルダ処理では、GUI と同じ `{original}` ファイル名テンプレートも使えます:
+
+```bash
+jasna --input input_folder --output output_folder --output-pattern "{original}_restored.mp4"
+```
+
+画像は元の拡張子を維持し、動画はテンプレートに拡張子がある場合その拡張子を使います。Jasna は処理前に予定される出力パスを確認し、テンプレートによって複数の入力が同じ出力ファイルに対応する場合はエラーで終了します。
 
 ## 初回実行
 
