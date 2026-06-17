@@ -1,183 +1,290 @@
-[**English**](README.md) | [日本語](README.ja.md) | [中文](README.zh.md)
+[English](README.md) | [日本語](README.ja.md) | [**中文**](README.zh.md)
 
 # Jasna
-### 🚀 Jasna 是免费的。[支持它](#支持本项目)，让我能训练更好的模型 🚀
-支持者将获得一个密钥，解锁我额外训练的模型——**unet-4x** 二级放大模型和实验性的
-**SD 1.5 图像修复**模型。详情见[支持本项目](#支持本项目)。
 
-受 Lada 启发（部分基于其代码）的 马赛克修复工具。\
-Jasna 使用的修复模型（mosaic_restoration_1.2）由 ladaapp（Lada 作者）训练。
+Jasna 是一个 马赛克修复工具，提供简洁 GUI、CLI、纯 GPU 处理流水线、TensorRT 支持、可选二级修复模型、静态图像修复以及流媒体支持。
 
-全新马赛克检测模型 & **超快速纯 GPU 流水线** & TVAI 支持 & 简洁 GUI。\
-请查看下方的基准测试和使用说明。
-![slop_gui](https://github.com/user-attachments/assets/ae5d9b73-ea22-4263-8203-0ff89bbbcc51)
+它受 Lada 启发，部分代码也基于 Lada。Jasna 使用的 `mosaic_restoration_1.2` 修复模型由 Lada 作者 ladaapp 训练。
 
+Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目训练的额外模型: **unet-4x** 二级放大模型，以及实验性的 **SD 1.5 图像修复**模型。详情见[支持本项目](#支持本项目)。
 
-### 差异:
-- **改进的马赛克检测模型。**
-- **减少闪烁的时间重叠。**
-- **二级修复模型（Topaz TVAI 和 RTX Super Res）。提升画质和锐度。**
-- **静态照片的实验性 SD 1.5 图像修复**——有时能产生非常好的结果（支持者模型）。
-- 纯 GPU 处理。初步测试表明速度可提升 2 倍。无马赛克区域的原始处理在 RTX 5090 上约 250fps <img width="860" height="56" alt="image" src="https://github.com/user-attachments/assets/a80ecaee-e36d-4c91-93e4-8bdd75048ac3" />
-- GPU 上精确的色彩转换（输入与输出匹配，无色带）。
-- 仅支持较新的 Nvidia GPU。
-- TensorRT 支持。
+![Jasna GUI](https://github.com/user-attachments/assets/ae5d9b73-ea22-4263-8203-0ff89bbbcc51)
 
-### 待办:
-- 完善 VR 支持
-- ~~TVAI~~ 和 SeedVR
-- ~~可在 Stash（及其他工具）中播放的流媒体~~
-- ~~提升性能（当前版本非常简单）~~
-- ~~改善 VRAM 使用~~
+## 目录
 
-### VRAM 管理
-Jasna 自动管理 VRAM。当 GPU 显存不足时，处理队列中等待的帧会被临时移动到系统内存，需要时再移回。这在后台自动完成，无需任何配置。
+- [Jasna 能做什么](#jasna-能做什么)
+- [社区](#社区)
+- [要求](#要求)
+- [快速开始](#快速开始)
+- [首次运行](#首次运行)
+- [模型选择](#模型选择)
+- [调整质量和 VRAM](#调整质量和-vram)
+- [流媒体](#流媒体)
+- [基准测试](#基准测试)
+- [支持本项目](#支持本项目)
+- [当前限制和 TODO](#当前限制和-todo)
+- [从源代码运行](#从源代码运行)
 
-如果仍然遇到内存不足错误，请减小**片段大小**（例如从 180 减到 60）或禁用模型编译——两者都能显著降低峰值 VRAM（见下表）。
+## Jasna 能做什么
 
-### 基准测试
-RTX 5090 + i9 13900k
-| 文件 | 片段（秒） | lada 0.10.1 | jasna 0.3.0 | jasna 0.5.0 | **jasna 0.6.2** |
-|---|---|---|---|---|---|
-| **A017**（4k，2小时25分） | 60 | 02:56:26 | 01:20:49（快 2.2 倍） | 01:10:00（快 2.5 倍） | xx |
-| **H063**（1080p，3小时10分） | 180 | 01:34:51 | 44:21（快 2.1 倍） | 37:57（快 2.5 倍） | **30:58（快 3.1 倍）** |
-| **D570_2m** | 30 | 01:08 | 00:30（快 2.3 倍） | 00:24（快 2.8 倍） | **00:20（快 3.4 倍）** |
-| **N223_Test** | 30 | 03:12 | 01:18（快 2.5 倍） | 01:02（快 3.1 倍） | **00:58（快 3.3 倍）** |
-| **test-007** | 30 | 01:16 | 00:41（快 1.9 倍） | 00:28（快 2.7 倍） | **00:22（快 3.5 倍）** |
-| **厚码测试2** | 30 | 01:52 | 00:43（快 2.6 倍） | 00:36（快 3.1 倍） | **00:34（快 3.3 倍）** |
+- 修复视频文件中的马赛克。
+- 使用实验性 SD 1.5 图像模型修复静态图像中的马赛克。
+- 默认使用 RF-DETR 模型检测马赛克；也提供 Lada YOLO 模型。
+- 通过时间重叠和交叉淡化减少片段边界闪烁。
+- 可使用 **unet-4x**、**RTX Super Resolution** 或 **Topaz Video AI** 进行二级修复。
+- 可将修复后的视频串流到内置浏览器播放器，或支持的 Stash 分支。
 
+## 社区
 
+加入 SLS Discord 查看示例、获取支持，并讨论设置。请不要表现得太奇怪。
 
-## 支持本项目
-支持用于训练额外的模型——主要是租用更大的 GPU 以及在更大数据集上训练所需的算力。支持者将获得一个密钥，解锁我以此方式训练的模型：
-- **unet-4x** 二级放大模型（更清晰的 256→1024 修复）。
-- **SD 1.5 图像修复**（实验性静态图像模型）。
+## 要求
 
-如何获取密钥：
-1. 累计贡献 **15 USD 或以上**——不限次数、任何时间均可。
-2. 贡献处理完成后，支持者密钥会自动发送给你：
-   - **[Unifans](https://app.unifans.io/c/kruk2)**——密钥会自动通过平台私信发送，可能会有轻微延迟。
-   - **[请我喝杯咖啡](https://buymeacoffee.com/kruk2)**（也支持**加密货币**）——密钥会自动发送到你贡献时使用的邮箱/账号。密钥与该邮箱/账号绑定。
+- 计算能力 **7.5 或更新**的现代 Nvidia GPU。
+- GPU 粗略判断: **GTX 16 系列**、**RTX 20 系列**、**RTX 30 系列**、**RTX 40 系列**、**RTX 50 系列**，以及更新的工作站/数据中心显卡。
+- 太旧: **GTX 10 系列**，包括 GTX 1050/1060/1070/1080。
+- 精确 GPU 查询请查看 NVIDIA 的 [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus)。
+- 最新 Nvidia 驱动。已测试驱动: **591.67**。59x 驱动系列是最低预期系列。
+- 安装路径只能包含 ASCII 字符。
+- Windows 发行包: 已包含 `ffmpeg`、`ffprobe` 和 `mkvmerge`。
+- Linux 发行包: 系统中需要有 `ffmpeg`、`ffprobe` 和 `mkvmerge`。`ffmpeg` 主版本号必须为 **8**。`mkvmerge` 是 [MKVToolNix](https://mkvtoolnix.download/downloads.html) 的一部分。
 
-### 使用方法
-下载最新的发行包（Windows/Linux）。\
-解压发行包，然后双击 jasna.exe（Windows）或 jasna 文件（Linux）。这会打开控制台。\
-你也可以把它作为命令行程序使用。
+Jasna 会自动管理 VRAM。当 GPU 显存不足时，处理队列中等待的帧会临时移动到系统内存，并在需要时移回。无需配置。
 
-- **如果你下载了应用程序（推荐）**：
-  - **Windows**：开箱即用——Jasna 已包含所需的一切（`ffmpeg`、`ffprobe` 和 `mkvmerge`）。
-  - **Linux**：需要系统中有 `ffmpeg`、`ffprobe`（**主版本号必须为 8**）和 `mkvmerge`。通过包管理器安装。MKVToolNix：[下载](https://mkvtoolnix.download/downloads.html)。
+## 快速开始
 
-**首次运行会较慢**——TensorRT 引擎会针对你的 GPU 进行编译，需要 **15-60 分钟**。\
-编译期间请关闭所有其他应用程序（包括浏览器），不要使用电脑。\
-引擎缓存在 `model_weights` 文件夹中，后续运行会自动复用（你可以将引擎文件和文件夹复制到新版本中）。
+1. 下载最新的 Windows 或 Linux 发行包。
+2. 解压到只包含 ASCII 字符的路径。
+3. 启动应用:
+   - Windows: 双击 `jasna.exe`。
+   - Linux: 运行 `jasna` 文件。
+4. 在 GUI 中添加视频或图像，选择设置，然后开始处理。
 
-**请确保 Nvidia 驱动程序为最新版。**\
-已测试驱动：**591.67**（但 59x 系列的任何版本应该都可以，这是最低要求版本）。\
-**Jasna 要求 GPU 最低计算能力：7.5**
+也可以通过命令行使用 Jasna:
+
+```bash
+jasna --input input.mp4 --output output.mkv
+```
+
+静态图像不需要额外的图像专用参数:
+
+```bash
+jasna --input photo.png --output restored.png
+```
+
+使用文件夹输入时，`--input` 和 `--output` 都必须是文件夹。Jasna 会先处理图像，再处理视频，并将 `<name>_out<ext>` 写入输出文件夹。
+
+```bash
+jasna --input input_folder --output output_folder
+```
+
+## 首次运行
+
+首次运行会比较慢，因为 TensorRT 引擎会针对你的 GPU 编译。通常需要 **15-60 分钟**。
+
+编译期间请关闭其他应用，包括浏览器，并避免使用电脑。引擎会缓存在 `model_weights` 中，后续运行会复用。你可以把旧 Jasna 版本中的引擎文件和文件夹复制到新版本中。
+
+如果处理时显存不足，请先降低 **max clip size**，例如从 `180` 降到 `60`。禁用 BasicVSR++ 编译也会降低峰值 VRAM，但处理速度会变慢。
+
+## 模型选择
 
 ### 检测模型
-通常建议选择最新的 rf-detr。\
-Lada Yolo 模型可用，因为它们更擅长处理 2D 动画。
 
-### 二级修复模型
-Jasna/Lada 提取马赛克区域的 256×256 像素裁切并以 256×256 分辨率修复。当马赛克区域较大时（特写、4K 视频等），结果会模糊。\
-为缓解此问题，可以使用第二个修复模型将 256×256 放大到 512×512 或 1024×1024，以获得更清晰的结果。
-目前支持：
-- **unet-4x**（支持者模型，比 TVAI 快很多，画质相近）。在领域内数据集上训练，视觉效果相当接近 TVAI iris-2，但可在本地运行，无需额外设置。如果遇到画质问题，请提交 [GitHub issue](https://github.com/Kruk2/jasna/issues)。使用支持者密钥解锁——见[支持本项目](#支持本项目)。
-- **RTX Super-resolution**（非常快，画质尚可）。非常快，免费，零依赖。某些视频中可能产生闪烁效果——请先在短片段上测试。将 Jasna 放在仅含英文字符的文件夹中。
-- **TVAI**（优于 RTX Super Resolution，接近 unet-4x，非常慢）。需要 [Topaz Video](https://www.topazlabs.com/topaz-video)（付费，仅限 Windows）。推荐模型：**iris-2**。\
-  ```--tvai-args``` 允许你自定义模型和其他参数。默认为 iris-2。\
-  为 "Topaz Video" 设置以下环境变量：\
-  <img width="505" height="37" alt="image" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
+通常建议使用最新的 RF-DETR 模型。Lada YOLO 模型也可用，并且在 2D 动画上可能效果更好。
 
-VRAM + 处理时间：
+CLI 选项:
+
+```bash
+jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v5
+```
+
+### 二级修复
+
+Jasna 和 Lada 会修复每个马赛克区域的 256x256 裁切图。因此，大马赛克区域、特写和 4K 视频在一次修复后可能看起来模糊。二级修复模型可以先将修复后的裁切图放大到 512x512 或 1024x1024，再混合回原视频。
+
+支持的二级模型:
+
+- **unet-4x**: 支持者模型。当前测试中比 TVAI 更快，质量相近。它在 视频修复数据集上训练，视觉效果接近 TVAI `iris-2`。使用支持者密钥解锁；见[支持本项目](#支持本项目)。如果遇到质量问题，请提交 [GitHub issue](https://github.com/Kruk2/jasna/issues)。
+- **RTX Super Resolution**: 非常快、免费、没有额外依赖。质量尚可。部分视频可能会闪烁，请先用短片段测试。
+- **TVAI**: 当前测试中质量优于 RTX Super Resolution，并与 unet-4x 接近，但非常慢。需要 [Topaz Video](https://www.topazlabs.com/topaz-video)，这是付费软件且仅支持 Windows。推荐模型: `iris-2`。
+
+CLI 选项:
+
+```bash
+jasna --input input.mp4 --output output.mkv --secondary-restoration unet-4x
+```
+
+对于 TVAI，`--tvai-args` 可以自定义 Topaz 模型参数。默认模型是 `iris-2`。请为 Topaz Video 设置这些环境变量:
+
+<img width="505" height="37" alt="Topaz Video environment variables" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
+
+VRAM 和处理时间:
+
 | 二级类型 | CAWD 1080p | K109 1080p |
-|---|---:|---:|
+| --- | ---: | ---: |
 | 无二级修复 | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
 | unet-4x | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
 | RTX Super-Res | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
-| TVAI（2 workers, Iris-2） | 52秒 / 12.1 GB VRAM | 24秒 / 12.4 GB VRAM |
+| TVAI (2 workers, Iris-2) | 52秒 / 12.1 GB VRAM | 24秒 / 12.4 GB VRAM |
 
-修复示例可在 SLS discord 查看。
+修复示例可在 SLS Discord 查看。
 
-### 图像修复（SD 1.5）
-对于**静态图像**，Jasna 可以使用微调过的 Stable Diffusion 1.5 inpaint 模型，而不是视频流水线。它会检测马赛克，在 512×512 下对每个区域进行 inpaint，再把结果混合回原图。
+### 静态图像修复
 
-修复示例可以查看 SLS discord 和这里。
+对于静态图像，Jasna 可以使用微调过的 Stable Diffusion 1.5 inpaint 模型，而不是视频流水线。它会检测马赛克，在 512x512 下对每个区域进行 inpaint，再把结果混合回原图。
 
-- CLI：`jasna --input photo.png --output out.png`——图像输入会**自动路由**到 SD 1.5 模型，无需任何标志。图像模型通过 `--image-restoration-model-name` 选择（默认且唯一的值：`sd-15-jav`）；`--restoration-model-name` 仅用于视频。可调参数：`--sd15-steps`、`--sd15-strength`（≤ 0.7）、`--sd15-freeu/--no-sd15-freeu`、`--sd15-seed`、`--sd15-variants N`。
-- GUI：只需把图像加入队列——图像任务会自动路由到 SD 1.5 模型。在 **Image Restoration**（图像修复）设置区进行调节。
-- 文件夹输入（CLI）：`--input <文件夹> --output <文件夹>` 会处理文件夹中的每个媒体文件——**先图像，后视频**——将 `<name>_out<ext>` 写入输出文件夹（此时 `--output` 必须是文件夹）。GUI 队列本身就可以自由混合图像和视频。
-- 该模型**未随程序打包**（约 6.9 GB），位于 `model_weights/sd-15-jav/`。你可以自己把模型包放进去，或让 Jasna 从 [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 下载——下载前会先询问（CLI 提示，或 GUI 中的 **Download model** 按钮）。目前 checkpoint 仅面向支持者提供——与 unet-4x 使用同一个密钥——见[支持本项目](#支持本项目)。
-- 它是**实验性的**：效果因场景而异，但在合适的图像上可以看起来相当不错。尝试几个 `--sd15-variants`（不同的种子），保留最好的那个。
-- 推理期间大约需要 **7 GB 显存**（较大的 4K 图像会再多一些）。
+- CLI: `jasna --input photo.png --output out.png`
+- GUI: 将图像加入队列。图像任务会自动路由到 SD 1.5。
+- 调整选项: `--sd15-steps`、`--sd15-strength`（限制为 `<= 0.7`）、`--sd15-freeu` / `--no-sd15-freeu`、`--sd15-seed`、`--sd15-variants N`。
+- 图像模型通过 `--image-restoration-model-name` 选择。当前默认且唯一的值是 `sd-15-jav`。
+- `--restoration-model-name` 仅用于视频。
 
-### 最大片段大小 + 时间重叠
-时间重叠的主要目的是减少片段边缘的闪烁。\
-超过 20 效果提升不大。重叠越大，处理时间越长，但闪烁越少。\
-**选择你能使用的最大片段大小，将重叠设置为 8-20 之间。**\
-来自有限测试的参考：
-- 片段大小 60 + 时间重叠 6
-- 片段大小 90 + 时间重叠 8
-- 片段大小 180 + 时间重叠 15（启用 BasicVSR++ 编译时需要 12 GB 以上显存，禁用时需要更少）。
+SD 1.5 模型**未随程序打包**，大小约 **6.9 GB**。它应放在 `model_weights/sd-15-jav/`。你可以自己把模型包放到那里，或让 Jasna 从 [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 获取。Jasna 会在下载前询问，可以通过 CLI 提示或 GUI 的 **Download model** 按钮确认。
 
-4K 视频使用更多显存——较小的片段大小可能产生类似的画质但处理速度更快。可以多试试。
+checkpoint 目前仅面向支持者提供，并使用与 unet-4x 相同的密钥。详情见[支持本项目](#支持本项目)。
 
-片段大小低于 60 可能看起来没问题，取决于视频，但建议即使禁用模型编译也使用 60。
-```--enable-crossfade``` 可减少闪烁，建议始终启用。
+SD 1.5 路径是实验性的。结果因场景而异，但合适的图像可能效果很好。可以尝试多个 `--sd15-variants`，保留最好的结果。推理期间大约需要 **7 GB VRAM**，较大的 4K 图像会再多一些。
+
+示例可在 SLS Discord 和这里查看。
+
+## 调整质量和 VRAM
+
+### Max Clip Size 和 Temporal Overlap
+
+时间重叠用于减少片段边界闪烁。数值越大，处理时间越长，但可能减少闪烁。超过 `20` 通常没有太大帮助。
+
+推荐起点:
+
+- 使用 GPU 能承受的最大 **max clip size**。
+- 将 **temporal overlap** 设置在 `8` 到 `20` 之间。
+- 保持 `--enable-crossfade` 启用。
+
+有限测试中的参考:
+
+| Max clip size | Temporal overlap | 说明 |
+| ---: | ---: | --- |
+| 60 | 6 | 较低 VRAM 选择。 |
+| 90 | 8 | 接近当前默认设置的平衡点。 |
+| 180 | 15 | 启用 BasicVSR++ 编译时需要 12 GB+ VRAM；禁用编译时需求更低。 |
+
+4K 视频使用更多 VRAM。较低的片段大小可能产生类似质量，并且处理更快。低于 `60` 的片段大小在部分视频上可用，但即使需要禁用模型编译，也更推荐 `60`。
+
+CLI 示例:
+
+```bash
+jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overlap 8 --enable-crossfade
+```
 
 ### 修复模型编译
-修复模型被编译为 TensorRT 子引擎。\
-首次编译需要 **15-60 分钟**——请关闭所有其他应用程序（包括浏览器），不要使用电脑。\
-引擎会被缓存并自动复用。你可以选择不编译，但会牺牲性能。
 
-下表显示**仅编译引擎**占用的显存（非总处理显存）：
+修复模型会编译为 TensorRT 子引擎。编译会提高速度，但会使用更多 VRAM。你可以禁用它，以性能换取更低 VRAM:
 
-| | 片段 60 | 片段 180 |
-|---|---|---|
-| **引擎显存（已编译）** | 约 1.9 GB | 约 5.4 GB |
-| **引擎显存（未编译）** | 约 1.2 GB | 约 1.2 GB |
-
-### 流媒体
-
-无需处理整个文件即可实时观看修复后的视频。
-
-**浏览器播放器（内置）**\
-使用 `--stream` 参数运行 jasna（目前仅限 CLI）。浏览器窗口将打开 HLS 播放器。选择视频文件开始观看。支持跳转。
+```bash
+jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 ```
+
+下面仅为编译引擎本身占用的 VRAM，不是总处理 VRAM:
+
+| | Clip 60 | Clip 180 |
+| --- | ---: | ---: |
+| Engine VRAM, compiled | 约 1.9 GB | 约 5.4 GB |
+| Engine VRAM, no compilation | 约 1.2 GB | 约 1.2 GB |
+
+## 流媒体
+
+流媒体可以让你不必先处理完整文件，就实时观看修复后的视频。
+
+### 浏览器播放器
+
+流媒体模式目前仅支持 CLI。它会在浏览器中打开 HLS 播放器。选择视频文件即可开始观看。支持跳转。
+
+```bash
 jasna --stream
 ```
 
-**Stash 集成**\
-在 [Stash](https://github.com/stashapp/stash) 中直接使用 Jasna——播放任何场景，Jasna 会实时处理。Stash 会自动启动 Jasna。提供了支持 Jasna 的自定义 Stash 分支：\
-👉 **[Stash v0.30.1-jasna](https://github.com/Kruk2/stash/releases/tag/v0.30.1-jasna)**
+### Stash 集成
 
-设置：
+Jasna 可以通过自定义 Stash 分支在 [Stash](https://github.com/stashapp/stash) 内使用。播放场景时，Stash 会自动启动 Jasna，并在观看时实时处理。支持跳转。
+
+自定义分支: **[Stash v0.30.1-jasna](https://github.com/Kruk2/stash/releases/tag/v0.30.1-jasna)**
+
+设置:
+
 1. 从上方链接下载 Stash 分支。
-2. 启动 Stash 前设置环境变量：
-   - `JASNA_CLI_PATH` — `jasna-cli.exe` 的完整路径
-   - `JASNA_WORKING_DIR` — `jasna-cli.exe` 所在文件夹的完整路径
-3. 启动 Stash 并播放任何场景——Jasna 会在你观看时实时处理。支持跳转。
+2. 启动 Stash 前设置环境变量:
+   - `JASNA_CLI_PATH`: `jasna-cli.exe` 的完整路径
+   - `JASNA_WORKING_DIR`: 包含 `jasna-cli.exe` 的文件夹完整路径
+3. 启动 Stash 并播放场景。
 
-### 免责声明
-Jasna 处于早期开发阶段，主要目标是改善：修复质量、马赛克检测、速度和显存消耗（按此优先级）。
-因此，当前项目面向技术用户，程序的易用性较低，可能对部分用户有门槛。
-这样做是为了将更多时间投入到重要功能上。如果你想帮忙，欢迎提交 Pull Request。
+## 基准测试
 
-## 构建
-通过 ```uv pip install . --no-build-isolation``` 安装以下库。\
-构建下方的 Nvidia 库还需要 VS Build Tools 2022（C++）。
-确保有 cmake 和 ninja ```uv pip install cmake ninja```\
-以及系统中的 CUDA 13.0。
+RTX 5090 + i9 13900k:
 
-### 从源代码运行（开发者设置）
-- 安装 `ffmpeg` + `ffprobe` 并确保它们在 PATH 中（**ffmpeg 主版本号必须为 8**）。
-- 安装 `mkvmerge`（MKVToolNix 的一部分）：[下载](https://mkvtoolnix.download/downloads.html)。
+| 文件 | 片段（秒） | lada 0.10.1 | jasna 0.3.0 | jasna 0.5.0 | **jasna 0.6.2** |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **A017** (4k，2小时25分) | 60 | 02:56:26 | 01:20:49 (快 2.2 倍) | 01:10:00 (快 2.5 倍) | xx |
+| **H063** (1080p，3小时10分) | 180 | 01:34:51 | 44:21 (快 2.1 倍) | 37:57 (快 2.5 倍) | **30:58 (快 3.1 倍)** |
+| **D570_2m** | 30 | 01:08 | 00:30 (快 2.3 倍) | 00:24 (快 2.8 倍) | **00:20 (快 3.4 倍)** |
+| **N223_Test** | 30 | 03:12 | 01:18 (快 2.5 倍) | 01:02 (快 3.1 倍) | **00:58 (快 3.3 倍)** |
+| **test-007** | 30 | 01:16 | 00:41 (快 1.9 倍) | 00:28 (快 2.7 倍) | **00:22 (快 3.5 倍)** |
+| **厚码测试2** | 30 | 01:52 | 00:43 (快 2.6 倍) | 00:36 (快 3.1 倍) | **00:34 (快 3.3 倍)** |
 
-https://codeberg.org/Kruk2/vali
+## 支持本项目
 
-https://codeberg.org/Kruk2/PyNvVideoCodec
+支持用于训练额外模型，主要是租用 GPU，以及在更大数据集上训练所需的计算时间。支持者会获得一个密钥，用于解锁:
 
-将上述两个库安装到你的 Python 环境后，在 jasna 仓库中运行：
-```uv pip install -e .[dev]```
+- **unet-4x** 二级放大模型，用于更清晰的 256->1024 修复。
+- **SD 1.5 图像修复**，实验性静态图像模型。
+
+如何获取密钥:
+
+1. 累计贡献 **15 USD 或以上**，不限次数、不限时间。
+2. 贡献处理完成后，支持者密钥会自动发送:
+   - **[Unifans](https://app.unifans.io/c/kruk2)**: 通过平台消息发送，可能会有轻微延迟。
+   - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**，包括**加密货币**: 发送到贡献时使用的邮箱或账号。密钥与该邮箱或账号绑定。
+
+## 当前限制和 TODO
+
+Jasna 仍处于早期开发阶段。主要目标是按顺序改善修复质量、马赛克检测、速度和 VRAM 使用。当前项目更面向技术用户，因此部分流程可能仍然粗糙。欢迎 Pull Request。
+
+当前 TODO:
+
+- 完善 VR 支持。
+- SeedVR 支持。
+- 持续改善性能和 VRAM 使用。
+
+## 从源代码运行
+
+`pyproject.toml` 中的 Python 要求: **Python 3.13 或更新**。
+
+公开源代码检出不包含 protection module。它可以用于开发和免费模型，但普通源代码检出无法使用 **unet-4x** 和 **SD 1.5 图像修复** 等支持者专用模型。
+
+安装运行时依赖:
+
+```bash
+uv pip install . --no-build-isolation
+```
+
+构建 Nvidia 库还需要:
+
+- 带 C++ 支持的 VS Build Tools 2022。
+- 系统中安装 CUDA 13.0。
+- `cmake` 和 `ninja`:
+
+```bash
+uv pip install cmake ninja
+```
+
+开发者设置还需要:
+
+- `ffmpeg` 和 `ffprobe` 位于 `PATH` 中；`ffmpeg` 主版本号必须为 **8**。
+- [MKVToolNix](https://mkvtoolnix.download/downloads.html) 中的 `mkvmerge`。
+- 将以下两个库安装到 Python 环境:
+  - https://codeberg.org/Kruk2/vali
+  - https://codeberg.org/Kruk2/PyNvVideoCodec
+
+然后以 editable mode 安装 Jasna:
+
+```bash
+uv pip install -e .[dev]
+```
