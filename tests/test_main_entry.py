@@ -91,6 +91,19 @@ def test_spawn_child_does_not_run_dispatch(monkeypatch) -> None:
             main.assert_not_called()
 
 
+def test_startup_configures_windows_dll_search_paths() -> None:
+    if "jasna.__main__" in sys.modules:
+        del sys.modules["jasna.__main__"]
+    with patch.object(sys, "argv", ["jasna"]):
+        with patch(
+            "jasna.packaging.windows_dll_paths.configure_windows_dll_search_paths"
+        ) as configure:
+            with patch("jasna.gui.run_gui"):
+                with patch("jasna.main.main"):
+                    import jasna.__main__  # noqa: F401
+    configure.assert_called_once()
+
+
 def test_no_progress_flag_defaults_false() -> None:
     from jasna.main import build_parser
     args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4"])
