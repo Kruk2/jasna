@@ -56,9 +56,9 @@ on larger datasets. Supporters get a key that unlocks the models I train this wa
 
 How to get a key:
 1. Contribute **$15 USD or more in total** — across any number of contributions, at any time.
-2. How you get the key depends on where you contribute:
-   - **[Unifans](https://app.unifans.io/c/kruk2)** — I'll just message you the key. If I forget, ping me.
-   - **[Buy me a coffee](https://buymeacoffee.com/kruk2)** (also handles **crypto**) — email me at **myprotonmailkekw@proton.me** from the address/handle you used, and I'll send your key. The key is tied to that email.
+2. After your contribution is processed, your supporter key is sent automatically:
+   - **[Unifans](https://app.unifans.io/c/kruk2)** — the key is sent automatically by platform message. There might be a slight delay.
+   - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)** (also handles **crypto**) — the key is sent automatically to the email/handle you used for the contribution. The key is tied to that email/handle.
 
 ### Usage
 Download the latest release package (Windows/Linux).\
