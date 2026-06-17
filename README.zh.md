@@ -225,6 +225,8 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 jasna --stream
 ```
 
+在 Windows 上，串流也使用应用本身的文件: `jasna.exe --stream`。可能没有单独的 `jasna-cli.exe`。
+
 ### Stash 集成
 
 Jasna 可以通过自定义 Stash 分支在 [Stash](https://github.com/stashapp/stash) 内使用。播放场景时，Stash 会自动启动 Jasna，并在观看时实时处理。支持跳转。
@@ -235,9 +237,12 @@ Jasna 可以通过自定义 Stash 分支在 [Stash](https://github.com/stashapp/
 
 1. 从上方链接下载 Stash 分支。
 2. 启动 Stash 前设置环境变量:
-   - `JASNA_CLI_PATH`: `jasna-cli.exe` 的完整路径
-   - `JASNA_WORKING_DIR`: 包含 `jasna-cli.exe` 的文件夹完整路径
-3. 启动 Stash 并播放场景。
+   - `JASNA_CLI_PATH`: `jasna.exe` 的完整路径，除非你自己重命名了它。
+   - `JASNA_WORKING_DIR`: 包含该可执行文件的文件夹完整路径。
+3. **重要:** 使用 Stash 前，先用同样的设置在短视频上串流一次。这样可以预编译 TensorRT 引擎，避免第一次健康检查超时。
+4. 启动 Stash 并播放场景。
+
+如果 Stash 日志出现 `timeout waiting for jasna-cli to become healthy`，先检查 `JASNA_CLI_PATH`，然后按上面的方法预编译。
 
 ## 基准测试
 
