@@ -20,9 +20,7 @@ patch_frozen_torch()
 
 from jasna.media import UnsupportedColorspaceError, get_video_meta_data
 from jasna.media.video_encoder import NvidiaVideoEncoder
-from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
-from jasna.mosaic.yolo import YoloMosaicDetectionModel
-from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
+from jasna.mosaic.detection_registry import build_detection_model
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, _SENTINEL
 from jasna.pipeline_threads import decode_detect_loop, primary_restore_loop, secondary_restore_loop, blend_encode_loop
@@ -89,23 +87,14 @@ class Pipeline:
         self.temporal_overlap = int(temporal_overlap)
         self.enable_crossfade = bool(enable_crossfade)
 
-        det_name = coerce_detection_model_name(detection_model_name)
-        if is_rfdetr_model(det_name):
-            self.detection_model = RfDetrMosaicDetectionModel(
-                onnx_path=detection_model_path,
-                batch_size=self.batch_size,
-                device=self.device,
-                score_threshold=float(detection_score_threshold),
-                fp16=bool(fp16),
-            )
-        elif is_yolo_model(det_name):
-            self.detection_model = YoloMosaicDetectionModel(
-                model_path=detection_model_path,
-                batch_size=self.batch_size,
-                device=self.device,
-                score_threshold=float(detection_score_threshold),
-                fp16=bool(fp16),
-            )
+        self.detection_model = build_detection_model(
+            detection_model_name,
+            detection_model_path,
+            batch_size=self.batch_size,
+            device=self.device,
+            score_threshold=float(detection_score_threshold),
+            fp16=bool(fp16),
+        )
         self.restoration_pipeline = restoration_pipeline
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback

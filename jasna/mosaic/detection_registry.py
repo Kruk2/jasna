@@ -61,6 +61,37 @@ def detection_model_weights_path(name: str) -> Path:
     return base / f"{DEFAULT_DETECTION_MODEL_NAME}.onnx"
 
 
+def build_detection_model(
+    detection_model_name: str,
+    detection_model_path: Path,
+    *,
+    batch_size: int,
+    device: torch.device,
+    score_threshold: float,
+    fp16: bool,
+):
+    det_name = coerce_detection_model_name(detection_model_name)
+    if is_rfdetr_model(det_name):
+        from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
+
+        return RfDetrMosaicDetectionModel(
+            onnx_path=detection_model_path,
+            batch_size=int(batch_size),
+            device=device,
+            score_threshold=float(score_threshold),
+            fp16=bool(fp16),
+        )
+    from jasna.mosaic.yolo import YoloMosaicDetectionModel
+
+    return YoloMosaicDetectionModel(
+        model_path=detection_model_path,
+        batch_size=int(batch_size),
+        device=device,
+        score_threshold=float(score_threshold),
+        fp16=bool(fp16),
+    )
+
+
 def precompile_detection_engine(
     detection_model_name: str,
     detection_model_path: Path,

@@ -8,6 +8,7 @@ from jasna.mosaic.detection_registry import (
     DEFAULT_DETECTION_MODEL_NAME,
     RFDETR_MODEL_NAMES,
     YOLO_MODEL_FILES,
+    build_detection_model,
     coerce_detection_model_name,
     detection_model_weights_path,
     discover_available_detection_models,
@@ -161,3 +162,41 @@ def test_precompile_yolo_on_cuda() -> None:
     ):
         precompile_detection_engine("lada-yolo-v4", Path("m.pt"), 4, torch.device("cuda:0"), True)
         mock_compile.assert_called_once()
+
+
+# --- build_detection_model ---
+
+def test_build_detection_model_rfdetr() -> None:
+    with (
+        patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf,
+        patch("jasna.mosaic.yolo.YoloMosaicDetectionModel") as mock_yolo,
+    ):
+        build_detection_model(
+            "rfdetr-v5", Path("rfdetr-v5.onnx"),
+            batch_size=4, device=torch.device("cpu"), score_threshold=0.25, fp16=True,
+        )
+        mock_rf.assert_called_once()
+        mock_yolo.assert_not_called()
+        assert mock_rf.call_args.kwargs["onnx_path"] == Path("rfdetr-v5.onnx")
+
+
+def test_build_detection_model_yolo() -> None:
+    with (
+        patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf,
+        patch("jasna.mosaic.yolo.YoloMosaicDetectionModel") as mock_yolo,
+    ):
+        build_detection_model(
+            "lada-yolo-v4", Path("lada_mosaic_detection_model_v4_fast.pt"),
+            batch_size=4, device=torch.device("cpu"), score_threshold=0.25, fp16=True,
+        )
+        mock_yolo.assert_called_once()
+        mock_rf.assert_not_called()
+        assert mock_yolo.call_args.kwargs["model_path"] == Path("lada_mosaic_detection_model_v4_fast.pt")
+
+
+def test_build_detection_model_unknown_raises() -> None:
+    with pytest.raises(ValueError, match="Unknown detection model 'nonsense'"):
+        build_detection_model(
+            "nonsense", Path("x"),
+            batch_size=1, device=torch.device("cpu"), score_threshold=0.25, fp16=False,
+        )

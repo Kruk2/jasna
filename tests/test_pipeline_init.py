@@ -26,8 +26,8 @@ def _make_pipeline(**overrides):
     defaults.update(overrides)
 
     with (
-        patch("jasna.pipeline.RfDetrMosaicDetectionModel"),
-        patch("jasna.pipeline.YoloMosaicDetectionModel"),
+        patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
+        patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
     ):
         return Pipeline(**defaults)
 
@@ -43,8 +43,8 @@ class TestPipelineInit:
 
     def test_rfdetr_model_created(self):
         with (
-            patch("jasna.pipeline.RfDetrMosaicDetectionModel") as mock_rf,
-            patch("jasna.pipeline.YoloMosaicDetectionModel") as mock_yolo,
+            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf,
+            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel") as mock_yolo,
         ):
             Pipeline(
                 input_video=Path("in.mp4"),
@@ -66,8 +66,8 @@ class TestPipelineInit:
 
     def test_yolo_model_created(self):
         with (
-            patch("jasna.pipeline.RfDetrMosaicDetectionModel") as mock_rf,
-            patch("jasna.pipeline.YoloMosaicDetectionModel") as mock_yolo,
+            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf,
+            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel") as mock_yolo,
         ):
             Pipeline(
                 input_video=Path("in.mp4"),

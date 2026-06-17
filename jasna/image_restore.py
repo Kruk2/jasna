@@ -250,10 +250,10 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]]) -> None:
     from jasna.engine_paths import SD15_DIR
     from jasna.media import image_io
     from jasna.mosaic.detection_registry import (
+        build_detection_model,
         coerce_detection_model_name,
         detection_model_weights_path,
     )
-    from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
     from jasna.restorer.sd15_download import ensure_sd15_bundle
     from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU, Sd15InpaintRestorer
 
@@ -293,8 +293,9 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]]) -> None:
     freeu = dict(DEFAULT_FREEU) if bool(args.sd15_freeu) else None
     strength = clamp_strength(args.sd15_strength)
 
-    detector = RfDetrMosaicDetectionModel(
-        onnx_path=detection_model_path,
+    detector = build_detection_model(
+        detection_model_name,
+        detection_model_path,
         batch_size=batch_size,
         device=device,
         score_threshold=score_threshold,

@@ -975,8 +975,8 @@ class TestPipelineRunStreamingWrapper:
         from jasna.pipeline import Pipeline
 
         with (
-            patch("jasna.pipeline.RfDetrMosaicDetectionModel"),
-            patch("jasna.pipeline.YoloMosaicDetectionModel"),
+            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
+            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
         ):
             p = Pipeline(
                 input_video=MagicMock(),
