@@ -104,7 +104,7 @@ Jasna and Lada restore a 256x256 crop of each mosaic region. Large mosaic region
 
 Supported secondary models:
 
-- **unet-4x**: supporter model. Faster than TVAI with similar quality in current testing. Trained on an in-domain dataset and visually close to TVAI `iris-2`. Unlock it with a supporter key; see [Supporting the project](#supporting-the-project). If you hit quality problems, open a [GitHub issue](https://github.com/Kruk2/jasna/issues).
+- **unet-4x**: supporter model. Faster than TVAI with similar quality in current testing. Trained on an in-domain dataset and visually close to TVAI `iris-2`. See unet-4x / secondary restoration examples on SLS Discord. Unlock it with a supporter key; see [Supporting the project](#supporting-the-project). If you hit quality problems, open a [GitHub issue](https://github.com/Kruk2/jasna/issues).
 - **RTX Super Resolution**: very fast, free, and has no extra dependencies. Quality is okay. Some videos may flicker, so test on a short clip first.
 - **TVAI**: better than RTX Super Resolution and comparable to unet-4x in current testing, but very slow. Requires [Topaz Video](https://www.topazlabs.com/topaz-video), which is paid and Windows-only. Recommended model: `iris-2`.
 
@@ -145,7 +145,7 @@ The checkpoint is currently available only to supporters and uses the same key a
 
 The SD 1.5 path is experimental. Results vary by scene, but some images can work very well. Try several `--sd15-variants` values and keep the best result. Expect about **7 GB VRAM** during inference, and a bit more for large 4K images.
 
-Examples are available on SLS Discord and here.
+Examples are available on SLS Discord and more SD 1.5 examples.
 
 ## Tuning Quality and VRAM
 
@@ -235,6 +235,11 @@ Support pays for training extra models, mainly GPU rental and compute time for l
 
 - **unet-4x** secondary upscaler for sharper 256->1024 restoration.
 - **SD 1.5 image restoration**, the experimental still-image model.
+
+Example results:
+
+- unet-4x / secondary restoration examples on SLS Discord
+- SD 1.5 image restoration examples on SLS Discord and more SD 1.5 examples
 
 How to get a key:
 

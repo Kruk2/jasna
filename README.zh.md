@@ -104,7 +104,7 @@ Jasna 和 Lada 会修复每个马赛克区域的 256x256 裁切图。因此，�
 
 支持的二级模型:
 
-- **unet-4x**: 支持者模型。当前测试中比 TVAI 更快，质量相近。它在 视频修复数据集上训练，视觉效果接近 TVAI `iris-2`。使用支持者密钥解锁；见[支持本项目](#支持本项目)。如果遇到质量问题，请提交 [GitHub issue](https://github.com/Kruk2/jasna/issues)。
+- **unet-4x**: 支持者模型。当前测试中比 TVAI 更快，质量相近。它在 视频修复数据集上训练，视觉效果接近 TVAI `iris-2`。可以查看 unet-4x / 二级修复示例（SLS Discord）。使用支持者密钥解锁；见[支持本项目](#支持本项目)。如果遇到质量问题，请提交 [GitHub issue](https://github.com/Kruk2/jasna/issues)。
 - **RTX Super Resolution**: 非常快、免费、没有额外依赖。质量尚可。部分视频可能会闪烁，请先用短片段测试。
 - **TVAI**: 当前测试中质量优于 RTX Super Resolution，并与 unet-4x 接近，但非常慢。需要 [Topaz Video](https://www.topazlabs.com/topaz-video)，这是付费软件且仅支持 Windows。推荐模型: `iris-2`。
 
@@ -145,7 +145,7 @@ checkpoint 目前仅面向支持者提供，并使用与 unet-4x 相同的密钥
 
 SD 1.5 路径是实验性的。结果因场景而异，但合适的图像可能效果很好。可以尝试多个 `--sd15-variants`，保留最好的结果。推理期间大约需要 **7 GB VRAM**，较大的 4K 图像会再多一些。
 
-示例可在 SLS Discord 和这里查看。
+示例可在 SLS Discord 和更多 SD 1.5 示例查看。
 
 ## 调整质量和 VRAM
 
@@ -235,6 +235,11 @@ RTX 5090 + i9 13900k:
 
 - **unet-4x** 二级放大模型，用于更清晰的 256->1024 修复。
 - **SD 1.5 图像修复**，实验性静态图像模型。
+
+结果示例:
+
+- unet-4x / 二级修复示例（SLS Discord）
+- SD 1.5 图像修复示例（SLS Discord） 和 更多 SD 1.5 示例
 
 如何获取密钥:
 
