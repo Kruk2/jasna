@@ -8,6 +8,13 @@ if sys.platform == "win32":
 
 os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
+# Wire CUDA/TensorRT/native-lib DLL search before any torch/native import. The Nuitka
+# build has no PyInstaller runtime hook, so this is the only place it runs; without it
+# torch's CUDA init depends on ambient PATH and randomly fails the system check.
+from jasna.packaging.windows_dll_paths import configure_windows_dll_search_paths
+
+configure_windows_dll_search_paths()
+
 if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
     from jasna.engine_compiler import EngineCompilationRequest, _subprocess_compile
     _subprocess_compile(EngineCompilationRequest.from_json(sys.argv[2]))
