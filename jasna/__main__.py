@@ -3,6 +3,8 @@ import os
 import sys
 from pathlib import Path
 
+from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
+
 if sys.platform == "win32":
     os.environ.setdefault("OMP_WAIT_POLICY", "passive")
 

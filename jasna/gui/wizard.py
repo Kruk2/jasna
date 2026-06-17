@@ -5,6 +5,7 @@ import os
 import subprocess
 import threading
 import webbrowser
+from collections.abc import Iterable
 
 import customtkinter as ctk
 
@@ -23,6 +24,22 @@ _HELP_URLS = {
 _WARNING_ONLY_CHECKS = {"sysmem"}
 
 
+def _evaluate_check_results(
+    results: dict[str, tuple[bool, str]], keys: Iterable[str]
+) -> tuple[bool, bool]:
+    """Return ``(all_passed, has_required_failure)`` for the displayed check keys.
+
+    A key missing from ``results`` counts as a failure: a check that never ran (e.g. the
+    check thread died early) must read as failed, never as passed — otherwise the wizard
+    shows red rows while still reporting "ready to use" and enabling Get Started."""
+    passed = {key: results.get(key, (False, ""))[0] for key in keys}
+    all_passed = all(passed.values())
+    has_required_failure = any(
+        not ok and key not in _WARNING_ONLY_CHECKS for key, ok in passed.items()
+    )
+    return all_passed, has_required_failure
+
+
 class FirstRunWizard(ctk.CTkToplevel):
     """Modal wizard shown on first run to check dependencies."""
     
@@ -30,8 +47,10 @@ class FirstRunWizard(ctk.CTkToplevel):
         super().__init__(master, **kwargs)
         
         self._on_complete = on_complete
-        self._checks_passed = True
-        self._has_required_failure = False
+        # Pessimistic until the checks actually finish: a crash mid-run must not leave
+        # the wizard claiming everything passed.
+        self._checks_passed = False
+        self._has_required_failure = True
         self._check_results = {}
         
         self.title(t("wizard_window_title"))
@@ -200,6 +219,10 @@ class FirstRunWizard(ctk.CTkToplevel):
         if not self.winfo_exists():
             return
 
+        self._checks_passed, self._has_required_failure = _evaluate_check_results(
+            self._check_results, self._check_labels.keys()
+        )
+
         if self._checks_passed:
             subtitle_text = t("wizard_all_passed")
             subtitle_color = Colors.STATUS_COMPLETED
@@ -348,13 +371,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._check_results["driver"] = os_utils.check_gpu_driver_version()
         if os.name == "nt":
             self._check_results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-        
-        self._has_required_failure = any(
-            not passed and key not in _WARNING_ONLY_CHECKS
-            for key, (passed, _) in self._check_results.items()
-        )
-        self._checks_passed = all(passed for passed, _ in self._check_results.values())
-        
+
     def _check_executable(self, name: str) -> tuple[bool, str]:
         path = os_utils.find_executable(name)
         if not path:

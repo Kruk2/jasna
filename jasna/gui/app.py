@@ -9,6 +9,7 @@ import time
 from tkinterdnd2 import TkinterDnD, DND_FILES
 
 from jasna import __version__
+from jasna import startup_timing
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
 from jasna.gui.queue_panel import QueuePanel
@@ -21,12 +22,24 @@ from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 
+logger = logging.getLogger(__name__)
+
+
+def _warm_up_cuda() -> None:
+    """Import torch and create the CUDA context. Run off the UI thread after the window
+    paints, so the window shows first and the first job skips cold torch/CUDA init."""
+    import torch
+
+    if torch.cuda.is_available():
+        torch.zeros(1, device="cuda")
+
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     """Main application window for Jasna GUI."""
     
     def __init__(self, skip_wizard: bool = False):
         super().__init__()
+        self._t_init_start = startup_timing.elapsed_ms()
         try:
             self.TkdndVersion = TkinterDnD._require(self)
         except RuntimeError:
@@ -62,11 +75,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._system_stats_thread: threading.Thread | None = None
         
         self._build_ui()
+        self._t_ui_built = startup_timing.elapsed_ms()
         self._setup_processor()
         self._start_system_stats_poller()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        
+
+        self.after_idle(self._log_startup_timing)
+        self.after_idle(self._start_cuda_warmup)
+
         if not skip_wizard:
             if self._preset_manager.get_system_check_passed_version() != __version__:
                 self.after(100, self._show_wizard)
@@ -256,6 +273,23 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             on_log=self._on_processor_log,
             on_complete=self._on_processor_complete,
         )
+
+    def _log_startup_timing(self):
+        logger.info(
+            "startup: first paint %.0f ms (pre-window %.0f ms, ui build %.0f ms)",
+            startup_timing.elapsed_ms(),
+            self._t_init_start,
+            self._t_ui_built - self._t_init_start,
+        )
+
+    def _start_cuda_warmup(self):
+        def _run():
+            try:
+                _warm_up_cuda()
+            except Exception:
+                logger.debug("CUDA warm-up failed", exc_info=True)
+
+        threading.Thread(target=_run, daemon=True, name="cuda-warmup").start()
 
     def _start_system_stats_poller(self):
         if self._system_stats_thread and self._system_stats_thread.is_alive():
