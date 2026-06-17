@@ -600,8 +600,11 @@ def main() -> None:
                     segment_duration=float(args.stream_segment_duration),
                 )
             else:
-                for vid in video_inputs:
-                    pipeline = _make_pipeline(vid, _video_output_path(vid))
+                for i, vid in enumerate(video_inputs, start=1):
+                    out_path = _video_output_path(vid)
+                    if input_is_dir:
+                        print(f"[{i}/{len(video_inputs)}] Processing {vid.name} -> {out_path.name}")
+                    pipeline = _make_pipeline(vid, out_path)
                     try:
                         pipeline.run()
                     except UnsupportedColorspaceError as e:

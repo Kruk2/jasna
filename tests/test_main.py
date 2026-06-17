@@ -361,6 +361,38 @@ class TestArgForwarding:
 
 
 # ---------------------------------------------------------------------------
+# Folder batch
+# ---------------------------------------------------------------------------
+
+class TestFolderBatchProgress:
+    def test_prints_each_video_filename(self, tmp_path, capsys):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "a.mp4").touch()
+        (in_dir / "b.mp4").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(tmp_path / "out"),
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+        ]
+        _run_main(argv)
+        printed = capsys.readouterr().out
+        assert "[1/2] Processing a.mp4 -> a_out.mp4" in printed
+        assert "[2/2] Processing b.mp4 -> b_out.mp4" in printed
+
+    def test_single_file_does_not_print_batch_line(self, tmp_path, capsys):
+        inp, out, rest, det = _make_model_files(tmp_path)
+        _run_main(_base_argv(inp, out, rest, det))
+        assert "Processing" not in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
 # Streaming paths
 # ---------------------------------------------------------------------------
 
