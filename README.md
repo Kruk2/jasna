@@ -72,11 +72,19 @@ For still images, no image-specific flag is needed:
 jasna --input photo.png --output restored.png
 ```
 
-For folder input, both `--input` and `--output` must be folders. Jasna processes images first, then videos, and writes `<name>_out<ext>` into the output folder.
+For folder input, both `--input` and `--output` must be folders. Jasna processes images first, then videos, shows an overall `[current/total]` file counter, and writes `<name>_out<ext>` into the output folder by default.
 
 ```bash
 jasna --input input_folder --output output_folder
 ```
+
+Folder batches can also use the same `{original}` filename template style as the GUI:
+
+```bash
+jasna --input input_folder --output output_folder --output-pattern "{original}_restored.mp4"
+```
+
+Images keep their source extension, while videos use the template extension when one is provided. Jasna checks the planned folder outputs before processing and exits with an error if the template maps multiple inputs to the same output file.
 
 ## First Run
 

@@ -72,11 +72,19 @@ jasna --input input.mp4 --output output.mkv
 jasna --input photo.png --output restored.png
 ```
 
-使用文件夹输入时，`--input` 和 `--output` 都必须是文件夹。Jasna 会先处理图像，再处理视频，并将 `<name>_out<ext>` 写入输出文件夹。
+使用文件夹输入时，`--input` 和 `--output` 都必须是文件夹。Jasna 会先处理图像，再处理视频，显示整体 `[current/total]` 文件计数，并默认将 `<name>_out<ext>` 写入输出文件夹。
 
 ```bash
 jasna --input input_folder --output output_folder
 ```
+
+文件夹批处理也可以使用与 GUI 相同的 `{original}` 文件名模板:
+
+```bash
+jasna --input input_folder --output output_folder --output-pattern "{original}_restored.mp4"
+```
+
+图像会保留源文件扩展名；视频会在模板提供扩展名时使用该扩展名。Jasna 会在处理前检查计划输出路径，如果模板让多个输入映射到同一个输出文件，则会报错退出。
 
 ## 首次运行
 
