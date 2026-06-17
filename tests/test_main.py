@@ -365,6 +365,30 @@ class TestArgForwarding:
 # ---------------------------------------------------------------------------
 
 class TestFolderBatchProgress:
+    def test_folder_input_rejects_file_shaped_output(self, tmp_path, capsys):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "a.mp4").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        out_file = tmp_path / "out.mp4"
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(out_file),
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+        ]
+
+        with pytest.raises(SystemExit) as exc:
+            _run_main(argv)
+
+        assert exc.value.code == 2
+        assert not out_file.exists()
+        assert "--output must be a folder when --input is a folder" in capsys.readouterr().err
+
     def test_prints_each_video_filename(self, tmp_path, capsys):
         in_dir = tmp_path / "in"
         in_dir.mkdir()

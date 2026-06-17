@@ -384,7 +384,7 @@ def main() -> None:
     if input_is_dir:
         if is_streaming:
             parser.error("--stream does not support folder input")
-        from jasna.media.media_files import classify_folder
+        from jasna.media.media_files import classify_folder, is_media
         folder_images, folder_videos = classify_folder(input_video)
         if not folder_images and not folder_videos:
             parser.error(f"No image or video files found in folder: {input_video}")
@@ -393,6 +393,10 @@ def main() -> None:
         folder_output_dir = output_video
         if folder_output_dir.exists() and not folder_output_dir.is_dir():
             parser.error(f"--output must be a folder when --input is a folder (got existing file: {folder_output_dir})")
+        if not folder_output_dir.exists() and is_media(folder_output_dir):
+            parser.error(
+                f"--output must be a folder when --input is a folder; got a media filename: {folder_output_dir}"
+            )
         folder_output_dir.mkdir(parents=True, exist_ok=True)
         # Images first, then videos.
         if folder_images:
@@ -628,4 +632,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
