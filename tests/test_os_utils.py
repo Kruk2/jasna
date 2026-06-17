@@ -1,8 +1,33 @@
+import os
 import sys
+import types
 
 import pytest
 
 from jasna import os_utils
+
+
+class _FakeKernel32:
+    def __init__(self) -> None:
+        self.free = 0
+        self.set_std: list[int] = []
+
+    def FreeConsole(self) -> None:
+        self.free += 1
+
+    def SetStdHandle(self, which, handle) -> int:
+        self.set_std.append(which)
+        return 1
+
+
+def _fake_windll(monkeypatch) -> _FakeKernel32:
+    """Replace ctypes.windll so _redirect_std_streams_to_null's SetStdHandle/FreeConsole
+    calls hit a recorder, never the live test process's real OS std handles."""
+    import ctypes
+
+    kernel32 = _FakeKernel32()
+    monkeypatch.setattr(ctypes, "windll", types.SimpleNamespace(kernel32=kernel32), raising=False)
+    return kernel32
 
 
 def test_redirect_std_streams_to_null_discards_writes(monkeypatch) -> None:
@@ -11,12 +36,30 @@ def test_redirect_std_streams_to_null_discards_writes(monkeypatch) -> None:
     monkeypatch.setattr(sys, "stdout", sys.stdout)
     monkeypatch.setattr(sys, "stderr", sys.stderr)
     monkeypatch.setattr(sys, "stdin", sys.stdin)
+    _fake_windll(monkeypatch)
 
     os_utils._redirect_std_streams_to_null()
 
     print("discarded")            # must not raise
     sys.stderr.write("discarded")  # must not raise
     assert sys.stdin.read() == ""
+
+
+def test_redirect_std_streams_to_null_repoints_os_std_handles_on_windows(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.os, "name", "nt", raising=False)
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "stderr", sys.stderr)
+    monkeypatch.setattr(sys, "stdin", sys.stdin)
+    monkeypatch.setitem(sys.modules, "msvcrt", types.SimpleNamespace(get_osfhandle=lambda fd: 0))
+    kernel32 = _fake_windll(monkeypatch)
+
+    os_utils._redirect_std_streams_to_null()
+
+    assert kernel32.set_std == [
+        os_utils.STD_INPUT_HANDLE,
+        os_utils.STD_OUTPUT_HANDLE,
+        os_utils.STD_ERROR_HANDLE,
+    ]
 
 
 def test_parse_ffmpeg_major_version_parses_plain_semver() -> None:
@@ -208,24 +251,52 @@ def test_drop_console_window_dev_win_is_noop(monkeypatch) -> None:
 
 
 def test_drop_console_window_frozen_win_calls_freeconsole(monkeypatch) -> None:
-    import ctypes
-
-    calls = {"free": 0}
-
-    class _Kernel32:
-        def FreeConsole(self) -> None:
-            calls["free"] += 1
-
-    class _Windll:
-        kernel32 = _Kernel32()
-
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
-    monkeypatch.setattr(ctypes, "windll", _Windll(), raising=False)
+    monkeypatch.setattr(sys, "stdout", sys.stdout)
+    monkeypatch.setattr(sys, "stderr", sys.stderr)
+    monkeypatch.setattr(sys, "stdin", sys.stdin)
+    kernel32 = _fake_windll(monkeypatch)
 
     os_utils.drop_console_window()
 
-    assert calls["free"] == 1
+    assert kernel32.free == 1
+
+
+def test_freeconsole_dangling_std_handles_break_subprocess_until_redirect(tmp_path) -> None:
+    if sys.platform != "win32":
+        pytest.skip("FreeConsole and the dangling-std-handle bug are Windows-only")
+
+    import subprocess
+
+    result_path = tmp_path / "result.txt"
+    child = tmp_path / "child.py"
+    child.write_text(
+        "import ctypes, subprocess, sys\n"
+        "from jasna.os_utils import _redirect_std_streams_to_null\n"
+        "k = ctypes.windll.kernel32\n"
+        "def popen_ok():\n"
+        "    try:\n"
+        "        p = subprocess.Popen([sys.executable, '-c', 'pass'],\n"
+        "                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)\n"
+        "        p.communicate()\n"
+        "        return True\n"
+        "    except OSError:\n"
+        "        return False\n"
+        "k.FreeConsole(); k.AllocConsole(); k.FreeConsole()\n"  # OS std handles now dangle
+        "before = popen_ok()\n"
+        "_redirect_std_streams_to_null()\n"
+        f"after = popen_ok()\n"
+        f"open(r'{result_path}', 'w').write(f'{{before}},{{after}}')\n"
+    )
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    subprocess.run([sys.executable, str(child)], check=True, env=env)
+
+    before, after = result_path.read_text().split(",")
+    assert before == "False"  # bug reproduces: dangling stdin handle breaks Popen(stdin=None)
+    assert after == "True"     # fix: NUL OS std handles let the child duplicate them
 
 
 def test_subprocess_no_window_kwargs_non_nt_is_empty(monkeypatch) -> None:
