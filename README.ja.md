@@ -225,6 +225,8 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 jasna --stream
 ```
 
+Windows では、ストリーミングもアプリ本体と同じファイルを使います: `jasna.exe --stream`。別の `jasna-cli.exe` がない場合があります。
+
 ### Stash 連携
 
 Jasna はカスタム Stash フォーク経由で [Stash](https://github.com/stashapp/stash) 内から使用できます。シーンを再生すると Stash が Jasna を自動起動し、視聴しながら処理します。シークも動作します。
@@ -235,9 +237,12 @@ Jasna はカスタム Stash フォーク経由で [Stash](https://github.com/sta
 
 1. 上記リンクから Stash フォークをダウンロードします。
 2. Stash 起動前に環境変数を設定します:
-   - `JASNA_CLI_PATH`: `jasna-cli.exe` のフルパス
-   - `JASNA_WORKING_DIR`: `jasna-cli.exe` があるフォルダのフルパス
-3. Stash を起動してシーンを再生します。
+   - `JASNA_CLI_PATH`: `jasna.exe` のフルパス。自分でリネームした場合はその名前にします。
+   - `JASNA_WORKING_DIR`: その実行ファイルがあるフォルダのフルパス。
+3. **重要:** Stash を使う前に、同じ設定で短い動画を一度ストリーミングしてください。TensorRT エンジンを事前コンパイルでき、初回のヘルスチェックタイムアウトを避けやすくなります。
+4. Stash を起動してシーンを再生します。
+
+Stash ログに `timeout waiting for jasna-cli to become healthy` と出る場合は、まず `JASNA_CLI_PATH` を確認し、その後で上の方法で事前コンパイルしてください。
 
 ## ベンチマーク
 

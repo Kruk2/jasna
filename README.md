@@ -225,6 +225,8 @@ Streaming mode is CLI-only for now. It opens an HLS player in a browser window. 
 jasna --stream
 ```
 
+On Windows, streaming uses the same file as the app: `jasna.exe --stream`. There may be no separate `jasna-cli.exe`.
+
 ### Stash Integration
 
 Jasna can be used inside [Stash](https://github.com/stashapp/stash) through a custom Stash fork. Play a scene and Stash launches Jasna automatically, processing as you watch. Seeking works.
@@ -235,9 +237,12 @@ Setup:
 
 1. Download the Stash fork from the link above.
 2. Set environment variables before starting Stash:
-   - `JASNA_CLI_PATH`: full path to `jasna-cli.exe`
-   - `JASNA_WORKING_DIR`: full path to the folder containing `jasna-cli.exe`
-3. Start Stash and play a scene.
+   - `JASNA_CLI_PATH`: full path to `jasna.exe`, unless you renamed it.
+   - `JASNA_WORKING_DIR`: full path to the folder containing that executable.
+3. **Important:** Before using Stash, run streaming once on a short video with the same settings you plan to use in Stash. This precompiles TensorRT engines and avoids the first health-check timeout.
+4. Start Stash and play a scene.
+
+If Stash logs `timeout waiting for jasna-cli to become healthy`, check `JASNA_CLI_PATH` first, then precompile as above.
 
 ## Benchmarks
 
