@@ -108,15 +108,37 @@ def get_subprocess_startup_info():
     return startup_info
 
 
+STD_INPUT_HANDLE = -10
+STD_OUTPUT_HANDLE = -11
+STD_ERROR_HANDLE = -12
+
+
 def _redirect_std_streams_to_null() -> None:
-    """Point sys.stdout/stderr/stdin at os.devnull. After FreeConsole the inherited
-    console handles are invalid, so any later write to the real streams — a stray
-    `print()` or a logging StreamHandler — raises `OSError: [WinError 6] The handle is
-    invalid`. Discard those writes instead of crashing."""
+    """Point sys.stdout/stderr/stdin AND the process's OS-level standard handles at NUL.
+
+    After FreeConsole the inherited console handles are dead, and two things break.
+    First, a stray `print()` or a logging StreamHandler writing to the real stream raises
+    `OSError: [WinError 6] The handle is invalid` — repointing sys.* at NUL discards those
+    writes. Second — and this is what randomly fails the system check and later crashes
+    ffprobe/mkvmerge — `subprocess.Popen` calls `GetStdHandle()` for every stream the
+    caller left as None (our tools run with stdout/stderr=PIPE but stdin unset), then
+    `DuplicateHandle`s that dangling handle and dies with `[WinError 6]`/`[WinError 50]`.
+    Repointing the OS std handles at NUL gives each child a valid, inheritable handle to
+    duplicate; fixing sys.* alone does not."""
+    null_r = open(os.devnull, "r")
     null_w = open(os.devnull, "w")
+    sys.stdin = null_r
     sys.stdout = null_w
     sys.stderr = null_w
-    sys.stdin = open(os.devnull, "r")
+    if os.name != "nt":
+        return
+    import ctypes
+    import msvcrt
+
+    kernel32 = ctypes.windll.kernel32
+    kernel32.SetStdHandle(STD_INPUT_HANDLE, ctypes.c_void_p(msvcrt.get_osfhandle(null_r.fileno())))
+    kernel32.SetStdHandle(STD_OUTPUT_HANDLE, ctypes.c_void_p(msvcrt.get_osfhandle(null_w.fileno())))
+    kernel32.SetStdHandle(STD_ERROR_HANDLE, ctypes.c_void_p(msvcrt.get_osfhandle(null_w.fileno())))
 
 
 def drop_console_window() -> None:
