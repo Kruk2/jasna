@@ -359,8 +359,15 @@ def main() -> None:
         return
 
     is_streaming = bool(args.stream)
-    from jasna.post_export_action import validate_post_export_action, run_post_export_action
+    from jasna.post_export_action import validate_post_export_action, run_post_export_action_safely
     validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
+
+    def _run_post_export_action() -> None:
+        run_post_export_action_safely(
+            str(args.post_export_action),
+            str(args.post_export_command),
+            lambda message: print(f"Warning: {message}"),
+        )
 
     if args.input is None and not is_streaming:
         parser.error("--input is required when not using --benchmark or --stream")
@@ -464,7 +471,7 @@ def main() -> None:
                 progress_total=folder_total,
             )
         if not folder_videos:
-            run_post_export_action(str(args.post_export_action), str(args.post_export_command))
+            _run_post_export_action()
             return
 
     if input_is_image:
@@ -472,7 +479,7 @@ def main() -> None:
             parser.error("Image input does not support --stream")
         from jasna.image_restore import run_image_restoration
         run_image_restoration(args)
-        run_post_export_action(str(args.post_export_action), str(args.post_export_command))
+        _run_post_export_action()
         return
 
     from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models
@@ -684,7 +691,7 @@ def main() -> None:
                     finally:
                         pipeline.close()
                         pipeline = None
-                run_post_export_action(str(args.post_export_action), str(args.post_export_command))
+                _run_post_export_action()
         except UnsupportedColorspaceError as e:
             print(f"Error: {e}")
             sys.exit(1)

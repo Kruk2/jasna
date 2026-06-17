@@ -120,7 +120,7 @@ def test_english_activation_copy_uses_app_activation_language() -> None:
     en = TRANSLATIONS["en"]
     assert en["supporter_title"] == "Activate Jasna"
     assert en["license_chip_inactive"] == "Activate Jasna"
-    assert en["secondary_unet_4x_hint"] == "supporter-only, much faster than TVAI, high quality"
+    assert en["secondary_unet_4x_hint"] == "high-quality, fast"
     assert "supporter" not in en["supporter_title"].lower()
     assert "license" not in en["supporter_title"].lower()
 
