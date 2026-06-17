@@ -52,8 +52,8 @@ def _fake_metadata() -> VideoMetadata:
 
 def _make_pipeline():
     with (
-        patch("jasna.pipeline.RfDetrMosaicDetectionModel"),
-        patch("jasna.pipeline.YoloMosaicDetectionModel"),
+        patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
+        patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
     ):
         rest_pipeline = MagicMock()
         rest_pipeline.secondary_restorer = None
@@ -978,8 +978,8 @@ class TestPipelineRun:
     def test_run_with_progress_callback(self):
         cb = MagicMock()
         with (
-            patch("jasna.pipeline.RfDetrMosaicDetectionModel"),
-            patch("jasna.pipeline.YoloMosaicDetectionModel"),
+            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
+            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
         ):
             rest_pipeline = MagicMock()
             rest_pipeline.secondary_num_workers = 1

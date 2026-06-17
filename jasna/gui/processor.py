@@ -416,8 +416,7 @@ class Processor:
         import torch
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.engine_paths import SD15_DIR
-        from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
-        from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
+        from jasna.mosaic.detection_registry import build_detection_model, coerce_detection_model_name, detection_model_weights_path
         from jasna.restorer.sd15_download import bundle_present
         from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
 
@@ -442,8 +441,9 @@ class Processor:
             ),
             log_callback=lambda msg: self._log("INFO", msg),
         )
-        detector = RfDetrMosaicDetectionModel(
-            onnx_path=detection_model_path,
+        detector = build_detection_model(
+            det_name,
+            detection_model_path,
             batch_size=settings.batch_size,
             device=device,
             score_threshold=settings.detection_score_threshold,
