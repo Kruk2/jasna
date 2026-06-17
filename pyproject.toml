@@ -16,7 +16,6 @@ dependencies = [
   "av>=16.1.0",
   "numpy",
   "psutil",
-  "transformers>5",
   "diffusers",
   "accelerate",
   "huggingface-hub",
