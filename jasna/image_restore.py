@@ -302,7 +302,8 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]]) -> None:
     )
     restorer = Sd15InpaintRestorer(SD15_DIR, device, fp16)
     try:
-        for input_path, output_base in jobs:
+        for i, (input_path, output_base) in enumerate(jobs, start=1):
+            logger.info("[%d/%d] Processing %s", i, len(jobs), input_path.name)
             img = image_io.read_image_rgb_chw(input_path)
             with torch.cuda.device(device) if device.type == "cuda" else nullcontext():
                 outputs = restore_image(
