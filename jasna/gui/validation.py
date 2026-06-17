@@ -6,10 +6,16 @@ from jasna.gui.locales import t
 
 
 def validate_gui_start(settings: AppSettings) -> list[str]:
-    if settings.secondary_restoration != "tvai":
-        return []
-
     errors: list[str] = []
+
+    from jasna.post_export_action import validate_post_export_action
+    try:
+        validate_post_export_action(settings.post_export_action, settings.post_export_command)
+    except ValueError:
+        errors.append(t("error_post_export_command_required"))
+
+    if settings.secondary_restoration != "tvai":
+        return errors
 
     data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")
     model_dir = os.environ.get("TVAI_MODEL_DIR")
@@ -29,4 +35,3 @@ def validate_gui_start(settings: AppSettings) -> list[str]:
         errors.append(t("error_tvai_ffmpeg_not_found", path=ffmpeg_path))
 
     return errors
-

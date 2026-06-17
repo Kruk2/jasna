@@ -264,6 +264,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._build_secondary_section()
         self._build_image_restoration_section()
         self._build_encoding_section()
+        self._build_post_export_section()
         
     def _build_basic_section(self):
         section = CollapsibleSection(self._scroll, t("section_basic"), expanded=True)
@@ -1056,6 +1057,64 @@ class SettingsPanel(ctk.CTkFrame):
             self._widgets["lut_path"].delete(0, "end")
             self._widgets["lut_path"].insert(0, filepath)
 
+    def _build_post_export_section(self):
+        section = CollapsibleSection(self._scroll, t("section_post_export_action"), expanded=True)
+        section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        content = section.content
+        content.configure(corner_radius=Sizing.BORDER_RADIUS)
+
+        inner = ctk.CTkFrame(content, fg_color="transparent")
+        inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+
+        row1 = ctk.CTkFrame(inner, fg_color="transparent")
+        row1.pack(fill="x")
+
+        action_label = ctk.CTkLabel(row1, text=t("post_export_action"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        action_label.pack(side="left")
+        action_tip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        action_tip.pack(side="left", padx=4)
+        Tooltip(action_tip, get_tooltip("post_export_action"))
+
+        self._widgets["post_export_action"] = ctk.CTkOptionMenu(
+            row1,
+            values=[t("post_export_none"), t("post_export_shutdown"), t("post_export_command")],
+            fg_color=Colors.BG_CARD,
+            button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=160,
+            command=self._on_post_export_action_changed,
+        )
+        self._widgets["post_export_action"].pack(side="right")
+        self._widgets["post_export_action"].set(t("post_export_none"))
+
+        self._post_export_command_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        command_label = ctk.CTkLabel(
+            self._post_export_command_frame,
+            text=t("post_export_command"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        command_label.pack(anchor="w", pady=(Sizing.PADDING_SMALL, 4))
+        self._widgets["post_export_command"] = ctk.CTkEntry(
+            self._post_export_command_frame,
+            fg_color=Colors.BG_CARD,
+            border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY,
+            placeholder_text=t("post_export_command_placeholder"),
+        )
+        self._widgets["post_export_command"].pack(fill="x")
+        self._widgets["post_export_command"].bind("<KeyRelease>", lambda _event: self._mark_modified())
+
+    def _on_post_export_action_changed(self, _value: str):
+        if self._widgets["post_export_action"].get() == t("post_export_command"):
+            self._post_export_command_frame.pack(fill="x")
+        else:
+            self._post_export_command_frame.pack_forget()
+        self._mark_modified()
+
     def _on_preset_changed(self, preset_display_name: str):
         # Strip modified indicator if present
         if preset_display_name.endswith(" (Modified)*"):
@@ -1170,6 +1229,16 @@ class SettingsPanel(ctk.CTkFrame):
 
         self._widgets["lut_path"].delete(0, "end")
         self._widgets["lut_path"].insert(0, getattr(preset, "lut_path", "") or "")
+
+        post_export_display = {
+            "none": t("post_export_none"),
+            "shutdown": t("post_export_shutdown"),
+            "command": t("post_export_command"),
+        }
+        self._widgets["post_export_action"].set(post_export_display.get(getattr(preset, "post_export_action", "none"), t("post_export_none")))
+        self._widgets["post_export_command"].delete(0, "end")
+        self._widgets["post_export_command"].insert(0, getattr(preset, "post_export_command", "") or "")
+        self._on_post_export_action_changed(self._widgets["post_export_action"].get())
 
         # File conflict setting
         file_conflict_display = {
@@ -1291,6 +1360,13 @@ class SettingsPanel(ctk.CTkFrame):
             t("denoise_high"): "high",
         }
         denoise_strength = denoise_strength_map.get(self._widgets["denoise_strength"].get(), "none")
+
+        post_export_action_map = {
+            t("post_export_none"): "none",
+            t("post_export_shutdown"): "shutdown",
+            t("post_export_command"): "command",
+        }
+        post_export_action = post_export_action_map.get(self._widgets["post_export_action"].get(), "none")
         
         try:
             image_restore_seed = int(self._widgets["image_restore_seed"].get().strip() or "0")
@@ -1328,6 +1404,8 @@ class SettingsPanel(ctk.CTkFrame):
             file_conflict=file_conflict,
             working_directory=self._widgets["working_directory"].get().strip(),
             lut_path=self._widgets["lut_path"].get().strip(),
+            post_export_action=post_export_action,
+            post_export_command=self._widgets["post_export_command"].get().strip(),
         )
     
     def set_enabled(self, enabled: bool):

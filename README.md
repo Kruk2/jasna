@@ -16,6 +16,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [Community](#community)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
+- [Post-export Actions](#post-export-actions)
 - [First Run](#first-run)
 - [Choosing Models](#choosing-models)
 - [Tuning Quality and VRAM](#tuning-quality-and-vram)
@@ -85,6 +86,20 @@ jasna --input input_folder --output output_folder --output-pattern "{original}_r
 ```
 
 Images keep their source extension, while videos use the template extension when one is provided. Jasna checks the planned folder outputs before processing and exits with an error if the template maps multiple inputs to the same output file.
+
+## Post-export Actions
+
+The GUI can run an action after the whole queue finishes: **None**, **Shutdown PC**, or **Custom Command**. The same feature is available in the CLI on Windows and Linux:
+
+```bash
+jasna --input input.mp4 --output output.mkv --post-export-action shutdown
+```
+
+Custom commands run through the system shell after all exports finish:
+
+```bash
+jasna --input input_folder --output output_folder --post-export-action command --post-export-command "echo done"
+```
 
 ## First Run
 

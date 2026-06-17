@@ -12,6 +12,11 @@ def test_validate_gui_start_non_tvai_returns_empty() -> None:
     assert validate_gui_start(settings) == []
 
 
+def test_validate_gui_start_custom_post_export_requires_command() -> None:
+    settings = AppSettings(secondary_restoration="none", post_export_action="command", post_export_command="")
+    assert t("error_post_export_command_required") in validate_gui_start(settings)
+
+
 def test_validate_gui_start_tvai_missing_env_vars(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.delenv("TVAI_MODEL_DATA_DIR", raising=False)
     monkeypatch.delenv("TVAI_MODEL_DIR", raising=False)

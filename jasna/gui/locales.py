@@ -44,6 +44,7 @@ def _get_cli_descriptions() -> dict[str, str]:
                 "codec": "codec",
                 "encoder_settings": "encoder_custom_args",
                 "working_directory": "working_directory",
+                "post_export_action": "post_export_action",
             }
             
             dest = action.dest
@@ -154,6 +155,7 @@ TRANSLATIONS = {
         "tip_image_restore_seed": "Controls randomness. Same image, settings, and seed should repeat the same result; change it for a different attempt.\n\nVariants use seed, seed+1, seed+2, and so on.",
         "tip_image_restore_freeu": "Extra UNet tweak that often sharpens structure. Keep it on by default; turn it off if it creates harsh edges or odd texture.",
         "section_encoding": "Encoding",
+        "section_post_export_action": "Post-export Action",
         
         # Basic Processing
         "max_clip_size": "Max Clip Size",
@@ -223,6 +225,11 @@ TRANSLATIONS = {
         "codec": "Codec",
         "quality_cq": "Quality (CQ)",
         "custom_args": "Custom Args",
+        "post_export_action": "Action",
+        "post_export_none": "None",
+        "post_export_shutdown": "Shutdown PC",
+        "post_export_command": "Custom Command",
+        "post_export_command_placeholder": "Command to run after all jobs finish",
         
         # Control Bar
         "btn_start": "▶ Start",
@@ -319,6 +326,7 @@ TRANSLATIONS = {
         "tip_encoder_cq": "Video quality level (Constant Quality). Lower number = better quality but larger file.\n\n18-22: high quality (recommended).\n22-28: balanced.\n28+: smaller files, lower quality.\nDefault: 22",
         "tip_encoder_custom_args": "Advanced encoder parameters as comma-separated key=value pairs.\nLeave empty unless you know what you're doing.\n\nExample: lookahead=32",
         "tip_working_directory": "Folder for temporary files created during encoding.\nUsing a fast SSD can improve speed. Leave empty to use the output folder.\n\nDefault: same as output folder",
+        "tip_post_export_action": "Optional action after the whole queue finishes.\n\nNone: do nothing.\nShutdown PC: powers off the computer.\nCustom Command: runs the command below in the system shell.",
         "tip_output_location": "Folder where processed videos are saved.\nLeave empty to save next to the original file.",
         "tip_output_pattern": "Filename template for output files.\nUse {original} as a placeholder for the input filename (without extension).\n\nExample: {original}_restored.mp4 → my_video_restored.mp4",
         
@@ -352,6 +360,7 @@ TRANSLATIONS = {
         # App messages
         "error_cannot_start": "Cannot start processing:",
         "error_invalid_tvai": "Invalid TVAI configuration",
+        "error_post_export_command_required": "Custom post-export command is required",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "Select Topaz Video ffmpeg.exe",
@@ -476,6 +485,7 @@ TRANSLATIONS = {
         "tip_image_restore_seed": "控制随机性。同一图片、设置和种子通常会得到相同结果；换种子就是换一次尝试。\n\n变体会使用 seed、seed+1、seed+2，依此类推。",
         "tip_image_restore_freeu": "额外的 UNet 调整，通常能让结构更清晰。默认保持开启；如果出现生硬边缘或奇怪纹理，可以关闭。",
         "section_encoding": "编码设置",
+        "section_post_export_action": "导出后操作",
         
         # Basic Processing
         "max_clip_size": "最大片段大小",
@@ -545,6 +555,11 @@ TRANSLATIONS = {
         "codec": "编解码器",
         "quality_cq": "质量 (CQ)",
         "custom_args": "自定义参数",
+        "post_export_action": "操作",
+        "post_export_none": "无",
+        "post_export_shutdown": "关闭电脑",
+        "post_export_command": "自定义命令",
+        "post_export_command_placeholder": "所有任务完成后运行的命令",
         
         # Control Bar
         "btn_start": "▶ 开始",
@@ -641,6 +656,7 @@ TRANSLATIONS = {
         "tip_encoder_cq": "视频质量等级（恒定质量模式）。数值越低画质越好，但文件越大。\n\n18-22：高画质（推荐）。\n22-28：画质与体积平衡。\n28 以上：较小文件，画质较低。\n默认值：22",
         "tip_encoder_custom_args": "高级编码器参数，以逗号分隔的 key=value 格式。\n如果不清楚用途，请留空。\n\n示例：lookahead=32",
         "tip_working_directory": "编码过程中产生的临时文件存放目录。\n使用高速 SSD 可提升速度。留空则使用输出文件夹。\n\n默认值：与输出文件夹相同",
+        "tip_post_export_action": "整个队列完成后的可选操作。\n\n无：不执行任何操作。\n关闭电脑：关闭计算机。\n自定义命令：在系统 shell 中运行下方命令。",
         "tip_output_location": "处理后视频的保存文件夹。\n留空则保存在原始文件旁边。",
         "tip_output_pattern": "输出文件的命名模板。\n使用 {original} 作为输入文件名（不含扩展名）的占位符。\n\n示例：{original}_restored.mp4 → my_video_restored.mp4",
 
@@ -674,6 +690,7 @@ TRANSLATIONS = {
         # App messages
         "error_cannot_start": "无法开始处理：",
         "error_invalid_tvai": "无效的 TVAI 配置",
+        "error_post_export_command_required": "需要填写导出后的自定义命令",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "选择 Topaz Video ffmpeg.exe",
@@ -798,6 +815,7 @@ TRANSLATIONS = {
         "tip_image_restore_seed": "ランダム性を制御します。同じ画像・設定・シードなら同じ結果になりやすく、別の試行をしたいときは変更します。\n\nバリエーションは seed、seed+1、seed+2 の順に使います。",
         "tip_image_restore_freeu": "UNet に追加する調整で、構造がくっきりしやすくなります。通常はオンのままにし、硬いエッジや不自然な質感が出る場合はオフにしてください。",
         "section_encoding": "エンコード",
+        "section_post_export_action": "エクスポート後のアクション",
 
         # Basic Processing
         "max_clip_size": "最大クリップサイズ",
@@ -867,6 +885,11 @@ TRANSLATIONS = {
         "codec": "コーデック",
         "quality_cq": "品質 (CQ)",
         "custom_args": "カスタム引数",
+        "post_export_action": "アクション",
+        "post_export_none": "なし",
+        "post_export_shutdown": "PC をシャットダウン",
+        "post_export_command": "カスタムコマンド",
+        "post_export_command_placeholder": "すべてのジョブ完了後に実行するコマンド",
 
         # Control Bar
         "btn_start": "▶ 開始",
@@ -963,6 +986,7 @@ TRANSLATIONS = {
         "tip_encoder_cq": "動画の品質レベル（固定品質モード）。数値が低いほど高品質ですが、ファイルが大きくなります。\n\n18-22：高画質（おすすめ）。\n22-28：バランス型。\n28 以上：小さいファイル、画質は控えめ。\nデフォルト：22",
         "tip_encoder_custom_args": "上級者向けのエンコーダーパラメータ（カンマ区切りの key=value 形式）。\nよくわからない場合は空欄のままにしてください。\n\n例：lookahead=32",
         "tip_working_directory": "エンコード中の一時ファイルを保存するフォルダ。\n高速な SSD を使用すると処理が速くなります。空欄の場合は出力フォルダを使用します。\n\nデフォルト：出力フォルダと同じ",
+        "tip_post_export_action": "キュー全体が完了した後に実行する任意のアクションです。\n\nなし：何もしません。\nPC をシャットダウン：コンピューターの電源を切ります。\nカスタムコマンド：下のコマンドをシステムシェルで実行します。",
         "tip_output_location": "処理済み動画の保存先フォルダ。\n空欄の場合、元のファイルと同じ場所に保存されます。",
         "tip_output_pattern": "出力ファイルの名前テンプレート。\n{original} は入力ファイル名（拡張子なし）のプレースホルダーです。\n\n例：{original}_restored.mp4 → my_video_restored.mp4",
 
@@ -996,6 +1020,7 @@ TRANSLATIONS = {
         # App messages
         "error_cannot_start": "処理を開始できません:",
         "error_invalid_tvai": "無効な TVAI 設定",
+        "error_post_export_command_required": "エクスポート後のカスタムコマンドが必要です",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "Topaz Video の ffmpeg.exe を選択",
@@ -1101,6 +1126,7 @@ TRANSLATIONS = {
         "tip_image_restore_seed": "무작위성을 제어합니다. 같은 이미지, 설정, 시드는 같은 결과를 반복하기 쉽고, 다른 시도를 원하면 값을 바꾸세요.\n\n변형은 seed, seed+1, seed+2 순서로 사용합니다.",
         "tip_image_restore_freeu": "UNet에 추가하는 조정으로 구조가 더 또렷해지는 경우가 많습니다. 기본으로 켜두고, 딱딱한 경계나 이상한 질감이 생기면 끄세요.",
         "section_encoding": "인코딩",
+        "section_post_export_action": "내보내기 후 작업",
 
         # Basic Processing
         "max_clip_size": "최대 클립 크기",
@@ -1169,6 +1195,11 @@ TRANSLATIONS = {
         "codec": "코덱",
         "quality_cq": "품질 (CQ)",
         "custom_args": "사용자 정의 인수",
+        "post_export_action": "작업",
+        "post_export_none": "없음",
+        "post_export_shutdown": "PC 종료",
+        "post_export_command": "사용자 정의 명령",
+        "post_export_command_placeholder": "모든 작업 완료 후 실행할 명령",
 
         # Control Bar
         "btn_start": "▶ 시작",
@@ -1265,6 +1296,7 @@ TRANSLATIONS = {
         "tip_encoder_cq": "동영상 품질 수준 (고정 품질 모드). 숫자가 낮을수록 화질이 좋지만 파일이 커집니다.\n\n18-22: 고화질 (권장).\n22-28: 균형.\n28 이상: 작은 파일, 낮은 화질.\n기본값: 22",
         "tip_encoder_custom_args": "고급 인코더 매개변수 (쉼표로 구분된 key=value 형식).\n잘 모르겠으면 비워두세요.\n\n예: lookahead=32",
         "tip_working_directory": "인코딩 중 생성되는 임시 파일을 저장할 폴더.\n빠른 SSD를 사용하면 속도가 향상됩니다. 비워두면 출력 폴더를 사용합니다.\n\n기본값: 출력 폴더와 동일",
+        "tip_post_export_action": "전체 대기열이 완료된 뒤 실행할 선택 작업입니다.\n\n없음: 아무 작업도 하지 않습니다.\nPC 종료: 컴퓨터 전원을 끕니다.\n사용자 정의 명령: 아래 명령을 시스템 셸에서 실행합니다.",
         "tip_output_location": "처리된 동영상을 저장할 폴더.\n비워두면 원본 파일 옆에 저장됩니다.",
         "tip_output_pattern": "출력 파일의 이름 템플릿.\n{original}은 입력 파일명(확장자 제외)의 자리 표시자입니다.\n\n예: {original}_restored.mp4 → my_video_restored.mp4",
 
@@ -1298,6 +1330,7 @@ TRANSLATIONS = {
         # App messages
         "error_cannot_start": "처리를 시작할 수 없습니다:",
         "error_invalid_tvai": "잘못된 TVAI 구성",
+        "error_post_export_command_required": "내보내기 후 사용자 정의 명령이 필요합니다",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "Topaz Video ffmpeg.exe 선택",
@@ -1404,6 +1437,7 @@ TRANSLATIONS = {
         "tip_image_restore_seed": "ควบคุมความสุ่ม ภาพ การตั้งค่า และซีดเดิมมักให้ผลเดิม เปลี่ยนค่านี้เมื่อต้องการลองผลแบบอื่น\n\nตัวแปรจะใช้ seed, seed+1, seed+2 ต่อไปเรื่อย ๆ",
         "tip_image_restore_freeu": "การปรับ UNet เพิ่มเติมที่มักทำให้โครงสร้างคมขึ้น เปิดไว้เป็นค่าเริ่มต้น และปิดถ้าเกิดขอบแข็งหรือพื้นผิวแปลก ๆ",
         "section_encoding": "การเข้ารหัส",
+        "section_post_export_action": "การทำงานหลังส่งออก",
 
         # Basic Processing
         "max_clip_size": "ขนาดคลิปสูงสุด",
@@ -1473,6 +1507,11 @@ TRANSLATIONS = {
         "codec": "ตัวแปลงสัญญาณ",
         "quality_cq": "คุณภาพ (CQ)",
         "custom_args": "อาร์กิวเมนต์กำหนดเอง",
+        "post_export_action": "การทำงาน",
+        "post_export_none": "ไม่มี",
+        "post_export_shutdown": "ปิดเครื่อง PC",
+        "post_export_command": "คำสั่งกำหนดเอง",
+        "post_export_command_placeholder": "คำสั่งที่จะเรียกใช้หลังงานทั้งหมดเสร็จ",
 
         # Control Bar
         "btn_start": "▶ เริ่ม",
@@ -1569,6 +1608,7 @@ TRANSLATIONS = {
         "tip_encoder_cq": "ระดับคุณภาพวิดีโอ (Constant Quality) ตัวเลขต่ำ = คุณภาพดีขึ้นแต่ไฟล์ใหญ่ขึ้น\n\n18-22: คุณภาพสูง (แนะนำ)\n22-28: สมดุล\n28+: ไฟล์เล็กลง คุณภาพต่ำลง\nค่าเริ่มต้น: 22",
         "tip_encoder_custom_args": "พารามิเตอร์ encoder ขั้นสูง ในรูปแบบ key=value คั่นด้วยจุลภาค\nเว้นว่างไว้หากไม่แน่ใจ\n\nตัวอย่าง: lookahead=32",
         "tip_working_directory": "โฟลเดอร์สำหรับไฟล์ชั่วคราวที่สร้างระหว่างการเข้ารหัส\nใช้ SSD ที่เร็วจะช่วยเพิ่มความเร็ว เว้นว่างเพื่อใช้โฟลเดอร์เอาต์พุต\n\nค่าเริ่มต้น: เหมือนกับโฟลเดอร์เอาต์พุต",
+        "tip_post_export_action": "การทำงานเสริมหลังคิวทั้งหมดเสร็จ\n\nไม่มี: ไม่ทำอะไร\nปิดเครื่อง PC: ปิดคอมพิวเตอร์\nคำสั่งกำหนดเอง: เรียกใช้คำสั่งด้านล่างใน system shell",
         "tip_output_location": "โฟลเดอร์ที่ใช้บันทึกวิดีโอที่ประมวลผลแล้ว\nเว้นว่างเพื่อบันทึกไว้ข้างไฟล์ต้นฉบับ",
         "tip_output_pattern": "รูปแบบชื่อไฟล์เอาต์พุต\nใช้ {original} เป็นตัวแทนชื่อไฟล์อินพุต (ไม่รวมนามสกุล)\n\nตัวอย่าง: {original}_restored.mp4 → my_video_restored.mp4",
 
@@ -1602,6 +1642,7 @@ TRANSLATIONS = {
         # App messages
         "error_cannot_start": "ไม่สามารถเริ่มประมวลผล:",
         "error_invalid_tvai": "การกำหนดค่า TVAI ไม่ถูกต้อง",
+        "error_post_export_command_required": "ต้องระบุคำสั่งกำหนดเองหลังส่งออก",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "เลือก Topaz Video ffmpeg.exe",

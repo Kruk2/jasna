@@ -80,6 +80,21 @@ def test_preset_manager_persists_lut_path_in_user_preset(monkeypatch, tmp_path: 
     assert loaded.lut_path == r"C:\luts\film.cube"
 
 
+def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    mgr = PresetManager()
+    settings = AppSettings(post_export_action="command", post_export_command="echo done")
+    assert mgr.create_preset("WithAction", settings)
+
+    mgr2 = PresetManager()
+    loaded = mgr2.get_preset("WithAction")
+    assert loaded is not None
+    assert loaded.post_export_action == "command"
+    assert loaded.post_export_command == "echo done"
+
+
 def test_preset_manager_saves_and_loads_last_output_pattern(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))

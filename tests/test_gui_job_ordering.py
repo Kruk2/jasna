@@ -148,6 +148,37 @@ class TestProcessorPullLoop:
 
         assert processed_filenames == ["a.mp4", "c.mp4", "b.mp4"]
 
+    def test_runs_post_export_action_after_queue_completes(self):
+        calls: list[tuple[str, str]] = []
+        p = Processor()
+        jobs = _make_jobs("a.mp4")
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch("jasna.post_export_action.run_post_export_action", lambda action, command: calls.append((action, command))),
+        ):
+            p.start(
+                jobs,
+                AppSettings(post_export_action="command", post_export_command="echo done"),
+                output_folder="",
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        assert calls == [("command", "echo done")]
+
+    def test_skips_post_export_action_when_stopped(self):
+        calls: list[tuple[str, str]] = []
+        p = Processor()
+        p._settings = AppSettings(post_export_action="shutdown")
+        p._stop_event.set()
+
+        with patch("jasna.post_export_action.run_post_export_action", lambda action, command: calls.append((action, command))):
+            p._run()
+
+        assert calls == []
+
 
 class TestJobItemId:
     def test_unique_ids(self):

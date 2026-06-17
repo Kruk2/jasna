@@ -317,6 +317,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a .cube color LUT (1D or 3D) applied on GPU before encoding.",
     )
 
+    post_export = parser.add_argument_group("Post-export action")
+    post_export.add_argument(
+        "--post-export-action",
+        type=str,
+        default="none",
+        choices=["none", "shutdown", "command"],
+        help="Action to run after all non-streaming exports finish.",
+    )
+    post_export.add_argument(
+        "--post-export-command",
+        type=str,
+        default="",
+        help="Shell command to run when --post-export-action=command.",
+    )
+
     benchmark_group = parser.add_argument_group("Benchmark")
     benchmark_group.add_argument(
         "--benchmark-filter",
@@ -344,6 +359,8 @@ def main() -> None:
         return
 
     is_streaming = bool(args.stream)
+    from jasna.post_export_action import validate_post_export_action, run_post_export_action
+    validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
 
     if args.input is None and not is_streaming:
         parser.error("--input is required when not using --benchmark or --stream")
@@ -447,6 +464,7 @@ def main() -> None:
                 progress_total=folder_total,
             )
         if not folder_videos:
+            run_post_export_action(str(args.post_export_action), str(args.post_export_command))
             return
 
     if input_is_image:
@@ -454,6 +472,7 @@ def main() -> None:
             parser.error("Image input does not support --stream")
         from jasna.image_restore import run_image_restoration
         run_image_restoration(args)
+        run_post_export_action(str(args.post_export_action), str(args.post_export_command))
         return
 
     from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models
@@ -665,6 +684,7 @@ def main() -> None:
                     finally:
                         pipeline.close()
                         pipeline = None
+                run_post_export_action(str(args.post_export_action), str(args.post_export_command))
         except UnsupportedColorspaceError as e:
             print(f"Error: {e}")
             sys.exit(1)

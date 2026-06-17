@@ -103,6 +103,10 @@ class AppSettings:
     encoder_cq: int = 22
     encoder_custom_args: str = ""
     lut_path: str = ""
+
+    # Post-export action
+    post_export_action: str = "none"  # none, shutdown, command
+    post_export_command: str = ""
     
     # Output
     output_same_as_input: bool = True

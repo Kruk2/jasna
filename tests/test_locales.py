@@ -78,6 +78,17 @@ _IMAGE_RESTORE_TOOLTIP_KEYS = {
     "tip_image_restore_freeu",
 }
 
+_POST_EXPORT_KEYS = {
+    "section_post_export_action",
+    "post_export_action",
+    "post_export_none",
+    "post_export_shutdown",
+    "post_export_command",
+    "post_export_command_placeholder",
+    "tip_post_export_action",
+    "error_post_export_command_required",
+}
+
 
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
 def test_all_languages_define_license_keys(lang: str) -> None:
@@ -97,6 +108,12 @@ def test_all_languages_define_support_button_labels(lang: str) -> None:
     assert translations["bmc_support"].strip()
     # Unifans is a brand name — kept verbatim across every locale.
     assert translations["unifans_support"] == "Unifans"
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_all_languages_define_post_export_keys(lang: str) -> None:
+    missing = _POST_EXPORT_KEYS - TRANSLATIONS[lang].keys()
+    assert not missing, f"{lang} missing post-export keys: {sorted(missing)}"
 
 
 def test_english_activation_copy_uses_app_activation_language() -> None:

@@ -94,6 +94,8 @@ class TestBuildParser:
         assert args.detection_model == "rfdetr-v5"
         assert args.detection_score_threshold == 0.25
         assert args.benchmark is False
+        assert args.post_export_action == "none"
+        assert args.post_export_command == ""
 
     def test_no_fp16(self):
         args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4", "--no-fp16"])
@@ -123,6 +125,16 @@ class TestBuildParser:
         assert args.rtx_quality == "high"
         assert args.rtx_denoise == "medium"
         assert args.rtx_deblur == "none"
+
+    def test_post_export_command(self):
+        args = build_parser().parse_args([
+            "--input", "a.mp4",
+            "--output", "b.mp4",
+            "--post-export-action", "command",
+            "--post-export-command", "echo done",
+        ])
+        assert args.post_export_action == "command"
+        assert args.post_export_command == "echo done"
 
 
 # ---------------------------------------------------------------------------

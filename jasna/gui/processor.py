@@ -144,8 +144,23 @@ class Processor:
             self._log("INFO", "Processing stopped by user")
         else:
             self._log("INFO", "Processing completed")
+            self._run_post_export_action()
         if self._on_complete:
             self._on_complete()
+
+    def _run_post_export_action(self):
+        settings = self._settings
+        if settings is None:
+            return
+        from jasna.post_export_action import run_post_export_action
+
+        action = settings.post_export_action
+        command = settings.post_export_command
+        if action == "none":
+            return
+
+        self._log("INFO", f"Running post-export action: {action}")
+        run_post_export_action(action, command)
             
     def _process_job(self, job: JobItem):
         job.status = JobStatus.PROCESSING
@@ -195,10 +210,9 @@ class Processor:
         try:
             if is_image:
                 self._close_video_session()
-                self._run_image_job(job.id, input_path, output_path)
             else:
                 self._close_image_session()
-                self._run_video_job(job.id, input_path, output_path)
+            self._run_pipeline(job.id, input_path, output_path)
 
             job.status = JobStatus.COMPLETED
             self._progress(ProgressUpdate(
@@ -234,6 +248,14 @@ class Processor:
             _cleanup_torch(torch)
         except Exception:
             pass
+
+    def _run_pipeline(self, job_id: int, input_path: Path, output_path: Path):
+        from jasna.media.image_io import IMAGE_EXTENSIONS
+
+        if input_path.suffix.lower() in IMAGE_EXTENSIONS:
+            self._run_image_job(job_id, input_path, output_path)
+        else:
+            self._run_video_job(job_id, input_path, output_path)
             
     def _ensure_video_session(self):
         """Compile engines + build the BasicVSR++ (and optional secondary) restorer
