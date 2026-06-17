@@ -1,5 +1,6 @@
 import subprocess
 import sys
+from collections.abc import Callable
 
 from jasna.os_utils import subprocess_no_window_kwargs
 
@@ -33,3 +34,12 @@ def run_post_export_action(action: str, command: str = "") -> None:
         return
 
     subprocess.Popen(command.strip(), shell=True, **subprocess_no_window_kwargs())
+
+
+def run_post_export_action_safely(action: str, command: str, report_error: Callable[[str], None]) -> bool:
+    try:
+        run_post_export_action(action, command)
+        return True
+    except Exception as e:
+        report_error(f"Post-export action failed: {e}")
+        return False

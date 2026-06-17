@@ -152,7 +152,7 @@ class Processor:
         settings = self._settings
         if settings is None:
             return
-        from jasna.post_export_action import run_post_export_action
+        from jasna.post_export_action import run_post_export_action_safely
 
         action = settings.post_export_action
         command = settings.post_export_command
@@ -160,7 +160,7 @@ class Processor:
             return
 
         self._log("INFO", f"Running post-export action: {action}")
-        run_post_export_action(action, command)
+        run_post_export_action_safely(action, command, lambda message: self._log("ERROR", message))
             
     def _process_job(self, job: JobItem):
         job.status = JobStatus.PROCESSING

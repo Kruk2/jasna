@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from jasna.post_export_action import run_post_export_action, validate_post_export_action
+from jasna.post_export_action import run_post_export_action, run_post_export_action_safely, validate_post_export_action
 
 
 def test_validate_post_export_command_requires_command() -> None:
@@ -48,3 +48,15 @@ def test_run_post_export_custom_command_uses_shell(monkeypatch) -> None:
     run_post_export_action("command", "  echo done  ")
 
     assert calls == [("echo done", {"shell": True})]
+
+
+def test_run_post_export_safely_reports_spawn_error(monkeypatch) -> None:
+    errors: list[str] = []
+
+    def fail_popen(*_args, **_kwargs):
+        raise OSError("cannot spawn")
+
+    monkeypatch.setattr(subprocess, "Popen", fail_popen)
+
+    assert run_post_export_action_safely("shutdown", "", errors.append) is False
+    assert errors == ["Post-export action failed: cannot spawn"]
