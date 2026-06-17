@@ -236,16 +236,29 @@ def run_image_restoration(args) -> None:
     _run_image_jobs(args, [(input_path, output_base)])
 
 
-def run_image_restoration_folder(args, input_paths: list[Path], output_dir: Path) -> None:
+def run_image_restoration_folder(
+    args,
+    input_paths: list[Path],
+    output_dir: Path,
+    *,
+    output_pattern: str | None = None,
+    progress_offset: int = 0,
+    progress_total: int | None = None,
+) -> None:
     """Restore every image in ``input_paths``, writing into ``output_dir`` (one
     shared model load for the whole batch)."""
     from jasna.media.media_files import folder_output_path
 
-    jobs = [(Path(p), folder_output_path(output_dir, p)) for p in input_paths]
-    _run_image_jobs(args, jobs)
+    jobs = [(Path(p), folder_output_path(output_dir, p, output_pattern)) for p in input_paths]
+    total = progress_total or len(jobs)
+
+    def progress(i: int, input_path: Path, output_base: Path) -> None:
+        print(f"[{progress_offset + i}/{total}] Processing {input_path.name} -> {output_base.name}")
+
+    _run_image_jobs(args, jobs, progress_callback=progress)
 
 
-def _run_image_jobs(args, jobs: list[tuple[Path, Path]]) -> None:
+def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None) -> None:
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.engine_paths import SD15_DIR
     from jasna.media import image_io
@@ -305,6 +318,8 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]]) -> None:
     try:
         for i, (input_path, output_base) in enumerate(jobs, start=1):
             logger.info("[%d/%d] Processing %s", i, len(jobs), input_path.name)
+            if progress_callback is not None:
+                progress_callback(i, input_path, output_base)
             img = image_io.read_image_rgb_chw(input_path)
             with torch.cuda.device(device) if device.type == "cuda" else nullcontext():
                 outputs = restore_image(

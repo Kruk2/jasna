@@ -45,7 +45,19 @@ def folder_media_in_processing_order(folder: str | Path) -> list[Path]:
     return images + videos
 
 
-def folder_output_path(output_dir: str | Path, input_path: str | Path) -> Path:
-    """Per-file output path for folder batches: ``<output_dir>/<stem>_out<ext>``."""
+def folder_output_path(output_dir: str | Path, input_path: str | Path, output_pattern: str | None = None) -> Path:
+    """Per-file output path for folder batches.
+
+    Without a pattern, writes ``<output_dir>/<stem>_out<ext>``. With a pattern,
+    replaces ``{original}`` with the input stem. Image outputs keep their source
+    extension; video outputs use the pattern extension when one is provided.
+    """
     input_path = Path(input_path)
-    return Path(output_dir) / f"{input_path.stem}_out{input_path.suffix}"
+    if not output_pattern:
+        return Path(output_dir) / f"{input_path.stem}_out{input_path.suffix}"
+
+    output_name = output_pattern.replace("{original}", input_path.stem)
+    output_path = Path(output_dir) / output_name
+    if is_image(input_path) or not output_path.suffix:
+        output_path = output_path.with_suffix(input_path.suffix)
+    return output_path
