@@ -15,12 +15,34 @@ from jasna.os_utils import (
 )
 
 
+def _path_collision_key(path: Path) -> str:
+    absolute = path.resolve(strict=False)
+    key = str(absolute)
+    return key.casefold() if sys.platform == "win32" else key
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jasna")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--benchmark", action="store_true", help="Run benchmarks instead of processing video")
-    parser.add_argument("--input", required=False, type=str, default=None, help="Path to input video")
-    parser.add_argument("--output", required=False, type=str, default=None, help="Path to output video")
+    parser.add_argument("--input", required=False, type=str, default=None, help="Path to input video, image, or folder")
+    parser.add_argument(
+        "--output",
+        required=False,
+        type=str,
+        default=None,
+        help="Path to output file, or output folder when --input is a folder",
+    )
+    parser.add_argument(
+        "--output-pattern",
+        type=str,
+        default=None,
+        help=(
+            "Filename template for folder input, matching the GUI pattern behavior. "
+            "Use {original} for the input stem. Default: {original}_out with each input extension. "
+            "Images keep their source extension; videos use the template extension when provided."
+        ),
+    )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument(
@@ -384,8 +406,9 @@ def main() -> None:
     if input_is_dir:
         if is_streaming:
             parser.error("--stream does not support folder input")
-        from jasna.media.media_files import classify_folder, is_media
+        from jasna.media.media_files import classify_folder, folder_output_path, is_media
         folder_images, folder_videos = classify_folder(input_video)
+        folder_total = len(folder_images) + len(folder_videos)
         if not folder_images and not folder_videos:
             parser.error(f"No image or video files found in folder: {input_video}")
         if output_video is None:
@@ -397,11 +420,32 @@ def main() -> None:
             parser.error(
                 f"--output must be a folder when --input is a folder; got a media filename: {folder_output_dir}"
             )
+        folder_inputs = [*folder_images, *folder_videos]
+        planned_outputs: dict[str, tuple[Path, Path]] = {}
+        input_keys = {_path_collision_key(path) for path in folder_inputs}
+        for path in folder_inputs:
+            out_path = folder_output_path(folder_output_dir, path, args.output_pattern)
+            out_key = _path_collision_key(out_path)
+            if out_key in planned_outputs:
+                other_input, other_output = planned_outputs[out_key]
+                parser.error(
+                    "--output-pattern maps multiple inputs to the same output: "
+                    f"{other_input.name} and {path.name} -> {other_output}"
+                )
+            if out_key in input_keys:
+                parser.error(f"--output-pattern would overwrite an input file: {out_path}")
+            planned_outputs[out_key] = (path, out_path)
         folder_output_dir.mkdir(parents=True, exist_ok=True)
         # Images first, then videos.
         if folder_images:
             from jasna.image_restore import run_image_restoration_folder
-            run_image_restoration_folder(args, folder_images, folder_output_dir)
+            run_image_restoration_folder(
+                args,
+                folder_images,
+                folder_output_dir,
+                output_pattern=args.output_pattern,
+                progress_total=folder_total,
+            )
         if not folder_videos:
             return
 
@@ -562,7 +606,7 @@ def main() -> None:
 
         def _video_output_path(vid: Path) -> Path:
             if input_is_dir:
-                return folder_output_dir / f"{vid.stem}_out{vid.suffix}"
+                return folder_output_path(folder_output_dir, vid, args.output_pattern)
             return output_video or vid.with_stem(vid.stem + "_out")
 
         pipeline: Pipeline | None = None
@@ -604,10 +648,12 @@ def main() -> None:
                     segment_duration=float(args.stream_segment_duration),
                 )
             else:
-                for i, vid in enumerate(video_inputs, start=1):
+                video_start = len(folder_images) + 1 if input_is_dir else 1
+                video_total = len(folder_images) + len(video_inputs) if input_is_dir else len(video_inputs)
+                for i, vid in enumerate(video_inputs, start=video_start):
                     out_path = _video_output_path(vid)
                     if input_is_dir:
-                        print(f"[{i}/{len(video_inputs)}] Processing {vid.name} -> {out_path.name}")
+                        print(f"[{i}/{video_total}] Processing {vid.name} -> {out_path.name}")
                     pipeline = _make_pipeline(vid, out_path)
                     try:
                         pipeline.run()

@@ -90,6 +90,7 @@ class TestBuildParser:
         assert args.stream_port == 8765
         assert args.stream_segment_duration == 4.0
         assert args.no_browser is False
+        assert args.output_pattern is None
         assert args.detection_model == "rfdetr-v5"
         assert args.detection_score_threshold == 0.25
         assert args.benchmark is False
@@ -409,6 +410,105 @@ class TestFolderBatchProgress:
         printed = capsys.readouterr().out
         assert "[1/2] Processing a.mp4 -> a_out.mp4" in printed
         assert "[2/2] Processing b.mp4 -> b_out.mp4" in printed
+
+    def test_folder_output_pattern_applies_to_videos(self, tmp_path, capsys):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "a.mkv").touch()
+        (in_dir / "b.mov").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        out_dir = tmp_path / "out"
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(out_dir),
+            "--output-pattern", "{original}_restored.mp4",
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+        ]
+
+        pipeline_cls = _run_main(argv)
+
+        output_names = [call.kwargs["output_video"].name for call in pipeline_cls.call_args_list]
+        assert output_names == ["a_restored.mp4", "b_restored.mp4"]
+        printed = capsys.readouterr().out
+        assert "[1/2] Processing a.mkv -> a_restored.mp4" in printed
+        assert "[2/2] Processing b.mov -> b_restored.mp4" in printed
+
+    def test_folder_output_pattern_rejects_duplicate_outputs(self, tmp_path, capsys):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "a.mkv").touch()
+        (in_dir / "b.mov").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        out_dir = tmp_path / "out"
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(out_dir),
+            "--output-pattern", "restored.mp4",
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+        ]
+
+        with pytest.raises(SystemExit) as exc:
+            _run_main(argv)
+
+        assert exc.value.code == 2
+        assert not out_dir.exists()
+        assert "maps multiple inputs to the same output" in capsys.readouterr().err
+
+    def test_folder_output_pattern_rejects_input_overwrite(self, tmp_path, capsys):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "clip.mp4").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(in_dir),
+            "--output-pattern", "{original}.mp4",
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+        ]
+
+        with pytest.raises(SystemExit) as exc:
+            _run_main(argv)
+
+        assert exc.value.code == 2
+        assert "would overwrite an input file" in capsys.readouterr().err
+
+    def test_folder_video_progress_counts_images_too(self, tmp_path, capsys):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "photo.png").touch()
+        (in_dir / "clip.mp4").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(tmp_path / "out"),
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+        ]
+
+        with patch("jasna.image_restore.run_image_restoration_folder") as image_batch:
+            _run_main(argv)
+
+        assert image_batch.call_args.kwargs["progress_total"] == 2
+        assert "[2/2] Processing clip.mp4 -> clip_out.mp4" in capsys.readouterr().out
 
     def test_single_file_does_not_print_batch_line(self, tmp_path, capsys):
         inp, out, rest, det = _make_model_files(tmp_path)

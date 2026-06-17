@@ -66,3 +66,15 @@ class TestFolderOutputPath:
     def test_preserves_extension(self):
         out = folder_output_path(Path("/out"), Path("/in/clip.mkv"))
         assert out == Path("/out/clip_out.mkv")
+
+    def test_pattern_uses_video_template_extension(self):
+        out = folder_output_path(Path("/out"), Path("/in/clip.mkv"), "{original}_restored.mp4")
+        assert out == Path("/out/clip_restored.mp4")
+
+    def test_pattern_keeps_image_extension(self):
+        out = folder_output_path(Path("/out"), Path("/in/photo.jpg"), "{original}_restored.mp4")
+        assert out == Path("/out/photo_restored.jpg")
+
+    def test_pattern_without_suffix_preserves_input_extension(self):
+        out = folder_output_path(Path("/out"), Path("/in/clip.mkv"), "{original}_restored")
+        assert out == Path("/out/clip_restored.mkv")
