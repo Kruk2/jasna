@@ -48,7 +48,7 @@ Join the [SLS Discord](https://discord.gg/5R2Rx5nBH) for examples, support, and 
 - Up-to-date Nvidia drivers. Tested driver: **591.67**. The 59x driver family is the minimum expected family.
 - An install path that uses ASCII characters only.
 - Windows release package: bundled with `ffmpeg`, `ffprobe`, and `mkvmerge`.
-- Linux release package: requires `ffmpeg`, `ffprobe`, and `mkvmerge` on your system. `ffmpeg` major version must be **8**. `mkvmerge` is part of [MKVToolNix](https://mkvtoolnix.download/downloads.html).
+- Linux release package: bundled with `ffmpeg`, `ffprobe`, and `mkvmerge`.
 
 Jasna automatically manages VRAM. When GPU VRAM runs low, frames waiting in the processing queue are temporarily moved to system RAM and moved back when needed. This requires no configuration.
 
