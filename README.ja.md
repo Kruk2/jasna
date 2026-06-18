@@ -48,7 +48,7 @@ SLS Discord では、復元例、サポート、設定について話せます�
 - 最新の Nvidia ドライバー。テスト済みドライバー: **591.67**。59x 系が最低想定ドライバーです。
 - インストール先パスは ASCII 文字のみである必要があります。
 - Windows リリースパッケージ: `ffmpeg`、`ffprobe`、`mkvmerge` を同梱しています。
-- Linux リリースパッケージ: システム側に `ffmpeg`、`ffprobe`、`mkvmerge` が必要です。`ffmpeg` のメジャーバージョンは **8** である必要があります。`mkvmerge` は [MKVToolNix](https://mkvtoolnix.download/downloads.html) に含まれます。
+- Linux リリースパッケージ: `ffmpeg`、`ffprobe`、`mkvmerge` を同梱しています。
 
 Jasna は VRAM を自動管理します。GPU VRAM が不足すると、処理キューで待機中のフレームを一時的にシステム RAM へ移し、必要なときに戻します。設定は不要です。
 

@@ -349,6 +349,21 @@ def test_find_executable_prefers_bundled_when_frozen(monkeypatch, tmp_path) -> N
     assert os_utils.find_executable("ffmpeg") == str(ffmpeg)
 
 
+def test_find_executable_bundled_wins_over_system_path(monkeypatch, tmp_path) -> None:
+    # A frozen release ships its own ffmpeg/mkvmerge; it must use those even when a different
+    # copy is on the user's PATH (otherwise a wrong-version system ffmpeg would be picked).
+    monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
+    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(os_utils, "_bundled_exe_filename", lambda name: name)
+
+    ffmpeg = tmp_path / "tools" / "ffmpeg"
+    ffmpeg.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg.write_bytes(b"")
+
+    assert os_utils.find_executable("ffmpeg") == str(ffmpeg)
+
+
 def test_find_executable_finds_bundled_mkvmerge_recursive(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
     monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
