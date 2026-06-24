@@ -77,6 +77,15 @@ class BlendBuffer:
                 return True
             return all(tid in self._results for tid in pending)
 
+    def has_pending(self, frame_idx: int) -> bool:
+        """True if this frame has any (non-empty) pending restorations to blend.
+
+        Used by the reproject-to-source path to skip the fisheye round trip on
+        frames with no detections (they pass straight through as the source frame).
+        """
+        with self._lock:
+            return bool(self.pending_map.get(frame_idx))
+
     def blend_frame(self, frame_idx: int, original_frame: torch.Tensor) -> torch.Tensor:
         with self._lock:
             pending = self.pending_map.pop(frame_idx, None)

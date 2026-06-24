@@ -71,15 +71,18 @@ class FisheyeRemapper:
 
     @torch.inference_mode()
     def __call__(self, frames: torch.Tensor) -> torch.Tensor:
-        """frames: (N, 3, H, W) uint8 CUDA RGB -> same shape/dtype, fisheye-remapped.
+        """frames: (3,H,W) or (N,3,H,W) uint8 CUDA RGB -> same shape/dtype, fisheye-remapped.
 
         Sampled one frame at a time: at 8K an fp32 grid_sample transient is ~0.8 GB
         per frame, so a whole batch at once would spike VRAM on a tool that runs
         restoration concurrently. The per-frame loop caps the transient; grid_sample
         is fast enough that the extra launches are negligible.
         """
+        single = frames.ndim == 3
+        if single:
+            frames = frames.unsqueeze(0)
         if frames.ndim != 4 or frames.shape[1] != 3:
-            raise ValueError(f"expected (N,3,H,W), got {tuple(frames.shape)}")
+            raise ValueError(f"expected (3,H,W) or (N,3,H,W), got {tuple(frames.shape)}")
         if frames.shape[-2:] != (self.height, self.width):
             raise ValueError(
                 f"frame size {tuple(frames.shape[-2:])} != grid {(self.height, self.width)}")
@@ -88,7 +91,7 @@ class FisheyeRemapper:
             sampled = F.grid_sample(frames[i:i + 1].float(), self._grid, mode="bilinear",
                                     padding_mode="zeros", align_corners=False)
             out[i] = sampled[0].round_().clamp_(0, 255).to(torch.uint8)
-        return out
+        return out[0] if single else out
 
 
 class InverseFisheyeRemapper:
