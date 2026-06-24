@@ -12,6 +12,7 @@ from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
 from jasna.frame_queue import FrameQueue
 from jasna.media.video_decoder import NvidiaVideoReader
+from jasna.media.fisheye_remap import InverseFisheyeRemapper
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
@@ -270,6 +271,7 @@ def blend_encode_loop(
     error_holder: list[BaseException],
     frame_writer: FrameWriter,
     fisheye_remap: bool = False,
+    reproject_to_source: bool = False,
     cancel_event: threading.Event | None = None,
     seek_ts: float | None = None,
     vram_offloader=None,
@@ -277,6 +279,13 @@ def blend_encode_loop(
     timer = LoopTimer("blend-encode")
     try:
         torch.cuda.set_device(device)
+
+        # When processing in fisheye but exporting in the source (VR180) projection,
+        # reproject each blended frame fisheye -> hequirect just before encode.
+        inverse_remapper = (
+            InverseFisheyeRemapper(metadata.video_width, metadata.video_height, device)
+            if (fisheye_remap and reproject_to_source) else None
+        )
 
         def _flat_frames(rdr: NvidiaVideoReader):
             for batch, pts in rdr.frames(seek_ts=seek_ts):
@@ -335,6 +344,8 @@ def blend_encode_loop(
 
                 with timer.measure("blend"):
                     blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
+                    if inverse_remapper is not None:
+                        blended = inverse_remapper(blended)
                 with timer.measure("write"):
                     frame_writer.write(blended, meta.pts)
                     frames_encoded += 1

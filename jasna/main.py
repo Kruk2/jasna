@@ -278,6 +278,17 @@ def build_parser() -> argparse.ArgumentParser:
             "VR180 content and produces a fisheye-projected output. (default: %(default)s)"
         ),
     )
+    projection.add_argument(
+        "--reproject-to-source",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "With --fisheye-remap, reproject the restored result back to the source "
+            "half-equirectangular (VR180) projection before encoding, so the output "
+            "matches the original projection. No effect without --fisheye-remap. "
+            "(default: %(default)s)"
+        ),
+    )
 
     streaming = parser.add_argument_group("Streaming")
     streaming.add_argument(
@@ -635,6 +646,7 @@ def main() -> None:
                 temporal_overlap=temporal_overlap,
                 enable_crossfade=bool(args.enable_crossfade),
                 fisheye_remap=bool(args.fisheye_remap),
+                reproject_to_source=bool(args.reproject_to_source),
                 fp16=fp16,
                 disable_progress=args.no_progress,
                 working_directory=working_directory,

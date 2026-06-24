@@ -72,6 +72,7 @@ class Pipeline:
         temporal_overlap: int,
         enable_crossfade: bool = True,
         fisheye_remap: bool = False,
+        reproject_to_source: bool = False,
         fp16: bool,
         disable_progress: bool = False,
         progress_callback: callable | None = None,
@@ -88,6 +89,7 @@ class Pipeline:
         self.temporal_overlap = int(temporal_overlap)
         self.enable_crossfade = bool(enable_crossfade)
         self.fisheye_remap = bool(fisheye_remap)
+        self.reproject_to_source = bool(reproject_to_source)
 
         self.detection_model = build_detection_model(
             detection_model_name,
@@ -401,6 +403,7 @@ class Pipeline:
                     error_holder=error_holder,
                     frame_writer=frame_writer,
                     fisheye_remap=self.fisheye_remap,
+                    reproject_to_source=self.reproject_to_source,
                     vram_offloader=vram_offloader,
                 ),
                 name="BlendEncode", daemon=True,

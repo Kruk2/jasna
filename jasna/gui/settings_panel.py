@@ -471,6 +471,24 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["fisheye_remap"].pack(side="right", padx=12, pady=8)
         self._widgets["fisheye_remap"].deselect()
 
+        # Reproject restored result back to source (VR180) projection
+        row_reproject = ctk.CTkFrame(inner, fg_color="transparent")
+        row_reproject.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        reproject_frame = ctk.CTkFrame(row_reproject, fg_color=Colors.BG_CARD, corner_radius=6)
+        reproject_frame.pack(fill="x")
+        reproject_label = ctk.CTkLabel(reproject_frame, text=t("reproject_to_source"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        reproject_label.pack(side="left", padx=12, pady=8)
+        reproject_tip = ctk.CTkLabel(reproject_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        reproject_tip.pack(side="left")
+        Tooltip(reproject_tip, get_tooltip("reproject_to_source"))
+        self._widgets["reproject_to_source"] = ctk.CTkSwitch(
+            reproject_frame, text="", fg_color=Colors.BORDER_LIGHT, progress_color=Colors.PRIMARY,
+            command=lambda: self._on_toggle_change("reproject_to_source")
+        )
+        self._widgets["reproject_to_source"].pack(side="right", padx=12, pady=8)
+        self._widgets["reproject_to_source"].deselect()
+
         # Denoising Strength
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -1178,6 +1196,11 @@ class SettingsPanel(ctk.CTkFrame):
             self._widgets["fisheye_remap"].select()
         else:
             self._widgets["fisheye_remap"].deselect()
+
+        if getattr(preset, "reproject_to_source", False):
+            self._widgets["reproject_to_source"].select()
+        else:
+            self._widgets["reproject_to_source"].deselect()
             
         if preset.fp16_mode:
             self._widgets["fp16_mode"].select()
@@ -1407,6 +1430,7 @@ class SettingsPanel(ctk.CTkFrame):
             temporal_overlap=int(self._widgets["temporal_overlap"].get()),
             enable_crossfade=self._widgets["enable_crossfade"].get() == 1,
             fisheye_remap=self._widgets["fisheye_remap"].get() == 1,
+            reproject_to_source=self._widgets["reproject_to_source"].get() == 1,
             fp16_mode=self._widgets["fp16_mode"].get() == 1,
             denoise_strength=denoise_strength,
             denoise_step=denoise_step,
