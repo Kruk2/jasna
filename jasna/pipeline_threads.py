@@ -12,6 +12,7 @@ from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
 from jasna.frame_queue import FrameQueue
 from jasna.media.video_decoder import NvidiaVideoReader
+from jasna.media.fisheye_remap import FisheyeRemapper, InverseFisheyeRemapper
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.pipeline_processing import process_frame_batch, finalize_processing
@@ -38,6 +39,7 @@ def decode_detect_loop(
     max_clip_size: int,
     temporal_overlap: int,
     enable_crossfade: bool,
+    fisheye_remap: bool = False,
     blend_buffer: BlendBuffer,
     crop_buffers: dict[int, CropBuffer],
     clip_queue: FrameQueue,
@@ -57,7 +59,7 @@ def decode_detect_loop(
         blend_frames = (temporal_overlap // 3) if enable_crossfade else 0
 
         with (
-            NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata) as reader,
+            NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata, fisheye_remap=fisheye_remap) as reader,
             torch.inference_mode(),
         ):
             if progress is not None:
@@ -268,6 +270,8 @@ def blend_encode_loop(
     metadata_queue: Queue,
     error_holder: list[BaseException],
     frame_writer: FrameWriter,
+    fisheye_remap: bool = False,
+    reproject_to_source: bool = False,
     cancel_event: threading.Event | None = None,
     seek_ts: float | None = None,
     vram_offloader=None,
@@ -276,12 +280,22 @@ def blend_encode_loop(
     try:
         torch.cuda.set_device(device)
 
+        # Reproject-to-source: process in fisheye but export in the source (VR180)
+        # projection. reader2 (below) decodes the SOURCE equirect, so frames with no
+        # detections pass straight through untouched (no remap). Only frames that
+        # actually have restorations are round-tripped: equirect -> fisheye (forward,
+        # identical grid to detection) -> blend the fisheye crops -> fisheye -> equirect.
+        forward_remapper = inverse_remapper = None
+        if fisheye_remap and reproject_to_source:
+            forward_remapper = FisheyeRemapper(metadata.video_width, metadata.video_height, device)
+            inverse_remapper = InverseFisheyeRemapper(metadata.video_width, metadata.video_height, device)
+
         def _flat_frames(rdr: NvidiaVideoReader):
             for batch, pts in rdr.frames(seek_ts=seek_ts):
                 for i in range(len(pts)):
                     yield batch[i]
 
-        with NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata) as reader2:
+        with NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata, fisheye_remap=(fisheye_remap and not reproject_to_source)) as reader2:
             frame_gen = _flat_frames(reader2)
             secondary_done = False
             frames_encoded = 0
@@ -332,7 +346,13 @@ def blend_encode_loop(
                             pass
 
                 with timer.measure("blend"):
-                    blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
+                    if forward_remapper is not None and blend_buffer.has_pending(meta.frame_idx):
+                        # restored frame: round-trip equirect -> fisheye -> blend -> equirect
+                        fisheye_frame = forward_remapper(original_frame)
+                        blended = inverse_remapper(blend_buffer.blend_frame(meta.frame_idx, fisheye_frame))
+                    else:
+                        # no restoration (or not reproject mode): no remap, source passthrough
+                        blended = blend_buffer.blend_frame(meta.frame_idx, original_frame)
                 with timer.measure("write"):
                     frame_writer.write(blended, meta.pts)
                     frames_encoded += 1

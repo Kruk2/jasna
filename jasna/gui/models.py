@@ -68,6 +68,8 @@ class AppSettings:
     max_clip_size: int = 90
     temporal_overlap: int = 8
     enable_crossfade: bool = True
+    fisheye_remap: bool = False
+    reproject_to_source: bool = False
     fp16_mode: bool = True
     
     # Denoising

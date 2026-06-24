@@ -398,6 +398,8 @@ class Processor:
                 max_clip_size=settings.max_clip_size,
                 temporal_overlap=settings.temporal_overlap,
                 enable_crossfade=settings.enable_crossfade,
+                fisheye_remap=settings.fisheye_remap,
+                reproject_to_source=settings.reproject_to_source,
                 fp16=settings.fp16_mode,
                 disable_progress=True,
                 progress_callback=progress_callback,

@@ -3,6 +3,7 @@ import sys
 import torch
 import python_vali as vali
 from jasna.media import VideoMetadata
+from jasna.media.fisheye_remap import FisheyeRemapper
 from typing import Iterator
 
 _libcuda: ctypes.CDLL | None = None
@@ -24,11 +25,13 @@ def _create_blocking_cuda_stream() -> int:
 
 
 class NvidiaVideoReader:
-    def __init__(self, file: str, batch_size: int, device: torch.device, metadata: VideoMetadata):
+    def __init__(self, file: str, batch_size: int, device: torch.device, metadata: VideoMetadata, fisheye_remap: bool = False):
         self.device = device
         self.file = file
         self.batch_size = batch_size
         self.metadata = metadata
+        self.fisheye_remap = bool(fisheye_remap)
+        self._remapper = None
 
     def __enter__(self):
         self._raw_stream = _create_blocking_cuda_stream()
@@ -91,6 +94,9 @@ class NvidiaVideoReader:
             t = self._bayer8[self._y_mod8][:, self._x_mod8].unsqueeze(0)
             self._dither2 = torch.floor(t * 4.0).to(torch.int32)
 
+        if self.fisheye_remap:
+            self._remapper = FisheyeRemapper(self.decoder.Width, self.decoder.Height, self.device)
+
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -129,6 +135,9 @@ class NvidiaVideoReader:
                     frame_idx += 1
                     pkts.append(pkt_data.pts)
                 self.stream.synchronize()
+            if self._remapper is not None and pkts:
+                n = len(pkts)
+                batch_tensor_nv[:n] = self._remapper(batch_tensor_nv[:n])
             yield batch_tensor_nv, pkts
             if eof:
                 break
