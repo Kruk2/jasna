@@ -63,3 +63,9 @@ CLAUDE.md
 *.pth
 model_weights/
 dist_windows/
+
+.repowise/
+.repowise-workspace/
+.repowise-workspace.yaml
+.mcp.json
+AGENTS.md
