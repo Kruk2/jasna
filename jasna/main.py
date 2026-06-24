@@ -267,6 +267,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Detection score threshold (default: %(default)s)",
     )
 
+    projection = parser.add_argument_group("Projection")
+    projection.add_argument(
+        "--fisheye-remap",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help=(
+            "Remap half-equirectangular side-by-side (VR180) frames to equidistant "
+            "fisheye SBS on the GPU before detection. Improves detection/restoration on "
+            "VR180 content and produces a fisheye-projected output. (default: %(default)s)"
+        ),
+    )
+
     streaming = parser.add_argument_group("Streaming")
     streaming.add_argument(
         "--stream",
@@ -622,6 +634,7 @@ def main() -> None:
                 max_clip_size=max_clip_size,
                 temporal_overlap=temporal_overlap,
                 enable_crossfade=bool(args.enable_crossfade),
+                fisheye_remap=bool(args.fisheye_remap),
                 fp16=fp16,
                 disable_progress=args.no_progress,
                 working_directory=working_directory,

@@ -452,7 +452,25 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["enable_crossfade"].pack(side="right", padx=12, pady=8)
         self._widgets["enable_crossfade"].select()
-        
+
+        # Fisheye remap (VR180) toggle
+        row_fisheye = ctk.CTkFrame(inner, fg_color="transparent")
+        row_fisheye.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        fisheye_frame = ctk.CTkFrame(row_fisheye, fg_color=Colors.BG_CARD, corner_radius=6)
+        fisheye_frame.pack(fill="x")
+        fisheye_label = ctk.CTkLabel(fisheye_frame, text=t("fisheye_remap"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        fisheye_label.pack(side="left", padx=12, pady=8)
+        fisheye_tip = ctk.CTkLabel(fisheye_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        fisheye_tip.pack(side="left")
+        Tooltip(fisheye_tip, get_tooltip("fisheye_remap"))
+        self._widgets["fisheye_remap"] = ctk.CTkSwitch(
+            fisheye_frame, text="", fg_color=Colors.BORDER_LIGHT, progress_color=Colors.PRIMARY,
+            command=lambda: self._on_toggle_change("fisheye_remap")
+        )
+        self._widgets["fisheye_remap"].pack(side="right", padx=12, pady=8)
+        self._widgets["fisheye_remap"].deselect()
+
         # Denoising Strength
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -1155,6 +1173,11 @@ class SettingsPanel(ctk.CTkFrame):
             self._widgets["enable_crossfade"].select()
         else:
             self._widgets["enable_crossfade"].deselect()
+
+        if getattr(preset, "fisheye_remap", False):
+            self._widgets["fisheye_remap"].select()
+        else:
+            self._widgets["fisheye_remap"].deselect()
             
         if preset.fp16_mode:
             self._widgets["fp16_mode"].select()
@@ -1383,6 +1406,7 @@ class SettingsPanel(ctk.CTkFrame):
             max_clip_size=int(self._widgets["max_clip_size"].get()),
             temporal_overlap=int(self._widgets["temporal_overlap"].get()),
             enable_crossfade=self._widgets["enable_crossfade"].get() == 1,
+            fisheye_remap=self._widgets["fisheye_remap"].get() == 1,
             fp16_mode=self._widgets["fp16_mode"].get() == 1,
             denoise_strength=denoise_strength,
             denoise_step=denoise_step,

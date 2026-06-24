@@ -33,6 +33,7 @@ def _get_cli_descriptions() -> dict[str, str]:
                 "max_clip_size": "max_clip_size",
                 "temporal_overlap": "temporal_overlap",
                 "enable_crossfade": "enable_crossfade",
+                "fisheye_remap": "fisheye_remap",
                 "denoise": "denoise_strength",
                 "denoise_step": "denoise_step",
                 "secondary_restoration": "secondary_restoration",
@@ -175,6 +176,7 @@ TRANSLATIONS = {
         # Advanced Processing
         "temporal_overlap": "Temporal Overlap",
         "enable_crossfade": "Enable Crossfade",
+        "fisheye_remap": "Fisheye Remap (VR180)",
         "denoise_strength": "Denoise Strength",
         "denoise_step": "Denoise Apply After",
         "denoise_none": "None",
@@ -304,6 +306,7 @@ TRANSLATIONS = {
         "tip_max_clip_size": "How many frames are processed at once. Larger values can improve quality but use more VRAM.\n\nRecommended: 60 or higher. Use 60 even if it means disabling model compilation.\nGuidance: 60 (safe), 90 (good balance), 180 (best quality, needs 12 GB+ VRAM with Compile BasicVSR++ enabled, less with it disabled).\n4K videos use more VRAM — a lower clip size may produce similar quality but process much faster.\nDefault: 90",
         "tip_temporal_overlap": "Overlap between processed clips to reduce flickering at boundaries.\nHigher = smoother transitions but slightly slower. Going above 20 has little benefit.\n\nRecommended values based on clip size:\n- Clip 60 → overlap 6-8\n- Clip 90 → overlap 8-12\n- Clip 180 → overlap 15-20\nDefault: 8",
         "tip_enable_crossfade": "Smoothly blends clip boundaries to reduce flickering. Reuses already-processed frames so there is zero extra GPU cost.\n\nRecommended: Always ON.\nDefault: ON",
+        "tip_fisheye_remap": "Remaps half-equirectangular side-by-side (VR180) frames to equidistant fisheye SBS on the GPU before detection. Equirectangular distortion degrades mosaic detection/restoration; fisheye is more natural for the models. The exported video is fisheye-projected.\n\nOnly enable for VR180 SBS sources. Output resolution is unchanged.\nDefault: OFF",
         "tip_fp16_mode": "Uses half-precision math to reduce VRAM usage and often run faster. No visible quality loss on modern GPUs.\n\nRecommended: ON for RTX 20-series and newer.\nDefault: ON",
         "tip_compile_basicvsrpp": "Compiles the restoration model into TensorRT sub-engines for a big speed boost (~2-3x faster).\nFirst compilation takes 15-60 minutes. Close all other applications (including browsers) and avoid using the PC during compilation.\nEngines are cached and reused on subsequent runs.\n\nEngine VRAM: ~1.9 GB (clip 60), ~5.4 GB (clip 180).\nPeak VRAM during processing: ~7.6 GB (clip 60), ~14.7 GB (clip 180).\nWithout compilation: ~6 GB (clip 60), ~10.4 GB (clip 180).\n\nIf you run out of VRAM, disable this or lower clip size.\n\nRecommended: ON with clip size 60-90.\nDefault: ON",
         "tip_denoise_strength": "Reduces noise and grain in restored areas. Higher = smoother but may lose fine detail.\n\nNone: no denoising. Low/Medium: good starting point. High: heavy smoothing.\nDefault: None",

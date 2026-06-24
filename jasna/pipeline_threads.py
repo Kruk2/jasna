@@ -38,6 +38,7 @@ def decode_detect_loop(
     max_clip_size: int,
     temporal_overlap: int,
     enable_crossfade: bool,
+    fisheye_remap: bool = False,
     blend_buffer: BlendBuffer,
     crop_buffers: dict[int, CropBuffer],
     clip_queue: FrameQueue,
@@ -57,7 +58,7 @@ def decode_detect_loop(
         blend_frames = (temporal_overlap // 3) if enable_crossfade else 0
 
         with (
-            NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata) as reader,
+            NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata, fisheye_remap=fisheye_remap) as reader,
             torch.inference_mode(),
         ):
             if progress is not None:
@@ -268,6 +269,7 @@ def blend_encode_loop(
     metadata_queue: Queue,
     error_holder: list[BaseException],
     frame_writer: FrameWriter,
+    fisheye_remap: bool = False,
     cancel_event: threading.Event | None = None,
     seek_ts: float | None = None,
     vram_offloader=None,
@@ -281,7 +283,7 @@ def blend_encode_loop(
                 for i in range(len(pts)):
                     yield batch[i]
 
-        with NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata) as reader2:
+        with NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata, fisheye_remap=fisheye_remap) as reader2:
             frame_gen = _flat_frames(reader2)
             secondary_done = False
             frames_encoded = 0
