@@ -91,6 +91,10 @@ class TestPipelineInit:
         p = _make_pipeline(enable_crossfade=False)
         assert p.enable_crossfade is False
 
+    def test_codec_forwarded_unchanged(self):
+        for codec in ("hevc", "h264", "av1"):
+            assert _make_pipeline(codec=codec).codec == codec
+
     def test_progress_callback(self):
         cb = MagicMock()
         p = _make_pipeline(progress_callback=cb)

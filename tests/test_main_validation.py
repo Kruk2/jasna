@@ -42,9 +42,20 @@ def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detec
 
 
 class TestMainValidation:
-    def test_bad_codec_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="Unsupported codec"):
-            _run_main_with_args(tmp_path, ["--codec", "h264"])
+    def test_bad_codec_rejected_by_argparse(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--codec", "vp9"])
+
+    def test_h264_and_av1_codecs_accepted(self, tmp_path):
+        _run_main_with_args(tmp_path, ["--codec", "h264"])
+        _run_main_with_args(tmp_path, ["--codec", "av1"])
+
+    def test_codec_case_normalized(self, tmp_path):
+        _run_main_with_args(tmp_path, ["--codec", "AV1"])
+
+    def test_codec_specific_encoder_settings_validated(self, tmp_path):
+        with pytest.raises(ValueError, match="for codec av1.*profile"):
+            _run_main_with_args(tmp_path, ["--codec", "av1", "--encoder-settings", "profile=main"])
 
     def test_batch_size_zero_raises(self, tmp_path):
         with pytest.raises(ValueError, match="batch-size must be > 0"):

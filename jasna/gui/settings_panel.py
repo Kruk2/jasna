@@ -10,6 +10,30 @@ from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.components import CollapsibleSection, Toast, PresetDialog, ConfirmDialog
 from jasna.gui.locales import t
 
+# Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
+# from these maps, never from .lower() on the label.
+CODEC_LABEL_TO_CANONICAL = {
+    "HEVC (H.265)": "hevc",
+    "H.264 (AVC)": "h264",
+    "AV1": "av1",
+}
+CODEC_CANONICAL_TO_LABEL = {v: k for k, v in CODEC_LABEL_TO_CANONICAL.items()}
+
+_AV1_CQ_OFFSET = 7
+_CQ_MIN = 15
+_CQ_MAX = 35
+
+
+def translate_cq_for_codec(cq: int, old_codec: str, new_codec: str) -> int:
+    """Keep roughly equal quality when the user visibly switches codec scales."""
+    if old_codec == new_codec:
+        return cq
+    if old_codec == "av1":
+        cq -= _AV1_CQ_OFFSET
+    if new_codec == "av1":
+        cq += _AV1_CQ_OFFSET
+    return max(_CQ_MIN, min(_CQ_MAX, cq))
+
 
 def get_tooltip(key: str) -> str:
     """Get localized tooltip for a setting key."""
@@ -947,13 +971,15 @@ class SettingsPanel(ctk.CTkFrame):
         codec_tip.pack(side="left", padx=4)
         Tooltip(codec_tip, get_tooltip("codec"))
         self._widgets["codec"] = ctk.CTkOptionMenu(
-            row1, values=["HEVC"],
+            row1, values=list(CODEC_LABEL_TO_CANONICAL),
             fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY, width=100
+            text_color=Colors.TEXT_PRIMARY, width=120,
+            command=self._on_codec_changed,
         )
         self._widgets["codec"].pack(side="right")
-        self._widgets["codec"].set("HEVC")
+        self._widgets["codec"].set(CODEC_CANONICAL_TO_LABEL["hevc"])
+        self._active_codec = "hevc"
         
         # Quality/CQ
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -1016,6 +1042,17 @@ class SettingsPanel(ctk.CTkFrame):
             command=self._browse_lut_path,
         )
         lut_browse_btn.pack(side="right")
+
+    def _on_codec_changed(self, label: str):
+        new_codec = CODEC_LABEL_TO_CANONICAL[label]
+        old_codec = getattr(self, "_active_codec", "hevc")
+        cq = translate_cq_for_codec(
+            int(self._widgets["encoder_cq"].get()), old_codec, new_codec
+        )
+        self._widgets["encoder_cq"].set(cq)
+        self._widgets["encoder_cq_val"].configure(text=str(cq))
+        self._active_codec = new_codec
+        self._mark_modified()
 
     def _browse_lut_path(self):
         filepath = filedialog.askopenfilename(
@@ -1187,7 +1224,10 @@ class SettingsPanel(ctk.CTkFrame):
         else:
             self._widgets["image_restore_freeu"].deselect()
 
-        self._widgets["codec"].set(preset.codec.upper())
+        self._widgets["codec"].set(
+            CODEC_CANONICAL_TO_LABEL.get(preset.codec, CODEC_CANONICAL_TO_LABEL["hevc"])
+        )
+        self._active_codec = preset.codec if preset.codec in CODEC_CANONICAL_TO_LABEL else "hevc"
         self._widgets["encoder_cq"].set(preset.encoder_cq)
         self._widgets["encoder_cq_val"].configure(text=str(preset.encoder_cq))
         self._widgets["encoder_custom_args"].delete(0, "end")
@@ -1364,7 +1404,7 @@ class SettingsPanel(ctk.CTkFrame):
             detection_model=self._widgets["detection_model"].get(),
             detection_score_threshold=float(self._widgets["detection_score_threshold"].get()),
             compile_basicvsrpp=self._widgets["compile_basicvsrpp"].get() == 1,
-            codec=self._widgets["codec"].get().lower(),
+            codec=CODEC_LABEL_TO_CANONICAL[self._widgets["codec"].get()],
             encoder_cq=int(self._widgets["encoder_cq"].get()),
             encoder_custom_args=self._widgets["encoder_custom_args"].get(),
             file_conflict=file_conflict,

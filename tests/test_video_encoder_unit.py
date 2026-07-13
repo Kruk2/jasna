@@ -13,6 +13,14 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 from jasna.media import VideoMetadata
+from jasna.media.rgb_to_nv12 import (
+    chw_rgb_to_nv12_bt2020_full,
+    chw_rgb_to_nv12_bt2020_limited,
+    chw_rgb_to_nv12_bt601_full,
+    chw_rgb_to_nv12_bt601_limited,
+    chw_rgb_to_nv12_bt709_full,
+    chw_rgb_to_nv12_bt709_limited,
+)
 from jasna.media.rgb_to_p010 import (
     chw_rgb_to_p010_bt2020_full,
     chw_rgb_to_p010_bt2020_limited,
@@ -21,7 +29,14 @@ from jasna.media.rgb_to_p010 import (
     chw_rgb_to_p010_bt709_full,
     chw_rgb_to_p010_bt709_limited,
 )
-from jasna.media.video_encoder import DEFAULT_ENCODER_OPTIONS, NvidiaVideoEncoder
+from jasna.media.video_encoder import (
+    DEFAULT_AV1_ENCODER_OPTIONS,
+    DEFAULT_ENCODER_OPTIONS,
+    DEFAULT_H264_ENCODER_OPTIONS,
+    ENCODER_SPECS,
+    _CODEC_MAP,
+    NvidiaVideoEncoder,
+)
 
 
 def _fake_metadata(**overrides) -> VideoMetadata:
@@ -45,14 +60,85 @@ def _fake_metadata(**overrides) -> VideoMetadata:
     return VideoMetadata(**defaults)
 
 
-def _make_encoder(tmp_path, encoder_settings=None, **meta_overrides) -> NvidiaVideoEncoder:
+def _make_encoder(tmp_path, encoder_settings=None, codec="hevc", **meta_overrides) -> NvidiaVideoEncoder:
     return NvidiaVideoEncoder(
         file=str(tmp_path / "result.mkv"),
         device=torch.device("cuda:0"),
         metadata=_fake_metadata(**meta_overrides),
-        codec="hevc",
+        codec=codec,
         encoder_settings=encoder_settings or {},
     )
+
+
+# Pre-PR hevc_nvenc configuration; the HEVC path must never drift from it.
+_HEVC_OPTIONS_SNAPSHOT = {
+    "preset": "p5",
+    "tune": "hq",
+    "profile": "main10",
+    "rc": "vbr",
+    "cq": "25",
+    "qmin": "17",
+    "qmax": "34",
+    "nonref_p": "1",
+    "g": "250",
+    "temporal-aq": "1",
+    "rc-lookahead": "32",
+    "lookahead_level": "1",
+    "spatial_aq": "1",
+    "aq-strength": "8",
+    "init_qpI": "17",
+    "init_qpP": "17",
+    "init_qpB": "17",
+    "bf": "4",
+    "b_ref_mode": "middle",
+}
+
+
+class TestCodecSpecs:
+    def test_public_to_ffmpeg_codec_mapping(self):
+        assert _CODEC_MAP == {"hevc": "hevc_nvenc", "h264": "h264_nvenc", "av1": "av1_nvenc"}
+
+    def test_hevc_defaults_snapshot_unchanged(self):
+        assert DEFAULT_ENCODER_OPTIONS == _HEVC_OPTIONS_SNAPSHOT
+        assert dict(ENCODER_SPECS["hevc"].default_options) == _HEVC_OPTIONS_SNAPSHOT
+
+    def test_h264_defaults_snapshot(self):
+        expected = dict(_HEVC_OPTIONS_SNAPSHOT)
+        expected["profile"] = "high"
+        expected["cq"] = "24"
+        del expected["lookahead_level"]
+        assert DEFAULT_H264_ENCODER_OPTIONS == expected
+
+    def test_av1_defaults_snapshot(self):
+        expected = dict(_HEVC_OPTIONS_SNAPSHOT)
+        del expected["profile"]
+        expected["cq"] = "32"
+        del expected["qmin"]
+        del expected["qmax"]
+        del expected["spatial_aq"]
+        del expected["init_qpI"]
+        del expected["init_qpP"]
+        del expected["init_qpB"]
+        expected["spatial-aq"] = "1"
+        assert DEFAULT_AV1_ENCODER_OPTIONS == expected
+
+    def test_av1_does_not_reuse_hevc_qp_scale(self):
+        assert DEFAULT_AV1_ENCODER_OPTIONS["cq"] == "32"
+        assert not {
+            "qmin",
+            "qmax",
+            "init_qpI",
+            "init_qpP",
+            "init_qpB",
+        } & DEFAULT_AV1_ENCODER_OPTIONS.keys()
+
+    def test_frame_formats_and_bit_depth(self):
+        assert ENCODER_SPECS["hevc"].frame_format == "p010le"
+        assert ENCODER_SPECS["hevc"].ten_bit is True
+        assert ENCODER_SPECS["h264"].frame_format == "nv12"
+        assert ENCODER_SPECS["h264"].ten_bit is False
+        assert ENCODER_SPECS["av1"].frame_format == "p010le"
+        assert ENCODER_SPECS["av1"].ten_bit is True
 
 
 class TestEncoderOptions:
@@ -60,8 +146,22 @@ class TestEncoderOptions:
         enc = _make_encoder(tmp_path)
         assert enc.encoder_options == DEFAULT_ENCODER_OPTIONS
 
-    def test_settings_override_and_stringify(self, tmp_path):
-        enc = _make_encoder(tmp_path, encoder_settings={"cq": 22, "temporal-aq": False, "maxrate": "10M"})
+    @pytest.mark.parametrize(
+        ("codec", "defaults"),
+        [
+            ("hevc", DEFAULT_ENCODER_OPTIONS),
+            ("h264", DEFAULT_H264_ENCODER_OPTIONS),
+            ("av1", DEFAULT_AV1_ENCODER_OPTIONS),
+        ],
+    )
+    def test_defaults_per_codec(self, tmp_path, codec, defaults):
+        enc = _make_encoder(tmp_path, codec=codec)
+        assert enc.encoder_options == defaults
+        assert enc.encoder_name == _CODEC_MAP[codec]
+
+    @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+    def test_settings_override_and_stringify(self, tmp_path, codec):
+        enc = _make_encoder(tmp_path, codec=codec, encoder_settings={"cq": 22, "temporal-aq": False, "maxrate": "10M"})
         assert enc.encoder_options["cq"] == "22"
         assert enc.encoder_options["temporal-aq"] == "0"
         assert enc.encoder_options["maxrate"] == "10M"
@@ -73,9 +173,27 @@ class TestEncoderOptions:
                 file=str(tmp_path / "o.mkv"),
                 device=torch.device("cuda:0"),
                 metadata=_fake_metadata(),
-                codec="av1",
+                codec="vp9",
                 encoder_settings={},
             )
+
+    def test_codec_specific_settings_rejected(self, tmp_path):
+        with pytest.raises(ValueError, match="for codec av1.*profile"):
+            _make_encoder(tmp_path, codec="av1", encoder_settings={"profile": "main"})
+        with pytest.raises(ValueError, match="for codec av1.*spatial_aq"):
+            _make_encoder(tmp_path, codec="av1", encoder_settings={"spatial_aq": 1})
+        with pytest.raises(ValueError, match="for codec h264.*tier"):
+            _make_encoder(tmp_path, codec="h264", encoder_settings={"tier": "high"})
+
+    def test_h264_user_can_opt_into_lookahead_level(self, tmp_path):
+        enc = _make_encoder(tmp_path, codec="h264", encoder_settings={"lookahead_level": 1})
+        assert enc.encoder_options["lookahead_level"] == "1"
+
+    @pytest.mark.parametrize("codec", ["hevc", "h264"])
+    def test_hyphenated_spatial_aq_replaces_underscore_default(self, tmp_path, codec):
+        enc = _make_encoder(tmp_path, codec=codec, encoder_settings={"spatial-aq": 0})
+        assert enc.encoder_options["spatial_aq"] == "0"
+        assert "spatial-aq" not in enc.encoder_options
 
     def test_leftover_options_raise(self, tmp_path):
         enc = _make_encoder(tmp_path)
@@ -109,9 +227,30 @@ class TestColorHandling:
             (AvColorspace.BT2020, AvColorRange.JPEG, chw_rgb_to_p010_bt2020_full),
         ],
     )
-    def test_selects_matrix_and_range_converter(self, tmp_path, color_space, color_range, expected):
-        enc = _make_encoder(tmp_path, color_space=color_space, color_range=color_range)
-        assert enc._to_p010 is expected
+    @pytest.mark.parametrize("codec", ["hevc", "av1"])
+    def test_selects_p010_converter_for_hevc_and_av1(self, tmp_path, codec, color_space, color_range, expected):
+        enc = _make_encoder(tmp_path, codec=codec, color_space=color_space, color_range=color_range)
+        assert enc._to_yuv is expected
+
+    @pytest.mark.parametrize(
+        ("color_space", "color_range", "expected"),
+        [
+            (AvColorspace.ITU709, AvColorRange.MPEG, chw_rgb_to_nv12_bt709_limited),
+            (AvColorspace.ITU709, AvColorRange.JPEG, chw_rgb_to_nv12_bt709_full),
+            (AvColorspace.ITU601, AvColorRange.MPEG, chw_rgb_to_nv12_bt601_limited),
+            (AvColorspace.ITU601, AvColorRange.JPEG, chw_rgb_to_nv12_bt601_full),
+            (AvColorspace.BT2020, AvColorRange.MPEG, chw_rgb_to_nv12_bt2020_limited),
+            (AvColorspace.BT2020, AvColorRange.JPEG, chw_rgb_to_nv12_bt2020_full),
+        ],
+    )
+    def test_selects_nv12_converter_for_h264(self, tmp_path, color_space, color_range, expected):
+        enc = _make_encoder(tmp_path, codec="h264", color_space=color_space, color_range=color_range)
+        assert enc._to_yuv is expected
+
+    @pytest.mark.parametrize("codec", ["h264", "av1"])
+    def test_unsupported_color_range_raises_for_new_codecs(self, tmp_path, codec):
+        with pytest.raises(ValueError, match="Unsupported color space or color range"):
+            _make_encoder(tmp_path, codec=codec, color_range=AvColorRange.UNSPECIFIED)
 
 
 def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
