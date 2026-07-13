@@ -14,25 +14,35 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# ffmpeg hevc_nvenc option names
 SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
         "preset",
-        "tuning_info",
+        "tune",
+        "profile",
         "rc",
         "cq",
         "qmin",
         "qmax",
-        "nonrefp",
-        "gop",
-        "maxbitrate",
-        "vbvinit",
-        "vbvbufsize",
-        "temporalaq",
-        "lookahead",
+        "nonref_p",
+        "g",
+        "temporal-aq",
+        "rc-lookahead",
         "lookahead_level",
-        "aq",
-        "initqp",
-        "tflevel",
+        "spatial_aq",
+        "aq-strength",
+        "init_qpI",
+        "init_qpP",
+        "init_qpB",
+        "bf",
+        "b_ref_mode",
+        "maxrate",
+        "bufsize",
+        "multipass",
+        "b_adapt",
+        "weighted_pred",
+        "tier",
+        "tf_level",
     }
 )
 
@@ -189,9 +199,19 @@ def get_video_meta_data(path: str) -> VideoMetadata:
     time_base = Fraction(value[0], value[1])
 
     start_pts = json_video_stream.get('start_pts')
-    color_range = AvColorRange.MPEG if 'color_range' not in json_video_stream or json_video_stream['color_range'] == 'tv' else AvColorRange.JPEG if json_video_stream['color_range'] == 'jpeg' else AvColorRange.MPEG
-    _cs = json_video_stream.get('color_space', '')
-    color_space = AvColorspace.ITU601 if _cs in ('bt601', 'bt470bg', 'smpte170m') else AvColorspace.ITU709
+    range_name = (json_video_stream.get("color_range") or "").lower()
+    color_range = (
+        AvColorRange.JPEG
+        if range_name in {"pc", "jpeg", "full"}
+        else AvColorRange.MPEG
+    )
+    color_space_name = (json_video_stream.get("color_space") or "").lower()
+    if color_space_name in {"bt601", "bt470bg", "smpte170m"}:
+        color_space = AvColorspace.ITU601
+    elif color_space_name in {"bt2020", "bt2020nc", "bt2020_ncl"}:
+        color_space = AvColorspace.BT2020
+    else:
+        color_space = AvColorspace.ITU709
 
 
     num_frames = int(json_video_stream.get('nb_frames', 0))

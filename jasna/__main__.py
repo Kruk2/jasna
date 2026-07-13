@@ -39,15 +39,15 @@ if not is_frozen():
 
 
 def _preload_native_libs():
-    """Import native GPU libraries before tkinter on Linux.
+    """Import native media libraries before tkinter on Linux.
 
-    On Linux, loading Tcl/Tk (via customtkinter) first introduces shared
-    library conflicts that prevent _python_vali and PyNvVideoCodec native
-    extensions from initializing. Importing them before tkinter avoids this.
+    On Linux, loading Tcl/Tk (via customtkinter) first can introduce shared
+    library conflicts that prevent PyAV's bundled libav from initializing.
+    Importing it before tkinter avoids this.
     """
     if sys.platform != "linux":
         return
-    for mod in ("python_vali", "PyNvVideoCodec"):
+    for mod in ("av",):
         try:
             __import__(mod)
         except Exception:

@@ -131,3 +131,31 @@ class TestSeekBehavior:
             f"Subsequent batches too slow ({avg_interval:.2f}s avg), "
             f"suggests re-seeking on each batch"
         )
+
+    def test_seek_honors_nonzero_stream_start_time(self, video_path, tmp_path):
+        """Seek targets must be offset by the stream's start_time, and the first
+        returned frame must not precede the requested timestamp."""
+        import subprocess
+        from jasna.os_utils import resolve_executable
+
+        shifted = tmp_path / "shifted.mp4"
+        subprocess.run(
+            [resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+             "-i", video_path, "-t", "4", "-c", "copy",
+             "-output_ts_offset", "1.5", str(shifted)],
+            check=True,
+        )
+        shifted_meta = get_video_meta_data(str(shifted))
+        device = torch.device("cuda:0")
+        seek_ts = 2.5
+        with NvidiaVideoReader(str(shifted), batch_size=8, device=device, metadata=shifted_meta) as reader:
+            _, pts = next(iter(reader.frames(seek_ts=seek_ts)))
+
+        first_seconds = float(pts[0] * shifted_meta.time_base)
+        start_seconds = float(shifted_meta.start_pts * shifted_meta.time_base)
+        assert start_seconds >= 1.4, f"fixture lost its start offset ({start_seconds})"
+        assert first_seconds >= start_seconds + seek_ts - 0.001, (
+            f"first frame at {first_seconds:.3f}s precedes start_time+seek_ts "
+            f"({start_seconds + seek_ts:.3f}s)"
+        )
+        assert first_seconds < start_seconds + seek_ts + 0.5

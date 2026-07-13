@@ -1,181 +1,77 @@
 from __future__ import annotations
 
-import torch
-import logging
-
-import PyNvVideoCodec as nvc
-from pathlib import Path
-from jasna.media import VideoMetadata
-from jasna.media.lut import GpuLutApplier, parse_cube_file
-from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited, chw_rgb_to_p010_bt601_limited
-from jasna.os_utils import subprocess_no_window_kwargs
-from jasna.media.audio_utils import audio_codec_args
-import av
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 import heapq
-from collections  import deque
-import subprocess
-import threading
+import logging
 import queue
-av.logging.set_level(logging.ERROR)
+import threading
+from collections import deque
+from pathlib import Path
 
-from jasna.os_utils import resolve_executable
+import av
+import torch
+from av.video.frame import CudaContext
+from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
+
+from jasna.media import VideoMetadata
+from jasna.media.audio_utils import needs_audio_reencode
+from jasna.media.lut import GpuLutApplier, parse_cube_file
+from jasna.media.rgb_to_p010 import (
+    chw_rgb_to_p010_bt2020_full,
+    chw_rgb_to_p010_bt2020_limited,
+    chw_rgb_to_p010_bt601_full,
+    chw_rgb_to_p010_bt601_limited,
+    chw_rgb_to_p010_bt709_full,
+    chw_rgb_to_p010_bt709_limited,
+)
+
+av.logging.set_level(logging.ERROR)
 
 logger = logging.getLogger(__name__)
 
-def _parse_hevc_nal_units(data: bytes):
-    """Parse HEVC NAL units from Annex B bitstream. Returns list of (nal_type, start, end)."""
-    nal_units = []
-    i = 0
-    n = len(data)
-    
-    while i < n - 3:
-        # Find start code (0x000001 or 0x00000001)
-        if data[i:i+3] == b'\x00\x00\x01':
-            start = i + 3
-            sc_len = 3
-        elif i < n - 4 and data[i:i+4] == b'\x00\x00\x00\x01':
-            start = i + 4
-            sc_len = 4
-        else:
-            i += 1
-            continue
-        
-        # Find next start code
-        end = start
-        while end < n - 3:
-            if data[end:end+3] == b'\x00\x00\x01' or (end < n - 4 and data[end:end+4] == b'\x00\x00\x00\x01'):
-                break
-            end += 1
-        if end >= n - 3:
-            end = n
-        
-        if start < n:
-            # HEVC NAL unit type is bits 1-6 of first byte
-            nal_type = (data[start] >> 1) & 0x3F
-            nal_units.append((nal_type, i, end))
-        
-        i = end
-    
-    return nal_units
+_CODEC_MAP = {"hevc": "hevc_nvenc"}
+
+DEFAULT_ENCODER_OPTIONS: dict[str, str] = {
+    "preset": "p5",
+    "tune": "hq",
+    "profile": "main10",
+    "rc": "vbr",
+    "cq": "25",
+    "qmin": "17",
+    "qmax": "34",
+    "nonref_p": "1",
+    "g": "250",
+    "temporal-aq": "1",
+    "rc-lookahead": "32",
+    "lookahead_level": "1",
+    "spatial_aq": "1",
+    "aq-strength": "8",
+    "init_qpI": "17",
+    "init_qpP": "17",
+    "init_qpB": "17",
+    "bf": "4",
+    "b_ref_mode": "middle",
+}
+
+# ITU-T H.273 matrix, primaries, and transfer-characteristic code points.
+_COLOR_TAGS = {
+    AvColorspace.ITU709: (1, 1, 1),
+    AvColorspace.ITU601: (6, 6, 6),
+    AvColorspace.BT2020: (9, 9, 14),  # bt2020nc, bt2020 primaries, bt2020-10 transfer
+}
+_COLOR_CONVERTERS = {
+    (AvColorspace.ITU709, AvColorRange.MPEG): chw_rgb_to_p010_bt709_limited,
+    (AvColorspace.ITU709, AvColorRange.JPEG): chw_rgb_to_p010_bt709_full,
+    (AvColorspace.ITU601, AvColorRange.MPEG): chw_rgb_to_p010_bt601_limited,
+    (AvColorspace.ITU601, AvColorRange.JPEG): chw_rgb_to_p010_bt601_full,
+    (AvColorspace.BT2020, AvColorRange.MPEG): chw_rgb_to_p010_bt2020_limited,
+    (AvColorspace.BT2020, AvColorRange.JPEG): chw_rgb_to_p010_bt2020_full,
+}
 
 
-def _is_hevc_keyframe(data: bytes) -> bool:
-    """Check if HEVC bitstream contains an IDR or CRA frame."""
-    # HEVC NAL types for keyframes: IDR_W_RADL=19, IDR_N_LP=20, CRA_NUT=21, BLA types=16-18
-    keyframe_types = {16, 17, 18, 19, 20, 21}
-    for nal_type, _, _ in _parse_hevc_nal_units(data):
-        if nal_type in keyframe_types:
-            return True
-    return False
-
-
-def _extract_hevc_extradata(data: bytes) -> bytes:
-    """Extract VPS, SPS, PPS NAL units for codec extradata."""
-    # VPS=32, SPS=33, PPS=34
-    param_types = {32, 33, 34}
-    extradata_parts = []
-    
-    for nal_type, start, end in _parse_hevc_nal_units(data):
-        if nal_type in param_types:
-            # Include the start code
-            extradata_parts.append(data[start-4:end] if data[start-4:start] == b'\x00\x00\x00\x01' else b'\x00\x00\x00\x01' + data[start:end])
-    
-    return b''.join(extradata_parts)
-
-
-def mux_hevc_to_mkv(hevc_path: Path, output_path: Path, pts_list, time_base):
-    timecodes_path = output_path.with_suffix('.txt')
-    with open(timecodes_path, 'w') as f:
-        f.write("# timestamp format v4\n")
-        for pts in pts_list:
-            timestamp_ms = float(pts * time_base * 1000)
-            f.write(f"{timestamp_ms:.6f}\n")
-    
-    cmd = [
-        resolve_executable("mkvmerge"),
-        "-o",
-        str(output_path),
-        "--timestamps",
-        f"0:{timecodes_path}",
-        str(hevc_path),
-    ]
-    result = subprocess.run(cmd, capture_output=True, **subprocess_no_window_kwargs())
-    if result.returncode != 0:
-        stdout_text = (result.stdout or b"").decode(errors="replace")
-        stderr_text = (result.stderr or b"").decode(errors="replace")
-        logger.error("mkvmerge failed (exit code %s). stdout:\n%s\nstderr:\n%s", result.returncode, stdout_text, stderr_text)
-        raise RuntimeError(f"mkvmerge failed with code {result.returncode}: {' '.join(cmd)}\n{stderr_text}")
-    timecodes_path.unlink()
-
-
-def remux_with_audio_and_metadata(video_input: Path, output_path: Path, metadata: VideoMetadata):
-    colorspace_map = {
-        AvColorspace.ITU709: 'bt709',
-        AvColorspace.ITU601: 'smpte170m',
-    }
-    color_range_map = {
-        AvColorRange.MPEG: 'tv',
-        AvColorRange.JPEG: 'pc',
-    }
-    # ITU-T H.273 / ISO 23091-2 code points for the HEVC VUI.
-    vui_code_map = {
-        AvColorspace.ITU709: 1,
-        AvColorspace.ITU601: 6,  # SMPTE 170M
-    }
-    ffmpeg_colorspace = colorspace_map.get(metadata.color_space, 'bt709')
-    ffmpeg_color_range = color_range_map.get(metadata.color_range, 'tv')
-    vui_code = vui_code_map.get(metadata.color_space, 1)
-    full_range_flag = 1 if metadata.color_range == AvColorRange.JPEG else 0
-
-    # NVENC bakes a BT.709 description into the HEVC bitstream VUI regardless of
-    # the source. Rewrite the VUI in-place (no re-encode) so the bitstream agrees
-    # with the container color tags set below.
-    hevc_metadata_bsf = (
-        f"hevc_metadata=colour_primaries={vui_code}"
-        f":transfer_characteristics={vui_code}"
-        f":matrix_coefficients={vui_code}"
-        f":video_full_range_flag={full_range_flag}"
-    )
-
-    cmd = [
-        resolve_executable("ffmpeg"),
-        "-y",
-        "-i",
-        str(video_input),
-        "-i",
-        metadata.video_file,
-        "-map",
-        "0:v:0",
-        "-map",
-        "1:a?",
-        "-map_metadata",
-        "1",
-        "-c:v",
-        "copy",
-        "-bsf:v",
-        hevc_metadata_bsf,
-        "-c:a",
-        *audio_codec_args(metadata.video_file, output_path),
-        "-color_primaries",
-        ffmpeg_colorspace,
-        "-color_trc",
-        ffmpeg_colorspace,
-        "-colorspace",
-        ffmpeg_colorspace,
-        "-color_range",
-        ffmpeg_color_range,
-    ]
-    if output_path.suffix.lower() in {'.mp4', '.mov'}:
-        cmd += ['-movflags', '+faststart']
-    cmd.append(str(output_path))
-    logger.debug("[remux] cmd: %s", ' '.join(cmd))
-    result = subprocess.run(cmd, capture_output=True, **subprocess_no_window_kwargs())
-    if result.returncode != 0:
-        stdout_text = (result.stdout or b"").decode(errors="replace")
-        stderr_text = (result.stderr or b"").decode(errors="replace")
-        logger.error("ffmpeg failed (exit code %s). stdout:\n%s\nstderr:\n%s", result.returncode, stdout_text, stderr_text)
-        raise RuntimeError(f"ffmpeg failed with code {result.returncode}: {' '.join(cmd)}\n{stderr_text}")
+def _option_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "1" if value else "0"
+    return str(value)
 
 
 class NvidiaVideoEncoder:
@@ -187,149 +83,132 @@ class NvidiaVideoEncoder:
         *,
         codec: str,
         encoder_settings: dict[str, object],
-        stream_mode: bool = False,
-        working_directory: Path | None = None,
         lut_path: str | Path | None = None,
     ):
+        if codec not in _CODEC_MAP:
+            raise ValueError(f"Unsupported codec: {codec}")
+        converter = _COLOR_CONVERTERS.get((metadata.color_space, metadata.color_range))
+        if converter is None:
+            raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
+
         self.metadata = metadata
         self.device = device
         self.file = file
         self.output_path = Path(file)
-        self.stream_mode = stream_mode
+        self.encoder_name = _CODEC_MAP[codec]
 
         self._lut_applier: GpuLutApplier | None = None
         if lut_path:
             lut = parse_cube_file(lut_path)
             self._lut_applier = GpuLutApplier(lut, device)
 
-        temp_dir = Path(working_directory) if working_directory is not None else self.output_path.parent
-        if working_directory is not None:
-            temp_dir.mkdir(parents=True, exist_ok=True)
-        bf = 1 if stream_mode else 4 # 1 or 2?
+        self._to_p010 = converter
 
-        #todo for streaming mode enable tuning low latency, disable qpass
-        encoder_options = {
-            'codec': codec,
-            'preset': 'P5',
-            'tuning_info': 'high_quality',
-            'profile': 'main10',
-            'rc': 'vbr',
-            "cq": 25,
-            "qmin": 17,
-            "qmax": 34,
-            # 'rc': 'constqp',
-            # 'constqp': 21,
-            'nonrefp': 1,
-            # 'multipass': 'qres', # lower psnr
-            'gop': 250,
-            'fps': float(metadata.video_fps_exact),
-            "maxbitrate": 0,
-            # "maxbitrate": 153600,
-            "vbvinit": 0,
-            "vbvbufsize": 0,
-            'temporalaq': 1,
-            'lookahead': 32,
-            'lookahead_level': 1,
-            'aq': 8,
-            "initqp": 17,
-            'bf': bf,
-            'tflevel': 0,
-            "bref": 2 if not stream_mode else 0,
-        }
-
+        self.encoder_options = dict(DEFAULT_ENCODER_OPTIONS)
         if encoder_settings:
-            encoder_options.update(encoder_settings)
-
-        gpu_id = self.device.index if self.device.index is not None else 0
-        self.stream = torch.cuda.Stream(device)
-        self.encoder = nvc.CreateEncoder(
-            width=metadata.video_width,
-            height=metadata.video_height,
-            gpu_id=gpu_id,
-            cudastream=self.stream.cuda_stream,
-            fmt="P010",
-            usecpuinputbuffer=False,
-            **encoder_options
-        )
+            self.encoder_options.update({k: _option_value(v) for k, v in encoder_settings.items()})
 
         self.BUFFER_MAX_SIZE = 8
-        self.pts_heap = []
-        self.frame_buffer = deque()
-        self.pts_set = set()
-        self.reordered_pts_queue = deque()
+
+    def __enter__(self):
+        self._src = av.open(self.metadata.video_file)
+
+        container_options = {}
+        if self.output_path.suffix.lower() in {".mp4", ".mov"}:
+            container_options["movflags"] = "+faststart"
+        self.dst = av.open(str(self.output_path), "w", container_options=container_options)
+        self.dst.metadata.update(self._src.metadata)
+
+        out_v = self.dst.add_stream(
+            self.encoder_name,
+            rate=self.metadata.video_fps_exact,
+            options=dict(self.encoder_options),
+        )
+        out_v.width = self.metadata.video_width
+        out_v.height = self.metadata.video_height
+        out_v.time_base = self.metadata.time_base
+        ctx = out_v.codec_context
+        ctx.time_base = self.metadata.time_base
+        ctx.framerate = self.metadata.video_fps_exact
+        ctx.pix_fmt = "cuda"
+        matrix, primaries, transfer = _COLOR_TAGS[self.metadata.color_space]
+        ctx.color_range = int(self.metadata.color_range)
+        ctx.colorspace = matrix
+        ctx.color_primaries = primaries
+        ctx.color_trc = transfer
+        self.out_stream = out_v
+
+        self._setup_audio()
+
+        # Wrap torch's already-current primary context.  FFmpeg's primary_ctx
+        # mode tries to change its scheduling flags and fails once torch has
+        # initialized it; current_ctx leaves the context and its flags alone.
+        # Keeping conversion and NVENC in one context also avoids a ~500 MiB
+        # secondary CUDA context and cross-context scheduling overhead.
+        self._cuda_ctx = CudaContext(
+            device_id=self.device.index or 0,
+            primary_ctx=False,
+            current_ctx=True,
+        )
+        self.stream = torch.cuda.Stream(self.device)
+        self.pts_heap: list[int] = []
+        self.frame_buffer: deque = deque()
+        self.pts_set: set[int] = set()
+        self._video_started = False
+        self._options_validated = False
+        self._worker_error: Exception | None = None
 
         self._stop_sentinel = object()
         self._encode_queue: queue.Queue = queue.Queue(maxsize=self.BUFFER_MAX_SIZE)
         self._encode_thread = threading.Thread(target=self._encode_worker, name="NvidiaVideoEncoderWorker", daemon=True)
         self._encode_thread.start()
-
-        if metadata.color_space not in (AvColorspace.ITU709, AvColorspace.ITU601) or metadata.color_range != AvColorRange.MPEG:
-            raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
-
-        self._to_p010 = (
-            chw_rgb_to_p010_bt601_limited
-            if metadata.color_space == AvColorspace.ITU601
-            else chw_rgb_to_p010_bt709_limited
-        )
-
-        self.temp_video_path = temp_dir / (self.output_path.stem + '_temp_video' + self.output_path.suffix)
-
-        if self.stream_mode:
-            dst_file = av.open(str(self.temp_video_path), 'w')
-            out_stream = dst_file.add_stream('hevc', rate=metadata.video_fps_exact)
-            out_stream.width = metadata.video_width
-            out_stream.height = metadata.video_height
-            out_stream.time_base = metadata.time_base
-            out_stream.color_range = metadata.color_range
-            out_stream.colorspace = metadata.color_space
-            out_stream.codec_context.width = metadata.video_width
-            out_stream.codec_context.height = metadata.video_height
-            out_stream.codec_context.time_base = metadata.time_base
-            out_stream.codec_context.color_range = metadata.color_range
-            out_stream.codec_context.colorspace = metadata.color_space
-            out_stream.options.update({'x265-params': 'log_level=error'})
-            self.dst_file = dst_file
-            self.out_stream = out_stream
-            self.extradata_set = False
-        else:
-            self.hevc_path = temp_dir / (self.output_path.stem + '.hevc')
-            self.raw_hevc = open(self.hevc_path, "wb")
-
-    def __enter__(self):
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
-        while self.frame_buffer:
-            self._process_buffer(flush_all=True)
-
-        self._encode_queue.join()
-        self._encode_queue.put(self._stop_sentinel)
-        self._encode_thread.join()
-
-        while True:
-            with torch.cuda.stream(self.stream):
-                bitstream = self.encoder.EndEncode()
-            if len(bitstream) == 0:
-                break
-            data = bytearray(bitstream)
-            if self.stream_mode:
-                pts = self.reordered_pts_queue.popleft()
-                self._mux_packet_pyav(data, pts)
+    def _setup_audio(self):
+        self._audio_pipes: dict[int, tuple[str, object, object]] = {}
+        self._audio_backlog: deque = deque()
+        self._audio_iter = None
+        audio_streams = list(self._src.streams.audio)
+        if not audio_streams:
+            return
+        for in_a in audio_streams:
+            if needs_audio_reencode(in_a.codec_context.name, self.output_path.suffix):
+                logger.info("re-encoding audio %s -> aac for %s", in_a.codec_context.name, self.output_path.suffix)
+                out_a = self.dst.add_stream("aac", rate=in_a.codec_context.sample_rate)
+                out_a.codec_context.layout = in_a.codec_context.layout
+                out_a.bit_rate = 256_000
+                resampler = av.AudioResampler(
+                    format="fltp",
+                    layout=in_a.codec_context.layout,
+                    rate=in_a.codec_context.sample_rate,
+                )
+                self._audio_pipes[in_a.index] = ("transcode", out_a, resampler)
             else:
-                self.raw_hevc.write(data)
+                out_a = self.dst.add_stream_from_template(in_a)
+                self._audio_pipes[in_a.index] = ("copy", out_a, None)
+            # add_stream_from_template copies neither of these
+            out_a.metadata.update(in_a.metadata)
+            out_a.disposition = in_a.disposition
+        self._audio_iter = self._src.demux(audio_streams)
 
-        if self.stream_mode:
-            self.dst_file.close()
-            remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
-            self.temp_video_path.unlink()
-        else:
-            self.raw_hevc.close()
-            mux_hevc_to_mkv(self.hevc_path, self.temp_video_path, self.reordered_pts_queue, self.metadata.time_base)
-            self.hevc_path.unlink()
-            remux_with_audio_and_metadata(self.temp_video_path, self.output_path, self.metadata)
-            self.temp_video_path.unlink()
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            if exc_type is None:
+                while self.frame_buffer:
+                    self._process_buffer(flush_all=True)
+            self._encode_queue.join()
+            self._encode_queue.put(self._stop_sentinel)
+            self._encode_thread.join()
 
-        del self.encoder
+            if exc_type is None and self._worker_error is None and self.out_stream.codec_context.is_open:
+                for packet in self.out_stream.encode(None):
+                    self._mux_video(packet)
+                self._drain_audio()
+        finally:
+            self.dst.close()
+            self._src.close()
+        if exc_type is None and self._worker_error is not None:
+            raise self._worker_error
 
     def _encode_worker(self):
         if self.device.type == "cuda":
@@ -340,11 +219,12 @@ class NvidiaVideoEncoder:
             try:
                 if item is self._stop_sentinel:
                     return
-                frame, pts, ready_event = item
-                self._handle_encode_item(frame, pts, ready_event)
-            except Exception:
+                if self._worker_error is None:
+                    frame, pts, ready_event = item
+                    self._handle_encode_item(frame, pts, ready_event)
+            except Exception as exc:
+                self._worker_error = exc
                 logger.exception("[encoder-worker] crashed")
-                raise
             finally:
                 self._encode_queue.task_done()
 
@@ -359,24 +239,72 @@ class NvidiaVideoEncoder:
         frame.record_stream(self.stream)
         self._encode_frame(frame, pts)
 
-    def _mux_packet_pyav(self, data: bytearray, pts: int):
-        data_bytes = bytes(data)
-        
-        if not self.extradata_set:
-            extradata = _extract_hevc_extradata(data_bytes)
-            if extradata:
-                self.out_stream.codec_context.extradata = extradata
-                self.extradata_set = True
-        
-        pkt = av.packet.Packet(data_bytes)
-        pkt.stream = self.out_stream
-        pkt.time_base = self.out_stream.time_base
-        pkt.pts = pts
-        
-        if _is_hevc_keyframe(data_bytes):
-            pkt.is_keyframe = True
-        
-        self.dst_file.mux(pkt)
+    def _validate_encoder_options(self):
+        leftover = dict(self.out_stream.codec_context.options)
+        if leftover:
+            raise ValueError(f"{self.encoder_name} did not accept encoder option(s): {sorted(leftover)}")
+        self._options_validated = True
+
+    def _mux_video(self, packet: av.Packet):
+        threshold = (
+            float(packet.dts * packet.time_base)
+            if packet.dts is not None and packet.time_base is not None
+            else None
+        )
+        self.dst.mux(packet)
+        if not self._video_started:
+            self._video_started = True
+        if not self._options_validated:
+            self._validate_encoder_options()
+        if threshold is not None:
+            self._pump_audio(threshold)
+
+    def _produce_audio_packets(self, in_packet) -> list:
+        kind, out_a, resampler = self._audio_pipes[in_packet.stream.index]
+        if kind == "copy":
+            if in_packet.dts is None and in_packet.pts is None:
+                return []
+            in_packet.stream = out_a
+            return [in_packet]
+        out_packets = []
+        for aframe in in_packet.decode():
+            for rframe in resampler.resample(aframe):
+                out_packets.extend(out_a.encode(rframe))
+        return out_packets
+
+    def _pump_audio(self, upto_seconds: float | None):
+        if self._audio_iter is None:
+            return
+        while True:
+            if self._audio_backlog:
+                packet = self._audio_backlog[0]
+                ts = packet.dts if packet.dts is not None else packet.pts
+                if (
+                    upto_seconds is not None
+                    and ts is not None
+                    and float(ts * packet.time_base) > upto_seconds
+                ):
+                    return
+                self._audio_backlog.popleft()
+                self.dst.mux(packet)
+                continue
+            in_packet = next(self._audio_iter, None)
+            if in_packet is None:
+                self._audio_iter = None
+                return
+            self._audio_backlog.extend(self._produce_audio_packets(in_packet))
+
+    def _drain_audio(self):
+        self._pump_audio(None)
+        for kind, out_a, resampler in self._audio_pipes.values():
+            if kind != "transcode":
+                continue
+            packets = []
+            for rframe in resampler.resample(None):
+                packets.extend(out_a.encode(rframe))
+            packets.extend(out_a.encode(None))
+            for packet in packets:
+                self.dst.mux(packet)
 
     def _process_buffer(self, flush_all=False):
         if len(self.frame_buffer) > (self.BUFFER_MAX_SIZE // 2) or (flush_all and self.frame_buffer):
@@ -386,23 +314,30 @@ class NvidiaVideoEncoder:
             self._encode_queue.put(self._build_encode_item(frame_to_encode, pts_to_assign))
 
     def _encode_frame(self, frame: torch.Tensor, pts: int):
-        self.reordered_pts_queue.append(pts)
-
         with torch.cuda.stream(self.stream):
             if self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
             p010 = self._to_p010(frame)
-            bitstream = self.encoder.Encode(p010)
 
-        if len(bitstream) > 0:
-            data = bytearray(bitstream)
-            if self.stream_mode:
-                pts = self.reordered_pts_queue.popleft()
-                self._mux_packet_pyav(data, pts)
-            else:
-                self.raw_hevc.write(data)
+        height = self.metadata.video_height
+        # NVENC consumes these pointers asynchronously, so finish the conversion
+        # before constructing the hardware frame on the shared CUDA context.
+        self.stream.synchronize()
+        hw_frame = av.VideoFrame.from_dlpack(
+            [p010[:height].view(torch.uint16), p010[height:].view(torch.uint16)],
+            format="p010le",
+            primary_ctx=False,
+            cuda_context=self._cuda_ctx,
+            current_ctx=True,
+        )
+        hw_frame.pts = pts
+        hw_frame.time_base = self.metadata.time_base
+        for packet in self.out_stream.encode(hw_frame):
+            self._mux_video(packet)
 
     def encode(self, frame: torch.Tensor, pts: int):
+        if self._worker_error is not None:
+            raise self._worker_error
         while pts in self.pts_set:
             pts += 1
         heapq.heappush(self.pts_heap, pts)

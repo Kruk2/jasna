@@ -1,52 +1,74 @@
 import logging
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import av
 import pytest
-import python_vali as vali
 
-from jasna.media.video_decoder import NvidiaVideoReader, VideoDecodeError
+from jasna.media.video_decoder import (
+    CORRUPT_PACKET_TOLERANCE,
+    NvidiaVideoReader,
+    VideoDecodeError,
+)
 
 
-def _reader(details, success):
+def _reader():
     reader = NvidiaVideoReader.__new__(NvidiaVideoReader)
     reader.file = "broken.mp4"
-    reader.decoder = MagicMock()
-    reader.decoder.DecodeSingleSurfaceAsyncDetailed.return_value = (success, details)
-    reader.decode_surface = MagicMock()
     return reader
 
 
-def test_decode_surface_logs_recovered_corruption(caplog):
-    details = SimpleNamespace(
-        info=vali.TaskExecInfo.SUCCESS,
-        message="recovered after 1 corrupt packet: Invalid data found when processing input",
+def _corrupt_packet():
+    packet = MagicMock()
+    packet.decode.side_effect = av.error.InvalidDataError(
+        1094995529, "Invalid data found when processing input"
     )
-    reader = _reader(details, success=True)
+    return packet
+
+
+def _good_packet():
+    packet = MagicMock()
+    packet.decode.return_value = [MagicMock()]
+    return packet
+
+
+def test_corrupt_packet_is_skipped_and_logged(caplog):
+    reader = _reader()
 
     with caplog.at_level(logging.WARNING):
-        assert reader._decode_surface(vali.PacketData(), None)
+        frames, errors = reader._decode_packet(_corrupt_packet(), 0)
 
+    assert frames == []
+    assert errors == 1
     assert "Recovered video corruption in broken.mp4" in caplog.text
     assert "Invalid data found when processing input" in caplog.text
 
 
-def test_decode_surface_returns_false_at_end_of_stream():
-    details = SimpleNamespace(info=vali.TaskExecInfo.END_OF_STREAM, message="end of stream")
-    reader = _reader(details, success=False)
+def test_error_counter_resets_after_good_packet():
+    reader = _reader()
 
-    assert not reader._decode_surface(vali.PacketData(), None)
+    _, errors = reader._decode_packet(_corrupt_packet(), 0)
+    assert errors == 1
+    frames, errors = reader._decode_packet(_good_packet(), errors)
+    assert len(frames) == 1
+    assert errors == 0
 
 
-def test_decode_surface_raises_clean_error_with_native_details():
-    details = SimpleNamespace(
-        info=SimpleNamespace(name="CORRUPT_DATA"),
-        message="too many consecutive corrupt packets (10)",
-    )
-    reader = _reader(details, success=False)
+def test_too_many_consecutive_corrupt_packets_raise():
+    reader = _reader()
 
+    errors = 0
     with pytest.raises(
         VideoDecodeError,
-        match=r"broken\.mp4.*CORRUPT_DATA.*too many consecutive corrupt packets",
+        match=r"broken\.mp4.*too many consecutive corrupt packets",
     ):
-        reader._decode_surface(vali.PacketData(), None)
+        for _ in range(CORRUPT_PACKET_TOLERANCE + 1):
+            _, errors = reader._decode_packet(_corrupt_packet(), errors)
+
+
+def test_other_ffmpeg_errors_raise_video_decode_error():
+    reader = _reader()
+    packet = MagicMock()
+    packet.decode.side_effect = av.error.MemoryError(12, "Cannot allocate memory")
+
+    with pytest.raises(VideoDecodeError, match=r"broken\.mp4"):
+        reader._decode_packet(packet, 0)

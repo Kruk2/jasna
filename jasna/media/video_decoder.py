@@ -3,13 +3,17 @@ import logging
 import sys
 from typing import Iterator
 
+import av
 import torch
-import python_vali as vali
+from av.codec.hwaccel import HWAccel
+from av.video.reformatter import ColorRange as AvColorRange
 
 from jasna.media import VideoMetadata
+from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 log = logging.getLogger(__name__)
 
+CORRUPT_PACKET_TOLERANCE = 10
 _libcuda: ctypes.CDLL | None = None
 
 
@@ -20,16 +24,22 @@ class VideoDecodeError(RuntimeError):
 def _cuda_driver() -> ctypes.CDLL:
     global _libcuda
     if _libcuda is None:
-        _libcuda = ctypes.CDLL("nvcuda.dll" if sys.platform == "win32" else "libcuda.so.1")
+        loader = ctypes.WinDLL if sys.platform == "win32" else ctypes.CDLL
+        lib = loader("nvcuda.dll" if sys.platform == "win32" else "libcuda.so.1")
+        lib.cuStreamCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
+        lib.cuStreamCreate.restype = ctypes.c_int
+        lib.cuStreamDestroy.argtypes = [ctypes.c_void_p]
+        lib.cuStreamDestroy.restype = ctypes.c_int
+        _libcuda = lib
     return _libcuda
 
 
-def _create_blocking_cuda_stream() -> int:
+def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.ExternalStream]:
     handle = ctypes.c_void_p()
-    rc = _cuda_driver().cuStreamCreate(ctypes.byref(handle), ctypes.c_uint(0))
-    if rc != 0:
-        raise RuntimeError(f"cuStreamCreate failed (CUDA error {rc})")
-    return handle.value
+    result = _cuda_driver().cuStreamCreate(ctypes.byref(handle), 0)
+    if result != 0 or handle.value is None:
+        raise RuntimeError(f"cuStreamCreate failed (CUDA error {result})")
+    return handle.value, torch.cuda.ExternalStream(handle.value, device=device)
 
 
 class NvidiaVideoReader:
@@ -40,126 +50,116 @@ class NvidiaVideoReader:
         self.metadata = metadata
 
     def __enter__(self):
-        self._raw_stream = _create_blocking_cuda_stream()
-        self.stream = torch.cuda.ExternalStream(self._raw_stream, device=self.device)
-        self.decoder = vali.PyDecoder(
-            self.file,
-            {},
-            gpu_id=self.device.index,
-            stream=self.stream.cuda_stream,
+        # Make torch's primary CUDA context current on this worker thread before
+        # asking FFmpeg to reuse it.
+        torch.cuda.current_stream(self.device)
+        hwaccel = HWAccel(
+            "cuda",
+            device=str(self.device.index or 0),
+            allow_software_fallback=False,
+            is_hw_owned=True,
         )
-        self.rgb_planar_surface = vali.Surface.Make(
-            format=vali.PixelFormat.RGB_PLANAR if self.decoder.Format == vali.PixelFormat.NV12 else vali.PixelFormat.RGB10_PLANAR,
-            width=self.decoder.Width,
-            height=self.decoder.Height,
-            gpu_id=self.device.index)
-        self.py_cvt = vali.PySurfaceConverter(gpu_id=self.device.index, stream=self.stream.cuda_stream)
-        self.decode_surface = vali.Surface.Make(
-            format=self.decoder.Format,
-            width=self.decoder.Width,
-            height=self.decoder.Height,
-            gpu_id=self.device.index,
+        # Reuse the CUDA context already made current by torch without asking
+        # FFmpeg to change the active primary context's scheduling flags.
+        hwaccel.options["primary_ctx"] = "0"
+        hwaccel.options["current_ctx"] = "1"
+        try:
+            self.container = av.open(self.file, hwaccel=hwaccel)
+            self.video_stream = self.container.streams.video[0]
+        except av.FFmpegError as e:
+            raise VideoDecodeError(f"Failed to open {self.file}: {e}") from e
+
+        ctx = self.video_stream.codec_context
+        self.width = ctx.width
+        self.height = ctx.height
+        full_range = (
+            ctx.color_range == int(AvColorRange.JPEG)
+            or self.metadata.color_range == AvColorRange.JPEG
         )
-        self.rgb_surface = vali.Surface.Make(
-            format=vali.PixelFormat.RGB if self.decoder.Format == vali.PixelFormat.NV12 else vali.PixelFormat.RGB10,
-            width=self.decoder.Width,
-            height=self.decoder.Height,
-            gpu_id=self.device.index)
-        
-        if self.decoder.Format == vali.PixelFormat.P10:
-            self.nv12_surface = vali.Surface.Make(
-                format=vali.PixelFormat.NV12,
-                width=self.decoder.Width,
-                height=self.decoder.Height,
-                gpu_id=self.device.index)
-        else:
-            self.nv12_surface = self.decode_surface
-
-        color_space = vali.ColorSpace.BT_709 if self.decoder.ColorSpace == vali.ColorSpace.UNSPEC else self.decoder.ColorSpace
-        color_range = vali.ColorRange.MPEG if self.decoder.ColorRange == vali.ColorRange.UDEF else self.decoder.ColorRange
-        self.cc_ctx = vali.ColorspaceConversionContext(color_space, color_range)
-
-        if self.decoder.Format == vali.PixelFormat.P10:
-            self._bayer8 = torch.tensor(
-                [
-                    [0, 48, 12, 60, 3, 51, 15, 63],
-                    [32, 16, 44, 28, 35, 19, 47, 31],
-                    [8, 56, 4, 52, 11, 59, 7, 55],
-                    [40, 24, 36, 20, 43, 27, 39, 23],
-                    [2, 50, 14, 62, 1, 49, 13, 61],
-                    [34, 18, 46, 30, 33, 17, 45, 29],
-                    [10, 58, 6, 54, 9, 57, 5, 53],
-                    [42, 26, 38, 22, 41, 25, 37, 21],
-                ],
-                device=self.device,
-                dtype=torch.float32,
-            )
-            self._bayer8 = (self._bayer8 + 0.5) / 64.0
-            self._y_mod8 = torch.arange(self.decoder.Height, device=self.device) & 7
-            self._x_mod8 = torch.arange(self.decoder.Width, device=self.device) & 7
-            t = self._bayer8[self._y_mod8][:, self._x_mod8].unsqueeze(0)
-            self._dither2 = torch.floor(t * 4.0).to(torch.int32)
-
+        self._converter = YuvToRgbConverter(
+            self.height,
+            self.width,
+            self.metadata.color_space,
+            full_range,
+            self.metadata.is_10bit,
+            self.device,
+        )
+        # A blocking stream participates in legacy-default-stream ordering.
+        # FFmpeg's CUDA/NVDEC device uses stream 0, so this makes decoded-frame
+        # writes happen-before conversion without an explicit cross-library event.
+        self._raw_stream, self.stream = _create_blocking_cuda_stream(self.device)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        del self.decoder
-        _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
+        self.container.close()
+        result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
+        if result != 0 and exc_type is None:
+            raise RuntimeError(f"cuStreamDestroy failed (CUDA error {result})")
 
-    def _decode_surface(
-        self,
-        pkt_data: vali.PacketData,
-        seek_ctx: vali.SeekContext | None,
-    ) -> bool:
-        success, details = self.decoder.DecodeSingleSurfaceAsyncDetailed(
-            self.decode_surface, pkt_data, seek_ctx,
-        )
-        if success:
-            if details.message:
-                log.warning(
-                    "Recovered video corruption in %s: %s",
-                    self.file,
-                    details.message,
-                )
-            return True
-        if details.info == vali.TaskExecInfo.END_OF_STREAM:
-            return False
-        message = details.message or details.info.name
-        raise VideoDecodeError(
-            f"Failed to decode {self.file} ({details.info.name}): {message}"
-        )
+    def _decode_packet(self, packet, consecutive_errors: int) -> tuple[list, int]:
+        try:
+            frames = packet.decode()
+        except av.error.InvalidDataError as e:
+            consecutive_errors += 1
+            if consecutive_errors > CORRUPT_PACKET_TOLERANCE:
+                raise VideoDecodeError(
+                    f"Failed to decode {self.file}: too many consecutive corrupt packets "
+                    f"({consecutive_errors}): {e}"
+                ) from e
+            log.warning("Recovered video corruption in %s: %s", self.file, e)
+            return [], consecutive_errors
+        except av.FFmpegError as e:
+            raise VideoDecodeError(f"Failed to decode {self.file}: {e}") from e
+        if frames:
+            consecutive_errors = 0
+        return frames, consecutive_errors
+
+    def _decoded_frames(self, seek_ts: float | None):
+        target_pts = None
+        if seek_ts is not None:
+            start = self.video_stream.start_time or 0
+            target_pts = start + round(seek_ts / self.video_stream.time_base)
+            self.container.seek(target_pts, stream=self.video_stream, backward=True)
+
+        consecutive_errors = 0
+        for packet in self.container.demux(self.video_stream):
+            frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
+            for frame in frames:
+                if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
+                    continue
+                target_pts = None
+                yield frame
+
+    def _read_group(self, decoded) -> list:
+        group = []
+        while len(group) < self.batch_size:
+            frame = next(decoded, None)
+            if frame is None:
+                break
+            group.append(frame)
+        return group
 
     def frames(
         self,
         seek_ts: float | None = None,
     ) -> Iterator[tuple[torch.Tensor, list[int]]]:
-        pkt_data = vali.PacketData()
-        eof = False
-        while True:
+        # FFmpeg 8 maps NVDEC output on CUDA stream 0. Conversion runs in a
+        # blocking stream in that same context, so legacy-default-stream ordering
+        # makes the decoded writes visible before this kernel without a race.
+        # Decode one group ahead while conversion runs; keep both groups' frame
+        # references alive until conversion is synchronized so their mapped
+        # surfaces cannot be recycled underneath queued work.
+        decoded = self._decoded_frames(seek_ts)
+        group = self._read_group(decoded)
+        while group:
+            batch = torch.empty(
+                (len(group), 3, self.height, self.width), device=self.device, dtype=torch.uint8
+            )
+            pts = [frame.pts for frame in group]
             with torch.cuda.stream(self.stream):
-                batch_tensor_nv = torch.empty((self.batch_size, 3, self.decoder.Height, self.decoder.Width), device=self.device, dtype=torch.uint8)
-                pkts: list[int] = []
-                seek_ctx = vali.SeekContext(seek_ts=seek_ts) if seek_ts is not None else None
-                seek_ts = None
+                self._converter.convert_frames_into(group, batch, self.stream.cuda_stream)
 
-                for i in range(self.batch_size):
-                    has_frame = self._decode_surface(pkt_data, seek_ctx)
-                    seek_ctx = None
-                    if not has_frame:
-                        eof = True
-                        break
-
-                    self.py_cvt.RunAsync(self.decode_surface, self.rgb_surface, self.cc_ctx)
-                    self.py_cvt.RunAsync(self.rgb_surface, self.rgb_planar_surface)
-
-                    tensor_nv = torch.from_dlpack(self.rgb_planar_surface)
-                    if tensor_nv.dtype == torch.uint16:
-                        frame10 = (tensor_nv.to(torch.int32) >> 6)
-                        tensor_nv = ((frame10 + self._dither2) >> 2).clamp(0, 255).to(torch.uint8)
-                    batch_tensor_nv[i].copy_(tensor_nv)
-
-                    pkts.append(pkt_data.pts)
-                self.stream.synchronize()
-            yield batch_tensor_nv, pkts
-            if eof:
-                break
+            next_group = self._read_group(decoded)
+            self.stream.synchronize()
+            group = next_group
+            yield batch, pts

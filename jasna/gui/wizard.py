@@ -113,9 +113,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._check_labels = {}
         checks = [
             ("ascii_path", t("wizard_check_ascii_path")),
-            ("ffmpeg", t("wizard_check_ffmpeg")),
             ("ffprobe", t("wizard_check_ffprobe")),
-            ("mkvmerge", t("wizard_check_mkvmerge")),
             ("gpu", t("wizard_check_gpu")),
             ("cuda", t("wizard_check_cuda")),
             ("driver", t("wizard_check_driver")),
@@ -287,9 +285,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         
         checks = [
             ("ascii_path", t("wizard_check_ascii_path")),
-            ("ffmpeg", t("wizard_check_ffmpeg")),
             ("ffprobe", t("wizard_check_ffprobe")),
-            ("mkvmerge", t("wizard_check_mkvmerge")),
             ("gpu", t("wizard_check_gpu")),
             ("cuda", t("wizard_check_cuda")),
             ("driver", t("wizard_check_driver")),
@@ -363,9 +359,7 @@ class FirstRunWizard(ctk.CTkToplevel):
     def _run_checks_blocking(self):
         """Run all dependency checks (blocking)."""
         self._check_results["ascii_path"] = os_utils.check_ascii_install_path()
-        self._check_results["ffmpeg"] = self._check_executable("ffmpeg")
         self._check_results["ffprobe"] = self._check_executable("ffprobe")
-        self._check_results["mkvmerge"] = self._check_executable("mkvmerge")
         self._check_results["gpu"] = self._check_gpu()
         self._check_results["cuda"] = self._check_cuda()
         self._check_results["driver"] = os_utils.check_gpu_driver_version()
@@ -376,7 +370,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         path = os_utils.find_executable(name)
         if not path:
             return False, t("wizard_not_found")
-        if name in {"ffmpeg", "ffprobe"}:
+        if name == "ffprobe":
             completed = subprocess.run(
                 [path, "-version"],
                 capture_output=True,
@@ -400,27 +394,6 @@ class FirstRunWizard(ctk.CTkToplevel):
             if major != 8:
                 return False, t("wizard_found_bad_major", path=path, major=major)
             return True, t("wizard_found_major", path=path, major=major)
-
-        if name == "mkvmerge":
-            completed = subprocess.run(
-                [path, "--version"],
-                capture_output=True,
-                text=True,
-                check=False,
-                **os_utils.subprocess_no_window_kwargs(),
-            )
-            if completed.returncode != 0:
-                logger.error(
-                    "%s failed (exit code %s). stdout:\n%s\nstderr:\n%s",
-                    name,
-                    completed.returncode,
-                    completed.stdout or "",
-                    completed.stderr or "",
-                )
-                return False, t("wizard_not_callable", path=path)
-            first = ((completed.stdout or "") + (completed.stderr or "")).splitlines()
-            ver = first[0].strip() if first else "OK"
-            return True, t("wizard_found_version", path=path, version=ver)
 
         return True, t("wizard_found", path=path)
         

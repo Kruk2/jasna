@@ -31,7 +31,6 @@ def test_iter_top_level_lib_dirs_finds_nuitka_root_layout(tmp_path) -> None:
     # dist root (no _internal/). configure_windows_dll_search_paths relies on this set.
     (tmp_path / "torch" / "lib").mkdir(parents=True)
     (tmp_path / "tensorrt_libs").mkdir()
-    (tmp_path / "PyNvVideoCodec").mkdir()
     (tmp_path / "nvvfx" / "libs").mkdir(parents=True)
     (tmp_path / "numpy.libs").mkdir()
 
@@ -40,7 +39,6 @@ def test_iter_top_level_lib_dirs_finds_nuitka_root_layout(tmp_path) -> None:
     assert str(tmp_path) in dirs
     assert str(tmp_path / "torch" / "lib") in dirs
     assert str(tmp_path / "tensorrt_libs") in dirs
-    assert str(tmp_path / "PyNvVideoCodec") in dirs
     assert str(tmp_path / "nvvfx" / "libs") in dirs
     assert str(tmp_path / "numpy.libs") in dirs
 

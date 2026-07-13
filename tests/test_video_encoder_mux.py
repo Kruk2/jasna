@@ -1,299 +1,166 @@
+"""Behavioral tests for the PyAV-based NvidiaVideoEncoder muxing: color tags,
+audio copy vs aac fallback, metadata/disposition, faststart, pts passthrough.
+Requires a CUDA GPU and an ffmpeg binary for fixture generation."""
+from __future__ import annotations
+
+import subprocess
 from fractions import Fraction
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
+import av
 import pytest
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
+import torch
 
-from jasna.media import VideoMetadata
-from jasna.media.audio_utils import (
-    _INCOMPATIBLE_AUDIO,
-    audio_codec_args,
-    needs_audio_reencode,
-    probe_audio_codec,
-)
-from jasna.media.video_encoder import mux_hevc_to_mkv, remux_with_audio_and_metadata
+from jasna.media import get_video_meta_data
+from jasna.media.audio_utils import needs_audio_reencode
+from jasna.media.video_decoder import NvidiaVideoReader
+from jasna.media.video_encoder import NvidiaVideoEncoder
+from jasna.os_utils import resolve_executable
+
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+
+DEVICE = torch.device("cuda:0")
 
 
-def _fake_metadata(**overrides) -> VideoMetadata:
-    defaults = dict(
-        video_file="fake_input.mkv",
-        num_frames=100,
-        video_fps=24.0,
-        average_fps=24.0,
-        video_fps_exact=Fraction(24, 1),
-        codec_name="hevc",
-        duration=100.0 / 24.0,
-        video_width=1920,
-        video_height=1080,
-        time_base=Fraction(1, 24000),
-        start_pts=0,
-        color_space=AvColorspace.ITU709,
-        color_range=AvColorRange.MPEG,
-        is_10bit=True,
+def _make_source(tmp_path: Path, name: str, acodec: str | None = "aac", extra: list[str] | None = None) -> Path:
+    out = tmp_path / name
+    cmd = [
+        resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=12:duration=2",
+    ]
+    if acodec:
+        cmd += ["-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", acodec]
+    cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
+    cmd += extra or []
+    cmd.append(str(out))
+    subprocess.run(cmd, check=True)
+    return out
+
+
+def _transcode(src: Path, dst: Path) -> None:
+    metadata = get_video_meta_data(str(src))
+    with (
+        NvidiaVideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={}) as encoder,
+    ):
+        for frames, pts_list in reader.frames():
+            for i, pts in enumerate(pts_list):
+                encoder.encode(frames[i], pts)
+
+
+def test_color_tags_and_frame_count(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as c:
+        v = c.streams.video[0]
+        assert v.codec_context.name == "hevc"
+        assert int(v.codec_context.color_range) == 1  # tv/mpeg
+        assert int(v.codec_context.colorspace) == 1  # bt709
+        assert int(v.codec_context.color_primaries) == 1
+        assert int(v.codec_context.color_trc) == 1
+        n = sum(1 for _ in c.decode(v))
+        assert n == 24
+
+
+def test_audio_copy_when_compatible(tmp_path):
+    src = _make_source(tmp_path, "src.mp4", acodec="aac")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as c:
+        assert len(c.streams.audio) == 1
+        assert c.streams.audio[0].codec_context.name == "aac"
+        assert float(c.streams.audio[0].duration * c.streams.audio[0].time_base) == pytest.approx(2.0, abs=0.15)
+
+
+def test_audio_reencoded_when_incompatible(tmp_path):
+    assert needs_audio_reencode("vorbis", ".mp4")
+    src = _make_source(tmp_path, "src.mkv", acodec="libvorbis")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as c:
+        a = c.streams.audio[0]
+        assert a.codec_context.name == "aac"
+        assert float(a.duration * a.time_base) == pytest.approx(2.0, abs=0.2)
+
+
+def test_container_metadata_and_audio_language_copied(tmp_path):
+    src = _make_source(
+        tmp_path, "src.mp4",
+        extra=["-metadata", "title=jasna-test", "-metadata:s:a:0", "language=pol"],
     )
-    defaults.update(overrides)
-    return VideoMetadata(**defaults)
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as c:
+        assert c.metadata.get("title") == "jasna-test"
+        assert c.streams.audio[0].metadata.get("language") == "pol"
 
 
-class TestMuxHevcToMkv:
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="mkvmerge")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_success_writes_timecodes_and_cleans_up(self, mock_run, mock_resolve, mock_si, tmp_path):
-        hevc_path = tmp_path / "video.hevc"
-        hevc_path.write_bytes(b"\x00")
-        output_path = tmp_path / "video.mkv"
+def test_faststart_moov_before_mdat(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
 
-        mock_run.return_value = MagicMock(returncode=0)
-        pts_list = [0, 1001, 2002]
-        time_base = Fraction(1, 24000)
-
-        mux_hevc_to_mkv(hevc_path, output_path, pts_list, time_base)
-
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "mkvmerge" in cmd[0]
-        assert str(output_path) in cmd
-        timecodes_path = output_path.with_suffix('.txt')
-        assert not timecodes_path.exists()
-
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="mkvmerge")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_failure_raises_runtime_error(self, mock_run, mock_resolve, mock_si, tmp_path):
-        hevc_path = tmp_path / "video.hevc"
-        hevc_path.write_bytes(b"\x00")
-        output_path = tmp_path / "video.mkv"
-
-        mock_run.return_value = MagicMock(returncode=2, stdout=b"", stderr=b"mux error")
-
-        with pytest.raises(RuntimeError, match="mkvmerge failed"):
-            mux_hevc_to_mkv(hevc_path, output_path, [0, 1001], Fraction(1, 24000))
-
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="mkvmerge")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_timecodes_file_content(self, mock_run, mock_resolve, mock_si, tmp_path):
-        hevc_path = tmp_path / "video.hevc"
-        hevc_path.write_bytes(b"\x00")
-        output_path = tmp_path / "video.mkv"
-        timecodes_path = output_path.with_suffix('.txt')
-
-        written_content = []
-
-        def capture_run(cmd, **kwargs):
-            written_content.append(timecodes_path.read_text())
-            return MagicMock(returncode=0)
-
-        mock_run.side_effect = capture_run
-
-        pts_list = [0, 1001, 2002]
-        time_base = Fraction(1, 24000)
-        mux_hevc_to_mkv(hevc_path, output_path, pts_list, time_base)
-
-        content = written_content[0]
-        assert "# timestamp format v4" in content
-        lines = content.strip().split("\n")
-        assert len(lines) == 4
+    data = dst.read_bytes()
+    assert data.index(b"moov") < data.index(b"mdat")
 
 
-class TestNeedsAudioReencode:
-    @pytest.mark.parametrize("codec,suffix,expected", [
-        ("wmav2", ".mp4", True),
-        ("wmav1", ".mp4", True),
-        ("wmapro", ".mp4", True),
-        ("vorbis", ".mp4", True),
-        ("aac", ".mp4", False),
-        ("mp3", ".mp4", False),
-        ("opus", ".mp4", False),
-        ("wmav2", ".mov", True),
-        ("opus", ".mov", True),
-        ("aac", ".mov", False),
-        ("opus", ".avi", True),
-        ("vorbis", ".avi", True),
-        ("flac", ".avi", True),
-        ("mp3", ".avi", False),
-        ("aac", ".webm", True),
-        ("mp3", ".webm", True),
-        ("wmav2", ".webm", True),
-        ("opus", ".webm", False),
-        ("vorbis", ".webm", False),
-        ("aac", ".mkv", False),
-        ("wmav2", ".mkv", False),
-        ("opus", ".mkv", False),
-        (None, ".mp4", False),
-        (None, ".mkv", False),
-        ("WMAv2", ".mp4", True),
-    ])
-    def test_table(self, codec, suffix, expected):
-        assert needs_audio_reencode(codec, suffix) == expected
+def test_video_pts_deltas_passthrough(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    def _pts(path):
+        with av.open(str(path)) as c:
+            v = c.streams.video[0]
+            values = sorted(p.pts for p in c.demux(v) if p.pts is not None)
+            return [(p - values[0], v.time_base) for p in values]
+
+    src_pts = _pts(src)
+    dst_pts = _pts(dst)
+    assert len(src_pts) == len(dst_pts)
+    src_seconds = [float(p * tb) for p, tb in src_pts]
+    dst_seconds = [float(p * tb) for p, tb in dst_pts]
+    assert src_seconds == pytest.approx(dst_seconds, abs=1e-6)
 
 
-class TestProbeAudioCodec:
-    @patch("jasna.media.audio_utils.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.audio_utils.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.audio_utils.subprocess.run")
-    def test_returns_codec_name(self, mock_run, _resolve, _si):
-        import json
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"streams": [{"codec_name": "wmav2"}]}).encode(),
-        )
-        assert probe_audio_codec("input.wmv") == "wmav2"
+def test_av_skew_preserved(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
 
-    @patch("jasna.media.audio_utils.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.audio_utils.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.audio_utils.subprocess.run")
-    def test_no_audio_stream(self, mock_run, _resolve, _si):
-        import json
-        mock_run.return_value = MagicMock(
-            returncode=0,
-            stdout=json.dumps({"streams": []}).encode(),
-        )
-        assert probe_audio_codec("input.mp4") is None
+    def _skew(path):
+        with av.open(str(path)) as c:
+            v, a = c.streams.video[0], c.streams.audio[0]
+            v_start = float((v.start_time or 0) * v.time_base)
+            a_start = float((a.start_time or 0) * a.time_base)
+            return v_start - a_start
 
-    @patch("jasna.media.audio_utils.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.audio_utils.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.audio_utils.subprocess.run")
-    def test_ffprobe_failure(self, mock_run, _resolve, _si):
-        mock_run.return_value = MagicMock(returncode=1)
-        assert probe_audio_codec("input.mp4") is None
+    assert _skew(dst) == pytest.approx(_skew(src), abs=0.05)
 
 
-class TestAudioCodecArgs:
-    @patch("jasna.media.audio_utils.probe_audio_codec", return_value="wmav2")
-    def test_reencode_for_incompatible(self, _probe):
-        assert audio_codec_args("input.wmv", Path("out.mp4")) == ["aac", "-b:a", "256k"]
+def test_zero_frame_job_closes_cleanly(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    metadata = get_video_meta_data(str(src))
+    dst = tmp_path / "out.mp4"
 
-    @patch("jasna.media.audio_utils.probe_audio_codec", return_value="aac")
-    def test_copy_for_compatible(self, _probe):
-        assert audio_codec_args("input.mp4", Path("out.mp4")) == ["copy"]
+    with NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={}):
+        pass
 
-    @patch("jasna.media.audio_utils.probe_audio_codec", return_value=None)
-    def test_copy_when_no_audio(self, _probe):
-        assert audio_codec_args("input.mp4", Path("out.mp4")) == ["copy"]
+    # constructing without entering must not leak containers or threads
+    NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={})
 
 
-class TestRemuxWithAudioAndMetadata:
-    @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_success_bt709_mpeg(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
-        video_input = tmp_path / "temp.mkv"
-        video_input.touch()
-        output_path = tmp_path / "output.mkv"
+def test_mkv_output_supported(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mkv"
+    _transcode(src, dst)
 
-        mock_run.return_value = MagicMock(returncode=0)
-        meta = _fake_metadata()
-
-        remux_with_audio_and_metadata(video_input, output_path, meta)
-
-        mock_run.assert_called_once()
-        cmd = mock_run.call_args[0][0]
-        assert "bt709" in cmd
-        assert "tv" in cmd
-        assert "-movflags" not in cmd
-        assert "-bsf:v" in cmd
-        assert cmd[cmd.index("-bsf:v") + 1] == (
-            "hevc_metadata=colour_primaries=1:transfer_characteristics=1"
-            ":matrix_coefficients=1:video_full_range_flag=0"
-        )
-
-    @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_success_bt601_jpeg(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
-        video_input = tmp_path / "temp.mkv"
-        video_input.touch()
-        output_path = tmp_path / "output.mkv"
-
-        mock_run.return_value = MagicMock(returncode=0)
-        meta = _fake_metadata(color_space=AvColorspace.ITU601, color_range=AvColorRange.JPEG)
-
-        remux_with_audio_and_metadata(video_input, output_path, meta)
-
-        cmd = mock_run.call_args[0][0]
-        assert "smpte170m" in cmd
-        assert "pc" in cmd
-        assert cmd[cmd.index("-bsf:v") + 1] == (
-            "hevc_metadata=colour_primaries=6:transfer_characteristics=6"
-            ":matrix_coefficients=6:video_full_range_flag=1"
-        )
-
-    @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_success_bt601_mpeg_rewrites_vui(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
-        video_input = tmp_path / "temp.mkv"
-        video_input.touch()
-        output_path = tmp_path / "output.mkv"
-
-        mock_run.return_value = MagicMock(returncode=0)
-        meta = _fake_metadata(color_space=AvColorspace.ITU601, color_range=AvColorRange.MPEG)
-
-        remux_with_audio_and_metadata(video_input, output_path, meta)
-
-        cmd = mock_run.call_args[0][0]
-        assert "smpte170m" in cmd
-        assert "tv" in cmd
-        assert cmd[cmd.index("-bsf:v") + 1] == (
-            "hevc_metadata=colour_primaries=6:transfer_characteristics=6"
-            ":matrix_coefficients=6:video_full_range_flag=0"
-        )
-
-    @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_mp4_output_adds_faststart(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
-        video_input = tmp_path / "temp.mkv"
-        video_input.touch()
-        output_path = tmp_path / "output.mp4"
-
-        mock_run.return_value = MagicMock(returncode=0)
-        meta = _fake_metadata()
-
-        remux_with_audio_and_metadata(video_input, output_path, meta)
-
-        cmd = mock_run.call_args[0][0]
-        assert "-movflags" in cmd
-        assert "+faststart" in cmd
-
-    @patch("jasna.media.video_encoder.audio_codec_args", return_value=["copy"])
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_failure_raises_runtime_error(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
-        video_input = tmp_path / "temp.mkv"
-        video_input.touch()
-        output_path = tmp_path / "output.mkv"
-
-        mock_run.return_value = MagicMock(returncode=1, stdout=b"", stderr=b"ffmpeg error")
-        meta = _fake_metadata()
-
-        with pytest.raises(RuntimeError, match="ffmpeg failed"):
-            remux_with_audio_and_metadata(video_input, output_path, meta)
-
-    @patch("jasna.media.video_encoder.audio_codec_args", return_value=["aac", "-b:a", "256k"])
-    @patch("jasna.media.video_encoder.subprocess_no_window_kwargs", return_value={})
-    @patch("jasna.media.video_encoder.resolve_executable", return_value="ffmpeg")
-    @patch("jasna.media.video_encoder.subprocess.run")
-    def test_reencode_args_in_ffmpeg_cmd(self, mock_run, mock_resolve, mock_si, _codec_args, tmp_path):
-        video_input = tmp_path / "temp.mkv"
-        video_input.touch()
-        output_path = tmp_path / "output.mp4"
-
-        mock_run.return_value = MagicMock(returncode=0)
-        meta = _fake_metadata()
-
-        remux_with_audio_and_metadata(video_input, output_path, meta)
-
-        cmd = mock_run.call_args[0][0]
-        ca_idx = cmd.index("-c:a")
-        assert cmd[ca_idx + 1] == "aac"
-        assert cmd[ca_idx + 2] == "-b:a"
-        assert cmd[ca_idx + 3] == "256k"
+    with av.open(str(dst)) as c:
+        assert c.streams.video[0].codec_context.name == "hevc"
+        assert c.streams.video[0].average_rate == Fraction(12, 1)
+        assert c.streams.audio[0].codec_context.name == "aac"

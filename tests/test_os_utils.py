@@ -90,12 +90,8 @@ def test_check_required_executables_uses_expected_version_commands(monkeypatch) 
     def fake_run(cmd, **kwargs):
         calls.append(list(cmd))
         exe = os_utils.Path(cmd[0]).name
-        if exe == "ffmpeg":
-            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version 8.0.0", "stderr": ""})()
         if exe == "ffprobe":
             return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.1.0", "stderr": ""})()
-        if exe == "mkvmerge":
-            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
         raise AssertionError(f"Unexpected exe {exe!r}")
 
     monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
@@ -104,28 +100,7 @@ def test_check_required_executables_uses_expected_version_commands(monkeypatch) 
 
     assert calls == [
         ["/fake/ffprobe", "-version"],
-        ["/fake/ffmpeg", "-version"],
-        ["/fake/mkvmerge", "--version"],
     ]
-
-
-def test_check_required_executables_skips_ffmpeg_when_disabled(monkeypatch) -> None:
-    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
-
-    calls: list[list[str]] = []
-
-    def fake_run(cmd, **kwargs):
-        calls.append(list(cmd))
-        exe = os_utils.Path(cmd[0]).name
-        if exe == "mkvmerge":
-            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
-        raise AssertionError(f"Unexpected exe {exe!r}")
-
-    monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
-
-    os_utils.check_required_executables(disable_ffmpeg_check=True)
-
-    assert calls == [["/fake/mkvmerge", "--version"]]
 
 
 def test_check_required_executables_logs_stdout_stderr_when_exe_fails(monkeypatch, caplog) -> None:
@@ -134,11 +109,7 @@ def test_check_required_executables_logs_stdout_stderr_when_exe_fails(monkeypatc
     def fake_run(cmd, **kwargs):
         exe = os_utils.Path(cmd[0]).name
         if exe == "ffprobe":
-            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.0.0", "stderr": ""})()
-        if exe == "ffmpeg":
-            return type("R", (), {"returncode": 1, "stdout": "ffmpeg stdout", "stderr": "ffmpeg stderr"})()
-        if exe == "mkvmerge":
-            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+            return type("R", (), {"returncode": 1, "stdout": "ffprobe stdout", "stderr": "ffprobe stderr"})()
         raise AssertionError(f"Unexpected exe {exe!r}")
 
     monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
@@ -147,20 +118,16 @@ def test_check_required_executables_logs_stdout_stderr_when_exe_fails(monkeypatc
         with pytest.raises(SystemExit):
             os_utils.check_required_executables()
 
-    assert any("ffmpeg failed" in rec.message and "ffmpeg stdout" in rec.message and "ffmpeg stderr" in rec.message for rec in caplog.records)
+    assert any("ffprobe failed" in rec.message and "ffprobe stdout" in rec.message and "ffprobe stderr" in rec.message for rec in caplog.records)
 
 
-def test_check_required_executables_errors_on_old_ffmpeg(monkeypatch, capsys) -> None:
+def test_check_required_executables_errors_on_old_ffprobe(monkeypatch, capsys) -> None:
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
 
     def fake_run(cmd, **kwargs):
         exe = os_utils.Path(cmd[0]).name
         if exe == "ffprobe":
-            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.0.0", "stderr": ""})()
-        if exe == "ffmpeg":
-            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version 7.1.0", "stderr": ""})()
-        if exe == "mkvmerge":
-            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 7.1.0", "stderr": ""})()
         raise AssertionError(f"Unexpected exe {exe!r}")
 
     monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
@@ -173,17 +140,13 @@ def test_check_required_executables_errors_on_old_ffmpeg(monkeypatch, capsys) ->
     assert "major version must be exactly 8" in captured.out
 
 
-def test_check_required_executables_errors_on_newer_ffmpeg(monkeypatch, capsys) -> None:
+def test_check_required_executables_errors_on_newer_ffprobe(monkeypatch, capsys) -> None:
     monkeypatch.setattr(os_utils.shutil, "which", lambda exe: f"/fake/{exe}")
 
     def fake_run(cmd, **kwargs):
         exe = os_utils.Path(cmd[0]).name
         if exe == "ffprobe":
-            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 8.0.0", "stderr": ""})()
-        if exe == "ffmpeg":
-            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version 9.0.0", "stderr": ""})()
-        if exe == "mkvmerge":
-            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
+            return type("R", (), {"returncode": 0, "stdout": "ffprobe version 9.0.0", "stderr": ""})()
         raise AssertionError(f"Unexpected exe {exe!r}")
 
     monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
@@ -203,10 +166,6 @@ def test_check_required_executables_errors_when_version_cannot_be_detected(monke
         exe = os_utils.Path(cmd[0]).name
         if exe == "ffprobe":
             return type("R", (), {"returncode": 0, "stdout": "ffprobe version N-113224-gdeadbeef", "stderr": ""})()
-        if exe == "ffmpeg":
-            return type("R", (), {"returncode": 0, "stdout": "ffmpeg version N-113224-gdeadbeef", "stderr": ""})()
-        if exe == "mkvmerge":
-            return type("R", (), {"returncode": 0, "stdout": "mkvmerge v82.0", "stderr": ""})()
         raise AssertionError(f"Unexpected exe {exe!r}")
 
     monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
@@ -350,7 +309,7 @@ def test_find_executable_prefers_bundled_when_frozen(monkeypatch, tmp_path) -> N
 
 
 def test_find_executable_bundled_wins_over_system_path(monkeypatch, tmp_path) -> None:
-    # A frozen release ships its own ffmpeg/mkvmerge; it must use those even when a different
+    # A frozen release ships its own ffmpeg; it must use those even when a different
     # copy is on the user's PATH (otherwise a wrong-version system ffmpeg would be picked).
     monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
     monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
@@ -362,19 +321,6 @@ def test_find_executable_bundled_wins_over_system_path(monkeypatch, tmp_path) ->
     ffmpeg.write_bytes(b"")
 
     assert os_utils.find_executable("ffmpeg") == str(ffmpeg)
-
-
-def test_find_executable_finds_bundled_mkvmerge_recursive(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(os_utils.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(os_utils.sys, "executable", str(tmp_path / "jasna"), raising=False)
-    monkeypatch.setattr(os_utils.shutil, "which", lambda exe: None)
-    monkeypatch.setattr(os_utils, "_bundled_exe_filename", lambda name: name)
-
-    mkvmerge = tmp_path / "mkvtoolnix" / "nested" / "mkvmerge"
-    mkvmerge.parent.mkdir(parents=True, exist_ok=True)
-    mkvmerge.write_bytes(b"")
-
-    assert os_utils.find_executable("mkvmerge") == str(mkvmerge)
 
 
 def test_check_sysmem_fallback_returns_true_when_prefer_no_sysmem(monkeypatch) -> None:
@@ -646,4 +592,3 @@ def test_check_ascii_install_path_uses_executable_when_frozen(monkeypatch, tmp_p
     monkeypatch.setattr(os_utils.sys, "executable", str(exe_path), raising=False)
     ok, info = os_utils.check_ascii_install_path()
     assert ok is True
-

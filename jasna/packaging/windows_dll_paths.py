@@ -84,7 +84,7 @@ def _iter_top_level_lib_dirs(root: Path) -> list[Path]:
     if torch_lib.is_dir():
         out.append(torch_lib)
 
-    for name in ["tensorrt_libs", "PyNvVideoCodec", "python_vali", "nvvfx"]:
+    for name in ["tensorrt_libs", "nvvfx"]:
         p = root / name
         if p.is_dir():
             out.append(p)

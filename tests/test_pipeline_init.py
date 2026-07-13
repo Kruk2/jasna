@@ -91,10 +91,6 @@ class TestPipelineInit:
         p = _make_pipeline(enable_crossfade=False)
         assert p.enable_crossfade is False
 
-    def test_working_directory(self):
-        p = _make_pipeline(working_directory=Path("/tmp/work"))
-        assert p.working_directory == Path("/tmp/work")
-
     def test_progress_callback(self):
         cb = MagicMock()
         p = _make_pipeline(progress_callback=cb)

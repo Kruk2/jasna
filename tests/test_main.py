@@ -353,8 +353,8 @@ class TestArgForwarding:
         assert pipe["fp16"] is False
 
     def test_encoder_settings_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--encoder-settings", "cq=22,lookahead=32"])
-        assert pipe["encoder_settings"] == {"cq": 22, "lookahead": 32}
+        pipe, _ = self._capture_run(tmp_path, ["--encoder-settings", "cq=22,rc-lookahead=32"])
+        assert pipe["encoder_settings"] == {"cq": 22, "rc-lookahead": 32}
 
     def test_batch_size_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--batch-size", "8"])

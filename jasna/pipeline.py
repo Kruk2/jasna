@@ -74,7 +74,6 @@ class Pipeline:
         fp16: bool,
         disable_progress: bool = False,
         progress_callback: callable | None = None,
-        working_directory: Path | None = None,
         lut_path: str | Path | None = None,
     ) -> None:
         self.input_video = input_video
@@ -98,7 +97,6 @@ class Pipeline:
         self.restoration_pipeline = restoration_pipeline
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback
-        self.working_directory = working_directory
         self.lut_path = lut_path
 
     def close(self) -> None:
@@ -269,9 +267,14 @@ class Pipeline:
         from av.video.reformatter import Colorspace as AvColorspace
         device = self.device
         metadata = get_video_meta_data(str(self.input_video))
-        if metadata.color_space not in (AvColorspace.ITU709, AvColorspace.ITU601):
+        if metadata.color_space not in (
+            AvColorspace.ITU709,
+            AvColorspace.ITU601,
+            AvColorspace.BT2020,
+        ):
             raise UnsupportedColorspaceError(
-                f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. Only BT.709 and BT.601 are supported."
+                f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. "
+                "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
             )
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
 
@@ -318,8 +321,6 @@ class Pipeline:
             metadata=metadata,
             codec=self.codec,
             encoder_settings=self.encoder_settings,
-            stream_mode=False,
-            working_directory=self.working_directory,
             lut_path=self.lut_path,
         )
         frame_writer = _OfflineFrameWriter(encoder_ctx, encode_heartbeat)
