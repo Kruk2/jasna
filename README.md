@@ -47,8 +47,8 @@ Join the [SLS Discord](https://discord.gg/5R2Rx5nBH) for examples, support, and 
 - For exact GPU lookup, check NVIDIA's [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus).
 - Up-to-date Nvidia drivers. Tested driver: **591.67**. The 59x driver family is the minimum expected family.
 - An install path that uses ASCII characters only.
-- Windows release package: bundled with `ffmpeg`, `ffprobe`, and `mkvmerge`.
-- Linux release package: bundled with `ffmpeg`, `ffprobe`, and `mkvmerge`.
+- Windows release package: bundled with `ffmpeg` and `ffprobe`.
+- Linux release package: bundled with `ffmpeg` and `ffprobe`.
 
 Jasna automatically manages VRAM. When GPU VRAM runs low, frames waiting in the processing queue are temporarily moved to system RAM and moved back when needed. This requires no configuration.
 
@@ -311,10 +311,6 @@ uv pip install cmake ninja
 Developer setup also requires:
 
 - `ffmpeg` and `ffprobe` on `PATH`; `ffmpeg` major version must be **8**.
-- `mkvmerge`, from [MKVToolNix](https://mkvtoolnix.download/downloads.html).
-- The two libraries below installed into your Python environment:
-  - https://codeberg.org/Kruk2/vali
-  - https://codeberg.org/Kruk2/PyNvVideoCodec
 
 Then install Jasna in editable mode:
 

@@ -160,7 +160,7 @@ def main():
         NvidiaVideoReader(str(input_path), BATCH_SIZE, device, metadata) as reader,
         NvidiaVideoEncoder(
             str(output_path), device, metadata,
-            codec="hevc", encoder_settings={}, stream_mode=True,
+            codec="hevc", encoder_settings={},
         ) as encoder,
     ):
         for batch_tensor, pts_list in reader.frames():

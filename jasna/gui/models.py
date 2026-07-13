@@ -2,7 +2,8 @@
 
 import itertools
 import json
-from dataclasses import dataclass, field, asdict
+import re
+from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
 from pathlib import Path
 from typing import Callable
@@ -113,16 +114,73 @@ class AppSettings:
     output_folder: str = ""
     output_pattern: str = "{original}_restored.mp4"
     file_conflict: str = "auto_rename"  # auto_rename, overwrite, skip
-    working_directory: str = ""
 
 
 # Factory default preset - frozen, matches CLI defaults
 DEFAULT_SETTINGS = AppSettings()
 
 
+# Old presets carry PyNvVideoCodec-era encoder option names; the encoder now
+# speaks ffmpeg hevc_nvenc. Renames plus the two one-to-many expansions below.
+_OLD_ENCODER_ARG_RENAMES = {
+    "nonrefp": "nonref_p",
+    "gop": "g",
+    "maxbitrate": "maxrate",
+    "vbvbufsize": "bufsize",
+    "temporalaq": "temporal-aq",
+    "lookahead": "rc-lookahead",
+    "tflevel": "tf_level",
+}
+_OLD_TUNING_INFO_VALUES = {
+    "high_quality": "hq",
+    "low_latency": "ll",
+    "ultra_low_latency": "ull",
+    "lossless": "lossless",
+}
+
+
+def _migrate_encoder_custom_args(value: str) -> str:
+    from jasna.media import parse_encoder_settings
+
+    try:
+        settings = parse_encoder_settings(value)
+    except (ValueError, json.JSONDecodeError):
+        return value
+
+    migrated: dict[str, object] = {}
+    for key, v in settings.items():
+        if key == "aq":
+            migrated["spatial_aq"] = 1
+            migrated["aq-strength"] = v
+        elif key == "initqp":
+            migrated["init_qpI"] = v
+            migrated["init_qpP"] = v
+            migrated["init_qpB"] = v
+        elif key == "tuning_info":
+            migrated["tune"] = _OLD_TUNING_INFO_VALUES.get(str(v), str(v))
+        elif key == "preset" and isinstance(v, str) and re.fullmatch(r"P[1-7]", v):
+            migrated["preset"] = v.lower()
+        elif key == "vbvinit":
+            continue  # no hevc_nvenc equivalent
+        elif key in _OLD_ENCODER_ARG_RENAMES:
+            migrated[_OLD_ENCODER_ARG_RENAMES[key]] = v
+        else:
+            migrated[key] = v
+    return ",".join(f"{k}={v}" for k, v in migrated.items())
+
+
+def _migrate_preset_dict(preset_dict: dict) -> dict:
+    known_fields = {f.name for f in fields(AppSettings)}
+    migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
+    custom_args = migrated.get("encoder_custom_args")
+    if custom_args:
+        migrated["encoder_custom_args"] = _migrate_encoder_custom_args(custom_args)
+    return migrated
+
+
 class PresetManager:
     """Manages user presets with persistence to settings.json."""
-    
+
     FACTORY_PRESETS = {"Default": DEFAULT_SETTINGS}
     
     def __init__(self):
@@ -150,7 +208,7 @@ class PresetManager:
             
             for name, preset_dict in data.get("user_presets", {}).items():
                 try:
-                    self._user_presets[name] = AppSettings(**preset_dict)
+                    self._user_presets[name] = AppSettings(**_migrate_preset_dict(preset_dict))
                 except (TypeError, ValueError):
                     pass  # Skip invalid presets
         except (json.JSONDecodeError, IOError):

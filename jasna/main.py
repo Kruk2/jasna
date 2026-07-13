@@ -59,11 +59,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Logging level (default: %(default)s)",
     )
     parser.add_argument(
-        "--disable-ffmpeg-check",
-        action="store_true",
-        help="Skip checking for ffmpeg/ffprobe in PATH and their version.",
-    )
-    parser.add_argument(
         "--no-progress",
         action="store_true",
         help="Disable the progress bar.",
@@ -302,13 +297,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--encoder-settings",
         type=str,
         default="",
-        help='Encoder settings, as JSON object or comma-separated key=value pairs (e.g. {"cq":22} or cq=22,lookahead=32)',
-    )
-    encoding.add_argument(
-        "--working-directory",
-        type=str,
-        default="",
-        help="Directory for encoder temp files (.hevc, temp video). Default: same as output.",
+        help='Encoder settings, as JSON object or comma-separated key=value pairs (e.g. {"cq":22} or cq=22,rc-lookahead=32)',
     )
     encoding.add_argument(
         "--lut",
@@ -380,7 +369,7 @@ def main() -> None:
         print(f"Current path: {path_info}")
         sys.exit(1)
 
-    check_required_executables(disable_ffmpeg_check=args.disable_ffmpeg_check)
+    check_required_executables()
 
     gpu_ok, gpu_result = check_nvidia_gpu()
     if not gpu_ok:
@@ -600,8 +589,6 @@ def main() -> None:
             denoise_step=denoise_step,
         )
 
-        working_directory = Path(args.working_directory) if args.working_directory else None
-
         lut_arg = str(args.lut).strip()
         if lut_arg and not Path(lut_arg).exists():
             raise FileNotFoundError(lut_arg)
@@ -624,7 +611,6 @@ def main() -> None:
                 enable_crossfade=bool(args.enable_crossfade),
                 fp16=fp16,
                 disable_progress=args.no_progress,
-                working_directory=working_directory,
                 lut_path=lut_path,
             )
 

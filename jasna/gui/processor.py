@@ -349,7 +349,6 @@ class Processor:
             "restoration_pipeline": restoration_pipeline,
             "secondary_restorer": secondary_restorer,
             "encoder_settings": encoder_settings,
-            "working_directory": Path(settings.working_directory) if (settings.working_directory or "").strip() else None,
             "lut_path": (settings.lut_path or "").strip() or None,
         }
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
@@ -401,7 +400,6 @@ class Processor:
                 fp16=settings.fp16_mode,
                 disable_progress=True,
                 progress_callback=progress_callback,
-                working_directory=s["working_directory"],
                 lut_path=s["lut_path"],
             )
             pipeline.run()

@@ -127,7 +127,10 @@ class TestPipelineColorspaceCheck:
         p = _make_pipeline()
 
         from jasna.media import UnsupportedColorspaceError
-        with pytest.raises(UnsupportedColorspaceError, match="Only BT.709 and BT.601 are supported"):
+        with pytest.raises(
+            UnsupportedColorspaceError,
+            match="Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported",
+        ):
             p.run()
 
 

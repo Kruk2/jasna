@@ -1,20 +1,27 @@
-"""Unit tests for NvidiaVideoEncoder internals (encode, _process_buffer, _encode_frame, __exit__)."""
+"""Unit tests for NvidiaVideoEncoder internals (options, color guard, buffer, worker, audio pump)."""
 from __future__ import annotations
 
-import heapq
-import io
 import queue
 import threading
 from collections import deque
 from fractions import Fraction
-from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
+import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 from jasna.media import VideoMetadata
-from jasna.media.video_encoder import NvidiaVideoEncoder
+from jasna.media.rgb_to_p010 import (
+    chw_rgb_to_p010_bt2020_full,
+    chw_rgb_to_p010_bt2020_limited,
+    chw_rgb_to_p010_bt601_full,
+    chw_rgb_to_p010_bt601_limited,
+    chw_rgb_to_p010_bt709_full,
+    chw_rgb_to_p010_bt709_limited,
+)
+from jasna.media.video_encoder import DEFAULT_ENCODER_OPTIONS, NvidiaVideoEncoder
 
 
 def _fake_metadata(**overrides) -> VideoMetadata:
@@ -38,292 +45,184 @@ def _fake_metadata(**overrides) -> VideoMetadata:
     return VideoMetadata(**defaults)
 
 
-class _FakeThread:
-    def __init__(self, *args, **kwargs):
-        pass
-    def start(self):
-        pass
-    def join(self, timeout=None):
-        pass
+def _make_encoder(tmp_path, encoder_settings=None, **meta_overrides) -> NvidiaVideoEncoder:
+    return NvidiaVideoEncoder(
+        file=str(tmp_path / "result.mkv"),
+        device=torch.device("cuda:0"),
+        metadata=_fake_metadata(**meta_overrides),
+        codec="hevc",
+        encoder_settings=encoder_settings or {},
+    )
 
 
-class _FakeCudaStream:
-    def __init__(self, *args, **kwargs):
-        self.cuda_stream = 0
-        self.wait_event = MagicMock()
-    def __enter__(self):
-        return self
-    def __exit__(self, *a):
-        return False
+class TestEncoderOptions:
+    def test_defaults_used_when_no_settings(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        assert enc.encoder_options == DEFAULT_ENCODER_OPTIONS
 
+    def test_settings_override_and_stringify(self, tmp_path):
+        enc = _make_encoder(tmp_path, encoder_settings={"cq": 22, "temporal-aq": False, "maxrate": "10M"})
+        assert enc.encoder_options["cq"] == "22"
+        assert enc.encoder_options["temporal-aq"] == "0"
+        assert enc.encoder_options["maxrate"] == "10M"
+        assert enc.encoder_options["preset"] == "p5"
 
-def _make_encoder(tmp_path, encoder_settings=None):
-    output_path = tmp_path / "output" / "result.mkv"
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    working_dir = tmp_path / "work"
-    working_dir.mkdir(exist_ok=True)
-
-    mock_nvc_encoder = MagicMock()
-    mock_nvc_encoder.EndEncode.return_value = []
-
-    with (
-        patch("jasna.media.video_encoder.nvc") as mock_nvc,
-        patch("jasna.media.video_encoder.threading.Thread", _FakeThread),
-        patch("jasna.media.video_encoder.torch.cuda.Stream", _FakeCudaStream),
-    ):
-        mock_nvc.CreateEncoder.return_value = mock_nvc_encoder
-        import torch
-        enc = NvidiaVideoEncoder(
-            file=str(output_path),
-            device=torch.device("cuda:0"),
-            metadata=_fake_metadata(),
-            codec="hevc",
-            encoder_settings=encoder_settings or {},
-            stream_mode=False,
-            working_directory=working_dir,
-        )
-    return enc, mock_nvc_encoder
-
-
-class TestEncoderSettings:
-    def test_empty_settings_no_update(self, tmp_path):
-        enc, nvc_enc = _make_encoder(tmp_path, encoder_settings={})
-        enc.raw_hevc.close()
-
-    def test_nonempty_settings_passed_through(self, tmp_path):
-        with (
-            patch("jasna.media.video_encoder.nvc") as mock_nvc,
-            patch("jasna.media.video_encoder.threading.Thread", _FakeThread),
-            patch("jasna.media.video_encoder.torch.cuda.Stream", _FakeCudaStream),
-        ):
-            mock_nvc.CreateEncoder.return_value = MagicMock(EndEncode=MagicMock(return_value=[]))
-            output_path = tmp_path / "output" / "result.mkv"
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            working_dir = tmp_path / "work"
-            working_dir.mkdir(exist_ok=True)
-
-            import torch
-            enc = NvidiaVideoEncoder(
-                file=str(output_path),
+    def test_unsupported_codec_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="Unsupported codec"):
+            NvidiaVideoEncoder(
+                file=str(tmp_path / "o.mkv"),
                 device=torch.device("cuda:0"),
                 metadata=_fake_metadata(),
-                codec="hevc",
-                encoder_settings={"cq": 18, "custom_key": "custom_val"},
-                stream_mode=False,
-                working_directory=working_dir,
-            )
-
-            create_kwargs = mock_nvc.CreateEncoder.call_args[1]
-            assert create_kwargs["cq"] == 18
-            assert create_kwargs["custom_key"] == "custom_val"
-            enc.raw_hevc.close()
-
-
-class TestColorValidation:
-    def test_unsupported_color_raises(self, tmp_path):
-        with (
-            patch("jasna.media.video_encoder.nvc") as mock_nvc,
-            patch("jasna.media.video_encoder.threading.Thread", _FakeThread),
-            patch("jasna.media.video_encoder.torch.cuda.Stream", _FakeCudaStream),
-        ):
-            mock_nvc.CreateEncoder.return_value = MagicMock(EndEncode=MagicMock(return_value=[]))
-
-            output_path = tmp_path / "output" / "result.mkv"
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            import torch
-            with pytest.raises(ValueError, match="Unsupported color"):
-                NvidiaVideoEncoder(
-                    file=str(output_path),
-                    device=torch.device("cuda:0"),
-                    metadata=_fake_metadata(
-                        color_space=AvColorspace.ITU601,
-                        color_range=AvColorRange.JPEG,
-                    ),
-                    codec="hevc",
-                    encoder_settings={},
-                    stream_mode=False,
-                )
-
-
-class TestColorspaceConverterSelection:
-    def _make_encoder_with_metadata(self, tmp_path, metadata):
-        output_path = tmp_path / "output" / "result.mkv"
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with (
-            patch("jasna.media.video_encoder.nvc") as mock_nvc,
-            patch("jasna.media.video_encoder.threading.Thread", _FakeThread),
-            patch("jasna.media.video_encoder.torch.cuda.Stream", _FakeCudaStream),
-        ):
-            mock_nvc.CreateEncoder.return_value = MagicMock(EndEncode=MagicMock(return_value=[]))
-            import torch
-            enc = NvidiaVideoEncoder(
-                file=str(output_path),
-                device=torch.device("cuda:0"),
-                metadata=metadata,
-                codec="hevc",
+                codec="av1",
                 encoder_settings={},
-                stream_mode=False,
             )
-        return enc
 
-    def test_bt709_selects_bt709_converter(self, tmp_path):
-        from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt709_limited
-        enc = self._make_encoder_with_metadata(tmp_path, _fake_metadata(color_space=AvColorspace.ITU709))
-        assert enc._to_p010 is chw_rgb_to_p010_bt709_limited
-        enc.raw_hevc.close()
+    def test_leftover_options_raise(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        enc.out_stream = MagicMock()
+        enc.out_stream.codec_context.options = {"bogus": "1"}
+        with pytest.raises(ValueError, match="did not accept encoder option.*bogus"):
+            enc._validate_encoder_options()
 
-    def test_bt601_selects_bt601_converter(self, tmp_path):
-        from jasna.media.rgb_to_p010 import chw_rgb_to_p010_bt601_limited
-        enc = self._make_encoder_with_metadata(tmp_path, _fake_metadata(color_space=AvColorspace.ITU601))
-        assert enc._to_p010 is chw_rgb_to_p010_bt601_limited
-        enc.raw_hevc.close()
+    def test_no_leftover_options_pass(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        enc.out_stream = MagicMock()
+        enc.out_stream.codec_context.options = {}
+        enc._options_validated = False
+        enc._validate_encoder_options()
+        assert enc._options_validated
 
 
-class TestEncode:
+class TestColorHandling:
+    def test_unsupported_color_range_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="Unsupported color space or color range"):
+            _make_encoder(tmp_path, color_range=AvColorRange.UNSPECIFIED)
+
+    @pytest.mark.parametrize(
+        ("color_space", "color_range", "expected"),
+        [
+            (AvColorspace.ITU709, AvColorRange.MPEG, chw_rgb_to_p010_bt709_limited),
+            (AvColorspace.ITU709, AvColorRange.JPEG, chw_rgb_to_p010_bt709_full),
+            (AvColorspace.ITU601, AvColorRange.MPEG, chw_rgb_to_p010_bt601_limited),
+            (AvColorspace.ITU601, AvColorRange.JPEG, chw_rgb_to_p010_bt601_full),
+            (AvColorspace.BT2020, AvColorRange.MPEG, chw_rgb_to_p010_bt2020_limited),
+            (AvColorspace.BT2020, AvColorRange.JPEG, chw_rgb_to_p010_bt2020_full),
+        ],
+    )
+    def test_selects_matrix_and_range_converter(self, tmp_path, color_space, color_range, expected):
+        enc = _make_encoder(tmp_path, color_space=color_space, color_range=color_range)
+        assert enc._to_p010 is expected
+
+
+def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
+    enc = _make_encoder(tmp_path)
+    enc.pts_heap = []
+    enc.frame_buffer = deque()
+    enc.pts_set = set()
+    enc._worker_error = None
+    enc._encode_queue = MagicMock()
+    enc._build_encode_item = MagicMock(side_effect=lambda frame, pts: (frame, pts, None))
+    return enc
+
+
+class TestEncodeBuffer:
     def test_encode_pushes_to_buffer_and_heap(self, tmp_path):
-        enc, _ = _make_encoder(tmp_path)
-        import torch
-        frame = torch.zeros(3, 8, 8)
-        enc.encode(frame, pts=100)
-
-        assert len(enc.frame_buffer) == 1
-        assert 100 in enc.pts_set
-        assert len(enc.pts_heap) == 1
-        enc.raw_hevc.close()
+        enc = _buffered_encoder(tmp_path)
+        enc.encode("frame0", 10)
+        assert list(enc.frame_buffer) == ["frame0"]
+        assert enc.pts_heap == [10]
+        assert enc.pts_set == {10}
 
     def test_encode_dedup_pts(self, tmp_path):
-        enc, _ = _make_encoder(tmp_path)
-        import torch
-        frame = torch.zeros(3, 8, 8)
-        enc.encode(frame, pts=50)
-        enc.encode(frame, pts=50)
+        enc = _buffered_encoder(tmp_path)
+        enc.encode("a", 5)
+        enc.encode("b", 5)
+        assert sorted(enc.pts_set) == [5, 6]
 
-        assert len(enc.pts_set) == 2
-        assert 50 in enc.pts_set
-        assert 51 in enc.pts_set
-        enc.raw_hevc.close()
-
-    def test_encode_triggers_process_buffer_at_threshold(self, tmp_path):
-        enc, _ = _make_encoder(tmp_path)
-        enc._encode_queue = MagicMock()
-        enc._encode_queue.put = MagicMock()
-        enc._build_encode_item = MagicMock(return_value=("frame", 0, "event"))
-
-        import torch
-        frame = torch.zeros(3, 8, 8)
-        for i in range(enc.BUFFER_MAX_SIZE // 2 + 1):
-            enc.encode(frame, pts=i)
-
-        enc._encode_queue.put.assert_called_once()
-        enc.raw_hevc.close()
-
-
-class TestProcessBuffer:
-    def test_does_not_flush_below_threshold(self, tmp_path):
-        enc, _ = _make_encoder(tmp_path)
-        import torch
-        enc.frame_buffer.append(torch.zeros(3, 8, 8))
-        enc.pts_heap = [10]
-        enc.pts_set = {10}
-        enc._encode_queue = MagicMock()
-        enc._build_encode_item = MagicMock(return_value=("f", 10, "e"))
-
-        enc._process_buffer(flush_all=False)
+    def test_flush_starts_above_half_buffer(self, tmp_path):
+        enc = _buffered_encoder(tmp_path)
+        for i in range(enc.BUFFER_MAX_SIZE // 2):
+            enc.encode(f"f{i}", i)
         enc._encode_queue.put.assert_not_called()
-        enc.raw_hevc.close()
+        enc.encode("one-more", 99)
+        enc._encode_queue.put.assert_called_once_with(("f0", 0, None))
 
-    def test_flush_all_sends_to_queue(self, tmp_path):
-        enc, _ = _make_encoder(tmp_path)
-        import torch
-        enc.frame_buffer.append(torch.zeros(3, 8, 8))
-        heapq.heappush(enc.pts_heap, 10)
-        enc.pts_set.add(10)
-        enc._encode_queue = MagicMock()
-        enc._build_encode_item = MagicMock(return_value=("f", 10, "e"))
-
+    def test_smallest_pts_pairs_with_oldest_frame(self, tmp_path):
+        enc = _buffered_encoder(tmp_path)
+        for i, pts in enumerate([30, 10, 20, 40]):
+            enc.encode(f"f{i}", pts)
         enc._process_buffer(flush_all=True)
-        enc._encode_queue.put.assert_called_once()
-        assert len(enc.frame_buffer) == 0
-        enc.raw_hevc.close()
+        enc._encode_queue.put.assert_called_once_with(("f0", 10, None))
+
+    def test_encode_raises_pending_worker_error(self, tmp_path):
+        enc = _buffered_encoder(tmp_path)
+        enc._worker_error = RuntimeError("nvenc exploded")
+        with pytest.raises(RuntimeError, match="nvenc exploded"):
+            enc.encode("frame", 0)
 
 
-class TestEncodeFrame:
-    def test_writes_bitstream_to_raw_hevc(self, tmp_path):
-        enc, nvc_enc = _make_encoder(tmp_path)
-        nvc_enc.Encode.return_value = b'\x00\x00\x01\x40'
-
-        import torch
-        buf = io.BytesIO()
-        enc.raw_hevc = buf
-        with patch("jasna.media.video_encoder.torch.cuda.stream", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))):
-            enc._encode_frame(torch.zeros(3, 8, 8), pts=42)
-
-        assert 42 in list(enc.reordered_pts_queue)
-        assert buf.getvalue() == bytearray(b'\x00\x00\x01\x40')
-
-    def test_empty_bitstream_no_write(self, tmp_path):
-        enc, nvc_enc = _make_encoder(tmp_path)
-        nvc_enc.Encode.return_value = b''
-
-        import torch
-        buf = io.BytesIO()
-        enc.raw_hevc = buf
-        with patch("jasna.media.video_encoder.torch.cuda.stream", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))):
-            enc._encode_frame(torch.zeros(3, 8, 8), pts=10)
-
-        assert 10 in list(enc.reordered_pts_queue)
-        assert buf.getvalue() == b''
-
-
-class TestExit:
-    def test_exit_flushes_buffer_and_endencodes(self, tmp_path):
-        enc, nvc_enc = _make_encoder(tmp_path)
-        import torch
-
-        enc._encode_queue = MagicMock()
-        enc._encode_queue.join = MagicMock()
-        enc._encode_queue.put = MagicMock()
-        enc._encode_thread = MagicMock()
-
-        enc.frame_buffer.append(torch.zeros(3, 8, 8))
-        heapq.heappush(enc.pts_heap, 5)
-        enc.pts_set.add(5)
-        enc._build_encode_item = MagicMock(return_value=("f", 5, "e"))
-
-        nvc_enc.EndEncode.side_effect = [b'\x00\x01\x02', b'']
-
-        written_data = []
-        raw_hevc_mock = MagicMock()
-        raw_hevc_mock.write = lambda data: written_data.append(bytes(data))
-        raw_hevc_mock.close = MagicMock()
-        enc.raw_hevc = raw_hevc_mock
-
-        with (
-            patch("jasna.media.video_encoder.torch.cuda.stream", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
-            patch("jasna.media.video_encoder.mux_hevc_to_mkv") as mock_mux,
-            patch("jasna.media.video_encoder.remux_with_audio_and_metadata") as mock_remux,
-            patch.object(Path, "unlink", MagicMock()),
-        ):
-            mock_mux.side_effect = lambda *a, **kw: enc.output_path.touch()
-            enc.__exit__(None, None, None)
-
-        assert enc._encode_queue.put.call_count >= 1
-        assert b'\x00\x01\x02' in written_data
-
-
-class TestEncodeWorkerCrash:
-    def test_worker_logs_and_reraises(self, tmp_path):
-        enc, nvc_enc = _make_encoder(tmp_path)
-        import torch
-
+class TestWorkerErrorChannel:
+    def test_worker_records_error_and_keeps_consuming(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        enc.device = torch.device("cpu")
+        enc._worker_error = None
         enc._encode_queue = queue.Queue()
-        enc._handle_encode_item = MagicMock(side_effect=RuntimeError("encode boom"))
+        enc._stop_sentinel = object()
+        enc._handle_encode_item = MagicMock(side_effect=RuntimeError("mux failed"))
 
-        enc._encode_queue.put((torch.zeros(3, 8, 8), 0, MagicMock()))
+        worker = threading.Thread(target=enc._encode_worker, daemon=True)
+        worker.start()
+        enc._encode_queue.put(("frame", 0, None))
+        enc._encode_queue.put(("frame", 1, None))
+        enc._encode_queue.join()
+        enc._encode_queue.put(enc._stop_sentinel)
+        worker.join(timeout=5)
 
-        with patch("jasna.media.video_encoder.torch.cuda.set_device"):
-            with pytest.raises(RuntimeError, match="encode boom"):
-                enc._encode_worker()
+        assert not worker.is_alive()
+        assert isinstance(enc._worker_error, RuntimeError)
+        assert enc._handle_encode_item.call_count == 1
 
-        enc.raw_hevc.close()
+
+def _packet(stream_index, dts, time_base=Fraction(1, 1000)):
+    return SimpleNamespace(
+        stream=SimpleNamespace(index=stream_index),
+        dts=dts,
+        pts=dts,
+        time_base=time_base,
+    )
+
+
+class TestAudioPump:
+    def _audio_encoder(self, tmp_path, packets):
+        enc = _make_encoder(tmp_path)
+        out_a = MagicMock()
+        enc._audio_pipes = {1: ("copy", out_a, None)}
+        enc._audio_backlog = deque()
+        enc._audio_iter = iter(packets)
+        enc.dst = MagicMock()
+        return enc, out_a
+
+    def test_copy_reassigns_stream_and_skips_flush_packet(self, tmp_path):
+        enc, out_a = self._audio_encoder(tmp_path, [])
+        pkt = _packet(1, dts=0)
+        assert enc._produce_audio_packets(pkt) == [pkt]
+        assert pkt.stream is out_a
+
+        flush = SimpleNamespace(stream=SimpleNamespace(index=1), dts=None, pts=None, time_base=None)
+        assert enc._produce_audio_packets(flush) == []
+
+    def test_pump_respects_threshold(self, tmp_path):
+        packets = [_packet(1, dts=0), _packet(1, dts=500), _packet(1, dts=1500)]
+        enc, _ = self._audio_encoder(tmp_path, packets)
+
+        enc._pump_audio(1.0)
+        assert enc.dst.mux.call_count == 2
+        assert len(enc._audio_backlog) == 1  # dts=1500 held back
+
+        enc._pump_audio(None)
+        assert enc.dst.mux.call_count == 3
+
+    def test_pump_without_audio_is_noop(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        enc._audio_iter = None
+        enc._pump_audio(1.0)

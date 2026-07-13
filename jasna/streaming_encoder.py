@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 
 from jasna.media import VideoMetadata
-from jasna.os_utils import get_subprocess_startup_info, resolve_executable
+from jasna.os_utils import find_executable, get_subprocess_startup_info
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +42,11 @@ class StreamingEncoder:
             gpu_idx = device.index if device.index is not None else 0
         self._gpu_index = gpu_idx
 
-        self._ffmpeg = resolve_executable('ffmpeg')
+        self._ffmpeg = find_executable('ffmpeg')
+        if self._ffmpeg is None:
+            raise RuntimeError(
+                "ffmpeg not found (bundled tools/ or PATH); required for HLS streaming"
+            )
         self._process: subprocess.Popen | None = None
         self._stderr_thread: threading.Thread | None = None
         self._write_queue: queue.Queue = queue.Queue(maxsize=16)

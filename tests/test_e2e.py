@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import threading
+from importlib.util import find_spec
 from fractions import Fraction
 from pathlib import Path
 
@@ -21,11 +22,7 @@ RESTORATION_ENGINE_CLIP10 = Path("model_weights/lada_mosaic_restoration_model_ge
 RFDETR_ONNX = Path("model_weights/rfdetr-v5.onnx")
 
 def _nvvfx_available() -> bool:
-    try:
-        import nvvfx  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    return find_spec("nvvfx") is not None
 
 REQUIRES_NVVFX = pytest.mark.skipif(not _nvvfx_available(), reason="nvvfx (RTX Video Effects) not available")
 REQUIRES_RFDETR = pytest.mark.skipif(not RFDETR_ONNX.exists(), reason="rfdetr-v5 ONNX not found")
@@ -179,8 +176,6 @@ class TestEncoderE2E:
                 metadata=meta,
                 codec="hevc",
                 encoder_settings={},
-                stream_mode=False,
-                working_directory=tmp_path,
             ) as encoder:
                 count = 0
                 for frames, pts_list in reader.frames():
@@ -304,7 +299,6 @@ class TestFullPipelineE2E:
             enable_crossfade=enable_crossfade,
             fp16=True,
             disable_progress=True,
-            working_directory=tmp_path,
         )
 
         det_spy = _DetectionSpy(pipeline.detection_model)

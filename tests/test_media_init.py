@@ -87,7 +87,7 @@ class TestParseEncoderSettings:
 
 class TestValidateEncoderSettings:
     def test_valid_settings(self):
-        settings = {"cq": 22, "lookahead": 32, "preset": "P5"}
+        settings = {"cq": 22, "rc-lookahead": 32, "preset": "p5"}
         assert validate_encoder_settings(settings) == settings
 
     def test_empty_settings(self):
