@@ -289,9 +289,10 @@ def build_parser() -> argparse.ArgumentParser:
     encoding = parser.add_argument_group("Encoding")
     encoding.add_argument(
         "--codec",
-        type=str,
+        type=lambda value: str(value).lower(),
         default="hevc",
-        help='Output video codec (only "hevc" supported for now)',
+        choices=["hevc", "h264", "av1"],
+        help="Offline output video codec (HLS streaming always uses H.264). Default: %(default)s",
     )
     encoding.add_argument(
         "--encoder-settings",
@@ -489,10 +490,10 @@ def main() -> None:
         raise FileNotFoundError(str(restoration_model_path))
 
     codec = str(args.codec).lower()
-    if codec != "hevc":
-        raise ValueError(f"Unsupported codec: {codec} (only hevc supported)")
+    if codec not in {"hevc", "h264", "av1"}:
+        raise ValueError(f"Unsupported codec: {codec} (supported: hevc, h264, av1)")
 
-    encoder_settings = validate_encoder_settings(parse_encoder_settings(str(args.encoder_settings)))
+    encoder_settings = validate_encoder_settings(parse_encoder_settings(str(args.encoder_settings)), codec=codec)
 
     batch_size = int(args.batch_size)
     if batch_size <= 0:

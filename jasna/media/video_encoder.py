@@ -5,16 +5,27 @@ import logging
 import queue
 import threading
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
+from typing import Mapping
 
 import av
 import torch
 from av.video.frame import CudaContext
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.media import VideoMetadata
+from jasna.media import SUPPORTED_ENCODER_SETTINGS_BY_CODEC, VideoMetadata, validate_encoder_settings
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.lut import GpuLutApplier, parse_cube_file
+from jasna.media.rgb_to_nv12 import (
+    chw_rgb_to_nv12_bt2020_full,
+    chw_rgb_to_nv12_bt2020_limited,
+    chw_rgb_to_nv12_bt601_full,
+    chw_rgb_to_nv12_bt601_limited,
+    chw_rgb_to_nv12_bt709_full,
+    chw_rgb_to_nv12_bt709_limited,
+)
 from jasna.media.rgb_to_p010 import (
     chw_rgb_to_p010_bt2020_full,
     chw_rgb_to_p010_bt2020_limited,
@@ -27,8 +38,6 @@ from jasna.media.rgb_to_p010 import (
 av.logging.set_level(logging.ERROR)
 
 logger = logging.getLogger(__name__)
-
-_CODEC_MAP = {"hevc": "hevc_nvenc"}
 
 DEFAULT_ENCODER_OPTIONS: dict[str, str] = {
     "preset": "p5",
@@ -52,6 +61,91 @@ DEFAULT_ENCODER_OPTIONS: dict[str, str] = {
     "b_ref_mode": "middle",
 }
 
+# lookahead_level breaks avcodec_open2 on h264_nvenc with this lookahead/AQ
+# combination (ENOSYS on RTX 5090), so H.264 deliberately omits it.
+DEFAULT_H264_ENCODER_OPTIONS: dict[str, str] = {
+    "preset": "p5",
+    "tune": "hq",
+    "profile": "high",
+    "rc": "vbr",
+    # CQ 24 matched HEVC CQ 25 in representative VMAF comparisons.
+    "cq": "24",
+    "qmin": "17",
+    "qmax": "34",
+    "nonref_p": "1",
+    "g": "250",
+    "temporal-aq": "1",
+    "rc-lookahead": "32",
+    "spatial_aq": "1",
+    "aq-strength": "8",
+    "init_qpI": "17",
+    "init_qpP": "17",
+    "init_qpB": "17",
+    "bf": "4",
+    "b_ref_mode": "middle",
+}
+
+# AV1 target quality uses a 0..63 scale rather than H.264/HEVC's 0..51.
+# CQ 32 matched HEVC CQ 25 in representative VMAF/SSIM comparisons. AV1 QP limits use a separate
+# 0..255 scale, so the HEVC qmin/qmax/init_qp values must not be copied here.
+# No profile: P010 input makes av1_nvenc emit AV1 Main 10-bit on its own.
+# av1_nvenc only consumes the hyphenated spatial-aq spelling.
+DEFAULT_AV1_ENCODER_OPTIONS: dict[str, str] = {
+    "preset": "p5",
+    "tune": "hq",
+    "rc": "vbr",
+    "cq": "32",
+    "nonref_p": "1",
+    "g": "250",
+    "temporal-aq": "1",
+    "rc-lookahead": "32",
+    "lookahead_level": "1",
+    "spatial-aq": "1",
+    "aq-strength": "8",
+    "bf": "4",
+    "b_ref_mode": "middle",
+}
+
+
+@dataclass(frozen=True)
+class EncoderSpec:
+    name: str
+    encoder_name: str
+    frame_format: str  # PyAV hardware-frame software format: "nv12" or "p010le"
+    default_options: Mapping[str, str]
+    ten_bit: bool
+    supported_settings: frozenset[str] = field(default_factory=frozenset)
+
+
+ENCODER_SPECS: dict[str, EncoderSpec] = {
+    "hevc": EncoderSpec(
+        name="hevc",
+        encoder_name="hevc_nvenc",
+        frame_format="p010le",
+        default_options=MappingProxyType(DEFAULT_ENCODER_OPTIONS),
+        ten_bit=True,
+        supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["hevc"],
+    ),
+    "h264": EncoderSpec(
+        name="h264",
+        encoder_name="h264_nvenc",
+        frame_format="nv12",
+        default_options=MappingProxyType(DEFAULT_H264_ENCODER_OPTIONS),
+        ten_bit=False,
+        supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["h264"],
+    ),
+    "av1": EncoderSpec(
+        name="av1",
+        encoder_name="av1_nvenc",
+        frame_format="p010le",
+        default_options=MappingProxyType(DEFAULT_AV1_ENCODER_OPTIONS),
+        ten_bit=True,
+        supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["av1"],
+    ),
+}
+
+_CODEC_MAP = {spec.name: spec.encoder_name for spec in ENCODER_SPECS.values()}
+
 # ITU-T H.273 matrix, primaries, and transfer-characteristic code points.
 _COLOR_TAGS = {
     AvColorspace.ITU709: (1, 1, 1),
@@ -65,6 +159,14 @@ _COLOR_CONVERTERS = {
     (AvColorspace.ITU601, AvColorRange.JPEG): chw_rgb_to_p010_bt601_full,
     (AvColorspace.BT2020, AvColorRange.MPEG): chw_rgb_to_p010_bt2020_limited,
     (AvColorspace.BT2020, AvColorRange.JPEG): chw_rgb_to_p010_bt2020_full,
+}
+_COLOR_CONVERTERS_NV12 = {
+    (AvColorspace.ITU709, AvColorRange.MPEG): chw_rgb_to_nv12_bt709_limited,
+    (AvColorspace.ITU709, AvColorRange.JPEG): chw_rgb_to_nv12_bt709_full,
+    (AvColorspace.ITU601, AvColorRange.MPEG): chw_rgb_to_nv12_bt601_limited,
+    (AvColorspace.ITU601, AvColorRange.JPEG): chw_rgb_to_nv12_bt601_full,
+    (AvColorspace.BT2020, AvColorRange.MPEG): chw_rgb_to_nv12_bt2020_limited,
+    (AvColorspace.BT2020, AvColorRange.JPEG): chw_rgb_to_nv12_bt2020_full,
 }
 
 
@@ -85,32 +187,51 @@ class NvidiaVideoEncoder:
         encoder_settings: dict[str, object],
         lut_path: str | Path | None = None,
     ):
-        if codec not in _CODEC_MAP:
+        if codec not in ENCODER_SPECS:
             raise ValueError(f"Unsupported codec: {codec}")
-        converter = _COLOR_CONVERTERS.get((metadata.color_space, metadata.color_range))
+        spec = ENCODER_SPECS[codec]
+        converter_map = _COLOR_CONVERTERS if spec.frame_format == "p010le" else _COLOR_CONVERTERS_NV12
+        converter = converter_map.get((metadata.color_space, metadata.color_range))
         if converter is None:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
+        if encoder_settings:
+            validate_encoder_settings(encoder_settings, codec=codec)
 
         self.metadata = metadata
         self.device = device
         self.file = file
         self.output_path = Path(file)
-        self.encoder_name = _CODEC_MAP[codec]
+        self.codec = codec
+        self.spec = spec
+        self.encoder_name = spec.encoder_name
 
         self._lut_applier: GpuLutApplier | None = None
         if lut_path:
             lut = parse_cube_file(lut_path)
             self._lut_applier = GpuLutApplier(lut, device)
 
-        self._to_p010 = converter
+        self._to_yuv = converter
 
-        self.encoder_options = dict(DEFAULT_ENCODER_OPTIONS)
+        self.encoder_options = dict(spec.default_options)
         if encoder_settings:
-            self.encoder_options.update({k: _option_value(v) for k, v in encoder_settings.items()})
+            overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
+            # FFmpeg accepts both spellings for HEVC/H.264, but their defaults
+            # use the underscore key. Normalize the alias so a user override
+            # replaces that default instead of passing two conflicting options.
+            if "spatial-aq" in overrides and "spatial_aq" in self.encoder_options:
+                overrides["spatial_aq"] = overrides.pop("spatial-aq")
+            self.encoder_options.update(overrides)
 
         self.BUFFER_MAX_SIZE = 8
 
     def __enter__(self):
+        try:
+            av.Codec(self.encoder_name, "w")
+        except ValueError as exc:  # av.codec.codec.UnknownCodecError
+            raise RuntimeError(
+                f"Encoder {self.encoder_name} (codec {self.codec}) is not available in the "
+                f"bundled FFmpeg libraries: {exc}"
+            ) from exc
         self._src = av.open(self.metadata.video_file)
 
         container_options = {}
@@ -251,7 +372,12 @@ class NvidiaVideoEncoder:
             if packet.dts is not None and packet.time_base is not None
             else None
         )
-        self.dst.mux(packet)
+        try:
+            self.dst.mux(packet)
+        except av.FFmpegError as exc:
+            raise RuntimeError(
+                f"Failed to mux {self.codec} video into '{self.output_path.suffix}' output: {exc}"
+            ) from exc
         if not self._video_started:
             self._video_started = True
         if not self._options_validated:
@@ -313,26 +439,49 @@ class NvidiaVideoEncoder:
             self.pts_set.remove(pts_to_assign)
             self._encode_queue.put(self._build_encode_item(frame_to_encode, pts_to_assign))
 
+    def _encoder_open_error(self, exc: Exception) -> RuntimeError:
+        try:
+            gpu = torch.cuda.get_device_name(self.device)
+        except Exception:
+            gpu = str(self.device)
+        message = (
+            f"Failed to open {self.codec} encoder ({self.encoder_name}) for "
+            f"'{self.output_path.suffix}' output on {gpu}: {exc}"
+        )
+        if self.codec == "av1":
+            message += ". AV1 NVENC encoding requires a GPU/driver generation that provides it."
+        return RuntimeError(message)
+
     def _encode_frame(self, frame: torch.Tensor, pts: int):
         with torch.cuda.stream(self.stream):
             if self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
-            p010 = self._to_p010(frame)
+            packed = self._to_yuv(frame)
 
         height = self.metadata.video_height
         # NVENC consumes these pointers asynchronously, so finish the conversion
         # before constructing the hardware frame on the shared CUDA context.
         self.stream.synchronize()
+        if self.spec.frame_format == "p010le":
+            planes = [packed[:height].view(torch.uint16), packed[height:].view(torch.uint16)]
+        else:
+            planes = [packed[:height], packed[height:]]
         hw_frame = av.VideoFrame.from_dlpack(
-            [p010[:height].view(torch.uint16), p010[height:].view(torch.uint16)],
-            format="p010le",
+            planes,
+            format=self.spec.frame_format,
             primary_ctx=False,
             cuda_context=self._cuda_ctx,
             current_ctx=True,
         )
         hw_frame.pts = pts
         hw_frame.time_base = self.metadata.time_base
-        for packet in self.out_stream.encode(hw_frame):
+        try:
+            packets = self.out_stream.encode(hw_frame)
+        except av.FFmpegError as exc:
+            if not self._video_started:
+                raise self._encoder_open_error(exc) from exc
+            raise
+        for packet in packets:
             self._mux_video(packet)
 
     def encode(self, frame: torch.Tensor, pts: int):

@@ -6,7 +6,7 @@ from typing import Iterator
 import av
 import torch
 from av.codec.hwaccel import HWAccel
-from av.video.reformatter import ColorRange as AvColorRange
+from av.video.reformatter import ColorRange as AvColorRange, VideoReformatter
 
 from jasna.media import VideoMetadata
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
@@ -56,7 +56,7 @@ class NvidiaVideoReader:
         hwaccel = HWAccel(
             "cuda",
             device=str(self.device.index or 0),
-            allow_software_fallback=False,
+            allow_software_fallback=True,
             is_hw_owned=True,
         )
         # Reuse the CUDA context already made current by torch without asking
@@ -70,28 +70,23 @@ class NvidiaVideoReader:
             raise VideoDecodeError(f"Failed to open {self.file}: {e}") from e
 
         ctx = self.video_stream.codec_context
+        if not ctx.is_hwaccel:
+            # Definite software decode: let FFmpeg pick frame/slice threading.
+            # CUDA contexts must keep their default threading configuration.
+            ctx.thread_type = "AUTO"
         self.width = ctx.width
         self.height = ctx.height
-        full_range = (
+        self._full_range = (
             ctx.color_range == int(AvColorRange.JPEG)
             or self.metadata.color_range == AvColorRange.JPEG
         )
-        self._converter = YuvToRgbConverter(
-            self.height,
-            self.width,
-            self.metadata.color_space,
-            full_range,
-            self.metadata.is_10bit,
-            self.device,
-        )
-        # A blocking stream participates in legacy-default-stream ordering.
-        # FFmpeg's CUDA/NVDEC device uses stream 0, so this makes decoded-frame
-        # writes happen-before conversion without an explicit cross-library event.
-        self._raw_stream, self.stream = _create_blocking_cuda_stream(self.device)
+        self._raw_stream: int | None = None
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
+        if self._raw_stream is None:
+            return
         result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
         if result != 0 and exc_type is None:
             raise RuntimeError(f"cuStreamDestroy failed (CUDA error {result})")
@@ -143,23 +138,136 @@ class NvidiaVideoReader:
         self,
         seek_ts: float | None = None,
     ) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        # The first decoded frame's format is the final backend decision: a codec
+        # can advertise a CUDA config and still fall back to software when
+        # hardware initialization rejects a profile or pixel format. Dispatch
+        # once here so neither per-frame loop carries a backend branch.
+        decoded = self._decoded_frames(seek_ts)
+        group = self._read_group(decoded)
+        if not group:
+            return
+        if group[0].format.name == "cuda":
+            backend = self._frames_hardware(decoded, group)
+        else:
+            log.warning(
+                "CUDA/NVDEC cannot decode %s (codec %s, %s); using FFmpeg software "
+                "decoding and uploading frames to CUDA",
+                self.file,
+                self.metadata.codec_name,
+                group[0].format.name,
+            )
+            backend = self._frames_software(decoded, group)
+
+        # The backend generator now owns the first group. Drop this outer
+        # reference before yielding: retaining four 4K P010 NVDEC surfaces here
+        # for the reader's lifetime costs about 96 MiB of avoidable VRAM.
+        del group
+        yield from backend
+
+    def _frames_hardware(self, decoded, group: list) -> Iterator[tuple[torch.Tensor, list[int]]]:
         # FFmpeg 8 maps NVDEC output on CUDA stream 0. Conversion runs in a
         # blocking stream in that same context, so legacy-default-stream ordering
         # makes the decoded writes visible before this kernel without a race.
         # Decode one group ahead while conversion runs; keep both groups' frame
         # references alive until conversion is synchronized so their mapped
         # surfaces cannot be recycled underneath queued work.
-        decoded = self._decoded_frames(seek_ts)
-        group = self._read_group(decoded)
+        converter = YuvToRgbConverter(
+            self.height,
+            self.width,
+            self.metadata.color_space,
+            self._full_range,
+            self.metadata.is_10bit,
+            self.device,
+        )
+        if self._raw_stream is None:
+            self._raw_stream, self.stream = _create_blocking_cuda_stream(self.device)
         while group:
             batch = torch.empty(
                 (len(group), 3, self.height, self.width), device=self.device, dtype=torch.uint8
             )
             pts = [frame.pts for frame in group]
             with torch.cuda.stream(self.stream):
-                self._converter.convert_frames_into(group, batch, self.stream.cuda_stream)
+                converter.convert_frames_into(group, batch, self.stream.cuda_stream)
 
             next_group = self._read_group(decoded)
             self.stream.synchronize()
+            group = next_group
+            yield batch, pts
+
+    def _frames_software(self, decoded, group: list) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        # Normalize CPU frames to the two layouts the CUDA conversion kernel
+        # accepts (NV12 for <=8-bit sources, P010 above), keeping the resolved
+        # matrix/range identical on both reformat sides so swscale changes only
+        # layout/subsampling/depth. The one authoritative YUV->RGB conversion
+        # stays in the CUDA kernel.
+        depth = max(
+            (component.bits for component in group[0].format.components if component.bits),
+            default=10 if self.metadata.is_10bit else 8,
+        )
+        ten_bit = depth > 8
+        if depth > 10:
+            log.warning(
+                "Reducing %d-bit source %s to 10-bit P010 before CUDA upload", depth, self.file
+            )
+        target_format = "p010le" if ten_bit else "nv12"
+        dtype = torch.uint16 if ten_bit else torch.uint8
+        bytes_per_sample = 2 if ten_bit else 1
+
+        converter = YuvToRgbConverter(
+            self.height,
+            self.width,
+            self.metadata.color_space,
+            self._full_range,
+            ten_bit,
+            self.device,
+        )
+        reformatter = VideoReformatter()
+        color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
+        H, W = self.height, self.width
+
+        # One packed pinned host batch and one packed device staging frame bound
+        # the fallback's extra memory: H2D copies and conversion kernels are
+        # ordered on the same stream, so the next H2D overwrite of the staging
+        # frame starts only after the prior conversion kernel consumed it.
+        pinned = torch.empty((self.batch_size, H + H // 2, W), dtype=dtype, pin_memory=True)
+        staging = torch.empty((H + H // 2, W), dtype=dtype, device=self.device)
+        stream = torch.cuda.Stream(self.device)
+
+        while group:
+            batch = torch.empty((len(group), 3, H, W), device=self.device, dtype=torch.uint8)
+            pts = [frame.pts for frame in group]
+            for i, frame in enumerate(group):
+                try:
+                    normalized = reformatter.reformat(
+                        frame,
+                        width=W,
+                        height=H,
+                        format=target_format,
+                        src_colorspace=self.metadata.color_space,
+                        dst_colorspace=self.metadata.color_space,
+                        src_color_range=color_range,
+                        dst_color_range=color_range,
+                    )
+                except av.FFmpegError as e:
+                    raise VideoDecodeError(f"Failed to decode {self.file}: {e}") from e
+                y_plane, uv_plane = normalized.planes
+                y = torch.frombuffer(y_plane, dtype=dtype).reshape(
+                    H, y_plane.line_size // bytes_per_sample
+                )[:, :W]
+                uv = torch.frombuffer(uv_plane, dtype=dtype).reshape(
+                    H // 2, uv_plane.line_size // bytes_per_sample
+                )[:, :W]
+                pinned[i, :H].copy_(y)
+                pinned[i, H:].copy_(uv)
+
+            with torch.cuda.stream(stream):
+                for i in range(len(group)):
+                    staging.copy_(pinned[i], non_blocking=True)
+                    converter.convert_into(
+                        staging[:H], staging[H:].view(H // 2, W // 2, 2), batch[i]
+                    )
+
+            next_group = self._read_group(decoded)
+            stream.synchronize()
             group = next_group
             yield batch, pts

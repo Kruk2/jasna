@@ -2,6 +2,7 @@
 
 import itertools
 import json
+import logging
 import re
 from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
@@ -9,6 +10,8 @@ from pathlib import Path
 from typing import Callable
 
 from jasna import os_utils
+
+logger = logging.getLogger(__name__)
 
 
 def get_settings_path() -> Path:
@@ -169,12 +172,34 @@ def _migrate_encoder_custom_args(value: str) -> str:
     return ",".join(f"{k}={v}" for k, v in migrated.items())
 
 
+_LEGACY_CODEC_SPELLINGS = {
+    "hevc": "hevc",
+    "h265": "hevc",
+    "h.265": "hevc",
+    "h264": "h264",
+    "h.264": "h264",
+    "avc": "h264",
+    "av1": "av1",
+    "av01": "av1",
+}
+
+
+def _normalize_preset_codec(value: object) -> str:
+    canonical = _LEGACY_CODEC_SPELLINGS.get(str(value).strip().lower())
+    if canonical is None:
+        logger.warning("Unknown codec %r in preset; falling back to hevc", value)
+        return "hevc"
+    return canonical
+
+
 def _migrate_preset_dict(preset_dict: dict) -> dict:
     known_fields = {f.name for f in fields(AppSettings)}
     migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
     custom_args = migrated.get("encoder_custom_args")
     if custom_args:
         migrated["encoder_custom_args"] = _migrate_encoder_custom_args(custom_args)
+    if "codec" in migrated:
+        migrated["codec"] = _normalize_preset_codec(migrated["codec"])
     return migrated
 
 

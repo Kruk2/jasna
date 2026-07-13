@@ -7,6 +7,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 from jasna.media import (
     SUPPORTED_ENCODER_SETTINGS,
+    SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
     _parse_encoder_setting_scalar,
     parse_encoder_settings,
     validate_encoder_settings,
@@ -98,8 +99,65 @@ class TestValidateEncoderSettings:
             validate_encoder_settings({"cq": 22, "bad_key": 1})
 
     def test_all_supported_keys_accepted(self):
-        settings = {k: 0 for k in SUPPORTED_ENCODER_SETTINGS}
+        # spatial_aq/spatial-aq are aliases and may not be combined.
+        settings = {k: 0 for k in SUPPORTED_ENCODER_SETTINGS if k != "spatial-aq"}
         assert validate_encoder_settings(settings) == settings
+        settings = {k: 0 for k in SUPPORTED_ENCODER_SETTINGS if k != "spatial_aq"}
+        assert validate_encoder_settings(settings) == settings
+
+
+class TestValidateEncoderSettingsPerCodec:
+    def test_union_is_union_of_codec_sets(self):
+        union = frozenset().union(*SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values())
+        assert union == SUPPORTED_ENCODER_SETTINGS
+
+    @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+    def test_common_settings_accepted_for_all_codecs(self, codec):
+        settings = {"preset": "p5", "cq": 25, "rc-lookahead": 32, "bf": 4, "maxrate": "10M"}
+        assert validate_encoder_settings(settings, codec=codec) == settings
+
+    @pytest.mark.parametrize("codec", ["hevc", "h264"])
+    def test_profile_accepted_for_hevc_and_h264(self, codec):
+        assert validate_encoder_settings({"profile": "x"}, codec=codec) == {"profile": "x"}
+
+    def test_profile_rejected_for_av1(self):
+        with pytest.raises(ValueError, match="for codec av1.*profile"):
+            validate_encoder_settings({"profile": "main"}, codec="av1")
+
+    @pytest.mark.parametrize("codec", ["hevc", "h264"])
+    def test_underscore_aq_alias_accepted_for_hevc_and_h264(self, codec):
+        assert validate_encoder_settings({"spatial_aq": 1}, codec=codec)
+        assert validate_encoder_settings({"spatial-aq": 1}, codec=codec)
+
+    def test_av1_requires_hyphen_aq_spelling(self):
+        assert validate_encoder_settings({"spatial-aq": 1}, codec="av1")
+        with pytest.raises(ValueError, match="for codec av1.*spatial_aq"):
+            validate_encoder_settings({"spatial_aq": 1}, codec="av1")
+
+    def test_av1_tile_options_accepted(self):
+        settings = {"tile-rows": 2, "tile-columns": 2}
+        assert validate_encoder_settings(settings, codec="av1") == settings
+        with pytest.raises(ValueError, match="for codec hevc"):
+            validate_encoder_settings(settings, codec="hevc")
+
+    def test_h264_coder_accepted_only_for_h264(self):
+        assert validate_encoder_settings({"coder": "cabac"}, codec="h264")
+        with pytest.raises(ValueError, match="for codec hevc"):
+            validate_encoder_settings({"coder": "cabac"}, codec="hevc")
+
+    def test_error_message_names_selected_codec(self):
+        with pytest.raises(ValueError, match=r"for codec h264.*tier.*Supported for h264"):
+            validate_encoder_settings({"tier": "high"}, codec="h264")
+
+    def test_conflicting_aq_aliases_rejected(self):
+        with pytest.raises(ValueError, match="Conflicting encoder settings.*spatial"):
+            validate_encoder_settings({"spatial_aq": 1, "spatial-aq": 1}, codec="hevc")
+        with pytest.raises(ValueError, match="Conflicting encoder settings.*spatial"):
+            validate_encoder_settings({"spatial_aq": 1, "spatial-aq": 1})
+
+    def test_unknown_codec_rejected(self):
+        with pytest.raises(ValueError, match="Unsupported codec: vp9"):
+            validate_encoder_settings({}, codec="vp9")
 
 
 class TestIsStream10bit:

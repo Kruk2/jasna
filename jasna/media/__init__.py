@@ -14,12 +14,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ffmpeg hevc_nvenc option names
-SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
+# ffmpeg *_nvenc option names shared by every codec
+_COMMON_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
         "preset",
         "tune",
-        "profile",
         "rc",
         "cq",
         "qmin",
@@ -29,7 +28,6 @@ SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
         "temporal-aq",
         "rc-lookahead",
         "lookahead_level",
-        "spatial_aq",
         "aq-strength",
         "init_qpI",
         "init_qpP",
@@ -41,9 +39,19 @@ SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset(
         "multipass",
         "b_adapt",
         "weighted_pred",
-        "tier",
         "tf_level",
     }
+)
+
+# hevc_nvenc/h264_nvenc accept both AQ spellings; av1_nvenc only the hyphen one.
+SUPPORTED_ENCODER_SETTINGS_BY_CODEC: dict[str, frozenset[str]] = {
+    "hevc": _COMMON_ENCODER_SETTINGS | {"profile", "tier", "spatial_aq", "spatial-aq"},
+    "h264": _COMMON_ENCODER_SETTINGS | {"profile", "coder", "spatial_aq", "spatial-aq"},
+    "av1": _COMMON_ENCODER_SETTINGS | {"tier", "spatial-aq", "tile-rows", "tile-columns"},
+}
+
+SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
+    *SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values()
 )
 
 
@@ -91,14 +99,26 @@ def parse_encoder_settings(value: str) -> dict[str, object]:
     return settings
 
 
-def validate_encoder_settings(settings: dict[str, object]) -> dict[str, object]:
-    invalid = sorted(set(settings.keys()) - set(SUPPORTED_ENCODER_SETTINGS))
+def validate_encoder_settings(settings: dict[str, object], codec: str | None = None) -> dict[str, object]:
+    if "spatial_aq" in settings and "spatial-aq" in settings:
+        raise ValueError(
+            "Conflicting encoder settings: spatial_aq and spatial-aq are aliases; use only one"
+        )
+    if codec is None:
+        supported = SUPPORTED_ENCODER_SETTINGS
+        scope = "Supported"
+    else:
+        if codec not in SUPPORTED_ENCODER_SETTINGS_BY_CODEC:
+            raise ValueError(f"Unsupported codec: {codec}")
+        supported = SUPPORTED_ENCODER_SETTINGS_BY_CODEC[codec]
+        scope = f"Supported for {codec}"
+    invalid = sorted(set(settings.keys()) - set(supported))
     if invalid:
         raise ValueError(
-            "Unsupported encoder setting(s): "
+            f"Unsupported encoder setting(s){'' if codec is None else f' for codec {codec}'}: "
             + ", ".join(invalid)
-            + ". Supported: "
-            + ", ".join(sorted(SUPPORTED_ENCODER_SETTINGS))
+            + f". {scope}: "
+            + ", ".join(sorted(supported))
         )
     return settings
 

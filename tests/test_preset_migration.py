@@ -47,3 +47,38 @@ def test_new_style_args_pass_through():
 
 def test_garbage_args_returned_unchanged():
     assert _migrate_encoder_custom_args("not==valid,,=x") == "not==valid,,=x"
+
+
+def test_legacy_codec_spellings_normalized():
+    for legacy, canonical in [
+        ("HEVC", "hevc"), ("h265", "hevc"), ("H.265", "hevc"),
+        ("H264", "h264"), ("H.264", "h264"), ("avc", "h264"),
+        ("AV1", "av1"), ("av01", "av1"),
+    ]:
+        migrated = _migrate_preset_dict({"codec": legacy})
+        assert migrated["codec"] == canonical, legacy
+        assert AppSettings(**migrated).codec == canonical
+
+
+def test_unknown_codec_falls_back_to_hevc():
+    assert _migrate_preset_dict({"codec": "prores"})["codec"] == "hevc"
+
+
+def test_gui_codec_label_maps_round_trip():
+    from jasna.gui.settings_panel import (
+        CODEC_CANONICAL_TO_LABEL,
+        CODEC_LABEL_TO_CANONICAL,
+        translate_cq_for_codec,
+    )
+
+    assert set(CODEC_CANONICAL_TO_LABEL) == {"hevc", "h264", "av1"}
+    for canonical, label in CODEC_CANONICAL_TO_LABEL.items():
+        assert CODEC_LABEL_TO_CANONICAL[label] == canonical
+        # .lower() on a display label must never be used as the canonical value
+        if canonical != "av1":
+            assert label.lower() != canonical
+
+    assert translate_cq_for_codec(22, "hevc", "av1") == 29
+    assert translate_cq_for_codec(29, "av1", "hevc") == 22
+    assert translate_cq_for_codec(22, "hevc", "h264") == 22
+    assert translate_cq_for_codec(35, "hevc", "av1") == 35

@@ -267,7 +267,6 @@ class Processor:
         import torch
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.engine_paths import model_weights_dir
-        from jasna.media import parse_encoder_settings, validate_encoder_settings
         from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
         from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
         from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
@@ -335,27 +334,33 @@ class Processor:
             denoise_step=DenoiseStep(settings.denoise_step),
         )
 
-        encoder_settings = {}
-        if settings.encoder_cq:
-            encoder_settings["cq"] = settings.encoder_cq
-        if settings.encoder_custom_args:
-            encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
-        encoder_settings = validate_encoder_settings(encoder_settings)
-
         self._video_session = {
             "device": device,
             "det_name": det_name,
             "detection_model_path": detection_model_path,
             "restoration_pipeline": restoration_pipeline,
             "secondary_restorer": secondary_restorer,
-            "encoder_settings": encoder_settings,
             "lut_path": (settings.lut_path or "").strip() or None,
         }
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
 
+    def _build_encoder_settings(self) -> dict:
+        # Built per job (not cached in the video session) so a codec change
+        # between queued jobs is always validated against the selected codec.
+        from jasna.media import parse_encoder_settings, validate_encoder_settings
+
+        settings = self._settings
+        encoder_settings = {}
+        if settings.encoder_cq:
+            encoder_settings["cq"] = settings.encoder_cq
+        if settings.encoder_custom_args:
+            encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
+        return validate_encoder_settings(encoder_settings, codec=settings.codec)
+
     def _run_video_job(self, job_id: int, input_path: Path, output_path: Path):
         from jasna.pipeline import Pipeline
 
+        encoder_settings = self._build_encoder_settings()
         self._ensure_video_session()
         s = self._video_session
         settings = self._settings
@@ -391,7 +396,7 @@ class Processor:
                 detection_score_threshold=settings.detection_score_threshold,
                 restoration_pipeline=s["restoration_pipeline"],
                 codec=settings.codec,
-                encoder_settings=s["encoder_settings"],
+                encoder_settings=encoder_settings,
                 batch_size=settings.batch_size,
                 device=s["device"],
                 max_clip_size=settings.max_clip_size,
@@ -410,6 +415,8 @@ class Processor:
             _KERNEL_CACHE.clear()
             from jasna.media.rgb_to_p010 import _cache as _p010_cache
             _p010_cache.clear()
+            from jasna.media.rgb_to_nv12 import _cache as _nv12_cache
+            _nv12_cache.clear()
 
     def _close_video_session(self):
         if self._video_session is None:

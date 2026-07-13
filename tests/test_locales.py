@@ -126,6 +126,26 @@ def test_english_activation_copy_uses_app_activation_language() -> None:
 
 
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_codec_tooltip_covers_all_three_codecs(lang: str) -> None:
+    tip = TRANSLATIONS[lang].get("tip_codec")
+    if tip is None:
+        pytest.skip(f"{lang} has no tip_codec override")
+    assert "AV1" in tip
+    assert "H.264" in tip
+    assert "H.265" in tip
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_cq_tooltip_mentions_codec_relative_values(lang: str) -> None:
+    tip = TRANSLATIONS[lang].get("tip_encoder_cq")
+    if tip is None:
+        pytest.skip(f"{lang} has no tip_encoder_cq override")
+    assert "CQ" in tip
+    assert "AV1" in tip
+    assert "29" in tip
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
 def test_activation_benefits_include_sd15_image_restoration(lang: str) -> None:
     perks = TRANSLATIONS[lang]["supporter_perks"]
     assert "UNet 4x" in perks
