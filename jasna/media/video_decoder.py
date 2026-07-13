@@ -1,11 +1,20 @@
 import ctypes
+import logging
 import sys
-import torch
-import python_vali as vali
-from jasna.media import VideoMetadata
 from typing import Iterator
 
+import torch
+import python_vali as vali
+
+from jasna.media import VideoMetadata
+
+log = logging.getLogger(__name__)
+
 _libcuda: ctypes.CDLL | None = None
+
+
+class VideoDecodeError(RuntimeError):
+    pass
 
 
 def _cuda_driver() -> ctypes.CDLL:
@@ -97,8 +106,33 @@ class NvidiaVideoReader:
         del self.decoder
         _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
 
-    def frames(self, seek_ts: float|None=None) -> Iterator[tuple[torch.Tensor, int]]:
-        frame_idx = 0
+    def _decode_surface(
+        self,
+        pkt_data: vali.PacketData,
+        seek_ctx: vali.SeekContext | None,
+    ) -> bool:
+        success, details = self.decoder.DecodeSingleSurfaceAsyncDetailed(
+            self.decode_surface, pkt_data, seek_ctx,
+        )
+        if success:
+            if details.message:
+                log.warning(
+                    "Recovered video corruption in %s: %s",
+                    self.file,
+                    details.message,
+                )
+            return True
+        if details.info == vali.TaskExecInfo.END_OF_STREAM:
+            return False
+        message = details.message or details.info.name
+        raise VideoDecodeError(
+            f"Failed to decode {self.file} ({details.info.name}): {message}"
+        )
+
+    def frames(
+        self,
+        seek_ts: float | None = None,
+    ) -> Iterator[tuple[torch.Tensor, list[int]]]:
         pkt_data = vali.PacketData()
         eof = False
         while True:
@@ -109,13 +143,11 @@ class NvidiaVideoReader:
                 seek_ts = None
 
                 for i in range(self.batch_size):
-                    success, details = self.decoder.DecodeSingleSurfaceAsync(self.decode_surface, pkt_data, seek_ctx)
+                    has_frame = self._decode_surface(pkt_data, seek_ctx)
                     seek_ctx = None
-                    if not success:
-                        if details.name == 'END_OF_STREAM':
-                            eof = True
-                            break
-                        raise Exception(details)
+                    if not has_frame:
+                        eof = True
+                        break
 
                     self.py_cvt.RunAsync(self.decode_surface, self.rgb_surface, self.cc_ctx)
                     self.py_cvt.RunAsync(self.rgb_surface, self.rgb_planar_surface)
@@ -126,7 +158,6 @@ class NvidiaVideoReader:
                         tensor_nv = ((frame10 + self._dither2) >> 2).clamp(0, 255).to(torch.uint8)
                     batch_tensor_nv[i].copy_(tensor_nv)
 
-                    frame_idx += 1
                     pkts.append(pkt_data.pts)
                 self.stream.synchronize()
             yield batch_tensor_nv, pkts
