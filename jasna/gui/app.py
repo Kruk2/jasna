@@ -2,7 +2,9 @@
 
 import customtkinter as ctk
 import logging
+import os
 from pathlib import Path
+import sys
 import threading
 import time
 
@@ -21,6 +23,14 @@ from jasna.gui.log_filter import runtime_log_level_for_filter
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
+from jasna.gui.font_backend import (
+    GuiFontBackendError,
+    font_backend_error,
+    font_backend_problem,
+    font_backend_status_json,
+    inspect_font_backend,
+)
+from jasna._frozen import is_frozen
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +49,16 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     
     def __init__(self, skip_wizard: bool = False):
         super().__init__()
+        font_status = inspect_font_backend(self)
+        font_problem = font_backend_problem(font_status)
+        if font_problem is not None:
+            from tkinter import messagebox
+
+            message = font_backend_error(font_status, frozen=is_frozen())
+            self.withdraw()
+            messagebox.showerror("Jasna GUI font error", message, parent=self)
+            self.destroy()
+            raise GuiFontBackendError(message)
         self._t_init_start = startup_timing.elapsed_ms()
         try:
             self.TkdndVersion = TkinterDnD._require(self)
@@ -655,7 +675,6 @@ class GUILogHandler(logging.Handler):
 def run_gui():
     """Entry point to run the GUI application."""
     import logging
-    import os
     # Set up basic logging - will be connected to GUI after app creation
     logging.basicConfig(
         level=logging.INFO,
@@ -663,7 +682,20 @@ def run_gui():
         handlers=[logging.StreamHandler()]  # Temporary console output
     )
     
-    app = JasnaApp()
+    if os.environ.get("JASNA_GUI_FONT_PROBE") == "1":
+        root = ctk.CTk()
+        try:
+            status = inspect_font_backend(root)
+            print(font_backend_status_json(status), flush=True)
+            raise SystemExit(0 if font_backend_problem(status) is None else 1)
+        finally:
+            root.destroy()
+
+    try:
+        app = JasnaApp()
+    except GuiFontBackendError as error:
+        print(error, file=sys.stderr)
+        return
     
     # Replace console handler with GUI handler for all jasna loggers
     gui_handler = GUILogHandler(app._log_panel)
