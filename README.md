@@ -319,6 +319,22 @@ Current TODO:
 
 Python requirement from `pyproject.toml`: **Python 3.13 or newer**.
 
+On Linux, create the venv from a distribution-provided Python whose matching Tk package
+uses Xft/fontconfig. Avoid a downloaded standalone Python that reports a `no-xft` Tk build;
+it reduces all GUI text and CustomTkinter shapes to the legacy bitmap `fixed` font. For
+example, when `/usr/bin/python3.13` is supplied by your distribution:
+
+```bash
+uv venv --python /usr/bin/python3.13 --no-managed-python --no-python-downloads .venv
+source .venv/bin/activate
+python -c "import tkinter; root = tkinter.Tk(); print(root.tk.call('info', 'patchlevel')); root.destroy()"
+```
+
+Ubuntu 22.04 does not provide Python 3.13 in its base repositories, so source development
+there needs a separately installed or source-built Python 3.13 linked to the system `tk-dev`
+and `libxft-dev`. This does not affect the prebuilt Linux release, which bundles its own
+compatible Python/Tk runtime.
+
 The public source checkout does not include the protection module. Running from source is fine for development and free models, but supporter-only models such as **unet-4x** and **SD 1.5 image restoration** will not be available from a plain source checkout.
 
 Install runtime dependencies:

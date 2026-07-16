@@ -1,5 +1,13 @@
 """Jasna GUI theme colors and styling constants."""
 
+import sys
+
+
+def _font_families_for_platform(platform: str) -> tuple[str, str]:
+    if platform.startswith("linux"):
+        return "sans-serif", "monospace"
+    return "Segoe UI", "Consolas"
+
 
 class Colors:
     # Backgrounds
@@ -44,11 +52,7 @@ class Colors:
 
 
 class Fonts:
-    # Primary: Segoe UI (Windows system font, no embedding needed for PyInstaller)
-    # Fallback chain handled by OS if unavailable
-    FAMILY = "Segoe UI"
-    # Monospace: Consolas (Windows system font)
-    FAMILY_MONO = "Consolas"
+    FAMILY, FAMILY_MONO = _font_families_for_platform(sys.platform)
     
     # Typography hierarchy per spec (+1px from original)
     SIZE_TITLE = 16      # App title "JASNA GUI" - bold
