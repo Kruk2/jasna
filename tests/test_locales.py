@@ -91,6 +91,44 @@ _POST_EXPORT_KEYS = {
 
 _FRAME_RATE_KEYS = {"retarget_high_fps", "tip_retarget_high_fps"}
 
+_SEGMENT_EDITOR_KEYS = {
+    "segments_full_video",
+    "segments_media_info",
+    "segments_previous_frame",
+    "segments_next_frame",
+    "segments_ranges",
+    "segments_undo",
+    "segments_redo",
+    "segments_new_range",
+    "segments_clear_all",
+    "segments_clear_confirm",
+    "segments_mark_in_short",
+    "segments_mark_out_short",
+    "segments_mark_in_hint",
+    "segments_mark_out_hint",
+    "segments_add_range",
+    "segments_update_range",
+    "segments_apply",
+    "segments_invalid_range",
+    "segments_time_out_of_bounds",
+    "segments_merged",
+    "segments_drag_hint",
+    "segments_range_row",
+    "segments_delete_range",
+    "segments_zoom_out",
+    "segments_zoom_in",
+    "segments_fit",
+    "segments_fit_hint",
+    "segments_workload_full",
+    "segments_workload",
+    "segments_analysis_failed",
+    "segments_smart_render_unavailable",
+    "segments_discard_title",
+    "segments_discard_changes",
+    "segments_edit_tooltip",
+    "segments_summary_percent",
+}
+
 
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
 def test_all_languages_define_license_keys(lang: str) -> None:
@@ -122,6 +160,25 @@ def test_all_languages_define_post_export_keys(lang: str) -> None:
 def test_all_languages_define_frame_rate_retarget_keys(lang: str) -> None:
     missing = _FRAME_RATE_KEYS - TRANSLATIONS[lang].keys()
     assert not missing, f"{lang} missing frame-rate keys: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_all_languages_define_segment_editor_keys(lang: str) -> None:
+    missing = _SEGMENT_EDITOR_KEYS - TRANSLATIONS[lang].keys()
+    assert not missing, f"{lang} missing segment-editor keys: {sorted(missing)}"
+
+
+def test_segment_editor_copy_hides_smart_render_assembly_details() -> None:
+    translations = TRANSLATIONS["en"]
+    copy = " ".join(
+        translations[key]
+        for key in _SEGMENT_EDITOR_KEYS
+        if key in translations
+    ).lower()
+
+    assert "silent preview" not in copy
+    assert "transition" not in copy
+    assert "cut point" not in copy
 
 
 def test_english_activation_copy_uses_app_activation_language() -> None:

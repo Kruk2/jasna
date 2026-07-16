@@ -163,7 +163,9 @@ class Processor:
         run_post_export_action_safely(action, command, lambda message: self._log("ERROR", message))
             
     def _process_job(self, job: JobItem):
-        job.status = JobStatus.PROCESSING
+        segments = job.begin_processing()
+        if segments is None:
+            return
         self._log("INFO", f"Started processing {job.filename}")
         self._progress(ProgressUpdate(
             job_id=job.id,
@@ -212,7 +214,10 @@ class Processor:
                 self._close_video_session()
             else:
                 self._close_image_session()
-            self._run_pipeline(job.id, input_path, output_path)
+            if segments:
+                self._run_pipeline(job.id, input_path, output_path, segments=segments)
+            else:
+                self._run_pipeline(job.id, input_path, output_path)
 
             job.status = JobStatus.COMPLETED
             self._progress(ProgressUpdate(
@@ -249,13 +254,20 @@ class Processor:
         except Exception:
             pass
 
-    def _run_pipeline(self, job_id: int, input_path: Path, output_path: Path):
+    def _run_pipeline(
+        self,
+        job_id: int,
+        input_path: Path,
+        output_path: Path,
+        *,
+        segments=(),
+    ):
         from jasna.media.image_io import IMAGE_EXTENSIONS
 
         if input_path.suffix.lower() in IMAGE_EXTENSIONS:
             self._run_image_job(job_id, input_path, output_path)
         else:
-            self._run_video_job(job_id, input_path, output_path)
+            self._run_video_job(job_id, input_path, output_path, segments=segments)
             
     def _ensure_video_session(self):
         """Compile engines + build the BasicVSR++ (and optional secondary) restorer
@@ -344,7 +356,7 @@ class Processor:
         }
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
 
-    def _build_encoder_settings(self) -> dict:
+    def _build_encoder_settings(self, codec: str) -> dict:
         # Built per job (not cached in the video session) so a codec change
         # between queued jobs is always validated against the selected codec.
         from jasna.media import parse_encoder_settings, validate_encoder_settings
@@ -352,18 +364,45 @@ class Processor:
         settings = self._settings
         encoder_settings = {}
         if settings.encoder_cq:
-            encoder_settings["cq"] = settings.encoder_cq
+            from jasna.gui.settings_panel import translate_cq_for_codec
+            encoder_settings["cq"] = translate_cq_for_codec(
+                settings.encoder_cq,
+                settings.codec,
+                codec,
+            )
         if settings.encoder_custom_args:
             encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
-        return validate_encoder_settings(encoder_settings, codec=settings.codec)
+        return validate_encoder_settings(encoder_settings, codec=codec)
 
-    def _run_video_job(self, job_id: int, input_path: Path, output_path: Path):
+    def _run_video_job(self, job_id: int, input_path: Path, output_path: Path, *, segments=()):
         from jasna.pipeline import Pipeline
 
-        encoder_settings = self._build_encoder_settings()
+        settings = self._settings
+        codec = settings.codec
+        splice_plan = None
+        if segments:
+            from jasna.media import get_video_meta_data
+            from jasna.media.splice import build_splice_plan, probe_keyframes, validate_smart_render
+            metadata = get_video_meta_data(str(input_path))
+            codec = {
+                "avc": "h264",
+                "h265": "hevc",
+                "av01": "av1",
+            }.get(metadata.codec_name.lower(), metadata.codec_name.lower())
+            validate_smart_render(
+                metadata,
+                output_path=output_path,
+                codec=codec,
+                retarget_high_fps=settings.retarget_high_fps,
+            )
+            splice_plan = build_splice_plan(
+                tuple(segments),
+                probe_keyframes(input_path, metadata),
+                duration=metadata.duration,
+            )
+        encoder_settings = self._build_encoder_settings(codec)
         self._ensure_video_session()
         s = self._video_session
-        settings = self._settings
         last_update_time = [0.0]
 
         def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
@@ -395,7 +434,7 @@ class Processor:
                 detection_model_path=s["detection_model_path"],
                 detection_score_threshold=settings.detection_score_threshold,
                 restoration_pipeline=s["restoration_pipeline"],
-                codec=settings.codec,
+                codec=codec,
                 encoder_settings=encoder_settings,
                 batch_size=settings.batch_size,
                 device=s["device"],
@@ -407,6 +446,8 @@ class Processor:
                 progress_callback=progress_callback,
                 lut_path=s["lut_path"],
                 retarget_high_fps=settings.retarget_high_fps,
+                segments=tuple(segments) or None,
+                splice_plan=splice_plan,
             )
             pipeline.run()
         finally:

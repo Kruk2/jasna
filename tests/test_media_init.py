@@ -14,8 +14,22 @@ from jasna.media import (
     is_stream_10bit,
     get_video_meta_data,
     parse_sample_aspect_ratio,
+    resolve_video_start_pts,
     VideoMetadata,
 )
+
+
+@pytest.mark.parametrize(
+    ("stream_start", "metadata_start", "expected"),
+    [
+        (900, 300, 900),
+        (0, 300, 0),
+        (None, 300, 300),
+        (None, None, 0),
+    ],
+)
+def test_resolve_video_start_pts(stream_start, metadata_start, expected) -> None:
+    assert resolve_video_start_pts(stream_start, metadata_start) == expected
 
 
 class TestParseEncoderSettingScalar:
@@ -268,6 +282,25 @@ class TestGetVideoMetaData:
 
         meta = get_video_meta_data("test.mp4")
         assert meta.is_10bit is True
+
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
+    def test_preserves_color_primaries_and_transfer_names(self, mock_popen, mock_resolve):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(
+                color_primaries="bt2020",
+                color_transfer="smpte2084",
+            ),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mp4")
+
+        assert meta.color_primaries == "bt2020"
+        assert meta.color_transfer == "smpte2084"
 
     @patch("jasna.media.resolve_executable", return_value="ffprobe")
     @patch("jasna.media.subprocess.Popen")

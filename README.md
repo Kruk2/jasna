@@ -95,6 +95,27 @@ are unchanged, and audio timing and playback speed are preserved:
 jasna --input input.mp4 --output output.mp4 --retarget-high-fps
 ```
 
+To restore only selected time ranges while keeping a full-length output, use
+`--segments`. Unselected sections are stream-copied. Jasna re-encodes the
+selection plus any short transition around the nearest safe video cut points;
+transition frames are not restored.
+
+```bash
+jasna --input input.mp4 --output output.mp4 --segments "10-25,01:10-01:30.5"
+```
+
+Segment processing accepts a single H.264, HEVC, or AV1 video and MP4, MOV, or
+MKV output. The output codec must match the input codec; when `--codec` is not
+specified, Jasna selects it automatically. It cannot be combined with folder,
+image, streaming, variable-frame-rate, interlaced, or frame-rate-retargeting
+input. HEVC files also need usable safe video cut points around the selection.
+The GUI exposes the same feature through the scissors button or range summary
+on each pending video. Its silent preview includes a zoomable timeline, direct
+range dragging, frame stepping, exact time entry, undo/redo, and keyboard I/O
+marks. The timeline distinguishes frames receiving restoration from surrounding
+transition frames that are re-encoded unchanged, and estimates restored,
+re-encoded, and stream-copied durations before the job starts.
+
 ## Post-export Actions
 
 The GUI can run an action after the whole queue finishes: **None**, **Shutdown PC**, or **Custom Command**. The same feature is available in the CLI on Windows and Linux:

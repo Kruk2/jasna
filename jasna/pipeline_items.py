@@ -15,6 +15,7 @@ _SENTINEL = object()
 class FrameMeta:
     frame_idx: int
     pts: int
+    apply_effect: bool = True
 
 
 @dataclass

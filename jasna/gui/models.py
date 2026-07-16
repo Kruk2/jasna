@@ -4,12 +4,14 @@ import itertools
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
 from pathlib import Path
 from typing import Callable
 
 from jasna import os_utils
+from jasna.segments import SegmentRange
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,12 @@ class JobItem:
     progress: float = 0.0
     error_message: str = ""
     has_conflict: bool = False  # True if output file already exists
+    segments: tuple[SegmentRange, ...] = ()
+    _state_lock: threading.Lock = field(
+        default_factory=threading.Lock,
+        repr=False,
+        compare=False,
+    )
     
     @property
     def filename(self) -> str:
@@ -50,6 +58,24 @@ class JobItem:
             return ""
         mins, secs = divmod(int(self.duration_seconds), 60)
         return f"{mins}m {secs}s"
+
+    def snapshot_segments(self) -> tuple[SegmentRange, ...]:
+        with self._state_lock:
+            return self.segments
+
+    def try_set_segments(self, segments: tuple[SegmentRange, ...]) -> bool:
+        with self._state_lock:
+            if self.status is not JobStatus.PENDING:
+                return False
+            self.segments = tuple(segments)
+            return True
+
+    def begin_processing(self) -> tuple[SegmentRange, ...] | None:
+        with self._state_lock:
+            if self.status is not JobStatus.PENDING:
+                return None
+            self.status = JobStatus.PROCESSING
+            return self.segments
 
 
 @dataclass

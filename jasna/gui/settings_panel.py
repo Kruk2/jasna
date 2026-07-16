@@ -7,7 +7,7 @@ from dataclasses import asdict, fields
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import AppSettings, PresetManager
-from jasna.gui.components import CollapsibleSection, Toast, PresetDialog, ConfirmDialog
+from jasna.gui.components import CollapsibleSection, ConfirmDialog, PresetDialog, Toast, Tooltip
 from jasna.gui.locales import t
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
@@ -38,61 +38,6 @@ def translate_cq_for_codec(cq: int, old_codec: str, new_codec: str) -> int:
 def get_tooltip(key: str) -> str:
     """Get localized tooltip for a setting key."""
     return t(f"tip_{key}")
-
-
-class Tooltip:
-    """Simple tooltip implementation for CustomTkinter widgets."""
-    
-    _SHOW_DELAY_MS = 150
-
-    def __init__(self, widget, text: str):
-        self._widget = widget
-        self._text = text
-        self._tooltip_window = None
-        self._after_id = None
-        widget.bind("<Enter>", self._schedule_show)
-        widget.bind("<Leave>", self._hide)
-        
-    def _schedule_show(self, event=None):
-        self._cancel_schedule()
-        self._after_id = self._widget.after(self._SHOW_DELAY_MS, self._show)
-
-    def _cancel_schedule(self):
-        if self._after_id is not None:
-            self._widget.after_cancel(self._after_id)
-            self._after_id = None
-
-    def _show(self):
-        self._after_id = None
-        if self._tooltip_window:
-            return
-        x = self._widget.winfo_rootx() + 20
-        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 5
-        
-        self._tooltip_window = tw = ctk.CTkToplevel(self._widget)
-        tw.wm_overrideredirect(True)
-        tw.wm_geometry(f"+{x}+{y}")
-        tw.configure(fg_color=Colors.BG_CARD)
-        tw.wm_attributes("-topmost", True)
-        
-        label = ctk.CTkLabel(
-            tw,
-            text=self._text,
-            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_PRIMARY,
-            fg_color=Colors.BG_CARD,
-            corner_radius=4,
-            wraplength=300,
-            justify="left",
-        )
-        label.pack(padx=8, pady=6)
-        tw.bind("<Leave>", self._hide)
-        
-    def _hide(self, event=None):
-        self._cancel_schedule()
-        if self._tooltip_window:
-            self._tooltip_window.destroy()
-            self._tooltip_window = None
 
 
 class SettingsPanel(ctk.CTkFrame):

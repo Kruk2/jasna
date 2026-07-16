@@ -8,7 +8,7 @@ import torch
 from av.codec.hwaccel import HWAccel
 from av.video.reformatter import ColorRange as AvColorRange, VideoReformatter
 
-from jasna.media import VideoMetadata
+from jasna.media import VideoMetadata, resolve_video_start_pts
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 log = logging.getLogger(__name__)
@@ -124,7 +124,10 @@ class NvidiaVideoReader:
     def _decoded_frames(self, seek_ts: float | None):
         target_pts = None
         if seek_ts is not None:
-            start = self.video_stream.start_time or 0
+            start = resolve_video_start_pts(
+                self.video_stream.start_time,
+                self.metadata.start_pts,
+            )
             target_pts = start + round(seek_ts / self.video_stream.time_base)
             self.container.seek(target_pts, stream=self.video_stream, backward=True)
 

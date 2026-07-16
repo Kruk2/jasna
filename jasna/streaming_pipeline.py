@@ -40,7 +40,7 @@ class _StreamingFrameWriter:
     def set_cancel_event(self, cancel_event: threading.Event) -> None:
         self._cancel_event = cancel_event
 
-    def write(self, frame: torch.Tensor, pts: int) -> None:
+    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
         self._encoder.write_frame(frame, pts)
 
     def after_write(self, frames_written: int) -> None:
