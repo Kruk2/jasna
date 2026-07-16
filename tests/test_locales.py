@@ -34,6 +34,12 @@ def test_locale_values_are_not_empty(lang: str) -> None:
     assert not empty, f"{lang} has empty values for keys: {sorted(empty)}"
 
 
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+@pytest.mark.parametrize("key", ["btn_add_files", "btn_clear"])
+def test_queue_button_text_does_not_depend_on_emoji_fonts(lang: str, key: str) -> None:
+    assert not TRANSLATIONS[lang][key].startswith(("📁", "🗑"))
+
+
 @pytest.mark.parametrize("lang", _FULL_LOCALES)
 def test_format_placeholders_match(lang: str) -> None:
     mismatches: list[str] = []

@@ -83,10 +83,10 @@ TRANSLATIONS = {
         "language": "Language",
         
         # Queue Panel
-        "btn_add_files": "📁 Add Files",
+        "btn_add_files": "Add Files",
         "queue_empty": "Drag and drop files here\nor use buttons above",
         "items_queued": "{count} item(s) queued",
-        "btn_clear": "🗑 Clear",
+        "btn_clear": "Clear",
         "btn_clear_completed": "✓ Clear Done",
         "output_location": "OUTPUT LOCATION",
         "output_pattern": "OUTPUT PATTERN",
@@ -455,10 +455,10 @@ TRANSLATIONS = {
         "language": "语言",
         
         # Queue Panel
-        "btn_add_files": "📁 添加文件",
+        "btn_add_files": "添加文件",
         "queue_empty": "拖放文件到这里\n或使用上方按钮",
         "items_queued": "队列中有 {count} 个项目",
-        "btn_clear": "🗑 清空",
+        "btn_clear": "清空",
         "btn_clear_completed": "✓ 清除已完成",
         "output_location": "输出位置",
         "output_pattern": "输出文件名模板",
@@ -827,10 +827,10 @@ TRANSLATIONS = {
         "language": "言語",
 
         # Queue Panel
-        "btn_add_files": "📁 ファイル追加",
+        "btn_add_files": "ファイル追加",
         "queue_empty": "ここにファイルをドラッグ＆ドロップ\nまたは上のボタンを使用",
         "items_queued": "{count} 件がキューに追加済み",
-        "btn_clear": "🗑 クリア",
+        "btn_clear": "クリア",
         "btn_clear_completed": "✓ 完了済みを削除",
         "output_location": "出力先",
         "output_pattern": "出力ファイル名テンプレート",
@@ -1198,10 +1198,10 @@ TRANSLATIONS = {
         "language": "언어",
 
         # Queue Panel
-        "btn_add_files": "📁 파일 추가",
+        "btn_add_files": "파일 추가",
         "queue_empty": "여기에 파일을 드래그 앤 드롭하거나\n위의 버튼을 사용하세요",
         "items_queued": "{count}개 항목 대기 중",
-        "btn_clear": "🗑 비우기",
+        "btn_clear": "비우기",
         "btn_clear_completed": "✓ 완료 항목 제거",
         "output_location": "출력 위치",
         "output_pattern": "출력 파일명 템플릿",
@@ -1551,10 +1551,10 @@ TRANSLATIONS = {
         "language": "ภาษา",
 
         # Queue Panel
-        "btn_add_files": "📁 เพิ่มไฟล์",
+        "btn_add_files": "เพิ่มไฟล์",
         "queue_empty": "ลากและวางไฟล์ที่นี่\nหรือใช้ปุ่มด้านบน",
         "items_queued": "{count} รายการในคิว",
-        "btn_clear": "🗑 ล้าง",
+        "btn_clear": "ล้าง",
         "btn_clear_completed": "✓ ล้างที่เสร็จแล้ว",
         "output_location": "ตำแหน่งเอาต์พุต",
         "output_pattern": "รูปแบบชื่อไฟล์เอาต์พุต",

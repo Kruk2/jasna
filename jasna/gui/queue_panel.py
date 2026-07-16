@@ -10,6 +10,7 @@ from tkinterdnd2 import DND_FILES
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import JobItem, JobStatus
 from jasna.gui.components import JobListItem, Tooltip
+from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 
 from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order
@@ -49,6 +50,8 @@ class QueuePanel(ctk.CTkFrame):
         self._add_files_btn = ctk.CTkButton(
             toolbar,
             text=t("btn_add_files"),
+            image=create_icon("folder", 18, Colors.TEXT_PRIMARY),
+            compound="left",
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             fg_color=Colors.PRIMARY,
             hover_color=Colors.PRIMARY_HOVER,
@@ -59,8 +62,8 @@ class QueuePanel(ctk.CTkFrame):
         
         self._add_folder_btn = ctk.CTkButton(
             toolbar,
-            text="📂",
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text="",
+            image=create_icon("folder", 18, Colors.TEXT_PRIMARY),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
             text_color=Colors.TEXT_PRIMARY,
@@ -99,9 +102,8 @@ class QueuePanel(ctk.CTkFrame):
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", side="bottom", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
         
-        # Queue count and clear button
         count_row = ctk.CTkFrame(footer, fg_color="transparent")
-        count_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        count_row.pack(fill="x")
         
         self._queue_count = ctk.CTkLabel(
             count_row,
@@ -110,9 +112,12 @@ class QueuePanel(ctk.CTkFrame):
             text_color=Colors.TEXT_PRIMARY,
         )
         self._queue_count.pack(side="left")
+
+        actions_row = ctk.CTkFrame(footer, fg_color="transparent")
+        actions_row.pack(fill="x", pady=(4, Sizing.PADDING_SMALL))
         
         self._clear_btn = ctk.CTkButton(
-            count_row,
+            actions_row,
             text=t("btn_clear"),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             fg_color=Colors.BG_CARD,
@@ -125,7 +130,7 @@ class QueuePanel(ctk.CTkFrame):
         self._clear_btn.pack(side="right")
         
         self._clear_completed_btn = ctk.CTkButton(
-            count_row,
+            actions_row,
             text=t("btn_clear_completed"),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             fg_color=Colors.BG_CARD,
@@ -169,8 +174,8 @@ class QueuePanel(ctk.CTkFrame):
         
         self._output_browse_btn = ctk.CTkButton(
             output_row,
-            text="📂",
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text="",
+            image=create_icon("folder", 16, Colors.TEXT_PRIMARY),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
             text_color=Colors.TEXT_PRIMARY,
