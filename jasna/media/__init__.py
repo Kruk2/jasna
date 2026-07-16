@@ -143,6 +143,7 @@ class VideoMetadata:
     color_space: AvColorspace
     num_frames: int
     is_10bit: bool
+    sample_aspect_ratio: Fraction = Fraction(1, 1)
 
 def _get_frame_count_by_counting(path: str) -> int:
     import cv2
@@ -170,6 +171,14 @@ def is_stream_10bit(json_video_stream: dict) -> bool:
         'rgb10', 'bgr10', 'x2rgb10', 'x2bgr10', 'yuv10', 'gray10'
     )
     return any(marker in pix_fmt for marker in ten_bit_markers)
+
+def parse_sample_aspect_ratio(json_video_stream: dict) -> Fraction:
+    text = json_video_stream.get('sample_aspect_ratio') or ''
+    num, sep, den = text.partition(':')
+    if sep and num.isdigit() and den.isdigit() and int(num) > 0 and int(den) > 0:
+        return Fraction(int(num), int(den))
+    return Fraction(1, 1)
+
 
 def get_video_meta_data(path: str) -> VideoMetadata:
     from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
@@ -254,5 +263,6 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         color_space=color_space,
         num_frames=num_frames,
         is_10bit=is_10bit,
+        sample_aspect_ratio=parse_sample_aspect_ratio(json_video_stream),
     )
     return metadata

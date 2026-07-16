@@ -252,6 +252,8 @@ class NvidiaVideoEncoder:
         ctx.time_base = self.metadata.time_base
         ctx.framerate = self.metadata.video_fps_exact
         ctx.pix_fmt = "cuda"
+        if self.metadata.sample_aspect_ratio != 1:
+            ctx.sample_aspect_ratio = self.metadata.sample_aspect_ratio
         matrix, primaries, transfer = _COLOR_TAGS[self.metadata.color_space]
         ctx.color_range = int(self.metadata.color_range)
         ctx.colorspace = matrix

@@ -108,6 +108,28 @@ def test_color_tags_and_frame_count(tmp_path):
         assert n == 24
 
 
+def test_anamorphic_sar_preserved(tmp_path):
+    src = _make_source(tmp_path, "src.mp4", extra=["-vf", "setsar=8/9"])
+    metadata = get_video_meta_data(str(src))
+    assert metadata.sample_aspect_ratio == Fraction(8, 9)
+
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as c:
+        assert c.streams.video[0].sample_aspect_ratio == Fraction(8, 9)
+
+
+def test_square_pixels_keep_default_sar(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as c:
+        sar = c.streams.video[0].sample_aspect_ratio
+        assert sar is None or sar == Fraction(1, 1)
+
+
 def test_audio_copy_when_compatible(tmp_path):
     src = _make_source(tmp_path, "src.mp4", acodec="aac")
     dst = tmp_path / "out.mp4"

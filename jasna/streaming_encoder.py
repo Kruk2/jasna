@@ -137,6 +137,10 @@ class StreamingEncoder:
             '-pix_fmt', 'yuv420p',
         ]
 
+        sar = self.metadata.sample_aspect_ratio
+        if sar != 1:
+            cmd += ['-vf', f'setsar={sar.numerator}/{sar.denominator}']
+
         if has_source:
             cmd += ['-c:a', 'copy']
 

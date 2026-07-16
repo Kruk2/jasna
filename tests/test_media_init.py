@@ -13,6 +13,7 @@ from jasna.media import (
     validate_encoder_settings,
     is_stream_10bit,
     get_video_meta_data,
+    parse_sample_aspect_ratio,
     VideoMetadata,
 )
 
@@ -198,6 +199,23 @@ class TestIsStream10bit:
         assert is_stream_10bit({"bits_per_raw_sample": "abc", "pix_fmt": "yuv420p"}) is False
 
 
+class TestParseSampleAspectRatio:
+    def test_anamorphic(self):
+        assert parse_sample_aspect_ratio({"sample_aspect_ratio": "8:9"}) == Fraction(8, 9)
+
+    def test_square(self):
+        assert parse_sample_aspect_ratio({"sample_aspect_ratio": "1:1"}) == Fraction(1, 1)
+
+    def test_missing_defaults_to_square(self):
+        assert parse_sample_aspect_ratio({}) == Fraction(1, 1)
+
+    def test_zero_defaults_to_square(self):
+        assert parse_sample_aspect_ratio({"sample_aspect_ratio": "0:1"}) == Fraction(1, 1)
+
+    def test_unparsable_defaults_to_square(self):
+        assert parse_sample_aspect_ratio({"sample_aspect_ratio": "N/A"}) == Fraction(1, 1)
+
+
 class TestGetVideoMetaData:
     def _make_ffprobe_output(self, **overrides):
         stream = {
@@ -364,3 +382,28 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.color_range == AvColorRange.MPEG
         assert meta.color_space == AvColorspace.ITU709
+
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
+    def test_sample_aspect_ratio(self, mock_popen, mock_resolve):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(sample_aspect_ratio="8:9"),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mp4")
+        assert meta.sample_aspect_ratio == Fraction(8, 9)
+
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
+    def test_missing_sample_aspect_ratio_defaults_to_square(self, mock_popen, mock_resolve):
+        proc = MagicMock()
+        proc.communicate.return_value = (self._make_ffprobe_output(), b"")
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mp4")
+        assert meta.sample_aspect_ratio == Fraction(1, 1)
