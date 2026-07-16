@@ -19,6 +19,7 @@ def _make_fake_runner(device: torch.device, dtype: torch.dtype):
     runner.outputs = {
         "out": torch.rand(1, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE, 3, dtype=dtype, device=device),
     }
+    runner.input_dtypes = {"lr_prev": dtype, "lr_curr": dtype, "hr_prev": dtype}
     return runner
 
 
@@ -92,6 +93,30 @@ class TestUnet4xSecondaryRestorer:
         assert len(result) == 1
         assert result[0].shape == (3, UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE)
         assert result[0].dtype == torch.uint8
+
+
+class TestEngineDtypeMismatch:
+    def test_buffers_match_half_engine_bindings_when_fp16_off(self, tmp_path: Path):
+        device = torch.device("cpu")
+        fake_engine = tmp_path / "fake_engine.trt"
+        fake_engine.write_text("x")
+        mock_stream = MagicMock()
+        mock_stream.cuda_stream = 0
+        with (
+            patch("jasna.restorer.unet4x_secondary_restorer.get_unet4x_engine_path", return_value=fake_engine),
+            patch("jasna.restorer.unet4x_secondary_restorer.TrtRunner", return_value=_make_fake_runner(device, torch.float16)),
+            patch("torch.cuda.current_stream", return_value=mock_stream),
+        ):
+            r = Unet4xSecondaryRestorer(device=device, fp16=False)
+
+        assert r._g_lr_prev.dtype == torch.float16
+        assert r._g_lr_curr.dtype == torch.float16
+        assert r._g_hr_prev.dtype == torch.float16
+
+        frames = torch.rand(2, 3, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE)
+        result = r.restore(frames, keep_start=0, keep_end=2)
+        assert len(result) == 2
+        assert all(f.dtype == torch.uint8 for f in result)
 
 
 class TestGetUnet4xEnginePath:
