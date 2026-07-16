@@ -3,16 +3,18 @@
 import customtkinter as ctk
 from pathlib import Path
 from tkinter import filedialog
+from tkinter import messagebox
 
 from tkinterdnd2 import DND_FILES
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import JobItem, JobStatus
-from jasna.gui.components import JobListItem
+from jasna.gui.components import JobListItem, Tooltip
 from jasna.gui.locales import t
-from jasna.gui.settings_panel import Tooltip
 
 from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order
+from jasna.media.image_io import is_image_path
+from jasna.segments import SegmentRange
 
 
 class QueuePanel(ctk.CTkFrame):
@@ -33,6 +35,7 @@ class QueuePanel(ctk.CTkFrame):
         self._on_jobs_changed: callable = None
         self._on_output_changed: callable = None
         self._processing_job_id: int | None = None
+        self._segment_editor = None
         
         self._build_toolbar()
         self._build_list_area()
@@ -299,9 +302,11 @@ class QueuePanel(ctk.CTkFrame):
             on_drag_start=self._on_widget_drag_start,
             on_drag_move=self._on_widget_drag_move,
             on_drag_end=self._on_widget_drag_end,
+            on_edit_segments=(None if is_image_path(path) else lambda j=job: self._edit_segments(j)),
         )
         widget.pack(fill="x", pady=(0, 4))
         self._job_widgets.append(widget)
+        widget.set_segment_summary(t("segments_full_video"))
         
         # Show conflict indicator if needed
         if job.has_conflict:
@@ -311,6 +316,49 @@ class QueuePanel(ctk.CTkFrame):
         self._update_count()
         if self._on_jobs_changed:
             self._on_jobs_changed()
+
+    def _edit_segments(self, job: JobItem) -> None:
+        if job.status is not JobStatus.PENDING:
+            return
+        if self._segment_editor is not None and self._segment_editor.winfo_exists():
+            self._segment_editor.lift()
+            self._segment_editor.focus_force()
+            return
+        self._segment_editor = None
+        try:
+            from jasna.gui.segment_editor import SegmentEditor
+
+            self._segment_editor = SegmentEditor(
+                self,
+                job,
+                lambda segments, j=job: self._segments_saved(j, segments),
+                self._segment_editor_closed,
+            )
+        except Exception as exc:
+            self._segment_editor = None
+            messagebox.showerror(t("segments_title"), str(exc), parent=self.winfo_toplevel())
+
+    def _segment_editor_closed(self) -> None:
+        self._segment_editor = None
+
+    def _segments_saved(self, job: JobItem, segments: tuple[SegmentRange, ...]) -> None:
+        idx = self._find_job_index_by_id(job.id)
+        if idx is None:
+            return
+        if segments:
+            duration = sum(segment.duration for segment in segments)
+            if job.duration_seconds:
+                summary = t(
+                    "segments_summary_percent",
+                    count=len(segments),
+                    seconds=duration,
+                    percent=duration / job.duration_seconds * 100,
+                )
+            else:
+                summary = t("segments_summary", count=len(segments), seconds=duration)
+        else:
+            summary = t("segments_full_video")
+        self._job_widgets[idx].set_segment_summary(summary, selected=bool(segments))
             
     def _get_output_path(self, input_path: Path) -> Path | None:
         """Get the output path for a given input file based on current settings."""
@@ -412,6 +460,7 @@ class QueuePanel(ctk.CTkFrame):
         # Hide conflict indicator once processing starts
         if status != JobStatus.PENDING:
             widget.set_conflict(False)
+        widget.set_segments_editable(status is JobStatus.PENDING)
                 
     def _refresh_conflicts(self):
         """Re-check all jobs for output file conflicts."""
@@ -521,6 +570,7 @@ class QueuePanel(ctk.CTkFrame):
             processing_idx = self._find_job_index_by_id(processing_job_id) if processing_job_id is not None else None
             for i, widget in enumerate(self._job_widgets):
                 widget.set_removable(i != processing_idx)
+                widget.set_segments_editable(self._jobs[i].status is JobStatus.PENDING)
         else:
             # Restore normal appearance and enable controls
             self._clear_btn.configure(state="normal")
@@ -529,8 +579,9 @@ class QueuePanel(ctk.CTkFrame):
             self._pattern_entry.configure(state="normal")
             self._add_files_btn.configure(state="normal")
             self._add_folder_btn.configure(state="normal")
-            for widget in self._job_widgets:
+            for job, widget in zip(self._jobs, self._job_widgets):
                 widget.set_removable(True)
+                widget.set_segments_editable(job.status is JobStatus.PENDING)
 
     def enable_file_drop(self):
         """Register the list area as an OS file drop target."""

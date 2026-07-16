@@ -87,6 +87,7 @@ class TestBuildParser:
         assert args.codec == "hevc"
         assert args.encoder_settings == ""
         assert args.retarget_high_fps is False
+        assert args.segments == ""
         assert args.stream is False
         assert args.stream_port == 8765
         assert args.stream_segment_duration == 4.0

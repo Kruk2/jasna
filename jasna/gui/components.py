@@ -11,6 +11,61 @@ BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
 
+class Tooltip:
+    """Simple tooltip implementation for CustomTkinter widgets."""
+
+    _SHOW_DELAY_MS = 150
+
+    def __init__(self, widget, text: str):
+        self._widget = widget
+        self._text = text
+        self._tooltip_window = None
+        self._after_id = None
+        widget.bind("<Enter>", self._schedule_show)
+        widget.bind("<Leave>", self.hide)
+
+    def _schedule_show(self, event=None):
+        self._cancel_schedule()
+        self._after_id = self._widget.after(self._SHOW_DELAY_MS, self._show)
+
+    def _cancel_schedule(self):
+        if self._after_id is not None:
+            self._widget.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _show(self):
+        self._after_id = None
+        if self._tooltip_window:
+            return
+        x = self._widget.winfo_rootx() + 20
+        y = self._widget.winfo_rooty() + self._widget.winfo_height() + 5
+
+        self._tooltip_window = tw = ctk.CTkToplevel(self._widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tw.configure(fg_color=Colors.BG_CARD)
+        tw.wm_attributes("-topmost", True)
+
+        label = ctk.CTkLabel(
+            tw,
+            text=self._text,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.TEXT_PRIMARY,
+            fg_color=Colors.BG_CARD,
+            corner_radius=4,
+            wraplength=300,
+            justify="left",
+        )
+        label.pack(padx=8, pady=6)
+        tw.bind("<Leave>", self.hide)
+
+    def hide(self, event=None):
+        self._cancel_schedule()
+        if self._tooltip_window:
+            self._tooltip_window.destroy()
+            self._tooltip_window = None
+
+
 class _SupportButton(ctk.CTkButton):
     """Brand-styled button that opens a support page and scales 1.05x on hover."""
 
@@ -302,24 +357,28 @@ class JobListItem(ctk.CTkFrame):
         on_drag_start: callable = None,
         on_drag_move: callable = None,
         on_drag_end: callable = None,
+        on_edit_segments: callable = None,
         **kwargs
     ):
         super().__init__(
             master,
             fg_color=Colors.BG_CARD,
             corner_radius=Sizing.BORDER_RADIUS,
-            height=64,
+            height=72,
             **kwargs
         )
         self.pack_propagate(False)
         
         self._on_remove = on_remove
+        self._on_edit_segments = on_edit_segments
         # Drag callbacks (set by QueuePanel)
         self._on_drag_start = on_drag_start
         self._on_drag_move = on_drag_move
         self._on_drag_end = on_drag_end
         self._progress_visible = False
         self._conflict_visible = False
+        self._segments_editable = True
+        self._segment_tooltips: list[Tooltip] = []
         
         # Main content container
         content = ctk.CTkFrame(self, fg_color="transparent")
@@ -397,10 +456,39 @@ class JobListItem(ctk.CTkFrame):
             text_color=Colors.TEXT_PRIMARY,
         )
         self._status_label.pack(side="left")
+
+        self._segment_summary = ctk.CTkLabel(
+            bottom_row,
+            text="",
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+            cursor="hand2" if self._on_edit_segments else "arrow",
+        )
+        self._segment_summary.pack(side="left", padx=(8, 0))
+        if self._on_edit_segments:
+            self._segment_summary.bind("<Button-1>", lambda _event: self._handle_edit_segments())
         
         # FPS / ETA small labels on the right of bottom row
         self._stats_frame = ctk.CTkFrame(bottom_row, fg_color="transparent")
         self._stats_frame.pack(side="right")
+
+        self._segments_btn = ctk.CTkButton(
+            bottom_row,
+            text="✂",
+            width=30,
+            height=22,
+            fg_color=Colors.BG_PANEL,
+            hover_color=Colors.BORDER_LIGHT,
+            text_color=Colors.TEXT_PRIMARY,
+            cursor="hand2",
+            command=self._handle_edit_segments,
+        )
+        if self._on_edit_segments:
+            self._segments_btn.pack(side="right", padx=(0, 6))
+            self._segment_tooltips = [
+                Tooltip(self._segments_btn, t("segments_edit_tooltip")),
+                Tooltip(self._segment_summary, t("segments_edit_tooltip")),
+            ]
 
         self._fps_label = ctk.CTkLabel(
             self._stats_frame,
@@ -454,6 +542,7 @@ class JobListItem(ctk.CTkFrame):
         child_widgets = [
             self._handle, self._info, self._filename, self._duration,
             self._status_frame, self._status_label, self._top_row, self._bottom_row,
+            self._segment_summary, self._segments_btn,
         ]
         for child in child_widgets:
             try:
@@ -521,6 +610,24 @@ class JobListItem(ctk.CTkFrame):
     def _handle_remove(self):
         if self._on_remove:
             self._on_remove()
+
+    def _handle_edit_segments(self):
+        if self._on_edit_segments and self._segments_editable:
+            for tooltip in self._segment_tooltips:
+                tooltip.hide()
+            self._on_edit_segments()
+
+    def set_segment_summary(self, text: str, *, selected: bool = False) -> None:
+        self._segment_summary.configure(
+            text=text,
+            text_color=Colors.PRIMARY if selected else Colors.STATUS_PENDING,
+        )
+
+    def set_segments_editable(self, editable: bool) -> None:
+        if self._on_edit_segments:
+            self._segments_editable = bool(editable)
+            self._segments_btn.configure(state="normal" if editable else "disabled")
+            self._segment_summary.configure(cursor="hand2" if editable else "arrow")
 
     # Internal drag event proxies to allow QueuePanel to handle reordering
     def _internal_drag_start(self, event):

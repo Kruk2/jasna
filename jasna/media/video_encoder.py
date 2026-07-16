@@ -153,6 +153,19 @@ _COLOR_TAGS = {
     AvColorspace.ITU601: (6, 6, 6),
     AvColorspace.BT2020: (9, 9, 14),  # bt2020nc, bt2020 primaries, bt2020-10 transfer
 }
+_COLOR_PRIMARIES = {
+    "bt709": 1,
+    "bt470bg": 5,
+    "smpte170m": 6,
+    "bt2020": 9,
+}
+_COLOR_TRANSFERS = {
+    "bt709": 1,
+    "smpte170m": 6,
+    "bt2020-10": 14,
+    "smpte2084": 16,
+    "arib-std-b67": 18,
+}
 _COLOR_CONVERTERS = {
     (AvColorspace.ITU709, AvColorRange.MPEG): chw_rgb_to_p010_bt709_limited,
     (AvColorspace.ITU709, AvColorRange.JPEG): chw_rgb_to_p010_bt709_full,
@@ -188,10 +201,26 @@ class NvidiaVideoEncoder:
         encoder_settings: dict[str, object],
         lut_path: str | Path | None = None,
         output_fps: Fraction | None = None,
+        mux_audio: bool = True,
+        pts_origin: int = 0,
+        match_input_bit_depth: bool = False,
+        smart_fragment: bool = False,
     ):
         if codec not in ENCODER_SPECS:
             raise ValueError(f"Unsupported codec: {codec}")
         spec = ENCODER_SPECS[codec]
+        if match_input_bit_depth and codec in {"hevc", "av1"} and not metadata.is_10bit:
+            options = dict(spec.default_options)
+            if codec == "hevc":
+                options["profile"] = "main"
+            spec = EncoderSpec(
+                name=spec.name,
+                encoder_name=spec.encoder_name,
+                frame_format="nv12",
+                default_options=MappingProxyType(options),
+                ten_bit=False,
+                supported_settings=spec.supported_settings,
+            )
         converter_map = _COLOR_CONVERTERS if spec.frame_format == "p010le" else _COLOR_CONVERTERS_NV12
         converter = converter_map.get((metadata.color_space, metadata.color_range))
         if converter is None:
@@ -206,6 +235,9 @@ class NvidiaVideoEncoder:
         self.codec = codec
         self.spec = spec
         self.encoder_name = spec.encoder_name
+        self.mux_audio = bool(mux_audio)
+        self.pts_origin = int(pts_origin)
+        self.smart_fragment = bool(smart_fragment)
         self.output_fps = Fraction(
             metadata.video_fps_exact if output_fps is None else output_fps
         )
@@ -226,8 +258,14 @@ class NvidiaVideoEncoder:
             if "spatial-aq" in overrides and "spatial_aq" in self.encoder_options:
                 overrides["spatial_aq"] = overrides.pop("spatial-aq")
             self.encoder_options.update(overrides)
+        if self.smart_fragment:
+            self.encoder_options["g"] = "999999"
+            self.encoder_options["bf"] = "0"
+            self.encoder_options.pop("b_ref_mode", None)
+            self.encoder_options["forced-idr"] = "1"
 
         self.BUFFER_MAX_SIZE = 8
+        self._lut_flags: deque[bool] = deque()
 
     def __enter__(self):
         try:
@@ -257,9 +295,15 @@ class NvidiaVideoEncoder:
         ctx.time_base = self.metadata.time_base
         ctx.framerate = self.output_fps
         ctx.pix_fmt = "cuda"
+        if self.smart_fragment:
+            from av.codec.context import Flags
+
+            ctx.flags |= Flags.closed_gop
         if self.metadata.sample_aspect_ratio != 1:
             ctx.sample_aspect_ratio = self.metadata.sample_aspect_ratio
         matrix, primaries, transfer = _COLOR_TAGS[self.metadata.color_space]
+        primaries = _COLOR_PRIMARIES.get(self.metadata.color_primaries.lower(), primaries)
+        transfer = _COLOR_TRANSFERS.get(self.metadata.color_transfer.lower(), transfer)
         ctx.color_range = int(self.metadata.color_range)
         ctx.colorspace = matrix
         ctx.color_primaries = primaries
@@ -281,6 +325,7 @@ class NvidiaVideoEncoder:
         self.stream = torch.cuda.Stream(self.device)
         self.pts_heap: list[int] = []
         self.frame_buffer: deque = deque()
+        self._lut_flags.clear()
         self.pts_set: set[int] = set()
         self._video_started = False
         self._options_validated = False
@@ -296,6 +341,8 @@ class NvidiaVideoEncoder:
         self._audio_pipes: dict[int, tuple[str, object, object]] = {}
         self._audio_backlog: deque = deque()
         self._audio_iter = None
+        if not self.mux_audio:
+            return
         audio_streams = list(self._src.streams.audio)
         if not audio_streams:
             return
@@ -331,7 +378,8 @@ class NvidiaVideoEncoder:
             if exc_type is None and self._worker_error is None and self.out_stream.codec_context.is_open:
                 for packet in self.out_stream.encode(None):
                     self._mux_video(packet)
-                self._drain_audio()
+                if self.mux_audio:
+                    self._drain_audio()
         finally:
             self.dst.close()
             self._src.close()
@@ -348,24 +396,39 @@ class NvidiaVideoEncoder:
                 if item is self._stop_sentinel:
                     return
                 if self._worker_error is None:
-                    frame, pts, ready_event = item
-                    self._handle_encode_item(frame, pts, ready_event)
+                    if len(item) == 3:
+                        frame, pts, ready_event = item
+                        apply_lut = True
+                    else:
+                        frame, pts, apply_lut, ready_event = item
+                    self._handle_encode_item(frame, pts, apply_lut, ready_event)
             except Exception as exc:
                 self._worker_error = exc
                 logger.exception("[encoder-worker] crashed")
             finally:
                 self._encode_queue.task_done()
 
-    def _build_encode_item(self, frame: torch.Tensor, pts: int) -> tuple[torch.Tensor, int, torch.cuda.Event]:
+    def _build_encode_item(
+        self,
+        frame: torch.Tensor,
+        pts: int,
+        apply_lut: bool = True,
+    ) -> tuple[torch.Tensor, int, bool, torch.cuda.Event]:
         producer_stream = torch.cuda.current_stream(self.device)
         ready_event = torch.cuda.Event()
         producer_stream.record_event(ready_event)
-        return frame, pts, ready_event
+        return frame, pts, bool(apply_lut), ready_event
 
-    def _handle_encode_item(self, frame: torch.Tensor, pts: int, ready_event: torch.cuda.Event) -> None:
+    def _handle_encode_item(
+        self,
+        frame: torch.Tensor,
+        pts: int,
+        apply_lut: bool,
+        ready_event: torch.cuda.Event,
+    ) -> None:
         self.stream.wait_event(ready_event)
         frame.record_stream(self.stream)
-        self._encode_frame(frame, pts)
+        self._encode_frame(frame, pts, apply_lut=apply_lut)
 
     def _validate_encoder_options(self):
         leftover = dict(self.out_stream.codec_context.options)
@@ -444,7 +507,12 @@ class NvidiaVideoEncoder:
             frame_to_encode = self.frame_buffer.popleft()
             pts_to_assign = heapq.heappop(self.pts_heap)
             self.pts_set.remove(pts_to_assign)
-            self._encode_queue.put(self._build_encode_item(frame_to_encode, pts_to_assign))
+            apply_lut = self._lut_flags.popleft() if self._lut_flags else True
+            if apply_lut:
+                item = self._build_encode_item(frame_to_encode, pts_to_assign)
+            else:
+                item = self._build_encode_item(frame_to_encode, pts_to_assign, False)
+            self._encode_queue.put(item)
 
     def _encoder_open_error(self, exc: Exception) -> RuntimeError:
         try:
@@ -459,9 +527,9 @@ class NvidiaVideoEncoder:
             message += ". AV1 NVENC encoding requires a GPU/driver generation that provides it."
         return RuntimeError(message)
 
-    def _encode_frame(self, frame: torch.Tensor, pts: int):
+    def _encode_frame(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
         with torch.cuda.stream(self.stream):
-            if self._lut_applier is not None:
+            if apply_lut and self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
             packed = self._to_yuv(frame)
 
@@ -491,12 +559,14 @@ class NvidiaVideoEncoder:
         for packet in packets:
             self._mux_video(packet)
 
-    def encode(self, frame: torch.Tensor, pts: int):
+    def encode(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
         if self._worker_error is not None:
             raise self._worker_error
+        pts = int(pts) - self.pts_origin
         while pts in self.pts_set:
             pts += 1
         heapq.heappush(self.pts_heap, pts)
         self.frame_buffer.append(frame)
+        self._lut_flags.append(bool(apply_lut))
         self.pts_set.add(pts)
         self._process_buffer()

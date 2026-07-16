@@ -144,6 +144,20 @@ class VideoMetadata:
     num_frames: int
     is_10bit: bool
     sample_aspect_ratio: Fraction = Fraction(1, 1)
+    pixel_format: str = ""
+    profile: str = ""
+    field_order: str = ""
+    color_primaries: str = ""
+    color_transfer: str = ""
+
+
+def resolve_video_start_pts(
+    stream_start_time: int | None,
+    metadata_start_pts: int | None,
+) -> int:
+    if stream_start_time is not None:
+        return int(stream_start_time)
+    return int(metadata_start_pts or 0)
 
 def _get_frame_count_by_counting(path: str) -> int:
     import cv2
@@ -264,5 +278,10 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         num_frames=num_frames,
         is_10bit=is_10bit,
         sample_aspect_ratio=parse_sample_aspect_ratio(json_video_stream),
+        pixel_format=str(json_video_stream.get("pix_fmt") or ""),
+        profile=str(json_video_stream.get("profile") or ""),
+        field_order=str(json_video_stream.get("field_order") or ""),
+        color_primaries=str(json_video_stream.get("color_primaries") or ""),
+        color_transfer=str(json_video_stream.get("color_transfer") or ""),
     )
     return metadata

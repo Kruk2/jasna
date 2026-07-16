@@ -7,6 +7,7 @@ import threading
 import time
 from pathlib import Path
 from queue import Empty, Queue
+from tempfile import TemporaryDirectory
 
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
@@ -21,6 +22,16 @@ patch_frozen_torch()
 from jasna.media import UnsupportedColorspaceError, get_video_meta_data
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
+from jasna.media.splice import (
+    SplicePlan,
+    build_splice_plan,
+    concatenate_fragments,
+    create_copy_fragment,
+    mux_final_output,
+    normalize_fragment,
+    probe_keyframes,
+    validate_smart_render,
+)
 from jasna.mosaic.detection_registry import build_detection_model
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, _SENTINEL
@@ -28,6 +39,7 @@ from jasna.pipeline_threads import decode_detect_loop, primary_restore_loop, sec
 from jasna.progressbar import Progressbar
 from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
+from jasna.segments import SegmentRange
 from jasna.vram_offloader import VramOffloader
 
 log = logging.getLogger(__name__)
@@ -39,11 +51,11 @@ class _OfflineFrameWriter:
         self._encode_heartbeat = encode_heartbeat
         self._entered = False
 
-    def write(self, frame: torch.Tensor, pts: int) -> None:
+    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
         if not self._entered:
             self._encoder_ctx.__enter__()
             self._entered = True
-        self._encoder_ctx.encode(frame, pts)
+        self._encoder_ctx.encode(frame, pts, apply_lut=apply_lut)
         self._encode_heartbeat[0] = time.monotonic()
 
     def after_write(self, frames_written: int) -> None:
@@ -77,6 +89,8 @@ class Pipeline:
         progress_callback: callable | None = None,
         lut_path: str | Path | None = None,
         retarget_high_fps: bool = False,
+        segments: tuple[SegmentRange, ...] | None = None,
+        splice_plan: SplicePlan | None = None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -101,6 +115,8 @@ class Pipeline:
         self.progress_callback = progress_callback
         self.lut_path = lut_path
         self.retarget_high_fps = bool(retarget_high_fps)
+        self.segments = tuple(segments) if segments else None
+        self.splice_plan = splice_plan
 
     def close(self) -> None:
         if hasattr(self, "detection_model") and self.detection_model is not None:
@@ -266,37 +282,22 @@ class Pipeline:
             clips_popped=clips_popped,
         )
 
-    def run(self) -> None:
-        from av.video.reformatter import Colorspace as AvColorspace
+    def _run_pass(
+        self,
+        *,
+        metadata,
+        encoder_ctx: NvidiaVideoEncoder,
+        progress: Progressbar,
+        seek_ts: float | None = None,
+        end_pts: int | None = None,
+        effect_ranges: tuple[tuple[int, int], ...] | None = None,
+        output_frame_count: int | None = None,
+    ) -> None:
         device = self.device
-        metadata = get_video_meta_data(str(self.input_video))
-        if metadata.color_space not in (
-            AvColorspace.ITU709,
-            AvColorspace.ITU601,
-            AvColorspace.BT2020,
-        ):
-            raise UnsupportedColorspaceError(
-                f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. "
-                "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
-            )
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
-        frame_rate = resolve_frame_rate_retarget(
-            metadata.video_fps_exact,
-            enabled=self.retarget_high_fps,
-        )
-        if frame_rate.active:
-            log.info(
-                "Retargeting frame rate: %s fps -> %s fps (keeping every %dth frame)",
-                frame_rate.source_fps,
-                frame_rate.output_fps,
-                frame_rate.frame_stride,
-            )
-        elif self.retarget_high_fps:
-            log.info(
-                "Frame-rate retargeting requested, but %s fps is not a supported source rate; keeping source rate",
-                frame_rate.source_fps,
-            )
-        output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
+        frame_rate = resolve_frame_rate_retarget(metadata.video_fps_exact, enabled=self.retarget_high_fps)
+        if output_frame_count is None:
+            output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
 
         clip_queue = FrameQueue(max_frames=self.max_clip_size)
         secondary_queue = FrameQueue(max_frames=self.max_clip_size * secondary_workers)
@@ -311,6 +312,7 @@ class Pipeline:
         frame_shape: list[tuple[int, int]] = []
 
         encode_heartbeat: list[float] = [time.monotonic()]
+        frame_writer = _OfflineFrameWriter(encoder_ctx, encode_heartbeat)
         vram_offloader = VramOffloader(
             device=device,
             blend_buffer=blend_buffer,
@@ -327,24 +329,6 @@ class Pipeline:
             secondary_queue=secondary_queue,
             encode_queue=encode_queue,
         )
-
-        pb = Progressbar(
-            total_frames=output_frame_count,
-            video_fps=float(frame_rate.output_fps),
-            disable=self.disable_progress,
-            callback=self.progress_callback,
-        )
-
-        encoder_ctx = NvidiaVideoEncoder(
-            str(self.output_video),
-            device=device,
-            metadata=metadata,
-            codec=self.codec,
-            encoder_settings=self.encoder_settings,
-            lut_path=self.lut_path,
-            output_fps=frame_rate.output_fps,
-        )
-        frame_writer = _OfflineFrameWriter(encoder_ctx, encode_heartbeat)
 
         starvation_stats = SecondaryLoopStats()
 
@@ -390,7 +374,11 @@ class Pipeline:
                     metadata_queue=metadata_queue,
                     error_holder=error_holder,
                     frame_shape=frame_shape,
-                    progress=pb,
+                    progress=progress,
+                    close_progress=False,
+                    seek_ts=seek_ts,
+                    end_pts=end_pts,
+                    effect_ranges=effect_ranges,
                     debug_memory=debug_memory,
                     frame_stride=frame_rate.frame_stride,
                     output_frame_count=output_frame_count,
@@ -424,6 +412,7 @@ class Pipeline:
                     frame_writer=frame_writer,
                     vram_offloader=vram_offloader,
                     frame_stride=frame_rate.frame_stride,
+                    seek_ts=seek_ts,
                 ),
                 name="BlendEncode", daemon=True,
             ),
@@ -471,11 +460,163 @@ class Pipeline:
         if err is not None:
             raise err
 
+    def _validate_metadata(self, metadata) -> None:
+        from av.video.reformatter import Colorspace as AvColorspace
+
+        if metadata.color_space not in (
+            AvColorspace.ITU709,
+            AvColorspace.ITU601,
+            AvColorspace.BT2020,
+        ):
+            raise UnsupportedColorspaceError(
+                f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. "
+                "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
+            )
+
+    def _run_full(self, metadata) -> None:
+        frame_rate = resolve_frame_rate_retarget(
+            metadata.video_fps_exact,
+            enabled=self.retarget_high_fps,
+        )
+        if frame_rate.active:
+            log.info(
+                "Retargeting frame rate: %s fps -> %s fps (keeping every %dth frame)",
+                frame_rate.source_fps,
+                frame_rate.output_fps,
+                frame_rate.frame_stride,
+            )
+        elif self.retarget_high_fps:
+            log.info(
+                "Frame-rate retargeting requested, but %s fps is not a supported source rate; keeping source rate",
+                frame_rate.source_fps,
+            )
+        output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
+        progress = Progressbar(
+            total_frames=output_frame_count,
+            video_fps=float(frame_rate.output_fps),
+            disable=self.disable_progress,
+            callback=self.progress_callback,
+        )
+        encoder_ctx = NvidiaVideoEncoder(
+            str(self.output_video),
+            device=self.device,
+            metadata=metadata,
+            codec=self.codec,
+            encoder_settings=self.encoder_settings,
+            lut_path=self.lut_path,
+            output_fps=frame_rate.output_fps,
+        )
+        try:
+            self._run_pass(
+                metadata=metadata,
+                encoder_ctx=encoder_ctx,
+                progress=progress,
+                output_frame_count=output_frame_count,
+            )
+        finally:
+            progress.close(ensure_completed_bar=True)
+
+    def _run_smart(self, metadata) -> None:
+        codec = validate_smart_render(
+            metadata,
+            output_path=self.output_video,
+            codec=self.codec,
+            retarget_high_fps=self.retarget_high_fps,
+        )
+        if self.splice_plan is None:
+            index = probe_keyframes(self.input_video, metadata)
+            plan = build_splice_plan(self.segments or (), index, duration=metadata.duration)
+        else:
+            plan = self.splice_plan
+            if plan.segments != tuple(self.segments or ()):
+                raise ValueError("Precomputed splice plan does not match pipeline segments")
+            index = plan.index
+        total_frames = max(
+            1,
+            sum(
+                round((span.end_pts - span.start_pts) * index.time_base * metadata.video_fps)
+                for span in plan.render_spans
+            ),
+        )
+        progress = Progressbar(
+            total_frames=total_frames,
+            video_fps=metadata.video_fps,
+            disable=self.disable_progress,
+            callback=self.progress_callback,
+        )
+        self.output_video.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with TemporaryDirectory(
+                dir=self.output_video.parent,
+                prefix=f".{self.output_video.stem}.segments-",
+            ) as temp_dir_name:
+                temp_dir = Path(temp_dir_name)
+                fragments: list[tuple[Path, float]] = []
+                fragment_suffix = ".ts" if codec in {"h264", "hevc"} else ".mkv"
+                for span_index, span in enumerate(plan.spans):
+                    raw = temp_dir / f"{span_index:04d}-raw.nut"
+                    normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
+                    duration = float((span.end_pts - span.start_pts) * index.time_base)
+                    if span.is_render:
+                        encoder_ctx = NvidiaVideoEncoder(
+                            str(raw),
+                            device=self.device,
+                            metadata=metadata,
+                            codec=codec,
+                            encoder_settings=self.encoder_settings,
+                            lut_path=self.lut_path,
+                            output_fps=metadata.video_fps_exact,
+                            mux_audio=False,
+                            pts_origin=span.start_pts,
+                            match_input_bit_depth=True,
+                            smart_fragment=True,
+                        )
+                        self._run_pass(
+                            metadata=metadata,
+                            encoder_ctx=encoder_ctx,
+                            progress=progress,
+                            seek_ts=index.seconds_for_pts(span.start_pts),
+                            end_pts=span.end_pts,
+                            effect_ranges=span.effect_ranges,
+                            output_frame_count=max(1, round(duration * metadata.video_fps)),
+                        )
+                    else:
+                        create_copy_fragment(self.input_video, span, index, raw, codec=codec)
+                    normalize_fragment(raw, normalized, codec=codec)
+                    fragments.append((normalized, duration))
+
+                assembled = temp_dir / f"assembled{fragment_suffix}"
+                concatenate_fragments(
+                    fragments,
+                    manifest=temp_dir / "fragments.ffconcat",
+                    destination=assembled,
+                    codec=codec,
+                )
+                mux_final_output(
+                    assembled,
+                    self.input_video,
+                    self.output_video,
+                    codec=codec,
+                )
+        finally:
+            progress.close(ensure_completed_bar=True)
+
+    def run(self) -> None:
+        metadata = get_video_meta_data(str(self.input_video))
+        self._validate_metadata(metadata)
+        if self.segments:
+            self._run_smart(metadata)
+        else:
+            self._run_full(metadata)
+
     def run_streaming(
         self,
         port: int = 8765,
         segment_duration: float = 4.0,
         hls_server=None,
     ) -> None:
+        if self.segments:
+            raise ValueError("Segment processing is not supported in streaming mode")
         from jasna.streaming_pipeline import run_streaming
         run_streaming(self, port=port, segment_duration=segment_duration, hls_server=hls_server)

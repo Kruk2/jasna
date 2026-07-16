@@ -2,9 +2,9 @@
 
 import customtkinter as ctk
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.gui.components import Tooltip
 from jasna.gui.locales import t
 from jasna.gui.system_stats import SystemStats
-from jasna.gui.settings_panel import Tooltip
 
 
 _METRIC_WIDTH = 48

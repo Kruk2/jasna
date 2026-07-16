@@ -314,6 +314,15 @@ def build_parser() -> argparse.ArgumentParser:
             "by processing every second frame. Other source rates are unchanged."
         ),
     )
+    encoding.add_argument(
+        "--segments",
+        type=str,
+        default="",
+        help=(
+            "Restore only selected ranges and smart-render the rest, for example "
+            "10-25,01:10-01:30. Output codec must match the H.264, HEVC, or AV1 input."
+        ),
+    )
 
     post_export = parser.add_argument_group("Post-export action")
     post_export.add_argument(
@@ -350,6 +359,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    codec_was_explicit = any(
+        value == "--codec" or value.startswith("--codec=")
+        for value in sys.argv[1:]
+    )
 
     if args.benchmark:
         from jasna.benchmark import run_benchmark_cli
@@ -424,6 +437,14 @@ def main() -> None:
     from jasna.media.image_io import is_image_path
     input_is_image = input_video is not None and is_image_path(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
+    segments_spec = str(args.segments).strip()
+    if segments_spec:
+        if is_streaming:
+            parser.error("--segments cannot be combined with --stream")
+        if input_is_image:
+            parser.error("--segments requires a single video input, not an image")
+        if input_is_dir:
+            parser.error("--segments requires a single video input, not a folder")
 
     folder_videos: list[Path] = []
     folder_output_dir: Path | None = None
@@ -499,7 +520,48 @@ def main() -> None:
     if not restoration_model_path.exists():
         raise FileNotFoundError(str(restoration_model_path))
 
+    segments = None
+    splice_plan = None
     codec = str(args.codec).lower()
+    if segments_spec:
+        from jasna.media import get_video_meta_data
+        from jasna.media.splice import (
+            SmartRenderCompatibilityError,
+            build_splice_plan,
+            probe_keyframes,
+            validate_smart_render,
+        )
+        from jasna.segments import parse_segments
+
+        metadata = get_video_meta_data(str(input_video))
+        try:
+            segments = parse_segments(segments_spec, duration=metadata.duration)
+        except ValueError as exc:
+            parser.error(f"invalid --segments: {exc}")
+        input_codec = {
+            "avc": "h264",
+            "h265": "hevc",
+            "av01": "av1",
+        }.get(metadata.codec_name.lower(), metadata.codec_name.lower())
+        if codec_was_explicit and codec != input_codec:
+            parser.error(
+                f"with --segments output codec must match input; pass --codec {input_codec}"
+            )
+        codec = input_codec
+        try:
+            validate_smart_render(
+                metadata,
+                output_path=output_video,
+                codec=codec,
+                retarget_high_fps=bool(args.retarget_high_fps),
+            )
+            splice_plan = build_splice_plan(
+                segments,
+                probe_keyframes(input_video, metadata),
+                duration=metadata.duration,
+            )
+        except SmartRenderCompatibilityError as exc:
+            parser.error(str(exc))
     if codec not in {"hevc", "h264", "av1"}:
         raise ValueError(f"Unsupported codec: {codec} (supported: hevc, h264, av1)")
 
@@ -624,6 +686,8 @@ def main() -> None:
                 disable_progress=args.no_progress,
                 lut_path=lut_path,
                 retarget_high_fps=bool(args.retarget_high_fps),
+                segments=segments,
+                splice_plan=splice_plan,
             )
 
         video_inputs = folder_videos if input_is_dir else ([input_video] if input_video is not None else [])

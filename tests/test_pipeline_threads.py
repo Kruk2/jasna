@@ -91,6 +91,62 @@ class TestEstimateStartFrame:
 # ---------------------------------------------------------------------------
 
 class TestDecodeDetectLoop:
+    def test_segment_pass_trims_at_end_and_detects_only_exact_effect_frames(self):
+        frames_t = torch.arange(6 * 3 * 8 * 8, dtype=torch.int64).reshape(6, 3, 8, 8).to(torch.uint8)
+        reader = _mock_reader([(frames_t, [60, 61, 62, 63, 64, 65])])
+        clip_queue = FrameQueue(max_frames=999)
+        metadata_queue = Queue(maxsize=999)
+        frame_shape = []
+
+        from jasna.pipeline_processing import BatchProcessResult
+
+        def _process(**kwargs):
+            for offset, pts in enumerate(kwargs["pts_list"]):
+                metadata_queue.put(FrameMeta(kwargs["start_frame_idx"] + offset, pts))
+            return BatchProcessResult(
+                next_frame_idx=kwargs["start_frame_idx"] + len(kwargs["pts_list"]),
+                clips_emitted=0,
+            )
+
+        with (
+            patch("jasna.pipeline_threads.NvidiaVideoReader", return_value=reader),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=_process) as process,
+            patch("jasna.pipeline_threads.finalize_processing") as finalize,
+        ):
+            decode_detect_loop(
+                input_video="fake.mkv",
+                batch_size=6,
+                device=torch.device("cpu"),
+                metadata=_fake_metadata(num_frames=100, fps=24),
+                detection_model=MagicMock(),
+                max_clip_size=60,
+                temporal_overlap=8,
+                enable_crossfade=True,
+                blend_buffer=BlendBuffer(device=torch.device("cpu")),
+                crop_buffers={},
+                clip_queue=clip_queue,
+                metadata_queue=metadata_queue,
+                error_holder=[],
+                frame_shape=frame_shape,
+                seek_ts=2.5,
+                end_pts=64,
+                effect_ranges=((61, 63),),
+            )
+
+        assert process.call_count == 1
+        assert process.call_args.kwargs["pts_list"] == [61, 62]
+        assert finalize.call_count == 1
+        metas = []
+        while True:
+            item = metadata_queue.get_nowait()
+            if item is _SENTINEL:
+                break
+            metas.append(item)
+        assert [meta.pts for meta in metas] == [60, 61, 62, 63]
+        assert [meta.apply_effect for meta in metas] == [False, True, True, False]
+
     def test_cancel_event_breaks_loop(self):
         cancel = threading.Event()
         frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
@@ -565,6 +621,17 @@ class TestOfflineFrameWriter:
         from jasna.pipeline import _OfflineFrameWriter
         writer = _OfflineFrameWriter(MagicMock(), [0.0])
         writer.after_write(1)
+
+    def test_write_can_bypass_lut_for_bridge_frame(self):
+        from jasna.pipeline import _OfflineFrameWriter
+        mock_enc = MagicMock()
+        mock_enc.__enter__ = MagicMock(return_value=mock_enc)
+        writer = _OfflineFrameWriter(mock_enc, [0.0])
+        frame = torch.zeros(3, 8, 8)
+
+        writer.write(frame, pts=10, apply_lut=False)
+
+        mock_enc.encode.assert_called_once_with(frame, 10, apply_lut=False)
 
     def test_close_exits_ctx(self):
         from jasna.pipeline import _OfflineFrameWriter

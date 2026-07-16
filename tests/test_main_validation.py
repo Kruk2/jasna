@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from jasna.segments import SegmentRange
+
 
 def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detection=True, create_restoration=True):
     input_path = tmp_path / "in.mp4"
@@ -33,15 +35,40 @@ def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detec
         patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
         patch("jasna.main.check_required_executables"),        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
-        patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
+        patch("jasna.pipeline.Pipeline", return_value=MagicMock()) as pipeline_cls,
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
     ):
         with patch.object(sys, "argv", base_args + extra_args):
             from jasna.main import main
             main()
+    return pipeline_cls
 
 
 class TestMainValidation:
+    def test_segments_auto_select_source_codec_and_reach_pipeline(self, tmp_path):
+        metadata = MagicMock(codec_name="h264", duration=10.0)
+        splice_plan = MagicMock()
+        with (
+            patch("jasna.media.get_video_meta_data", return_value=metadata),
+            patch("jasna.media.splice.validate_smart_render"),
+            patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
+            patch("jasna.media.splice.build_splice_plan", return_value=splice_plan),
+        ):
+            pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2"])
+
+        assert pipeline_cls.call_args.kwargs["codec"] == "h264"
+        assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
+        assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
+
+    def test_segments_reject_explicit_codec_mismatch(self, tmp_path):
+        metadata = MagicMock(codec_name="h264", duration=10.0)
+        with patch("jasna.media.get_video_meta_data", return_value=metadata):
+            with pytest.raises(SystemExit):
+                _run_main_with_args(
+                    tmp_path,
+                    ["--segments", "1-2", "--codec", "hevc"],
+                )
+
     def test_bad_codec_rejected_by_argparse(self, tmp_path):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--codec", "vp9"])
