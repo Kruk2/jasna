@@ -43,11 +43,23 @@ def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.
 
 
 class NvidiaVideoReader:
-    def __init__(self, file: str, batch_size: int, device: torch.device, metadata: VideoMetadata):
+    def __init__(
+        self,
+        file: str,
+        batch_size: int,
+        device: torch.device,
+        metadata: VideoMetadata,
+        *,
+        frame_stride: int = 1,
+    ):
+        frame_stride = int(frame_stride)
+        if frame_stride <= 0:
+            raise ValueError("frame_stride must be > 0")
         self.device = device
         self.file = file
         self.batch_size = batch_size
         self.metadata = metadata
+        self.frame_stride = frame_stride
 
     def __enter__(self):
         # Make torch's primary CUDA context current on this worker thread before
@@ -134,15 +146,28 @@ class NvidiaVideoReader:
             group.append(frame)
         return group
 
+    def _selected_frames(self, decoded):
+        if self.frame_stride == 1:
+            yield from decoded
+            return
+        for frame_index, frame in enumerate(decoded):
+            if frame_index % self.frame_stride == 0:
+                yield frame
+
     def frames(
         self,
         seek_ts: float | None = None,
     ) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        if seek_ts is not None and self.frame_stride != 1:
+            raise ValueError(
+                "frame_stride > 1 is not supported with seek_ts because frame selection "
+                "must stay anchored to the start of the file"
+            )
         # The first decoded frame's format is the final backend decision: a codec
         # can advertise a CUDA config and still fall back to software when
         # hardware initialization rejects a profile or pixel format. Dispatch
         # once here so neither per-frame loop carries a backend branch.
-        decoded = self._decoded_frames(seek_ts)
+        decoded = self._selected_frames(self._decoded_frames(seek_ts))
         group = self._read_group(decoded)
         if not group:
             return

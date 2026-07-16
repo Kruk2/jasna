@@ -1000,6 +1000,34 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["encoder_cq"].pack(side="right", padx=(0, 8))
         self._widgets["encoder_cq"].set(22)
+
+        # Optional exact 60/59.94 -> 30/29.97 frame-rate retargeting.
+        retarget_row = ctk.CTkFrame(inner, fg_color="transparent")
+        retarget_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        retarget_label = ctk.CTkLabel(
+            retarget_row,
+            text=t("retarget_high_fps"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        retarget_label.pack(side="left")
+        retarget_tip = ctk.CTkLabel(
+            retarget_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        retarget_tip.pack(side="left", padx=4)
+        Tooltip(retarget_tip, get_tooltip("retarget_high_fps"))
+        self._widgets["retarget_high_fps"] = ctk.CTkSwitch(
+            retarget_row,
+            text="",
+            fg_color=Colors.BORDER_LIGHT,
+            progress_color=Colors.PRIMARY,
+            command=lambda: self._on_toggle_change("retarget_high_fps"),
+        )
+        self._widgets["retarget_high_fps"].pack(side="right")
         
         # Custom args
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -1232,6 +1260,10 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["encoder_cq_val"].configure(text=str(preset.encoder_cq))
         self._widgets["encoder_custom_args"].delete(0, "end")
         self._widgets["encoder_custom_args"].insert(0, preset.encoder_custom_args)
+        if preset.retarget_high_fps:
+            self._widgets["retarget_high_fps"].select()
+        else:
+            self._widgets["retarget_high_fps"].deselect()
 
         self._widgets["lut_path"].delete(0, "end")
         self._widgets["lut_path"].insert(0, getattr(preset, "lut_path", "") or "")
@@ -1407,6 +1439,7 @@ class SettingsPanel(ctk.CTkFrame):
             codec=CODEC_LABEL_TO_CANONICAL[self._widgets["codec"].get()],
             encoder_cq=int(self._widgets["encoder_cq"].get()),
             encoder_custom_args=self._widgets["encoder_custom_args"].get(),
+            retarget_high_fps=self._widgets["retarget_high_fps"].get() == 1,
             file_conflict=file_conflict,
             lut_path=self._widgets["lut_path"].get().strip(),
             post_export_action=post_export_action,

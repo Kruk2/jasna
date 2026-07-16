@@ -6,6 +6,7 @@ import queue
 import threading
 from collections import deque
 from dataclasses import dataclass, field
+from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
 from typing import Mapping
@@ -186,6 +187,7 @@ class NvidiaVideoEncoder:
         codec: str,
         encoder_settings: dict[str, object],
         lut_path: str | Path | None = None,
+        output_fps: Fraction | None = None,
     ):
         if codec not in ENCODER_SPECS:
             raise ValueError(f"Unsupported codec: {codec}")
@@ -204,6 +206,9 @@ class NvidiaVideoEncoder:
         self.codec = codec
         self.spec = spec
         self.encoder_name = spec.encoder_name
+        self.output_fps = Fraction(
+            metadata.video_fps_exact if output_fps is None else output_fps
+        )
 
         self._lut_applier: GpuLutApplier | None = None
         if lut_path:
@@ -242,7 +247,7 @@ class NvidiaVideoEncoder:
 
         out_v = self.dst.add_stream(
             self.encoder_name,
-            rate=self.metadata.video_fps_exact,
+            rate=self.output_fps,
             options=dict(self.encoder_options),
         )
         out_v.width = self.metadata.video_width
@@ -250,7 +255,7 @@ class NvidiaVideoEncoder:
         out_v.time_base = self.metadata.time_base
         ctx = out_v.codec_context
         ctx.time_base = self.metadata.time_base
-        ctx.framerate = self.metadata.video_fps_exact
+        ctx.framerate = self.output_fps
         ctx.pix_fmt = "cuda"
         if self.metadata.sample_aspect_ratio != 1:
             ctx.sample_aspect_ratio = self.metadata.sample_aspect_ratio

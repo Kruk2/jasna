@@ -306,6 +306,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Path to a .cube color LUT (1D or 3D) applied on GPU before encoding.",
     )
+    encoding.add_argument(
+        "--retarget-high-fps",
+        action="store_true",
+        help=(
+            "For offline exports, map 60 fps to 30 fps and 59.94 fps to 29.97 fps "
+            "by processing every second frame. Other source rates are unchanged."
+        ),
+    )
 
     post_export = parser.add_argument_group("Post-export action")
     post_export.add_argument(
@@ -349,6 +357,8 @@ def main() -> None:
         return
 
     is_streaming = bool(args.stream)
+    if is_streaming and args.retarget_high_fps:
+        parser.error("--retarget-high-fps is only supported for offline exports")
     from jasna.post_export_action import validate_post_export_action, run_post_export_action_safely
     validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
 
@@ -613,6 +623,7 @@ def main() -> None:
                 fp16=fp16,
                 disable_progress=args.no_progress,
                 lut_path=lut_path,
+                retarget_high_fps=bool(args.retarget_high_fps),
             )
 
         video_inputs = folder_videos if input_is_dir else ([input_video] if input_video is not None else [])

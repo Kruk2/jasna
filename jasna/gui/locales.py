@@ -186,6 +186,8 @@ TRANSLATIONS = {
         "lut_path_placeholder": "Optional, path to a .cube LUT file",
         "dialog_select_lut": "Select Color LUT (.cube)",
         "tip_lut_path": "Optional .cube color LUT applied on GPU just before encoding.\nSupports both 1D and 3D LUTs (e.g. exported from Adobe Premiere or DaVinci Resolve).\nUseful for fixing raised blacks, white balance, etc. without an extra encoding pass.",
+        "retarget_high_fps": "Reduce 60 FPS to 30 FPS",
+        "tip_retarget_high_fps": "For offline exports, process every second frame of 60 or 59.94 FPS video and encode at exactly 30 or 29.97 FPS. Other frame rates are unchanged. Audio timing and playback speed are preserved.",
         
         # Secondary Restoration
         "supporter_title": "Activate Jasna",
@@ -509,6 +511,8 @@ TRANSLATIONS = {
         "lut_path_placeholder": "可选，.cube LUT 文件路径",
         "dialog_select_lut": "选择色彩 LUT (.cube)",
         "tip_lut_path": "可选的 .cube 色彩 LUT，在编码前由 GPU 应用。\n支持 1D 和 3D LUT（例如 Adobe Premiere 或 DaVinci Resolve 导出的文件）。\n可在不重新编码的情况下修正黑色抬升、白平衡等问题。",
+        "retarget_high_fps": "将 60 FPS 降至 30 FPS",
+        "tip_retarget_high_fps": "仅用于离线导出：60 或 59.94 FPS 视频每两帧处理一帧，并精确编码为 30 或 29.97 FPS。其他帧率保持不变，音频时序和播放速度不变。",
 
         # Secondary Restoration
         "supporter_title": "激活 Jasna",
@@ -832,6 +836,8 @@ TRANSLATIONS = {
         "lut_path_placeholder": "オプション。.cube LUT ファイルのパス",
         "dialog_select_lut": "カラー LUT (.cube) を選択",
         "tip_lut_path": "オプションの .cube カラー LUT。エンコード直前に GPU で適用されます。\n1D / 3D LUT 両方に対応（Adobe Premiere や DaVinci Resolve からのエクスポートなど）。\n再エンコードせずに黒浮きやホワイトバランスなどを補正できます。",
+        "retarget_high_fps": "60 FPS を 30 FPS に変換",
+        "tip_retarget_high_fps": "オフライン書き出しで、60 または 59.94 FPS 動画を1フレームおきに処理し、正確に 30 または 29.97 FPS でエンコードします。他のフレームレート、音声タイミング、再生速度は変更しません。",
 
         # Secondary Restoration
         "supporter_title": "Jasna を有効化",
@@ -1136,6 +1142,8 @@ TRANSLATIONS = {
         "lut_path_placeholder": "선택 사항, .cube LUT 파일 경로",
         "dialog_select_lut": "컬러 LUT (.cube) 선택",
         "tip_lut_path": "선택적인 .cube 컬러 LUT. 인코딩 직전에 GPU에서 적용됩니다.\n1D 및 3D LUT 모두 지원합니다 (예: Adobe Premiere, DaVinci Resolve 내보내기).\n재인코딩 없이 검정 들뜸, 화이트 밸런스 등을 보정할 수 있습니다.",
+        "retarget_high_fps": "60 FPS를 30 FPS로 줄이기",
+        "tip_retarget_high_fps": "오프라인 내보내기에서 60 또는 59.94 FPS 영상의 두 프레임마다 한 프레임을 처리하고 정확히 30 또는 29.97 FPS로 인코딩합니다. 다른 프레임 속도, 오디오 타이밍, 재생 속도는 유지됩니다.",
 
         # Secondary Restoration
         "supporter_title": "Jasna 활성화",
@@ -1440,6 +1448,8 @@ TRANSLATIONS = {
         "lut_path_placeholder": "ไม่บังคับ พาธไปยังไฟล์ .cube LUT",
         "dialog_select_lut": "เลือกคัลเลอร์ LUT (.cube)",
         "tip_lut_path": "ไฟล์ .cube LUT แบบเลือกได้ ใช้บน GPU ก่อนการเข้ารหัสวิดีโอ\nรองรับทั้ง LUT แบบ 1D และ 3D (เช่น ที่ส่งออกจาก Adobe Premiere หรือ DaVinci Resolve)\nช่วยแก้สีดำที่ลอย ไวต์บาลานซ์ ฯลฯ โดยไม่ต้องเข้ารหัสซ้ำ",
+        "retarget_high_fps": "ลด 60 FPS เป็น 30 FPS",
+        "tip_retarget_high_fps": "สำหรับการส่งออกแบบออฟไลน์ ประมวลผลหนึ่งเฟรมจากทุกสองเฟรมของวิดีโอ 60 หรือ 59.94 FPS และเข้ารหัสเป็น 30 หรือ 29.97 FPS อย่างแม่นยำ อัตราเฟรมอื่น เวลาเสียง และความเร็วการเล่นจะไม่เปลี่ยนแปลง",
 
         # Secondary Restoration
         "supporter_title": "เปิดใช้งาน Jasna",

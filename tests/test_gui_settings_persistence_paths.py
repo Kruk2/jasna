@@ -80,6 +80,18 @@ def test_preset_manager_persists_lut_path_in_user_preset(monkeypatch, tmp_path: 
     assert loaded.lut_path == r"C:\luts\film.cube"
 
 
+def test_preset_manager_persists_frame_rate_retargeting(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    mgr = PresetManager()
+    assert mgr.create_preset("HalfRate", AppSettings(retarget_high_fps=True))
+
+    loaded = PresetManager().get_preset("HalfRate")
+    assert loaded is not None
+    assert loaded.retarget_high_fps is True
+
+
 def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))

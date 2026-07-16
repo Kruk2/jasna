@@ -135,6 +135,41 @@ class TestPipelineColorspaceCheck:
 
 
 class TestPipelineRun:
+    def test_retarget_high_fps_propagates_to_both_readers_encoder_and_progress(self):
+        p = _make_pipeline()
+        p.retarget_high_fps = True
+        metadata = _fake_metadata()
+        metadata.video_fps = 60.0
+        metadata.average_fps = 60.0
+        metadata.video_fps_exact = Fraction(60, 1)
+        metadata.num_frames = 5
+
+        reader_cls, _, _ = _make_two_readers([])
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=metadata),
+            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
+            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder) as encoder_cls,
+            patch("jasna.pipeline.Progressbar") as progress_cls,
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch(
+                "jasna.pipeline_threads.torch.inference_mode",
+                return_value=MagicMock(
+                    __enter__=MagicMock(),
+                    __exit__=MagicMock(return_value=False),
+                ),
+            ),
+        ):
+            p.run()
+
+        assert [call.kwargs["frame_stride"] for call in reader_cls.call_args_list] == [2, 2]
+        assert encoder_cls.call_args.kwargs["output_fps"] == Fraction(30, 1)
+        assert progress_cls.call_args.kwargs["total_frames"] == 3
+        assert progress_cls.call_args.kwargs["video_fps"] == 30.0
+
     def test_run_no_frames(self):
         p = _make_pipeline()
 
