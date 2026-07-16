@@ -104,11 +104,10 @@ class BuyMeCoffeeButton(_SupportButton):
     """Buy Me a Coffee button with brand styling and hover animation."""
 
     def __init__(self, master, compact: bool = False, **kwargs):
-        # Keep the rocket emoji present; translate the support text
         if compact:
-            text, width = "☕ 🚀", 40
+            text, width = "BMC", 50
         else:
-            text, width = f"☕ {t('bmc_support')} 🚀", 100
+            text, width = t("bmc_support"), 100
         super().__init__(
             master, text=text, url=BMC_URL,
             fg_color=Colors.BMC_YELLOW, text_color=Colors.BMC_TEXT, width=width, **kwargs,
@@ -120,9 +119,9 @@ class UnifansButton(_SupportButton):
 
     def __init__(self, master, compact: bool = False, **kwargs):
         if compact:
-            text, width = "💜", 40
+            text, width = "Unifans", 70
         else:
-            text, width = f"💜 {t('unifans_support')}", 110
+            text, width = t("unifans_support"), 110
         super().__init__(
             master, text=text, url=UNIFANS_URL,
             fg_color=Colors.UNIFANS_PURPLE, text_color=Colors.UNIFANS_TEXT, width=width, **kwargs,

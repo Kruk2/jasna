@@ -10,7 +10,7 @@ from PIL import ImageTk
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.components import CollapsibleSection, ConfirmDialog, PresetDialog, Toast, Tooltip
-from jasna.gui.icons import create_icon, render_toggle
+from jasna.gui.icons import NativeIconButton, create_icon, render_toggle
 from jasna.gui.locales import t
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
@@ -103,13 +103,18 @@ def create_compact_switch(master, command: callable, background: str) -> Compact
     return CompactSwitch(master, command, background)
 
 
-def create_slider_value_label(master, text: str, width: int) -> tk.Label:
+def create_slider_value_label(
+    master,
+    text: str,
+    width: int,
+    background: str,
+) -> tk.Label:
     return tk.Label(
         master,
         text=text,
         foreground=Colors.TEXT_PRIMARY,
-        background=Colors.BG_PANEL,
-        font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        background=background,
+        font=(Fonts.FAMILY, -Fonts.SIZE_NORMAL),
         width=width,
         borderwidth=0,
         highlightthickness=0,
@@ -174,58 +179,62 @@ class SettingsPanel(ctk.CTkFrame):
         self._preset_dropdown.pack(side="left")
         
         # Action buttons (right-aligned): Reset, Delete, Save, Create
-        self._reset_btn = ctk.CTkButton(
+        self._reset_btn = NativeIconButton(
             bar,
-            text="",
-            image=create_icon("reset", 18, Colors.TEXT_PRIMARY),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=32,
-            height=32,
-            command=self._on_reset,
+            "reset",
+            18,
+            Colors.TEXT_PRIMARY,
+            Colors.BG_PANEL,
+            Colors.BG_CARD,
+            Colors.BORDER_LIGHT,
+            self._on_reset,
+            32,
+            32,
         )
         self._reset_btn.pack(side="right")
         Tooltip(self._reset_btn, t("tip_preset_reset"))
         
-        self._delete_btn = ctk.CTkButton(
+        self._delete_btn = NativeIconButton(
             bar,
-            text="",
-            image=create_icon("delete", 18, Colors.TEXT_PRIMARY),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=32,
-            height=32,
-            command=self._on_delete_preset,
+            "delete",
+            18,
+            Colors.TEXT_PRIMARY,
+            Colors.BG_PANEL,
+            Colors.BG_CARD,
+            Colors.BORDER_LIGHT,
+            self._on_delete_preset,
+            32,
+            32,
         )
         self._delete_btn.pack(side="right", padx=(0, 4))
         Tooltip(self._delete_btn, t("tip_preset_delete"))
         
-        self._save_btn = ctk.CTkButton(
+        self._save_btn = NativeIconButton(
             bar,
-            text="",
-            image=create_icon("save", 18, Colors.TEXT_PRIMARY),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=32,
-            height=32,
-            command=self._on_save_preset,
+            "save",
+            18,
+            Colors.TEXT_PRIMARY,
+            Colors.BG_PANEL,
+            Colors.BG_CARD,
+            Colors.BORDER_LIGHT,
+            self._on_save_preset,
+            32,
+            32,
         )
         self._save_btn.pack(side="right", padx=(0, 4))
         Tooltip(self._save_btn, t("tip_preset_save"))
         
-        self._create_btn = ctk.CTkButton(
+        self._create_btn = NativeIconButton(
             bar,
-            text="",
-            image=create_icon("create", 18, Colors.TEXT_PRIMARY),
-            fg_color="transparent",
-            hover_color=Colors.BG_CARD,
-            text_color=Colors.TEXT_PRIMARY,
-            width=32,
-            height=32,
-            command=self._on_create_preset,
+            "create",
+            18,
+            Colors.TEXT_PRIMARY,
+            Colors.BG_PANEL,
+            Colors.BG_CARD,
+            Colors.BORDER_LIGHT,
+            self._on_create_preset,
+            32,
+            32,
         )
         self._create_btn.pack(side="right", padx=(0, 4))
         Tooltip(self._create_btn, t("tip_preset_create"))
@@ -263,9 +272,9 @@ class SettingsPanel(ctk.CTkFrame):
         
         # Save button: disabled for factory presets
         if is_factory:
-            self._save_btn.configure(state="disabled", text_color=Colors.TEXT_PRIMARY)
+            self._save_btn.configure(state="disabled")
         else:
-            self._save_btn.configure(state="normal", text_color=Colors.TEXT_PRIMARY)
+            self._save_btn.configure(state="normal")
         
         # Delete button: hidden for factory presets
         if is_factory:
@@ -330,7 +339,9 @@ class SettingsPanel(ctk.CTkFrame):
         clip_tooltip.pack(side="left", padx=4)
         Tooltip(clip_tooltip, get_tooltip("max_clip_size"))
         
-        self._widgets["max_clip_size_val"] = create_slider_value_label(row1, "90", 4)
+        self._widgets["max_clip_size_val"] = create_slider_value_label(
+            row1, "90", 4, Colors.BG_PANEL
+        )
         self._widgets["max_clip_size_val"].pack(side="right")
         self._widgets["max_clip_size"] = ctk.CTkSlider(
             row1, from_=10, to=180, number_of_steps=17,
@@ -374,7 +385,9 @@ class SettingsPanel(ctk.CTkFrame):
         thresh_tip.pack(side="left", padx=4)
         Tooltip(thresh_tip, get_tooltip("detection_score_threshold"))
         
-        self._widgets["detection_threshold_val"] = ctk.CTkLabel(row3, text="0.25", text_color=Colors.TEXT_PRIMARY, width=40)
+        self._widgets["detection_threshold_val"] = create_slider_value_label(
+            row3, "0.25", 4, Colors.BG_PANEL
+        )
         self._widgets["detection_threshold_val"].pack(side="right")
         self._widgets["detection_score_threshold"] = ctk.CTkSlider(
             row3, from_=0.0, to=1.0, number_of_steps=20,
@@ -472,7 +485,9 @@ class SettingsPanel(ctk.CTkFrame):
         overlap_tooltip.pack(side="left", padx=4)
         Tooltip(overlap_tooltip, get_tooltip("temporal_overlap"))
         
-        self._widgets["temporal_overlap_val"] = ctk.CTkLabel(row1, text="8", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL), width=30)
+        self._widgets["temporal_overlap_val"] = create_slider_value_label(
+            row1, "8", 3, Colors.BG_PANEL
+        )
         self._widgets["temporal_overlap_val"].pack(side="right")
         self._widgets["temporal_overlap"] = ctk.CTkSlider(
             row1, from_=0, to=30, number_of_steps=30,
@@ -685,7 +700,9 @@ class SettingsPanel(ctk.CTkFrame):
         tvai_workers_tip = ctk.CTkLabel(tvai_workers_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         tvai_workers_tip.pack(side="left", padx=4)
         Tooltip(tvai_workers_tip, get_tooltip("tvai_workers"))
-        self._widgets["tvai_workers_val"] = ctk.CTkLabel(tvai_workers_row, text="2", text_color=Colors.TEXT_PRIMARY, width=20)
+        self._widgets["tvai_workers_val"] = create_slider_value_label(
+            tvai_workers_row, "2", 2, Colors.BG_CARD
+        )
         self._widgets["tvai_workers_val"].pack(side="right")
         self._widgets["tvai_workers"] = ctk.CTkSlider(
             tvai_workers_row, from_=1, to=8, number_of_steps=7,
@@ -822,7 +839,9 @@ class SettingsPanel(ctk.CTkFrame):
         steps_tip = ctk.CTkLabel(row_steps, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         steps_tip.pack(side="left", padx=4)
         Tooltip(steps_tip, get_tooltip("image_restore_steps"))
-        self._widgets["image_restore_steps_val"] = ctk.CTkLabel(row_steps, text="25", text_color=Colors.TEXT_PRIMARY, width=40)
+        self._widgets["image_restore_steps_val"] = create_slider_value_label(
+            row_steps, "25", 4, Colors.BG_PANEL
+        )
         self._widgets["image_restore_steps_val"].pack(side="right")
         self._widgets["image_restore_steps"] = ctk.CTkSlider(
             row_steps, from_=5, to=60, number_of_steps=11,
@@ -840,7 +859,9 @@ class SettingsPanel(ctk.CTkFrame):
         str_tip = ctk.CTkLabel(row_str, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         str_tip.pack(side="left", padx=4)
         Tooltip(str_tip, get_tooltip("image_restore_strength"))
-        self._widgets["image_restore_strength_val"] = ctk.CTkLabel(row_str, text="0.60", text_color=Colors.TEXT_PRIMARY, width=40)
+        self._widgets["image_restore_strength_val"] = create_slider_value_label(
+            row_str, "0.60", 4, Colors.BG_PANEL
+        )
         self._widgets["image_restore_strength_val"].pack(side="right")
         self._widgets["image_restore_strength"] = ctk.CTkSlider(
             row_str, from_=0.1, to=0.7, number_of_steps=12,
@@ -858,7 +879,9 @@ class SettingsPanel(ctk.CTkFrame):
         var_tip = ctk.CTkLabel(row_var, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         var_tip.pack(side="left", padx=4)
         Tooltip(var_tip, get_tooltip("image_restore_variants"))
-        self._widgets["image_restore_variants_val"] = ctk.CTkLabel(row_var, text="1", text_color=Colors.TEXT_PRIMARY, width=40)
+        self._widgets["image_restore_variants_val"] = create_slider_value_label(
+            row_var, "1", 4, Colors.BG_PANEL
+        )
         self._widgets["image_restore_variants_val"].pack(side="right")
         self._widgets["image_restore_variants"] = ctk.CTkSlider(
             row_var, from_=1, to=8, number_of_steps=7,
@@ -1016,7 +1039,9 @@ class SettingsPanel(ctk.CTkFrame):
         cq_tip.pack(side="left", padx=4)
         Tooltip(cq_tip, get_tooltip("encoder_cq"))
         
-        self._widgets["encoder_cq_val"] = ctk.CTkLabel(row2, text="22", text_color=Colors.TEXT_PRIMARY, width=30)
+        self._widgets["encoder_cq_val"] = create_slider_value_label(
+            row2, "22", 3, Colors.BG_PANEL
+        )
         self._widgets["encoder_cq_val"].pack(side="right")
         self._widgets["encoder_cq"] = ctk.CTkSlider(
             row2, from_=15, to=35, number_of_steps=20,

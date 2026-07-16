@@ -7,11 +7,11 @@ import customtkinter as ctk
 import pytest
 
 from jasna.gui import settings_panel
-from jasna.gui.icons import render_icon, render_toggle
+from jasna.gui.icons import NativeIconButton, render_icon, render_toggle
 from jasna.gui.theme import Colors
 
 
-@pytest.mark.parametrize("name", ["create", "delete", "folder", "reset", "save"])
+@pytest.mark.parametrize("name", ["create", "delete", "folder", "globe", "reset", "save"])
 def test_gui_icons_render_without_font_glyphs(name: str) -> None:
     image = render_icon(name, 18, Colors.TEXT_PRIMARY)
 
@@ -69,12 +69,46 @@ def test_compact_switch_preserves_switch_state_and_callback() -> None:
         root.destroy()
 
 
+def test_native_icon_button_keeps_image_and_disabled_state() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        command = MagicMock()
+        button = NativeIconButton(
+            root,
+            "save",
+            18,
+            Colors.TEXT_PRIMARY,
+            Colors.BG_PANEL,
+            Colors.BG_CARD,
+            Colors.BORDER_LIGHT,
+            command,
+            32,
+            32,
+        )
+
+        normal_image = button.cget("image")
+        button.configure(state="disabled")
+        assert button.cget("state") == "disabled"
+        assert button.cget("image") != normal_image
+        button.invoke()
+        command.assert_not_called()
+        button.configure(state="normal")
+        button.invoke()
+        command.assert_called_once_with()
+    finally:
+        root.destroy()
+
+
 def test_slider_value_uses_native_label_without_ctk_canvas(monkeypatch) -> None:
     constructor = MagicMock(return_value=object())
     monkeypatch.setattr(settings_panel.tk, "Label", constructor)
     master = object()
 
-    result = settings_panel.create_slider_value_label(master, "90", 4)
+    result = settings_panel.create_slider_value_label(master, "90", 4, Colors.BG_PANEL)
 
     assert result is constructor.return_value
     constructor.assert_called_once_with(
@@ -82,7 +116,7 @@ def test_slider_value_uses_native_label_without_ctk_canvas(monkeypatch) -> None:
         text="90",
         foreground=Colors.TEXT_PRIMARY,
         background=Colors.BG_PANEL,
-        font=(settings_panel.Fonts.FAMILY, settings_panel.Fonts.SIZE_NORMAL),
+        font=(settings_panel.Fonts.FAMILY, -settings_panel.Fonts.SIZE_NORMAL),
         width=4,
         borderwidth=0,
         highlightthickness=0,

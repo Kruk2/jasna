@@ -1,7 +1,9 @@
 """Font-independent icons for GUI controls."""
 
+import tkinter as tk
+
 import customtkinter as ctk
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageTk
 
 
 def render_icon(name: str, size: int, color: str) -> Image.Image:
@@ -69,6 +71,19 @@ def render_icon(name: str, size: int, color: str) -> Image.Image:
             width=line_width,
             joint="curve",
         )
+    elif name == "globe":
+        bounds = (point(2), point(2), point(16), point(16))
+        draw.ellipse(bounds, outline=color, width=line_width)
+        draw.ellipse(
+            (point(6), point(2), point(12), point(16)),
+            outline=color,
+            width=line_width,
+        )
+        draw.line(
+            [(point(2), point(9)), (point(16), point(9))],
+            fill=color,
+            width=line_width,
+        )
     elif name == "reset":
         draw.arc(
             (point(3), point(3), point(15), point(15)),
@@ -111,6 +126,68 @@ def render_icon(name: str, size: int, color: str) -> Image.Image:
 def create_icon(name: str, size: int, color: str) -> ctk.CTkImage:
     image = render_icon(name, size, color)
     return ctk.CTkImage(light_image=image, dark_image=image, size=(size, size))
+
+
+def create_native_icon_image(master, name: str, size: int, color: str) -> ImageTk.PhotoImage:
+    return ImageTk.PhotoImage(render_icon(name, size, color), master=master)
+
+
+class NativeIconButton(tk.Button):
+    def __init__(
+        self,
+        master,
+        name: str,
+        icon_size: int,
+        color: str,
+        background: str,
+        active_background: str,
+        disabled_color: str,
+        command: callable,
+        width: int,
+        height: int,
+    ):
+        self._enabled = True
+        self._button_command = command
+        self._icon_image = create_native_icon_image(master, name, icon_size, color)
+        self._disabled_icon_image = create_native_icon_image(
+            master, name, icon_size, disabled_color
+        )
+        super().__init__(
+            master,
+            image=self._icon_image,
+            command=self._invoke,
+            width=width,
+            height=height,
+            background=background,
+            activebackground=active_background,
+            relief="flat",
+            overrelief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            padx=0,
+            pady=0,
+            cursor="hand2",
+        )
+
+    def _invoke(self) -> None:
+        if self._enabled:
+            self._button_command()
+
+    def configure(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        state = kwargs.pop("state", None)
+        if state is not None:
+            self._enabled = state != "disabled"
+            kwargs["image"] = (
+                self._icon_image if self._enabled else self._disabled_icon_image
+            )
+        return super().configure(**kwargs)
+
+    def cget(self, key: str):
+        if key == "state":
+            return "normal" if self._enabled else "disabled"
+        return super().cget(key)
 
 
 def render_toggle(
