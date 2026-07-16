@@ -2,12 +2,15 @@
 
 import customtkinter as ctk
 from pathlib import Path
+import tkinter as tk
 from tkinter import filedialog
 from dataclasses import asdict, fields
+from PIL import ImageTk
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.components import CollapsibleSection, ConfirmDialog, PresetDialog, Toast, Tooltip
+from jasna.gui.icons import create_icon, render_toggle
 from jasna.gui.locales import t
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
@@ -38,6 +41,79 @@ def translate_cq_for_codec(cq: int, old_codec: str, new_codec: str) -> int:
 def get_tooltip(key: str) -> str:
     """Get localized tooltip for a setting key."""
     return t(f"tip_{key}")
+
+
+class CompactSwitch(tk.Label):
+    def __init__(self, master, command: callable, background: str):
+        self._selected = False
+        self._change_command = command
+        self._off_image = ImageTk.PhotoImage(
+            render_toggle(
+                False,
+                36,
+                18,
+                Colors.BORDER_LIGHT,
+                Colors.TEXT_PRIMARY,
+            ),
+            master=master,
+        )
+        self._on_image = ImageTk.PhotoImage(
+            render_toggle(
+                True,
+                36,
+                18,
+                Colors.PRIMARY,
+                Colors.TEXT_PRIMARY,
+            ),
+            master=master,
+        )
+        super().__init__(
+            master,
+            image=self._off_image,
+            width=40,
+            height=24,
+            background=background,
+            borderwidth=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        self.bind("<Button-1>", self._toggle)
+
+    def _toggle(self, _event=None) -> None:
+        self._selected = not self._selected
+        self._refresh_image()
+        self._change_command()
+
+    def _refresh_image(self) -> None:
+        self.configure(image=self._on_image if self._selected else self._off_image)
+
+    def select(self) -> None:
+        self._selected = True
+        self._refresh_image()
+
+    def deselect(self) -> None:
+        self._selected = False
+        self._refresh_image()
+
+    def get(self) -> int:
+        return int(self._selected)
+
+
+def create_compact_switch(master, command: callable, background: str) -> CompactSwitch:
+    return CompactSwitch(master, command, background)
+
+
+def create_slider_value_label(master, text: str, width: int) -> tk.Label:
+    return tk.Label(
+        master,
+        text=text,
+        foreground=Colors.TEXT_PRIMARY,
+        background=Colors.BG_PANEL,
+        font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        width=width,
+        borderwidth=0,
+        highlightthickness=0,
+    )
 
 
 class SettingsPanel(ctk.CTkFrame):
@@ -100,8 +176,8 @@ class SettingsPanel(ctk.CTkFrame):
         # Action buttons (right-aligned): Reset, Delete, Save, Create
         self._reset_btn = ctk.CTkButton(
             bar,
-            text="↺",
-            font=(Fonts.FAMILY, Fonts.SIZE_LARGE, "bold"),
+            text="",
+            image=create_icon("reset", 18, Colors.TEXT_PRIMARY),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
             text_color=Colors.TEXT_PRIMARY,
@@ -114,8 +190,8 @@ class SettingsPanel(ctk.CTkFrame):
         
         self._delete_btn = ctk.CTkButton(
             bar,
-            text="🗑",
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text="",
+            image=create_icon("delete", 18, Colors.TEXT_PRIMARY),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
             text_color=Colors.TEXT_PRIMARY,
@@ -128,8 +204,8 @@ class SettingsPanel(ctk.CTkFrame):
         
         self._save_btn = ctk.CTkButton(
             bar,
-            text="💾",
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text="",
+            image=create_icon("save", 18, Colors.TEXT_PRIMARY),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
             text_color=Colors.TEXT_PRIMARY,
@@ -142,8 +218,8 @@ class SettingsPanel(ctk.CTkFrame):
         
         self._create_btn = ctk.CTkButton(
             bar,
-            text="+",
-            font=(Fonts.FAMILY, Fonts.SIZE_LARGE, "bold"),
+            text="",
+            image=create_icon("create", 18, Colors.TEXT_PRIMARY),
             fg_color="transparent",
             hover_color=Colors.BG_CARD,
             text_color=Colors.TEXT_PRIMARY,
@@ -254,7 +330,7 @@ class SettingsPanel(ctk.CTkFrame):
         clip_tooltip.pack(side="left", padx=4)
         Tooltip(clip_tooltip, get_tooltip("max_clip_size"))
         
-        self._widgets["max_clip_size_val"] = ctk.CTkLabel(row1, text="90", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL), width=40)
+        self._widgets["max_clip_size_val"] = create_slider_value_label(row1, "90", 4)
         self._widgets["max_clip_size_val"].pack(side="right")
         self._widgets["max_clip_size"] = ctk.CTkSlider(
             row1, from_=10, to=180, number_of_steps=17,
@@ -319,9 +395,10 @@ class SettingsPanel(ctk.CTkFrame):
         fp16_tip = ctk.CTkLabel(fp16_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         fp16_tip.pack(side="left")
         Tooltip(fp16_tip, get_tooltip("fp16_mode"))
-        self._widgets["fp16_mode"] = ctk.CTkSwitch(
-            fp16_frame, text="", fg_color=Colors.BORDER_LIGHT, progress_color=Colors.PRIMARY,
-            command=lambda: self._on_toggle_change("fp16_mode")
+        self._widgets["fp16_mode"] = create_compact_switch(
+            fp16_frame,
+            lambda: self._on_toggle_change("fp16_mode"),
+            Colors.BG_CARD,
         )
         self._widgets["fp16_mode"].pack(side="right", padx=12, pady=8)
         self._widgets["fp16_mode"].select()
@@ -333,9 +410,10 @@ class SettingsPanel(ctk.CTkFrame):
         compile_tip = ctk.CTkLabel(compile_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         compile_tip.pack(side="left")
         Tooltip(compile_tip, get_tooltip("compile_basicvsrpp"))
-        self._widgets["compile_basicvsrpp"] = ctk.CTkSwitch(
-            compile_frame, text="", fg_color=Colors.BORDER_LIGHT, progress_color=Colors.PRIMARY,
-            command=lambda: self._on_toggle_change("compile_basicvsrpp")
+        self._widgets["compile_basicvsrpp"] = create_compact_switch(
+            compile_frame,
+            lambda: self._on_toggle_change("compile_basicvsrpp"),
+            Colors.BG_CARD,
         )
         self._widgets["compile_basicvsrpp"].pack(side="right", padx=12, pady=8)
         self._widgets["compile_basicvsrpp"].select()
@@ -415,9 +493,10 @@ class SettingsPanel(ctk.CTkFrame):
         crossfade_tip = ctk.CTkLabel(crossfade_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         crossfade_tip.pack(side="left")
         Tooltip(crossfade_tip, get_tooltip("enable_crossfade"))
-        self._widgets["enable_crossfade"] = ctk.CTkSwitch(
-            crossfade_frame, text="", fg_color=Colors.BORDER_LIGHT, progress_color=Colors.PRIMARY,
-            command=lambda: self._on_toggle_change("enable_crossfade")
+        self._widgets["enable_crossfade"] = create_compact_switch(
+            crossfade_frame,
+            lambda: self._on_toggle_change("enable_crossfade"),
+            Colors.BG_CARD,
         )
         self._widgets["enable_crossfade"].pack(side="right", padx=12, pady=8)
         self._widgets["enable_crossfade"].select()
@@ -558,7 +637,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["tvai_ffmpeg_path"].insert(0, r"C:\Program Files\Topaz Labs LLC\Topaz Video\ffmpeg.exe")
         
         tvai_browse_btn = ctk.CTkButton(
-            tvai_path_input_row, text="📂", width=32, height=28,
+            tvai_path_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
             fg_color=Colors.BG_PANEL, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
             command=self._browse_tvai_ffmpeg
         )
@@ -813,9 +892,10 @@ class SettingsPanel(ctk.CTkFrame):
         freeu_tip = ctk.CTkLabel(freeu_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         freeu_tip.pack(side="left")
         Tooltip(freeu_tip, get_tooltip("image_restore_freeu"))
-        self._widgets["image_restore_freeu"] = ctk.CTkSwitch(
-            freeu_frame, text="", fg_color=Colors.BORDER_LIGHT, progress_color=Colors.PRIMARY,
-            command=lambda: self._on_toggle_change("image_restore_freeu"),
+        self._widgets["image_restore_freeu"] = create_compact_switch(
+            freeu_frame,
+            lambda: self._on_toggle_change("image_restore_freeu"),
+            Colors.BG_CARD,
         )
         self._widgets["image_restore_freeu"].pack(side="right", padx=12, pady=8)
         self._widgets["image_restore_freeu"].select()
@@ -965,12 +1045,10 @@ class SettingsPanel(ctk.CTkFrame):
         )
         retarget_tip.pack(side="left", padx=4)
         Tooltip(retarget_tip, get_tooltip("retarget_high_fps"))
-        self._widgets["retarget_high_fps"] = ctk.CTkSwitch(
+        self._widgets["retarget_high_fps"] = create_compact_switch(
             retarget_row,
-            text="",
-            fg_color=Colors.BORDER_LIGHT,
-            progress_color=Colors.PRIMARY,
-            command=lambda: self._on_toggle_change("retarget_high_fps"),
+            lambda: self._on_toggle_change("retarget_high_fps"),
+            Colors.BG_PANEL,
         )
         self._widgets["retarget_high_fps"].pack(side="right")
         
@@ -1010,7 +1088,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["lut_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
 
         lut_browse_btn = ctk.CTkButton(
-            lut_input_row, text="📂", width=32, height=28,
+            lut_input_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
             fg_color=Colors.BG_CARD, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
             command=self._browse_lut_path,
         )
