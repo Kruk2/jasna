@@ -365,7 +365,7 @@ class ControlBar(ctk.CTkFrame):
     def set_start_enabled(self, enabled: bool, disabled_tooltip: str = ""):
         if enabled:
             if self._start_disabled_tooltip is not None:
-                self._start_disabled_tooltip._hide()
+                self._start_disabled_tooltip.hide()
                 self._start_btn.unbind("<Enter>")
                 self._start_btn.unbind("<Leave>")
                 self._start_disabled_tooltip = None
@@ -373,7 +373,7 @@ class ControlBar(ctk.CTkFrame):
         else:
             self._start_btn.configure(state="disabled", fg_color=Colors.BORDER_LIGHT, hover_color=Colors.BORDER_LIGHT)
             if self._start_disabled_tooltip is not None:
-                self._start_disabled_tooltip._hide()
+                self._start_disabled_tooltip.hide()
                 self._start_btn.unbind("<Enter>")
                 self._start_btn.unbind("<Leave>")
             if disabled_tooltip:
