@@ -95,7 +95,6 @@ class Unet4xSecondaryRestorer:
     def __init__(self, *, device: torch.device, fp16: bool = True) -> None:
         self.device = torch.device(device)
         self.fp16 = bool(fp16)
-        self._dtype = torch.float16 if self.fp16 else torch.float32
 
         if use_plaintext_unet4x():
             self.engine_path = get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=self.fp16)
@@ -136,6 +135,7 @@ class Unet4xSecondaryRestorer:
             UNET4X_OUTPUT_SIZE, UNET4X_OUTPUT_SIZE,
         )
 
+        self._dtype = self.runner.input_dtypes["lr_curr"]
         self._stream = torch.cuda.current_stream(self.device)
 
         self._g_lr_prev = torch.zeros(1, UNET4X_INPUT_SIZE, UNET4X_INPUT_SIZE, 3, dtype=self._dtype, device=self.device)
