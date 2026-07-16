@@ -20,6 +20,7 @@ patch_frozen_torch()
 
 from jasna.media import UnsupportedColorspaceError, get_video_meta_data
 from jasna.media.video_encoder import NvidiaVideoEncoder
+from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.mosaic.detection_registry import build_detection_model
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, _SENTINEL
@@ -75,6 +76,7 @@ class Pipeline:
         disable_progress: bool = False,
         progress_callback: callable | None = None,
         lut_path: str | Path | None = None,
+        retarget_high_fps: bool = False,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -98,6 +100,7 @@ class Pipeline:
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback
         self.lut_path = lut_path
+        self.retarget_high_fps = bool(retarget_high_fps)
 
     def close(self) -> None:
         if hasattr(self, "detection_model") and self.detection_model is not None:
@@ -277,6 +280,23 @@ class Pipeline:
                 "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
             )
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
+        frame_rate = resolve_frame_rate_retarget(
+            metadata.video_fps_exact,
+            enabled=self.retarget_high_fps,
+        )
+        if frame_rate.active:
+            log.info(
+                "Retargeting frame rate: %s fps -> %s fps (keeping every %dth frame)",
+                frame_rate.source_fps,
+                frame_rate.output_fps,
+                frame_rate.frame_stride,
+            )
+        elif self.retarget_high_fps:
+            log.info(
+                "Frame-rate retargeting requested, but %s fps is not a supported source rate; keeping source rate",
+                frame_rate.source_fps,
+            )
+        output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
 
         clip_queue = FrameQueue(max_frames=self.max_clip_size)
         secondary_queue = FrameQueue(max_frames=self.max_clip_size * secondary_workers)
@@ -309,8 +329,8 @@ class Pipeline:
         )
 
         pb = Progressbar(
-            total_frames=metadata.num_frames,
-            video_fps=metadata.video_fps,
+            total_frames=output_frame_count,
+            video_fps=float(frame_rate.output_fps),
             disable=self.disable_progress,
             callback=self.progress_callback,
         )
@@ -322,6 +342,7 @@ class Pipeline:
             codec=self.codec,
             encoder_settings=self.encoder_settings,
             lut_path=self.lut_path,
+            output_fps=frame_rate.output_fps,
         )
         frame_writer = _OfflineFrameWriter(encoder_ctx, encode_heartbeat)
 
@@ -371,6 +392,9 @@ class Pipeline:
                     frame_shape=frame_shape,
                     progress=pb,
                     debug_memory=debug_memory,
+                    frame_stride=frame_rate.frame_stride,
+                    output_frame_count=output_frame_count,
+                    output_fps=float(frame_rate.output_fps),
                 ),
                 name="DecodeDetect", daemon=True,
             ),
@@ -399,6 +423,7 @@ class Pipeline:
                     error_holder=error_holder,
                     frame_writer=frame_writer,
                     vram_offloader=vram_offloader,
+                    frame_stride=frame_rate.frame_stride,
                 ),
                 name="BlendEncode", daemon=True,
             ),

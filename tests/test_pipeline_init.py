@@ -100,4 +100,7 @@ class TestPipelineInit:
         p = _make_pipeline(progress_callback=cb)
         assert p.progress_callback is cb
 
+    def test_retarget_high_fps_defaults_off_and_can_be_enabled(self):
+        assert _make_pipeline().retarget_high_fps is False
+        assert _make_pipeline(retarget_high_fps=True).retarget_high_fps is True
 

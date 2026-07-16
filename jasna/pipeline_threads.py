@@ -46,6 +46,9 @@ def decode_detect_loop(
     frame_shape: list[tuple[int, int]],
     cancel_event: threading.Event | None = None,
     seek_ts: float | None = None,
+    frame_stride: int = 1,
+    output_frame_count: int | None = None,
+    output_fps: float | None = None,
     progress: Progressbar | None = None,
     debug_memory: PipelineDebugMemoryLogger | None = None,
 ) -> None:
@@ -57,7 +60,13 @@ def decode_detect_loop(
         blend_frames = (temporal_overlap // 3) if enable_crossfade else 0
 
         with (
-            NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata) as reader,
+            NvidiaVideoReader(
+                input_video,
+                batch_size=batch_size,
+                device=device,
+                metadata=metadata,
+                frame_stride=frame_stride,
+            ) as reader,
             torch.inference_mode(),
         ):
             if progress is not None:
@@ -67,7 +76,11 @@ def decode_detect_loop(
             first_batch = seek_ts is not None
             log.info(
                 "Processing %s: %d frames @ %s fps, %dx%d",
-                input_video, metadata.num_frames, metadata.video_fps, metadata.video_width, metadata.video_height,
+                input_video,
+                metadata.num_frames if output_frame_count is None else output_frame_count,
+                metadata.video_fps if output_fps is None else output_fps,
+                metadata.video_width,
+                metadata.video_height,
             )
 
             try:
@@ -270,6 +283,7 @@ def blend_encode_loop(
     frame_writer: FrameWriter,
     cancel_event: threading.Event | None = None,
     seek_ts: float | None = None,
+    frame_stride: int = 1,
     vram_offloader=None,
 ) -> None:
     timer = LoopTimer("blend-encode")
@@ -281,7 +295,13 @@ def blend_encode_loop(
                 for i in range(len(pts)):
                     yield batch[i]
 
-        with NvidiaVideoReader(input_video, batch_size=batch_size, device=device, metadata=metadata) as reader2:
+        with NvidiaVideoReader(
+            input_video,
+            batch_size=batch_size,
+            device=device,
+            metadata=metadata,
+            frame_stride=frame_stride,
+        ) as reader2:
             frame_gen = _flat_frames(reader2)
             secondary_done = False
             frames_encoded = 0

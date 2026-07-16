@@ -86,6 +86,7 @@ class TestBuildParser:
         assert args.secondary_restoration == "none"
         assert args.codec == "hevc"
         assert args.encoder_settings == ""
+        assert args.retarget_high_fps is False
         assert args.stream is False
         assert args.stream_port == 8765
         assert args.stream_segment_duration == 4.0
@@ -371,6 +372,10 @@ class TestArgForwarding:
     def test_no_progress_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--no-progress"])
         assert pipe["disable_progress"] is True
+
+    def test_retarget_high_fps_forwarded(self, tmp_path):
+        pipe, _ = self._capture_run(tmp_path, ["--retarget-high-fps"])
+        assert pipe["retarget_high_fps"] is True
 
 
 # ---------------------------------------------------------------------------

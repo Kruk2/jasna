@@ -406,6 +406,7 @@ class Processor:
                 disable_progress=True,
                 progress_callback=progress_callback,
                 lut_path=s["lut_path"],
+                retarget_high_fps=settings.retarget_high_fps,
             )
             pipeline.run()
         finally:

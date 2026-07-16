@@ -89,6 +89,8 @@ _POST_EXPORT_KEYS = {
     "error_post_export_command_required",
 }
 
+_FRAME_RATE_KEYS = {"retarget_high_fps", "tip_retarget_high_fps"}
+
 
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
 def test_all_languages_define_license_keys(lang: str) -> None:
@@ -114,6 +116,12 @@ def test_all_languages_define_support_button_labels(lang: str) -> None:
 def test_all_languages_define_post_export_keys(lang: str) -> None:
     missing = _POST_EXPORT_KEYS - TRANSLATIONS[lang].keys()
     assert not missing, f"{lang} missing post-export keys: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_all_languages_define_frame_rate_retarget_keys(lang: str) -> None:
+    missing = _FRAME_RATE_KEYS - TRANSLATIONS[lang].keys()
+    assert not missing, f"{lang} missing frame-rate keys: {sorted(missing)}"
 
 
 def test_english_activation_copy_uses_app_activation_language() -> None:

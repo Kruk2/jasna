@@ -87,6 +87,14 @@ jasna --input input_folder --output output_folder --output-pattern "{original}_r
 
 Images keep their source extension, while videos use the template extension when one is provided. Jasna checks the planned folder outputs before processing and exits with an error if the template maps multiple inputs to the same output file.
 
+For offline exports, `--retarget-high-fps` processes every second frame of standard
+60 or 59.94 FPS input and writes exactly 30 or 29.97 FPS output. Other input rates
+are unchanged, and audio timing and playback speed are preserved:
+
+```bash
+jasna --input input.mp4 --output output.mp4 --retarget-high-fps
+```
+
 ## Post-export Actions
 
 The GUI can run an action after the whole queue finishes: **None**, **Shutdown PC**, or **Custom Command**. The same feature is available in the CLI on Windows and Linux:

@@ -142,6 +142,21 @@ class TestCodecSpecs:
 
 
 class TestEncoderOptions:
+    def test_output_fps_defaults_to_source_rate(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        assert enc.output_fps == Fraction(24, 1)
+
+    def test_output_fps_can_override_source_rate(self, tmp_path):
+        enc = NvidiaVideoEncoder(
+            file=str(tmp_path / "result.mkv"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(video_fps_exact=Fraction(60_000, 1_001)),
+            codec="hevc",
+            encoder_settings={},
+            output_fps=Fraction(30_000, 1_001),
+        )
+        assert enc.output_fps == Fraction(30_000, 1_001)
+
     def test_defaults_used_when_no_settings(self, tmp_path):
         enc = _make_encoder(tmp_path)
         assert enc.encoder_options == DEFAULT_ENCODER_OPTIONS

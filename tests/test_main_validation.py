@@ -131,3 +131,7 @@ class TestMainValidation:
 
     def test_valid_args_succeed(self, tmp_path):
         _run_main_with_args(tmp_path, [])
+
+    def test_retarget_high_fps_rejected_for_streaming(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--stream", "--retarget-high-fps"])

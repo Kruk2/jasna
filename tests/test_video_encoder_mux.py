@@ -66,14 +66,22 @@ def require_codec(request):
     return _require
 
 
-def _make_source(tmp_path: Path, name: str, acodec: str | None = "aac", extra: list[str] | None = None) -> Path:
+def _make_source(
+    tmp_path: Path,
+    name: str,
+    acodec: str | None = "aac",
+    extra: list[str] | None = None,
+    *,
+    rate: str = "12",
+    duration: float = 2,
+) -> Path:
     out = tmp_path / name
     cmd = [
         resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=12:duration=2",
+        "-f", "lavfi", "-i", f"testsrc2=size=256x256:rate={rate}:duration={duration}",
     ]
     if acodec:
-        cmd += ["-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-c:a", acodec]
+        cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}", "-c:a", acodec]
     cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p"]
     cmd += extra or []
     cmd.append(str(out))
@@ -106,6 +114,69 @@ def test_color_tags_and_frame_count(tmp_path):
         assert int(v.codec_context.color_trc) == 1
         n = sum(1 for _ in c.decode(v))
         assert n == 24
+
+
+@pytest.mark.parametrize(
+    ("source_rate", "target_rate", "expected_frames"),
+    [
+        ("60", Fraction(30, 1), 60),
+        ("60000/1001", Fraction(30_000, 1_001), 60),
+    ],
+)
+def test_half_rate_output_preserves_duration_and_audio_sync(
+    tmp_path,
+    source_rate,
+    target_rate,
+    expected_frames,
+):
+    src = _make_source(tmp_path, "src.mp4", rate=source_rate)
+    metadata = get_video_meta_data(str(src))
+    dst = tmp_path / "out.mp4"
+
+    with (
+        NvidiaVideoReader(
+            str(src),
+            batch_size=8,
+            device=DEVICE,
+            metadata=metadata,
+            frame_stride=2,
+        ) as reader,
+        NvidiaVideoEncoder(
+            str(dst),
+            device=DEVICE,
+            metadata=metadata,
+            codec="hevc",
+            encoder_settings={},
+            output_fps=target_rate,
+        ) as encoder,
+    ):
+        for frames, pts_list in reader.frames():
+            for i, pts in enumerate(pts_list):
+                encoder.encode(frames[i], pts)
+
+    with av.open(str(dst)) as container:
+        video = container.streams.video[0]
+        audio = container.streams.audio[0]
+        frames = list(container.decode(video))
+        assert video.average_rate == target_rate
+        assert len(frames) == expected_frames
+        assert float(video.duration * video.time_base) == pytest.approx(2.0, abs=0.05)
+        assert float(audio.duration * audio.time_base) == pytest.approx(2.0, abs=0.05)
+        frame_seconds = [float(frame.pts * frame.time_base) for frame in frames]
+        assert frame_seconds[1] - frame_seconds[0] == pytest.approx(
+            float(1 / target_rate),
+            abs=float(video.time_base),
+        )
+
+    def stream_start_skew(path: Path) -> float:
+        with av.open(str(path)) as container:
+            video = container.streams.video[0]
+            audio = container.streams.audio[0]
+            video_start = float((video.start_time or 0) * video.time_base)
+            audio_start = float((audio.start_time or 0) * audio.time_base)
+            return video_start - audio_start
+
+    assert stream_start_skew(dst) == pytest.approx(stream_start_skew(src), abs=0.05)
 
 
 def test_anamorphic_sar_preserved(tmp_path):
