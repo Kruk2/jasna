@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+import tkinter as tk
 
 from tkinterdnd2 import TkinterDnD, DND_FILES
 
@@ -14,6 +15,7 @@ from jasna import __version__
 from jasna import startup_timing
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
+from jasna.gui.icons import create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.engine_paths import UNET4X_ONNX_ENC_PATH
@@ -160,11 +162,20 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         right.pack(side="right", padx=Sizing.PADDING_MEDIUM)
         
         # Language selector
-        lang_label = ctk.CTkLabel(
+        self._language_icon = create_native_icon_image(
             right,
-            text="🌐",
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_PRIMARY,
+            "globe",
+            16,
+            Colors.TEXT_PRIMARY,
+        )
+        lang_label = tk.Label(
+            right,
+            image=self._language_icon,
+            background=Colors.BG_PANEL,
+            width=18,
+            height=18,
+            borderwidth=0,
+            highlightthickness=0,
         )
         lang_label.pack(side="left", padx=(0, 4))
         

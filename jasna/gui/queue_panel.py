@@ -94,8 +94,10 @@ class QueuePanel(ctk.CTkFrame):
             text=t("queue_empty"),
             font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
             text_color=Colors.TEXT_PRIMARY,
+            wraplength=230,
+            justify="center",
         )
-        self._empty_label.pack(padx=40, pady=60)
+        self._empty_label.pack(padx=20, pady=60)
         self._empty_state.pack(fill="x", pady=20)
         
     def _build_footer(self):

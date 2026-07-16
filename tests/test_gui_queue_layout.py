@@ -26,5 +26,8 @@ def test_queue_footer_stacks_count_above_action_buttons() -> None:
             panel._clear_btn.winfo_rooty(),
         )
         assert count_bottom <= actions_top
+
+        empty_content_width = panel._empty_state.winfo_width() - 40
+        assert panel._empty_label.winfo_reqwidth() <= empty_content_width
     finally:
         root.destroy()
