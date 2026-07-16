@@ -13,6 +13,11 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 
 from jasna import __version__
 from jasna import startup_timing
+from jasna.gui.branding import (
+    HEADER_LOGO_SIZE,
+    create_header_logo,
+    install_window_icon,
+)
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
 from jasna.gui.icons import create_native_icon_image
@@ -70,6 +75,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self.TkdndVersion = None
         
         self.title("Jasna GUI")
+        self._window_icon = install_window_icon(self)
         self.configure(fg_color=Colors.BG_MAIN)
 
         self.update_idletasks()
@@ -124,15 +130,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         left = ctk.CTkFrame(header, fg_color="transparent")
         left.pack(side="left", padx=Sizing.PADDING_MEDIUM)
         
+        self._header_logo = create_header_logo()
         logo = ctk.CTkLabel(
             left,
-            text="J",
-            font=(Fonts.FAMILY, 18, "bold"),
-            text_color=Colors.PRIMARY,
-            fg_color=Colors.PRIMARY_DARK,
-            corner_radius=4,
-            width=28,
-            height=28,
+            text="",
+            image=self._header_logo,
+            fg_color="transparent",
+            width=HEADER_LOGO_SIZE[0],
+            height=HEADER_LOGO_SIZE[1],
         )
         logo.pack(side="left")
         
