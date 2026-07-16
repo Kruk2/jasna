@@ -31,6 +31,7 @@ def _make_metadata(duration: float = 60.0, fps: float = 30.0, num_frames: int = 
     m.start_pts = 0
     m.is_10bit = False
     m.video_file = "test.mp4"
+    m.sample_aspect_ratio = Fraction(1, 1)
     return m
 
 
@@ -365,6 +366,33 @@ class TestStreamingEncoder:
         enc.start(start_number=0)
         cmd = mock_popen.call_args[0][0]
         assert 'h264_nvenc' in cmd
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_anamorphic_sar_in_cmd(self, mock_popen, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        mock_popen.return_value = _mock_ffmpeg_process()
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        meta.sample_aspect_ratio = Fraction(8, 9)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path,
+            segment_duration=4.0,
+            metadata=meta,
+            source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        idx = cmd.index('-vf')
+        assert cmd[idx + 1] == 'setsar=8/9'
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_square_pixels_no_setsar_in_cmd(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert '-vf' not in cmd
         enc.stop()
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
