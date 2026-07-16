@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Jasna logo</title>
+  <desc id="description">A luminous letter J emerging from mosaic pixels on a violet rounded square.</desc>
+  <defs>
+    <linearGradient id="background" x1="72" y1="54" x2="452" y2="470" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4338ca"/>
+      <stop offset="0.52" stop-color="#5b45ed"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <radialGradient id="light" cx="0" cy="0" r="1" gradientTransform="translate(393 92) rotate(132) scale(330)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#67e8f9" stop-opacity="0.42"/>
+      <stop offset="0.55" stop-color="#a78bfa" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#312e81" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="letter" x1="260" y1="104" x2="260" y2="446" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e0f2fe"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect x="16" y="16" width="480" height="480" rx="112"/>
+    </clipPath>
+  </defs>
+
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#background)"/>
+  <g clip-path="url(#tile)">
+    <rect x="16" y="16" width="480" height="480" fill="url(#light)"/>
+    <path d="M-48 449 403-34h145L93 529H-48Z" fill="#ffffff" opacity="0.055"/>
+    <circle cx="438" cy="70" r="111" fill="#ffffff" opacity="0.035"/>
+  </g>
+  <rect x="19" y="19" width="474" height="474" rx="109" fill="none" stroke="#c4b5fd" stroke-opacity="0.36" stroke-width="6"/>
+
+  <g fill="#cffafe">
+    <rect x="101" y="111" width="66" height="66" rx="15" opacity="0.38"/>
+    <rect x="180" y="116" width="48" height="48" rx="11" opacity="0.62"/>
+    <rect x="239" y="114" width="31" height="31" rx="7" opacity="0.88"/>
+  </g>
+
+  <path d="M282 104h128v77h-50v132c0 86-46 133-123 133-71 0-119-40-132-103l79-25c7 34 25 53 55 53 31 0 45-18 45-58V181h-2Z" fill="url(#letter)"/>
+  <path d="M395 85v-22h16v22h22v16h-22v22h-16v-22h-22V85Z" fill="#a5f3fc"/>
+</svg>
