@@ -544,9 +544,7 @@ class NvidiaVideoEncoder:
         hw_frame = av.VideoFrame.from_dlpack(
             planes,
             format=self.spec.frame_format,
-            primary_ctx=False,
             cuda_context=self._cuda_ctx,
-            current_ctx=True,
         )
         hw_frame.pts = pts
         hw_frame.time_base = self.metadata.time_base

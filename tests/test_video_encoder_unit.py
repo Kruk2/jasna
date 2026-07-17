@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from contextlib import nullcontext
 from collections import deque
 from fractions import Fraction
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+import jasna.media.video_encoder as video_encoder_module
 from jasna.media import VideoMetadata
 from jasna.media.rgb_to_nv12 import (
     chw_rgb_to_nv12_bt2020_full,
@@ -311,6 +313,28 @@ def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
 
 
 class TestEncodeBuffer:
+    def test_from_dlpack_reuses_cuda_context_without_repeating_context_flags(self, tmp_path, monkeypatch):
+        enc = _make_encoder(tmp_path, codec="h264", video_width=2, video_height=2)
+        enc.stream = MagicMock()
+        enc._cuda_ctx = object()
+        enc._lut_applier = None
+        enc._to_yuv = lambda frame: torch.zeros((3, 2), dtype=torch.uint8)
+        enc.out_stream = MagicMock()
+        enc.out_stream.encode.return_value = []
+        hw_frame = SimpleNamespace(pts=None, time_base=None)
+        from_dlpack = MagicMock(return_value=hw_frame)
+        monkeypatch.setattr(
+            video_encoder_module.av,
+            "VideoFrame",
+            SimpleNamespace(from_dlpack=from_dlpack),
+        )
+        monkeypatch.setattr(video_encoder_module.torch.cuda, "stream", lambda stream: nullcontext())
+
+        enc._encode_frame(torch.zeros((3, 2, 2), dtype=torch.uint8), 7)
+
+        _, kwargs = from_dlpack.call_args
+        assert kwargs == {"format": "nv12", "cuda_context": enc._cuda_ctx}
+
     def test_pts_origin_is_removed_from_fragment_timestamps(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
         enc.pts_origin = 100
