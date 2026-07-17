@@ -259,9 +259,6 @@ class NvidiaVideoEncoder:
                 overrides["spatial_aq"] = overrides.pop("spatial-aq")
             self.encoder_options.update(overrides)
         if self.smart_fragment:
-            self.encoder_options["g"] = "999999"
-            self.encoder_options["bf"] = "0"
-            self.encoder_options.pop("b_ref_mode", None)
             self.encoder_options["forced-idr"] = "1"
 
         self.BUFFER_MAX_SIZE = 8
