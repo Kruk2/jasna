@@ -112,7 +112,7 @@ Segment processing accepts a single H.264, HEVC, or AV1 video and MP4, MOV, or
 MKV output. The output codec must match the input codec; when `--codec` is not
 specified, Jasna selects it automatically. It cannot be combined with folder,
 image, streaming, variable-frame-rate, interlaced, or frame-rate-retargeting
-input. HEVC files also need usable safe video cut points around the selection.
+input.
 The GUI exposes the same feature through the scissors button or range summary
 on each pending video. Its silent preview includes a zoomable timeline, direct
 range dragging, frame stepping, exact time entry, undo/redo, and keyboard I/O
@@ -122,7 +122,8 @@ re-encoded, and stream-copied durations before the job starts.
 
 ## Segment Editor
 
-<!-- SCREENSHOT PLACEHOLDER: Add the final Segment Editor screenshot here. -->
+<img width="822" alt="Screenshot_20260717_211339" src="https://github.com/user-attachments/assets/c67939a9-37de-46ae-b722-20c6a0933df7" />
+
 
 The Segment Editor lets you preview a queued video and select frame-accurate
 ranges for restoration; leave the selection empty to restore the full video.
@@ -140,9 +141,6 @@ Mosaic scanning is built into the editor:
   and settings.
 - Change confidence after scanning to update amber detected ranges immediately,
   then add them to the purple restoration selection.
-- Preview saved masks on sampled frames; unsampled frames are detected exactly
-  on demand. Low-VRAM systems automatically recycle results through system
-  memory.
 
 The detection model and confidence are remembered per queued video and used
 during final processing, so different videos can use different settings.
@@ -178,9 +176,8 @@ and joins the two eyes again for the output.
 
 1. Add the VR video like any normal video.
 2. Leave **VR180 Mode** set to **Auto (recommended)**.
-3. For the best VR mosaic detection, select the bundled
-   **zelefans-vr-yolo-v2** detection model. It is included with Jasna and does
-   not need a separate download.
+3. For the best VR mosaic detection, you can either use **rf-detr-v5** or
+   **zelefans-vr-yolo-v2** detection model.
 4. Start processing normally. You can also use the segment editor if you only
    want to restore part of the video.
 
@@ -198,29 +195,6 @@ VR processing.
 - **SBS + fisheye**: use this when the mosaic is strongly stretched near the
   edge of the VR image or the normal SBS mode misses it. This mode temporarily
   corrects the lens distortion to improve detection and restoration.
-
-### Preview and output
-
-The segment editor intentionally shows only the left eye, so the preview is
-large enough to inspect. This does not mean the right eye is ignored: mosaic
-scans, selected segments, restoration previews, and final exports process both
-eyes.
-
-For the easiest VR-player compatibility, export to MP4 or MOV. Jasna preserves
-compatible source VR metadata or adds standard side-by-side VR180 metadata when
-it is missing. Other containers still contain both restored eyes, but some VR
-players may not recognize them as VR automatically.
-
-**SBS + fisheye** is an internal processing option; it does not convert the
-finished video into a different projection. The output keeps the same visual
-layout as the source. Streaming behavior is unchanged.
-
-Command-line users can select the same modes with `--vr-mode`:
-
-```bash
-jasna --input input.mp4 --output output.mp4 --vr-mode auto
-jasna --input input.mp4 --output output.mp4 --vr-mode sbs-fisheye
-```
 
 ## Post-export Actions
 
@@ -250,8 +224,7 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 
 In general, use the latest RF-DETR model. Lada YOLO models are also available
 and can work better for 2D animations. For VR180, the bundled
-`zelefans-vr-yolo-v2` model is the accurate detector from
-[ZeLeFans VR Mosaic Remover](https://huggingface.co/zelefans/vrmr).
+`zelefans-vr-yolo-v2` model can be more accurate detector.
 
 CLI option:
 
@@ -414,9 +387,7 @@ How to get a key:
    - **[Unifans](https://app.unifans.io/c/kruk2)**: sent by platform message. There might be a slight delay.
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**, including **crypto**: sent to the email or handle used for the contribution. The key is tied to that email or handle.
 
-## Current Limitations and TODO
-
-Jasna is in early development. The main goals are improving restoration quality, mosaic detection, speed, and VRAM usage, in that order. The project is currently aimed at more technical users, so some workflows may still be rough. Pull requests are welcome.
+## TODO
 
 Current TODO:
 
