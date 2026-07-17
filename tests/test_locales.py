@@ -265,3 +265,29 @@ def test_activation_benefits_include_sd15_image_restoration(lang: str) -> None:
     perks = TRANSLATIONS[lang]["supporter_perks"]
     assert "UNet 4x" in perks
     assert "SD 1.5" in perks
+
+
+_MASK_FEEDBACK_KEYS = [
+    "segments_suggest_mask",
+    "segments_suggest_mask_hint",
+    "mask_editor_title",
+    "mask_editor_instructions",
+    "mask_editor_anonymous_note",
+    "mask_editor_undo_point",
+    "mask_editor_erase_all",
+    "mask_editor_submit",
+    "mask_editor_hide_shapes",
+    "mask_editor_show_shapes",
+    "mask_editor_quick_help",
+    "mask_editor_opacity",
+    "mask_editor_loading_frame",
+    "mask_editor_frame_failed",
+    "mask_feedback_uploaded",
+    "mask_feedback_upload_failed",
+]
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+@pytest.mark.parametrize("key", _MASK_FEEDBACK_KEYS)
+def test_all_languages_define_mask_feedback_keys(lang: str, key: str) -> None:
+    assert TRANSLATIONS[lang][key].strip()

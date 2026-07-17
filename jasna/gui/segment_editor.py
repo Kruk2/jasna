@@ -23,6 +23,13 @@ from jasna.gui.restoration_preview import (
     RestorationStatus,
     RestoredClipFrame,
 )
+from jasna import __version__
+from jasna.gui.components import Toast
+from jasna.gui.mask_feedback import (
+    FeedbackUploadFinished,
+    MaskFeedbackWorker,
+    MaskSuggestDialog,
+)
 from jasna.gui.mosaic_scan import (
     SCAN_SCORE_FLOOR,
     MosaicScanResult,
@@ -41,6 +48,7 @@ from jasna.gui.segment_preview import (
     PreviewEnded,
     PreviewFailed,
     PreviewFrame,
+    PreviewFullFrame,
     PreviewLoaded,
     SegmentPreviewWorker,
 )
@@ -122,6 +130,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._scan_mask_cache: OrderedDict[int, tuple[float, float, object]] = OrderedDict()
         self._segment_action_widgets: list = []
         self._timeline_zoom_buttons: list = []
+        self._mask_feedback_worker = MaskFeedbackWorker()
+        self._suggest_busy = False
 
         self.title(t("segments_title"))
         self.configure(fg_color=Colors.BG_MAIN)
@@ -293,6 +303,16 @@ class SegmentEditor(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY,
         )
         self._time_label.pack(side="left", padx=12)
+        self._suggest_btn = ctk.CTkButton(
+            transport,
+            text=t("segments_suggest_mask"),
+            height=28,
+            fg_color=Colors.BG_PANEL,
+            hover_color=Colors.BORDER_LIGHT,
+            command=self._suggest_mask,
+        )
+        self._suggest_btn.pack(side="left", padx=(12, 0))
+        Tooltip(self._suggest_btn, t("segments_suggest_mask_hint"))
         restore_control = ctk.CTkFrame(transport, fg_color="transparent")
         restore_control.pack(side="right")
         self._restore_toggle = create_compact_switch(
@@ -753,6 +773,8 @@ class SegmentEditor(ctk.CTkToplevel):
                         self._build_editor(event.metadata)
                 elif isinstance(event, PreviewFrame):
                     self._show_frame(event)
+                elif isinstance(event, PreviewFullFrame):
+                    self._open_mask_suggest(event.image)
                 elif isinstance(event, PreviewEnded):
                     if event.generation == self._preview_generation:
                         self._set_playing(False)
@@ -786,6 +808,11 @@ class SegmentEditor(ctk.CTkToplevel):
                     self._handle_scan_event(scan_worker.events.get_nowait())
             except queue.Empty:
                 pass
+        try:
+            while True:
+                self._handle_feedback_event(self._mask_feedback_worker.events.get_nowait())
+        except queue.Empty:
+            pass
         if self._state is not None:
             self._refresh_restore_toggle()
         self.after(25, self._poll_workers)
@@ -1256,6 +1283,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._restore_toggle,
             self._start_entry,
             self._end_entry,
+            self._suggest_btn,
             *self._timeline_zoom_buttons,
             *self._segment_action_widgets,
         )
@@ -1515,6 +1543,54 @@ class SegmentEditor(ctk.CTkToplevel):
             detection_model=self._scan_model.get(),
             detection_score_threshold=self._scan_threshold,
         )
+
+    def _suggest_mask(self) -> None:
+        self._require_state()
+        if self._suggest_busy:
+            return
+        self._suggest_busy = True
+        self._set_playing(False)
+        self._suggest_btn.configure(state="disabled", text=t("mask_editor_loading_frame"))
+        self._preview_worker.grab_full()
+
+    def _open_mask_suggest(self, image: Image.Image) -> None:
+        if not self._suggest_busy or self._closed.is_set():
+            return
+        self._suggest_btn.configure(text=t("segments_suggest_mask"))
+        MaskSuggestDialog(
+            self,
+            image,
+            on_submit=lambda polygons: self._submit_mask_feedback(image, polygons),
+            on_closed=self._mask_suggest_closed,
+        )
+
+    def _mask_suggest_closed(self) -> None:
+        self._suggest_busy = False
+        if not self._scan_active:
+            self._suggest_btn.configure(state="normal")
+        self._take_focus()
+
+    def _submit_mask_feedback(self, image: Image.Image, polygons: tuple) -> None:
+        self._mask_feedback_worker.upload(
+            image,
+            polygons,
+            str(self._current_video_settings().detection_model),
+            __version__,
+        )
+
+    def _handle_feedback_event(self, event) -> None:
+        if isinstance(event, FeedbackUploadFinished):
+            if event.ok:
+                self._show_toast(t("mask_feedback_uploaded"), "success")
+            else:
+                self._show_toast(
+                    t("mask_feedback_upload_failed", message=event.message), "error"
+                )
+
+    def _show_toast(self, message: str, type_: str) -> None:
+        if self._closed.is_set():
+            return
+        Toast(self, message, type_).place(relx=0.5, rely=0.92, anchor="center")
 
     def _new_range(self) -> None:
         state = self._require_state()
