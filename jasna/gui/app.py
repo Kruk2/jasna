@@ -638,19 +638,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _show_about(self):
         dialog = ctk.CTkToplevel(self)
         dialog.title(t("dialog_about_title"))
-        dialog.geometry("400x250")
         dialog.resizable(False, False)
         dialog.configure(fg_color=Colors.BG_MAIN)
         dialog.transient(self)
         dialog.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
         dialog.grab_set()
-        
-        # Center on parent
-        dialog.update_idletasks()
-        x = self.winfo_x() + (self.winfo_width() - 400) // 2
-        y = self.winfo_y() + (self.winfo_height() - 250) // 2
-        dialog.geometry(f"+{x}+{y}")
-        
+
         ctk.CTkLabel(
             dialog,
             text="Jasna",
@@ -687,6 +680,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             text_color=Colors.TEXT_PRIMARY,
             command=dialog.destroy,
         ).pack(pady=30)
+
+        # Size to content so translated text never clips the close button
+        dialog.update_idletasks()
+        w = max(400, dialog.winfo_reqwidth())
+        h = dialog.winfo_reqheight()
+        x = self.winfo_x() + (self.winfo_width() - w) // 2
+        y = self.winfo_y() + (self.winfo_height() - h) // 2
+        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        return dialog
 
 
 class GUILogHandler(logging.Handler):
