@@ -37,6 +37,9 @@ class QueuePanel(ctk.CTkFrame):
         self._on_output_changed: callable = None
         self._processing_job_id: int | None = None
         self._segment_editor = None
+        self._get_settings: callable = None
+        self._is_gpu_busy: callable = None
+        self._set_preview_gpu_busy: callable = None
         
         self._build_toolbar()
         self._build_list_area()
@@ -338,6 +341,9 @@ class QueuePanel(ctk.CTkFrame):
             self._segment_editor = SegmentEditor(
                 self,
                 job,
+                self._get_settings,
+                self._is_gpu_busy,
+                self._set_preview_gpu_busy,
                 lambda segments, j=job: self._segments_saved(j, segments),
                 self._segment_editor_closed,
             )
@@ -415,6 +421,16 @@ class QueuePanel(ctk.CTkFrame):
         
     def set_on_jobs_changed(self, callback: callable):
         self._on_jobs_changed = callback
+
+    def set_segment_editor_context(
+        self,
+        get_settings: callable,
+        is_gpu_busy: callable,
+        set_preview_gpu_busy: callable,
+    ):
+        self._get_settings = get_settings
+        self._is_gpu_busy = is_gpu_busy
+        self._set_preview_gpu_busy = set_preview_gpu_busy
 
     def set_on_output_changed(self, callback: callable):
         self._on_output_changed = callback

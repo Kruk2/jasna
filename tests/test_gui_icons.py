@@ -6,8 +6,8 @@ from unittest.mock import MagicMock
 import customtkinter as ctk
 import pytest
 
-from jasna.gui import settings_panel
-from jasna.gui.icons import NativeIconButton, render_icon, render_toggle
+from jasna.gui import icons, settings_panel
+from jasna.gui.icons import CompactSwitch, NativeIconButton, render_icon, render_toggle
 from jasna.gui.theme import Colors
 
 
@@ -37,11 +37,11 @@ def test_toggle_switch_renders_without_customtkinter_shape_glyphs(selected: bool
 
 def test_compact_switch_uses_image_backed_control(monkeypatch) -> None:
     constructor = MagicMock(return_value=object())
-    monkeypatch.setattr(settings_panel, "CompactSwitch", constructor)
+    monkeypatch.setattr(icons, "CompactSwitch", constructor)
     master = object()
     command = MagicMock()
 
-    result = settings_panel.create_compact_switch(master, command, Colors.BG_CARD)
+    result = icons.create_compact_switch(master, command, Colors.BG_CARD)
 
     assert result is constructor.return_value
     constructor.assert_called_once_with(master, command, Colors.BG_CARD)
@@ -55,7 +55,7 @@ def test_compact_switch_preserves_switch_state_and_callback() -> None:
 
     try:
         callback = MagicMock()
-        switch = settings_panel.CompactSwitch(root, callback, Colors.BG_PANEL)
+        switch = CompactSwitch(root, callback, Colors.BG_PANEL)
 
         assert switch.get() == 0
         switch.select()
@@ -63,6 +63,32 @@ def test_compact_switch_preserves_switch_state_and_callback() -> None:
         switch.deselect()
         assert switch.get() == 0
         switch._toggle()
+        assert switch.get() == 1
+        callback.assert_called_once_with()
+    finally:
+        root.destroy()
+
+
+def test_compact_switch_ignores_clicks_while_disabled() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        callback = MagicMock()
+        switch = CompactSwitch(root, callback, Colors.BG_PANEL)
+
+        switch.configure(state="disabled")
+        switch._toggle()
+
+        assert switch.cget("state") == "disabled"
+        assert switch.get() == 0
+        callback.assert_not_called()
+
+        switch.configure(state="normal")
+        switch._toggle()
+
         assert switch.get() == 1
         callback.assert_called_once_with()
     finally:
