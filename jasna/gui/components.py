@@ -737,8 +737,8 @@ class JobListItem(ctk.CTkFrame):
             duration_str = f"{mins}m {secs}s"
         else:
             duration_str = f"{secs}s"
-        text = f"{t('completed_in')} {duration_str}"
-        self._fps_label.configure(text=text)
+        self._status_label.configure(text=f"{t('completed_in')} {duration_str}")
+        self._fps_label.configure(text="")
         self._eta_label.configure(text="")
         
     def hide_progress(self):
