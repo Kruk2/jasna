@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import pytest
 
-from jasna.mosaic.yolo import YoloMosaicDetectionModel
+from jasna.mosaic.yolo import YoloMosaicDetectionModel, _batched_nms_keep
 
 
 def _mock_engine_path():
@@ -111,6 +111,46 @@ class TestYoloInit:
 
 
 class TestYoloCall:
+    def test_scan_nms_is_class_aware(self):
+        boxes = torch.tensor(
+            [[[0.0, 0.0, 4.0, 4.0], [0.0, 0.0, 4.0, 4.0], [0.0, 0.0, 4.0, 4.0]]]
+        )
+        keep = _batched_nms_keep(
+            boxes,
+            torch.tensor([[0.9, 0.8, 0.7]]),
+            torch.tensor([[0, 0, 1]]),
+            score_threshold=0.05,
+            iou_threshold=0.7,
+            max_det=2,
+        )
+        assert keep.tolist() == [[True, False, True]]
+
+    def test_scan_mask_is_cropped_to_predicted_box(self):
+        model = object.__new__(YoloMosaicDetectionModel)
+        model.device = torch.device("cpu")
+        model.input_dtype = torch.float32
+        model.imgsz = 4
+        model.stride = 1
+        model.max_det = 1
+        model.score_threshold = 0.05
+        model.iou_threshold = 0.7
+
+        pred = torch.zeros(1, 6, 1)
+        pred[0, :4, 0] = torch.tensor([2.0, 2.0, 2.0, 2.0])
+        pred[0, 4, 0] = 0.9
+        pred[0, 5, 0] = 100.0
+        proto = torch.ones(1, 1, 4, 4)
+        model._forward_raw = MagicMock(return_value=(pred, proto, 1))
+
+        scores, masks = model.scan_scores_masks(
+            torch.zeros(1, 3, 4, 4, dtype=torch.uint8),
+            mask_hw=(4, 4),
+        )
+
+        assert scores.tolist() == pytest.approx([0.9])
+        assert masks[0].sum().item() == 4
+        assert masks[0, 1:3, 1:3].all()
+
     def test_call_no_detections(self):
         model, mock_runner = _build_yolo_model(batch_size=1, imgsz=640)
 

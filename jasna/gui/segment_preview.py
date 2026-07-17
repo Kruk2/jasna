@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 from dataclasses import dataclass
+from itertools import chain
 from pathlib import Path
 from typing import Iterator
 
@@ -46,12 +47,18 @@ class _Next:
 
 
 @dataclass(frozen=True)
+class _Previous:
+    seconds: float
+    generation: int
+
+
+@dataclass(frozen=True)
 class _Stop:
     pass
 
 
 PreviewEvent = PreviewLoaded | PreviewFrame | PreviewEnded | PreviewFailed
-_Command = _Seek | _Next | _Stop
+_Command = _Seek | _Next | _Previous | _Stop
 
 
 class SegmentPreviewWorker:
@@ -85,6 +92,11 @@ class SegmentPreviewWorker:
             self._commands.put_nowait(_Next(self._generation))
         except queue.Full:
             pass
+
+    def previous_frame(self, seconds: float) -> int:
+        self._generation += 1
+        self._replace_command(_Previous(max(0.0, float(seconds)), self._generation))
+        return self._generation
 
     def close(self) -> None:
         if self._closed.is_set():
@@ -131,6 +143,13 @@ class SegmentPreviewWorker:
                             command.seconds,
                             start_pts,
                         )
+                    elif isinstance(command, _Previous):
+                        frame, decoded = self._previous(
+                            container,
+                            stream,
+                            command.seconds,
+                            start_pts,
+                        )
                     else:
                         frame = next(decoded, None) if decoded is not None else None
                     if frame is None:
@@ -157,6 +176,24 @@ class SegmentPreviewWorker:
             if frame.pts is None or frame.pts >= target_pts:
                 return frame, decoded
         return closest, decoded
+
+    def _previous(self, container, stream, seconds: float, start_pts: int):
+        target_pts = start_pts + round(float(seconds) / stream.time_base)
+        one_second_pts = max(1, round(1.0 / stream.time_base))
+        container.seek(
+            max(start_pts, target_pts - one_second_pts),
+            stream=stream,
+            backward=True,
+        )
+        decoded = container.decode(stream)
+        previous = None
+        for frame in decoded:
+            if frame.pts is None or frame.pts >= target_pts:
+                if previous is None:
+                    return frame, decoded
+                return previous, chain((frame,), decoded)
+            previous = frame
+        return previous, decoded
 
     def _frame_seconds(self, frame, stream, start_pts: int) -> float:
         if frame.pts is None:

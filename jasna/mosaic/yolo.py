@@ -60,6 +60,43 @@ def _letterbox_normalized_bchw(
     return x, ratio_pad
 
 
+def _batched_nms_keep(
+    boxes_xyxy: torch.Tensor,
+    scores: torch.Tensor,
+    classes: torch.Tensor,
+    *,
+    score_threshold: float,
+    iou_threshold: float,
+    max_det: int,
+) -> torch.Tensor:
+    """Return a GPU boolean keep mask for confidence-sorted batched boxes."""
+    _, count, _ = boxes_xyxy.shape
+    x1, y1, x2, y2 = boxes_xyxy.unbind(dim=-1)
+    areas = (x2 - x1).clamp_min(0) * (y2 - y1).clamp_min(0)
+    inter_w = (
+        torch.minimum(x2[:, :, None], x2[:, None, :])
+        - torch.maximum(x1[:, :, None], x1[:, None, :])
+    ).clamp_min(0)
+    inter_h = (
+        torch.minimum(y2[:, :, None], y2[:, None, :])
+        - torch.maximum(y1[:, :, None], y1[:, None, :])
+    ).clamp_min(0)
+    intersections = inter_w * inter_h
+    unions = areas[:, :, None] + areas[:, None, :] - intersections
+    ious = intersections / unions.clamp_min(torch.finfo(intersections.dtype).eps)
+    overlaps = (ious > iou_threshold) & (classes[:, :, None] == classes[:, None, :])
+
+    alive = scores > score_threshold
+    keep = torch.zeros_like(alive)
+    indexes = torch.arange(count, device=boxes_xyxy.device)
+    for index in range(count):
+        keep_i = alive[:, index]
+        keep[:, index] = keep_i
+        later = indexes > index
+        alive &= ~(keep_i[:, None] & overlaps[:, index] & later[None, :])
+    return keep & (keep.cumsum(dim=1) <= max_det)
+
+
 class YoloMosaicDetectionModel:
     DEFAULT_SCORE_THRESHOLD = 0.25
     DEFAULT_IOU_THRESHOLD = 0.7
@@ -191,9 +228,9 @@ class YoloMosaicDetectionModel:
         self, frames_uint8_bchw: torch.Tensor, *, mask_hw: tuple[int, int]
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """GPU-only fast path for whole-video scanning: per-frame best score
-        (B,) float32 and merged low-res mask (B, mask_h, mask_w) bool, with no
-        host synchronization. Skips NMS and box cropping — masks come straight
-        from the top-confidence anchors' prototype coefficients."""
+        (B,) float32 and merged, box-cropped low-res mask
+        (B, mask_h, mask_w) bool, with class-aware NMS and no host
+        synchronization."""
 
         _, _, src_h, src_w = frames_uint8_bchw.shape
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
@@ -205,23 +242,50 @@ class YoloMosaicDetectionModel:
         )
         pred_raw, protos, nc = self._forward_raw(x)
 
-        per_anchor = pred_raw[:, 4 : 4 + max(1, nc), :].amax(dim=1)  # (B, A)
+        per_anchor, anchor_classes = pred_raw[
+            :, 4 : 4 + max(1, nc), :
+        ].max(dim=1)  # (B, A)
         scores = per_anchor.amax(dim=1).float()  # (B,)
 
         mask_dim = int(protos.shape[1])
-        k = min(self.max_det, per_anchor.shape[1])
+        k = min(self.max_det * 4, per_anchor.shape[1])
         top_conf, top_idx = per_anchor.topk(k, dim=1)  # (B, K)
+        top_classes = anchor_classes.gather(1, top_idx)
         coeffs = pred_raw[:, 4 + nc :, :].gather(
             2, top_idx[:, None, :].expand(-1, mask_dim, -1)
         )  # (B, mask_dim, K)
         anchor_masks = (
             torch.einsum("bmk,bmhw->bkhw", coeffs.float(), protos.float()).sigmoid() > 0.5
         )
-        valid = top_conf > self.score_threshold
+        boxes_xywh = pred_raw[:, :4, :].gather(
+            2, top_idx[:, None, :].expand(-1, 4, -1)
+        ).transpose(1, 2)
+        box_x, box_y, box_w, box_h = boxes_xywh.unbind(dim=-1)
+        ph, pw = anchor_masks.shape[-2:]
+        x1 = (box_x - box_w / 2) * (pw / float(self.imgsz))
+        y1 = (box_y - box_h / 2) * (ph / float(self.imgsz))
+        x2 = (box_x + box_w / 2) * (pw / float(self.imgsz))
+        y2 = (box_y + box_h / 2) * (ph / float(self.imgsz))
+        boxes_xyxy = torch.stack((x1, y1, x2, y2), dim=-1)
+        valid = _batched_nms_keep(
+            boxes_xyxy,
+            top_conf,
+            top_classes,
+            score_threshold=self.score_threshold,
+            iou_threshold=self.iou_threshold,
+            max_det=self.max_det,
+        )
+        grid_x = torch.arange(pw, device=anchor_masks.device)[None, None, None, :]
+        grid_y = torch.arange(ph, device=anchor_masks.device)[None, None, :, None]
+        anchor_masks &= (
+            (grid_x >= x1[:, :, None, None])
+            & (grid_x < x2[:, :, None, None])
+            & (grid_y >= y1[:, :, None, None])
+            & (grid_y < y2[:, :, None, None])
+        )
         merged = (anchor_masks & valid[:, :, None, None]).any(dim=1)  # (B, ph, pw)
 
         (gain, _), (left, top) = ratio_pad
-        ph, pw = merged.shape[-2:]
         sy, sx = ph / float(self.imgsz), pw / float(self.imgsz)
         top_p = int(round(top * sy))
         left_p = int(round(left * sx))
@@ -288,4 +352,3 @@ class YoloMosaicDetectionModel:
                 masks_list.append(empty_masks)
 
         return Detections(boxes_xyxy=boxes_list, masks=masks_list)
-
