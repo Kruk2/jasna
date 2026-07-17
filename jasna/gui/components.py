@@ -1,5 +1,6 @@
 """Reusable UI components for Jasna GUI."""
 
+import tkinter
 import customtkinter as ctk
 import webbrowser
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -103,6 +104,32 @@ class _SupportButton(ctk.CTkButton):
         self.configure(width=self._original_width, height=self._original_height)
 
 
+def attach_entry_context_menu(entry: ctk.CTkEntry) -> tkinter.Menu:
+    """Right-click menu with clipboard actions, for users who don't know Ctrl+V."""
+    widget = entry._entry
+    menu = tkinter.Menu(
+        widget, tearoff=0,
+        background=Colors.BG_PANEL, foreground=Colors.TEXT_PRIMARY,
+        activebackground=Colors.PRIMARY, activeforeground=Colors.TEXT_PRIMARY,
+    )
+    menu.add_command(label=t("ctx_cut"), command=lambda: widget.event_generate("<<Cut>>"))
+    menu.add_command(label=t("ctx_copy"), command=lambda: widget.event_generate("<<Copy>>"))
+    menu.add_command(label=t("ctx_paste"), command=lambda: widget.event_generate("<<Paste>>"))
+    menu.add_separator()
+    menu.add_command(label=t("ctx_select_all"), command=lambda: widget.select_range(0, "end"))
+
+    def _popup(event):
+        widget.focus_set()
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
+    widget.bind("<Button-3>", _popup)
+    return menu
+
+
 class BuyMeCoffeeButton(_SupportButton):
     """Buy Me a Coffee button with brand styling and hover animation."""
 
@@ -174,11 +201,13 @@ class LicenseDialog(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_email_placeholder"),
         )
         self._email.pack(fill="x", pady=(0, 6))
+        attach_entry_context_menu(self._email)
         self._key = ctk.CTkEntry(
             outer, width=340, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_key_placeholder"),
         )
         self._key.pack(fill="x", pady=(0, 10))
+        attach_entry_context_menu(self._key)
 
         action = ctk.CTkFrame(outer, fg_color="transparent")
         action.pack(fill="x")
