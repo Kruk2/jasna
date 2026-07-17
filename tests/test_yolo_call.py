@@ -288,3 +288,37 @@ class TestYoloAutoBackendCall:
         frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8)
         det = model(frames, target_hw=(480, 640))
         assert len(det.boxes_xyxy) == 1
+
+    def test_call_accepts_nested_segmentation_output_with_metadata_dict(self):
+        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
+        pred = torch.zeros(1, 4 + 2 + 32, 100)
+        proto = torch.zeros(1, 32, 160, 160)
+        mock_ab.return_value = (
+            (pred, proto),
+            {"boxes": None, "mask_coefficient": None, "proto": proto},
+        )
+
+        det = model(
+            torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8),
+            target_hw=(480, 640),
+        )
+
+        assert len(det.boxes_xyxy) == 1
+        assert det.boxes_xyxy[0].shape[0] == 0
+
+    def test_scan_accepts_nested_segmentation_output_with_metadata_dict(self):
+        model, mock_ab = _build_yolo_autobackend(batch_size=1, imgsz=640)
+        pred = torch.zeros(1, 4 + 2 + 32, 100)
+        proto = torch.zeros(1, 32, 160, 160)
+        mock_ab.return_value = (
+            (pred, proto),
+            {"boxes": None, "mask_coefficient": None, "proto": proto},
+        )
+
+        scores, masks = model.scan_scores_masks(
+            torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8),
+            mask_hw=(90, 160),
+        )
+
+        assert scores.shape == (1,)
+        assert masks.shape == (1, 90, 160)

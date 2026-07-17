@@ -1,18 +1,49 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from jasna.engine_paths import model_weights_dir
 
+@dataclass(frozen=True)
+class DetectionModelSpec:
+    name: str
+    backend: str
+    filename: str
+
+
+DETECTION_MODEL_SPECS: dict[str, DetectionModelSpec] = {
+    "lada-yolo-v2": DetectionModelSpec(
+        "lada-yolo-v2",
+        "yolo",
+        "lada_mosaic_detection_model_v2.pt",
+    ),
+    "lada-yolo-v4": DetectionModelSpec(
+        "lada-yolo-v4",
+        "yolo",
+        "lada_mosaic_detection_model_v4_fast.pt",
+    ),
+    "zelefans-vr-yolo-v2": DetectionModelSpec(
+        "zelefans-vr-yolo-v2",
+        "yolo",
+        "lada_vr_mosaic_detection_model_v2_accurate.pt",
+    ),
+}
+
 RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v2", "rfdetr-v3", "rfdetr-v4", "rfdetr-v5"})
-YOLO_MODEL_NAMES: frozenset[str] = frozenset({"lada-yolo-v2", "lada-yolo-v4"})
+YOLO_MODEL_NAMES: frozenset[str] = frozenset(
+    name
+    for name, spec in DETECTION_MODEL_SPECS.items()
+    if spec.backend == "yolo"
+)
 
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v5"
 
 YOLO_MODEL_FILES: dict[str, str] = {
-    "lada-yolo-v2": "lada_mosaic_detection_model_v2.pt",
-    "lada-yolo-v4": "lada_mosaic_detection_model_v4_fast.pt",
+    name: spec.filename
+    for name, spec in DETECTION_MODEL_SPECS.items()
+    if spec.backend == "yolo"
 }
 
 _RFDETR_PATTERN = re.compile(r"^rfdetr-.+$")
@@ -23,7 +54,25 @@ def is_rfdetr_model(name: str) -> bool:
 
 
 def is_yolo_model(name: str) -> bool:
-    return name in YOLO_MODEL_NAMES
+    spec = DETECTION_MODEL_SPECS.get(str(name))
+    return spec is not None and spec.backend == "yolo"
+
+
+def detection_model_spec(name: str) -> DetectionModelSpec:
+    normalized = str(name).strip().lower()
+    spec = DETECTION_MODEL_SPECS.get(normalized)
+    if spec is not None:
+        return spec
+    if is_rfdetr_model(normalized):
+        return DetectionModelSpec(
+            normalized,
+            "rfdetr",
+            f"{normalized}.onnx",
+        )
+    valid = sorted(RFDETR_MODEL_NAMES | set(DETECTION_MODEL_SPECS))
+    raise ValueError(
+        f"Unknown detection model '{normalized}'. Valid names: {', '.join(valid)}"
+    )
 
 
 def discover_available_detection_models(weights_dir: Path | None = None) -> list[str]:
@@ -43,22 +92,29 @@ def discover_available_detection_models(weights_dir: Path | None = None) -> list
     return rfdetr_names + yolo_names
 
 
+def detection_model_choices(weights_dir: Path | None = None) -> list[str]:
+    choices = discover_available_detection_models(weights_dir)
+    if not choices:
+        choices.append(DEFAULT_DETECTION_MODEL_NAME)
+    return choices
+
+
 def coerce_detection_model_name(name: str) -> str:
     name = str(name).strip().lower()
-    if is_rfdetr_model(name) or is_yolo_model(name):
-        return name
-    valid = sorted(RFDETR_MODEL_NAMES | YOLO_MODEL_NAMES)
-    raise ValueError(f"Unknown detection model '{name}'. Valid names: {', '.join(valid)}")
+    return detection_model_spec(name).name
 
 
 def detection_model_weights_path(name: str) -> Path:
     name = coerce_detection_model_name(name)
     base = model_weights_dir()
-    if is_rfdetr_model(name):
-        return base / f"{name}.onnx"
-    if is_yolo_model(name):
-        return base / YOLO_MODEL_FILES[name]
-    return base / f"{DEFAULT_DETECTION_MODEL_NAME}.onnx"
+    return base / detection_model_spec(name).filename
+
+
+def require_detection_model_weights(name: str) -> Path:
+    path = detection_model_weights_path(name)
+    if not path.is_file():
+        raise FileNotFoundError(f"Detection model weights not found: {path}")
+    return path
 
 
 def build_detection_model(
@@ -117,4 +173,3 @@ def precompile_detection_engine(
             imgsz=YoloMosaicDetectionModel.DEFAULT_IMGSZ,
             device=device,
         )
-

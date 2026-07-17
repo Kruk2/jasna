@@ -305,16 +305,15 @@ class SettingsPanel(ctk.CTkFrame):
         model_tip.pack(side="left", padx=4)
         Tooltip(model_tip, get_tooltip("detection_model"))
         
-        from jasna.mosaic.detection_registry import DEFAULT_DETECTION_MODEL_NAME, discover_available_detection_models
-        available_models = discover_available_detection_models()
-        if not available_models:
-            available_models = [DEFAULT_DETECTION_MODEL_NAME]
+        from jasna.mosaic.detection_registry import detection_model_choices
+        available_models = detection_model_choices()
         self._widgets["detection_model"] = ctk.CTkOptionMenu(
             row2, values=available_models,
             fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
             dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
-            width=120, command=lambda v: self._on_setting_change("detection_model", v)
+            width=160,
+            command=lambda value: self._on_setting_change("detection_model", value),
         )
         self._widgets["detection_model"].pack(side="right")
         self._widgets["detection_model"].set(available_models[0])
@@ -459,7 +458,49 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["enable_crossfade"].pack(side="right", padx=12, pady=8)
         self._widgets["enable_crossfade"].select()
-        
+
+        row_vr = ctk.CTkFrame(inner, fg_color="transparent")
+        row_vr.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        vr_label = ctk.CTkLabel(
+            row_vr,
+            text=t("vr_mode"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        vr_label.pack(side="left")
+        vr_tip = ctk.CTkLabel(
+            row_vr,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        vr_tip.pack(side="left", padx=4)
+        Tooltip(vr_tip, get_tooltip("vr_mode"))
+        self._vr_mode_values = {
+            t("vr_mode_auto"): "auto",
+            t("vr_mode_off"): "off",
+            t("vr_mode_sbs"): "sbs",
+            t("vr_mode_sbs_fisheye"): "sbs-fisheye",
+        }
+        self._widgets["vr_mode"] = ctk.CTkOptionMenu(
+            row_vr,
+            values=list(self._vr_mode_values),
+            fg_color=Colors.BG_CARD,
+            button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=180,
+            command=lambda value: self._on_setting_change(
+                "vr_mode",
+                self._vr_mode_values[value],
+            ),
+        )
+        self._widgets["vr_mode"].pack(side="right")
+        self._widgets["vr_mode"].set(t("vr_mode_auto"))
+
         # Denoising Strength
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -1181,6 +1222,13 @@ class SettingsPanel(ctk.CTkFrame):
             self._widgets["enable_crossfade"].select()
         else:
             self._widgets["enable_crossfade"].deselect()
+
+        vr_display_values = {
+            value: display for display, value in self._vr_mode_values.items()
+        }
+        self._widgets["vr_mode"].set(
+            vr_display_values.get(preset.vr_mode, t("vr_mode_auto"))
+        )
             
         if preset.fp16_mode:
             self._widgets["fp16_mode"].select()
@@ -1350,7 +1398,7 @@ class SettingsPanel(ctk.CTkFrame):
         
     def _on_setting_change(self, key: str, value):
         self._mark_modified()
-        
+
     def _on_toggle_change(self, key: str):
         self._mark_modified()
         
@@ -1413,6 +1461,7 @@ class SettingsPanel(ctk.CTkFrame):
             max_clip_size=int(self._widgets["max_clip_size"].get()),
             temporal_overlap=int(self._widgets["temporal_overlap"].get()),
             enable_crossfade=self._widgets["enable_crossfade"].get() == 1,
+            vr_mode=self._vr_mode_values[self._widgets["vr_mode"].get()],
             fp16_mode=self._widgets["fp16_mode"].get() == 1,
             denoise_strength=denoise_strength,
             denoise_step=denoise_step,

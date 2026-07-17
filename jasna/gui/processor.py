@@ -400,6 +400,7 @@ class Processor:
                 max_clip_size=settings.max_clip_size,
                 temporal_overlap=settings.temporal_overlap,
                 enable_crossfade=settings.enable_crossfade,
+                vr_mode=settings.vr_mode,
                 fp16=settings.fp16_mode,
                 disable_progress=True,
                 progress_callback=progress_callback,
@@ -426,11 +427,11 @@ class Processor:
     ) -> tuple[str, Path]:
         from jasna.mosaic.detection_registry import (
             coerce_detection_model_name,
-            detection_model_weights_path,
+            require_detection_model_weights,
         )
 
         det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = detection_model_weights_path(det_name)
+        detection_model_path = require_detection_model_weights(det_name)
         if det_name == session.det_name and detection_model_path == session.detection_model_path:
             return det_name, detection_model_path
 
@@ -466,7 +467,7 @@ class Processor:
         import torch
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.engine_paths import SD15_DIR
-        from jasna.mosaic.detection_registry import build_detection_model, coerce_detection_model_name, detection_model_weights_path
+        from jasna.mosaic.detection_registry import build_detection_model, coerce_detection_model_name, require_detection_model_weights
         from jasna.restorer.sd15_download import bundle_present
         from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
 
@@ -479,7 +480,7 @@ class Processor:
             )
 
         det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = detection_model_weights_path(det_name)
+        detection_model_path = require_detection_model_weights(det_name)
         ensure_engines_compiled(
             EngineCompilationRequest(
                 device=str(device),

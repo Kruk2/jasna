@@ -81,6 +81,7 @@ class TestBuildParser:
         assert args.max_clip_size == 90
         assert args.temporal_overlap == 8
         assert args.enable_crossfade is True
+        assert args.vr_mode == "auto"
         assert args.denoise == "none"
         assert args.denoise_step == "after_primary"
         assert args.secondary_restoration == "none"
@@ -284,7 +285,7 @@ class TestDetectionModelDiscovery:
         det.touch()
 
         with patch("jasna.mosaic.detection_registry.discover_available_detection_models", return_value=["rfdetr-v3"]):
-            with patch("jasna.mosaic.detection_registry.detection_model_weights_path", return_value=det):
+            with patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=det):
                 _run_main([
                     "jasna",
                     "--input", str(inp),
@@ -301,7 +302,7 @@ class TestDetectionModelDiscovery:
         det.touch()
 
         with patch("jasna.mosaic.detection_registry.discover_available_detection_models", return_value=["rfdetr-v5"]):
-            with patch("jasna.mosaic.detection_registry.detection_model_weights_path", return_value=det):
+            with patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=det):
                 _run_main([
                     "jasna",
                     "--input", str(inp),
@@ -310,6 +311,38 @@ class TestDetectionModelDiscovery:
                 ])
         captured = capsys.readouterr()
         assert "not found in model_weights" not in captured.out
+
+    def test_bundled_model_does_not_emit_missing_warning(self, tmp_path, capsys):
+        inp, out, rest, _ = _make_model_files(tmp_path, create_detection=False)
+        det = tmp_path / "model_weights" / "vr.pt"
+        det.parent.mkdir(exist_ok=True)
+        det.touch()
+
+        with (
+            patch(
+                "jasna.mosaic.detection_registry.discover_available_detection_models",
+                return_value=["rfdetr-v5", "zelefans-vr-yolo-v2"],
+            ),
+            patch(
+                "jasna.mosaic.detection_registry.require_detection_model_weights",
+                return_value=det,
+            ),
+        ):
+            _run_main(
+                [
+                    "jasna",
+                    "--input",
+                    str(inp),
+                    "--output",
+                    str(out),
+                    "--restoration-model-path",
+                    str(rest),
+                    "--detection-model",
+                    "zelefans-vr-yolo-v2",
+                ]
+            )
+
+        assert "not found in model_weights" not in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +402,10 @@ class TestArgForwarding:
     def test_temporal_overlap_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--temporal-overlap", "4", "--max-clip-size", "90"])
         assert pipe["temporal_overlap"] == 4
+
+    def test_vr_mode_forwarded(self, tmp_path):
+        pipe, _ = self._capture_run(tmp_path, ["--vr-mode", "sbs-fisheye"])
+        assert pipe["vr_mode"] == "sbs-fisheye"
 
     def test_no_progress_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--no-progress"])

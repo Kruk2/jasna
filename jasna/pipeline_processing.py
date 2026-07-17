@@ -118,6 +118,7 @@ def process_frame_batch(
     metadata_queue: Queue[FrameMeta | object],
     discard_margin: int,
     blend_frames: int = 0,
+    crop_eye_width: int | None = None,
 ) -> BatchProcessResult:
     effective_bs = len(pts_list)
     if effective_bs == 0:
@@ -149,7 +150,15 @@ def process_frame_batch(
                 continue
             if track_id not in crop_buffers:
                 crop_buffers[track_id] = CropBuffer(track_id=track_id, start_frame=clip.start_frame)
-            raw_crop = extract_crop(frame, clip.bboxes[-1], frame_h, frame_w)
+            bbox = clip.bboxes[-1]
+            x_bounds = _eye_bounds(bbox, crop_eye_width, frame_w)
+            raw_crop = extract_crop(
+                frame,
+                bbox,
+                frame_h,
+                frame_w,
+                x_bounds=x_bounds,
+            )
             crop_buffers[track_id].add(raw_crop)
 
         for ec in ended_clips:
@@ -157,7 +166,15 @@ def process_frame_batch(
             if tid not in crop_buffers:
                 crop_buffers[tid] = CropBuffer(track_id=tid, start_frame=ec.clip.start_frame)
             if crop_buffers[tid].frame_count < ec.clip.frame_count:
-                raw_crop = extract_crop(frame, ec.clip.bboxes[-1], frame_h, frame_w)
+                bbox = ec.clip.bboxes[-1]
+                x_bounds = _eye_bounds(bbox, crop_eye_width, frame_w)
+                raw_crop = extract_crop(
+                    frame,
+                    bbox,
+                    frame_h,
+                    frame_w,
+                    x_bounds=x_bounds,
+                )
                 crop_buffers[tid].add(raw_crop)
 
         clips_emitted += len(ended_clips)
@@ -177,6 +194,22 @@ def process_frame_batch(
         next_frame_idx=int(start_frame_idx) + effective_bs,
         clips_emitted=clips_emitted,
     )
+
+
+def _eye_bounds(
+    bbox,
+    eye_width: int | None,
+    frame_width: int,
+) -> tuple[int, int] | None:
+    if eye_width is None:
+        return None
+    eye_width = int(eye_width)
+    if eye_width <= 0 or eye_width * 2 != int(frame_width):
+        raise ValueError(
+            f"Invalid SBS eye width {eye_width} for frame width {frame_width}"
+        )
+    center_x = (float(bbox[0]) + float(bbox[2])) * 0.5
+    return (0, eye_width) if center_x < eye_width else (eye_width, frame_width)
 
 
 def finalize_processing(

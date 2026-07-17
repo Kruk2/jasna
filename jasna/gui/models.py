@@ -126,6 +126,7 @@ class AppSettings:
     max_clip_size: int = 90
     temporal_overlap: int = 8
     enable_crossfade: bool = True
+    vr_mode: str = "auto"
     fp16_mode: bool = True
     
     # Denoising
@@ -145,7 +146,7 @@ class AppSettings:
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
     
     # Detection
-    detection_model: str = "rfdetr-v5"  # rfdetr-v2, rfdetr-v3, rfdetr-v4, rfdetr-v5, lada-yolo-v2, lada-yolo-v4
+    detection_model: str = "rfdetr-v5"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
     detection_score_threshold: float = 0.25
     compile_basicvsrpp: bool = True
     

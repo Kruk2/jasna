@@ -54,6 +54,8 @@ def decode_detect_loop(
     progress: Progressbar | None = None,
     close_progress: bool = True,
     debug_memory: PipelineDebugMemoryLogger | None = None,
+    vr_mode: str = "off",
+    vr_projector=None,
 ) -> None:
     timer = LoopTimer("decode-detect")
     try:
@@ -75,6 +77,11 @@ def decode_detect_loop(
             if progress is not None:
                 progress.init()
             target_hw = (int(metadata.video_height), int(metadata.video_width))
+            crop_eye_width = (
+                int(metadata.video_width) // 2
+                if vr_mode in {"sbs", "sbs-fisheye"}
+                else None
+            )
             frame_idx = 0 if seek_ts is None else _estimate_start_frame(metadata, seek_ts)
             effect_active = effect_ranges is None
             stop_after_batch = False
@@ -149,8 +156,13 @@ def decode_detect_loop(
 
                             if selected:
                                 effect_active = True
+                                selected_frames = frames[offset:group_end]
+                                if vr_projector is not None:
+                                    selected_frames = vr_projector.forward_sbs(
+                                        selected_frames
+                                    )
                                 res = process_frame_batch(
-                                    frames=frames[offset:group_end],
+                                    frames=selected_frames,
                                     pts_list=[int(p) for p in pts_list[offset:group_end]],
                                     start_frame_idx=frame_idx,
                                     batch_size=batch_size,
@@ -163,6 +175,7 @@ def decode_detect_loop(
                                     metadata_queue=metadata_queue,
                                     discard_margin=discard_margin,
                                     blend_frames=blend_frames,
+                                    crop_eye_width=crop_eye_width,
                                 )
                                 frame_idx = res.next_frame_idx
                             else:
@@ -335,6 +348,7 @@ def blend_encode_loop(
     seek_ts: float | None = None,
     frame_stride: int = 1,
     vram_offloader=None,
+    vr_projector=None,
 ) -> None:
     timer = LoopTimer("blend-encode")
     try:
@@ -402,11 +416,27 @@ def blend_encode_loop(
                             pass
 
                 with timer.measure("blend"):
-                    blended = (
-                        blend_buffer.blend_frame(meta.frame_idx, original_frame)
-                        if meta.apply_effect
-                        else original_frame
-                    )
+                    if not meta.apply_effect:
+                        blended = original_frame
+                    elif (
+                        vr_projector is not None
+                        and blend_buffer.has_pending(meta.frame_idx)
+                    ):
+                        projected_source = vr_projector.forward_sbs(original_frame)
+                        blended_fisheye = blend_buffer.blend_frame(
+                            meta.frame_idx,
+                            projected_source,
+                        )
+                        blended = vr_projector.restore_delta_to_source(
+                            original_frame,
+                            projected_source,
+                            blended_fisheye,
+                        )
+                    else:
+                        blended = blend_buffer.blend_frame(
+                            meta.frame_idx,
+                            original_frame,
+                        )
                 with timer.measure("write"):
                     if meta.apply_effect:
                         frame_writer.write(blended, meta.pts)

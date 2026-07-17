@@ -212,8 +212,29 @@ class YoloMosaicDetectionModel:
         if not isinstance(raw, (tuple, list)) or len(raw) < 2:
             raise RuntimeError(f"Unexpected YOLO output type/shape: {type(raw)}")
 
-        pred_raw = raw[0] if not isinstance(raw[0], tuple) else raw[0][0]
-        protos = raw[1]
+        primary = raw[0]
+        pred_raw = primary[0] if isinstance(primary, (tuple, list)) else primary
+        protos = None
+        candidates = (
+            list(primary[1:])
+            if isinstance(primary, (tuple, list))
+            else []
+        )
+        candidates.extend(raw[1:])
+        for candidate in candidates:
+            if isinstance(candidate, torch.Tensor) and candidate.ndim == 4:
+                protos = candidate
+                break
+            if isinstance(candidate, dict):
+                candidate_proto = candidate.get("proto")
+                if (
+                    isinstance(candidate_proto, torch.Tensor)
+                    and candidate_proto.ndim == 4
+                ):
+                    protos = candidate_proto
+                    break
+        if not isinstance(pred_raw, torch.Tensor) or protos is None:
+            raise RuntimeError("Unexpected YOLO segmentation output layout")
         if protos.ndim == 4 and protos.shape[1] not in {8, 16, 32, 64, 128} and protos.shape[-1] in {8, 16, 32, 64, 128}:
             protos = protos.permute(0, 3, 1, 2).contiguous()
 
@@ -224,6 +245,7 @@ class YoloMosaicDetectionModel:
         nc = int(pred_raw.shape[1]) - 4 - mask_dim
         return pred_raw, protos, nc
 
+    @torch.inference_mode()
     def scan_scores_masks(
         self, frames_uint8_bchw: torch.Tensor, *, mask_hw: tuple[int, int]
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -295,6 +317,7 @@ class YoloMosaicDetectionModel:
         merged = F.interpolate(merged[:, None].float(), size=mask_hw, mode="area") > 0.0
         return scores, merged[:, 0]
 
+    @torch.inference_mode()
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
         x /= 255.0

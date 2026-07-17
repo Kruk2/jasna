@@ -247,7 +247,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--detection-model",
         type=str,
         default="rfdetr-v5",
-        help="Detection model name. Available models are discovered from model_weights/ folder (default: %(default)s)",
+        help=(
+            "Detection model name. Installed models are discovered from model_weights/; "
+            "zelefans-vr-yolo-v2 is bundled with Jasna "
+            "(default: %(default)s)"
+        ),
     )
     detection.add_argument(
         "--detection-model-path",
@@ -260,6 +264,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.25,
         help="Detection score threshold (default: %(default)s)",
+    )
+
+    projection = parser.add_argument_group("VR projection")
+    projection.add_argument(
+        "--vr-mode",
+        type=str,
+        default="auto",
+        choices=["auto", "off", "sbs", "sbs-fisheye"],
+        help=(
+            "VR180 handling: auto uses conservative studio/metadata detection; "
+            "sbs processes each eye separately; sbs-fisheye also reprojects each "
+            "eye for detection/restoration and preserves source projection on output. "
+            "(default: %(default)s)"
+        ),
     )
 
     streaming = parser.add_argument_group("Streaming")
@@ -503,7 +521,11 @@ def main() -> None:
         _run_post_export_action()
         return
 
-    from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path, discover_available_detection_models
+    from jasna.mosaic.detection_registry import (
+        coerce_detection_model_name,
+        discover_available_detection_models,
+        require_detection_model_weights,
+    )
 
     detection_model_name = coerce_detection_model_name(str(args.detection_model))
     has_explicit_path = bool(str(args.detection_model_path).strip())
@@ -511,7 +533,11 @@ def main() -> None:
         available = discover_available_detection_models()
         if available and detection_model_name not in available:
             print(f"Warning: detection model '{detection_model_name}' not found in model_weights/. Available: {', '.join(available)}")
-    detection_model_path = Path(str(args.detection_model_path)) if has_explicit_path else detection_model_weights_path(detection_model_name)
+    detection_model_path = (
+        Path(str(args.detection_model_path))
+        if has_explicit_path
+        else require_detection_model_weights(detection_model_name)
+    )
     if not detection_model_path.exists():
         raise FileNotFoundError(str(detection_model_path))
 
@@ -682,6 +708,7 @@ def main() -> None:
                 max_clip_size=max_clip_size,
                 temporal_overlap=temporal_overlap,
                 enable_crossfade=bool(args.enable_crossfade),
+                vr_mode=str(args.vr_mode),
                 fp16=fp16,
                 disable_progress=args.no_progress,
                 lut_path=lut_path,

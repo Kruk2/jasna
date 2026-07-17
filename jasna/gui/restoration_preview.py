@@ -104,7 +104,16 @@ def playback_window(metadata: VideoMetadata, start_seconds: float, max_clip_size
     return PreviewWindow(seek_ts=start_seconds, end_pts=end_pts, center_pts=start_pts)
 
 
-def _frame_image(frame, max_size: tuple[int, int], lut_applier=None, *, apply_lut: bool = True) -> Image.Image:
+def _frame_image(
+    frame,
+    max_size: tuple[int, int],
+    lut_applier=None,
+    *,
+    apply_lut: bool = True,
+    left_eye_only: bool = False,
+) -> Image.Image:
+    if left_eye_only:
+        frame = frame[:, :, : frame.shape[-1] // 2]
     if apply_lut and lut_applier is not None:
         frame = lut_applier.apply(frame)
     image = Image.fromarray(frame.cpu().permute(1, 2, 0).numpy()).copy()
@@ -122,10 +131,18 @@ class _CenterFrameCollector:
     """FrameWriter that keeps the restored frame closest to ``center_pts`` and
     cancels the pass once the center has been written."""
 
-    def __init__(self, center_pts: int, cancel_event: threading.Event, lut_applier=None) -> None:
+    def __init__(
+        self,
+        center_pts: int,
+        cancel_event: threading.Event,
+        lut_applier=None,
+        *,
+        left_eye_only: bool = False,
+    ) -> None:
         self._center_pts = center_pts
         self._cancel_event = cancel_event
         self._lut_applier = lut_applier
+        self._left_eye_only = bool(left_eye_only)
         self._best_pts: int | None = None
         self._best_frame = None
         self.done = False
@@ -135,6 +152,8 @@ class _CenterFrameCollector:
             return
         if self._best_pts is None or abs(pts - self._center_pts) < abs(self._best_pts - self._center_pts):
             self._best_pts = pts
+            if self._left_eye_only:
+                frame = frame[:, :, : frame.shape[-1] // 2]
             if apply_lut and self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
             self._best_frame = frame.cpu()
@@ -144,6 +163,10 @@ class _CenterFrameCollector:
 
     def after_write(self, frames_written: int) -> None:
         pass
+
+    @property
+    def has_result(self) -> bool:
+        return self._best_frame is not None
 
     def result_image(self, max_size: tuple[int, int]) -> Image.Image:
         return _frame_image(self._best_frame, max_size, apply_lut=False)
@@ -155,10 +178,13 @@ class _PlaybackFrameCollector:
         metadata: VideoMetadata,
         max_size: tuple[int, int],
         lut_applier=None,
+        *,
+        left_eye_only: bool = False,
     ) -> None:
         self._metadata = metadata
         self._max_size = max_size
         self._lut_applier = lut_applier
+        self._left_eye_only = bool(left_eye_only)
         self._frames: list[tuple[int, Image.Image]] = []
 
     @property
@@ -174,6 +200,7 @@ class _PlaybackFrameCollector:
                     self._max_size,
                     self._lut_applier,
                     apply_lut=apply_lut,
+                    left_eye_only=self._left_eye_only,
                 ),
             )
         )
@@ -358,6 +385,31 @@ class RestorationPreviewWorker:
         from jasna.vram_offloader import VramOffloader
 
         settings = command.settings
+        from jasna.vr180 import (
+            FisheyeProjector,
+            SbsDetectionAdapter,
+            resolve_vr_mode,
+        )
+
+        vr_resolution = resolve_vr_mode(
+            settings.vr_mode,
+            self.metadata,
+            self.path,
+        )
+        pass_detection_model = (
+            SbsDetectionAdapter(detection_model)
+            if vr_resolution.is_sbs
+            else detection_model
+        )
+        vr_projector = (
+            FisheyeProjector(
+                eye_width=int(self.metadata.video_width) // 2,
+                height=int(self.metadata.video_height),
+                device=session.device,
+            )
+            if vr_resolution.uses_fisheye
+            else None
+        )
         window = (
             playback_window(self.metadata, command.center_seconds, settings.max_clip_size)
             if command.playback
@@ -396,9 +448,19 @@ class RestorationPreviewWorker:
             lut_applier = GpuLutApplier(parse_cube_file(lut_path), session.device)
 
         collector = (
-            _PlaybackFrameCollector(self.metadata, self.max_size, lut_applier)
+            _PlaybackFrameCollector(
+                self.metadata,
+                self.max_size,
+                lut_applier,
+                left_eye_only=vr_resolution.is_sbs,
+            )
             if command.playback
-            else _CenterFrameCollector(window.center_pts, cancel_event, lut_applier)
+            else _CenterFrameCollector(
+                window.center_pts,
+                cancel_event,
+                lut_applier,
+                left_eye_only=vr_resolution.is_sbs,
+            )
         )
         seek_ts = window.seek_ts if window.seek_ts > 0 else None
 
@@ -409,7 +471,7 @@ class RestorationPreviewWorker:
                     batch_size=settings.batch_size,
                     device=session.device,
                     metadata=self.metadata,
-                    detection_model=detection_model,
+                    detection_model=pass_detection_model,
                     max_clip_size=settings.max_clip_size,
                     temporal_overlap=settings.temporal_overlap,
                     enable_crossfade=settings.enable_crossfade,
@@ -422,6 +484,8 @@ class RestorationPreviewWorker:
                     cancel_event=cancel_event,
                     seek_ts=seek_ts,
                     end_pts=window.end_pts,
+                    vr_mode=vr_resolution.resolved,
+                    vr_projector=vr_projector,
                 ),
                 name="PreviewDecodeDetect", daemon=True,
             ),
@@ -462,6 +526,7 @@ class RestorationPreviewWorker:
                     cancel_event=cancel_event,
                     seek_ts=seek_ts,
                     vram_offloader=vram_offloader,
+                    vr_projector=vr_projector,
                 ),
                 name="PreviewBlendEncode", daemon=True,
             ),
@@ -508,15 +573,17 @@ class RestorationPreviewWorker:
         superseded = not self._commands.empty() or self._closed.is_set()
         if error_holder and not collector.done and not superseded:
             raise error_holder[0]
-        if collector.done and not superseded:
-            if isinstance(collector, _PlaybackFrameCollector):
+        if not superseded:
+            if isinstance(collector, _PlaybackFrameCollector) and collector.done:
                 return RestorationClip(collector.result_frames(), command.generation)
-            return RestorationFrame(
-                max(
-                    0.0,
-                    (collector._best_pts - self.metadata.start_pts) * float(self.metadata.time_base),
-                ),
-                collector.result_image(self.max_size),
-                command.generation,
-            )
+            if isinstance(collector, _CenterFrameCollector) and collector.has_result:
+                return RestorationFrame(
+                    max(
+                        0.0,
+                        (collector._best_pts - self.metadata.start_pts)
+                        * float(self.metadata.time_base),
+                    ),
+                    collector.result_image(self.max_size),
+                    command.generation,
+                )
         return None

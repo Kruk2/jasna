@@ -594,6 +594,87 @@ class TestBlendEncodeLoop:
 
         assert len(writer.written) == 1
 
+    def test_vr_delta_projection_runs_only_for_pending_restoration(self):
+        original = torch.randint(0, 256, (1, 3, 8, 8), dtype=torch.uint8)
+        projected = torch.full_like(original[0], 10)
+        blended_fisheye = torch.full_like(original[0], 20)
+        restored_source = torch.full_like(original[0], 30)
+        reader = _mock_reader([(original, [0])])
+        blend_buffer = MagicMock()
+        blend_buffer.is_frame_ready.return_value = True
+        blend_buffer.has_pending.return_value = True
+        blend_buffer.blend_frame.return_value = blended_fisheye
+        metadata_queue = Queue()
+        metadata_queue.put(FrameMeta(frame_idx=0, pts=0))
+        metadata_queue.put(_SENTINEL)
+        projector = MagicMock()
+        projector.forward_sbs.return_value = projected
+        projector.restore_delta_to_source.return_value = restored_source
+        writer = _RecordingWriter()
+
+        with (
+            patch("jasna.pipeline_threads.NvidiaVideoReader", return_value=reader),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+        ):
+            blend_encode_loop(
+                input_video="fake.mkv",
+                batch_size=1,
+                device=torch.device("cpu"),
+                metadata=_fake_metadata(),
+                blend_buffer=blend_buffer,
+                encode_queue=FrameQueue(max_frames=8),
+                metadata_queue=metadata_queue,
+                error_holder=[],
+                frame_writer=writer,
+                vr_projector=projector,
+            )
+
+        projector.forward_sbs.assert_called_once()
+        assert torch.equal(projector.forward_sbs.call_args.args[0], original[0])
+        blend_buffer.blend_frame.assert_called_once()
+        assert blend_buffer.blend_frame.call_args.args[0] == 0
+        assert torch.equal(blend_buffer.blend_frame.call_args.args[1], projected)
+        projector.restore_delta_to_source.assert_called_once()
+        restore_args = projector.restore_delta_to_source.call_args.args
+        assert torch.equal(restore_args[0], original[0])
+        assert torch.equal(restore_args[1], projected)
+        assert torch.equal(restore_args[2], blended_fisheye)
+        assert torch.equal(writer.written[0][0], restored_source)
+
+    def test_vr_projection_is_bypassed_without_pending_restoration(self):
+        original = torch.randint(0, 256, (1, 3, 8, 8), dtype=torch.uint8)
+        reader = _mock_reader([(original, [0])])
+        blend_buffer = MagicMock()
+        blend_buffer.is_frame_ready.return_value = True
+        blend_buffer.has_pending.return_value = False
+        blend_buffer.blend_frame.return_value = original[0]
+        metadata_queue = Queue()
+        metadata_queue.put(FrameMeta(frame_idx=0, pts=0))
+        metadata_queue.put(_SENTINEL)
+        projector = MagicMock()
+        writer = _RecordingWriter()
+
+        with (
+            patch("jasna.pipeline_threads.NvidiaVideoReader", return_value=reader),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+        ):
+            blend_encode_loop(
+                input_video="fake.mkv",
+                batch_size=1,
+                device=torch.device("cpu"),
+                metadata=_fake_metadata(),
+                blend_buffer=blend_buffer,
+                encode_queue=FrameQueue(max_frames=8),
+                metadata_queue=metadata_queue,
+                error_holder=[],
+                frame_writer=writer,
+                vr_projector=projector,
+            )
+
+        projector.forward_sbs.assert_not_called()
+        projector.restore_delta_to_source.assert_not_called()
+        assert torch.equal(writer.written[0][0], original[0])
+
 
 # ---------------------------------------------------------------------------
 # _OfflineFrameWriter

@@ -128,6 +128,18 @@ def test_collector_prefers_first_frame_past_center_when_closer() -> None:
     assert collector._best_pts == 105
 
 
+def test_collector_exposes_nearest_frame_when_center_is_past_eof() -> None:
+    collector = _CenterFrameCollector(100, threading.Event())
+
+    collector.write(_frame(1), 40)
+    collector.write(_frame(2), 90)
+
+    assert not collector.done
+    assert collector.has_result
+    assert collector._best_pts == 90
+    assert collector.result_image((10, 10)).getpixel((0, 0)) == (2, 2, 2)
+
+
 def test_collector_result_image_caps_size() -> None:
     cancel = threading.Event()
     collector = _CenterFrameCollector(0, cancel)
@@ -169,6 +181,32 @@ def test_playback_collector_returns_timestamped_bounded_images() -> None:
     assert len(frames) == 1
     assert frames[0].seconds == pytest.approx(1.0)
     assert frames[0].image.size == (8, 4)
+
+
+def test_restoration_collectors_show_only_left_eye() -> None:
+    frame = torch.zeros((3, 8, 16), dtype=torch.uint8)
+    frame[:, :, :8] = 25
+    frame[:, :, 8:] = 200
+    still = _CenterFrameCollector(
+        0,
+        threading.Event(),
+        left_eye_only=True,
+    )
+    still.write(frame, 0)
+    playback = _PlaybackFrameCollector(
+        _metadata(),
+        (16, 16),
+        left_eye_only=True,
+    )
+    playback.write(frame, 0)
+
+    still_image = still.result_image((16, 16))
+    playback_image = playback.result_frames()[0].image
+
+    assert still_image.size == (8, 8)
+    assert playback_image.size == (8, 8)
+    assert still_image.getpixel((0, 0)) == (25, 25, 25)
+    assert playback_image.getpixel((0, 0)) == (25, 25, 25)
 
 
 def test_restoration_worker_coalesces_pending_requests() -> None:
@@ -265,6 +303,34 @@ def test_segment_editor_requests_restored_playback_when_no_buffer_exists() -> No
     editor._toggle_play()
 
     editor._request_restoration_playback.assert_called_once_with(2.0)
+
+
+def test_segment_editor_clears_tk_image_before_releasing_preview_image() -> None:
+    editor = SegmentEditor.__new__(SegmentEditor)
+    editor._preview = MagicMock()
+    editor._preview_image = object()
+    calls = []
+    editor._preview._label.configure.side_effect = (
+        lambda **kwargs: calls.append(("tk", kwargs))
+    )
+    editor._preview.configure.side_effect = (
+        lambda **kwargs: calls.append(("ctk", kwargs))
+    )
+
+    editor._show_preview_message("Restoring…", "pending")
+
+    assert calls == [
+        ("tk", {"image": ""}),
+        (
+            "ctk",
+            {
+                "image": None,
+                "text": "Restoring…",
+                "text_color": "pending",
+            },
+        ),
+    ]
+    assert editor._preview_image is None
 
 
 def test_segment_editor_continues_with_next_restored_playback_window() -> None:
