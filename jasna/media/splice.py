@@ -19,6 +19,12 @@ log = logging.getLogger(__name__)
 
 SUPPORTED_SMART_CODECS = frozenset({"h264", "hevc", "av1"})
 SUPPORTED_SMART_OUTPUTS = frozenset({".mp4", ".mov", ".mkv"})
+H264_SMART_PROFILES = {
+    "baseline": "baseline",
+    "constrained baseline": "baseline",
+    "main": "main",
+    "high": "high",
+}
 
 
 class SmartRenderCompatibilityError(ValueError):
@@ -33,6 +39,8 @@ class KeyframeIndex:
     time_base: Fraction
     start_pts: int
     end_pts: int
+    max_b_frames: int = 0
+    uses_b_references: bool = False
 
     def seconds_for_pts(self, pts: int) -> float:
         return float((int(pts) - self.start_pts) * self.time_base)
@@ -114,6 +122,10 @@ def validate_smart_render(
         raise SmartRenderCompatibilityError("Smart rendering currently requires progressive video")
     if input_codec == "h264" and metadata.is_10bit:
         raise SmartRenderCompatibilityError("10-bit H.264 smart rendering is not supported by this NVENC path")
+    if input_codec == "h264" and str(metadata.profile or "").strip().lower() not in H264_SMART_PROFILES:
+        raise SmartRenderCompatibilityError(
+            f"Smart rendering cannot match H.264 profile {metadata.profile!r}"
+        )
     if metadata.average_fps > 0 and metadata.video_fps > 0:
         relative_delta = abs(metadata.average_fps - metadata.video_fps) / metadata.video_fps
         if relative_delta > 0.001:
@@ -121,8 +133,71 @@ def validate_smart_render(
     return input_codec
 
 
+def _analyze_packet_reordering(packet_pts: tuple[int, ...] | list[int]) -> tuple[int, bool]:
+    anchor_pts: int | None = None
+    reordered_pts: list[int] = []
+    max_b_frames = 0
+    uses_b_references = False
+
+    for pts in packet_pts:
+        if anchor_pts is not None and pts < anchor_pts:
+            reordered_pts.append(pts)
+            continue
+        if reordered_pts:
+            max_b_frames = max(max_b_frames, len(reordered_pts))
+            uses_b_references |= reordered_pts != sorted(reordered_pts)
+        anchor_pts = pts
+        reordered_pts = []
+
+    if reordered_pts:
+        max_b_frames = max(max_b_frames, len(reordered_pts))
+        uses_b_references |= reordered_pts != sorted(reordered_pts)
+    return max_b_frames, uses_b_references
+
+
+def _source_gop_size(index: KeyframeIndex, video_fps: Fraction) -> int | None:
+    intervals = tuple(
+        current - previous
+        for previous, current in zip(index.pts, index.pts[1:])
+        if current > previous
+    )
+    if not intervals:
+        return None
+    return max(1, round(max(intervals) * index.time_base * video_fps))
+
+
+def resolve_smart_encoder_settings(
+    codec: str,
+    metadata: VideoMetadata,
+    index: KeyframeIndex,
+    settings: dict[str, object],
+) -> dict[str, object]:
+    resolved = dict(settings)
+    source_gop_size = _source_gop_size(index, metadata.video_fps_exact)
+    if source_gop_size is not None:
+        resolved["g"] = source_gop_size
+
+    if _canonical_codec(codec) != "h264":
+        return resolved
+
+    profile = str(metadata.profile or "").strip().lower()
+    if profile not in H264_SMART_PROFILES:
+        raise SmartRenderCompatibilityError(
+            f"Smart rendering cannot match H.264 profile {metadata.profile!r}"
+        )
+    resolved["profile"] = H264_SMART_PROFILES[profile]
+    resolved["bf"] = index.max_b_frames
+    resolved["b_ref_mode"] = (
+        "middle"
+        if index.uses_b_references and index.max_b_frames >= 2
+        else "disabled"
+    )
+    return resolved
+
+
 def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
     keyframes: list[int] = []
+    packet_pts: list[int] = []
     with av.open(str(path)) as container:
         stream = container.streams.video[0]
         codec = _canonical_codec(metadata.codec_name)
@@ -137,6 +212,8 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
         time_base = Fraction(stream.time_base)
         start_pts = resolve_video_start_pts(stream.start_time, metadata.start_pts)
         for packet in container.demux(stream):
+            if packet.pts is not None:
+                packet_pts.append(int(packet.pts))
             if (
                 packet.pts is not None
                 and packet.is_keyframe
@@ -159,7 +236,15 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
         end_pts = start_pts + round(float(metadata.duration) / time_base)
     if end_pts <= keyframes[-1]:
         end_pts = keyframes[-1] + max(1, round(1 / (metadata.video_fps * time_base)))
-    return KeyframeIndex(tuple(keyframes), time_base, start_pts, int(end_pts))
+    max_b_frames, uses_b_references = _analyze_packet_reordering(packet_pts)
+    return KeyframeIndex(
+        tuple(keyframes),
+        time_base,
+        start_pts,
+        int(end_pts),
+        max_b_frames=max_b_frames,
+        uses_b_references=uses_b_references,
+    )
 
 
 def _nal_unit_types(

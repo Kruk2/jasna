@@ -30,6 +30,7 @@ from jasna.media.splice import (
     mux_final_output,
     normalize_fragment,
     probe_keyframes,
+    resolve_smart_encoder_settings,
     validate_smart_render,
 )
 from jasna.mosaic.detection_registry import build_detection_model
@@ -565,6 +566,12 @@ class Pipeline:
             if plan.segments != tuple(self.segments or ()):
                 raise ValueError("Precomputed splice plan does not match pipeline segments")
             index = plan.index
+        smart_encoder_settings = resolve_smart_encoder_settings(
+            codec,
+            metadata,
+            index,
+            self.encoder_settings,
+        )
         total_frames = max(
             1,
             sum(
@@ -598,7 +605,7 @@ class Pipeline:
                             device=self.device,
                             metadata=metadata,
                             codec=codec,
-                            encoder_settings=self.encoder_settings,
+                            encoder_settings=smart_encoder_settings,
                             lut_path=self.lut_path,
                             output_fps=metadata.video_fps_exact,
                             mux_audio=False,
