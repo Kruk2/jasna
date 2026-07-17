@@ -16,9 +16,10 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [Community](#community)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
+- [Segment Editor](#segment-editor)
+- [Suggesting Better Masks](#suggesting-better-masks)
 - [VR180 Videos](#vr180-videos)
 - [Post-export Actions](#post-export-actions)
-- [Suggesting Better Masks](#suggesting-better-masks)
 - [First Run](#first-run)
 - [Choosing Models](#choosing-models)
 - [Tuning Quality and VRAM](#tuning-quality-and-vram)
@@ -27,7 +28,6 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [Supporting the Project](#supporting-the-project)
 - [Current Limitations and TODO](#current-limitations-and-todo)
 - [Running from Source](#running-from-source)
-- [Segment Editor](#segment-editor)
 
 ## What Jasna Does
 
@@ -120,6 +120,54 @@ marks. The timeline distinguishes frames receiving restoration from surrounding
 transition frames that are re-encoded unchanged, and estimates restored,
 re-encoded, and stream-copied durations before the job starts.
 
+## Segment Editor
+
+<!-- SCREENSHOT PLACEHOLDER: Add the final Segment Editor screenshot here. -->
+
+The Segment Editor lets you preview a queued video and select frame-accurate
+ranges for restoration; leave the selection empty to restore the full video.
+**Restore preview** shows the current frame or a short playback with the
+selected restoration settings before processing.
+
+When ranges are selected, the editor clearly shows that export keeps the
+source video codec; the main **Encoding** codec setting does not apply because
+unselected sections are stream-copied.
+
+Mosaic scanning is built into the editor:
+
+- Scan every frame or at 0.25–2 second intervals. It is GPU-only and reaches
+  about **2,000 FPS on an RTX 5090**; actual speed depends on the video, model,
+  and settings.
+- Change confidence after scanning to update amber detected ranges immediately,
+  then add them to the purple restoration selection.
+- Preview saved masks on sampled frames; unsampled frames are detected exactly
+  on demand. Low-VRAM systems automatically recycle results through system
+  memory.
+
+The detection model and confidence are remembered per queued video and used
+during final processing, so different videos can use different settings.
+
+## Suggesting Better Masks
+
+When a mosaic detection looks wrong, you can contribute a corrected mask and
+help train better detection models. In the segment editor, pause on the frame
+and click **Suggest better mask**:
+
+- Click to add points around each mosaic area — one shape per area, and as
+  many shapes as the frame needs. Clicks outside the frame snap to its edge.
+- Close a shape by clicking its first point, double-clicking, or pressing
+  Enter.
+- Scroll to zoom in for precise outlines, right-drag to pan, press H to
+  temporarily hide the shapes, and use the opacity slider to adjust the mask
+  overlay.
+- Draw accurately: if the mosaic fades out with soft or blurry edges, include
+  that soft region in the shape too.
+
+Submitting uploads the frame and your mask **anonymously**. The data is
+encrypted on your machine before upload, and the only attached details are the
+app version, the detection model name, and the frame resolution — never file
+names, timestamps, or anything identifying you.
+
 ## VR180 Videos
 
 VR180 files usually contain the left-eye and right-eye pictures next to each
@@ -187,27 +235,6 @@ Custom commands run through the system shell after all exports finish:
 ```bash
 jasna --input input_folder --output output_folder --post-export-action command --post-export-command "echo done"
 ```
-
-## Suggesting Better Masks
-
-When a mosaic detection looks wrong, you can contribute a corrected mask and
-help train better detection models. In the segment editor, pause on the frame
-and click **Suggest better mask**:
-
-- Click to add points around each mosaic area — one shape per area, and as
-  many shapes as the frame needs. Clicks outside the frame snap to its edge.
-- Close a shape by clicking its first point, double-clicking, or pressing
-  Enter.
-- Scroll to zoom in for precise outlines, right-drag to pan, press H to
-  temporarily hide the shapes, and use the opacity slider to adjust the mask
-  overlay.
-- Draw accurately: if the mosaic fades out with soft or blurry edges, include
-  that soft region in the shape too.
-
-Submitting uploads the frame and your mask **anonymously**. The data is
-encrypted on your machine before upload, and the only attached details are the
-app version, the detection model name, and the frame resolution — never file
-names, timestamps, or anything identifying you.
 
 ## First Run
 
@@ -395,6 +422,8 @@ Current TODO:
 
 - SeedVR support.
 - Continued performance and VRAM improvements.
+- Better restoration model.
+- Better detection model.
 
 ## Running from Source
 
@@ -446,30 +475,3 @@ Then install Jasna in editable mode:
 ```bash
 uv pip install -e .[dev]
 ```
-
-## Segment Editor
-
-<!-- SCREENSHOT PLACEHOLDER: Add the final Segment Editor screenshot here. -->
-
-The Segment Editor lets you preview a queued video and select frame-accurate
-ranges for restoration; leave the selection empty to restore the full video.
-**Restore preview** shows the current frame or a short playback with the
-selected restoration settings before processing.
-
-When ranges are selected, the editor clearly shows that export keeps the
-source video codec; the main **Encoding** codec setting does not apply because
-unselected sections are stream-copied.
-
-Mosaic scanning is built into the editor:
-
-- Scan every frame or at 0.25–2 second intervals. It is GPU-only and reaches
-  about **2,000 FPS on an RTX 5090**; actual speed depends on the video, model,
-  and settings.
-- Change confidence after scanning to update amber detected ranges immediately,
-  then add them to the purple restoration selection.
-- Preview saved masks on sampled frames; unsampled frames are detected exactly
-  on demand. Low-VRAM systems automatically recycle results through system
-  memory.
-
-The detection model and confidence are remembered per queued video and used
-during final processing, so different videos can use different settings.
