@@ -140,6 +140,27 @@ class SegmentEditorState:
 
         return self.replace_selected(start, end)
 
+    def add_many(self, ranges: tuple[SegmentRange, ...]) -> int:
+        """Add several ranges as one undoable step; returns how many were new."""
+
+        fresh = [
+            candidate
+            for candidate in ranges
+            if not any(
+                existing.start <= candidate.start and existing.end >= candidate.end
+                for existing in self.segments
+            )
+        ]
+        if not fresh:
+            return 0
+        self._record_change()
+        self.segments = normalize_segments(
+            (*self.segments, *fresh), duration=self.duration
+        )
+        self.selected_index = None
+        self.clear_marks()
+        return len(fresh)
+
     def delete_selected(self) -> bool:
         if self.selected_index is None:
             return False

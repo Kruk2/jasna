@@ -104,6 +104,12 @@ transition frames are not restored.
 jasna --input input.mp4 --output output.mp4 --segments "10-25,01:10-01:30.5"
 ```
 
+In the GUI segment editor, **Scan for mosaic** samples the video (every 0.25–2
+seconds) with the configured detection model and marks where mosaic was found
+on the timeline. Adjust the score threshold after the scan to see detections
+change without rescanning, add the detected ranges with one click, and toggle
+**Show detections** to overlay the detection masks on the preview frame.
+
 Segment processing accepts a single H.264, HEVC, or AV1 video and MP4, MOV, or
 MKV output. The output codec must match the input codec; when `--codec` is not
 specified, Jasna selects it automatically. It cannot be combined with folder,
