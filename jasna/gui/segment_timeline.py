@@ -68,6 +68,7 @@ class SegmentTimeline(ctk.CTkFrame):
         self._on_select = on_select
         self._on_adjust = on_adjust
         self._segments: tuple[SegmentRange, ...] = ()
+        self._detections: tuple[SegmentRange, ...] = ()
         self._selected_index: int | None = None
         self._playhead = 0.0
         self._view_start = 0.0
@@ -111,6 +112,10 @@ class SegmentTimeline(ctk.CTkFrame):
         self._playhead = min(self.duration, max(0.0, float(playhead)))
         self._redraw_timeline()
 
+    def set_detections(self, runs: tuple[SegmentRange, ...]) -> None:
+        self._detections = tuple(runs)
+        self._redraw_timeline()
+
     def zoom_in(self) -> None:
         self._zoom(0.6, self._playhead)
 
@@ -143,6 +148,15 @@ class SegmentTimeline(ctk.CTkFrame):
             outline=Colors.BORDER_LIGHT,
         )
         self._draw_ticks(width)
+
+        for run in self._detections:
+            self._draw_range(
+                run,
+                width,
+                top=_MAIN_BOTTOM - 6,
+                bottom=_MAIN_BOTTOM - 1,
+                fill=Colors.STATUS_PAUSED,
+            )
 
         for index, segment in enumerate(self._segments):
             self._draw_range(
@@ -237,6 +251,17 @@ class SegmentTimeline(ctk.CTkFrame):
                 max(x1 + 1, x2),
                 _OVERVIEW_BOTTOM - 2,
                 fill=Colors.PRIMARY,
+                outline="",
+            )
+        for run in self._detections:
+            x1 = _PAD_X + run.start / self.duration * usable
+            x2 = _PAD_X + run.end / self.duration * usable
+            self._canvas.create_rectangle(
+                x1,
+                _OVERVIEW_BOTTOM - 4,
+                max(x1 + 1, x2),
+                _OVERVIEW_BOTTOM - 1,
+                fill=Colors.STATUS_PAUSED,
                 outline="",
             )
         x1 = _PAD_X + self._view_start / self.duration * usable
