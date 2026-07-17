@@ -117,8 +117,8 @@ class SegmentEditor(ctk.CTkToplevel):
     def _size_and_center(self) -> None:
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        width = min(1060, max(1, screen_w - 48))
-        height = min(720, max(1, screen_h - 96))
+        height = max(560, screen_h - 200)
+        width = min(max(1, screen_w - 48), max(800, round(height * 1060 / 720)))
         x = max(0, (screen_w - width) // 2)
         y = max(0, (screen_h - height) // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
