@@ -8,6 +8,7 @@ import customtkinter as ctk
 import pytest
 
 from jasna.gui.app import JasnaApp
+from jasna.gui.models import JobStatus
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.theme import Colors, Sizing
 
@@ -56,6 +57,37 @@ def test_queue_scrollbar_only_appears_when_jobs_overflow() -> None:
         root.update()
 
         assert panel._list_frame._scrollbar.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+def test_segment_button_only_appears_for_pending_video_jobs() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        panel.add_job(Path("/tmp/video.mp4"))
+        root.update()
+
+        job = panel._jobs[0]
+        widget = panel._job_widgets[0]
+        assert widget._segments_btn.winfo_ismapped()
+
+        panel.update_job_status(job.id, JobStatus.PROCESSING)
+        root.update()
+        assert not widget._segments_btn.winfo_ismapped()
+
+        panel.update_job_status(job.id, JobStatus.COMPLETED)
+        root.update()
+        assert not widget._segments_btn.winfo_ismapped()
+
+        panel.update_job_status(job.id, JobStatus.PENDING)
+        root.update()
+        assert widget._segments_btn.winfo_ismapped()
     finally:
         root.destroy()
 
