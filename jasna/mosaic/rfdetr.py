@@ -127,6 +127,23 @@ class RfDetrMosaicDetectionModel:
         
         return boxes_list, masks_list
 
+    def scan_scores_masks(
+        self, frames_uint8_bchw: torch.Tensor, *, mask_hw: tuple[int, int]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """GPU-only fast path for whole-video scanning: per-frame best score
+        (B,) float32 and merged low-res mask (B, mask_h, mask_w) bool, with no
+        host synchronization."""
+
+        x = self._preprocess(frames_uint8_bchw)
+        outs = self.runner.infer({self._input_name: x})
+        per_query = outs[self.logits_out].sigmoid().amax(dim=-1)  # (B, Q)
+        scores = per_query.amax(dim=-1).float()  # (B,)
+        pred_masks = outs[self.masks_out]  # (B, Q, Hm, Wm)
+        active = (pred_masks > 0.0) & (per_query > self.score_threshold)[:, :, None, None]
+        merged = active.any(dim=1, keepdim=True).float()
+        merged = F.interpolate(merged, size=mask_hw, mode="area") > 0.0
+        return scores, merged[:, 0]
+
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)
         outs = self.runner.infer({self._input_name: x})

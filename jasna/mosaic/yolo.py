@@ -160,15 +160,9 @@ class YoloMosaicDetectionModel:
             self._empty_masks_cache[key] = t
         return t
 
-    def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
-        x /= 255.0
-        x, ratio_pad = _letterbox_normalized_bchw(
-            x,
-            new_shape=(self.imgsz, self.imgsz),
-            stride=self.stride,
-        )
-
+    def _forward_raw(
+        self, x: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, int]:
         with torch.inference_mode():
             if self.runner is not None:
                 outs = self.runner.infer({self._input_name: x})
@@ -191,6 +185,61 @@ class YoloMosaicDetectionModel:
 
         mask_dim = int(protos.shape[1]) if protos.ndim == 4 else 0
         nc = int(pred_raw.shape[1]) - 4 - mask_dim
+        return pred_raw, protos, nc
+
+    def scan_scores_masks(
+        self, frames_uint8_bchw: torch.Tensor, *, mask_hw: tuple[int, int]
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """GPU-only fast path for whole-video scanning: per-frame best score
+        (B,) float32 and merged low-res mask (B, mask_h, mask_w) bool, with no
+        host synchronization. Skips NMS and box cropping — masks come straight
+        from the top-confidence anchors' prototype coefficients."""
+
+        _, _, src_h, src_w = frames_uint8_bchw.shape
+        x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
+        x /= 255.0
+        x, ratio_pad = _letterbox_normalized_bchw(
+            x,
+            new_shape=(self.imgsz, self.imgsz),
+            stride=self.stride,
+        )
+        pred_raw, protos, nc = self._forward_raw(x)
+
+        per_anchor = pred_raw[:, 4 : 4 + max(1, nc), :].amax(dim=1)  # (B, A)
+        scores = per_anchor.amax(dim=1).float()  # (B,)
+
+        mask_dim = int(protos.shape[1])
+        k = min(self.max_det, per_anchor.shape[1])
+        top_conf, top_idx = per_anchor.topk(k, dim=1)  # (B, K)
+        coeffs = pred_raw[:, 4 + nc :, :].gather(
+            2, top_idx[:, None, :].expand(-1, mask_dim, -1)
+        )  # (B, mask_dim, K)
+        anchor_masks = (
+            torch.einsum("bmk,bmhw->bkhw", coeffs.float(), protos.float()).sigmoid() > 0.5
+        )
+        valid = top_conf > self.score_threshold
+        merged = (anchor_masks & valid[:, :, None, None]).any(dim=1)  # (B, ph, pw)
+
+        (gain, _), (left, top) = ratio_pad
+        ph, pw = merged.shape[-2:]
+        sy, sx = ph / float(self.imgsz), pw / float(self.imgsz)
+        top_p = int(round(top * sy))
+        left_p = int(round(left * sx))
+        h_p = max(1, int(round(src_h * gain * sy)))
+        w_p = max(1, int(round(src_w * gain * sx)))
+        merged = merged[:, top_p : top_p + h_p, left_p : left_p + w_p]
+        merged = F.interpolate(merged[:, None].float(), size=mask_hw, mode="area") > 0.0
+        return scores, merged[:, 0]
+
+    def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
+        x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
+        x /= 255.0
+        x, ratio_pad = _letterbox_normalized_bchw(
+            x,
+            new_shape=(self.imgsz, self.imgsz),
+            stride=self.stride,
+        )
+        pred_raw, protos, nc = self._forward_raw(x)
         preds = nms.non_max_suppression(
             pred_raw,
             conf_thres=float(self.score_threshold),
