@@ -356,6 +356,9 @@ uv pip install cmake ninja
 Developer setup also requires:
 
 - `ffmpeg` and `ffprobe` on `PATH`; `ffmpeg` major version must be **8**.
+- Until PyAV 18.1.0 is published, a PyAV wheel built from upstream main commit `61e4aa8`.
+  This contains the merged CUDA-current-context API used by Jasna; switch back to the PyPI
+  wheel once 18.1.0 is released.
 
 Then install Jasna in editable mode:
 

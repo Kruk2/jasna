@@ -13,6 +13,9 @@ dependencies = [
   "torchvision==0.27.0+cu130",
   "tensorrt==10.16.1.11",
   "torch-tensorrt==2.12.0",
+  # current_ctx support is merged upstream for PyAV 18.1.0 but is not published yet.
+  # Linux releases override this with the pinned upstream-main wheel in build_linux.sh;
+  # remove that override and require av>=18.1 once the release reaches PyPI.
   "av>=18,<19",
   "numpy",
   "psutil",
