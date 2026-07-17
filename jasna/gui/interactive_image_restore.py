@@ -334,7 +334,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         from jasna._suppress_noise import install as _install_noise_filters
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.engine_paths import SD15_DIR
-        from jasna.mosaic.detection_registry import build_detection_model, coerce_detection_model_name, detection_model_weights_path
+        from jasna.mosaic.detection_registry import build_detection_model, coerce_detection_model_name, require_detection_model_weights
         from jasna.restorer.sd15_download import bundle_present
         from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
 
@@ -345,7 +345,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         settings = self._settings
         self._device = torch.device("cuda:0")
         det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = detection_model_weights_path(det_name)
+        detection_model_path = require_detection_model_weights(det_name)
         ensure_engines_compiled(
             EngineCompilationRequest(
                 device=str(self._device),

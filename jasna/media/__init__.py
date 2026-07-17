@@ -149,6 +149,8 @@ class VideoMetadata:
     field_order: str = ""
     color_primaries: str = ""
     color_transfer: str = ""
+    stereo_layout: str = ""
+    spherical_projection: str = ""
 
 
 def resolve_video_start_pts(
@@ -192,6 +194,23 @@ def parse_sample_aspect_ratio(json_video_stream: dict) -> Fraction:
     if sep and num.isdigit() and den.isdigit() and int(num) > 0 and int(den) > 0:
         return Fraction(int(num), int(den))
     return Fraction(1, 1)
+
+
+def parse_spatial_metadata(json_video_stream: dict) -> tuple[str, str]:
+    stereo_layout = ""
+    spherical_projection = ""
+    for side_data in json_video_stream.get("side_data_list") or ():
+        side_data_type = str(side_data.get("side_data_type") or "").lower()
+        if side_data_type == "stereo 3d":
+            stereo_layout = str(side_data.get("type") or "")
+        elif side_data_type == "spherical mapping":
+            spherical_projection = str(side_data.get("projection") or "")
+    tags = json_video_stream.get("tags") or {}
+    if not stereo_layout:
+        stereo_layout = str(tags.get("stereo_mode") or "")
+    if not spherical_projection:
+        spherical_projection = str(tags.get("projection") or "")
+    return stereo_layout, spherical_projection
 
 
 def get_video_meta_data(path: str) -> VideoMetadata:
@@ -261,6 +280,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
     if num_frames == 0:
         num_frames = _get_frame_count_by_counting(path)
     is_10bit = is_stream_10bit(json_video_stream)
+    stereo_layout, spherical_projection = parse_spatial_metadata(json_video_stream)
 
     metadata = VideoMetadata(
         video_file=path,
@@ -283,5 +303,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         field_order=str(json_video_stream.get("field_order") or ""),
         color_primaries=str(json_video_stream.get("color_primaries") or ""),
         color_transfer=str(json_video_stream.get("color_transfer") or ""),
+        stereo_layout=stereo_layout,
+        spherical_projection=spherical_projection,
     )
     return metadata

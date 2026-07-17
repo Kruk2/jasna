@@ -76,9 +76,17 @@ _Command = _Seek | _Next | _Previous | _GrabFull | _Stop
 class SegmentPreviewWorker:
     """Single-threaded PyAV preview decoder controlled by coalesced commands."""
 
-    def __init__(self, path: str | Path, *, max_size: tuple[int, int] = (960, 540)) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        max_size: tuple[int, int] = (960, 540),
+        vr_mode: str = "auto",
+    ) -> None:
         self.path = Path(path)
         self.max_size = max_size
+        self.vr_mode = str(vr_mode)
+        self._left_eye_only = False
         self.events: queue.Queue[PreviewEvent] = queue.Queue()
         self._commands: queue.Queue[_Command] = queue.Queue(maxsize=1)
         self._closed = threading.Event()
@@ -140,6 +148,13 @@ class SegmentPreviewWorker:
             metadata = get_video_meta_data(str(self.path))
             if float(metadata.duration) <= 0:
                 raise ValueError(f"Could not determine duration of {self.path.name}")
+            from jasna.vr180 import resolve_vr_mode
+
+            self._left_eye_only = resolve_vr_mode(
+                self.vr_mode,
+                metadata,
+                self.path,
+            ).is_sbs
             self.events.put(PreviewLoaded(metadata))
             with av.open(str(self.path)) as container:
                 stream = container.streams.video[0]
@@ -235,17 +250,22 @@ class SegmentPreviewWorker:
 
     def _to_image(self, frame) -> Image.Image:
         width, height = int(frame.width), int(frame.height)
+        content_width = width // 2 if self._left_eye_only else width
         max_width, max_height = self.max_size
-        scale = min(1.0, max_width / width, max_height / height)
-        target_width = max(2, round(width * scale))
+        scale = min(1.0, max_width / content_width, max_height / height)
+        target_width = max(2, round(content_width * scale))
         target_height = max(2, round(height * scale))
         if target_width % 2:
             target_width -= 1
         if target_height % 2:
             target_height -= 1
+        preview_width = target_width * 2 if self._left_eye_only else target_width
         preview = frame.reformat(
-            width=target_width,
+            width=preview_width,
             height=target_height,
             format="rgb24",
         )
-        return preview.to_image()
+        image = preview.to_image()
+        if self._left_eye_only:
+            return image.crop((0, 0, target_width, target_height))
+        return image

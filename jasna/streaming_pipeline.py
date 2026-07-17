@@ -67,6 +67,7 @@ def run_streaming(
     from av.video.reformatter import Colorspace as AvColorspace
     device = pipeline.device
     metadata = get_video_meta_data(str(pipeline.input_video))
+    pipeline.configure_vr(metadata)
     if metadata.color_space not in (
         AvColorspace.ITU709,
         AvColorspace.ITU601,
@@ -222,7 +223,7 @@ def _run_streaming_pass(
                 batch_size=pipeline.batch_size,
                 device=device,
                 metadata=metadata,
-                detection_model=pipeline.detection_model,
+                detection_model=pipeline._job_detection_model,
                 max_clip_size=pipeline.max_clip_size,
                 temporal_overlap=pipeline.temporal_overlap,
                 enable_crossfade=pipeline.enable_crossfade,
@@ -234,6 +235,8 @@ def _run_streaming_pass(
                 frame_shape=frame_shape,
                 cancel_event=cancel_event,
                 seek_ts=seek_ts,
+                vr_mode=pipeline._vr_resolution.resolved,
+                vr_projector=pipeline._vr_projector,
             ),
             name="StreamDecodeDetect", daemon=True,
         ),
@@ -274,6 +277,7 @@ def _run_streaming_pass(
                 cancel_event=cancel_event,
                 seek_ts=seek_ts,
                 vram_offloader=vram_offloader,
+                vr_projector=pipeline._vr_projector,
             ),
             name="StreamBlendEncode", daemon=True,
         ),

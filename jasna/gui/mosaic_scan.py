@@ -416,13 +416,13 @@ class MosaicScanWorker:
         from jasna.mosaic.detection_registry import (
             build_detection_model,
             coerce_detection_model_name,
-            detection_model_weights_path,
+            require_detection_model_weights,
         )
 
         settings = self.settings
         device = torch.device("cuda:0")
         det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = detection_model_weights_path(det_name)
+        detection_model_path = require_detection_model_weights(det_name)
         ensure_engines_compiled(
             EngineCompilationRequest(
                 device=str(device),
@@ -434,7 +434,7 @@ class MosaicScanWorker:
             ),
             log_callback=lambda message: self.events.put(ScanStatus(message)),
         )
-        return build_detection_model(
+        detector = build_detection_model(
             det_name,
             detection_model_path,
             batch_size=settings.batch_size,
@@ -442,6 +442,50 @@ class MosaicScanWorker:
             score_threshold=SCAN_SCORE_FLOOR,
             fp16=bool(settings.fp16_mode),
         )
+        from jasna.vr180 import (
+            FisheyeProjector,
+            SbsDetectionAdapter,
+            resolve_vr_mode,
+        )
+
+        self._vr_resolution = resolve_vr_mode(
+            settings.vr_mode,
+            self.metadata,
+            self.path,
+        )
+        self._vr_projector = (
+            FisheyeProjector(
+                eye_width=int(self.metadata.video_width) // 2,
+                height=int(self.metadata.video_height),
+                device=device,
+            )
+            if self._vr_resolution.uses_fisheye
+            else None
+        )
+        self._scan_mask_projector = (
+            FisheyeProjector(
+                eye_width=SCAN_MASK_HW[1] // 2,
+                height=SCAN_MASK_HW[0],
+                device=device,
+            )
+            if self._vr_resolution.uses_fisheye
+            else None
+        )
+        return (
+            SbsDetectionAdapter(detector)
+            if self._vr_resolution.is_sbs
+            else detector
+        )
+
+    def _prepare_detection_batch(self, batch):
+        if self._vr_projector is None:
+            return batch
+        return self._vr_projector.forward_sbs(batch)
+
+    def _source_projection_masks(self, masks):
+        if self._scan_mask_projector is None:
+            return masks
+        return self._scan_mask_projector.inverse_mask_sbs(masks)
 
     def _scan(self, detector) -> None:
         import torch
@@ -493,9 +537,11 @@ class MosaicScanWorker:
                 if batch.shape[0] < batch_size:
                     pad = batch[-1:].expand(batch_size - batch.shape[0], -1, -1, -1)
                     batch = torch.cat((batch, pad))
+                detection_batch = self._prepare_detection_batch(batch)
                 batch_scores, batch_masks = detector.scan_scores_masks(
-                    batch, mask_hw=SCAN_MASK_HW
+                    detection_batch, mask_hw=SCAN_MASK_HW
                 )
+                batch_masks = self._source_projection_masks(batch_masks)
                 count = len(pts_list)
                 if collector is None:
                     collector = _ScanTensorCollector(
@@ -574,7 +620,12 @@ class MosaicScanWorker:
             if batch.shape[0] < batch_size:
                 pad = batch[-1:].expand(batch_size - batch.shape[0], -1, -1, -1)
                 batch = torch.cat((batch, pad))
-            scores, masks = detector.scan_scores_masks(batch, mask_hw=SCAN_MASK_HW)
+            detection_batch = self._prepare_detection_batch(batch)
+            scores, masks = detector.scan_scores_masks(
+                detection_batch,
+                mask_hw=SCAN_MASK_HW,
+            )
+            masks = self._source_projection_masks(masks)
             start_pts = resolve_video_start_pts(
                 reader.video_stream.start_time,
                 metadata.start_pts,

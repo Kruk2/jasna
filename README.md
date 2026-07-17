@@ -16,6 +16,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [Community](#community)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
+- [VR180 Videos](#vr180-videos)
 - [Post-export Actions](#post-export-actions)
 - [Suggesting Better Masks](#suggesting-better-masks)
 - [First Run](#first-run)
@@ -26,12 +27,14 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [Supporting the Project](#supporting-the-project)
 - [Current Limitations and TODO](#current-limitations-and-todo)
 - [Running from Source](#running-from-source)
+- [Segment Editor](#segment-editor)
 
 ## What Jasna Does
 
 - Restores mosaics in video files.
 - Restores mosaics in still images with the experimental SD 1.5 image model.
-- Detects mosaics with RF-DETR models by default; Lada YOLO models are also available.
+- Detects mosaics with RF-DETR models by default; Lada and ZeLeFans YOLO models are also available.
+- Processes side-by-side VR180 videos per eye, with optional fisheye reprojection for detection and restoration.
 - Reduces clip-boundary flicker with temporal overlap and crossfade.
 - Can use secondary restoration through **unet-4x**, **RTX Super Resolution**, or **Topaz Video AI**.
 - Can stream restored video to the built-in browser player or a supported Stash fork.
@@ -117,6 +120,59 @@ marks. The timeline distinguishes frames receiving restoration from surrounding
 transition frames that are re-encoded unchanged, and estimates restored,
 re-encoded, and stream-copied durations before the job starts.
 
+## VR180 Videos
+
+VR180 files usually contain the left-eye and right-eye pictures next to each
+other in one wide frame. Jasna splits that frame, restores each eye separately,
+and joins the two eyes again for the output.
+
+### Quick setup
+
+1. Add the VR video like any normal video.
+2. Leave **VR180 Mode** set to **Auto (recommended)**.
+3. For the best VR mosaic detection, select the bundled
+   **zelefans-vr-yolo-v2** detection model. It is included with Jasna and does
+   not need a separate download.
+4. Start processing normally. You can also use the segment editor if you only
+   want to restore part of the video.
+
+Auto mode always treats an exact 2:1 video taller than 1080 pixels as
+side-by-side VR. For example, 3840x1920 and 8192x4096 are detected
+automatically. Compatible VR metadata and known VR studio names can also enable
+VR processing.
+
+### What the modes mean
+
+- **Auto (recommended)**: let Jasna decide. Start here.
+- **Off**: treat the file as an ordinary flat video.
+- **SBS — per eye**: force side-by-side VR processing if Auto does not recognize
+  the file.
+- **SBS + fisheye**: use this when the mosaic is strongly stretched near the
+  edge of the VR image or the normal SBS mode misses it. This mode temporarily
+  corrects the lens distortion to improve detection and restoration.
+
+### Preview and output
+
+The segment editor intentionally shows only the left eye, so the preview is
+large enough to inspect. This does not mean the right eye is ignored: mosaic
+scans, selected segments, restoration previews, and final exports process both
+eyes.
+
+For the easiest VR-player compatibility, export to MP4 or MOV. Jasna preserves
+compatible source VR metadata or adds standard side-by-side VR180 metadata when
+it is missing. Other containers still contain both restored eyes, but some VR
+players may not recognize them as VR automatically.
+
+**SBS + fisheye** is an internal processing option; it does not convert the
+finished video into a different projection. The output keeps the same visual
+layout as the source. Streaming behavior is unchanged.
+
+Command-line users can select the same modes with `--vr-mode`:
+
+```bash
+jasna --input input.mp4 --output output.mp4 --vr-mode auto
+jasna --input input.mp4 --output output.mp4 --vr-mode sbs-fisheye
+```
 
 ## Post-export Actions
 
@@ -165,7 +221,10 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 
 ### Detection Model
 
-In general, use the latest RF-DETR model. Lada YOLO models are also available and can work better for 2D animations.
+In general, use the latest RF-DETR model. Lada YOLO models are also available
+and can work better for 2D animations. For VR180, the bundled
+`zelefans-vr-yolo-v2` model is the accurate detector from
+[ZeLeFans VR Mosaic Remover](https://huggingface.co/zelefans/vrmr).
 
 CLI option:
 
@@ -334,7 +393,6 @@ Jasna is in early development. The main goals are improving restoration quality,
 
 Current TODO:
 
-- Proper VR support.
 - SeedVR support.
 - Continued performance and VRAM improvements.
 

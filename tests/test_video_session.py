@@ -24,6 +24,12 @@ def test_video_session_key_ignores_encoder_fields() -> None:
     assert video_session_key(replace(AppSettings(), encoder_cq=30, codec="h264")) == base
 
 
+def test_video_session_key_ignores_vr_mode() -> None:
+    base = video_session_key(AppSettings())
+    assert video_session_key(replace(AppSettings(), vr_mode="off")) == base
+    assert video_session_key(replace(AppSettings(), vr_mode="sbs-fisheye")) == base
+
+
 def test_video_session_key_includes_active_secondary_knobs() -> None:
     tvai = replace(AppSettings(), secondary_restoration="tvai")
     assert video_session_key(replace(tvai, tvai_scale=2)) != video_session_key(tvai)
@@ -41,7 +47,7 @@ def _build(settings: AppSettings):
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=compile_result) as compiled,
         patch("jasna.engine_paths.model_weights_dir"),
         patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda n: n),
-        patch("jasna.mosaic.detection_registry.detection_model_weights_path") as det_path,
+        patch("jasna.mosaic.detection_registry.require_detection_model_weights") as det_path,
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer") as restorer_cls,
         patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as pipeline_cls,
         patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,

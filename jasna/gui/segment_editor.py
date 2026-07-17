@@ -90,6 +90,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_source: Image.Image | None = None
         self._preview_image = None
         self._preview_generation = 0
+        self._preview_left_eye = False
         self._restore_active = False
         self._restore_after: str | None = None
         self._restore_toggle_blocked = False
@@ -144,7 +145,10 @@ class SegmentEditor(ctk.CTkToplevel):
         self.wait_visibility()
         self._take_focus()
 
-        self._preview_worker = SegmentPreviewWorker(job.path)
+        self._preview_worker = SegmentPreviewWorker(
+            job.path,
+            vr_mode=settings.vr_mode,
+        )
         self._preview_worker.start()
         self.after(25, self._poll_workers)
 
@@ -474,13 +478,10 @@ class SegmentEditor(ctk.CTkToplevel):
         Tooltip(self._scan_info_btn, t("segments_scan_help_hint"))
 
         from jasna.mosaic.detection_registry import (
-            DEFAULT_DETECTION_MODEL_NAME,
-            discover_available_detection_models,
+            detection_model_choices,
         )
 
-        available_models = discover_available_detection_models()
-        if not available_models:
-            available_models = [DEFAULT_DETECTION_MODEL_NAME]
+        available_models = detection_model_choices()
         if self._scan_detection_model not in available_models:
             available_models.insert(0, self._scan_detection_model)
 
@@ -770,6 +771,13 @@ class SegmentEditor(ctk.CTkToplevel):
                 event = self._preview_worker.events.get_nowait()
                 if isinstance(event, PreviewLoaded):
                     if self._state is None:
+                        from jasna.vr180 import resolve_vr_mode
+
+                        self._preview_left_eye = resolve_vr_mode(
+                            self._get_settings().vr_mode,
+                            event.metadata,
+                            self._job.path,
+                        ).is_sbs
                         self._build_editor(event.metadata)
                 elif isinstance(event, PreviewFrame):
                     self._show_frame(event)
@@ -880,13 +888,22 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_image = self._fit_to_label(self._preview, source)
         self._preview.configure(image=self._preview_image, text="")
 
+    def _show_preview_message(self, text: str, color: str) -> None:
+        # CTkLabel.configure(image=None) updates its Python-side image reference
+        # but does not clear the underlying tkinter.Label image. Clear that
+        # first so releasing our CTkImage cannot leave Tk pointing at a deleted
+        # ``pyimage`` and abort the callback before background work starts.
+        self._preview._label.configure(image="")
+        self._preview.configure(image=None, text=text, text_color=color)
+        self._preview_image = None
+
     def _show_preview_error(self, message: str) -> None:
         self._set_playing(False)
         if self._state is None:
             self._loading_bar.stop()
             self._loading_label.configure(text=message, text_color=Colors.STATUS_ERROR)
             return
-        self._preview.configure(image=None, text=message, text_color=Colors.STATUS_ERROR)
+        self._show_preview_message(message, Colors.STATUS_ERROR)
 
     def _time_text(self) -> str:
         if self._state is None:
@@ -922,12 +939,10 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         self._restored_clip = ()
         self._restored_source = None
-        self._preview_image = None
         self._restore_play_pending = False
-        self._preview.configure(
-            image=None,
-            text=t("segments_restore_restoring"),
-            text_color=Colors.STATUS_PENDING,
+        self._show_preview_message(
+            t("segments_restore_restoring"),
+            Colors.STATUS_PENDING,
         )
         self._schedule_restoration_preview()
 
@@ -990,11 +1005,9 @@ class SegmentEditor(ctk.CTkToplevel):
         self._set_playing(False)
         self._restore_toggle.select()
         self._restored_source = None
-        self._preview_image = None
-        self._preview.configure(
-            image=None,
-            text=t("segments_restore_restoring"),
-            text_color=Colors.STATUS_PENDING,
+        self._show_preview_message(
+            t("segments_restore_restoring"),
+            Colors.STATUS_PENDING,
         )
         if self._restoration_worker is None:
             self._set_preview_gpu_busy(True)
@@ -1053,10 +1066,9 @@ class SegmentEditor(ctk.CTkToplevel):
             self._current_video_settings(),
         )
         if self._restored_source is None:
-            self._preview.configure(
-                image=None,
-                text=t("segments_restore_restoring"),
-                text_color=Colors.STATUS_PENDING,
+            self._show_preview_message(
+                t("segments_restore_restoring"),
+                Colors.STATUS_PENDING,
             )
 
     def _request_restoration_playback(self, start_seconds: float) -> None:
@@ -1072,12 +1084,10 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restore_play_pending = True
         self._restored_clip = ()
         self._restored_source = None
-        self._preview_image = None
         self._play.configure(text="…")
-        self._preview.configure(
-            image=None,
-            text=t("segments_restore_restoring"),
-            text_color=Colors.STATUS_PENDING,
+        self._show_preview_message(
+            t("segments_restore_restoring"),
+            Colors.STATUS_PENDING,
         )
         self._restore_generation = self._restoration_worker.request(
             start_seconds,
@@ -1090,10 +1100,9 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         if isinstance(event, RestorationStatus):
             if self._restored_source is None:
-                self._preview.configure(
-                    image=None,
-                    text=self._restoration_status_text(event.message),
-                    text_color=Colors.STATUS_PENDING,
+                self._show_preview_message(
+                    self._restoration_status_text(event.message),
+                    Colors.STATUS_PENDING,
                 )
         elif isinstance(event, RestorationFrame):
             self._restored_clip = ()
@@ -1115,11 +1124,9 @@ class SegmentEditor(ctk.CTkToplevel):
             self._play.configure(text="▶")
             self._restored_clip = ()
             self._restored_source = None
-            self._preview_image = None
-            self._preview.configure(
-                image=None,
-                text=t("segments_restore_failed", message=event.message),
-                text_color=Colors.STATUS_ERROR,
+            self._show_preview_message(
+                t("segments_restore_failed", message=event.message),
+                Colors.STATUS_ERROR,
             )
 
     def _restored_clip_covers(self, seconds: float) -> bool:
@@ -1468,6 +1475,8 @@ class SegmentEditor(ctk.CTkToplevel):
         if score < self._scan_threshold:
             return image
         mask_np = mask.numpy()
+        if getattr(self, "_preview_left_eye", False):
+            mask_np = mask_np[:, : mask_np.shape[1] // 2]
         if not mask_np.any():
             return image
         alpha = Image.fromarray((mask_np * 130).astype("uint8"), "L").resize(

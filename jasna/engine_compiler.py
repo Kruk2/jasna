@@ -53,10 +53,11 @@ def _basicvsrpp_engines_exist(model_path: str, fp16: bool, max_clip_size: int) -
 
 def _detection_engine_exists(detection_model_name: str, detection_model_path: str, batch_size: int, fp16: bool) -> bool:
     from jasna.engine_paths import get_onnx_tensorrt_engine_path, get_yolo_tensorrt_engine_path
+    from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model
 
-    if detection_model_name.startswith("rfdetr"):
+    if is_rfdetr_model(detection_model_name):
         return get_onnx_tensorrt_engine_path(detection_model_path, batch_size=batch_size, fp16=fp16).exists()
-    if detection_model_name.startswith("lada-yolo"):
+    if is_yolo_model(detection_model_name):
         return get_yolo_tensorrt_engine_path(detection_model_path, fp16=fp16).exists()
     return True
 

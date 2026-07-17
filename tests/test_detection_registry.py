@@ -11,10 +11,12 @@ from jasna.mosaic.detection_registry import (
     build_detection_model,
     coerce_detection_model_name,
     detection_model_weights_path,
+    detection_model_choices,
     discover_available_detection_models,
     is_rfdetr_model,
     is_yolo_model,
     precompile_detection_engine,
+    require_detection_model_weights,
 )
 
 
@@ -56,6 +58,7 @@ def test_is_rfdetr_model_rejects_non_rfdetr() -> None:
 def test_is_yolo_model() -> None:
     assert is_yolo_model("lada-yolo-v2")
     assert is_yolo_model("lada-yolo-v4")
+    assert is_yolo_model("zelefans-vr-yolo-v2")
     assert not is_yolo_model("rfdetr-v5")
     assert not is_yolo_model("lada-yolo-v99")
 
@@ -127,6 +130,18 @@ def test_discover_yolo_absent_when_pt_missing(tmp_path: Path) -> None:
     assert "lada-yolo-v4" not in result
 
 
+def test_bundled_vr_model_is_not_offered_when_weights_are_missing(tmp_path: Path) -> None:
+    result = detection_model_choices(tmp_path)
+    assert "zelefans-vr-yolo-v2" not in result
+
+
+def test_discover_bundled_vr_model(tmp_path: Path) -> None:
+    (tmp_path / "lada_vr_mosaic_detection_model_v2_accurate.pt").touch()
+    assert discover_available_detection_models(tmp_path) == [
+        "zelefans-vr-yolo-v2"
+    ]
+
+
 def test_discover_mixed(tmp_path: Path) -> None:
     (tmp_path / "rfdetr-v5.onnx").touch()
     (tmp_path / "rfdetr-v3.onnx").touch()
@@ -134,6 +149,34 @@ def test_discover_mixed(tmp_path: Path) -> None:
     (tmp_path / "lada_mosaic_detection_model_v4_fast.pt").touch()
     result = discover_available_detection_models(tmp_path)
     assert result == ["rfdetr-v5", "rfdetr-v3", "lada-yolo-v4", "lada-yolo-v2"]
+
+
+def test_zelefans_vr_model_weights_path() -> None:
+    assert detection_model_weights_path("zelefans-vr-yolo-v2") == Path(
+        "model_weights/lada_vr_mosaic_detection_model_v2_accurate.pt"
+    )
+
+
+def test_require_detection_model_weights_returns_existing_path(tmp_path: Path) -> None:
+    path = tmp_path / "vr.pt"
+    path.touch()
+    with patch(
+        "jasna.mosaic.detection_registry.detection_model_weights_path",
+        return_value=path,
+    ):
+        assert require_detection_model_weights("zelefans-vr-yolo-v2") == path
+
+
+def test_require_detection_model_weights_rejects_missing_path(tmp_path: Path) -> None:
+    path = tmp_path / "missing.pt"
+    with (
+        patch(
+            "jasna.mosaic.detection_registry.detection_model_weights_path",
+            return_value=path,
+        ),
+        pytest.raises(FileNotFoundError, match="Detection model weights not found"),
+    ):
+        require_detection_model_weights("zelefans-vr-yolo-v2")
 
 
 def test_discover_ignores_non_matching_files(tmp_path: Path) -> None:
@@ -162,6 +205,21 @@ def test_precompile_yolo_on_cuda() -> None:
     ):
         precompile_detection_engine("lada-yolo-v4", Path("m.pt"), 4, torch.device("cuda:0"), True)
         mock_compile.assert_called_once()
+
+
+def test_precompile_zelefans_yolo_on_cuda() -> None:
+    with patch(
+        "jasna.mosaic.yolo_tensorrt_compilation.compile_yolo_to_tensorrt_engine"
+    ) as mock_compile:
+        precompile_detection_engine(
+            "zelefans-vr-yolo-v2",
+            Path("vr.pt"),
+            4,
+            torch.device("cuda:0"),
+            True,
+        )
+
+    mock_compile.assert_called_once()
 
 
 # --- build_detection_model ---

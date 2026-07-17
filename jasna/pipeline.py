@@ -41,6 +41,11 @@ from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange
 from jasna.vram_offloader import VramOffloader
+from jasna.vr180 import (
+    FisheyeProjector,
+    SbsDetectionAdapter,
+    resolve_vr_mode,
+)
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +89,7 @@ class Pipeline:
         max_clip_size: int,
         temporal_overlap: int,
         enable_crossfade: bool = True,
+        vr_mode: str = "auto",
         fp16: bool,
         disable_progress: bool = False,
         progress_callback: callable | None = None,
@@ -101,6 +107,7 @@ class Pipeline:
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
         self.enable_crossfade = bool(enable_crossfade)
+        self.vr_mode = str(vr_mode)
 
         self.detection_model = build_detection_model(
             detection_model_name,
@@ -117,6 +124,30 @@ class Pipeline:
         self.retarget_high_fps = bool(retarget_high_fps)
         self.segments = tuple(segments) if segments else None
         self.splice_plan = splice_plan
+        self._vr_resolution = None
+        self._vr_projector = None
+        self._job_detection_model = self.detection_model
+
+    def configure_vr(self, metadata) -> None:
+        self._vr_resolution = resolve_vr_mode(
+            self.vr_mode,
+            metadata,
+            self.input_video,
+        )
+        self._job_detection_model = (
+            SbsDetectionAdapter(self.detection_model)
+            if self._vr_resolution.is_sbs
+            else self.detection_model
+        )
+        self._vr_projector = (
+            FisheyeProjector(
+                eye_width=int(metadata.video_width) // 2,
+                height=int(metadata.video_height),
+                device=self.device,
+            )
+            if self._vr_resolution.uses_fisheye
+            else None
+        )
 
     def close(self) -> None:
         if hasattr(self, "detection_model") and self.detection_model is not None:
@@ -364,7 +395,7 @@ class Pipeline:
                     batch_size=self.batch_size,
                     device=device,
                     metadata=metadata,
-                    detection_model=self.detection_model,
+                    detection_model=self._job_detection_model,
                     max_clip_size=self.max_clip_size,
                     temporal_overlap=self.temporal_overlap,
                     enable_crossfade=self.enable_crossfade,
@@ -383,6 +414,8 @@ class Pipeline:
                     frame_stride=frame_rate.frame_stride,
                     output_frame_count=output_frame_count,
                     output_fps=float(frame_rate.output_fps),
+                    vr_mode=self._vr_resolution.resolved,
+                    vr_projector=self._vr_projector,
                 ),
                 name="DecodeDetect", daemon=True,
             ),
@@ -413,6 +446,7 @@ class Pipeline:
                     vram_offloader=vram_offloader,
                     frame_stride=frame_rate.frame_stride,
                     seek_ts=seek_ts,
+                    vr_projector=self._vr_projector,
                 ),
                 name="BlendEncode", daemon=True,
             ),
@@ -605,10 +639,18 @@ class Pipeline:
     def run(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))
         self._validate_metadata(metadata)
+        self.configure_vr(metadata)
         if self.segments:
             self._run_smart(metadata)
         else:
             self._run_full(metadata)
+        if self._vr_resolution.is_sbs:
+            from jasna.media.spatial_metadata import inject_vr180_spatial_metadata
+
+            inject_vr180_spatial_metadata(
+                self.input_video,
+                self.output_video,
+            )
 
     def run_streaming(
         self,

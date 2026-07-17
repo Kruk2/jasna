@@ -265,7 +265,7 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
     from jasna.mosaic.detection_registry import (
         build_detection_model,
         coerce_detection_model_name,
-        detection_model_weights_path,
+        require_detection_model_weights,
     )
     from jasna.restorer.sd15_download import ensure_sd15_bundle
     from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU, Sd15InpaintRestorer
@@ -287,8 +287,9 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
     detection_model_name = coerce_detection_model_name(str(args.detection_model))
     has_explicit_path = bool(str(args.detection_model_path).strip())
     detection_model_path = (
-        Path(str(args.detection_model_path)) if has_explicit_path
-        else detection_model_weights_path(detection_model_name)
+        Path(str(args.detection_model_path))
+        if has_explicit_path
+        else require_detection_model_weights(detection_model_name)
     )
     if not detection_model_path.exists():
         raise FileNotFoundError(str(detection_model_path))

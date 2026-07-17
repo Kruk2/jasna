@@ -440,3 +440,51 @@ class TestGetVideoMetaData:
 
         meta = get_video_meta_data("test.mp4")
         assert meta.sample_aspect_ratio == Fraction(1, 1)
+
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
+    def test_spatial_side_data(self, mock_popen, mock_resolve):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(
+                side_data_list=[
+                    {
+                        "side_data_type": "Stereo 3D",
+                        "type": "side by side",
+                    },
+                    {
+                        "side_data_type": "Spherical Mapping",
+                        "projection": "equirectangular",
+                    },
+                ],
+            ),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mp4")
+
+        assert meta.stereo_layout == "side by side"
+        assert meta.spherical_projection == "equirectangular"
+
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
+    def test_spatial_metadata_tag_fallback(self, mock_popen, mock_resolve):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(
+                tags={
+                    "stereo_mode": "left_right",
+                    "projection": "equirectangular",
+                },
+            ),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mp4")
+
+        assert meta.stereo_layout == "left_right"
+        assert meta.spherical_projection == "equirectangular"

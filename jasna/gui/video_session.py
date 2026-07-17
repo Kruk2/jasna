@@ -81,7 +81,7 @@ def build_video_session(
     import torch
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.engine_paths import model_weights_dir
-    from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
+    from jasna.mosaic.detection_registry import coerce_detection_model_name, require_detection_model_weights
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
@@ -89,7 +89,7 @@ def build_video_session(
     device = torch.device("cuda:0")
     restoration_model_path = model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth"
     det_name = coerce_detection_model_name(str(settings.detection_model))
-    detection_model_path = detection_model_weights_path(det_name)
+    detection_model_path = require_detection_model_weights(det_name)
 
     compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not disable_basicvsrpp_tensorrt)
     compile_result = ensure_engines_compiled(
