@@ -8,7 +8,7 @@ It is inspired by, and in some places based on, [Lada](https://codeberg.org/lada
 
 Jasna is free. Supporters get a key that unlocks the extra models trained for this project: the **unet-4x** secondary upscaler and the experimental **SD 1.5 image restoration** model. See [Supporting the project](#supporting-the-project).
 
-![Jasna GUI](https://github.com/user-attachments/assets/ae5d9b73-ea22-4263-8203-0ff89bbbcc51)
+<img width="1201" height="917" alt="image" src="https://github.com/user-attachments/assets/502a4689-e22a-4351-8e26-e14412097ec8" />
 
 ## Contents
 
