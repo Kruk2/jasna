@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -53,17 +52,17 @@ class TestTrtDtypeToTorch:
 
 class TestGetOnnxTensorrtEnginePath:
     def test_basic_fp16_windows(self):
-        with patch.object(os, "name", "nt"):
+        with patch("jasna.engine_paths.engine_system_suffix", return_value=".win"):
             result = get_onnx_tensorrt_engine_path("model.onnx", fp16=True)
             assert result == Path("model.fp16.win.engine")
 
     def test_basic_fp32_windows(self):
-        with patch.object(os, "name", "nt"):
+        with patch("jasna.engine_paths.engine_system_suffix", return_value=".win"):
             result = get_onnx_tensorrt_engine_path("model.onnx", fp16=False)
             assert result == Path("model.win.engine")
 
     def test_with_batch_size(self):
-        with patch.object(os, "name", "nt"):
+        with patch("jasna.engine_paths.engine_system_suffix", return_value=".win"):
             result = get_onnx_tensorrt_engine_path("model.onnx", batch_size=4, fp16=True)
             assert result == Path("model.bs4.fp16.win.engine")
 
@@ -76,7 +75,7 @@ class TestGetOnnxTensorrtEnginePath:
             get_onnx_tensorrt_engine_path("model.onnx", batch_size=-1)
 
     def test_path_object_input(self):
-        with patch.object(os, "name", "nt"):
+        with patch("jasna.engine_paths.engine_system_suffix", return_value=".win"):
             result = get_onnx_tensorrt_engine_path(Path("dir/model.onnx"), fp16=True)
             assert result == Path("dir/model.fp16.win.engine")
 
