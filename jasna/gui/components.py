@@ -657,7 +657,14 @@ class JobListItem(ctk.CTkFrame):
     def set_segments_editable(self, editable: bool) -> None:
         if self._on_edit_segments:
             self._segments_editable = bool(editable)
-            self._segments_btn.configure(state="normal" if editable else "disabled")
+            if editable:
+                self._segments_btn.configure(state="normal")
+                if not self._segments_btn.winfo_manager():
+                    self._segments_btn.pack(side="right", padx=(0, 6))
+            else:
+                for tooltip in self._segment_tooltips:
+                    tooltip.hide()
+                self._segments_btn.pack_forget()
             self._segment_summary.configure(cursor="hand2" if editable else "arrow")
 
     # Internal drag event proxies to allow QueuePanel to handle reordering
