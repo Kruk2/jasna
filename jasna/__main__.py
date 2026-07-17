@@ -1,7 +1,7 @@
 import multiprocessing
 import os
 import sys
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
 
@@ -58,7 +58,12 @@ if __name__ == "__main__":
     multiprocessing.freeze_support()
 
 if multiprocessing.parent_process() is None:
-    argv0_stem = Path(sys.argv[0]).stem.lower()
+    argv0_path = (
+        PureWindowsPath(sys.argv[0])
+        if sys.platform == "win32"
+        else Path(sys.argv[0])
+    )
+    argv0_stem = argv0_path.stem.lower()
 
     if sys.platform == "win32":
         if argv0_stem == "jasna-cli":
