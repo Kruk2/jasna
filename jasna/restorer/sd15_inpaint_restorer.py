@@ -78,7 +78,11 @@ class Sd15InpaintRestorer:
             logger.info("Loaded EMA weights into SD15 UNet")
 
         self.unet = unet.to(self.device, dtype=self._dtype).eval()
-        self.vae = AutoencoderKL.from_pretrained(self.model_dir / "vae", local_files_only=True).to(self.device).eval()
+        self.vae = (
+            AutoencoderKL.from_pretrained(self.model_dir / "vae", local_files_only=True, low_cpu_mem_usage=False)
+            .to(self.device)
+            .eval()
+        )
 
         ddpm_config = DDPMScheduler.from_pretrained(
             self.model_dir / "scheduler",

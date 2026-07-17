@@ -58,6 +58,23 @@ class TestCheckpointPathSelection:
             assert use_plaintext_sd15(tmp_path) is False
 
 
+class TestVaeLoad:
+    def test_vae_loaded_without_low_cpu_mem_usage(self, tmp_path: Path):
+        _write_bundle(tmp_path, with_plaintext=True, with_enc=False)
+        unet = MagicMock()
+        unet.to.return_value.eval.return_value = unet
+        with (
+            patch.object(sd15, "_read_checkpoint", return_value={"state_dict": {}}),
+            patch.object(sd15.UNet2DConditionModel, "from_config", return_value=unet),
+            patch.object(sd15.AutoencoderKL, "from_pretrained") as mock_vae,
+            patch.object(sd15.DDPMScheduler, "from_pretrained"),
+            patch.object(sd15.DPMSolverMultistepScheduler, "from_config"),
+            patch.object(sd15.torch, "load", return_value=MagicMock()),
+        ):
+            Sd15InpaintRestorer(tmp_path, torch.device("cpu"), fp16=False)
+            assert mock_vae.call_args.kwargs["low_cpu_mem_usage"] is False
+
+
 class _FakeLatentDist:
     def __init__(self, latents: torch.Tensor):
         self._latents = latents
