@@ -262,20 +262,37 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _build_main_body(self):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True)
-        
-        # Left: Queue panel
-        self._queue_panel = QueuePanel(body)
-        self._queue_panel.pack(side="left", fill="y")
+
+        self._workspace = tk.PanedWindow(
+            body,
+            orient=tk.HORIZONTAL,
+            background=Colors.BORDER,
+            borderwidth=0,
+            opaqueresize=True,
+            sashcursor="sb_h_double_arrow",
+            sashpad=0,
+            sashrelief=tk.FLAT,
+            sashwidth=4,
+        )
+        self._workspace.pack(fill="both", expand=True)
+
+        self._queue_panel = QueuePanel(self._workspace)
         self._queue_panel.set_on_jobs_changed(self._on_jobs_changed)
-        
-        # Separator
-        sep = ctk.CTkFrame(body, fg_color=Colors.BORDER, width=1)
-        sep.pack(side="left", fill="y")
-        
-        # Right: Settings panel
-        self._settings_panel = SettingsPanel(body)
-        self._settings_panel.pack(side="right", fill="both", expand=True)
+
+        self._settings_panel = SettingsPanel(self._workspace)
         self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
+
+        self._workspace.add(
+            self._queue_panel,
+            minsize=Sizing.QUEUE_PANEL_MIN_WIDTH,
+            stretch="never",
+            width=Sizing.QUEUE_PANEL_WIDTH,
+        )
+        self._workspace.add(
+            self._settings_panel,
+            minsize=Sizing.SETTINGS_PANEL_MIN_WIDTH,
+            stretch="always",
+        )
         
         self._queue_panel.set_segment_editor_context(
             self._settings_panel.get_settings,

@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 from jasna.gui.components import JobListItem
 from jasna.gui.control_bar import ControlBar
+from jasna.gui.locales import t
 
 
 def test_segment_tooltips_hide_before_editor_opens() -> None:
@@ -46,3 +47,18 @@ def test_updating_disabled_start_button_hides_previous_tooltip() -> None:
     ControlBar.set_start_enabled(control_bar, False)
 
     tooltip.hide.assert_called_once_with()
+
+
+def test_completed_job_combines_status_and_elapsed_time() -> None:
+    item = object.__new__(JobListItem)
+    item._status_label = MagicMock()
+    item._fps_label = MagicMock()
+    item._eta_label = MagicMock()
+
+    JobListItem.set_completed(item, 2.6)
+
+    item._status_label.configure.assert_called_once_with(
+        text=f"{t('completed_in')} 2s",
+    )
+    item._fps_label.configure.assert_called_once_with(text="")
+    item._eta_label.configure.assert_called_once_with(text="")
