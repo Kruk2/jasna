@@ -144,7 +144,7 @@ class TestCodecSpecs:
 
 
 class TestEncoderOptions:
-    def test_smart_fragment_forces_single_closed_gop_settings(self, tmp_path):
+    def test_smart_fragment_preserves_normal_closed_gop_settings(self, tmp_path):
         enc = NvidiaVideoEncoder(
             file=str(tmp_path / "part.nut"),
             device=torch.device("cuda:0"),
@@ -154,11 +154,24 @@ class TestEncoderOptions:
             smart_fragment=True,
             mux_audio=False,
         )
-        assert enc.encoder_options["g"] == "999999"
-        assert enc.encoder_options["bf"] == "0"
+        assert enc.encoder_options["g"] == DEFAULT_ENCODER_OPTIONS["g"]
+        assert enc.encoder_options["bf"] == DEFAULT_ENCODER_OPTIONS["bf"]
         assert enc.encoder_options["forced-idr"] == "1"
-        assert "b_ref_mode" not in enc.encoder_options
+        assert enc.encoder_options["b_ref_mode"] == DEFAULT_ENCODER_OPTIONS["b_ref_mode"]
         assert enc.mux_audio is False
+
+    def test_smart_fragment_preserves_custom_gop_size(self, tmp_path):
+        enc = NvidiaVideoEncoder(
+            file=str(tmp_path / "part.nut"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={"g": "180"},
+            smart_fragment=True,
+            mux_audio=False,
+        )
+
+        assert enc.encoder_options["g"] == "180"
 
     @pytest.mark.parametrize("codec", ["hevc", "av1"])
     def test_smart_fragment_can_match_eight_bit_source(self, tmp_path, codec):

@@ -13,6 +13,7 @@ import torch
 
 from jasna.media import get_video_meta_data
 from jasna.media.audio_utils import needs_audio_reencode
+from jasna.media.splice import probe_keyframes
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.os_utils import resolve_executable
@@ -114,6 +115,41 @@ def test_color_tags_and_frame_count(tmp_path):
         assert int(v.codec_context.color_trc) == 1
         n = sum(1 for _ in c.decode(v))
         assert n == 24
+
+
+def test_smart_fragment_keeps_periodic_random_access_points(tmp_path):
+    src = _make_source(tmp_path, "smart-src.mp4", acodec=None, duration=3)
+    metadata = get_video_meta_data(str(src))
+    dst = tmp_path / "smart-part.nut"
+
+    with (
+        NvidiaVideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        NvidiaVideoEncoder(
+            str(dst),
+            device=DEVICE,
+            metadata=metadata,
+            codec="hevc",
+            encoder_settings={"g": "12"},
+            smart_fragment=True,
+            mux_audio=False,
+        ) as encoder,
+    ):
+        for frames, pts_list in reader.frames():
+            for index, pts in enumerate(pts_list):
+                encoder.encode(frames[index], pts)
+
+    output_metadata = get_video_meta_data(str(dst))
+    keyframes = probe_keyframes(dst, output_metadata)
+
+    assert len(keyframes.pts) >= 3
+    with av.open(str(dst)) as container:
+        stream = container.streams.video[0]
+        assert any(
+            packet.pts is not None
+            and packet.dts is not None
+            and packet.pts != packet.dts
+            for packet in container.demux(stream)
+        )
 
 
 @pytest.mark.parametrize(

@@ -34,8 +34,8 @@ def _ffmpeg(*args: str) -> None:
 @pytest.mark.parametrize(
     ("codec", "encoder", "source_options", "render_options"),
     [
-        ("h264", "libx264", ["-g", "12", "-keyint_min", "12", "-sc_threshold", "0"], ["-g", "9999", "-bf", "0"]),
-        ("hevc", "libx265", ["-x265-params", "keyint=12:min-keyint=12:scenecut=0:open-gop=0"], ["-x265-params", "keyint=9999:bframes=0:open-gop=0"]),
+        ("h264", "libx264", ["-g", "12", "-keyint_min", "12", "-sc_threshold", "0"], ["-g", "12", "-bf", "3", "-flags", "+cgop"]),
+        ("hevc", "libx265", ["-x265-params", "keyint=12:min-keyint=12:scenecut=0:open-gop=0"], ["-x265-params", "keyint=12:bframes=4:open-gop=0"]),
         ("av1", "libsvtav1", ["-preset", "10", "-g", "12", "-svtav1-params", "scd=0"], ["-preset", "10", "-g", "9999"]),
     ],
 )
