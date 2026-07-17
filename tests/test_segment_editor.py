@@ -452,3 +452,85 @@ def test_save_remembers_detection_settings_on_video(monkeypatch) -> None:
         if editor is not None and editor.winfo_exists():
             SegmentEditor._finish_close(editor)
         root.destroy()
+
+
+def test_suggest_mask_button_locked_during_scan(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        assert editor._suggest_btn.cget("text") == t("segments_suggest_mask")
+        assert editor._suggest_btn in editor._scan_lockable_widgets()
+        editor._set_scan_locked(True)
+        assert editor._suggest_btn.cget("state") == "disabled"
+        editor._set_scan_locked(False)
+        assert editor._suggest_btn.cget("state") == "normal"
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_suggest_mask_grabs_full_frame_and_opens_dialog(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    opened = {}
+
+    class _FakeDialog:
+        def __init__(self, master, image, on_submit, on_closed=None):
+            opened.update(image=image, on_submit=on_submit, on_closed=on_closed)
+
+    monkeypatch.setattr(segment_editor, "MaskSuggestDialog", _FakeDialog)
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        editor._suggest_mask()
+        assert editor._suggest_busy
+        assert editor._suggest_btn.cget("state") == "disabled"
+        editor._preview_worker.grab_full.assert_called_once_with()
+
+        from PIL import Image
+
+        frame = Image.new("RGB", (1920, 1080))
+        editor._open_mask_suggest(frame)
+        assert opened["image"] is frame
+
+        opened["on_closed"]()
+        assert not editor._suggest_busy
+        assert editor._suggest_btn.cget("state") == "normal"
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_feedback_upload_events_show_toast(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    toasts = []
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        monkeypatch.setattr(
+            type(editor),
+            "_show_toast",
+            lambda self, message, type_: toasts.append((message, type_)),
+        )
+        editor._handle_feedback_event(segment_editor.FeedbackUploadFinished(True, ""))
+        editor._handle_feedback_event(
+            segment_editor.FeedbackUploadFinished(False, "boom")
+        )
+        assert toasts[0] == (t("mask_feedback_uploaded"), "success")
+        assert toasts[1][1] == "error"
+        assert "boom" in toasts[1][0]
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()

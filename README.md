@@ -17,6 +17,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
 - [Post-export Actions](#post-export-actions)
+- [Suggesting Better Masks](#suggesting-better-masks)
 - [First Run](#first-run)
 - [Choosing Models](#choosing-models)
 - [Tuning Quality and VRAM](#tuning-quality-and-vram)
@@ -116,6 +117,7 @@ marks. The timeline distinguishes frames receiving restoration from surrounding
 transition frames that are re-encoded unchanged, and estimates restored,
 re-encoded, and stream-copied durations before the job starts.
 
+
 ## Post-export Actions
 
 The GUI can run an action after the whole queue finishes: **None**, **Shutdown PC**, or **Custom Command**. The same feature is available in the CLI on Windows and Linux:
@@ -129,6 +131,27 @@ Custom commands run through the system shell after all exports finish:
 ```bash
 jasna --input input_folder --output output_folder --post-export-action command --post-export-command "echo done"
 ```
+
+## Suggesting Better Masks
+
+When a mosaic detection looks wrong, you can contribute a corrected mask and
+help train better detection models. In the segment editor, pause on the frame
+and click **Suggest better mask**:
+
+- Click to add points around each mosaic area — one shape per area, and as
+  many shapes as the frame needs. Clicks outside the frame snap to its edge.
+- Close a shape by clicking its first point, double-clicking, or pressing
+  Enter.
+- Scroll to zoom in for precise outlines, right-drag to pan, press H to
+  temporarily hide the shapes, and use the opacity slider to adjust the mask
+  overlay.
+- Draw accurately: if the mosaic fades out with soft or blurry edges, include
+  that soft region in the shape too.
+
+Submitting uploads the frame and your mask **anonymously**. The data is
+encrypted on your machine before upload, and the only attached details are the
+app version, the detection model name, and the frame resolution — never file
+names, timestamps, or anything identifying you.
 
 ## First Run
 

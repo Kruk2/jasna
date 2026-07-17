@@ -26,6 +26,13 @@ class PreviewFrame:
 
 
 @dataclass(frozen=True)
+class PreviewFullFrame:
+    seconds: float
+    image: Image.Image
+    generation: int
+
+
+@dataclass(frozen=True)
 class PreviewEnded:
     generation: int
 
@@ -53,12 +60,17 @@ class _Previous:
 
 
 @dataclass(frozen=True)
+class _GrabFull:
+    generation: int
+
+
+@dataclass(frozen=True)
 class _Stop:
     pass
 
 
-PreviewEvent = PreviewLoaded | PreviewFrame | PreviewEnded | PreviewFailed
-_Command = _Seek | _Next | _Previous | _Stop
+PreviewEvent = PreviewLoaded | PreviewFrame | PreviewFullFrame | PreviewEnded | PreviewFailed
+_Command = _Seek | _Next | _Previous | _GrabFull | _Stop
 
 
 class SegmentPreviewWorker:
@@ -98,6 +110,12 @@ class SegmentPreviewWorker:
         self._replace_command(_Previous(max(0.0, float(seconds)), self._generation))
         return self._generation
 
+    def grab_full(self) -> int:
+        """Emit the currently shown frame at native resolution."""
+
+        self._replace_command(_GrabFull(self._generation))
+        return self._generation
+
     def close(self) -> None:
         if self._closed.is_set():
             return
@@ -129,6 +147,7 @@ class SegmentPreviewWorker:
                 if not stream.codec_context.is_hwaccel:
                     stream.codec_context.thread_type = "AUTO"
                 decoded: Iterator[av.VideoFrame] | None = None
+                last_frame: av.VideoFrame | None = None
                 while not self._closed.is_set():
                     try:
                         command = self._commands.get(timeout=0.1)
@@ -136,6 +155,16 @@ class SegmentPreviewWorker:
                         continue
                     if isinstance(command, _Stop):
                         break
+                    if isinstance(command, _GrabFull):
+                        if last_frame is not None:
+                            self.events.put(
+                                PreviewFullFrame(
+                                    self._frame_seconds(last_frame, stream, start_pts),
+                                    self._to_full_image(last_frame),
+                                    command.generation,
+                                )
+                            )
+                        continue
                     if isinstance(command, _Seek):
                         frame, decoded = self._seek(
                             container,
@@ -155,6 +184,7 @@ class SegmentPreviewWorker:
                     if frame is None:
                         self.events.put(PreviewEnded(command.generation))
                         continue
+                    last_frame = frame
                     self.events.put(
                         PreviewFrame(
                             self._frame_seconds(frame, stream, start_pts),
@@ -199,6 +229,9 @@ class SegmentPreviewWorker:
         if frame.pts is None:
             return 0.0
         return max(0.0, float((frame.pts - start_pts) * stream.time_base))
+
+    def _to_full_image(self, frame) -> Image.Image:
+        return frame.reformat(format="rgb24").to_image()
 
     def _to_image(self, frame) -> Image.Image:
         width, height = int(frame.width), int(frame.height)

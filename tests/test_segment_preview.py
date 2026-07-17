@@ -5,7 +5,12 @@ import subprocess
 
 import pytest
 
-from jasna.gui.segment_preview import PreviewFrame, PreviewLoaded, SegmentPreviewWorker
+from jasna.gui.segment_preview import (
+    PreviewFrame,
+    PreviewFullFrame,
+    PreviewLoaded,
+    SegmentPreviewWorker,
+)
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
 
@@ -116,5 +121,25 @@ def test_preview_worker_finds_exact_previous_vfr_frame(tmp_path) -> None:
         previous = _next_event(worker, PreviewFrame)
 
         assert previous.seconds == pytest.approx(0.4)
+    finally:
+        worker.close()
+
+
+def test_grab_full_returns_native_resolution_of_shown_frame(tmp_path) -> None:
+    source = tmp_path / "preview.mp4"
+    _make_preview_source(source)
+    worker = SegmentPreviewWorker(source, max_size=(80, 80))
+    worker.start()
+
+    try:
+        _next_event(worker, PreviewLoaded)
+        worker.seek(0.5)
+        shown = _next_event(worker, PreviewFrame)
+        assert shown.image.width <= 80
+
+        worker.grab_full()
+        full = _next_event(worker, PreviewFullFrame)
+        assert (full.image.width, full.image.height) == (160, 90)
+        assert full.seconds == shown.seconds
     finally:
         worker.close()
