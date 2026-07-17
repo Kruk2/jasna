@@ -12,9 +12,11 @@ from jasna.media.splice import (
     KeyframeIndex,
     SpliceSpan,
     SmartRenderCompatibilityError,
+    _analyze_packet_reordering,
     _is_safe_random_access_packet,
     build_splice_plan,
     create_copy_fragment,
+    resolve_smart_encoder_settings,
     validate_smart_render,
 )
 from jasna.segments import SegmentRange
@@ -37,6 +39,7 @@ def _metadata(codec: str = "h264", **overrides) -> VideoMetadata:
         num_frames=180,
         is_10bit=False,
         pixel_format="yuv420p",
+        profile="High",
         field_order="progressive",
     )
     values.update(overrides)
@@ -84,6 +87,59 @@ def test_plan_rejects_range_shorter_than_timestamp_interval() -> None:
         build_splice_plan([SegmentRange(2.001, 2.01)], _index(), duration=6)
 
 
+def test_packet_reordering_detects_flat_and_hierarchical_b_frames() -> None:
+    assert _analyze_packet_reordering((0, 4, 1, 2, 3, 8, 5, 6, 7)) == (3, False)
+    assert _analyze_packet_reordering((0, 5, 3, 1, 2, 4, 10, 8, 6, 7, 9)) == (4, True)
+
+
+def test_smart_h264_settings_match_source_structure() -> None:
+    index = KeyframeIndex(
+        (0, 60, 120),
+        Fraction(1, 30),
+        0,
+        180,
+        max_b_frames=3,
+        uses_b_references=False,
+    )
+
+    settings = resolve_smart_encoder_settings(
+        "h264",
+        _metadata("h264", profile="Main"),
+        index,
+        {"cq": 22, "profile": "high", "g": 250, "bf": 4, "b_ref_mode": "middle"},
+    )
+
+    assert settings == {
+        "cq": 22,
+        "profile": "main",
+        "g": 60,
+        "bf": 3,
+        "b_ref_mode": "disabled",
+    }
+
+
+@pytest.mark.parametrize("codec", ["hevc", "av1"])
+def test_smart_settings_match_source_gop_for_other_codecs(codec: str) -> None:
+    settings = resolve_smart_encoder_settings(
+        codec,
+        _metadata(codec),
+        _index(),
+        {"cq": 22, "g": 250, "bf": 4},
+    )
+
+    assert settings == {"cq": 22, "g": 60, "bf": 4}
+
+
+def test_smart_h264_settings_reject_unknown_source_profile() -> None:
+    with pytest.raises(SmartRenderCompatibilityError, match="H.264 profile"):
+        resolve_smart_encoder_settings(
+            "h264",
+            _metadata("h264", profile="Extended"),
+            _index(),
+            {},
+        )
+
+
 @pytest.mark.parametrize("codec", ["h264", "hevc", "av1"])
 def test_validation_accepts_supported_source_matched_codecs(codec: str) -> None:
     assert validate_smart_render(_metadata(codec), output_path="out.mp4", codec=codec) == codec
@@ -92,6 +148,15 @@ def test_validation_accepts_supported_source_matched_codecs(codec: str) -> None:
 def test_validation_rejects_codec_mismatch() -> None:
     with pytest.raises(SmartRenderCompatibilityError, match="match the input codec"):
         validate_smart_render(_metadata("h264"), output_path="out.mp4", codec="hevc")
+
+
+def test_validation_rejects_unsupported_h264_profile() -> None:
+    with pytest.raises(SmartRenderCompatibilityError, match="H.264 profile"):
+        validate_smart_render(
+            _metadata("h264", profile="Extended"),
+            output_path="out.mp4",
+            codec="h264",
+        )
 
 
 def test_validation_rejects_vfr_and_retargeting() -> None:

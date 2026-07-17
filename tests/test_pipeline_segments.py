@@ -30,8 +30,16 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
         video_fps=30.0,
         video_fps_exact=Fraction(30, 1),
         duration=6.0,
+        profile="Main",
     )
-    index = KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180)
+    index = KeyframeIndex(
+        (0, 60, 120),
+        Fraction(1, 30),
+        0,
+        180,
+        max_b_frames=3,
+        uses_b_references=False,
+    )
     plan = SplicePlan(
         index=index,
         spans=(
@@ -63,6 +71,13 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     assert encoder.call_args.kwargs["mux_audio"] is False
     assert encoder.call_args.kwargs["pts_origin"] == 60
     assert encoder.call_args.kwargs["smart_fragment"] is True
+    assert encoder.call_args.kwargs["encoder_settings"] == {
+        "cq": 22,
+        "profile": "main",
+        "g": 60,
+        "bf": 3,
+        "b_ref_mode": "disabled",
+    }
     pipeline._run_pass.assert_called_once()
     pass_args = pipeline._run_pass.call_args.kwargs
     assert pass_args["seek_ts"] == 2.0
