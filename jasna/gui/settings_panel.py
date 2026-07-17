@@ -5,12 +5,16 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
 from dataclasses import asdict, fields
-from PIL import ImageTk
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.components import CollapsibleSection, ConfirmDialog, PresetDialog, Toast, Tooltip
-from jasna.gui.icons import NativeIconButton, create_icon, render_toggle
+from jasna.gui.icons import (
+    CompactSwitch,
+    NativeIconButton,
+    create_compact_switch,
+    create_icon,
+)
 from jasna.gui.locales import t
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
@@ -41,66 +45,6 @@ def translate_cq_for_codec(cq: int, old_codec: str, new_codec: str) -> int:
 def get_tooltip(key: str) -> str:
     """Get localized tooltip for a setting key."""
     return t(f"tip_{key}")
-
-
-class CompactSwitch(tk.Label):
-    def __init__(self, master, command: callable, background: str):
-        self._selected = False
-        self._change_command = command
-        self._off_image = ImageTk.PhotoImage(
-            render_toggle(
-                False,
-                36,
-                18,
-                Colors.BORDER_LIGHT,
-                Colors.TEXT_PRIMARY,
-            ),
-            master=master,
-        )
-        self._on_image = ImageTk.PhotoImage(
-            render_toggle(
-                True,
-                36,
-                18,
-                Colors.PRIMARY,
-                Colors.TEXT_PRIMARY,
-            ),
-            master=master,
-        )
-        super().__init__(
-            master,
-            image=self._off_image,
-            width=40,
-            height=24,
-            background=background,
-            borderwidth=0,
-            highlightthickness=0,
-            cursor="hand2",
-        )
-        self.bind("<Button-1>", self._toggle)
-
-    def _toggle(self, _event=None) -> None:
-        self._selected = not self._selected
-        self._refresh_image()
-        self._change_command()
-
-    def _refresh_image(self) -> None:
-        self.configure(image=self._on_image if self._selected else self._off_image)
-
-    def select(self) -> None:
-        self._selected = True
-        self._refresh_image()
-
-    def deselect(self) -> None:
-        self._selected = False
-        self._refresh_image()
-
-    def get(self) -> int:
-        return int(self._selected)
-
-
-def create_compact_switch(master, command: callable, background: str) -> CompactSwitch:
-    return CompactSwitch(master, command, background)
 
 
 def create_slider_value_label(

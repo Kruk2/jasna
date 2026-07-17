@@ -97,6 +97,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._processor: Processor | None = None
         self._job_start_times: dict[int, float] = {}
         self._processing_start_time: float = 0.0
+        self._preview_gpu_busy = False
         self._preset_manager = PresetManager()
 
         self._system_stats_stop = threading.Event()
@@ -276,6 +277,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._settings_panel.pack(side="right", fill="both", expand=True)
         self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
         
+        self._queue_panel.set_segment_editor_context(
+            self._settings_panel.get_settings,
+            lambda: self._processor is not None and self._processor.is_running(),
+            self._set_preview_gpu_busy,
+        )
         self._queue_panel.set_initial_output(
             self._settings_panel.get_last_output_folder(),
             self._settings_panel.get_last_output_pattern(),
@@ -420,11 +426,20 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         
     def _update_start_button_state(self):
         jobs = self._queue_panel.get_jobs()
-        can_start = bool(jobs)
+        can_start = bool(jobs) and not self._preview_gpu_busy
         if can_start:
             self._control_bar.set_start_enabled(True)
+        elif self._preview_gpu_busy:
+            self._control_bar.set_start_enabled(False, t("segments_restore_restoring"))
         else:
             self._control_bar.set_start_enabled(False, t("toast_no_files"))
+
+    def _set_preview_gpu_busy(self, busy: bool) -> None:
+        self._preview_gpu_busy = bool(busy)
+        try:
+            self.after(0, self._update_start_button_state)
+        except (tk.TclError, RuntimeError):
+            pass
         
     def _show_toast(self, message: str, type_: str = "info"):
         """Show a toast notification."""
@@ -432,6 +447,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         toast.place(relx=0.5, rely=0.9, anchor="center")
         
     def _on_start(self):
+        if self._preview_gpu_busy:
+            return
         jobs = self._queue_panel.get_jobs()
         if not jobs:
             self._log_panel.warning(t("toast_no_files"))

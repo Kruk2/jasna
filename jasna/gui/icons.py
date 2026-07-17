@@ -5,6 +5,8 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
+from jasna.gui.theme import Colors
+
 
 def render_icon(name: str, size: int, color: str) -> Image.Image:
     scale = 4
@@ -213,3 +215,95 @@ def render_toggle(
         fill=button_color,
     )
     return image.resize((width, height), Image.Resampling.LANCZOS)
+
+
+class CompactSwitch(tk.Label):
+    def __init__(self, master, command: callable, background: str):
+        self._selected = False
+        self._enabled = True
+        self._change_command = command
+        self._off_image = self._create_image(
+            master, False, Colors.BORDER_LIGHT, Colors.TEXT_PRIMARY
+        )
+        self._on_image = self._create_image(
+            master, True, Colors.PRIMARY, Colors.TEXT_PRIMARY
+        )
+        self._disabled_off_image = self._create_image(
+            master, False, Colors.BORDER, Colors.STATUS_PENDING
+        )
+        self._disabled_on_image = self._create_image(
+            master, True, Colors.BORDER_LIGHT, Colors.STATUS_PENDING
+        )
+        super().__init__(
+            master,
+            image=self._off_image,
+            width=40,
+            height=24,
+            background=background,
+            borderwidth=0,
+            highlightthickness=0,
+            cursor="hand2",
+        )
+        self.bind("<Button-1>", self._toggle)
+
+    @staticmethod
+    def _create_image(
+        master,
+        selected: bool,
+        track_color: str,
+        button_color: str,
+    ) -> ImageTk.PhotoImage:
+        return ImageTk.PhotoImage(
+            render_toggle(selected, 36, 18, track_color, button_color),
+            master=master,
+        )
+
+    def _toggle(self, _event=None) -> None:
+        if not self._enabled:
+            return
+        self._selected = not self._selected
+        self._refresh_image()
+        self._change_command()
+
+    def _refresh_image(self) -> None:
+        if self._enabled:
+            image = self._on_image if self._selected else self._off_image
+        else:
+            image = (
+                self._disabled_on_image
+                if self._selected
+                else self._disabled_off_image
+            )
+        super().configure(image=image)
+
+    def select(self) -> None:
+        self._selected = True
+        self._refresh_image()
+
+    def deselect(self) -> None:
+        self._selected = False
+        self._refresh_image()
+
+    def get(self) -> int:
+        return int(self._selected)
+
+    def configure(self, cnf=None, **kwargs):
+        if cnf:
+            kwargs.update(cnf)
+        state = kwargs.pop("state", None)
+        if state is not None:
+            self._enabled = state != "disabled"
+            kwargs["cursor"] = "hand2" if self._enabled else ""
+        result = super().configure(**kwargs)
+        if state is not None:
+            self._refresh_image()
+        return result
+
+    def cget(self, key: str):
+        if key == "state":
+            return "normal" if self._enabled else "disabled"
+        return super().cget(key)
+
+
+def create_compact_switch(master, command: callable, background: str) -> CompactSwitch:
+    return CompactSwitch(master, command, background)

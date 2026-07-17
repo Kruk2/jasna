@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from jasna.gui.models import JobItem, JobStatus, AppSettings
+from jasna.gui.video_session import VideoSession, build_video_session
 from jasna.media import UnsupportedColorspaceError
 
 
@@ -62,7 +63,7 @@ class Processor:
         # Heavy models are loaded once and reused across consecutive jobs of the
         # same type; the other session is unloaded when the type switches.
         self._img_session: tuple | None = None      # (detector, restorer, device)
-        self._video_session: dict | None = None
+        self._video_session: VideoSession | None = None
         
     def start(
         self,
@@ -274,86 +275,11 @@ class Processor:
         once; reused across consecutive video jobs."""
         if self._video_session is not None:
             return
-        from jasna._suppress_noise import install as _install_noise_filters
-        _install_noise_filters()
-        import torch
-        from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
-        from jasna.engine_paths import model_weights_dir
-        from jasna.mosaic.detection_registry import coerce_detection_model_name, detection_model_weights_path
-        from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-        from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
-        from jasna.restorer.restoration_pipeline import RestorationPipeline
-
-        settings = self._settings
-        device = torch.device("cuda:0")
-        restoration_model_path = model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth"
-        det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = detection_model_weights_path(det_name)
-
-        compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not self._disable_basicvsrpp_tensorrt_for_run)
-        compile_result = ensure_engines_compiled(
-            EngineCompilationRequest(
-                device=str(device),
-                fp16=settings.fp16_mode,
-                basicvsrpp=compile_basicvsrpp,
-                basicvsrpp_model_path=str(restoration_model_path),
-                basicvsrpp_max_clip_size=int(settings.max_clip_size),
-                detection=True,
-                detection_model_name=det_name,
-                detection_model_path=str(detection_model_path),
-                detection_batch_size=settings.batch_size,
-                unet4x=(settings.secondary_restoration == "unet-4x"),
-            ),
-            log_callback=lambda msg: self._log("INFO", msg),
+        self._video_session = build_video_session(
+            self._settings,
+            disable_basicvsrpp_tensorrt=self._disable_basicvsrpp_tensorrt_for_run,
+            log=lambda msg: self._log("INFO", msg),
         )
-        use_tensorrt = compile_result.use_basicvsrpp_tensorrt
-
-        secondary_restorer = None
-        if settings.secondary_restoration == "tvai":
-            from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
-            tvai_args_str = f"model={settings.tvai_model}:scale={settings.tvai_scale}:{settings.tvai_args}"
-            secondary_restorer = TvaiSecondaryRestorer(
-                ffmpeg_path=settings.tvai_ffmpeg_path,
-                tvai_args=tvai_args_str,
-                scale=settings.tvai_scale,
-                num_workers=settings.tvai_workers,
-            )
-        elif settings.secondary_restoration == "unet-4x":
-            from jasna.restorer.unet4x_secondary_restorer import Unet4xSecondaryRestorer
-            secondary_restorer = Unet4xSecondaryRestorer(device=device, fp16=settings.fp16_mode)
-        elif settings.secondary_restoration == "rtx-super-res":
-            from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
-            rtx_denoise = settings.rtx_denoise.lower()
-            rtx_deblur = settings.rtx_deblur.lower()
-            secondary_restorer = RtxSuperresSecondaryRestorer(
-                device=device,
-                scale=settings.rtx_scale,
-                quality=settings.rtx_quality.lower(),
-                denoise=None if rtx_denoise == "none" else rtx_denoise,
-                deblur=None if rtx_deblur == "none" else rtx_deblur,
-            )
-
-        restoration_pipeline = RestorationPipeline(
-            restorer=BasicvsrppMosaicRestorer(
-                checkpoint_path=str(restoration_model_path),
-                device=device,
-                max_clip_size=settings.max_clip_size,
-                use_tensorrt=use_tensorrt,
-                fp16=settings.fp16_mode,
-            ),
-            secondary_restorer=secondary_restorer,
-            denoise_strength=DenoiseStrength(settings.denoise_strength),
-            denoise_step=DenoiseStep(settings.denoise_step),
-        )
-
-        self._video_session = {
-            "device": device,
-            "det_name": det_name,
-            "detection_model_path": detection_model_path,
-            "restoration_pipeline": restoration_pipeline,
-            "secondary_restorer": secondary_restorer,
-            "lut_path": (settings.lut_path or "").strip() or None,
-        }
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
 
     def _build_encoder_settings(self, codec: str) -> dict:
@@ -430,21 +356,21 @@ class Processor:
             pipeline = Pipeline(
                 input_video=input_path,
                 output_video=output_path,
-                detection_model_name=s["det_name"],
-                detection_model_path=s["detection_model_path"],
+                detection_model_name=s.det_name,
+                detection_model_path=s.detection_model_path,
                 detection_score_threshold=settings.detection_score_threshold,
-                restoration_pipeline=s["restoration_pipeline"],
+                restoration_pipeline=s.restoration_pipeline,
                 codec=codec,
                 encoder_settings=encoder_settings,
                 batch_size=settings.batch_size,
-                device=s["device"],
+                device=s.device,
                 max_clip_size=settings.max_clip_size,
                 temporal_overlap=settings.temporal_overlap,
                 enable_crossfade=settings.enable_crossfade,
                 fp16=settings.fp16_mode,
                 disable_progress=True,
                 progress_callback=progress_callback,
-                lut_path=s["lut_path"],
+                lut_path=s.lut_path,
                 retarget_high_fps=settings.retarget_high_fps,
                 segments=tuple(segments) or None,
                 splice_plan=splice_plan,
@@ -465,15 +391,7 @@ class Processor:
             return
         s = self._video_session
         self._video_session = None
-        s["restoration_pipeline"].restorer.close()
-        secondary = s["secondary_restorer"]
-        if secondary is not None and hasattr(secondary, "close"):
-            secondary.close()
-        import gc
-        import torch
-        for _ in range(3):
-            gc.collect()
-        _cleanup_torch(torch)
+        s.close()
         self._log("INFO", "Restoration models unloaded")
 
     def _ensure_image_session(self):

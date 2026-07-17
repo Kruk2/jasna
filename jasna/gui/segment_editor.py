@@ -10,8 +10,17 @@ from PIL import Image
 from tkinter import messagebox
 
 from jasna.gui.locales import t
-from jasna.gui.models import JobItem
+from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.components import Tooltip
+from jasna.gui.icons import create_compact_switch
+from jasna.gui.restoration_preview import (
+    RestorationClip,
+    RestorationFailed,
+    RestorationFrame,
+    RestorationPreviewWorker,
+    RestorationStatus,
+    RestoredClipFrame,
+)
 from jasna.gui.segment_editor_state import SegmentEditorState
 from jasna.gui.segment_preview import (
     PreviewEnded,
@@ -33,11 +42,17 @@ class SegmentEditor(ctk.CTkToplevel):
         self,
         master,
         job: JobItem,
+        get_settings: Callable[[], AppSettings],
+        is_gpu_busy: Callable[[], bool],
+        set_preview_gpu_busy: Callable[[bool], None],
         on_saved: Callable[[tuple[SegmentRange, ...]], None],
         on_closed: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(master)
         self._job = job
+        self._get_settings = get_settings
+        self._is_gpu_busy = is_gpu_busy
+        self._set_preview_gpu_busy = set_preview_gpu_busy
         self._on_saved = on_saved
         self._on_closed = on_closed
         self._state: SegmentEditorState | None = None
@@ -51,6 +66,14 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_source: Image.Image | None = None
         self._preview_image = None
         self._preview_generation = 0
+        self._restore_active = False
+        self._restore_after: str | None = None
+        self._restore_toggle_blocked = False
+        self._restoration_worker: RestorationPreviewWorker | None = None
+        self._restored_source: Image.Image | None = None
+        self._restored_clip: tuple[RestoredClipFrame, ...] = ()
+        self._restore_play_pending = False
+        self._restore_generation = 0
         self._keyframe_index = None
         self._analysis_error: str | None = None
         self._compatibility_error: str | None = None
@@ -65,11 +88,13 @@ class SegmentEditor(ctk.CTkToplevel):
         self._size_and_center()
         self._build_loading()
         self._bind_shortcuts()
+        self.update_idletasks()
+        self.wait_visibility()
+        self._take_focus()
 
         self._preview_worker = SegmentPreviewWorker(job.path)
         self._preview_worker.start()
         self.after(25, self._poll_workers)
-        self.after_idle(self._take_focus)
 
     def _size_and_center(self) -> None:
         screen_w = self.winfo_screenwidth()
@@ -214,6 +239,21 @@ class SegmentEditor(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY,
         )
         self._time_label.pack(side="left", padx=12)
+        restore_control = ctk.CTkFrame(transport, fg_color="transparent")
+        restore_control.pack(side="right")
+        self._restore_toggle = create_compact_switch(
+            restore_control,
+            self._toggle_restoration_preview,
+            Colors.BG_CARD,
+        )
+        self._restore_toggle.pack(side="right")
+        ctk.CTkLabel(
+            restore_control,
+            text=t("segments_restore_preview"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+        ).pack(side="right", padx=(0, 6))
+        self._restore_toggle_tooltip = Tooltip(self._restore_toggle, t("segments_restore_preview_hint"))
         range_panel = ctk.CTkFrame(
             body,
             fg_color=Colors.BG_CARD,
@@ -388,6 +428,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if initial is not None:
             self._current = initial.start
         self._refresh_all()
+        self.update_idletasks()
         self._preview_generation = self._preview_worker.seek(self._current)
         self._start_keyframe_probe(metadata)
 
@@ -421,6 +462,15 @@ class SegmentEditor(ctk.CTkToplevel):
                 self._refresh_workload()
         except queue.Empty:
             pass
+
+        if self._restoration_worker is not None:
+            try:
+                while True:
+                    self._handle_restoration_event(self._restoration_worker.events.get_nowait())
+            except queue.Empty:
+                pass
+        if self._state is not None:
+            self._refresh_restore_toggle()
         self.after(25, self._poll_workers)
 
     def _start_keyframe_probe(self, metadata: VideoMetadata) -> None:
@@ -445,7 +495,10 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         self._current = min(self._state.duration, max(0.0, event.seconds))
         self._preview_source = event.image
-        self._refresh_preview_image()
+        if self._restore_active and self._playing and self._restored_clip:
+            self._show_restored_clip_frame(self._current)
+        elif not self._restore_active:
+            self._refresh_preview_image()
         self._time_label.configure(text=self._time_text())
         self._timeline.reveal(self._current)
         self._refresh_timeline()
@@ -461,20 +514,24 @@ class SegmentEditor(ctk.CTkToplevel):
                 pass
         self._resize_after = self.after(60, self._refresh_preview_image)
 
-    def _refresh_preview_image(self) -> None:
-        self._resize_after = None
-        if self._preview_source is None or self._closed.is_set():
-            return
-        width = max(2, self._preview.winfo_width() - 16)
-        height = max(2, self._preview.winfo_height() - 16)
-        source_width, source_height = self._preview_source.size
+    def _fit_to_label(self, label: ctk.CTkLabel, source: Image.Image) -> ctk.CTkImage:
+        width = max(2, label.winfo_width() - 16)
+        height = max(2, label.winfo_height() - 16)
+        source_width, source_height = source.size
         scale = min(width / source_width, height / source_height)
         target_size = (
             max(2, round(source_width * scale)),
             max(2, round(source_height * scale)),
         )
-        image = self._preview_source.resize(target_size, Image.Resampling.LANCZOS)
-        self._preview_image = ctk.CTkImage(image, size=image.size)
+        image = source.resize(target_size, Image.Resampling.LANCZOS)
+        return ctk.CTkImage(image, size=image.size)
+
+    def _refresh_preview_image(self) -> None:
+        self._resize_after = None
+        source = self._restored_source if self._restore_active else self._preview_source
+        if source is None or self._closed.is_set():
+            return
+        self._preview_image = self._fit_to_label(self._preview, source)
         self._preview.configure(image=self._preview_image, text="")
 
     def _show_preview_error(self, message: str) -> None:
@@ -498,6 +555,17 @@ class SegmentEditor(ctk.CTkToplevel):
         self._timeline.reveal(self._current)
         self._refresh_timeline()
         self._preview_generation = self._preview_worker.seek(self._current)
+        if self._restore_active:
+            self._restored_clip = ()
+            self._restored_source = None
+            self._preview_image = None
+            self._restore_play_pending = False
+            self._preview.configure(
+                image=None,
+                text=t("segments_restore_restoring"),
+                text_color=Colors.STATUS_PENDING,
+            )
+            self._schedule_restoration_preview()
 
     def _step(self, frames: int) -> None:
         state = self._require_state()
@@ -505,11 +573,22 @@ class SegmentEditor(ctk.CTkToplevel):
 
     def _toggle_play(self) -> None:
         state = self._require_state()
+        if self._restore_play_pending:
+            self._restore_play_pending = False
+            self._play.configure(text="▶")
+            self._request_restoration_preview()
+            return
         if self._playing:
             self._set_playing(False)
             return
         if self._current >= state.duration - 1 / state.fps:
             self._current = 0.0
+        if self._restore_active:
+            if self._restored_clip_covers(self._current):
+                self._start_restored_playback(self._current)
+            else:
+                self._request_restoration_playback(self._current)
+            return
         self._set_playing(True)
         self._preview_generation = self._preview_worker.seek(self._current)
 
@@ -527,7 +606,201 @@ class SegmentEditor(ctk.CTkToplevel):
     def _request_next_frame(self) -> None:
         self._next_frame_after = None
         if self._playing and not self._closed.is_set():
+            if self._restore_active and self._restored_clip:
+                state = self._require_state()
+                last_seconds = self._restored_clip[-1].seconds
+                frame_duration = 1 / state.fps
+                if self._current >= last_seconds - frame_duration / 2:
+                    self._set_playing(False)
+                    next_seconds = last_seconds + frame_duration
+                    if next_seconds < state.duration - frame_duration / 2:
+                        self._request_restoration_playback(next_seconds)
+                    return
             self._preview_worker.next_frame()
+
+    def _toggle_restoration_preview(self) -> None:
+        self._require_state()
+        if self._restore_active:
+            self._deactivate_restoration_preview()
+            return
+        if self._is_gpu_busy():
+            self._restore_toggle.deselect()
+            return
+        self._restore_active = True
+        self._set_playing(False)
+        self._restore_toggle.select()
+        self._restored_source = None
+        self._preview_image = None
+        self._preview.configure(
+            image=None,
+            text=t("segments_restore_restoring"),
+            text_color=Colors.STATUS_PENDING,
+        )
+        if self._restoration_worker is None:
+            self._set_preview_gpu_busy(True)
+            try:
+                self._restoration_worker = RestorationPreviewWorker(
+                    self._job.path,
+                    self._metadata,
+                    on_stopped=lambda: self._set_preview_gpu_busy(False),
+                )
+                self._restoration_worker.start()
+            except Exception:
+                self._restoration_worker = None
+                self._set_preview_gpu_busy(False)
+                self._restore_active = False
+                self._restore_toggle.deselect()
+                self._refresh_preview_image()
+                raise
+        self._request_restoration_preview()
+
+    def _deactivate_restoration_preview(self) -> None:
+        self._restore_active = False
+        if self._restoration_worker is not None:
+            self._restoration_worker.cancel()
+        self._restore_play_pending = False
+        self._restored_clip = ()
+        self._set_playing(False)
+        if self._restore_after is not None:
+            try:
+                self.after_cancel(self._restore_after)
+            except tk.TclError:
+                pass
+            self._restore_after = None
+        self._restored_source = None
+        self._preview_image = None
+        self._restore_toggle.deselect()
+        self._refresh_preview_image()
+
+    def _schedule_restoration_preview(self) -> None:
+        self._restore_generation = -1
+        if self._restore_after is not None:
+            try:
+                self.after_cancel(self._restore_after)
+            except tk.TclError:
+                pass
+        self._restore_after = self.after(400, self._request_restoration_preview)
+
+    def _request_restoration_preview(self) -> None:
+        self._restore_after = None
+        if not self._restore_active or self._closed.is_set():
+            return
+        self._restore_play_pending = False
+        self._restored_clip = ()
+        self._play.configure(text="▶")
+        self._restore_generation = self._restoration_worker.request(
+            self._current,
+            self._get_settings(),
+        )
+        if self._restored_source is None:
+            self._preview.configure(
+                image=None,
+                text=t("segments_restore_restoring"),
+                text_color=Colors.STATUS_PENDING,
+            )
+
+    def _request_restoration_playback(self, start_seconds: float) -> None:
+        if not self._restore_active or self._closed.is_set():
+            return
+        if self._restore_after is not None:
+            try:
+                self.after_cancel(self._restore_after)
+            except tk.TclError:
+                pass
+            self._restore_after = None
+        self._set_playing(False)
+        self._restore_play_pending = True
+        self._restored_clip = ()
+        self._restored_source = None
+        self._preview_image = None
+        self._play.configure(text="…")
+        self._preview.configure(
+            image=None,
+            text=t("segments_restore_restoring"),
+            text_color=Colors.STATUS_PENDING,
+        )
+        self._restore_generation = self._restoration_worker.request(
+            start_seconds,
+            self._get_settings(),
+            playback=True,
+        )
+
+    def _handle_restoration_event(self, event) -> None:
+        if not self._restore_active or event.generation != self._restore_generation:
+            return
+        if isinstance(event, RestorationStatus):
+            if self._restored_source is None:
+                self._preview.configure(
+                    image=None,
+                    text=self._restoration_status_text(event.message),
+                    text_color=Colors.STATUS_PENDING,
+                )
+        elif isinstance(event, RestorationFrame):
+            self._restored_clip = ()
+            self._restored_source = event.image
+            self._refresh_preview_image()
+        elif isinstance(event, RestorationClip):
+            self._restored_clip = event.frames
+            if not event.frames:
+                self._restore_play_pending = False
+                self._play.configure(text="▶")
+                return
+            self._restored_source = event.frames[0].image
+            self._refresh_preview_image()
+            if self._restore_play_pending:
+                self._restore_play_pending = False
+                self._start_restored_playback(event.frames[0].seconds)
+        elif isinstance(event, RestorationFailed):
+            self._restore_play_pending = False
+            self._play.configure(text="▶")
+            self._restored_clip = ()
+            self._restored_source = None
+            self._preview_image = None
+            self._preview.configure(
+                image=None,
+                text=t("segments_restore_failed", message=event.message),
+                text_color=Colors.STATUS_ERROR,
+            )
+
+    def _restored_clip_covers(self, seconds: float) -> bool:
+        if len(self._restored_clip) < 2 or self._state is None:
+            return False
+        tolerance = 0.75 / self._state.fps
+        return (
+            self._restored_clip[0].seconds - tolerance
+            <= seconds
+            < self._restored_clip[-1].seconds - tolerance
+        )
+
+    def _start_restored_playback(self, seconds: float) -> None:
+        self._show_restored_clip_frame(seconds)
+        self._set_playing(True)
+        self._preview_generation = self._preview_worker.seek(seconds)
+
+    def _show_restored_clip_frame(self, seconds: float) -> None:
+        frame = min(self._restored_clip, key=lambda item: abs(item.seconds - seconds))
+        self._restored_source = frame.image
+        self._refresh_preview_image()
+
+    @staticmethod
+    def _restoration_status_text(message: str) -> str:
+        if message == "loading_models":
+            return t("segments_restore_loading_models")
+        if message == "restoring":
+            return t("segments_restore_restoring")
+        return message
+
+    def _refresh_restore_toggle(self) -> None:
+        busy = bool(self._is_gpu_busy())
+        if busy == self._restore_toggle_blocked:
+            return
+        self._restore_toggle_blocked = busy
+        if busy and self._restore_active:
+            self._deactivate_restoration_preview()
+        self._restore_toggle.configure(state="disabled" if busy else "normal")
+        self._restore_toggle_tooltip.set_text(
+            t("segments_restore_gpu_busy") if busy else t("segments_restore_preview_hint")
+        )
 
     def _new_range(self) -> None:
         state = self._require_state()
@@ -819,6 +1092,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._set_playing(False)
         self._closed.set()
         self._preview_worker.close()
+        if self._restoration_worker is not None:
+            self._restoration_worker.close()
         try:
             self.grab_release()
         except tk.TclError:

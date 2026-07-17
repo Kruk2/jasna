@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from jasna.gui.models import AppSettings, JobItem, JobStatus
 from jasna.gui.processor import Processor
+from jasna.gui.video_session import VideoSession
 from jasna.segments import SegmentRange
 
 
@@ -51,13 +52,14 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     pipeline = MagicMock()
     processor = Processor()
     processor._settings = AppSettings()
-    processor._video_session = {
-        "det_name": "detector",
-        "detection_model_path": tmp_path / "detector.engine",
-        "restoration_pipeline": MagicMock(),
-        "device": MagicMock(),
-        "lut_path": None,
-    }
+    processor._video_session = VideoSession(
+        device=MagicMock(),
+        det_name="detector",
+        detection_model_path=tmp_path / "detector.engine",
+        restoration_pipeline=MagicMock(),
+        secondary_restorer=None,
+        lut_path=None,
+    )
     processor._ensure_video_session = MagicMock()
     processor._build_encoder_settings = MagicMock(return_value={})
 
@@ -71,3 +73,21 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
         processor._run_video_job(1, input_path, output_path, segments=segments)
 
     assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
+
+
+def test_ensure_video_session_delegates_to_factory_and_close_unloads() -> None:
+    processor = Processor()
+    processor._settings = AppSettings()
+    session = MagicMock()
+
+    with patch("jasna.gui.processor.build_video_session", return_value=session) as build:
+        processor._ensure_video_session()
+        processor._ensure_video_session()
+
+    build.assert_called_once()
+    assert build.call_args.kwargs["disable_basicvsrpp_tensorrt"] is False
+    assert processor._video_session is session
+
+    processor._close_video_session()
+    session.close.assert_called_once_with()
+    assert processor._video_session is None

@@ -24,6 +24,9 @@ class Tooltip:
         widget.bind("<Enter>", self._schedule_show)
         widget.bind("<Leave>", self.hide)
 
+    def set_text(self, text: str):
+        self._text = text
+
     def _schedule_show(self, event=None):
         self._cancel_schedule()
         self._after_id = self._widget.after(self._SHOW_DELAY_MS, self._show)
