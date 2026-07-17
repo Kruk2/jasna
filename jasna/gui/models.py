@@ -32,6 +32,13 @@ class JobStatus(Enum):
 _job_id_counter = itertools.count(1)
 
 
+@dataclass(frozen=True)
+class JobProcessingSnapshot:
+    segments: tuple[SegmentRange, ...]
+    detection_model: str | None
+    detection_score_threshold: float | None
+
+
 @dataclass
 class JobItem:
     path: Path
@@ -42,6 +49,8 @@ class JobItem:
     error_message: str = ""
     has_conflict: bool = False  # True if output file already exists
     segments: tuple[SegmentRange, ...] = ()
+    detection_model: str | None = None
+    detection_score_threshold: float | None = None
     _state_lock: threading.Lock = field(
         default_factory=threading.Lock,
         repr=False,
@@ -70,12 +79,31 @@ class JobItem:
             self.segments = tuple(segments)
             return True
 
-    def begin_processing(self) -> tuple[SegmentRange, ...] | None:
+    def try_set_video_options(
+        self,
+        segments: tuple[SegmentRange, ...],
+        *,
+        detection_model: str,
+        detection_score_threshold: float,
+    ) -> bool:
+        with self._state_lock:
+            if self.status is not JobStatus.PENDING:
+                return False
+            self.segments = tuple(segments)
+            self.detection_model = str(detection_model)
+            self.detection_score_threshold = float(detection_score_threshold)
+            return True
+
+    def begin_processing(self) -> JobProcessingSnapshot | None:
         with self._state_lock:
             if self.status is not JobStatus.PENDING:
                 return None
             self.status = JobStatus.PROCESSING
-            return self.segments
+            return JobProcessingSnapshot(
+                segments=self.segments,
+                detection_model=self.detection_model,
+                detection_score_threshold=self.detection_score_threshold,
+            )
 
 
 @dataclass

@@ -22,7 +22,9 @@ SUPPORTED_SMART_OUTPUTS = frozenset({".mp4", ".mov", ".mkv"})
 
 
 class SmartRenderCompatibilityError(ValueError):
-    pass
+    def __init__(self, message: str, *, reason: str = "generic") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -234,12 +236,14 @@ def build_splice_plan(
         effect_end = index.start_pts + round(segment.end / index.time_base)
         if effect_end <= effect_start:
             raise SmartRenderCompatibilityError(
-                "A selected range is shorter than one video timestamp interval"
+                "A selected range is shorter than one video timestamp interval",
+                reason="range_too_short",
             )
         left_index = bisect.bisect_right(index.pts, effect_start) - 1
         if left_index < 0:
             raise SmartRenderCompatibilityError(
-                "The first selected segment begins before the first random-access keyframe"
+                "The first selected segment begins before the first random-access keyframe",
+                reason="before_first_keyframe",
             )
         render_start = index.pts[left_index]
         right_index = bisect.bisect_left(index.pts, effect_end)
@@ -272,7 +276,8 @@ def build_splice_plan(
     ):
         raise SmartRenderCompatibilityError(
             "The selected ranges have no usable safe video cut points, so they would "
-            "require re-encoding the entire video"
+            "require re-encoding the entire video",
+            reason="whole_video_reencode",
         )
     return SplicePlan(index=index, spans=tuple(spans), segments=normalized)
 

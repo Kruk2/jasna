@@ -30,6 +30,31 @@ def _make_preview_source(path) -> None:
     )
 
 
+def _make_variable_rate_preview_source(path) -> None:
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=160x90:rate=10:duration=1",
+            "-vf",
+            r"setpts=if(lt(N\,5)\,N/(10*TB)\,(N+5)/(10*TB))",
+            "-fps_mode",
+            "vfr",
+            "-c:v",
+            "mpeg4",
+            str(path),
+        ],
+        check=True,
+        **subprocess_no_window_kwargs(),
+    )
+
+
 def _next_event(worker, event_type):
     while True:
         event = worker.events.get(timeout=5)
@@ -73,3 +98,23 @@ def test_preview_worker_coalesces_pending_seeks() -> None:
     with pytest.raises(queue.Empty):
         worker._commands.get_nowait()
     worker.close()
+
+
+def test_preview_worker_finds_exact_previous_vfr_frame(tmp_path) -> None:
+    source = tmp_path / "variable-rate-preview.mp4"
+    _make_variable_rate_preview_source(source)
+    worker = SegmentPreviewWorker(source, max_size=(80, 80))
+    worker.start()
+
+    try:
+        _next_event(worker, PreviewLoaded)
+        worker.seek(1.0)
+        current = _next_event(worker, PreviewFrame)
+        assert current.seconds == pytest.approx(1.0)
+
+        worker.previous_frame(current.seconds)
+        previous = _next_event(worker, PreviewFrame)
+
+        assert previous.seconds == pytest.approx(0.4)
+    finally:
+        worker.close()

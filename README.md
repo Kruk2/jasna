@@ -104,12 +104,6 @@ transition frames are not restored.
 jasna --input input.mp4 --output output.mp4 --segments "10-25,01:10-01:30.5"
 ```
 
-In the GUI segment editor, **Scan for mosaic** samples the video (every 0.25–2
-seconds) with the configured detection model and marks where mosaic was found
-on the timeline. Adjust the score threshold after the scan to see detections
-change without rescanning, add the detected ranges with one click, and toggle
-**Show detections** to overlay the detection masks on the preview frame.
-
 Segment processing accepts a single H.264, HEVC, or AV1 video and MP4, MOV, or
 MKV output. The output codec must match the input codec; when `--codec` is not
 specified, Jasna selects it automatically. It cannot be combined with folder,
@@ -371,3 +365,30 @@ Then install Jasna in editable mode:
 ```bash
 uv pip install -e .[dev]
 ```
+
+## Segment Editor
+
+<!-- SCREENSHOT PLACEHOLDER: Add the final Segment Editor screenshot here. -->
+
+The Segment Editor lets you preview a queued video and select frame-accurate
+ranges for restoration; leave the selection empty to restore the full video.
+**Restore preview** shows the current frame or a short playback with the
+selected restoration settings before processing.
+
+When ranges are selected, the editor clearly shows that export keeps the
+source video codec; the main **Encoding** codec setting does not apply because
+unselected sections are stream-copied.
+
+Mosaic scanning is built into the editor:
+
+- Scan every frame or at 0.25–2 second intervals. It is GPU-only and reaches
+  about **2,000 FPS on an RTX 5090**; actual speed depends on the video, model,
+  and settings.
+- Change confidence after scanning to update amber detected ranges immediately,
+  then add them to the purple restoration selection.
+- Preview saved masks on sampled frames; unsampled frames are detected exactly
+  on demand. Low-VRAM systems automatically recycle results through system
+  memory.
+
+The detection model and confidence are remembered per queued video and used
+during final processing, so different videos can use different settings.

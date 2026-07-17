@@ -5,7 +5,7 @@ import traceback
 import queue
 import time
 from pathlib import Path
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable
 
 from jasna.gui.models import JobItem, JobStatus, AppSettings
@@ -164,9 +164,10 @@ class Processor:
         run_post_export_action_safely(action, command, lambda message: self._log("ERROR", message))
             
     def _process_job(self, job: JobItem):
-        segments = job.begin_processing()
-        if segments is None:
+        snapshot = job.begin_processing()
+        if snapshot is None:
             return
+        segments = snapshot.segments
         self._log("INFO", f"Started processing {job.filename}")
         self._progress(ProgressUpdate(
             job_id=job.id,
@@ -177,6 +178,15 @@ class Processor:
         input_path = job.path
         from jasna.media.image_io import IMAGE_EXTENSIONS
         is_image = input_path.suffix.lower() in IMAGE_EXTENSIONS
+        job_settings = self._settings
+        if not is_image:
+            overrides = {}
+            if snapshot.detection_model is not None:
+                overrides["detection_model"] = snapshot.detection_model
+            if snapshot.detection_score_threshold is not None:
+                overrides["detection_score_threshold"] = snapshot.detection_score_threshold
+            if overrides:
+                job_settings = replace(job_settings, **overrides)
 
         # Determine output path
         if self._output_folder:
@@ -215,10 +225,17 @@ class Processor:
                 self._close_video_session()
             else:
                 self._close_image_session()
+            pipeline_options = {}
             if segments:
-                self._run_pipeline(job.id, input_path, output_path, segments=segments)
-            else:
-                self._run_pipeline(job.id, input_path, output_path)
+                pipeline_options["segments"] = segments
+            if job_settings is not self._settings:
+                pipeline_options["settings"] = job_settings
+            self._run_pipeline(
+                job.id,
+                input_path,
+                output_path,
+                **pipeline_options,
+            )
 
             job.status = JobStatus.COMPLETED
             self._progress(ProgressUpdate(
@@ -262,21 +279,28 @@ class Processor:
         output_path: Path,
         *,
         segments=(),
+        settings: AppSettings | None = None,
     ):
         from jasna.media.image_io import IMAGE_EXTENSIONS
 
         if input_path.suffix.lower() in IMAGE_EXTENSIONS:
             self._run_image_job(job_id, input_path, output_path)
         else:
-            self._run_video_job(job_id, input_path, output_path, segments=segments)
+            self._run_video_job(
+                job_id,
+                input_path,
+                output_path,
+                segments=segments,
+                settings=settings or self._settings,
+            )
             
-    def _ensure_video_session(self):
+    def _ensure_video_session(self, settings: AppSettings | None = None):
         """Compile engines + build the BasicVSR++ (and optional secondary) restorer
         once; reused across consecutive video jobs."""
         if self._video_session is not None:
             return
         self._video_session = build_video_session(
-            self._settings,
+            settings or self._settings,
             disable_basicvsrpp_tensorrt=self._disable_basicvsrpp_tensorrt_for_run,
             log=lambda msg: self._log("INFO", msg),
         )
@@ -300,10 +324,18 @@ class Processor:
             encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
         return validate_encoder_settings(encoder_settings, codec=codec)
 
-    def _run_video_job(self, job_id: int, input_path: Path, output_path: Path, *, segments=()):
+    def _run_video_job(
+        self,
+        job_id: int,
+        input_path: Path,
+        output_path: Path,
+        *,
+        segments=(),
+        settings: AppSettings | None = None,
+    ):
         from jasna.pipeline import Pipeline
 
-        settings = self._settings
+        settings = settings or self._settings
         codec = settings.codec
         splice_plan = None
         if segments:
@@ -327,8 +359,9 @@ class Processor:
                 duration=metadata.duration,
             )
         encoder_settings = self._build_encoder_settings(codec)
-        self._ensure_video_session()
+        self._ensure_video_session(settings)
         s = self._video_session
+        det_name, detection_model_path = self._prepare_job_detector(settings, s)
         last_update_time = [0.0]
 
         def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
@@ -356,8 +389,8 @@ class Processor:
             pipeline = Pipeline(
                 input_video=input_path,
                 output_video=output_path,
-                detection_model_name=s.det_name,
-                detection_model_path=s.detection_model_path,
+                detection_model_name=det_name,
+                detection_model_path=detection_model_path,
                 detection_score_threshold=settings.detection_score_threshold,
                 restoration_pipeline=s.restoration_pipeline,
                 codec=codec,
@@ -385,6 +418,36 @@ class Processor:
             _p010_cache.clear()
             from jasna.media.rgb_to_nv12 import _cache as _nv12_cache
             _nv12_cache.clear()
+
+    def _prepare_job_detector(
+        self,
+        settings: AppSettings,
+        session: VideoSession,
+    ) -> tuple[str, Path]:
+        from jasna.mosaic.detection_registry import (
+            coerce_detection_model_name,
+            detection_model_weights_path,
+        )
+
+        det_name = coerce_detection_model_name(str(settings.detection_model))
+        detection_model_path = detection_model_weights_path(det_name)
+        if det_name == session.det_name and detection_model_path == session.detection_model_path:
+            return det_name, detection_model_path
+
+        from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
+
+        ensure_engines_compiled(
+            EngineCompilationRequest(
+                device=str(session.device),
+                fp16=settings.fp16_mode,
+                detection=True,
+                detection_model_name=det_name,
+                detection_model_path=str(detection_model_path),
+                detection_batch_size=settings.batch_size,
+            ),
+            log_callback=lambda msg: self._log("INFO", msg),
+        )
+        return det_name, detection_model_path
 
     def _close_video_session(self):
         if self._video_session is None:

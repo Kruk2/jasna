@@ -3,7 +3,9 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
+from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import replace
 
 import customtkinter as ctk
 from PIL import Image
@@ -27,7 +29,10 @@ from jasna.gui.mosaic_scan import (
     MosaicScanWorker,
     ScanCompleted,
     ScanFailed,
+    ScanMaskFailed,
+    ScanMaskReady,
     ScanProgress,
+    ScanStorageSpilled,
     ScanStatus,
     segments_from_scores,
 )
@@ -39,6 +44,7 @@ from jasna.gui.segment_preview import (
     PreviewLoaded,
     SegmentPreviewWorker,
 )
+from jasna.gui.settings_panel import CODEC_CANONICAL_TO_LABEL
 from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media import VideoMetadata
@@ -91,13 +97,31 @@ class SegmentEditor(ctk.CTkToplevel):
         self._edit_notice_warning = False
         self._analysis_events: queue.Queue[object] = queue.Queue()
         self._scan_worker: MosaicScanWorker | None = None
+        self._scan_active = False
+        self._scan_low_vram = False
+        self._scan_was_stopped = False
         self._scan_result: MosaicScanResult | None = None
         self._scan_proposals: tuple = ()
-        self._scan_overlay = False
+        self._scan_overlay = True
+        settings = get_settings()
+        self._scan_detection_model = job.detection_model or str(settings.detection_model)
         self._scan_threshold = min(
-            0.9, max(SCAN_SCORE_FLOOR, float(get_settings().detection_score_threshold))
+            1.0,
+            max(
+                SCAN_SCORE_FLOOR,
+                float(
+                    job.detection_score_threshold
+                    if job.detection_score_threshold is not None
+                    else settings.detection_score_threshold
+                ),
+            ),
         )
         self._scan_thr_after: str | None = None
+        self._scan_mask_generation = 0
+        self._scan_mask_requested_key: int | None = None
+        self._scan_mask_cache: OrderedDict[int, tuple[float, float, object]] = OrderedDict()
+        self._segment_action_widgets: list = []
+        self._timeline_zoom_buttons: list = []
 
         self.title(t("segments_title"))
         self.configure(fg_color=Colors.BG_MAIN)
@@ -117,12 +141,12 @@ class SegmentEditor(ctk.CTkToplevel):
     def _size_and_center(self) -> None:
         screen_w = self.winfo_screenwidth()
         screen_h = self.winfo_screenheight()
-        height = max(560, screen_h - 200)
-        width = min(max(1, screen_w - 48), max(800, round(height * 1060 / 720)))
+        height = min(max(640, screen_h - 200), max(1, screen_h - 72))
+        width = min(max(1, screen_w - 48), max(900, round(height * 1060 / 720)))
         x = max(0, (screen_w - width) // 2)
         y = max(0, (screen_h - height) // 2)
         self.geometry(f"{width}x{height}+{x}+{y}")
-        self.minsize(min(800, width), min(560, height))
+        self.minsize(min(900, width), min(640, height))
 
     def _take_focus(self) -> None:
         if self._closed.is_set():
@@ -196,12 +220,24 @@ class SegmentEditor(ctk.CTkToplevel):
             text_color=Colors.STATUS_PENDING,
             anchor="w",
         ).pack(fill="x")
+        self._codec_notice = ctk.CTkLabel(
+            title_column,
+            text="",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+            text_color=Colors.STATUS_PAUSED,
+            anchor="w",
+            justify="left",
+            wraplength=840,
+        )
 
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=16)
         body.grid_columnconfigure(0, weight=7, uniform="editor")
         body.grid_columnconfigure(1, weight=4, uniform="editor")
         body.grid_rowconfigure(0, weight=1)
+        # Let the preview/range area absorb small-window height changes instead
+        # of allowing its requested size to push the timeline/footer off-screen.
+        body.grid_propagate(False)
 
         preview_card = ctk.CTkFrame(
             body,
@@ -377,98 +413,240 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._range_action.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(5, 0))
 
-        scan_bar = ctk.CTkFrame(self, fg_color="transparent")
-        scan_bar.pack(fill="x", padx=16, pady=(8, 0))
-        self._scan_btn = ctk.CTkButton(
-            scan_bar,
-            text=t("segments_scan"),
-            height=24,
-            width=130,
-            command=self._start_scan,
-        )
-        self._scan_btn.pack(side="left")
-        self._scan_stop_btn = ctk.CTkButton(
-            scan_bar,
-            text=t("segments_scan_stop"),
-            height=24,
-            width=90,
+        scan_card = ctk.CTkFrame(
+            self,
             fg_color=Colors.BG_CARD,
-            hover_color=Colors.STATUS_ERROR,
-            state="disabled",
-            command=self._stop_scan,
+            corner_radius=Sizing.BORDER_RADIUS,
         )
-        self._scan_stop_btn.pack(side="left", padx=(6, 0))
+        self._scan_card = scan_card
+        scan_card.pack(fill="x", padx=16, pady=(8, 0))
+
+        scan_header = ctk.CTkFrame(scan_card, fg_color="transparent")
+        scan_header.pack(fill="x", padx=12, pady=(7, 0))
         ctk.CTkLabel(
-            scan_bar,
+            scan_header,
+            text=t("segments_scan_title"),
+            font=(Fonts.FAMILY, Fonts.SIZE_HEADING, "bold"),
+            text_color=Colors.TEXT_PRIMARY,
+            anchor="w",
+            height=26,
+        ).pack(side="left")
+        ctk.CTkLabel(
+            scan_header,
+            text=t("segments_scan_subtitle"),
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+            anchor="w",
+            height=26,
+        ).pack(side="left", fill="x", expand=True, padx=(8, 8))
+        self._scan_info_btn = ctk.CTkButton(
+            scan_header,
+            text=t("segments_scan_help_button"),
+            width=104,
+            height=26,
+            fg_color="transparent",
+            hover_color=Colors.BORDER_LIGHT,
+            border_width=1,
+            border_color=Colors.BORDER_LIGHT,
+            command=self._show_scan_help,
+        )
+        self._scan_info_btn.pack(side="right")
+        Tooltip(self._scan_info_btn, t("segments_scan_help_hint"))
+
+        from jasna.mosaic.detection_registry import (
+            DEFAULT_DETECTION_MODEL_NAME,
+            discover_available_detection_models,
+        )
+
+        available_models = discover_available_detection_models()
+        if not available_models:
+            available_models = [DEFAULT_DETECTION_MODEL_NAME]
+        if self._scan_detection_model not in available_models:
+            available_models.insert(0, self._scan_detection_model)
+
+        self._scan_interval_seconds_by_label = {
+            t("segments_scan_frequency_every_frame"): 0.0,
+            t("segments_scan_frequency_quarter"): 0.25,
+            t("segments_scan_frequency_half"): 0.5,
+            t("segments_scan_frequency_one"): 1.0,
+            t("segments_scan_frequency_two"): 2.0,
+        }
+
+        scan_settings = ctk.CTkFrame(scan_card, fg_color="transparent")
+        scan_settings.pack(fill="x", padx=12, pady=(3, 7))
+        scan_settings.grid_columnconfigure(3, weight=1)
+
+        model_field = ctk.CTkFrame(scan_settings, fg_color="transparent")
+        model_field.grid(row=0, column=0, sticky="w", padx=(0, 16))
+        model_label = ctk.CTkLabel(
+            model_field,
+            text=t("segments_scan_model"),
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+            height=16,
+        )
+        model_label.pack(anchor="w", pady=(0, 1))
+        self._scan_model = ctk.CTkOptionMenu(
+            model_field,
+            values=available_models,
+            width=170,
+            height=26,
+            command=self._on_scan_model_changed,
+        )
+        self._scan_model.set(self._scan_detection_model)
+        self._scan_model.pack(anchor="w")
+        Tooltip(model_label, t("segments_scan_model_hint"))
+        Tooltip(self._scan_model, t("segments_scan_model_hint"))
+
+        frequency_field = ctk.CTkFrame(scan_settings, fg_color="transparent")
+        frequency_field.grid(row=0, column=1, sticky="w", padx=(0, 16))
+        frequency_label = ctk.CTkLabel(
+            frequency_field,
             text=t("segments_scan_interval"),
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_PRIMARY,
-        ).pack(side="left", padx=(12, 4))
-        self._scan_interval = ctk.CTkOptionMenu(
-            scan_bar,
-            values=["0.25s", "0.5s", "1s", "2s"],
-            width=70,
-            height=24,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+            height=16,
         )
-        self._scan_interval.set("1s")
-        self._scan_interval.pack(side="left")
-        ctk.CTkLabel(
-            scan_bar,
+        frequency_label.pack(anchor="w", pady=(0, 1))
+        self._scan_interval = ctk.CTkOptionMenu(
+            frequency_field,
+            values=list(self._scan_interval_seconds_by_label),
+            width=210,
+            height=26,
+        )
+        self._scan_interval.set(t("segments_scan_frequency_one"))
+        self._scan_interval.pack(anchor="w")
+        Tooltip(frequency_label, t("segments_scan_interval_hint"))
+        Tooltip(self._scan_interval, t("segments_scan_interval_hint"))
+
+        confidence_field = ctk.CTkFrame(scan_settings, fg_color="transparent")
+        confidence_field.grid(row=0, column=2, sticky="w")
+        confidence_label = ctk.CTkLabel(
+            confidence_field,
             text=t("segments_scan_threshold"),
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.TEXT_PRIMARY,
-        ).pack(side="left", padx=(12, 4))
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+            height=16,
+        )
+        confidence_label.pack(anchor="w", pady=(0, 1))
+        confidence_control = ctk.CTkFrame(confidence_field, fg_color="transparent")
+        confidence_control.pack(anchor="w")
         self._scan_thr_slider = ctk.CTkSlider(
-            scan_bar,
+            confidence_control,
             from_=SCAN_SCORE_FLOOR,
-            to=0.9,
-            width=110,
+            to=1.0,
+            width=150,
             command=self._on_scan_threshold,
         )
         self._scan_thr_slider.set(self._scan_threshold)
         self._scan_thr_slider.pack(side="left")
         self._scan_thr_label = ctk.CTkLabel(
-            scan_bar,
+            confidence_control,
             text=f"{self._scan_threshold:.2f}",
             font=(Fonts.FAMILY_MONO, Fonts.SIZE_SMALL),
             text_color=Colors.TEXT_PRIMARY,
-            width=36,
+            width=42,
+            height=26,
         )
-        self._scan_thr_label.pack(side="left", padx=(4, 0))
+        self._scan_thr_label.pack(side="left", padx=(6, 0))
+        Tooltip(confidence_label, t("segments_scan_threshold_hint"))
+        Tooltip(self._scan_thr_slider, t("segments_scan_threshold_hint"))
+
+        self._scan_btn = ctk.CTkButton(
+            scan_settings,
+            text=t("segments_scan"),
+            height=28,
+            width=130,
+            command=self._start_scan,
+        )
+        self._scan_btn.grid(row=0, column=4, sticky="se", padx=(16, 0))
+
+        self._scan_activity = ctk.CTkFrame(
+            scan_card,
+            fg_color=Colors.BG_PANEL,
+            corner_radius=Sizing.BORDER_RADIUS,
+        )
+        scan_activity_row = ctk.CTkFrame(self._scan_activity, fg_color="transparent")
+        scan_activity_row.pack(fill="x", padx=10, pady=8)
+        self._scan_status_dot = ctk.CTkLabel(
+            scan_activity_row,
+            text="●",
+            width=14,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+        )
+        self._scan_status_dot.pack(side="left", padx=(0, 5))
+        self._scan_status = ctk.CTkLabel(
+            scan_activity_row,
+            text="",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+            text_color=Colors.STATUS_PENDING,
+            anchor="w",
+        )
+        self._scan_status.pack(side="left", fill="x", expand=True)
+
+        self._scan_stop_btn = ctk.CTkButton(
+            scan_activity_row,
+            text=t("segments_scan_stop"),
+            height=28,
+            width=90,
+            fg_color=Colors.STATUS_ERROR,
+            hover_color="#e11d48",
+            state="disabled",
+            command=self._stop_scan,
+        )
+
         self._scan_add_btn = ctk.CTkButton(
-            scan_bar,
+            scan_activity_row,
             text=t("segments_scan_add", count=0),
-            height=24,
+            height=28,
+            width=150,
             state="disabled",
             command=self._add_detected_ranges,
         )
-        self._scan_add_btn.pack(side="left", padx=(12, 0))
-        overlay_box = ctk.CTkFrame(scan_bar, fg_color="transparent")
-        overlay_box.pack(side="right")
+        Tooltip(self._scan_add_btn, t("segments_scan_add_hint"))
+
+        self._scan_overlay_box = ctk.CTkFrame(
+            scan_activity_row,
+            fg_color="transparent",
+        )
         self._scan_overlay_toggle = create_compact_switch(
-            overlay_box,
+            self._scan_overlay_box,
             self._toggle_scan_overlay,
-            Colors.BG_MAIN,
+            Colors.BG_PANEL,
         )
         self._scan_overlay_toggle.pack(side="right")
+        self._scan_overlay_toggle.select()
         ctk.CTkLabel(
-            overlay_box,
+            self._scan_overlay_box,
             text=t("segments_scan_overlay"),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             text_color=Colors.TEXT_PRIMARY,
         ).pack(side="right", padx=(0, 6))
-        self._scan_progress = ctk.CTkProgressBar(scan_bar, width=120, height=8)
-        self._scan_progress.set(0.0)
-        self._scan_status = ctk.CTkLabel(
-            scan_bar,
-            text="",
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.STATUS_PENDING,
+        Tooltip(self._scan_overlay_box, t("segments_scan_overlay_hint"))
+
+        self._scan_progress = ctk.CTkProgressBar(
+            self._scan_activity,
+            height=7,
         )
-        self._scan_status.pack(side="left", padx=(12, 0))
+        self._scan_progress.set(0.0)
 
         timeline_header = ctk.CTkFrame(self, fg_color="transparent")
-        timeline_header.pack(fill="x", padx=16, pady=(4, 2))
+        timeline_header.pack(fill="x", padx=16, pady=(6, 2))
+        timeline_heading = ctk.CTkFrame(timeline_header, fg_color="transparent")
+        timeline_heading.pack(side="left")
+        ctk.CTkLabel(
+            timeline_heading,
+            text=t("segments_timeline_title"),
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL, "bold"),
+            text_color=Colors.TEXT_PRIMARY,
+        ).pack(side="left")
+        ctk.CTkLabel(
+            timeline_heading,
+            text=t("segments_timeline_hint"),
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+        ).pack(side="left", padx=(8, 0))
         for text, command, tip in (
             ("−", lambda: self._timeline.zoom_out(), "segments_zoom_out"),
             (t("segments_fit"), lambda: self._timeline.fit(), "segments_fit_hint"),
@@ -485,6 +663,7 @@ class SegmentEditor(ctk.CTkToplevel):
             )
             button.pack(side="right", padx=(4, 0))
             Tooltip(button, t(tip))
+            self._timeline_zoom_buttons.append(button)
 
         self._timeline = SegmentTimeline(
             self,
@@ -496,6 +675,29 @@ class SegmentEditor(ctk.CTkToplevel):
             on_adjust=self._timeline_adjust,
         )
         self._timeline.pack(fill="x", padx=16)
+
+        legend = ctk.CTkFrame(self, fg_color="transparent")
+        legend.pack(fill="x", padx=20, pady=(0, 2))
+        for color, label in (
+            (Colors.PRIMARY, t("segments_legend_selected")),
+            (Colors.STATUS_PAUSED, t("segments_legend_detected")),
+            ("#f8fafc", t("segments_legend_playhead")),
+        ):
+            item = ctk.CTkFrame(legend, fg_color="transparent")
+            item.pack(side="left", padx=(0, 16))
+            ctk.CTkFrame(
+                item,
+                width=12,
+                height=12,
+                fg_color=color,
+                corner_radius=2,
+            ).pack(side="left", padx=(0, 5))
+            ctk.CTkLabel(
+                item,
+                text=label,
+                font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+                text_color=Colors.STATUS_PENDING,
+            ).pack(side="left")
 
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", padx=16, pady=(3, 12))
@@ -672,21 +874,35 @@ class SegmentEditor(ctk.CTkToplevel):
         self._timeline.reveal(self._current)
         self._refresh_timeline()
         self._preview_generation = self._preview_worker.seek(self._current)
-        if self._restore_active:
-            self._restored_clip = ()
-            self._restored_source = None
-            self._preview_image = None
-            self._restore_play_pending = False
-            self._preview.configure(
-                image=None,
-                text=t("segments_restore_restoring"),
-                text_color=Colors.STATUS_PENDING,
-            )
-            self._schedule_restoration_preview()
+        self._prepare_restoration_after_seek()
 
     def _step(self, frames: int) -> None:
         state = self._require_state()
+        if int(frames) == -1:
+            current = self._current
+            self._set_playing(False)
+            self._current = state.snap(current - 1 / state.fps)
+            self._time_label.configure(text=self._time_text())
+            self._timeline.reveal(self._current)
+            self._refresh_timeline()
+            self._preview_generation = self._preview_worker.previous_frame(current)
+            self._prepare_restoration_after_seek()
+            return
         self._seek(self._current + int(frames) / state.fps)
+
+    def _prepare_restoration_after_seek(self) -> None:
+        if not self._restore_active:
+            return
+        self._restored_clip = ()
+        self._restored_source = None
+        self._preview_image = None
+        self._restore_play_pending = False
+        self._preview.configure(
+            image=None,
+            text=t("segments_restore_restoring"),
+            text_color=Colors.STATUS_PENDING,
+        )
+        self._schedule_restoration_preview()
 
     def _toggle_play(self) -> None:
         state = self._require_state()
@@ -807,7 +1023,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._play.configure(text="▶")
         self._restore_generation = self._restoration_worker.request(
             self._current,
-            self._get_settings(),
+            self._current_video_settings(),
         )
         if self._restored_source is None:
             self._preview.configure(
@@ -838,7 +1054,7 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._restore_generation = self._restoration_worker.request(
             start_seconds,
-            self._get_settings(),
+            self._current_video_settings(),
             playback=True,
         )
 
@@ -919,28 +1135,71 @@ class SegmentEditor(ctk.CTkToplevel):
             t("segments_restore_gpu_busy") if busy else t("segments_restore_preview_hint")
         )
 
+    def _set_scan_activity_status(
+        self,
+        text: str,
+        *,
+        color: str = Colors.STATUS_PENDING,
+        dot_color: str | None = None,
+    ) -> None:
+        self._scan_status.configure(text=text, text_color=color)
+        self._scan_status_dot.configure(text_color=dot_color or color)
+
+    def _set_scan_ui_state(self, state: str) -> None:
+        self._scan_stop_btn.pack_forget()
+        self._scan_add_btn.pack_forget()
+        self._scan_overlay_box.pack_forget()
+        self._scan_progress.pack_forget()
+
+        if state == "idle":
+            self._scan_activity.pack_forget()
+            self._scan_btn.configure(text=t("segments_scan"))
+            return
+
+        self._scan_activity.pack(fill="x", padx=12, pady=(0, 10))
+        if state == "scanning":
+            self._scan_btn.configure(text=t("segments_scan"))
+            self._scan_stop_btn.pack(side="right", padx=(10, 0))
+            self._scan_progress.pack(fill="x", padx=10, pady=(0, 8))
+            return
+
+        self._scan_btn.configure(
+            text=t("segments_scan_again") if self._scan_result is not None else t("segments_scan")
+        )
+        if state == "results":
+            if self._scan_proposals:
+                self._scan_add_btn.pack(side="right", padx=(10, 0))
+            self._scan_overlay_box.pack(side="right", padx=(12, 0))
+
     def _start_scan(self) -> None:
         self._require_state()
-        if self._scan_worker is not None:
+        if self._scan_active:
             return
         if self._is_gpu_busy():
-            self._scan_status.configure(
-                text=t("segments_restore_gpu_busy"), text_color=Colors.STATUS_ERROR
+            self._set_scan_activity_status(
+                t("segments_restore_gpu_busy"),
+                color=Colors.STATUS_ERROR,
             )
+            self._set_scan_ui_state("message")
             return
         if self._restore_active:
             self._deactivate_restoration_preview()
         if self._restoration_worker is not None:
             self._restoration_worker.close()
             self._restoration_worker = None
+        if self._scan_worker is not None:
+            self._scan_worker.close()
+            self._scan_worker.join()
+            self._scan_worker = None
         self._set_playing(False)
         self._set_preview_gpu_busy(True)
-        stride_seconds = float(self._scan_interval.get().rstrip("s"))
+        stride_seconds = self._scan_interval_seconds_by_label[self._scan_interval.get()]
+        settings = self._current_video_settings()
         try:
             worker = MosaicScanWorker(
                 self._job.path,
                 self._metadata,
-                self._get_settings(),
+                settings,
                 stride_seconds=stride_seconds,
                 on_stopped=lambda: self._set_preview_gpu_busy(False),
             )
@@ -950,26 +1209,38 @@ class SegmentEditor(ctk.CTkToplevel):
             raise
         self._scan_worker = worker
         self._scan_result = None
+        self._scan_low_vram = False
+        self._scan_was_stopped = False
         self._scan_proposals = ()
+        self._scan_mask_cache.clear()
+        self._scan_mask_requested_key = None
         self._timeline.set_detections(())
         self._scan_progress.set(0.0)
-        self._scan_status.configure(
-            text=t("segments_restore_loading_models"), text_color=Colors.STATUS_PENDING
+        self._set_scan_activity_status(
+            t("segments_restore_loading_models"),
+            dot_color=Colors.STATUS_PROCESSING,
         )
         self._set_scan_locked(True)
 
     def _stop_scan(self) -> None:
-        if self._scan_worker is None:
+        if self._scan_worker is None or not self._scan_active:
             return
         self._scan_worker.stop()
         self._scan_stop_btn.configure(state="disabled")
+        self._set_scan_activity_status(
+            t("segments_scan_stopping"),
+            dot_color=Colors.STATUS_PAUSED,
+        )
 
     def _scan_lockable_widgets(self) -> tuple:
         return (
             self._scan_btn,
+            self._scan_info_btn,
+            self._scan_model,
             self._scan_interval,
             self._scan_thr_slider,
             self._scan_add_btn,
+            self._scan_overlay_toggle,
             self._apply_btn,
             self._cancel_btn,
             self._new_btn,
@@ -982,50 +1253,80 @@ class SegmentEditor(ctk.CTkToplevel):
             self._step_back,
             self._step_forward,
             self._play,
+            self._restore_toggle,
+            self._start_entry,
+            self._end_entry,
+            *self._timeline_zoom_buttons,
+            *self._segment_action_widgets,
         )
 
     def _set_scan_locked(self, locked: bool) -> None:
+        self._scan_active = bool(locked)
         state = "disabled" if locked else "normal"
         for widget in self._scan_lockable_widgets():
             widget.configure(state=state)
+        self._timeline.set_enabled(not locked)
         self._scan_stop_btn.configure(state="normal" if locked else "disabled")
         if locked:
-            self._scan_progress.pack(side="left", padx=(12, 0))
+            self._set_scan_ui_state("scanning")
         else:
-            self._scan_progress.pack_forget()
             self._refresh_all()
             self._refresh_scan_view()
+            if self._scan_result is None:
+                self._set_scan_ui_state("idle")
 
     def _handle_scan_event(self, event) -> None:
         if isinstance(event, ScanStatus):
-            self._scan_status.configure(
-                text=self._restoration_status_text(event.message),
-                text_color=Colors.STATUS_PENDING,
+            self._set_scan_activity_status(
+                self._restoration_status_text(event.message),
+                dot_color=Colors.STATUS_PROCESSING,
             )
         elif isinstance(event, ScanProgress):
             self._scan_progress.set(event.fraction)
-            self._scan_status.configure(
-                text=(
-                    f"{event.fps:.0f} fps · "
-                    f"ETA {format_timestamp(event.eta_seconds, milliseconds=False)}"
-                ),
-                text_color=Colors.STATUS_PENDING,
+            status = t(
+                "segments_scan_progress",
+                percent=round(event.fraction * 100),
+                fps=round(event.fps),
+                eta=format_timestamp(event.eta_seconds, milliseconds=False),
+            )
+            if self._scan_low_vram:
+                status = f"{status} · {t('segments_scan_low_vram_short')}"
+            self._set_scan_activity_status(
+                status,
+                dot_color=Colors.STATUS_PROCESSING,
+            )
+        elif isinstance(event, ScanStorageSpilled):
+            self._scan_low_vram = True
+            self._set_scan_activity_status(
+                t("segments_scan_low_vram"),
+                dot_color=Colors.STATUS_PAUSED,
             )
         elif isinstance(event, ScanFailed):
+            if self._scan_worker is not None:
+                self._scan_worker.close()
             self._scan_worker = None
-            self._scan_status.configure(
-                text=t("segments_scan_failed", message=event.message),
-                text_color=Colors.STATUS_ERROR,
-            )
             self._set_scan_locked(False)
+            self._set_scan_activity_status(
+                t("segments_scan_failed", message=event.message),
+                color=Colors.STATUS_ERROR,
+            )
+            self._set_scan_ui_state("message")
         elif isinstance(event, ScanCompleted):
-            self._scan_worker = None
             self._scan_result = event.result
-            self._scan_status.configure(
-                text=t("segments_scan_stopped") if event.stopped else "",
-                text_color=Colors.STATUS_PENDING,
-            )
+            self._scan_was_stopped = event.stopped
             self._set_scan_locked(False)
+        elif isinstance(event, ScanMaskReady):
+            self._cache_scan_mask(event.seconds, event.score, event.mask)
+            if event.generation == self._scan_mask_generation:
+                self._scan_mask_requested_key = None
+                self._refresh_preview_image()
+        elif isinstance(event, ScanMaskFailed):
+            if event.generation == self._scan_mask_generation:
+                self._scan_mask_requested_key = None
+                self._set_scan_activity_status(
+                    t("segments_scan_mask_failed", message=event.message),
+                    color=Colors.STATUS_ERROR,
+                )
 
     def _refresh_scan_view(self) -> None:
         result = self._scan_result
@@ -1040,22 +1341,52 @@ class SegmentEditor(ctk.CTkToplevel):
             pad=0.0,
         )
         self._timeline.set_detections(runs)
-        self._scan_proposals = segments_from_scores(
+        proposals = segments_from_scores(
             result.times,
             result.scores,
             threshold=self._scan_threshold,
             stride=result.stride,
             duration=self._state.duration,
         )
+        self._scan_proposals = tuple(
+            proposal
+            for proposal in proposals
+            if not any(
+                selected.start <= proposal.start and selected.end >= proposal.end
+                for selected in self._state.segments
+            )
+        )
         count = len(self._scan_proposals)
         self._scan_add_btn.configure(
             text=t("segments_scan_add", count=count),
-            state="normal" if count and self._scan_worker is None else "disabled",
+            state="normal" if count and not self._scan_active else "disabled",
         )
-        if not count and self._scan_worker is None:
-            self._scan_status.configure(
-                text=t("segments_scan_none"), text_color=Colors.STATUS_PENDING
+        total_seconds = sum(proposal.duration for proposal in proposals)
+        if not proposals:
+            self._set_scan_activity_status(
+                t("segments_scan_none"),
+                dot_color=Colors.STATUS_PENDING,
             )
+        elif not count:
+            self._set_scan_activity_status(
+                t("segments_scan_all_added"),
+                dot_color=Colors.STATUS_COMPLETED,
+            )
+        else:
+            summary_key = (
+                "segments_scan_result_partial"
+                if self._scan_was_stopped
+                else "segments_scan_result"
+            )
+            self._set_scan_activity_status(
+                t(
+                    summary_key,
+                    count=len(proposals),
+                    duration=format_timestamp(total_seconds, milliseconds=False),
+                ),
+                dot_color=Colors.STATUS_PAUSED,
+            )
+        self._set_scan_ui_state("results")
         if self._scan_overlay:
             self._refresh_preview_image()
 
@@ -1072,6 +1403,8 @@ class SegmentEditor(ctk.CTkToplevel):
     def _apply_scan_threshold(self) -> None:
         self._scan_thr_after = None
         self._refresh_scan_view()
+        if self._restore_active:
+            self._schedule_restoration_preview()
 
     def _add_detected_ranges(self) -> None:
         state = self._require_state()
@@ -1080,24 +1413,31 @@ class SegmentEditor(ctk.CTkToplevel):
         added = state.add_many(self._scan_proposals)
         self._set_edit_result_notice(0)
         if not added:
-            self._edit_notice = t("segments_scan_none")
+            self._edit_notice = t("segments_scan_all_added")
             self._edit_notice_warning = True
         self._refresh_all()
+        self._refresh_scan_view()
 
     def _toggle_scan_overlay(self) -> None:
-        self._scan_overlay = not self._scan_overlay
-        if self._scan_overlay:
-            self._scan_overlay_toggle.select()
-        else:
-            self._scan_overlay_toggle.deselect()
+        self._scan_overlay = bool(self._scan_overlay_toggle.get())
         self._refresh_preview_image()
 
     def _apply_scan_overlay(self, image: Image.Image) -> Image.Image:
         result = self._scan_result
         if result is None:
             return image
-        mask = result.mask_at(self._current)
-        if mask is None:
+        state = self._require_state()
+        sample = result.sample_at(
+            self._current,
+            tolerance=0.51 / state.fps,
+        )
+        if sample is None:
+            sample = self._cached_scan_mask(self._current)
+        if sample is None:
+            self._request_scan_mask(self._current)
+            return image
+        _, score, mask = sample
+        if score < self._scan_threshold:
             return image
         mask_np = mask.numpy()
         if not mask_np.any():
@@ -1109,6 +1449,72 @@ class SegmentEditor(ctk.CTkToplevel):
         composed = image.copy()
         composed.paste(overlay, (0, 0), alpha)
         return composed
+
+    def _request_scan_mask(self, seconds: float) -> None:
+        worker = self._scan_worker
+        if worker is None or self._scan_active:
+            return
+        key = self._scan_mask_key(seconds)
+        if self._scan_mask_requested_key == key:
+            return
+        self._scan_mask_requested_key = key
+        self._scan_mask_generation = worker.request_mask(seconds)
+
+    def _cache_scan_mask(self, seconds: float, score: float, mask) -> None:
+        key = self._scan_mask_key(seconds)
+        self._scan_mask_cache[key] = (float(seconds), float(score), mask)
+        self._scan_mask_cache.move_to_end(key)
+        while len(self._scan_mask_cache) > 256:
+            self._scan_mask_cache.popitem(last=False)
+
+    def _cached_scan_mask(self, seconds: float):
+        key = self._scan_mask_key(seconds)
+        sample = self._scan_mask_cache.get(key)
+        if sample is not None:
+            self._scan_mask_cache.move_to_end(key)
+        return sample
+
+    def _scan_mask_key(self, seconds: float) -> int:
+        state = self._require_state()
+        return round(float(seconds) * state.fps)
+
+    def _on_scan_model_changed(self, model: str) -> None:
+        self._scan_detection_model = str(model)
+        if self._scan_worker is not None:
+            self._scan_worker.close()
+            self._scan_worker = None
+        self._scan_result = None
+        self._scan_proposals = ()
+        self._scan_mask_cache.clear()
+        self._scan_mask_requested_key = None
+        self._timeline.set_detections(())
+        self._scan_add_btn.configure(
+            text=t("segments_scan_add", count=0),
+            state="disabled",
+        )
+        self._set_scan_activity_status(
+            t("segments_scan_model_changed"),
+            dot_color=Colors.STATUS_PENDING,
+        )
+        self._set_scan_ui_state("message")
+        if self._restore_active:
+            self._schedule_restoration_preview()
+        else:
+            self._refresh_preview_image()
+
+    def _show_scan_help(self) -> None:
+        messagebox.showinfo(
+            t("segments_scan_help_title"),
+            t("segments_scan_help_body"),
+            parent=self,
+        )
+
+    def _current_video_settings(self) -> AppSettings:
+        return replace(
+            self._get_settings(),
+            detection_model=self._scan_model.get(),
+            detection_score_threshold=self._scan_threshold,
+        )
 
     def _new_range(self) -> None:
         state = self._require_state()
@@ -1218,6 +1624,7 @@ class SegmentEditor(ctk.CTkToplevel):
 
     def _render_segment_list(self) -> None:
         state = self._require_state()
+        self._segment_action_widgets = []
         for child in self._segment_list.winfo_children():
             child.destroy()
         if not state.segments:
@@ -1254,6 +1661,8 @@ class SegmentEditor(ctk.CTkToplevel):
                 command=lambda i=index: self._select_range(i),
             )
             label.pack(side="left", fill="x", expand=True)
+            label.configure(state="disabled" if self._scan_active else "normal")
+            self._segment_action_widgets.append(label)
             delete = ctk.CTkButton(
                 row,
                 text="✕",
@@ -1264,6 +1673,8 @@ class SegmentEditor(ctk.CTkToplevel):
                 command=lambda i=index: self._delete_range(i),
             )
             delete.pack(side="right", padx=3)
+            delete.configure(state="disabled" if self._scan_active else "normal")
+            self._segment_action_widgets.append(delete)
             Tooltip(delete, t("segments_delete_range"))
 
     def _refresh_all(self) -> None:
@@ -1281,8 +1692,12 @@ class SegmentEditor(ctk.CTkToplevel):
             )
         )
         self._apply_btn.configure(text=t("segments_apply"))
-        self._undo_btn.configure(state="normal" if state.can_undo else "disabled")
-        self._redo_btn.configure(state="normal" if state.can_redo else "disabled")
+        self._undo_btn.configure(
+            state="normal" if state.can_undo and not self._scan_active else "disabled"
+        )
+        self._redo_btn.configure(
+            state="normal" if state.can_redo and not self._scan_active else "disabled"
+        )
         self._render_segment_list()
         self._refresh_timeline()
         self._refresh_workload()
@@ -1302,6 +1717,7 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         state = self._state
         if not state.segments:
+            self._codec_notice.pack_forget()
             self._compatibility_error = None
             self._workload.configure(
                 text=t("segments_workload_full", duration=format_timestamp(state.duration, milliseconds=False)),
@@ -1310,43 +1726,47 @@ class SegmentEditor(ctk.CTkToplevel):
             self._refresh_timeline()
             self._update_apply_state()
             return
+        codec = str(self._metadata.codec_name).lower()
+        codec = {"avc": "h264", "h265": "hevc", "av01": "av1"}.get(codec, codec)
+        self._codec_notice.configure(
+            text=t(
+                "segments_source_codec_notice",
+                codec=CODEC_CANONICAL_TO_LABEL.get(codec, codec.upper()),
+            )
+        )
+        if not self._codec_notice.winfo_manager():
+            self._codec_notice.pack(fill="x", pady=(2, 0))
+        self._workload.configure(
+            text=t(
+                "segments_workload",
+                selected=format_timestamp(state.selected_duration, milliseconds=False),
+                percent=state.selected_duration / state.duration * 100,
+            ),
+            text_color=Colors.TEXT_PRIMARY,
+        )
         if self._analysis_error is not None:
             self._compatibility_error = t("segments_analysis_failed")
-            self._workload.configure(text=t("segments_smart_render_unavailable"), text_color=Colors.STATUS_ERROR)
+            self._refresh_notice()
             self._update_apply_state()
             return
         if self._keyframe_index is None:
             self._compatibility_error = None
-            self._workload.configure(
-                text=t(
-                    "segments_workload",
-                    selected=format_timestamp(state.selected_duration, milliseconds=False),
-                    percent=state.selected_duration / state.duration * 100,
-                ),
-                text_color=Colors.TEXT_PRIMARY,
-            )
+            self._refresh_notice()
             self._update_apply_state()
             return
         try:
             from jasna.media.splice import build_splice_plan
 
             build_splice_plan(state.segments, self._keyframe_index, duration=state.duration)
-            percent = state.selected_duration / state.duration * 100
             self._compatibility_error = None
-            self._workload.configure(
-                text=t(
-                    "segments_workload",
-                    selected=format_timestamp(state.selected_duration, milliseconds=False),
-                    percent=percent,
-                ),
-                text_color=Colors.TEXT_PRIMARY,
-            )
-        except Exception:
-            self._compatibility_error = t("segments_smart_render_unavailable")
-            self._workload.configure(
-                text=t("segments_smart_render_unavailable"),
-                text_color=Colors.STATUS_ERROR,
-            )
+        except Exception as exc:
+            reason = getattr(exc, "reason", "generic")
+            key = {
+                "range_too_short": "segments_smart_render_range_too_short",
+                "before_first_keyframe": "segments_smart_render_before_first_keyframe",
+                "whole_video_reencode": "segments_smart_render_whole_video",
+            }.get(reason, "segments_smart_render_unavailable")
+            self._compatibility_error = t(key)
         self._refresh_notice()
         self._update_apply_state()
 
@@ -1366,12 +1786,16 @@ class SegmentEditor(ctk.CTkToplevel):
     def _update_apply_state(self) -> None:
         if self._state is None or not hasattr(self, "_apply_btn"):
             return
-        enabled = not self._compatibility_error
+        enabled = not self._compatibility_error and not self._scan_active
         self._apply_btn.configure(state="normal" if enabled else "disabled")
 
     def _save(self) -> None:
         state = self._require_state()
-        if not self._job.try_set_segments(state.output_segments):
+        if not self._job.try_set_video_options(
+            state.output_segments,
+            detection_model=self._scan_model.get(),
+            detection_score_threshold=self._scan_threshold,
+        ):
             self._edit_notice = t("segments_job_started")
             self._edit_notice_warning = False
             self._refresh_notice()
@@ -1381,7 +1805,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._finish_close()
 
     def _request_close(self) -> None:
-        if self._scan_worker is not None:
+        if self._scan_active:
             self._stop_scan()
             return
         if (
@@ -1406,7 +1830,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._restoration_worker is not None:
             self._restoration_worker.close()
         if self._scan_worker is not None:
-            self._scan_worker.stop()
+            self._scan_worker.close()
         try:
             self.grab_release()
         except tk.TclError:
@@ -1428,7 +1852,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self.bind("<Escape>", lambda _event: self._request_close())
 
     def _shortcut(self, event, action: Callable[[], None], *, allow_entry: bool = False):
-        if self._state is None or self._scan_worker is not None:
+        if self._state is None or self._scan_active:
             return "break"
         if not allow_entry and self._is_text_entry(event.widget):
             return None
@@ -1436,7 +1860,7 @@ class SegmentEditor(ctk.CTkToplevel):
         return "break"
 
     def _shortcut_step(self, event, direction: int):
-        if self._state is None or self._scan_worker is not None or self._is_text_entry(event.widget):
+        if self._state is None or self._scan_active or self._is_text_entry(event.widget):
             return None
         if int(getattr(event, "state", 0)) & 0x0001:
             self._seek(self._current + direction)

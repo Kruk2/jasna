@@ -73,6 +73,7 @@ class SegmentTimeline(ctk.CTkFrame):
         self._playhead = 0.0
         self._view_start = 0.0
         self._view_end = self.duration
+        self._enabled = True
         self._drag_kind: str | None = None
         self._drag_index: int | None = None
         self._drag_anchor = 0.0
@@ -115,6 +116,16 @@ class SegmentTimeline(ctk.CTkFrame):
     def set_detections(self, runs: tuple[SegmentRange, ...]) -> None:
         self._detections = tuple(runs)
         self._redraw_timeline()
+
+    def set_enabled(self, enabled: bool) -> None:
+        self._enabled = bool(enabled)
+        self._canvas.configure(cursor="crosshair" if self._enabled else "")
+        if not self._enabled:
+            self._drag_kind = None
+            self._drag_index = None
+            self._drag_segment = None
+            self._draft = None
+            self._redraw_timeline()
 
     def zoom_in(self) -> None:
         self._zoom(0.6, self._playhead)
@@ -305,6 +316,8 @@ class SegmentTimeline(ctk.CTkFrame):
         )
 
     def _on_press(self, event) -> None:
+        if not self._enabled:
+            return
         width = self._canvas.winfo_width()
         if event.y >= _OVERVIEW_TOP - 4:
             seconds = self._overview_x_to_time(event.x, width)
@@ -342,7 +355,7 @@ class SegmentTimeline(ctk.CTkFrame):
         self._redraw_timeline()
 
     def _on_motion(self, event) -> None:
-        if self._drag_kind is None:
+        if not self._enabled or self._drag_kind is None:
             return
         seconds = self._snap(self._x_to_time(event.x, self._canvas.winfo_width()))
         if self._drag_kind == "create":
@@ -360,7 +373,7 @@ class SegmentTimeline(ctk.CTkFrame):
         self._redraw_timeline()
 
     def _on_release(self, event) -> None:
-        if self._drag_kind is None:
+        if not self._enabled or self._drag_kind is None:
             return
         kind = self._drag_kind
         index = self._drag_index
@@ -382,6 +395,8 @@ class SegmentTimeline(ctk.CTkFrame):
         self._redraw_timeline()
 
     def _on_wheel(self, event, *, delta: int | None = None) -> str:
+        if not self._enabled:
+            return "break"
         wheel_delta = delta if delta is not None else int(getattr(event, "delta", 0))
         if not wheel_delta:
             return "break"

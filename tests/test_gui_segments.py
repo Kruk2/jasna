@@ -17,8 +17,16 @@ def test_pending_job_segments_can_be_replaced() -> None:
 
 
 def test_begin_processing_atomically_freezes_segments() -> None:
-    job = JobItem(Path("video.mp4"), segments=(SegmentRange(1, 2),))
-    assert job.begin_processing() == (SegmentRange(1, 2),)
+    job = JobItem(
+        Path("video.mp4"),
+        segments=(SegmentRange(1, 2),),
+        detection_model="lada-yolo-v4",
+        detection_score_threshold=0.4,
+    )
+    snapshot = job.begin_processing()
+    assert snapshot.segments == (SegmentRange(1, 2),)
+    assert snapshot.detection_model == "lada-yolo-v4"
+    assert snapshot.detection_score_threshold == 0.4
     assert job.status is JobStatus.PROCESSING
     assert not job.try_set_segments((SegmentRange(3, 4),))
     assert job.begin_processing() is None
@@ -43,6 +51,34 @@ def test_processor_passes_frozen_segments_to_video_job(tmp_path) -> None:
     assert job.status is JobStatus.COMPLETED
 
 
+def test_processor_uses_each_videos_detection_overrides(tmp_path) -> None:
+    source = tmp_path / "video.mp4"
+    source.touch()
+    job = JobItem(
+        source,
+        detection_model="lada-yolo-v4",
+        detection_score_threshold=0.55,
+    )
+    processor = Processor()
+    processor._settings = AppSettings(
+        detection_model="rfdetr-v5",
+        detection_score_threshold=0.25,
+    )
+    processor._output_pattern = "{original}_restored.mp4"
+
+    with (
+        patch.object(processor, "_run_pipeline") as run_pipeline,
+        patch("jasna.gui.processor._cleanup_torch"),
+    ):
+        processor._process_job(job)
+
+    settings = run_pipeline.call_args.kwargs["settings"]
+    assert settings.detection_model == "lada-yolo-v4"
+    assert settings.detection_score_threshold == 0.55
+    assert processor._settings.detection_model == "rfdetr-v5"
+    assert processor._settings.detection_score_threshold == 0.25
+
+
 def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     input_path = tmp_path / "video.mp4"
     output_path = tmp_path / "output.mp4"
@@ -61,6 +97,9 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
         lut_path=None,
     )
     processor._ensure_video_session = MagicMock()
+    processor._prepare_job_detector = MagicMock(
+        return_value=("detector", tmp_path / "detector.engine")
+    )
     processor._build_encoder_settings = MagicMock(return_value={})
 
     with (
