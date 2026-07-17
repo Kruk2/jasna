@@ -1,6 +1,6 @@
 [**English**](README.md) | [日本語](README.ja.md) | [中文](README.zh.md)
 
-# Jasna
+# <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna 
 
 Jasna is a JAV mosaic restoration tool with a simple GUI, a CLI, a GPU-only processing pipeline, TensorRT support, optional secondary restoration models, still-image restoration, and streaming support.
 
