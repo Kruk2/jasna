@@ -208,6 +208,10 @@ def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", onnx_path)
     enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
     monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
+    monkeypatch.setattr(
+        "jasna.protection.protected_model.decrypt_engine_bytes",
+        lambda model_id, data: b"decrypted-engine",
+    )
 
     assert _unet4x_engine_exists(fp16=True) is False
     enc_engine.write_text("x")
