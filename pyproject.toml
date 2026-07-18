@@ -6,7 +6,6 @@ build-backend = "setuptools.build_meta"
 name = "jasna"
 version = "0.8.1"
 description = "Jasna"
-readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   # current_ctx support is merged upstream for PyAV 18.1.0 but is not published yet.
