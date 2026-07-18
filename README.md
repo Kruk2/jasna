@@ -53,8 +53,7 @@ Release packages are vendor-specific:
 - Too old: **GTX 10-series**, including GTX 1050/1060/1070/1080.
 - For exact GPU lookup, check NVIDIA's [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus).
 - Nvidia driver **610.00 or newer** on Windows and 580.xx or newer on Linux.
-- AMD (experimental, Linux only): a ROCm-supported AMD GPU and ROCm 7.2.
-  The current AMD release target is Ubuntu 24.04, PyTorch 2.9.1, and Python 3.12.
+- AMD (experimental): a ROCm-supported GPU, Python 3.12, and PyTorch 2.9.1.
 - An install path that uses ASCII characters only.
 - Windows release package: bundled with `ffmpeg` and `ffprobe`.
 - Linux release package: bundled with `ffmpeg` and `ffprobe`.
@@ -435,6 +434,9 @@ uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu
 # AMD Linux (inside a ROCm 7.2 environment)
 uv pip install ".[amd]" \
   --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
+
+# AMD Windows
+uv pip install ".[amd]"
 ```
 
 For Nvidia library builds, you also need:
@@ -460,11 +462,12 @@ Then install Jasna in editable mode:
 uv pip install -e ".[nvidia,dev]"  # or .[amd,dev]
 ```
 
-The AMD release tooling is isolated from the host Python environment:
+AMD release builds:
 
 ```bash
 jasna/protection/keytool/build_linux_amd.sh
 jasna/protection/keytool/validate_amd_ssh.sh user@amd-host
+python jasna/protection/keytool/build_windows_amd.py
 ```
 
 The AMD build uses PyTorch/ROCm for BasicVSR++ and YOLO, ONNX Runtime MIGraphX
