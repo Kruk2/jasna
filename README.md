@@ -42,7 +42,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 
 ## Community
 
-Join the [SLS Discord](https://discord.gg/5R2Rx5nBH) for examples, support, and settings discussion. Please don't be too weird.
+Join the [SLS Discord](https://discord.gg/uNwQ4mHqgv) for examples, support, and settings discussion. Please don't be too weird.
 
 ## Requirements
 
