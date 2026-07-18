@@ -40,7 +40,7 @@ def test_cli_creates_stream_on_chosen_device(tmp_path: Path) -> None:
     with (
         patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
         patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
-        patch("jasna.main.check_gpu_driver_version", return_value=(True, "590.18")),
+        patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
         patch("jasna.main.check_required_executables"),        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
         patch("jasna.pipeline.Pipeline", side_effect=capture_pipeline),
