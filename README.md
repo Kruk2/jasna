@@ -2,7 +2,7 @@
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna 
 
-Jasna is a JAV mosaic restoration tool with a simple GUI, a CLI, a GPU-only processing pipeline, TensorRT support, optional secondary restoration models, still-image restoration, and streaming support.
+Jasna is a JAV mosaic restoration tool with a simple GUI, a CLI, a GPU-only processing pipeline, NVIDIA TensorRT and experimental AMD ROCm support, optional secondary restoration models, still-image restoration, and streaming support.
 
 It is inspired by, and in some places based on, [Lada](https://codeberg.org/ladaapp/lada). The `mosaic_restoration_1.2` restoration model used by Jasna was trained by ladaapp, the Lada author.
 
@@ -46,11 +46,15 @@ Join the [SLS Discord](https://discord.gg/5R2Rx5nBH) for examples, support, and 
 
 ## Requirements
 
-- A modern Nvidia GPU with compute capability **7.5 or newer**.
+Release packages are vendor-specific:
+
+- NVIDIA: a modern Nvidia GPU with compute capability **7.5 or newer**.
 - Rough GPU guide: **GTX 16-series**, **RTX 20-series**, **RTX 30-series**, **RTX 40-series**, **RTX 50-series**, and newer workstation/data-center cards.
 - Too old: **GTX 10-series**, including GTX 1050/1060/1070/1080.
 - For exact GPU lookup, check NVIDIA's [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus).
 - Nvidia driver **610.00 or newer** on Windows and 580.xx or newer on Linux.
+- AMD (experimental, Linux only): a ROCm-supported AMD GPU and ROCm 7.2.
+  The current AMD release target is Ubuntu 24.04, PyTorch 2.9.1, and Python 3.12.
 - An install path that uses ASCII characters only.
 - Windows release package: bundled with `ffmpeg` and `ffprobe`.
 - Linux release package: bundled with `ffmpeg` and `ffprobe`.
@@ -59,11 +63,12 @@ Jasna automatically manages VRAM. When GPU VRAM runs low, frames waiting in the 
 
 ## Quick Start
 
-1. Download the latest Windows or Linux release package.
+1. Download the release package for your OS and GPU vendor.
 2. Unzip it into a folder with ASCII-only characters in the path.
 3. Start the app:
    - Windows: double click `jasna.exe`.
-   - Linux: run the `jasna` file.
+   - Linux NVIDIA: run the `jasna` file.
+   - Linux AMD: run `run_jasna_amd.sh`.
 4. Add a video or image in the GUI, choose settings, and start processing.
 
 You can also use Jasna from the command line:
@@ -213,7 +218,9 @@ jasna --input input_folder --output output_folder --post-export-action command -
 
 ## First Run
 
-The first run is slow because TensorRT engines are compiled for your GPU. Compilation usually takes **15-60 minutes**.
+The first run is slow because GPU-specific detection artifacts are prepared. NVIDIA
+builds compile TensorRT engines (usually **15-60 minutes**); AMD builds prepare the
+RF-DETR MIGraphX cache. Artifacts are cached per model, precision, and GPU architecture.
 
 Close other applications, including browsers, and avoid using the PC during compilation. Engines are cached in `model_weights` and reused on later runs. You can copy engine files and folders from an older Jasna version to a newer one.
 
@@ -312,7 +319,7 @@ jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overla
 
 ### Restoration Model Compilation
 
-The restoration model is compiled into TensorRT sub-engines. Compilation improves speed but uses more VRAM. You can opt out at the cost of performance:
+On NVIDIA, the restoration model is compiled into TensorRT sub-engines. Compilation improves speed but uses more VRAM. You can opt out at the cost of performance. AMD always uses the PyTorch model:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
@@ -351,7 +358,7 @@ Setup:
 2. Set environment variables before starting Stash:
    - `JASNA_CLI_PATH`: full path to `jasna.exe`, unless you renamed it.
    - `JASNA_WORKING_DIR`: full path to the folder containing that executable.
-3. **Important:** Before using Stash, run streaming once on a short video with the same settings you plan to use in Stash. This precompiles TensorRT engines and avoids the first health-check timeout.
+3. **Important:** Before using Stash, run streaming once on a short video with the same settings you plan to use in Stash. This prepares the GPU-specific detection cache and avoids the first health-check timeout.
 4. Start Stash and play a scene.
 
 If Stash logs `timeout waiting for jasna-cli to become healthy`, check `JASNA_CLI_PATH` first, then precompile as above.
@@ -399,7 +406,7 @@ Current TODO:
 
 ## Running from Source
 
-Python requirement from `pyproject.toml`: **Python 3.13 or newer**.
+Python requirement from `pyproject.toml`: **Python 3.12 or newer**.
 
 On Linux, create the venv from a distribution-provided Python whose matching Tk package
 uses Xft/fontconfig. Avoid a downloaded standalone Python that reports a `no-xft` Tk build;
@@ -419,10 +426,15 @@ compatible Python/Tk runtime.
 
 The public source checkout does not include the protection module. Running from source is fine for development and free models, but supporter-only models such as **unet-4x** and **SD 1.5 image restoration** will not be available from a plain source checkout.
 
-Install runtime dependencies:
+Install runtime dependencies for the active vendor:
 
 ```bash
-uv pip install . --no-build-isolation
+# NVIDIA (CUDA 13 wheels)
+uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu130
+
+# AMD Linux (inside a ROCm 7.2 environment)
+uv pip install ".[amd]" \
+  --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
 ```
 
 For Nvidia library builds, you also need:
@@ -445,5 +457,26 @@ Developer setup also requires:
 Then install Jasna in editable mode:
 
 ```bash
-uv pip install -e .[dev]
+uv pip install -e ".[nvidia,dev]"  # or .[amd,dev]
 ```
+
+The AMD release tooling is isolated from the host Python environment:
+
+```bash
+jasna/protection/keytool/build_linux_amd.sh
+jasna/protection/keytool/validate_amd_ssh.sh user@amd-host
+```
+
+The AMD build uses PyTorch/ROCm for BasicVSR++ and YOLO, ONNX Runtime MIGraphX
+for RF-DETR, and AMF for H.264/HEVC/AV1 decode and encode. Decode falls back to
+FFmpeg software decoding when AMF cannot handle the source. Secondary restoration
+and segment smart rendering remain NVIDIA-only. Blend-mask blur avoids dynamic
+convolutions, and AMD defaults `MIOPEN_FIND_MODE=FAST` to prevent first-use
+benchmarking stalls across different clip lengths; set the variable explicitly to
+override it.
+
+`--device cuda:N` selects the PyTorch/MIGraphX GPU and is propagated to NVIDIA
+video I/O. FFmpeg 8's Linux AMF device context currently ignores its adapter
+argument, so AMF decode/encode can use the default Vulkan adapter on a multi-GPU
+AMD host. Isolate the target GPU at the container/host level when deterministic
+AMF adapter selection matters.

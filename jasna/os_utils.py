@@ -13,20 +13,32 @@ logger = logging.getLogger(__name__)
 MIN_GPU_COMPUTE = (7, 5)
 MIN_DRIVER_VERSION = 580 if sys.platform == "linux" else 610
 
-def check_nvidia_gpu() -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
-    """Return (True, gpu_name) or (False, "no_cuda") or (False, ("compute_too_low", major, minor))."""
+def check_supported_gpu(
+    device: str = "cuda:0",
+) -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
+    """Validate the GPU supported by the current vendor-specific build."""
     try:
         from jasna._suppress_noise import install as _install_noise_filters
         _install_noise_filters()
         import torch
+        from jasna.accelerator import AcceleratorVendor, vendor_for_device
     except ImportError:
         return False, "no_cuda"
     if not torch.cuda.is_available():
         return False, "no_cuda"
-    capability = torch.cuda.get_device_capability(0)
+    if vendor_for_device(device) is AcceleratorVendor.AMD:
+        return True, torch.cuda.get_device_name(device)
+    capability = torch.cuda.get_device_capability(device)
     if capability < MIN_GPU_COMPUTE:
         return False, ("compute_too_low", capability[0], capability[1])
-    return True, torch.cuda.get_device_name(0)
+    return True, torch.cuda.get_device_name(device)
+
+
+def check_nvidia_gpu(
+    device: str = "cuda:0",
+) -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
+    """Backward-compatible alias for callers/tests predating AMD builds."""
+    return check_supported_gpu(device)
 
 
 def _bundled_exe_filename(name: str) -> str:
@@ -294,6 +306,17 @@ def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
 
 
 def check_gpu_driver_version() -> tuple[bool, str]:
+    try:
+        import torch
+
+        hip_version = getattr(torch.version, "hip", None)
+        if hip_version:
+            if not torch.cuda.is_available():
+                return False, f"ROCm {hip_version} is installed but no AMD GPU is available"
+            return True, f"ROCm {hip_version}"
+    except ImportError:
+        pass
+
     nvidia_smi = find_executable("nvidia-smi")
     if not nvidia_smi:
         return False, "nvidia-smi not found"

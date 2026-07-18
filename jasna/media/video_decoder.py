@@ -8,6 +8,13 @@ import torch
 from av.codec.hwaccel import HWAccel
 from av.video.reformatter import ColorRange as AvColorRange, VideoReformatter
 
+from jasna.accelerator import (
+    AcceleratorVendor,
+    current_stream,
+    new_stream,
+    stream_context,
+    vendor_for_device,
+)
 from jasna.media import VideoMetadata, resolve_video_start_pts
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
@@ -60,29 +67,37 @@ class NvidiaVideoReader:
         self.batch_size = batch_size
         self.metadata = metadata
         self.frame_stride = frame_stride
+        self.vendor = vendor_for_device(device)
+        self._decoder_ctx = None
+        self._amd_hardware_decode = False
 
     def __enter__(self):
-        # Make torch's primary CUDA context current on this worker thread before
-        # asking FFmpeg to reuse it.
-        torch.cuda.current_stream(self.device)
-        hwaccel = HWAccel(
-            "cuda",
-            device=str(self.device.index or 0),
-            allow_software_fallback=True,
-            is_hw_owned=True,
-        )
-        # Reuse the CUDA context already made current by torch without asking
-        # FFmpeg to change the active primary context's scheduling flags.
-        hwaccel.options["primary_ctx"] = "0"
-        hwaccel.options["current_ctx"] = "1"
+        self._decoder_ctx = None
+        self._amd_hardware_decode = False
+        current_stream(self.device)
         try:
-            self.container = av.open(self.file, hwaccel=hwaccel)
+            if self.vendor is AcceleratorVendor.NVIDIA:
+                hwaccel = HWAccel(
+                    "cuda",
+                    device=str(self.device.index or 0),
+                    allow_software_fallback=True,
+                    is_hw_owned=True,
+                )
+                # Reuse torch's current primary context without changing its
+                # scheduling flags.
+                hwaccel.options["primary_ctx"] = "0"
+                hwaccel.options["current_ctx"] = "1"
+                self.container = av.open(self.file, hwaccel=hwaccel)
+            else:
+                self.container = av.open(self.file)
             self.video_stream = self.container.streams.video[0]
         except av.FFmpegError as e:
             raise VideoDecodeError(f"Failed to open {self.file}: {e}") from e
 
         ctx = self.video_stream.codec_context
-        if not ctx.is_hwaccel:
+        if self.vendor is AcceleratorVendor.AMD:
+            self._setup_amf_decoder(ctx)
+        elif not ctx.is_hwaccel:
             # Definite software decode: let FFmpeg pick frame/slice threading.
             # CUDA contexts must keep their default threading configuration.
             ctx.thread_type = "AUTO"
@@ -95,8 +110,50 @@ class NvidiaVideoReader:
         self._raw_stream: int | None = None
         return self
 
+    def _setup_amf_decoder(self, source_ctx) -> None:
+        decoder_name = {
+            "h264": "h264_amf",
+            "hevc": "hevc_amf",
+            "av1": "av1_amf",
+        }.get(str(source_ctx.name).lower())
+        if decoder_name is None:
+            source_ctx.thread_type = "AUTO"
+            return
+        try:
+            hwaccel = HWAccel(
+                "amf",
+                device=str(self.device.index or 0),
+                allow_software_fallback=False,
+                is_hw_owned=False,
+            )
+            decoder = av.CodecContext.create(
+                decoder_name,
+                "r",
+                hwaccel=hwaccel,
+            )
+            decoder.extradata = source_ctx.extradata
+            decoder.width = source_ctx.width
+            decoder.height = source_ctx.height
+            decoder.time_base = source_ctx.time_base
+            decoder.framerate = source_ctx.framerate
+            decoder.sample_aspect_ratio = source_ctx.sample_aspect_ratio
+            decoder.open(strict=False)
+            self._decoder_ctx = decoder
+            self._amd_hardware_decode = True
+            log.info("Using AMF hardware decoder %s for %s", decoder_name, self.file)
+        except (ValueError, av.FFmpegError, RuntimeError) as exc:
+            source_ctx.thread_type = "AUTO"
+            log.warning(
+                "AMF cannot decode %s (codec %s): %s; using FFmpeg software "
+                "decoding and uploading frames to ROCm",
+                self.file,
+                self.metadata.codec_name,
+                exc,
+            )
+
     def __exit__(self, exc_type, exc_value, traceback):
         self.container.close()
+        self._decoder_ctx = None
         if self._raw_stream is None:
             return
         result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
@@ -105,7 +162,11 @@ class NvidiaVideoReader:
 
     def _decode_packet(self, packet, consecutive_errors: int) -> tuple[list, int]:
         try:
-            frames = packet.decode()
+            frames = (
+                self._decoder_ctx.decode(packet)
+                if getattr(self, "_decoder_ctx", None) is not None
+                else packet.decode()
+            )
         except av.error.InvalidDataError as e:
             consecutive_errors += 1
             if consecutive_errors > CORRUPT_PACKET_TOLERANCE:
@@ -130,6 +191,8 @@ class NvidiaVideoReader:
             )
             target_pts = start + round(seek_ts / self.video_stream.time_base)
             self.container.seek(target_pts, stream=self.video_stream, backward=True)
+            if self._decoder_ctx is not None:
+                self._decoder_ctx.flush_buffers()
 
         consecutive_errors = 0
         for packet in self.container.demux(self.video_stream):
@@ -174,16 +237,21 @@ class NvidiaVideoReader:
         group = self._read_group(decoded)
         if not group:
             return
-        if group[0].format.name == "cuda":
+        vendor = getattr(self, "vendor", AcceleratorVendor.NVIDIA)
+        if (
+            vendor is AcceleratorVendor.NVIDIA
+            and group[0].format.name == "cuda"
+        ):
             backend = self._frames_hardware(decoded, group)
         else:
-            log.warning(
-                "CUDA/NVDEC cannot decode %s (codec %s, %s); using FFmpeg software "
-                "decoding and uploading frames to CUDA",
-                self.file,
-                self.metadata.codec_name,
-                group[0].format.name,
-            )
+            if vendor is AcceleratorVendor.NVIDIA:
+                log.warning(
+                    "CUDA/NVDEC cannot decode %s (codec %s, %s); using FFmpeg "
+                    "software decoding and uploading frames to CUDA",
+                    self.file,
+                    self.metadata.codec_name,
+                    group[0].format.name,
+                )
             backend = self._frames_software(decoded, group)
 
         # The backend generator now owns the first group. Drop this outer
@@ -259,7 +327,7 @@ class NvidiaVideoReader:
         # frame starts only after the prior conversion kernel consumed it.
         pinned = torch.empty((self.batch_size, H + H // 2, W), dtype=dtype, pin_memory=True)
         staging = torch.empty((H + H // 2, W), dtype=dtype, device=self.device)
-        stream = torch.cuda.Stream(self.device)
+        stream = new_stream(self.device)
 
         while group:
             batch = torch.empty((len(group), 3, H, W), device=self.device, dtype=torch.uint8)
@@ -288,7 +356,7 @@ class NvidiaVideoReader:
                 pinned[i, :H].copy_(y)
                 pinned[i, H:].copy_(uv)
 
-            with torch.cuda.stream(stream):
+            with stream_context(stream):
                 for i in range(len(group)):
                     staging.copy_(pinned[i], non_blocking=True)
                     converter.convert_into(

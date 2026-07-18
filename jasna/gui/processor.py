@@ -413,8 +413,6 @@ class Processor:
         finally:
             if pipeline is not None:
                 pipeline.close()
-            from jasna.tracking.blending import _KERNEL_CACHE
-            _KERNEL_CACHE.clear()
             from jasna.media.rgb_to_p010 import _cache as _p010_cache
             _p010_cache.clear()
             from jasna.media.rgb_to_nv12 import _cache as _nv12_cache

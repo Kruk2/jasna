@@ -414,10 +414,10 @@ def main() -> None:
 
     check_required_executables()
 
-    gpu_ok, gpu_result = check_nvidia_gpu()
+    gpu_ok, gpu_result = check_nvidia_gpu(str(args.device))
     if not gpu_ok:
         if gpu_result == "no_cuda":
-            print("Error: No CUDA device. An NVIDIA GPU with compute capability 7.5+ is required.")
+            print("Error: No compatible GPU was found for this Jasna build.")
         else:
             _, major, minor = gpu_result
             print(f"Error: Compute capability 7.5+ required (GPU: {major}.{minor}).")
@@ -426,10 +426,13 @@ def main() -> None:
     driver_ok, driver_info = check_gpu_driver_version()
     if not driver_ok:
         print(f"Error: GPU driver version check failed: {driver_info}")
-        print(f"Please update your NVIDIA driver to version {MIN_DRIVER_VERSION} or newer.")
+        if "ROCm" not in driver_info:
+            print(f"Please update your NVIDIA driver to version {MIN_DRIVER_VERSION} or newer.")
         sys.exit(1)
 
-    if sys.platform == "win32":
+    from jasna.accelerator import is_nvidia_device
+
+    if sys.platform == "win32" and is_nvidia_device():
         sysmem_ok, sysmem_info = check_windows_nvidia_sysmem_fallback_policy()
         if not sysmem_ok:
             print(f"Warning: CUDA Sysmem Fallback Policy: {sysmem_info}")
@@ -611,6 +614,8 @@ def main() -> None:
         raise ValueError("--temporal-overlap must satisfy 2*--temporal-overlap < --max-clip-size")
 
     device = torch.device(str(args.device))
+    from jasna.accelerator import device_context, is_amd_device
+
     fp16 = bool(args.fp16)
     detection_score_threshold = float(args.detection_score_threshold)
     if not (0.0 <= detection_score_threshold <= 1.0):
@@ -625,6 +630,10 @@ def main() -> None:
     from jasna.restorer.restoration_pipeline import RestorationPipeline
 
     secondary_name = str(args.secondary_restoration).lower()
+    if is_amd_device(device) and secondary_name != "none":
+        raise ValueError(
+            f"Secondary restoration '{secondary_name}' is not available in the AMD build yet"
+        )
 
     if args.license_email and args.license_key:
         from jasna.protection import license_store
@@ -633,7 +642,7 @@ def main() -> None:
     compile_result = ensure_engines_compiled(EngineCompilationRequest(
         device=str(device),
         fp16=fp16,
-        basicvsrpp=bool(args.compile_basicvsrpp),
+        basicvsrpp=bool(args.compile_basicvsrpp) and not is_amd_device(device),
         basicvsrpp_model_path=str(restoration_model_path),
         basicvsrpp_max_clip_size=max_clip_size,
         detection=True,
@@ -644,7 +653,7 @@ def main() -> None:
     ))
     use_tensorrt = compile_result.use_basicvsrpp_tensorrt
 
-    with torch.cuda.device(device):
+    with device_context(device):
         if secondary_name == "none":
             secondary_restorer = None
         elif secondary_name == "tvai":

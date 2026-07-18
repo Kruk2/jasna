@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import TYPE_CHECKING
 
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
 if TYPE_CHECKING:
@@ -54,6 +55,37 @@ SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
     *SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values()
 )
 
+# User-facing AMF settings. ``cq`` is kept as a portable Jasna option and is
+# translated to AMF's qvbr_quality_level by the encoder.
+_COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
+    {
+        "preset",
+        "usage",
+        "quality",
+        "rc",
+        "cq",
+        "qvbr_quality_level",
+        "g",
+        "bf",
+        "preanalysis",
+        "vbaq",
+        "maxrate",
+        "bufsize",
+        "profile",
+        "level",
+    }
+)
+
+AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC: dict[str, frozenset[str]] = {
+    "hevc": _COMMON_AMF_ENCODER_SETTINGS | {"tier", "bitdepth"},
+    "h264": _COMMON_AMF_ENCODER_SETTINGS | {"coder"},
+    "av1": _COMMON_AMF_ENCODER_SETTINGS | {"bitdepth"},
+}
+
+AMF_SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
+    *AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values()
+)
+
 
 def _parse_encoder_setting_scalar(value: str) -> object:
     v = value.strip()
@@ -99,18 +131,38 @@ def parse_encoder_settings(value: str) -> dict[str, object]:
     return settings
 
 
-def validate_encoder_settings(settings: dict[str, object], codec: str | None = None) -> dict[str, object]:
+def validate_encoder_settings(
+    settings: dict[str, object],
+    codec: str | None = None,
+    *,
+    vendor: AcceleratorVendor | str | None = None,
+) -> dict[str, object]:
+    resolved_vendor = (
+        vendor_for_device()
+        if vendor is None
+        else AcceleratorVendor(str(vendor))
+    )
+    by_codec = (
+        AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC
+        if resolved_vendor is AcceleratorVendor.AMD
+        else SUPPORTED_ENCODER_SETTINGS_BY_CODEC
+    )
+    supported_all = (
+        AMF_SUPPORTED_ENCODER_SETTINGS
+        if resolved_vendor is AcceleratorVendor.AMD
+        else SUPPORTED_ENCODER_SETTINGS
+    )
     if "spatial_aq" in settings and "spatial-aq" in settings:
         raise ValueError(
             "Conflicting encoder settings: spatial_aq and spatial-aq are aliases; use only one"
         )
     if codec is None:
-        supported = SUPPORTED_ENCODER_SETTINGS
+        supported = supported_all
         scope = "Supported"
     else:
-        if codec not in SUPPORTED_ENCODER_SETTINGS_BY_CODEC:
+        if codec not in by_codec:
             raise ValueError(f"Unsupported codec: {codec}")
-        supported = SUPPORTED_ENCODER_SETTINGS_BY_CODEC[codec]
+        supported = by_codec[codec]
         scope = f"Supported for {codec}"
     invalid = sorted(set(settings.keys()) - set(supported))
     if invalid:

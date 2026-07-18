@@ -31,13 +31,14 @@ class VideoSession:
             self.secondary_restorer.close()
         import gc
         import torch
+        from jasna.accelerator import empty_cache, ipc_collect, synchronize
 
         for _ in range(3):
             gc.collect()
         if torch.cuda.is_available():
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
+            synchronize(self.device)
+            empty_cache(self.device)
+            ipc_collect(self.device)
 
 
 def video_session_key(settings: AppSettings) -> tuple:
@@ -79,6 +80,7 @@ def build_video_session(
     from jasna._suppress_noise import install as _install_noise_filters
     _install_noise_filters()
     import torch
+    from jasna.accelerator import is_amd_device
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.engine_paths import model_weights_dir
     from jasna.mosaic.detection_registry import coerce_detection_model_name, require_detection_model_weights
@@ -91,7 +93,17 @@ def build_video_session(
     det_name = coerce_detection_model_name(str(settings.detection_model))
     detection_model_path = require_detection_model_weights(det_name)
 
-    compile_basicvsrpp = bool(settings.compile_basicvsrpp) and (not disable_basicvsrpp_tensorrt)
+    amd = is_amd_device(device)
+    if amd and settings.secondary_restoration != "none":
+        raise RuntimeError(
+            f"Secondary restoration '{settings.secondary_restoration}' is not "
+            "available in the AMD build yet"
+        )
+    compile_basicvsrpp = (
+        bool(settings.compile_basicvsrpp)
+        and not disable_basicvsrpp_tensorrt
+        and not amd
+    )
     compile_result = ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),

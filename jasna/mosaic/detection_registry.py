@@ -4,6 +4,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import torch
+
+from jasna.accelerator import is_amd_device, is_nvidia_device
 from jasna.engine_paths import model_weights_dir
 
 @dataclass(frozen=True)
@@ -155,14 +158,14 @@ def precompile_detection_engine(
     device: torch.device,
     fp16: bool,
 ) -> None:
-    if device.type != "cuda":
+    if not (is_nvidia_device(device) or is_amd_device(device)):
         return
     det_name = coerce_detection_model_name(detection_model_name)
     if is_rfdetr_model(det_name):
         from jasna.mosaic.rfdetr import compile_rfdetr_engine
 
         compile_rfdetr_engine(detection_model_path, device, batch_size=int(batch_size), fp16=bool(fp16))
-    elif is_yolo_model(det_name):
+    elif is_yolo_model(det_name) and is_nvidia_device(device):
         from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
         from jasna.mosaic.yolo import YoloMosaicDetectionModel
 
