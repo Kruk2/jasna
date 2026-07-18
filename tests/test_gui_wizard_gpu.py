@@ -30,6 +30,13 @@ def _make_fake_torch(
 
 def _call_check_gpu(monkeypatch, fake_torch) -> tuple[bool, str]:
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    import jasna.accelerator as accelerator
+
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda _device: accelerator.AcceleratorVendor.NVIDIA,
+    )
     stub = types.SimpleNamespace()
     return FirstRunWizard._check_gpu(stub)
 

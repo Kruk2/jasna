@@ -54,8 +54,7 @@ Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目�
 - Nvidia 驱动: Windows 需 **610.00 或更高版本**，Linux 需 **580.xx 或更高版本**。内置的
   FFmpeg 8.1.2 库使用 NVENC API 13.1，旧版驱动不提供此 API。旧版驱动可能仍能初始化
   CUDA 推理，但硬件视频编码会失败。
-- AMD（实验性，仅 Linux）: ROCm 支持的 AMD GPU 和 ROCm 7.2。当前发行目标为
-  Ubuntu 24.04、PyTorch 2.9.1 和 Python 3.12。
+- AMD（实验性）: ROCm 支持的 AMD GPU、Python 3.12 和 PyTorch 2.9.1。
 - 安装路径只能包含 ASCII 字符。
 - Windows 发行包: 已包含 `ffmpeg` 和 `ffprobe`。
 - Linux 发行包: 已包含 `ffmpeg` 和 `ffprobe`。
@@ -176,7 +175,7 @@ jasna --input input_folder --output output_folder --post-export-action command -
 
 ## 首次运行
 
-首次运行会比较慢，因为需要准备 GPU 专用检测产物。NVIDIA 会编译 TensorRT 引擎（通常 **15-60 分钟**）；AMD 会生成 RF-DETR MIGraphX 缓存。
+首次运行会比较慢，因为需要准备 GPU 专用检测产物。NVIDIA 会编译 TensorRT 引擎（通常 **15-60 分钟**）；Linux AMD 会生成 RF-DETR MIGraphX 缓存。
 
 编译期间请关闭其他应用，包括浏览器，并避免使用电脑。引擎会缓存在 `model_weights` 中，后续运行会复用。你可以把旧 Jasna 版本中的引擎文件和文件夹复制到新版本中。
 
@@ -187,6 +186,8 @@ jasna --input input_folder --output output_folder --post-export-action command -
 ### 检测模型
 
 通常建议使用最新的 RF-DETR 模型。Lada YOLO 模型也可用，并且在 2D 动画上可能效果更好。VR180 可使用 [ZeLeFans VR Mosaic Remover](https://huggingface.co/zelefans/vrmr) 的高精度检测模型 `zelefans-vr-yolo-v2`，该模型已内置于 Jasna。
+
+RF-DETR 在 AMD 上非常慢。除非特别需要 RF-DETR，否则建议在 AMD 上使用 Lada YOLO（`lada-yolo-v4`）。
 
 CLI 选项:
 
@@ -375,6 +376,9 @@ uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu
 # AMD Linux（在 ROCm 7.2 环境中）
 uv pip install ".[amd]" \
   --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
+
+# AMD Windows
+uv pip install ".[amd]"
 ```
 
 构建 Nvidia 库还需要:
@@ -397,16 +401,16 @@ uv pip install cmake ninja
 uv pip install -e ".[nvidia,dev]"  # 或 .[amd,dev]
 ```
 
-AMD 发行版使用专用 Docker 脚本构建，不会修改主机 Python 环境:
+Linux AMD 发行版使用专用 Docker 脚本构建，Windows AMD 发行版使用原生构建脚本:
 
 Release archives use maintainer-only packaging tools.
 
-AMD 版使用 PyTorch ROCm 运行 BasicVSR++/YOLO，使用 MIGraphX 运行 RF-DETR，并使用
-AMF 对 H.264/HEVC/AV1 进行硬件解码和编码。AMF 无法解码时会回退到 FFmpeg 软件解码。
-二级修复和区间智能渲染目前仍仅支持 NVIDIA。为避免动态卷积形状反复分析性能，AMD
-默认设置 `MIOPEN_FIND_MODE=FAST`。
+AMD 版使用 PyTorch ROCm 运行 BasicVSR++/YOLO，使用 ONNX Runtime 运行 RF-DETR，
+并使用 AMF 对 H.264/HEVC/AV1 进行硬件解码和编码。RF-DETR 在 Linux 上使用
+MIGraphX，在 Windows 上回退到 ONNX Runtime CPU 推理。AMF 无法解码时会回退到
+FFmpeg 软件解码。二级修复和区间智能渲染目前仍仅支持 NVIDIA。
 
-`--device cuda:N` 会选择 PyTorch/MIGraphX GPU，也会传递给 NVIDIA 视频 I/O。
+`--device cuda:N` 会选择 PyTorch GPU，并在 Linux 上同时选择 MIGraphX GPU。
 FFmpeg 8 的 Linux AMF 设备上下文目前会忽略适配器参数，因此在多 GPU AMD 主机上，
 AMF 解码/编码可能使用默认 Vulkan 适配器。如果必须确定 AMF 使用哪张卡，请在容器或
 主机层面只暴露目标 GPU。

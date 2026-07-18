@@ -18,7 +18,7 @@ dependencies = [
   "accelerate",
   "huggingface-hub",
   "mmengine==0.10.7",
-  "opencv-python",
+  "opencv-python<5",
   "Pillow",
   "tqdm",
   "customtkinter",

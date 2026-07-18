@@ -7,5 +7,48 @@
 -    checkpoint = torch.load(filename, map_location=map_location)
 +    checkpoint = torch.load(filename, map_location=map_location, weights_only=False)
      return checkpoint
+
+
+--- old/mmengine/dist/dist.py	2025-06-19 00:00:00.0.0
++++ new/mmengine/dist/dist.py	2025-06-19 00:00:00.0.0
+@@ -1,4 +1,5 @@
+ # Copyright (c) OpenMMLab. All rights reserved.
++from __future__ import annotations
+ import os.path as osp
+ import pickle
+ import shutil
+--- old/mmengine/model/__init__.py	2025-06-19 00:00:00.0.0
++++ new/mmengine/model/__init__.py	2025-06-19 00:00:00.0.0
+@@ -1,4 +1,5 @@
+ # Copyright (c) OpenMMLab. All rights reserved.
++import torch
+ from mmengine.utils.dl_utils import TORCH_VERSION
+ from mmengine.utils.version_utils import digit_version
+ from .averaged_model import (BaseAveragedModel, ExponentialMovingAverage,
+@@ -32,6 +33,7 @@
+     'convert_sync_batchnorm', 'BaseTTAModel'
+ ]
  
+-if digit_version(TORCH_VERSION) >= digit_version('2.0.0'):
++if (digit_version(TORCH_VERSION) >= digit_version('2.0.0')
++        and torch.distributed.is_available()):
+     from .wrappers import MMFullyShardedDataParallel  # noqa:F401
+     __all__.append('MMFullyShardedDataParallel')
+--- old/mmengine/model/wrappers/__init__.py	2025-06-19 00:00:00.0.0
++++ new/mmengine/model/wrappers/__init__.py	2025-06-19 00:00:00.0.0
+@@ -1,4 +1,5 @@
+ # Copyright (c) OpenMMLab. All rights reserved.
++import torch
+ from mmengine.utils.dl_utils import TORCH_VERSION
+ from mmengine.utils.version_utils import digit_version
+ from .distributed import MMDistributedDataParallel
+@@ -10,7 +11,8 @@
+     'MMSeparateDistributedDataParallel'
+ ]
  
+-if digit_version(TORCH_VERSION) >= digit_version('2.0.0'):
++if (digit_version(TORCH_VERSION) >= digit_version('2.0.0')
++        and torch.distributed.is_available()):
+     from .fully_sharded_distributed import \
+         MMFullyShardedDataParallel  # noqa:F401
+     __all__.append('MMFullyShardedDataParallel')

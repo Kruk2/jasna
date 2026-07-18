@@ -3,10 +3,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import pytest
 import torch
 
 from jasna.gui.engine_preflight import run_engine_preflight
 from jasna.gui.models import AppSettings
+
+
+@pytest.fixture(autouse=True)
+def _use_nvidia_preflight_by_default(monkeypatch):
+    import jasna.accelerator as accelerator
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: False)
 
 
 def _touch(path: Path) -> None:
@@ -70,6 +78,7 @@ def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) ->
 
 
 def test_get_onnx_tensorrt_engine_path_matches_compile_return_when_present(monkeypatch, tmp_path: Path) -> None:
+    pytest.importorskip("tensorrt")
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
 
@@ -134,6 +143,7 @@ def test_amd_preflight_checks_only_migraphx_cache(monkeypatch, tmp_path: Path) -
 
     cache = tmp_path / "model_weights" / "rfdetr-v5.migraphx" / "test"
     monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
+    monkeypatch.setattr(migraphx, "migraphx_provider_available", lambda: True)
     monkeypatch.setattr(migraphx, "migraphx_cache_dir", lambda *_args, **_kwargs: cache)
     monkeypatch.setattr(
         migraphx,
@@ -146,3 +156,23 @@ def test_amd_preflight_checks_only_migraphx_cache(monkeypatch, tmp_path: Path) -
 
     assert [requirement.key for requirement in result.requirements] == ["rfdetr"]
     assert result.missing[0].paths == (cache,)
+
+
+def test_amd_preflight_needs_no_cache_for_cpu_onnxruntime(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    import jasna.accelerator as accelerator
+    import jasna.mosaic.migraphx_runner as migraphx
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
+    monkeypatch.setattr(migraphx, "migraphx_provider_available", lambda: False)
+
+    result = run_engine_preflight(AppSettings(compile_basicvsrpp=True))
+
+    assert result.requirements == ()
+    assert result.missing == ()
+    assert result.should_warn_first_run_slow is False

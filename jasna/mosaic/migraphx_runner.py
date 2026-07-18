@@ -15,6 +15,7 @@ from jasna.accelerator import device_name
 logger = logging.getLogger(__name__)
 
 _MIGRAPHX_PROVIDER = "MIGraphXExecutionProvider"
+_CPU_PROVIDER = "CPUExecutionProvider"
 _ORT_DTYPES: dict[str, tuple[torch.dtype, np.dtype]] = {
     "tensor(float)": (torch.float32, np.dtype(np.float32)),
     "tensor(float16)": (torch.float16, np.dtype(np.float16)),
@@ -77,6 +78,14 @@ def migraphx_cache_is_ready(
     return directory.is_dir() and any(path.is_file() for path in directory.rglob("*"))
 
 
+def migraphx_provider_available() -> bool:
+    try:
+        import onnxruntime as ort
+    except ImportError:
+        return False
+    return _MIGRAPHX_PROVIDER in ort.get_available_providers()
+
+
 def _shape(node, *, kind: str) -> tuple[int, ...]:
     dimensions = tuple(node.shape)
     if any(not isinstance(value, int) or value <= 0 for value in dimensions):
@@ -109,39 +118,54 @@ class MigraphxRunner:
             import onnxruntime as ort
         except ImportError as exc:
             raise RuntimeError(
-                "RF-DETR on AMD requires the onnxruntime-migraphx package"
+                "RF-DETR on AMD requires the onnxruntime package"
             ) from exc
 
         available = set(ort.get_available_providers())
-        if _MIGRAPHX_PROVIDER not in available:
+        use_migraphx = _MIGRAPHX_PROVIDER in available
+        if not use_migraphx and _CPU_PROVIDER not in available:
             raise RuntimeError(
-                "RF-DETR on AMD requires MIGraphXExecutionProvider; available providers: "
+                "RF-DETR on AMD requires the MIGraphX or CPU ONNX Runtime provider; "
+                "available providers: "
                 + ", ".join(sorted(available))
             )
 
         self.device = torch.device(device)
-        self.cache_dir = migraphx_cache_dir(onnx_path, self.device, fp16=fp16)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.execution_provider = (
+            _MIGRAPHX_PROVIDER if use_migraphx else _CPU_PROVIDER
+        )
+        self.cache_dir: Path | None = None
+        if use_migraphx:
+            self.cache_dir = migraphx_cache_dir(
+                onnx_path,
+                self.device,
+                fp16=fp16,
+            )
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
+            provider_options = {
+                "device_id": str(self.device.index or 0),
+                "migraphx_fp16_enable": "1" if fp16 else "0",
+                "migraphx_model_cache_dir": str(self.cache_dir),
+            }
+            providers = [
+                (_MIGRAPHX_PROVIDER, provider_options),
+                _CPU_PROVIDER,
+            ]
+        else:
+            providers = [_CPU_PROVIDER]
 
-        provider_options = {
-            "device_id": str(self.device.index or 0),
-            "migraphx_fp16_enable": "1" if fp16 else "0",
-            "migraphx_model_cache_dir": str(self.cache_dir),
-        }
         session_options = ort.SessionOptions()
         session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         self.session = ort.InferenceSession(
             str(onnx_path),
             sess_options=session_options,
-            providers=[
-                (_MIGRAPHX_PROVIDER, provider_options),
-                "CPUExecutionProvider",
-            ],
+            providers=providers,
         )
         active = self.session.get_providers()
-        if not active or active[0] != _MIGRAPHX_PROVIDER:
+        if not active or active[0] != self.execution_provider:
             raise RuntimeError(
-                "MIGraphX did not become the primary RF-DETR execution provider: "
+                f"{self.execution_provider} did not become the primary "
+                "RF-DETR execution provider: "
                 + ", ".join(active)
             )
 
@@ -182,9 +206,10 @@ class MigraphxRunner:
             )
 
         logger.info(
-            "MIGraphX model loaded: %s on %s (cache=%s)",
+            "ONNX model loaded: %s on %s (provider=%s, cache=%s)",
             onnx_path,
             device_name(self.device),
+            self.execution_provider,
             self.cache_dir,
         )
 

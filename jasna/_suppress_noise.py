@@ -4,6 +4,7 @@ Call ``install()`` once before importing torch.  The function is idempotent.
 """
 from __future__ import annotations
 
+from importlib.util import find_spec
 import logging
 import warnings
 
@@ -98,6 +99,9 @@ def install() -> None:
     # logger at import time (triggered by torch_tensorrt). It bypasses the
     # logging/warnings machinery, so the only way to mute it is to filter the
     # message in trt.Logger.log before the module is imported.
+    if find_spec("tensorrt") is None:
+        return
+
     import tensorrt as trt
 
     _original_trt_log = trt.Logger.log

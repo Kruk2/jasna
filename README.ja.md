@@ -55,8 +55,7 @@ SLS Discord では、復元例、サポート、設定について話せます�
   FFmpeg 8.1.2 ライブラリは NVENC API 13.1 を使用しており、古いドライバーではこの API を
   利用できません。古いドライバーでも CUDA 推論は初期化できる場合がありますが、
   ハードウェア動画エンコードは失敗します。
-- AMD（実験的、Linux のみ）: ROCm 対応 AMD GPU と ROCm 7.2。現在のリリース対象は
-  Ubuntu 24.04、PyTorch 2.9.1、Python 3.12 です。
+- AMD（実験的）: ROCm 対応 AMD GPU、Python 3.12、PyTorch 2.9.1。
 - インストール先パスは ASCII 文字のみである必要があります。
 - Windows リリースパッケージ: `ffmpeg`、`ffprobe` を同梱しています。
 - Linux リリースパッケージ: `ffmpeg`、`ffprobe` を同梱しています。
@@ -177,7 +176,7 @@ jasna --input input_folder --output output_folder --post-export-action command -
 
 ## 初回実行
 
-初回実行は GPU 固有の検出アーティファクトを準備するため遅くなります。NVIDIA は TensorRT エンジンをコンパイルし（通常 **15-60 分**）、AMD は RF-DETR の MIGraphX キャッシュを作成します。
+初回実行は GPU 固有の検出アーティファクトを準備するため遅くなります。NVIDIA は TensorRT エンジンをコンパイルし（通常 **15-60 分**）、Linux AMD は RF-DETR の MIGraphX キャッシュを作成します。
 
 コンパイル中はブラウザを含む他のアプリを閉じ、PC の使用を避けてください。エンジンは `model_weights` にキャッシュされ、以降の実行で再利用されます。古い Jasna バージョンから新しいバージョンへ、エンジンファイルやフォルダをコピーできます。
 
@@ -188,6 +187,8 @@ jasna --input input_folder --output output_folder --post-export-action command -
 ### 検出モデル
 
 通常は最新の RF-DETR モデルを使ってください。Lada YOLO モデルも利用でき、2D アニメーションではより良い場合があります。VR180 向けには、[ZeLeFans VR Mosaic Remover](https://huggingface.co/zelefans/vrmr) の高精度検出モデル `zelefans-vr-yolo-v2` が Jasna に同梱されています。
+
+AMD では RF-DETR は非常に遅いため、RF-DETR が特に必要でない限り Lada YOLO（`lada-yolo-v4`）を推奨します。
 
 CLI オプション:
 
@@ -376,6 +377,9 @@ uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu
 # AMD Linux（ROCm 7.2 環境内）
 uv pip install ".[amd]" \
   --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
+
+# AMD Windows
+uv pip install ".[amd]"
 ```
 
 Nvidia ライブラリをビルドするには、以下も必要です:
@@ -398,18 +402,19 @@ uv pip install cmake ninja
 uv pip install -e ".[nvidia,dev]"  # または .[amd,dev]
 ```
 
-AMD リリースはホストの Python 環境を変更せず、専用 Docker スクリプトでビルドします:
+Linux AMD リリースは専用 Docker スクリプト、Windows AMD リリースはネイティブ
+ビルドスクリプトで作成します:
 
 Release archives use maintainer-only packaging tools.
 
-AMD では BasicVSR++/YOLO に PyTorch ROCm、RF-DETR に MIGraphX、H.264/HEVC/AV1 の
-デコード/エンコードに AMF を使います。AMF でデコードできない入力は FFmpeg
-ソフトウェアデコードへフォールバックします。セカンダリ復元と区間スマートレンダリングは
-現在 NVIDIA 専用です。動的な畳み込みプロファイリング停止のため、AMD は既定で
-`MIOPEN_FIND_MODE=FAST` を使います。
+AMD では BasicVSR++/YOLO に PyTorch ROCm、RF-DETR に ONNX Runtime、
+H.264/HEVC/AV1 のデコード/エンコードに AMF を使います。RF-DETR は Linux では
+MIGraphX、Windows では ONNX Runtime の CPU 推論を使います。AMF でデコード
+できない入力は FFmpeg ソフトウェアデコードへフォールバックします。セカンダリ復元と
+区間スマートレンダリングは現在 NVIDIA 専用です。
 
-`--device cuda:N` は PyTorch/MIGraphX の GPU を選択し、NVIDIA の動画 I/O にも
-引き継がれます。FFmpeg 8 の Linux AMF デバイスコンテキストは現在アダプター引数を
+`--device cuda:N` は PyTorch の GPU を選択し、Linux では MIGraphX の GPU も
+選択します。FFmpeg 8 の Linux AMF デバイスコンテキストは現在アダプター引数を
 無視するため、複数 GPU の AMD ホストでは AMF デコード/エンコードが既定の Vulkan
 アダプターを使う場合があります。AMF アダプターを確実に選ぶ必要がある場合は、
 コンテナまたはホスト側で対象 GPU のみを公開してください。

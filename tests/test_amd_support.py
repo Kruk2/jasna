@@ -249,6 +249,87 @@ def test_migraphx_runner_provider_and_tensor_bridge(monkeypatch, tmp_path) -> No
     assert torch.equal(result["scores"], torch.tensor([[0.25, 0.75]]))
 
 
+def test_migraphx_runner_falls_back_to_cpu_onnxruntime(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.migraphx_runner as module
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"onnx")
+    input_node = SimpleNamespace(
+        name="images",
+        shape=[1, 3, 4, 4],
+        type="tensor(float)",
+    )
+    output_node = SimpleNamespace(
+        name="scores",
+        shape=[1, 2],
+        type="tensor(float)",
+    )
+
+    class FakeSession:
+        def __init__(self, *_args, providers, **_kwargs):
+            self.providers_arg = providers
+
+        def get_providers(self):
+            return ["CPUExecutionProvider"]
+
+        def get_inputs(self):
+            return [input_node]
+
+        def get_outputs(self):
+            return [output_node]
+
+        def run(self, names, feeds):
+            assert names == ["scores"]
+            assert feeds["images"].shape == (1, 3, 4, 4)
+            return [np.array([[0.4, 0.6]], dtype=np.float32)]
+
+    fake_ort = SimpleNamespace(
+        get_available_providers=lambda: ["CPUExecutionProvider"],
+        SessionOptions=lambda: SimpleNamespace(graph_optimization_level=None),
+        GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL=99),
+        InferenceSession=FakeSession,
+    )
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    monkeypatch.setattr(module, "device_name", lambda _device: "AMD test GPU")
+
+    runner = module.MigraphxRunner(
+        model,
+        input_shapes=[(1, 3, 4, 4)],
+        device=torch.device("cpu"),
+        fp16=True,
+    )
+
+    assert runner.execution_provider == "CPUExecutionProvider"
+    assert runner.cache_dir is None
+    assert runner.session.providers_arg == ["CPUExecutionProvider"]
+    result = runner.infer({"images": torch.ones(1, 3, 4, 4)})
+    assert torch.equal(result["scores"], torch.tensor([[0.4, 0.6]]))
+
+
+def test_cpu_onnxruntime_fallback_needs_no_detection_engine(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    import jasna.engine_compiler as compiler
+    import jasna.mosaic.detection_registry as registry
+    import jasna.mosaic.migraphx_runner as migraphx
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
+    monkeypatch.setattr(registry, "is_rfdetr_model", lambda _name: True)
+    monkeypatch.setattr(migraphx, "migraphx_provider_available", lambda: False)
+    monkeypatch.setattr(
+        migraphx,
+        "migraphx_cache_is_ready",
+        MagicMock(side_effect=AssertionError("CPU fallback has no engine cache")),
+    )
+
+    assert compiler._detection_engine_exists(
+        "rfdetr-v5",
+        "model.onnx",
+        batch_size=4,
+        fp16=True,
+        device="cpu",
+    )
+
+
 def test_migraphx_model_digest_is_cached_for_unchanged_file(tmp_path) -> None:
     import jasna.mosaic.migraphx_runner as module
 
