@@ -493,7 +493,7 @@ TRANSLATIONS = {
         # Wizard check labels
         "wizard_window_title": "Jasna - System Check",
         "wizard_check_ffprobe": "FFprobe",
-        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_gpu": "GPU",
         "wizard_check_cuda": "GPU Runtime",
         "wizard_check_ascii_path": "Install Path (must be ASCII-only)",
         "wizard_check_driver": "GPU Driver Version",
@@ -944,7 +944,7 @@ TRANSLATIONS = {
         # Wizard check labels
         "wizard_window_title": "Jasna - 系统检查",
         "wizard_check_ffprobe": "FFprobe",
-        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_gpu": "GPU",
         "wizard_check_cuda": "GPU 运行时",
         "wizard_check_ascii_path": "安装路径（仅限 ASCII 字符）",
         "wizard_check_driver": "GPU 驱动版本",
@@ -1395,7 +1395,7 @@ TRANSLATIONS = {
         # Wizard check labels
         "wizard_window_title": "Jasna - システムチェック",
         "wizard_check_ffprobe": "FFprobe",
-        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_gpu": "GPU",
         "wizard_check_cuda": "GPU ランタイム",
         "wizard_check_ascii_path": "インストールパス（ASCII文字のみ）",
         "wizard_check_driver": "GPU ドライバーバージョン",
@@ -1826,7 +1826,7 @@ TRANSLATIONS = {
         # Wizard check labels
         "wizard_window_title": "Jasna - 시스템 점검",
         "wizard_check_ffprobe": "FFprobe",
-        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_gpu": "GPU",
         "wizard_check_cuda": "GPU 런타임",
         "wizard_check_ascii_path": "설치 경로 (ASCII 문자만 허용)",
         "wizard_check_driver": "GPU 드라이버 버전",
@@ -2259,7 +2259,7 @@ TRANSLATIONS = {
         # Wizard check labels
         "wizard_window_title": "Jasna - ตรวจสอบระบบ",
         "wizard_check_ffprobe": "FFprobe",
-        "wizard_check_gpu": "NVIDIA GPU",
+        "wizard_check_gpu": "GPU",
         "wizard_check_cuda": "GPU รันไทม์",
         "wizard_check_ascii_path": "เส้นทางการติดตั้ง (ASCII เท่านั้น)",
         "wizard_check_driver": "เวอร์ชันไดรเวอร์ GPU",

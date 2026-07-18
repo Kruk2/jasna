@@ -40,7 +40,7 @@ def test_cli_creates_stream_on_chosen_device(tmp_path: Path) -> None:
     with (
         patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
         patch(
-            "jasna.main.check_nvidia_gpu",
+            "jasna.main.check_supported_gpu",
             return_value=(True, "Fake GPU"),
         ) as check_gpu,
         patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),

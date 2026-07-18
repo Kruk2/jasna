@@ -56,7 +56,7 @@ def _detection_engine_exists(
     detection_model_path: str,
     batch_size: int,
     fp16: bool,
-    device: str = "cuda:0",
+    device: str,
 ) -> bool:
     import torch
 

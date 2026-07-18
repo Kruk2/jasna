@@ -181,13 +181,17 @@ def test_subprocess_compile_patches_frozen_torch(monkeypatch) -> None:
 def test_detection_engine_exists_rfdetr(tmp_path: Path) -> None:
     onnx_path = tmp_path / "model.onnx"
     onnx_path.write_text("x")
-    assert _detection_engine_exists("rfdetr-v5", str(onnx_path), 4, True) is False
+    assert _detection_engine_exists(
+        "rfdetr-v5", str(onnx_path), 4, True, "cuda:0"
+    ) is False
 
     from jasna.trt import get_onnx_tensorrt_engine_path
     engine = get_onnx_tensorrt_engine_path(onnx_path, batch_size=4, fp16=True)
     engine.parent.mkdir(parents=True, exist_ok=True)
     engine.write_text("x")
-    assert _detection_engine_exists("rfdetr-v5", str(onnx_path), 4, True) is True
+    assert _detection_engine_exists(
+        "rfdetr-v5", str(onnx_path), 4, True, "cuda:0"
+    ) is True
 
 
 def test_unet4x_engine_exists_plaintext(monkeypatch, tmp_path: Path) -> None:

@@ -14,6 +14,12 @@ def _touch(path: Path) -> None:
     path.write_text("x", encoding="utf-8")
 
 
+def test_engine_preflight_defers_torch_import() -> None:
+    import jasna.gui.engine_preflight as module
+
+    assert "torch" not in module.__dict__
+
+
 def test_preflight_detects_missing_engines(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
@@ -123,10 +129,11 @@ def test_amd_preflight_checks_only_migraphx_cache(monkeypatch, tmp_path: Path) -
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
 
     import jasna.gui.engine_preflight as module
+    import jasna.accelerator as accelerator
     import jasna.mosaic.migraphx_runner as migraphx
 
     cache = tmp_path / "model_weights" / "rfdetr-v5.migraphx" / "test"
-    monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
     monkeypatch.setattr(migraphx, "migraphx_cache_dir", lambda *_args, **_kwargs: cache)
     monkeypatch.setattr(
         migraphx,

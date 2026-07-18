@@ -9,7 +9,7 @@ import torch
 from jasna.benchmark.basicvsrpp_restoration import benchmark_basicvsrpp_restoration
 from jasna.benchmark.lada_yolo_detection_speed import benchmark_lada_yolo_detection_speed
 from jasna.benchmark.rfdetr_detection_speed import benchmark_rfdetr_detection_speed
-from jasna.os_utils import check_nvidia_gpu, check_required_executables
+from jasna.os_utils import check_required_executables, check_supported_gpu
 
 BENCHMARK_VIDEO_DEFAULTS: list[Path] = [
     Path("assets/test_clip1_1080p.mp4"),
@@ -98,10 +98,10 @@ def _print_results_table(
 
 def run_benchmark_cli(args: Namespace) -> None:
     check_required_executables()
-    gpu_ok, gpu_result = check_nvidia_gpu()
+    gpu_ok, gpu_result = check_supported_gpu(str(args.device))
     if not gpu_ok:
         if gpu_result == "no_cuda":
-            print("Error: No CUDA device. An NVIDIA GPU with compute capability 7.5+ is required.")
+            print("Error: No compatible GPU was found for this Jasna build.")
         else:
             _, major, minor = gpu_result
             print(f"Error: Compute capability 7.5+ required (GPU: {major}.{minor}).")
