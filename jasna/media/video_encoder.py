@@ -13,10 +13,25 @@ from typing import Mapping
 
 import av
 import torch
-from av.video.frame import CudaContext
+from av.codec.hwaccel import HWAccel
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.media import SUPPORTED_ENCODER_SETTINGS_BY_CODEC, VideoMetadata, validate_encoder_settings
+from jasna.accelerator import (
+    AcceleratorVendor,
+    current_stream,
+    device_name,
+    new_event,
+    new_stream,
+    set_device,
+    stream_context,
+    vendor_for_device,
+)
+from jasna.media import (
+    AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
+    SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
+    VideoMetadata,
+    validate_encoder_settings,
+)
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.rgb_to_nv12 import (
@@ -107,6 +122,41 @@ DEFAULT_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "b_ref_mode": "middle",
 }
 
+DEFAULT_AMF_H264_ENCODER_OPTIONS: dict[str, str] = {
+    "usage": "high_quality",
+    "quality": "quality",
+    "rc": "qvbr",
+    "qvbr_quality_level": "24",
+    "g": "250",
+    "preanalysis": "1",
+    "vbaq": "1",
+    "profile": "high",
+}
+
+DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
+    "usage": "high_quality",
+    "quality": "quality",
+    "rc": "qvbr",
+    "qvbr_quality_level": "25",
+    "g": "250",
+    "preanalysis": "1",
+    "vbaq": "1",
+    "profile": "main10",
+    "bitdepth": "10",
+}
+
+DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
+    "usage": "high_quality",
+    "quality": "quality",
+    "rc": "qvbr",
+    "qvbr_quality_level": "32",
+    "g": "250",
+    "preanalysis": "1",
+    "vbaq": "1",
+    "profile": "main",
+    "bitdepth": "10",
+}
+
 
 @dataclass(frozen=True)
 class EncoderSpec:
@@ -142,6 +192,33 @@ ENCODER_SPECS: dict[str, EncoderSpec] = {
         default_options=MappingProxyType(DEFAULT_AV1_ENCODER_OPTIONS),
         ten_bit=True,
         supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["av1"],
+    ),
+}
+
+AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
+    "hevc": EncoderSpec(
+        name="hevc",
+        encoder_name="hevc_amf",
+        frame_format="p010le",
+        default_options=MappingProxyType(DEFAULT_AMF_HEVC_ENCODER_OPTIONS),
+        ten_bit=True,
+        supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["hevc"],
+    ),
+    "h264": EncoderSpec(
+        name="h264",
+        encoder_name="h264_amf",
+        frame_format="nv12",
+        default_options=MappingProxyType(DEFAULT_AMF_H264_ENCODER_OPTIONS),
+        ten_bit=False,
+        supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["h264"],
+    ),
+    "av1": EncoderSpec(
+        name="av1",
+        encoder_name="av1_amf",
+        frame_format="p010le",
+        default_options=MappingProxyType(DEFAULT_AMF_AV1_ENCODER_OPTIONS),
+        ten_bit=True,
+        supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["av1"],
     ),
 }
 
@@ -225,9 +302,20 @@ class NvidiaVideoEncoder:
         match_input_bit_depth: bool = False,
         smart_fragment: bool = False,
     ):
-        if codec not in ENCODER_SPECS:
+        self.device = torch.device(device)
+        self.vendor = vendor_for_device(self.device)
+        if self.vendor not in {AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD}:
+            raise RuntimeError(
+                f"GPU video encoding is not supported on {self.vendor.value}"
+            )
+        specs = (
+            AMF_ENCODER_SPECS
+            if self.vendor is AcceleratorVendor.AMD
+            else ENCODER_SPECS
+        )
+        if codec not in specs:
             raise ValueError(f"Unsupported codec: {codec}")
-        spec = ENCODER_SPECS[codec]
+        spec = specs[codec]
         if match_input_bit_depth and codec in {"hevc", "av1"} and not metadata.is_10bit:
             options = dict(spec.default_options)
             if codec == "hevc":
@@ -245,10 +333,15 @@ class NvidiaVideoEncoder:
         if converter is None:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
         if encoder_settings:
-            validate_encoder_settings(encoder_settings, codec=codec)
+            validate_encoder_settings(
+                encoder_settings,
+                codec=codec,
+                vendor=self.vendor,
+            )
+        if smart_fragment and self.vendor is AcceleratorVendor.AMD:
+            raise ValueError("Smart rendering is currently supported only with NVENC")
 
         self.metadata = metadata
-        self.device = device
         self.file = file
         self.output_path = Path(file)
         self.codec = codec
@@ -276,6 +369,13 @@ class NvidiaVideoEncoder:
             # replaces that default instead of passing two conflicting options.
             if "spatial-aq" in overrides and "spatial_aq" in self.encoder_options:
                 overrides["spatial_aq"] = overrides.pop("spatial-aq")
+            if self.vendor is AcceleratorVendor.AMD and "cq" in overrides:
+                if "qvbr_quality_level" in overrides:
+                    raise ValueError(
+                        "Conflicting encoder settings: cq and "
+                        "qvbr_quality_level are aliases on AMD; use only one"
+                    )
+                overrides["qvbr_quality_level"] = overrides.pop("cq")
             self.encoder_options.update(overrides)
         if self.smart_fragment:
             self.encoder_options["forced-idr"] = "1"
@@ -299,18 +399,29 @@ class NvidiaVideoEncoder:
         self.dst = av.open(str(self.output_path), "w", container_options=container_options)
         self.dst.metadata.update(self._src.metadata)
 
-        out_v = self.dst.add_stream(
-            self.encoder_name,
-            rate=self.output_fps,
-            options=dict(self.encoder_options),
-        )
+        stream_kwargs = {
+            "rate": self.output_fps,
+            "options": dict(self.encoder_options),
+        }
+        if self.vendor is AcceleratorVendor.AMD:
+            stream_kwargs["hwaccel"] = HWAccel(
+                "amf",
+                device=str(self.device.index or 0),
+                allow_software_fallback=False,
+                is_hw_owned=False,
+            )
+        out_v = self.dst.add_stream(self.encoder_name, **stream_kwargs)
         out_v.width = self.metadata.video_width
         out_v.height = self.metadata.video_height
         out_v.time_base = self.metadata.time_base
         ctx = out_v.codec_context
         ctx.time_base = self.metadata.time_base
         ctx.framerate = self.output_fps
-        ctx.pix_fmt = "cuda"
+        ctx.pix_fmt = (
+            self.spec.frame_format
+            if self.vendor is AcceleratorVendor.AMD
+            else "cuda"
+        )
         if self.smart_fragment:
             from av.codec.context import Flags
 
@@ -333,12 +444,28 @@ class NvidiaVideoEncoder:
         # initialized it; current_ctx leaves the context and its flags alone.
         # Keeping conversion and NVENC in one context also avoids a ~500 MiB
         # secondary CUDA context and cross-context scheduling overhead.
-        self._cuda_ctx = CudaContext(
-            device_id=self.device.index or 0,
-            primary_ctx=False,
-            current_ctx=True,
-        )
-        self.stream = torch.cuda.Stream(self.device)
+        self._cuda_ctx = None
+        if self.vendor is AcceleratorVendor.NVIDIA:
+            from av.video.frame import CudaContext
+
+            self._cuda_ctx = CudaContext(
+                device_id=self.device.index or 0,
+                primary_ctx=False,
+                current_ctx=True,
+            )
+        self.stream = new_stream(self.device)
+        self._host_yuv = None
+        if self.vendor is AcceleratorVendor.AMD:
+            dtype = torch.uint16 if self.spec.ten_bit else torch.uint8
+            self._host_yuv = torch.empty(
+                (
+                    self.metadata.video_height
+                    + self.metadata.video_height // 2,
+                    self.metadata.video_width,
+                ),
+                dtype=dtype,
+                pin_memory=True,
+            )
         self.pts_heap: list[int] = []
         self.frame_buffer: deque = deque()
         self._lut_flags.clear()
@@ -403,8 +530,7 @@ class NvidiaVideoEncoder:
             raise self._worker_error
 
     def _encode_worker(self):
-        if self.device.type == "cuda":
-            torch.cuda.set_device(self.device)
+        set_device(self.device)
 
         while True:
             item = self._encode_queue.get()
@@ -429,9 +555,9 @@ class NvidiaVideoEncoder:
         frame: torch.Tensor,
         pts: int,
         apply_lut: bool = True,
-    ) -> tuple[torch.Tensor, int, bool, torch.cuda.Event]:
-        producer_stream = torch.cuda.current_stream(self.device)
-        ready_event = torch.cuda.Event()
+    ) -> tuple[torch.Tensor, int, bool, object]:
+        producer_stream = current_stream(self.device)
+        ready_event = new_event(self.device)
         producer_stream.record_event(ready_event)
         return frame, pts, bool(apply_lut), ready_event
 
@@ -440,7 +566,7 @@ class NvidiaVideoEncoder:
         frame: torch.Tensor,
         pts: int,
         apply_lut: bool,
-        ready_event: torch.cuda.Event,
+        ready_event: object,
     ) -> None:
         self.stream.wait_event(ready_event)
         frame.record_stream(self.stream)
@@ -532,7 +658,7 @@ class NvidiaVideoEncoder:
 
     def _encoder_open_error(self, exc: Exception) -> RuntimeError:
         try:
-            gpu = torch.cuda.get_device_name(self.device)
+            gpu = device_name(self.device)
         except Exception:
             gpu = str(self.device)
         message = (
@@ -540,28 +666,44 @@ class NvidiaVideoEncoder:
             f"'{self.output_path.suffix}' output on {gpu}: {exc}"
         )
         if self.codec == "av1":
-            message += ". AV1 NVENC encoding requires a GPU/driver generation that provides it."
+            backend = "AMF" if self.vendor is AcceleratorVendor.AMD else "NVENC"
+            message += (
+                f". AV1 {backend} encoding requires a GPU/driver generation "
+                "that provides it."
+            )
         return RuntimeError(message)
 
     def _encode_frame(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
-        with torch.cuda.stream(self.stream):
+        with stream_context(self.stream):
             if apply_lut and self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
-            packed = _align_yuv_pitch(self._to_yuv(frame))
+            packed = self._to_yuv(frame)
+            if self.vendor is AcceleratorVendor.NVIDIA:
+                packed = _align_yuv_pitch(packed)
+            else:
+                self._host_yuv.copy_(packed, non_blocking=True)
 
         height = self.metadata.video_height
-        # NVENC consumes these pointers asynchronously, so finish the conversion
-        # before constructing the hardware frame on the shared CUDA context.
         self.stream.synchronize()
-        if self.spec.frame_format == "p010le":
-            planes = [packed[:height].view(torch.uint16), packed[height:].view(torch.uint16)]
+        if self.vendor is AcceleratorVendor.AMD:
+            planes = [self._host_yuv[:height], self._host_yuv[height:]]
+            hw_frame = av.VideoFrame.from_dlpack(
+                planes,
+                format=self.spec.frame_format,
+            )
         else:
-            planes = [packed[:height], packed[height:]]
-        hw_frame = av.VideoFrame.from_dlpack(
-            planes,
-            format=self.spec.frame_format,
-            cuda_context=self._cuda_ctx,
-        )
+            if self.spec.frame_format == "p010le":
+                planes = [
+                    packed[:height].view(torch.uint16),
+                    packed[height:].view(torch.uint16),
+                ]
+            else:
+                planes = [packed[:height], packed[height:]]
+            hw_frame = av.VideoFrame.from_dlpack(
+                planes,
+                format=self.spec.frame_format,
+                cuda_context=self._cuda_ctx,
+            )
         hw_frame.pts = pts
         hw_frame.time_base = self.metadata.time_base
         try:

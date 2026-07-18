@@ -9,6 +9,7 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace
 
 from jasna._frozen import is_frozen
+from jasna.accelerator import is_nvidia_device
 
 # YUV->RGB from standard luma coefficients (Kr, Kb):
 #   R = Y' + 2(1-Kr) * V'
@@ -274,7 +275,7 @@ class YuvToRgbConverter:
             raise ValueError(f"Unsupported YUV color space: {color_space}") from exc
 
         self._cuda_kernel = None
-        if device.type == "cuda":
+        if is_nvidia_device(device):
             bits = 10 if is_10bit else 8
             value_range = "full" if full_range else "limited"
             self._cuda_kernel = _CudaYuvKernel(f"yuv{bits}_{name}_{value_range}")

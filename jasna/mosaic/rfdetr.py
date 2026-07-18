@@ -9,9 +9,15 @@ import torch
 logger = logging.getLogger(__name__)
 from torch.nn import functional as F
 
+from jasna.accelerator import is_amd_device, is_nvidia_device
 from jasna.engine_paths import get_onnx_tensorrt_engine_path
-from jasna.trt.trt_runner import TrtRunner
 from jasna.mosaic.detections import Detections
+
+
+def TrtRunner(*args, **kwargs):
+    from jasna.trt.trt_runner import TrtRunner as Runner
+
+    return Runner(*args, **kwargs)
 
 
 def compile_rfdetr_engine(
@@ -20,6 +26,23 @@ def compile_rfdetr_engine(
     batch_size: int,
     fp16: bool = True,
 ) -> Path:
+    if is_amd_device(device):
+        from jasna.mosaic.migraphx_runner import MigraphxRunner
+
+        runner = MigraphxRunner(
+            onnx_path,
+            input_shapes=[(int(batch_size), 3, 768, 768)],
+            device=device,
+            fp16=bool(fp16),
+        )
+        cache_path = runner.cache_path
+        runner.close()
+        return cache_path
+    if not is_nvidia_device(device):
+        raise RuntimeError(
+            f"RF-DETR is not supported on device backend {device.type!r}"
+        )
+
     from jasna.trt import compile_onnx_to_tensorrt_engine
     return compile_onnx_to_tensorrt_engine(
         onnx_path,
@@ -53,19 +76,38 @@ class RfDetrMosaicDetectionModel:
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
 
-        self.engine_path = get_onnx_tensorrt_engine_path(
-            self.onnx_path, batch_size=self.batch_size, fp16=bool(fp16),
-        )
-        if not self.engine_path.exists():
-            raise FileNotFoundError(
-                f"RF-DETR engine not found: {self.engine_path}. "
-                "Run engine compilation first via ensure_engines_compiled()."
+        if is_amd_device(self.device):
+            from jasna.mosaic.migraphx_runner import MigraphxRunner
+
+            self.runner = MigraphxRunner(
+                self.onnx_path,
+                input_shapes=[
+                    (self.batch_size, 3, self.resolution, self.resolution)
+                ],
+                device=self.device,
+                fp16=bool(fp16),
             )
-        self.runner = TrtRunner(
-            self.engine_path,
-            input_shapes=[(self.batch_size, 3, self.resolution, self.resolution)],
-            device=self.device,
-        )
+            self.engine_path = self.runner.cache_path
+        elif is_nvidia_device(self.device):
+            self.engine_path = get_onnx_tensorrt_engine_path(
+                self.onnx_path, batch_size=self.batch_size, fp16=bool(fp16),
+            )
+            if not self.engine_path.exists():
+                raise FileNotFoundError(
+                    f"RF-DETR engine not found: {self.engine_path}. "
+                    "Run engine compilation first via ensure_engines_compiled()."
+                )
+            self.runner = TrtRunner(
+                self.engine_path,
+                input_shapes=[
+                    (self.batch_size, 3, self.resolution, self.resolution)
+                ],
+                device=self.device,
+            )
+        else:
+            raise RuntimeError(
+                f"RF-DETR is not supported on device backend {self.device.type!r}"
+            )
         self._input_name = self.runner.input_names[0]
         self.input_dtype = self.runner.input_dtypes[self._input_name]
 
@@ -159,4 +201,3 @@ class RfDetrMosaicDetectionModel:
             boxes_xyxy=boxes_list,
             masks=masks_list,
         )
-

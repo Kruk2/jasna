@@ -9,6 +9,7 @@ from pathlib import Path
 
 import torch
 
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media import VideoMetadata
 from jasna.os_utils import find_executable, get_subprocess_startup_info
 
@@ -16,7 +17,7 @@ log = logging.getLogger(__name__)
 
 
 class StreamingEncoder:
-    """Encodes RGB frames to HLS MPEGTS segments via ffmpeg (h264_nvenc) + audio copy."""
+    """Encodes RGB frames to HLS MPEGTS segments with the active GPU backend."""
 
     def __init__(
         self,
@@ -30,6 +31,7 @@ class StreamingEncoder:
         self.segment_duration = float(segment_duration)
         self.metadata = metadata
         self.source_video = source_video
+        self._vendor = vendor_for_device(device)
 
         self._width = metadata.video_width
         self._height = metadata.video_height
@@ -121,21 +123,34 @@ class StreamingEncoder:
         else:
             cmd += ['-map', '0:v:0']
 
-        cmd += [
-            '-c:v', 'h264_nvenc',
-            '-preset', 'p4',
-            '-tune', 'll',
-            '-rc', 'vbr',
-            '-cq', '19',
-            '-bf', '0',
-            '-profile:v', 'high',
-            '-spatial-aq', '1',
-            '-temporal-aq', '1',
-            '-rc-lookahead', '8',
-            '-gpu', str(self._gpu_index),
-            '-g', str(self._gop_size),
-            '-pix_fmt', 'yuv420p',
-        ]
+        if self._vendor is AcceleratorVendor.AMD:
+            cmd += [
+                '-c:v', 'h264_amf',
+                '-usage', 'lowlatency_high_quality',
+                '-quality', 'balanced',
+                '-rc', 'qvbr',
+                '-qvbr_quality_level', '19',
+                '-bf', '0',
+                '-profile:v', 'high',
+                '-g', str(self._gop_size),
+                '-pix_fmt', 'yuv420p',
+            ]
+        else:
+            cmd += [
+                '-c:v', 'h264_nvenc',
+                '-preset', 'p4',
+                '-tune', 'll',
+                '-rc', 'vbr',
+                '-cq', '19',
+                '-bf', '0',
+                '-profile:v', 'high',
+                '-spatial-aq', '1',
+                '-temporal-aq', '1',
+                '-rc-lookahead', '8',
+                '-gpu', str(self._gpu_index),
+                '-g', str(self._gop_size),
+                '-pix_fmt', 'yuv420p',
+            ]
 
         sar = self.metadata.sample_aspect_ratio
         if sar != 1:

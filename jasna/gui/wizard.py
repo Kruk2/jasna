@@ -399,7 +399,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         
     def _check_gpu(self) -> tuple[bool, str]:
         try:
-            ok, result = os_utils.check_nvidia_gpu()
+            ok, result = os_utils.check_supported_gpu()
             if ok:
                 return True, result
             if result == "no_cuda":
@@ -413,7 +413,9 @@ class FirstRunWizard(ctk.CTkToplevel):
         try:
             import torch
             if torch.cuda.is_available():
-                version = torch.version.cuda
+                version = torch.version.hip or torch.version.cuda
+                if torch.version.hip:
+                    return True, f"ROCm {version}"
                 capability = torch.cuda.get_device_capability(0)
                 return True, t(
                     "wizard_cuda_version_compute",

@@ -117,3 +117,25 @@ def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch, tmp_path: Pa
     suffix = ".fp16.win.engine" if os.name == "nt" else ".fp16.linux.engine"
     assert yolo_req.paths == (Path("model_weights") / f"lada_mosaic_detection_model_v4_fast{suffix}",)
 
+
+def test_amd_preflight_checks_only_migraphx_cache(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    import jasna.gui.engine_preflight as module
+    import jasna.mosaic.migraphx_runner as migraphx
+
+    cache = tmp_path / "model_weights" / "rfdetr-v5.migraphx" / "test"
+    monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
+    monkeypatch.setattr(migraphx, "migraphx_cache_dir", lambda *_args, **_kwargs: cache)
+    monkeypatch.setattr(
+        migraphx,
+        "migraphx_cache_is_ready",
+        lambda *_args, **_kwargs: False,
+    )
+
+    settings = AppSettings(compile_basicvsrpp=True)
+    result = run_engine_preflight(settings)
+
+    assert [requirement.key for requirement in result.requirements] == ["rfdetr"]
+    assert result.missing[0].paths == (cache,)

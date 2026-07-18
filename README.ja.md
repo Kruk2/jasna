@@ -2,7 +2,7 @@
 
 # Jasna
 
-Jasna は、シンプルな GUI、CLI、GPU 専用処理パイプライン、TensorRT 対応、任意のセカンダリ復元モデル、静止画復元、ストリーミング機能を備えた モザイク復元ツールです。
+Jasna は、シンプルな GUI、CLI、GPU 専用処理パイプライン、NVIDIA TensorRT と実験的な AMD ROCm 対応、任意のセカンダリ復元モデル、静止画復元、ストリーミング機能を備えた モザイク復元ツールです。
 
 Lada に着想を得ており、一部は Lada をベースにしています。Jasna で使っている `mosaic_restoration_1.2` 復元モデルは、Lada 作者の ladaapp によって訓練されました。
 
@@ -45,7 +45,9 @@ SLS Discord では、復元例、サポート、設定について話せます�
 
 ## 要件
 
-- コンピュート能力 **7.5 以上**の新しい Nvidia GPU。
+リリースパッケージは GPU ベンダー別です。
+
+- NVIDIA: コンピュート能力 **7.5 以上**の新しい Nvidia GPU。
 - GPU の目安: **GTX 16 シリーズ**、**RTX 20 シリーズ**、**RTX 30 シリーズ**、**RTX 40 シリーズ**、**RTX 50 シリーズ**、および新しいワークステーション/データセンター向けカード。
 - 古すぎるもの: **GTX 10 シリーズ**。GTX 1050/1060/1070/1080 は対象外です。
 - 正確な GPU 確認には NVIDIA の [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus) を参照してください。
@@ -53,6 +55,8 @@ SLS Discord では、復元例、サポート、設定について話せます�
   FFmpeg 8.1.2 ライブラリは NVENC API 13.1 を使用しており、古いドライバーではこの API を
   利用できません。古いドライバーでも CUDA 推論は初期化できる場合がありますが、
   ハードウェア動画エンコードは失敗します。
+- AMD（実験的、Linux のみ）: ROCm 対応 AMD GPU と ROCm 7.2。現在のリリース対象は
+  Ubuntu 24.04、PyTorch 2.9.1、Python 3.12 です。
 - インストール先パスは ASCII 文字のみである必要があります。
 - Windows リリースパッケージ: `ffmpeg`、`ffprobe` を同梱しています。
 - Linux リリースパッケージ: `ffmpeg`、`ffprobe` を同梱しています。
@@ -61,11 +65,12 @@ Jasna は VRAM を自動管理します。GPU VRAM が不足すると、処理�
 
 ## クイックスタート
 
-1. 最新の Windows または Linux リリースパッケージをダウンロードします。
+1. OS と GPU ベンダーに合うリリースパッケージをダウンロードします。
 2. ASCII 文字のみのパスに展開します。
 3. アプリを起動します:
    - Windows: `jasna.exe` をダブルクリックします。
-   - Linux: `jasna` ファイルを実行します。
+   - Linux NVIDIA: `jasna` ファイルを実行します。
+   - Linux AMD: `run_jasna_amd.sh` を実行します。
 4. GUI に動画または画像を追加し、設定を選んで処理を開始します。
 
 コマンドラインからも使えます:
@@ -172,7 +177,7 @@ jasna --input input_folder --output output_folder --post-export-action command -
 
 ## 初回実行
 
-初回実行は、お使いの GPU 向けに TensorRT エンジンをコンパイルするため遅くなります。通常 **15-60 分**かかります。
+初回実行は GPU 固有の検出アーティファクトを準備するため遅くなります。NVIDIA は TensorRT エンジンをコンパイルし（通常 **15-60 分**）、AMD は RF-DETR の MIGraphX キャッシュを作成します。
 
 コンパイル中はブラウザを含む他のアプリを閉じ、PC の使用を避けてください。エンジンは `model_weights` にキャッシュされ、以降の実行で再利用されます。古い Jasna バージョンから新しいバージョンへ、エンジンファイルやフォルダをコピーできます。
 
@@ -358,14 +363,19 @@ Jasna は開発初期段階です。主な目標は、復元品質、モザイ�
 
 ## ソースから実行
 
-`pyproject.toml` の Python 要件: **Python 3.13 以上**。
+`pyproject.toml` の Python 要件: **Python 3.12 以上**。
 
 公開されているソースチェックアウトには protection module が含まれていません。開発や無料モデルには使えますが、通常のソースチェックアウトでは **unet-4x** や **SD 1.5 画像復元** などの支援者限定モデルは利用できません。
 
-実行時依存関係をインストールします:
+GPU ベンダーに合う実行時依存関係をインストールします:
 
 ```bash
-uv pip install . --no-build-isolation
+# NVIDIA
+uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu130
+
+# AMD Linux（ROCm 7.2 環境内）
+uv pip install ".[amd]" \
+  --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
 ```
 
 Nvidia ライブラリをビルドするには、以下も必要です:
@@ -385,5 +395,21 @@ uv pip install cmake ninja
 その後、Jasna を editable mode でインストールします:
 
 ```bash
-uv pip install -e .[dev]
+uv pip install -e ".[nvidia,dev]"  # または .[amd,dev]
 ```
+
+AMD リリースはホストの Python 環境を変更せず、専用 Docker スクリプトでビルドします:
+
+Release archives use maintainer-only packaging tools.
+
+AMD では BasicVSR++/YOLO に PyTorch ROCm、RF-DETR に MIGraphX、H.264/HEVC/AV1 の
+デコード/エンコードに AMF を使います。AMF でデコードできない入力は FFmpeg
+ソフトウェアデコードへフォールバックします。セカンダリ復元と区間スマートレンダリングは
+現在 NVIDIA 専用です。動的な畳み込みプロファイリング停止のため、AMD は既定で
+`MIOPEN_FIND_MODE=FAST` を使います。
+
+`--device cuda:N` は PyTorch/MIGraphX の GPU を選択し、NVIDIA の動画 I/O にも
+引き継がれます。FFmpeg 8 の Linux AMF デバイスコンテキストは現在アダプター引数を
+無視するため、複数 GPU の AMD ホストでは AMF デコード/エンコードが既定の Vulkan
+アダプターを使う場合があります。AMF アダプターを確実に選ぶ必要がある場合は、
+コンテナまたはホスト側で対象 GPU のみを公開してください。

@@ -39,7 +39,18 @@ def _parse_nvidia_smi_csv_line(line: str) -> tuple[int, int]:
 def read_gpu_vram() -> tuple[int | None, int | None]:
     exe_path = os_utils.find_executable("nvidia-smi")
     if exe_path is None:
-        return None, None
+        try:
+            import torch
+            from jasna.accelerator import is_amd_device
+
+            if not torch.cuda.is_available() or not is_amd_device():
+                return None, None
+            free, total = torch.cuda.mem_get_info()
+            if total <= 0:
+                return None, None
+            return None, _clamp_pct(((total - free) / total) * 100.0)
+        except (ImportError, RuntimeError):
+            return None, None
 
     cmd = [
         exe_path,
@@ -88,4 +99,3 @@ def read_system_stats() -> SystemStats:
         ram_util=ram_util,
         cpu_util=cpu_util,
     )
-

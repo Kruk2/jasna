@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import torch
+
+from jasna.accelerator import is_amd_device
 from jasna.gui.models import AppSettings
 
 
@@ -42,16 +45,35 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
 
     reqs: list[EngineRequirement] = []
+    device = torch.device("cuda:0")
+    amd = is_amd_device(device)
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
     det_weights = _detection_weights_path(settings)
     if is_rfdetr_model(det_name):
-        det_engine = get_onnx_tensorrt_engine_path(
-            det_weights,
-            batch_size=int(settings.batch_size),
-            fp16=bool(settings.fp16_mode),
-        )
-        det_exists = det_engine.is_file()
+        if amd:
+            from jasna.mosaic.migraphx_runner import (
+                migraphx_cache_dir,
+                migraphx_cache_is_ready,
+            )
+
+            det_engine = migraphx_cache_dir(
+                det_weights,
+                device,
+                fp16=bool(settings.fp16_mode),
+            )
+            det_exists = migraphx_cache_is_ready(
+                det_weights,
+                device,
+                fp16=bool(settings.fp16_mode),
+            )
+        else:
+            det_engine = get_onnx_tensorrt_engine_path(
+                det_weights,
+                batch_size=int(settings.batch_size),
+                fp16=bool(settings.fp16_mode),
+            )
+            det_exists = det_engine.is_file()
         reqs.append(
             EngineRequirement(
                 key="rfdetr",
@@ -61,7 +83,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
                 missing_paths=() if det_exists else (det_engine,),
             )
         )
-    elif is_yolo_model(det_name):
+    elif is_yolo_model(det_name) and not amd:
         det_engine = get_yolo_tensorrt_engine_path(det_weights, fp16=bool(settings.fp16_mode))
         det_exists = det_engine.is_file()
         reqs.append(
@@ -75,7 +97,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         )
 
     restoration_model_path = model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth"
-    if bool(settings.compile_basicvsrpp):
+    if bool(settings.compile_basicvsrpp) and not amd:
         sub_paths = get_basicvsrpp_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode), int(settings.max_clip_size))
         all_engine_paths = tuple(Path(p) for p in sub_paths.values())
         missing_paths = tuple(p for p in all_engine_paths if not p.is_file())
@@ -108,4 +130,3 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         requirements=tuple(reqs),
         should_warn_first_run_slow=bool(should_warn),
     )
-

@@ -2,7 +2,7 @@
 
 # Jasna
 
-Jasna 是一个 马赛克修复工具，提供简洁 GUI、CLI、纯 GPU 处理流水线、TensorRT 支持、可选二级修复模型、静态图像修复以及流媒体支持。
+Jasna 是一个 马赛克修复工具，提供简洁 GUI、CLI、纯 GPU 处理流水线、NVIDIA TensorRT 与实验性 AMD ROCm 支持、可选二级修复模型、静态图像修复以及流媒体支持。
 
 它受 Lada 启发，部分代码也基于 Lada。Jasna 使用的 `mosaic_restoration_1.2` 修复模型由 Lada 作者 ladaapp 训练。
 
@@ -45,13 +45,17 @@ Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目�
 
 ## 要求
 
-- 计算能力 **7.5 或更新**的现代 Nvidia GPU。
+发行包按 GPU 厂商区分:
+
+- NVIDIA: 计算能力 **7.5 或更新**的现代 Nvidia GPU。
 - GPU 粗略判断: **GTX 16 系列**、**RTX 20 系列**、**RTX 30 系列**、**RTX 40 系列**、**RTX 50 系列**，以及更新的工作站/数据中心显卡。
 - 太旧: **GTX 10 系列**，包括 GTX 1050/1060/1070/1080。
 - 精确 GPU 查询请查看 NVIDIA 的 [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus)。
 - Nvidia 驱动: Windows 需 **610.00 或更高版本**，Linux 需 **580.xx 或更高版本**。内置的
   FFmpeg 8.1.2 库使用 NVENC API 13.1，旧版驱动不提供此 API。旧版驱动可能仍能初始化
   CUDA 推理，但硬件视频编码会失败。
+- AMD（实验性，仅 Linux）: ROCm 支持的 AMD GPU 和 ROCm 7.2。当前发行目标为
+  Ubuntu 24.04、PyTorch 2.9.1 和 Python 3.12。
 - 安装路径只能包含 ASCII 字符。
 - Windows 发行包: 已包含 `ffmpeg` 和 `ffprobe`。
 - Linux 发行包: 已包含 `ffmpeg` 和 `ffprobe`。
@@ -60,11 +64,12 @@ Jasna 会自动管理 VRAM。当 GPU 显存不足时，处理队列中等待的�
 
 ## 快速开始
 
-1. 下载最新的 Windows 或 Linux 发行包。
+1. 下载与你的操作系统和 GPU 厂商匹配的发行包。
 2. 解压到只包含 ASCII 字符的路径。
 3. 启动应用:
    - Windows: 双击 `jasna.exe`。
-   - Linux: 运行 `jasna` 文件。
+   - Linux NVIDIA: 运行 `jasna` 文件。
+   - Linux AMD: 运行 `run_jasna_amd.sh`。
 4. 在 GUI 中添加视频或图像，选择设置，然后开始处理。
 
 也可以通过命令行使用 Jasna:
@@ -171,7 +176,7 @@ jasna --input input_folder --output output_folder --post-export-action command -
 
 ## 首次运行
 
-首次运行会比较慢，因为 TensorRT 引擎会针对你的 GPU 编译。通常需要 **15-60 分钟**。
+首次运行会比较慢，因为需要准备 GPU 专用检测产物。NVIDIA 会编译 TensorRT 引擎（通常 **15-60 分钟**）；AMD 会生成 RF-DETR MIGraphX 缓存。
 
 编译期间请关闭其他应用，包括浏览器，并避免使用电脑。引擎会缓存在 `model_weights` 中，后续运行会复用。你可以把旧 Jasna 版本中的引擎文件和文件夹复制到新版本中。
 
@@ -357,14 +362,19 @@ Jasna 仍处于早期开发阶段。主要目标是按顺序改善修复质量�
 
 ## 从源代码运行
 
-`pyproject.toml` 中的 Python 要求: **Python 3.13 或更新**。
+`pyproject.toml` 中的 Python 要求: **Python 3.12 或更新**。
 
 公开源代码检出不包含 protection module。它可以用于开发和免费模型，但普通源代码检出无法使用 **unet-4x** 和 **SD 1.5 图像修复** 等支持者专用模型。
 
-安装运行时依赖:
+安装对应 GPU 厂商的运行时依赖:
 
 ```bash
-uv pip install . --no-build-isolation
+# NVIDIA
+uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu130
+
+# AMD Linux（在 ROCm 7.2 环境中）
+uv pip install ".[amd]" \
+  --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
 ```
 
 构建 Nvidia 库还需要:
@@ -384,5 +394,19 @@ uv pip install cmake ninja
 然后以 editable mode 安装 Jasna:
 
 ```bash
-uv pip install -e .[dev]
+uv pip install -e ".[nvidia,dev]"  # 或 .[amd,dev]
 ```
+
+AMD 发行版使用专用 Docker 脚本构建，不会修改主机 Python 环境:
+
+Release archives use maintainer-only packaging tools.
+
+AMD 版使用 PyTorch ROCm 运行 BasicVSR++/YOLO，使用 MIGraphX 运行 RF-DETR，并使用
+AMF 对 H.264/HEVC/AV1 进行硬件解码和编码。AMF 无法解码时会回退到 FFmpeg 软件解码。
+二级修复和区间智能渲染目前仍仅支持 NVIDIA。为避免动态卷积形状反复分析性能，AMD
+默认设置 `MIOPEN_FIND_MODE=FAST`。
+
+`--device cuda:N` 会选择 PyTorch/MIGraphX GPU，也会传递给 NVIDIA 视频 I/O。
+FFmpeg 8 的 Linux AMF 设备上下文目前会忽略适配器参数，因此在多 GPU AMD 主机上，
+AMF 解码/编码可能使用默认 Vulkan 适配器。如果必须确定 AMF 使用哪张卡，请在容器或
+主机层面只暴露目标 GPU。

@@ -8,15 +8,28 @@ import torch
 import torch.nn.functional as F
 from ultralytics.utils import nms, ops
 
+from jasna.accelerator import is_nvidia_device
 from jasna.mosaic.detections import Detections
-from jasna.mosaic.yolo_tensorrt_compilation import get_yolo_tensorrt_engine_path
-from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
 
 
 _YOLO_LETTERBOX_PAD_VALUE = 114.0 / 255.0
 _MASK_MAX_SIDE = 256
+
+
+def get_yolo_tensorrt_engine_path(*args, **kwargs):
+    from jasna.mosaic.yolo_tensorrt_compilation import (
+        get_yolo_tensorrt_engine_path as resolve,
+    )
+
+    return resolve(*args, **kwargs)
+
+
+def TrtRunner(*args, **kwargs):
+    from jasna.trt.trt_runner import TrtRunner as Runner
+
+    return Runner(*args, **kwargs)
 
 
 def _mask_hw_for_frame(target_hw: tuple[int, int]) -> tuple[int, int]:
@@ -137,11 +150,11 @@ class YoloMosaicDetectionModel:
             raise ValueError(f"imgsz must be > 0, got {imgsz}")
         self.stride = 32
         self.end2end = False
-        self.runner: TrtRunner | None = None
+        self.runner = None
         self.input_dtype = torch.float16 if self.fp16 else torch.float32
 
         runtime_path = self.model_path
-        if self.device.type == "cuda":
+        if is_nvidia_device(self.device):
             runtime_path = get_yolo_tensorrt_engine_path(self.model_path, fp16=self.fp16)
             if not runtime_path.exists():
                 raise FileNotFoundError(

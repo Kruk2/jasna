@@ -149,6 +149,7 @@ def _build_rfdetr_model():
     engine_path.exists.return_value = True
 
     with (
+        patch("jasna.mosaic.rfdetr.is_nvidia_device", return_value=True),
         patch("jasna.mosaic.rfdetr.get_onnx_tensorrt_engine_path", return_value=engine_path),
         patch("jasna.mosaic.rfdetr.TrtRunner", return_value=mock_runner),
     ):

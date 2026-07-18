@@ -5,8 +5,8 @@ import torch
 logger = logging.getLogger(__name__)
 from torch import Tensor
 
+from jasna.accelerator import is_nvidia_device
 from jasna.models.basicvsrpp.inference import load_model
-from jasna.restorer.basicvsrpp_sub_engines import create_split_forward
 
 INFERENCE_SIZE = 256
 
@@ -30,7 +30,9 @@ class BasicvsrppMosaicRestorer:
         self._split_forward = None
         self.model = None
 
-        if self.use_tensorrt and self.device.type == "cuda":
+        if self.use_tensorrt and is_nvidia_device(self.device):
+            from jasna.restorer.basicvsrpp_sub_engines import create_split_forward
+
             pytorch_model = load_model(config, checkpoint_path, self.device, fp16)
             self._split_forward = create_split_forward(
                 model=pytorch_model,
@@ -45,6 +47,7 @@ class BasicvsrppMosaicRestorer:
                 self.model = pytorch_model
                 logger.info("BasicVSR++ sub-engines not found, using PyTorch model (fp16=%s)", fp16)
         else:
+            self.use_tensorrt = False
             self.model = load_model(config, checkpoint_path, self.device, fp16)
             logger.info("BasicVSR++ loaded from checkpoint: %s (fp16=%s)", checkpoint_path, fp16)
 
