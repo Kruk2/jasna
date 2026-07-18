@@ -44,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Images keep their source extension; videos use the template extension when provided."
         ),
     )
+    parser.add_argument(
+        "--working-directory",
+        type=str,
+        default=None,
+        help="Directory for temporary files created while assembling segment output (default: the output video's directory)",
+    )
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument(
@@ -703,6 +709,8 @@ def main() -> None:
             raise FileNotFoundError(lut_arg)
         lut_path = lut_arg or None
 
+        working_dir = Path(args.working_directory) if args.working_directory else None
+
         def _make_pipeline(vid_input: Path, out_path: Path) -> Pipeline:
             return Pipeline(
                 input_video=vid_input,
@@ -725,6 +733,7 @@ def main() -> None:
                 retarget_high_fps=bool(args.retarget_high_fps),
                 segments=segments,
                 splice_plan=splice_plan,
+                working_dir=working_dir,
             )
 
         video_inputs = folder_videos if input_is_dir else ([input_video] if input_video is not None else [])

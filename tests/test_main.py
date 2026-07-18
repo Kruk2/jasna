@@ -99,6 +99,15 @@ class TestBuildParser:
         assert args.benchmark is False
         assert args.post_export_action == "none"
         assert args.post_export_command == ""
+        assert args.working_directory is None
+
+    def test_working_directory(self):
+        args = build_parser().parse_args([
+            "--input", "a.mp4",
+            "--output", "b.mp4",
+            "--working-directory", "/fast/scratch",
+        ])
+        assert args.working_directory == "/fast/scratch"
 
     def test_no_fp16(self):
         args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4", "--no-fp16"])

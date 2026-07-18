@@ -408,6 +408,7 @@ class Processor:
                 retarget_high_fps=settings.retarget_high_fps,
                 segments=tuple(segments) or None,
                 splice_plan=splice_plan,
+                working_dir=Path(settings.working_directory) if settings.working_directory else None,
             )
             pipeline.run()
         finally:

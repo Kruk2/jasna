@@ -80,6 +80,20 @@ def test_preset_manager_persists_lut_path_in_user_preset(monkeypatch, tmp_path: 
     assert loaded.lut_path == r"C:\luts\film.cube"
 
 
+def test_preset_manager_persists_working_directory(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    mgr = PresetManager()
+    settings = AppSettings(working_directory=r"D:\scratch")
+    assert mgr.create_preset("WithWorkDir", settings)
+
+    mgr2 = PresetManager()
+    loaded = mgr2.get_preset("WithWorkDir")
+    assert loaded is not None
+    assert loaded.working_directory == r"D:\scratch"
+
+
 def test_preset_manager_persists_frame_rate_retargeting(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))

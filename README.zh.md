@@ -105,6 +105,12 @@ jasna --input input_folder --output output_folder --output-pattern "{original}_r
 
 选择一个或多个区间后，编辑器会提示：为直接流复制未选择的部分，导出将使用源视频编解码器；主界面的 **编码** 编解码器选项不会生效。
 
+组装区间输出时，Jasna 会把临时片段存放在输出视频旁的隐藏文件夹中。可使用 `--working-directory`（或 GUI 编码设置中的**工作目录**）把这些临时文件放到其他磁盘：
+
+```bash
+jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
+```
+
 编辑器内置马赛克扫描:
 
 - 可逐帧扫描，或按 0.25–2 秒间隔扫描。扫描完全在 GPU 上运行，在 **RTX 5090 上约为 2,000 FPS**；实际速度取决于视频、模型和设置。
