@@ -10,8 +10,8 @@ from jasna.os_utils import (
     MIN_DRIVER_VERSION,
     check_ascii_install_path,
     check_gpu_driver_version,
-    check_nvidia_gpu,
     check_required_executables,
+    check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
 )
 
@@ -414,7 +414,7 @@ def main() -> None:
 
     check_required_executables()
 
-    gpu_ok, gpu_result = check_nvidia_gpu(str(args.device))
+    gpu_ok, gpu_result = check_supported_gpu(str(args.device))
     if not gpu_ok:
         if gpu_result == "no_cuda":
             print("Error: No compatible GPU was found for this Jasna build.")

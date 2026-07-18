@@ -3,9 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
-
-from jasna.accelerator import is_amd_device
 from jasna.gui.models import AppSettings
 
 
@@ -35,6 +32,9 @@ def _detection_weights_path(settings: AppSettings) -> Path:
 
 
 def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
+    import torch
+
+    from jasna.accelerator import is_amd_device
     from jasna.engine_paths import (
         expected_unet4x_engine_path,
         get_basicvsrpp_sub_engine_paths,

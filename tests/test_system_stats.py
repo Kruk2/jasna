@@ -48,8 +48,11 @@ def test_parse_nvidia_smi_csv_line_parses_gpu_and_vram_pct() -> None:
     assert vram == 50
 
 
-def test_read_gpu_vram_returns_none_when_nvidia_smi_missing(monkeypatch) -> None:
+def test_read_gpu_vram_returns_none_when_gpu_tools_and_amd_sysfs_are_missing(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setattr(system_stats.os_utils, "find_executable", lambda name: None)
+    monkeypatch.setattr(system_stats, "_DRM_CLASS_PATH", tmp_path)
 
     def _should_not_run(*args, **kwargs):
         raise AssertionError("subprocess.run should not be called when nvidia-smi is missing")
@@ -59,6 +62,19 @@ def test_read_gpu_vram_returns_none_when_nvidia_smi_missing(monkeypatch) -> None
     gpu, vram = system_stats.read_gpu_vram()
     assert gpu is None
     assert vram is None
+
+
+def test_read_gpu_vram_reads_amd_sysfs_without_torch(monkeypatch, tmp_path) -> None:
+    device = tmp_path / "card1" / "device"
+    device.mkdir(parents=True)
+    (device / "vendor").write_text("0x1002\n", encoding="utf-8")
+    (device / "gpu_busy_percent").write_text("73\n", encoding="utf-8")
+    (device / "mem_info_vram_used").write_text("300\n", encoding="utf-8")
+    (device / "mem_info_vram_total").write_text("1200\n", encoding="utf-8")
+    monkeypatch.setattr(system_stats.os_utils, "find_executable", lambda name: None)
+    monkeypatch.setattr(system_stats, "_DRM_CLASS_PATH", tmp_path)
+
+    assert system_stats.read_gpu_vram() == (73, 25)
 
 
 def test_read_gpu_vram_parses_first_device(monkeypatch) -> None:
@@ -82,4 +98,3 @@ def test_read_cpu_ram_uses_psutil(monkeypatch) -> None:
     cpu, ram = system_stats.read_cpu_ram()
     assert cpu == 23
     assert ram == 46
-

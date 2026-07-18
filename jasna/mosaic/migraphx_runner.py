@@ -4,6 +4,7 @@ import hashlib
 import logging
 import re
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -35,8 +36,15 @@ class MigraphxTensorInfo:
 
 
 def _model_digest(path: Path) -> str:
+    resolved = path.resolve()
+    stat = resolved.stat()
+    return _cached_model_digest(str(resolved), stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=16)
+def _cached_model_digest(path: str, _size: int, _mtime_ns: int) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as model:
+    with Path(path).open("rb") as model:
         while chunk := model.read(8 * 1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()[:16]

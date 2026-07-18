@@ -1,3 +1,5 @@
+from unittest.mock import MagicMock
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -16,6 +18,25 @@ def test_box_blur_matches_dense_reference(kernel_size: int) -> None:
     dense = F.conv2d(x4d, kernel).squeeze(0).squeeze(0)
 
     assert torch.allclose(_box_blur(x, kernel_size, kernel_size), dense, atol=1e-4)
+
+
+def test_box_blur_uses_convolution_only_for_nvidia(monkeypatch) -> None:
+    import jasna.tracking.blending as module
+
+    x = torch.ones((8, 8))
+    conv = MagicMock(return_value=x)
+    prefix = MagicMock(return_value=x)
+    monkeypatch.setattr(module, "_conv_box_blur", conv)
+    monkeypatch.setattr(module, "_prefix_box_blur", prefix)
+    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: True)
+
+    assert module._box_blur(x, 3, 3) is x
+    conv.assert_called_once_with(x, 3, 3)
+    prefix.assert_not_called()
+
+    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
+    assert module._box_blur(x, 5, 5) is x
+    prefix.assert_called_once_with(x, 5, 5)
 
 
 def test_create_blend_mask_all_ones_stays_ones() -> None:
@@ -123,4 +144,3 @@ def test_bbox_blend_mask_same_res_mask_matches_reference_exactly() -> None:
     ref = _reference_fullres_blend_mask(mask, bbox, frame_shape)
     out = create_bbox_blend_mask(mask, bbox, frame_shape)
     assert torch.allclose(out, ref, atol=1e-5)
-

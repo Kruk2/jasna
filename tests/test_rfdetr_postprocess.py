@@ -171,6 +171,33 @@ class TestRfDetrInit:
         assert model.logits_out == "pred_logits"
         assert model.masks_out == "pred_masks"
 
+    def test_amd_init_uses_migraphx_cache_dir(self, monkeypatch, tmp_path):
+        import jasna.mosaic.migraphx_runner as migraphx
+        import jasna.mosaic.rfdetr as module
+
+        cache_dir = tmp_path / "rfdetr.migraphx"
+        runner = MagicMock()
+        runner.cache_dir = cache_dir
+        runner.input_names = ["images"]
+        runner.input_dtypes = {"images": torch.float16}
+        runner.output_names = ["pred_boxes", "pred_logits", "pred_masks"]
+        runner.outputs = {
+            "pred_boxes": MagicMock(ndim=3, shape=(1, 100, 4)),
+            "pred_logits": MagicMock(ndim=3, shape=(1, 100, 1)),
+            "pred_masks": MagicMock(ndim=4, shape=(1, 100, 8, 8)),
+        }
+        monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
+        monkeypatch.setattr(migraphx, "MigraphxRunner", MagicMock(return_value=runner))
+
+        model = RfDetrMosaicDetectionModel(
+            onnx_path=tmp_path / "model.onnx",
+            batch_size=1,
+            device=torch.device("cpu"),
+            fp16=True,
+        )
+
+        assert model.engine_path == cache_dir
+
 
 class TestRfDetrPreprocess:
     def test_output_shape_and_dtype(self):
@@ -212,3 +239,24 @@ class TestCompileRfdetrEngine:
             result = compile_rfdetr_engine(Path("model.onnx"), torch.device("cuda:0"), batch_size=4, fp16=True)
             mock_compile.assert_called_once_with(Path("model.onnx"), torch.device("cuda:0"), batch_size=4, fp16=True, workspace_gb=20)
             assert result == Path("out.engine")
+
+    def test_amd_returns_migraphx_cache_dir_and_closes_runner(
+        self, monkeypatch, tmp_path
+    ):
+        import jasna.mosaic.migraphx_runner as migraphx
+        import jasna.mosaic.rfdetr as module
+
+        cache_dir = tmp_path / "rfdetr.migraphx"
+        runner = MagicMock(cache_dir=cache_dir)
+        monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
+        monkeypatch.setattr(migraphx, "MigraphxRunner", MagicMock(return_value=runner))
+
+        result = compile_rfdetr_engine(
+            tmp_path / "model.onnx",
+            torch.device("cpu"),
+            batch_size=4,
+            fp16=True,
+        )
+
+        assert result == cache_dir
+        runner.close.assert_called_once_with()

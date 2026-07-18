@@ -104,6 +104,16 @@ def test_video_encoder_selects_amf_and_normalizes_cq(monkeypatch, tmp_path) -> N
     assert "cq" not in encoder.encoder_options
 
 
+def test_amf_p010_host_input_reinterprets_signed_storage() -> None:
+    import jasna.media.video_encoder as module
+
+    packed = torch.tensor([-32768, -1, 0, 32767], dtype=torch.int16)
+    host_input = module._amf_host_input(packed, ten_bit=True)
+
+    assert host_input.dtype is torch.uint16
+    assert torch.equal(host_input, packed.view(torch.uint16))
+
+
 def test_smart_render_is_rejected_on_amd(monkeypatch, tmp_path) -> None:
     import jasna.media.video_encoder as module
 
@@ -234,5 +244,17 @@ def test_migraphx_runner_provider_and_tensor_bridge(monkeypatch, tmp_path) -> No
     provider, options = runner.session.providers_arg[0]
     assert provider == "MIGraphXExecutionProvider"
     assert options["migraphx_fp16_enable"] == "1"
+    assert options["migraphx_model_cache_dir"] == str(runner.cache_dir)
     result = runner.infer({"images": torch.ones(1, 3, 4, 4)})
     assert torch.equal(result["scores"], torch.tensor([[0.25, 0.75]]))
+
+
+def test_migraphx_model_digest_is_cached_for_unchanged_file(tmp_path) -> None:
+    import jasna.mosaic.migraphx_runner as module
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"onnx")
+    module._cached_model_digest.cache_clear()
+
+    assert module._model_digest(model) == module._model_digest(model)
+    assert module._cached_model_digest.cache_info().hits == 1

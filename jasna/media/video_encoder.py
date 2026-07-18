@@ -286,6 +286,10 @@ def _align_yuv_pitch(packed: torch.Tensor) -> torch.Tensor:
     return storage[:, :width]
 
 
+def _amf_host_input(packed: torch.Tensor, *, ten_bit: bool) -> torch.Tensor:
+    return packed.view(torch.uint16) if ten_bit else packed
+
+
 class NvidiaVideoEncoder:
     def __init__(
         self,
@@ -681,7 +685,10 @@ class NvidiaVideoEncoder:
             if self.vendor is AcceleratorVendor.NVIDIA:
                 packed = _align_yuv_pitch(packed)
             else:
-                self._host_yuv.copy_(packed, non_blocking=True)
+                self._host_yuv.copy_(
+                    _amf_host_input(packed, ten_bit=self.spec.ten_bit),
+                    non_blocking=True,
+                )
 
         height = self.metadata.video_height
         self.stream.synchronize()

@@ -7,7 +7,7 @@ import pytest
 
 def test_benchmark_mode_runs_benchmark_cli() -> None:
     with (
-        patch("jasna.main.check_nvidia_gpu", return_value=(True, "Fake GPU")),
+        patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
         patch("jasna.main.check_required_executables"),
         patch("jasna.benchmark.run_benchmark_cli") as run_benchmark_cli,
     ):

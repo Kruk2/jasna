@@ -32,15 +32,6 @@ def check_supported_gpu(
     if capability < MIN_GPU_COMPUTE:
         return False, ("compute_too_low", capability[0], capability[1])
     return True, torch.cuda.get_device_name(device)
-
-
-def check_nvidia_gpu(
-    device: str = "cuda:0",
-) -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:
-    """Backward-compatible alias for callers/tests predating AMD builds."""
-    return check_supported_gpu(device)
-
-
 def _bundled_exe_filename(name: str) -> str:
     if os.name == "nt" and not name.lower().endswith(".exe"):
         return f"{name}.exe"
