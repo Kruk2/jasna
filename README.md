@@ -50,7 +50,9 @@ Join the [SLS Discord](https://discord.gg/5R2Rx5nBH) for examples, support, and 
 - Rough GPU guide: **GTX 16-series**, **RTX 20-series**, **RTX 30-series**, **RTX 40-series**, **RTX 50-series**, and newer workstation/data-center cards.
 - Too old: **GTX 10-series**, including GTX 1050/1060/1070/1080.
 - For exact GPU lookup, check NVIDIA's [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus).
-- Up-to-date Nvidia drivers. Tested driver: **591.67**. The 59x driver family is the minimum expected family.
+- Nvidia driver **610.00 or newer**. The bundled FFmpeg 8.1.2 libraries use NVENC API
+  13.1, which older drivers do not expose. CUDA inference may initialize on an older
+  driver, but hardware video encoding will fail.
 - An install path that uses ASCII characters only.
 - Windows release package: bundled with `ffmpeg` and `ffprobe`.
 - Linux release package: bundled with `ffmpeg` and `ffprobe`.

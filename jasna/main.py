@@ -7,6 +7,7 @@ from jasna import __version__
 from jasna.engine_paths import model_weights_dir
 from jasna.media import UnsupportedColorspaceError
 from jasna.os_utils import (
+    MIN_DRIVER_VERSION,
     check_ascii_install_path,
     check_gpu_driver_version,
     check_nvidia_gpu,
@@ -425,7 +426,7 @@ def main() -> None:
     driver_ok, driver_info = check_gpu_driver_version()
     if not driver_ok:
         print(f"Error: GPU driver version check failed: {driver_info}")
-        print("Please update your NVIDIA driver to version 580 or newer.")
+        print(f"Please update your NVIDIA driver to version {MIN_DRIVER_VERSION} or newer.")
         sys.exit(1)
 
     if sys.platform == "win32":
