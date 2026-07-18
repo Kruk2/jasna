@@ -31,6 +31,7 @@ dist_linux_amd/
 dist_nuitka/
 dist_nuitka_amd/
 dist_nuitka_win/
+release/
 *.egg-info/
 .eggs/
 
