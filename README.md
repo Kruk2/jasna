@@ -50,7 +50,7 @@ Join the [SLS Discord](https://discord.gg/5R2Rx5nBH) for examples, support, and 
 - Rough GPU guide: **GTX 16-series**, **RTX 20-series**, **RTX 30-series**, **RTX 40-series**, **RTX 50-series**, and newer workstation/data-center cards.
 - Too old: **GTX 10-series**, including GTX 1050/1060/1070/1080.
 - For exact GPU lookup, check NVIDIA's [CUDA GPU compute capability table](https://developer.nvidia.com/cuda/gpus).
-- Nvidia driver **610.00 or newer**.
+- Nvidia driver **610.00 or newer** on Windows and 580.xx or newer on Linux.
 - An install path that uses ASCII characters only.
 - Windows release package: bundled with `ffmpeg` and `ffprobe`.
 - Linux release package: bundled with `ffmpeg` and `ffprobe`.
