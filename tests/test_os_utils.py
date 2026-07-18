@@ -448,16 +448,22 @@ def test_min_gpu_compute_constant() -> None:
     assert os_utils.MIN_GPU_COMPUTE == (7, 5)
 
 
+def test_min_driver_version_is_platform_specific() -> None:
+    import sys
+    assert os_utils.MIN_DRIVER_VERSION == (580 if sys.platform == "linux" else 610)
+
+
 def test_check_gpu_driver_version_passes_at_minimum(monkeypatch) -> None:
     monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+    version = f"{os_utils.MIN_DRIVER_VERSION}.00"
 
     def fake_run(cmd, **kwargs):
-        return type("R", (), {"returncode": 0, "stdout": "610.00\n", "stderr": ""})()
+        return type("R", (), {"returncode": 0, "stdout": f"{version}\n", "stderr": ""})()
 
     monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
     ok, info = os_utils.check_gpu_driver_version()
     assert ok is True
-    assert info == "610.00"
+    assert info == version
 
 
 def test_check_gpu_driver_version_passes_when_newer(monkeypatch) -> None:
@@ -474,15 +480,16 @@ def test_check_gpu_driver_version_passes_when_newer(monkeypatch) -> None:
 
 def test_check_gpu_driver_version_fails_below_minimum(monkeypatch) -> None:
     monkeypatch.setattr(os_utils, "find_executable", lambda name: "/fake/nvidia-smi")
+    below = f"{os_utils.MIN_DRIVER_VERSION - 1}.99"
 
     def fake_run(cmd, **kwargs):
-        return type("R", (), {"returncode": 0, "stdout": "609.99\n", "stderr": ""})()
+        return type("R", (), {"returncode": 0, "stdout": f"{below}\n", "stderr": ""})()
 
     monkeypatch.setattr(os_utils.subprocess, "run", fake_run)
     ok, info = os_utils.check_gpu_driver_version()
     assert ok is False
-    assert "609.99" in info
-    assert "610" in info
+    assert below in info
+    assert str(os_utils.MIN_DRIVER_VERSION) in info
 
 
 def test_check_gpu_driver_version_fails_when_nvidia_smi_not_found(monkeypatch) -> None:
