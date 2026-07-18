@@ -27,7 +27,9 @@ skills-lock.json
 dist/
 dist-old/
 dist_linux/
+dist_linux_amd/
 dist_nuitka/
+dist_nuitka_amd/
 dist_nuitka_win/
 *.egg-info/
 .eggs/
