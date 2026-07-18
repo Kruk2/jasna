@@ -190,34 +190,6 @@ class TestPipelineRun:
 
         mock_encoder.encode.assert_not_called()
 
-    def test_sbs_run_injects_vr_spatial_metadata(self):
-        p = _make_pipeline()
-        p.vr_mode = "sbs"
-        reader_cls, _, _ = _make_two_readers([])
-        mock_encoder = MagicMock()
-        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
-        mock_encoder.__exit__ = MagicMock(return_value=False)
-
-        with (
-            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
-            patch("jasna.pipeline_threads.NvidiaVideoReader", reader_cls),
-            patch("jasna.pipeline.NvidiaVideoEncoder", return_value=mock_encoder),
-            patch("jasna.pipeline_threads.torch.cuda.set_device"),
-            patch(
-                "jasna.pipeline_threads.torch.inference_mode",
-                return_value=MagicMock(
-                    __enter__=MagicMock(),
-                    __exit__=MagicMock(return_value=False),
-                ),
-            ),
-            patch(
-                "jasna.media.spatial_metadata.inject_vr180_spatial_metadata"
-            ) as inject,
-        ):
-            p.run()
-
-        inject.assert_called_once_with(Path("in.mp4"), Path("out.mkv"))
-
     def test_run_full_thread_flow(self):
         """Exercise all four thread bodies: decode->primary->secondary->encode."""
         p = _make_pipeline()

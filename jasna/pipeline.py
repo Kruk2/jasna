@@ -651,13 +651,6 @@ class Pipeline:
             self._run_smart(metadata)
         else:
             self._run_full(metadata)
-        if self._vr_resolution.is_sbs:
-            from jasna.media.spatial_metadata import inject_vr180_spatial_metadata
-
-            inject_vr180_spatial_metadata(
-                self.input_video,
-                self.output_video,
-            )
 
     def run_streaming(
         self,
