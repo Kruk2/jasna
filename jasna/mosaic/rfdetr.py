@@ -35,7 +35,7 @@ def compile_rfdetr_engine(
             device=device,
             fp16=bool(fp16),
         )
-        cache_path = runner.cache_dir
+        cache_path = runner.cache_dir or onnx_path
         runner.close()
         return cache_path
     if not is_nvidia_device(device):
@@ -87,7 +87,7 @@ class RfDetrMosaicDetectionModel:
                 device=self.device,
                 fp16=bool(fp16),
             )
-            self.engine_path = self.runner.cache_dir
+            self.engine_path = self.runner.cache_dir or self.onnx_path
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(
                 self.onnx_path, batch_size=self.batch_size, fp16=bool(fp16),

@@ -218,8 +218,8 @@ jasna --input input_folder --output output_folder --post-export-action command -
 ## First Run
 
 The first run is slow because GPU-specific detection artifacts are prepared. NVIDIA
-builds compile TensorRT engines (usually **15-60 minutes**); AMD builds prepare the
-RF-DETR MIGraphX cache. Artifacts are cached per model, precision, and GPU architecture.
+builds compile TensorRT engines (usually **15-60 minutes**); Linux AMD builds prepare
+the RF-DETR MIGraphX cache. Artifacts are cached per model, precision, and GPU architecture.
 
 Close other applications, including browsers, and avoid using the PC during compilation. Engines are cached in `model_weights` and reused on later runs. You can copy engine files and folders from an older Jasna version to a newer one.
 
@@ -232,6 +232,9 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 In general, use the latest RF-DETR model. Lada YOLO models are also available
 and can work better for 2D animations. For VR180, the bundled
 `zelefans-vr-yolo-v2` model can be more accurate detector.
+
+RF-DETR is very slow on AMD. Use Lada YOLO (`lada-yolo-v4`) on AMD unless you
+specifically need RF-DETR.
 
 CLI option:
 
@@ -470,16 +473,14 @@ jasna/protection/keytool/validate_amd_ssh.sh user@amd-host
 python jasna/protection/keytool/build_windows_amd.py
 ```
 
-The AMD build uses PyTorch/ROCm for BasicVSR++ and YOLO, ONNX Runtime MIGraphX
-for RF-DETR, and AMF for H.264/HEVC/AV1 decode and encode. Decode falls back to
-FFmpeg software decoding when AMF cannot handle the source. Secondary restoration
-and segment smart rendering remain NVIDIA-only. Blend-mask blur avoids dynamic
-convolutions, and AMD defaults `MIOPEN_FIND_MODE=FAST` to prevent first-use
-benchmarking stalls across different clip lengths; set the variable explicitly to
-override it.
+The AMD build uses PyTorch/ROCm for BasicVSR++ and YOLO, ONNX Runtime for RF-DETR,
+and AMF for H.264/HEVC/AV1 decode and encode. RF-DETR uses MIGraphX on Linux and
+falls back to ONNX Runtime CPU inference on Windows. Decode falls back to FFmpeg
+software decoding when AMF cannot handle the source. Secondary restoration and
+segment smart rendering remain NVIDIA-only.
 
-`--device cuda:N` selects the PyTorch/MIGraphX GPU and is propagated to NVIDIA
-video I/O. FFmpeg 8's Linux AMF device context currently ignores its adapter
+`--device cuda:N` selects the PyTorch GPU and, on Linux, the MIGraphX GPU.
+FFmpeg 8's Linux AMF device context currently ignores its adapter
 argument, so AMF decode/encode can use the default Vulkan adapter on a multi-GPU
 AMD host. Isolate the target GPU at the container/host level when deterministic
 AMF adapter selection matters.

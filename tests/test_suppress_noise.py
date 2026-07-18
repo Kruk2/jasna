@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-import tensorrt as trt
+import pytest
 
 import jasna._suppress_noise as suppress_noise
 from jasna._suppress_noise import install
@@ -73,6 +73,7 @@ def test_flop_counter_triton_warning_is_filtered() -> None:
 
 
 def test_tensorrt_plugin_experimental_warning_is_muted(monkeypatch) -> None:
+    trt = pytest.importorskip("tensorrt")
     # TensorRT's C++ logger writes to the original stderr handle and bypasses
     # Python capture, so assert the patch's behaviour directly: the experimental
     # message must not reach the wrapped logger, while other messages do.
@@ -93,3 +94,10 @@ def test_tensorrt_plugin_experimental_warning_is_muted(monkeypatch) -> None:
     logger.log(trt.Logger.WARNING, "an-unrelated-trt-warning")
 
     assert logged == ["an-unrelated-trt-warning"]
+
+
+def test_install_succeeds_without_tensorrt(monkeypatch) -> None:
+    monkeypatch.setattr(suppress_noise, "_installed", False)
+    monkeypatch.setattr(suppress_noise, "find_spec", lambda _name: None)
+
+    install()

@@ -66,8 +66,15 @@ def _detection_engine_exists(
     resolved_device = torch.device(device)
     if is_amd_device(resolved_device):
         if is_rfdetr_model(detection_model_name):
-            from jasna.mosaic.migraphx_runner import migraphx_cache_is_ready
+            from jasna.mosaic.migraphx_runner import (
+                migraphx_cache_is_ready,
+                migraphx_provider_available,
+            )
 
+            if not migraphx_provider_available():
+                # Windows AMD uses standard ONNX Runtime's CPU provider and has
+                # no compiled MIGraphX cache artifact.
+                return True
             return migraphx_cache_is_ready(
                 Path(detection_model_path),
                 resolved_device,

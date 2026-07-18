@@ -55,18 +55,25 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             from jasna.mosaic.migraphx_runner import (
                 migraphx_cache_dir,
                 migraphx_cache_is_ready,
+                migraphx_provider_available,
             )
 
-            det_engine = migraphx_cache_dir(
-                det_weights,
-                device,
-                fp16=bool(settings.fp16_mode),
-            )
-            det_exists = migraphx_cache_is_ready(
-                det_weights,
-                device,
-                fp16=bool(settings.fp16_mode),
-            )
+            if migraphx_provider_available():
+                det_engine = migraphx_cache_dir(
+                    det_weights,
+                    device,
+                    fp16=bool(settings.fp16_mode),
+                )
+                det_exists = migraphx_cache_is_ready(
+                    det_weights,
+                    device,
+                    fp16=bool(settings.fp16_mode),
+                )
+            else:
+                # Standard ONNX Runtime on Windows executes RF-DETR on CPU and
+                # does not create a precompiled engine/cache artifact.
+                det_engine = None
+                det_exists = True
         else:
             det_engine = get_onnx_tensorrt_engine_path(
                 det_weights,
@@ -74,15 +81,16 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
                 fp16=bool(settings.fp16_mode),
             )
             det_exists = det_engine.is_file()
-        reqs.append(
-            EngineRequirement(
-                key="rfdetr",
-                label=f"RF-DETR ({det_weights.name})",
-                paths=(det_engine,),
-                exists=det_exists,
-                missing_paths=() if det_exists else (det_engine,),
+        if det_engine is not None:
+            reqs.append(
+                EngineRequirement(
+                    key="rfdetr",
+                    label=f"RF-DETR ({det_weights.name})",
+                    paths=(det_engine,),
+                    exists=det_exists,
+                    missing_paths=() if det_exists else (det_engine,),
+                )
             )
-        )
     elif is_yolo_model(det_name) and not amd:
         det_engine = get_yolo_tensorrt_engine_path(det_weights, fp16=bool(settings.fp16_mode))
         det_exists = det_engine.is_file()
