@@ -125,6 +125,15 @@ marks. The timeline distinguishes frames receiving restoration from surrounding
 transition frames that are re-encoded unchanged, and estimates restored,
 re-encoded, and stream-copied durations before the job starts.
 
+While assembling segment output, Jasna stores temporary fragments in a hidden
+folder next to the output video. Use `--working-directory` (or the **Working
+directory** setting in the GUI's Encoding section) to place these temporary
+files on another drive:
+
+```bash
+jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
+```
+
 ## Segment Editor
 
 <img width="822" alt="Screenshot_20260717_211339" src="https://github.com/user-attachments/assets/c67939a9-37de-46ae-b722-20c6a0933df7" />

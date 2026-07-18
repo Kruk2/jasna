@@ -173,6 +173,7 @@ class AppSettings:
     output_folder: str = ""
     output_pattern: str = "{original}_restored.mp4"
     file_conflict: str = "auto_rename"  # auto_rename, overwrite, skip
+    working_directory: str = ""  # empty = same directory as the output video
 
 
 # Factory default preset - frozen, matches CLI defaults

@@ -106,6 +106,12 @@ jasna --input input_folder --output output_folder --output-pattern "{original}_r
 
 1 つ以上の区間を選択すると、未選択部分をストリームコピーするため、書き出しには元動画のコーデックが使われることをエディターに表示します。メイン画面の **エンコード** コーデック選択は適用されません。
 
+区間出力の組み立て中、Jasna は一時ファイルを出力動画と同じ場所の隠しフォルダーに保存します。`--working-directory`（または GUI のエンコード設定にある**作業ディレクトリ**）を使うと、これらの一時ファイルを別のドライブに置けます:
+
+```bash
+jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
+```
+
 エディターにはモザイクスキャンも組み込まれています:
 
 - 全フレーム、または 0.25～2 秒間隔でスキャンできます。GPU のみで動作し、**RTX 5090 では約 2,000 FPS**です。実際の速度は動画、モデル、設定によって変わります。

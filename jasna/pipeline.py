@@ -98,9 +98,11 @@ class Pipeline:
         retarget_high_fps: bool = False,
         segments: tuple[SegmentRange, ...] | None = None,
         splice_plan: SplicePlan | None = None,
+        working_dir: Path | None = None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
+        self.working_dir = working_dir
         self.codec = str(codec)
         self.encoder_settings = dict(encoder_settings)
         self.batch_size = int(batch_size)
@@ -586,10 +588,12 @@ class Pipeline:
             callback=self.progress_callback,
         )
         self.output_video.parent.mkdir(parents=True, exist_ok=True)
+        work_root = self.working_dir or self.output_video.parent
+        work_root.mkdir(parents=True, exist_ok=True)
 
         try:
             with TemporaryDirectory(
-                dir=self.output_video.parent,
+                dir=work_root,
                 prefix=f".{self.output_video.stem}.segments-",
             ) as temp_dir_name:
                 temp_dir = Path(temp_dir_name)

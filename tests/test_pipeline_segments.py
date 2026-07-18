@@ -24,6 +24,7 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     pipeline.lut_path = None
     pipeline.retarget_high_fps = False
     pipeline.segments = (SegmentRange(2.5, 3.0),)
+    pipeline.working_dir = None
     pipeline._run_pass = MagicMock()
 
     metadata = MagicMock(
@@ -85,6 +86,50 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     assert pass_args["effect_ranges"] == ((75, 90),)
     concatenate.assert_called_once()
     mux.assert_called_once()
+
+
+def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
+    pipeline = object.__new__(Pipeline)
+    pipeline.input_video = tmp_path / "input.mp4"
+    pipeline.output_video = tmp_path / "out" / "output.mp4"
+    pipeline.codec = "h264"
+    pipeline.encoder_settings = {"cq": 22}
+    pipeline.device = torch.device("cuda:0")
+    pipeline.disable_progress = True
+    pipeline.progress_callback = None
+    pipeline.lut_path = None
+    pipeline.retarget_high_fps = False
+    pipeline.segments = (SegmentRange(2.5, 3.0),)
+    pipeline.working_dir = tmp_path / "scratch"
+    pipeline._run_pass = MagicMock()
+
+    metadata = MagicMock(
+        video_fps=30.0,
+        video_fps_exact=Fraction(30, 1),
+        duration=6.0,
+        profile="Main",
+    )
+    index = KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180)
+    pipeline.splice_plan = SplicePlan(
+        index=index,
+        spans=(SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 180)),
+        segments=pipeline.segments,
+    )
+
+    with (
+        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
+        patch("jasna.pipeline.NvidiaVideoEncoder"),
+        patch("jasna.pipeline.create_copy_fragment"),
+        patch("jasna.pipeline.normalize_fragment"),
+        patch("jasna.pipeline.concatenate_fragments"),
+        patch("jasna.pipeline.mux_final_output") as mux,
+    ):
+        pipeline._run_smart(metadata)
+
+    assembled = mux.call_args.args[0]
+    assert assembled.parent.parent == pipeline.working_dir
+    assert pipeline.working_dir.is_dir()
+    assert pipeline.output_video.parent.is_dir()
 
 
 def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
