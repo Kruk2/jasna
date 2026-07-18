@@ -867,16 +867,26 @@ class SegmentEditor(ctk.CTkToplevel):
         self._resize_after = self.after(60, self._refresh_preview_image)
 
     def _fit_to_label(self, label: ctk.CTkLabel, source: Image.Image) -> ctk.CTkImage:
+        # winfo_* measures physical pixels while CTkImage's size is multiplied
+        # by the widget scaling factor at render time; divide it back out so
+        # HiDPI displays do not overflow and clip the preview (issue #229).
+        scaling = ctk.ScalingTracker.get_widget_scaling(label)
         width = max(2, label.winfo_width() - 16)
         height = max(2, label.winfo_height() - 16)
         source_width, source_height = source.size
         scale = min(width / source_width, height / source_height)
-        target_size = (
+        pixel_size = (
             max(2, round(source_width * scale)),
             max(2, round(source_height * scale)),
         )
-        image = source.resize(target_size, Image.Resampling.LANCZOS)
-        return ctk.CTkImage(image, size=image.size)
+        image = source.resize(pixel_size, Image.Resampling.LANCZOS)
+        return ctk.CTkImage(
+            image,
+            size=(
+                max(1, round(pixel_size[0] / scaling)),
+                max(1, round(pixel_size[1] / scaling)),
+            ),
+        )
 
     def _refresh_preview_image(self) -> None:
         self._resize_after = None

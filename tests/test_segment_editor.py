@@ -534,3 +534,24 @@ def test_feedback_upload_events_show_toast(monkeypatch) -> None:
         if editor is not None:
             editor._finish_close()
         root.destroy()
+
+
+@pytest.mark.parametrize("scaling", [1.0, 1.5])
+def test_fit_to_label_compensates_widget_scaling(monkeypatch, scaling: float) -> None:
+    editor = object.__new__(SegmentEditor)
+    label = MagicMock()
+    label.winfo_width.return_value = 916
+    label.winfo_height.return_value = 556
+    monkeypatch.setattr(
+        ctk.ScalingTracker, "get_widget_scaling", staticmethod(lambda widget: scaling)
+    )
+    source = Image.new("RGB", (1920, 1080))
+
+    result = SegmentEditor._fit_to_label(editor, label, source)
+
+    rendered = (
+        round(result._size[0] * scaling),
+        round(result._size[1] * scaling),
+    )
+    assert rendered[0] <= 900 and rendered[1] <= 540
+    assert result._light_image.size == (900, 506)
