@@ -183,11 +183,30 @@ _COLOR_CONVERTERS_NV12 = {
     (AvColorspace.BT2020, AvColorRange.JPEG): chw_rgb_to_nv12_bt2020_full,
 }
 
+_NVENC_PITCH_ALIGNMENT = 16
+
 
 def _option_value(value: object) -> str:
     if isinstance(value, bool):
         return "1" if value else "0"
     return str(value)
+
+
+def _align_yuv_pitch(packed: torch.Tensor) -> torch.Tensor:
+    item_size = packed.element_size()
+    if packed.stride(0) * item_size % _NVENC_PITCH_ALIGNMENT == 0:
+        return packed
+
+    width = packed.shape[1]
+    row_bytes = width * item_size
+    aligned_row_bytes = (
+        row_bytes + _NVENC_PITCH_ALIGNMENT - 1
+    ) // _NVENC_PITCH_ALIGNMENT * _NVENC_PITCH_ALIGNMENT
+    pitch_elements = aligned_row_bytes // item_size
+    storage = packed.new_empty((packed.shape[0], pitch_elements))
+    storage[:, :width].copy_(packed)
+    storage[:, width:].zero_()
+    return storage[:, :width]
 
 
 class NvidiaVideoEncoder:
@@ -528,7 +547,7 @@ class NvidiaVideoEncoder:
         with torch.cuda.stream(self.stream):
             if apply_lut and self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
-            packed = self._to_yuv(frame)
+            packed = _align_yuv_pitch(self._to_yuv(frame))
 
         height = self.metadata.video_height
         # NVENC consumes these pointers asynchronously, so finish the conversion
