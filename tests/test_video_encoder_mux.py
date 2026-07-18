@@ -3,7 +3,10 @@ audio copy vs aac fallback, metadata/disposition, faststart, pts passthrough.
 Requires a CUDA GPU and an ffmpeg binary for fixture generation."""
 from __future__ import annotations
 
+import os
 import subprocess
+import sys
+from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
@@ -99,6 +102,67 @@ def _transcode(src: Path, dst: Path, codec: str = "hevc") -> None:
         for frames, pts_list in reader.frames():
             for i, pts in enumerate(pts_list):
                 encoder.encode(frames[i], pts)
+
+
+def _run_unaligned_pitch_probe(src: str, dst: str, codec: str, width: int) -> None:
+    metadata = replace(
+        get_video_meta_data(src),
+        video_width=width,
+        video_height=480,
+        num_frames=12,
+    )
+    frame = _gradient_frame(0, 480, width)
+    with NvidiaVideoEncoder(
+        dst,
+        device=DEVICE,
+        metadata=metadata,
+        codec=codec,
+        encoder_settings={},
+        mux_audio=False,
+    ) as encoder:
+        for index in range(12):
+            encoder.encode(frame.clone(), index * 512)
+
+
+@pytest.mark.parametrize("width", [852, 854, 860])
+@pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+def test_unaligned_pitch_encodes_in_isolated_process(
+    tmp_path,
+    codec,
+    width,
+    require_codec,
+):
+    require_codec(codec)
+    src = _make_source(tmp_path, "pitch-src.mp4", acodec=None)
+    dst = tmp_path / f"pitch-{codec}-{width}.mp4"
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "pitch-probe",
+        str(src),
+        str(dst),
+        codec,
+        str(width),
+    ]
+    result = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parents[1],
+        env=os.environ.copy(),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    with av.open(str(dst)) as container:
+        video = container.streams.video[0]
+        assert video.width == width
+        assert video.height == 480
+        frames = list(container.decode(video))
+        assert len(frames) == 12
+        rgb = frames[0].to_ndarray(format="rgb24")
+        assert rgb[:, -width // 4 :, 0].mean() > rgb[:, : width // 4, 0].mean() + 100
+        assert rgb[-120:, :, 1].mean() > rgb[:120, :, 1].mean() + 100
 
 
 def test_color_tags_and_frame_count(tmp_path):
@@ -464,3 +528,12 @@ def test_audio_transcode_for_new_codecs(tmp_path, codec, require_codec):
         a = c.streams.audio[0]
         assert a.codec_context.name == "aac"
         assert float(a.duration * a.time_base) == pytest.approx(2.0, abs=0.2)
+
+
+if __name__ == "__main__" and len(sys.argv) == 6 and sys.argv[1] == "pitch-probe":
+    _run_unaligned_pitch_probe(
+        sys.argv[2],
+        sys.argv[3],
+        sys.argv[4],
+        int(sys.argv[5]),
+    )

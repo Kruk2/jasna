@@ -37,6 +37,7 @@ from jasna.media.video_encoder import (
     DEFAULT_H264_ENCODER_OPTIONS,
     ENCODER_SPECS,
     _CODEC_MAP,
+    _align_yuv_pitch,
     NvidiaVideoEncoder,
 )
 
@@ -326,6 +327,47 @@ def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
 
 
 class TestEncodeBuffer:
+    @pytest.mark.parametrize(
+        ("dtype", "width", "expected_pitch"),
+        [
+            (torch.uint8, 852, 864),
+            (torch.uint8, 854, 864),
+            (torch.uint8, 856, 864),
+            (torch.uint8, 860, 864),
+            (torch.uint8, 864, 864),
+            (torch.int16, 852, 856),
+            (torch.int16, 854, 856),
+            (torch.int16, 856, 856),
+            (torch.int16, 860, 864),
+            (torch.int16, 864, 864),
+        ],
+    )
+    def test_yuv_pitch_is_aligned_without_changing_visible_data(
+        self,
+        dtype,
+        width,
+        expected_pitch,
+    ):
+        height = 4
+        packed = torch.arange(height * 3 // 2 * width, dtype=dtype).reshape(
+            height * 3 // 2,
+            width,
+        )
+
+        aligned = _align_yuv_pitch(packed)
+
+        assert aligned.shape == packed.shape
+        assert torch.equal(aligned, packed)
+        assert aligned.stride() == (expected_pitch, 1)
+        assert aligned.stride(0) * aligned.element_size() % 16 == 0
+        assert aligned[height:].data_ptr() - aligned.data_ptr() == (
+            height * aligned.stride(0) * aligned.element_size()
+        )
+        if packed.stride(0) * packed.element_size() % 16 == 0:
+            assert aligned.data_ptr() == packed.data_ptr()
+        else:
+            assert aligned.data_ptr() != packed.data_ptr()
+
     def test_from_dlpack_reuses_cuda_context_without_repeating_context_flags(self, tmp_path, monkeypatch):
         enc = _make_encoder(tmp_path, codec="h264", video_width=2, video_height=2)
         enc.stream = MagicMock()
