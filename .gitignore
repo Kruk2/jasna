@@ -31,6 +31,7 @@ dist_linux_amd/
 dist_nuitka/
 dist_nuitka_amd/
 dist_nuitka_win/
+dist_nuitka_win_amd/
 release/
 *.egg-info/
 .eggs/
@@ -66,6 +67,7 @@ CLAUDE.md
 *.pth
 model_weights/
 dist_windows/
+dist_windows_amd/
 
 .repowise/
 .repowise-workspace/
