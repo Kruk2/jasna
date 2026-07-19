@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 import customtkinter as ctk
 import pytest
 
-from jasna.gui import icons, settings_panel
+from jasna.gui import icons
+from jasna.gui.settings_sections import widgets as settings_widgets
 from jasna.gui.icons import CompactSwitch, NativeIconButton, render_icon, render_toggle
 from jasna.gui.theme import Colors
 
@@ -131,10 +132,10 @@ def test_native_icon_button_keeps_image_and_disabled_state() -> None:
 
 def test_slider_value_uses_native_label_without_ctk_canvas(monkeypatch) -> None:
     constructor = MagicMock(return_value=object())
-    monkeypatch.setattr(settings_panel.tk, "Label", constructor)
+    monkeypatch.setattr(settings_widgets.tk, "Label", constructor)
     master = object()
 
-    result = settings_panel.create_slider_value_label(master, "90", 4, Colors.BG_PANEL)
+    result = settings_widgets.create_slider_value_label(master, "90", 4, Colors.BG_PANEL)
 
     assert result is constructor.return_value
     constructor.assert_called_once_with(
@@ -142,7 +143,7 @@ def test_slider_value_uses_native_label_without_ctk_canvas(monkeypatch) -> None:
         text="90",
         foreground=Colors.TEXT_PRIMARY,
         background=Colors.BG_PANEL,
-        font=(settings_panel.Fonts.FAMILY, -settings_panel.Fonts.SIZE_NORMAL),
+        font=(settings_widgets.Fonts.FAMILY, -settings_widgets.Fonts.SIZE_NORMAL),
         width=4,
         borderwidth=0,
         highlightthickness=0,

@@ -52,7 +52,7 @@ from jasna.gui.segment_preview import (
     PreviewLoaded,
     SegmentPreviewWorker,
 )
-from jasna.gui.settings_panel import CODEC_CANONICAL_TO_LABEL
+from jasna.gui.settings_sections.encoding import CODEC_CANONICAL_TO_LABEL
 from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media import VideoMetadata

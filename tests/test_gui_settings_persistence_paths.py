@@ -121,6 +121,21 @@ def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path)
     assert loaded.post_export_command == "echo done"
 
 
+def test_preset_manager_resolve_falls_back_to_default(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    mgr = PresetManager()
+    name, preset = mgr.resolve("DoesNotExist")
+    assert name == "Default"
+    assert preset == AppSettings()
+
+    assert mgr.create_preset("Mine", AppSettings(encoder_cq=30))
+    name, preset = mgr.resolve("Mine")
+    assert name == "Mine"
+    assert preset.encoder_cq == 30
+
+
 def test_preset_manager_saves_and_loads_last_output_pattern(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
