@@ -273,7 +273,7 @@ class Processor:
             import torch
             _cleanup_torch(torch)
         except Exception:
-            logger.debug("Torch cleanup failed after job", exc_info=True)
+            logger.warning("Torch cleanup failed after job", exc_info=True)
 
     def _run_pipeline(
         self,

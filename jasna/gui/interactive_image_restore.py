@@ -326,7 +326,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
                 from jasna.gui.processor import _cleanup_torch
                 _cleanup_torch(torch)
             except Exception:
-                logger.debug("Torch cleanup failed during render worker teardown", exc_info=True)
+                logger.warning("Torch cleanup failed during render worker teardown", exc_info=True)
 
     def _ensure_session(self, detector, restorer):
         if detector is not None and restorer is not None:
