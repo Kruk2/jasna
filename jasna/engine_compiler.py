@@ -89,7 +89,9 @@ def _detection_engine_exists(
     )
 
     if is_rfdetr_model(detection_model_name):
-        return get_onnx_tensorrt_engine_path(detection_model_path, batch_size=batch_size, fp16=fp16).exists()
+        return get_onnx_tensorrt_engine_path(
+            detection_model_path, batch_size=batch_size, fp16=fp16, dynamic_batch=True,
+        ).exists()
     if is_yolo_model(detection_model_name):
         return get_yolo_tensorrt_engine_path(detection_model_path, fp16=fp16).exists()
     return True

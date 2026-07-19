@@ -51,6 +51,7 @@ def compile_rfdetr_engine(
         batch_size=int(batch_size),
         fp16=bool(fp16),
         workspace_gb=20,
+        dynamic_batch=True,
     )
 
 
@@ -92,6 +93,7 @@ class RfDetrMosaicDetectionModel:
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(
                 self.onnx_path, batch_size=self.batch_size, fp16=bool(fp16),
+                dynamic_batch=True,
             )
             if not self.engine_path.exists():
                 raise FileNotFoundError(

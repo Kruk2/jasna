@@ -64,6 +64,7 @@ def _build_serialized_engine(
     fp16: bool,
     optimization_level: int,
     workspace_gb: int,
+    dynamic_batch: bool = False,
 ) -> bytes:
     logger = get_trt_logger()
     builder = trt.Builder(logger)
@@ -95,8 +96,12 @@ def _build_serialized_engine(
                     f"ONNX input '{t.name}' has dynamic shape {shape}; "
                     "provide batch_size to fix dynamic dimensions."
                 )
-            fixed = tuple(batch_size if d < 0 else d for d in shape)
-            profile.set_shape(t.name, min=fixed, opt=fixed, max=fixed)
+            opt = tuple(batch_size if d < 0 else d for d in shape)
+            # dynamic_batch keeps the batch axis flexible (min=1..max=batch_size) so a
+            # single engine serves partial batches without host-side padding; otherwise
+            # the shape is pinned (min==opt==max) as before.
+            min_shape = tuple(1 if d < 0 else d for d in shape) if dynamic_batch else opt
+            profile.set_shape(t.name, min=min_shape, opt=opt, max=opt)
             needs_profile = True
         if fp16 and t.dtype == trt.DataType.FLOAT:
             t.dtype = trt.DataType.HALF
@@ -124,9 +129,12 @@ def compile_onnx_to_tensorrt_engine(
     fp16: bool = True,
     optimization_level: int = 5,
     workspace_gb: int,
+    dynamic_batch: bool = False,
 ) -> Path:
     onnx_path = Path(onnx_path)
-    engine_path = get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=bool(fp16))
+    engine_path = get_onnx_tensorrt_engine_path(
+        onnx_path, batch_size=batch_size, fp16=bool(fp16), dynamic_batch=dynamic_batch,
+    )
 
     if engine_path.exists():
         return engine_path
@@ -148,6 +156,7 @@ def compile_onnx_to_tensorrt_engine(
         fp16=bool(fp16),
         optimization_level=optimization_level,
         workspace_gb=workspace_gb,
+        dynamic_batch=dynamic_batch,
     )
 
     engine_path.parent.mkdir(parents=True, exist_ok=True)

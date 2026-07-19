@@ -237,7 +237,10 @@ class TestCompileRfdetrEngine:
     def test_delegates_to_compile_onnx(self):
         with patch("jasna.trt.compile_onnx_to_tensorrt_engine", return_value=Path("out.engine")) as mock_compile:
             result = compile_rfdetr_engine(Path("model.onnx"), torch.device("cuda:0"), batch_size=4, fp16=True)
-            mock_compile.assert_called_once_with(Path("model.onnx"), torch.device("cuda:0"), batch_size=4, fp16=True, workspace_gb=20)
+            mock_compile.assert_called_once_with(
+                Path("model.onnx"), torch.device("cuda:0"),
+                batch_size=4, fp16=True, workspace_gb=20, dynamic_batch=True,
+            )
             assert result == Path("out.engine")
 
     def test_amd_returns_migraphx_cache_dir_and_closes_runner(

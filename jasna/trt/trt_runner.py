@@ -50,19 +50,28 @@ class TrtRunner:
         if isinstance(input_shapes, list):
             input_shapes = dict(zip(self.input_names, input_shapes))
 
-        self.input_dtypes: dict[str, torch.dtype] = {}
+        self.input_dtypes: dict[str, torch.dtype] = {
+            name: _trt_dtype_to_torch(self.engine.get_tensor_dtype(name))
+            for name in self.input_names
+        }
+        self.outputs: dict[str, torch.Tensor] = {}
+        self._cur_shapes: dict[str, tuple[int, ...]] = {}
+        self._bind({name: tuple(int(d) for d in input_shapes[name]) for name in self.input_names})
+
+    def _bind(self, input_shapes: dict[str, tuple[int, ...]]) -> None:
+        """Set input shapes on the context and (re)allocate output tensors. For a
+        dynamic-batch engine this runs whenever the fed batch changes."""
         for name in self.input_names:
             self.context.set_input_shape(name, input_shapes[name])
-            self.input_dtypes[name] = _trt_dtype_to_torch(self.engine.get_tensor_dtype(name))
-
         dev = torch.device(self.device)
-        self.outputs: dict[str, torch.Tensor] = {}
+        self.outputs = {}
         for name in self.output_names:
             shape = tuple(int(d) for d in self.context.get_tensor_shape(name))
             dtype = _trt_dtype_to_torch(self.engine.get_tensor_dtype(name))
             t = torch.empty(size=shape, dtype=dtype, device=dev)
             self.outputs[name] = t
             self.context.set_tensor_address(name, int(t.data_ptr()))
+        self._cur_shapes = dict(input_shapes)
 
     def close(self) -> None:
         self.outputs.clear()
@@ -71,6 +80,9 @@ class TrtRunner:
         self.runtime = None
 
     def infer(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        shapes = {name: tuple(inputs[name].shape) for name in self.input_names}
+        if shapes != self._cur_shapes:
+            self._bind(shapes)
         for name, tensor in inputs.items():
             self.context.set_tensor_address(name, int(tensor.data_ptr()))
         self.context.execute_async_v3(torch.cuda.current_stream(self.device).cuda_stream)
