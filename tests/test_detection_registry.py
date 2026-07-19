@@ -38,6 +38,8 @@ def test_rfdetr_model_config_per_version() -> None:
     assert (fast.resolution, fast.score_threshold) == (576, 0.35)
     large = rfdetr_model_config("rfdetr-v6-large")
     assert (large.resolution, large.score_threshold) == (768, 0.40)
+    vr = rfdetr_model_config("rfdetr-vr")
+    assert (vr.resolution, vr.score_threshold) == (576, 0.50)
 
 
 def test_rfdetr_model_config_unknown_falls_back_to_legacy() -> None:

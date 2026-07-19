@@ -40,7 +40,7 @@ DETECTION_MODEL_SPECS: dict[str, DetectionModelSpec] = {
     ),
 }
 
-RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v6", "rfdetr-v6-large"})
+RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v6", "rfdetr-v6-large", "rfdetr-vr"})
 YOLO_MODEL_NAMES: frozenset[str] = frozenset(
     name
     for name, spec in DETECTION_MODEL_SPECS.items()
@@ -52,6 +52,7 @@ DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-v6": RfDetrModelConfig(resolution=576, score_threshold=0.35),
     "rfdetr-v6-large": RfDetrModelConfig(resolution=768, score_threshold=0.40),
+    "rfdetr-vr": RfDetrModelConfig(resolution=576, score_threshold=0.50),
 }
 _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(resolution=768, score_threshold=0.25)  # legacy v5
 
