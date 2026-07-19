@@ -181,6 +181,21 @@ class TestRtxSuperresInit:
         assert restorer._denoise is None
         assert restorer._deblur is None
 
+    def test_custom_input_size(self):
+        with patch("torch.cuda.current_stream") as mock_stream:
+            mock_stream.return_value.cuda_stream = 12345
+            restorer = RtxSuperresSecondaryRestorer(
+                device=torch.device("cuda:0"),
+                input_size=384,
+                scale=4,
+                denoise=None,
+                deblur=None,
+            )
+        assert restorer.input_size == 384
+        assert restorer.output_size == 1536
+        assert restorer._sr.output_width == 1536
+        assert restorer._sr.output_height == 1536
+
 
 class TestRtxSuperresRestore:
     def test_restore_empty_tensor(self):
@@ -218,6 +233,35 @@ class TestRtxSuperresRestore:
         for frame in result:
             assert frame.dtype == torch.uint8
             assert frame.shape == (3, 1024, 1024)
+
+    def test_restore_custom_input_size(self):
+        with patch("torch.cuda.current_stream") as mock_stream:
+            mock_stream.return_value.cuda_stream = 12345
+            restorer = RtxSuperresSecondaryRestorer(
+                device=torch.device("cuda:0"),
+                input_size=384,
+                scale=4,
+                denoise=None,
+                deblur=None,
+            )
+        frames = torch.rand((2, 3, 384, 384), dtype=torch.float32)
+        mock_result = MagicMock()
+        mock_result.image = torch.rand((3, 1536, 1536), dtype=torch.float32)
+        restorer._sr.run = MagicMock(return_value=mock_result)
+
+        result = restorer.restore(frames, keep_start=0, keep_end=2)
+
+        assert [tuple(frame.shape) for frame in result] == [
+            (3, 1536, 1536),
+            (3, 1536, 1536),
+        ]
+
+    def test_restore_rejects_wrong_input_size(self):
+        restorer = _make_restorer()
+        frames = torch.rand((2, 3, 384, 384), dtype=torch.float32)
+
+        with pytest.raises(ValueError, match="expected frames shaped"):
+            restorer.restore(frames, keep_start=0, keep_end=2)
 
     def test_restore_with_keep_slicing(self):
         restorer = _make_restorer()
