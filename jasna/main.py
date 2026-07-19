@@ -451,6 +451,9 @@ def main() -> None:
 
     from jasna._suppress_noise import install as _install_noise_filters
     _install_noise_filters()
+
+    from jasna._frozen import patch_frozen_torch
+    patch_frozen_torch()
     import torch
 
     from jasna.pipeline import Pipeline
