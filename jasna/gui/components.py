@@ -1,10 +1,13 @@
 """Reusable UI components for Jasna GUI."""
 
+import logging
 import tkinter
 import customtkinter as ctk
 import webbrowser
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
+
+logger = logging.getLogger(__name__)
 
 
 # Support page URLs — two ways to back the project
@@ -580,7 +583,7 @@ class JobListItem(ctk.CTkFrame):
                 child.bind("<Enter>", self._on_enter)
                 child.bind("<Leave>", self._on_leave)
             except Exception:
-                pass
+                logger.debug("Failed to bind hover events on child widget", exc_info=True)
         # Ensure remove button keeps the enter binding so moving onto it still shows
         self._remove_btn.bind("<Enter>", self._on_enter)
         self._remove_btn.bind("<Leave>", self._on_leave)
@@ -595,7 +598,7 @@ class JobListItem(ctk.CTkFrame):
                 self.after_cancel(self._hide_after_id)
                 self._hide_after_id = None
         except Exception:
-            pass
+            logger.debug("Failed to cancel pending hide on enter", exc_info=True)
         try:
             x, y = self.winfo_pointerxy()
             widget_x = self.winfo_rootx()
@@ -605,7 +608,7 @@ class JobListItem(ctk.CTkFrame):
             if widget_x <= x <= widget_x + widget_w and widget_y <= y <= widget_y + widget_h:
                 self._remove_btn.place(relx=1.0, rely=0, anchor="ne", x=-4, y=4)
         except Exception:
-            # Fallback: show button if any error querying pointer
+            logger.debug("Pointer query failed on enter; showing remove button", exc_info=True)
             self._remove_btn.place(relx=1.0, rely=0, anchor="ne", x=-4, y=4)
         
     def _on_leave(self, event=None):
@@ -615,7 +618,7 @@ class JobListItem(ctk.CTkFrame):
             if self._hide_after_id:
                 self.after_cancel(self._hide_after_id)
         except Exception:
-            pass
+            logger.debug("Failed to cancel pending hide on leave", exc_info=True)
 
         def _hide_if_outside():
             try:
@@ -627,15 +630,17 @@ class JobListItem(ctk.CTkFrame):
                 if not (widget_x <= x <= widget_x + widget_w and widget_y <= y <= widget_y + widget_h):
                     self._remove_btn.place_forget()
             except Exception:
+                logger.debug("Pointer query failed in delayed hide; forcing hide", exc_info=True)
                 try:
                     self._remove_btn.place_forget()
                 except Exception:
-                    pass
+                    logger.debug("place_forget failed in delayed hide", exc_info=True)
 
         # Schedule a short delayed check
         try:
             self._hide_after_id = self.after(80, _hide_if_outside)
         except Exception:
+            logger.debug("Could not schedule delayed hide; hiding now", exc_info=True)
             _hide_if_outside()
         
     def _handle_remove(self):
@@ -699,8 +704,8 @@ class JobListItem(ctk.CTkFrame):
             try:
                 self._remove_btn.place_forget()
             except Exception:
-                pass
-            
+                logger.debug("place_forget failed in set_removable", exc_info=True)
+
     def set_progress(self, value: float):
         if not self._progress_visible:
             self._progress.place(relx=0, rely=1.0, anchor="sw", relwidth=1.0)
@@ -713,7 +718,7 @@ class JobListItem(ctk.CTkFrame):
             try:
                 self._progress.set(float(value) / 100.0)
             except Exception:
-                pass
+                logger.debug("Failed to set progress value %r", value, exc_info=True)
 
     def set_fps_eta(self, fps: float = 0.0, eta_seconds: float = 0.0):
         """Update small FPS and ETA labels shown on the tile."""

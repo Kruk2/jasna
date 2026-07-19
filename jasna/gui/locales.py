@@ -2,8 +2,11 @@
 
 import json
 import locale as _locale
+import logging
 from pathlib import Path
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from jasna import os_utils
 
@@ -2359,8 +2362,7 @@ class LocaleManager:
                 elif lang and lang.startswith("th"):
                     self._current_lang = "th"
             except Exception:
-                # Fall back to default 'en'
-                pass
+                logger.debug("System locale autodetection failed; using 'en'", exc_info=True)
                 
     def _save(self):
         """Save language preference to settings."""

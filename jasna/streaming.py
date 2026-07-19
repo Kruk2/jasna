@@ -304,6 +304,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             root.destroy()
             return path if path else None
         except Exception:
+            log.warning("File open dialog failed", exc_info=True)
             return None
 
     def _serve_file(self, path: Path):

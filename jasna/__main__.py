@@ -1,7 +1,10 @@
+import logging
 import multiprocessing
 import os
 import sys
 from pathlib import Path, PureWindowsPath
+
+logger = logging.getLogger(__name__)
 
 from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
 
@@ -51,7 +54,7 @@ def _preload_native_libs():
         try:
             __import__(mod)
         except Exception:
-            pass
+            logger.debug("Native preload of %s failed", mod, exc_info=True)
 
 
 if __name__ == "__main__":

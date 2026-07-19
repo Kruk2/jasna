@@ -52,6 +52,11 @@ def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch
                     with open(checkpoint_path, "rb") as f:
                         trt_module = torch.export.load(f).module()
                 except Exception:
+                    logger.debug(
+                        "torch.export.load failed for %s, falling back to torch.load",
+                        checkpoint_path,
+                        exc_info=True,
+                    )
                     trt_module = torch.load(checkpoint_path, map_location=device, weights_only=False)
                 result = trt_module.to(device)
         finally:

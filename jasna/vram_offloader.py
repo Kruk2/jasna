@@ -213,8 +213,8 @@ class VramOffloader:
                 crop_ids = list(self._crop_buffers.keys())
                 crop_sizes = {k: v.frame_count for k, v in self._crop_buffers.items()}
             lines.append(f"  crop_buffers: track_ids={crop_ids} sizes={crop_sizes}")
-        except Exception:
-            pass
+        except Exception as e:
+            lines.append(f"  crop_buffers: <error: {e}>")
 
         # VRAM
         try:
@@ -227,8 +227,8 @@ class VramOffloader:
                 f" reserved={reserved / _MIB:.0f} MiB"
                 f" free={free / _MIB:.0f} MiB"
             )
-        except Exception:
-            pass
+        except Exception as e:
+            lines.append(f"  VRAM: <error: {e}>")
 
         # Thread stack traces
         lines.append("  --- Thread stacks ---")

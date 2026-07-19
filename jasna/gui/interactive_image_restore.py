@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from contextlib import nullcontext
@@ -11,6 +12,8 @@ from PIL import Image
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
 from jasna.gui.theme import Colors, Fonts, Sizing
+
+logger = logging.getLogger(__name__)
 
 
 def interactive_output_path(input_path: Path, output_folder: str, output_pattern: str) -> Path:
@@ -323,7 +326,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
                 from jasna.gui.processor import _cleanup_torch
                 _cleanup_torch(torch)
             except Exception:
-                pass
+                logger.debug("Torch cleanup failed during render worker teardown", exc_info=True)
 
     def _ensure_session(self, detector, restorer):
         if detector is not None and restorer is not None:
@@ -450,7 +453,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         try:
             self.after(0, callback)
         except Exception:
-            pass
+            logger.debug("Failed to schedule callback (widget gone)", exc_info=True)
 
     def _close(self) -> None:
         self._closed = True
