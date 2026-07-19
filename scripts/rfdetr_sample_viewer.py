@@ -43,7 +43,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("samples", help="directory of sample images (searched recursively)")
     ap.add_argument("--non-vr-models", default=DEFAULT_NON_VR, help="comma-separated detectors for non-VR frames")
     ap.add_argument("--vr-models", default=DEFAULT_VR, help="comma-separated detectors for VR frames (run per eye)")
-    ap.add_argument("--batch", type=int, default=1, help="TensorRT/inference batch size (default: %(default)s)")
+    ap.add_argument("--batch", type=int, default=4,
+                    help="max/opt batch for dynamic engines; frames are fed one at a time (default: %(default)s)")
     ap.add_argument("--exts", default="jpg,jpeg,png,webp,bmp", help="comma-separated image extensions")
     ap.add_argument("--include-mask-files", action="store_true",
                     help="also load files named mask.* (excluded by default; sample dirs pair frame/mask)")
@@ -108,22 +109,29 @@ def main() -> int:
         print("need at least one available model in each category", file=sys.stderr)
         return 2
 
-    def model_batch(name: str) -> int:
-        # A statically-batched ONNX (e.g. the legacy rfdetr-v5, baked at batch 4)
-        # forces its own batch; a dynamic ONNX / YOLO uses --batch (default 1, the
-        # cheapest per displayed frame). jasna bakes a fixed shape either way.
+    def static_batch(name: str) -> int | None:
+        # A statically-batched ONNX (the legacy rfdetr-v5, baked at batch 4) has a fixed
+        # batch and must be padded; a dynamic ONNX / YOLO engine accepts any batch, so a
+        # single frame is fed with no padding.
         path = detection_model_weights_path(name)
         if path.suffix == ".onnx":
             import onnx
             d0 = onnx.load(str(path), load_external_data=False).graph.input[0].type.tensor_type.shape.dim[0]
             if d0.dim_value and not d0.dim_param:
                 return int(d0.dim_value)
-        return args.batch
+        return None
+
+    def build_batch(name: str) -> int:
+        # Static models keep their baked batch; dynamic engines compile min=1..max=--batch.
+        return static_batch(name) or int(args.batch)
+
+    def pad_to(name: str) -> int:
+        return static_batch(name) or 1  # only static engines need the single frame padded
 
     # Pre-compile every engine up front so Q/E swaps never stall on a TRT build.
     for name in dict.fromkeys(non_vr_models + vr_models):
         path = detection_model_weights_path(name)
-        bs = model_batch(name)
+        bs = build_batch(name)
         print(f"[engine] ensuring TensorRT engine for {name} ({path.name}, bs={bs}) ...", flush=True)
         precompile_detection_engine(name, path, batch_size=bs, device=device, fp16=True)
 
@@ -133,19 +141,18 @@ def main() -> int:
         if name not in _model_cache:
             path = detection_model_weights_path(name)
             _model_cache[name] = build_detection_model(
-                name, path, batch_size=model_batch(name), device=device,
+                name, path, batch_size=build_batch(name), device=device,
                 score_threshold=recommended_score_threshold(name), fp16=True,
             )
         return _model_cache[name]
 
     @torch.no_grad()
-    def run_region(model, bgr):
+    def run_region(model, bgr, pad):
         h, w = bgr.shape[:2]
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         t = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).contiguous().to(device)
-        bs = int(getattr(model, "batch_size", 1))
-        if bs > 1:  # static-batch engine: pad this single frame to the fixed batch
-            t = t.repeat(bs, 1, 1, 1)
+        if pad > 1:  # static-batch engine: pad the single frame to its fixed batch
+            t = t.repeat(pad, 1, 1, 1)
         det = model(t, target_hw=(h, w))
         boxes = np.asarray(det.boxes_xyxy[0], dtype=np.float32).reshape(-1, 4)
         masks = det.masks[0]
@@ -160,12 +167,13 @@ def main() -> int:
 
     def infer(bgr, is_vr, model_name):
         model = get_model(model_name)
+        pad = pad_to(model_name)
         h, w = bgr.shape[:2]
         if not is_vr:
-            return run_region(model, bgr)
+            return run_region(model, bgr, pad)
         half = w // 2
-        bl, ml = run_region(model, bgr[:, :half])
-        br, mr = run_region(model, bgr[:, half:])
+        bl, ml = run_region(model, bgr[:, :half], pad)
+        br, mr = run_region(model, bgr[:, half:], pad)
         if br.shape[0]:
             br = br.copy()
             br[:, [0, 2]] += half
