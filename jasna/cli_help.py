@@ -50,6 +50,8 @@ GUI_TOOLTIP_KEY_BY_DEST: dict[str, str] = {
     "tvai_scale": "tvai_scale",
     "tvai_workers": "tvai_workers",
     "detection_score_threshold": "detection_score_threshold",
+    "max_detection_gap": "max_detection_gap",
+    "min_detection_duration": "min_detection_duration",
     "codec": "codec",
     "encoder_settings": "encoder_custom_args",
     "post_export_action": "post_export_action",

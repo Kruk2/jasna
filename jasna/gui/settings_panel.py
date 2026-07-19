@@ -33,6 +33,7 @@ CODEC_CANONICAL_TO_LABEL = {v: k for k, v in CODEC_LABEL_TO_CANONICAL.items()}
 _AV1_CQ_OFFSET = 7
 _CQ_MIN = 15
 _CQ_MAX = 35
+_TEMPORAL_FILTER_SLIDER_MAX = 10
 
 
 def translate_cq_for_codec(cq: int, old_codec: str, new_codec: str) -> int:
@@ -294,7 +295,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["max_clip_size"] = ctk.CTkSlider(
             row1, from_=10, to=180, number_of_steps=17,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=200, command=lambda v: self._on_slider_change("max_clip_size", int(v))
+            width=200, command=self._on_max_clip_size_change
         )
         self._widgets["max_clip_size"].pack(side="right", padx=(0, 8))
         self._widgets["max_clip_size"].set(90)
@@ -459,7 +460,8 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["max_detection_gap_val"].pack(side="right")
         self._widgets["max_detection_gap"] = ctk.CTkSlider(
-            gap_row, from_=0, to=10, number_of_steps=10,
+            gap_row, from_=0, to=_TEMPORAL_FILTER_SLIDER_MAX,
+            number_of_steps=_TEMPORAL_FILTER_SLIDER_MAX,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
             width=200, command=lambda v: self._on_slider_change("max_detection_gap", int(v))
         )
@@ -481,7 +483,8 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["min_detection_duration_val"].pack(side="right")
         self._widgets["min_detection_duration"] = ctk.CTkSlider(
-            mindur_row, from_=0, to=10, number_of_steps=10,
+            mindur_row, from_=0, to=_TEMPORAL_FILTER_SLIDER_MAX,
+            number_of_steps=_TEMPORAL_FILTER_SLIDER_MAX,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
             width=200, command=lambda v: self._on_slider_change("min_detection_duration", int(v))
         )
@@ -1298,6 +1301,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["max_detection_gap_val"].configure(text=str(preset.max_detection_gap))
         self._widgets["min_detection_duration"].set(preset.min_detection_duration)
         self._widgets["min_detection_duration_val"].configure(text=str(preset.min_detection_duration))
+        self._sync_temporal_filter_limits(int(self._widgets["max_clip_size"].get()))
         
         if preset.enable_crossfade:
             self._widgets["enable_crossfade"].select()
@@ -1479,6 +1483,20 @@ class SettingsPanel(ctk.CTkFrame):
         if f"{key}_val" in self._widgets:
             self._widgets[f"{key}_val"].configure(text=str(value))
         self._mark_modified()
+
+    def _on_max_clip_size_change(self, value: float):
+        max_clip_size = int(value)
+        self._on_slider_change("max_clip_size", max_clip_size)
+        self._sync_temporal_filter_limits(max_clip_size)
+
+    def _sync_temporal_filter_limits(self, max_clip_size: int):
+        limit = max(0, min(_TEMPORAL_FILTER_SLIDER_MAX, int(max_clip_size) - 1))
+        for key in ("max_detection_gap", "min_detection_duration"):
+            slider = self._widgets[key]
+            slider.configure(to=limit, number_of_steps=max(1, limit))
+            value = min(int(slider.get()), limit)
+            slider.set(value)
+            self._widgets[f"{key}_val"].configure(text=str(value))
         
     def _on_setting_change(self, key: str, value):
         self._mark_modified()
