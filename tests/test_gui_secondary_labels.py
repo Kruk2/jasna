@@ -1,10 +1,10 @@
 import inspect
 
-from jasna.gui.settings_panel import SettingsPanel
+from jasna.gui.settings_sections.secondary import SecondarySection
 
 
 def test_secondary_radio_labels_use_compact_hints() -> None:
-    source = inspect.getsource(SettingsPanel._build_secondary_section)
+    source = inspect.getsource(SecondarySection)
 
     assert "secondary_unet_4x_hint" in source
     assert "secondary_tvai_hint" in source

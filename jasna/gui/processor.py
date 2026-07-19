@@ -319,7 +319,7 @@ class Processor:
         settings = self._settings
         encoder_settings = {}
         if settings.encoder_cq:
-            from jasna.gui.settings_panel import translate_cq_for_codec
+            from jasna.gui.settings_sections.encoding import translate_cq_for_codec
             encoder_settings["cq"] = translate_cq_for_codec(
                 settings.encoder_cq,
                 settings.codec,

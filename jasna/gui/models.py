@@ -331,6 +331,13 @@ class PresetManager:
     def is_factory_preset(self, name: str) -> bool:
         """Check if preset is a factory preset."""
         return name in self.FACTORY_PRESETS
+
+    def resolve(self, name: str) -> tuple[str, AppSettings]:
+        """Return (name, preset), falling back to Default for unknown names."""
+        preset = self.get_preset(name)
+        if preset is None:
+            return "Default", self.FACTORY_PRESETS["Default"]
+        return name, preset
     
     def create_preset(self, name: str, settings: AppSettings) -> bool:
         """Create a new user preset. Returns False if name is invalid."""

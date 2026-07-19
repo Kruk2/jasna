@@ -65,7 +65,7 @@ def test_unknown_codec_falls_back_to_hevc():
 
 
 def test_gui_codec_label_maps_round_trip():
-    from jasna.gui.settings_panel import (
+    from jasna.gui.settings_sections.encoding import (
         CODEC_CANONICAL_TO_LABEL,
         CODEC_LABEL_TO_CANONICAL,
         translate_cq_for_codec,
