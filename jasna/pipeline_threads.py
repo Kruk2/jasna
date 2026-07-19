@@ -172,7 +172,6 @@ def decode_detect_loop(
                                     frames=selected_frames,
                                     pts_list=[int(p) for p in pts_list[offset:group_end]],
                                     start_frame_idx=frame_idx,
-                                    batch_size=batch_size,
                                     target_hw=target_hw,
                                     detections_fn=detection_model,
                                     tracker=tracker,
