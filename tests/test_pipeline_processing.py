@@ -640,6 +640,40 @@ def test_process_frame_batch_empty_pts_list_returns_immediately() -> None:
     assert metadata_queue.empty()
 
 
+def test_process_frame_batch_forwards_partial_batch_without_padding() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0)
+    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    crop_buffers: dict[int, CropBuffer] = {}
+    clip_queue = FrameQueue(max_frames=9999)
+    metadata_queue: Queue[FrameMeta | object] = Queue()
+    frames = torch.zeros((4, 3, 8, 8), dtype=torch.uint8)
+    seen_shapes: list[tuple[int, ...]] = []
+
+    def detections_fn(
+        input_frames: torch.Tensor,
+        *,
+        target_hw: tuple[int, int],
+    ) -> Detections:
+        seen_shapes.append(tuple(input_frames.shape))
+        return _make_empty_det_batch(batch_size=input_frames.shape[0])
+
+    process_frame_batch(
+        frames=frames,
+        pts_list=[0, 1],
+        start_frame_idx=0,
+        target_hw=(8, 8),
+        detections_fn=detections_fn,
+        tracker=tracker,
+        blend_buffer=blend_buffer,
+        crop_buffers=crop_buffers,
+        clip_queue=clip_queue,
+        metadata_queue=metadata_queue,
+        discard_margin=0,
+    )
+
+    assert seen_shapes == [(2, 3, 8, 8)]
+
+
 def test_clip_split_child_crop_count_matches_frame_count() -> None:
     """When a clip splits, the child CropBuffer must have exactly frame_count crops.
     The overlap tail from split_overlap already contains the split-boundary frame,

@@ -8,9 +8,12 @@ import torch
 from jasna.benchmark.harness import run_repeatedly
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
-from jasna.mosaic.detection_registry import DEFAULT_DETECTION_MODEL_NAME, detection_model_weights_path
-from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
-from jasna.tensor_utils import pad_batch_with_last
+from jasna.mosaic.detection_registry import (
+    DEFAULT_DETECTION_MODEL_NAME,
+    build_detection_model,
+    detection_model_weights_path,
+    recommended_score_threshold,
+)
 
 
 def _run_single(
@@ -30,8 +33,9 @@ def _run_single(
     if not model_path.exists():
         raise FileNotFoundError(str(model_path))
 
-    detection_model = RfDetrMosaicDetectionModel(
-        onnx_path=model_path,
+    detection_model = build_detection_model(
+        DEFAULT_DETECTION_MODEL_NAME,
+        model_path,
         batch_size=batch_size,
         device=device,
         score_threshold=score_threshold,
@@ -57,9 +61,10 @@ def _run_single(
             if effective_bs == 0:
                 continue
 
-            frames_eff = frames[:effective_bs]
-            frames_in = pad_batch_with_last(frames_eff, batch_size=batch_size)
-            detections = detection_model(frames_in, target_hw=target_hw)
+            detections = detection_model(
+                frames[:effective_bs],
+                target_hw=target_hw,
+            )
 
             total_frames += effective_bs
             for i in range(effective_bs):
@@ -82,10 +87,15 @@ def benchmark_rfdetr_detection_speed(
     batch_size: int,
     fp16: bool,
     benchmark_videos: list[Path],
-    detection_score_threshold: float,
+    detection_score_threshold: float | None,
     **_: object,
 ) -> dict[str, tuple[float, float]]:
     results: dict[str, tuple[float, float]] = {}
+    score_threshold = (
+        recommended_score_threshold(DEFAULT_DETECTION_MODEL_NAME)
+        if detection_score_threshold is None
+        else float(detection_score_threshold)
+    )
     for video_path in benchmark_videos:
         path = video_path.resolve()
         if not path.exists():
@@ -96,7 +106,7 @@ def benchmark_rfdetr_detection_speed(
                 batch_size=batch_size,
                 fp16=fp16,
                 video_path=vp,
-                score_threshold=detection_score_threshold,
+                score_threshold=score_threshold,
             ),
             runs=3,
         )

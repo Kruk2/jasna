@@ -61,7 +61,11 @@ def _detection_engine_exists(
     import torch
 
     from jasna.accelerator import is_amd_device
-    from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model
+    from jasna.mosaic.detection_registry import (
+        is_rfdetr_model,
+        is_yolo_model,
+        rfdetr_model_config,
+    )
 
     resolved_device = torch.device(device)
     if is_amd_device(resolved_device):
@@ -89,8 +93,12 @@ def _detection_engine_exists(
     )
 
     if is_rfdetr_model(detection_model_name):
+        config = rfdetr_model_config(detection_model_name)
         return get_onnx_tensorrt_engine_path(
-            detection_model_path, batch_size=batch_size, fp16=fp16, dynamic_batch=True,
+            detection_model_path,
+            batch_size=config.engine_batch_size(batch_size),
+            fp16=fp16,
+            dynamic_batch=config.dynamic_batch,
         ).exists()
     if is_yolo_model(detection_model_name):
         return get_yolo_tensorrt_engine_path(detection_model_path, fp16=fp16).exists()

@@ -57,6 +57,28 @@ def test_preflight_no_warning_when_all_expected_engines_exist(monkeypatch, tmp_p
     assert res.missing == ()
 
 
+def test_preflight_uses_fixed_batch_path_for_rfdetr_v5(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    settings = AppSettings(
+        detection_model="rfdetr-v5",
+        batch_size=8,
+        compile_basicvsrpp=False,
+    )
+
+    result = run_engine_preflight(settings)
+
+    requirement = next(
+        item for item in result.requirements if item.key == "rfdetr"
+    )
+    assert ".bs4." in requirement.paths[0].name
+    assert ".bs1-" not in requirement.paths[0].name
+
+
 def test_preflight_basicvsrpp_missing_then_found(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)

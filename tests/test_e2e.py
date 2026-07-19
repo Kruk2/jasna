@@ -125,7 +125,10 @@ class TestVideoDecoderE2E:
 @REQUIRES_CUDA
 class TestDetectionE2E:
     def test_rfdetr_detection_on_real_frames(self):
-        from jasna.mosaic.detection_registry import detection_model_weights_path
+        from jasna.mosaic.detection_registry import (
+            build_detection_model,
+            detection_model_weights_path,
+        )
 
         model_path = detection_model_weights_path("rfdetr-v5")
         if not model_path.exists():
@@ -133,17 +136,17 @@ class TestDetectionE2E:
         if not model_path.exists():
             pytest.skip("rfdetr-v5 model weights not found")
 
-        from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
-
         meta = get_video_meta_data(str(TEST_CLIP))
         from jasna.media.video_decoder import NvidiaVideoReader
 
         device = torch.device("cuda:0")
         bs = 4
-        model = RfDetrMosaicDetectionModel(
-            onnx_path=model_path,
+        model = build_detection_model(
+            "rfdetr-v5",
+            model_path,
             batch_size=bs,
             device=device,
+            score_threshold=0.25,
             fp16=True,
         )
 

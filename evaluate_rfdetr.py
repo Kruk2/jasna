@@ -24,10 +24,10 @@ stream = torch.cuda.Stream(device=DEVICE)
 with torch.cuda.stream(stream):
     model = RfDetrMosaicDetectionModel(
         onnx_path=ONNX_PATH,
-        stream=stream,
         batch_size=BATCH_SIZE,
         device=DEVICE,
         resolution=RESOLUTION,
+        dynamic_batch=False,
         score_threshold=SCORE_THRESHOLD,
     )
     detections = model(img_bchw, target_hw=(h, w))

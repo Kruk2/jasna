@@ -41,8 +41,6 @@ def get_onnx_tensorrt_engine_path(
         batch_size = int(batch_size)
         if batch_size <= 0:
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
-        # Dynamic-batch engines accept 1..batch_size; the distinct ".bs1-N" tag keeps
-        # them from colliding with (and reusing) a stale fixed ".bsN" engine.
         suffix += f".bs1-{batch_size}" if dynamic_batch else f".bs{batch_size}"
     suffix += ".fp16" if bool(fp16) else ""
     suffix += engine_system_suffix()

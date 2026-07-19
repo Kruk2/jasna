@@ -16,6 +16,10 @@
 每个模型默认应用其推荐的检测阈值（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）；
 可用 `--detection-score-threshold` 覆盖。
 
+RF-DETR v6 引擎支持动态批次，因此视频末尾的不完整批次无需填充即可运行。
+旧版 `rfdetr-v5` 模型仍受支持，但其 TensorRT 引擎固定为批次 4；
+Jasna 会自动拆分并填充输入。
+
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 ```

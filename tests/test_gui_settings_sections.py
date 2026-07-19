@@ -184,7 +184,6 @@ def test_switching_detection_model_applies_recommended_threshold(_basic_section_
 def test_apply_reverts_missing_model_to_default_recommended(_basic_section_panel) -> None:
     panel, basic = _basic_section_panel
 
-    # Preset pins a model that is no longer installed (e.g. de-bundled v5).
     basic.apply(AppSettings(detection_model="rfdetr-v5", detection_score_threshold=0.6))
 
     assert panel._widgets["detection_model"].get() == "rfdetr-v6"

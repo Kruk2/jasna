@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 _MIGRAPHX_PROVIDER = "MIGraphXExecutionProvider"
 _CPU_PROVIDER = "CPUExecutionProvider"
-_ORT_DTYPES: dict[str, tuple[torch.dtype, np.dtype]] = {
-    "tensor(float)": (torch.float32, np.dtype(np.float32)),
-    "tensor(float16)": (torch.float16, np.dtype(np.float16)),
-    "tensor(int64)": (torch.int64, np.dtype(np.int64)),
-    "tensor(int32)": (torch.int32, np.dtype(np.int32)),
-    "tensor(uint8)": (torch.uint8, np.dtype(np.uint8)),
-    "tensor(bool)": (torch.bool, np.dtype(np.bool_)),
+_ORT_DTYPES: dict[str, torch.dtype] = {
+    "tensor(float)": torch.float32,
+    "tensor(float16)": torch.float16,
+    "tensor(int64)": torch.int64,
+    "tensor(int32)": torch.int32,
+    "tensor(uint8)": torch.uint8,
+    "tensor(bool)": torch.bool,
 }
 
 
@@ -86,17 +86,38 @@ def migraphx_provider_available() -> bool:
     return _MIGRAPHX_PROVIDER in ort.get_available_providers()
 
 
-def _shape(node, *, kind: str) -> tuple[int, ...]:
-    dimensions = tuple(node.shape)
-    if any(not isinstance(value, int) or value <= 0 for value in dimensions):
-        raise RuntimeError(
-            f"MIGraphX requires fixed positive {kind} dimensions for {node.name}: "
-            f"{dimensions}"
+def _validate_shape(
+    node,
+    actual_shape: tuple[int, ...],
+    *,
+    kind: str,
+) -> None:
+    model_shape = tuple(node.shape)
+    if len(model_shape) != len(actual_shape):
+        raise ValueError(
+            f"RF-DETR ONNX {kind} {node.name} expects {len(model_shape)} "
+            f"dimensions, got {actual_shape}"
         )
-    return tuple(int(value) for value in dimensions)
+    for expected, actual in zip(model_shape, actual_shape, strict=True):
+        if isinstance(expected, int) and expected > 0 and expected != actual:
+            raise ValueError(
+                f"RF-DETR ONNX {kind} {node.name} is fixed at {model_shape}; "
+                f"requested {actual_shape}"
+            )
 
 
-def _dtype(node) -> tuple[torch.dtype, np.dtype]:
+def _output_shape(node, batch_size: int) -> tuple[int, ...]:
+    return tuple(
+        int(value)
+        if isinstance(value, int) and value > 0
+        else int(batch_size)
+        if index == 0
+        else -1
+        for index, value in enumerate(node.shape)
+    )
+
+
+def _dtype(node) -> torch.dtype:
     try:
         return _ORT_DTYPES[str(node.type)]
     except KeyError as exc:
@@ -177,32 +198,26 @@ class MigraphxRunner:
             input_shapes = dict(zip(self.input_names, input_shapes, strict=True))
 
         self.input_dtypes: dict[str, torch.dtype] = {}
-        self._input_numpy_dtypes: dict[str, np.dtype] = {}
+        self._input_nodes = {node.name: node for node in input_nodes}
         self._host_inputs: dict[str, torch.Tensor] = {}
         for node in input_nodes:
-            model_shape = _shape(node, kind="input")
             requested_shape = tuple(int(value) for value in input_shapes[node.name])
-            if requested_shape != model_shape:
-                raise ValueError(
-                    f"RF-DETR ONNX input {node.name} is fixed at {model_shape}; "
-                    f"requested {requested_shape}"
-                )
-            torch_dtype, numpy_dtype = _dtype(node)
+            _validate_shape(node, requested_shape, kind="input")
+            torch_dtype = _dtype(node)
             self.input_dtypes[node.name] = torch_dtype
-            self._input_numpy_dtypes[node.name] = numpy_dtype
             self._host_inputs[node.name] = torch.empty(
-                model_shape,
+                requested_shape,
                 dtype=torch_dtype,
                 device="cpu",
                 pin_memory=self.device.type != "cpu",
             )
 
         self.outputs: dict[str, MigraphxTensorInfo] = {}
+        initial_batch_size = int(next(iter(input_shapes.values()))[0])
         for node in output_nodes:
-            torch_dtype, _ = _dtype(node)
             self.outputs[node.name] = MigraphxTensorInfo(
-                shape=_shape(node, kind="output"),
-                dtype=torch_dtype,
+                shape=_output_shape(node, initial_batch_size),
+                dtype=_dtype(node),
             )
 
         logger.info(
@@ -214,6 +229,7 @@ class MigraphxRunner:
         )
 
     def close(self) -> None:
+        self._input_nodes.clear()
         self._host_inputs.clear()
         self.outputs.clear()
         self.session = None
@@ -224,7 +240,17 @@ class MigraphxRunner:
 
         feeds: dict[str, np.ndarray] = {}
         for name, tensor in inputs.items():
+            tensor_shape = tuple(int(value) for value in tensor.shape)
+            _validate_shape(self._input_nodes[name], tensor_shape, kind="input")
             host = self._host_inputs[name]
+            if tuple(host.shape) != tensor_shape:
+                host = torch.empty(
+                    tensor_shape,
+                    dtype=self.input_dtypes[name],
+                    device="cpu",
+                    pin_memory=self.device.type != "cpu",
+                )
+                self._host_inputs[name] = host
             host.copy_(
                 tensor.detach().to(dtype=self.input_dtypes[name]).contiguous(),
                 non_blocking=False,
@@ -232,7 +258,15 @@ class MigraphxRunner:
             feeds[name] = host.numpy()
 
         arrays = self.session.run(self.output_names, feeds)
-        return {
-            name: torch.from_numpy(array).to(device=self.device, non_blocking=False)
-            for name, array in zip(self.output_names, arrays, strict=True)
-        }
+        outputs = {}
+        for name, array in zip(self.output_names, arrays, strict=True):
+            tensor = torch.from_numpy(array).to(
+                device=self.device,
+                non_blocking=False,
+            )
+            outputs[name] = tensor
+            self.outputs[name] = MigraphxTensorInfo(
+                shape=tuple(tensor.shape),
+                dtype=tensor.dtype,
+            )
+        return outputs

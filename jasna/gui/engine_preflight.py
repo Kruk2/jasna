@@ -42,7 +42,12 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
         get_yolo_tensorrt_engine_path,
         model_weights_dir,
     )
-    from jasna.mosaic.detection_registry import is_rfdetr_model, is_yolo_model, coerce_detection_model_name
+    from jasna.mosaic.detection_registry import (
+        coerce_detection_model_name,
+        is_rfdetr_model,
+        is_yolo_model,
+        rfdetr_model_config,
+    )
 
     reqs: list[EngineRequirement] = []
     device = torch.device("cuda:0")
@@ -75,11 +80,12 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
                 det_engine = None
                 det_exists = True
         else:
+            config = rfdetr_model_config(det_name)
             det_engine = get_onnx_tensorrt_engine_path(
                 det_weights,
-                batch_size=int(settings.batch_size),
+                batch_size=config.engine_batch_size(settings.batch_size),
                 fp16=bool(settings.fp16_mode),
-                dynamic_batch=True,
+                dynamic_batch=config.dynamic_batch,
             )
             det_exists = det_engine.is_file()
         if det_engine is not None:

@@ -138,8 +138,6 @@ def process_frame_batch(
         return BatchProcessResult(next_frame_idx=int(start_frame_idx), clips_emitted=0)
 
     frames_eff = frames[:effective_bs]
-    # Feed the real (possibly partial) batch; fixed-batch engines pad internally
-    # via TrtRunner, dynamic RF-DETR engines take it as-is (no wasted compute).
     detections: Detections = detections_fn(frames_eff, target_hw=target_hw)
     _, frame_h, frame_w = frames_eff[0].shape
 

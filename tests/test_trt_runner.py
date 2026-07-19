@@ -8,7 +8,14 @@ import torch
 from jasna.trt.trt_runner import TrtRunner
 
 
-def _build_runner(tmp_path, *, num_outputs=1):
+def _build_runner(
+    tmp_path,
+    *,
+    num_outputs=1,
+    engine_batch=1,
+    initial_batch=1,
+    min_batch=1,
+):
     engine_path = tmp_path / "model.engine"
     engine_path.write_bytes(b"fake")
 
@@ -20,12 +27,32 @@ def _build_runner(tmp_path, *, num_outputs=1):
         trt.TensorIOMode.INPUT if name == "input" else trt.TensorIOMode.OUTPUT
     )
     mock_engine.get_tensor_dtype = lambda name: trt.DataType.FLOAT
+    mock_engine.get_tensor_shape = lambda name: (engine_batch, 3, 64, 64)
+    mock_engine.get_tensor_profile_shape = lambda name, profile: (
+        (min_batch, 3, 64, 64),
+        (initial_batch, 3, 64, 64),
+        (initial_batch, 3, 64, 64),
+    )
 
     mock_context = MagicMock()
-    mock_context.get_tensor_shape = lambda name: (1, 3, 64, 64)
-    mock_context.set_input_shape = MagicMock()
+    current_batch = initial_batch
+
+    def set_input_shape(_name, shape):
+        nonlocal current_batch
+        if engine_batch > 0 and shape[0] != engine_batch:
+            return False
+        current_batch = shape[0]
+        return True
+
+    mock_context.get_tensor_shape = lambda name: (
+        current_batch,
+        3,
+        64,
+        64,
+    )
+    mock_context.set_input_shape = MagicMock(side_effect=set_input_shape)
     mock_context.set_tensor_address = MagicMock()
-    mock_context.execute_async_v3 = MagicMock()
+    mock_context.execute_async_v3 = MagicMock(return_value=True)
     mock_engine.create_execution_context.return_value = mock_context
 
     mock_runtime = MagicMock()
@@ -37,7 +64,7 @@ def _build_runner(tmp_path, *, num_outputs=1):
     ):
         runner = TrtRunner(
             engine_path=engine_path,
-            input_shapes={"input": (1, 3, 64, 64)},
+            input_shapes={"input": (initial_batch, 3, 64, 64)},
             device=torch.device("cuda:0"),
         )
     return runner, mock_context
@@ -103,3 +130,54 @@ class TestTrtRunnerInfer:
         result = runner.infer({"input": x})
         assert "output_0" in result
         assert "output_1" in result
+
+    def test_dynamic_engine_rebinds_without_padding(self, tmp_path):
+        runner, ctx = _build_runner(
+            tmp_path,
+            engine_batch=-1,
+            initial_batch=4,
+        )
+        x = torch.randn(1, 3, 64, 64, device="cuda:0")
+
+        result = runner.infer({"input": x})
+
+        assert result["output_0"].shape[0] == 1
+        assert ctx.set_input_shape.call_args.args[1][0] == 1
+
+    def test_fixed_engine_pads_partial_batch_and_trims_outputs(self, tmp_path):
+        runner, ctx = _build_runner(
+            tmp_path,
+            engine_batch=4,
+            initial_batch=4,
+        )
+        x = torch.randn(1, 3, 64, 64, device="cuda:0")
+
+        result = runner.infer({"input": x})
+
+        assert result["output_0"].shape[0] == 1
+        assert ctx.set_input_shape.call_args.args[1][0] == 4
+
+    def test_fixed_profile_pads_partial_batch_and_trims_outputs(self, tmp_path):
+        runner, _ = _build_runner(
+            tmp_path,
+            engine_batch=-1,
+            initial_batch=4,
+            min_batch=4,
+        )
+        x = torch.randn(1, 3, 64, 64, device="cuda:0")
+
+        result = runner.infer({"input": x})
+
+        assert runner.dynamic_batch is False
+        assert result["output_0"].shape[0] == 1
+
+    def test_fixed_engine_rejects_oversized_batch(self, tmp_path):
+        runner, _ = _build_runner(
+            tmp_path,
+            engine_batch=4,
+            initial_batch=4,
+        )
+        x = torch.randn(5, 3, 64, 64, device="cuda:0")
+
+        with pytest.raises(ValueError, match="exceeds fixed TensorRT batch 4"):
+            runner.infer({"input": x})

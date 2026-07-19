@@ -199,6 +199,26 @@ def test_scan_bar_builds_with_editor(monkeypatch) -> None:
         root.destroy()
 
 
+def test_scan_model_change_applies_recommended_threshold(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+
+        editor._on_scan_model_changed("rfdetr-v6-large")
+
+        assert editor._scan_threshold == pytest.approx(0.40)
+        assert editor._scan_thr_slider.get() == pytest.approx(0.40)
+        assert editor._scan_thr_label.cget("text") == "0.40"
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
 def test_source_codec_notice_only_shows_for_selected_ranges(monkeypatch) -> None:
     try:
         root = ctk.CTk()

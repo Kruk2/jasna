@@ -8,7 +8,10 @@ import torch
 from jasna.benchmark.harness import run_repeatedly
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
-from jasna.mosaic.detection_registry import detection_model_weights_path
+from jasna.mosaic.detection_registry import (
+    detection_model_weights_path,
+    recommended_score_threshold,
+)
 from jasna.mosaic.yolo import YoloMosaicDetectionModel
 from jasna.tensor_utils import pad_batch_with_last
 
@@ -84,10 +87,15 @@ def benchmark_lada_yolo_detection_speed(
     batch_size: int,
     fp16: bool,
     benchmark_videos: list[Path],
-    detection_score_threshold: float,
+    detection_score_threshold: float | None,
     **_: object,
 ) -> dict[str, tuple[float, float]]:
     results: dict[str, tuple[float, float]] = {}
+    score_threshold = (
+        recommended_score_threshold(LADA_YOLO_FAST_MODEL)
+        if detection_score_threshold is None
+        else float(detection_score_threshold)
+    )
     for video_path in benchmark_videos:
         path = video_path.resolve()
         if not path.exists():
@@ -98,7 +106,7 @@ def benchmark_lada_yolo_detection_speed(
                 batch_size=batch_size,
                 fp16=fp16,
                 video_path=vp,
-                score_threshold=detection_score_threshold,
+                score_threshold=score_threshold,
             ),
             runs=3,
         )
