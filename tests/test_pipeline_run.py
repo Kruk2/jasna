@@ -72,6 +72,8 @@ def _make_pipeline():
             device=torch.device("cuda:0"),
             max_clip_size=60,
             temporal_overlap=8,
+            max_detection_gap=0,
+            min_detection_duration=0,
             fp16=True,
             disable_progress=True,
         )
@@ -1036,6 +1038,8 @@ class TestPipelineRun:
                 device=torch.device("cuda:0"),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 fp16=True,
                 disable_progress=True,
                 progress_callback=cb,

@@ -86,6 +86,8 @@ class Pipeline:
         device: torch.device,
         max_clip_size: int,
         temporal_overlap: int,
+        max_detection_gap: int,
+        min_detection_duration: int,
         enable_crossfade: bool = True,
         vr_mode: str = "auto",
         fp16: bool,
@@ -106,6 +108,8 @@ class Pipeline:
         self.device = device
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
+        self.max_detection_gap = int(max_detection_gap)
+        self.min_detection_duration = int(min_detection_duration)
         self.enable_crossfade = bool(enable_crossfade)
         self.vr_mode = str(vr_mode)
 
@@ -398,6 +402,8 @@ class Pipeline:
                     detection_model=self._job_detection_model,
                     max_clip_size=self.max_clip_size,
                     temporal_overlap=self.temporal_overlap,
+                    max_detection_gap=self.max_detection_gap,
+                    min_detection_duration=self.min_detection_duration,
                     enable_crossfade=self.enable_crossfade,
                     blend_buffer=blend_buffer,
                     crop_buffers=crop_buffers,

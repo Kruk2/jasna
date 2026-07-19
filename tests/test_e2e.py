@@ -296,6 +296,8 @@ class TestFullPipelineE2E:
             device=device,
             max_clip_size=60,
             temporal_overlap=temporal_overlap,
+            max_detection_gap=0,
+            min_detection_duration=0,
             enable_crossfade=enable_crossfade,
             fp16=True,
             disable_progress=True,

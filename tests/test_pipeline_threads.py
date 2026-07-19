@@ -123,6 +123,8 @@ class TestDecodeDetectLoop:
                 detection_model=MagicMock(),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 enable_crossfade=True,
                 blend_buffer=BlendBuffer(device=torch.device("cpu")),
                 crop_buffers={},
@@ -187,6 +189,8 @@ class TestDecodeDetectLoop:
                 detection_model=MagicMock(),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 enable_crossfade=True,
                 blend_buffer=BlendBuffer(device=torch.device("cpu")),
                 crop_buffers={},
@@ -226,6 +230,8 @@ class TestDecodeDetectLoop:
                 detection_model=MagicMock(),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 enable_crossfade=True,
                 blend_buffer=BlendBuffer(device=torch.device("cpu")),
                 crop_buffers={},
@@ -275,6 +281,8 @@ class TestDecodeDetectLoop:
                 detection_model=MagicMock(),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 enable_crossfade=True,
                 blend_buffer=BlendBuffer(device=torch.device("cpu")),
                 crop_buffers={},
@@ -815,6 +823,8 @@ class TestRunStreamingPass:
         mock_pipeline = MagicMock()
         mock_pipeline.max_clip_size = 60
         mock_pipeline.temporal_overlap = 8
+        mock_pipeline.max_detection_gap = 0
+        mock_pipeline.min_detection_duration = 0
         mock_pipeline.enable_crossfade = True
         mock_pipeline.batch_size = 2
         mock_pipeline.input_video = "fake.mkv"
@@ -882,6 +892,8 @@ class TestRunStreamingPass:
         mock_pipeline = MagicMock()
         mock_pipeline.max_clip_size = 60
         mock_pipeline.temporal_overlap = 8
+        mock_pipeline.max_detection_gap = 0
+        mock_pipeline.min_detection_duration = 0
         mock_pipeline.enable_crossfade = True
         mock_pipeline.batch_size = 2
         mock_pipeline.input_video = "fake.mkv"
@@ -1139,6 +1151,8 @@ class TestPipelineRunStreamingWrapper:
                 device=torch.device("cpu"),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 fp16=True,
             )
 

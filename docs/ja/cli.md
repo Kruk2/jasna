@@ -49,6 +49,8 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | `--detection-model` | `rfdetr-v5` | インストール済みモデルは `model_weights/` から検出されます。`zelefans-vr-yolo-v2` は同梱です。詳しくは[モデル](models.md)。 |
 | `--detection-model-path` | 自動 | デフォルトは `model_weights/<detection-model>.onnx`（RF-DETR）または `.pt`（YOLO）。 |
 | `--detection-score-threshold` | `0.25` | モザイクを見逃す場合は下げ、通常の領域が誤検出される場合は上げてください。 |
+| `--max-detection-gap` | `2` | モザイクが同じ位置に再出現する場合、最大 N フレームの検出途切れを補完します。`0` で無効。 |
+| `--min-detection-duration` | `2` | N フレーム未満の検出を誤検出として破棄します（該当フレームは未処理のまま）。`0` で無効。 |
 
 ## セカンダリ復元
 

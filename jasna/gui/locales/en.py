@@ -222,6 +222,8 @@ EN = {
         
         # Advanced Processing
         "temporal_overlap": "Temporal Overlap",
+        "max_detection_gap": "Max Detection Gap",
+        "min_detection_duration": "Min Detection Duration",
         "enable_crossfade": "Enable Crossfade",
         "vr_mode": "VR180 Mode",
         "vr_mode_auto": "Auto (recommended)",
@@ -364,6 +366,8 @@ EN = {
         "tip_max_clip_size": "How many frames are processed at once. Larger values can improve quality but use more VRAM.\n\nRecommended: 60 or higher. Use 60 even if it means disabling model compilation.\nGuidance: 60 (safe), 90 (good balance), 180 (best quality, needs 12 GB+ VRAM with Compile BasicVSR++ enabled, less with it disabled).\n4K videos use more VRAM — a lower clip size may produce similar quality but process much faster.\nDefault: 90",
         "tip_temporal_overlap": "Overlap between processed clips to reduce flickering at boundaries.\nHigher = smoother transitions but slightly slower. Going above 20 has little benefit.\n\nRecommended values based on clip size:\n- Clip 60 → overlap 6-8\n- Clip 90 → overlap 8-12\n- Clip 180 → overlap 15-20\nDefault: 8",
         "tip_enable_crossfade": "Smoothly blends clip boundaries to reduce flickering. Reuses already-processed frames so there is zero extra GPU cost.\n\nRecommended: Always ON.\nDefault: ON",
+        "tip_max_detection_gap": "Bridges short detection dropouts: if a tracked mosaic disappears for up to N frames and reappears at the same location, the gap is filled and the clip continues instead of being cut.\nKeep small so genuine fast appear/disappear moments are not filled.\n0 disables.\nDefault: 2",
+        "tip_min_detection_duration": "Discards detections shorter than N frames (likely single-frame false positives). Those frames are left untouched.\nKeep small — real mosaics lasting only a few frames would otherwise be skipped.\n0 or 1 disables.\nDefault: 2",
         "tip_vr_mode": "Controls side-by-side VR180 processing.\n\nAuto enables it for exact 2:1 frames taller than 1080 pixels, trusted studio filename tokens, or compatible spatial metadata. SBS detects and restores both eyes separately. SBS + fisheye reprojects each eye for more reliable detection, then applies only the restored delta back to the original projection.\n\nThe segment editor displays the left eye while scans and exports process both eyes.\nDefault: Auto",
         "tip_fp16_mode": "Uses half-precision math to reduce VRAM usage and often run faster. No visible quality loss on modern GPUs.\n\nRecommended: ON for RTX 20-series and newer.\nDefault: ON",
         "tip_compile_basicvsrpp": "Compiles the restoration model into TensorRT sub-engines for a big speed boost (~2-3x faster).\nFirst compilation takes 15-60 minutes. Close all other applications (including browsers) and avoid using the PC during compilation.\nEngines are cached and reused on subsequent runs.\n\nEngine VRAM: ~1.9 GB (clip 60), ~5.4 GB (clip 180).\nPeak VRAM during processing: ~7.6 GB (clip 60), ~14.7 GB (clip 180).\nWithout compilation: ~6 GB (clip 60), ~10.4 GB (clip 180).\n\nIf you run out of VRAM, disable this or lower clip size.\n\nRecommended: ON with clip size 60-90.\nDefault: ON",
