@@ -5,11 +5,11 @@ from jasna.media import parse_encoder_settings, validate_encoder_settings
 
 
 def test_unknown_fields_are_dropped():
-    old = {"codec": "hevc", "encoder_cq": 22, "working_directory": "/tmp/x"}
+    old = {"codec": "hevc", "encoder_cq": 22, "pynv_preset": "P7"}
     migrated = _migrate_preset_dict(old)
     settings = AppSettings(**migrated)
     assert settings.encoder_cq == 22
-    assert "working_directory" not in migrated
+    assert "pynv_preset" not in migrated
 
 
 def test_old_encoder_args_are_translated():

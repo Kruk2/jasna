@@ -8,10 +8,16 @@ from test_main import _base_argv, _main_patches, _make_model_files
 
 
 def test_importing_pipeline_does_not_patch_frozen_torch():
-    with patch("jasna._frozen.patch_frozen_torch") as spy:
-        sys.modules.pop("jasna.pipeline", None)
-        importlib.import_module("jasna.pipeline")
-    spy.assert_not_called()
+    orig = sys.modules.pop("jasna.pipeline", None)
+    try:
+        with patch("jasna._frozen.patch_frozen_torch") as spy:
+            importlib.import_module("jasna.pipeline")
+        spy.assert_not_called()
+    finally:
+        if orig is not None:
+            sys.modules["jasna.pipeline"] = orig
+        else:
+            sys.modules.pop("jasna.pipeline", None)
 
 
 def test_cli_main_patches_frozen_torch(tmp_path):
