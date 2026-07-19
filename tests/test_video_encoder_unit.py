@@ -247,9 +247,9 @@ class TestEncoderOptions:
         with pytest.raises(ValueError, match="for codec h264.*tier"):
             _make_encoder(tmp_path, codec="h264", encoder_settings={"tier": "high"})
 
-    def test_h264_user_can_opt_into_lookahead_level(self, tmp_path):
+    def test_h264_lookahead_level_override_is_dropped(self, tmp_path):
         enc = _make_encoder(tmp_path, codec="h264", encoder_settings={"lookahead_level": 1})
-        assert enc.encoder_options["lookahead_level"] == "1"
+        assert "lookahead_level" not in enc.encoder_options
 
     @pytest.mark.parametrize("codec", ["hevc", "h264"])
     def test_hyphenated_spatial_aq_replaces_underscore_default(self, tmp_path, codec):
@@ -502,3 +502,34 @@ class TestAudioPump:
         enc = _make_encoder(tmp_path)
         enc._audio_iter = None
         enc._pump_audio(1.0)
+
+
+class TestDropUnsupportedNvencOverrides:
+    def _drop(self, codec, overrides, defaults=None):
+        video_encoder_module._drop_unsupported_nvenc_overrides(
+            codec, overrides, defaults if defaults is not None else {"bf": "4"}
+        )
+        return overrides
+
+    def test_h264_lookahead_level_dropped(self):
+        assert self._drop("h264", {"lookahead_level": "1", "cq": "22"}) == {"cq": "22"}
+
+    def test_hevc_and_av1_keep_lookahead_level(self):
+        assert self._drop("hevc", {"lookahead_level": "2"}) == {"lookahead_level": "2"}
+        assert self._drop("av1", {"lookahead_level": "2"}) == {"lookahead_level": "2"}
+
+    def test_weighted_pred_dropped_with_default_b_frames(self):
+        assert self._drop("h264", {"weighted_pred": "1"}) == {}
+        assert self._drop("hevc", {"weighted_pred": "1"}) == {}
+
+    def test_weighted_pred_kept_when_b_frames_disabled(self):
+        assert self._drop("h264", {"weighted_pred": "1", "bf": "0"}) == {
+            "weighted_pred": "1",
+            "bf": "0",
+        }
+
+    def test_weighted_pred_zero_untouched(self):
+        assert self._drop("h264", {"weighted_pred": "0"}) == {"weighted_pred": "0"}
+
+    def test_av1_weighted_pred_always_dropped(self):
+        assert self._drop("av1", {"weighted_pred": "1", "bf": "0"}) == {"bf": "0"}

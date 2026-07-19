@@ -269,6 +269,23 @@ def _option_value(value: object) -> str:
     return str(value)
 
 
+def _drop_unsupported_nvenc_overrides(
+    codec: str, overrides: dict[str, str], defaults: Mapping[str, str]
+) -> None:
+    # NVENC rejects these combinations at avcodec_open2, so dropping them with
+    # a warning beats failing the whole job.
+    if codec == "h264" and "lookahead_level" in overrides:
+        overrides.pop("lookahead_level")
+        logger.warning("dropping lookahead_level: h264_nvenc fails to open with it")
+    if overrides.get("weighted_pred", "0") != "0":
+        if codec == "av1":
+            overrides.pop("weighted_pred")
+            logger.warning("dropping weighted_pred: av1_nvenc does not support it")
+        elif overrides.get("bf", defaults.get("bf", "0")) != "0":
+            overrides.pop("weighted_pred")
+            logger.warning("dropping weighted_pred: NVENC supports it only with bf=0")
+
+
 def _align_yuv_pitch(packed: torch.Tensor) -> torch.Tensor:
     item_size = packed.element_size()
     if packed.stride(0) * item_size % _NVENC_PITCH_ALIGNMENT == 0:
@@ -380,6 +397,8 @@ class NvidiaVideoEncoder:
                         "qvbr_quality_level are aliases on AMD; use only one"
                     )
                 overrides["qvbr_quality_level"] = overrides.pop("cq")
+            if self.vendor is AcceleratorVendor.NVIDIA:
+                _drop_unsupported_nvenc_overrides(codec, overrides, self.encoder_options)
             self.encoder_options.update(overrides)
         if self.smart_fragment:
             self.encoder_options["forced-idr"] = "1"
