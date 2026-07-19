@@ -1526,7 +1526,18 @@ class SegmentEditor(ctk.CTkToplevel):
         return round(float(seconds) * state.fps)
 
     def _on_scan_model_changed(self, model: str) -> None:
+        from jasna.mosaic.detection_registry import recommended_score_threshold
+
         self._scan_detection_model = str(model)
+        self._scan_threshold = min(
+            1.0,
+            max(
+                SCAN_SCORE_FLOOR,
+                recommended_score_threshold(self._scan_detection_model),
+            ),
+        )
+        self._scan_thr_slider.set(self._scan_threshold)
+        self._scan_thr_label.configure(text=f"{self._scan_threshold:.2f}")
         if self._scan_worker is not None:
             self._scan_worker.close()
             self._scan_worker = None

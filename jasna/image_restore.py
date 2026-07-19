@@ -285,9 +285,11 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
     ensure_sd15_bundle(SD15_DIR)
 
     detection_model_name = coerce_detection_model_name(str(args.detection_model))
-    if args.detection_score_threshold is None:
-        args.detection_score_threshold = recommended_score_threshold(detection_model_name)
-    score_threshold = float(args.detection_score_threshold)
+    score_threshold = float(
+        recommended_score_threshold(detection_model_name)
+        if args.detection_score_threshold is None
+        else args.detection_score_threshold
+    )
     has_explicit_path = bool(str(args.detection_model_path).strip())
     detection_model_path = (
         Path(str(args.detection_model_path))

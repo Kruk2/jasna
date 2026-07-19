@@ -53,3 +53,13 @@ def test_pad_batch_with_last_single_frame() -> None:
     assert result.shape == (3, 3, 8, 8)
     for i in range(3):
         assert torch.equal(result[i], x[0])
+
+
+def test_pad_batch_with_last_rejects_empty_batch() -> None:
+    with pytest.raises(ValueError, match="empty batch"):
+        pad_batch_with_last(torch.empty((0, 1)), batch_size=4)
+
+
+def test_pad_batch_with_last_rejects_oversized_batch() -> None:
+    with pytest.raises(ValueError, match="exceeds target batch_size 4"):
+        pad_batch_with_last(torch.ones((5, 1)), batch_size=4)

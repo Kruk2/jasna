@@ -34,24 +34,51 @@ def test_rfdetr_v6_weights_path() -> None:
 
 
 def test_rfdetr_model_config_per_version() -> None:
-    fast = rfdetr_model_config("rfdetr-v6")
-    assert (fast.resolution, fast.score_threshold) == (576, 0.35)
-    large = rfdetr_model_config("rfdetr-v6-large")
-    assert (large.resolution, large.score_threshold) == (768, 0.40)
-    vr = rfdetr_model_config("rfdetr-vr")
-    assert (vr.resolution, vr.score_threshold) == (576, 0.50)
-
-
-def test_rfdetr_model_config_unknown_falls_back_to_legacy() -> None:
     legacy = rfdetr_model_config("rfdetr-v5")
-    assert (legacy.resolution, legacy.score_threshold) == (768, 0.25)
+    assert (
+        legacy.resolution,
+        legacy.score_threshold,
+        legacy.dynamic_batch,
+        legacy.fixed_batch_size,
+    ) == (768, 0.25, False, 4)
+    fast = rfdetr_model_config("rfdetr-v6")
+    assert (
+        fast.resolution,
+        fast.score_threshold,
+        fast.dynamic_batch,
+        fast.fixed_batch_size,
+    ) == (576, 0.35, True, None)
+    large = rfdetr_model_config("rfdetr-v6-large")
+    assert (
+        large.resolution,
+        large.score_threshold,
+        large.dynamic_batch,
+        large.fixed_batch_size,
+    ) == (768, 0.40, True, None)
+    vr = rfdetr_model_config("rfdetr-vr")
+    assert (
+        vr.resolution,
+        vr.score_threshold,
+        vr.dynamic_batch,
+        vr.fixed_batch_size,
+    ) == (576, 0.50, True, None)
+
+
+def test_rfdetr_model_config_unknown_falls_back_to_dynamic_batch() -> None:
+    config = rfdetr_model_config("rfdetr-custom")
+    assert (
+        config.resolution,
+        config.score_threshold,
+        config.dynamic_batch,
+        config.fixed_batch_size,
+    ) == (768, 0.25, True, None)
 
 
 def test_recommended_score_threshold() -> None:
     assert recommended_score_threshold("rfdetr-v6") == 0.35
     assert recommended_score_threshold("rfdetr-v6-large") == 0.40
-    assert recommended_score_threshold("rfdetr-v5") == 0.25  # legacy rfdetr fallback
-    assert recommended_score_threshold("lada-yolo-v4") == 0.25  # yolo default
+    assert recommended_score_threshold("rfdetr-v5") == 0.25
+    assert recommended_score_threshold("lada-yolo-v4") == 0.25
 
 
 def test_lada_yolo_v4_weights_path() -> None:
@@ -222,7 +249,22 @@ def test_precompile_rfdetr_on_cuda() -> None:
         precompile_detection_engine("rfdetr-v5", Path("m.onnx"), 2, torch.device("cuda:0"), True)
         mock_compile.assert_called_once_with(
             Path("m.onnx"), torch.device("cuda:0"),
-            batch_size=2, fp16=True, workspace_gb=20, dynamic_batch=True,
+            batch_size=4, fp16=True, workspace_gb=20, dynamic_batch=False,
+        )
+
+
+def test_precompile_rfdetr_v6_uses_requested_dynamic_batch() -> None:
+    with patch("jasna.trt.compile_onnx_to_tensorrt_engine") as mock_compile:
+        precompile_detection_engine(
+            "rfdetr-v6",
+            Path("m.onnx"),
+            8,
+            torch.device("cuda:0"),
+            True,
+        )
+        mock_compile.assert_called_once_with(
+            Path("m.onnx"), torch.device("cuda:0"),
+            batch_size=8, fp16=True, workspace_gb=20, dynamic_batch=True,
         )
 
 
@@ -263,7 +305,9 @@ def test_build_detection_model_rfdetr() -> None:
         mock_rf.assert_called_once()
         mock_yolo.assert_not_called()
         assert mock_rf.call_args.kwargs["onnx_path"] == Path("rfdetr-v5.onnx")
-        assert mock_rf.call_args.kwargs["resolution"] == 768  # legacy fallback
+        assert mock_rf.call_args.kwargs["resolution"] == 768
+        assert mock_rf.call_args.kwargs["batch_size"] == 4
+        assert mock_rf.call_args.kwargs["dynamic_batch"] is False
 
 
 def test_build_detection_model_rfdetr_resolution_per_version() -> None:
@@ -273,12 +317,15 @@ def test_build_detection_model_rfdetr_resolution_per_version() -> None:
             batch_size=4, device=torch.device("cpu"), score_threshold=0.35, fp16=True,
         )
         assert mock_rf.call_args.kwargs["resolution"] == 576
+        assert mock_rf.call_args.kwargs["batch_size"] == 4
+        assert mock_rf.call_args.kwargs["dynamic_batch"] is True
     with patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf:
         build_detection_model(
             "rfdetr-v6-large", Path("rfdetr-v6-large.onnx"),
             batch_size=4, device=torch.device("cpu"), score_threshold=0.40, fp16=True,
         )
         assert mock_rf.call_args.kwargs["resolution"] == 768
+        assert mock_rf.call_args.kwargs["dynamic_batch"] is True
 
 
 def test_build_detection_model_yolo() -> None:

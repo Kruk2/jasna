@@ -24,7 +24,7 @@ jasna --input input_folder --output output_folder
 | `--output` | — | 输出文件；当 `--input` 是文件夹时为输出文件夹。 |
 | `--output-pattern` | `{original}_out` | 文件夹输入的文件名模板。`{original}` 是输入文件名主干。图像保留源扩展名；视频在模板提供扩展名时使用该扩展名。Jasna 会在处理前检查计划输出路径，如果两个输入映射到同一个文件则报错退出。 |
 | `--device` | `cuda:0` | GPU 选择。在 AMD Linux 上同时选择 MIGraphX GPU。 |
-| `--batch-size` | `4` | 检测批处理大小。 |
+| `--batch-size` | `4` | 检测批处理大小。RF-DETR v6 可动态处理不完整批次；旧版 v5 在内部使用固定批次 4。 |
 | `--fp16` / `--no-fp16` | 开启 | 在支持的环节使用 FP16（修复 + TensorRT）。降低 VRAM，可能提升速度。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
 | `--no-progress` | 关闭 | 禁用进度条。 |

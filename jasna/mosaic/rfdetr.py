@@ -5,13 +5,14 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch.nn import functional as F
 
 logger = logging.getLogger(__name__)
-from torch.nn import functional as F
 
 from jasna.accelerator import is_amd_device, is_nvidia_device
 from jasna.engine_paths import get_onnx_tensorrt_engine_path
 from jasna.mosaic.detections import Detections
+from jasna.tensor_utils import pad_batch_with_last
 
 
 def TrtRunner(*args, **kwargs):
@@ -23,9 +24,11 @@ def TrtRunner(*args, **kwargs):
 def compile_rfdetr_engine(
     onnx_path: Path,
     device: torch.device,
+    *,
     batch_size: int,
-    resolution: int = 768,
-    fp16: bool = True,
+    resolution: int,
+    dynamic_batch: bool,
+    fp16: bool,
 ) -> Path:
     if is_amd_device(device):
         from jasna.mosaic.migraphx_runner import MigraphxRunner
@@ -51,12 +54,11 @@ def compile_rfdetr_engine(
         batch_size=int(batch_size),
         fp16=bool(fp16),
         workspace_gb=20,
-        dynamic_batch=True,
+        dynamic_batch=dynamic_batch,
     )
 
 
 class RfDetrMosaicDetectionModel:
-    DEFAULT_RESOLUTION = 768
     DEFAULT_SCORE_THRESHOLD = 0.25
     DEFAULT_MAX_SELECT = 16
 
@@ -66,7 +68,8 @@ class RfDetrMosaicDetectionModel:
         onnx_path: Path,
         batch_size: int,
         device: torch.device,
-        resolution: int = DEFAULT_RESOLUTION,
+        resolution: int,
+        dynamic_batch: bool,
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         max_select: int = DEFAULT_MAX_SELECT,
         fp16: bool = True,
@@ -75,8 +78,11 @@ class RfDetrMosaicDetectionModel:
         self.batch_size = int(batch_size)
         self.device = device
         self.resolution = int(resolution)
+        self.dynamic_batch = bool(dynamic_batch)
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
+        if self.batch_size <= 0:
+            raise ValueError(f"batch_size must be > 0, got {batch_size}")
 
         if is_amd_device(self.device):
             from jasna.mosaic.migraphx_runner import MigraphxRunner
@@ -93,7 +99,7 @@ class RfDetrMosaicDetectionModel:
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(
                 self.onnx_path, batch_size=self.batch_size, fp16=bool(fp16),
-                dynamic_batch=True,
+                dynamic_batch=self.dynamic_batch,
             )
             if not self.engine_path.exists():
                 raise FileNotFoundError(
@@ -115,7 +121,14 @@ class RfDetrMosaicDetectionModel:
         self.input_dtype = self.runner.input_dtypes[self._input_name]
 
         self.boxes_out = next(
-            k for k in self.runner.output_names if self.runner.outputs[k].ndim == 3 and self.runner.outputs[k].shape[-1] == 4
+            name
+            for name in self.runner.output_names
+            if self.runner.outputs[name].ndim == 3
+            and (
+                self.runner.outputs[name].shape[-1] == 4
+                or name.lower() == "dets"
+                or "box" in name.lower()
+            )
         )
         self.masks_out = next(k for k in self.runner.output_names if self.runner.outputs[k].ndim == 4)
         self.logits_out = next(k for k in self.runner.output_names if k not in {self.boxes_out, self.masks_out})
@@ -132,6 +145,26 @@ class RfDetrMosaicDetectionModel:
         mean = x.new_tensor([0.485, 0.456, 0.406])[:, None, None]
         std = x.new_tensor([0.229, 0.224, 0.225])[:, None, None]
         return (x - mean) / std
+
+    def _infer(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
+        if self.dynamic_batch:
+            return self.runner.infer({self._input_name: x})
+
+        output_parts: dict[str, list[torch.Tensor]] = {
+            name: [] for name in self.runner.output_names
+        }
+        for chunk in x.split(self.batch_size):
+            effective_batch_size = int(chunk.shape[0])
+            padded = pad_batch_with_last(chunk, batch_size=self.batch_size)
+            outputs = self.runner.infer({self._input_name: padded})
+            for name in output_parts:
+                output_parts[name].append(
+                    outputs[name][:effective_batch_size].clone()
+                )
+        return {
+            name: torch.cat(parts, dim=0)
+            for name, parts in output_parts.items()
+        }
 
     @staticmethod
     def _postprocess(
@@ -180,7 +213,7 @@ class RfDetrMosaicDetectionModel:
         host synchronization."""
 
         x = self._preprocess(frames_uint8_bchw)
-        outs = self.runner.infer({self._input_name: x})
+        outs = self._infer(x)
         per_query = outs[self.logits_out].sigmoid().amax(dim=-1)  # (B, Q)
         scores = per_query.amax(dim=-1).float()  # (B,)
         pred_masks = outs[self.masks_out]  # (B, Q, Hm, Wm)
@@ -191,7 +224,7 @@ class RfDetrMosaicDetectionModel:
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)
-        outs = self.runner.infer({self._input_name: x})
+        outs = self._infer(x)
         boxes_list, masks_list = self._postprocess(
             pred_boxes=outs[self.boxes_out],
             pred_logits=outs[self.logits_out],

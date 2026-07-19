@@ -17,8 +17,13 @@ def to_device(tensor: torch.Tensor, device: torch.device) -> torch.Tensor:
 def pad_batch_with_last(x: torch.Tensor, *, batch_size: int) -> torch.Tensor:
     n = int(x.shape[0])
     bs = int(batch_size)
+    if n <= 0:
+        raise ValueError("cannot pad an empty batch")
+    if bs <= 0:
+        raise ValueError(f"batch_size must be > 0, got {batch_size}")
+    if n > bs:
+        raise ValueError(f"input batch {n} exceeds target batch_size {bs}")
     if n == bs:
         return x
     pad = x[-1:].expand(bs - n, *x.shape[1:])
     return torch.cat([x, pad], dim=0)
-

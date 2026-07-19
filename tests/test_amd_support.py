@@ -249,6 +249,75 @@ def test_migraphx_runner_provider_and_tensor_bridge(monkeypatch, tmp_path) -> No
     assert torch.equal(result["scores"], torch.tensor([[0.25, 0.75]]))
 
 
+def test_migraphx_runner_accepts_dynamic_batch_shapes(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    import jasna.mosaic.migraphx_runner as module
+
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"onnx")
+    input_node = SimpleNamespace(
+        name="images",
+        shape=["batch", 3, 4, 4],
+        type="tensor(float)",
+    )
+    output_node = SimpleNamespace(
+        name="scores",
+        shape=["batch", "queries"],
+        type="tensor(float)",
+    )
+    feed_shapes: list[tuple[int, ...]] = []
+
+    class FakeSession:
+        def __init__(self, *_args, providers, **_kwargs):
+            self.providers_arg = providers
+
+        def get_providers(self):
+            return ["MIGraphXExecutionProvider", "CPUExecutionProvider"]
+
+        def get_inputs(self):
+            return [input_node]
+
+        def get_outputs(self):
+            return [output_node]
+
+        def run(self, names, feeds):
+            feed_shapes.append(feeds["images"].shape)
+            return [
+                np.ones((feeds["images"].shape[0], 2), dtype=np.float32)
+            ]
+
+    fake_ort = SimpleNamespace(
+        get_available_providers=lambda: [
+            "MIGraphXExecutionProvider",
+            "CPUExecutionProvider",
+        ],
+        SessionOptions=lambda: SimpleNamespace(graph_optimization_level=None),
+        GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL=99),
+        InferenceSession=FakeSession,
+    )
+    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
+    monkeypatch.setattr(module, "_gpu_arch", lambda _device: "gfx-test")
+    monkeypatch.setattr(module, "device_name", lambda _device: "AMD test GPU")
+
+    runner = module.MigraphxRunner(
+        model,
+        input_shapes=[(4, 3, 4, 4)],
+        device=torch.device("cpu"),
+        fp16=True,
+    )
+
+    assert runner.outputs["scores"].shape == (4, -1)
+    assert runner.infer({"images": torch.ones(1, 3, 4, 4)})[
+        "scores"
+    ].shape == (1, 2)
+    assert runner.infer({"images": torch.ones(3, 3, 4, 4)})[
+        "scores"
+    ].shape == (3, 2)
+    assert feed_shapes == [(1, 3, 4, 4), (3, 3, 4, 4)]
+
+
 def test_migraphx_runner_falls_back_to_cpu_onnxruntime(monkeypatch, tmp_path) -> None:
     import jasna.mosaic.migraphx_runner as module
 

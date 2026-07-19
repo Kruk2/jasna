@@ -43,8 +43,15 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("samples", help="directory of sample images (searched recursively)")
     ap.add_argument("--non-vr-models", default=DEFAULT_NON_VR, help="comma-separated detectors for non-VR frames")
     ap.add_argument("--vr-models", default=DEFAULT_VR, help="comma-separated detectors for VR frames (run per eye)")
-    ap.add_argument("--batch", type=int, default=4,
-                    help="max/opt batch for dynamic engines; frames are fed one at a time (default: %(default)s)")
+    ap.add_argument(
+        "--batch",
+        type=int,
+        default=4,
+        help=(
+            "maximum/optimal batch for dynamic engines; legacy static RF-DETR "
+            "models use their fixed batch (default: %(default)s)"
+        ),
+    )
     ap.add_argument("--exts", default="jpg,jpeg,png,webp,bmp", help="comma-separated image extensions")
     ap.add_argument("--include-mask-files", action="store_true",
                     help="also load files named mask.* (excluded by default; sample dirs pair frame/mask)")
@@ -74,7 +81,7 @@ def main() -> int:
     exts = {e.strip().lower().lstrip(".") for e in args.exts.split(",") if e.strip()}
     disp_max_w, disp_max_h = (int(v) for v in args.disp_max.lower().split("x"))
 
-    os.chdir(REPO_ROOT)  # jasna resolves model_weights/ relative to cwd
+    os.chdir(REPO_ROOT)
     if str(REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(REPO_ROOT))
 
@@ -93,66 +100,98 @@ def main() -> int:
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
 
+    files = collect_images(samples, exts, args.include_mask_files)
+    if args.limit:
+        files = files[: args.limit]
+    if not files:
+        print(f"no images found under {samples}", file=sys.stderr)
+        return 1
+
+    items = []
+    for file in files:
+        bgr = cv2.imread(str(file))
+        if bgr is None:
+            print(f"[skip] unreadable: {file}", file=sys.stderr)
+            continue
+        height, width = bgr.shape[:2]
+        items.append(
+            {
+                "bgr": bgr,
+                "is_vr": width == 2 * height,
+                "name": (
+                    file.parent.name
+                    if file.name == "frame.jpg"
+                    else file.name
+                ),
+            }
+        )
+    if not items:
+        return 1
+
     def available(names: list[str]) -> list[str]:
         out = []
         for raw in names:
             name = coerce_detection_model_name(raw)
-            if detection_model_weights_path(name).is_file():
+            weights_path = detection_model_weights_path(name)
+            if weights_path.is_file():
                 out.append(name)
             else:
-                print(f"[skip] {name}: weights not found ({detection_model_weights_path(name)})", file=sys.stderr)
+                print(
+                    f"[skip] {name}: weights not found ({weights_path})",
+                    file=sys.stderr,
+                )
         return out
 
     non_vr_models = available([m.strip() for m in args.non_vr_models.split(",") if m.strip()])
     vr_models = available([m.strip() for m in args.vr_models.split(",") if m.strip()])
-    if not non_vr_models or not vr_models:
-        print("need at least one available model in each category", file=sys.stderr)
+    needs_non_vr = any(not item["is_vr"] for item in items)
+    needs_vr = any(item["is_vr"] for item in items)
+    if needs_non_vr and not non_vr_models:
+        print("need at least one available non-VR model", file=sys.stderr)
+        return 2
+    if needs_vr and not vr_models:
+        print("need at least one available VR model", file=sys.stderr)
         return 2
 
-    def static_batch(name: str) -> int | None:
-        # A statically-batched ONNX (the legacy rfdetr-v5, baked at batch 4) has a fixed
-        # batch and must be padded; a dynamic ONNX / YOLO engine accepts any batch, so a
-        # single frame is fed with no padding.
+    models_to_prepare = (
+        (non_vr_models if needs_non_vr else [])
+        + (vr_models if needs_vr else [])
+    )
+    for name in dict.fromkeys(models_to_prepare):
         path = detection_model_weights_path(name)
-        if path.suffix == ".onnx":
-            import onnx
-            d0 = onnx.load(str(path), load_external_data=False).graph.input[0].type.tensor_type.shape.dim[0]
-            if d0.dim_value and not d0.dim_param:
-                return int(d0.dim_value)
-        return None
-
-    def build_batch(name: str) -> int:
-        # Static models keep their baked batch; dynamic engines compile min=1..max=--batch.
-        return static_batch(name) or int(args.batch)
-
-    def pad_to(name: str) -> int:
-        return static_batch(name) or 1  # only static engines need the single frame padded
-
-    # Pre-compile every engine up front so Q/E swaps never stall on a TRT build.
-    for name in dict.fromkeys(non_vr_models + vr_models):
-        path = detection_model_weights_path(name)
-        bs = build_batch(name)
-        print(f"[engine] ensuring TensorRT engine for {name} ({path.name}, bs={bs}) ...", flush=True)
-        precompile_detection_engine(name, path, batch_size=bs, device=device, fp16=True)
+        print(
+            f"[engine] ensuring TensorRT engine for {name} "
+            f"({path.name}, requested batch={args.batch}) ...",
+            flush=True,
+        )
+        precompile_detection_engine(
+            name,
+            path,
+            batch_size=args.batch,
+            device=device,
+            fp16=True,
+        )
 
     _model_cache: dict[str, object] = {}
+
+    def close_models() -> None:
+        for model in _model_cache.values():
+            model.close()
 
     def get_model(name: str):
         if name not in _model_cache:
             path = detection_model_weights_path(name)
             _model_cache[name] = build_detection_model(
-                name, path, batch_size=build_batch(name), device=device,
+                name, path, batch_size=args.batch, device=device,
                 score_threshold=recommended_score_threshold(name), fp16=True,
             )
         return _model_cache[name]
 
     @torch.no_grad()
-    def run_region(model, bgr, pad):
+    def run_region(model, bgr):
         h, w = bgr.shape[:2]
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         t = torch.from_numpy(rgb).permute(2, 0, 1).unsqueeze(0).contiguous().to(device)
-        if pad > 1:  # static-batch engine: pad the single frame to its fixed batch
-            t = t.repeat(pad, 1, 1, 1)
         det = model(t, target_hw=(h, w))
         boxes = np.asarray(det.boxes_xyxy[0], dtype=np.float32).reshape(-1, 4)
         masks = det.masks[0]
@@ -167,13 +206,12 @@ def main() -> int:
 
     def infer(bgr, is_vr, model_name):
         model = get_model(model_name)
-        pad = pad_to(model_name)
         h, w = bgr.shape[:2]
         if not is_vr:
-            return run_region(model, bgr, pad)
+            return run_region(model, bgr)
         half = w // 2
-        bl, ml = run_region(model, bgr[:, :half], pad)
-        br, mr = run_region(model, bgr[:, half:], pad)
+        bl, ml = run_region(model, bgr[:, :half])
+        br, mr = run_region(model, bgr[:, half:])
         if br.shape[0]:
             br = br.copy()
             br[:, [0, 2]] += half
@@ -231,27 +269,6 @@ def main() -> int:
         draw_hud(bgr, lines)
         return bgr
 
-    files = collect_images(samples, exts, args.include_mask_files)
-    if args.limit:
-        files = files[: args.limit]
-    if not files:
-        print(f"no images found under {samples}", file=sys.stderr)
-        return 1
-
-    items = []
-    for f in files:
-        bgr = cv2.imread(str(f))
-        if bgr is None:
-            print(f"[skip] unreadable: {f}", file=sys.stderr)
-            continue
-        h, w = bgr.shape[:2]
-        items.append({
-            "bgr": bgr, "is_vr": (w == 2 * h),
-            "name": f.parent.name if f.name == "frame.jpg" else f.name,
-        })
-    if not items:
-        return 1
-
     if args.headless:
         for idx, it in enumerate(items):
             mlist = vr_models if it["is_vr"] else non_vr_models
@@ -262,9 +279,9 @@ def main() -> int:
                   "  ".join(f"{m}={c}" for m, c in counts.items()))
         n_vr = sum(it["is_vr"] for it in items)
         print(f"[done] {len(items)} images  VR={n_vr}  non-VR={len(items) - n_vr}")
+        close_models()
         return 0
 
-    # Active model index per category, persistent as you navigate.
     active = {"vr": 0, "non_vr": 0}
 
     def current_model(idx):
@@ -280,7 +297,7 @@ def main() -> int:
         model_name, mlist, cat_key = current_model(idx)
         cv2.imshow(win, render(idx, model_name, show_mask))
         k = cv2.waitKey(0) & 0xFF
-        if k == 27:  # Esc
+        if k == 27:
             break
         elif k in (ord("d"), 83):
             idx = (idx + 1) % len(items)
@@ -295,6 +312,7 @@ def main() -> int:
         elif cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
             break
     cv2.destroyAllWindows()
+    close_models()
     return 0
 
 

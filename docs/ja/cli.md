@@ -24,7 +24,7 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | `--output` | — | 出力ファイル。`--input` がフォルダの場合は出力フォルダ。 |
 | `--output-pattern` | `{original}_out` | フォルダ入力時のファイル名テンプレート。`{original}` は入力ファイル名（拡張子なし）です。画像は元の拡張子を保持し、動画はテンプレートに拡張子があればそれを使います。Jasna は処理前に予定される出力を確認し、2 つの入力が同じファイルに対応する場合はエラーで終了します。 |
 | `--device` | `cuda:0` | GPU の選択。AMD Linux では MIGraphX の GPU も選択します。 |
-| `--batch-size` | `4` | 検出のバッチサイズ。 |
+| `--batch-size` | `4` | 検出のバッチサイズ。RF-DETR v6 は部分バッチを動的に処理し、旧 v5 は内部で固定バッチ 4 を使います。 |
 | `--fp16` / `--no-fp16` | オン | 対応箇所（復元 + TensorRT）で FP16 を使用。VRAM を抑え、速度が上がる場合があります。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
 | `--no-progress` | オフ | プログレスバーを無効にします。 |

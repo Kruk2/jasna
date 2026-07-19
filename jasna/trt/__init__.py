@@ -86,25 +86,46 @@ def _build_serialized_engine(
         config.set_flag(trt.BuilderFlag.FP16)
 
     needs_profile = False
+    has_dynamic_batch_input = False
     profile = builder.create_optimization_profile()
     for i in range(network.num_inputs):
         t = network.get_input(i)
         shape = tuple(int(d) for d in t.shape)
-        if any(d < 0 for d in shape):
+        dynamic_axes = [axis for axis, dimension in enumerate(shape) if dimension < 0]
+        if any(axis != 0 for axis in dynamic_axes):
+            raise ValueError(
+                f"ONNX input '{t.name}' has unsupported non-batch dynamic shape {shape}"
+            )
+        if dynamic_axes:
             if batch_size is None:
                 raise ValueError(
                     f"ONNX input '{t.name}' has dynamic shape {shape}; "
                     "provide batch_size to fix dynamic dimensions."
                 )
-            opt = tuple(batch_size if d < 0 else d for d in shape)
-            # dynamic_batch keeps the batch axis flexible (min=1..max=batch_size) so a
-            # single engine serves partial batches without host-side padding; otherwise
-            # the shape is pinned (min==opt==max) as before.
-            min_shape = tuple(1 if d < 0 else d for d in shape) if dynamic_batch else opt
+            opt = (int(batch_size), *shape[1:])
+            min_shape = (1, *shape[1:]) if dynamic_batch else opt
             profile.set_shape(t.name, min=min_shape, opt=opt, max=opt)
             needs_profile = True
+            has_dynamic_batch_input = True
+        elif dynamic_batch:
+            raise ValueError(
+                "dynamic_batch=True requires an ONNX input with a dynamic batch axis"
+            )
+        elif (
+            batch_size is not None
+            and shape
+            and shape[0] != int(batch_size)
+        ):
+            raise ValueError(
+                f"ONNX input '{t.name}' has fixed batch {shape[0]}, "
+                f"requested batch_size={batch_size}"
+            )
         if fp16 and t.dtype == trt.DataType.FLOAT:
             t.dtype = trt.DataType.HALF
+    if dynamic_batch and not has_dynamic_batch_input:
+        raise ValueError(
+            "dynamic_batch=True requires an ONNX input with a dynamic batch axis"
+        )
     if needs_profile:
         config.add_optimization_profile(profile)
 
@@ -197,4 +218,3 @@ def compile_onnx_bytes_to_encrypted_engine(
     engine_path.parent.mkdir(parents=True, exist_ok=True)
     engine_path.write_bytes(encrypted)
     return engine_path
-

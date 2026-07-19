@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -39,6 +40,62 @@ def test_benchmark_rfdetr_detection_speed_file_not_found() -> None:
             video_path=Path("/nonexistent/assets/test_clip1_1080p.mp4"),
             score_threshold=0.2,
         )
+
+
+def test_benchmark_cli_preserves_auto_threshold_for_each_benchmark() -> None:
+    from jasna.benchmark import run_benchmark_cli
+
+    args = SimpleNamespace(
+        device="cuda:0",
+        benchmark_video=[],
+        batch_size=4,
+        fp16=True,
+        detection_score_threshold=None,
+        restoration_model_path="model.pth",
+        compile_basicvsrpp=True,
+        benchmark_filter=None,
+    )
+    with (
+        patch("jasna.benchmark.check_required_executables"),
+        patch(
+            "jasna.benchmark.check_supported_gpu",
+            return_value=(True, "gpu"),
+        ),
+        patch("jasna.benchmark.run_benchmarks") as run_benchmarks,
+    ):
+        run_benchmark_cli(args)
+
+    assert run_benchmarks.call_args.kwargs["detection_score_threshold"] is None
+
+
+def test_rfdetr_benchmark_uses_its_model_recommended_threshold(
+    tmp_path,
+) -> None:
+    from jasna.benchmark.rfdetr_detection_speed import (
+        benchmark_rfdetr_detection_speed,
+    )
+
+    video = tmp_path / "video.mp4"
+    video.touch()
+    with (
+        patch(
+            "jasna.benchmark.rfdetr_detection_speed._run_single",
+            return_value=(1.0, {"frames": 1}),
+        ) as run_single,
+        patch(
+            "jasna.benchmark.rfdetr_detection_speed.run_repeatedly",
+            side_effect=lambda callback, runs: (1.0, callback()[1]),
+        ),
+    ):
+        benchmark_rfdetr_detection_speed(
+            device=MagicMock(),
+            batch_size=4,
+            fp16=True,
+            benchmark_videos=[video],
+            detection_score_threshold=None,
+        )
+
+    assert run_single.call_args.kwargs["score_threshold"] == pytest.approx(0.35)
 
 
 def test_benchmark_harness_runs_three_times_and_takes_median() -> None:

@@ -66,6 +66,16 @@ class TestGetOnnxTensorrtEnginePath:
             result = get_onnx_tensorrt_engine_path("model.onnx", batch_size=4, fp16=True)
             assert result == Path("model.bs4.fp16.win.engine")
 
+    def test_with_dynamic_batch_range(self):
+        with patch("jasna.engine_paths.engine_system_suffix", return_value=".win"):
+            result = get_onnx_tensorrt_engine_path(
+                "model.onnx",
+                batch_size=4,
+                fp16=True,
+                dynamic_batch=True,
+            )
+            assert result == Path("model.bs1-4.fp16.win.engine")
+
     def test_batch_size_zero_raises(self):
         with pytest.raises(ValueError, match="batch_size must be > 0"):
             get_onnx_tensorrt_engine_path("model.onnx", batch_size=0)
@@ -193,6 +203,114 @@ class TestCompileOnnxToTensorrtEngine:
         ):
             with pytest.raises(ValueError, match="dynamic shape"):
                 compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
+
+    def test_dynamic_batch_profile_varies_only_batch_axis(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(
+            tmp_path,
+            dynamic_shape=True,
+        )
+        profile = mock_builder.create_optimization_profile.return_value
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch(
+                "jasna.trt.torch.cuda.device",
+                return_value=MagicMock(
+                    __enter__=MagicMock(),
+                    __exit__=MagicMock(return_value=False),
+                ),
+            ),
+        ):
+            result = compile_onnx_to_tensorrt_engine(
+                onnx_path,
+                torch.device("cuda:0"),
+                batch_size=4,
+                fp16=True,
+                workspace_gb=20,
+                dynamic_batch=True,
+            )
+
+        assert result == get_onnx_tensorrt_engine_path(
+            onnx_path,
+            batch_size=4,
+            fp16=True,
+            dynamic_batch=True,
+        )
+        profile.set_shape.assert_called_once_with(
+            "input",
+            min=(1, 3, 64, 64),
+            opt=(4, 3, 64, 64),
+            max=(4, 3, 64, 64),
+        )
+
+    def test_dynamic_batch_rejects_static_onnx(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(
+            tmp_path,
+        )
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+        ):
+            with pytest.raises(
+                ValueError,
+                match="requires an ONNX input with a dynamic batch axis",
+            ):
+                compile_onnx_to_tensorrt_engine(
+                    onnx_path,
+                    torch.device("cuda:0"),
+                    batch_size=4,
+                    fp16=True,
+                    workspace_gb=20,
+                    dynamic_batch=True,
+                )
+
+    def test_static_onnx_rejects_different_requested_batch(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, network = _setup_trt_mocks(
+            tmp_path,
+        )
+        network.get_input.return_value.shape = (4, 3, 64, 64)
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+        ):
+            with pytest.raises(
+                ValueError,
+                match="has fixed batch 4, requested batch_size=8",
+            ):
+                compile_onnx_to_tensorrt_engine(
+                    onnx_path,
+                    torch.device("cuda:0"),
+                    batch_size=8,
+                    fp16=True,
+                    workspace_gb=20,
+                )
+
+    def test_batch_api_rejects_non_batch_dynamic_axis(self, tmp_path):
+        onnx_path, _, mock_builder, mock_parser, _, network = _setup_trt_mocks(
+            tmp_path,
+        )
+        network.get_input.return_value.shape = (-1, 3, -1, 64)
+
+        with (
+            patch("jasna.trt.trt.Logger"),
+            patch("jasna.trt.trt.Builder", return_value=mock_builder),
+            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+        ):
+            with pytest.raises(ValueError, match="non-batch dynamic shape"):
+                compile_onnx_to_tensorrt_engine(
+                    onnx_path,
+                    torch.device("cuda:0"),
+                    batch_size=4,
+                    fp16=True,
+                    workspace_gb=20,
+                    dynamic_batch=True,
+                )
 
     def test_build_returns_none_raises(self, tmp_path):
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, build_result=None)
