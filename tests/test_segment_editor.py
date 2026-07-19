@@ -190,7 +190,7 @@ def test_scan_bar_builds_with_editor(monkeypatch) -> None:
             == t("segments_scan_frequency_every_frame")
         )
         assert editor._scan_model.get() == AppSettings().detection_model
-        assert editor._scan_thr_label.cget("text") == "0.25"
+        assert editor._scan_thr_label.cget("text") == f"{AppSettings().detection_score_threshold:.2f}"
         assert editor._scan_overlay
         assert editor._scan_overlay_toggle.get() == 1
     finally:

@@ -109,6 +109,10 @@ def run_benchmark_cli(args: Namespace) -> None:
     benchmark_videos = (
         [Path(p) for p in args.benchmark_video] if args.benchmark_video else BENCHMARK_VIDEO_DEFAULTS
     )
+    from jasna.mosaic.detection_registry import recommended_score_threshold
+
+    if args.detection_score_threshold is None:
+        args.detection_score_threshold = recommended_score_threshold(str(args.detection_model))
     run_benchmarks(
         device=torch.device(str(args.device)),
         batch_size=int(args.batch_size),

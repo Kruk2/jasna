@@ -4,15 +4,22 @@
 
 The detection model finds mosaics in each frame.
 
-- **Use the latest RF-DETR model** (`rfdetr-v5`) — it's the default and the
-  best all-rounder.
+- **Use the latest RF-DETR model** (`rfdetr-v6`) — it's the default, fast, and
+  the best all-rounder. Bundled with Jasna.
+- **`rfdetr-v6-large`** is a higher-quality, slower variant. It is an optional
+  separate download; drop `rfdetr-v6-large.onnx` into `model_weights/` and Jasna
+  detects it automatically.
 - **Lada YOLO** models can work better for 2D animations.
 - **zelefans-vr-yolo-v2** (bundled) can be more accurate for VR180 videos.
 - **On AMD**, RF-DETR is very slow (on Windows it even runs on the CPU) —
   use `lada-yolo-v4` instead unless you specifically need RF-DETR.
 
+Each model applies its own recommended detection threshold by default
+(`rfdetr-v6`: 0.35, `rfdetr-v6-large`: 0.40); override with
+`--detection-score-threshold`.
+
 ```bash
-jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v5
+jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 ```
 
 You can also set a different detection model per video inside the

@@ -28,13 +28,18 @@ def _session_config_from_args(
     restoration_model_path: Path,
     lut_path: str | None,
 ) -> SessionConfig:
+    from jasna.mosaic.detection_registry import recommended_score_threshold
+
+    threshold = args.detection_score_threshold
+    if threshold is None:
+        threshold = recommended_score_threshold(detection_model_name)
     return SessionConfig(
         device=str(args.device),
         fp16=bool(args.fp16),
         batch_size=int(args.batch_size),
         detection_model_name=detection_model_name,
         detection_model_path=detection_model_path,
-        detection_score_threshold=float(args.detection_score_threshold),
+        detection_score_threshold=float(threshold),
         max_detection_gap=int(args.max_detection_gap),
         min_detection_duration=int(args.min_detection_duration),
         restoration_model_path=restoration_model_path,
@@ -301,10 +306,11 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-model",
         type=str,
-        default="rfdetr-v5",
+        default="rfdetr-v6",
         help=(
             "Detection model name. Installed models are discovered from model_weights/; "
-            "zelefans-vr-yolo-v2 is bundled with Jasna "
+            "rfdetr-v6 (fast) and zelefans-vr-yolo-v2 are bundled with Jasna, "
+            "rfdetr-v6-large is an optional higher-quality download "
             "(default: %(default)s)"
         ),
     )
@@ -317,7 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--detection-score-threshold",
         type=float,
-        default=0.25,
+        default=None,
         help=CLI_HELP["detection_score_threshold"],
     )
     detection.add_argument(
@@ -592,6 +598,7 @@ def main() -> None:
     from jasna.mosaic.detection_registry import (
         coerce_detection_model_name,
         discover_available_detection_models,
+        recommended_score_threshold,
         require_detection_model_weights,
     )
 
@@ -692,6 +699,8 @@ def main() -> None:
     device = torch.device(str(args.device))
     from jasna.accelerator import device_context
 
+    if args.detection_score_threshold is None:
+        args.detection_score_threshold = recommended_score_threshold(detection_model_name)
     detection_score_threshold = float(args.detection_score_threshold)
     if not (0.0 <= detection_score_threshold <= 1.0):
         raise ValueError("--detection-score-threshold must be in [0, 1]")

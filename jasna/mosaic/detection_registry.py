@@ -16,6 +16,12 @@ class DetectionModelSpec:
     filename: str
 
 
+@dataclass(frozen=True)
+class RfDetrModelConfig:
+    resolution: int
+    score_threshold: float  # recommended / default
+
+
 DETECTION_MODEL_SPECS: dict[str, DetectionModelSpec] = {
     "lada-yolo-v2": DetectionModelSpec(
         "lada-yolo-v2",
@@ -34,14 +40,20 @@ DETECTION_MODEL_SPECS: dict[str, DetectionModelSpec] = {
     ),
 }
 
-RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v2", "rfdetr-v3", "rfdetr-v4", "rfdetr-v5"})
+RFDETR_MODEL_NAMES: frozenset[str] = frozenset({"rfdetr-v6", "rfdetr-v6-large"})
 YOLO_MODEL_NAMES: frozenset[str] = frozenset(
     name
     for name, spec in DETECTION_MODEL_SPECS.items()
     if spec.backend == "yolo"
 )
 
-DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v5"
+DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
+
+RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
+    "rfdetr-v6": RfDetrModelConfig(resolution=576, score_threshold=0.35),
+    "rfdetr-v6-large": RfDetrModelConfig(resolution=768, score_threshold=0.40),
+}
+_RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(resolution=768, score_threshold=0.25)  # legacy v5
 
 YOLO_MODEL_FILES: dict[str, str] = {
     name: spec.filename
@@ -107,6 +119,17 @@ def coerce_detection_model_name(name: str) -> str:
     return detection_model_spec(name).name
 
 
+def rfdetr_model_config(name: str) -> RfDetrModelConfig:
+    return RFDETR_MODEL_CONFIGS.get(coerce_detection_model_name(name), _RFDETR_FALLBACK_CONFIG)
+
+
+def recommended_score_threshold(name: str) -> float:
+    coerced = coerce_detection_model_name(name)
+    if is_rfdetr_model(coerced):
+        return rfdetr_model_config(coerced).score_threshold
+    return 0.25
+
+
 def detection_model_weights_path(name: str) -> Path:
     name = coerce_detection_model_name(name)
     base = model_weights_dir()
@@ -137,6 +160,7 @@ def build_detection_model(
             onnx_path=detection_model_path,
             batch_size=int(batch_size),
             device=device,
+            resolution=rfdetr_model_config(det_name).resolution,
             score_threshold=float(score_threshold),
             fp16=bool(fp16),
         )
@@ -164,7 +188,13 @@ def precompile_detection_engine(
     if is_rfdetr_model(det_name):
         from jasna.mosaic.rfdetr import compile_rfdetr_engine
 
-        compile_rfdetr_engine(detection_model_path, device, batch_size=int(batch_size), fp16=bool(fp16))
+        compile_rfdetr_engine(
+            detection_model_path,
+            device,
+            batch_size=int(batch_size),
+            resolution=rfdetr_model_config(det_name).resolution,
+            fp16=bool(fp16),
+        )
     elif is_yolo_model(det_name) and is_nvidia_device(device):
         from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
         from jasna.mosaic.yolo import YoloMosaicDetectionModel
