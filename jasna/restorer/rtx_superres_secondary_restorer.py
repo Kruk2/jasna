@@ -81,13 +81,25 @@ class RtxSuperresSecondaryRestorer:
     preferred_queue_size = 2
     prefers_cpu_input = False
 
-    def __init__(self, *, device: torch.device, scale: int = 4, quality: str = "high",
-                 denoise: Optional[str] = "medium", deblur: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        *,
+        device: torch.device,
+        scale: int = 4,
+        quality: str = "high",
+        denoise: Optional[str] = "medium",
+        deblur: Optional[str] = None,
+        input_size: int = RTX_SUPERRES_INPUT_SIZE,
+    ) -> None:
         from nvvfx import VideoSuperRes
 
-        output_size = RTX_SUPERRES_INPUT_SIZE * scale
+        if input_size < 1:
+            raise ValueError("input_size must be positive")
+        output_size = input_size * scale
 
         self.device = torch.device(device)
+        self.input_size = int(input_size)
+        self.output_size = int(output_size)
         gpu = self.device.index or 0
         self._stream_ptr = torch.cuda.current_stream(self.device).cuda_stream
 
@@ -112,24 +124,33 @@ class RtxSuperresSecondaryRestorer:
 
         logger.info("RtxSuperresSecondaryRestorer: scale=%dx quality=%s denoise=%s deblur=%s (%dx%d -> %dx%d)",
                      scale, quality, denoise, deblur,
-                     RTX_SUPERRES_INPUT_SIZE, RTX_SUPERRES_INPUT_SIZE,
+                     self.input_size, self.input_size,
                      output_size, output_size)
 
-    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
-        t = int(frames_256.shape[0])
+    def restore(self, frames: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
+        t = int(frames.shape[0])
         if t == 0:
             return []
+        if frames.ndim != 4 or tuple(frames.shape[1:]) != (
+            3,
+            self.input_size,
+            self.input_size,
+        ):
+            raise ValueError(
+                f"expected frames shaped (T, 3, {self.input_size}, {self.input_size}), "
+                f"got {tuple(frames.shape)}"
+            )
 
         ks = max(0, int(keep_start))
         ke = min(t, int(keep_end))
         if ks >= ke:
             return []
-        frames_256 = frames_256[ks:ke]
-        t = int(frames_256.shape[0])
+        frames = frames[ks:ke]
+        t = int(frames.shape[0])
 
         out: list[torch.Tensor] = []
         for i in range(t):
-            frame = frames_256[i].to(device=self.device, dtype=torch.float32).contiguous()
+            frame = frames[i].to(device=self.device, dtype=torch.float32).contiguous()
 
             result = torch.from_dlpack(self._sr.run(frame, stream_ptr=self._stream_ptr).image).clone()
             if self._denoise is not None:
