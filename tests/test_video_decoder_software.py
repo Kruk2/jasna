@@ -267,3 +267,56 @@ def test_hardware_input_never_enters_software_path(tmp_path, monkeypatch):
     with NvidiaVideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
         total = sum(len(pts) for _, pts in reader.frames())
     assert total == n
+
+
+def _has_av1_software_encoder() -> bool:
+    try:
+        av.codec.Codec("libsvtav1", "w")
+        return True
+    except ValueError:
+        return False
+
+
+def _gpu_supports_av1_nvdec() -> bool:
+    if not torch.cuda.is_available() or getattr(torch.version, "hip", None):
+        return False
+    major, minor = torch.cuda.get_device_capability(DEVICE)
+    return major >= 10 or (major == 8 and minor in {6, 7, 9})
+
+
+@pytest.mark.skipif(not _has_av1_software_encoder(), reason="libsvtav1 unavailable")
+@pytest.mark.skipif(not _gpu_supports_av1_nvdec(), reason="GPU has no AV1 NVDEC")
+def test_av1_decodes_on_nvdec_not_software(tmp_path, monkeypatch):
+    # PyAV's default AV1 decoder (libdav1d) has no NVDEC hwaccel config, so
+    # av.open decodes AV1 in software. _setup_nvdec_decoder swaps in the native
+    # av1 decoder, which does, keeping AV1 on the hardware path. Dimensions stay
+    # above NVDEC's AV1 minimum coded size (~128px) so the GPU path is exercised.
+    w, h, n = 256, 144, 12
+    frames = [_solid_yuv420p_frame(w, h, 120, 90, 200) for _ in range(n)]
+    path = tmp_path / "sample.mp4"
+    _write_video(path, "libsvtav1", "yuv420p", frames, options={"preset": "8", "crf": "40"})
+    metadata = _metadata(path, w, h, n, codec_name="av1")
+
+    def _boom(self, decoded, group):
+        raise AssertionError("AV1 input entered the software path instead of NVDEC")
+
+    monkeypatch.setattr(NvidiaVideoReader, "_frames_software", _boom)
+    with NvidiaVideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
+        batches = [(batch, pts) for batch, pts in reader.frames()]
+    assert batches
+    assert all(batch.is_cuda and batch.dtype == torch.uint8 for batch, _ in batches)
+    assert sum(len(pts) for _, pts in batches) == n
+
+
+@pytest.mark.skipif(not _has_av1_software_encoder(), reason="libsvtav1 unavailable")
+def test_subminimum_av1_uses_software_decoder(tmp_path):
+    w, h, n = 128, 96, 4
+    frames = [_solid_yuv420p_frame(w, h, 120, 90, 200) for _ in range(n)]
+    path = tmp_path / "tiny.mp4"
+    _write_video(path, "libsvtav1", "yuv420p", frames, options={"preset": "8", "crf": "40"})
+    metadata = _metadata(path, w, h, n, codec_name="av1")
+
+    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+        assert reader._decoder_ctx is None
+        total = sum(len(pts) for _, pts in reader.frames())
+    assert total == n

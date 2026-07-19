@@ -23,6 +23,13 @@ log = logging.getLogger(__name__)
 CORRUPT_PACKET_TOLERANCE = 10
 _libcuda: ctypes.CDLL | None = None
 
+# PyAV's avcodec_find_decoder returns libdav1d for AV1, which carries no NVDEC
+# hwaccel config, so av.open silently decodes AV1 in software. Force the native
+# FFmpeg av1 decoder, which does carry the CUDA hwaccel config. Keyed by codec
+# name whose default PyAV decoder lacks NVDEC (only AV1 today).
+_NVDEC_DECODER_OVERRIDES = {"av1": "av1"}
+_NVDEC_MIN_CODED_SIZE = {"av1": (128, 128)}
+
 
 class VideoDecodeError(RuntimeError):
     pass
@@ -98,9 +105,12 @@ class NvidiaVideoReader:
         if self.vendor is AcceleratorVendor.AMD:
             self._setup_amf_decoder(ctx)
         elif not ctx.is_hwaccel:
-            # Definite software decode: let FFmpeg pick frame/slice threading.
-            # CUDA contexts must keep their default threading configuration.
-            ctx.thread_type = "AUTO"
+            if self.vendor is AcceleratorVendor.NVIDIA:
+                self._setup_nvdec_decoder(ctx)
+            else:
+                # Definite software decode: let FFmpeg pick frame/slice threading.
+                # CUDA contexts must keep their default threading configuration.
+                ctx.thread_type = "AUTO"
         self.width = ctx.width
         self.height = ctx.height
         self._full_range = (
@@ -146,6 +156,58 @@ class NvidiaVideoReader:
             log.warning(
                 "AMF cannot decode %s (codec %s): %s; using FFmpeg software "
                 "decoding and uploading frames to ROCm",
+                self.file,
+                self.metadata.codec_name,
+                exc,
+            )
+
+    def _setup_nvdec_decoder(self, source_ctx) -> None:
+        decoder_name = _NVDEC_DECODER_OVERRIDES.get(str(self.metadata.codec_name).lower())
+        if decoder_name is None:
+            source_ctx.thread_type = "AUTO"
+            return
+        min_width, min_height = _NVDEC_MIN_CODED_SIZE[decoder_name]
+        if source_ctx.width < min_width or source_ctx.height < min_height:
+            source_ctx.thread_type = "AUTO"
+            log.info(
+                "Skipping NVDEC decoder %s for %s: %dx%d is below its %dx%d minimum",
+                decoder_name,
+                self.file,
+                source_ctx.width,
+                source_ctx.height,
+                min_width,
+                min_height,
+            )
+            return
+        hwaccel = HWAccel(
+            "cuda",
+            device=str(self.device.index or 0),
+            allow_software_fallback=True,
+            is_hw_owned=True,
+        )
+        hwaccel.options["primary_ctx"] = "0"
+        hwaccel.options["current_ctx"] = "1"
+        try:
+            decoder = av.CodecContext.create(
+                decoder_name,
+                "r",
+                hwaccel=hwaccel,
+            )
+            decoder.extradata = source_ctx.extradata
+            decoder.width = source_ctx.width
+            decoder.height = source_ctx.height
+            if source_ctx.pix_fmt is not None:
+                decoder.pix_fmt = source_ctx.pix_fmt
+            decoder.profile = source_ctx.profile
+            decoder.open(strict=False)
+            self._decoder_ctx = decoder
+            log.info("Using NVDEC decoder %s for %s", decoder_name, self.file)
+        except (ValueError, av.FFmpegError, RuntimeError) as exc:
+            source_ctx.thread_type = "AUTO"
+            log.warning(
+                "NVDEC decoder %s unavailable for %s (codec %s): %s; using FFmpeg "
+                "software decoding and uploading frames to CUDA",
+                decoder_name,
                 self.file,
                 self.metadata.codec_name,
                 exc,
