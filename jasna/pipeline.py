@@ -465,12 +465,12 @@ class Pipeline:
             vram_used = total - free
             log.info("VRAM usage at end — %.1f MiB", vram_used / (1024 ** 2))
         except Exception:
-            pass
+            log.debug("Could not read end-of-run VRAM usage", exc_info=True)
         try:
             rss = _process.memory_info().rss
             log.info("RAM usage at end — %.1f MiB", rss / (1024 ** 2))
         except Exception:
-            pass
+            log.debug("Could not read end-of-run RAM usage", exc_info=True)
 
         ss = starvation_stats
         if ss.clips_pushed > 0 or ss.clips_popped > 0:

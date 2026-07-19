@@ -1,5 +1,7 @@
 """Settings panel - right side configuration options."""
 
+import logging
+
 import customtkinter as ctk
 from pathlib import Path
 import tkinter as tk
@@ -16,6 +18,8 @@ from jasna.gui.icons import (
     create_icon,
 )
 from jasna.gui.locales import t
+
+logger = logging.getLogger(__name__)
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
 # from these maps, never from .lower() on the label.
@@ -1539,4 +1543,4 @@ class SettingsPanel(ctk.CTkFrame):
             try:
                 widget.configure(state=state)
             except Exception:
-                pass  # Some widgets don't support state
+                logger.debug("Widget %r does not support state=%s", key, state, exc_info=True)

@@ -363,6 +363,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 try:
                     self.after(0, lambda s=stats: self._control_bar.set_system_stats(s))
                 except Exception:
+                    logger.debug("System stats poller stopping (widget gone)", exc_info=True)
                     return
                 self._system_stats_stop.wait(1.5)
 
@@ -585,7 +586,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             try:
                 self._queue_panel.set_running(True, processing_job_id=job_id)
             except Exception:
-                pass
+                logger.debug("Failed to mark queue panel running", exc_info=True)
         job_elapsed: float | None = None
         if update.status == JobStatus.COMPLETED:
             start = self._job_start_times.pop(job_id, None)
@@ -600,7 +601,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 elapsed_seconds=job_elapsed,
             )
         except Exception:
-            pass
+            logger.debug("Failed to update job status in queue panel", exc_info=True)
             
     def _on_processor_log(self, level: str, message: str):
         self.after(0, lambda: self._log_panel.add_log(level, message))
@@ -622,7 +623,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         try:
             self._queue_panel.set_running(False)
         except Exception:
-            pass
+            logger.debug("Failed to clear queue panel running state", exc_info=True)
         
     def _on_language_changed(self, lang_name: str):
         """Handle language selection change."""

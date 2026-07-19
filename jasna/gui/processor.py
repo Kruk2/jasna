@@ -1,5 +1,6 @@
 """Background processor for video processing jobs."""
 
+import logging
 import threading
 import traceback
 import queue
@@ -11,6 +12,8 @@ from typing import Callable
 from jasna.gui.models import JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import VideoSession, build_video_session
 from jasna.media import UnsupportedColorspaceError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -270,7 +273,7 @@ class Processor:
             import torch
             _cleanup_torch(torch)
         except Exception:
-            pass
+            logger.debug("Torch cleanup failed after job", exc_info=True)
 
     def _run_pipeline(
         self,

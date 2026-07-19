@@ -123,7 +123,7 @@ class _TvaiWorker:
                 if msg:
                     logger.debug("TVAI ffmpeg stderr: %s", msg)
         except Exception:
-            pass
+            logger.debug("TVAI stderr reader loop stopped", exc_info=True)
 
     def _writer_loop(self) -> None:
         assert self._proc is not None and self._proc.stdin is not None

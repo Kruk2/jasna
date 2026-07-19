@@ -229,7 +229,7 @@ def is_stream_10bit(json_video_stream: dict) -> bool:
         try:
             if int(bprs) == 10:
                 return True
-        except Exception:
+        except ValueError:
             pass
     pix_fmt = (json_video_stream.get('pix_fmt') or '').lower()
     ten_bit_markers = (

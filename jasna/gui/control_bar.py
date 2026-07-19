@@ -1,10 +1,14 @@
 """Control bar - bottom playback controls and progress display."""
 
+import logging
+
 import customtkinter as ctk
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.components import Tooltip
 from jasna.gui.locales import t
 from jasna.gui.system_stats import SystemStats
+
+logger = logging.getLogger(__name__)
 
 
 _METRIC_WIDTH = 48
@@ -108,7 +112,7 @@ class _SystemMetric(ctk.CTkFrame):
                 try:
                     self.after_cancel(self._anim_after_id)
                 except Exception:
-                    pass
+                    logger.debug("after_cancel failed on progress reset", exc_info=True)
                 self._anim_after_id = None
             self._set_bar_value(0.0, _color_for_percent(0))
             return
@@ -125,7 +129,7 @@ class _SystemMetric(ctk.CTkFrame):
             try:
                 self.after_cancel(self._anim_after_id)
             except Exception:
-                pass
+                logger.debug("after_cancel failed on progress animation restart", exc_info=True)
             self._anim_after_id = None
 
         steps = 6

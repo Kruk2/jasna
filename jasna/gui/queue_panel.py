@@ -1,5 +1,7 @@
 """Queue panel - left side job list management."""
 
+import logging
+
 import customtkinter as ctk
 from pathlib import Path
 from tkinter import filedialog
@@ -14,6 +16,8 @@ from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 
 from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order
+
+logger = logging.getLogger(__name__)
 from jasna.media.image_io import is_image_path
 from jasna.segments import SegmentRange
 
@@ -368,6 +372,7 @@ class QueuePanel(ctk.CTkFrame):
             )
         except Exception as exc:
             self._segment_editor = None
+            logger.warning("Failed to open segment editor", exc_info=True)
             messagebox.showerror(t("segments_title"), str(exc), parent=self.winfo_toplevel())
 
     def _segment_editor_closed(self) -> None:
@@ -536,11 +541,11 @@ class QueuePanel(ctk.CTkFrame):
         try:
             widget.lift()
         except Exception:
-            pass
+            logger.debug("widget.lift failed on drag start", exc_info=True)
         try:
             widget.configure(cursor="hand2")
         except Exception:
-            pass
+            logger.debug("cursor configure failed on drag start", exc_info=True)
 
     def _on_widget_drag_move(self, widget: 'JobListItem', event):
         if self._is_processing_widget(widget):
@@ -550,6 +555,7 @@ class QueuePanel(ctk.CTkFrame):
         try:
             y = event.y_root - lf.winfo_rooty()
         except Exception:
+            logger.debug("drag move aborted (widget geometry unavailable)", exc_info=True)
             return
 
         # Compute new index among widgets based on center positions
@@ -584,7 +590,7 @@ class QueuePanel(ctk.CTkFrame):
         try:
             widget.configure(cursor="")
         except Exception:
-            pass
+            logger.debug("cursor reset failed on drag end", exc_info=True)
         for w in self._job_widgets:
             w.pack_forget()
         for w in self._job_widgets:
