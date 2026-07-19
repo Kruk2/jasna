@@ -186,12 +186,23 @@ def test_detection_engine_exists_rfdetr(tmp_path: Path) -> None:
     ) is False
 
     from jasna.trt import get_onnx_tensorrt_engine_path
-    engine = get_onnx_tensorrt_engine_path(onnx_path, batch_size=4, fp16=True)
+    engine = get_onnx_tensorrt_engine_path(onnx_path, batch_size=4, fp16=True, dynamic_batch=True)
     engine.parent.mkdir(parents=True, exist_ok=True)
     engine.write_text("x")
     assert _detection_engine_exists(
         "rfdetr-v5", str(onnx_path), 4, True, "cuda:0"
     ) is True
+
+
+def test_dynamic_batch_engine_path_is_distinct_from_fixed() -> None:
+    from jasna.engine_paths import get_onnx_tensorrt_engine_path
+
+    onnx = Path("model_weights/rfdetr-v6.onnx")
+    fixed = get_onnx_tensorrt_engine_path(onnx, batch_size=4, fp16=True)
+    dyn = get_onnx_tensorrt_engine_path(onnx, batch_size=4, fp16=True, dynamic_batch=True)
+    assert ".bs4." in fixed.name
+    assert ".bs1-4." in dyn.name
+    assert fixed != dyn
 
 
 def test_unet4x_engine_exists_plaintext(monkeypatch, tmp_path: Path) -> None:

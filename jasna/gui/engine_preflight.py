@@ -79,6 +79,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
                 det_weights,
                 batch_size=int(settings.batch_size),
                 fp16=bool(settings.fp16_mode),
+                dynamic_batch=True,
             )
             det_exists = det_engine.is_file()
         if det_engine is not None:
