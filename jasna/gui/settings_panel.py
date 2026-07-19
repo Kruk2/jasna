@@ -443,7 +443,51 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._widgets["temporal_overlap"].pack(side="right", padx=(0, 8))
         self._widgets["temporal_overlap"].set(8)
-        
+
+        # Max Detection Gap row
+        gap_row = ctk.CTkFrame(inner, fg_color="transparent")
+        gap_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        gap_label = ctk.CTkLabel(gap_row, text=t("max_detection_gap"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        gap_label.pack(side="left")
+        gap_tooltip = ctk.CTkLabel(gap_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        gap_tooltip.pack(side="left", padx=4)
+        Tooltip(gap_tooltip, get_tooltip("max_detection_gap"))
+
+        self._widgets["max_detection_gap_val"] = create_slider_value_label(
+            gap_row, "2", 3, Colors.BG_PANEL
+        )
+        self._widgets["max_detection_gap_val"].pack(side="right")
+        self._widgets["max_detection_gap"] = ctk.CTkSlider(
+            gap_row, from_=0, to=10, number_of_steps=10,
+            fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
+            width=200, command=lambda v: self._on_slider_change("max_detection_gap", int(v))
+        )
+        self._widgets["max_detection_gap"].pack(side="right", padx=(0, 8))
+        self._widgets["max_detection_gap"].set(2)
+
+        # Min Detection Duration row
+        mindur_row = ctk.CTkFrame(inner, fg_color="transparent")
+        mindur_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        mindur_label = ctk.CTkLabel(mindur_row, text=t("min_detection_duration"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        mindur_label.pack(side="left")
+        mindur_tooltip = ctk.CTkLabel(mindur_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        mindur_tooltip.pack(side="left", padx=4)
+        Tooltip(mindur_tooltip, get_tooltip("min_detection_duration"))
+
+        self._widgets["min_detection_duration_val"] = create_slider_value_label(
+            mindur_row, "2", 3, Colors.BG_PANEL
+        )
+        self._widgets["min_detection_duration_val"].pack(side="right")
+        self._widgets["min_detection_duration"] = ctk.CTkSlider(
+            mindur_row, from_=0, to=10, number_of_steps=10,
+            fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
+            width=200, command=lambda v: self._on_slider_change("min_detection_duration", int(v))
+        )
+        self._widgets["min_detection_duration"].pack(side="right", padx=(0, 8))
+        self._widgets["min_detection_duration"].set(2)
+
         # Crossfade toggle
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
         row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -1250,6 +1294,10 @@ class SettingsPanel(ctk.CTkFrame):
         self._widgets["max_clip_size_val"].configure(text=str(preset.max_clip_size))
         self._widgets["temporal_overlap"].set(preset.temporal_overlap)
         self._widgets["temporal_overlap_val"].configure(text=str(preset.temporal_overlap))
+        self._widgets["max_detection_gap"].set(preset.max_detection_gap)
+        self._widgets["max_detection_gap_val"].configure(text=str(preset.max_detection_gap))
+        self._widgets["min_detection_duration"].set(preset.min_detection_duration)
+        self._widgets["min_detection_duration_val"].configure(text=str(preset.min_detection_duration))
         
         if preset.enable_crossfade:
             self._widgets["enable_crossfade"].select()
@@ -1512,6 +1560,8 @@ class SettingsPanel(ctk.CTkFrame):
             rtx_deblur=self._widgets["rtx_deblur"].get().lower(),
             detection_model=self._widgets["detection_model"].get(),
             detection_score_threshold=float(self._widgets["detection_score_threshold"].get()),
+            max_detection_gap=int(self._widgets["max_detection_gap"].get()),
+            min_detection_duration=int(self._widgets["min_detection_duration"].get()),
             compile_basicvsrpp=self._widgets["compile_basicvsrpp"].get() == 1,
             codec=CODEC_LABEL_TO_CANONICAL[self._widgets["codec"].get()],
             encoder_cq=int(self._widgets["encoder_cq"].get()),

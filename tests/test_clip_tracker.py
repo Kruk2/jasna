@@ -315,3 +315,174 @@ def test_negative_temporal_overlap_raises() -> None:
     with pytest.raises(ValueError):
         ClipTracker(max_clip_size=5, temporal_overlap=-1)
 
+
+def test_negative_max_detection_gap_raises() -> None:
+    with pytest.raises(ValueError):
+        ClipTracker(max_clip_size=5, max_detection_gap=-1)
+
+
+def test_gap_bridged_when_within_max_gap() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=2)
+
+    for frame_idx in range(3):
+        bboxes, masks = _det()
+        ended, active = tracker.update(frame_idx, bboxes, masks)
+        assert ended == []
+        assert active == {0}
+
+    bboxes, masks = _no_det()
+    ended, active = tracker.update(3, bboxes, masks)
+    assert ended == []
+    assert active == {0}
+    assert tracker.active_clips[0].coast_count == 1
+
+    bboxes, masks = _det()
+    ended, active = tracker.update(4, bboxes, masks)
+    assert ended == []
+    assert active == {0}
+
+    clip = tracker.active_clips[0]
+    assert clip.frame_count == 5
+    assert clip.coast_count == 0
+    np.testing.assert_array_equal(clip.bboxes[3], clip.bboxes[2])
+
+    ended = tracker.flush()
+    assert len(ended) == 1
+    assert ended[0].clip.frame_count == 5
+    assert ended[0].trimmed_frame_indices == ()
+
+
+def test_gap_exceeding_max_gap_ends_trimmed() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=2)
+
+    for frame_idx in range(3):
+        bboxes, masks = _det()
+        tracker.update(frame_idx, bboxes, masks)
+
+    for frame_idx in (3, 4):
+        bboxes, masks = _no_det()
+        ended, active = tracker.update(frame_idx, bboxes, masks)
+        assert ended == []
+        assert active == {0}
+
+    bboxes, masks = _no_det()
+    ended, active = tracker.update(5, bboxes, masks)
+    assert active == set()
+    assert len(ended) == 1
+    assert ended[0].split_due_to_max_size is False
+    assert ended[0].clip.frame_count == 3
+    assert ended[0].clip.end_frame == 2
+    assert ended[0].trimmed_frame_indices == (3, 4)
+    assert len(ended[0].clip.masks) == 3
+
+
+def test_gap_bridge_requires_iou_match() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=1)
+
+    for frame_idx in range(3):
+        bboxes, masks = _det(box=(0.0, 0.0, 10.0, 10.0))
+        tracker.update(frame_idx, bboxes, masks)
+
+    bboxes, masks = _no_det()
+    ended, active = tracker.update(3, bboxes, masks)
+    assert ended == []
+    assert active == {0}
+
+    bboxes, masks = _det(box=(100.0, 100.0, 110.0, 110.0))
+    ended, active = tracker.update(4, bboxes, masks)
+    assert len(ended) == 1
+    assert ended[0].clip.track_id == 0
+    assert ended[0].clip.frame_count == 3
+    assert ended[0].trimmed_frame_indices == (3,)
+    assert active == {1}
+    assert tracker.active_clips[1].start_frame == 4
+
+
+def test_legit_fast_blink_stays_two_clips() -> None:
+    tracker = ClipTracker(max_clip_size=20, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=2)
+
+    for frame_idx in range(3):
+        bboxes, masks = _det()
+        tracker.update(frame_idx, bboxes, masks)
+
+    all_ended = []
+    for frame_idx in range(3, 8):
+        bboxes, masks = _no_det()
+        ended, _ = tracker.update(frame_idx, bboxes, masks)
+        all_ended.extend(ended)
+
+    assert len(all_ended) == 1
+    assert all_ended[0].clip.frame_count == 3
+    assert all_ended[0].trimmed_frame_indices == (3, 4)
+
+    for frame_idx in range(8, 12):
+        bboxes, masks = _det()
+        ended, active = tracker.update(frame_idx, bboxes, masks)
+        assert ended == []
+
+    ended = tracker.flush()
+    assert len(ended) == 1
+    assert ended[0].clip.start_frame == 8
+    assert ended[0].clip.frame_count == 4
+
+
+def test_flush_during_coast_trims_tail() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=2)
+
+    for frame_idx in range(3):
+        bboxes, masks = _det()
+        tracker.update(frame_idx, bboxes, masks)
+
+    bboxes, masks = _no_det()
+    tracker.update(3, bboxes, masks)
+
+    ended = tracker.flush()
+    assert len(ended) == 1
+    assert ended[0].clip.frame_count == 3
+    assert ended[0].trimmed_frame_indices == (3,)
+    assert tracker.active_clips == {}
+
+
+def test_no_coast_into_split_boundary() -> None:
+    tracker = ClipTracker(max_clip_size=4, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=3)
+
+    for frame_idx in range(3):
+        bboxes, masks = _det()
+        tracker.update(frame_idx, bboxes, masks)
+
+    bboxes, masks = _no_det()
+    ended, active = tracker.update(3, bboxes, masks)
+    assert active == set()
+    assert len(ended) == 1
+    assert ended[0].clip.frame_count == 3
+    assert ended[0].trimmed_frame_indices == ()
+
+
+def test_gap_bridged_then_split_with_overlap() -> None:
+    tracker = ClipTracker(max_clip_size=10, temporal_overlap=2, iou_threshold=0.0, max_detection_gap=2)
+
+    for frame_idx in range(5):
+        bboxes, masks = _det()
+        tracker.update(frame_idx, bboxes, masks)
+
+    bboxes, masks = _no_det()
+    ended, active = tracker.update(5, bboxes, masks)
+    assert ended == []
+    assert active == {0}
+
+    all_ended = []
+    for frame_idx in range(6, 10):
+        bboxes, masks = _det()
+        ended, active = tracker.update(frame_idx, bboxes, masks)
+        all_ended.extend(ended)
+
+    assert len(all_ended) == 1
+    assert all_ended[0].split_due_to_max_size is True
+    assert all_ended[0].clip.frame_count == 10
+    assert all_ended[0].trimmed_frame_indices == ()
+    child_id = int(all_ended[0].continuation_track_id)
+    child = tracker.active_clips[child_id]
+    assert child.is_continuation is True
+    assert child.start_frame == 6
+    assert child.frame_count == 4
+

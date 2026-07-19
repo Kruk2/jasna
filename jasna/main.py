@@ -273,6 +273,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.25,
         help=CLI_HELP["detection_score_threshold"],
     )
+    detection.add_argument(
+        "--max-detection-gap",
+        type=int,
+        default=2,
+        help=CLI_HELP["max_detection_gap"],
+    )
+    detection.add_argument(
+        "--min-detection-duration",
+        type=int,
+        default=2,
+        help=CLI_HELP["min_detection_duration"],
+    )
 
     projection = parser.add_argument_group("VR projection")
     projection.add_argument(
@@ -618,6 +630,18 @@ def main() -> None:
     if temporal_overlap > 0 and (2 * temporal_overlap) >= max_clip_size:
         raise ValueError("--temporal-overlap must satisfy 2*--temporal-overlap < --max-clip-size")
 
+    max_detection_gap = int(args.max_detection_gap)
+    if max_detection_gap < 0:
+        raise ValueError("--max-detection-gap must be >= 0")
+    if max_detection_gap >= max_clip_size:
+        raise ValueError("--max-detection-gap must be < --max-clip-size")
+
+    min_detection_duration = int(args.min_detection_duration)
+    if min_detection_duration < 0:
+        raise ValueError("--min-detection-duration must be >= 0")
+    if min_detection_duration >= max_clip_size:
+        raise ValueError("--min-detection-duration must be < --max-clip-size")
+
     device = torch.device(str(args.device))
     from jasna.accelerator import device_context, is_amd_device
 
@@ -724,6 +748,8 @@ def main() -> None:
                 device=device,
                 max_clip_size=max_clip_size,
                 temporal_overlap=temporal_overlap,
+                max_detection_gap=max_detection_gap,
+                min_detection_duration=min_detection_duration,
                 enable_crossfade=bool(args.enable_crossfade),
                 vr_mode=str(args.vr_mode),
                 fp16=fp16,

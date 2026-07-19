@@ -226,6 +226,8 @@ def _run_streaming_pass(
                 detection_model=pipeline._job_detection_model,
                 max_clip_size=pipeline.max_clip_size,
                 temporal_overlap=pipeline.temporal_overlap,
+                max_detection_gap=pipeline.max_detection_gap,
+                min_detection_duration=pipeline.min_detection_duration,
                 enable_crossfade=pipeline.enable_crossfade,
                 blend_buffer=blend_buffer,
                 crop_buffers=crop_buffers,

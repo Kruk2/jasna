@@ -26,6 +26,8 @@ CLI_HELP: dict[str, str] = {
     "tvai_scale": "Topaz tvai_up scale (1=no scale). Output size is 256*scale (default: %(default)s)",
     "tvai_workers": "Number of parallel TVAI ffmpeg workers (default: %(default)s)",
     "detection_score_threshold": "Detection score threshold (default: %(default)s)",
+    "max_detection_gap": "Fill detection dropouts up to N frames when the mosaic reappears at the same spot. 0 disables (default: %(default)s)",
+    "min_detection_duration": "Drop detections shorter than N frames as false positives. 0 disables (default: %(default)s)",
     "codec": "Offline output video codec (HLS streaming always uses H.264). Default: %(default)s",
     "encoder_settings": 'Encoder settings, as JSON object or comma-separated key=value pairs (e.g. {"cq":22} or cq=22,rc-lookahead=32)',
     "post_export_action": "Action to run after all non-streaming exports finish.",

@@ -23,6 +23,8 @@ def _make_pipeline(**overrides):
         device=torch.device("cpu"),
         max_clip_size=60,
         temporal_overlap=8,
+        max_detection_gap=0,
+        min_detection_duration=0,
         enable_crossfade=True,
         fp16=True,
     )
@@ -62,6 +64,8 @@ class TestPipelineInit:
                 device=torch.device("cpu"),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 fp16=True,
             )
             mock_rf.assert_called_once()
@@ -85,6 +89,8 @@ class TestPipelineInit:
                 device=torch.device("cpu"),
                 max_clip_size=60,
                 temporal_overlap=8,
+                max_detection_gap=0,
+                min_detection_duration=0,
                 fp16=True,
             )
             mock_yolo.assert_called_once()

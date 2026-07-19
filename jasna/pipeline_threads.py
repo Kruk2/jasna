@@ -37,6 +37,8 @@ def decode_detect_loop(
     detection_model,
     max_clip_size: int,
     temporal_overlap: int,
+    max_detection_gap: int,
+    min_detection_duration: int,
     enable_crossfade: bool,
     blend_buffer: BlendBuffer,
     crop_buffers: dict[int, CropBuffer],
@@ -60,7 +62,11 @@ def decode_detect_loop(
     timer = LoopTimer("decode-detect")
     try:
         torch.cuda.set_device(device)
-        tracker = ClipTracker(max_clip_size=max_clip_size, temporal_overlap=temporal_overlap)
+        tracker = ClipTracker(
+            max_clip_size=max_clip_size,
+            temporal_overlap=temporal_overlap,
+            max_detection_gap=max_detection_gap,
+        )
         discard_margin = temporal_overlap
         blend_frames = (temporal_overlap // 3) if enable_crossfade else 0
 
@@ -104,6 +110,7 @@ def decode_detect_loop(
                     frame_shape=fs,
                     discard_margin=discard_margin,
                     blend_frames=blend_frames,
+                    min_detection_duration=min_detection_duration,
                 )
                 effect_active = False
             log.info(
@@ -176,6 +183,7 @@ def decode_detect_loop(
                                     discard_margin=discard_margin,
                                     blend_frames=blend_frames,
                                     crop_eye_width=crop_eye_width,
+                                    min_detection_duration=min_detection_duration,
                                 )
                                 frame_idx = res.next_frame_idx
                             else:

@@ -402,6 +402,8 @@ class Processor:
                 device=s.device,
                 max_clip_size=settings.max_clip_size,
                 temporal_overlap=settings.temporal_overlap,
+                max_detection_gap=settings.max_detection_gap,
+                min_detection_duration=settings.min_detection_duration,
                 enable_crossfade=settings.enable_crossfade,
                 vr_mode=settings.vr_mode,
                 fp16=settings.fp16_mode,

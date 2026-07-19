@@ -693,3 +693,111 @@ def test_clip_split_child_crop_count_matches_frame_count() -> None:
             f"clip {ci.clip.track_id} (start={ci.clip.start_frame}) has "
             f"{len(ci.raw_crops)} crops but frame_count={ci.clip.frame_count}"
         )
+
+
+def _scripted_detections_fn(script: list[bool]):
+    frames_iter = iter(script)
+
+    def fn(_: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
+        if next(frames_iter):
+            boxes = np.array([[2.0, 2.0, 6.0, 6.0]], dtype=np.float32)
+            mask = torch.zeros((1, 8, 8), dtype=torch.bool)
+            mask[0, 0, 0] = True
+        else:
+            boxes = np.zeros((0, 4), dtype=np.float32)
+            mask = torch.zeros((0, 8, 8), dtype=torch.bool)
+        return Detections(boxes_xyxy=[boxes], masks=[mask])
+
+    return fn
+
+
+def _run_scripted(
+    script: list[bool],
+    *,
+    max_clip_size: int = 10,
+    temporal_overlap: int = 0,
+    max_detection_gap: int = 0,
+    min_detection_duration: int = 0,
+) -> tuple[list[ClipRestoreItem], BlendBuffer, dict[int, CropBuffer]]:
+    tracker = ClipTracker(
+        max_clip_size=max_clip_size,
+        temporal_overlap=temporal_overlap,
+        iou_threshold=0.0,
+        max_detection_gap=max_detection_gap,
+    )
+    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    crop_buffers: dict[int, CropBuffer] = {}
+    clip_queue = FrameQueue(max_frames=9999)
+    metadata_queue: Queue[FrameMeta | object] = Queue()
+    frames = torch.zeros((1, 3, 8, 8), dtype=torch.uint8)
+    detections_fn = _scripted_detections_fn(script)
+
+    items: list[ClipRestoreItem] = []
+
+    def collect(ci: ClipRestoreItem, _: BlendBuffer) -> None:
+        items.append(ci)
+
+    frame_idx = 0
+    for pts in range(len(script)):
+        res = process_frame_batch(
+            frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
+            batch_size=1, target_hw=(8, 8), detections_fn=detections_fn,
+            tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
+            clip_queue=clip_queue, metadata_queue=metadata_queue,
+            discard_margin=temporal_overlap, blend_frames=0,
+            min_detection_duration=min_detection_duration,
+        )
+        _drain_queue(clip_queue, blend_buffer, collect)
+        frame_idx = res.next_frame_idx
+
+    finalize_processing(
+        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
+        clip_queue=clip_queue, frame_shape=(8, 8),
+        discard_margin=temporal_overlap, blend_frames=0,
+        min_detection_duration=min_detection_duration,
+    )
+    _drain_queue(clip_queue, blend_buffer, collect)
+    return items, blend_buffer, crop_buffers
+
+
+def test_short_clip_dropped_by_min_detection_duration() -> None:
+    items, blend_buffer, crop_buffers = _run_scripted(
+        [True, False, False], min_detection_duration=2,
+    )
+    assert items == []
+    assert crop_buffers == {}
+    assert blend_buffer.is_frame_ready(0)
+
+
+def test_gap_bridged_produces_single_clip_with_crops_for_gap_frames() -> None:
+    items, blend_buffer, _ = _run_scripted(
+        [True, True, False, True, True], max_detection_gap=2,
+    )
+    assert len(items) == 1
+    ci = items[0]
+    assert ci.clip.frame_count == 5
+    assert len(ci.raw_crops) == 5
+    assert not blend_buffer.is_frame_ready(2)
+
+
+def test_coast_death_trims_crops_and_clears_pending() -> None:
+    items, blend_buffer, _ = _run_scripted(
+        [True, True, True, False, False], max_detection_gap=1,
+    )
+    assert len(items) == 1
+    ci = items[0]
+    assert ci.clip.frame_count == 3
+    assert len(ci.raw_crops) == 3
+    assert blend_buffer.is_frame_ready(3)
+    assert not blend_buffer.is_frame_ready(2)
+
+
+def test_split_and_continuation_clips_not_dropped_by_min_duration() -> None:
+    items, _, _ = _run_scripted(
+        [True, True, True, True],
+        max_clip_size=4, temporal_overlap=1, min_detection_duration=3,
+    )
+    assert len(items) == 2
+    assert items[0].clip.frame_count == 4
+    assert items[1].clip.is_continuation is True
+    assert items[1].clip.frame_count == 2

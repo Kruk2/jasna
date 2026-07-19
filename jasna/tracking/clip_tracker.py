@@ -14,6 +14,7 @@ class TrackedClip:
     bboxes: list[np.ndarray] = field(default_factory=list)  # each (4,) xyxy, CPU
     masks: list[torch.Tensor] = field(default_factory=list)  # each (Hm, Wm) bool, GPU
     is_continuation: bool = False
+    coast_count: int = 0  # trailing synthetic frames not yet confirmed by a re-match
 
     @property
     def end_frame(self) -> int:
@@ -106,13 +107,23 @@ class EndedClip:
     clip: TrackedClip
     split_due_to_max_size: bool
     continuation_track_id: int | None = None
+    trimmed_frame_indices: tuple[int, ...] = ()
 
 
 class ClipTracker:
-    def __init__(self, max_clip_size: int, temporal_overlap: int = 0, iou_threshold: float = 0.3):
+    def __init__(
+        self,
+        max_clip_size: int,
+        temporal_overlap: int = 0,
+        iou_threshold: float = 0.3,
+        max_detection_gap: int = 0,
+    ):
         self.max_clip_size = int(max_clip_size)
         self.temporal_overlap = int(temporal_overlap)
         self.iou_threshold = iou_threshold
+        self.max_detection_gap = int(max_detection_gap)
+        if self.max_detection_gap < 0:
+            raise ValueError("max_detection_gap must be >= 0")
         self.active_clips: dict[int, TrackedClip] = {}
         self.next_track_id = 0
         self.last_frame_boxes: np.ndarray | None = None  # (T, 4) xyxy, CPU
@@ -123,6 +134,33 @@ class ClipTracker:
             raise ValueError("temporal_overlap must be < max_clip_size")
         if self.temporal_overlap > 0 and (2 * self.temporal_overlap) >= self.max_clip_size:
             raise ValueError("temporal_overlap must satisfy 2*temporal_overlap < max_clip_size")
+
+    def _end_track(self, track_id: int) -> EndedClip:
+        clip = self.active_clips.pop(track_id)
+        trimmed: tuple[int, ...] = ()
+        if clip.coast_count > 0:
+            trimmed = tuple(range(clip.end_frame - clip.coast_count + 1, clip.end_frame + 1))
+            del clip.bboxes[-clip.coast_count:]
+            del clip.masks[-clip.coast_count:]
+            clip.coast_count = 0
+        return EndedClip(clip=clip, split_due_to_max_size=False, trimmed_frame_indices=trimmed)
+
+    def _coast_or_end(
+        self, track_id: int, ended_clips: list[EndedClip], active_track_ids: set[int]
+    ) -> None:
+        clip = self.active_clips[track_id]
+        can_coast = (
+            self.max_detection_gap > 0
+            and clip.coast_count < self.max_detection_gap
+            and clip.frame_count + 1 < self.max_clip_size
+        )
+        if can_coast:
+            clip.bboxes.append(clip.bboxes[-1])
+            clip.masks.append(clip.masks[-1])
+            clip.coast_count += 1
+            active_track_ids.add(track_id)
+        else:
+            ended_clips.append(self._end_track(track_id))
 
     def update(
         self, frame_idx: int, bboxes: np.ndarray, masks: torch.Tensor
@@ -140,9 +178,8 @@ class ClipTracker:
 
         if bboxes.shape[0] == 0:
             for track_id in self.track_ids:
-                ended_clips.append(EndedClip(clip=self.active_clips.pop(track_id), split_due_to_max_size=False))
-            self.last_frame_boxes = None
-            self.track_ids = []
+                self._coast_or_end(track_id, ended_clips, active_track_ids)
+            self._rebuild_last_frame_boxes(active_track_ids)
             return ended_clips, active_track_ids
 
         n_detections = bboxes.shape[0]
@@ -173,6 +210,7 @@ class ClipTracker:
             clip = self.active_clips[track_id]
             clip.bboxes.append(bboxes[det_idx])
             clip.masks.append(masks[det_idx])
+            clip.coast_count = 0
             active_track_ids.add(track_id)
 
             if clip.frame_count >= self.max_clip_size:
@@ -206,7 +244,7 @@ class ClipTracker:
 
         for track_idx, track_id in enumerate(self.track_ids):
             if track_idx not in matched_track_indices and track_id in self.active_clips:
-                ended_clips.append(EndedClip(clip=self.active_clips.pop(track_id), split_due_to_max_size=False))
+                self._coast_or_end(track_id, ended_clips, active_track_ids)
 
         for det_idx in range(n_detections):
             if not matched_det[det_idx]:
@@ -223,6 +261,11 @@ class ClipTracker:
                 self.active_clips[track_id] = clip
                 active_track_ids.add(track_id)
 
+        self._rebuild_last_frame_boxes(active_track_ids)
+
+        return ended_clips, active_track_ids
+
+    def _rebuild_last_frame_boxes(self, active_track_ids: set[int]) -> None:
         new_boxes = []
         new_track_ids = []
         for track_id in active_track_ids:
@@ -238,11 +281,8 @@ class ClipTracker:
             self.last_frame_boxes = None
             self.track_ids = []
 
-        return ended_clips, active_track_ids
-
     def flush(self) -> list[EndedClip]:
-        clips = [EndedClip(clip=c, split_due_to_max_size=False) for c in self.active_clips.values()]
-        self.active_clips.clear()
+        clips = [self._end_track(track_id) for track_id in list(self.active_clips)]
         self.last_frame_boxes = None
         self.track_ids = []
         return clips

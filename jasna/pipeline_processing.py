@@ -33,6 +33,7 @@ def _process_ended_clips(
     crop_buffers: dict[int, CropBuffer],
     clip_queue: Queue[ClipRestoreItem | object],
     frame_shape: tuple[int, int],
+    min_detection_duration: int = 0,
 ) -> None:
     bf = min(int(blend_frames), int(discard_margin)) if discard_margin > 0 else 0
     if bf > 0 and discard_margin > 0:
@@ -44,6 +45,19 @@ def _process_ended_clips(
         crop_buf = crop_buffers.pop(clip.track_id, None)
         if crop_buf is None:
             raise RuntimeError(f"missing CropBuffer for clip {clip.track_id}")
+
+        if ended_clip.trimmed_frame_indices:
+            del crop_buf.crops[clip.frame_count:]
+            blend_buffer.remove_pending_clip(list(ended_clip.trimmed_frame_indices), clip.track_id)
+
+        if (
+            min_detection_duration > 1
+            and clip.frame_count < min_detection_duration
+            and not ended_clip.split_due_to_max_size
+            and not clip.is_continuation
+        ):
+            blend_buffer.remove_pending_clip(clip.frame_indices(), clip.track_id)
+            continue
 
         if ended_clip.split_due_to_max_size and discard_margin > 0:
             child_id = ended_clip.continuation_track_id
@@ -119,6 +133,7 @@ def process_frame_batch(
     discard_margin: int,
     blend_frames: int = 0,
     crop_eye_width: int | None = None,
+    min_detection_duration: int = 0,
 ) -> BatchProcessResult:
     effective_bs = len(pts_list)
     if effective_bs == 0:
@@ -188,6 +203,7 @@ def process_frame_batch(
             crop_buffers=crop_buffers,
             clip_queue=clip_queue,
             frame_shape=(frame_h, frame_w),
+            min_detection_duration=int(min_detection_duration),
         )
 
     return BatchProcessResult(
@@ -221,6 +237,7 @@ def finalize_processing(
     frame_shape: tuple[int, int],
     discard_margin: int,
     blend_frames: int = 0,
+    min_detection_duration: int = 0,
 ) -> None:
     ended_clips = tracker.flush()
     _process_ended_clips(
@@ -232,4 +249,5 @@ def finalize_processing(
         crop_buffers=crop_buffers,
         clip_queue=clip_queue,
         frame_shape=frame_shape,
+        min_detection_duration=int(min_detection_duration),
     )

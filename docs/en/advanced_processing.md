@@ -13,6 +13,22 @@ and raise it only if artifacts remain.
 By default it runs before secondary restoration;
 `--denoise-step after_secondary` moves it right before blending.
 
+## Detection stability filtering
+
+Detection is not perfect frame-to-frame: a mosaic can vanish for a frame or
+two (cutting one clip into several, with a visible seam and an unrestored
+frame), and a single-frame false detection triggers a needless restore.
+
+- **Max Detection Gap** (`--max-detection-gap`, default `2`) fills dropouts
+  up to N frames when the mosaic reappears at the same spot, keeping the
+  clip continuous.
+- **Min Detection Duration** (`--min-detection-duration`, default `2`) drops
+  detections shorter than N frames as false positives; those frames stay
+  unrestored.
+
+Keep both small so genuine fast appear/disappear moments are unaffected.
+`0` disables either.
+
 ## 60 FPS to 30 FPS export
 
 For 60 (or 59.94) FPS input, **Reduce 60 FPS to 30 FPS**
