@@ -108,7 +108,7 @@ def _run_batches(
 
         res = process_frame_batch(
             frames=frames, pts_list=list(pts_list), start_frame_idx=frame_idx,
-            batch_size=batch_size, target_hw=(8, 8), detections_fn=detections_fn,
+            target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
             discard_margin=discard_margin, blend_frames=blend_frames,
@@ -266,7 +266,7 @@ def _run_real_pipeline_batches(
         original_frames[frame_idx] = frame_batch[0].clone()
         res = process_frame_batch(
             frames=frame_batch, pts_list=[pts], start_frame_idx=frame_idx,
-            batch_size=1, target_hw=(8, 8), detections_fn=detections_fn,
+            target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
             discard_margin=temporal_overlap, blend_frames=blend_frames,
@@ -353,7 +353,7 @@ def test_merged_crossfade_weights_sum_to_one_across_clip_boundaries() -> None:
     for pts in range(25):
         res = process_frame_batch(
             frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
-            batch_size=batch_size, target_hw=(8, 8), detections_fn=detections_fn,
+            target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
             discard_margin=discard_margin, blend_frames=blend_frames,
@@ -483,7 +483,7 @@ def test_crossfade_weights_applied_in_blending(monkeypatch) -> None:
             originals[fi] = torch.full((3, 8, 8), original_value, dtype=torch.uint8)
             res = process_frame_batch(
                 frames=torch.full((1, 3, 8, 8), original_value, dtype=torch.uint8),
-                pts_list=[pts], start_frame_idx=fi, batch_size=1, target_hw=(8, 8),
+                pts_list=[pts], start_frame_idx=fi, target_hw=(8, 8),
                 detections_fn=detections_fn, tracker=t, blend_buffer=bb,
                 crop_buffers=cbufs, clip_queue=q, metadata_queue=mq,
                 discard_margin=discard_margin, blend_frames=bf,
@@ -594,7 +594,7 @@ def test_crossfade_with_split_assigns_parent_weights() -> None:
     for pts in range(10):
         res = process_frame_batch(
             frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
-            batch_size=batch_size, target_hw=(8, 8), detections_fn=detections_fn,
+            target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
             discard_margin=discard_margin, blend_frames=blend_frames,
@@ -629,7 +629,7 @@ def test_process_frame_batch_empty_pts_list_returns_immediately() -> None:
 
     res = process_frame_batch(
         frames=frames, pts_list=[], start_frame_idx=5,
-        batch_size=1, target_hw=(8, 8),
+        target_hw=(8, 8),
         detections_fn=lambda *a, **kw: _make_empty_det_batch(batch_size=1),
         tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
         clip_queue=clip_queue, metadata_queue=metadata_queue,
@@ -671,7 +671,7 @@ def test_clip_split_child_crop_count_matches_frame_count() -> None:
     for pts in range(6):
         res = process_frame_batch(
             frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
-            batch_size=batch_size, target_hw=(8, 8), detections_fn=detections_fn,
+            target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
             discard_margin=discard_margin, blend_frames=0,
@@ -741,7 +741,7 @@ def _run_scripted(
     for pts in range(len(script)):
         res = process_frame_batch(
             frames=frames, pts_list=[pts], start_frame_idx=frame_idx,
-            batch_size=1, target_hw=(8, 8), detections_fn=detections_fn,
+            target_hw=(8, 8), detections_fn=detections_fn,
             tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
             clip_queue=clip_queue, metadata_queue=metadata_queue,
             discard_margin=temporal_overlap, blend_frames=0,

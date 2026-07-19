@@ -11,7 +11,6 @@ from jasna.crop_buffer import CropBuffer, RawCrop, extract_crop
 from jasna.mosaic.detections import Detections
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta
 from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
-from jasna.tensor_utils import pad_batch_with_last
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip
 
 logger = logging.getLogger(__name__)
@@ -122,7 +121,6 @@ def process_frame_batch(
     frames: torch.Tensor,
     pts_list: list[int],
     start_frame_idx: int,
-    batch_size: int,
     target_hw: tuple[int, int],
     detections_fn,
     tracker: ClipTracker,
@@ -140,9 +138,9 @@ def process_frame_batch(
         return BatchProcessResult(next_frame_idx=int(start_frame_idx), clips_emitted=0)
 
     frames_eff = frames[:effective_bs]
-    frames_in = pad_batch_with_last(frames_eff, batch_size=int(batch_size))
-
-    detections: Detections = detections_fn(frames_in, target_hw=target_hw)
+    # Feed the real (possibly partial) batch; fixed-batch engines pad internally
+    # via TrtRunner, dynamic RF-DETR engines take it as-is (no wasted compute).
+    detections: Detections = detections_fn(frames_eff, target_hw=target_hw)
     _, frame_h, frame_w = frames_eff[0].shape
 
     clips_emitted = 0
