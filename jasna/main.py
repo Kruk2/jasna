@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from jasna import __version__
+from jasna.cli_help import CLI_HELP
 from jasna.engine_paths import model_weights_dir
 from jasna.media import UnsupportedColorspaceError
 from jasna.os_utils import (
@@ -56,7 +57,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--fp16",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
+        help=CLI_HELP["fp16"],
     )
     parser.add_argument(
         "--log-level",
@@ -89,39 +90,39 @@ def build_parser() -> argparse.ArgumentParser:
         "--compile-basicvsrpp",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes. (default: %(default)s)",
+        help=CLI_HELP["compile_basicvsrpp"],
     )
     restoration.add_argument(
         "--max-clip-size",
         type=int,
         default=90,
-        help="Maximum clip size for tracking (default: %(default)s)",
+        help=CLI_HELP["max_clip_size"],
     )
     restoration.add_argument(
         "--temporal-overlap",
         type=int,
         default=8,
-        help="Discard margin for overlap+discard clip splitting. Each split uses 2*temporal_overlap input overlap and discards temporal_overlap frames at each split boundary (default: %(default)s)",
+        help=CLI_HELP["temporal_overlap"],
     )
     restoration.add_argument(
         "--enable-crossfade",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Cross-fade between clip boundaries to reduce flickering at seams. Uses frames that are already processed but otherwise discarded, so no extra GPU cost. (default: %(default)s)",
+        help=CLI_HELP["enable_crossfade"],
     )
     restoration.add_argument(
         "--denoise",
         type=str,
         default="none",
         choices=["none", "low", "medium", "high"],
-        help="Spatial denoising strength applied to restored crops. Reduces noise artifacts. (default: %(default)s)",
+        help=CLI_HELP["denoise"],
     )
     restoration.add_argument(
         "--denoise-step",
         type=str,
         default="after_primary",
         choices=["after_primary", "after_secondary"],
-        help="When to apply denoising: after_primary (before secondary) or after_secondary (right before blend). (default: %(default)s)",
+        help=CLI_HELP["denoise_step"],
     )
 
     secondary = parser.add_argument_group("2nd restoration")
@@ -130,7 +131,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="none",
         choices=["none", "unet-4x", "tvai", "rtx-super-res"],
-        help='Secondary restoration after primary model (default: %(default)s)',
+        help=CLI_HELP["secondary_restoration"],
     )
 
     sd15 = parser.add_argument_group("SD 1.5 image restoration")
@@ -221,20 +222,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--tvai-ffmpeg-path",
         type=str,
         default="C:\\Program Files\\Topaz Labs LLC\\Topaz Video\\ffmpeg.exe",
-        help="Path to Topaz Video ffmpeg.exe (default: %(default)s)",
+        help=CLI_HELP["tvai_ffmpeg_path"],
     )
     tvai.add_argument(
         "--tvai-model",
         type=str,
         default="iris-2",
-        help='Topaz model name for tvai_up (e.g. "iris-2", "prob-4", "iris-3") (default: %(default)s)',
+        help=CLI_HELP["tvai_model"],
     )
     tvai.add_argument(
         "--tvai-scale",
         type=int,
         default=4,
         choices=[1, 2, 4],
-        help='Topaz tvai_up scale (1=no scale). Output size is 256*scale (default: %(default)s)',
+        help=CLI_HELP["tvai_scale"],
     )
     tvai.add_argument(
         "--tvai-args",
@@ -246,7 +247,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--tvai-workers",
         type=int,
         default=2,
-        help="Number of parallel TVAI ffmpeg workers (default: %(default)s)",
+        help=CLI_HELP["tvai_workers"],
     )
 
     detection = parser.add_argument_group("Detection")
@@ -270,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--detection-score-threshold",
         type=float,
         default=0.25,
-        help="Detection score threshold (default: %(default)s)",
+        help=CLI_HELP["detection_score_threshold"],
     )
 
     projection = parser.add_argument_group("VR projection")
@@ -279,12 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="auto",
         choices=["auto", "off", "sbs", "sbs-fisheye"],
-        help=(
-            "VR180 handling: auto uses conservative studio/metadata detection; "
-            "sbs processes each eye separately; sbs-fisheye also reprojects each "
-            "eye for detection/restoration and preserves source projection on output. "
-            "(default: %(default)s)"
-        ),
+        help=CLI_HELP["vr_mode"],
     )
 
     streaming = parser.add_argument_group("Streaming")
@@ -317,13 +313,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=lambda value: str(value).lower(),
         default="hevc",
         choices=["hevc", "h264", "av1"],
-        help="Offline output video codec (HLS streaming always uses H.264). Default: %(default)s",
+        help=CLI_HELP["codec"],
     )
     encoding.add_argument(
         "--encoder-settings",
         type=str,
         default="",
-        help='Encoder settings, as JSON object or comma-separated key=value pairs (e.g. {"cq":22} or cq=22,rc-lookahead=32)',
+        help=CLI_HELP["encoder_settings"],
     )
     encoding.add_argument(
         "--lut",
@@ -355,7 +351,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=str,
         default="none",
         choices=["none", "shutdown", "command"],
-        help="Action to run after all non-streaming exports finish.",
+        help=CLI_HELP["post_export_action"],
     )
     post_export.add_argument(
         "--post-export-command",

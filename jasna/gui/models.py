@@ -10,14 +10,10 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable
 
-from jasna import os_utils
+from jasna.gui.paths import get_settings_path
 from jasna.segments import SegmentRange
 
 logger = logging.getLogger(__name__)
-
-
-def get_settings_path() -> Path:
-    return os_utils.get_user_config_dir("jasna") / "settings.json"
 
 
 class JobStatus(Enum):

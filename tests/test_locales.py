@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 
 import pytest
 
@@ -26,6 +27,32 @@ def test_locale_has_no_extra_keys(lang: str) -> None:
 
     extra = lang_keys - en_keys
     assert not extra, f"{lang} has extra keys not in English (en): {sorted(extra)}"
+
+
+@pytest.mark.parametrize("lang", _FULL_LOCALES)
+def test_full_locale_key_set_exactly_matches_english(lang: str) -> None:
+    assert set(TRANSLATIONS[lang]) == set(TRANSLATIONS["en"])
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_no_locale_defines_keys_outside_english(lang: str) -> None:
+    extra = set(TRANSLATIONS[lang]) - set(TRANSLATIONS["en"])
+    assert not extra, f"{lang} defines keys absent from English (en): {sorted(extra)}"
+
+
+def test_gui_tooltip_lookup_uses_help_table_not_argparse(monkeypatch) -> None:
+    import jasna.gui.locales as loc
+    from jasna.cli_help import CLI_HELP, GUI_TOOLTIP_KEY_BY_DEST
+
+    # Break the CLI parser import: tooltip lookup must not depend on argparse internals.
+    monkeypatch.setitem(sys.modules, "jasna.main", None)
+    monkeypatch.setattr(loc, "_CLI_DESCRIPTIONS", None)
+
+    descriptions = loc.get_cli_descriptions()
+
+    assert set(descriptions) == set(GUI_TOOLTIP_KEY_BY_DEST.values())
+    assert descriptions["fp16_mode"] == CLI_HELP["fp16"]
+    assert descriptions["max_clip_size"] == "Maximum clip size for tracking"
 
 
 @pytest.mark.parametrize("lang", _FULL_LOCALES)
