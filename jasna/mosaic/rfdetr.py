@@ -24,6 +24,7 @@ def compile_rfdetr_engine(
     onnx_path: Path,
     device: torch.device,
     batch_size: int,
+    resolution: int = 768,
     fp16: bool = True,
 ) -> Path:
     if is_amd_device(device):
@@ -31,7 +32,7 @@ def compile_rfdetr_engine(
 
         runner = MigraphxRunner(
             onnx_path,
-            input_shapes=[(int(batch_size), 3, 768, 768)],
+            input_shapes=[(int(batch_size), 3, int(resolution), int(resolution))],
             device=device,
             fp16=bool(fp16),
         )

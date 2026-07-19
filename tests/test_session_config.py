@@ -8,7 +8,7 @@ from jasna.gui.models import AppSettings
 from jasna.gui.video_session import video_session_config
 from jasna.main import _session_config_from_args, build_parser
 
-_DETECTION_PATH = Path("mw") / "rfdetr-v5.onnx"
+_DETECTION_PATH = Path("mw") / "rfdetr-v6.onnx"
 _RESTORATION_PATH = Path("mw") / "lada_mosaic_restoration_model_generic_v1.2.pth"
 
 
@@ -20,7 +20,7 @@ def _cli_config(extra_args: list[str] | None = None):
         args,
         codec="hevc",
         encoder_settings={},
-        detection_model_name="rfdetr-v5",
+        detection_model_name="rfdetr-v6",
         detection_model_path=_DETECTION_PATH,
         restoration_model_path=_RESTORATION_PATH,
         lut_path=None,
@@ -48,9 +48,9 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.device == "cuda:0"
     assert config.fp16 is True
     assert config.batch_size == 4
-    assert config.detection_model_name == "rfdetr-v5"
+    assert config.detection_model_name == "rfdetr-v6"
     assert config.detection_model_path == _DETECTION_PATH
-    assert config.detection_score_threshold == 0.25
+    assert config.detection_score_threshold == 0.35
     assert config.max_detection_gap == 2
     assert config.min_detection_duration == 2
     assert config.restoration_model_path == _RESTORATION_PATH

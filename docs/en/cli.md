@@ -46,9 +46,9 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 
 | Option | Default | Notes |
 | ------ | ------- | ----- |
-| `--detection-model` | `rfdetr-v5` | Installed models are discovered from `model_weights/`; `zelefans-vr-yolo-v2` is bundled. See [Models](models.md). |
+| `--detection-model` | `rfdetr-v6` | Installed models are discovered from `model_weights/`; `rfdetr-v6` (fast) and `zelefans-vr-yolo-v2` are bundled, `rfdetr-v6-large` is an optional download. See [Models](models.md). |
 | `--detection-model-path` | auto | Defaults to `model_weights/<detection-model>.onnx` (RF-DETR) or `.pt` (YOLO). |
-| `--detection-score-threshold` | `0.25` | Lower it when mosaics are missed; raise it when normal areas get falsely detected. |
+| `--detection-score-threshold` | auto | Defaults to the model's recommended value (`rfdetr-v6`: 0.35, `rfdetr-v6-large`: 0.40). Lower it when mosaics are missed; raise it when normal areas get falsely detected. |
 | `--max-detection-gap` | `2` | Fill detection dropouts up to N frames when the mosaic reappears at the same spot. `0` disables. |
 | `--min-detection-duration` | `2` | Drop detections shorter than N frames as false positives; those frames stay unrestored. `0` disables. |
 

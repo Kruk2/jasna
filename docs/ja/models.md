@@ -4,15 +4,21 @@
 
 検出モデルは各フレーム内のモザイクを見つけます。
 
-- **最新の RF-DETR モデル**（`rfdetr-v5`）を使ってください — デフォルトで、
-  最もバランスの取れた選択です。
+- **最新の RF-DETR モデル**（`rfdetr-v6`）を使ってください — デフォルトかつ
+  高速で、最もバランスの取れた選択です。Jasna に同梱されています。
+- **`rfdetr-v6-large`** は高品質だが低速の派生モデルです。別途ダウンロードの
+  任意モデルで、`rfdetr-v6-large.onnx` を `model_weights/` に置くと自動的に
+  検出されます。
 - **Lada YOLO** モデルは 2D アニメーションでより良い場合があります。
 - **zelefans-vr-yolo-v2**（同梱）は VR180 動画でより正確な場合があります。
 - **AMD では** RF-DETR は非常に遅く（Windows では CPU で動くほどです）、
   RF-DETR が特に必要でない限り `lada-yolo-v4` を使ってください。
 
+各モデルは既定で推奨検出しきい値を適用します（`rfdetr-v6`：0.35、
+`rfdetr-v6-large`：0.40）。`--detection-score-threshold` で上書きできます。
+
 ```bash
-jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v5
+jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 ```
 
 [区間エディター](segments.md)の中で、動画ごとに別の検出モデルを

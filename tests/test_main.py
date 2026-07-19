@@ -94,8 +94,8 @@ class TestBuildParser:
         assert args.stream_segment_duration == 4.0
         assert args.no_browser is False
         assert args.output_pattern is None
-        assert args.detection_model == "rfdetr-v5"
-        assert args.detection_score_threshold == 0.25
+        assert args.detection_model == "rfdetr-v6"
+        assert args.detection_score_threshold is None
         assert args.benchmark is False
         assert args.post_export_action == "none"
         assert args.post_export_command == ""
@@ -277,6 +277,31 @@ class TestSecondaryRestorers:
 
 
 # ---------------------------------------------------------------------------
+# Detection threshold resolution
+# ---------------------------------------------------------------------------
+
+class TestDetectionThresholdResolution:
+    def test_default_threshold_uses_fast_model_recommended(self, tmp_path):
+        inp, out, rest, det = _make_model_files(tmp_path)
+        pipeline_cls = _run_main(_base_argv(inp, out, rest, det))
+        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.35
+
+    def test_default_threshold_uses_large_model_recommended(self, tmp_path):
+        inp, out, rest, det = _make_model_files(tmp_path)
+        pipeline_cls = _run_main(
+            _base_argv(inp, out, rest, det, ["--detection-model", "rfdetr-v6-large"])
+        )
+        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.40
+
+    def test_explicit_threshold_overrides_recommended(self, tmp_path):
+        inp, out, rest, det = _make_model_files(tmp_path)
+        pipeline_cls = _run_main(
+            _base_argv(inp, out, rest, det, ["--detection-score-threshold", "0.5"])
+        )
+        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.5
+
+
+# ---------------------------------------------------------------------------
 # Detection model discovery
 # ---------------------------------------------------------------------------
 
@@ -306,11 +331,11 @@ class TestDetectionModelDiscovery:
 
     def test_auto_discovery_no_warning_when_model_available(self, tmp_path, capsys):
         inp, out, rest, _ = _make_model_files(tmp_path, create_detection=False)
-        det = tmp_path / "model_weights" / "rfdetr-v5.onnx"
+        det = tmp_path / "model_weights" / "rfdetr-v6.onnx"
         (tmp_path / "model_weights").mkdir(exist_ok=True)
         det.touch()
 
-        with patch("jasna.mosaic.detection_registry.discover_available_detection_models", return_value=["rfdetr-v5"]):
+        with patch("jasna.mosaic.detection_registry.discover_available_detection_models", return_value=["rfdetr-v6"]):
             with patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=det):
                 _run_main([
                     "jasna",

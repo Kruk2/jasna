@@ -63,8 +63,8 @@ def _fake_section_widgets() -> dict:
     return {
         "max_clip_size": _FakeWidget(90),
         "fp16_mode": _FakeWidget(1),
-        "detection_model": _FakeWidget("rfdetr-v5"),
-        "detection_score_threshold": _FakeWidget(0.25),
+        "detection_model": _FakeWidget("rfdetr-v6"),
+        "detection_score_threshold": _FakeWidget(0.35),
         "compile_basicvsrpp": _FakeWidget(1),
         "file_conflict": _FakeValueMenu({"auto_rename": "A", "overwrite": "B", "skip": "C"}, "skip"),
         "temporal_overlap": _FakeWidget(8),
@@ -142,6 +142,62 @@ def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
 
     settings = AppSettings(batch_size=4, **values)
     assert settings.codec == "av1"
+
+
+@pytest.fixture
+def _basic_section_panel(monkeypatch, tmp_path):
+    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+
+    from jasna.mosaic import detection_registry
+
+    monkeypatch.setattr(
+        detection_registry,
+        "detection_model_choices",
+        lambda *a, **k: ["rfdetr-v6", "rfdetr-v6-large"],
+    )
+
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    from jasna.gui.settings_panel import SettingsPanel
+
+    panel = SettingsPanel(root)
+    try:
+        yield panel, panel._sections[0]
+    finally:
+        root.destroy()
+
+
+def test_switching_detection_model_applies_recommended_threshold(_basic_section_panel) -> None:
+    panel, basic = _basic_section_panel
+
+    basic._on_detection_model_changed("rfdetr-v6-large")
+    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.40)
+
+    basic._on_detection_model_changed("rfdetr-v6")
+    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.35)
+
+
+def test_apply_reverts_missing_model_to_default_recommended(_basic_section_panel) -> None:
+    panel, basic = _basic_section_panel
+
+    # Preset pins a model that is no longer installed (e.g. de-bundled v5).
+    basic.apply(AppSettings(detection_model="rfdetr-v5", detection_score_threshold=0.6))
+
+    assert panel._widgets["detection_model"].get() == "rfdetr-v6"
+    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.35)
+
+
+def test_apply_keeps_installed_model_and_threshold(_basic_section_panel) -> None:
+    panel, basic = _basic_section_panel
+
+    basic.apply(AppSettings(detection_model="rfdetr-v6-large", detection_score_threshold=0.55))
+
+    assert panel._widgets["detection_model"].get() == "rfdetr-v6-large"
+    assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.55)
 
 
 def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path) -> None:

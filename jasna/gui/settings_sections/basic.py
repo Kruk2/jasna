@@ -67,7 +67,7 @@ class BasicSection:
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
             dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
             width=160,
-            command=lambda _value: self._on_modified(),
+            command=self._on_detection_model_changed,
         )
         self._widgets["detection_model"].pack(side="right")
         self._widgets["detection_model"].set(available_models[0])
@@ -83,7 +83,7 @@ class BasicSection:
         Tooltip(thresh_tip, get_tooltip("detection_score_threshold"))
 
         self._widgets["detection_threshold_val"] = create_slider_value_label(
-            row3, "0.25", 4, Colors.BG_PANEL
+            row3, "0.35", 4, Colors.BG_PANEL
         )
         self._widgets["detection_threshold_val"].pack(side="right")
         self._widgets["detection_score_threshold"] = ctk.CTkSlider(
@@ -92,7 +92,7 @@ class BasicSection:
             width=160, command=lambda v: self._widgets["detection_threshold_val"].configure(text=f"{v:.2f}")
         )
         self._widgets["detection_score_threshold"].pack(side="right", padx=(0, 8))
-        self._widgets["detection_score_threshold"].set(0.25)
+        self._widgets["detection_score_threshold"].set(0.35)
 
         # Toggles row - FP16 Mode and Compile BasicVSR++
         row4 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -165,6 +165,14 @@ class BasicSection:
         self._on_modified()
         self._on_max_clip_size_change(max_clip_size)
 
+    def _on_detection_model_changed(self, value: str):
+        from jasna.mosaic.detection_registry import recommended_score_threshold
+
+        threshold = recommended_score_threshold(value)
+        self._widgets["detection_score_threshold"].set(threshold)
+        self._widgets["detection_threshold_val"].configure(text=f"{threshold:.2f}")
+        self._on_modified()
+
     def _on_file_conflict_changed(self, value: str):
         if value == "overwrite":
             self._widgets["conflict_warning"].pack(side="right", padx=(0, 8))
@@ -189,10 +197,14 @@ class BasicSection:
 
         det_model = preset.detection_model
         det_threshold = preset.detection_score_threshold
-        if det_model not in self._widgets["detection_model"].cget("values"):
-            from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
-            det_model = "rfdetr-v5"
-            det_threshold = max(det_threshold, RfDetrMosaicDetectionModel.DEFAULT_SCORE_THRESHOLD)
+        choices = self._widgets["detection_model"].cget("values")
+        if det_model not in choices:
+            from jasna.mosaic.detection_registry import (
+                DEFAULT_DETECTION_MODEL_NAME,
+                recommended_score_threshold,
+            )
+            det_model = DEFAULT_DETECTION_MODEL_NAME if DEFAULT_DETECTION_MODEL_NAME in choices else choices[0]
+            det_threshold = recommended_score_threshold(det_model)
         self._widgets["detection_model"].set(det_model)
         self._widgets["detection_score_threshold"].set(det_threshold)
         self._widgets["detection_threshold_val"].configure(text=f"{det_threshold:.2f}")

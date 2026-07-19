@@ -142,8 +142,8 @@ class AppSettings:
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
     
     # Detection
-    detection_model: str = "rfdetr-v5"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
-    detection_score_threshold: float = 0.25
+    detection_model: str = "rfdetr-v6"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
+    detection_score_threshold: float = 0.35
     max_detection_gap: int = 2
     min_detection_duration: int = 2
     compile_basicvsrpp: bool = True

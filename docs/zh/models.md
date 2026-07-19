@@ -4,15 +4,20 @@
 
 检测模型负责在每一帧中找到马赛克。
 
-- **使用最新的 RF-DETR 模型**（`rfdetr-v5`）— 它是默认值，也是综合
-  表现最好的选择。
+- **使用最新的 RF-DETR 模型**（`rfdetr-v6`）— 它是默认值、速度快，也是综合
+  表现最好的选择。已随 Jasna 内置。
+- **`rfdetr-v6-large`** 是质量更高、速度更慢的变体。它是可选的单独下载，
+  将 `rfdetr-v6-large.onnx` 放入 `model_weights/`，Jasna 会自动检测。
 - **Lada YOLO** 模型在 2D 动画上可能效果更好。
 - **zelefans-vr-yolo-v2**（已内置）在 VR180 视频上可能更准确。
 - **在 AMD 上**，RF-DETR 非常慢（在 Windows 上甚至只能用 CPU 运行）—
   除非特别需要 RF-DETR，否则请改用 `lada-yolo-v4`。
 
+每个模型默认应用其推荐的检测阈值（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）；
+可用 `--detection-score-threshold` 覆盖。
+
 ```bash
-jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v5
+jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 ```
 
 你也可以在[区间编辑器](segments.md)中为每个视频单独设置不同的检测模型。
