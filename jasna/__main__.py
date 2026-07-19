@@ -54,7 +54,7 @@ def _preload_native_libs():
         try:
             __import__(mod)
         except Exception:
-            logger.debug("Native preload of %s failed", mod, exc_info=True)
+            logger.warning("Native preload of %s failed", mod, exc_info=True)
 
 
 if __name__ == "__main__":
