@@ -15,6 +15,53 @@ from jasna.os_utils import (
     check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
 )
+from jasna.session_config import SessionConfig
+
+
+def _session_config_from_args(
+    args: argparse.Namespace,
+    *,
+    codec: str,
+    encoder_settings: dict[str, object],
+    detection_model_name: str,
+    detection_model_path: Path,
+    restoration_model_path: Path,
+    lut_path: str | None,
+) -> SessionConfig:
+    return SessionConfig(
+        device=str(args.device),
+        fp16=bool(args.fp16),
+        batch_size=int(args.batch_size),
+        detection_model_name=detection_model_name,
+        detection_model_path=detection_model_path,
+        detection_score_threshold=float(args.detection_score_threshold),
+        max_detection_gap=int(args.max_detection_gap),
+        min_detection_duration=int(args.min_detection_duration),
+        restoration_model_path=restoration_model_path,
+        compile_basicvsrpp=bool(args.compile_basicvsrpp),
+        max_clip_size=int(args.max_clip_size),
+        temporal_overlap=int(args.temporal_overlap),
+        enable_crossfade=bool(args.enable_crossfade),
+        denoise_strength=str(args.denoise).lower(),
+        denoise_step=str(args.denoise_step).lower(),
+        secondary_restoration=str(args.secondary_restoration).lower(),
+        tvai_ffmpeg_path=str(args.tvai_ffmpeg_path),
+        tvai_model=str(args.tvai_model),
+        tvai_scale=int(args.tvai_scale),
+        tvai_args=str(args.tvai_args),
+        tvai_workers=int(args.tvai_workers),
+        rtx_scale=int(args.rtx_scale),
+        rtx_quality=str(args.rtx_quality).lower(),
+        rtx_denoise=str(args.rtx_denoise).lower(),
+        rtx_deblur=str(args.rtx_deblur).lower(),
+        vr_mode=str(args.vr_mode),
+        codec=codec,
+        encoder_settings=encoder_settings,
+        lut_path=lut_path,
+        retarget_high_fps=bool(args.retarget_high_fps),
+        disable_progress=bool(args.no_progress),
+        working_dir=Path(args.working_directory) if args.working_directory else None,
+    )
 
 
 def _path_collision_key(path: Path) -> str:
@@ -643,9 +690,8 @@ def main() -> None:
         raise ValueError("--min-detection-duration must be < --max-clip-size")
 
     device = torch.device(str(args.device))
-    from jasna.accelerator import device_context, is_amd_device
+    from jasna.accelerator import device_context
 
-    fp16 = bool(args.fp16)
     detection_score_threshold = float(args.detection_score_threshold)
     if not (0.0 <= detection_score_threshold <= 1.0):
         raise ValueError("--detection-score-threshold must be in [0, 1]")
@@ -653,112 +699,41 @@ def main() -> None:
     if restoration_model_name != "basicvsrpp":
         raise ValueError(f"Unsupported restoration model: {restoration_model_name}")
 
-    from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
-    from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
-    from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
-    from jasna.restorer.restoration_pipeline import RestorationPipeline
-
-    secondary_name = str(args.secondary_restoration).lower()
-    if is_amd_device(device) and secondary_name != "none":
-        raise ValueError(
-            f"Secondary restoration '{secondary_name}' is not available in the AMD build yet"
-        )
-
     if args.license_email and args.license_key:
         from jasna.protection import license_store
         license_store.set_license(args.license_email, args.license_key)
 
-    compile_result = ensure_engines_compiled(EngineCompilationRequest(
-        device=str(device),
-        fp16=fp16,
-        basicvsrpp=bool(args.compile_basicvsrpp) and not is_amd_device(device),
-        basicvsrpp_model_path=str(restoration_model_path),
-        basicvsrpp_max_clip_size=max_clip_size,
-        detection=True,
+    lut_arg = str(args.lut).strip()
+    if lut_arg and not Path(lut_arg).exists():
+        raise FileNotFoundError(lut_arg)
+
+    config = _session_config_from_args(
+        args,
+        codec=codec,
+        encoder_settings=encoder_settings,
         detection_model_name=detection_model_name,
-        detection_model_path=str(detection_model_path),
-        detection_batch_size=batch_size,
-        unet4x=(secondary_name == "unet-4x"),
-    ))
-    use_tensorrt = compile_result.use_basicvsrpp_tensorrt
+        detection_model_path=detection_model_path,
+        restoration_model_path=restoration_model_path,
+        lut_path=lut_arg or None,
+    )
+
+    from jasna.session_factory import build_pipeline, build_restoration_session
 
     with device_context(device):
-        if secondary_name == "none":
-            secondary_restorer = None
-        elif secondary_name == "tvai":
-            from jasna.restorer.tvai_secondary_restorer import TvaiSecondaryRestorer
-            tvai_args_str = f"model={args.tvai_model}:scale={args.tvai_scale}:{args.tvai_args}"
-            secondary_restorer = TvaiSecondaryRestorer(
-                ffmpeg_path=args.tvai_ffmpeg_path,
-                tvai_args=tvai_args_str,
-                scale=int(args.tvai_scale),
-                num_workers=int(args.tvai_workers),
-            )
-        elif secondary_name == "unet-4x":
-            from jasna.restorer.unet4x_secondary_restorer import Unet4xSecondaryRestorer
-            secondary_restorer = Unet4xSecondaryRestorer(device=device, fp16=fp16)
-        elif secondary_name == "rtx-super-res":
-            from jasna.restorer.rtx_superres_secondary_restorer import RtxSuperresSecondaryRestorer
-            rtx_denoise = str(args.rtx_denoise).lower()
-            rtx_deblur = str(args.rtx_deblur).lower()
-            secondary_restorer = RtxSuperresSecondaryRestorer(
-                device=device,
-                scale=int(args.rtx_scale),
-                quality=str(args.rtx_quality).lower(),
-                denoise=None if rtx_denoise == "none" else rtx_denoise,
-                deblur=None if rtx_deblur == "none" else rtx_deblur,
-            )
-        else:
-            raise ValueError(f"Unsupported secondary restoration: {secondary_name}")
-
-        denoise_strength = DenoiseStrength(str(args.denoise).lower())
-        denoise_step = DenoiseStep(str(args.denoise_step).lower())
-
-        restoration_pipeline = RestorationPipeline(
-            restorer=BasicvsrppMosaicRestorer(
-                checkpoint_path=str(restoration_model_path),
-                device=device,
-                max_clip_size=max_clip_size,
-                use_tensorrt=use_tensorrt,
-                fp16=fp16,
-            ),
-            secondary_restorer=secondary_restorer,
-            denoise_strength=denoise_strength,
-            denoise_step=denoise_step,
+        session = build_restoration_session(
+            config,
+            disable_basicvsrpp_tensorrt=False,
+            log_callback=None,
         )
 
-        lut_arg = str(args.lut).strip()
-        if lut_arg and not Path(lut_arg).exists():
-            raise FileNotFoundError(lut_arg)
-        lut_path = lut_arg or None
-
-        working_dir = Path(args.working_directory) if args.working_directory else None
-
         def _make_pipeline(vid_input: Path, out_path: Path) -> Pipeline:
-            return Pipeline(
-                input_video=vid_input,
-                output_video=out_path,
-                detection_model_name=detection_model_name,
-                detection_model_path=detection_model_path,
-                detection_score_threshold=detection_score_threshold,
-                restoration_pipeline=restoration_pipeline,
-                codec=codec,
-                encoder_settings=encoder_settings,
-                batch_size=batch_size,
-                device=device,
-                max_clip_size=max_clip_size,
-                temporal_overlap=temporal_overlap,
-                max_detection_gap=max_detection_gap,
-                min_detection_duration=min_detection_duration,
-                enable_crossfade=bool(args.enable_crossfade),
-                vr_mode=str(args.vr_mode),
-                fp16=fp16,
-                disable_progress=args.no_progress,
-                lut_path=lut_path,
-                retarget_high_fps=bool(args.retarget_high_fps),
+            return build_pipeline(
+                config,
+                session,
+                vid_input,
+                out_path,
                 segments=segments,
                 splice_plan=splice_plan,
-                working_dir=working_dir,
             )
 
         video_inputs = folder_videos if input_is_dir else ([input_video] if input_video is not None else [])
@@ -831,9 +806,7 @@ def main() -> None:
         finally:
             if pipeline is not None:
                 pipeline.close()
-            restoration_pipeline.restorer.close()
-            if secondary_restorer is not None and hasattr(secondary_restorer, "close"):
-                secondary_restorer.close()
+            session.close()
 
 
 if __name__ == "__main__":

@@ -17,7 +17,8 @@ from pathlib import Path
 from PIL import Image
 
 from jasna.gui.models import AppSettings
-from jasna.gui.video_session import VideoSession, build_video_session, video_session_key
+from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
+from jasna.session_factory import RestorationSession
 from jasna.media import VideoMetadata
 
 
@@ -308,7 +309,7 @@ class RestorationPreviewWorker:
             pass
 
     def _run(self) -> None:
-        session: VideoSession | None = None
+        session: RestorationSession | None = None
         session_key: tuple | None = None
         detection_model = None
         try:
@@ -329,6 +330,7 @@ class RestorationPreviewWorker:
                             detection_model = None
                         if session is not None:
                             session.close()
+                            release_session_memory(session.device)
                             session = None
                             session_key = None
                         self.events.put(RestorationStatus("loading_models", command.generation))
@@ -340,7 +342,7 @@ class RestorationPreviewWorker:
                         from jasna.mosaic.detection_registry import build_detection_model
 
                         detection_model = build_detection_model(
-                            session.det_name,
+                            session.detection_model_name,
                             session.detection_model_path,
                             batch_size=command.settings.batch_size,
                             device=session.device,
@@ -362,13 +364,14 @@ class RestorationPreviewWorker:
                 detection_model.close()
             if session is not None:
                 session.close()
+                release_session_memory(session.device)
             if self._on_stopped is not None:
                 self._on_stopped()
 
     def _run_preview_pass(
         self,
         command: _Request,
-        session: VideoSession,
+        session: RestorationSession,
         detection_model,
     ) -> RestorationFrame | RestorationClip | None:
         from queue import Empty, Queue

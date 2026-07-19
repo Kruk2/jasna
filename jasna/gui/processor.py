@@ -10,8 +10,10 @@ from dataclasses import dataclass, replace
 from typing import Callable
 
 from jasna.gui.models import JobItem, JobStatus, AppSettings
-from jasna.gui.video_session import VideoSession, build_video_session
+from jasna.gui.video_session import build_video_session, release_session_memory, video_session_config
 from jasna.media import UnsupportedColorspaceError
+from jasna.session_config import SessionConfig
+from jasna.session_factory import RestorationSession, build_pipeline
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ class Processor:
         # Heavy models are loaded once and reused across consecutive jobs of the
         # same type; the other session is unloaded when the type switches.
         self._img_session: tuple | None = None      # (detector, restorer, device)
-        self._video_session: VideoSession | None = None
+        self._video_session: RestorationSession | None = None
         
     def start(
         self,
@@ -336,8 +338,6 @@ class Processor:
         segments=(),
         settings: AppSettings | None = None,
     ):
-        from jasna.pipeline import Pipeline
-
         settings = settings or self._settings
         codec = settings.codec
         splice_plan = None
@@ -362,9 +362,10 @@ class Processor:
                 duration=metadata.duration,
             )
         encoder_settings = self._build_encoder_settings(codec)
+        config = video_session_config(settings, codec=codec, encoder_settings=encoder_settings)
         self._ensure_video_session(settings)
         s = self._video_session
-        det_name, detection_model_path = self._prepare_job_detector(settings, s)
+        self._prepare_job_detector(config, s)
         last_update_time = [0.0]
 
         def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
@@ -389,31 +390,14 @@ class Processor:
 
         pipeline = None
         try:
-            pipeline = Pipeline(
-                input_video=input_path,
-                output_video=output_path,
-                detection_model_name=det_name,
-                detection_model_path=detection_model_path,
-                detection_score_threshold=settings.detection_score_threshold,
-                restoration_pipeline=s.restoration_pipeline,
-                codec=codec,
-                encoder_settings=encoder_settings,
-                batch_size=settings.batch_size,
-                device=s.device,
-                max_clip_size=settings.max_clip_size,
-                temporal_overlap=settings.temporal_overlap,
-                max_detection_gap=settings.max_detection_gap,
-                min_detection_duration=settings.min_detection_duration,
-                enable_crossfade=settings.enable_crossfade,
-                vr_mode=settings.vr_mode,
-                fp16=settings.fp16_mode,
-                disable_progress=True,
+            pipeline = build_pipeline(
+                config,
+                s,
+                input_path,
+                output_path,
                 progress_callback=progress_callback,
-                lut_path=s.lut_path,
-                retarget_high_fps=settings.retarget_high_fps,
                 segments=tuple(segments) or None,
                 splice_plan=splice_plan,
-                working_dir=Path(settings.working_directory) if settings.working_directory else None,
             )
             pipeline.run()
         finally:
@@ -426,33 +410,28 @@ class Processor:
 
     def _prepare_job_detector(
         self,
-        settings: AppSettings,
-        session: VideoSession,
-    ) -> tuple[str, Path]:
-        from jasna.mosaic.detection_registry import (
-            coerce_detection_model_name,
-            require_detection_model_weights,
-        )
-
-        det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = require_detection_model_weights(det_name)
-        if det_name == session.det_name and detection_model_path == session.detection_model_path:
-            return det_name, detection_model_path
+        config: SessionConfig,
+        session: RestorationSession,
+    ) -> None:
+        if (
+            config.detection_model_name == session.detection_model_name
+            and config.detection_model_path == session.detection_model_path
+        ):
+            return
 
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
 
         ensure_engines_compiled(
             EngineCompilationRequest(
                 device=str(session.device),
-                fp16=settings.fp16_mode,
+                fp16=config.fp16,
                 detection=True,
-                detection_model_name=det_name,
-                detection_model_path=str(detection_model_path),
-                detection_batch_size=settings.batch_size,
+                detection_model_name=config.detection_model_name,
+                detection_model_path=str(config.detection_model_path),
+                detection_batch_size=config.batch_size,
             ),
             log_callback=lambda msg: self._log("INFO", msg),
         )
-        return det_name, detection_model_path
 
     def _close_video_session(self):
         if self._video_session is None:
@@ -460,6 +439,7 @@ class Processor:
         s = self._video_session
         self._video_session = None
         s.close()
+        release_session_memory(s.device)
         self._log("INFO", "Restoration models unloaded")
 
     def _ensure_image_session(self):

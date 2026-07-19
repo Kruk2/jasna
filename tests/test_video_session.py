@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from jasna.gui.models import AppSettings
@@ -60,10 +61,9 @@ def _build(settings: AppSettings):
 def test_build_video_session_without_secondary() -> None:
     session, compiled, restorer_cls, pipeline_cls, _unet_cls = _build(AppSettings())
 
-    assert session.det_name == AppSettings().detection_model
-    assert session.detection_model_path == "det.engine"
+    assert session.detection_model_name == AppSettings().detection_model
+    assert session.detection_model_path == Path("det.engine")
     assert session.secondary_restorer is None
-    assert session.lut_path is None
     assert restorer_cls.call_args.kwargs["use_tensorrt"] is True
     assert pipeline_cls.call_args.kwargs["secondary_restorer"] is None
     assert compiled.call_args.args[0].unet4x is False
@@ -81,8 +81,7 @@ def test_build_video_session_selects_unet_secondary() -> None:
 def test_video_session_close_closes_restorers() -> None:
     session, *_ = _build(replace(AppSettings(), secondary_restoration="unet-4x"))
 
-    with patch("torch.cuda.is_available", return_value=False):
-        session.close()
+    session.close()
 
     session.restoration_pipeline.restorer.close.assert_called_once_with()
     session.secondary_restorer.close.assert_called_once_with()
