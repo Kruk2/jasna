@@ -53,6 +53,12 @@ def test_gui_tooltip_lookup_uses_help_table_not_argparse(monkeypatch) -> None:
     assert set(descriptions) == set(GUI_TOOLTIP_KEY_BY_DEST.values())
     assert descriptions["fp16_mode"] == CLI_HELP["fp16"]
     assert descriptions["max_clip_size"] == "Maximum clip size for tracking"
+    assert descriptions["max_detection_gap"] == (
+        "Fill detection dropouts up to N frames when the mosaic reappears at the same spot. 0 disables"
+    )
+    assert descriptions["min_detection_duration"] == (
+        "Drop detections shorter than N frames as false positives. 0 disables"
+    )
 
 
 @pytest.mark.parametrize("lang", _FULL_LOCALES)
