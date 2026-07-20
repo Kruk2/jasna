@@ -356,6 +356,33 @@ class YuvToRgbConverter:
             stream,
         )
 
+    def convert_surface_into(
+        self,
+        y_ptr: int,
+        uv_ptr: int,
+        pitch: int,
+        out: torch.Tensor,
+        stream: int | None = None,
+    ) -> None:
+        """Convert one NV12/P010 device surface given raw plane pointers.
+
+        Both planes must share ``pitch`` (in bytes), as in a single contiguous
+        NVDEC surface with the chroma plane below the luma plane.
+        """
+        if self._cuda_kernel is None:
+            raise RuntimeError("CUDA surface conversion requires a CUDA converter")
+        bytes_per_sample = 2 if self.is_10bit else 1
+        if pitch % bytes_per_sample:
+            raise ValueError("YUV plane pitch is not aligned to its sample size")
+        if pitch < self.width * bytes_per_sample:
+            raise ValueError("YUV plane pitch is smaller than the visible width")
+        if out.shape != (3, self.height, self.width) or out.dtype != torch.uint8:
+            raise ValueError(f"Unexpected RGB destination: {tuple(out.shape)} {out.dtype}")
+        if not out.is_cuda or out.stride(2) != 1:
+            raise ValueError("RGB destination must be a CUDA tensor with contiguous pixels")
+        stride = pitch // bytes_per_sample
+        self._cuda_kernel.launch_ptr(y_ptr, stride, uv_ptr, stride, out, stream)
+
     def convert_frames_into(
         self, frames: list, out: torch.Tensor, stream: int | None = None
     ) -> None:

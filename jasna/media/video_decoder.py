@@ -23,6 +23,16 @@ log = logging.getLogger(__name__)
 CORRUPT_PACKET_TOLERANCE = 10
 _libcuda: ctypes.CDLL | None = None
 
+# Decode backend selection (benchmark toggle, flip in code for now):
+# - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
+#              software, when VALI cannot open or decode the first frame. AMD
+#              keeps its AMF -> software escalation.
+# - "vali":    VALI only; any failure raises (NVIDIA only).
+# - "pyav-hw": skip VALI, use the PyAV hwaccel path with its software fallback.
+# - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
+DECODE_BACKEND = "auto"
+_DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
+
 # PyAV's avcodec_find_decoder returns libdav1d for AV1, which carries no NVDEC
 # hwaccel config, so av.open silently decodes AV1 in software. Force the native
 # FFmpeg av1 decoder, which does carry the CUDA hwaccel config. Keyed by codec
@@ -56,6 +66,155 @@ def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.
     return handle.value, torch.cuda.ExternalStream(handle.value, device=device)
 
 
+class _ValiFrameSource:
+    """NVDEC decoding through python_vali, converted by the shared CUDA kernel.
+
+    Construction is the whole VALI viability check: it opens the decoder and
+    decodes the first frame, so any container/codec VALI cannot handle raises
+    here, before the caller commits to this backend. Corrupt packets after that
+    are skipped inside the VALI fork (up to its internal consecutive-packet
+    tolerance) and surface only as recovery messages; exceeding the tolerance
+    raises VideoDecodeError like the PyAV path.
+    """
+
+    def __init__(
+        self,
+        file: str,
+        batch_size: int,
+        device: torch.device,
+        metadata: VideoMetadata,
+        frame_stride: int,
+    ):
+        import python_vali as vali
+
+        if not hasattr(vali.PyDecoder, "DecodeSingleSurfaceAsyncDetailed"):
+            raise VideoDecodeError(
+                "python_vali build lacks DecodeSingleSurfaceAsyncDetailed; "
+                "the corruption-tolerant fork is required"
+            )
+        self._vali = vali
+        self.file = file
+        self.batch_size = batch_size
+        self.device = device
+        self.metadata = metadata
+        self.frame_stride = frame_stride
+        self.decoder = None
+        self.surface = None
+        self._raw_stream, self.stream = _create_blocking_cuda_stream(device)
+        try:
+            self.decoder = vali.PyDecoder(
+                file,
+                {},
+                gpu_id=device.index or 0,
+                stream=self.stream.cuda_stream,
+            )
+            if not self.decoder.IsAccelerated:
+                raise VideoDecodeError(f"VALI decoder for {file} is not hardware accelerated")
+            fmt = self.decoder.Format
+            if fmt == vali.PixelFormat.NV12:
+                self.is_10bit = False
+            elif fmt == vali.PixelFormat.P10:
+                self.is_10bit = True
+            else:
+                raise VideoDecodeError(
+                    f"VALI surface format {fmt.name} of {file} has no CUDA conversion"
+                )
+            self.width = self.decoder.Width
+            self.height = self.decoder.Height
+            self.surface = vali.Surface.Make(
+                format=fmt, width=self.width, height=self.height, gpu_id=device.index or 0
+            )
+            plane = self.surface.Planes[0]
+            self._pitch = plane.Pitch
+            self._y_ptr = plane.GpuMem
+            self._uv_ptr = plane.GpuMem + plane.Pitch * self.height
+            self._pkt_data = vali.PacketData()
+            self._first_pts = self._decode_next(None)
+        except BaseException:
+            self.close()
+            raise
+
+    def _decode_next(self, seek_ctx) -> int | None:
+        success, details = self.decoder.DecodeSingleSurfaceAsyncDetailed(
+            self.surface, self._pkt_data, seek_ctx
+        )
+        if success:
+            if details.message:
+                log.warning("Recovered video corruption in %s: %s", self.file, details.message)
+            return self._pkt_data.pts
+        if details.info == self._vali.TaskExecInfo.END_OF_STREAM:
+            return None
+        raise VideoDecodeError(
+            f"Failed to decode {self.file} ({details.info.name}): "
+            f"{details.message or details.info.name}"
+        )
+
+    def frames(self, seek_ts: float | None) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        converter = YuvToRgbConverter(
+            self.height,
+            self.width,
+            self.metadata.color_space,
+            self.metadata.color_range == AvColorRange.JPEG,
+            self.is_10bit,
+            self.device,
+        )
+        # VALI seeks in absolute stream seconds while the reader contract is
+        # seconds past the stream start, so shift by the start offset. VALI's
+        # own StartTime is unreliable (wrong scale), use the probed metadata.
+        seek_ctx = None
+        if seek_ts is not None:
+            start_seconds = float(
+                resolve_video_start_pts(None, self.metadata.start_pts) * self.metadata.time_base
+            )
+            seek_ctx = self._vali.SeekContext(seek_ts=seek_ts + start_seconds)
+        pending_pts = self._first_pts if seek_ctx is None else None
+        exhausted = seek_ctx is None and self._first_pts is None
+        self._first_pts = None
+        frame_index = 0
+        while not exhausted:
+            batch = torch.empty(
+                (self.batch_size, 3, self.height, self.width),
+                device=self.device,
+                dtype=torch.uint8,
+            )
+            pts: list[int] = []
+            while len(pts) < self.batch_size:
+                if pending_pts is not None:
+                    frame_pts = pending_pts
+                    pending_pts = None
+                else:
+                    frame_pts = self._decode_next(seek_ctx)
+                    seek_ctx = None
+                    if frame_pts is None:
+                        exhausted = True
+                        break
+                selected = frame_index % self.frame_stride == 0
+                frame_index += 1
+                if not selected:
+                    continue
+                converter.convert_surface_into(
+                    self._y_ptr,
+                    self._uv_ptr,
+                    self._pitch,
+                    batch[len(pts)],
+                    self.stream.cuda_stream,
+                )
+                pts.append(frame_pts)
+            if pts:
+                self.stream.synchronize()
+                yield batch[: len(pts)], pts
+
+    def close(self) -> None:
+        self.decoder = None
+        self.surface = None
+        if self._raw_stream is None:
+            return
+        raw_stream, self._raw_stream = self._raw_stream, None
+        result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(raw_stream))
+        if result != 0:
+            raise RuntimeError(f"cuStreamDestroy failed (CUDA error {result})")
+
+
 class NvidiaVideoReader:
     def __init__(
         self,
@@ -77,13 +236,47 @@ class NvidiaVideoReader:
         self.vendor = vendor_for_device(device)
         self._decoder_ctx = None
         self._amd_hardware_decode = False
+        self._vali_source: _ValiFrameSource | None = None
+        self._software_only = False
 
     def __enter__(self):
         self._decoder_ctx = None
         self._amd_hardware_decode = False
+        self._vali_source = None
         current_stream(self.device)
-        try:
+        backend = DECODE_BACKEND
+        if backend not in _DECODE_BACKENDS:
+            raise ValueError(f"Unknown DECODE_BACKEND {backend!r}, expected {_DECODE_BACKENDS}")
+        if backend in ("auto", "vali"):
             if self.vendor is AcceleratorVendor.NVIDIA:
+                try:
+                    self._vali_source = _ValiFrameSource(
+                        self.file,
+                        self.batch_size,
+                        self.device,
+                        self.metadata,
+                        self.frame_stride,
+                    )
+                except (ImportError, RuntimeError, ValueError, VideoDecodeError) as exc:
+                    if backend == "vali":
+                        raise VideoDecodeError(f"VALI cannot decode {self.file}: {exc}") from exc
+                    log.warning(
+                        "VALI cannot decode %s (codec %s): %s; falling back to PyAV",
+                        self.file,
+                        self.metadata.codec_name,
+                        exc,
+                    )
+                else:
+                    self.width = self._vali_source.width
+                    self.height = self._vali_source.height
+                    log.info("Using VALI NVDEC decoder for %s", self.file)
+                    return self
+            elif backend == "vali":
+                raise VideoDecodeError("The VALI decode backend requires an NVIDIA device")
+        software_only = backend == "pyav-sw"
+        self._software_only = software_only
+        try:
+            if not software_only and self.vendor is AcceleratorVendor.NVIDIA:
                 hwaccel = HWAccel(
                     "cuda",
                     device=str(self.device.index or 0),
@@ -102,7 +295,9 @@ class NvidiaVideoReader:
             raise VideoDecodeError(f"Failed to open {self.file}: {e}") from e
 
         ctx = self.video_stream.codec_context
-        if self.vendor is AcceleratorVendor.AMD:
+        if software_only:
+            ctx.thread_type = "AUTO"
+        elif self.vendor is AcceleratorVendor.AMD:
             self._setup_amf_decoder(ctx)
         elif not ctx.is_hwaccel:
             if self.vendor is AcceleratorVendor.NVIDIA:
@@ -215,6 +410,10 @@ class NvidiaVideoReader:
             )
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if self._vali_source is not None:
+            source, self._vali_source = self._vali_source, None
+            source.close()
+            return
         self.container.close()
         self._decoder_ctx = None
         if self._raw_stream is None:
@@ -292,6 +491,9 @@ class NvidiaVideoReader:
                 "frame_stride > 1 is not supported with seek_ts because frame selection "
                 "must stay anchored to the start of the file"
             )
+        if self._vali_source is not None:
+            yield from self._vali_source.frames(seek_ts)
+            return
         # The first decoded frame's format is the final backend decision: a codec
         # can advertise a CUDA config and still fall back to software when
         # hardware initialization rejects a profile or pixel format. Dispatch
@@ -307,7 +509,7 @@ class NvidiaVideoReader:
         ):
             backend = self._frames_hardware(decoded, group)
         else:
-            if vendor is AcceleratorVendor.NVIDIA:
+            if vendor is AcceleratorVendor.NVIDIA and not self._software_only:
                 log.warning(
                     "CUDA/NVDEC cannot decode %s (codec %s, %s); using FFmpeg "
                     "software decoding and uploading frames to CUDA",
