@@ -144,7 +144,8 @@ class NvidiaVideoReader:
             decoder.extradata = source_ctx.extradata
             decoder.width = source_ctx.width
             decoder.height = source_ctx.height
-            decoder.time_base = source_ctx.time_base
+            # PyAV 18 rejects assigning time_base on a decoder ("Cannot access
+            # 'time_base' as a decoder"); decoders take timing from packets.
             decoder.framerate = source_ctx.framerate
             decoder.sample_aspect_ratio = source_ctx.sample_aspect_ratio
             decoder.open(strict=False)

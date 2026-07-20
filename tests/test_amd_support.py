@@ -186,6 +186,96 @@ def test_amf_decoder_context_is_created(monkeypatch) -> None:
     assert reader._amd_hardware_decode is True
 
 
+def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
+    import jasna.media.video_decoder as module
+
+    class FakeDecoder:
+        def __init__(self):
+            object.__setattr__(self, "opened", False)
+
+        def __setattr__(self, name, value):
+            if name == "time_base":
+                raise RuntimeError("Cannot access 'time_base' as a decoder")
+            object.__setattr__(self, name, value)
+
+        def open(self, strict=False):
+            object.__setattr__(self, "opened", True)
+
+    decoder = FakeDecoder()
+    monkeypatch.setattr(
+        module.av,
+        "CodecContext",
+        SimpleNamespace(create=MagicMock(return_value=decoder)),
+    )
+    reader = module.NvidiaVideoReader(
+        "input.mp4",
+        4,
+        torch.device("cuda:0"),
+        _metadata(),
+    )
+    source = SimpleNamespace(
+        name="hevc",
+        extradata=b"header",
+        width=16,
+        height=16,
+        time_base=Fraction(1, 30),
+        framerate=Fraction(30, 1),
+        sample_aspect_ratio=Fraction(1, 1),
+        thread_type=None,
+    )
+    reader._setup_amf_decoder(source)
+    assert decoder.opened is True
+    assert reader._decoder_ctx is decoder
+    assert reader._amd_hardware_decode is True
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_yuv_eager_converter_runs_on_gpu_planes(monkeypatch) -> None:
+    import jasna.media.yuv_to_rgb as module
+
+    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
+    H = W = 16
+    generator = torch.Generator().manual_seed(0)
+    y = torch.randint(16, 236, (H, W), dtype=torch.uint8, generator=generator)
+    uv = torch.randint(16, 240, (H // 2, W // 2, 2), dtype=torch.uint8, generator=generator)
+
+    cpu = module.YuvToRgbConverter(
+        H, W, AvColorspace.ITU709, False, False, torch.device("cpu")
+    )
+    expected = torch.empty((3, H, W), dtype=torch.uint8)
+    cpu.convert_into(y, uv, expected)
+
+    gpu = module.YuvToRgbConverter(
+        H, W, AvColorspace.ITU709, False, False, torch.device("cuda:0")
+    )
+    out = torch.empty((3, H, W), dtype=torch.uint8, device="cuda:0")
+    gpu.convert_into(y.cuda(), uv.cuda(), out)
+
+    assert (out.cpu().int() - expected.int()).abs().max() <= 1
+
+
+def test_amf_8bit_downgrade_drops_bitdepth(monkeypatch, tmp_path) -> None:
+    import jasna.media.video_encoder as module
+
+    monkeypatch.setattr(
+        module,
+        "vendor_for_device",
+        lambda _device: AcceleratorVendor.AMD,
+    )
+    encoder = module.NvidiaVideoEncoder(
+        str(tmp_path / "out.mp4"),
+        torch.device("cuda:0"),
+        _metadata(),
+        codec="hevc",
+        encoder_settings={},
+        match_input_bit_depth=True,
+    )
+    assert encoder.spec.frame_format == "nv12"
+    assert encoder.encoder_options["profile"] == "main"
+    assert "bitdepth" not in encoder.encoder_options
+
+
+
 def test_rfdetr_torch_runner_maps_outputs(monkeypatch, tmp_path) -> None:
     import jasna.mosaic.rfdetr_torch_runner as module
 
