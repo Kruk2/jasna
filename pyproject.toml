@@ -38,6 +38,10 @@ nvidia = [
   "tensorrt==10.16.1.11",
   "torch-tensorrt==2.12.0",
   "nvidia-vfx",
+  # The VALI decode backend needs the corruption-tolerant fork (~/k-drive/vali,
+  # DecodeSingleSurfaceAsyncDetailed); with the stock PyPI wheel the reader
+  # falls back to PyAV at open time.
+  "python_vali==4.8.7",
 ]
 amd = [
   "torch==2.9.1",

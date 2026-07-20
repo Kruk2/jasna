@@ -82,6 +82,7 @@ def test_backend_dispatch_releases_outer_first_group_reference():
         format = SimpleNamespace(name="cuda")
 
     reader = NvidiaVideoReader.__new__(NvidiaVideoReader)
+    reader._vali_source = None
     reader._decoded_frames = lambda seek_ts: iter(())
     calls = 0
 

@@ -230,7 +230,7 @@ def test_software_selection_logged_once(ffv1_video, caplog):
         with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
             for _ in reader.frames():
                 pass
-    fallback_logs = [r for r in caplog.records if "software" in r.getMessage()]
+    fallback_logs = [r for r in caplog.records if "software decoding" in r.getMessage()]
     assert len(fallback_logs) == 1
 
 
