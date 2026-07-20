@@ -408,7 +408,10 @@ class YuvToRgbConverter:
         """
         if y.is_cuda:
             if self._cuda_kernel is None:
-                raise RuntimeError("CPU YUV converter cannot process CUDA planes")
+                # AMD/ROCm path: the coefficient tensors already live on the
+                # device, so the eager math runs there directly.
+                self._convert_eager(y, uv, out)
+                return
             expected = torch.uint16 if self.is_10bit else torch.uint8
             if y.dtype != expected or uv.dtype != expected:
                 raise TypeError(

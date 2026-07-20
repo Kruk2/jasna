@@ -341,6 +341,9 @@ class NvidiaVideoEncoder:
             options = dict(spec.default_options)
             if codec == "hevc":
                 options["profile"] = "main"
+            # AMF pins output depth via "bitdepth"; dropping it lets FFmpeg
+            # derive 8-bit from the nv12 input instead of conflicting with it.
+            options.pop("bitdepth", None)
             spec = EncoderSpec(
                 name=spec.name,
                 encoder_name=spec.encoder_name,
