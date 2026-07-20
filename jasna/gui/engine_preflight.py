@@ -57,28 +57,10 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     det_weights = _detection_weights_path(settings)
     if is_rfdetr_model(det_name):
         if amd:
-            from jasna.mosaic.migraphx_runner import (
-                migraphx_cache_dir,
-                migraphx_cache_is_ready,
-                migraphx_provider_available,
-            )
-
-            if migraphx_provider_available():
-                det_engine = migraphx_cache_dir(
-                    det_weights,
-                    device,
-                    fp16=bool(settings.fp16_mode),
-                )
-                det_exists = migraphx_cache_is_ready(
-                    det_weights,
-                    device,
-                    fp16=bool(settings.fp16_mode),
-                )
-            else:
-                # Standard ONNX Runtime on Windows executes RF-DETR on CPU and
-                # does not create a precompiled engine/cache artifact.
-                det_engine = None
-                det_exists = True
+            # AMD runs RF-DETR through the rfdetr torch model; no precompiled
+            # engine/cache artifact to check or build.
+            det_engine = None
+            det_exists = True
         else:
             config = rfdetr_model_config(det_name)
             det_engine = get_onnx_tensorrt_engine_path(

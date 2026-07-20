@@ -28,7 +28,6 @@ class AcceleratorCapabilities:
     vendor: AcceleratorVendor
     pytorch_device_type: str
     tensorrt: bool
-    migraphx: bool
     nvcodec: bool
     amf: bool
     xpu: bool
@@ -67,7 +66,6 @@ def capabilities_for_device(
         vendor=vendor,
         pytorch_device_type=device_type,
         tensorrt=vendor is AcceleratorVendor.NVIDIA,
-        migraphx=vendor is AcceleratorVendor.AMD,
         nvcodec=vendor is AcceleratorVendor.NVIDIA,
         amf=vendor is AcceleratorVendor.AMD,
         xpu=vendor is AcceleratorVendor.INTEL,

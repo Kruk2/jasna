@@ -42,8 +42,9 @@ nvidia = [
 amd = [
   "torch==2.9.1",
   "torchvision==0.24.1",
-  "onnxruntime-migraphx==1.23.2; sys_platform == 'linux'",
-  "onnxruntime==1.23.2; sys_platform == 'win32'",
+  # AMD runs RF-DETR through the rfdetr torch model (ROCm), not ONNX/MIGraphX,
+  # which sidesteps the Windows-only MIGraphX wheels (see issue #240).
+  "rfdetr==1.8.3",
   "numpy==1.26.4",
 ]
 dev = [

@@ -5,7 +5,6 @@ from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
@@ -41,7 +40,6 @@ def test_rocm_uses_cuda_device_api_but_reports_amd(monkeypatch) -> None:
     monkeypatch.setattr(torch.version, "hip", "7.2.1")
     assert vendor_for_device("cuda:0") is AcceleratorVendor.AMD
     capabilities = capabilities_for_device("cuda:0")
-    assert capabilities.migraphx is True
     assert capabilities.amf is True
     assert capabilities.tensorrt is False
     assert capabilities.nvcodec is False
@@ -188,223 +186,97 @@ def test_amf_decoder_context_is_created(monkeypatch) -> None:
     assert reader._amd_hardware_decode is True
 
 
-def test_migraphx_runner_provider_and_tensor_bridge(monkeypatch, tmp_path) -> None:
-    import jasna.mosaic.migraphx_runner as module
+def test_rfdetr_torch_runner_maps_outputs(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.rfdetr_torch_runner as module
 
-    model = tmp_path / "model.onnx"
-    model.write_bytes(b"onnx")
-    input_node = SimpleNamespace(
-        name="images",
-        shape=[1, 3, 4, 4],
-        type="tensor(float)",
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"pt")
+
+    class FakeCore:
+        def to(self, _device):
+            return self
+
+        def eval(self):
+            return self
+
+        def __call__(self, x):
+            batch = x.shape[0]
+            return {
+                "pred_boxes": torch.zeros(batch, 5, 4),
+                "pred_logits": torch.zeros(batch, 5, 3),
+                "pred_masks": torch.zeros(batch, 5, 8, 8),
+            }
+
+    class FakeModel:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.model = SimpleNamespace(model=FakeCore())
+
+    monkeypatch.setitem(sys.modules, "rfdetr", SimpleNamespace(RFDETRSegMedium=FakeModel))
+    monkeypatch.setattr(
+        module.torch,
+        "load",
+        lambda *_a, **_k: {"model": {"class_embed.weight": torch.zeros(3, 256)}},
     )
-    output_node = SimpleNamespace(
-        name="scores",
-        shape=[1, 2],
-        type="tensor(float)",
-    )
 
-    class FakeSession:
-        def __init__(self, *_args, providers, **_kwargs):
-            self.providers_arg = providers
-
-        def get_providers(self):
-            return ["MIGraphXExecutionProvider", "CPUExecutionProvider"]
-
-        def get_inputs(self):
-            return [input_node]
-
-        def get_outputs(self):
-            return [output_node]
-
-        def run(self, names, feeds):
-            assert names == ["scores"]
-            assert feeds["images"].shape == (1, 3, 4, 4)
-            return [np.array([[0.25, 0.75]], dtype=np.float32)]
-
-    fake_ort = SimpleNamespace(
-        get_available_providers=lambda: [
-            "MIGraphXExecutionProvider",
-            "CPUExecutionProvider",
-        ],
-        SessionOptions=lambda: SimpleNamespace(graph_optimization_level=None),
-        GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL=99),
-        InferenceSession=FakeSession,
-    )
-    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
-    monkeypatch.setattr(module, "_gpu_arch", lambda _device: "gfx-test")
-    monkeypatch.setattr(module, "device_name", lambda _device: "AMD test GPU")
-
-    runner = module.MigraphxRunner(
-        model,
-        input_shapes=[(1, 3, 4, 4)],
+    runner = module.RfDetrTorchRunner(
+        weights,
+        input_shapes=[(2, 3, 576, 576)],
         device=torch.device("cpu"),
-        fp16=True,
-    )
-    provider, options = runner.session.providers_arg[0]
-    assert provider == "MIGraphXExecutionProvider"
-    assert options["migraphx_fp16_enable"] == "1"
-    assert options["migraphx_model_cache_dir"] == str(runner.cache_dir)
-    result = runner.infer({"images": torch.ones(1, 3, 4, 4)})
-    assert torch.equal(result["scores"], torch.tensor([[0.25, 0.75]]))
-
-
-def test_migraphx_runner_accepts_dynamic_batch_shapes(
-    monkeypatch,
-    tmp_path,
-) -> None:
-    import jasna.mosaic.migraphx_runner as module
-
-    model = tmp_path / "model.onnx"
-    model.write_bytes(b"onnx")
-    input_node = SimpleNamespace(
-        name="images",
-        shape=["batch", 3, 4, 4],
-        type="tensor(float)",
-    )
-    output_node = SimpleNamespace(
-        name="scores",
-        shape=["batch", "queries"],
-        type="tensor(float)",
-    )
-    feed_shapes: list[tuple[int, ...]] = []
-
-    class FakeSession:
-        def __init__(self, *_args, providers, **_kwargs):
-            self.providers_arg = providers
-
-        def get_providers(self):
-            return ["MIGraphXExecutionProvider", "CPUExecutionProvider"]
-
-        def get_inputs(self):
-            return [input_node]
-
-        def get_outputs(self):
-            return [output_node]
-
-        def run(self, names, feeds):
-            feed_shapes.append(feeds["images"].shape)
-            return [
-                np.ones((feeds["images"].shape[0], 2), dtype=np.float32)
-            ]
-
-    fake_ort = SimpleNamespace(
-        get_available_providers=lambda: [
-            "MIGraphXExecutionProvider",
-            "CPUExecutionProvider",
-        ],
-        SessionOptions=lambda: SimpleNamespace(graph_optimization_level=None),
-        GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL=99),
-        InferenceSession=FakeSession,
-    )
-    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
-    monkeypatch.setattr(module, "_gpu_arch", lambda _device: "gfx-test")
-    monkeypatch.setattr(module, "device_name", lambda _device: "AMD test GPU")
-
-    runner = module.MigraphxRunner(
-        model,
-        input_shapes=[(4, 3, 4, 4)],
-        device=torch.device("cpu"),
-        fp16=True,
+        fp16=False,
+        resolution=576,
+        variant="medium",
     )
 
-    assert runner.outputs["scores"].shape == (4, -1)
-    assert runner.infer({"images": torch.ones(1, 3, 4, 4)})[
-        "scores"
-    ].shape == (1, 2)
-    assert runner.infer({"images": torch.ones(3, 3, 4, 4)})[
-        "scores"
-    ].shape == (3, 2)
-    assert feed_shapes == [(1, 3, 4, 4), (3, 3, 4, 4)]
+    assert runner.input_names == ["input"]
+    assert runner.input_dtypes == {"input": torch.float32}
+    assert runner.output_names == ["dets", "labels", "masks"]
+    assert runner.outputs["dets"].ndim == 3
+    assert runner.outputs["dets"].shape[-1] == 4
+    assert runner.outputs["labels"].ndim == 3
+    assert runner.outputs["masks"].ndim == 4
+    # num_classes derived from class_embed rows - 1 (rfdetr adds a reserve slot).
+    assert runner._wrapper.kwargs["num_classes"] == 2
+
+    out = runner.infer({"input": torch.zeros(2, 3, 576, 576)})
+    assert set(out) == {"dets", "labels", "masks"}
+    assert out["dets"].shape == (2, 5, 4)
+    assert out["labels"].shape == (2, 5, 3)
+    assert out["masks"].shape == (2, 5, 8, 8)
+
+    runner.close()
+    with pytest.raises(RuntimeError, match="closed"):
+        runner.infer({"input": torch.zeros(2, 3, 576, 576)})
 
 
-def test_migraphx_runner_falls_back_to_cpu_onnxruntime(monkeypatch, tmp_path) -> None:
-    import jasna.mosaic.migraphx_runner as module
+def test_rfdetr_torch_runner_rejects_unknown_variant(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.rfdetr_torch_runner as module
 
-    model = tmp_path / "model.onnx"
-    model.write_bytes(b"onnx")
-    input_node = SimpleNamespace(
-        name="images",
-        shape=[1, 3, 4, 4],
-        type="tensor(float)",
-    )
-    output_node = SimpleNamespace(
-        name="scores",
-        shape=[1, 2],
-        type="tensor(float)",
-    )
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"pt")
+    monkeypatch.setitem(sys.modules, "rfdetr", SimpleNamespace())
 
-    class FakeSession:
-        def __init__(self, *_args, providers, **_kwargs):
-            self.providers_arg = providers
-
-        def get_providers(self):
-            return ["CPUExecutionProvider"]
-
-        def get_inputs(self):
-            return [input_node]
-
-        def get_outputs(self):
-            return [output_node]
-
-        def run(self, names, feeds):
-            assert names == ["scores"]
-            assert feeds["images"].shape == (1, 3, 4, 4)
-            return [np.array([[0.4, 0.6]], dtype=np.float32)]
-
-    fake_ort = SimpleNamespace(
-        get_available_providers=lambda: ["CPUExecutionProvider"],
-        SessionOptions=lambda: SimpleNamespace(graph_optimization_level=None),
-        GraphOptimizationLevel=SimpleNamespace(ORT_ENABLE_ALL=99),
-        InferenceSession=FakeSession,
-    )
-    monkeypatch.setitem(sys.modules, "onnxruntime", fake_ort)
-    monkeypatch.setattr(module, "device_name", lambda _device: "AMD test GPU")
-
-    runner = module.MigraphxRunner(
-        model,
-        input_shapes=[(1, 3, 4, 4)],
-        device=torch.device("cpu"),
-        fp16=True,
-    )
-
-    assert runner.execution_provider == "CPUExecutionProvider"
-    assert runner.cache_dir is None
-    assert runner.session.providers_arg == ["CPUExecutionProvider"]
-    result = runner.infer({"images": torch.ones(1, 3, 4, 4)})
-    assert torch.equal(result["scores"], torch.tensor([[0.4, 0.6]]))
+    with pytest.raises(RuntimeError, match="unsupported variant"):
+        module.RfDetrTorchRunner(
+            weights,
+            input_shapes=[(1, 3, 576, 576)],
+            device=torch.device("cpu"),
+            fp16=False,
+            resolution=576,
+            variant="mystery",
+        )
 
 
-def test_cpu_onnxruntime_fallback_needs_no_detection_engine(monkeypatch) -> None:
+def test_amd_rfdetr_needs_no_detection_engine(monkeypatch) -> None:
     import jasna.accelerator as accelerator
     import jasna.engine_compiler as compiler
-    import jasna.mosaic.detection_registry as registry
-    import jasna.mosaic.migraphx_runner as migraphx
 
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
-    monkeypatch.setattr(registry, "is_rfdetr_model", lambda _name: True)
-    monkeypatch.setattr(migraphx, "migraphx_provider_available", lambda: False)
-    monkeypatch.setattr(
-        migraphx,
-        "migraphx_cache_is_ready",
-        MagicMock(side_effect=AssertionError("CPU fallback has no engine cache")),
-    )
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device=None: True)
 
     assert compiler._detection_engine_exists(
-        "rfdetr-v5",
-        "model.onnx",
+        "rfdetr-v6",
+        "rfdetr-v6.pt",
         batch_size=4,
         fp16=True,
         device="cpu",
     )
-
-
-def test_migraphx_model_digest_is_cached_for_unchanged_file(tmp_path) -> None:
-    import jasna.mosaic.migraphx_runner as module
-
-    model = tmp_path / "model.onnx"
-    model.write_bytes(b"onnx")
-    module._cached_model_digest.cache_clear()
-
-    assert module._model_digest(model) == module._model_digest(model)
-    assert module._cached_model_digest.cache_info().hits == 1

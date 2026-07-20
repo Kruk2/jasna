@@ -304,7 +304,7 @@ def test_build_detection_model_rfdetr() -> None:
         )
         mock_rf.assert_called_once()
         mock_yolo.assert_not_called()
-        assert mock_rf.call_args.kwargs["onnx_path"] == Path("rfdetr-v5.onnx")
+        assert mock_rf.call_args.kwargs["weights_path"] == Path("rfdetr-v5.onnx")
         assert mock_rf.call_args.kwargs["resolution"] == 768
         assert mock_rf.call_args.kwargs["batch_size"] == 4
         assert mock_rf.call_args.kwargs["dynamic_batch"] is False
@@ -348,3 +348,37 @@ def test_build_detection_model_unknown_raises() -> None:
             "nonsense", Path("x"),
             batch_size=1, device=torch.device("cpu"), score_threshold=0.25, fp16=False,
         )
+
+
+def test_rfdetr_weights_suffix_is_vendor_specific(monkeypatch) -> None:
+    import jasna.mosaic.detection_registry as registry
+
+    monkeypatch.setattr(registry, "is_amd_device", lambda: True)
+    assert registry.rfdetr_weights_suffix() == ".pt"
+    assert registry.detection_model_spec("rfdetr-v6").filename == "rfdetr-v6.pt"
+
+    monkeypatch.setattr(registry, "is_amd_device", lambda: False)
+    assert registry.rfdetr_weights_suffix() == ".onnx"
+    assert registry.detection_model_spec("rfdetr-v6").filename == "rfdetr-v6.onnx"
+
+
+def test_build_detection_model_passes_amd_torch_variant(monkeypatch) -> None:
+    with patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf:
+        build_detection_model(
+            "rfdetr-v6", Path("rfdetr-v6.pt"),
+            batch_size=1, device=torch.device("cpu"), score_threshold=0.35, fp16=True,
+        )
+        assert mock_rf.call_args.kwargs["torch_variant"] == "medium"
+
+
+def test_discover_lists_torch_rfdetr_weights_on_amd(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.detection_registry as registry
+
+    (tmp_path / "rfdetr-v6.pt").write_bytes(b"pt")
+    (tmp_path / "rfdetr-v6-large.onnx").write_bytes(b"onnx")
+
+    monkeypatch.setattr(registry, "is_amd_device", lambda: True)
+    assert registry.discover_available_detection_models(tmp_path) == ["rfdetr-v6"]
+
+    monkeypatch.setattr(registry, "is_amd_device", lambda: False)
+    assert registry.discover_available_detection_models(tmp_path) == ["rfdetr-v6-large"]

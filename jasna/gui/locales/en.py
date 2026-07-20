@@ -402,7 +402,7 @@ EN = {
 
         # Engine compilation / first run warnings
         "engine_first_run_title": "First run may be slow",
-        "engine_first_run_body": "GPU-specific model files need to be prepared. This is normal on the first run. NVIDIA TensorRT compilation can take 15-60 minutes; AMD MIGraphX setup is typically shorter.\n\nClose all other applications (browsers, games, etc.) and do not use the PC during preparation. The application may appear unresponsive — do not close it.\n\nModel artifacts are cached and reused on all future runs.",
+        "engine_first_run_body": "GPU-specific model files need to be prepared. This is normal on the first run. NVIDIA TensorRT compilation can take 15-60 minutes.\n\nClose all other applications (browsers, games, etc.) and do not use the PC during preparation. The application may appear unresponsive — do not close it.\n\nModel artifacts are cached and reused on all future runs.",
         "engine_first_run_missing": "Missing engines:",
         "engine_name_rfdetr": "RF-DETR (detection)",
         "engine_name_yolo": "YOLO (detection)",

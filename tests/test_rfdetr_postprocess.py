@@ -154,7 +154,7 @@ def _build_rfdetr_model():
         patch("jasna.mosaic.rfdetr.TrtRunner", return_value=mock_runner),
     ):
         model = RfDetrMosaicDetectionModel(
-            onnx_path=Path("model.onnx"),
+            weights_path=Path("model.onnx"),
             batch_size=2,
             device=torch.device("cpu"),
             resolution=768,
@@ -173,34 +173,51 @@ class TestRfDetrInit:
         assert model.logits_out == "pred_logits"
         assert model.masks_out == "pred_masks"
 
-    def test_amd_init_uses_migraphx_cache_dir(self, monkeypatch, tmp_path):
-        import jasna.mosaic.migraphx_runner as migraphx
+    def test_amd_init_uses_torch_runner(self, monkeypatch, tmp_path):
         import jasna.mosaic.rfdetr as module
+        import jasna.mosaic.rfdetr_torch_runner as torch_runner_module
 
-        cache_dir = tmp_path / "rfdetr.migraphx"
+        weights_path = tmp_path / "rfdetr-v6.pt"
         runner = MagicMock()
-        runner.cache_dir = cache_dir
-        runner.input_names = ["images"]
-        runner.input_dtypes = {"images": torch.float16}
-        runner.output_names = ["pred_boxes", "pred_logits", "pred_masks"]
+        runner.input_names = ["input"]
+        runner.input_dtypes = {"input": torch.float32}
+        runner.output_names = ["dets", "labels", "masks"]
         runner.outputs = {
-            "pred_boxes": MagicMock(ndim=3, shape=(1, 100, 4)),
-            "pred_logits": MagicMock(ndim=3, shape=(1, 100, 1)),
-            "pred_masks": MagicMock(ndim=4, shape=(1, 100, 8, 8)),
+            "dets": MagicMock(ndim=3, shape=(1, 100, 4)),
+            "labels": MagicMock(ndim=3, shape=(1, 100, 3)),
+            "masks": MagicMock(ndim=4, shape=(1, 100, 8, 8)),
         }
+        constructed = MagicMock(return_value=runner)
         monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
-        monkeypatch.setattr(migraphx, "MigraphxRunner", MagicMock(return_value=runner))
+        monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
+        monkeypatch.setattr(torch_runner_module, "RfDetrTorchRunner", constructed)
 
         model = RfDetrMosaicDetectionModel(
-            onnx_path=tmp_path / "model.onnx",
+            weights_path=weights_path,
             batch_size=1,
             device=torch.device("cpu"),
-            resolution=768,
-            dynamic_batch=False,
+            resolution=576,
+            dynamic_batch=True,
+            torch_variant="medium",
             fp16=True,
         )
 
-        assert model.engine_path == cache_dir
+        assert model.engine_path == weights_path
+        assert constructed.call_args.kwargs["variant"] == "medium"
+
+    def test_amd_init_requires_torch_variant(self, monkeypatch, tmp_path):
+        import jasna.mosaic.rfdetr as module
+
+        monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
+        with pytest.raises(RuntimeError, match="torch variant"):
+            RfDetrMosaicDetectionModel(
+                weights_path=tmp_path / "rfdetr-v6.pt",
+                batch_size=1,
+                device=torch.device("cpu"),
+                resolution=576,
+                dynamic_batch=True,
+                fp16=True,
+            )
 
 
 class TestRfDetrPreprocess:
@@ -297,25 +314,20 @@ class TestCompileRfdetrEngine:
             )
             assert result == Path("out.engine")
 
-    def test_amd_returns_migraphx_cache_dir_and_closes_runner(
-        self, monkeypatch, tmp_path
-    ):
-        import jasna.mosaic.migraphx_runner as migraphx
+    def test_amd_is_a_noop_returning_the_weights_path(self, monkeypatch, tmp_path):
         import jasna.mosaic.rfdetr as module
 
-        cache_dir = tmp_path / "rfdetr.migraphx"
-        runner = MagicMock(cache_dir=cache_dir)
+        weights = tmp_path / "rfdetr-v6.pt"
         monkeypatch.setattr(module, "is_amd_device", lambda _device: True)
-        monkeypatch.setattr(migraphx, "MigraphxRunner", MagicMock(return_value=runner))
 
         result = compile_rfdetr_engine(
-            tmp_path / "model.onnx",
+            weights,
             torch.device("cpu"),
             batch_size=4,
-            resolution=768,
-            dynamic_batch=False,
+            resolution=576,
+            dynamic_batch=True,
             fp16=True,
         )
 
-        assert result == cache_dir
-        runner.close.assert_called_once_with()
+        # AMD runs the checkpoint through the rfdetr torch model; nothing to build.
+        assert result == weights
