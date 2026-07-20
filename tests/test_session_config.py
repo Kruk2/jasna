@@ -53,6 +53,7 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.detection_score_threshold == 0.35
     assert config.max_detection_gap == 2
     assert config.min_detection_duration == 2
+    assert config.scene_detection is True
     assert config.restoration_model_path == _RESTORATION_PATH
     assert config.compile_basicvsrpp is True
     assert config.max_clip_size == 90
@@ -90,6 +91,7 @@ def test_cli_non_default_args_are_mapped() -> None:
             "--no-progress",
             "--working-directory", "/fast/scratch",
             "--retarget-high-fps",
+            "--no-scene-detection",
         ]
     )
 
@@ -103,6 +105,7 @@ def test_cli_non_default_args_are_mapped() -> None:
     assert config.disable_progress is True
     assert config.working_dir == Path("/fast/scratch")
     assert config.retarget_high_fps is True
+    assert config.scene_detection is False
 
 
 def test_gui_defaults_match_cli_defaults() -> None:
@@ -120,6 +123,7 @@ def test_gui_config_maps_settings_fields() -> None:
         secondary_restoration="tvai",
         tvai_scale=2,
         denoise_strength="low",
+        scene_detection=False,
     )
     config = _gui_config(settings)
 
@@ -129,4 +133,5 @@ def test_gui_config_maps_settings_fields() -> None:
     assert config.secondary_restoration == "tvai"
     assert config.tvai_scale == 2
     assert config.denoise_strength == "low"
+    assert config.scene_detection is False
     assert config.disable_progress is True

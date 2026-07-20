@@ -30,6 +30,7 @@ class SessionConfig:
     detection_score_threshold: float
     max_detection_gap: int
     min_detection_duration: int
+    scene_detection: bool
     restoration_model_path: Path
     compile_basicvsrpp: bool
     max_clip_size: int

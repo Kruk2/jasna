@@ -12,6 +12,7 @@ from jasna.mosaic.detections import Detections
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta
 from jasna.pipeline_overlap import compute_crossfade_weights, compute_keep_range, compute_overlap_and_tail_indices, compute_parent_crossfade_weights
 from jasna.tracking.clip_tracker import ClipTracker, EndedClip
+from jasna.tracking.scene_detector import SceneCutDetector
 
 logger = logging.getLogger(__name__)
 
@@ -132,12 +133,14 @@ def process_frame_batch(
     blend_frames: int = 0,
     crop_eye_width: int | None = None,
     min_detection_duration: int = 0,
+    scene_detector: SceneCutDetector | None = None,
 ) -> BatchProcessResult:
     effective_bs = len(pts_list)
     if effective_bs == 0:
         return BatchProcessResult(next_frame_idx=int(start_frame_idx), clips_emitted=0)
 
     frames_eff = frames[:effective_bs]
+    scene_cuts = scene_detector.find_cuts(frames_eff) if scene_detector is not None else frozenset()
     detections: Detections = detections_fn(frames_eff, target_hw=target_hw)
     _, frame_h, frame_w = frames_eff[0].shape
 
@@ -150,7 +153,9 @@ def process_frame_batch(
         valid_boxes = detections.boxes_xyxy[i]
         valid_masks = detections.masks[i]
 
+        scene_cut_clips = tracker.flush() if i in scene_cuts else []
         ended_clips, active_track_ids = tracker.update(current_frame_idx, valid_boxes, valid_masks)
+        ended_clips = scene_cut_clips + ended_clips
 
         blend_buffer.register_frame(current_frame_idx, active_track_ids)
         metadata_queue.put(FrameMeta(frame_idx=current_frame_idx, pts=pts))

@@ -42,6 +42,7 @@ def _session_config_from_args(
         detection_score_threshold=float(threshold),
         max_detection_gap=int(args.max_detection_gap),
         min_detection_duration=int(args.min_detection_duration),
+        scene_detection=bool(args.scene_detection),
         restoration_model_path=restoration_model_path,
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
@@ -337,6 +338,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help=CLI_HELP["min_detection_duration"],
+    )
+    detection.add_argument(
+        "--scene-detection",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help=CLI_HELP["scene_detection"],
     )
 
     projection = parser.add_argument_group("VR projection")

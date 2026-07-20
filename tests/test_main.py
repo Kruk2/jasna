@@ -449,6 +449,14 @@ class TestArgForwarding:
         pipe, _ = self._capture_run(tmp_path, ["--retarget-high-fps"])
         assert pipe["retarget_high_fps"] is True
 
+    def test_scene_detection_on_by_default(self, tmp_path):
+        pipe, _ = self._capture_run(tmp_path, [])
+        assert pipe["scene_detection"] is True
+
+    def test_no_scene_detection_forwarded(self, tmp_path):
+        pipe, _ = self._capture_run(tmp_path, ["--no-scene-detection"])
+        assert pipe["scene_detection"] is False
+
 
 # ---------------------------------------------------------------------------
 # Folder batch

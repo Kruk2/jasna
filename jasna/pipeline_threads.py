@@ -19,6 +19,7 @@ from jasna.pipeline_timing import LoopTimer
 from jasna.progressbar import Progressbar
 from jasna.restorer import RestorationPipeline
 from jasna.tracking import ClipTracker
+from jasna.tracking.scene_detector import SceneCutDetector
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ def decode_detect_loop(
     max_detection_gap: int,
     min_detection_duration: int,
     enable_crossfade: bool,
+    scene_detection: bool,
     blend_buffer: BlendBuffer,
     crop_buffers: dict[int, CropBuffer],
     clip_queue: FrameQueue,
@@ -67,6 +69,7 @@ def decode_detect_loop(
             temporal_overlap=temporal_overlap,
             max_detection_gap=max_detection_gap,
         )
+        scene_detector = SceneCutDetector() if scene_detection else None
         discard_margin = temporal_overlap
         blend_frames = (temporal_overlap // 3) if enable_crossfade else 0
 
@@ -112,6 +115,8 @@ def decode_detect_loop(
                     blend_frames=blend_frames,
                     min_detection_duration=min_detection_duration,
                 )
+                if scene_detector is not None:
+                    scene_detector.reset()
                 effect_active = False
             log.info(
                 "Processing %s: %d frames @ %s fps, %dx%d",
@@ -183,6 +188,7 @@ def decode_detect_loop(
                                     blend_frames=blend_frames,
                                     crop_eye_width=crop_eye_width,
                                     min_detection_duration=min_detection_duration,
+                                    scene_detector=scene_detector,
                                 )
                                 frame_idx = res.next_frame_idx
                             else:

@@ -146,6 +146,7 @@ class AppSettings:
     detection_score_threshold: float = 0.35
     max_detection_gap: int = 2
     min_detection_duration: int = 2
+    scene_detection: bool = True
     compile_basicvsrpp: bool = True
     
     # Image restoration (SD 1.5 inpaint; used only for still-image inputs)

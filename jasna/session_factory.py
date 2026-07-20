@@ -158,6 +158,7 @@ def build_pipeline(
         max_detection_gap=int(config.max_detection_gap),
         min_detection_duration=int(config.min_detection_duration),
         enable_crossfade=bool(config.enable_crossfade),
+        scene_detection=bool(config.scene_detection),
         vr_mode=config.vr_mode,
         fp16=bool(config.fp16),
         disable_progress=bool(config.disable_progress),

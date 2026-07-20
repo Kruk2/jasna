@@ -89,6 +89,7 @@ class Pipeline:
         max_detection_gap: int,
         min_detection_duration: int,
         enable_crossfade: bool = True,
+        scene_detection: bool = True,
         vr_mode: str = "auto",
         fp16: bool,
         disable_progress: bool = False,
@@ -111,6 +112,7 @@ class Pipeline:
         self.max_detection_gap = int(max_detection_gap)
         self.min_detection_duration = int(min_detection_duration)
         self.enable_crossfade = bool(enable_crossfade)
+        self.scene_detection = bool(scene_detection)
         self.vr_mode = str(vr_mode)
 
         self.detection_model = build_detection_model(
@@ -405,6 +407,7 @@ class Pipeline:
                     max_detection_gap=self.max_detection_gap,
                     min_detection_duration=self.min_detection_duration,
                     enable_crossfade=self.enable_crossfade,
+                    scene_detection=self.scene_detection,
                     blend_buffer=blend_buffer,
                     crop_buffers=crop_buffers,
                     clip_queue=clip_queue,
