@@ -155,32 +155,7 @@ def test_preflight_uses_yolo_engine_name_when_selected(monkeypatch, tmp_path: Pa
     assert yolo_req.paths == (Path("model_weights") / f"lada_mosaic_detection_model_v4_fast{suffix}",)
 
 
-def test_amd_preflight_checks_only_migraphx_cache(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.chdir(tmp_path)
-    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
-
-    import jasna.gui.engine_preflight as module
-    import jasna.accelerator as accelerator
-    import jasna.mosaic.migraphx_runner as migraphx
-
-    cache = tmp_path / "model_weights" / "rfdetr-v5.migraphx" / "test"
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
-    monkeypatch.setattr(migraphx, "migraphx_provider_available", lambda: True)
-    monkeypatch.setattr(migraphx, "migraphx_cache_dir", lambda *_args, **_kwargs: cache)
-    monkeypatch.setattr(
-        migraphx,
-        "migraphx_cache_is_ready",
-        lambda *_args, **_kwargs: False,
-    )
-
-    settings = AppSettings(compile_basicvsrpp=True)
-    result = run_engine_preflight(settings)
-
-    assert [requirement.key for requirement in result.requirements] == ["rfdetr"]
-    assert result.missing[0].paths == (cache,)
-
-
-def test_amd_preflight_needs_no_cache_for_cpu_onnxruntime(
+def test_amd_preflight_has_no_engine_requirements(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -188,10 +163,10 @@ def test_amd_preflight_needs_no_cache_for_cpu_onnxruntime(
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
 
     import jasna.accelerator as accelerator
-    import jasna.mosaic.migraphx_runner as migraphx
 
+    # AMD runs RF-DETR (rfdetr torch model) and YOLO through PyTorch and skips
+    # BasicVSR++ TensorRT, so nothing needs precompiling.
     monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
-    monkeypatch.setattr(migraphx, "migraphx_provider_available", lambda: False)
 
     result = run_engine_preflight(AppSettings(compile_basicvsrpp=True))
 

@@ -22,7 +22,7 @@ def TrtRunner(*args, **kwargs):
 
 
 def compile_rfdetr_engine(
-    onnx_path: Path,
+    weights_path: Path,
     device: torch.device,
     *,
     batch_size: int,
@@ -31,17 +31,9 @@ def compile_rfdetr_engine(
     fp16: bool,
 ) -> Path:
     if is_amd_device(device):
-        from jasna.mosaic.migraphx_runner import MigraphxRunner
-
-        runner = MigraphxRunner(
-            onnx_path,
-            input_shapes=[(int(batch_size), 3, int(resolution), int(resolution))],
-            device=device,
-            fp16=bool(fp16),
-        )
-        cache_path = runner.cache_dir or onnx_path
-        runner.close()
-        return cache_path
+        # AMD runs the trained checkpoint through the rfdetr torch model
+        # (RfDetrTorchRunner); there is no ahead-of-time engine to build.
+        return weights_path
     if not is_nvidia_device(device):
         raise RuntimeError(
             f"RF-DETR is not supported on device backend {device.type!r}"
@@ -49,7 +41,7 @@ def compile_rfdetr_engine(
 
     from jasna.trt import compile_onnx_to_tensorrt_engine
     return compile_onnx_to_tensorrt_engine(
-        onnx_path,
+        weights_path,
         device,
         batch_size=int(batch_size),
         fp16=bool(fp16),
@@ -65,16 +57,17 @@ class RfDetrMosaicDetectionModel:
     def __init__(
         self,
         *,
-        onnx_path: Path,
+        weights_path: Path,
         batch_size: int,
         device: torch.device,
         resolution: int,
         dynamic_batch: bool,
+        torch_variant: str | None = None,
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         max_select: int = DEFAULT_MAX_SELECT,
         fp16: bool = True,
     ) -> None:
-        self.onnx_path = onnx_path
+        self.weights_path = weights_path
         self.batch_size = int(batch_size)
         self.device = device
         self.resolution = int(resolution)
@@ -85,20 +78,26 @@ class RfDetrMosaicDetectionModel:
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
 
         if is_amd_device(self.device):
-            from jasna.mosaic.migraphx_runner import MigraphxRunner
+            if torch_variant is None:
+                raise RuntimeError(
+                    f"RF-DETR on AMD requires a torch variant for {weights_path.name}"
+                )
+            from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner
 
-            self.runner = MigraphxRunner(
-                self.onnx_path,
+            self.runner = RfDetrTorchRunner(
+                self.weights_path,
                 input_shapes=[
                     (self.batch_size, 3, self.resolution, self.resolution)
                 ],
                 device=self.device,
                 fp16=bool(fp16),
+                resolution=self.resolution,
+                variant=torch_variant,
             )
-            self.engine_path = self.runner.cache_dir or self.onnx_path
+            self.engine_path = self.weights_path
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(
-                self.onnx_path, batch_size=self.batch_size, fp16=bool(fp16),
+                self.weights_path, batch_size=self.batch_size, fp16=bool(fp16),
                 dynamic_batch=self.dynamic_batch,
             )
             if not self.engine_path.exists():

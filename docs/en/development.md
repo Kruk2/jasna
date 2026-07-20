@@ -31,13 +31,40 @@ Install runtime dependencies for the active vendor:
 # NVIDIA (CUDA 13 wheels)
 uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu130
 
-# AMD Linux (inside a ROCm 7.2 environment)
+# AMD Linux (inside a ROCm 7.2 environment; torch/torchvision+rocm come from the
+# rocm/pytorch base image, the find-links only backfills any missing rocm wheel)
 uv pip install ".[amd]" \
   --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
+```
 
-# AMD Windows
+**AMD Windows** (ROCm 7.2.1 — Python 3.12, Adrenalin ≥ 26.2.2). Install the ROCm
+SDK + torch/torchvision ROCm wheels FIRST, with `--no-deps` so pip cannot silently
+replace them with the CPU `torch==2.9.1` from PyPI when a later dependency
+(torchvision, rfdetr, …) pulls torch — that swap is the usual cause of a
+"non-ROCm torch/torchvision" env:
+
+```powershell
+$R = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
+pip install --no-deps `
+  "$R/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl" `
+  "$R/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl" `
+  "$R/torch-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl" `
+  "$R/torchvision-0.24.1+rocm7.2.1-cp312-cp312-win_amd64.whl"
+# then the remaining AMD deps (torch/torchvision above already satisfy the pins)
 uv pip install ".[amd]"
 ```
+
+Verify ROCm actually stuck on either OS (the Linux Docker build asserts the same):
+
+```bash
+python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK', torch.__version__, torchvision.__version__)"
+```
+
+`jasna[amd]` pins `torch==2.9.1` / `torchvision==0.24.1` as plain versions on purpose:
+the ROCm wheels (`2.9.1+rocm7.2.1`, `0.24.1+rocm7.2.1`) satisfy them, and a single
+`+rocm7.2.1` *local-version* pin can't be shared across OSes (the Linux manylinux
+channel ships torchvision `0.24.0`, Windows ships `0.24.1`). The ROCm-build
+assertion above is the fail-loud guard instead.
 
 For Nvidia library builds, you also need:
 
@@ -74,13 +101,15 @@ jasna/protection/keytool/validate_amd_ssh.sh user@amd-host
 python jasna/protection/keytool/build_windows_amd.py
 ```
 
-The AMD build uses PyTorch/ROCm for BasicVSR++ and YOLO, ONNX Runtime for RF-DETR,
-and AMF for H.264/HEVC/AV1 decode and encode. RF-DETR uses MIGraphX on Linux and
-falls back to ONNX Runtime CPU inference on Windows. Decode falls back to FFmpeg
-software decoding when AMF cannot handle the source. Secondary restoration and
-segment smart rendering remain NVIDIA-only.
+The AMD build uses PyTorch/ROCm for BasicVSR++, YOLO and RF-DETR, and AMF for
+H.264/HEVC/AV1 decode and encode. RF-DETR runs the trained checkpoint through the
+`rfdetr` torch model (bundled as `rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
+per-model engine precompile step. NVIDIA builds keep the ONNX → TensorRT path
+(`rfdetr-v6.onnx`). Decode falls back to FFmpeg software decoding when AMF cannot
+handle the source. Secondary restoration and segment smart rendering remain
+NVIDIA-only.
 
-`--device cuda:N` selects the PyTorch GPU and, on Linux, the MIGraphX GPU.
+`--device cuda:N` selects the PyTorch GPU (ROCm reuses the CUDA device API).
 FFmpeg 8's Linux AMF device context currently ignores its adapter
 argument, so AMF decode/encode can use the default Vulkan adapter on a multi-GPU
 AMD host. Isolate the target GPU at the container/host level when deterministic
