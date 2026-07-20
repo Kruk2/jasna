@@ -29,6 +29,17 @@ frame), and a single-frame false detection triggers a needless restore.
 Keep both small so genuine fast appear/disappear moments are unaffected.
 `0` disables either.
 
+## Scene cut detection
+
+Without it, a mosaic tracked across a hard scene cut can end up in one clip
+spanning two different shots, and the restorer blends content across the
+cut. **Scene Cut Detection** (`--scene-detection`, default on) detects hard
+cuts and ends every tracked clip at the boundary, so each clip stays within
+a single shot. It runs on the GPU with negligible cost.
+
+Disable with `--no-scene-detection` (or the switch in the GUI's Advanced
+section) only if you see clips being split where there is no real cut.
+
 ## 60 FPS to 30 FPS export
 
 For 60 (or 59.94) FPS input, **Reduce 60 FPS to 30 FPS**

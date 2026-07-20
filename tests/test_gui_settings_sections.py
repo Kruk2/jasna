@@ -70,6 +70,7 @@ def _fake_section_widgets() -> dict:
         "temporal_overlap": _FakeWidget(8),
         "max_detection_gap": _FakeWidget(2),
         "min_detection_duration": _FakeWidget(2),
+        "scene_detection": _FakeWidget(0),
         "enable_crossfade": _FakeWidget(0),
         "vr_mode": _FakeValueMenu({"auto": "自動", "off": "オフ"}, "off"),
         "denoise_strength": _FakeValueMenu({"none": "なし", "high": "高"}, "high"),
@@ -130,6 +131,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["image_restore_seed"] == 0
     assert values["lut_path"] == "/luts/a.cube"
     assert values["enable_crossfade"] is False
+    assert values["scene_detection"] is False
     assert values["retarget_high_fps"] is True
 
 

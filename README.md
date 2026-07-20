@@ -30,6 +30,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - Detects mosaics with the fast `rfdetr-v6` model by default; the larger RF-DETR variant and Lada and ZeLeFans YOLO models are also available.
 - Processes side-by-side VR180 videos per eye, with optional fisheye reprojection for detection and restoration.
 - Reduces clip-boundary flicker with temporal overlap and crossfade.
+- Detects hard scene cuts and ends tracked clips at the boundary, so restoration never blends content across a cut.
 - Can further improve quality with optional [secondary restoration models](docs/en/models.md#secondary-restoration) — **unet-4x**, **RTX Super Resolution**, or **Topaz Video AI** — which sharpen restored regions, especially large mosaics, close-ups, and 4K video.
 - Can stream restored video to the built-in browser player or a supported Stash fork.
 

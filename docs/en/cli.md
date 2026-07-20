@@ -51,6 +51,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | `--detection-score-threshold` | auto | Defaults to the model's recommended value (`rfdetr-v6`: 0.35, `rfdetr-v6-large`: 0.40). Lower it when mosaics are missed; raise it when normal areas get falsely detected. |
 | `--max-detection-gap` | `2` | Fill detection dropouts up to N frames when the mosaic reappears at the same spot. `0` disables. |
 | `--min-detection-duration` | `2` | Drop detections shorter than N frames as false positives; those frames stay unrestored. `0` disables. |
+| `--scene-detection` | on | Detect hard scene cuts and end all tracked mosaic clips at the cut, so no clip spans two shots. Disable with `--no-scene-detection`. |
 
 ## Secondary restoration
 

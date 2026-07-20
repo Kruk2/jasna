@@ -835,3 +835,80 @@ def test_split_and_continuation_clips_not_dropped_by_min_duration() -> None:
     assert items[0].clip.frame_count == 4
     assert items[1].clip.is_continuation is True
     assert items[1].clip.frame_count == 2
+
+
+class _StubSceneDetector:
+    def __init__(self, cuts: set[int]):
+        self._cuts = set(cuts)
+
+    def find_cuts(self, frames_uint8_bchw: torch.Tensor) -> set[int]:
+        return self._cuts
+
+
+def test_scene_cut_flushes_tracker_and_splits_clip() -> None:
+    tracker = ClipTracker(max_clip_size=60, temporal_overlap=0, iou_threshold=0.0)
+    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    crop_buffers: dict[int, CropBuffer] = {}
+    clip_queue = FrameQueue(max_frames=9999)
+    metadata_queue: Queue[FrameMeta | object] = Queue()
+    frames = torch.zeros((8, 3, 8, 8), dtype=torch.uint8)
+
+    def detections_fn(frames_eff, target_hw):
+        return _make_single_det_batch(effective_bs=len(frames_eff), batch_size=len(frames_eff))
+
+    res = process_frame_batch(
+        frames=frames, pts_list=list(range(8)), start_frame_idx=0,
+        target_hw=(8, 8), detections_fn=detections_fn,
+        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
+        clip_queue=clip_queue, metadata_queue=metadata_queue,
+        discard_margin=0, scene_detector=_StubSceneDetector({4}),
+    )
+
+    assert res.clips_emitted == 1
+    first = clip_queue.get(timeout=0)
+    assert first.clip.start_frame == 0
+    assert first.clip.frame_count == 4
+    assert len(first.raw_crops) == 4
+
+    finalize_processing(
+        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
+        clip_queue=clip_queue, frame_shape=(8, 8), discard_margin=0,
+    )
+    second = clip_queue.get(timeout=0)
+    assert second.clip.start_frame == 4
+    assert second.clip.frame_count == 4
+    assert second.clip.track_id != first.clip.track_id
+    assert second.clip.is_continuation is False
+
+
+def test_scene_cut_ends_coasting_track_and_trims_synthetic_tail() -> None:
+    tracker = ClipTracker(
+        max_clip_size=60, temporal_overlap=0, iou_threshold=0.0, max_detection_gap=5,
+    )
+    blend_buffer = BlendBuffer(device=torch.device("cpu"))
+    crop_buffers: dict[int, CropBuffer] = {}
+    clip_queue = FrameQueue(max_frames=9999)
+    metadata_queue: Queue[FrameMeta | object] = Queue()
+    frames = torch.zeros((8, 3, 8, 8), dtype=torch.uint8)
+    detected = [True, True, True, False, False, False, False, False]
+
+    def detections_fn(frames_eff, target_hw):
+        dets = _make_single_det_batch(effective_bs=len(frames_eff), batch_size=len(frames_eff))
+        empty = _make_empty_det_batch(batch_size=1)
+        boxes = [b if detected[i] else empty.boxes_xyxy[0] for i, b in enumerate(dets.boxes_xyxy)]
+        masks = [m if detected[i] else empty.masks[0] for i, m in enumerate(dets.masks)]
+        return Detections(boxes_xyxy=boxes, masks=masks)
+
+    res = process_frame_batch(
+        frames=frames, pts_list=list(range(8)), start_frame_idx=0,
+        target_hw=(8, 8), detections_fn=detections_fn,
+        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
+        clip_queue=clip_queue, metadata_queue=metadata_queue,
+        discard_margin=0, scene_detector=_StubSceneDetector({5}),
+    )
+
+    assert res.clips_emitted == 1
+    ended = clip_queue.get(timeout=0)
+    assert ended.clip.frame_count == 3
+    assert len(ended.raw_crops) == 3
+    assert not tracker.active_clips

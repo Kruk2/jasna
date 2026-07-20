@@ -51,6 +51,7 @@ jasna --input input_folder --output output_folder
 | `--detection-score-threshold` | 自动 | 默认使用所选模型的推荐值（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）。漏检马赛克时调低；正常区域被误检时调高。 |
 | `--max-detection-gap` | `2` | 当马赛克在相同位置重新出现时，填补最多 N 帧的检测中断。`0` 表示禁用。 |
 | `--min-detection-duration` | `2` | 丢弃持续少于 N 帧的检测（视为误检，相应帧保持原样）。`0` 表示禁用。 |
+| `--scene-detection` | 开 | 检测硬切镜头并在切换点结束所有跟踪中的马赛克片段，使片段不会跨越两个镜头。使用 `--no-scene-detection` 关闭。 |
 
 ## 二级修复
 

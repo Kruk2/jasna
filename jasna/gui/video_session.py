@@ -66,6 +66,7 @@ def video_session_config(
         detection_score_threshold=float(settings.detection_score_threshold),
         max_detection_gap=int(settings.max_detection_gap),
         min_detection_duration=int(settings.min_detection_duration),
+        scene_detection=bool(settings.scene_detection),
         restoration_model_path=model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth",
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),

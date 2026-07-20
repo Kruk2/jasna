@@ -96,6 +96,25 @@ class AdvancedSection:
         self._widgets["min_detection_duration"].pack(side="right", padx=(0, 8))
         self._widgets["min_detection_duration"].set(2)
 
+        # Scene cut detection toggle
+        scene_row = ctk.CTkFrame(inner, fg_color="transparent")
+        scene_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        scene_frame = ctk.CTkFrame(scene_row, fg_color=Colors.BG_CARD, corner_radius=6)
+        scene_frame.pack(fill="x")
+        scene_label = ctk.CTkLabel(scene_frame, text=t("scene_detection"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        scene_label.pack(side="left", padx=12, pady=8)
+        scene_tip = ctk.CTkLabel(scene_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        scene_tip.pack(side="left")
+        Tooltip(scene_tip, get_tooltip("scene_detection"))
+        self._widgets["scene_detection"] = create_compact_switch(
+            scene_frame,
+            self._on_modified,
+            Colors.BG_CARD,
+        )
+        self._widgets["scene_detection"].pack(side="right", padx=12, pady=8)
+        self._widgets["scene_detection"].select()
+
         # Crossfade toggle
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
         row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
@@ -217,6 +236,11 @@ class AdvancedSection:
         self._widgets["min_detection_duration"].set(preset.min_detection_duration)
         self._widgets["min_detection_duration_val"].configure(text=str(preset.min_detection_duration))
 
+        if preset.scene_detection:
+            self._widgets["scene_detection"].select()
+        else:
+            self._widgets["scene_detection"].deselect()
+
         if preset.enable_crossfade:
             self._widgets["enable_crossfade"].select()
         else:
@@ -231,6 +255,7 @@ class AdvancedSection:
             "temporal_overlap": int(self._widgets["temporal_overlap"].get()),
             "max_detection_gap": int(self._widgets["max_detection_gap"].get()),
             "min_detection_duration": int(self._widgets["min_detection_duration"].get()),
+            "scene_detection": self._widgets["scene_detection"].get() == 1,
             "enable_crossfade": self._widgets["enable_crossfade"].get() == 1,
             "vr_mode": self._widgets["vr_mode"].get_value(),
             "denoise_strength": self._widgets["denoise_strength"].get_value(),

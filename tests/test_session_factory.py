@@ -20,6 +20,7 @@ def _config(**overrides) -> SessionConfig:
         detection_score_threshold=0.25,
         max_detection_gap=2,
         min_detection_duration=2,
+        scene_detection=True,
         restoration_model_path=Path("restore.pth"),
         compile_basicvsrpp=True,
         max_clip_size=90,
@@ -204,6 +205,7 @@ def test_build_pipeline_passes_through_config_and_session() -> None:
     assert kwargs["max_detection_gap"] == 2
     assert kwargs["min_detection_duration"] == 2
     assert kwargs["enable_crossfade"] is True
+    assert kwargs["scene_detection"] is True
     assert kwargs["vr_mode"] == "auto"
     assert kwargs["fp16"] is True
     assert kwargs["disable_progress"] is True
