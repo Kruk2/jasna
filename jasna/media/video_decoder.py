@@ -59,6 +59,9 @@ def _cuda_driver() -> ctypes.CDLL:
 
 
 def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.ExternalStream]:
+    # cuStreamCreate needs a current CUDA context; threads other than the one
+    # torch initialized on have none until torch binds them to the device.
+    torch.cuda.set_device(device)
     handle = ctypes.c_void_p()
     result = _cuda_driver().cuStreamCreate(ctypes.byref(handle), 0)
     if result != 0 or handle.value is None:
