@@ -498,11 +498,9 @@ class NvidiaVideoReader:
         self,
         seek_ts: float | None = None,
     ) -> Iterator[tuple[torch.Tensor, list[int]]]:
-        if seek_ts is not None and self.frame_stride != 1:
-            raise ValueError(
-                "frame_stride > 1 is not supported with seek_ts because frame selection "
-                "must stay anchored to the start of the file"
-            )
+        # With seek_ts, strided selection re-anchors at the first decoded frame
+        # after the seek instead of the start of the file: sample phase is only
+        # stable relative to the seek target.
         if self._vali_source is not None:
             yield from self._vali_source.frames(seek_ts)
             return

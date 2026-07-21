@@ -82,7 +82,7 @@ def test_reader_rejects_invalid_frame_stride():
         )
 
 
-def test_reader_rejects_seek_with_strided_selection():
+def test_strided_selection_reanchors_at_the_first_frame_after_seek():
     reader = NvidiaVideoReader(
         "unused.mp4",
         batch_size=4,
@@ -90,6 +90,8 @@ def test_reader_rejects_seek_with_strided_selection():
         metadata=SimpleNamespace(),
         frame_stride=2,
     )
+    frames = [SimpleNamespace(pts=pts) for pts in range(31, 38)]
 
-    with pytest.raises(ValueError, match="anchored to the start of the file"):
-        next(reader.frames(seek_ts=1.0))
+    selected = list(reader._selected_frames(iter(frames)))
+
+    assert [frame.pts for frame in selected] == [31, 33, 35, 37]

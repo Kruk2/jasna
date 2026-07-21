@@ -306,3 +306,11 @@ def test_start_pts_uses_metadata_for_vali_and_stream_for_pyav() -> None:
     reader._vali_source = None
     reader.video_stream = SimpleNamespace(start_time=2000)
     assert reader.start_pts == 2000
+
+
+def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
+    script = [_frame(0)] + [_frame(pts) for pts in (30720, 31232, 31744, 32256)] + [_EOF]
+    _install_fake_vali(monkeypatch, script)
+    source = _vali_source(batch_size=2, frame_stride=2)
+    batches = list(source.frames(2.0))
+    assert [pts for _batch, pts in batches] == [[30720, 31744]]
