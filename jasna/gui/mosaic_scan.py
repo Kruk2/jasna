@@ -72,7 +72,6 @@ SCAN_PARALLEL_MIN_DURATION = 10.0
 
 
 def scan_decoder_count(
-    frame_stride: int,
     video_width: int,
     video_height: int,
     duration: float,
@@ -81,13 +80,14 @@ def scan_decoder_count(
 ) -> int:
     """Parallel decoders for a scan.
 
-    Every-frame scans of 4K+ material are NVDEC-bound while the GPU has more
-    than one NVDEC unit, so split the video across decoders. Strided scans and
-    smaller resolutions are detection-bound and AMD decode sessions are not
-    known to be safe to duplicate, so those stay on one decoder.
+    Scans of 4K+ material are NVDEC-bound while the GPU has more than one
+    NVDEC unit (NVDEC decodes every frame regardless of stride), so split the
+    video across decoders. Smaller resolutions are detection- or
+    loop-overhead-bound and AMD decode sessions are not known to be safe to
+    duplicate, so those stay on one decoder.
     """
 
-    if amd or frame_stride != 1 or duration < SCAN_PARALLEL_MIN_DURATION:
+    if amd or duration < SCAN_PARALLEL_MIN_DURATION:
         return 1
     if video_width * video_height < SCAN_PARALLEL_MIN_PIXELS:
         return 1
@@ -545,7 +545,6 @@ class MosaicScanWorker:
             capacity = math.ceil(duration * estimated_rate / frame_stride) + batch_size
 
         decoders = scan_decoder_count(
-            frame_stride,
             int(metadata.video_width),
             int(metadata.video_height),
             duration,
