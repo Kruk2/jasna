@@ -66,6 +66,43 @@ def scan_sample_stride(fps: float, *, seconds: float = 1.0) -> int:
     return max(1, round(float(fps) * float(seconds)))
 
 
+SCAN_PARALLEL_DECODERS = 2
+SCAN_PARALLEL_MIN_PIXELS = 3840 * 2160
+SCAN_PARALLEL_MIN_DURATION = 10.0
+
+
+def scan_decoder_count(
+    frame_stride: int,
+    video_width: int,
+    video_height: int,
+    duration: float,
+    *,
+    amd: bool,
+) -> int:
+    """Parallel decoders for a scan.
+
+    Every-frame scans of 4K+ material are NVDEC-bound while the GPU has more
+    than one NVDEC unit, so split the video across decoders. Strided scans and
+    smaller resolutions are detection-bound and AMD decode sessions are not
+    known to be safe to duplicate, so those stay on one decoder.
+    """
+
+    if amd or frame_stride != 1 or duration < SCAN_PARALLEL_MIN_DURATION:
+        return 1
+    if video_width * video_height < SCAN_PARALLEL_MIN_PIXELS:
+        return 1
+    return SCAN_PARALLEL_DECODERS
+
+
+def segment_sample_indices(
+    times: list[float], start: float, end: float, *, is_last: bool
+) -> list[int]:
+    """Indices of samples a segment owns: ``start <= t < end`` (last segment
+    keeps everything from ``start``)."""
+
+    return [i for i, t in enumerate(times) if t >= start and (is_last or t < end)]
+
+
 def segments_from_scores(
     times: tuple[float, ...] | list[float],
     scores: tuple[float, ...] | list[float],
@@ -490,6 +527,7 @@ class MosaicScanWorker:
     def _scan(self, detector) -> None:
         import torch
 
+        from jasna.accelerator import is_amd_device
         from jasna.media.video_decoder import NvidiaVideoReader
 
         metadata = self.metadata
@@ -506,26 +544,84 @@ class MosaicScanWorker:
             estimated_rate = max(float(metadata.average_fps), float(metadata.video_fps))
             capacity = math.ceil(duration * estimated_rate / frame_stride) + batch_size
 
-        times: list[float] = []
-        collector = None
-        stopped = False
-        last_progress = -1.0
-        started = time.monotonic()
-
-        reader = NvidiaVideoReader(
-            str(self.path),
-            batch_size,
-            device,
-            metadata,
-            frame_stride=frame_stride,
+        decoders = scan_decoder_count(
+            frame_stride,
+            int(metadata.video_width),
+            int(metadata.video_height),
+            duration,
+            amd=is_amd_device(device),
         )
-        with reader:
-            start_pts = reader.start_pts
-            for batch, pts_list in reader.frames():
-                if self._stop_scan.is_set():
-                    stopped = True
-                    break
-                if len(times) + len(pts_list) > capacity:
+        segment_capacity = (
+            capacity if decoders == 1 else math.ceil(capacity / decoders) + batch_size
+        )
+        bounds = [duration * index / decoders for index in range(decoders + 1)]
+        batches: queue.Queue = queue.Queue(maxsize=decoders + 1)
+
+        def decode_segment(index: int) -> None:
+            start_s, end_s = bounds[index], bounds[index + 1]
+            is_last = index == decoders - 1
+            try:
+                reader = NvidiaVideoReader(
+                    str(self.path),
+                    batch_size,
+                    device,
+                    metadata,
+                    frame_stride=frame_stride,
+                )
+                with reader:
+                    start_pts = reader.start_pts
+                    for batch, pts_list in reader.frames(
+                        seek_ts=start_s if index else None
+                    ):
+                        if self._stop_scan.is_set():
+                            break
+                        sample_times = [
+                            max(0.0, (pts - start_pts) * time_base) for pts in pts_list
+                        ]
+                        keep = segment_sample_indices(
+                            sample_times, start_s, end_s, is_last=is_last
+                        )
+                        if keep:
+                            if len(keep) < len(sample_times):
+                                batch = batch[keep]
+                            batches.put(
+                                (index, batch, [sample_times[i] for i in keep])
+                            )
+                        if not is_last and sample_times[-1] >= end_s:
+                            break
+            except BaseException as exc:
+                batches.put((index, exc, None))
+                return
+            batches.put((index, None, None))
+
+        seg_times: list[list[float]] = [[] for _ in range(decoders)]
+        collectors: list[_ScanTensorCollector | None] = [None] * decoders
+        threads = [
+            threading.Thread(
+                target=decode_segment,
+                args=(index,),
+                name=f"scan-decode-{index}",
+                daemon=True,
+            )
+            for index in range(decoders)
+        ]
+        started = time.monotonic()
+        last_progress = -1.0
+        total_samples = 0
+        expected_samples = max(1, capacity - batch_size)
+        active = decoders
+        try:
+            for thread in threads:
+                thread.start()
+            while active:
+                index, payload, sample_times = batches.get()
+                if payload is None:
+                    active -= 1
+                    continue
+                if isinstance(payload, BaseException):
+                    raise payload
+                batch = payload
+                if len(seg_times[index]) + len(sample_times) > segment_capacity:
                     raise RuntimeError(
                         "Video contains more frames than reported by its metadata"
                     )
@@ -537,43 +633,65 @@ class MosaicScanWorker:
                     detection_batch, mask_hw=SCAN_MASK_HW
                 )
                 batch_masks = self._source_projection_masks(batch_masks)
-                count = len(pts_list)
-                if collector is None:
-                    collector = _ScanTensorCollector(
+                if collectors[index] is None:
+                    collectors[index] = _ScanTensorCollector(
                         torch,
-                        capacity=capacity,
+                        capacity=segment_capacity,
                         mask_hw=SCAN_MASK_HW,
                         batch_size=batch_size,
                         device=device,
                         on_spill=lambda: self.events.put(ScanStorageSpilled()),
                     )
-                collector.add(batch_scores, batch_masks, count=count)
-                times.extend(
-                    max(0.0, (pts - start_pts) * time_base) for pts in pts_list
+                collectors[index].add(
+                    batch_scores, batch_masks, count=len(sample_times)
                 )
-                fraction = min(1.0, times[-1] / duration) if duration > 0 else 1.0
+                seg_times[index].extend(sample_times)
+                total_samples += len(sample_times)
+                fraction = min(1.0, total_samples / expected_samples)
                 if fraction - last_progress >= 0.01:
                     last_progress = fraction
                     elapsed = max(1e-6, time.monotonic() - started)
-                    fps = len(times) * frame_stride / elapsed
-                    video_rate = times[-1] / elapsed
-                    eta = (
-                        (duration - times[-1]) / video_rate if video_rate > 0 else 0.0
-                    )
+                    fps = total_samples * frame_stride / elapsed
+                    sample_rate = total_samples / elapsed
+                    eta = (expected_samples - total_samples) / sample_rate
                     self.events.put(ScanProgress(fraction, fps, eta))
+        except BaseException:
+            self._stop_scan.set()
+            while any(thread.is_alive() for thread in threads):
+                try:
+                    batches.get(timeout=0.1)
+                except queue.Empty:
+                    pass
+            raise
+        for thread in threads:
+            thread.join()
+        stopped = self._stop_scan.is_set()
 
-        if collector is None:
-            masks = torch.empty((0, *SCAN_MASK_HW), dtype=torch.uint8, device="cpu")
-            result_scores = ()
+        times: list[float] = []
+        scores: list[float] = []
+        mask_parts = []
+        for index in range(decoders):
+            if collectors[index] is None:
+                continue
+            seg_scores, seg_masks = collectors[index].finish()
+            times.extend(seg_times[index])
+            scores.extend(seg_scores)
+            mask_parts.append(seg_masks)
+        if mask_parts:
+            masks = mask_parts[0] if len(mask_parts) == 1 else torch.cat(mask_parts)
         else:
-            result_scores, masks = collector.finish()
+            masks = torch.empty((0, *SCAN_MASK_HW), dtype=torch.uint8, device="cpu")
+        if stopped and decoders > 1:
+            completed_until = seg_times[0][-1] if seg_times[0] else 0.0
+        else:
+            completed_until = times[-1] if times else 0.0
         result = MosaicScanResult(
             times=tuple(times),
-            scores=result_scores,
+            scores=tuple(scores),
             masks=masks,
             stride=sample_stride_seconds,
             duration=duration,
-            completed_until=times[-1] if times else 0.0,
+            completed_until=completed_until,
         )
         self.events.put(ScanCompleted(result, stopped))
 

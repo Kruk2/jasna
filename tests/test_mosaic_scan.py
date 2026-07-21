@@ -137,3 +137,23 @@ def test_add_many_skips_already_covered_ranges():
     added = state.add_many((SegmentRange(2.0, 3.0), SegmentRange(20.0, 21.0)))
     assert added == 1
     assert state.segments == (SegmentRange(0.0, 10.0), SegmentRange(20.0, 21.0))
+
+
+def test_scan_decoder_count_parallel_only_for_every_frame_4k():
+    from jasna.gui.mosaic_scan import scan_decoder_count
+
+    assert scan_decoder_count(1, 3840, 2160, 120.0, amd=False) == 2
+    assert scan_decoder_count(1, 8192, 4096, 15.0, amd=False) == 2
+    assert scan_decoder_count(1, 1920, 1080, 120.0, amd=False) == 1
+    assert scan_decoder_count(30, 3840, 2160, 120.0, amd=False) == 1
+    assert scan_decoder_count(1, 3840, 2160, 5.0, amd=False) == 1
+    assert scan_decoder_count(1, 3840, 2160, 120.0, amd=True) == 1
+
+
+def test_segment_sample_indices_ownership():
+    from jasna.gui.mosaic_scan import segment_sample_indices
+
+    times = [9.8, 9.9, 10.0, 10.1]
+    assert segment_sample_indices(times, 0.0, 10.0, is_last=False) == [0, 1]
+    assert segment_sample_indices(times, 10.0, 20.0, is_last=True) == [2, 3]
+    assert segment_sample_indices([5.0], 10.0, 20.0, is_last=True) == []
