@@ -75,3 +75,4 @@ dist_windows_amd/
 .repowise-workspace.yaml
 .mcp.json
 AGENTS.md
+assets/benchmark/
