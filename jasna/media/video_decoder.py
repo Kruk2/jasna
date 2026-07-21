@@ -315,6 +315,15 @@ class NvidiaVideoReader:
         self._raw_stream: int | None = None
         return self
 
+    @property
+    def start_pts(self) -> int:
+        if self._vali_source is not None:
+            return resolve_video_start_pts(None, self.metadata.start_pts)
+        return resolve_video_start_pts(
+            self.video_stream.start_time,
+            self.metadata.start_pts,
+        )
+
     def _setup_amf_decoder(self, source_ctx) -> None:
         decoder_name = {
             "h264": "h264_amf",

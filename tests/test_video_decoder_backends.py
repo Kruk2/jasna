@@ -293,3 +293,16 @@ def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
     pyav_batch, pyav_pts = first_batch("pyav-hw")
     assert vali_pts == pyav_pts
     assert torch.equal(vali_batch, pyav_batch)
+
+
+def test_start_pts_uses_metadata_for_vali_and_stream_for_pyav() -> None:
+    import dataclasses
+
+    reader = module.NvidiaVideoReader.__new__(module.NvidiaVideoReader)
+    reader.metadata = dataclasses.replace(_metadata(), start_pts=1500)
+    reader._vali_source = object()
+    assert reader.start_pts == 1500
+
+    reader._vali_source = None
+    reader.video_stream = SimpleNamespace(start_time=2000)
+    assert reader.start_pts == 2000
