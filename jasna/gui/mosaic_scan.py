@@ -520,12 +520,7 @@ class MosaicScanWorker:
             frame_stride=frame_stride,
         )
         with reader:
-            from jasna.media import resolve_video_start_pts
-
-            start_pts = resolve_video_start_pts(
-                reader.video_stream.start_time,
-                metadata.start_pts,
-            )
+            start_pts = reader.start_pts
             for batch, pts_list in reader.frames():
                 if self._stop_scan.is_set():
                     stopped = True
@@ -600,7 +595,6 @@ class MosaicScanWorker:
     def _detect_mask(self, detector, command: _MaskRequest) -> ScanMaskReady:
         import torch
 
-        from jasna.media import resolve_video_start_pts
         from jasna.media.video_decoder import NvidiaVideoReader
 
         metadata = self.metadata
@@ -626,10 +620,7 @@ class MosaicScanWorker:
                 mask_hw=SCAN_MASK_HW,
             )
             masks = self._source_projection_masks(masks)
-            start_pts = resolve_video_start_pts(
-                reader.video_stream.start_time,
-                metadata.start_pts,
-            )
+            start_pts = reader.start_pts
             seconds = max(
                 0.0,
                 (pts_list[0] - start_pts) * float(metadata.time_base),
