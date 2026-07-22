@@ -4,8 +4,6 @@
 
 Jasna is a JAV mosaic restoration tool with a simple GUI, a CLI, a GPU-only processing pipeline, NVIDIA TensorRT and experimental AMD ROCm support, optional secondary restoration models, still-image restoration, and streaming support.
 
-It is inspired by, and in some places based on, [Lada](https://codeberg.org/ladaapp/lada). The `mosaic_restoration_1.2` restoration model used by Jasna was trained by ladaapp, the Lada author.
-
 Jasna is free. Supporters get a key that unlocks the extra models trained for this project: the **unet-4x** secondary upscaler and the experimental **SD 1.5 image restoration** model. See [Supporting the project](#supporting-the-project).
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
@@ -21,6 +19,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [Learn More](#learn-more)
 - [Benchmarks](#benchmarks)
 - [Supporting the Project](#supporting-the-project)
+- [Acknowledgments](#acknowledgments)
 - [TODO](#todo)
 
 ## What Jasna Does
@@ -127,6 +126,14 @@ How to get a key:
 2. After your contribution is processed, your supporter key is sent automatically:
    - **[Unifans](https://app.unifans.io/c/kruk2)**: sent by platform message. There might be a slight delay.
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**, including **crypto**: sent to the email or handle used for the contribution. The key is tied to that email or handle.
+
+## Acknowledgments
+
+- **[Lada](https://codeberg.org/ladaapp/lada) (Codeberg)** — Jasna is inspired
+  by, and in some places based on, Lada. The `mosaic_restoration_1.2`
+  restoration model used by Jasna was trained by ladaapp, the Lada author.
+- **ZeLeFans** — for the VR detection model and the in-depth analysis of mosaic
+  shapes and VR projection.
 
 ## TODO
 

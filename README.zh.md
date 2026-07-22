@@ -4,8 +4,6 @@
 
 Jasna 是一个 JAV 马赛克修复工具，提供简洁 GUI、CLI、纯 GPU 处理流水线、NVIDIA TensorRT 与实验性 AMD ROCm 支持、可选二级修复模型、静态图像修复以及流媒体支持。
 
-它受 [Lada](https://codeberg.org/ladaapp/lada) 启发，部分代码也基于 Lada。Jasna 使用的 `mosaic_restoration_1.2` 修复模型由 Lada 作者 ladaapp 训练。
-
 Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目训练的额外模型: **unet-4x** 二级放大模型，以及实验性的 **SD 1.5 图像修复**模型。详情见[支持本项目](#支持本项目)。
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
@@ -21,6 +19,7 @@ Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目�
 - [了解更多](#了解更多)
 - [基准测试](#基准测试)
 - [支持本项目](#支持本项目)
+- [致谢](#致谢)
 - [TODO](#todo)
 
 ## Jasna 能做什么
@@ -125,6 +124,13 @@ RTX 5090 + i9 13900k:
 2. 贡献处理完成后，支持者密钥会自动发送:
    - **[Unifans](https://app.unifans.io/c/kruk2)**: 通过平台消息发送，可能会有轻微延迟。
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**，包括**加密货币**: 发送到贡献时使用的邮箱或账号。密钥与该邮箱或账号绑定。
+
+## 致谢
+
+- **[Lada](https://codeberg.org/ladaapp/lada)（Codeberg）** — Jasna 受 Lada 启发，
+  部分代码也基于 Lada。Jasna 使用的 `mosaic_restoration_1.2` 修复模型由 Lada 作者
+  ladaapp 训练。
+- **ZeLeFans** — 感谢提供 VR 检测模型，以及对马赛克形状和 VR 投影的深入分析。
 
 ## TODO
 

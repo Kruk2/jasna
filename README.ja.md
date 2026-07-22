@@ -4,8 +4,6 @@
 
 Jasna は、シンプルな GUI、CLI、GPU 専用処理パイプライン、NVIDIA TensorRT と実験的な AMD ROCm 対応、任意のセカンダリ復元モデル、静止画復元、ストリーミング機能を備えた JAV モザイク復元ツールです。
 
-[Lada](https://codeberg.org/ladaapp/lada) に着想を得ており、一部は Lada をベースにしています。Jasna で使っている `mosaic_restoration_1.2` 復元モデルは、Lada 作者の ladaapp によって訓練されました。
-
 Jasna は無料です。支援者には、このプロジェクト用に訓練された追加モデルを解除するキーが提供されます: **unet-4x** セカンダリアップスケーラーと、実験的な **SD 1.5 画像復元**モデルです。詳しくは[プロジェクトを支援する](#プロジェクトを支援する)をご覧ください。
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
@@ -21,6 +19,7 @@ Jasna は無料です。支援者には、このプロジェクト用に訓練�
 - [さらに詳しく](#さらに詳しく)
 - [ベンチマーク](#ベンチマーク)
 - [プロジェクトを支援する](#プロジェクトを支援する)
+- [謝辞](#謝辞)
 - [TODO](#todo)
 
 ## Jasna でできること
@@ -125,6 +124,14 @@ RTX 5090 + i9 13900k:
 2. 支援が処理されると、支援者キーが自動送信されます:
    - **[Unifans](https://app.unifans.io/c/kruk2)**: プラットフォームメッセージで送信されます。少し遅れる場合があります。
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**、**暗号通貨**を含む: 支援時に使ったメールアドレスまたはハンドルへ送信されます。キーはそのメールアドレスまたはハンドルに紐付きます。
+
+## 謝辞
+
+- **[Lada](https://codeberg.org/ladaapp/lada)（Codeberg）** — Jasna は Lada に
+  着想を得ており、一部は Lada をベースにしています。Jasna で使っている
+  `mosaic_restoration_1.2` 復元モデルは、Lada 作者の ladaapp によって訓練されました。
+- **ZeLeFans** — VR 検出モデルと、モザイクの形状および VR 投影に関する詳細な分析に
+  感謝します。
 
 ## TODO
 
