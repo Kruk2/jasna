@@ -13,6 +13,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -28,7 +29,8 @@ DETECT_BATCH = 4
 def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", required=True)
-    ap.add_argument("--inputs", nargs="+", required=True)
+    ap.add_argument("--inputs", nargs="+", default=[])
+    ap.add_argument("--manifest", default=None, help="tsv whose last column is the source path")
     ap.add_argument("--detection-model", default="rfdetr-vr-v1")
     ap.add_argument("--candidates", type=int, default=10)
     ap.add_argument("--restore-frames", type=int, default=RESTORE_FRAMES)
@@ -81,9 +83,28 @@ def main() -> int:
     base = build_detection_model(name, wpath, batch_size=DETECT_BATCH, device=device,
                                  score_threshold=recommended_score_threshold(name), fp16=True)
 
-    records: list[SampleRecord] = []
+    inputs = [Path(p) for p in args.inputs]
+    if args.manifest:
+        for li, line in enumerate(Path(args.manifest).read_text().splitlines()):
+            if li == 0 or not line.strip():
+                continue
+            inputs.append(Path(line.rstrip("\n").split("\t")[-1]))
+    disc_path = root / "discovery.jsonl"
+    done_titles = set()
+    if disc_path.exists():
+        for l in disc_path.read_text().splitlines():
+            if l.strip():
+                done_titles.add(json.loads(l).get("title"))
+    jf = open(disc_path, "a")
+    n_saved = 0
 
-    for inp in [Path(p) for p in args.inputs]:
+    for inp in inputs:
+        if inp.stem in done_titles:
+            print(f"[skip] {inp.name} (already discovered)", flush=True)
+            continue
+        if not inp.exists():
+            print(f"[skip] {inp.name} (missing)", flush=True)
+            continue
         meta = get_video_meta_data(str(inp))
         H, W = int(meta.video_height), int(meta.video_width)
         vr = resolve_vr_mode("auto", meta, inp)
@@ -171,13 +192,15 @@ def main() -> int:
                 stability=s["stab"], vr_reason=vr.reason, zelefans_prior=prior,
             )
             np.save(sdir / "pts.npy", np.array(s["pts"], dtype=np.int64))
-            records.append(rec)
+            jf.write(rec.to_json() + "\n")
+            jf.flush()
+            n_saved += 1
             print(f"  [saved] {sid}", flush=True)
 
+    jf.close()
     if hasattr(base, "close"):
         base.close()
-    write_jsonl(root / "discovery.jsonl", records)
-    print(f"[done] {len(records)} samples -> {root/'discovery.jsonl'}", flush=True)
+    print(f"[done] +{n_saved} samples -> {disc_path}", flush=True)
     return 0
 
 
