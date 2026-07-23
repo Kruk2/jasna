@@ -151,6 +151,20 @@ def xyz_to_fisheye_uv(vec: np.ndarray, h_fov: float, v_fov: float):
     return np.stack((u, v), axis=-1), valid
 
 
+def fisheye_uv_to_xyz(fu: np.ndarray, fv: np.ndarray) -> np.ndarray:
+    """Fisheye output normalized (u,v) in [0,1] -> 3D direction (equidistant 180)."""
+    px = fu * 2.0 - 1.0
+    py = fv * 2.0 - 1.0
+    r = np.hypot(px, py)
+    theta = r * math.pi * 0.5
+    sin_t = np.sin(theta)
+    safe = np.where(r > 1e-12, r, 1.0)
+    x = np.where(r > 1e-12, sin_t * px / safe, 0.0)
+    y = np.where(r > 1e-12, -sin_t * py / safe, 0.0)
+    z = np.cos(theta)
+    return np.stack((x, y, z), axis=-1)
+
+
 # --- region gnomonic: tangent centre + extents derived from the source region ---
 
 def region_gnomonic_spec(bbox_uv: tuple[float, float, float, float]):
