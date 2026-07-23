@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import math
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -38,12 +37,11 @@ class VrModeResolution:
         return self.resolved == "sbs-fisheye"
 
 
-def _filename_tokens(path: Path) -> set[str]:
-    return {
-        token
-        for token in re.split(r"[^A-Z0-9]+", path.stem.upper())
-        if token
-    }
+def _studio_matches(path: Path, codes: frozenset[str]) -> list[str]:
+    # Substring match: real releases glue the studio code to the number
+    # (e.g. ``savr00327``), which a token split on separators would miss.
+    stem = path.stem.upper()
+    return sorted(code for code in codes if code in stem)
 
 
 def _display_aspect(metadata) -> float:
@@ -114,9 +112,8 @@ def resolve_vr_mode(
             aspect,
         )
     else:
-        tokens = _filename_tokens(input_path)
-        fisheye_matches = sorted(tokens & FISHEYE_STUDIO_TOKENS)
-        direct_matches = sorted(tokens & DIRECT_STUDIO_TOKENS)
+        fisheye_matches = _studio_matches(input_path, FISHEYE_STUDIO_TOKENS)
+        direct_matches = _studio_matches(input_path, DIRECT_STUDIO_TOKENS)
         if fisheye_matches:
             token = fisheye_matches[0]
             result = VrModeResolution(

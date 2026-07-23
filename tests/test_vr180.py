@@ -64,6 +64,17 @@ def test_auto_fisheye_studio_overrides_direct_token() -> None:
     assert result.resolved == "sbs-fisheye"
 
 
+def test_auto_matches_studio_code_glued_to_number() -> None:
+    # Real 8K releases glue the studio code to the number (savr00327-2);
+    # detection is a substring match, not a separator-bounded token.
+    assert resolve_vr_mode(
+        "auto", _metadata(), Path("savr00327-2.mp4")
+    ).resolved == "sbs-fisheye"
+    assert resolve_vr_mode(
+        "auto", _metadata(), Path("mdvr00271-2.mp4")
+    ).resolved == "sbs"
+
+
 def test_auto_uses_spatial_metadata_for_sbs() -> None:
     metadata = _metadata(
         stereo_layout="side by side",
