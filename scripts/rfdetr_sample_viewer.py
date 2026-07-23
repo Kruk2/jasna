@@ -23,7 +23,7 @@ Examples:
   python scripts/rfdetr_sample_viewer.py /path/to/samples
   python scripts/rfdetr_sample_viewer.py /path/to/samples \\
       --non-vr-models rfdetr-v5,lada-yolo-v4,rfdetr-v6,rfdetr-v6-large \\
-      --vr-models zelefans-vr-yolo-v2,rfdetr-vr
+      --vr-models zelefans-vr-yolo-v2,rfdetr-vr-v1
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_NON_VR = "rfdetr-v5,lada-yolo-v4,rfdetr-v6,rfdetr-v6-large"
-DEFAULT_VR = "zelefans-vr-yolo-v2,rfdetr-vr"
+DEFAULT_VR = "zelefans-vr-yolo-v2,rfdetr-vr-v1"
 
 
 def parse_args() -> argparse.Namespace:

@@ -10,7 +10,8 @@ The detection model finds mosaics in each frame.
   separate download; drop `rfdetr-v6-large.onnx` into `model_weights/` and Jasna
   detects it automatically.
 - **Lada YOLO** models can work better for 2D animations.
-- **zelefans-vr-yolo-v2** (bundled) can be more accurate for VR180 videos.
+- **rfdetr-vr-v1** (bundled) is the RF-DETR VR180 detection model — best for VR180 videos.
+- **zelefans-vr-yolo-v2** (optional download) is an alternative VR180 detector.
 - **On AMD**, RF-DETR is very slow (on Windows it even runs on the CPU) —
   use `lada-yolo-v4` instead unless you specifically need RF-DETR.
 

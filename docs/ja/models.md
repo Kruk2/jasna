@@ -10,7 +10,8 @@
   任意モデルで、`rfdetr-v6-large.onnx` を `model_weights/` に置くと自動的に
   検出されます。
 - **Lada YOLO** モデルは 2D アニメーションでより良い場合があります。
-- **zelefans-vr-yolo-v2**（同梱）は VR180 動画でより正確な場合があります。
+- **rfdetr-vr-v1**（同梱）は VR180 用の RF-DETR 検出モデルで、VR180 動画に最適です。
+- **zelefans-vr-yolo-v2**（任意ダウンロード）は VR180 の代替検出モデルです。
 - **AMD では** RF-DETR は非常に遅く（Windows では CPU で動くほどです）、
   RF-DETR が特に必要でない限り `lada-yolo-v4` を使ってください。
 
