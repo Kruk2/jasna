@@ -387,7 +387,7 @@ ZH = {
         "tip_rtx_quality": "放大质量。越高画面越好，但速度越慢。\n\n默认值：High",
         "tip_rtx_denoise": "使用 RTX 硬件去除噪点。设为 None 跳过降噪。\n\n默认值：Medium",
         "tip_rtx_deblur": "使用 RTX 硬件锐化模糊区域。设为 None 跳过锐化。\n\n默认值：None",
-        "tip_detection_model": "用于寻找需要修复区域的默认 AI 模型。\nrfdetr-v6：最新、快速 — 推荐使用（默认，内置）。\nrfdetr-v6-large：质量更高、速度更慢 — 可选的单独下载。\nLada YOLO 模型可能更适合 2D 动画。\nzelefans-vr-yolo-v2：Jasna 内置的高精度 VR180 模型。\n\n区间编辑器可以为每个视频单独覆盖并记住此设置。\n\n默认值：rfdetr-v6",
+        "tip_detection_model": "用于寻找需要修复区域的默认 AI 模型。\nrfdetr-v6：最新、快速 — 推荐使用（默认，内置）。\nrfdetr-v6-large：质量更高、速度更慢 — 可选的单独下载。\nrfdetr-vr-v1：VR180 模型（内置）— 推荐用于 VR。\nLada YOLO 模型可能更适合 2D 动画。\nzelefans-vr-yolo-v2：备用 VR180 模型 — 可选的单独下载。\n\n区间编辑器可以为每个视频单独覆盖并记住此设置。\n\n默认值：rfdetr-v6",
         "tip_detection_score_threshold": "AI 标记修复区域所需的默认置信度。\n数值越低 = 检测更多区域（可能误检）。\n数值越高 = 检测更少区域（可能漏检）。\n\n区间编辑器可以为每个视频单独覆盖并记住此设置。\n\n默认值：各模型的推荐值（rfdetr-v6：0.35，rfdetr-v6-large：0.40）",
         "tip_codec": "输出视频格式。\nH.264 (AVC)：兼容性最好，文件较大。\nHEVC (H.265)：较小文件体积下提供优秀画质。\nAV1：压缩率最高，需要较新的播放器；编码需要较新的 NVIDIA 显卡。",
         "tip_encoder_cq": "视频质量等级（恒定质量模式）。数值越低画质越好，但文件越大。\nCQ 值因编解码器而异。切换到或离开 AV1 时，Jasna 会将显示值调整 7，以保持大致相同的画质。\n起始值：HEVC/H.264 为 22，AV1 为 29。",

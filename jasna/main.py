@@ -310,8 +310,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="rfdetr-v6",
         help=(
             "Detection model name. Installed models are discovered from model_weights/; "
-            "rfdetr-v6 (fast) and zelefans-vr-yolo-v2 are bundled with Jasna, "
-            "rfdetr-v6-large is an optional higher-quality download "
+            "rfdetr-v6 (fast) and rfdetr-vr-v1 (VR180) are bundled with Jasna, "
+            "rfdetr-v6-large (higher quality) and zelefans-vr-yolo-v2 are optional downloads "
             "(default: %(default)s)"
         ),
     )

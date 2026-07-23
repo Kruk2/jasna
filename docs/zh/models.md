@@ -9,7 +9,8 @@
 - **`rfdetr-v6-large`** 是质量更高、速度更慢的变体。它是可选的单独下载，
   将 `rfdetr-v6-large.onnx` 放入 `model_weights/`，Jasna 会自动检测。
 - **Lada YOLO** 模型在 2D 动画上可能效果更好。
-- **zelefans-vr-yolo-v2**（已内置）在 VR180 视频上可能更准确。
+- **rfdetr-vr-v1**（已内置）是用于 VR180 的 RF-DETR 检测模型，最适合 VR180 视频。
+- **zelefans-vr-yolo-v2**（可选下载）是 VR180 的备用检测模型。
 - **在 AMD 上**，RF-DETR 非常慢（在 Windows 上甚至只能用 CPU 运行）—
   除非特别需要 RF-DETR，否则请改用 `lada-yolo-v4`。
 

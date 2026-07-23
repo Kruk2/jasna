@@ -46,7 +46,7 @@ jasna --input input_folder --output output_folder
 
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
-| `--detection-model` | `rfdetr-v6` | 已安装模型从 `model_weights/` 中发现；`rfdetr-v6`（快速）和 `zelefans-vr-yolo-v2` 已内置，`rfdetr-v6-large` 为可选下载。见[模型](models.md)。 |
+| `--detection-model` | `rfdetr-v6` | 已安装模型从 `model_weights/` 中发现；`rfdetr-v6`（快速）和 `rfdetr-vr-v1`（VR180）已内置，`rfdetr-v6-large` 和 `zelefans-vr-yolo-v2` 为可选下载。见[模型](models.md)。 |
 | `--detection-model-path` | 自动 | 默认为 `model_weights/<detection-model>.onnx`（RF-DETR）或 `.pt`（YOLO）。 |
 | `--detection-score-threshold` | 自动 | 默认使用所选模型的推荐值（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）。漏检马赛克时调低；正常区域被误检时调高。 |
 | `--max-detection-gap` | `2` | 当马赛克在相同位置重新出现时，填补最多 N 帧的检测中断。`0` 表示禁用。 |

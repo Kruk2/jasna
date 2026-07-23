@@ -65,7 +65,7 @@ RFDETR_MODEL_NAMES: frozenset[str] = frozenset(
         "rfdetr-v5",
         "rfdetr-v6",
         "rfdetr-v6-large",
-        "rfdetr-vr",
+        "rfdetr-vr-v1",
     }
 )
 YOLO_MODEL_NAMES: frozenset[str] = frozenset(
@@ -80,7 +80,7 @@ RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-v5": RfDetrModelConfig(768, 0.25, 4, None),
     "rfdetr-v6": RfDetrModelConfig(576, 0.35, None, "medium"),
     "rfdetr-v6-large": RfDetrModelConfig(768, 0.40, None, "large"),
-    "rfdetr-vr": RfDetrModelConfig(576, 0.50, None, "large"),
+    "rfdetr-vr-v1": RfDetrModelConfig(768, 0.50, None, "large"),
 }
 _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(768, 0.25, None, None)
 
