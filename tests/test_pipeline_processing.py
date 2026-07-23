@@ -912,3 +912,53 @@ def test_scene_cut_ends_coasting_track_and_trims_synthetic_tail() -> None:
     assert ended.clip.frame_count == 3
     assert len(ended.raw_crops) == 3
     assert not tracker.active_clips
+
+
+def test_vr_gnomonic_crop_and_blend_stays_within_one_eye() -> None:
+    from jasna.vr180 import GnomonicProjector
+
+    eye_w, height = 512, 64
+    frame_w = eye_w * 2
+    projector = GnomonicProjector(eye_width=eye_w, height=height, device=torch.device("cpu"))
+
+    frame = torch.zeros((1, 3, height, frame_w), dtype=torch.uint8)
+    frame[:, :, :, :eye_w] = 50
+    frame[:, :, :, eye_w:] = 150
+
+    def _detections_fn(frames: torch.Tensor, *, target_hw) -> Detections:
+        b = int(frames.shape[0])
+        boxes = [np.array([[180.0, 20.0, 300.0, 44.0]], dtype=np.float32) for _ in range(b)]
+        masks = [torch.ones((1, height, frame_w), dtype=torch.bool) for _ in range(b)]
+        return Detections(boxes_xyxy=boxes, masks=masks)
+
+    def _ones_blend_mask(mask_lr, bbox_xyxy, frame_shape):
+        x1, y1, x2, y2 = bbox_xyxy
+        return torch.ones((y2 - y1, x2 - x1), dtype=torch.float32)
+
+    tracker = ClipTracker(max_clip_size=8, temporal_overlap=0, iou_threshold=0.0)
+    blend_buffer = BlendBuffer(
+        device=torch.device("cpu"),
+        blend_mask_fn=_ones_blend_mask,
+        vr_projector=projector,
+    )
+    crop_buffers: dict[int, CropBuffer] = {}
+    clip_queue = FrameQueue(max_frames=9999)
+    metadata_queue: Queue[FrameMeta | object] = Queue()
+
+    process_frame_batch(
+        frames=frame, pts_list=[0], start_frame_idx=0, target_hw=(height, frame_w),
+        detections_fn=_detections_fn, tracker=tracker, blend_buffer=blend_buffer,
+        crop_buffers=crop_buffers, clip_queue=clip_queue, metadata_queue=metadata_queue,
+        discard_margin=0, blend_frames=0, crop_eye_width=eye_w, vr_projector=projector,
+    )
+    finalize_processing(
+        tracker=tracker, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
+        clip_queue=clip_queue, frame_shape=(height, frame_w), discard_margin=0,
+    )
+    _drain_queue(clip_queue, blend_buffer, _FakeRestorationPipeline().process_clip_item)
+
+    blended = blend_buffer.blend_frame(0, frame[0])
+
+    # The restored fill (200) landed in the left eye; the right eye is untouched.
+    assert torch.equal(blended[:, :, eye_w:], frame[0, :, :, eye_w:])
+    assert (blended[:, :, :eye_w] == 200).any()

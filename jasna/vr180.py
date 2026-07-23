@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from jasna.crop_buffer import RawCrop, compute_enlarged_bbox
 from jasna.mosaic.detections import Detections
 
 log = logging.getLogger(__name__)
@@ -31,10 +32,6 @@ class VrModeResolution:
     @property
     def is_sbs(self) -> bool:
         return self.resolved in {"sbs", "sbs-fisheye"}
-
-    @property
-    def uses_fisheye(self) -> bool:
-        return self.resolved == "sbs-fisheye"
 
 
 def _studio_matches(path: Path, codes: frozenset[str]) -> list[str]:
@@ -261,14 +258,27 @@ class SbsDetectionAdapter:
             self.detector.close()
 
 
-class FisheyeProjector:
+class GnomonicProjector:
+    """Per-mosaic-region rectilinear (gnomonic) projection for VR180 SBS eyes.
+
+    Each eye is treated as an equirectangular hemisphere: a pixel column maps to
+    longitude in [-pi/2, pi/2] and a row to latitude in [-pi/2, pi/2] (the same
+    mapping the whole-eye reprojection used, and consistent with the SBS
+    detector split). For one tracked region a tangent plane is placed at the
+    region's centre direction and the equirectangular content is resampled onto
+    it, giving the 2D-trained restoration model a near-undistorted flat patch.
+    The restored patch is resampled back onto the equirectangular region before
+    blending. Both grids are pure functions of the region's enlarged bbox and
+    the eye dimensions, so the blend side rebuilds the inverse without carrying
+    extra per-frame state.
+    """
+
     def __init__(
         self,
         *,
         eye_width: int,
         height: int,
         device: torch.device,
-        fov_degrees: float = 180.0,
     ) -> None:
         self.eye_width = int(eye_width)
         self.height = int(height)
@@ -277,214 +287,159 @@ class FisheyeProjector:
                 f"Invalid eye dimensions {self.eye_width}x{self.height}"
             )
         self.device = device
-        self.forward_grid = self._build_forward_grid(
+        log.info(
+            "VR per-region flat projection enabled (eye %dx%d)",
             self.eye_width,
             self.height,
-            fov_degrees,
-        ).to(device)
-        self.inverse_grid = self._build_inverse_grid(
-            self.eye_width,
-            self.height,
-            fov_degrees,
-        ).to(device)
+        )
+
+    def _eye_offset(self, enlarged_bbox: tuple[int, int, int, int]) -> int:
+        centre_x = (int(enlarged_bbox[0]) + int(enlarged_bbox[2])) * 0.5
+        return 0 if centre_x < self.eye_width else self.eye_width
 
     @staticmethod
-    def _pixel_centers(length: int) -> torch.Tensor:
-        return (torch.arange(length, dtype=torch.float64) + 0.5) / length
+    def _forward_gnomonic_scalar(
+        lon: float, lat: float, lon0: float, lat0: float
+    ) -> tuple[float, float]:
+        cos_c = (
+            math.sin(lat0) * math.sin(lat)
+            + math.cos(lat0) * math.cos(lat) * math.cos(lon - lon0)
+        )
+        cos_c = max(cos_c, 1e-6)
+        x = math.cos(lat) * math.sin(lon - lon0) / cos_c
+        y = (
+            math.cos(lat0) * math.sin(lat)
+            - math.sin(lat0) * math.cos(lat) * math.cos(lon - lon0)
+        ) / cos_c
+        return x, y
 
-    @classmethod
-    def _build_forward_grid(
-        cls,
-        width: int,
-        height: int,
-        fov_degrees: float,
+    def _region_geometry(
+        self, local_bbox: tuple[int, int, int, int]
+    ) -> tuple[float, float, float, float]:
+        x1, y1, x2, y2 = (float(v) for v in local_bbox)
+        lon1 = ((x1 + 0.5) / self.eye_width - 0.5) * math.pi
+        lon2 = ((x2 - 0.5) / self.eye_width - 0.5) * math.pi
+        lat1 = ((y1 + 0.5) / self.height - 0.5) * math.pi
+        lat2 = ((y2 - 0.5) / self.height - 0.5) * math.pi
+        lon0 = 0.5 * (lon1 + lon2)
+        lat0 = 0.5 * (lat1 + lat2)
+        x_extent = 1e-6
+        y_extent = 1e-6
+        for lon in (lon1, lon2):
+            for lat in (lat1, lat2):
+                x, y = self._forward_gnomonic_scalar(lon, lat, lon0, lat0)
+                x_extent = max(x_extent, abs(x))
+                y_extent = max(y_extent, abs(y))
+        return lon0, lat0, x_extent, y_extent
+
+    def _forward_grid(
+        self, local_bbox: tuple[int, int, int, int], patch_h: int, patch_w: int
     ) -> torch.Tensor:
-        half_fov = math.radians(float(fov_degrees)) * 0.5
-        output_y, output_x = torch.meshgrid(
-            cls._pixel_centers(height),
-            cls._pixel_centers(width),
+        """Grid mapping each flat-patch pixel to a normalized eye coordinate."""
+        lon0, lat0, x_extent, y_extent = self._region_geometry(local_bbox)
+        ty, tx = torch.meshgrid(
+            (torch.arange(patch_h, dtype=torch.float64) + 0.5) / patch_h * 2.0 - 1.0,
+            (torch.arange(patch_w, dtype=torch.float64) + 0.5) / patch_w * 2.0 - 1.0,
             indexing="ij",
         )
-        fisheye_x = output_x * 2.0 - 1.0
-        fisheye_y = output_y * 2.0 - 1.0
-        radius = torch.sqrt(fisheye_x.square() + fisheye_y.square())
-        theta = radius * half_fov
-        phi = torch.atan2(fisheye_y, fisheye_x)
-        sin_theta = torch.sin(theta)
-        direction_x = sin_theta * torch.cos(phi)
-        direction_y = sin_theta * torch.sin(phi)
-        direction_z = torch.cos(theta)
-        longitude = torch.atan2(direction_x, direction_z)
-        latitude = torch.asin(direction_y.clamp(-1.0, 1.0))
-        source_x = longitude / math.pi + 0.5
-        source_y = latitude / math.pi + 0.5
-        grid_x = source_x * 2.0 - 1.0
-        grid_y = source_y * 2.0 - 1.0
-        outside = radius > 1.0
-        grid_x = torch.where(outside, torch.full_like(grid_x, 2.0), grid_x)
-        grid_y = torch.where(outside, torch.full_like(grid_y, 2.0), grid_y)
+        plane_x = tx * x_extent
+        plane_y = ty * y_extent
+        radius = torch.sqrt(plane_x.square() + plane_y.square())
+        c = torch.atan(radius)
+        sin_c = torch.sin(c)
+        cos_c = torch.cos(c)
+        safe_radius = torch.where(radius > 1e-12, radius, torch.ones_like(radius))
+        latitude = torch.asin(
+            (
+                cos_c * math.sin(lat0)
+                + plane_y * sin_c * math.cos(lat0) / safe_radius
+            ).clamp(-1.0, 1.0)
+        )
+        longitude = lon0 + torch.atan2(
+            plane_x * sin_c,
+            safe_radius * math.cos(lat0) * cos_c - plane_y * math.sin(lat0) * sin_c,
+        )
+        at_centre = radius <= 1e-12
+        latitude = torch.where(at_centre, torch.full_like(latitude, lat0), latitude)
+        longitude = torch.where(at_centre, torch.full_like(longitude, lon0), longitude)
+        grid_x = (longitude / math.pi + 0.5) * 2.0 - 1.0
+        grid_y = (latitude / math.pi + 0.5) * 2.0 - 1.0
         return torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).float()
 
-    @classmethod
-    def _build_inverse_grid(
-        cls,
-        width: int,
-        height: int,
-        fov_degrees: float,
+    def _inverse_grid(
+        self, local_bbox: tuple[int, int, int, int], region_h: int, region_w: int
     ) -> torch.Tensor:
-        half_fov = math.radians(float(fov_degrees)) * 0.5
-        output_y, output_x = torch.meshgrid(
-            cls._pixel_centers(height),
-            cls._pixel_centers(width),
+        """Grid mapping each eye-region pixel back to a normalized patch coord."""
+        x1, y1, _, _ = (float(v) for v in local_bbox)
+        lon0, lat0, x_extent, y_extent = self._region_geometry(local_bbox)
+        eye_y, eye_x = torch.meshgrid(
+            torch.arange(region_h, dtype=torch.float64) + y1 + 0.5,
+            torch.arange(region_w, dtype=torch.float64) + x1 + 0.5,
             indexing="ij",
         )
-        longitude = (output_x - 0.5) * math.pi
-        latitude = (output_y - 0.5) * math.pi
-        direction_x = torch.cos(latitude) * torch.sin(longitude)
-        direction_y = torch.sin(latitude)
-        direction_z = torch.cos(latitude) * torch.cos(longitude)
-        theta = torch.acos(direction_z.clamp(-1.0, 1.0))
-        phi = torch.atan2(direction_y, direction_x)
-        radius = theta / half_fov
-        fisheye_x = radius * torch.cos(phi)
-        fisheye_y = radius * torch.sin(phi)
-        return torch.stack((fisheye_x, fisheye_y), dim=-1).unsqueeze(0).float()
+        longitude = (eye_x / self.eye_width - 0.5) * math.pi
+        latitude = (eye_y / self.height - 0.5) * math.pi
+        cos_c = (
+            math.sin(lat0) * torch.sin(latitude)
+            + math.cos(lat0) * torch.cos(latitude) * torch.cos(longitude - lon0)
+        ).clamp_min(1e-6)
+        plane_x = torch.cos(latitude) * torch.sin(longitude - lon0) / cos_c
+        plane_y = (
+            math.cos(lat0) * torch.sin(latitude)
+            - math.sin(lat0) * torch.cos(latitude) * torch.cos(longitude - lon0)
+        ) / cos_c
+        grid_x = plane_x / x_extent
+        grid_y = plane_y / y_extent
+        return torch.stack((grid_x, grid_y), dim=-1).unsqueeze(0).float()
 
-    def _validate_eye(self, eye: torch.Tensor) -> tuple[torch.Tensor, bool]:
-        single = eye.ndim == 3
-        if single:
-            eye = eye.unsqueeze(0)
-        if eye.ndim != 4 or eye.shape[1] != 3:
-            raise ValueError(
-                f"Expected (3,H,W) or (N,3,H,W), got {tuple(eye.shape)}"
-            )
-        if eye.shape[-2:] != (self.height, self.eye_width):
-            raise ValueError(
-                f"Eye size {tuple(eye.shape[-2:])} does not match "
-                f"{(self.height, self.eye_width)}"
-            )
-        return eye, single
-
-    def _sample_eye(
+    @torch.inference_mode()
+    def extract_region_crop(
         self,
-        eye: torch.Tensor,
-        grid: torch.Tensor,
+        frame: torch.Tensor,
+        bbox,
+        frame_h: int,
+        frame_w: int,
         *,
-        preserve_dtype: bool,
-    ) -> torch.Tensor:
-        eye, single = self._validate_eye(eye)
-        output_dtype = eye.dtype
-        output = torch.empty(
-            eye.shape,
-            dtype=torch.float32 if not preserve_dtype else output_dtype,
-            device=eye.device,
+        x_bounds: tuple[int, int] | None = None,
+    ) -> RawCrop:
+        x1, y1, x2, y2 = compute_enlarged_bbox(bbox, frame_h, frame_w, x_bounds)
+        offset = self._eye_offset((x1, y1, x2, y2))
+        local = (x1 - offset, y1, x2 - offset, y2)
+        patch_h = y2 - y1
+        patch_w = x2 - x1
+        eye = frame[:, :, offset : offset + self.eye_width]
+        grid = self._forward_grid(local, patch_h, patch_w).to(frame.device)
+        sampled = F.grid_sample(
+            eye.unsqueeze(0).float(),
+            grid,
+            mode="bilinear",
+            padding_mode="border",
+            align_corners=False,
+        )[0]
+        if frame.dtype == torch.uint8:
+            crop = sampled.round().clamp(0, 255).to(torch.uint8)
+        else:
+            crop = sampled.to(frame.dtype)
+        return RawCrop(
+            crop=crop,
+            enlarged_bbox=(x1, y1, x2, y2),
+            crop_shape=(patch_h, patch_w),
         )
-        for index in range(eye.shape[0]):
-            sampled = F.grid_sample(
-                eye[index : index + 1].float(),
-                grid,
-                mode="bilinear",
-                padding_mode="zeros",
-                align_corners=False,
-            )[0]
-            if preserve_dtype and not output_dtype.is_floating_point:
-                sampled = sampled.round().clamp(0, 255).to(output_dtype)
-            elif preserve_dtype:
-                sampled = sampled.to(output_dtype)
-            output[index] = sampled
-        return output[0] if single else output
-
-    def _validate_sbs(self, frames: torch.Tensor) -> tuple[torch.Tensor, bool]:
-        single = frames.ndim == 3
-        if single:
-            frames = frames.unsqueeze(0)
-        if frames.ndim != 4 or frames.shape[1] != 3:
-            raise ValueError(
-                f"Expected (3,H,W) or (N,3,H,W), got {tuple(frames.shape)}"
-            )
-        expected = (self.height, self.eye_width * 2)
-        if frames.shape[-2:] != expected:
-            raise ValueError(
-                f"SBS size {tuple(frames.shape[-2:])} does not match {expected}"
-            )
-        return frames, single
 
     @torch.inference_mode()
-    def forward_sbs(self, frames: torch.Tensor) -> torch.Tensor:
-        frames, single = self._validate_sbs(frames)
-        output = torch.empty_like(frames)
-        for index in range(frames.shape[0]):
-            for eye_index in range(2):
-                start = eye_index * self.eye_width
-                end = start + self.eye_width
-                output[index, :, :, start:end] = self._sample_eye(
-                    frames[index, :, :, start:end],
-                    self.forward_grid,
-                    preserve_dtype=True,
-                )
-        return output[0] if single else output
-
-    @torch.inference_mode()
-    def restore_delta_to_source(
+    def source_region_from_patch(
         self,
-        source_sbs: torch.Tensor,
-        projected_source_sbs: torch.Tensor,
-        blended_fisheye_sbs: torch.Tensor,
+        patch: torch.Tensor,
+        enlarged_bbox: tuple[int, int, int, int],
     ) -> torch.Tensor:
-        source_sbs, single = self._validate_sbs(source_sbs)
-        projected_source_sbs, _ = self._validate_sbs(projected_source_sbs)
-        blended_fisheye_sbs, _ = self._validate_sbs(blended_fisheye_sbs)
-        if (
-            source_sbs.shape != projected_source_sbs.shape
-            or source_sbs.shape != blended_fisheye_sbs.shape
-        ):
-            raise ValueError("Source, projected source, and blended frames must match")
-
-        output = source_sbs.float()
-        for index in range(source_sbs.shape[0]):
-            for eye_index in range(2):
-                start = eye_index * self.eye_width
-                end = start + self.eye_width
-                delta = (
-                    blended_fisheye_sbs[index, :, :, start:end].float()
-                    - projected_source_sbs[index, :, :, start:end].float()
-                )
-                source_delta = self._sample_eye(
-                    delta,
-                    self.inverse_grid,
-                    preserve_dtype=False,
-                )
-                output[index, :, :, start:end].add_(source_delta)
-        output = output.round_().clamp_(0, 255).to(source_sbs.dtype)
-        return output[0] if single else output
-
-    @torch.inference_mode()
-    def inverse_mask_sbs(self, masks: torch.Tensor) -> torch.Tensor:
-        single = masks.ndim == 2
-        if single:
-            masks = masks.unsqueeze(0)
-        if masks.ndim != 3:
-            raise ValueError(
-                f"Expected (H,W) or (N,H,W), got {tuple(masks.shape)}"
-            )
-        expected = (self.height, self.eye_width * 2)
-        if masks.shape[-2:] != expected:
-            raise ValueError(
-                f"SBS mask size {tuple(masks.shape[-2:])} does not match {expected}"
-            )
-        output = torch.empty_like(masks, dtype=torch.bool)
-        for index in range(masks.shape[0]):
-            for eye_index in range(2):
-                start = eye_index * self.eye_width
-                end = start + self.eye_width
-                sampled = F.grid_sample(
-                    masks[index : index + 1, :, start:end]
-                    .unsqueeze(1)
-                    .float(),
-                    self.inverse_grid,
-                    mode="bilinear",
-                    padding_mode="zeros",
-                    align_corners=False,
-                )
-                output[index, :, start:end] = sampled[0, 0] > 0.5
-        return output[0] if single else output
+        x1, y1, x2, y2 = (int(v) for v in enlarged_bbox)
+        offset = self._eye_offset((x1, y1, x2, y2))
+        local = (x1 - offset, y1, x2 - offset, y2)
+        grid = self._inverse_grid(local, y2 - y1, x2 - x1).to(patch.device)
+        return F.grid_sample(
+            patch.unsqueeze(0).float(),
+            grid,
+            mode="bilinear",
+            padding_mode="border",
+            align_corners=False,
+        )[0]

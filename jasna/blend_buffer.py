@@ -22,9 +22,11 @@ class BlendBuffer:
         blend_mask_fn: Callable[
             [torch.Tensor, tuple[int, int, int, int], tuple[int, int]], torch.Tensor
         ] = create_bbox_blend_mask,
+        vr_projector=None,
     ):
         self.device = device
         self.blend_mask_fn = blend_mask_fn
+        self.vr_projector = vr_projector
         self._lock = threading.Lock()
         self.pending_map: dict[int, set[int]] = {}
         self._results: dict[int, SecondaryRestoreResult] = {}
@@ -141,6 +143,11 @@ class BlendBuffer:
             mode="bilinear",
             align_corners=False,
         ).squeeze(0)
+
+        if self.vr_projector is not None:
+            resized_back = self.vr_projector.source_region_from_patch(
+                resized_back, (x1, y1, x2, y2)
+            )
 
         blend_mask = self.blend_mask_fn(mask_lr, (x1, y1, x2, y2), sr.frame_shape)
 

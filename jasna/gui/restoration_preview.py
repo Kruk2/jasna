@@ -389,7 +389,7 @@ class RestorationPreviewWorker:
 
         settings = command.settings
         from jasna.vr180 import (
-            FisheyeProjector,
+            GnomonicProjector,
             SbsDetectionAdapter,
             resolve_vr_mode,
         )
@@ -405,12 +405,12 @@ class RestorationPreviewWorker:
             else detection_model
         )
         vr_projector = (
-            FisheyeProjector(
+            GnomonicProjector(
                 eye_width=int(self.metadata.video_width) // 2,
                 height=int(self.metadata.video_height),
                 device=session.device,
             )
-            if vr_resolution.uses_fisheye
+            if vr_resolution.is_sbs
             else None
         )
         window = (
@@ -429,7 +429,7 @@ class RestorationPreviewWorker:
         metadata_queue: Queue = Queue(maxsize=settings.max_clip_size * 5)
 
         error_holder: list[BaseException] = []
-        blend_buffer = BlendBuffer(device=session.device)
+        blend_buffer = BlendBuffer(device=session.device, vr_projector=vr_projector)
         crop_buffers: dict[int, CropBuffer] = {}
         crop_lock = threading.Lock()
         primary_idle_event = threading.Event()
@@ -531,7 +531,6 @@ class RestorationPreviewWorker:
                     cancel_event=cancel_event,
                     seek_ts=seek_ts,
                     vram_offloader=vram_offloader,
-                    vr_projector=vr_projector,
                 ),
                 name="PreviewBlendEncode", daemon=True,
             ),

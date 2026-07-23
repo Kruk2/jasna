@@ -40,7 +40,7 @@ from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange
 from jasna.vram_offloader import VramOffloader
 from jasna.vr180 import (
-    FisheyeProjector,
+    GnomonicProjector,
     SbsDetectionAdapter,
     resolve_vr_mode,
 )
@@ -146,12 +146,12 @@ class Pipeline:
             else self.detection_model
         )
         self._vr_projector = (
-            FisheyeProjector(
+            GnomonicProjector(
                 eye_width=int(metadata.video_width) // 2,
                 height=int(metadata.video_height),
                 device=self.device,
             )
-            if self._vr_resolution.uses_fisheye
+            if self._vr_resolution.is_sbs
             else None
         )
 
@@ -342,7 +342,7 @@ class Pipeline:
         metadata_queue: Queue[FrameMeta | object] = Queue(maxsize=self.max_clip_size * 5)
 
         error_holder: list[BaseException] = []
-        blend_buffer = BlendBuffer(device=device)
+        blend_buffer = BlendBuffer(device=device, vr_projector=self._vr_projector)
         crop_buffers: dict[int, CropBuffer] = {}
         crop_lock = threading.Lock()
         primary_idle_event = threading.Event()
@@ -455,7 +455,6 @@ class Pipeline:
                     vram_offloader=vram_offloader,
                     frame_stride=frame_rate.frame_stride,
                     seek_ts=seek_ts,
-                    vr_projector=self._vr_projector,
                 ),
                 name="BlendEncode", daemon=True,
             ),

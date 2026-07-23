@@ -169,10 +169,6 @@ def decode_detect_loop(
                             if selected:
                                 effect_active = True
                                 selected_frames = frames[offset:group_end]
-                                if vr_projector is not None:
-                                    selected_frames = vr_projector.forward_sbs(
-                                        selected_frames
-                                    )
                                 res = process_frame_batch(
                                     frames=selected_frames,
                                     pts_list=[int(p) for p in pts_list[offset:group_end]],
@@ -189,6 +185,7 @@ def decode_detect_loop(
                                     crop_eye_width=crop_eye_width,
                                     min_detection_duration=min_detection_duration,
                                     scene_detector=scene_detector,
+                                    vr_projector=vr_projector,
                                 )
                                 frame_idx = res.next_frame_idx
                             else:
@@ -361,7 +358,6 @@ def blend_encode_loop(
     seek_ts: float | None = None,
     frame_stride: int = 1,
     vram_offloader=None,
-    vr_projector=None,
 ) -> None:
     timer = LoopTimer("blend-encode")
     try:
@@ -431,20 +427,6 @@ def blend_encode_loop(
                 with timer.measure("blend"):
                     if not meta.apply_effect:
                         blended = original_frame
-                    elif (
-                        vr_projector is not None
-                        and blend_buffer.has_pending(meta.frame_idx)
-                    ):
-                        projected_source = vr_projector.forward_sbs(original_frame)
-                        blended_fisheye = blend_buffer.blend_frame(
-                            meta.frame_idx,
-                            projected_source,
-                        )
-                        blended = vr_projector.restore_delta_to_source(
-                            original_frame,
-                            projected_source,
-                            blended_fisheye,
-                        )
                     else:
                         blended = blend_buffer.blend_frame(
                             meta.frame_idx,
