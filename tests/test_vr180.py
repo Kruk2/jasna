@@ -5,12 +5,13 @@ import numpy as np
 import pytest
 import torch
 
+from jasna.crop_buffer import compute_enlarged_bbox
 from jasna.media import VideoMetadata
 from jasna.mosaic.detections import Detections
 from jasna.vr180 import (
     FISHEYE_STUDIO_TOKENS,
     DIRECT_STUDIO_TOKENS,
-    FisheyeProjector,
+    GnomonicProjector,
     SbsDetectionAdapter,
     resolve_vr_mode,
 )
@@ -229,57 +230,71 @@ def test_sbs_adapter_rejects_odd_source_width() -> None:
         )
 
 
-def test_fisheye_projector_uses_eye_local_grids() -> None:
-    projector = FisheyeProjector(eye_width=8, height=8, device=torch.device("cpu"))
-    assert projector.forward_grid.shape == (1, 8, 8, 2)
-    assert projector.inverse_grid.shape == (1, 8, 8, 2)
+def _gradient_sbs_frame(eye_w: int, height: int) -> torch.Tensor:
+    xs = torch.arange(eye_w, dtype=torch.float32)
+    ys = torch.arange(height, dtype=torch.float32)
+    eye = ys[:, None] * 0.5 + xs[None, :] * 0.7
+    frame = torch.zeros((3, height, eye_w * 2), dtype=torch.float32)
+    frame[:, :, :eye_w] = eye
+    frame[:, :, eye_w:] = eye + 1000.0
+    return frame
 
 
-def test_fisheye_projector_keeps_eyes_isolated() -> None:
-    projector = FisheyeProjector(eye_width=8, height=8, device=torch.device("cpu"))
-    frame = torch.zeros((3, 8, 16), dtype=torch.uint8)
-    frame[:, :, :8] = 25
-    frame[:, :, 8:] = 200
+def test_gnomonic_extract_region_crop_matches_enlarged_bbox() -> None:
+    projector = GnomonicProjector(eye_width=64, height=64, device=torch.device("cpu"))
+    frame = _gradient_sbs_frame(64, 64)
+    bbox = np.array([10.0, 12.0, 34.0, 40.0], dtype=np.float32)
 
-    projected = projector.forward_sbs(frame)
+    raw = projector.extract_region_crop(frame, bbox, 64, 128, x_bounds=(0, 64))
 
-    assert projected[:, :, :8].max().item() <= 25
-    assert projected[:, :, 8:].max().item() == 200
-    assert projected[:, :, 8:].min().item() == 0
-
-
-def test_fisheye_delta_composition_preserves_untouched_source_pixels() -> None:
-    projector = FisheyeProjector(eye_width=16, height=16, device=torch.device("cpu"))
-    source = torch.randint(0, 256, (3, 16, 32), dtype=torch.uint8)
-    projected = projector.forward_sbs(source)
-
-    restored = projector.restore_delta_to_source(source, projected, projected.clone())
-
-    assert torch.equal(restored, source)
+    expected = compute_enlarged_bbox(bbox, 64, 128, (0, 64))
+    x1, y1, x2, y2 = expected
+    assert raw.enlarged_bbox == expected
+    assert raw.crop_shape == (y2 - y1, x2 - x1)
+    assert tuple(raw.crop.shape) == (3, y2 - y1, x2 - x1)
 
 
-def test_fisheye_delta_composition_applies_changes_without_background_roundtrip() -> None:
-    projector = FisheyeProjector(eye_width=16, height=16, device=torch.device("cpu"))
-    source = torch.full((3, 16, 32), 100, dtype=torch.uint8)
-    projected = projector.forward_sbs(source)
-    blended = projected.clone()
-    blended[:, 7:9, 7:9] = 140
+def test_gnomonic_projection_round_trips_a_region() -> None:
+    # A wide eye keeps the ~256 px crop to a small angular span; a horizontal-only
+    # gradient is invariant to the vertical warp, isolating the reprojection error.
+    eye_w, height = 1600, 64
+    projector = GnomonicProjector(eye_width=eye_w, height=height, device=torch.device("cpu"))
+    ramp = (torch.arange(eye_w, dtype=torch.float32) * 0.15).expand(height, eye_w)
+    frame = torch.zeros((3, height, eye_w * 2), dtype=torch.float32)
+    frame[:, :, :eye_w] = ramp
+    bbox = np.array([640.0, 12.0, 900.0, 52.0], dtype=np.float32)
 
-    restored = projector.restore_delta_to_source(source, projected, blended)
+    raw = projector.extract_region_crop(frame, bbox, height, eye_w * 2, x_bounds=(0, eye_w))
+    region = projector.source_region_from_patch(raw.crop.float(), raw.enlarged_bbox)
 
-    changed = restored != source
-    assert changed.any()
-    assert torch.equal(restored[~changed], source[~changed])
+    x1, y1, x2, y2 = raw.enlarged_bbox
+    truth = frame[:, y1:y2, x1:x2]
+    margin = 3
+    interior = (region - truth)[:, margin:-margin, margin:-margin]
+    dynamic_range = (truth.max() - truth.min()).item()
+    assert interior.abs().mean().item() < 0.02 * dynamic_range
 
 
-def test_fisheye_inverse_mask_keeps_full_sbs_shape_and_eye_isolation() -> None:
-    projector = FisheyeProjector(eye_width=8, height=8, device=torch.device("cpu"))
-    masks = torch.zeros((2, 8, 16), dtype=torch.bool)
-    masks[0, 3:5, 3:5] = True
-    masks[1, 3:5, 11:13] = True
+def test_gnomonic_extract_selects_the_correct_eye() -> None:
+    projector = GnomonicProjector(eye_width=64, height=64, device=torch.device("cpu"))
+    frame = torch.zeros((3, 64, 128), dtype=torch.float32)
+    frame[:, :, :64] = 30.0
+    frame[:, :, 64:] = 200.0
 
-    source_masks = projector.inverse_mask_sbs(masks)
+    left = projector.extract_region_crop(
+        frame, np.array([8.0, 8.0, 28.0, 28.0], dtype=np.float32), 64, 128,
+        x_bounds=(0, 64),
+    )
+    right = projector.extract_region_crop(
+        frame, np.array([72.0, 8.0, 92.0, 28.0], dtype=np.float32), 64, 128,
+        x_bounds=(64, 128),
+    )
 
-    assert source_masks.shape == masks.shape
-    assert source_masks[0, :, 8:].sum().item() == 0
-    assert source_masks[1, :, :8].sum().item() == 0
+    assert left.crop.max().item() <= 31.0
+    assert right.crop.min().item() >= 199.0
+    assert right.enlarged_bbox[0] >= 64
+
+
+def test_gnomonic_projector_rejects_degenerate_dimensions() -> None:
+    with pytest.raises(ValueError, match="Invalid eye dimensions"):
+        GnomonicProjector(eye_width=0, height=64, device=torch.device("cpu"))

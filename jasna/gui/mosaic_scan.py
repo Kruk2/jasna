@@ -480,7 +480,6 @@ class MosaicScanWorker:
             fp16=bool(settings.fp16_mode),
         )
         from jasna.vr180 import (
-            FisheyeProjector,
             SbsDetectionAdapter,
             resolve_vr_mode,
         )
@@ -490,24 +489,6 @@ class MosaicScanWorker:
             self.metadata,
             self.path,
         )
-        self._vr_projector = (
-            FisheyeProjector(
-                eye_width=int(self.metadata.video_width) // 2,
-                height=int(self.metadata.video_height),
-                device=device,
-            )
-            if self._vr_resolution.uses_fisheye
-            else None
-        )
-        self._scan_mask_projector = (
-            FisheyeProjector(
-                eye_width=SCAN_MASK_HW[1] // 2,
-                height=SCAN_MASK_HW[0],
-                device=device,
-            )
-            if self._vr_resolution.uses_fisheye
-            else None
-        )
         return (
             SbsDetectionAdapter(detector)
             if self._vr_resolution.is_sbs
@@ -515,14 +496,13 @@ class MosaicScanWorker:
         )
 
     def _prepare_detection_batch(self, batch):
-        if self._vr_projector is None:
-            return batch
-        return self._vr_projector.forward_sbs(batch)
+        # Detection runs on the source projection; the SBS adapter splits the
+        # eyes internally, so no whole-frame reprojection is applied here.
+        return batch
 
     def _source_projection_masks(self, masks):
-        if self._scan_mask_projector is None:
-            return masks
-        return self._scan_mask_projector.inverse_mask_sbs(masks)
+        # Scan masks already come back in full-SBS source space.
+        return masks
 
     def _scan(self, detector) -> None:
         import torch
