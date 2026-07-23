@@ -125,6 +125,9 @@ def main() -> int:
         return out, (lon0, lat0)
 
     for rec in recs:
+        if not args.only and (root / "blind" / rec.sample_id / "C.mp4").exists():
+            print(f"[skip] {rec.sample_id} (already done)", flush=True)
+            continue
         sdir = root / "samples" / rec.sample_id
         outdir = root / "blind" / rec.sample_id
         outdir.mkdir(parents=True, exist_ok=True)
@@ -137,32 +140,33 @@ def main() -> int:
         bboxes = rec.bboxes
         print(f"[restore] {rec.sample_id} pos={rec.position} frames={len(pts_want)}", flush=True)
 
-        # PTS-aligned reproduce: build patches/regions inline, discard each 8K eye.
+        # Track-stable projection: one fixed spec from the track's union bbox, so
+        # the projection centre/FOV do not breathe with per-frame detection jitter.
         F_ = len(pts_want)
         want = {int(p): k for k, p in enumerate(pts_want)}
+        bb = np.array(bboxes, np.float32)
+        union = np.array([bb[:, 0].min(), bb[:, 1].min(), bb[:, 2].max(), bb[:, 3].max()], np.float32)
+        x1, y1, x2, y2 = compute_enlarged_bbox(union, H, W, (0, eye_w))
+        rw, rh = x2 - x1, y2 - y1
+        bbox_uv = (x1 / eye_w, y1 / H, x2 / eye_w, y2 / H)
+        gr, center = variant_grids(bbox_uv, (rw, rh))
         inputs = {v: [None] * F_ for v in CORE}
         composites = {v: [] for v in CORE}
-        grids_per_frame = [None] * F_
         regions = [None] * F_
         with NvidiaVideoReader(rec.source_path, args.batch, device, meta) as r, torch.inference_mode():
             for batch, pts in r.frames(seek_ts=rec.seek_ts):
                 for i in range(len(pts)):
                     k = want.get(int(pts[i]))
-                    if k is None or grids_per_frame[k] is not None:
+                    if k is None or regions[k] is not None:
                         continue
                     eye = batch[i, :, :, :eye_w].float()
-                    x1, y1, x2, y2 = compute_enlarged_bbox(np.array(bboxes[k], np.float32), H, W, (0, eye_w))
-                    rw, rh = x2 - x1, y2 - y1
-                    bbox_uv = (x1 / eye_w, y1 / H, x2 / eye_w, y2 / H)
-                    gr, center = variant_grids(bbox_uv, (rw, rh))
-                    grids_per_frame[k] = (gr, (x1, y1, x2, y2), center)
                     regions[k] = eye[:, y1:y2, x1:x2].clone()
                     for v in CORE:
                         inputs[v][k] = sample_eye(eye, gr[v][0]).clone()
-                if all(g is not None for g in grids_per_frame):
+                if all(rr is not None for rr in regions):
                     break
-        if any(g is None for g in grids_per_frame):
-            print(f"  [!] PTS align failed ({sum(g is None for g in grids_per_frame)} missing) -> skip", flush=True)
+        if any(rr is None for rr in regions):
+            print(f"  [!] PTS align failed ({sum(rr is None for rr in regions)} missing) -> skip", flush=True)
             continue
 
         # restore each variant (primary), delta-composite into source region
@@ -171,8 +175,6 @@ def main() -> int:
             prim = primary.raw_process([p for p in inputs[v]])  # (F,3,256,256) [0,1]
             prim = prim.clamp(0, 1) * 255.0
             for k in range(F_):
-                gr, (x1, y1, x2, y2), center = grids_per_frame[k]
-                rw, rh = x2 - x1, y2 - y1
                 inp = inputs[v][k]
                 delta = prim[k] - inp                                  # patch-space delta [0..255]
                 inv = gr[v][1]; cov = gr[v][2]
@@ -194,28 +196,23 @@ def main() -> int:
                 out = out + region_delta * blend
                 composites[v].append(out.clamp(0, 255))
 
-        # render: source-region composite + gnomonic viewport, per variant -> mp4 frames
+        # fixed gnomonic headset-viewport grid (centred on the mosaic)
+        u1, v1 = x1 / eye_w, y1 / H
+        du, dv = (x2 - x1) / eye_w, (y2 - y1) / H
+        lon0g, lat0g, _hf, _vf, xmax, ymax = vp.region_gnomonic_spec((u1, v1, x2 / eye_w, y2 / H))
+        vpfov = 2 * math.degrees(math.atan(max(xmax, ymax)))
+        vuv, _ = vp.v360_map("flat", PATCH, PATCH, h_fov=vpfov, v_fov=vpfov, yaw=lon0g, pitch=lat0g)
+        ruvn = np.stack(((vuv[..., 0] - u1) / du, (vuv[..., 1] - v1) / dv), -1)
+        vgrid = torch.from_numpy(ruvn * 2 - 1).float().unsqueeze(0).to(device)
         variant_frames = {v: [] for v in CORE}
         for v in CORE:
             for k in range(F_):
-                gr, (x1, y1, x2, y2), (lon0, lat0) = grids_per_frame[k]
                 comp = composites[v][k]  # (3,rh,rw) float [0,255], equirect region
-                # viewport: gnomonic view centred on mosaic, sampled from the region
-                rw, rh = x2 - x1, y2 - y1
-                u1, v1 = x1 / eye_w, y1 / H
-                du, dv = (x2 - x1) / eye_w, (y2 - y1) / H
-                lon0g, lat0g, hf, vf, xmax, ymax = vp.region_gnomonic_spec((u1, v1, x2 / eye_w, y2 / H))
-                fov = 2 * math.degrees(math.atan(max(xmax, ymax)))
-                vuv, _ = vp.v360_map("flat", PATCH, PATCH, h_fov=fov, v_fov=fov, yaw=lon0g, pitch=lat0g)
-                # eye-uv -> region-local normalized
-                ruvn = np.stack(((vuv[..., 0] - u1) / du, (vuv[..., 1] - v1) / dv), -1)
-                rg = torch.from_numpy(ruvn * 2 - 1).float().unsqueeze(0).to(device)
-                vp_img = F.grid_sample(comp.unsqueeze(0), rg, mode="bilinear",
+                vp_img = F.grid_sample(comp.unsqueeze(0), vgrid, mode="bilinear",
                                        padding_mode="zeros", align_corners=False)[0]
-                # montage [region resized-square | viewport]
                 reg_sq = F.interpolate(comp.unsqueeze(0), size=(PATCH, PATCH), mode="bilinear",
                                        align_corners=False)[0]
-                tile = torch.cat([reg_sq, vp_img], dim=2)  # side by side
+                tile = torch.cat([reg_sq, vp_img], dim=2)  # [region | viewport]
                 variant_frames[v].append(tile.round().clamp(0, 255).to(torch.uint8).permute(1, 2, 0).cpu().numpy())
 
         # blind A/B/C
