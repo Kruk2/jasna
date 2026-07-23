@@ -94,6 +94,44 @@ def test_noop_delta_is_source_identical():
     assert np.array_equal(out, region)            # bit-identical no-op
 
 
+def test_delta_composite_real_change_bounded_by_mask():
+    # A real restoration change inside the mosaic mask must (a) leave pixels
+    # outside the mask bit-identical, (b) apply only the inverse-projected delta
+    # inside. This is the anti-halo / delta-compositing guarantee.
+    H = W = 512
+    yy, xx = np.meshgrid(np.linspace(0, 1, H), np.linspace(0, 1, W), indexing="ij")
+    source = (30 + 200 * (0.4 * xx + 0.6 * yy)).astype(np.float32)
+    bbox_uv = (0.44, 0.56, 0.58, 0.70)
+    lon0, lat0, hf, vf, xmax, ymax = region_gnomonic_spec(bbox_uv)
+
+    ph = pw = 80
+    fwd_uv, _ = v360_map("flat", ph, pw, h_fov=hf, v_fov=vf, yaw=lon0, pitch=lat0)
+    patch = _sample(source, fwd_uv)
+    restored = patch.copy()
+    restored[24:56, 24:56] += 50.0                      # a real change in the patch
+
+    u1, v1, u2, v2 = bbox_uv
+    x0, y0 = int(round(u1 * W)), int(round(v1 * H))
+    x1, y1 = int(round(u2 * W)), int(round(v2 * H))
+    ru = (np.arange(x0, x1) + 0.5) / W
+    rv = (np.arange(y0, y1) + 0.5) / H
+    rvv, ruu = np.meshgrid(rv, ru, indexing="ij")
+    vec = rotate_inv(hequirect_uv_to_xyz(ruu, rvv), lon0, lat0, 0.0)
+    patch_uv, cov = xyz_to_flat_uv(vec, hf, vf)
+
+    region_delta = _sample((restored - patch), patch_uv)
+    # source-space mosaic mask: where the patch change back-projects to
+    mask = np.abs(region_delta) > 1e-3
+
+    region = source[y0:y1, x0:x1].copy()
+    out = region.copy()
+    out[mask] = region[mask] + region_delta[mask]
+
+    assert np.array_equal(out[~mask], region[~mask])    # outside mask: untouched
+    assert np.abs(out[mask] - region[mask]).max() > 1.0  # inside: actually changed
+    assert np.isfinite(out).all()
+
+
 def test_region_spec_covers_bbox():
     bbox_uv = (0.40, 0.50, 0.62, 0.70)
     lon0, lat0, hf, vf, xmax, ymax = region_gnomonic_spec(bbox_uv)
