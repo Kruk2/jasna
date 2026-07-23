@@ -61,7 +61,7 @@ def test_rfdetr_model_config_per_version() -> None:
         vr.score_threshold,
         vr.dynamic_batch,
         vr.fixed_batch_size,
-    ) == (768, 0.50, True, None)
+    ) == (768, 0.40, True, None)
 
 
 def test_rfdetr_model_config_unknown_falls_back_to_dynamic_batch() -> None:
