@@ -14,6 +14,7 @@ from jasna.media import (
     is_stream_10bit,
     get_video_meta_data,
     parse_sample_aspect_ratio,
+    parse_video_bitrate,
     resolve_video_start_pts,
     VideoMetadata,
 )
@@ -30,6 +31,23 @@ from jasna.media import (
 )
 def test_resolve_video_start_pts(stream_start, metadata_start, expected) -> None:
     assert resolve_video_start_pts(stream_start, metadata_start) == expected
+
+
+@pytest.mark.parametrize(
+    ("stream", "fmt", "expected"),
+    [
+        ({"bit_rate": "18913000"}, {}, 18913000),
+        ({"bit_rate": "18913000"}, {"bit_rate": "19200000"}, 18913000),
+        ({"tags": {"BPS": "13567000"}}, {}, 13567000),
+        ({"tags": {"BPS-eng": "6505000"}}, {}, 6505000),
+        ({}, {"bit_rate": "25224000"}, 25224000),
+        ({"bit_rate": "N/A"}, {"bit_rate": "25224000"}, 25224000),
+        ({"bit_rate": "0"}, {}, 0),
+        ({}, {}, 0),
+    ],
+)
+def test_parse_video_bitrate(stream, fmt, expected) -> None:
+    assert parse_video_bitrate(stream, fmt) == expected
 
 
 class TestParseEncoderSettingScalar:

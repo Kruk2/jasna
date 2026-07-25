@@ -120,7 +120,7 @@ against the active encoder — an unsupported key fails with a clear error
 listing what the encoder accepts. You rarely need more than `cq`:
 
 ```bash
-# Higher quality (bigger file): lower cq. Default is 25 (HEVC), 24 (H.264), 32 (AV1).
+# Higher quality (bigger file): lower cq. Default is 28 (HEVC), 27 (H.264), 35 (AV1).
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"
 
 # Multiple keys
@@ -131,7 +131,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Target quality for VBR. **The main quality knob.** Lower = better quality and bigger file. Scale 0–51 for H.264/HEVC (defaults 24/25), 0–63 for AV1 (default 32). |
+| `cq` | Target quality for VBR. **The main quality knob.** Lower = better quality and bigger file. Scale 0–51 for H.264/HEVC (defaults 27/28), 0–63 for AV1 (default 35). |
 | `preset` | Speed/quality trade-off, `p1` (fastest) to `p7` (best). Default `p5`. |
 | `tune` | `hq` (default), `ll`, `ull`, or `lossless`. |
 | `rc` | Rate-control mode: `vbr` (default), `cbr`, `constqp`. |
@@ -147,10 +147,31 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 | `aq-strength` | AQ aggressiveness, 1–15. Default 8. |
 | `rc-lookahead` | Frames analyzed ahead for rate control. Default 32. |
 | `lookahead_level` | Lookahead quality, 0–3. HEVC/AV1 only — on H.264 it is ignored with a warning (the encoder can't use it). |
-| `maxrate` / `bufsize` | Bitrate cap and VBV buffer size, for when you need a hard bitrate limit. |
+| `maxrate` / `bufsize` | Bitrate cap and VBV buffer size, in bits per second. Jasna sets these automatically from the source bitrate (see below); setting `maxrate` yourself replaces that. |
 | `multipass` | Two-pass encoding: `disabled`, `qres`, `fullres`. |
 | `weighted_pred` | Weighted prediction. NVENC supports it only together with `bf=0`; otherwise (and always on AV1) it is ignored with a warning. |
 | `tf_level` | Temporal filtering level. |
+
+#### Automatic output size ceiling
+
+`cq` targets a fixed quality regardless of how the source was stored, so a cheaply
+encoded source gets re-encoded well above its own quality point and grows several
+times larger. To bound that, Jasna derives `maxrate` from the source video bitrate
+and sets `bufsize` to twice it:
+
+| Source codec | Ceiling |
+| ------------ | ------- |
+| HEVC | 1.25 x source video bitrate |
+| Everything else (H.264, ...) | 1.0 x source video bitrate |
+
+HEVC sources get headroom because restoration legitimately adds detail the source
+never had. The ceiling only binds on sources that were cheaply encoded; a
+generously encoded source is unaffected and comes out below it anyway.
+
+Pass your own `maxrate` to replace this, or set it very high to effectively disable
+it. If the source reports no bitrate at all, Jasna logs a warning and encodes
+without a ceiling.
+
 
 Per-codec extras:
 
@@ -164,7 +185,7 @@ Per-codec extras:
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Portable quality knob, automatically translated to AMF's `qvbr_quality_level`. Lower = better. Defaults 24 (H.264), 25 (HEVC), 32 (AV1). |
+| `cq` | Portable quality knob, automatically translated to AMF's `qvbr_quality_level`. Lower = better. Defaults 27 (H.264), 28 (HEVC), 35 (AV1). |
 | `qvbr_quality_level` | The native AMF quality level, if you prefer to set it directly. |
 | `usage` | Encoder usage profile. Default `high_quality`. |
 | `quality` | Speed/quality preset: `speed`, `balanced`, `quality` (default). |
@@ -174,7 +195,7 @@ Per-codec extras:
 | `bf` | Max consecutive B-frames. |
 | `preanalysis` | Pre-analysis pass, enabled by default. |
 | `vbaq` | Variance-based adaptive quantization, enabled by default. |
-| `maxrate` / `bufsize` | Bitrate cap and VBV buffer size. |
+| `maxrate` / `bufsize` | Bitrate cap and VBV buffer size, in bits per second. Set automatically from the source bitrate unless you pass `maxrate`. |
 | `profile` / `level` | Codec profile and level. |
 
 Per-codec extras:

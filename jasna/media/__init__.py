@@ -203,6 +203,7 @@ class VideoMetadata:
     color_transfer: str = ""
     stereo_layout: str = ""
     spherical_projection: str = ""
+    video_bitrate: int = 0
 
 
 def resolve_video_start_pts(
@@ -246,6 +247,30 @@ def parse_sample_aspect_ratio(json_video_stream: dict) -> Fraction:
     if sep and num.isdigit() and den.isdigit() and int(num) > 0 and int(den) > 0:
         return Fraction(int(num), int(den))
     return Fraction(1, 1)
+
+
+def parse_video_bitrate(json_video_stream: dict, json_video_format: dict) -> int:
+    """Video bitrate in bits/s, or 0 when no source reports one."""
+    tags = json_video_stream.get("tags") or {}
+    candidates = (
+        json_video_stream.get("bit_rate"),
+        tags.get("BPS"),
+        tags.get("BPS-eng"),
+        # Container rate counts audio too, so it slightly overstates the video
+        # stream. Matroska muxers routinely omit the per-stream rate, and an
+        # ceiling that is a few percent loose beats having none at all.
+        json_video_format.get("bit_rate"),
+    )
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            value = int(float(candidate))
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0
 
 
 def parse_spatial_metadata(json_video_stream: dict) -> tuple[str, str]:
@@ -357,5 +382,6 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         color_transfer=str(json_video_stream.get("color_transfer") or ""),
         stereo_layout=stereo_layout,
         spherical_projection=spherical_projection,
+        video_bitrate=parse_video_bitrate(json_video_stream, json_video_format),
     )
     return metadata
