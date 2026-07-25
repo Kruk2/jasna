@@ -1127,3 +1127,61 @@ class TestCurrentVideoPath:
     def test_initial_current_path_is_none(self):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
         assert server._current_video_path is None
+
+
+class TestStreamingEncoderWriterDeath:
+    def _make_encoder(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        return StreamingEncoder(
+            segments_dir=tmp_path,
+            segment_duration=4.0,
+            metadata=_make_metadata(duration=20.0, fps=30.0),
+            source_video="nonexistent.mp4",
+        )
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_broken_pipe_unblocks_write_frame(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        proc.stdin.write.side_effect = BrokenPipeError()
+        mock_popen.return_value = proc
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        assert enc.failed is False
+
+        enc.write_frame(_make_rgb_frame(), pts=0)
+        deadline = time.monotonic() + 5.0
+        while enc._started and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert enc.failed is True
+        assert enc._started is False
+
+        # More frames than the write queue holds: with a dead writer thread
+        # nothing drains it, so an encoder that still looks started blocks here.
+        def flood():
+            for pts in range(1, 40):
+                enc.write_frame(_make_rgb_frame(), pts=pts)
+
+        writer = threading.Thread(target=flood, daemon=True)
+        writer.start()
+        writer.join(timeout=5.0)
+        assert not writer.is_alive()
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_restart_clears_failed(self, mock_popen, tmp_path):
+        proc = _mock_ffmpeg_process()
+        proc.stdin.write.side_effect = BrokenPipeError()
+        mock_popen.return_value = proc
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        enc.write_frame(_make_rgb_frame(), pts=0)
+        deadline = time.monotonic() + 5.0
+        while not enc.failed and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert enc.failed is True
+
+        proc.stdin.write.side_effect = None
+        enc.flush_and_restart(start_number=1)
+        assert enc.failed is False
+        assert enc._started is True
+        enc.stop()
