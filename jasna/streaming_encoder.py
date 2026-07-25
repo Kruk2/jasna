@@ -55,10 +55,12 @@ class StreamingEncoder:
         self._writer_thread: threading.Thread | None = None
         self._stop_sentinel = object()
         self._started = False
+        self.failed = False
 
     def start(self, start_number: int = 0) -> None:
         self._launch_ffmpeg(start_number)
         self._started = True
+        self.failed = False
         self._writer_thread = threading.Thread(
             target=self._writer_loop, daemon=True, name="StreamingWriterThread",
         )
@@ -210,6 +212,10 @@ class StreamingEncoder:
                 self._process.stdin.write(item)
             except (BrokenPipeError, OSError):
                 log.warning("[stream-enc] pipe broken, writer exiting")
+                # Nothing drains the queue any more, so write_frame's retry
+                # loop would spin forever waiting for room.
+                self._started = False
+                self.failed = True
                 return
 
     def _stop_writer(self, drain: bool) -> None:
