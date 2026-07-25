@@ -15,6 +15,9 @@ Open it with the scissors button on any queued video.
   empty to restore the whole video.
 - **Restore preview** shows the current frame or a short playback with your
   current restoration settings, before you commit to processing.
+- Use the visible **− / +** controls or the mouse wheel to zoom into details,
+  then drag the preview to pan. **Reset view** appears only after the view has
+  been changed.
 - When ranges are selected, the export keeps the source video codec — the
   main **Encoding** codec setting does not apply, because unselected parts
   are copied as-is. The editor tells you upfront if a video can't be used

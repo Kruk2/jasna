@@ -5,6 +5,7 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageDraw, ImageTk
 
+from jasna.gui import scaling
 from jasna.gui.theme import Colors
 
 
@@ -131,7 +132,11 @@ def create_icon(name: str, size: int, color: str) -> ctk.CTkImage:
 
 
 def create_native_icon_image(master, name: str, size: int, color: str) -> ImageTk.PhotoImage:
-    return ImageTk.PhotoImage(render_icon(name, size, color), master=master)
+    """Render an icon for a raw tkinter widget, which CustomTkinter does not scale for us."""
+    return ImageTk.PhotoImage(
+        render_icon(name, scaling.raw_tk_size(master, size), color),
+        master=master,
+    )
 
 
 class NativeIconButton(tk.Button):
@@ -158,8 +163,8 @@ class NativeIconButton(tk.Button):
             master,
             image=self._icon_image,
             command=self._invoke,
-            width=width,
-            height=height,
+            width=scaling.raw_tk_size(master, width),
+            height=scaling.raw_tk_size(master, height),
             background=background,
             activebackground=active_background,
             relief="flat",
@@ -237,8 +242,8 @@ class CompactSwitch(tk.Label):
         super().__init__(
             master,
             image=self._off_image,
-            width=40,
-            height=24,
+            width=scaling.raw_tk_size(master, 40),
+            height=scaling.raw_tk_size(master, 24),
             background=background,
             borderwidth=0,
             highlightthickness=0,
@@ -254,7 +259,13 @@ class CompactSwitch(tk.Label):
         button_color: str,
     ) -> ImageTk.PhotoImage:
         return ImageTk.PhotoImage(
-            render_toggle(selected, 36, 18, track_color, button_color),
+            render_toggle(
+                selected,
+                scaling.raw_tk_size(master, 36),
+                scaling.raw_tk_size(master, 18),
+                track_color,
+                button_color,
+            ),
             master=master,
         )
 

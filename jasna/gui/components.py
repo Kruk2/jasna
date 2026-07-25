@@ -4,6 +4,7 @@ import logging
 import tkinter
 import customtkinter as ctk
 import webbrowser
+from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 
@@ -231,11 +232,13 @@ class LicenseDialog(ctk.CTkToplevel):
                 self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
 
         self.update_idletasks()
-        w = max(388, self.winfo_reqwidth())
-        h = self.winfo_reqheight()
-        x = master.winfo_x() + (master.winfo_width() - w) // 2
-        y = master.winfo_y() + (master.winfo_height() - h) // 2
-        self.geometry(f"{w}x{h}+{x}+{y}")
+        minimum_width, _ = scaling.to_physical(self, 388, 0)
+        scaling.place_centered_on_parent(
+            self,
+            master,
+            max(minimum_width, self.winfo_reqwidth()),
+            self.winfo_reqheight(),
+        )
 
     def _activate(self):
         from jasna.protection import ProtectionError, license_store
@@ -899,16 +902,8 @@ class PresetDialog(ctk.CTkToplevel):
         self._existing_names = [n.lower() for n in existing_names]
         self._result = None
         
-        # Center on parent
-        self.geometry("320x180")
         self.update_idletasks()
-        parent_x = master.winfo_rootx()
-        parent_y = master.winfo_rooty()
-        parent_w = master.winfo_width()
-        parent_h = master.winfo_height()
-        x = parent_x + (parent_w - 320) // 2
-        y = parent_y + (parent_h - 180) // 2
-        self.geometry(f"+{x}+{y}")
+        scaling.place_centered_on_parent(self, master, *scaling.to_physical(self, 320, 180))
         
         # Content
         content = ctk.CTkFrame(self, fg_color="transparent")
@@ -998,15 +993,8 @@ class ConfirmDialog(ctk.CTkToplevel):
         
         self._on_confirm = on_confirm
         
-        self.geometry("320x140")
         self.update_idletasks()
-        parent_x = master.winfo_rootx()
-        parent_y = master.winfo_rooty()
-        parent_w = master.winfo_width()
-        parent_h = master.winfo_height()
-        x = parent_x + (parent_w - 320) // 2
-        y = parent_y + (parent_h - 140) // 2
-        self.geometry(f"+{x}+{y}")
+        scaling.place_centered_on_parent(self, master, *scaling.to_physical(self, 320, 140))
         
         content = ctk.CTkFrame(self, fg_color="transparent")
         content.pack(fill="both", expand=True, padx=20, pady=20)

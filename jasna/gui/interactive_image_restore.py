@@ -9,6 +9,7 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image
 
+from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -82,8 +83,10 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self._photo = None
 
         image_size = _read_image_size(self._paths[0])
-        screen_size = (self.winfo_screenwidth(), self.winfo_screenheight())
-        self._window_w, self._window_h, self._preview_w, self._preview_h = _dialog_geometry_for_image(image_size, screen_size)
+        # Logical screen: the geometry it returns feeds both geometry() and CTk widget
+        # sizes, which are multiplied by the scaling factor again at render time.
+        logical_screen = scaling.to_logical(self, *scaling.screen_size(self))
+        self._window_w, self._window_h, self._preview_w, self._preview_h = _dialog_geometry_for_image(image_size, logical_screen)
 
         self._requests: queue.Queue[tuple[int, int, int] | None] = queue.Queue()
         self._worker = threading.Thread(target=self._worker_loop, daemon=True)
@@ -242,11 +245,10 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         self._refresh_header()
 
     def _center(self, master) -> None:
-        self.geometry(f"{self._window_w}x{self._window_h}")
         self.update_idletasks()
-        x = master.winfo_rootx() + (master.winfo_width() - self._window_w) // 2
-        y = master.winfo_rooty() + (master.winfo_height() - self._window_h) // 2
-        self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        scaling.place_centered_on_parent(
+            self, master, *scaling.to_physical(self, self._window_w, self._window_h)
+        )
 
     def _refresh_header(self) -> None:
         path = self._paths[self._index]

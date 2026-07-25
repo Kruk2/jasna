@@ -4,6 +4,7 @@ import tkinter as tk
 
 import customtkinter as ctk
 
+from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.theme import Colors, Fonts
 
@@ -24,7 +25,7 @@ def create_slider_value_label(
         text=text,
         foreground=Colors.TEXT_PRIMARY,
         background=background,
-        font=(Fonts.FAMILY, -Fonts.SIZE_NORMAL),
+        font=(Fonts.FAMILY, scaling.raw_tk_font_size(master, Fonts.SIZE_NORMAL)),
         width=width,
         borderwidth=0,
         highlightthickness=0,
