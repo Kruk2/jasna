@@ -208,6 +208,14 @@ def test_apply_keeps_installed_model_and_threshold(_basic_section_panel) -> None
     assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.55)
 
 
+def test_default_encoder_cq_matches_hevc_encoder_default() -> None:
+    # The GUI always sends an explicit cq, so a stale default here silently
+    # overrides the measured encoder default for every GUI job.
+    from jasna.media.video_encoder import DEFAULT_ENCODER_OPTIONS
+
+    assert str(AppSettings().encoder_cq) == DEFAULT_ENCODER_OPTIONS["cq"]
+
+
 def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))

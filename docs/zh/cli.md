@@ -117,7 +117,7 @@ jasna --input input_folder --output output_folder
 参数。通常你只需要 `cq`:
 
 ```bash
-# Higher quality (bigger file): lower cq. Default is 25 (HEVC), 24 (H.264), 32 (AV1).
+# Higher quality (bigger file): lower cq. Default is 28 (HEVC), 27 (H.264), 35 (AV1).
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"
 
 # Multiple keys
@@ -128,7 +128,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | VBR 的目标质量。**最主要的质量参数。**越低 = 质量越好、文件越大。H.264/HEVC 范围 0–51（默认 24/25），AV1 范围 0–63（默认 32）。 |
+| `cq` | VBR 的目标质量。**最主要的质量参数。**越低 = 质量越好、文件越大。H.264/HEVC 范围 0–51（默认 27/28），AV1 范围 0–63（默认 35）。 |
 | `preset` | 速度/质量权衡，从 `p1`（最快）到 `p7`（最佳）。默认 `p5`。 |
 | `tune` | `hq`（默认）、`ll`、`ull` 或 `lossless`。 |
 | `rc` | 码率控制模式: `vbr`（默认）、`cbr`、`constqp`。 |
@@ -144,10 +144,28 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 | `aq-strength` | AQ 强度，1–15。默认 8。 |
 | `rc-lookahead` | 码率控制的前瞻分析帧数。默认 32。 |
 | `lookahead_level` | 前瞻质量，0–3。仅 HEVC/AV1 — 在 H.264 上会被忽略并警告（编码器无法使用它）。 |
-| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小，用于需要硬性码率限制的场景。 |
+| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。Jasna 会根据源码率自动设置（见下文）；自行指定 `maxrate` 则以你的值为准。 |
 | `multipass` | 两遍编码: `disabled`、`qres`、`fullres`。 |
 | `weighted_pred` | 加权预测。NVENC 仅在 `bf=0` 时支持；否则（以及 AV1 上始终）会被忽略并警告。 |
 | `tf_level` | 时间滤波级别。 |
+
+#### 输出体积自动上限
+
+`cq` 只针对固定质量，不考虑源文件的存储方式，因此低码率保存的源会被重新编码到远高于
+其自身质量的水平，体积膨胀数倍。为此，Jasna 会根据源视频码率推导 `maxrate`，并将
+`bufsize` 设为其两倍：
+
+| 源编码 | 上限 |
+| ------ | ---- |
+| HEVC | 源视频码率的 1.25 倍 |
+| 其他（H.264 等） | 源视频码率的 1.0 倍 |
+
+HEVC 源获得额外余量，因为修复确实会加入源中原本没有的细节。该上限只对低码率保存的源
+生效；码率充足的源不受影响，本来就低于上限。
+
+自行指定 `maxrate` 即可替换；设为很大的值可实际停用。若源完全没有报告码率，Jasna 会
+记录警告并在无上限的情况下编码。
+
 
 各编解码器额外参数:
 
@@ -161,7 +179,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | 通用质量参数，自动转换为 AMF 的 `qvbr_quality_level`。越低越好。默认 24（H.264）、25（HEVC）、32（AV1）。 |
+| `cq` | 通用质量参数，自动转换为 AMF 的 `qvbr_quality_level`。越低越好。默认 27（H.264）、28（HEVC）、35（AV1）。 |
 | `qvbr_quality_level` | AMF 原生质量级别，如果你想直接设置它。 |
 | `usage` | 编码器用途配置。默认 `high_quality`。 |
 | `quality` | 速度/质量预设: `speed`、`balanced`、`quality`（默认）。 |
@@ -171,7 +189,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 | `bf` | 最大连续 B 帧数。 |
 | `preanalysis` | 预分析，默认开启。 |
 | `vbaq` | 基于方差的自适应量化，默认开启。 |
-| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小。 |
+| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。除非指定 `maxrate`，否则会根据源码率自动设置。 |
 | `profile` / `level` | 编解码器 profile 和 level。 |
 
 各编解码器额外参数:

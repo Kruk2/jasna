@@ -121,7 +121,7 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 `cq` 以外は必要ありません:
 
 ```bash
-# Higher quality (bigger file): lower cq. Default is 25 (HEVC), 24 (H.264), 32 (AV1).
+# Higher quality (bigger file): lower cq. Default is 28 (HEVC), 27 (H.264), 35 (AV1).
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"
 
 # Multiple keys
@@ -132,7 +132,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 
 | キー | 説明 |
 | --- | ------------ |
-| `cq` | VBR の目標品質。**主な品質調整項目です。** 低いほど高品質でファイルが大きくなります。H.264/HEVC は 0–51（デフォルト 24/25）、AV1 は 0–63（デフォルト 32）。 |
+| `cq` | VBR の目標品質。**主な品質調整項目です。** 低いほど高品質でファイルが大きくなります。H.264/HEVC は 0–51（デフォルト 27/28）、AV1 は 0–63（デフォルト 35）。 |
 | `preset` | 速度と品質のトレードオフ。`p1`（最速）から `p7`（最高品質）。デフォルト `p5`。 |
 | `tune` | `hq`（デフォルト）、`ll`、`ull`、または `lossless`。 |
 | `rc` | レート制御モード: `vbr`（デフォルト）、`cbr`、`constqp`。 |
@@ -148,10 +148,31 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 | `aq-strength` | AQ の強さ。1–15。デフォルト 8。 |
 | `rc-lookahead` | レート制御のために先読みするフレーム数。デフォルト 32。 |
 | `lookahead_level` | 先読みの品質。0–3。HEVC/AV1 のみ — H.264 では警告付きで無視されます（エンコーダーが使用できません）。 |
-| `maxrate` / `bufsize` | ビットレート上限と VBV バッファサイズ。ビットレートに厳密な上限が必要な場合に使います。 |
+| `maxrate` / `bufsize` | ビットレート上限と VBV バッファサイズ（bit/秒）。Jasna がソースのビットレートから自動設定します（下記参照）。`maxrate` を指定するとその値が使われます。 |
 | `multipass` | 2 パスエンコード: `disabled`、`qres`、`fullres`。 |
 | `weighted_pred` | 重み付き予測。NVENC は `bf=0` と組み合わせた場合のみ対応します。それ以外（および AV1 では常に）警告付きで無視されます。 |
 | `tf_level` | 時間フィルタリングのレベル。 |
+
+#### 出力サイズの自動上限
+
+`cq` はソースの保存状態に関係なく一定の品質を狙うため、低ビットレートで保存された
+ソースは元の品質を大きく上回る設定で再エンコードされ、数倍に膨れ上がります。これを
+抑えるため、Jasna はソースの映像ビットレートから `maxrate` を導出し、`bufsize` を
+その 2 倍に設定します。
+
+| ソースのコーデック | 上限 |
+| ------------------ | ---- |
+| HEVC | ソース映像ビットレートの 1.25 倍 |
+| その他（H.264 など） | ソース映像ビットレートの 1.0 倍 |
+
+HEVC ソースに余裕を持たせているのは、復元によってソースにはなかったディテールが
+実際に加わるためです。上限が効くのは低ビットレートで保存されたソースだけで、
+十分なビットレートのソースは影響を受けず、元々上限を下回ります。
+
+独自の `maxrate` を指定すれば置き換えられます。非常に大きな値を指定すれば実質的に
+無効化できます。ソースがビットレートを一切報告しない場合、Jasna は警告を記録し、
+上限なしでエンコードします。
+
 
 コーデック別の追加キー:
 
@@ -165,7 +186,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 
 | キー | 説明 |
 | --- | ------------ |
-| `cq` | 汎用の品質調整項目。AMF の `qvbr_quality_level` に自動変換されます。低いほど高品質。デフォルトは 24（H.264）、25（HEVC）、32（AV1）。 |
+| `cq` | 汎用の品質調整項目。AMF の `qvbr_quality_level` に自動変換されます。低いほど高品質。デフォルトは 27（H.264）、28（HEVC）、35（AV1）。 |
 | `qvbr_quality_level` | AMF ネイティブの品質レベル。直接設定したい場合に使います。 |
 | `usage` | エンコーダーの用途プロファイル。デフォルト `high_quality`。 |
 | `quality` | 速度/品質プリセット: `speed`、`balanced`、`quality`（デフォルト）。 |
@@ -175,7 +196,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 | `bf` | 連続 B フレームの最大数。 |
 | `preanalysis` | 事前分析パス。デフォルトで有効。 |
 | `vbaq` | 分散ベースの適応量子化。デフォルトで有効。 |
-| `maxrate` / `bufsize` | ビットレート上限と VBV バッファサイズ。 |
+| `maxrate` / `bufsize` | ビットレート上限と VBV バッファサイズ（bit/秒）。`maxrate` を指定しない限り、ソースのビットレートから自動設定されます。 |
 | `profile` / `level` | コーデックのプロファイルとレベル。 |
 
 コーデック別の追加キー:

@@ -164,7 +164,7 @@ class AppSettings:
 
     # Encoding
     codec: str = "hevc"
-    encoder_cq: int = 22
+    encoder_cq: int = 28
     encoder_custom_args: str = ""
     lut_path: str = ""
     retarget_high_fps: bool = False

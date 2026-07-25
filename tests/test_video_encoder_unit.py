@@ -73,13 +73,13 @@ def _make_encoder(tmp_path, encoder_settings=None, codec="hevc", **meta_override
     )
 
 
-# Pre-PR hevc_nvenc configuration; the HEVC path must never drift from it.
+# Measured hevc_nvenc configuration; the HEVC path must never drift from it.
 _HEVC_OPTIONS_SNAPSHOT = {
     "preset": "p5",
     "tune": "hq",
     "profile": "main10",
     "rc": "vbr",
-    "cq": "25",
+    "cq": "28",
     "qmin": "17",
     "qmax": "34",
     "nonref_p": "1",
@@ -108,14 +108,14 @@ class TestCodecSpecs:
     def test_h264_defaults_snapshot(self):
         expected = dict(_HEVC_OPTIONS_SNAPSHOT)
         expected["profile"] = "high"
-        expected["cq"] = "24"
+        expected["cq"] = "27"
         del expected["lookahead_level"]
         assert DEFAULT_H264_ENCODER_OPTIONS == expected
 
     def test_av1_defaults_snapshot(self):
         expected = dict(_HEVC_OPTIONS_SNAPSHOT)
         del expected["profile"]
-        expected["cq"] = "32"
+        expected["cq"] = "35"
         del expected["qmin"]
         del expected["qmax"]
         del expected["spatial_aq"]
@@ -126,7 +126,7 @@ class TestCodecSpecs:
         assert DEFAULT_AV1_ENCODER_OPTIONS == expected
 
     def test_av1_does_not_reuse_hevc_qp_scale(self):
-        assert DEFAULT_AV1_ENCODER_OPTIONS["cq"] == "32"
+        assert DEFAULT_AV1_ENCODER_OPTIONS["cq"] == "35"
         assert not {
             "qmin",
             "qmax",
@@ -228,6 +228,32 @@ class TestEncoderOptions:
         assert enc.encoder_options["temporal-aq"] == "0"
         assert enc.encoder_options["maxrate"] == "10M"
         assert enc.encoder_options["preset"] == "p5"
+
+    def test_source_bitrate_adds_ceiling(self, tmp_path):
+        enc = _make_encoder(tmp_path, codec_name="hevc", video_bitrate=20_000_000)
+        assert enc.encoder_options["maxrate"] == "25000000"
+        assert enc.encoder_options["bufsize"] == "50000000"
+
+    def test_source_bitrate_ceiling_is_tighter_for_non_hevc(self, tmp_path):
+        enc = _make_encoder(tmp_path, codec_name="h264", video_bitrate=20_000_000)
+        assert enc.encoder_options["maxrate"] == "20000000"
+        assert enc.encoder_options["bufsize"] == "40000000"
+
+    def test_no_ceiling_without_source_bitrate(self, tmp_path):
+        enc = _make_encoder(tmp_path, video_bitrate=0)
+        assert "maxrate" not in enc.encoder_options
+        assert "bufsize" not in enc.encoder_options
+
+    def test_explicit_maxrate_replaces_derived_ceiling(self, tmp_path):
+        enc = _make_encoder(
+            tmp_path,
+            encoder_settings={"maxrate": "3000000"},
+            codec_name="hevc",
+            video_bitrate=20_000_000,
+        )
+        assert enc.encoder_options["maxrate"] == "3000000"
+        # The derived buffer must not survive a user-chosen ceiling.
+        assert "bufsize" not in enc.encoder_options
 
     def test_unsupported_codec_raises(self, tmp_path):
         with pytest.raises(ValueError, match="Unsupported codec"):

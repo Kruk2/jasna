@@ -60,7 +60,7 @@ DEFAULT_ENCODER_OPTIONS: dict[str, str] = {
     "tune": "hq",
     "profile": "main10",
     "rc": "vbr",
-    "cq": "25",
+    "cq": "28",
     "qmin": "17",
     "qmax": "34",
     "nonref_p": "1",
@@ -84,8 +84,8 @@ DEFAULT_H264_ENCODER_OPTIONS: dict[str, str] = {
     "tune": "hq",
     "profile": "high",
     "rc": "vbr",
-    # CQ 24 matched HEVC CQ 25 in representative VMAF comparisons.
-    "cq": "24",
+    # CQ 27 matches HEVC CQ 28 on the same one-below-HEVC scale.
+    "cq": "27",
     "qmin": "17",
     "qmax": "34",
     "nonref_p": "1",
@@ -102,7 +102,7 @@ DEFAULT_H264_ENCODER_OPTIONS: dict[str, str] = {
 }
 
 # AV1 target quality uses a 0..63 scale rather than H.264/HEVC's 0..51.
-# CQ 32 matched HEVC CQ 25 in representative VMAF/SSIM comparisons. AV1 QP limits use a separate
+# CQ 35 matches HEVC CQ 28 on the same seven-above-HEVC scale. AV1 QP limits use a separate
 # 0..255 scale, so the HEVC qmin/qmax/init_qp values must not be copied here.
 # No profile: P010 input makes av1_nvenc emit AV1 Main 10-bit on its own.
 # av1_nvenc only consumes the hyphenated spatial-aq spelling.
@@ -110,7 +110,7 @@ DEFAULT_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "preset": "p5",
     "tune": "hq",
     "rc": "vbr",
-    "cq": "32",
+    "cq": "35",
     "nonref_p": "1",
     "g": "250",
     "temporal-aq": "1",
@@ -262,6 +262,37 @@ _COLOR_CONVERTERS_NV12 = {
 
 _NVENC_PITCH_ALIGNMENT = 16
 
+# `cq` alone targets a fixed quality and ignores how the source was stored, so a
+# cheaply encoded source is re-encoded far above its own quality point and grows
+# several times over (issues #235, #243). A ceiling tied to the source bitrate
+# bounds that without measurably costing quality: across 27 clips (1080p to 8K,
+# VR and flat) capped encodes landed on the uncapped quality-vs-bitrate curve to
+# within 0.07 VMAF, and the ceiling stays inert on sources that were already
+# generously encoded. HEVC sources get headroom because restoration legitimately
+# adds detail the source never had; other codecs re-encode smaller regardless.
+SOURCE_BITRATE_CAP_FACTORS: dict[str, float] = {"hevc": 1.25}
+DEFAULT_SOURCE_BITRATE_CAP_FACTOR = 1.0
+# Any VBV buffer of roughly a second or more never becomes the binding
+# constraint; only sub-second buffers throttle, which is the #243 unit trap.
+SOURCE_BITRATE_CAP_BUFFER_RATIO = 2
+
+
+def source_bitrate_cap_options(metadata: VideoMetadata) -> dict[str, str]:
+    if metadata.video_bitrate <= 0:
+        logger.warning(
+            "No source bitrate for %s; encoding without a source-tied bitrate ceiling",
+            metadata.video_file,
+        )
+        return {}
+    factor = SOURCE_BITRATE_CAP_FACTORS.get(
+        metadata.codec_name.lower(), DEFAULT_SOURCE_BITRATE_CAP_FACTOR
+    )
+    maxrate = int(metadata.video_bitrate * factor)
+    return {
+        "maxrate": str(maxrate),
+        "bufsize": str(maxrate * SOURCE_BITRATE_CAP_BUFFER_RATIO),
+    }
+
 
 def _option_value(value: object) -> str:
     if isinstance(value, bool):
@@ -386,6 +417,8 @@ class NvidiaVideoEncoder:
         self._to_yuv = converter
 
         self.encoder_options = dict(spec.default_options)
+        if "maxrate" not in encoder_settings:
+            self.encoder_options.update(source_bitrate_cap_options(metadata))
         if encoder_settings:
             overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
             # FFmpeg accepts both spellings for HEVC/H.264, but their defaults
