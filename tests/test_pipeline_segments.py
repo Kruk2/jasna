@@ -22,6 +22,7 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     pipeline.disable_progress = True
     pipeline.progress_callback = None
     pipeline.lut_path = None
+    pipeline.sharpen_strength = 0.0
     pipeline.retarget_high_fps = False
     pipeline.segments = (SegmentRange(2.5, 3.0),)
     pipeline.working_dir = None
@@ -98,6 +99,7 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     pipeline.disable_progress = True
     pipeline.progress_callback = None
     pipeline.lut_path = None
+    pipeline.sharpen_strength = 0.0
     pipeline.retarget_high_fps = False
     pipeline.segments = (SegmentRange(2.5, 3.0),)
     pipeline.working_dir = tmp_path / "scratch"

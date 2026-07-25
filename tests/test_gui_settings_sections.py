@@ -92,6 +92,7 @@ def _fake_section_widgets() -> dict:
         "codec": _FakeValueMenu({"hevc": "HEVC (H.265)", "av1": "AV1"}, "av1"),
         "encoder_cq": _FakeWidget(29),
         "encoder_custom_args": _FakeWidget("cq=22"),
+        "sharpen_strength": _FakeWidget(0.35),
         "retarget_high_fps": _FakeWidget(1),
         "fmp4": _FakeWidget(1),
         "lut_path": _FakeWidget(" /luts/a.cube "),
@@ -135,6 +136,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["scene_detection"] is False
     assert values["retarget_high_fps"] is True
     assert values["fmp4"] is True
+    assert values["sharpen_strength"] == 0.35
 
 
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:

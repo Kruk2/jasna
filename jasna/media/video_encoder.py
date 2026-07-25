@@ -33,6 +33,7 @@ from jasna.media import (
     validate_encoder_settings,
 )
 from jasna.media.audio_utils import needs_audio_reencode
+from jasna.media.cas import GpuCasSharpener
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.rgb_to_nv12 import (
     chw_rgb_to_nv12_bt2020_full,
@@ -359,6 +360,7 @@ class NvidiaVideoEncoder:
         codec: str,
         encoder_settings: dict[str, object],
         lut_path: str | Path | None = None,
+        sharpen_strength: float = 0.0,
         output_fps: Fraction | None = None,
         mux_audio: bool = True,
         pts_origin: int = 0,
@@ -426,6 +428,12 @@ class NvidiaVideoEncoder:
         if lut_path:
             lut = parse_cube_file(lut_path)
             self._lut_applier = GpuLutApplier(lut, device)
+
+        self._cas: GpuCasSharpener | None = None
+        if sharpen_strength > 0.0:
+            self._cas = GpuCasSharpener(
+                sharpen_strength, ten_bit=spec.ten_bit, device=self.device
+            )
 
         self._to_yuv = converter
 
@@ -746,10 +754,15 @@ class NvidiaVideoEncoder:
         return RuntimeError(message)
 
     def _encode_frame(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
+        height = self.metadata.video_height
         with stream_context(self.stream):
             if apply_lut and self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
             packed = self._to_yuv(frame)
+            # Sharpen before pitch alignment, which can hand back a strided view
+            # into a wider buffer, and before the AMD copy to host memory.
+            if self._cas is not None:
+                self._cas.apply_luma_(packed, height)
             if self.vendor is AcceleratorVendor.NVIDIA:
                 packed = _align_yuv_pitch(packed)
             else:
@@ -758,7 +771,6 @@ class NvidiaVideoEncoder:
                     non_blocking=True,
                 )
 
-        height = self.metadata.video_height
         self.stream.synchronize()
         if self.vendor is AcceleratorVendor.AMD:
             planes = [self._host_yuv[:height], self._host_yuv[height:]]

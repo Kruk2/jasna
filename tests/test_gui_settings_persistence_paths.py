@@ -106,6 +106,18 @@ def test_preset_manager_persists_frame_rate_retargeting(monkeypatch, tmp_path: P
     assert loaded.retarget_high_fps is True
 
 
+def test_preset_manager_persists_sharpen_strength(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    mgr = PresetManager()
+    assert mgr.create_preset("Crisp", AppSettings(sharpen_strength=0.45))
+
+    loaded = PresetManager().get_preset("Crisp")
+    assert loaded is not None
+    assert loaded.sharpen_strength == 0.45
+
+
 def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))

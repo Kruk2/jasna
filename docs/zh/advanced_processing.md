@@ -64,6 +64,18 @@ jasna --input input.mp4 --output output.mp4 --fmp4
 在 GUI 的编码设置部分设置，或使用 `--lut path/to/look.cube`。LUT 在
 编码前由 GPU 应用，几乎没有额外开销。
 
+## 锐化
+
+修复后的画面有时会显得偏软。GUI 编码设置中的**锐化**（`--sharpen`）会在导出时让
+边缘和细节更清晰，无需再用其他工具转码一次。
+
+```bash
+jasna --input in.mp4 --output out.mkv --sharpen 0.5
+```
+
+`0` 表示关闭，`0.2`–`0.5` 为轻微增强，`1` 最强且可能显得生硬。画面越锐利所需
+文件越大，如果结果反而变差，请同时调低 CQ 值。预览中不显示该效果。
+
 ## 自定义编码器设置
 
 **自定义参数**输入框（`--encoder-settings`）可微调硬件视频编码器 —

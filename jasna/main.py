@@ -64,6 +64,7 @@ def _session_config_from_args(
         codec=codec,
         encoder_settings=encoder_settings,
         lut_path=lut_path,
+        sharpen_strength=float(args.sharpen),
         retarget_high_fps=bool(args.retarget_high_fps),
         fmp4=bool(args.fmp4),
         disable_progress=bool(args.no_progress),
@@ -401,6 +402,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to a .cube color LUT (1D or 3D) applied on GPU before encoding.",
     )
     encoding.add_argument(
+        "--sharpen",
+        type=float,
+        default=0.0,
+        help=(
+            "Sharpen the picture on GPU before encoding, from 0 (off) to 1 "
+            "(strongest). Matches the ffmpeg cas filter."
+        ),
+    )
+    encoding.add_argument(
         "--retarget-high-fps",
         action="store_true",
         help=(
@@ -716,6 +726,8 @@ def main() -> None:
         raise ValueError("--min-detection-duration must be >= 0")
     if min_detection_duration >= max_clip_size:
         raise ValueError("--min-detection-duration must be < --max-clip-size")
+    if not (0.0 <= float(args.sharpen) <= 1.0):
+        raise ValueError("--sharpen must be in [0, 1]")
 
     device = torch.device(str(args.device))
     from jasna.accelerator import device_context

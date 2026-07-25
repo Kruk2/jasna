@@ -89,6 +89,7 @@ def video_session_config(
         codec=codec,
         encoder_settings=dict(encoder_settings),
         lut_path=(settings.lut_path or "").strip() or None,
+        sharpen_strength=float(settings.sharpen_strength),
         retarget_high_fps=bool(settings.retarget_high_fps),
         fmp4=bool(settings.fmp4),
         disable_progress=True,

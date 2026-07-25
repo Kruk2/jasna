@@ -108,6 +108,15 @@ class TestMainValidation:
         with pytest.raises(ValueError, match="detection-score-threshold must be in"):
             _run_main_with_args(tmp_path, ["--detection-score-threshold", "1.5"])
 
+    @pytest.mark.parametrize("value", ["1.5", "-0.1"])
+    def test_sharpen_out_of_range_raises(self, tmp_path, value):
+        with pytest.raises(ValueError, match="sharpen must be in"):
+            _run_main_with_args(tmp_path, ["--sharpen", value])
+
+    def test_sharpen_is_forwarded_to_the_pipeline(self, tmp_path):
+        pipeline_cls = _run_main_with_args(tmp_path, ["--sharpen", "0.4"])
+        assert pipeline_cls.call_args.kwargs["sharpen_strength"] == 0.4
+
     def test_missing_input_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             _run_main_with_args(tmp_path, [], create_input=False)

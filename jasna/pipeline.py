@@ -96,6 +96,7 @@ class Pipeline:
         disable_progress: bool = False,
         progress_callback: callable | None = None,
         lut_path: str | Path | None = None,
+        sharpen_strength: float = 0.0,
         retarget_high_fps: bool = False,
         fmp4: bool = False,
         segments: tuple[SegmentRange, ...] | None = None,
@@ -130,6 +131,7 @@ class Pipeline:
         self.disable_progress = bool(disable_progress)
         self.progress_callback = progress_callback
         self.lut_path = lut_path
+        self.sharpen_strength = float(sharpen_strength)
         self.retarget_high_fps = bool(retarget_high_fps)
         self.fmp4 = bool(fmp4)
         self.segments = tuple(segments) if segments else None
@@ -557,6 +559,7 @@ class Pipeline:
             codec=self.codec,
             encoder_settings=self.encoder_settings,
             lut_path=self.lut_path,
+            sharpen_strength=self.sharpen_strength,
             output_fps=frame_rate.output_fps,
             fmp4=self.fmp4,
         )
@@ -628,6 +631,7 @@ class Pipeline:
                             codec=codec,
                             encoder_settings=smart_encoder_settings,
                             lut_path=self.lut_path,
+                            sharpen_strength=self.sharpen_strength,
                             output_fps=metadata.video_fps_exact,
                             mux_audio=False,
                             pts_origin=span.start_pts,
