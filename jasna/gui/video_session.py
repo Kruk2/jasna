@@ -85,6 +85,7 @@ def video_session_config(
         rtx_denoise=settings.rtx_denoise.lower(),
         rtx_deblur=settings.rtx_deblur.lower(),
         vr_mode=settings.vr_mode,
+        vr_projection=settings.vr_projection,
         codec=codec,
         encoder_settings=dict(encoder_settings),
         lut_path=(settings.lut_path or "").strip() or None,

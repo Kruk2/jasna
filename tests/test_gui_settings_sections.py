@@ -138,7 +138,14 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
     values = _collect_all(_fake_section_widgets())
 
-    defaults_only = {"batch_size", "tvai_args", "output_same_as_input", "output_folder", "output_pattern"}
+    defaults_only = {
+        "batch_size",
+        "tvai_args",
+        "vr_projection",
+        "output_same_as_input",
+        "output_folder",
+        "output_pattern",
+    }
     expected = {f.name for f in fields(AppSettings)} - defaults_only
     assert set(values) == expected
 

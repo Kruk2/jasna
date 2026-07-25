@@ -16,10 +16,11 @@ CLI_HELP: dict[str, str] = {
     "denoise_step": "When to apply denoising: after_primary (before secondary) or after_secondary (right before blend). (default: %(default)s)",
     "secondary_restoration": "Secondary restoration after primary model (default: %(default)s)",
     "vr_mode": (
-        "VR180 handling: auto uses conservative studio/metadata detection; "
-        "sbs processes each eye separately; sbs-fisheye also reprojects each "
-        "eye for detection/restoration and preserves source projection on output. "
-        "(default: %(default)s)"
+        "VR180 SBS handling: auto uses conservative studio/metadata detection and "
+        "routes each mosaic region's restoration projection (raw/fisheye/gnomonic) "
+        "by studio; sbs forces per-eye SBS with the same studio routing; sbs-fisheye "
+        "forces fisheye conditioning for every region. Detection, tracking, and "
+        "blending stay in source coordinates. (default: %(default)s)"
     ),
     "tvai_ffmpeg_path": "Path to Topaz Video ffmpeg.exe (default: %(default)s)",
     "tvai_model": 'Topaz model name for tvai_up (e.g. "iris-2", "prob-4", "iris-3") (default: %(default)s)',

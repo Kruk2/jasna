@@ -81,7 +81,10 @@ def _equirect_to_fisheye_px(px, py, eye_width, height, fov_degrees=180.0):
     theta = math.acos(max(-1.0, min(1.0, dz)))
     phi = math.atan2(dy, dx)
     r = theta / half
-    return ((r * math.cos(phi) + 1) * 0.5 * eye_width, (r * math.sin(phi) + 1) * 0.5 * height)
+    return (
+        (r * math.cos(phi) + 1) * 0.5 * (eye_width - 1),
+        (r * math.sin(phi) + 1) * 0.5 * (height - 1),
+    )
 
 
 def _fisheye_patch_grid(h, w, fov_degrees, device):
@@ -120,7 +123,8 @@ def main() -> int:
     from jasna.session_config import SessionConfig
     from jasna.session_factory import build_restoration_session
     from jasna.tracking.clip_tracker import ClipTracker
-    from jasna.vr180 import GnomonicProjector, SbsDetectionAdapter, resolve_vr_mode
+    from jasna.vr180 import SbsDetectionAdapter, resolve_vr_mode
+    from jasna.vr_projection import GnomonicProjector
 
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
@@ -155,7 +159,7 @@ def main() -> int:
         h, w = int(crop_chw_u8.shape[1]), int(crop_chw_u8.shape[2])
         grid = _fisheye_patch_grid(h, w, fov, device).to(crop_chw_u8.device)
         s = F.grid_sample(crop_chw_u8.unsqueeze(0).float(), grid, mode="bilinear",
-                          padding_mode="border", align_corners=False)[0]
+                          padding_mode="border", align_corners=True)[0]
         return s.round().clamp(0, 255).to(torch.uint8)
 
     def _composite(base, warped, mask_chw):
@@ -166,7 +170,7 @@ def main() -> int:
         offset = x_bounds[0] if x_bounds is not None else 0
         x1, y1, x2, y2 = ebox
         eye = frame[:, :, offset:offset + eye_width].unsqueeze(0).float()
-        fe = F.grid_sample(eye, fe_eye_grid, mode="bilinear", padding_mode="zeros", align_corners=False)[0]
+        fe = F.grid_sample(eye, fe_eye_grid, mode="bilinear", padding_mode="zeros", align_corners=True)[0]
         xs, ys = [], []
         for px in (x1 - offset, x2 - offset):
             for py in (y1, y2):

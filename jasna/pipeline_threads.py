@@ -87,9 +87,7 @@ def decode_detect_loop(
                 progress.init()
             target_hw = (int(metadata.video_height), int(metadata.video_width))
             crop_eye_width = (
-                int(metadata.video_width) // 2
-                if vr_mode in {"sbs", "sbs-fisheye"}
-                else None
+                int(metadata.video_width) // 2 if vr_mode == "sbs" else None
             )
             frame_idx = 0 if seek_ts is None else _estimate_start_frame(metadata, seek_ts)
             effect_active = effect_ranges is None

@@ -40,10 +40,10 @@ from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange
 from jasna.vram_offloader import VramOffloader
 from jasna.vr180 import (
-    GnomonicProjector,
     SbsDetectionAdapter,
     resolve_vr_mode,
 )
+from jasna.vr_projection import build_vr_projector
 
 log = logging.getLogger(__name__)
 
@@ -91,6 +91,7 @@ class Pipeline:
         enable_crossfade: bool = True,
         scene_detection: bool = True,
         vr_mode: str = "auto",
+        vr_projection: str = "auto",
         fp16: bool,
         disable_progress: bool = False,
         progress_callback: callable | None = None,
@@ -114,6 +115,7 @@ class Pipeline:
         self.enable_crossfade = bool(enable_crossfade)
         self.scene_detection = bool(scene_detection)
         self.vr_mode = str(vr_mode)
+        self.vr_projection = str(vr_projection)
 
         self.detection_model = build_detection_model(
             detection_model_name,
@@ -139,6 +141,7 @@ class Pipeline:
             self.vr_mode,
             metadata,
             self.input_video,
+            projection=self.vr_projection,
         )
         self._job_detection_model = (
             SbsDetectionAdapter(self.detection_model)
@@ -146,7 +149,8 @@ class Pipeline:
             else self.detection_model
         )
         self._vr_projector = (
-            GnomonicProjector(
+            build_vr_projector(
+                self._vr_resolution.projection,
                 eye_width=int(metadata.video_width) // 2,
                 height=int(metadata.video_height),
                 device=self.device,

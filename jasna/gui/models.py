@@ -33,6 +33,7 @@ class JobProcessingSnapshot:
     segments: tuple[SegmentRange, ...]
     detection_model: str | None
     detection_score_threshold: float | None
+    vr_projection: str | None
 
 
 @dataclass
@@ -47,6 +48,7 @@ class JobItem:
     segments: tuple[SegmentRange, ...] = ()
     detection_model: str | None = None
     detection_score_threshold: float | None = None
+    vr_projection: str | None = None
     _state_lock: threading.Lock = field(
         default_factory=threading.Lock,
         repr=False,
@@ -81,6 +83,7 @@ class JobItem:
         *,
         detection_model: str,
         detection_score_threshold: float,
+        vr_projection: str,
     ) -> bool:
         with self._state_lock:
             if self.status is not JobStatus.PENDING:
@@ -88,6 +91,7 @@ class JobItem:
             self.segments = tuple(segments)
             self.detection_model = str(detection_model)
             self.detection_score_threshold = float(detection_score_threshold)
+            self.vr_projection = str(vr_projection)
             return True
 
     def begin_processing(self) -> JobProcessingSnapshot | None:
@@ -99,6 +103,7 @@ class JobItem:
                 segments=self.segments,
                 detection_model=self.detection_model,
                 detection_score_threshold=self.detection_score_threshold,
+                vr_projection=self.vr_projection,
             )
 
 
@@ -123,6 +128,7 @@ class AppSettings:
     temporal_overlap: int = 8
     enable_crossfade: bool = True
     vr_mode: str = "auto"
+    vr_projection: str = "auto"
     fp16_mode: bool = True
     
     # Denoising

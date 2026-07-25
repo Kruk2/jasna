@@ -5,13 +5,9 @@ Run: ~/.virtualenvs/jasna-linux/bin/python -m pytest scripts/test_vr_projection.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.vr_projection import (  # noqa: E402
+from scripts.vr_projection import (
     hequirect_uv_to_xyz, region_gnomonic_spec, rotate_inv, v360_map,
     xyz_to_fisheye_uv, xyz_to_flat_uv,
 )
@@ -27,8 +23,8 @@ def _out_centers(oh, ow):
 def _sample(img, uv):
     """Bilinear sample img (H,W[,C]) at normalized uv (h,w,2) in [0,1]."""
     h, w = img.shape[:2]
-    fx = np.clip(uv[..., 0] * w - 0.5, 0, w - 1)
-    fy = np.clip(uv[..., 1] * h - 0.5, 0, h - 1)
+    fx = np.clip(uv[..., 0] * (w - 1), 0, w - 1)
+    fy = np.clip(uv[..., 1] * (h - 1), 0, h - 1)
     x0 = np.floor(fx).astype(int); y0 = np.floor(fy).astype(int)
     x1 = np.minimum(x0 + 1, w - 1); y1 = np.minimum(y0 + 1, h - 1)
     ax = (fx - x0); ay = (fy - y0)

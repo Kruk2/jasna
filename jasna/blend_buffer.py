@@ -145,9 +145,17 @@ class BlendBuffer:
         ).squeeze(0)
 
         if self.vr_projector is not None:
-            resized_back = self.vr_projector.source_region_from_patch(
-                resized_back, (x1, y1, x2, y2)
+            # Project the restoration *delta* back to source space (not the whole
+            # restored patch): outside the mosaic the model leaves the patch
+            # unchanged, so the delta is ~0 there and the inverse resample cannot
+            # smear reprojection error onto untouched pixels.
+            original_projected = self.vr_projector.project_region(
+                original, (x1, y1, x2, y2)
             )
+            source_delta = self.vr_projector.source_region_from_patch(
+                resized_back - original_projected, (x1, y1, x2, y2)
+            )
+            resized_back = original[:, y1:y2, x1:x2].float() + source_delta
 
         blend_mask = self.blend_mask_fn(mask_lr, (x1, y1, x2, y2), sr.frame_shape)
 

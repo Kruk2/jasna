@@ -27,7 +27,7 @@ Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目�
 - 修复视频文件中的马赛克。
 - 使用实验性 SD 1.5 图像模型修复静态图像中的马赛克。
 - 默认使用快速的 `rfdetr-v6` 模型检测马赛克；也提供更大的 RF-DETR 变体，以及 Lada 和 ZeLeFans YOLO 模型。
-- 可逐眼处理并排 VR180 视频，并可在检测和修复时使用鱼眼重投影。
+- 可逐眼处理并排 VR180 视频，并按片商为每个马赛克区域选择修复投影（raw、鱼眼或等距投影）；还可在区间编辑器中预览每种方式。
 - 通过时间重叠和交叉淡化减少片段边界闪烁。
 - 检测硬切镜头并在切换点结束跟踪片段，确保修复不会混合切换前后的画面。
 - 可使用可选的[二级修复模型](docs/zh/models.md) — **unet-4x**、**RTX Super Resolution** 或 **Topaz Video AI** — 进一步提升质量，让修复区域更清晰，尤其是大面积马赛克、特写和 4K 视频。
@@ -86,7 +86,7 @@ jasna --input input_folder --output output_folder
 - **[使用 GUI](docs/zh/gui.md)** — 队列（拖放、排序）、预设、输出文件名模板与文件冲突，以及其他容易错过的功能。
 - **[选择模型](docs/zh/models.md)** — 该选哪个检测模型、用二级修复（unet-4x / RTX Super Resolution / Topaz）获得更清晰的结果，以及 SD 1.5 静态图像修复。
 - **[只修复视频的一部分](docs/zh/segments.md)** — 区间编辑器、内置马赛克扫描、提交更好的遮罩，以及 `--segments` CLI 参数。
-- **[VR180 视频](docs/zh/vr180.md)** — Jasna 如何处理并排 VR，以及何时使用鱼眼模式。
+- **[VR180 视频](docs/zh/vr180.md)** — Jasna 如何处理并排 VR，以及按片商的投影路由。
 - **[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)** — 片段大小、时间重叠、模型编译，以及显存不足时该怎么办。
 - **[高级处理](docs/zh/advanced_processing.md)** — 降噪、60→30 FPS 导出、色彩 LUT、自定义编码器设置和导出后操作。
 - **[流媒体](docs/zh/streaming.md)** — 在浏览器中或通过 Stash 实时观看修复后的视频。

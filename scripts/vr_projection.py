@@ -6,6 +6,9 @@ against real `v360` runs; see that harness for the conformance thresholds.
 
 All maps are OUTPUT->INPUT: for each output pixel we compute the normalized
 [0,1] source coordinate to sample from the stored half-equirectangular eye.
+FFmpeg converts that coordinate to an absolute source position with
+``uv * (size - 1)``; Torch consumers must therefore use
+``grid_sample(..., align_corners=True)``.
 Everything here is numpy/float64 for the CPU oracle; the GPU/product port comes
 later (Phase 5) once routing is decided.
 

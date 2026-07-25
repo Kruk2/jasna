@@ -10,6 +10,7 @@ import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from jasna.gui import restoration_preview
 from jasna.gui.models import AppSettings
 from jasna.gui.app import JasnaApp
 from jasna.gui.restoration_preview import (
@@ -212,11 +213,12 @@ def test_restoration_collectors_show_only_left_eye() -> None:
 def test_restoration_worker_coalesces_pending_requests() -> None:
     worker = RestorationPreviewWorker("unused.mp4", _metadata())
 
-    first_generation = worker.request(1.0, AppSettings())
-    second_generation = worker.request(2.0, AppSettings())
+    first_generation = worker.request(1.0, AppSettings(), projection="auto")
+    second_generation = worker.request(2.0, AppSettings(), projection="fisheye")
 
     command = worker._commands.get_nowait()
     assert command.center_seconds == 2.0
+    assert command.projection == "fisheye"
     assert command.generation == second_generation
     assert second_generation == first_generation + 1
     with pytest.raises(queue.Empty):
@@ -227,9 +229,51 @@ def test_restoration_worker_coalesces_pending_requests() -> None:
 def test_restoration_worker_marks_playback_requests() -> None:
     worker = RestorationPreviewWorker("unused.mp4", _metadata())
 
-    worker.request(2.0, AppSettings(), playback=True)
+    worker.request(2.0, AppSettings(), projection="raw", playback=True)
 
-    assert worker._commands.get_nowait().playback is True
+    command = worker._commands.get_nowait()
+    assert command.playback is True
+    assert command.projection == "raw"
+    worker.close()
+
+
+def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
+    from jasna import pipeline_threads
+    from jasna import vram_offloader
+
+    class ImmediateThread:
+        def __init__(self, *, target, **_kwargs):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
+    decode_detect = MagicMock()
+    monkeypatch.setattr(pipeline_threads, "decode_detect_loop", decode_detect)
+    monkeypatch.setattr(pipeline_threads, "primary_restore_loop", MagicMock())
+    monkeypatch.setattr(pipeline_threads, "secondary_restore_loop", MagicMock())
+    monkeypatch.setattr(pipeline_threads, "blend_encode_loop", MagicMock())
+    monkeypatch.setattr(restoration_preview.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(vram_offloader, "VramOffloader", MagicMock())
+    monkeypatch.setattr(torch.cuda, "empty_cache", MagicMock())
+    worker = RestorationPreviewWorker("video.mp4", _metadata())
+    settings = AppSettings(scene_detection=False)
+    worker.request(2.0, settings, projection="raw")
+    command = worker._commands.get_nowait()
+    session = SimpleNamespace(
+        device=torch.device("cpu"),
+        restoration_pipeline=SimpleNamespace(secondary_num_workers=1),
+    )
+
+    worker._run_preview_pass(command, session, MagicMock())
+
+    assert decode_detect.call_args.kwargs["scene_detection"] is False
     worker.close()
 
 
@@ -239,7 +283,7 @@ def test_restoration_worker_cancels_before_queueing_replacement() -> None:
     worker._cancel_active_pass = MagicMock(side_effect=lambda: order.append("cancel"))
     worker._replace_command = MagicMock(side_effect=lambda *_args, **_kwargs: order.append("queue"))
 
-    worker.request(1.0, AppSettings())
+    worker.request(1.0, AppSettings(), projection="auto")
 
     assert order == ["cancel", "queue"]
 
@@ -249,7 +293,7 @@ def test_restoration_worker_request_cancels_active_pass() -> None:
     active = threading.Event()
     worker._active_cancel = active
 
-    worker.request(1.0, AppSettings())
+    worker.request(1.0, AppSettings(), projection="auto")
 
     assert active.is_set()
     worker.close()

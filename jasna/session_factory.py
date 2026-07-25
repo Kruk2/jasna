@@ -160,6 +160,7 @@ def build_pipeline(
         enable_crossfade=bool(config.enable_crossfade),
         scene_detection=bool(config.scene_detection),
         vr_mode=config.vr_mode,
+        vr_projection=config.vr_projection,
         fp16=bool(config.fp16),
         disable_progress=bool(config.disable_progress),
         progress_callback=progress_callback,

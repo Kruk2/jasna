@@ -5,7 +5,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from jasna.gui.models import AppSettings
-from jasna.gui.video_session import build_video_session, video_session_key
+from jasna.gui.video_session import (
+    build_video_session,
+    video_session_config,
+    video_session_key,
+)
 
 
 def test_video_session_key_stable_for_identical_settings() -> None:
@@ -25,10 +29,34 @@ def test_video_session_key_ignores_encoder_fields() -> None:
     assert video_session_key(replace(AppSettings(), encoder_cq=30, codec="h264")) == base
 
 
-def test_video_session_key_ignores_vr_mode() -> None:
+def test_video_session_key_ignores_vr_routing() -> None:
     base = video_session_key(AppSettings())
     assert video_session_key(replace(AppSettings(), vr_mode="off")) == base
     assert video_session_key(replace(AppSettings(), vr_mode="sbs-fisheye")) == base
+    assert video_session_key(replace(AppSettings(), vr_projection="fisheye")) == base
+
+
+def test_video_session_config_forwards_vr_projection() -> None:
+    settings = replace(AppSettings(), vr_projection="gnomonic")
+
+    with (
+        patch("jasna.engine_paths.model_weights_dir"),
+        patch(
+            "jasna.mosaic.detection_registry.coerce_detection_model_name",
+            side_effect=lambda name: name,
+        ),
+        patch(
+            "jasna.mosaic.detection_registry.require_detection_model_weights",
+            return_value=Path("det.engine"),
+        ),
+    ):
+        config = video_session_config(
+            settings,
+            codec="hevc",
+            encoder_settings={},
+        )
+
+    assert config.vr_projection == "gnomonic"
 
 
 def test_video_session_key_includes_active_secondary_knobs() -> None:
