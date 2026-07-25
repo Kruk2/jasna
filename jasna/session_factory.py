@@ -165,6 +165,7 @@ def build_pipeline(
         disable_progress=bool(config.disable_progress),
         progress_callback=progress_callback,
         lut_path=config.lut_path,
+        sharpen_strength=config.sharpen_strength,
         retarget_high_fps=bool(config.retarget_high_fps),
         fmp4=bool(config.fmp4),
         segments=segments,

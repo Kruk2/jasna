@@ -94,6 +94,7 @@ jasna --input input_folder --output output_folder
 | `--codec` | `hevc` | 离线输出可选 `hevc`、`h264` 或 `av1`。HLS 流媒体始终使用 H.264。 |
 | `--encoder-settings` | — | JSON 对象或逗号分隔的 `key=value`，例如 `{"cq":22}` 或 `cq=22,rc-lookahead=32`。见下文。 |
 | `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），编码前由 GPU 应用。也可在 GUI 的编码设置部分设置。 |
+| `--sharpen` | `0` | 编码前锐化画面，取值 `0`（关闭）到 `1`（最强）。与 ffmpeg 的 `cas` 滤镜一致，无需二次转码。见[高级处理](advanced_processing.md)。 |
 | `--retarget-high-fps` | 关闭 | 通过每两帧处理一帧实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频时序保持不变。 |
 | `--fmp4` | 关闭 | `.mp4`/`.mov` 输出在生成过程中即可播放，任务中断后仍可播放。不能与 `--stream` 或 `--segments` 同时使用。见[高级处理](advanced_processing.md)。 |
 | `--segments` | — | 只修复选定区间，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps` 或 `--fmp4` 同时使用。见[区间](segments.md)。 |

@@ -1,15 +1,11 @@
 import ctypes
-import os
-import sys
-import threading
-from pathlib import Path
 
 import torch
 
 from av.video.reformatter import Colorspace as AvColorspace
 
-from jasna._frozen import is_frozen
 from jasna.accelerator import is_nvidia_device
+from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
 
 # YUV->RGB from standard luma coefficients (Kr, Kb):
 #   R = Y' + 2(1-Kr) * V'
@@ -44,95 +40,8 @@ def _rgb_from_yuv_coeffs(name: str) -> tuple[float, float, float, float]:
     )
 
 
-_driver: ctypes.CDLL | None = None
-_driver_lock = threading.Lock()
-_modules: dict[int, ctypes.c_void_p] = {}
 _CUDA_CONVERSION_BATCH = 8
-
-
-def _fatbin_path() -> Path:
-    if is_frozen():
-        return Path(sys.executable).resolve().parent / "yuv_to_rgb.fatbin"
-    return Path(__file__).resolve().with_name("yuv_to_rgb.fatbin")
-
-
-def _cuda_driver() -> ctypes.CDLL:
-    global _driver
-    if _driver is not None:
-        return _driver
-
-    loader = ctypes.WinDLL if os.name == "nt" else ctypes.CDLL
-    lib = loader("nvcuda.dll" if os.name == "nt" else "libcuda.so.1")
-    lib.cuInit.argtypes = [ctypes.c_uint]
-    lib.cuInit.restype = ctypes.c_int
-    lib.cuCtxGetCurrent.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
-    lib.cuCtxGetCurrent.restype = ctypes.c_int
-    lib.cuModuleLoadData.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
-    lib.cuModuleLoadData.restype = ctypes.c_int
-    lib.cuModuleGetFunction.argtypes = [
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.c_void_p,
-        ctypes.c_char_p,
-    ]
-    lib.cuModuleGetFunction.restype = ctypes.c_int
-    lib.cuLaunchKernel.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
-    lib.cuLaunchKernel.restype = ctypes.c_int
-    lib.cuGetErrorName.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
-    lib.cuGetErrorName.restype = ctypes.c_int
-    lib.cuGetErrorString.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
-    lib.cuGetErrorString.restype = ctypes.c_int
-    _driver = lib
-    return lib
-
-
-def _check_cuda(result: int, operation: str) -> None:
-    if result == 0:
-        return
-    lib = _cuda_driver()
-    name = ctypes.c_char_p()
-    message = ctypes.c_char_p()
-    lib.cuGetErrorName(result, ctypes.byref(name))
-    lib.cuGetErrorString(result, ctypes.byref(message))
-    name_text = name.value.decode(errors="replace") if name.value else f"CUDA error {result}"
-    message_text = message.value.decode(errors="replace") if message.value else "unknown error"
-    raise RuntimeError(f"{operation} failed: {name_text}: {message_text}")
-
-
-def _load_cuda_module() -> ctypes.c_void_p:
-    lib = _cuda_driver()
-    _check_cuda(lib.cuInit(0), "cuInit")
-
-    context = ctypes.c_void_p()
-    _check_cuda(lib.cuCtxGetCurrent(ctypes.byref(context)), "cuCtxGetCurrent")
-    if not context.value:
-        raise RuntimeError("No current CUDA context while loading YUV conversion kernel")
-
-    with _driver_lock:
-        cached = _modules.get(context.value)
-        if cached is not None:
-            return cached
-
-        path = _fatbin_path()
-        try:
-            image = ctypes.create_string_buffer(path.read_bytes())
-        except OSError as exc:
-            raise RuntimeError(f"Missing precompiled YUV conversion kernel: {path}") from exc
-        module = ctypes.c_void_p()
-        _check_cuda(lib.cuModuleLoadData(ctypes.byref(module), image), "cuModuleLoadData")
-        _modules[context.value] = module
-        return module
+_FATBIN = "yuv_to_rgb.fatbin"
 
 
 class _CudaYuvKernel:
@@ -156,23 +65,9 @@ class _CudaYuvKernel:
         )
 
     def _resolve(self) -> ctypes.c_void_p:
-        if self._function is not None:
-            return self._function
-        lib = _cuda_driver()
-        context = ctypes.c_void_p()
-        _check_cuda(lib.cuCtxGetCurrent(ctypes.byref(context)), "cuCtxGetCurrent")
-        if not context.value:
-            raise RuntimeError("No current CUDA context while launching YUV conversion kernel")
-        module = _load_cuda_module()
-        function = ctypes.c_void_p()
-        _check_cuda(
-            lib.cuModuleGetFunction(
-                ctypes.byref(function), module, self.function_name.encode("ascii")
-            ),
-            f"cuModuleGetFunction({self.function_name})",
-        )
-        self._function = function
-        return function
+        if self._function is None:
+            self._function = resolve_function(_FATBIN, self.function_name)
+        return self._function
 
     def launch(self, y: torch.Tensor, uv: torch.Tensor, out: torch.Tensor) -> None:
         self.launch_ptrs(
@@ -226,8 +121,8 @@ class _CudaYuvKernel:
         blocks = (pixels + threads - 1) // threads
         if stream is None:
             stream = torch.cuda.current_stream(out.device).cuda_stream
-        _check_cuda(
-            _cuda_driver().cuLaunchKernel(
+        check_cuda(
+            cuda_driver().cuLaunchKernel(
                 function,
                 blocks,
                 1,

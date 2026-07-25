@@ -94,6 +94,7 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 | `--codec` | `hevc` | `hevc`, `h264`, or `av1` for offline output. HLS streaming always uses H.264. |
 | `--encoder-settings` | — | JSON object or comma-separated `key=value` pairs, e.g. `{"cq":22}` or `cq=22,rc-lookahead=32`. See below. |
 | `--lut` | — | `.cube` color LUT (1D or 3D) applied on GPU before encoding. Also available in the GUI's Encoding section. |
+| `--sharpen` | `0` | Sharpen the picture before encoding, from `0` (off) to `1` (strongest). Matches ffmpeg's `cas` filter, so no second pass is needed. See [Advanced processing](advanced_processing.md). |
 | `--retarget-high-fps` | off | 60 → 30 FPS (and 59.94 → 29.97) by processing every second frame. Other rates unchanged; audio timing preserved. |
 | `--fmp4` | off | Play `.mp4`/`.mov` output while it is still being made; it also survives an interrupted job. Not available with `--stream` or `--segments`. See [Advanced processing](advanced_processing.md). |
 | `--segments` | — | Restore only selected ranges, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, or `--fmp4`. See [Segments](segments.md). |

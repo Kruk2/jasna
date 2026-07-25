@@ -73,6 +73,7 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.codec == "hevc"
     assert config.encoder_settings == {}
     assert config.lut_path is None
+    assert config.sharpen_strength == 0.0
     assert config.retarget_high_fps is False
     assert config.fmp4 is False
     assert config.disable_progress is False
@@ -92,6 +93,7 @@ def test_cli_non_default_args_are_mapped() -> None:
             "--no-progress",
             "--working-directory", "/fast/scratch",
             "--retarget-high-fps",
+            "--sharpen", "0.4",
             "--fmp4",
             "--no-scene-detection",
         ]
@@ -107,6 +109,7 @@ def test_cli_non_default_args_are_mapped() -> None:
     assert config.disable_progress is True
     assert config.working_dir == Path("/fast/scratch")
     assert config.retarget_high_fps is True
+    assert config.sharpen_strength == 0.4
     assert config.fmp4 is True
     assert config.scene_detection is False
 
@@ -122,6 +125,7 @@ def test_gui_config_maps_settings_fields() -> None:
     settings = AppSettings(
         fp16_mode=False,
         lut_path="  lut.cube  ",
+        sharpen_strength=0.35,
         working_directory="/tmp/work",
         secondary_restoration="tvai",
         tvai_scale=2,
@@ -132,6 +136,7 @@ def test_gui_config_maps_settings_fields() -> None:
 
     assert config.fp16 is False
     assert config.lut_path == "lut.cube"
+    assert config.sharpen_strength == 0.35
     assert config.working_dir == Path("/tmp/work")
     assert config.secondary_restoration == "tvai"
     assert config.tvai_scale == 2

@@ -89,6 +89,31 @@ Then install Jasna in editable mode:
 uv pip install -e ".[nvidia,dev]"  # or .[amd,dev]
 ```
 
+## CUDA kernels
+
+`jasna/media/*.cu` are compiled ahead of time into `.fatbin` files that are
+committed alongside them, and loaded at run time through the CUDA driver API
+(`jasna/media/cuda_kernel.py`). No CUDA toolkit is needed to *run* Jasna — only
+to rebuild a kernel after editing its `.cu`:
+
+```bash
+GENCODE="-gencode arch=compute_75,code=[compute_75,sm_75]"
+for arch in 80 86 87 88 89 90 100 103 110 120 121; do
+    GENCODE="$GENCODE -gencode arch=compute_$arch,code=sm_$arch"
+done
+nvcc -ccbin g++-15 -std=c++17 -O3 -fatbin $GENCODE \
+    -o jasna/media/cas.fatbin jasna/media/cas.cu
+```
+
+`-ccbin g++-15` is needed because CUDA 13 rejects newer host compilers. PTX is
+embedded for `compute_75` only, so future architectures still load via JIT.
+Verify the result with `cuobjdump -lelf jasna/media/cas.fatbin`, and add any new
+fatbin to `CUDA_KERNEL_FATBINS` in `jasna/protection/keytool/build_nuitka.py` so
+frozen builds bundle it.
+
+Every kernel needs a Torch equivalent: ROCm has no fatbin path and falls back to
+it, and the unit tests use it as the reference implementation.
+
 ## AMD release builds
 
 These scripts live in the private protection submodule and are for the

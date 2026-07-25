@@ -166,6 +166,7 @@ class AppSettings:
     codec: str = "hevc"
     encoder_cq: int = 28
     encoder_custom_args: str = ""
+    sharpen_strength: float = 0.0
     lut_path: str = ""
     retarget_high_fps: bool = False
     fmp4: bool = False

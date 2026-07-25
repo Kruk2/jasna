@@ -331,6 +331,115 @@ class TestEncoderOptions:
         assert enc._options_validated
 
 
+class _StopEncode(Exception):
+    """Cuts _encode_frame short once the encoder input has been captured."""
+
+
+class TestSharpening:
+    def test_no_sharpener_by_default(self, tmp_path):
+        assert _make_encoder(tmp_path)._cas is None
+
+    def test_sharpener_built_when_requested(self, tmp_path):
+        enc = NvidiaVideoEncoder(
+            file=str(tmp_path / "result.mkv"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={},
+            sharpen_strength=0.4,
+        )
+        assert enc._cas is not None
+        assert enc._cas.weight_scale == pytest.approx(-1.0 / (16.0 - 12.0 * 0.4))
+
+    def test_sharpener_follows_the_encoder_bit_depth(self, tmp_path):
+        ten_bit = NvidiaVideoEncoder(
+            file=str(tmp_path / "a.mkv"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={},
+            sharpen_strength=0.4,
+        )
+        eight_bit = NvidiaVideoEncoder(
+            file=str(tmp_path / "b.nut"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(is_10bit=False),
+            codec="hevc",
+            encoder_settings={},
+            sharpen_strength=0.4,
+            match_input_bit_depth=True,
+            smart_fragment=True,
+            mux_audio=False,
+        )
+        assert ten_bit._cas.ten_bit is True
+        assert ten_bit._cas.peak == 1023.0
+        assert eight_bit._cas.ten_bit is False
+        assert eight_bit._cas.peak == 255.0
+
+    def test_zero_strength_leaves_the_converted_frame_untouched(self, tmp_path, monkeypatch):
+        enc = _make_encoder(tmp_path, codec="h264")  # nv12, so planes stay uint8
+        packed = torch.arange(24, dtype=torch.uint8).reshape(6, 4)
+        enc._to_yuv = lambda frame: packed.clone()
+        enc.stream = SimpleNamespace(synchronize=lambda: None)
+        enc.metadata = _fake_metadata(video_height=4, video_width=4)
+        enc._cuda_ctx = None
+        seen = []
+
+        def capture(planes, **kwargs):
+            seen.append(planes)
+            raise _StopEncode
+
+        monkeypatch.setattr(
+            video_encoder_module, "stream_context", lambda _s: nullcontext()
+        )
+        monkeypatch.setattr(video_encoder_module, "_align_yuv_pitch", lambda p: p)
+        monkeypatch.setattr(video_encoder_module.av.VideoFrame, "from_dlpack", capture)
+
+        with pytest.raises(_StopEncode):
+            enc._encode_frame(torch.zeros(3, 4, 4), pts=0)
+
+        assert torch.equal(torch.cat(seen[0]), packed)
+
+    def test_sharpening_runs_before_pitch_alignment(self, tmp_path, monkeypatch):
+        enc = NvidiaVideoEncoder(
+            file=str(tmp_path / "result.mkv"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={},
+            sharpen_strength=0.4,
+        )
+        enc._to_yuv = lambda frame: torch.zeros((6, 4), dtype=torch.uint8)
+        enc.stream = SimpleNamespace(synchronize=lambda: None)
+        enc.metadata = _fake_metadata(video_height=4, video_width=4)
+        enc._cuda_ctx = None
+        order = []
+        enc._cas = SimpleNamespace(
+            apply_luma_=lambda packed, height: order.append(
+                ("sharpen", packed.is_contiguous())
+            )
+        )
+
+        def align(packed):
+            order.append(("align", True))
+            return packed
+
+        def stop(*args, **kwargs):
+            raise _StopEncode
+
+        monkeypatch.setattr(
+            video_encoder_module, "stream_context", lambda _s: nullcontext()
+        )
+        monkeypatch.setattr(video_encoder_module, "_align_yuv_pitch", align)
+        monkeypatch.setattr(video_encoder_module.av.VideoFrame, "from_dlpack", stop)
+
+        with pytest.raises(_StopEncode):
+            enc._encode_frame(torch.zeros(3, 4, 4), pts=0)
+
+        assert [step for step, _ in order] == ["sharpen", "align"]
+        assert order[0][1] is True  # sharpening sees a contiguous plane
+
+
 class TestColorHandling:
     def test_unsupported_color_range_raises(self, tmp_path):
         with pytest.raises(ValueError, match="Unsupported color space or color range"):

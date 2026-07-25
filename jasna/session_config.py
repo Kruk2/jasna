@@ -58,3 +58,4 @@ class SessionConfig:
     working_dir: Path | None
     vr_projection: VrProjectionName = "auto"
     fmp4: bool = False
+    sharpen_strength: float = 0.0

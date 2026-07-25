@@ -75,6 +75,21 @@ matching a house look. Set it in the GUI's Encoding section or with
 `--lut path/to/look.cube`. The LUT is applied on the GPU just before
 encoding, so it costs almost nothing.
 
+## Sharpening
+
+Restored video can look a little soft. **Sharpening** in the GUI's Encoding
+section (`--sharpen`) makes edges and fine detail crisper as the video is
+written, so you don't need a second pass through another tool.
+
+```bash
+jasna --input in.mp4 --output out.mkv --sharpen 0.5
+```
+
+`0` turns it off, `0.2`–`0.5` is a gentle boost, and `1` is the strongest and
+can look harsh. A sharper picture needs a bigger file, so if the result looks
+worse rather than better, lower the CQ value as well. The effect is not shown
+in the preview.
+
 ## Custom encoder settings
 
 The **Encoder custom args** field (`--encoder-settings`) fine-tunes the
