@@ -1,13 +1,10 @@
 """CPU tests for the Phase-2 harness primitives."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from scripts.vrx_harness import (  # noqa: E402
+from scripts.vrx_discover import studio_of
+from scripts.vrx_harness import (
     SampleRecord, angular_center, blind_labels, position_bin, read_jsonl,
     seek_candidates, stable_seed, track_stability, write_jsonl,
 )
@@ -50,10 +47,19 @@ def test_blind_labels_deterministic_and_complete():
     assert a == b
     assert set(a.keys()) == {"A", "B", "C"}
     assert sorted(a.values()) == sorted(variants)
-    assert blind_labels("s124", variants) != a or True  # may coincide; just must be defined
-    # inverse key recoverable
     inv = {v: k for k, v in a.items()}
     assert inv["raw"] in {"A", "B", "C"}
+
+
+def test_studio_parser_strips_release_site_tag():
+    studio, prior = studio_of(
+        "[98t.tv]bibivr-081-3",
+        frozenset({"SAVR"}),
+        frozenset({"MDVR"}),
+    )
+
+    assert studio == "BIBIVR"
+    assert prior == "unknown"
 
 
 def test_sample_record_roundtrip(tmp_path):

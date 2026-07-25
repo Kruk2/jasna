@@ -91,7 +91,7 @@ def test_segment_editor_maps_before_taking_modal_grab(monkeypatch) -> None:
         root.destroy()
 
 
-def _fake_metadata() -> object:
+def _fake_metadata(*, width: int = 1920, height: int = 1080) -> object:
     from fractions import Fraction
 
     from av.video.reformatter import ColorRange as AvColorRange
@@ -101,8 +101,8 @@ def _fake_metadata() -> object:
 
     return VideoMetadata(
         video_file="video.mp4",
-        video_height=1080,
-        video_width=1920,
+        video_height=height,
+        video_width=width,
         video_fps=30.0,
         average_fps=30.0,
         video_fps_exact=Fraction(30, 1),
@@ -117,7 +117,13 @@ def _fake_metadata() -> object:
     )
 
 
-def _build_editor_with_ui(root, monkeypatch) -> SegmentEditor:
+def _build_editor_with_ui(
+    root,
+    monkeypatch,
+    *,
+    metadata=None,
+    path: Path = Path("video.mp4"),
+) -> SegmentEditor:
     worker = MagicMock()
     worker.events = queue.Queue()
     monkeypatch.setattr(
@@ -126,17 +132,114 @@ def _build_editor_with_ui(root, monkeypatch) -> SegmentEditor:
     root.update()
     editor = SegmentEditor(
         root,
-        JobItem(Path("video.mp4")),
+        JobItem(path),
         lambda: AppSettings(),
         lambda: False,
         MagicMock(),
         MagicMock(),
     )
-    worker.events.put(segment_editor.PreviewLoaded(_fake_metadata()))
+    worker.events.put(segment_editor.PreviewLoaded(metadata or _fake_metadata()))
     editor._poll_workers()
     root.update()
     assert editor._state is not None
     return editor
+
+
+def test_projection_selector_is_disabled_for_non_vr_video(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+
+        assert editor._vr_projection_menu.cget("state") == "disabled"
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_projection_selector_is_enabled_for_detected_vr_video(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(
+            root,
+            monkeypatch,
+            metadata=_fake_metadata(width=3840, height=1920),
+        )
+
+        assert editor._vr_projection_menu.cget("state") == "normal"
+        assert editor._vr_projection_menu.get_value() == "auto"
+        assert editor._vr_projection_label.cget("text") == t(
+            "segments_vr_projection_resolved",
+            projection=t("segments_vr_projection_raw"),
+        )
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_projection_selector_is_next_to_restore_preview_with_long_filename(
+    monkeypatch,
+) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(
+            root,
+            monkeypatch,
+            metadata=_fake_metadata(width=3840, height=1920),
+            path=Path(f"SAVR-{'x' * 180}.mp4"),
+        )
+        editor.geometry("900x640")
+        editor.update()
+
+        menu_right = (
+            editor._vr_projection_menu.winfo_rootx()
+            + editor._vr_projection_menu.winfo_width()
+        )
+        editor_right = editor.winfo_rootx() + editor.winfo_width()
+        assert editor._vr_projection_menu.winfo_ismapped()
+        assert editor._vr_projection_menu.cget("state") == "normal"
+        assert menu_right <= editor_right
+        assert (
+            editor._vr_projection_menu.master.master
+            is editor._restore_toggle.master.master
+        )
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_projection_change_restarts_active_restoration_preview() -> None:
+    editor = object.__new__(SegmentEditor)
+    editor._vr_projection = "auto"
+    editor._restore_active = True
+    editor._restored_clip = (object(),)
+    editor._restored_source = object()
+    editor._restore_play_pending = True
+    editor._set_playing = MagicMock()
+    editor._schedule_restoration_preview = MagicMock()
+
+    editor._on_vr_projection_changed("fisheye")
+
+    assert editor._vr_projection == "fisheye"
+    assert editor._restored_clip == ()
+    assert editor._restored_source is None
+    assert not editor._restore_play_pending
+    editor._set_playing.assert_called_once_with(False)
+    editor._schedule_restoration_preview.assert_called_once_with()
 
 
 def test_editor_height_grows_on_tall_screens() -> None:
@@ -451,7 +554,7 @@ def test_smart_render_error_is_explained_once(monkeypatch) -> None:
         root.destroy()
 
 
-def test_save_remembers_detection_settings_on_video(monkeypatch) -> None:
+def test_save_remembers_detection_and_projection_settings_on_video(monkeypatch) -> None:
     try:
         root = ctk.CTk()
     except TclError as exc:
@@ -461,12 +564,14 @@ def test_save_remembers_detection_settings_on_video(monkeypatch) -> None:
         editor = _build_editor_with_ui(root, monkeypatch)
         editor._scan_model.set("lada-yolo-v4")
         editor._scan_threshold = 0.55
+        editor._vr_projection = "gnomonic"
         editor._finish_close = MagicMock()
 
         editor._save()
 
         assert editor._job.detection_model == "lada-yolo-v4"
         assert editor._job.detection_score_threshold == 0.55
+        assert editor._job.vr_projection == "gnomonic"
         editor._finish_close.assert_called_once_with()
     finally:
         if editor is not None and editor.winfo_exists():

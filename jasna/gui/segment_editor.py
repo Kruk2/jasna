@@ -53,6 +53,7 @@ from jasna.gui.segment_preview import (
     SegmentPreviewWorker,
 )
 from jasna.gui.settings_sections.encoding import CODEC_CANONICAL_TO_LABEL
+from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media import VideoMetadata
@@ -91,6 +92,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_image = None
         self._preview_generation = 0
         self._preview_left_eye = False
+        self._vr_resolution = None
+        self._vr_projection = job.vr_projection or "auto"
         self._restore_active = False
         self._restore_after: str | None = None
         self._restore_toggle_blocked = False
@@ -213,7 +216,6 @@ class SegmentEditor(ctk.CTkToplevel):
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(12, 8))
         title_column = ctk.CTkFrame(header, fg_color="transparent")
-        title_column.pack(side="left", fill="x", expand=True)
         ctk.CTkLabel(
             title_column,
             text=self._job.filename,
@@ -243,6 +245,7 @@ class SegmentEditor(ctk.CTkToplevel):
             justify="left",
             wraplength=840,
         )
+        title_column.pack(side="left", fill="x", expand=True)
 
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=16)
@@ -272,7 +275,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview.bind("<Configure>", self._preview_resized)
 
         transport = ctk.CTkFrame(preview_card, fg_color="transparent")
-        transport.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 8))
+        transport.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 2))
         self._step_back = ctk.CTkButton(
             transport,
             text="|◀",
@@ -317,7 +320,9 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._suggest_btn.pack(side="left", padx=(12, 0))
         Tooltip(self._suggest_btn, t("segments_suggest_mask_hint"))
-        restore_control = ctk.CTkFrame(transport, fg_color="transparent")
+        preview_options = ctk.CTkFrame(preview_card, fg_color="transparent")
+        preview_options.grid(row=2, column=0, sticky="ew", padx=8, pady=(2, 8))
+        restore_control = ctk.CTkFrame(preview_options, fg_color="transparent")
         restore_control.pack(side="right")
         self._restore_toggle = create_compact_switch(
             restore_control,
@@ -332,6 +337,46 @@ class SegmentEditor(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
         ).pack(side="right", padx=(0, 6))
         self._restore_toggle_tooltip = Tooltip(self._restore_toggle, t("segments_restore_preview_hint"))
+        projection_names = {
+            "raw": t("segments_vr_projection_raw"),
+            "fisheye": t("segments_vr_projection_fisheye"),
+            "gnomonic": t("segments_vr_projection_gnomonic"),
+        }
+        projection_control = ctk.CTkFrame(preview_options, fg_color="transparent")
+        projection_control.pack(side="right", padx=(0, 16))
+        projection_label_text = t("segments_vr_projection")
+        if self._vr_resolution.is_sbs:
+            projection_label_text = t(
+                "segments_vr_projection_resolved",
+                projection=projection_names[self._vr_resolution.projection],
+            )
+        self._vr_projection_label = ctk.CTkLabel(
+            projection_control,
+            text=projection_label_text,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+        )
+        self._vr_projection_label.pack(side="left", padx=(0, 6))
+        self._vr_projection_menu = ValueOptionMenu(
+            projection_control,
+            options={
+                "auto": t("segments_vr_projection_auto"),
+                **projection_names,
+            },
+            command=self._on_vr_projection_changed,
+            fg_color=Colors.BG_PANEL,
+            button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=150,
+            state="normal" if self._vr_resolution.is_sbs else "disabled",
+        )
+        self._vr_projection_menu.pack(side="left")
+        self._vr_projection_menu.set_value(self._vr_projection)
+        Tooltip(self._vr_projection_label, t("segments_vr_projection_hint"))
+        Tooltip(self._vr_projection_menu, t("segments_vr_projection_hint"))
         range_panel = ctk.CTkFrame(
             body,
             fg_color=Colors.BG_CARD,
@@ -773,11 +818,12 @@ class SegmentEditor(ctk.CTkToplevel):
                     if self._state is None:
                         from jasna.vr180 import resolve_vr_mode
 
-                        self._preview_left_eye = resolve_vr_mode(
+                        self._vr_resolution = resolve_vr_mode(
                             self._get_settings().vr_mode,
                             event.metadata,
                             self._job.path,
-                        ).is_sbs
+                        )
+                        self._preview_left_eye = self._vr_resolution.is_sbs
                         self._build_editor(event.metadata)
                 elif isinstance(event, PreviewFrame):
                     self._show_frame(event)
@@ -1074,6 +1120,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restore_generation = self._restoration_worker.request(
             self._current,
             self._current_video_settings(),
+            projection=self._vr_projection,
         )
         if self._restored_source is None:
             self._show_preview_message(
@@ -1102,8 +1149,21 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restore_generation = self._restoration_worker.request(
             start_seconds,
             self._current_video_settings(),
+            projection=self._vr_projection,
             playback=True,
         )
+
+    def _on_vr_projection_changed(self, projection: str) -> None:
+        if projection == self._vr_projection:
+            return
+        self._vr_projection = projection
+        if not self._restore_active:
+            return
+        self._set_playing(False)
+        self._restore_play_pending = False
+        self._restored_clip = ()
+        self._restored_source = None
+        self._schedule_restoration_preview()
 
     def _handle_restoration_event(self, event) -> None:
         if not self._restore_active or event.generation != self._restore_generation:
@@ -1901,6 +1961,7 @@ class SegmentEditor(ctk.CTkToplevel):
             state.output_segments,
             detection_model=self._scan_model.get(),
             detection_score_threshold=self._scan_threshold,
+            vr_projection=self._vr_projection,
         ):
             self._edit_notice = t("segments_job_started")
             self._edit_notice_warning = False

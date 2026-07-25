@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -39,9 +38,10 @@ def parse_args():
 
 
 def studio_of(name: str, fisheye_tokens, direct_tokens) -> tuple[str, str]:
+    from jasna.vr180 import studio_code
+
     s = name.upper()
-    m = re.match(r"^([0-9]?[A-Z]{2,7})", s)
-    studio = m.group(1) if m else s
+    studio = studio_code(s) or s
     if any(t in s for t in fisheye_tokens):
         prior = "fisheye"
     elif any(t in s for t in direct_tokens):

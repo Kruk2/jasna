@@ -7,6 +7,7 @@ import torch
 
 from jasna.pipeline import Pipeline
 from jasna.vr180 import SbsDetectionAdapter
+from jasna.vr_projection import FisheyeProjector, GnomonicProjector
 
 
 def _make_pipeline(**overrides):
@@ -151,6 +152,45 @@ class TestPipelineInit:
 
         pipeline.configure_vr(metadata)
 
-        assert pipeline._vr_resolution.resolved == "sbs-fisheye"
+        assert pipeline._vr_resolution.resolved == "sbs"
+        assert pipeline._vr_resolution.projection == "fisheye"
         assert isinstance(pipeline._job_detection_model, SbsDetectionAdapter)
+        assert isinstance(pipeline._vr_projector, FisheyeProjector)
         assert pipeline._vr_projector.eye_width == 100
+
+    def test_configure_vr_builds_gnomonic_projector_for_routed_studio(self):
+        pipeline = _make_pipeline(
+            input_video=Path("VRPRD-0108.mp4"),
+            vr_mode="auto",
+        )
+        metadata = SimpleNamespace(
+            video_width=200,
+            video_height=100,
+            sample_aspect_ratio=Fraction(1, 1),
+            stereo_layout="",
+            spherical_projection="",
+        )
+
+        pipeline.configure_vr(metadata)
+
+        assert pipeline._vr_resolution.projection == "gnomonic"
+        assert isinstance(pipeline._vr_projector, GnomonicProjector)
+
+    def test_configure_vr_honors_per_job_projection_override(self):
+        pipeline = _make_pipeline(
+            input_video=Path("VRKM-0001.mp4"),
+            vr_mode="auto",
+            vr_projection="fisheye",
+        )
+        metadata = SimpleNamespace(
+            video_width=200,
+            video_height=100,
+            sample_aspect_ratio=Fraction(1, 1),
+            stereo_layout="",
+            spherical_projection="",
+        )
+
+        pipeline.configure_vr(metadata)
+
+        assert pipeline._vr_resolution.projection == "fisheye"
+        assert isinstance(pipeline._vr_projector, FisheyeProjector)

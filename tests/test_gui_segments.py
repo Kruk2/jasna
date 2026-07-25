@@ -22,11 +22,13 @@ def test_begin_processing_atomically_freezes_segments() -> None:
         segments=(SegmentRange(1, 2),),
         detection_model="lada-yolo-v4",
         detection_score_threshold=0.4,
+        vr_projection="gnomonic",
     )
     snapshot = job.begin_processing()
     assert snapshot.segments == (SegmentRange(1, 2),)
     assert snapshot.detection_model == "lada-yolo-v4"
     assert snapshot.detection_score_threshold == 0.4
+    assert snapshot.vr_projection == "gnomonic"
     assert job.status is JobStatus.PROCESSING
     assert not job.try_set_segments((SegmentRange(3, 4),))
     assert job.begin_processing() is None
@@ -51,13 +53,14 @@ def test_processor_passes_frozen_segments_to_video_job(tmp_path) -> None:
     assert job.status is JobStatus.COMPLETED
 
 
-def test_processor_uses_each_videos_detection_overrides(tmp_path) -> None:
+def test_processor_uses_each_videos_detection_and_projection_overrides(tmp_path) -> None:
     source = tmp_path / "video.mp4"
     source.touch()
     job = JobItem(
         source,
         detection_model="lada-yolo-v4",
         detection_score_threshold=0.55,
+        vr_projection="fisheye",
     )
     processor = Processor()
     processor._settings = AppSettings(
@@ -75,8 +78,10 @@ def test_processor_uses_each_videos_detection_overrides(tmp_path) -> None:
     settings = run_pipeline.call_args.kwargs["settings"]
     assert settings.detection_model == "lada-yolo-v4"
     assert settings.detection_score_threshold == 0.55
+    assert settings.vr_projection == "fisheye"
     assert processor._settings.detection_model == "rfdetr-v5"
     assert processor._settings.detection_score_threshold == 0.25
+    assert processor._settings.vr_projection == "auto"
 
 
 def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:

@@ -93,7 +93,10 @@ def _equirect_to_fisheye_px(px, py, eye_width, height, fov_degrees=180.0):
     radius = theta / half_fov
     fx = radius * math.cos(phi)
     fy = radius * math.sin(phi)
-    return ((fx + 1.0) * 0.5 * eye_width, (fy + 1.0) * 0.5 * height)
+    return (
+        (fx + 1.0) * 0.5 * (eye_width - 1),
+        (fy + 1.0) * 0.5 * (height - 1),
+    )
 
 
 def main() -> int:
@@ -120,7 +123,8 @@ def main() -> int:
     )
     from jasna.pipeline_processing import _eye_bounds
     from jasna.tracking.clip_tracker import ClipTracker
-    from jasna.vr180 import GnomonicProjector, SbsDetectionAdapter, resolve_vr_mode
+    from jasna.vr180 import SbsDetectionAdapter, resolve_vr_mode
+    from jasna.vr_projection import GnomonicProjector
 
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
@@ -204,7 +208,7 @@ def main() -> int:
         x1, y1, x2, y2 = ebox
         eye = frame[:, :, offset:offset + eye_width].unsqueeze(0).float()
         fisheye_eye = F.grid_sample(
-            eye, fisheye_grid, mode="bilinear", padding_mode="zeros", align_corners=False,
+            eye, fisheye_grid, mode="bilinear", padding_mode="zeros", align_corners=True,
         )[0]
         xs, ys = [], []
         for px in (x1 - offset, x2 - offset):

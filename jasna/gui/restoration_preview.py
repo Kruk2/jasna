@@ -60,6 +60,7 @@ RestorationEvent = RestorationStatus | RestorationFrame | RestorationClip | Rest
 class _Request:
     center_seconds: float
     settings: AppSettings
+    projection: str
     generation: int
     playback: bool
 
@@ -255,15 +256,23 @@ class RestorationPreviewWorker:
     def start(self) -> None:
         self._thread.start()
 
-    def request(self, center_seconds: float, settings: AppSettings, *, playback: bool = False) -> int:
+    def request(
+        self,
+        center_seconds: float,
+        settings: AppSettings,
+        *,
+        projection: str,
+        playback: bool = False,
+    ) -> int:
         self._generation += 1
         self._cancel_active_pass()
         self._replace_command(
             _Request(
-                max(0.0, float(center_seconds)),
-                settings,
-                self._generation,
-                bool(playback),
+                center_seconds=max(0.0, float(center_seconds)),
+                settings=settings,
+                projection=projection,
+                generation=self._generation,
+                playback=bool(playback),
             )
         )
         return self._generation
@@ -389,15 +398,16 @@ class RestorationPreviewWorker:
 
         settings = command.settings
         from jasna.vr180 import (
-            GnomonicProjector,
             SbsDetectionAdapter,
             resolve_vr_mode,
         )
+        from jasna.vr_projection import build_vr_projector
 
         vr_resolution = resolve_vr_mode(
             settings.vr_mode,
             self.metadata,
             self.path,
+            projection=command.projection,
         )
         pass_detection_model = (
             SbsDetectionAdapter(detection_model)
@@ -405,7 +415,8 @@ class RestorationPreviewWorker:
             else detection_model
         )
         vr_projector = (
-            GnomonicProjector(
+            build_vr_projector(
+                vr_resolution.projection,
                 eye_width=int(self.metadata.video_width) // 2,
                 height=int(self.metadata.video_height),
                 device=session.device,
@@ -480,6 +491,7 @@ class RestorationPreviewWorker:
                     max_detection_gap=settings.max_detection_gap,
                     min_detection_duration=settings.min_detection_duration,
                     enable_crossfade=settings.enable_crossfade,
+                    scene_detection=settings.scene_detection,
                     blend_buffer=blend_buffer,
                     crop_buffers=crop_buffers,
                     clip_queue=clip_queue,

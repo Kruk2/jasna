@@ -915,7 +915,7 @@ def test_scene_cut_ends_coasting_track_and_trims_synthetic_tail() -> None:
 
 
 def test_vr_gnomonic_crop_and_blend_stays_within_one_eye() -> None:
-    from jasna.vr180 import GnomonicProjector
+    from jasna.vr_projection import GnomonicProjector
 
     eye_w, height = 512, 64
     frame_w = eye_w * 2

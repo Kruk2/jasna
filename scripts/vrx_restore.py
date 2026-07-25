@@ -83,7 +83,7 @@ def main() -> int:
     def sample_eye(eye_f, uv_np):  # eye_f (3,H,Ew) float; uv (h,w,2) in [0,1] -> (3,h,w)
         grid = torch.from_numpy(uv_np * 2 - 1).float().unsqueeze(0).to(device)
         return F.grid_sample(eye_f.unsqueeze(0), grid, mode="bilinear",
-                             padding_mode="border", align_corners=False)[0]
+                             padding_mode="border", align_corners=True)[0]
 
     def variant_grids(bbox_uv, region_wh):
         """Return dict variant -> (fwd_uv (P,P,2) eye-uv, inv_uv (rh,rw,2) patch-uv, cov)."""
@@ -180,7 +180,7 @@ def main() -> int:
                 inv = gr[v][1]; cov = gr[v][2]
                 ig = torch.from_numpy(inv * 2 - 1).float().unsqueeze(0).to(device)
                 region_delta = F.grid_sample(delta.unsqueeze(0), ig, mode="bilinear",
-                                             padding_mode="zeros", align_corners=False)[0]
+                                             padding_mode="zeros", align_corners=True)[0]
                 covm = torch.from_numpy(cov.astype(np.float32)).to(device)
                 # crop the full-frame detection mask to this region, then upsample
                 Hm, Wm = mask_t.shape[1], mask_t.shape[2]
@@ -209,7 +209,7 @@ def main() -> int:
             for k in range(F_):
                 comp = composites[v][k]  # (3,rh,rw) float [0,255], equirect region
                 vp_img = F.grid_sample(comp.unsqueeze(0), vgrid, mode="bilinear",
-                                       padding_mode="zeros", align_corners=False)[0]
+                                       padding_mode="zeros", align_corners=True)[0]
                 reg_sq = F.interpolate(comp.unsqueeze(0), size=(PATCH, PATCH), mode="bilinear",
                                        align_corners=False)[0]
                 tile = torch.cat([reg_sq, vp_img], dim=2)  # [region | viewport]

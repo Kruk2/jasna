@@ -165,6 +165,7 @@ def test_build_pipeline_passes_through_config_and_session() -> None:
         retarget_high_fps=True,
         disable_progress=True,
         working_dir=Path("/scratch"),
+        vr_projection="gnomonic",
     )
     session = RestorationSession(
         device=MagicMock(),
@@ -207,6 +208,7 @@ def test_build_pipeline_passes_through_config_and_session() -> None:
     assert kwargs["enable_crossfade"] is True
     assert kwargs["scene_detection"] is True
     assert kwargs["vr_mode"] == "auto"
+    assert kwargs["vr_projection"] == "gnomonic"
     assert kwargs["fp16"] is True
     assert kwargs["disable_progress"] is True
     assert kwargs["progress_callback"] is progress_callback

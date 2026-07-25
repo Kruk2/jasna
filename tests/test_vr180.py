@@ -5,14 +5,15 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.crop_buffer import compute_enlarged_bbox
 from jasna.media import VideoMetadata
 from jasna.mosaic.detections import Detections
 from jasna.vr180 import (
-    FISHEYE_STUDIO_TOKENS,
     DIRECT_STUDIO_TOKENS,
-    GnomonicProjector,
+    FISHEYE_STUDIO_TOKENS,
+    PROJECTION_CHOICES,
+    STUDIO_PROJECTION,
     SbsDetectionAdapter,
+    resolve_projection,
     resolve_vr_mode,
 )
 
@@ -49,7 +50,8 @@ def _metadata(
 @pytest.mark.parametrize("token", sorted(FISHEYE_STUDIO_TOKENS))
 def test_auto_resolves_known_fisheye_studios(token: str) -> None:
     result = resolve_vr_mode("auto", _metadata(), Path(f"{token}-001.mp4"))
-    assert result.resolved == "sbs-fisheye"
+    assert result.resolved == "sbs"
+    assert result.projection == "fisheye"
     assert token in result.reason
 
 
@@ -62,18 +64,19 @@ def test_auto_resolves_known_direct_sbs_studios(token: str) -> None:
 
 def test_auto_fisheye_studio_overrides_direct_token() -> None:
     result = resolve_vr_mode("auto", _metadata(), Path("VRKM-FSVSS-001.mp4"))
-    assert result.resolved == "sbs-fisheye"
+    assert result.resolved == "sbs"
+    assert result.projection == "fisheye"
 
 
 def test_auto_matches_studio_code_glued_to_number() -> None:
     # Real 8K releases glue the studio code to the number (savr00327-2);
     # detection is a substring match, not a separator-bounded token.
-    assert resolve_vr_mode(
-        "auto", _metadata(), Path("savr00327-2.mp4")
-    ).resolved == "sbs-fisheye"
-    assert resolve_vr_mode(
-        "auto", _metadata(), Path("mdvr00271-2.mp4")
-    ).resolved == "sbs"
+    savr = resolve_vr_mode("auto", _metadata(), Path("savr00327-2.mp4"))
+    assert savr.resolved == "sbs"
+    assert savr.projection == "fisheye"
+    mdvr = resolve_vr_mode("auto", _metadata(), Path("mdvr00271-2.mp4"))
+    assert mdvr.resolved == "sbs"
+    assert mdvr.projection == "raw"
 
 
 def test_auto_uses_spatial_metadata_for_sbs() -> None:
@@ -127,12 +130,70 @@ def test_explicit_sbs_rejects_odd_width() -> None:
 
 
 def test_explicit_mode_overrides_auto_detection() -> None:
-    assert resolve_vr_mode(
-        "sbs-fisheye", _metadata(), Path("unknown.mp4")
-    ).resolved == "sbs-fisheye"
+    explicit_fe = resolve_vr_mode("sbs-fisheye", _metadata(), Path("unknown.mp4"))
+    assert explicit_fe.resolved == "sbs"
+    assert explicit_fe.projection == "fisheye"
     assert resolve_vr_mode(
         "off", _metadata(), Path("FSVSS-001.mp4")
     ).resolved == "off"
+
+
+@pytest.mark.parametrize("projection", PROJECTION_CHOICES[1:])
+def test_projection_override_applies_to_detected_vr(projection: str) -> None:
+    result = resolve_vr_mode(
+        "auto",
+        _metadata(),
+        Path("pxvr-001.mp4"),
+        projection=projection,
+    )
+
+    assert result.is_sbs
+    assert result.projection == projection
+
+
+def test_projection_override_does_not_enable_vr_layout() -> None:
+    result = resolve_vr_mode(
+        "auto",
+        _metadata(width=1920, height=1080),
+        Path("movie.mp4"),
+        projection="gnomonic",
+    )
+
+    assert not result.is_sbs
+    assert result.projection == "none"
+
+
+@pytest.mark.parametrize(("code", "kind"), sorted(STUDIO_PROJECTION.items()))
+def test_resolve_projection_routes_confident_studios(code: str, kind: str) -> None:
+    assert resolve_projection(Path(f"{code}-001.mp4")) == kind
+    assert resolve_projection(Path(f"{code.lower()}00123-4.mp4")) == kind
+
+
+def test_resolve_projection_falls_back_to_raw_for_unknown_studio() -> None:
+    assert resolve_projection(Path("unknownvr-001.mp4")) == "raw"
+    # Direct-SBS token with no routing entry stays raw (its studio prior).
+    assert resolve_projection(Path("mdvr00271-2.mp4")) == "raw"
+
+
+def test_resolve_projection_fisheye_token_without_table_entry() -> None:
+    # SAVR/URVRSP are fisheye-shot but absent from the confident table;
+    # the fisheye-token prior still routes them to fisheye.
+    assert resolve_projection(Path("savr00327-2.mp4")) == "fisheye"
+    assert resolve_projection(Path("urvrsp00285-3.mp4")) == "fisheye"
+
+
+def test_resolve_projection_explicit_override_wins() -> None:
+    assert resolve_projection(Path("ipvr-001.mp4"), requested="gnomonic") == "gnomonic"
+    assert resolve_projection(Path("pxvr-001.mp4"), requested="raw") == "raw"
+
+
+def test_resolve_projection_rejects_unknown_override() -> None:
+    with pytest.raises(ValueError, match="Unknown VR projection"):
+        resolve_projection(Path("movie.mp4"), requested="cylindrical")
+
+
+def test_resolve_projection_strips_release_site_tag() -> None:
+    assert resolve_projection(Path("[98T.TV]VRPRD-004-A.mp4")) == "gnomonic"
 
 
 class _FakeDetector:
@@ -228,73 +289,3 @@ def test_sbs_adapter_rejects_odd_source_width() -> None:
             torch.zeros((1, 3, 4, 7), dtype=torch.uint8),
             target_hw=(4, 7),
         )
-
-
-def _gradient_sbs_frame(eye_w: int, height: int) -> torch.Tensor:
-    xs = torch.arange(eye_w, dtype=torch.float32)
-    ys = torch.arange(height, dtype=torch.float32)
-    eye = ys[:, None] * 0.5 + xs[None, :] * 0.7
-    frame = torch.zeros((3, height, eye_w * 2), dtype=torch.float32)
-    frame[:, :, :eye_w] = eye
-    frame[:, :, eye_w:] = eye + 1000.0
-    return frame
-
-
-def test_gnomonic_extract_region_crop_matches_enlarged_bbox() -> None:
-    projector = GnomonicProjector(eye_width=64, height=64, device=torch.device("cpu"))
-    frame = _gradient_sbs_frame(64, 64)
-    bbox = np.array([10.0, 12.0, 34.0, 40.0], dtype=np.float32)
-
-    raw = projector.extract_region_crop(frame, bbox, 64, 128, x_bounds=(0, 64))
-
-    expected = compute_enlarged_bbox(bbox, 64, 128, (0, 64))
-    x1, y1, x2, y2 = expected
-    assert raw.enlarged_bbox == expected
-    assert raw.crop_shape == (y2 - y1, x2 - x1)
-    assert tuple(raw.crop.shape) == (3, y2 - y1, x2 - x1)
-
-
-def test_gnomonic_projection_round_trips_a_region() -> None:
-    # A wide eye keeps the ~256 px crop to a small angular span; a horizontal-only
-    # gradient is invariant to the vertical warp, isolating the reprojection error.
-    eye_w, height = 1600, 64
-    projector = GnomonicProjector(eye_width=eye_w, height=height, device=torch.device("cpu"))
-    ramp = (torch.arange(eye_w, dtype=torch.float32) * 0.15).expand(height, eye_w)
-    frame = torch.zeros((3, height, eye_w * 2), dtype=torch.float32)
-    frame[:, :, :eye_w] = ramp
-    bbox = np.array([640.0, 12.0, 900.0, 52.0], dtype=np.float32)
-
-    raw = projector.extract_region_crop(frame, bbox, height, eye_w * 2, x_bounds=(0, eye_w))
-    region = projector.source_region_from_patch(raw.crop.float(), raw.enlarged_bbox)
-
-    x1, y1, x2, y2 = raw.enlarged_bbox
-    truth = frame[:, y1:y2, x1:x2]
-    margin = 3
-    interior = (region - truth)[:, margin:-margin, margin:-margin]
-    dynamic_range = (truth.max() - truth.min()).item()
-    assert interior.abs().mean().item() < 0.02 * dynamic_range
-
-
-def test_gnomonic_extract_selects_the_correct_eye() -> None:
-    projector = GnomonicProjector(eye_width=64, height=64, device=torch.device("cpu"))
-    frame = torch.zeros((3, 64, 128), dtype=torch.float32)
-    frame[:, :, :64] = 30.0
-    frame[:, :, 64:] = 200.0
-
-    left = projector.extract_region_crop(
-        frame, np.array([8.0, 8.0, 28.0, 28.0], dtype=np.float32), 64, 128,
-        x_bounds=(0, 64),
-    )
-    right = projector.extract_region_crop(
-        frame, np.array([72.0, 8.0, 92.0, 28.0], dtype=np.float32), 64, 128,
-        x_bounds=(64, 128),
-    )
-
-    assert left.crop.max().item() <= 31.0
-    assert right.crop.min().item() >= 199.0
-    assert right.enlarged_bbox[0] >= 64
-
-
-def test_gnomonic_projector_rejects_degenerate_dimensions() -> None:
-    with pytest.raises(ValueError, match="Invalid eye dimensions"):
-        GnomonicProjector(eye_width=0, height=64, device=torch.device("cpu"))

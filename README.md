@@ -27,7 +27,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - Restores mosaics in video files.
 - Restores mosaics in still images with the experimental SD 1.5 image model.
 - Detects mosaics with the fast `rfdetr-v6` model by default; the larger RF-DETR variant and Lada and ZeLeFans YOLO models are also available.
-- Processes side-by-side VR180 videos per eye, with optional fisheye reprojection for detection and restoration.
+- Processes side-by-side VR180 videos per eye, routing each mosaic region's restoration projection (raw, fisheye, or gnomonic) by studio; the Segment Editor can preview each option.
 - Reduces clip-boundary flicker with temporal overlap and crossfade.
 - Detects hard scene cuts and ends tracked clips at the boundary, so restoration never blends content across a cut.
 - Can further improve quality with optional [secondary restoration models](docs/en/models.md#secondary-restoration) — **unet-4x**, **RTX Super Resolution**, or **Topaz Video AI** — which sharpen restored regions, especially large mosaics, close-ups, and 4K video.
@@ -88,7 +88,7 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 - **[Using the GUI](docs/en/gui.md)** — the queue (drag & drop, reordering), presets, output patterns and file conflicts, and other easy-to-miss features.
 - **[Choosing models](docs/en/models.md)** — which detection model to pick, sharper results with secondary restoration (unet-4x / RTX Super Resolution / Topaz), and SD 1.5 still-image restoration.
 - **[Restoring only parts of a video](docs/en/segments.md)** — the Segment Editor, built-in mosaic scanning, suggesting better masks, and the `--segments` CLI flag.
-- **[VR180 videos](docs/en/vr180.md)** — how Jasna handles side-by-side VR and when to use fisheye mode.
+- **[VR180 videos](docs/en/vr180.md)** — how Jasna handles side-by-side VR and per-studio projection routing.
 - **[Tuning VRAM and GPU usage](docs/en/tuning.md)** — clip size, temporal overlap, model compilation, and what to do when VRAM runs out.
 - **[Advanced processing](docs/en/advanced_processing.md)** — denoising, 60→30 FPS export, color LUTs, custom encoder settings, and post-export actions.
 - **[Streaming](docs/en/streaming.md)** — watch restored video on the fly in your browser or through Stash.
