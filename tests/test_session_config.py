@@ -74,6 +74,7 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.encoder_settings == {}
     assert config.lut_path is None
     assert config.retarget_high_fps is False
+    assert config.fmp4 is False
     assert config.disable_progress is False
     assert config.working_dir is None
 
@@ -91,6 +92,7 @@ def test_cli_non_default_args_are_mapped() -> None:
             "--no-progress",
             "--working-directory", "/fast/scratch",
             "--retarget-high-fps",
+            "--fmp4",
             "--no-scene-detection",
         ]
     )
@@ -105,6 +107,7 @@ def test_cli_non_default_args_are_mapped() -> None:
     assert config.disable_progress is True
     assert config.working_dir == Path("/fast/scratch")
     assert config.retarget_high_fps is True
+    assert config.fmp4 is True
     assert config.scene_detection is False
 
 

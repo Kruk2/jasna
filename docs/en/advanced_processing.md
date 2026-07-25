@@ -53,6 +53,21 @@ jasna --input input.mp4 --output output.mp4 --retarget-high-fps
 
 Cannot be combined with [segment processing](segments.md).
 
+## Playable while processing (fragmented MP4)
+
+A normal MP4 can only be opened once the job is finished. **Playable while
+processing** (`--fmp4`) lets you play the output while it is still being made —
+handy for checking quality without waiting — and the file stays playable if a
+job is interrupted:
+
+```bash
+jasna --input input.mp4 --output output.mp4 --fmp4
+```
+
+The video grows in steps of a few seconds, and players may show the wrong length
+until the job ends. Only `.mp4` and `.mov` output is affected. Not available with
+streaming or [segment processing](segments.md).
+
 ## Color LUT
 
 Apply a `.cube` color LUT (1D or 3D) to the output — for color grading or

@@ -242,6 +242,8 @@ KO = {
         "tip_lut_path": "선택적인 .cube 컬러 LUT. 인코딩 직전에 GPU에서 적용됩니다.\n1D 및 3D LUT 모두 지원합니다 (예: Adobe Premiere, DaVinci Resolve 내보내기).\n재인코딩 없이 검정 들뜸, 화이트 밸런스 등을 보정할 수 있습니다.",
         "retarget_high_fps": "60 FPS를 30 FPS로 줄이기",
         "tip_retarget_high_fps": "오프라인 내보내기에서 60 또는 59.94 FPS 영상의 두 프레임마다 한 프레임을 처리하고 정확히 30 또는 29.97 FPS로 인코딩합니다. 다른 프레임 속도, 오디오 타이밍, 재생 속도는 유지됩니다.",
+        "fmp4": "처리 중에도 재생 가능 (fMP4)",
+        "tip_fmp4": "만드는 중인 MP4 및 MOV 출력을 바로 재생할 수 있고, 작업이 중단되어도 재생 가능한 상태로 남습니다.\n영상은 몇 초 단위로 늘어나며, 작업이 끝나기 전까지 재생기에 잘못된 길이가 표시될 수 있습니다.\n구간 처리에는 사용되지 않습니다.",
 
         # Secondary Restoration
         "supporter_title": "Jasna 활성화",

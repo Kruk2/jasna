@@ -57,3 +57,4 @@ class SessionConfig:
     disable_progress: bool
     working_dir: Path | None
     vr_projection: VrProjectionName = "auto"
+    fmp4: bool = False

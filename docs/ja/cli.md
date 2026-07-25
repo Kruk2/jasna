@@ -95,7 +95,8 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | `--encoder-settings` | — | JSON オブジェクトまたはカンマ区切りの `key=value`。例: `{"cq":22}` または `cq=22,rc-lookahead=32`。下記参照。 |
 | `--lut` | — | エンコード前に GPU で適用される `.cube` カラー LUT（1D または 3D）。GUI のエンコードセクションでも設定できます。 |
 | `--retarget-high-fps` | オフ | 1 フレームおきに処理して 60 → 30 FPS（および 59.94 → 29.97）に変換。他のレートは変更せず、音声のタイミングは維持されます。 |
-| `--segments` | — | 選択した範囲だけを復元します。例: `10-25,01:10-01:30.5`。`--stream` および `--retarget-high-fps` とは併用できません。詳しくは[区間](segments.md)。 |
+| `--fmp4` | オフ | 作成中の `.mp4` / `.mov` 出力をそのまま再生できます。中断してもファイルは再生可能なままです。`--stream` および `--segments` とは併用できません。詳しくは[高度な処理](advanced_processing.md)。 |
+| `--segments` | — | 選択した範囲だけを復元します。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4` とは併用できません。詳しくは[区間](segments.md)。 |
 | `--working-directory` | 出力ディレクトリ | 区間処理の一時ファイルの書き込み先。詳しくは[区間](segments.md)。 |
 
 ### コーデックの選び方

@@ -168,6 +168,7 @@ class AppSettings:
     encoder_custom_args: str = ""
     lut_path: str = ""
     retarget_high_fps: bool = False
+    fmp4: bool = False
 
     # Post-export action
     post_export_action: str = "none"  # none, shutdown, command

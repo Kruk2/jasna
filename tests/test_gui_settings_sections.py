@@ -93,6 +93,7 @@ def _fake_section_widgets() -> dict:
         "encoder_cq": _FakeWidget(29),
         "encoder_custom_args": _FakeWidget("cq=22"),
         "retarget_high_fps": _FakeWidget(1),
+        "fmp4": _FakeWidget(1),
         "lut_path": _FakeWidget(" /luts/a.cube "),
         "working_directory": _FakeWidget(""),
         "post_export_action": _FakeValueMenu({"none": "何も", "command": "コマンド"}, "command"),
@@ -133,6 +134,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["enable_crossfade"] is False
     assert values["scene_detection"] is False
     assert values["retarget_high_fps"] is True
+    assert values["fmp4"] is True
 
 
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
