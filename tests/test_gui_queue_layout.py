@@ -92,7 +92,8 @@ def test_segment_button_only_appears_for_pending_video_jobs() -> None:
         root.destroy()
 
 
-def test_main_workspace_starts_wider_and_can_resize_queue_panel() -> None:
+@pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)
+def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi) -> None:
     try:
         root = ctk.CTk()
     except TclError as exc:
@@ -112,8 +113,11 @@ def test_main_workspace_starts_wider_and_can_resize_queue_panel() -> None:
 
         assert isinstance(root._workspace, tk.PanedWindow)
         assert root._workspace.cget("background") == Colors.BORDER
-        assert int(root._workspace.cget("sashwidth")) == 4
-        assert root._queue_panel.winfo_width() >= Sizing.QUEUE_PANEL_WIDTH
+        assert int(root._workspace.cget("sashwidth")) == int(4 * hidpi)
+        assert root._queue_panel.winfo_width() >= int(Sizing.QUEUE_PANEL_WIDTH * hidpi)
+        assert int(root._workspace.panecget(root._queue_panel, "minsize")) == int(
+            Sizing.QUEUE_PANEL_MIN_WIDTH * hidpi
+        )
 
         queue_width = root._queue_panel.winfo_width()
         settings_width = root._settings_panel.winfo_width()

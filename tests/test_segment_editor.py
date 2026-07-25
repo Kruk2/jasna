@@ -4,6 +4,7 @@ import queue
 import threading
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from tkinter import TclError
 from unittest.mock import MagicMock
 
@@ -242,7 +243,106 @@ def test_projection_change_restarts_active_restoration_preview() -> None:
     editor._schedule_restoration_preview.assert_called_once_with()
 
 
-def test_editor_height_grows_on_tall_screens() -> None:
+def test_pan_zoom_controls_are_visible_and_explain_gestures(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+
+        assert editor._pan_zoom_hint.winfo_ismapped()
+        assert editor._pan_zoom_hint.cget("text") == t(
+            "segments_preview_pan_zoom_hint"
+        )
+        assert editor._zoom_out_btn.winfo_ismapped()
+        assert editor._zoom_label.cget("text") == "100%"
+        assert editor._zoom_in_btn.winfo_ismapped()
+        assert not editor._reset_view_btn.winfo_ismapped()
+        assert editor._reset_view_btn.cget("text") == t(
+            "segments_preview_reset_view"
+        )
+
+        editor._adjust_preview_zoom(0.25)
+        editor.update()
+        assert editor._reset_view_btn.winfo_ismapped()
+
+        editor._reset_preview_view()
+        editor.update()
+        assert not editor._reset_view_btn.winfo_ismapped()
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_preview_crop_uses_zoom_and_clamps_pan_to_source() -> None:
+    editor = object.__new__(SegmentEditor)
+    editor._preview_zoom = 2.0
+    editor._preview_center = (0.0, 0.0)
+    source = Image.new("RGB", (400, 200))
+
+    cropped = editor._preview_crop(source)
+
+    assert cropped.size == (200, 100)
+    assert editor._preview_center == pytest.approx((0.25, 0.25))
+
+
+def test_zoom_controls_update_state_and_reset_view_resets_pan() -> None:
+    editor = object.__new__(SegmentEditor)
+    editor._preview_zoom = 1.0
+    editor._preview_center = (0.5, 0.5)
+    editor._zoom_label = MagicMock()
+    editor._zoom_out_btn = MagicMock()
+    editor._zoom_in_btn = MagicMock()
+    editor._reset_view_btn = MagicMock()
+    editor._reset_view_visible = False
+    editor._preview = MagicMock()
+    editor._refresh_preview_image = MagicMock()
+
+    editor._set_preview_zoom(1.5)
+
+    assert editor._preview_zoom == 1.5
+    assert editor._reset_view_visible
+    editor._zoom_label.configure.assert_called_with(text="150%")
+    editor._reset_view_btn.pack.assert_called_once_with(side="left", padx=(6, 0))
+    editor._refresh_preview_image.assert_called_once_with()
+
+    editor._preview_center = (0.7, 0.6)
+    editor._refresh_preview_image.reset_mock()
+    editor._reset_preview_view()
+
+    assert editor._preview_zoom == 1.0
+    assert editor._preview_center == (0.5, 0.5)
+    assert not editor._reset_view_visible
+    editor._reset_view_btn.pack_forget.assert_called_once_with()
+    editor._refresh_preview_image.assert_called_once_with()
+
+
+def test_dragging_zoomed_preview_pans_the_source() -> None:
+    editor = object.__new__(SegmentEditor)
+    editor._preview_zoom = 2.0
+    editor._preview_center = (0.5, 0.5)
+    editor._preview_pan_anchor = (100, 100)
+    editor._preview = MagicMock()
+    editor._preview.winfo_width.return_value = 500
+    editor._preview.winfo_height.return_value = 300
+    editor._preview_source = Image.new("RGB", (400, 200))
+    editor._restored_source = None
+    editor._restore_active = False
+    editor._refresh_preview_image = MagicMock()
+
+    result = editor._preview_pan_drag(SimpleNamespace(x=150, y=100))
+
+    assert result == "break"
+    assert editor._preview_center[0] < 0.5
+    assert editor._preview_center[1] == pytest.approx(0.5)
+    editor._refresh_preview_image.assert_called_once_with()
+
+
+def test_editor_height_grows_on_tall_screens(monkeypatch) -> None:
+    monkeypatch.setattr(segment_editor.scaling, "window_scaling", lambda _window: 1.0)
     editor = object.__new__(SegmentEditor)
     editor.winfo_screenwidth = MagicMock(return_value=2560)
     editor.winfo_screenheight = MagicMock(return_value=1440)

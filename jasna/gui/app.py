@@ -18,6 +18,7 @@ from jasna.gui.branding import (
     create_header_logo,
     install_window_icon,
 )
+from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
 from jasna.gui.icons import create_native_icon_image
@@ -40,6 +41,9 @@ from jasna.gui.font_backend import (
 from jasna._frozen import is_frozen
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_WINDOW_SIZE = (1200, 880)
+_MIN_WINDOW_SIZE = (900, 580)
 
 
 def _warm_up_cuda() -> None:
@@ -78,17 +82,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._window_icon = install_window_icon(self)
         self.configure(fg_color=Colors.BG_MAIN)
 
-        self.update_idletasks()
-        screen_w = self.winfo_screenwidth()
-        screen_h = self.winfo_screenheight()
+        self._size_and_center()
 
-        win_w = min(1200, screen_w - 40)
-        win_h = min(880, screen_h - 80)
-        x = (screen_w - win_w) // 2
-        y = max(0, (screen_h - win_h) // 2 - int(screen_h * 0.15 / 2))
-        self.geometry(f"{win_w}x{win_h}+{x}+{y}")
-        self.minsize(900, 580)
-        
         # Set appearance
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
@@ -117,10 +112,25 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             if self._preset_manager.get_system_check_passed_version() != __version__:
                 self.after(100, self._show_wizard)
             
+    def _size_and_center(self):
+        self.update_idletasks()
+        screen = scaling.screen_size(self)
+        width, height = scaling.fit_size(
+            scaling.to_physical(self, *_DEFAULT_WINDOW_SIZE),
+            screen,
+            scaling.to_physical(self, *scaling.SCREEN_MARGIN),
+        )
+        x = (screen[0] - width) // 2
+        y = max(0, (screen[1] - height) // 2 - int(screen[1] * 0.15 / 2))
+        scaling.apply_geometry(self, width, height, x, y)
+        scaling.apply_minsize(self, *_MIN_WINDOW_SIZE)
+
     def _build_ui(self):
+        # Footer before the body: the packer starves its last slaves when the window is
+        # shorter than the requested layout, and the control bar must never be the casualty.
         self._build_header()
-        self._build_main_body()
         self._build_footer()
+        self._build_main_body()
         
     def _build_header(self):
         header = ctk.CTkFrame(self, fg_color=Colors.BG_PANEL, height=Sizing.HEADER_HEIGHT, corner_radius=0)
@@ -178,8 +188,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             right,
             image=self._language_icon,
             background=Colors.BG_PANEL,
-            width=18,
-            height=18,
+            width=scaling.raw_tk_size(right, 18),
+            height=scaling.raw_tk_size(right, 18),
             borderwidth=0,
             highlightthickness=0,
         )
@@ -231,7 +241,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             hover_color=Colors.BG_CARD,
             text_color=Colors.TEXT_PRIMARY,
             width=80,
-            command=self._show_wizard,
+            command=self._show_system_check,
         )
         self._system_check_btn.pack(side="left", padx=(0, 4))
         
@@ -272,7 +282,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             sashcursor="sb_h_double_arrow",
             sashpad=0,
             sashrelief=tk.FLAT,
-            sashwidth=4,
+            sashwidth=scaling.raw_tk_size(body, 4),
         )
         self._workspace.pack(fill="both", expand=True)
 
@@ -284,13 +294,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self._workspace.add(
             self._queue_panel,
-            minsize=Sizing.QUEUE_PANEL_MIN_WIDTH,
+            minsize=scaling.raw_tk_size(self._workspace, Sizing.QUEUE_PANEL_MIN_WIDTH),
             stretch="never",
-            width=Sizing.QUEUE_PANEL_WIDTH,
+            width=scaling.raw_tk_size(self._workspace, Sizing.QUEUE_PANEL_WIDTH),
         )
         self._workspace.add(
             self._settings_panel,
-            minsize=Sizing.SETTINGS_PANEL_MIN_WIDTH,
+            minsize=scaling.raw_tk_size(self._workspace, Sizing.SETTINGS_PANEL_MIN_WIDTH),
             stretch="always",
         )
         
@@ -400,10 +410,22 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         from jasna.gui.wizard import FirstRunWizard
         FirstRunWizard(self, on_complete=self._on_wizard_complete)
 
+    def _show_system_check(self):
+        from jasna.gui.wizard import FirstRunWizard
+        FirstRunWizard(self, on_complete=self._on_system_check_complete)
+
     def _on_wizard_complete(self, can_continue: bool, all_passed: bool = False):
         if not can_continue:
             self._log_panel.error(t("wizard_log_blocked"))
             self._on_close()
+            return
+        if all_passed:
+            self._preset_manager.set_system_check_passed_version(__version__)
+        self._log_panel.info(t("wizard_log_ready"))
+
+    def _on_system_check_complete(self, can_continue: bool, all_passed: bool = False):
+        """Dismissing a re-run system check only closes the dialog; it never quits the app."""
+        if not can_continue:
             return
         if all_passed:
             self._preset_manager.set_system_check_passed_version(__version__)
@@ -701,11 +723,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         # Size to content so translated text never clips the close button
         dialog.update_idletasks()
-        w = max(400, dialog.winfo_reqwidth())
-        h = dialog.winfo_reqheight()
-        x = self.winfo_x() + (self.winfo_width() - w) // 2
-        y = self.winfo_y() + (self.winfo_height() - h) // 2
-        dialog.geometry(f"{w}x{h}+{x}+{y}")
+        minimum_width, _ = scaling.to_physical(dialog, 400, 0)
+        scaling.place_centered_on_parent(
+            dialog,
+            self,
+            max(minimum_width, dialog.winfo_reqwidth()),
+            dialog.winfo_reqheight(),
+        )
         return dialog
 
 

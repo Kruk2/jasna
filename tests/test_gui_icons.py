@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tkinter as tk
 from tkinter import TclError
 from unittest.mock import MagicMock
 
@@ -130,21 +131,19 @@ def test_native_icon_button_keeps_image_and_disabled_state() -> None:
         root.destroy()
 
 
-def test_slider_value_uses_native_label_without_ctk_canvas(monkeypatch) -> None:
-    constructor = MagicMock(return_value=object())
-    monkeypatch.setattr(settings_widgets.tk, "Label", constructor)
-    master = object()
+def test_slider_value_uses_native_label_without_ctk_canvas() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
 
-    result = settings_widgets.create_slider_value_label(master, "90", 4, Colors.BG_PANEL)
+    try:
+        label = settings_widgets.create_slider_value_label(root, "90", 4, Colors.BG_PANEL)
 
-    assert result is constructor.return_value
-    constructor.assert_called_once_with(
-        master,
-        text="90",
-        foreground=Colors.TEXT_PRIMARY,
-        background=Colors.BG_PANEL,
-        font=(settings_widgets.Fonts.FAMILY, -settings_widgets.Fonts.SIZE_NORMAL),
-        width=4,
-        borderwidth=0,
-        highlightthickness=0,
-    )
+        assert isinstance(label, tk.Label)
+        assert label.cget("text") == "90"
+        assert label.cget("background") == Colors.BG_PANEL
+        assert int(label.cget("width")) == 4
+        assert label.cget("font") == f"{settings_widgets.Fonts.FAMILY} -{settings_widgets.Fonts.SIZE_NORMAL}"
+    finally:
+        root.destroy()

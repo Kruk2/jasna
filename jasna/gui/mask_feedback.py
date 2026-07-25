@@ -24,6 +24,7 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.theme import Colors, Fonts
 
@@ -258,13 +259,10 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         self.transient(master.winfo_toplevel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
 
-        screen_w = self.winfo_screenwidth()
-        screen_h = self.winfo_screenheight()
+        screen_w, screen_h = scaling.to_logical(self, *scaling.screen_size(self))
         width = min(screen_w - 120, max(800, screen_w - 400))
         height = min(screen_h - 160, max(560, screen_h - 260))
-        x = max(0, (screen_w - width) // 2)
-        y = max(0, (screen_h - height) // 2)
-        self.geometry(f"{width}x{height}+{x}+{y}")
+        scaling.place_centered_on_screen(self, *scaling.to_physical(self, width, height))
 
         ctk.CTkLabel(
             self,

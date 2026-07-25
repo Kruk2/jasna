@@ -11,6 +11,7 @@ import customtkinter as ctk
 from PIL import Image
 from tkinter import messagebox
 
+from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.components import Tooltip
@@ -63,6 +64,10 @@ from jasna.segments import SegmentRange, format_timestamp, parse_timestamp
 class SegmentEditor(ctk.CTkToplevel):
     """Modal, frame-aware editor for per-job restoration ranges."""
 
+    _PREVIEW_ZOOM_MIN = 1.0
+    _PREVIEW_ZOOM_MAX = 8.0
+    _PREVIEW_ZOOM_STEP = 0.25
+
     def __init__(
         self,
         master,
@@ -92,6 +97,10 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_image = None
         self._preview_generation = 0
         self._preview_left_eye = False
+        self._preview_zoom = self._PREVIEW_ZOOM_MIN
+        self._preview_center = (0.5, 0.5)
+        self._preview_pan_anchor: tuple[int, int] | None = None
+        self._reset_view_visible = False
         self._vr_resolution = None
         self._vr_projection = job.vr_projection or "auto"
         self._restore_active = False
@@ -156,14 +165,17 @@ class SegmentEditor(ctk.CTkToplevel):
         self.after(25, self._poll_workers)
 
     def _size_and_center(self) -> None:
-        screen_w = self.winfo_screenwidth()
-        screen_h = self.winfo_screenheight()
-        height = min(max(640, screen_h - 200), max(1, screen_h - 72))
-        width = min(max(1, screen_w - 48), max(900, round(height * 1060 / 720)))
+        screen_w, screen_h = scaling.screen_size(self)
+        min_width, min_height = scaling.to_physical(self, 900, 640)
+        side_margin, work_margin = scaling.to_physical(self, 48, 200)
+        _, chrome_margin = scaling.to_physical(self, 0, 72)
+        height = min(max(min_height, screen_h - work_margin), max(1, screen_h - chrome_margin))
+        width = min(max(1, screen_w - side_margin), max(min_width, round(height * 1060 / 720)))
         x = max(0, (screen_w - width) // 2)
         y = max(0, (screen_h - height) // 2)
-        self.geometry(f"{width}x{height}+{x}+{y}")
-        self.minsize(min(900, width), min(640, height))
+        scaling.apply_geometry(self, width, height, x, y)
+        logical_width, logical_height = scaling.to_logical(self, width, height)
+        scaling.apply_minsize(self, min(900, logical_width), min(640, logical_height))
 
     def _take_focus(self) -> None:
         if self._closed.is_set():
@@ -273,6 +285,13 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._preview.grid(row=0, column=0, sticky="nsew", padx=8, pady=(8, 4))
         self._preview.bind("<Configure>", self._preview_resized)
+        self._preview.bind("<MouseWheel>", self._preview_mousewheel)
+        self._preview.bind("<Button-4>", self._preview_mousewheel)
+        self._preview.bind("<Button-5>", self._preview_mousewheel)
+        self._preview.bind("<ButtonPress-1>", self._preview_pan_start)
+        self._preview.bind("<B1-Motion>", self._preview_pan_drag)
+        self._preview.bind("<ButtonRelease-1>", self._preview_pan_end)
+        self._preview.bind("<Double-Button-1>", self._reset_preview_view)
 
         transport = ctk.CTkFrame(preview_card, fg_color="transparent")
         transport.grid(row=1, column=0, sticky="ew", padx=8, pady=(4, 2))
@@ -320,8 +339,66 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._suggest_btn.pack(side="left", padx=(12, 0))
         Tooltip(self._suggest_btn, t("segments_suggest_mask_hint"))
+
+        view_controls = ctk.CTkFrame(preview_card, fg_color="transparent")
+        view_controls.grid(row=2, column=0, sticky="ew", padx=8, pady=2)
+        self._pan_zoom_hint = ctk.CTkLabel(
+            view_controls,
+            text=t("segments_preview_pan_zoom_hint"),
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            text_color=Colors.STATUS_PENDING,
+        )
+        self._pan_zoom_hint.pack(side="left")
+        Tooltip(self._pan_zoom_hint, t("segments_preview_pan_zoom_hint"))
+        zoom_controls = ctk.CTkFrame(view_controls, fg_color="transparent")
+        zoom_controls.pack(side="right")
+        self._zoom_out_btn = ctk.CTkButton(
+            zoom_controls,
+            text="−",
+            width=30,
+            height=26,
+            fg_color=Colors.BG_PANEL,
+            hover_color=Colors.BORDER_LIGHT,
+            command=lambda: self._adjust_preview_zoom(-self._PREVIEW_ZOOM_STEP),
+        )
+        self._zoom_out_btn.pack(side="left")
+        Tooltip(self._zoom_out_btn, t("segments_preview_zoom_out"))
+        self._zoom_label = ctk.CTkLabel(
+            zoom_controls,
+            text="100%",
+            width=48,
+            font=(Fonts.FAMILY_MONO, Fonts.SIZE_TINY),
+            text_color=Colors.TEXT_PRIMARY,
+        )
+        self._zoom_label.pack(side="left", padx=3)
+        self._zoom_in_btn = ctk.CTkButton(
+            zoom_controls,
+            text="+",
+            width=30,
+            height=26,
+            fg_color=Colors.BG_PANEL,
+            hover_color=Colors.BORDER_LIGHT,
+            command=lambda: self._adjust_preview_zoom(self._PREVIEW_ZOOM_STEP),
+        )
+        self._zoom_in_btn.pack(side="left")
+        Tooltip(self._zoom_in_btn, t("segments_preview_zoom_in"))
+        self._reset_view_btn = ctk.CTkButton(
+            zoom_controls,
+            text=t("segments_preview_reset_view"),
+            width=84,
+            height=26,
+            fg_color=Colors.BG_PANEL,
+            hover_color=Colors.BORDER_LIGHT,
+            command=self._reset_preview_view,
+        )
+        Tooltip(
+            self._reset_view_btn,
+            t("segments_preview_reset_view_hint"),
+        )
+        self._update_preview_zoom_controls()
+
         preview_options = ctk.CTkFrame(preview_card, fg_color="transparent")
-        preview_options.grid(row=2, column=0, sticky="ew", padx=8, pady=(2, 8))
+        preview_options.grid(row=3, column=0, sticky="ew", padx=8, pady=(2, 8))
         restore_control = ctk.CTkFrame(preview_options, fg_color="transparent")
         restore_control.pack(side="right")
         self._restore_toggle = create_compact_switch(
@@ -912,11 +989,177 @@ class SegmentEditor(ctk.CTkToplevel):
                 pass
         self._resize_after = self.after(60, self._refresh_preview_image)
 
+    def _active_preview_source(self) -> Image.Image | None:
+        return self._restored_source if self._restore_active else self._preview_source
+
+    @staticmethod
+    def _clamp_preview_center(
+        center: tuple[float, float],
+        zoom: float,
+    ) -> tuple[float, float]:
+        half_visible = 0.5 / zoom
+        return (
+            min(1.0 - half_visible, max(half_visible, float(center[0]))),
+            min(1.0 - half_visible, max(half_visible, float(center[1]))),
+        )
+
+    def _preview_image_geometry(
+        self,
+        source: Image.Image,
+    ) -> tuple[float, float, float, float]:
+        widget_width = max(2, self._preview.winfo_width())
+        widget_height = max(2, self._preview.winfo_height())
+        available_width = max(2, widget_width - 16)
+        available_height = max(2, widget_height - 16)
+        scale = min(
+            available_width / source.width,
+            available_height / source.height,
+        )
+        display_width = max(1.0, source.width * scale)
+        display_height = max(1.0, source.height * scale)
+        return (
+            (widget_width - display_width) / 2,
+            (widget_height - display_height) / 2,
+            display_width,
+            display_height,
+        )
+
+    def _preview_crop(self, source: Image.Image) -> Image.Image:
+        zoom = max(self._PREVIEW_ZOOM_MIN, float(getattr(self, "_preview_zoom", 1.0)))
+        if zoom <= self._PREVIEW_ZOOM_MIN:
+            self._preview_center = (0.5, 0.5)
+            return source
+        center = self._clamp_preview_center(self._preview_center, zoom)
+        self._preview_center = center
+        crop_width = max(1, min(source.width, round(source.width / zoom)))
+        crop_height = max(1, min(source.height, round(source.height / zoom)))
+        left = round(center[0] * source.width - crop_width / 2)
+        top = round(center[1] * source.height - crop_height / 2)
+        left = min(source.width - crop_width, max(0, left))
+        top = min(source.height - crop_height, max(0, top))
+        return source.crop((left, top, left + crop_width, top + crop_height))
+
+    def _update_preview_zoom_controls(self) -> None:
+        zoom = float(getattr(self, "_preview_zoom", self._PREVIEW_ZOOM_MIN))
+        center = getattr(self, "_preview_center", (0.5, 0.5))
+        if hasattr(self, "_zoom_label"):
+            self._zoom_label.configure(text=f"{round(zoom * 100)}%")
+        if hasattr(self, "_zoom_out_btn"):
+            self._zoom_out_btn.configure(
+                state="disabled" if zoom <= self._PREVIEW_ZOOM_MIN else "normal"
+            )
+        if hasattr(self, "_zoom_in_btn"):
+            self._zoom_in_btn.configure(
+                state="disabled" if zoom >= self._PREVIEW_ZOOM_MAX else "normal"
+            )
+        if hasattr(self, "_reset_view_btn"):
+            reset_needed = zoom > self._PREVIEW_ZOOM_MIN or center != (0.5, 0.5)
+            reset_visible = bool(getattr(self, "_reset_view_visible", False))
+            if reset_needed and not reset_visible:
+                self._reset_view_btn.pack(side="left", padx=(6, 0))
+                self._reset_view_visible = True
+            elif not reset_needed and reset_visible:
+                self._reset_view_btn.pack_forget()
+                self._reset_view_visible = False
+        if hasattr(self, "_preview"):
+            self._preview.configure(
+                cursor="fleur" if zoom > self._PREVIEW_ZOOM_MIN else ""
+            )
+
+    def _set_preview_zoom(
+        self,
+        zoom: float,
+        *,
+        anchor: tuple[float, float] | None = None,
+    ) -> None:
+        old_zoom = float(self._preview_zoom)
+        new_zoom = min(
+            self._PREVIEW_ZOOM_MAX,
+            max(self._PREVIEW_ZOOM_MIN, float(zoom)),
+        )
+        if new_zoom == old_zoom:
+            self._update_preview_zoom_controls()
+            return
+        center = self._clamp_preview_center(self._preview_center, old_zoom)
+        source = self._active_preview_source() if anchor is not None else None
+        if anchor is not None and source is not None:
+            left, top, width, height = self._preview_image_geometry(source)
+            fx = min(1.0, max(0.0, (anchor[0] - left) / width))
+            fy = min(1.0, max(0.0, (anchor[1] - top) / height))
+            source_x = center[0] + (fx - 0.5) / old_zoom
+            source_y = center[1] + (fy - 0.5) / old_zoom
+            center = (
+                source_x - (fx - 0.5) / new_zoom,
+                source_y - (fy - 0.5) / new_zoom,
+            )
+        self._preview_zoom = new_zoom
+        self._preview_center = self._clamp_preview_center(center, new_zoom)
+        self._update_preview_zoom_controls()
+        self._refresh_preview_image()
+
+    def _adjust_preview_zoom(self, amount: float) -> None:
+        self._set_preview_zoom(self._preview_zoom + float(amount))
+
+    def _reset_preview_view(self, event=None):
+        self._preview_zoom = self._PREVIEW_ZOOM_MIN
+        self._preview_center = (0.5, 0.5)
+        self._preview_pan_anchor = None
+        self._update_preview_zoom_controls()
+        self._refresh_preview_image()
+        return "break" if event is not None else None
+
+    def _preview_mousewheel(self, event):
+        button = int(getattr(event, "num", 0))
+        delta = int(getattr(event, "delta", 0))
+        direction = 1 if button == 4 or delta > 0 else -1 if button == 5 or delta < 0 else 0
+        if not direction:
+            return None
+        self._set_preview_zoom(
+            self._preview_zoom + direction * self._PREVIEW_ZOOM_STEP,
+            anchor=(float(event.x), float(event.y)),
+        )
+        return "break"
+
+    def _preview_pan_start(self, event):
+        if self._preview_zoom <= self._PREVIEW_ZOOM_MIN:
+            self._preview_pan_anchor = None
+            return None
+        self._preview_pan_anchor = (int(event.x), int(event.y))
+        return "break"
+
+    def _preview_pan_drag(self, event):
+        anchor = self._preview_pan_anchor
+        source = self._active_preview_source()
+        if (
+            anchor is None
+            or source is None
+            or self._preview_zoom <= self._PREVIEW_ZOOM_MIN
+        ):
+            return None
+        _, _, display_width, display_height = self._preview_image_geometry(source)
+        dx = int(event.x) - anchor[0]
+        dy = int(event.y) - anchor[1]
+        self._preview_center = self._clamp_preview_center(
+            (
+                self._preview_center[0] - dx / display_width / self._preview_zoom,
+                self._preview_center[1] - dy / display_height / self._preview_zoom,
+            ),
+            self._preview_zoom,
+        )
+        self._preview_pan_anchor = (int(event.x), int(event.y))
+        self._refresh_preview_image()
+        return "break"
+
+    def _preview_pan_end(self, _event=None):
+        was_panning = self._preview_pan_anchor is not None
+        self._preview_pan_anchor = None
+        return "break" if was_panning else None
+
     def _fit_to_label(self, label: ctk.CTkLabel, source: Image.Image) -> ctk.CTkImage:
         # winfo_* measures physical pixels while CTkImage's size is multiplied
         # by the widget scaling factor at render time; divide it back out so
         # HiDPI displays do not overflow and clip the preview (issue #229).
-        scaling = ctk.ScalingTracker.get_widget_scaling(label)
+        widget_scaling = scaling.widget_scaling(label)
         width = max(2, label.winfo_width() - 16)
         height = max(2, label.winfo_height() - 16)
         source_width, source_height = source.size
@@ -929,18 +1172,19 @@ class SegmentEditor(ctk.CTkToplevel):
         return ctk.CTkImage(
             image,
             size=(
-                max(1, round(pixel_size[0] / scaling)),
-                max(1, round(pixel_size[1] / scaling)),
+                max(1, round(pixel_size[0] / widget_scaling)),
+                max(1, round(pixel_size[1] / widget_scaling)),
             ),
         )
 
     def _refresh_preview_image(self) -> None:
         self._resize_after = None
-        source = self._restored_source if self._restore_active else self._preview_source
+        source = self._active_preview_source()
         if source is None or self._closed.is_set():
             return
         if self._scan_overlay and not self._restore_active:
             source = self._apply_scan_overlay(source)
+        source = self._preview_crop(source)
         self._preview_image = self._fit_to_label(self._preview, source)
         self._preview.configure(image=self._preview_image, text="")
 

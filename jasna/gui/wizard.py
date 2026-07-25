@@ -4,18 +4,21 @@ import logging
 import os
 import subprocess
 import threading
+import time
 import webbrowser
 from collections.abc import Iterable
 
 import customtkinter as ctk
 
 from jasna import os_utils
+from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.components import BuyMeCoffeeButton, UnifansButton
 
 logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
+_CHECKS_TIMEOUT_SECONDS = 30.0
 
 _HELP_URLS = {
     "sysmem": "https://docs.cognex.com/deep-learning_420/web/EN/deep-learning/Content/Topics/optimization/gpu-disable-shared.htm?TocPath=Optimization%20Guidelines%7CNVIDIA%C2%AE%20GPU%20Guidelines%7C_____6",
@@ -60,25 +63,26 @@ class FirstRunWizard(ctk.CTkToplevel):
         self.transient(master)
         self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
         self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", lambda: None)
+        # The wizard is modal, so closing it must always be possible - otherwise a check
+        # that never finishes leaves the whole app unusable.
+        self.protocol("WM_DELETE_WINDOW", self._on_exit)
+        self.bind("<Escape>", lambda _event: self._on_exit())
         self.lift()
         self.focus_force()
-        
+
         # Build UI immediately with loading state
         self._build_ui_loading()
 
         # Let geometry settle, then size to content and center on parent
         self.update_idletasks()
-        w = max(_WINDOW_WIDTH, self.winfo_reqwidth())
-        h = self.winfo_reqheight()
-        x = master.winfo_x() + (master.winfo_width() - w) // 2
-        y = master.winfo_y() + (master.winfo_height() - h) // 2
-        screen_w = self.winfo_screenwidth()
-        screen_h = self.winfo_screenheight()
-        x = max(0, min(x, screen_w - w))
-        y = max(0, min(y, screen_h - h))
-        self.geometry(f"{w}x{h}+{x}+{y}")
-        
+        minimum_width, _ = scaling.to_physical(self, _WINDOW_WIDTH, 0)
+        scaling.place_centered_on_parent(
+            self,
+            master,
+            max(minimum_width, self.winfo_reqwidth()),
+            self.winfo_reqheight(),
+        )
+
         self.after(50, self._start_checks_in_background)
         
     def _build_ui_loading(self):
@@ -102,14 +106,19 @@ class FirstRunWizard(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY,
         )
         self._subtitle.pack(pady=(8, 0))
-        
+
+        # Footer before the checks frame: the packer starves its last slaves when the
+        # window is shorter than the requested layout, and the only way out of this modal
+        # dialog must never be the casualty.
+        self._build_footer_loading()
+
         self._checks_frame = ctk.CTkFrame(
             self,
             fg_color=Colors.BG_PANEL,
             corner_radius=Sizing.BORDER_RADIUS,
         )
         self._checks_frame.pack(fill="both", expand=True, padx=40, pady=20)
-        
+
         self._check_labels = {}
         checks = [
             ("ascii_path", t("wizard_check_ascii_path")),
@@ -165,8 +174,9 @@ class FirstRunWizard(ctk.CTkToplevel):
                 help_label.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
 
             self._check_labels[key] = (status_label, info_label, help_label)
-            
-        # Footer with disabled button during checking
+
+    def _build_footer_loading(self):
+        """Footer with the disabled continue button shown while the checks run."""
         self._footer = ctk.CTkFrame(self, fg_color="transparent")
         self._footer.pack(fill="x", side="bottom", padx=40, pady=(20, 40))
         
@@ -201,6 +211,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._unifans_btn.pack(side="left", padx=(12, 0))
         
     def _start_checks_in_background(self) -> None:
+        self._checks_deadline = time.monotonic() + _CHECKS_TIMEOUT_SECONDS
         self._checks_thread = threading.Thread(target=self._run_checks_blocking, daemon=True)
         self._checks_thread.start()
         self.after(50, self._poll_checks_thread)
@@ -209,8 +220,16 @@ class FirstRunWizard(ctk.CTkToplevel):
         if not getattr(self, "_checks_thread", None):
             return
         if self._checks_thread.is_alive():
-            self.after(100, self._poll_checks_thread)
-            return
+            if time.monotonic() < self._checks_deadline:
+                self.after(100, self._poll_checks_thread)
+                return
+            # A wedged check (driver query, cold torch import) must not leave the modal
+            # wizard stuck on "checking" forever. The thread is a daemon, so abandoning
+            # it here cannot block process exit; the unfinished rows read as failures.
+            logger.warning(
+                "System check did not finish within %.0fs; showing partial results",
+                _CHECKS_TIMEOUT_SECONDS,
+            )
         self._apply_check_results_to_ui()
 
     def _apply_check_results_to_ui(self) -> None:
@@ -254,107 +273,6 @@ class FirstRunWizard(ctk.CTkToplevel):
             self._continue_btn.configure(text=t("btn_get_started"), state="normal")
         else:
             self._continue_btn.configure(text=t("btn_get_started"), state="normal")
-        
-    def _build_ui(self):
-        # Header
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(fill="x", padx=40, pady=(40, 20))
-        
-        title = ctk.CTkLabel(
-            header,
-            text=t("wizard_title"),
-            font=(Fonts.FAMILY, 24, "bold"),
-            text_color=Colors.TEXT_PRIMARY,
-        )
-        title.pack()
-        
-        subtitle_text = t("wizard_all_passed") if self._checks_passed else t("wizard_some_failed")
-        subtitle_color = Colors.STATUS_COMPLETED if self._checks_passed else Colors.STATUS_PAUSED
-        
-        self._subtitle = ctk.CTkLabel(
-            header,
-            text=subtitle_text,
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=subtitle_color,
-        )
-        self._subtitle.pack(pady=(8, 0))
-        
-        # Checks area - show results
-        self._checks_frame = ctk.CTkFrame(self, fg_color=Colors.BG_PANEL, corner_radius=Sizing.BORDER_RADIUS)
-        self._checks_frame.pack(fill="both", expand=True, padx=40, pady=20)
-        
-        checks = [
-            ("ascii_path", t("wizard_check_ascii_path")),
-            ("ffprobe", t("wizard_check_ffprobe")),
-            ("gpu", t("wizard_check_gpu")),
-            ("cuda", t("wizard_check_cuda")),
-            ("driver", t("wizard_check_driver")),
-        ]
-        if os.name == "nt":
-            checks.append(("sysmem", t("wizard_check_sysmem")))
-
-        for key, label in checks:
-            row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")
-            row.pack(fill="x", padx=20, pady=8)
-            
-            passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
-            
-            status_label = ctk.CTkLabel(
-                row,
-                text="✓" if passed else "✕",
-                font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-                text_color=Colors.STATUS_COMPLETED if passed else Colors.STATUS_ERROR,
-                width=24,
-            )
-            status_label.pack(side="left")
-            
-            name_label = ctk.CTkLabel(
-                row,
-                text=label,
-                font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-                text_color=Colors.TEXT_PRIMARY,
-            )
-            name_label.pack(side="left", padx=(8, 0))
-            
-            info_label = ctk.CTkLabel(
-                row,
-                text=info,
-                font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-                text_color=Colors.TEXT_PRIMARY,
-                justify="right",
-                anchor="e",
-            )
-            info_label.pack(side="right", fill="x", expand=True)
-
-            if key in _HELP_URLS and not passed:
-                help_link = ctk.CTkLabel(
-                    row,
-                    text=t(f"wizard_{key}_how_to_fix"),
-                    font=(Fonts.FAMILY, Fonts.SIZE_SMALL, "underline"),
-                    text_color=Colors.PRIMARY,
-                    cursor="hand2",
-                )
-                url = _HELP_URLS[key]
-                help_link.bind("<Button-1>", lambda e, u=url: webbrowser.open(u))
-                help_link.pack(side="right", padx=(0, 8))
-
-        # Footer with OK button (enabled since checks are done)
-        footer = ctk.CTkFrame(self, fg_color="transparent")
-        footer.pack(fill="x", padx=40, pady=(20, 40))
-        
-        btn_text = t("btn_get_started") if self._checks_passed else t("btn_continue_anyway")
-        
-        self._continue_btn = ctk.CTkButton(
-            footer,
-            text=btn_text,
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL, "bold"),
-            fg_color=Colors.PRIMARY,
-            hover_color=Colors.PRIMARY_HOVER,
-            height=48,
-            width=200,
-            command=self._on_continue,
-        )
-        self._continue_btn.pack()
         
     def _run_checks_blocking(self):
         """Run all dependency checks (blocking)."""
