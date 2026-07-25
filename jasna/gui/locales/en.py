@@ -261,6 +261,8 @@ EN = {
         "tip_lut_path": "Optional .cube color LUT applied on GPU just before encoding.\nSupports both 1D and 3D LUTs (e.g. exported from Adobe Premiere or DaVinci Resolve).\nUseful for fixing raised blacks, white balance, etc. without an extra encoding pass.",
         "retarget_high_fps": "Reduce 60 FPS to 30 FPS",
         "tip_retarget_high_fps": "For offline exports, process every second frame of 60 or 59.94 FPS video and encode at exactly 30 or 29.97 FPS. Other frame rates are unchanged. Audio timing and playback speed are preserved.",
+        "fmp4": "Playable while processing (fMP4)",
+        "tip_fmp4": "Play MP4 and MOV output while it is still being made, and keep it playable if a job is interrupted.\nThe video grows in steps of a few seconds, and players may show the wrong length until the job ends.\nNot used for segment processing.",
         
         # Secondary Restoration
         "supporter_title": "Activate Jasna",

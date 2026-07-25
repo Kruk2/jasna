@@ -38,6 +38,7 @@ from jasna.media.video_encoder import (
     ENCODER_SPECS,
     _CODEC_MAP,
     _align_yuv_pitch,
+    _mov_container_options,
     NvidiaVideoEncoder,
 )
 
@@ -142,6 +143,37 @@ class TestCodecSpecs:
         assert ENCODER_SPECS["h264"].ten_bit is False
         assert ENCODER_SPECS["av1"].frame_format == "p010le"
         assert ENCODER_SPECS["av1"].ten_bit is True
+
+
+class TestContainerOptions:
+    @pytest.mark.parametrize("suffix", [".mp4", ".MP4", ".mov"])
+    def test_faststart_by_default(self, suffix):
+        assert _mov_container_options(suffix, fmp4=False) == {"movflags": "+faststart"}
+
+    @pytest.mark.parametrize("suffix", [".mp4", ".MP4", ".mov"])
+    def test_fragmented_replaces_faststart(self, suffix):
+        assert _mov_container_options(suffix, fmp4=True) == {
+            "movflags": "+frag_keyframe+empty_moov"
+        }
+
+    @pytest.mark.parametrize("suffix", [".mkv", ".nut", ".ts"])
+    def test_other_containers_get_no_movflags(self, suffix):
+        assert _mov_container_options(suffix, fmp4=False) == {}
+        assert _mov_container_options(suffix, fmp4=True) == {}
+
+    def test_fmp4_defaults_off_and_leaves_encoder_options_alone(self, tmp_path):
+        default = _make_encoder(tmp_path)
+        fragmented = NvidiaVideoEncoder(
+            file=str(tmp_path / "result.mp4"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={},
+            fmp4=True,
+        )
+        assert default.fmp4 is False
+        assert fragmented.fmp4 is True
+        assert fragmented.encoder_options == default.encoder_options
 
 
 class TestEncoderOptions:

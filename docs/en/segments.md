@@ -66,6 +66,7 @@ What works with segment processing:
 - H.264, HEVC, or AV1 input with constant frame rate; MP4, MOV, or MKV output.
 - The output codec always matches the input codec.
 - Cannot be combined with `--retarget-high-fps`.
+- Cannot be combined with `--fmp4`; the output is assembled after processing finishes.
 
 Incompatible input is rejected with a clear error before processing starts.
 

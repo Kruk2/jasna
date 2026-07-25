@@ -114,6 +114,10 @@ class TestPipelineInit:
         assert _make_pipeline().retarget_high_fps is False
         assert _make_pipeline(retarget_high_fps=True).retarget_high_fps is True
 
+    def test_fmp4_defaults_off_and_can_be_enabled(self):
+        assert _make_pipeline().fmp4 is False
+        assert _make_pipeline(fmp4=True).fmp4 is True
+
     def test_scene_detection_defaults_on_and_can_be_disabled(self):
         assert _make_pipeline().scene_detection is True
         assert _make_pipeline(scene_detection=False).scene_detection is False

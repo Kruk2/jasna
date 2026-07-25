@@ -90,6 +90,7 @@ def video_session_config(
         encoder_settings=dict(encoder_settings),
         lut_path=(settings.lut_path or "").strip() or None,
         retarget_high_fps=bool(settings.retarget_high_fps),
+        fmp4=bool(settings.fmp4),
         disable_progress=True,
         working_dir=Path(settings.working_directory) if settings.working_directory else None,
     )

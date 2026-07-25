@@ -344,6 +344,58 @@ def test_faststart_moov_before_mdat(tmp_path):
 
     data = dst.read_bytes()
     assert data.index(b"moov") < data.index(b"mdat")
+    assert b"moof" not in data
+
+
+def _transcode_fragmented(src: Path, dst: Path, gop: int) -> None:
+    metadata = get_video_meta_data(str(src))
+    with (
+        NvidiaVideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        NvidiaVideoEncoder(
+            str(dst),
+            device=DEVICE,
+            metadata=metadata,
+            codec="hevc",
+            encoder_settings={"g": str(gop)},
+            fmp4=True,
+        ) as encoder,
+    ):
+        for frames, pts_list in reader.frames():
+            for i, pts in enumerate(pts_list):
+                encoder.encode(frames[i], pts)
+
+
+def _box_offsets(data: bytes, box: bytes) -> list[int]:
+    offsets = []
+    start = data.find(box)
+    while start != -1:
+        offsets.append(start - 4)
+        start = data.find(box, start + 1)
+    return offsets
+
+
+def test_fmp4_writes_moov_up_front_then_fragments(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode_fragmented(src, dst, gop=8)
+
+    data = dst.read_bytes()
+    assert data.index(b"moov") < data.index(b"moof")
+    assert len(_box_offsets(data, b"moof")) > 1
+
+
+def test_fmp4_truncated_output_still_decodes(tmp_path):
+    src = _make_source(tmp_path, "src.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode_fragmented(src, dst, gop=8)
+
+    data = dst.read_bytes()
+    partial = tmp_path / "partial.mp4"
+    partial.write_bytes(data[: _box_offsets(data, b"moof")[-1]])
+
+    with av.open(str(partial)) as container:
+        decoded = sum(1 for _ in container.decode(video=0))
+    assert decoded > 0
 
 
 def test_video_pts_deltas_passthrough(tmp_path):

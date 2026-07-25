@@ -162,3 +162,11 @@ class TestMainValidation:
     def test_retarget_high_fps_rejected_for_streaming(self, tmp_path):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--stream", "--retarget-high-fps"])
+
+    def test_fmp4_rejected_for_streaming(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--stream", "--fmp4"])
+
+    def test_fmp4_rejected_with_segments(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--segments", "10-20", "--fmp4"])

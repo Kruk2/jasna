@@ -261,6 +261,8 @@ JA = {
         "tip_lut_path": "オプションの .cube カラー LUT。エンコード直前に GPU で適用されます。\n1D / 3D LUT 両方に対応（Adobe Premiere や DaVinci Resolve からのエクスポートなど）。\n再エンコードせずに黒浮きやホワイトバランスなどを補正できます。",
         "retarget_high_fps": "60 FPS を 30 FPS に変換",
         "tip_retarget_high_fps": "オフライン書き出しで、60 または 59.94 FPS 動画を1フレームおきに処理し、正確に 30 または 29.97 FPS でエンコードします。他のフレームレート、音声タイミング、再生速度は変更しません。",
+        "fmp4": "処理中でも再生可能（fMP4）",
+        "tip_fmp4": "作成中の MP4 / MOV 出力をそのまま再生できます。中断してもファイルは再生可能なままです。\n映像は数秒ずつ増えていき、処理が終わるまで再生時間の表示が正しくないことがあります。\n区間処理では使用されません。",
 
         # Secondary Restoration
         "supporter_title": "Jasna を有効化",

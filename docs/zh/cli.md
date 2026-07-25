@@ -95,7 +95,8 @@ jasna --input input_folder --output output_folder
 | `--encoder-settings` | — | JSON 对象或逗号分隔的 `key=value`，例如 `{"cq":22}` 或 `cq=22,rc-lookahead=32`。见下文。 |
 | `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），编码前由 GPU 应用。也可在 GUI 的编码设置部分设置。 |
 | `--retarget-high-fps` | 关闭 | 通过每两帧处理一帧实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频时序保持不变。 |
-| `--segments` | — | 只修复选定区间，例如 `10-25,01:10-01:30.5`。不能与 `--stream` 或 `--retarget-high-fps` 同时使用。见[区间](segments.md)。 |
+| `--fmp4` | 关闭 | `.mp4`/`.mov` 输出在生成过程中即可播放，任务中断后仍可播放。不能与 `--stream` 或 `--segments` 同时使用。见[高级处理](advanced_processing.md)。 |
+| `--segments` | — | 只修复选定区间，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps` 或 `--fmp4` 同时使用。见[区间](segments.md)。 |
 | `--working-directory` | 输出目录 | 区间临时文件的写入位置。见[区间](segments.md)。 |
 
 ### 选择编解码器

@@ -131,6 +131,8 @@ _POST_EXPORT_KEYS = {
 
 _FRAME_RATE_KEYS = {"retarget_high_fps", "tip_retarget_high_fps"}
 
+_FMP4_KEYS = {"fmp4", "tip_fmp4"}
+
 _SEGMENT_EDITOR_KEYS = {
     "segments_full_video",
     "segments_media_info",
@@ -244,6 +246,12 @@ def test_all_languages_define_post_export_keys(lang: str) -> None:
 def test_all_languages_define_frame_rate_retarget_keys(lang: str) -> None:
     missing = _FRAME_RATE_KEYS - TRANSLATIONS[lang].keys()
     assert not missing, f"{lang} missing frame-rate keys: {sorted(missing)}"
+
+
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
+def test_all_languages_define_fmp4_keys(lang: str) -> None:
+    missing = _FMP4_KEYS - TRANSLATIONS[lang].keys()
+    assert not missing, f"{lang} missing fmp4 keys: {sorted(missing)}"
 
 
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))

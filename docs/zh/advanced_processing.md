@@ -46,6 +46,18 @@ jasna --input input.mp4 --output output.mp4 --retarget-high-fps
 
 不能与[区间处理](segments.md)同时使用。
 
+## 处理过程中即可播放（分片 MP4）
+
+普通 MP4 只有在任务完成后才能打开。**处理过程中即可播放**（`--fmp4`）让你在
+输出还在生成时就能播放它 — 不用等待即可检查质量，任务中断后文件也仍可播放:
+
+```bash
+jasna --input input.mp4 --output output.mp4 --fmp4
+```
+
+视频每隔几秒增长一段，完成前播放器可能显示错误的时长。只影响 `.mp4` 和 `.mov`
+输出。不能用于流媒体或[区间处理](segments.md)。
+
 ## 色彩 LUT
 
 对输出应用 `.cube` 色彩 LUT（1D 或 3D）— 用于调色或统一画面风格。
