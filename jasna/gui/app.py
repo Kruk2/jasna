@@ -42,7 +42,7 @@ from jasna._frozen import is_frozen
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_WINDOW_SIZE = (1200, 880)
+_DEFAULT_WINDOW_SIZE = (1320, 960)
 _MIN_WINDOW_SIZE = (900, 580)
 
 

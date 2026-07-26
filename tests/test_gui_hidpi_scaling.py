@@ -113,6 +113,31 @@ def test_main_window_fits_screen_at_hidpi(hidpi, monkeypatch) -> None:
         root.destroy()
 
 
+@pytest.mark.parametrize("screen", [(1280, 720), (1366, 768), (1920, 1080)])
+@pytest.mark.parametrize("factor", [1.0, 1.5])
+def test_main_window_fits_a_small_screen(screen, factor, monkeypatch) -> None:
+    monkeypatch.setattr(scaling, "window_scaling", lambda _window: factor)
+    requested: list[str] = []
+    minimum: list[tuple[int, int]] = []
+    window = SimpleNamespace(
+        winfo_screenwidth=lambda: screen[0],
+        winfo_screenheight=lambda: screen[1],
+        update_idletasks=lambda: None,
+        geometry=requested.append,
+        minsize=lambda width, height: minimum.append((width, height)),
+    )
+
+    JasnaApp._size_and_center(window)
+
+    _, x, y = requested[-1].split("+")
+    width, height = _physical_size(requested[-1], factor)
+    min_width, min_height = (round(value * factor) for value in minimum[-1])
+    assert width <= screen[0] and height <= screen[1]
+    assert int(x) + width <= screen[0] and int(y) + height <= screen[1]
+    assert int(x) >= 0 and int(y) >= 0
+    assert min_width <= width and min_height <= height
+
+
 @pytest.mark.parametrize("factor", [1.0, 1.25, 1.5, 2.0, 3.0])
 def test_segment_editor_fits_screen_at_hidpi(factor, monkeypatch) -> None:
     from jasna.gui import segment_editor
