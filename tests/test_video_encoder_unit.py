@@ -366,7 +366,8 @@ class TestSharpening:
         enc._converter = SimpleNamespace(
             uses_kernel=False, convert=lambda frame: packed.clone()
         )
-        enc.stream = SimpleNamespace(synchronize=lambda: None)
+        enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
+        enc._encoder_stream = enc.stream
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
         enc._cuda_ctx = None
         seen = []
@@ -398,7 +399,8 @@ class TestSharpening:
         enc._converter = SimpleNamespace(
             uses_kernel=False, convert=lambda frame: torch.zeros((6, 4), dtype=torch.uint8)
         )
-        enc.stream = SimpleNamespace(synchronize=lambda: None)
+        enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
+        enc._encoder_stream = enc.stream
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
         enc._cuda_ctx = None
         order = []
@@ -523,9 +525,13 @@ class TestEncodeBuffer:
         else:
             assert aligned.data_ptr() != packed.data_ptr()
 
-    def test_from_dlpack_reuses_cuda_context_without_repeating_context_flags(self, tmp_path, monkeypatch):
-        enc = _make_encoder(tmp_path, codec="h264", video_width=2, video_height=2)
+    def test_from_dlpack_hands_off_to_encoder_stream_without_host_sync(
+        self, tmp_path, monkeypatch
+    ):
+        enc = _make_encoder(tmp_path, codec="hevc", video_width=2, video_height=2)
         enc.stream = MagicMock()
+        enc.stream.cuda_stream = 1234
+        enc._encoder_stream = SimpleNamespace(cuda_stream=5678)
         enc._cuda_ctx = object()
         enc._lut_applier = None
         enc._converter = SimpleNamespace(
@@ -545,7 +551,43 @@ class TestEncodeBuffer:
         enc._encode_frame(torch.zeros((3, 2, 2), dtype=torch.uint8), 7)
 
         _, kwargs = from_dlpack.call_args
-        assert kwargs == {"format": "nv12", "cuda_context": enc._cuda_ctx}
+        assert kwargs == {
+            "format": "p010le",
+            "stream": 5678,
+            "cuda_context": enc._cuda_ctx,
+        }
+        enc.stream.synchronize.assert_not_called()
+
+    def test_amd_host_transfer_still_synchronizes_before_from_dlpack(
+        self, tmp_path, monkeypatch
+    ):
+        enc = _make_encoder(tmp_path, codec="h264", video_width=2, video_height=2)
+        enc.vendor = video_encoder_module.AcceleratorVendor.AMD
+        enc.stream = MagicMock()
+        enc._host_yuv = torch.empty((3, 2), dtype=torch.uint8)
+        enc._lut_applier = None
+        enc._converter = SimpleNamespace(
+            uses_kernel=False,
+            convert=lambda frame: torch.zeros((3, 2), dtype=torch.uint8),
+        )
+        enc.out_stream = MagicMock()
+        enc.out_stream.encode.return_value = []
+        hw_frame = SimpleNamespace(pts=None, time_base=None)
+        from_dlpack = MagicMock(return_value=hw_frame)
+        monkeypatch.setattr(
+            video_encoder_module.av,
+            "VideoFrame",
+            SimpleNamespace(from_dlpack=from_dlpack),
+        )
+        monkeypatch.setattr(
+            video_encoder_module, "stream_context", lambda _stream: nullcontext()
+        )
+
+        enc._encode_frame(torch.zeros((3, 2, 2), dtype=torch.uint8), 7)
+
+        enc.stream.synchronize.assert_called_once_with()
+        _, kwargs = from_dlpack.call_args
+        assert kwargs == {"format": "nv12"}
 
     def test_pts_origin_is_removed_from_fragment_timestamps(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
