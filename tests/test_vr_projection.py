@@ -255,3 +255,37 @@ def test_factory_rejects_unknown_projection() -> None:
             height=64,
             device=CPU,
         )
+
+
+def test_axis_tensors_are_reused_across_calls():
+    """Sampling axes depend only on their length, so they must be built once."""
+    device = torch.device("cpu")
+    vr_projection._AXIS_CACHE.clear()
+
+    first = vr_projection._centers(64, device)
+    second = vr_projection._centers(64, device)
+    unit_first = vr_projection._unit_centers(64, device)
+    unit_second = vr_projection._unit_centers(64, device)
+
+    assert first is second
+    assert unit_first is unit_second
+    assert first is not unit_first
+    assert len(vr_projection._AXIS_CACHE) == 2
+
+
+def test_rotation_matrix_matches_the_composed_form():
+    """The closed form must equal ry @ rx @ rz, which it replaced."""
+    device = torch.device("cpu")
+    for yaw, pitch, roll in ((0.0, 0.0, 0.0), (37.0, -12.0, 0.0), (-140.0, 61.0, 25.0)):
+        a, b, c = yaw * vr_projection.DEG, -pitch * vr_projection.DEG, roll * vr_projection.DEG
+        cy, sy = math.cos(a), math.sin(a)
+        cp, sp = math.cos(b), math.sin(b)
+        cr, sr = math.cos(c), math.sin(c)
+        ry = torch.tensor([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]], dtype=torch.float32)
+        rx = torch.tensor([[1, 0, 0], [0, cp, -sp], [0, sp, cp]], dtype=torch.float32)
+        rz = torch.tensor([[cr, -sr, 0], [sr, cr, 0], [0, 0, 1]], dtype=torch.float32)
+
+        composed = ry @ rx @ rz
+        closed = vr_projection._rot_matrix(yaw, pitch, roll, device)
+
+        assert torch.allclose(closed, composed, atol=1e-6)
