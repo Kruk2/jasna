@@ -529,6 +529,7 @@ class NvidiaVideoEncoder:
         self.frame_buffer: deque = deque()
         self._lut_flags.clear()
         self.pts_set: set[int] = set()
+        self._last_emitted_pts: int | None = None
         self._video_started = False
         self._options_validated = False
         self._worker_error: Exception | None = None
@@ -703,11 +704,19 @@ class NvidiaVideoEncoder:
             for packet in packets:
                 self.dst.mux(packet)
 
+    def _clamp_pts_monotonic(self, pts: int) -> int:
+        last = self._last_emitted_pts
+        if last is not None and pts <= last:
+            pts = last + 1
+        self._last_emitted_pts = pts
+        return pts
+
     def _process_buffer(self, flush_all=False):
         if len(self.frame_buffer) > (self.BUFFER_MAX_SIZE // 2) or (flush_all and self.frame_buffer):
             frame_to_encode = self.frame_buffer.popleft()
             pts_to_assign = heapq.heappop(self.pts_heap)
             self.pts_set.remove(pts_to_assign)
+            pts_to_assign = self._clamp_pts_monotonic(pts_to_assign)
             apply_lut = self._lut_flags.popleft() if self._lut_flags else True
             if apply_lut:
                 item = self._build_encode_item(frame_to_encode, pts_to_assign)

@@ -475,6 +475,7 @@ def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
     enc.pts_heap = []
     enc.frame_buffer = deque()
     enc.pts_set = set()
+    enc._last_emitted_pts = None
     enc._worker_error = None
     enc._encode_queue = MagicMock()
     enc._build_encode_item = MagicMock(side_effect=lambda frame, pts: (frame, pts, None))
@@ -625,6 +626,31 @@ class TestEncodeBuffer:
             enc.encode(f"f{i}", pts)
         enc._process_buffer(flush_all=True)
         enc._encode_queue.put.assert_called_once_with(("f0", 10, None))
+
+    def test_emitted_pts_stay_strictly_increasing_on_scrambled_source(self, tmp_path):
+        enc = _buffered_encoder(tmp_path)
+        scrambled = [
+            1761760, 1801800, 1841840, 1881880, 1801801, 1801803, 1801804,
+            1801805, 1801802, 1801807, 1801808, 1801809, 1801806, 1801811,
+            1801812, 1801813, 1801810,
+        ]
+        for i, pts in enumerate(scrambled):
+            enc.encode(f"f{i}", pts)
+        while enc.frame_buffer:
+            enc._process_buffer(flush_all=True)
+        emitted = [call.args[0][1] for call in enc._encode_queue.put.call_args_list]
+        assert len(emitted) == len(scrambled)
+        assert all(b > a for a, b in zip(emitted, emitted[1:]))
+
+    def test_in_order_pts_pass_through_unchanged(self, tmp_path):
+        enc = _buffered_encoder(tmp_path)
+        ordered = [1000 * i for i in range(10)]
+        for i, pts in enumerate(ordered):
+            enc.encode(f"f{i}", pts)
+        while enc.frame_buffer:
+            enc._process_buffer(flush_all=True)
+        emitted = [call.args[0][1] for call in enc._encode_queue.put.call_args_list]
+        assert emitted == ordered
 
     def test_encode_raises_pending_worker_error(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
