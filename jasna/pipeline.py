@@ -340,7 +340,11 @@ class Pipeline:
     ) -> None:
         device = self.device
         secondary_workers = max(1, int(self.restoration_pipeline.secondary_num_workers))
-        frame_rate = resolve_frame_rate_retarget(metadata.video_fps_exact, enabled=self.retarget_high_fps)
+        frame_rate = resolve_frame_rate_retarget(
+            metadata.video_fps_exact,
+            enabled=self.retarget_high_fps,
+            measured_fps=metadata.average_fps,
+        )
         if output_frame_count is None:
             output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
 
@@ -527,6 +531,7 @@ class Pipeline:
         frame_rate = resolve_frame_rate_retarget(
             metadata.video_fps_exact,
             enabled=self.retarget_high_fps,
+            measured_fps=metadata.average_fps,
         )
         if frame_rate.active:
             log.info(
@@ -534,6 +539,13 @@ class Pipeline:
                 frame_rate.source_fps,
                 frame_rate.output_fps,
                 frame_rate.frame_stride,
+            )
+        elif frame_rate.rate_mismatch:
+            log.warning(
+                "Frame-rate retargeting skipped: the container reports %s fps but the measured "
+                "frame rate is %.3f fps; keeping the source rate",
+                frame_rate.source_fps,
+                metadata.average_fps,
             )
         elif self.retarget_high_fps:
             log.info(
