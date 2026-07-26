@@ -33,9 +33,39 @@ DEG = math.pi / 180.0
 _PERIM = 33
 
 
+# Sampling axes depend only on their length, and a video reuses a handful of
+# patch and region sizes, so they are built once instead of per frame per
+# region. Consumers only ever read them into new tensors.
+_AXIS_CACHE: dict[tuple[str, int, torch.device], torch.Tensor] = {}
+
+
+def _cached_axis(kind: str, n: int, device: torch.device, build) -> torch.Tensor:
+    key = (kind, n, device)
+    axis = _AXIS_CACHE.get(key)
+    if axis is None:
+        axis = build()
+        _AXIS_CACHE[key] = axis
+    return axis
+
+
 def _centers(n: int, device: torch.device) -> torch.Tensor:
     """v360 pixel centers p = (2i+1)/n - 1 in (-1, 1)."""
-    return (2.0 * torch.arange(n, device=device, dtype=torch.float32) + 1.0) / n - 1.0
+    return _cached_axis(
+        "v360",
+        n,
+        device,
+        lambda: (2.0 * torch.arange(n, device=device, dtype=torch.float32) + 1.0) / n - 1.0,
+    )
+
+
+def _unit_centers(n: int, device: torch.device) -> torch.Tensor:
+    """Pixel centers (i + 0.5) / n in (0, 1)."""
+    return _cached_axis(
+        "unit",
+        n,
+        device,
+        lambda: (torch.arange(n, device=device, dtype=torch.float32) + 0.5) / n,
+    )
 
 
 def _flat_to_xyz(h: int, w: int, h_fov: float, v_fov: float, device) -> torch.Tensor:
@@ -53,10 +83,15 @@ def _rot_matrix(yaw: float, pitch: float, roll: float, device) -> torch.Tensor:
     cy, sy = math.cos(a), math.sin(a)
     cp, sp = math.cos(b), math.sin(b)
     cr, sr = math.cos(c), math.sin(c)
-    ry = torch.tensor([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]], dtype=torch.float32, device=device)
-    rx = torch.tensor([[1, 0, 0], [0, cp, -sp], [0, sp, cp]], dtype=torch.float32, device=device)
-    rz = torch.tensor([[cr, -sr, 0], [sr, cr, 0], [0, 0, 1]], dtype=torch.float32, device=device)
-    return ry @ rx @ rz
+    # ry @ rx @ rz, multiplied out in double on the host: the tensor form cost
+    # three host-to-device transfers and two 3x3 matmuls per region per frame,
+    # which was a fifth of the whole grid build.
+    rows = (
+        (cy * cr + sy * sp * sr, -cy * sr + sy * sp * cr, sy * cp),
+        (cp * sr, cp * cr, -sp),
+        (-sy * cr + cy * sp * sr, sy * sr + cy * sp * cr, cy * cp),
+    )
+    return torch.tensor(rows, dtype=torch.float32, device=device)
 
 
 def _rotate(vec: torch.Tensor, yaw: float, pitch: float, roll: float) -> torch.Tensor:
@@ -228,8 +263,8 @@ def _region_eye_uv_grid(
     u1: float, v1: float, u2: float, v2: float, rh: int, rw: int, device
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Per-source-pixel eye-uv meshgrid over the region (rh, rw)."""
-    ru = u1 + (u2 - u1) * (torch.arange(rw, device=device, dtype=torch.float32) + 0.5) / rw
-    rv = v1 + (v2 - v1) * (torch.arange(rh, device=device, dtype=torch.float32) + 0.5) / rh
+    ru = u1 + (u2 - u1) * _unit_centers(rw, device)
+    rv = v1 + (v2 - v1) * _unit_centers(rh, device)
     rvv, ruu = torch.meshgrid(rv, ru, indexing="ij")
     return ruu, rvv
 
@@ -384,8 +419,8 @@ class FisheyeProjector(_RegionProjector):
     def _forward_eye_uv(self, local_bbox, patch_h: int, patch_w: int) -> torch.Tensor:
         f1u, f2u, f1v, f2v = self._window(local_bbox)
         py, px = torch.meshgrid(
-            (torch.arange(patch_h, device=self.device, dtype=torch.float32) + 0.5) / patch_h,
-            (torch.arange(patch_w, device=self.device, dtype=torch.float32) + 0.5) / patch_w,
+            _unit_centers(patch_h, self.device),
+            _unit_centers(patch_w, self.device),
             indexing="ij",
         )
         vec = _fisheye_uv_to_xyz(f1u + (f2u - f1u) * px, f1v + (f2v - f1v) * py)
