@@ -15,22 +15,6 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 import jasna.media.video_encoder as video_encoder_module
 from jasna.media import VideoMetadata
-from jasna.media.rgb_to_nv12 import (
-    chw_rgb_to_nv12_bt2020_full,
-    chw_rgb_to_nv12_bt2020_limited,
-    chw_rgb_to_nv12_bt601_full,
-    chw_rgb_to_nv12_bt601_limited,
-    chw_rgb_to_nv12_bt709_full,
-    chw_rgb_to_nv12_bt709_limited,
-)
-from jasna.media.rgb_to_p010 import (
-    chw_rgb_to_p010_bt2020_full,
-    chw_rgb_to_p010_bt2020_limited,
-    chw_rgb_to_p010_bt601_full,
-    chw_rgb_to_p010_bt601_limited,
-    chw_rgb_to_p010_bt709_full,
-    chw_rgb_to_p010_bt709_limited,
-)
 from jasna.media.video_encoder import (
     DEFAULT_AV1_ENCODER_OPTIONS,
     DEFAULT_ENCODER_OPTIONS,
@@ -379,7 +363,9 @@ class TestSharpening:
     def test_zero_strength_leaves_the_converted_frame_untouched(self, tmp_path, monkeypatch):
         enc = _make_encoder(tmp_path, codec="h264")  # nv12, so planes stay uint8
         packed = torch.arange(24, dtype=torch.uint8).reshape(6, 4)
-        enc._to_yuv = lambda frame: packed.clone()
+        enc._converter = SimpleNamespace(
+            uses_kernel=False, convert=lambda frame: packed.clone()
+        )
         enc.stream = SimpleNamespace(synchronize=lambda: None)
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
         enc._cuda_ctx = None
@@ -409,7 +395,9 @@ class TestSharpening:
             encoder_settings={},
             sharpen_strength=0.4,
         )
-        enc._to_yuv = lambda frame: torch.zeros((6, 4), dtype=torch.uint8)
+        enc._converter = SimpleNamespace(
+            uses_kernel=False, convert=lambda frame: torch.zeros((6, 4), dtype=torch.uint8)
+        )
         enc.stream = SimpleNamespace(synchronize=lambda: None)
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
         enc._cuda_ctx = None
@@ -448,33 +436,33 @@ class TestColorHandling:
     @pytest.mark.parametrize(
         ("color_space", "color_range", "expected"),
         [
-            (AvColorspace.ITU709, AvColorRange.MPEG, chw_rgb_to_p010_bt709_limited),
-            (AvColorspace.ITU709, AvColorRange.JPEG, chw_rgb_to_p010_bt709_full),
-            (AvColorspace.ITU601, AvColorRange.MPEG, chw_rgb_to_p010_bt601_limited),
-            (AvColorspace.ITU601, AvColorRange.JPEG, chw_rgb_to_p010_bt601_full),
-            (AvColorspace.BT2020, AvColorRange.MPEG, chw_rgb_to_p010_bt2020_limited),
-            (AvColorspace.BT2020, AvColorRange.JPEG, chw_rgb_to_p010_bt2020_full),
+            (AvColorspace.ITU709, AvColorRange.MPEG, "p010_bt709_limited"),
+            (AvColorspace.ITU709, AvColorRange.JPEG, "p010_bt709_full"),
+            (AvColorspace.ITU601, AvColorRange.MPEG, "p010_bt601_limited"),
+            (AvColorspace.ITU601, AvColorRange.JPEG, "p010_bt601_full"),
+            (AvColorspace.BT2020, AvColorRange.MPEG, "p010_bt2020_limited"),
+            (AvColorspace.BT2020, AvColorRange.JPEG, "p010_bt2020_full"),
         ],
     )
     @pytest.mark.parametrize("codec", ["hevc", "av1"])
     def test_selects_p010_converter_for_hevc_and_av1(self, tmp_path, codec, color_space, color_range, expected):
         enc = _make_encoder(tmp_path, codec=codec, color_space=color_space, color_range=color_range)
-        assert enc._to_yuv is expected
+        assert enc._converter.variant == expected
 
     @pytest.mark.parametrize(
         ("color_space", "color_range", "expected"),
         [
-            (AvColorspace.ITU709, AvColorRange.MPEG, chw_rgb_to_nv12_bt709_limited),
-            (AvColorspace.ITU709, AvColorRange.JPEG, chw_rgb_to_nv12_bt709_full),
-            (AvColorspace.ITU601, AvColorRange.MPEG, chw_rgb_to_nv12_bt601_limited),
-            (AvColorspace.ITU601, AvColorRange.JPEG, chw_rgb_to_nv12_bt601_full),
-            (AvColorspace.BT2020, AvColorRange.MPEG, chw_rgb_to_nv12_bt2020_limited),
-            (AvColorspace.BT2020, AvColorRange.JPEG, chw_rgb_to_nv12_bt2020_full),
+            (AvColorspace.ITU709, AvColorRange.MPEG, "nv12_bt709_limited"),
+            (AvColorspace.ITU709, AvColorRange.JPEG, "nv12_bt709_full"),
+            (AvColorspace.ITU601, AvColorRange.MPEG, "nv12_bt601_limited"),
+            (AvColorspace.ITU601, AvColorRange.JPEG, "nv12_bt601_full"),
+            (AvColorspace.BT2020, AvColorRange.MPEG, "nv12_bt2020_limited"),
+            (AvColorspace.BT2020, AvColorRange.JPEG, "nv12_bt2020_full"),
         ],
     )
     def test_selects_nv12_converter_for_h264(self, tmp_path, color_space, color_range, expected):
         enc = _make_encoder(tmp_path, codec="h264", color_space=color_space, color_range=color_range)
-        assert enc._to_yuv is expected
+        assert enc._converter.variant == expected
 
     @pytest.mark.parametrize("codec", ["h264", "av1"])
     def test_unsupported_color_range_raises_for_new_codecs(self, tmp_path, codec):
@@ -540,7 +528,9 @@ class TestEncodeBuffer:
         enc.stream = MagicMock()
         enc._cuda_ctx = object()
         enc._lut_applier = None
-        enc._to_yuv = lambda frame: torch.zeros((3, 2), dtype=torch.uint8)
+        enc._converter = SimpleNamespace(
+            uses_kernel=False, convert=lambda frame: torch.zeros((3, 2), dtype=torch.uint8)
+        )
         enc.out_stream = MagicMock()
         enc.out_stream.encode.return_value = []
         hw_frame = SimpleNamespace(pts=None, time_base=None)
