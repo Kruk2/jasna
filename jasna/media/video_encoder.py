@@ -209,6 +209,7 @@ AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
 }
 
 _CODEC_MAP = {spec.name: spec.encoder_name for spec in ENCODER_SPECS.values()}
+_SEPARATE_NVENC_STREAM_CODECS = frozenset({"hevc", "av1"})
 
 # ITU-T H.273 matrix, primaries, and transfer-characteristic code points.
 _COLOR_TAGS = {
@@ -502,16 +503,20 @@ class NvidiaVideoEncoder:
         # initialized it; current_ctx leaves the context and its flags alone.
         # Keeping conversion and NVENC in one context also avoids a ~500 MiB
         # secondary CUDA context and cross-context scheduling overhead.
+        self.stream = new_stream(self.device)
+        self._encoder_stream = self.stream
         self._cuda_ctx = None
         if self.vendor is AcceleratorVendor.NVIDIA:
             from av.video.frame import CudaContext
 
+            if self.codec in _SEPARATE_NVENC_STREAM_CODECS:
+                self._encoder_stream = new_stream(self.device)
             self._cuda_ctx = CudaContext(
                 device_id=self.device.index or 0,
                 primary_ctx=False,
                 current_ctx=True,
+                cuda_stream=self._encoder_stream.cuda_stream,
             )
-        self.stream = new_stream(self.device)
         self._host_yuv = None
         if self.vendor is AcceleratorVendor.AMD:
             dtype = torch.uint16 if self.spec.ten_bit else torch.uint8
@@ -766,31 +771,31 @@ class NvidiaVideoEncoder:
             packed = self._to_yuv(frame, height)
             if self.vendor is AcceleratorVendor.NVIDIA:
                 packed = _align_yuv_pitch(packed)
+                if self.spec.frame_format == "p010le":
+                    planes = [
+                        packed[:height].view(torch.uint16),
+                        packed[height:].view(torch.uint16),
+                    ]
+                else:
+                    planes = [packed[:height], packed[height:]]
+                hw_frame = av.VideoFrame.from_dlpack(
+                    planes,
+                    format=self.spec.frame_format,
+                    stream=self._encoder_stream.cuda_stream,
+                    cuda_context=self._cuda_ctx,
+                )
             else:
                 self._host_yuv.copy_(
                     _amf_host_input(packed, ten_bit=self.spec.ten_bit),
                     non_blocking=True,
                 )
 
-        self.stream.synchronize()
         if self.vendor is AcceleratorVendor.AMD:
+            self.stream.synchronize()
             planes = [self._host_yuv[:height], self._host_yuv[height:]]
             hw_frame = av.VideoFrame.from_dlpack(
                 planes,
                 format=self.spec.frame_format,
-            )
-        else:
-            if self.spec.frame_format == "p010le":
-                planes = [
-                    packed[:height].view(torch.uint16),
-                    packed[height:].view(torch.uint16),
-                ]
-            else:
-                planes = [packed[:height], packed[height:]]
-            hw_frame = av.VideoFrame.from_dlpack(
-                planes,
-                format=self.spec.frame_format,
-                cuda_context=self._cuda_ctx,
             )
         hw_frame.pts = pts
         hw_frame.time_base = self.metadata.time_base

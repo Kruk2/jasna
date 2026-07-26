@@ -479,6 +479,7 @@ def _encode_synthetic_vfr(tmp_path: Path, codec: str, suffix: str) -> tuple[Path
         pts_list.append(pts)
         pts += step
     with NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as enc:
+        assert (enc._encoder_stream is enc.stream) is (codec == "h264")
         for i, p in enumerate(pts_list):
             enc.encode(_gradient_frame(i, h, w), p)
     return dst, pts_list, metadata.time_base
