@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+import ctypes
 from enum import Enum
+
 import torch
 import torch.nn.functional as F
+
+from jasna.accelerator import is_nvidia_device
+from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
+
+_FATBIN = "denoise.fatbin"
+_BLOCK_WIDTH = 16
+_BLOCK_HEIGHT = 16
 
 
 class DenoiseStrength(Enum):
@@ -22,6 +31,78 @@ _DENOISE_PARAMS: dict[DenoiseStrength, tuple[int, float, float]] = {
     DenoiseStrength.MEDIUM: (5, 1.5, 0.07),
     DenoiseStrength.HIGH: (5, 2.0, 0.09),
 }
+
+
+class _DenoiseKernel:
+    def __init__(self) -> None:
+        self._function: ctypes.c_void_p | None = None
+        self._values = [
+            ctypes.c_uint64(),  # frames pointer
+            ctypes.c_int64(),   # frame stride
+            ctypes.c_int64(),   # channel stride
+            ctypes.c_int64(),   # row stride
+            ctypes.c_uint64(),  # output pointer
+            ctypes.c_int64(),   # output frame stride
+            ctypes.c_int64(),   # output channel stride
+            ctypes.c_int64(),   # output row stride
+            ctypes.c_int(),     # frame count
+            ctypes.c_int(),     # height
+            ctypes.c_int(),     # width
+            ctypes.c_int(),     # kernel size
+            ctypes.c_float(),   # range scale
+            ctypes.c_uint64(),  # spatial weights pointer
+        ]
+        self._params = (ctypes.c_void_p * len(self._values))(
+            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
+        )
+
+    def launch(
+        self,
+        frames: torch.Tensor,
+        out: torch.Tensor,
+        kernel_size: int,
+        range_scale: float,
+        spatial_weights: torch.Tensor,
+    ) -> None:
+        if self._function is None:
+            self._function = resolve_function(_FATBIN, "bilateral_denoise_fp32")
+        count, _, height, width = frames.shape
+        for index, value in enumerate((
+            frames.data_ptr(), frames.stride(0), frames.stride(1), frames.stride(2),
+            out.data_ptr(), out.stride(0), out.stride(1), out.stride(2),
+            count, height, width, kernel_size, range_scale, spatial_weights.data_ptr(),
+        )):
+            self._values[index].value = value
+        check_cuda(
+            cuda_driver().cuLaunchKernel(
+                self._function,
+                (width + _BLOCK_WIDTH - 1) // _BLOCK_WIDTH,
+                (height + _BLOCK_HEIGHT - 1) // _BLOCK_HEIGHT,
+                count,
+                _BLOCK_WIDTH,
+                _BLOCK_HEIGHT,
+                1,
+                0,
+                ctypes.c_void_p(torch.cuda.current_stream(frames.device).cuda_stream),
+                self._params,
+                None,
+            ),
+            "cuLaunchKernel(bilateral_denoise_fp32)",
+        )
+
+
+_kernel = _DenoiseKernel()
+
+
+def _kernel_denoise(
+    frames: torch.Tensor,
+    kernel_size: int,
+    range_scale: float,
+    spatial_weights: torch.Tensor,
+) -> torch.Tensor:
+    out = torch.empty_like(frames)
+    _kernel.launch(frames, out, kernel_size, range_scale, spatial_weights.contiguous())
+    return out
 
 
 def spatial_denoise(
@@ -46,9 +127,19 @@ def spatial_denoise(
     gy, gx = torch.meshgrid(offsets, offsets, indexing="ij")
     spatial_weights = torch.exp(-0.5 * (gx * gx + gy * gy) / (sigma_spatial ** 2))
 
+    range_scale = -0.5 / (sigma_range ** 2)
+
+    if (
+        is_nvidia_device(frames.device)
+        and frames.dtype is torch.float32
+        and frames.ndim == 4
+        and frames.shape[1] == 3
+        and frames.stride(3) == 1
+    ):
+        return _kernel_denoise(frames, kernel_size, range_scale, spatial_weights)
+
     padded = F.pad(frames, (half, half, half, half), mode="reflect")
 
-    range_scale = -0.5 / (sigma_range ** 2)
     H, W = frames.shape[2], frames.shape[3]
 
     result = torch.zeros_like(frames)
