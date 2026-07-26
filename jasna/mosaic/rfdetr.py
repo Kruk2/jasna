@@ -15,6 +15,10 @@ from jasna.mosaic.detections import Detections
 from jasna.tensor_utils import pad_batch_with_last
 
 
+_IMAGENET_MEAN = (0.485, 0.456, 0.406)
+_IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
 def TrtRunner(*args, **kwargs):
     from jasna.trt.trt_runner import TrtRunner as Runner
 
@@ -74,6 +78,9 @@ class RfDetrMosaicDetectionModel:
         self.dynamic_batch = bool(dynamic_batch)
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
+        self._normalization_cache: dict[
+            tuple[torch.device, torch.dtype], tuple[torch.Tensor, torch.Tensor]
+        ] = {}
         if self.batch_size <= 0:
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
 
@@ -138,11 +145,20 @@ class RfDetrMosaicDetectionModel:
             self.runner.close()
             self.runner = None
 
+    def _normalization(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        key = (x.device, x.dtype)
+        cached = self._normalization_cache.get(key)
+        if cached is None:
+            mean = x.new_tensor(_IMAGENET_MEAN)[:, None, None]
+            std = x.new_tensor(_IMAGENET_STD)[:, None, None]
+            cached = (mean, std)
+            self._normalization_cache[key] = cached
+        return cached
+
     def _preprocess(self, frames_uint8_bchw: torch.Tensor) -> torch.Tensor:
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype).div_(255.0)
         x = F.interpolate(x, size=(self.resolution, self.resolution), mode="bilinear", align_corners=False)
-        mean = x.new_tensor([0.485, 0.456, 0.406])[:, None, None]
-        std = x.new_tensor([0.229, 0.224, 0.225])[:, None, None]
+        mean, std = self._normalization(x)
         return (x - mean) / std
 
     def _infer(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
