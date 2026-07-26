@@ -93,17 +93,22 @@ class BlendBuffer:
                 for track_id in pending
             ]
 
+        # A frame can be pending on tracks whose restoration never arrived. The
+        # clone is a full-frame copy (0.13 ms at 8K VR), so only pay it once
+        # something is actually going to be composited.
+        ready = [(track_id, sr) for track_id, sr in results_snapshot if sr is not None]
+        if not ready:
+            return original_frame
+
         blended = original_frame.clone()
         device = original_frame.device
 
-        for track_id, sr in results_snapshot:
-            if sr is None:
-                continue
+        for track_id, sr in ready:
             self._apply_blend(blended, original_frame, frame_idx, track_id, sr, device)
 
         with self._lock:
-            for track_id, sr in results_snapshot:
-                if sr is not None and self._result_last_frame.get(track_id) == frame_idx:
+            for track_id, sr in ready:
+                if self._result_last_frame.get(track_id) == frame_idx:
                     del self._results[track_id]
                     del self._result_last_frame[track_id]
 

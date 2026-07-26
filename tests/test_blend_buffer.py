@@ -102,6 +102,27 @@ class TestBlendBufferBlending:
         result = bb.blend_frame(0, original)
         assert result is original
 
+    def test_blend_skips_the_frame_copy_when_no_result_arrived(self):
+        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb.register_frame(0, {1})
+        original = torch.zeros(3, 8, 8, dtype=torch.uint8)
+
+        result = bb.blend_frame(0, original)
+
+        assert result is original
+
+    def test_blend_copies_when_only_some_tracks_have_results(self):
+        bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+        bb.register_frame(0, {1, 2})
+        bb.add_result(_make_sr(track_id=1, start_frame=0, frame_count=1, fill_value=200))
+
+        original = torch.zeros(3, 8, 8, dtype=torch.uint8)
+        result = bb.blend_frame(0, original)
+
+        assert result is not original
+        assert torch.all(result == 200)
+        assert torch.all(original == 0)
+
     def test_result_cleaned_up_after_last_frame(self):
         bb = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
         bb.register_frame(0, {1})
