@@ -40,7 +40,8 @@ nvidia = [
   "nvidia-vfx",
   # The VALI decode backend needs the corruption-tolerant fork (~/k-drive/vali,
   # DecodeSingleSurfaceAsyncDetailed); with the stock PyPI wheel the reader
-  # falls back to PyAV at open time.
+  # falls back to PyAV at open time. Release builds install the fork wheel from
+  # keytool/wheels/ on top of this pin (see keytool/build_linux.sh).
   "python_vali==4.8.7",
 ]
 amd = [
