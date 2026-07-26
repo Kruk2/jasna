@@ -86,6 +86,10 @@ Developer setup also requires:
   It carries both the CUDA-current-context API merged for PyAV 18.1.0 and the explicit
   NVENC CUDA stream the encoder hands to `CudaContext(cuda_stream=...)`, which is not in
   any published PyAV release.
+- Optional: a `python_vali` wheel built from <https://codeberg.org/Kruk2/vali>. Only that
+  fork has `DecodeSingleSurfaceAsyncDetailed` and its corrupt-packet tolerance, which the
+  VALI decode backend needs; with the stock PyPI wheel the reader falls back to PyAV for
+  every video.
 
 Then install Jasna in editable mode:
 
