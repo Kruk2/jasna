@@ -202,27 +202,17 @@ class GpuCasSharpener:
             else None
         )
 
-    def apply_luma_(self, packed: torch.Tensor, height: int) -> None:
-        luma = packed[:height]
-        if self.ten_bit:
-            luma = luma.view(torch.uint16)
-        if self._kernel is not None:
-            sharpened = torch.empty_like(luma)
-            try:
-                self._kernel.launch(luma, sharpened, self.weight_scale)
-            except RuntimeError as exc:
-                # The Torch path below is correct but roughly 30x slower, so a
-                # broken install must not degrade to it quietly.
-                logger.warning(
-                    "CUDA sharpening kernel unavailable (%s); falling back to the "
-                    "much slower Torch implementation",
-                    exc,
-                )
-                self._kernel = None
-            else:
-                luma.copy_(sharpened)
-                return
+    def _disable_kernel(self, exc: Exception) -> None:
+        # The Torch path is correct but roughly 30x slower, so a broken install
+        # must not degrade to it quietly.
+        logger.warning(
+            "CUDA sharpening kernel unavailable (%s); falling back to the "
+            "much slower Torch implementation",
+            exc,
+        )
+        self._kernel = None
 
+    def _sharpen_torch_(self, luma: torch.Tensor) -> None:
         plane = luma.to(torch.float32)
         if self.ten_bit:
             plane.div_(_P010_SCALE)
@@ -235,3 +225,39 @@ class GpuCasSharpener:
         if self.ten_bit:
             sharpened.mul_(_P010_SCALE)
         luma.copy_(sharpened)
+
+    def sharpen_into(self, source_luma: torch.Tensor, destination_luma: torch.Tensor) -> None:
+        """Sharpen one luma plane into another.
+
+        Saves the full-plane copy ``apply_luma_`` needs, because the caller can
+        hand over a scratch plane the conversion wrote and the real destination.
+        """
+        if self.ten_bit:
+            source_luma = source_luma.view(torch.uint16)
+            destination_luma = destination_luma.view(torch.uint16)
+        if self._kernel is not None:
+            try:
+                self._kernel.launch(source_luma, destination_luma, self.weight_scale)
+            except RuntimeError as exc:
+                self._disable_kernel(exc)
+            else:
+                return
+
+        destination_luma.copy_(source_luma)
+        self._sharpen_torch_(destination_luma)
+
+    def apply_luma_(self, packed: torch.Tensor, height: int) -> None:
+        luma = packed[:height]
+        if self.ten_bit:
+            luma = luma.view(torch.uint16)
+        if self._kernel is not None:
+            sharpened = torch.empty_like(luma)
+            try:
+                self._kernel.launch(luma, sharpened, self.weight_scale)
+            except RuntimeError as exc:
+                self._disable_kernel(exc)
+            else:
+                luma.copy_(sharpened)
+                return
+
+        self._sharpen_torch_(luma)

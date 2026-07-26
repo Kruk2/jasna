@@ -35,22 +35,7 @@ from jasna.media import (
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.cas import GpuCasSharpener
 from jasna.media.lut import GpuLutApplier, parse_cube_file
-from jasna.media.rgb_to_nv12 import (
-    chw_rgb_to_nv12_bt2020_full,
-    chw_rgb_to_nv12_bt2020_limited,
-    chw_rgb_to_nv12_bt601_full,
-    chw_rgb_to_nv12_bt601_limited,
-    chw_rgb_to_nv12_bt709_full,
-    chw_rgb_to_nv12_bt709_limited,
-)
-from jasna.media.rgb_to_p010 import (
-    chw_rgb_to_p010_bt2020_full,
-    chw_rgb_to_p010_bt2020_limited,
-    chw_rgb_to_p010_bt601_full,
-    chw_rgb_to_p010_bt601_limited,
-    chw_rgb_to_p010_bt709_full,
-    chw_rgb_to_p010_bt709_limited,
-)
+from jasna.media.rgb_to_yuv import RgbToYuvConverter
 
 av.logging.set_level(logging.ERROR)
 
@@ -244,21 +229,13 @@ _COLOR_TRANSFERS = {
     "smpte2084": 16,
     "arib-std-b67": 18,
 }
-_COLOR_CONVERTERS = {
-    (AvColorspace.ITU709, AvColorRange.MPEG): chw_rgb_to_p010_bt709_limited,
-    (AvColorspace.ITU709, AvColorRange.JPEG): chw_rgb_to_p010_bt709_full,
-    (AvColorspace.ITU601, AvColorRange.MPEG): chw_rgb_to_p010_bt601_limited,
-    (AvColorspace.ITU601, AvColorRange.JPEG): chw_rgb_to_p010_bt601_full,
-    (AvColorspace.BT2020, AvColorRange.MPEG): chw_rgb_to_p010_bt2020_limited,
-    (AvColorspace.BT2020, AvColorRange.JPEG): chw_rgb_to_p010_bt2020_full,
-}
-_COLOR_CONVERTERS_NV12 = {
-    (AvColorspace.ITU709, AvColorRange.MPEG): chw_rgb_to_nv12_bt709_limited,
-    (AvColorspace.ITU709, AvColorRange.JPEG): chw_rgb_to_nv12_bt709_full,
-    (AvColorspace.ITU601, AvColorRange.MPEG): chw_rgb_to_nv12_bt601_limited,
-    (AvColorspace.ITU601, AvColorRange.JPEG): chw_rgb_to_nv12_bt601_full,
-    (AvColorspace.BT2020, AvColorRange.MPEG): chw_rgb_to_nv12_bt2020_limited,
-    (AvColorspace.BT2020, AvColorRange.JPEG): chw_rgb_to_nv12_bt2020_full,
+_COLOR_VARIANTS = {
+    (AvColorspace.ITU709, AvColorRange.MPEG): "bt709_limited",
+    (AvColorspace.ITU709, AvColorRange.JPEG): "bt709_full",
+    (AvColorspace.ITU601, AvColorRange.MPEG): "bt601_limited",
+    (AvColorspace.ITU601, AvColorRange.JPEG): "bt601_full",
+    (AvColorspace.BT2020, AvColorRange.MPEG): "bt2020_limited",
+    (AvColorspace.BT2020, AvColorRange.JPEG): "bt2020_full",
 }
 
 _NVENC_PITCH_ALIGNMENT = 16
@@ -397,10 +374,11 @@ class NvidiaVideoEncoder:
                 ten_bit=False,
                 supported_settings=spec.supported_settings,
             )
-        converter_map = _COLOR_CONVERTERS if spec.frame_format == "p010le" else _COLOR_CONVERTERS_NV12
-        converter = converter_map.get((metadata.color_space, metadata.color_range))
-        if converter is None:
+        color_variant = _COLOR_VARIANTS.get((metadata.color_space, metadata.color_range))
+        if color_variant is None:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
+        pixel_format = "p010" if spec.frame_format == "p010le" else "nv12"
+        converter_variant = f"{pixel_format}_{color_variant}"
         if encoder_settings:
             validate_encoder_settings(
                 encoder_settings,
@@ -435,7 +413,7 @@ class NvidiaVideoEncoder:
                 sharpen_strength, ten_bit=spec.ten_bit, device=self.device
             )
 
-        self._to_yuv = converter
+        self._converter = RgbToYuvConverter(converter_variant, device=self.device)
 
         self.encoder_options = dict(spec.default_options)
         if "maxrate" not in encoder_settings:
@@ -753,16 +731,39 @@ class NvidiaVideoEncoder:
             )
         return RuntimeError(message)
 
+    def _to_yuv(self, frame: torch.Tensor, height: int) -> torch.Tensor:
+        # Sharpening happens here rather than after, because it must see a
+        # contiguous plane: pitch alignment can hand back a strided view into a
+        # wider buffer, and the AMD path copies straight to host memory.
+        if not self._converter.uses_kernel:
+            packed = self._converter.convert(frame)
+            if self._cas is not None:
+                self._cas.apply_luma_(packed, height)
+            return packed
+
+        width = frame.shape[2]
+        packed = torch.empty(
+            (height + height // 2, width),
+            dtype=self._converter.sample_dtype,
+            device=frame.device,
+        )
+        if self._cas is None:
+            self._converter.convert_into(frame, packed[:height], packed[height:])
+            return packed
+        # CAS is a 3x3 stencil, so it cannot run in place. Writing luma to a
+        # scratch plane and sharpening from there into the final frame costs one
+        # allocation; sharpening in place would cost that plus a full copy back.
+        luma = torch.empty_like(packed[:height])
+        self._converter.convert_into(frame, luma, packed[height:])
+        self._cas.sharpen_into(luma, packed[:height])
+        return packed
+
     def _encode_frame(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
         height = self.metadata.video_height
         with stream_context(self.stream):
             if apply_lut and self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
-            packed = self._to_yuv(frame)
-            # Sharpen before pitch alignment, which can hand back a strided view
-            # into a wider buffer, and before the AMD copy to host memory.
-            if self._cas is not None:
-                self._cas.apply_luma_(packed, height)
+            packed = self._to_yuv(frame, height)
             if self.vendor is AcceleratorVendor.NVIDIA:
                 packed = _align_yuv_pitch(packed)
             else:

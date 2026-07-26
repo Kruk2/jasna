@@ -97,6 +97,13 @@ committed alongside them, and loaded at run time through the CUDA driver API
 to rebuild a kernel after editing its `.cu`:
 
 ```bash
+scripts/build_fatbins.sh        # every kernel
+scripts/build_fatbins.sh cas    # just jasna/media/cas.cu
+```
+
+That script runs, for each `.cu`:
+
+```bash
 GENCODE="-gencode arch=compute_75,code=[compute_75,sm_75]"
 for arch in 80 86 87 88 89 90 100 103 110 120 121; do
     GENCODE="$GENCODE -gencode arch=compute_$arch,code=sm_$arch"
@@ -105,11 +112,12 @@ nvcc -ccbin g++-15 -std=c++17 -O3 -fatbin $GENCODE \
     -o jasna/media/cas.fatbin jasna/media/cas.cu
 ```
 
-`-ccbin g++-15` is needed because CUDA 13 rejects newer host compilers. PTX is
-embedded for `compute_75` only, so future architectures still load via JIT.
-Verify the result with `cuobjdump -lelf jasna/media/cas.fatbin`, and add any new
-fatbin to `CUDA_KERNEL_FATBINS` in `jasna/protection/keytool/build_nuitka.py` so
-frozen builds bundle it.
+`-ccbin g++-15` is needed because CUDA 13 rejects newer host compilers (override
+with `CCBIN=`). PTX is embedded for `compute_75` only, so future architectures
+still load via JIT. The script prints each fatbin's size and architecture list;
+`cuobjdump -lelf jasna/media/cas.fatbin` shows the detail. Add any new fatbin to
+`CUDA_KERNEL_FATBINS` in `jasna/protection/keytool/build_nuitka.py` so frozen
+builds bundle it.
 
 Every kernel needs a Torch equivalent: ROCm has no fatbin path and falls back to
 it, and the unit tests use it as the reference implementation.
