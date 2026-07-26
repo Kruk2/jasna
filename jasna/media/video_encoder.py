@@ -209,7 +209,6 @@ AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
 }
 
 _CODEC_MAP = {spec.name: spec.encoder_name for spec in ENCODER_SPECS.values()}
-_SEPARATE_NVENC_STREAM_CODECS = frozenset({"hevc", "av1"})
 
 # ITU-T H.273 matrix, primaries, and transfer-characteristic code points.
 _COLOR_TAGS = {
@@ -504,18 +503,15 @@ class NvidiaVideoEncoder:
         # Keeping conversion and NVENC in one context also avoids a ~500 MiB
         # secondary CUDA context and cross-context scheduling overhead.
         self.stream = new_stream(self.device)
-        self._encoder_stream = self.stream
         self._cuda_ctx = None
         if self.vendor is AcceleratorVendor.NVIDIA:
             from av.video.frame import CudaContext
 
-            if self.codec in _SEPARATE_NVENC_STREAM_CODECS:
-                self._encoder_stream = new_stream(self.device)
             self._cuda_ctx = CudaContext(
                 device_id=self.device.index or 0,
                 primary_ctx=False,
                 current_ctx=True,
-                cuda_stream=self._encoder_stream.cuda_stream,
+                cuda_stream=self.stream.cuda_stream,
             )
         self._host_yuv = None
         if self.vendor is AcceleratorVendor.AMD:
@@ -781,7 +777,7 @@ class NvidiaVideoEncoder:
                 hw_frame = av.VideoFrame.from_dlpack(
                     planes,
                     format=self.spec.frame_format,
-                    stream=self._encoder_stream.cuda_stream,
+                    stream=self.stream.cuda_stream,
                     cuda_context=self._cuda_ctx,
                 )
             else:

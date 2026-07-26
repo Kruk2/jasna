@@ -367,7 +367,6 @@ class TestSharpening:
             uses_kernel=False, convert=lambda frame: packed.clone()
         )
         enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
-        enc._encoder_stream = enc.stream
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
         enc._cuda_ctx = None
         seen = []
@@ -400,7 +399,6 @@ class TestSharpening:
             uses_kernel=False, convert=lambda frame: torch.zeros((6, 4), dtype=torch.uint8)
         )
         enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
-        enc._encoder_stream = enc.stream
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
         enc._cuda_ctx = None
         order = []
@@ -525,13 +523,12 @@ class TestEncodeBuffer:
         else:
             assert aligned.data_ptr() != packed.data_ptr()
 
-    def test_from_dlpack_hands_off_to_encoder_stream_without_host_sync(
+    def test_from_dlpack_uses_shared_cuda_stream_without_host_sync(
         self, tmp_path, monkeypatch
     ):
         enc = _make_encoder(tmp_path, codec="hevc", video_width=2, video_height=2)
         enc.stream = MagicMock()
         enc.stream.cuda_stream = 1234
-        enc._encoder_stream = SimpleNamespace(cuda_stream=5678)
         enc._cuda_ctx = object()
         enc._lut_applier = None
         enc._converter = SimpleNamespace(
@@ -553,7 +550,7 @@ class TestEncodeBuffer:
         _, kwargs = from_dlpack.call_args
         assert kwargs == {
             "format": "p010le",
-            "stream": 5678,
+            "stream": 1234,
             "cuda_context": enc._cuda_ctx,
         }
         enc.stream.synchronize.assert_not_called()
