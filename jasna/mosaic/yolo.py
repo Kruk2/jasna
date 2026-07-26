@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from ultralytics.utils import nms, ops
 
 from jasna.accelerator import is_nvidia_device
+from jasna.media.resize_normalize import ResizeNormalizer
 from jasna.mosaic.detections import Detections
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,16 @@ def _mask_hw_for_frame(target_hw: tuple[int, int]) -> tuple[int, int]:
     mh = max(1, int(round(h * scale)))
     mw = max(1, int(round(w * scale)))
     return mh, mw
+
+
+def _letterbox_geometry(
+    height: int, width: int, new_shape: tuple[int, int]
+) -> tuple[float, int, int, int, int]:
+    new_h, new_w = (int(new_shape[0]), int(new_shape[1]))
+    gain = min(new_h / height, new_w / width)
+    unpad_w = int(round(width * gain))
+    unpad_h = int(round(height * gain))
+    return gain, (new_w - unpad_w) // 2, (new_h - unpad_h) // 2, unpad_w, unpad_h
 
 
 def _letterbox_normalized_bchw(
@@ -193,7 +204,34 @@ class YoloMosaicDetectionModel:
                 self.stride = int(stride_attr)
             self.model.eval()
         self._empty_masks_cache: dict[tuple[int, int], torch.Tensor] = {}
+        resizer = ResizeNormalizer(
+            device=self.device,
+            dtype=self.input_dtype,
+            mean=(0.0, 0.0, 0.0),
+            std=(1.0, 1.0, 1.0),
+            fill=(_YOLO_LETTERBOX_PAD_VALUE,) * 3,
+        )
+        self._resizer = resizer if resizer.available else None
         logger.info("YOLO detection model loaded: %s (batch_size=%d)", runtime_path, self.batch_size)
+
+    def _preprocess(
+        self, frames_uint8_bchw: torch.Tensor
+    ) -> tuple[torch.Tensor, tuple[tuple[float, float], tuple[int, int]]]:
+        if self._resizer is not None and frames_uint8_bchw.dtype is torch.uint8:
+            _, _, h, w = frames_uint8_bchw.shape
+            gain, left, top, unpad_w, unpad_h = _letterbox_geometry(h, w, (self.imgsz, self.imgsz))
+            x = self._resizer.run(
+                frames_uint8_bchw,
+                out_hw=(self.imgsz, self.imgsz),
+                content=(left, top, unpad_w, unpad_h),
+            )
+            return x, ((float(gain), float(gain)), (int(left), int(top)))
+
+        x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
+        x = x / 255.0
+        return _letterbox_normalized_bchw(
+            x, new_shape=(self.imgsz, self.imgsz), stride=self.stride
+        )
 
     def close(self) -> None:
         if self.runner is not None:
@@ -268,13 +306,7 @@ class YoloMosaicDetectionModel:
         synchronization."""
 
         _, _, src_h, src_w = frames_uint8_bchw.shape
-        x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
-        x /= 255.0
-        x, ratio_pad = _letterbox_normalized_bchw(
-            x,
-            new_shape=(self.imgsz, self.imgsz),
-            stride=self.stride,
-        )
+        x, ratio_pad = self._preprocess(frames_uint8_bchw)
         pred_raw, protos, nc = self._forward_raw(x)
 
         per_anchor, anchor_classes = pred_raw[
@@ -332,13 +364,7 @@ class YoloMosaicDetectionModel:
 
     @torch.inference_mode()
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
-        x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
-        x /= 255.0
-        x, ratio_pad = _letterbox_normalized_bchw(
-            x,
-            new_shape=(self.imgsz, self.imgsz),
-            stride=self.stride,
-        )
+        x, ratio_pad = self._preprocess(frames_uint8_bchw)
         pred_raw, protos, nc = self._forward_raw(x)
         preds = nms.non_max_suppression(
             pred_raw,

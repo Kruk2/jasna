@@ -129,6 +129,7 @@ class TestYoloCall:
         model = object.__new__(YoloMosaicDetectionModel)
         model.device = torch.device("cpu")
         model.input_dtype = torch.float32
+        model._resizer = None
         model.imgsz = 4
         model.stride = 1
         model.max_det = 1

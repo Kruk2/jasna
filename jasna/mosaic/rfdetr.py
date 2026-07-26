@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 from jasna.accelerator import is_amd_device, is_nvidia_device
 from jasna.engine_paths import get_onnx_tensorrt_engine_path
+from jasna.media.resize_normalize import ResizeNormalizer
 from jasna.mosaic.detections import Detections
 from jasna.tensor_utils import pad_batch_with_last
 
@@ -125,6 +126,14 @@ class RfDetrMosaicDetectionModel:
             )
         self._input_name = self.runner.input_names[0]
         self.input_dtype = self.runner.input_dtypes[self._input_name]
+        resizer = ResizeNormalizer(
+            device=self.device,
+            dtype=self.input_dtype,
+            mean=_IMAGENET_MEAN,
+            std=_IMAGENET_STD,
+            fill=(0.0, 0.0, 0.0),
+        )
+        self._resizer = resizer if resizer.available else None
 
         self.boxes_out = next(
             name
@@ -156,6 +165,12 @@ class RfDetrMosaicDetectionModel:
         return cached
 
     def _preprocess(self, frames_uint8_bchw: torch.Tensor) -> torch.Tensor:
+        if self._resizer is not None and frames_uint8_bchw.dtype is torch.uint8:
+            return self._resizer.run(
+                frames_uint8_bchw,
+                out_hw=(self.resolution, self.resolution),
+                content=(0, 0, self.resolution, self.resolution),
+            )
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype).div_(255.0)
         x = F.interpolate(x, size=(self.resolution, self.resolution), mode="bilinear", align_corners=False)
         mean, std = self._normalization(x)
