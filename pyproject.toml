@@ -45,7 +45,12 @@ nvidia = [
 ]
 amd = [
   "torch==2.9.1",
-  "torchvision==0.24.1",
+  # The ROCm channels ship different torchvision versions per OS (Linux
+  # manylinux/base image: 0.24.0, Windows: 0.24.1). A shared ==0.24.1 pin is
+  # unsatisfiable by any Linux ROCm wheel, so uv silently replaced torchvision
+  # with the PyPI CUDA build and torchvision::nms failed to register.
+  "torchvision==0.24.0; sys_platform == 'linux'",
+  "torchvision==0.24.1; sys_platform == 'win32'",
   # AMD runs RF-DETR through the rfdetr torch model (ROCm), not ONNX/MIGraphX,
   # which sidesteps the Windows-only MIGraphX wheels (see issue #240).
   "rfdetr==1.8.3",

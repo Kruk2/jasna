@@ -60,11 +60,14 @@ Verify ROCm actually stuck on either OS (the Linux Docker build asserts the same
 python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK', torch.__version__, torchvision.__version__)"
 ```
 
-`jasna[amd]` pins `torch==2.9.1` / `torchvision==0.24.1` as plain versions on purpose:
-the ROCm wheels (`2.9.1+rocm7.2.1`, `0.24.1+rocm7.2.1`) satisfy them, and a single
-`+rocm7.2.1` *local-version* pin can't be shared across OSes (the Linux manylinux
-channel ships torchvision `0.24.0`, Windows ships `0.24.1`). The ROCm-build
-assertion above is the fail-loud guard instead.
+`jasna[amd]` pins `torch==2.9.1` as a plain version on purpose: the ROCm wheels
+(`2.9.1+rocm7.2.1`) satisfy it, and a `+rocm7.2.1` *local-version* pin can't be
+shared across OSes. torchvision is pinned per OS (`0.24.0` on Linux, `0.24.1`
+on Windows) because the ROCm channels ship different versions — the Linux
+manylinux channel and the `rocm/pytorch` base image only have `0.24.0`, so a
+shared `0.24.1` pin would make pip/uv silently install the PyPI CUDA build,
+which breaks `torchvision.ops.nms` (and with it RF-DETR) at runtime. The
+ROCm-build assertion above is the fail-loud guard on top.
 
 For Nvidia library builds, you also need:
 
