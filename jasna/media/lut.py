@@ -5,11 +5,19 @@ https://wwwimages2.adobe.com/content/dam/acom/en/products/speedgrade/cc/pdfs/cub
 """
 from __future__ import annotations
 
+import ctypes
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+
+from jasna.accelerator import is_nvidia_device
+from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
+
+_FATBIN = "lut.fatbin"
+_BLOCK_WIDTH = 32
+_BLOCK_HEIGHT = 8
 
 
 @dataclass
@@ -103,6 +111,71 @@ def parse_cube_text(text: str) -> CubeLut:
     )
 
 
+class _LutKernel:
+    def __init__(self, function_name: str):
+        self.function_name = function_name
+        self._function: ctypes.c_void_p | None = None
+        self._values = [
+            ctypes.c_uint64(),  # RGB pointer
+            ctypes.c_int64(),   # RGB channel stride
+            ctypes.c_int64(),   # RGB row stride
+            ctypes.c_uint64(),  # output pointer
+            ctypes.c_int64(),   # output channel stride
+            ctypes.c_int64(),   # output row stride
+            ctypes.c_int(),     # height
+            ctypes.c_int(),     # width
+            ctypes.c_uint64(),  # LUT table pointer
+            ctypes.c_int(),     # LUT size
+            ctypes.c_uint64(),  # domain minimum pointer
+            ctypes.c_uint64(),  # domain scale pointer
+        ]
+        self._params = (ctypes.c_void_p * len(self._values))(
+            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
+        )
+
+    def launch(
+        self,
+        frame: torch.Tensor,
+        out: torch.Tensor,
+        table: torch.Tensor,
+        lut_size: int,
+        domain_min: torch.Tensor,
+        domain_scale: torch.Tensor,
+    ) -> None:
+        if self._function is None:
+            self._function = resolve_function(_FATBIN, self.function_name)
+        _, height, width = frame.shape
+        values = self._values
+        values[0].value = frame.data_ptr()
+        values[1].value = frame.stride(0)
+        values[2].value = frame.stride(1)
+        values[3].value = out.data_ptr()
+        values[4].value = out.stride(0)
+        values[5].value = out.stride(1)
+        values[6].value = height
+        values[7].value = width
+        values[8].value = table.data_ptr()
+        values[9].value = lut_size
+        values[10].value = domain_min.data_ptr()
+        values[11].value = domain_scale.data_ptr()
+        check_cuda(
+            cuda_driver().cuLaunchKernel(
+                self._function,
+                (width + _BLOCK_WIDTH - 1) // _BLOCK_WIDTH,
+                (height + _BLOCK_HEIGHT - 1) // _BLOCK_HEIGHT,
+                1,
+                _BLOCK_WIDTH,
+                _BLOCK_HEIGHT,
+                1,
+                0,
+                ctypes.c_void_p(torch.cuda.current_stream(frame.device).cuda_stream),
+                self._params,
+                None,
+            ),
+            f"cuLaunchKernel({self.function_name})",
+        )
+
+
 class GpuLutApplier:
     """Applies a parsed CubeLut to RGB CHW frames on GPU.
 
@@ -123,15 +196,44 @@ class GpuLutApplier:
         if lut.is_3d:
             # (3, B, G, R) → (1, 3, B, G, R)
             self._lut_volume = lut.data.to(device).unsqueeze(0)
+            # (channel, B, G, R) -> (B, G, R, channel): the kernel reads all
+            # three channels of a corner together.
+            self._table = lut.data.to(device).permute(1, 2, 3, 0).contiguous()
         else:
             # (N, 3) → keep on device
             self._lut_1d = lut.data.to(device)
+            self._table = self._lut_1d.contiguous()
+
+        self._kernel = (
+            _LutKernel("lut3d_u8" if lut.is_3d else "lut1d_u8")
+            if is_nvidia_device(device)
+            else None
+        )
+        self._domain_min_flat = dmin.flatten().contiguous()
+        self._domain_scale_flat = self._domain_scale.flatten().contiguous()
 
     def apply(self, frame_chw: torch.Tensor) -> torch.Tensor:
         if frame_chw.ndim != 3 or frame_chw.shape[0] != 3:
             raise ValueError(f"Expected (3, H, W) RGB tensor, got {tuple(frame_chw.shape)}")
 
         original_dtype = frame_chw.dtype
+        if (
+            self._kernel is not None
+            and original_dtype == torch.uint8
+            and frame_chw.device == self.device
+            and frame_chw.stride(2) == 1
+        ):
+            out = torch.empty_like(frame_chw)
+            self._kernel.launch(
+                frame_chw,
+                out,
+                self._table,
+                self.lut.size,
+                self._domain_min_flat,
+                self._domain_scale_flat,
+            )
+            return out
+
         if original_dtype == torch.uint8:
             rgb = frame_chw.to(self.device, dtype=torch.float32).div_(255.0)
         else:
