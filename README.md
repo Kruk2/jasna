@@ -103,24 +103,37 @@ i9-13900K.
 Jasna used its default models with `--max-clip-size 180 --temporal-overlap 15
 --secondary-restoration none`. Lada Flatpak 0.11.0 used the accurate `v2`
 detector, CUDA FP16, `--max-clip-length 180`, and its NVIDIA HEVC HQ preset.
-Times are one measured run after a discarded warmup. Parenthetical ratios use
-Lada as the baseline; because Lada was not run on 8K, that row uses v0.8.1 as
-its baseline. All SONE clips contain 6,056 frames (3:22), and the 8K VR clip
-contains 900 frames (15 s).
+Frozen-release and Lada times are one measured run after a discarded warmup;
+v0.9.0 times are medians of three interleaved runs after warmup. Parenthetical
+ratios use Lada as the baseline; because Lada was not run on 8K, that row uses
+v0.8.1 as its baseline. All SONE clips contain 6,056 frames (3:22), and the 8K
+VR clip contains 900 frames (15 s).
 
-| Input | Lada 0.11.0 v2 | v0.4.1 | v0.5.0 | v0.6.2 | v0.7.2 | v0.8.1 | **v0.9.0 (7d9cc8c)** |
+| Input | Lada 0.11.0 v2 | v0.4.1 | v0.5.0 | v0.6.2 | v0.7.2 | v0.8.1 | **v0.9.0 (4a171c9)** |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 720p H.264 8-bit | 01:47 (baseline) | 01:35 (1.1x faster) | 00:45 (2.4x faster) | 00:45 (2.4x faster) | 00:47 (2.3x faster) | 00:49 (2.2x faster) | **00:35 (3.0x faster)** |
-| 1080p H.264 8-bit | 02:02 (baseline) | 01:46 (1.2x faster) | 00:47 (2.6x faster) | 00:46 (2.7x faster) | 00:44 (2.8x faster) | 00:50 (2.5x faster) | **00:40 (3.0x faster)** |
-| 1080p HEVC 10-bit | 02:06 (baseline) | 01:48 (1.2x faster) | 00:48 (2.6x faster) | 00:47 (2.7x faster) | 00:46 (2.7x faster) | 00:50 (2.5x faster) | **00:40 (3.2x faster)** |
-| 2160p H.264 8-bit | 04:56 (baseline) | 03:23 (1.5x faster) | 01:22 (3.6x faster) | 01:16 (3.9x faster) | 01:16 (3.9x faster) | 01:30 (3.3x faster) | **01:22 (3.6x faster)** |
-| 2160p HEVC 10-bit | 05:11 (baseline) | 03:24 (1.5x faster) | 01:31 (3.4x faster) | 01:24 (3.7x faster) | 01:20 (3.9x faster) | 01:34 (3.3x faster) | **01:23 (3.7x faster)** |
-| 2160p AV1 10-bit | 05:21 (baseline) | 03:22 (1.6x faster) | 01:30 (3.6x faster) | 01:20 (4.0x faster) | 01:20 (4.0x faster) | — | **01:25 (3.8x faster)** |
-| 8K VR HEVC 8-bit 60 fps | — | — | — | — | — | 00:45 (8K baseline) | 00:47 (1.04x slower) |
+| 720p H.264 8-bit | 01:47 (baseline) | 01:35 (1.1x faster) | 00:45 (2.4x faster) | 00:45 (2.4x faster) | 00:47 (2.3x faster) | 00:49 (2.2x faster) | **00:34 (3.1x faster)** |
+| 1080p H.264 8-bit | 02:02 (baseline) | 01:46 (1.2x faster) | 00:47 (2.6x faster) | 00:46 (2.7x faster) | 00:44 (2.8x faster) | 00:50 (2.5x faster) | **00:39 (3.2x faster)** |
+| 1080p HEVC 10-bit | 02:06 (baseline) | 01:48 (1.2x faster) | 00:48 (2.6x faster) | 00:47 (2.7x faster) | 00:46 (2.7x faster) | 00:50 (2.5x faster) | **00:36 (3.5x faster)** |
+| 2160p H.264 8-bit | 04:56 (baseline) | 03:23 (1.5x faster) | 01:22 (3.6x faster) | 01:16 (3.9x faster) | 01:16 (3.9x faster) | 01:30 (3.3x faster) | **01:15 (3.9x faster)** |
+| 2160p HEVC 10-bit | 05:11 (baseline) | 03:24 (1.5x faster) | 01:31 (3.4x faster) | 01:24 (3.7x faster) | 01:20 (3.9x faster) | 01:34 (3.3x faster) | **01:19 (3.9x faster)** |
+| 2160p AV1 10-bit | 05:21 (baseline) | 03:22 (1.6x faster) | 01:30 (3.6x faster) | 01:20 (4.0x faster) | 01:20 (4.0x faster) | — | **01:05 (5.0x faster)** |
+| 8K VR HEVC 8-bit 60 fps | — | — | — | — | — | 00:45 (8K baseline) | **00:34 (1.3x faster)** |
+
+GPU memory is median/peak GiB for the measured benchmark target; `—` means
+not run.
+
+| Input | Lada | v0.4.1 | v0.5.0 | v0.6.2 | v0.7.2 | v0.8.1 | **v0.9.0** |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 720p H.264 8-bit | 1.8/3.1 | 17.6/19.9 | 8.6/9.0 | 8.8/9.1 | 8.8/9.2 | 8.6/9.2 | **8.6/9.1** |
+| 1080p H.264 8-bit | 2.0/3.3 | 18.9/21.4 | 9.5/10.2 | 9.7/10.3 | 9.7/10.5 | 9.6/10.1 | **9.3/10.1** |
+| 1080p HEVC 10-bit | 2.0/3.5 | 19.1/21.5 | 9.9/10.6 | 10.0/10.7 | 10.0/10.7 | 9.6/10.3 | **9.4/10.3** |
+| 2160p H.264 8-bit | 2.6/4.1 | 26.0/30.5 | 12.9/15.0 | 12.4/15.3 | 12.5/15.2 | 11.8/15.0 | **11.4/15.4** |
+| 2160p HEVC 10-bit | 2.6/4.0 | 26.6/30.5 | 14.0/15.9 | 13.8/16.1 | 13.5/16.2 | 12.1/15.4 | **12.0/15.9** |
+| 2160p AV1 10-bit | 2.6/3.8 | 26.6/30.1 | 13.8/16.2 | 13.5/16.2 | 13.5/16.2 | — | **11.8/15.8** |
+| 8K VR HEVC 8-bit 60 fps | — | — | — | — | — | 18.5/18.9 | **17.1/18.3** |
 
 See the [full benchmark report](benchmarks/2026-07-26_release_matrix.md) for
-median/peak RAM and VRAM, methodology, raw data, and performance-commit
-comparisons.
+median/peak RAM, methodology, raw data, and performance-commit comparisons.
 
 ### Legacy full-video benchmarks
 

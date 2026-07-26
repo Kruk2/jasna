@@ -9,7 +9,7 @@
   [v0.6.2](https://github.com/Kruk2/jasna/releases/tag/v0.6.2),
   [v0.7.2](https://github.com/Kruk2/jasna/releases/tag/v0.7.2),
   [v0.8.1](https://github.com/Kruk2/jasna/releases/tag/v0.8.1), and v0.9.0
-  source commit `7d9cc8c`
+  source commit `4a171c9`
 - Harness: `scripts/benchmark_releases.py`
 
 ## Method
@@ -18,11 +18,15 @@
   --secondary-restoration none`; defaults otherwise, including each version's
   default models and HEVC output.
 - Each target first restored `assets/test_clip1_1080p.mp4`; that output and all
-  measured outputs were discarded. The release matrix is one measured run
-  after warmup. The recent-commit and feature-pair results are medians of three
-  fresh subprocess runs.
+  measured outputs were discarded. Frozen-release and Lada rows are one
+  measured run after warmup. Refreshed v0.9.0 rows are medians of three paired
+  runs, interleaved per input with alternating target order. The recent-commit
+  and feature-pair results are medians of three fresh subprocess runs.
 - Source targets forced the VALI decoder. Frozen releases used their own
   release defaults.
+- The v0.9.0 source target used a locally built PyAV 18.0.0 with explicit CUDA
+  stream support. Its paired runs used tmpfs scratch space. Released targets
+  used their bundled dependencies.
 - RAM RSS and per-process VRAM were sampled every 0.5 seconds. Values below are
   median/peak MiB for the benchmark process; compositor VRAM is excluded.
 - SONE files are six encodings of the same 6,056-frame, 202.07-second source.
@@ -69,13 +73,13 @@
 | v0.8.1 | 2160p HEVC 10-bit | 01:33.8 | 64.6 | 3616/3662 | 12434/15792 | OK |
 | v0.8.1 | 2160p AV1 10-bit | — | — | — | — | Excluded: v0.8.1 release bug |
 | v0.8.1 | 8K VR HEVC 8-bit 60 fps | 00:45.5 | 19.8 | 7410/7413 | 18928/19312 | OK |
-| v0.9.0 `7d9cc8c` | 720p H.264 8-bit | 00:35.2 | 172.0 | 2324/2353 | 8664/9270 | OK |
-| v0.9.0 `7d9cc8c` | 1080p H.264 8-bit | 00:40.2 | 150.6 | 2490/2519 | 9539/10125 | OK |
-| v0.9.0 `7d9cc8c` | 1080p HEVC 10-bit | 00:39.8 | 152.1 | 2488/2518 | 9567/10467 | OK |
-| v0.9.0 `7d9cc8c` | 2160p H.264 8-bit | 01:21.6 | 74.2 | 3381/3414 | 11636/14064 | OK |
-| v0.9.0 `7d9cc8c` | 2160p HEVC 10-bit | 01:23.4 | 72.6 | 3377/3409 | 12184/15710 | OK |
-| v0.9.0 `7d9cc8c` | 2160p AV1 10-bit | 01:25.1 | 71.2 | 3372/3403 | 12126/15292 | OK |
-| v0.9.0 `7d9cc8c` | 8K VR HEVC 8-bit 60 fps | 00:47.5 | 19.0 | 6658/6918 | 16926/17752 | OK |
+| v0.9.0 `4a171c9` | 720p H.264 8-bit | 00:34.4 | 175.9 | 2319/2342 | 8820/9330 | OK |
+| v0.9.0 `4a171c9` | 1080p H.264 8-bit | 00:38.6 | 156.8 | 2480/2508 | 9527/10361 | OK |
+| v0.9.0 `4a171c9` | 1080p HEVC 10-bit | 00:36.1 | 167.8 | 2481/2508 | 9637/10537 | OK |
+| v0.9.0 `4a171c9` | 2160p H.264 8-bit | 01:15.4 | 80.3 | 3356/3412 | 11708/15724 | OK |
+| v0.9.0 `4a171c9` | 2160p HEVC 10-bit | 01:19.3 | 76.4 | 3095/3398 | 12248/16322 | OK |
+| v0.9.0 `4a171c9` | 2160p AV1 10-bit | 01:04.7 | 93.6 | 3360/3394 | 12106/16142 | OK |
+| v0.9.0 `4a171c9` | 8K VR HEVC 8-bit 60 fps | 00:34.5 | 26.1 | 6648/6909 | 17548/18696 | OK |
 
 v0.5.0 is used because
 [v0.5.1](https://github.com/Kruk2/jasna/releases/tag/v0.5.1) has no Linux
@@ -100,11 +104,11 @@ feature defaults. Each cell is the median wall time of three runs.
 | `07fabc2` | Denoise kernel | 38.4 s | 77.4 s | 36.9 s |
 | `7d9cc8c` | Cache VR axes and rotations | 38.6 s | 77.8 s | 37.8 s |
 
-The full series reduced median wall time from baseline to v0.9.0 by 11.7% at
-1080p, 11.2% at 2160p, and 11.5% on the default 8K path. The detector
-preprocess commit produced the clearest always-on step. LUT, denoise, and
-explicit VR projection are disabled in this broad run, so their neighboring
-rows must not be used to estimate those commits.
+The full series reduced median wall time from baseline to the final pre-stream
+performance commit by 11.7% at 1080p, 11.2% at 2160p, and 11.5% on the default
+8K path. The detector preprocess commit produced the clearest always-on step.
+LUT, denoise, and explicit VR projection are disabled in this broad run, so
+their neighboring rows must not be used to estimate those commits.
 
 ### Feature-specific paired runs
 
@@ -127,12 +131,12 @@ all processes in the Flatpak cgroup, and no 8K input was run.
 
 | Input | Wall | fps | RAM med/peak MiB | VRAM med/peak MiB | Jasna v0.9.0 speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| 720p H.264 8-bit | 01:47.3 | 56.4 | 5134/5361 | 1893/3142 | 3.0x |
-| 1080p H.264 8-bit | 02:02.4 | 49.5 | 6738/7101 | 2020/3351 | 3.0x |
-| 1080p HEVC 10-bit | 02:06.5 | 47.9 | 7558/8103 | 2045/3613 | 3.2x |
-| 2160p H.264 8-bit | 04:55.6 | 20.5 | 13748/16576 | 2653/4225 | 3.6x |
-| 2160p HEVC 10-bit | 05:10.7 | 19.5 | 12700/17454 | 2613/4079 | 3.7x |
-| 2160p AV1 10-bit | 05:20.9 | 18.9 | 15016/18570 | 2649/3871 | 3.8x |
+| 720p H.264 8-bit | 01:47.3 | 56.4 | 5134/5361 | 1893/3142 | 3.1x |
+| 1080p H.264 8-bit | 02:02.4 | 49.5 | 6738/7101 | 2020/3351 | 3.2x |
+| 1080p HEVC 10-bit | 02:06.5 | 47.9 | 7558/8103 | 2045/3613 | 3.5x |
+| 2160p H.264 8-bit | 04:55.6 | 20.5 | 13748/16576 | 2653/4225 | 3.9x |
+| 2160p HEVC 10-bit | 05:10.7 | 19.5 | 12700/17454 | 2613/4079 | 3.9x |
+| 2160p AV1 10-bit | 05:20.9 | 18.9 | 15016/18570 | 2649/3871 | 5.0x |
 
 ## Legacy-video interest check
 
