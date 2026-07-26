@@ -24,7 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from bench_memory import MemorySampler
@@ -49,6 +49,13 @@ class Target:
     label: str
     command_prefix: tuple[str, ...]
     cwd: Path
+
+
+@dataclass
+class Measurements:
+    times: list[float] = field(default_factory=list)
+    memories: list[dict[str, float]] = field(default_factory=list)
+    flags: str = ""
 
 
 def parse_target_spec(spec: str) -> tuple[str, Path]:
@@ -78,6 +85,10 @@ def source_target(spec: tuple[str, Path]) -> Target:
 
 def safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
+
+
+def targets_for_repeat(targets: list[Target], repeat: int) -> list[Target]:
+    return targets if repeat % 2 else list(reversed(targets))
 
 
 def probe_frames(clip: Path) -> int:
@@ -291,6 +302,11 @@ def main() -> None:
     parser.add_argument("--warmup-clip", type=Path, default=None)
     parser.add_argument("--no-warmup", action="store_true")
     parser.add_argument("--repeats", type=int, default=1)
+    parser.add_argument(
+        "--interleave-targets",
+        action="store_true",
+        help="alternate target order within each clip to reduce run-order drift",
+    )
     parser.add_argument("--max-clip-size", type=int, default=180)
     parser.add_argument("--temporal-overlap", type=int, default=15)
     parser.add_argument("--extra-arg", action="append", default=[])
@@ -331,97 +347,150 @@ def main() -> None:
     log_dir.mkdir(exist_ok=True)
     args.csv.parent.mkdir(parents=True, exist_ok=True)
 
-    rows = []
+    rows: list[tuple[object, ...]] = []
     extra_args = tuple(args.extra_arg)
-    for target in targets:
-        no_progress = target_supports(target, "--no-progress")
-        disable_ffmpeg_check = target_supports(target, "--disable-ffmpeg-check")
-        if not args.no_warmup:
-            warmup_clip = (args.warmup_clip or clips[0]).resolve()
-            print(f"warmup: {target.label} {warmup_clip.name}", flush=True)
-            elapsed, flags, _ = run_once(
-                target,
-                warmup_clip,
-                workdir / f"warmup_{safe_name(target.label)}.mp4",
-                log_dir / f"warmup_{safe_name(target.label)}.log",
-                no_progress=no_progress,
-                disable_ffmpeg_check=disable_ffmpeg_check,
-                max_clip_size=args.max_clip_size,
-                temporal_overlap=args.temporal_overlap,
-                extra_args=extra_args,
-                timeout_seconds=args.timeout_seconds,
-            )
-            print(f"warmup: {target.label} {elapsed:.1f}s {flags}", flush=True)
-            if flags in FAILURE_FLAGS:
-                for clip in clips:
-                    rows.append(
-                        (
-                            target.label,
-                            clip.name,
-                            probe_frames(clip),
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            0.0,
-                            f"WARMUP_{flags}",
-                        )
-                    )
-                write_csv(args.csv, rows)
-                continue
+    target_options = {
+        target: (
+            target_supports(target, "--no-progress"),
+            target_supports(target, "--disable-ffmpeg-check"),
+        )
+        for target in targets
+    }
 
+    def warm_target(target: Target) -> bool:
+        if args.no_warmup:
+            return True
+        warmup_clip = (args.warmup_clip or clips[0]).resolve()
+        no_progress, disable_ffmpeg_check = target_options[target]
+        print(f"warmup: {target.label} {warmup_clip.name}", flush=True)
+        elapsed, flags, _ = run_once(
+            target,
+            warmup_clip,
+            workdir / f"warmup_{safe_name(target.label)}.mp4",
+            log_dir / f"warmup_{safe_name(target.label)}.log",
+            no_progress=no_progress,
+            disable_ffmpeg_check=disable_ffmpeg_check,
+            max_clip_size=args.max_clip_size,
+            temporal_overlap=args.temporal_overlap,
+            extra_args=extra_args,
+            timeout_seconds=args.timeout_seconds,
+        )
+        print(f"warmup: {target.label} {elapsed:.1f}s {flags}", flush=True)
+        if flags not in FAILURE_FLAGS:
+            return True
         for clip in clips:
-            frames = probe_frames(clip)
-            times = []
-            memories = []
-            flags = ""
-            for repeat in range(1, args.repeats + 1):
-                elapsed, run_flags, memory = run_once(
-                    target,
-                    clip,
-                    workdir / f"{safe_name(target.label)}_{clip.stem}_out.mp4",
-                    log_dir / f"{safe_name(target.label)}_{clip.stem}_{repeat}.log",
-                    no_progress=no_progress,
-                    disable_ffmpeg_check=disable_ffmpeg_check,
-                    max_clip_size=args.max_clip_size,
-                    temporal_overlap=args.temporal_overlap,
-                    extra_args=extra_args,
-                    timeout_seconds=args.timeout_seconds,
-                )
-                times.append(elapsed)
-                memories.append(memory)
-                flags = combine_flags(flags, run_flags)
-                if run_flags in FAILURE_FLAGS:
-                    break
-            wall = statistics.median(times)
-            fps = 0.0 if flags in FAILURE_FLAGS else frames / wall
-            ram_med = statistics.median(item["ram_med_mb"] for item in memories)
-            ram_peak = max(item["ram_peak_mb"] for item in memories)
-            vram_med = statistics.median(item["vram_med_mb"] for item in memories)
-            vram_peak = max(item["vram_peak_mb"] for item in memories)
             rows.append(
                 (
                     target.label,
                     clip.name,
-                    frames,
-                    wall,
-                    fps,
-                    ram_med,
-                    ram_peak,
-                    vram_med,
-                    vram_peak,
-                    flags,
+                    probe_frames(clip),
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    f"WARMUP_{flags}",
                 )
             )
-            print(
-                f"{target.label} {clip.name}: {wall:.1f}s {fps:.1f}fps "
-                f"ram {ram_med:.0f}/{ram_peak:.0f}MB "
-                f"vram {vram_med:.0f}/{vram_peak:.0f}MB {flags}",
-                flush=True,
+        write_csv(args.csv, rows)
+        return False
+
+    def run_sample(
+        target: Target, clip: Path, repeat: int
+    ) -> tuple[float, str, dict[str, float]]:
+        no_progress, disable_ffmpeg_check = target_options[target]
+        return run_once(
+            target,
+            clip,
+            workdir / f"{safe_name(target.label)}_{clip.stem}_out.mp4",
+            log_dir / f"{safe_name(target.label)}_{clip.stem}_{repeat}.log",
+            no_progress=no_progress,
+            disable_ffmpeg_check=disable_ffmpeg_check,
+            max_clip_size=args.max_clip_size,
+            temporal_overlap=args.temporal_overlap,
+            extra_args=extra_args,
+            timeout_seconds=args.timeout_seconds,
+        )
+
+    def record_result(
+        target: Target,
+        clip: Path,
+        frames: int,
+        times: list[float],
+        memories: list[dict[str, float]],
+        flags: str,
+    ) -> None:
+        wall = statistics.median(times)
+        fps = 0.0 if flags in FAILURE_FLAGS else frames / wall
+        ram_med = statistics.median(item["ram_med_mb"] for item in memories)
+        ram_peak = max(item["ram_peak_mb"] for item in memories)
+        vram_med = statistics.median(item["vram_med_mb"] for item in memories)
+        vram_peak = max(item["vram_peak_mb"] for item in memories)
+        rows.append(
+            (
+                target.label,
+                clip.name,
+                frames,
+                wall,
+                fps,
+                ram_med,
+                ram_peak,
+                vram_med,
+                vram_peak,
+                flags,
             )
-            write_csv(args.csv, rows)
-            print(f"checkpoint written to {args.csv}", flush=True)
+        )
+        print(
+            f"{target.label} {clip.name}: {wall:.1f}s {fps:.1f}fps "
+            f"ram {ram_med:.0f}/{ram_peak:.0f}MB "
+            f"vram {vram_med:.0f}/{vram_peak:.0f}MB {flags}",
+            flush=True,
+        )
+        write_csv(args.csv, rows)
+        print(f"checkpoint written to {args.csv}", flush=True)
+
+    if args.interleave_targets:
+        active_targets = [target for target in targets if warm_target(target)]
+        for clip in clips:
+            frames = probe_frames(clip)
+            measurements = {target: Measurements() for target in active_targets}
+            for repeat in range(1, args.repeats + 1):
+                for target in targets_for_repeat(active_targets, repeat):
+                    measurement = measurements[target]
+                    if measurement.flags in FAILURE_FLAGS:
+                        continue
+                    elapsed, run_flags, memory = run_sample(target, clip, repeat)
+                    measurement.times.append(elapsed)
+                    measurement.memories.append(memory)
+                    measurement.flags = combine_flags(measurement.flags, run_flags)
+            for target in active_targets:
+                measurement = measurements[target]
+                record_result(
+                    target,
+                    clip,
+                    frames,
+                    measurement.times,
+                    measurement.memories,
+                    measurement.flags,
+                )
+    else:
+        for target in targets:
+            if not warm_target(target):
+                continue
+            for clip in clips:
+                frames = probe_frames(clip)
+                times = []
+                memories = []
+                flags = ""
+                for repeat in range(1, args.repeats + 1):
+                    elapsed, run_flags, memory = run_sample(target, clip, repeat)
+                    times.append(elapsed)
+                    memories.append(memory)
+                    flags = combine_flags(flags, run_flags)
+                    if run_flags in FAILURE_FLAGS:
+                        break
+                record_result(target, clip, frames, times, memories, flags)
 
 
 if __name__ == "__main__":
