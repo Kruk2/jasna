@@ -14,6 +14,7 @@ from benchmark_releases import (
     remove_output_artifacts,
     run_once,
     safe_name,
+    targets_for_repeat,
 )
 
 
@@ -55,6 +56,17 @@ def test_build_command_uses_canonical_settings(tmp_path: Path) -> None:
 
 def test_safe_name_replaces_path_punctuation() -> None:
     assert safe_name("HEAD@7d9 / v0.7.2") == "HEAD_7d9_v0.7.2"
+
+
+def test_targets_for_repeat_alternates_order() -> None:
+    targets = [
+        Target("old", ("old",), Path("/old")),
+        Target("new", ("new",), Path("/new")),
+    ]
+
+    assert targets_for_repeat(targets, 1) == targets
+    assert targets_for_repeat(targets, 2) == list(reversed(targets))
+    assert targets_for_repeat(targets, 3) == targets
 
 
 def test_combine_flags_preserves_fallback_until_failure() -> None:
