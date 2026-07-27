@@ -13,6 +13,9 @@ Every setting has a tooltip: hover the ⓘ icon next to it.
   [Segment Editor](segments.md) to restore only parts of that video, and the
   cross removes it from the queue.
 - While processing, each item shows live progress, FPS, and time remaining.
+- **Stop** ends the run. The item you stopped goes back to **Pending**, so
+  the next start processes it again from the beginning; the half-written
+  output file is left on disk for you to delete.
 - **Clear Done** removes finished jobs; **Clear** empties the queue.
 
 ## Output settings

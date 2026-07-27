@@ -566,8 +566,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
-        self._update_start_button_state()
-        
+        # Start stays disabled until the worker thread has finished unwinding;
+        # _handle_complete re-enables it.
+        self._control_bar.set_start_enabled(False)
+
         # Re-enable settings and output controls
         self._settings_panel.set_enabled(True)
         self._queue_panel.set_output_enabled(True)
@@ -609,6 +611,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 self._queue_panel.set_running(True, processing_job_id=job_id)
             except Exception:
                 logger.warning("Failed to mark queue panel running", exc_info=True)
+        if update.status == JobStatus.PENDING:
+            self._job_start_times.pop(job_id, None)
         job_elapsed: float | None = None
         if update.status == JobStatus.COMPLETED:
             start = self._job_start_times.pop(job_id, None)
