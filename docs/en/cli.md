@@ -24,7 +24,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | `--output` | — | Output file, or output folder when `--input` is a folder. |
 | `--output-pattern` | `{original}_out` | Filename template for folder input. `{original}` is the input stem. Images keep their source extension; videos use the template extension when provided. Jasna checks planned outputs before processing and errors out if two inputs map to the same file. |
 | `--device` | `cuda:0` | GPU selection. AMD cards use the same `cuda:N` names through ROCm. |
-| `--batch-size` | `4` | Detection batch size. RF-DETR v6 accepts partial batches dynamically; legacy v5 uses its fixed batch of 4 internally. |
+| `--batch-size` | `4` | Detection batch size. Legacy `rfdetr-v5` always uses 4. |
 | `--fp16` / `--no-fp16` | on | FP16 where supported (restoration + TensorRT). Lowers VRAM, may improve speed. |
 | `--log-level` | `error` | `debug`, `info`, `warning`, `error`. |
 | `--no-progress` | off | Disable the progress bar. |
