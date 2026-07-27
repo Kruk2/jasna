@@ -442,10 +442,6 @@ class Processor:
             self._current_pipeline = None
             if pipeline is not None:
                 pipeline.close()
-            from jasna.media.rgb_to_p010 import _cache as _p010_cache
-            _p010_cache.clear()
-            from jasna.media.rgb_to_nv12 import _cache as _nv12_cache
-            _nv12_cache.clear()
 
     def _prepare_job_detector(
         self,
