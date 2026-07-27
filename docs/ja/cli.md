@@ -23,7 +23,7 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | `--input` | — | 動画、画像、またはフォルダ。 |
 | `--output` | — | 出力ファイル。`--input` がフォルダの場合は出力フォルダ。 |
 | `--output-pattern` | `{original}_out` | フォルダ入力時のファイル名テンプレート。`{original}` は入力ファイル名（拡張子なし）です。画像は元の拡張子を保持し、動画はテンプレートに拡張子があればそれを使います。Jasna は処理前に予定される出力を確認し、2 つの入力が同じファイルに対応する場合はエラーで終了します。 |
-| `--device` | `cuda:0` | GPU の選択。AMD Linux では MIGraphX の GPU も選択します。 |
+| `--device` | `cuda:0` | GPU の選択。AMD のカードも ROCm 経由で同じ `cuda:N` の名前を使います。 |
 | `--batch-size` | `4` | 検出のバッチサイズ。RF-DETR v6 は部分バッチを動的に処理し、旧 v5 は内部で固定バッチ 4 を使います。 |
 | `--fp16` / `--no-fp16` | オン | 対応箇所（復元 + TensorRT）で FP16 を使用。VRAM を抑え、速度が上がる場合があります。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
@@ -47,7 +47,7 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
 | `--detection-model` | `rfdetr-v6` | インストール済みモデルは `model_weights/` から検出されます。`rfdetr-v6`（高速）と `rfdetr-vr-v1`（VR180）は同梱、`rfdetr-v6-large` と `zelefans-vr-yolo-v2` は任意のダウンロードです。詳しくは[モデル](models.md)。 |
-| `--detection-model-path` | 自動 | デフォルトは `model_weights/<detection-model>.onnx`（RF-DETR）または `.pt`（YOLO）。 |
+| `--detection-model-path` | 自動 | デフォルトは `model_weights/<detection-model>` で、カードに合ったファイル形式を使います。RF-DETR は NVIDIA で `.onnx`、AMD で `.pt`。YOLO は常に `.pt`。 |
 | `--detection-score-threshold` | 自動 | モデルの推奨値を既定で使用します（`rfdetr-v6`：0.35、`rfdetr-v6-large`：0.40）。モザイクを見逃す場合は下げ、通常の領域が誤検出される場合は上げてください。 |
 | `--max-detection-gap` | `2` | モザイクが同じ位置に再出現する場合、最大 N フレームの検出途切れを補完します。`0` で無効。 |
 | `--min-detection-duration` | `2` | N フレーム未満の検出を誤検出として破棄します（該当フレームは未処理のまま）。`0` で無効。 |

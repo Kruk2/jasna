@@ -17,8 +17,9 @@
 - **Lada YOLO** モデルは 2D アニメーションでより良い場合があります。
 - **rfdetr-vr-v1**（同梱）は VR180 用の RF-DETR 検出モデルで、VR180 動画に最適です。
 - **zelefans-vr-yolo-v2**（任意ダウンロード）は VR180 の代替検出モデルです。
-- **AMD では** RF-DETR は非常に遅く（Windows では CPU で動くほどです）、
-  RF-DETR が特に必要でない限り `lada-yolo-v4` を使ってください。
+- **AMD では** RF-DETR はグラフィックスカードで動き、`.pt` のモデルファイルを
+  使います（NVIDIA は `.onnx`）。NVIDIA より遅いので、検出品質より速度を
+  優先する場合は `lada-yolo-v4` を選んでください。
 
 各モデルは既定で推奨検出しきい値を適用します（`rfdetr-v6`：0.35、
 `rfdetr-v6-large`：0.40）。`--detection-score-threshold` で上書きできます。

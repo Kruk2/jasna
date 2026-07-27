@@ -144,7 +144,8 @@ python jasna/protection/keytool/build_windows_amd.py
 
 The AMD build uses PyTorch/ROCm for BasicVSR++, YOLO and RF-DETR, and AMF for
 H.264/HEVC/AV1 decode and encode. RF-DETR runs the trained checkpoint through the
-`rfdetr` torch model (bundled as `rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
+`rfdetr` torch model (`rfdetr==1.8.3` on `transformers==5.1.0`, bundled as
+`rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
 per-model engine precompile step. NVIDIA builds keep the ONNX → TensorRT path
 (`rfdetr-v6.onnx`). Decode falls back to FFmpeg software decoding when AMF cannot
 handle the source. Secondary restoration and segment smart rendering remain

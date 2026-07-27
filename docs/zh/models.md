@@ -16,8 +16,9 @@
 - **Lada YOLO** 模型在 2D 动画上可能效果更好。
 - **rfdetr-vr-v1**（已内置）是用于 VR180 的 RF-DETR 检测模型，最适合 VR180 视频。
 - **zelefans-vr-yolo-v2**（可选下载）是 VR180 的备用检测模型。
-- **在 AMD 上**，RF-DETR 非常慢（在 Windows 上甚至只能用 CPU 运行）—
-  除非特别需要 RF-DETR，否则请改用 `lada-yolo-v4`。
+- **在 AMD 上**，RF-DETR 在显卡上运行，使用 `.pt` 模型文件（NVIDIA 使用
+  `.onnx`）。它比在 NVIDIA 上慢，若速度比检测质量更重要，请选择
+  `lada-yolo-v4`。
 
 每个模型默认应用其推荐的检测阈值（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）；
 可用 `--detection-score-threshold` 覆盖。
