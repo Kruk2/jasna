@@ -5,6 +5,8 @@ import subprocess
 import threading
 import time
 
+import psutil
+
 
 class MemorySampler:
     def __init__(self, pid: int, interval_seconds: float = 0.5) -> None:
@@ -18,13 +20,10 @@ class MemorySampler:
 
     def _sample_ram(self) -> None:
         try:
-            with open(f"/proc/{self.pid}/status") as fh:
-                for line in fh:
-                    if line.startswith("VmRSS:"):
-                        self._ram_mb.append(int(line.split()[1]) / 1024)
-                        return
-        except OSError:
-            pass
+            rss_bytes = psutil.Process(self.pid).memory_info().rss
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return
+        self._ram_mb.append(rss_bytes / (1024 * 1024))
 
     def _sample_vram(self) -> None:
         try:
