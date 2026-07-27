@@ -30,6 +30,14 @@ class ProgressUpdate:
     message: str = ""
 
 
+class ProcessingStopped(Exception):
+    """Raised inside a job when the user stopped processing."""
+
+
+def _pipeline_was_stopped(pipeline) -> bool:
+    return bool(pipeline.cancel_requested) and not bool(pipeline.completed)
+
+
 def _cleanup_torch(torch_mod) -> None:
     import gc
 
@@ -69,6 +77,7 @@ class Processor:
         # same type; the other session is unloaded when the type switches.
         self._img_session: tuple | None = None      # (detector, restorer, device)
         self._video_session: RestorationSession | None = None
+        self._current_pipeline = None
         
     def start(
         self,
@@ -106,6 +115,9 @@ class Processor:
     def stop(self):
         self._stop_event.set()
         self._pause_event.set()  # Unpause to allow thread to exit
+        pipeline = self._current_pipeline
+        if pipeline is not None:
+            pipeline.cancel()
 
     def join(self, timeout: float = 5.0):
         if self._thread and self._thread.is_alive():
@@ -142,6 +154,8 @@ class Processor:
                     break
 
                 self._process_job(job)
+                if job.status is JobStatus.PENDING:
+                    break  # stopped mid-job; it stays queued for the next run
         finally:
             self._close_image_session()
             self._close_video_session()
@@ -252,6 +266,9 @@ class Processor:
             ))
             self._log("INFO", f"Finished processing {job.filename}")
 
+        except ProcessingStopped:
+            self._mark_stopped(job)
+
         except UnsupportedColorspaceError as e:
             e.__traceback__ = None
             job.status = JobStatus.SKIPPED
@@ -279,6 +296,14 @@ class Processor:
         except Exception:
             logger.warning("Torch cleanup failed after job", exc_info=True)
 
+    def _mark_stopped(self, job: JobItem):
+        job.status = JobStatus.PENDING
+        self._progress(ProgressUpdate(
+            job_id=job.id,
+            status=JobStatus.PENDING,
+        ))
+        self._log("INFO", f"Stopped processing {job.filename}")
+
     def _run_pipeline(
         self,
         job_id: int,
@@ -288,19 +313,21 @@ class Processor:
         segments=(),
         settings: AppSettings | None = None,
     ):
+        """Run one job; raises ProcessingStopped when the user stopped it."""
         from jasna.media.image_io import IMAGE_EXTENSIONS
 
         if input_path.suffix.lower() in IMAGE_EXTENSIONS:
             self._run_image_job(job_id, input_path, output_path)
-        else:
-            self._run_video_job(
-                job_id,
-                input_path,
-                output_path,
-                segments=segments,
-                settings=settings or self._settings,
-            )
-            
+            return
+        self._run_video_job(
+            job_id,
+            input_path,
+            output_path,
+            segments=segments,
+            settings=settings or self._settings,
+        )
+
+
     def _ensure_video_session(self, settings: AppSettings | None = None):
         """Compile engines + build the BasicVSR++ (and optional secondary) restorer
         once; reused across consecutive video jobs."""
@@ -341,6 +368,8 @@ class Processor:
         settings: AppSettings | None = None,
     ):
         settings = settings or self._settings
+        if self._stop_event.is_set():
+            raise ProcessingStopped("Processing stopped")
         codec = settings.codec
         splice_plan = None
         if segments:
@@ -368,6 +397,8 @@ class Processor:
         self._ensure_video_session(settings)
         s = self._video_session
         self._prepare_job_detector(config, s)
+        if self._stop_event.is_set():
+            raise ProcessingStopped("Processing stopped")
         last_update_time = [0.0]
 
         def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
@@ -378,7 +409,7 @@ class Processor:
 
             self._pause_event.wait()
             if self._stop_event.is_set():
-                raise InterruptedError("Processing stopped")
+                raise ProcessingStopped("Processing stopped")
 
             self._progress(ProgressUpdate(
                 job_id=job_id,
@@ -401,8 +432,14 @@ class Processor:
                 segments=tuple(segments) or None,
                 splice_plan=splice_plan,
             )
+            self._current_pipeline = pipeline
+            if self._stop_event.is_set():
+                pipeline.cancel()
             pipeline.run()
+            if _pipeline_was_stopped(pipeline):
+                raise ProcessingStopped("Processing stopped")
         finally:
+            self._current_pipeline = None
             if pipeline is not None:
                 pipeline.close()
             from jasna.media.rgb_to_p010 import _cache as _p010_cache
@@ -502,7 +539,7 @@ class Processor:
 
         self._pause_event.wait()
         if self._stop_event.is_set():
-            raise InterruptedError("Processing stopped")
+            raise ProcessingStopped("Processing stopped")
         self._progress(ProgressUpdate(job_id=job_id, status=JobStatus.PROCESSING, progress=20.0, message="Detecting mosaics"))
 
         num_variants = max(1, int(settings.image_restore_variants))

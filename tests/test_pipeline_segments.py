@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from fractions import Fraction
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -26,6 +27,7 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     pipeline.retarget_high_fps = False
     pipeline.segments = (SegmentRange(2.5, 3.0),)
     pipeline.working_dir = None
+    pipeline._cancel_event = threading.Event()
     pipeline._run_pass = MagicMock()
 
     metadata = MagicMock(
@@ -103,6 +105,7 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     pipeline.retarget_high_fps = False
     pipeline.segments = (SegmentRange(2.5, 3.0),)
     pipeline.working_dir = tmp_path / "scratch"
+    pipeline._cancel_event = threading.Event()
     pipeline._run_pass = MagicMock()
 
     metadata = MagicMock(

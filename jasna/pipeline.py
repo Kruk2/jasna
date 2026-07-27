@@ -139,6 +139,16 @@ class Pipeline:
         self._vr_resolution = None
         self._vr_projector = None
         self._job_detection_model = self.detection_model
+        self._cancel_event = threading.Event()
+        self.completed = False
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel_event.is_set()
+
+    def cancel(self) -> None:
+        """Ask the running pipeline to stop as soon as the worker threads notice."""
+        self._cancel_event.set()
 
     def configure_vr(self, metadata) -> None:
         self._vr_resolution = resolve_vr_mode(
@@ -404,6 +414,7 @@ class Pipeline:
                 encode_queue=encode_queue,
                 error_holder=error_holder,
                 debug_memory=debug_memory,
+                cancel_event=self._cancel_event,
             )
 
         threads = [
@@ -437,6 +448,7 @@ class Pipeline:
                     output_fps=float(frame_rate.output_fps),
                     vr_mode=self._vr_resolution.resolved,
                     vr_projector=self._vr_projector,
+                    cancel_event=self._cancel_event,
                 ),
                 name="DecodeDetect", daemon=True,
             ),
@@ -449,6 +461,7 @@ class Pipeline:
                     error_holder=error_holder,
                     primary_idle_event=primary_idle_event,
                     debug_memory=debug_memory,
+                    cancel_event=self._cancel_event,
                 ),
                 name="PrimaryRestore", daemon=True,
             ),
@@ -467,6 +480,7 @@ class Pipeline:
                     vram_offloader=vram_offloader,
                     frame_stride=frame_rate.frame_stride,
                     seek_ts=seek_ts,
+                    cancel_event=self._cancel_event,
                 ),
                 name="BlendEncode", daemon=True,
             ),
@@ -632,6 +646,8 @@ class Pipeline:
                 fragments: list[tuple[Path, float]] = []
                 fragment_suffix = ".ts" if codec in {"h264", "hevc"} else ".mkv"
                 for span_index, span in enumerate(plan.spans):
+                    if self._cancel_event.is_set():
+                        return
                     raw = temp_dir / f"{span_index:04d}-raw.nut"
                     normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
                     duration = float((span.end_pts - span.start_pts) * index.time_base)
@@ -664,6 +680,8 @@ class Pipeline:
                     normalize_fragment(raw, normalized, codec=codec)
                     fragments.append((normalized, duration))
 
+                if self._cancel_event.is_set():
+                    return
                 assembled = temp_dir / f"assembled{fragment_suffix}"
                 concatenate_fragments(
                     fragments,
@@ -694,6 +712,7 @@ class Pipeline:
             self._run_smart(metadata)
         else:
             self._run_full(metadata)
+        self.completed = not self._cancel_event.is_set()
 
     def run_streaming(
         self,
