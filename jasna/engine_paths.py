@@ -115,3 +115,14 @@ def all_basicvsrpp_sub_engines_exist(
     model_weights_path: str, fp16: bool, max_clip_size: int = 60,
 ) -> bool:
     return all(os.path.isfile(p) for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16, max_clip_size).values())
+
+
+def get_basicvsrpp_fp8_upsample_onnx_path(model_weights_path: str) -> str:
+    """Bundled QDQ ONNX with dev-side-baked FP8 calibration for the upsample stage."""
+    stem = os.path.splitext(os.path.basename(model_weights_path))[0]
+    return os.path.join(os.path.dirname(model_weights_path), f"{stem}_upsample_fp8.onnx")
+
+
+def get_basicvsrpp_fp8_upsample_engine_path(model_weights_path: str, max_clip_size: int = 60) -> str:
+    engine_dir = _basicvsrpp_sub_engine_dir(model_weights_path)
+    return os.path.join(engine_dir, f"upsample_dyn_b{max_clip_size}.trt_fp8{engine_system_suffix()}.engine")

@@ -51,6 +51,19 @@ def _basicvsrpp_engines_exist(model_path: str, fp16: bool, max_clip_size: int) -
     return all_basicvsrpp_sub_engines_exist(model_path, fp16, max_clip_size)
 
 
+def _fp8_upsample_needed(model_path: str, device, max_clip_size: int) -> bool:
+    from jasna.accelerator import supports_fp8
+    from jasna.engine_paths import (
+        get_basicvsrpp_fp8_upsample_engine_path,
+        get_basicvsrpp_fp8_upsample_onnx_path,
+    )
+    return (
+        supports_fp8(device)
+        and os.path.isfile(get_basicvsrpp_fp8_upsample_onnx_path(model_path))
+        and not os.path.isfile(get_basicvsrpp_fp8_upsample_engine_path(model_path, max_clip_size))
+    )
+
+
 def _detection_engine_exists(
     detection_model_name: str,
     detection_model_path: str,
@@ -132,6 +145,9 @@ def ensure_engines_compiled(
     need_basicvsrpp = nvidia and req.basicvsrpp and req.fp16 and not _basicvsrpp_engines_exist(
         req.basicvsrpp_model_path, req.fp16, req.basicvsrpp_max_clip_size
     )
+    need_fp8_upsample = nvidia and req.basicvsrpp and req.fp16 and _fp8_upsample_needed(
+        req.basicvsrpp_model_path, device, req.basicvsrpp_max_clip_size
+    )
     need_detection = req.detection and not _detection_engine_exists(
         req.detection_model_name,
         req.detection_model_path,
@@ -153,7 +169,7 @@ def ensure_engines_compiled(
         elif not need_basicvsrpp:
             result.use_basicvsrpp_tensorrt = True
 
-    if not (need_basicvsrpp or need_detection or need_unet4x):
+    if not (need_basicvsrpp or need_fp8_upsample or need_detection or need_unet4x):
         return result
 
     logger.info("Spawning GPU model compilation subprocess...")
@@ -228,8 +244,11 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
     device = torch.device(req.device)
     nvidia = is_nvidia_device(device)
 
-    if nvidia and req.basicvsrpp and req.fp16 and not _basicvsrpp_engines_exist(
-        req.basicvsrpp_model_path, req.fp16, req.basicvsrpp_max_clip_size
+    if nvidia and req.basicvsrpp and req.fp16 and (
+        not _basicvsrpp_engines_exist(
+            req.basicvsrpp_model_path, req.fp16, req.basicvsrpp_max_clip_size
+        )
+        or _fp8_upsample_needed(req.basicvsrpp_model_path, device, req.basicvsrpp_max_clip_size)
     ):
         from jasna.restorer.basicvrspp_tenorrt_compilation import compile_mosaic_restoration_model
         print(f"Compiling BasicVSR++ sub-engines (max_clip_size={req.basicvsrpp_max_clip_size})...")

@@ -69,6 +69,51 @@ def test_ensure_basicvsrpp_fp32_no_tensorrt() -> None:
     assert ensure_engines_compiled(req).use_basicvsrpp_tensorrt is False
 
 
+def test_ensure_spawns_when_only_fp8_upsample_missing(monkeypatch) -> None:
+    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: True)
+    monkeypatch.setattr("jasna.engine_compiler._fp8_upsample_needed", lambda *_a, **_kw: True)
+    popen = MagicMock(return_value=_mock_proc([]))
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
+    result = ensure_engines_compiled(req)
+    assert popen.called
+    assert result.use_basicvsrpp_tensorrt is True
+
+
+def test_ensure_no_subprocess_when_fp8_upsample_present(monkeypatch) -> None:
+    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: True)
+    monkeypatch.setattr("jasna.engine_compiler._fp8_upsample_needed", lambda *_a, **_kw: False)
+    popen = MagicMock(return_value=_mock_proc([]))
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
+    result = ensure_engines_compiled(req)
+    assert not popen.called
+    assert result.use_basicvsrpp_tensorrt is True
+
+
+def test_fp8_upsample_needed_requires_onnx(tmp_path: Path, monkeypatch) -> None:
+    import torch
+
+    from jasna.engine_compiler import _fp8_upsample_needed
+    from jasna.engine_paths import (
+        get_basicvsrpp_fp8_upsample_engine_path,
+        get_basicvsrpp_fp8_upsample_onnx_path,
+    )
+
+    monkeypatch.setattr("jasna.accelerator.supports_fp8", lambda device: True)
+    model_path = str(tmp_path / "model.pth")
+    device = torch.device("cpu")
+    assert _fp8_upsample_needed(model_path, device, 60) is False
+
+    Path(get_basicvsrpp_fp8_upsample_onnx_path(model_path)).write_text("x", encoding="utf-8")
+    assert _fp8_upsample_needed(model_path, device, 60) is True
+
+    engine = Path(get_basicvsrpp_fp8_upsample_engine_path(model_path, 60))
+    engine.parent.mkdir(parents=True, exist_ok=True)
+    engine.write_text("x", encoding="utf-8")
+    assert _fp8_upsample_needed(model_path, device, 60) is False
+
+
 def test_ensure_spawns_subprocess_on_missing(monkeypatch) -> None:
     popen_calls = []
     proc = _mock_proc(["Compiling...\n", "Done.\n"])
