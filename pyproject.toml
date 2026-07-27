@@ -55,6 +55,9 @@ amd = [
   # AMD runs RF-DETR through the rfdetr torch model (ROCm), not ONNX/MIGraphX,
   # which sidesteps the Windows-only MIGraphX wheels (see issue #240).
   "rfdetr==1.8.3",
+  # Newer transformers imports FSDP while resolving AutoBackbone, but the
+  # Windows ROCm torch wheel intentionally has no distributed_c10d extension.
+  "transformers==5.1.0",
   "numpy==1.26.4",
 ]
 dev = [
@@ -64,6 +67,7 @@ dev = [
   "scikit-build",
   "cmake",
   "ninja",
+  "cython>=3.1,<4",
   "delvewheel; sys_platform == 'win32'",
 ]
 
