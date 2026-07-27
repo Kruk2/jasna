@@ -259,7 +259,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         self.transient(master.winfo_toplevel())
         self.protocol("WM_DELETE_WINDOW", self._cancel)
 
-        screen_w, screen_h = scaling.to_logical(self, *scaling.screen_size(self))
+        screen_w, screen_h = scaling.to_logical(self, *scaling.screen_rect(self)[2:])
         width = min(screen_w - 120, max(800, screen_w - 400))
         height = min(screen_h - 160, max(560, screen_h - 260))
         scaling.place_centered_on_screen(self, *scaling.to_physical(self, width, height))

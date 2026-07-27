@@ -69,16 +69,95 @@ def test_fit_size_leaves_a_window_that_already_fits():
 
 
 def test_centered_position_keeps_an_oversized_window_on_screen():
-    x, y = scaling.centered_position((3000, 2000), (0, 0, 1920, 1080), (1920, 1080))
+    x, y = scaling.centered_position((3000, 2000), (0, 0, 1920, 1080), (0, 0, 1920, 1080))
 
     assert (x, y) == (0, 0)
 
 
 def test_centered_position_never_overflows_the_screen():
-    x, y = scaling.centered_position((400, 300), (1800, 1000, 400, 300), (1920, 1080))
+    x, y = scaling.centered_position((400, 300), (1800, 1000, 400, 300), (0, 0, 1920, 1080))
 
     assert x + 400 <= 1920
     assert y + 300 <= 1080
+
+
+def test_centered_position_clamps_into_the_given_monitor_rect():
+    bounds = (2560, 0, 2560, 1440)
+
+    assert scaling.centered_position((400, 300), (5000, 1300, 400, 300), bounds) == (4720, 1140)
+    assert scaling.centered_position((400, 300), (2400, -100, 200, 100), bounds) == (2560, 0)
+
+
+def test_screen_rect_falls_back_to_the_full_screen_off_windows():
+    window = SimpleNamespace(winfo_screenwidth=lambda: 1920, winfo_screenheight=lambda: 1080)
+
+    assert scaling.screen_rect(window) == (0, 0, 1920, 1080)
+
+
+@pytest.mark.parametrize("dpi", [2.5, 3.0])
+def test_static_scaling_shrinks_when_design_minimum_does_not_fit(dpi) -> None:
+    factor = scaling._static_scaling(dpi, (2560, 1440), (900, 580), (40, 80))
+
+    assert factor < dpi
+    assert (900 + 40) * factor <= 2560
+    assert (580 + 80) * factor <= 1440
+
+
+def test_static_scaling_is_identity_when_design_minimum_fits() -> None:
+    assert scaling._static_scaling(2.25, (3840, 2160), (900, 580), (40, 80)) == 2.25
+    assert scaling._static_scaling(1.0, (1920, 1080), (900, 580), (40, 80)) == 1.0
+
+
+@pytest.mark.parametrize("dpi", [2.5, 3.0])
+def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, monkeypatch) -> None:
+    factor = scaling._static_scaling(dpi, (2560, 1440), (900, 580), scaling.SCREEN_MARGIN)
+    monkeypatch.setattr(scaling, "window_scaling", lambda _window: factor)
+    requested: list[str] = []
+    minimum: list[tuple[int, int]] = []
+    window = SimpleNamespace(
+        winfo_screenwidth=lambda: 2560,
+        winfo_screenheight=lambda: 1440,
+        update_idletasks=lambda: None,
+        geometry=requested.append,
+        minsize=lambda width, height: minimum.append((width, height)),
+    )
+
+    JasnaApp._size_and_center(window)
+
+    width, height = (int(value) for value in requested[-1].split("+")[0].split("x"))
+    # to_logical floors, so the realized size may fall one logical pixel short.
+    assert width >= 899 and height >= 579
+    assert minimum[-1][0] >= 899 and minimum[-1][1] >= 579
+
+
+def test_activate_static_dpi_is_a_no_op_off_windows() -> None:
+    scaling.activate_static_dpi((900, 580))
+
+    assert not ctk.ScalingTracker.deactivate_automatic_dpi_awareness
+    assert ctk.ScalingTracker.widget_scaling == 1
+    assert ctk.ScalingTracker.window_scaling == 1
+
+
+def test_activate_static_dpi_windows_path(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(scaling.sys, "platform", "win32")
+    monkeypatch.setattr(scaling, "_windows_set_dpi_aware", lambda: calls.append("aware"))
+    monkeypatch.setattr(scaling, "_windows_system_dpi", lambda: calls.append("dpi") or 2.5)
+    monkeypatch.setattr(
+        scaling, "_windows_screen_size", lambda: calls.append("screen") or (2560, 1440)
+    )
+    try:
+        scaling.activate_static_dpi((900, 580))
+
+        expected = scaling._static_scaling(2.5, (2560, 1440), (900, 580), scaling.SCREEN_MARGIN)
+        assert ctk.ScalingTracker.deactivate_automatic_dpi_awareness
+        assert calls == ["aware", "dpi", "screen"]
+        assert ctk.ScalingTracker.widget_scaling == expected
+        assert ctk.ScalingTracker.window_scaling == expected
+    finally:
+        ctk.ScalingTracker.deactivate_automatic_dpi_awareness = False
+        ctk.set_widget_scaling(1.0)
+        ctk.set_window_scaling(1.0)
 
 
 def test_scaling_helpers_are_identity_without_scaling():
