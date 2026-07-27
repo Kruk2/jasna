@@ -54,6 +54,14 @@ pip install --no-deps `
 uv pip install ".[amd]"
 ```
 
+The `rocm_sdk_core` / `rocm_sdk_libraries_*` wheels are the ROCm runtime itself.
+`import torch` reaches them through `rocm_sdk`, which resolves the package name at
+call time, so Nuitka sees no import and bundles nothing — the release build copies
+both wheel trees into the dist verbatim and then asserts that every library torch
+preloads resolves there. Without that, the frozen app dies at startup with
+`UnboundLocalError: cannot access local variable 'py_module'` (upstream
+`rocm_sdk.find_libraries` reports an absent payload package that way).
+
 Verify ROCm actually stuck on either OS (the Linux Docker build asserts the same):
 
 ```bash
