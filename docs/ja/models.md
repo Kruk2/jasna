@@ -7,8 +7,12 @@
 - **最新の RF-DETR モデル**（`rfdetr-v6`）を使ってください — デフォルトかつ
   高速で、最もバランスの取れた選択です。Jasna に同梱されています。
 - **`rfdetr-v6-large`** は高品質だが低速の派生モデルです。別途ダウンロードの
-  任意モデルで、`rfdetr-v6-large.onnx` を `model_weights/` に置くと自動的に
-  検出されます。
+  任意モデルです。お使いのグラフィックスカード用のファイルを
+  `model_weights/` に置くと自動的に検出されます。
+  - NVIDIA:
+    [rfdetr-v6-large.onnx](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.onnx)
+  - AMD:
+    [rfdetr-v6-large.pt](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.pt)
 - **Lada YOLO** モデルは 2D アニメーションでより良い場合があります。
 - **rfdetr-vr-v1**（同梱）は VR180 用の RF-DETR 検出モデルで、VR180 動画に最適です。
 - **zelefans-vr-yolo-v2**（任意ダウンロード）は VR180 の代替検出モデルです。
