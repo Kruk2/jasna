@@ -7,8 +7,12 @@ The detection model finds mosaics in each frame.
 - **Use the latest RF-DETR model** (`rfdetr-v6`) — it's the default, fast, and
   the best all-rounder. Bundled with Jasna.
 - **`rfdetr-v6-large`** is a higher-quality, slower variant. It is an optional
-  separate download; drop `rfdetr-v6-large.onnx` into `model_weights/` and Jasna
-  detects it automatically.
+  separate download — pick the file for your graphics card, drop it into
+  `model_weights/`, and Jasna detects it automatically:
+  - NVIDIA:
+    [rfdetr-v6-large.onnx](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.onnx)
+  - AMD:
+    [rfdetr-v6-large.pt](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.pt)
 - **Lada YOLO** models can work better for 2D animations.
 - **rfdetr-vr-v1** (bundled) is the RF-DETR VR180 detection model — best for VR180 videos.
 - **zelefans-vr-yolo-v2** (optional download) is an alternative VR180 detector.

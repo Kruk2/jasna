@@ -7,7 +7,11 @@
 - **使用最新的 RF-DETR 模型**（`rfdetr-v6`）— 它是默认值、速度快，也是综合
   表现最好的选择。已随 Jasna 内置。
 - **`rfdetr-v6-large`** 是质量更高、速度更慢的变体。它是可选的单独下载，
-  将 `rfdetr-v6-large.onnx` 放入 `model_weights/`，Jasna 会自动检测。
+  请按显卡选择对应文件，放入 `model_weights/`，Jasna 会自动检测：
+  - NVIDIA：
+    [rfdetr-v6-large.onnx](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.onnx)
+  - AMD：
+    [rfdetr-v6-large.pt](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.pt)
 - **Lada YOLO** 模型在 2D 动画上可能效果更好。
 - **rfdetr-vr-v1**（已内置）是用于 VR180 的 RF-DETR 检测模型，最适合 VR180 视频。
 - **zelefans-vr-yolo-v2**（可选下载）是 VR180 的备用检测模型。
