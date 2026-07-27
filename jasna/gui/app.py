@@ -114,14 +114,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             
     def _size_and_center(self):
         self.update_idletasks()
-        screen = scaling.screen_size(self)
+        rect = scaling.screen_rect(self)
         width, height = scaling.fit_size(
             scaling.to_physical(self, *_DEFAULT_WINDOW_SIZE),
-            screen,
+            rect[2:],
             scaling.to_physical(self, *scaling.SCREEN_MARGIN),
         )
-        x = (screen[0] - width) // 2
-        y = max(0, (screen[1] - height) // 2 - int(screen[1] * 0.15 / 2))
+        x = rect[0] + (rect[2] - width) // 2
+        y = rect[1] + max(0, (rect[3] - height) // 2 - int(rect[3] * 0.15 / 2))
         scaling.apply_geometry(self, width, height, x, y)
         scaling.apply_minsize(self, *_MIN_WINDOW_SIZE)
 
@@ -765,7 +765,9 @@ def run_gui():
         format='%(message)s',
         handlers=[logging.StreamHandler()]  # Temporary console output
     )
-    
+
+    scaling.activate_static_dpi(_MIN_WINDOW_SIZE)
+
     if os.environ.get("JASNA_GUI_FONT_PROBE") == "1":
         root = ctk.CTk()
         try:

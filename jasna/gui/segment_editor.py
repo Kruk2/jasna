@@ -165,14 +165,15 @@ class SegmentEditor(ctk.CTkToplevel):
         self.after(25, self._poll_workers)
 
     def _size_and_center(self) -> None:
-        screen_w, screen_h = scaling.screen_size(self)
+        rect = scaling.screen_rect(self)
+        screen_w, screen_h = rect[2], rect[3]
         min_width, min_height = scaling.to_physical(self, 900, 640)
         side_margin, work_margin = scaling.to_physical(self, 48, 200)
         _, chrome_margin = scaling.to_physical(self, 0, 72)
         height = min(max(min_height, screen_h - work_margin), max(1, screen_h - chrome_margin))
         width = min(max(1, screen_w - side_margin), max(min_width, round(height * 1060 / 720)))
-        x = max(0, (screen_w - width) // 2)
-        y = max(0, (screen_h - height) // 2)
+        x = rect[0] + max(0, (screen_w - width) // 2)
+        y = rect[1] + max(0, (screen_h - height) // 2)
         scaling.apply_geometry(self, width, height, x, y)
         logical_width, logical_height = scaling.to_logical(self, width, height)
         scaling.apply_minsize(self, min(900, logical_width), min(640, logical_height))

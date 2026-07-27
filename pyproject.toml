@@ -21,7 +21,7 @@ dependencies = [
   "opencv-python<5",
   "Pillow",
   "tqdm",
-  "customtkinter",
+  "customtkinter==6.0.0",
   "tkinterdnd2",
   "ultralytics",
   "onnx",

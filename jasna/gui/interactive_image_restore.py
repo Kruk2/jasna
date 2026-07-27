@@ -85,7 +85,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         image_size = _read_image_size(self._paths[0])
         # Logical screen: the geometry it returns feeds both geometry() and CTk widget
         # sizes, which are multiplied by the scaling factor again at render time.
-        logical_screen = scaling.to_logical(self, *scaling.screen_size(self))
+        logical_screen = scaling.to_logical(self, *scaling.screen_rect(self)[2:])
         self._window_w, self._window_h, self._preview_w, self._preview_h = _dialog_geometry_for_image(image_size, logical_screen)
 
         self._requests: queue.Queue[tuple[int, int, int] | None] = queue.Queue()
