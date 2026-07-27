@@ -23,7 +23,7 @@ CPU = torch.device("cpu")
 
 
 def _ref_forward_eye_uv(kind: str, bbox_uv, patch: int) -> np.ndarray:
-    """scripts/-reference forward (patch->eye) uv map, mirroring vrx_restore."""
+    """scripts/-reference forward (patch->eye) uv map."""
     u1, v1, u2, v2 = bbox_uv
     tx = (np.arange(patch) + 0.5) / patch
     pyy, pxx = np.meshgrid(tx, tx, indexing="ij")
