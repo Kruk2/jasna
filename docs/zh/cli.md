@@ -23,7 +23,7 @@ jasna --input input_folder --output output_folder
 | `--input` | — | 视频、图像或文件夹。 |
 | `--output` | — | 输出文件；当 `--input` 是文件夹时为输出文件夹。 |
 | `--output-pattern` | `{original}_out` | 文件夹输入的文件名模板。`{original}` 是输入文件名主干。图像保留源扩展名；视频在模板提供扩展名时使用该扩展名。Jasna 会在处理前检查计划输出路径，如果两个输入映射到同一个文件则报错退出。 |
-| `--device` | `cuda:0` | GPU 选择。在 AMD Linux 上同时选择 MIGraphX GPU。 |
+| `--device` | `cuda:0` | GPU 选择。AMD 显卡通过 ROCm 也使用相同的 `cuda:N` 名称。 |
 | `--batch-size` | `4` | 检测批处理大小。RF-DETR v6 可动态处理不完整批次；旧版 v5 在内部使用固定批次 4。 |
 | `--fp16` / `--no-fp16` | 开启 | 在支持的环节使用 FP16（修复 + TensorRT）。降低 VRAM，可能提升速度。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
@@ -47,7 +47,7 @@ jasna --input input_folder --output output_folder
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
 | `--detection-model` | `rfdetr-v6` | 已安装模型从 `model_weights/` 中发现；`rfdetr-v6`（快速）和 `rfdetr-vr-v1`（VR180）已内置，`rfdetr-v6-large` 和 `zelefans-vr-yolo-v2` 为可选下载。见[模型](models.md)。 |
-| `--detection-model-path` | 自动 | 默认为 `model_weights/<detection-model>.onnx`（RF-DETR）或 `.pt`（YOLO）。 |
+| `--detection-model-path` | 自动 | 默认为 `model_weights/<detection-model>`，并使用适合你显卡的文件类型：RF-DETR 在 NVIDIA 上用 `.onnx`，在 AMD 上用 `.pt`；YOLO 始终用 `.pt`。 |
 | `--detection-score-threshold` | 自动 | 默认使用所选模型的推荐值（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）。漏检马赛克时调低；正常区域被误检时调高。 |
 | `--max-detection-gap` | `2` | 当马赛克在相同位置重新出现时，填补最多 N 帧的检测中断。`0` 表示禁用。 |
 | `--min-detection-duration` | `2` | 丢弃持续少于 N 帧的检测（视为误检，相应帧保持原样）。`0` 表示禁用。 |

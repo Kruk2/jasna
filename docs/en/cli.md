@@ -23,7 +23,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | `--input` | — | Video, image, or folder. |
 | `--output` | — | Output file, or output folder when `--input` is a folder. |
 | `--output-pattern` | `{original}_out` | Filename template for folder input. `{original}` is the input stem. Images keep their source extension; videos use the template extension when provided. Jasna checks planned outputs before processing and errors out if two inputs map to the same file. |
-| `--device` | `cuda:0` | GPU selection. On AMD Linux this also selects the MIGraphX GPU. |
+| `--device` | `cuda:0` | GPU selection. AMD cards use the same `cuda:N` names through ROCm. |
 | `--batch-size` | `4` | Detection batch size. RF-DETR v6 accepts partial batches dynamically; legacy v5 uses its fixed batch of 4 internally. |
 | `--fp16` / `--no-fp16` | on | FP16 where supported (restoration + TensorRT). Lowers VRAM, may improve speed. |
 | `--log-level` | `error` | `debug`, `info`, `warning`, `error`. |
@@ -47,7 +47,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | Option | Default | Notes |
 | ------ | ------- | ----- |
 | `--detection-model` | `rfdetr-v6` | Installed models are discovered from `model_weights/`; `rfdetr-v6` (fast) and `rfdetr-vr-v1` (VR180) are bundled; `rfdetr-v6-large` and `zelefans-vr-yolo-v2` are optional downloads. See [Models](models.md). |
-| `--detection-model-path` | auto | Defaults to `model_weights/<detection-model>.onnx` (RF-DETR) or `.pt` (YOLO). |
+| `--detection-model-path` | auto | Defaults to `model_weights/<detection-model>` with the right file type for your card: RF-DETR uses `.onnx` on NVIDIA and `.pt` on AMD; YOLO always uses `.pt`. |
 | `--detection-score-threshold` | auto | Defaults to the model's recommended value (`rfdetr-v6`: 0.35, `rfdetr-v6-large`: 0.40). Lower it when mosaics are missed; raise it when normal areas get falsely detected. |
 | `--max-detection-gap` | `2` | Fill detection dropouts up to N frames when the mosaic reappears at the same spot. `0` disables. |
 | `--min-detection-duration` | `2` | Drop detections shorter than N frames as false positives; those frames stay unrestored. `0` disables. |
