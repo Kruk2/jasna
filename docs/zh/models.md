@@ -6,7 +6,8 @@
 
 - **使用最新的 RF-DETR 模型**（`rfdetr-v6`）— 它是默认值、速度快，也是综合
   表现最好的选择。已随 Jasna 内置。
-- **`rfdetr-v6-large`** 是质量更高、速度更慢的变体。它是可选的单独下载，
+- **`rfdetr-v6-large`** 是质量更高、速度更慢的变体，4K 视频可能更适合用它。
+  它是可选的单独下载，
   请按显卡选择对应文件，放入 `model_weights/`，Jasna 会自动检测：
   - NVIDIA：
     [rfdetr-v6-large.onnx](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.onnx)

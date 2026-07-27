@@ -6,7 +6,8 @@ The detection model finds mosaics in each frame.
 
 - **Use the latest RF-DETR model** (`rfdetr-v6`) — it's the default, fast, and
   the best all-rounder. Bundled with Jasna.
-- **`rfdetr-v6-large`** is a higher-quality, slower variant. It is an optional
+- **`rfdetr-v6-large`** is a higher-quality, slower variant, and can be the
+  better pick for 4K videos. It is an optional
   separate download — pick the file for your graphics card, drop it into
   `model_weights/`, and Jasna detects it automatically:
   - NVIDIA:
