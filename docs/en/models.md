@@ -25,10 +25,7 @@ Each model applies its own recommended detection threshold by default
 (`rfdetr-v6`: 0.35, `rfdetr-v6-large`: 0.40); override with
 `--detection-score-threshold`.
 
-RF-DETR v6 engines accept dynamic batches, so the final partial video batch
-runs without padding. The legacy `rfdetr-v5` model remains supported, but its
-TensorRT engine is fixed at batch 4; Jasna chunks and pads its input
-automatically.
+The legacy `rfdetr-v5` model remains supported.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6

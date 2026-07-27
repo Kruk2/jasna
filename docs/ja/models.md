@@ -24,10 +24,7 @@
 各モデルは既定で推奨検出しきい値を適用します（`rfdetr-v6`：0.35、
 `rfdetr-v6-large`：0.40）。`--detection-score-threshold` で上書きできます。
 
-RF-DETR v6 エンジンは動的バッチに対応するため、動画末尾の部分バッチを
-パディングなしで処理します。旧 `rfdetr-v5` モデルも引き続き利用できますが、
-TensorRT エンジンはバッチ 4 固定です。Jasna が入力の分割とパディングを
-自動的に行います。
+旧 `rfdetr-v5` モデルも引き続き利用できます。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
