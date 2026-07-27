@@ -41,6 +41,9 @@ def compile_mosaic_restoration_model(
         device = torch.device(device)
 
     if all_sub_engines_exist(mosaic_restoration_model_path, fp16, max_clip_size):
+        _compile_fp8_upsample_engine_if_supported(
+            mosaic_restoration_model_path, device, fp16, max_clip_size, optimization_level,
+        )
         return True
 
     if device.type != "cuda":
@@ -77,7 +80,62 @@ def compile_mosaic_restoration_model(
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    return all_sub_engines_exist(mosaic_restoration_model_path, fp16, max_clip_size)
+    compiled = all_sub_engines_exist(mosaic_restoration_model_path, fp16, max_clip_size)
+    if compiled:
+        _compile_fp8_upsample_engine_if_supported(
+            mosaic_restoration_model_path, device, fp16, max_clip_size, optimization_level,
+        )
+    return compiled
+
+
+def _compile_fp8_upsample_engine_if_supported(
+    model_weights_path: str,
+    device: torch.device,
+    fp16: bool,
+    max_clip_size: int,
+    optimization_level: int,
+) -> None:
+    """Compile the prebaked QDQ ONNX to an FP8 upsample engine on SM 8.9+ GPUs.
+
+    Calibration scales are baked into the bundled ONNX at dev time, so this is
+    a plain TensorRT build with no extra dependencies. Optional: absence of the
+    ONNX or an unsupported GPU silently keeps the fp16 upsample engine.
+    """
+    from jasna.accelerator import supports_fp8
+    from jasna.engine_paths import (
+        get_basicvsrpp_fp8_upsample_engine_path,
+        get_basicvsrpp_fp8_upsample_onnx_path,
+    )
+
+    onnx_path = get_basicvsrpp_fp8_upsample_onnx_path(model_weights_path)
+    engine_path = get_basicvsrpp_fp8_upsample_engine_path(model_weights_path, max_clip_size)
+    if (
+        not fp16
+        or os.path.isfile(engine_path)
+        or not os.path.isfile(onnx_path)
+        or not supports_fp8(device)
+    ):
+        return
+
+    from jasna.trt import _build_serialized_engine
+
+    msg = f"Compiling FP8 upsample sub-engine (batch=1..{max_clip_size})"
+    print(msg)
+    logger.info("%s", msg)
+    with open(onnx_path, "rb") as f:
+        onnx_bytes = f.read()
+    engine_bytes = _build_serialized_engine(
+        onnx_bytes,
+        device,
+        batch_size=max_clip_size,
+        fp16=True,
+        optimization_level=optimization_level,
+        workspace_gb=20,
+        dynamic_batch=True,
+    )
+    os.makedirs(os.path.dirname(engine_path), exist_ok=True)
+    with open(engine_path, "wb") as f:
+        f.write(engine_bytes)
 
 
 def basicvsrpp_startup_policy(

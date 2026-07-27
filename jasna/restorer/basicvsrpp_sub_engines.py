@@ -14,6 +14,7 @@ from jasna.engine_paths import (
     _basicvsrpp_sub_engine_dir as _sub_engine_dir,
     engine_precision_name,
     engine_system_suffix,
+    get_basicvsrpp_fp8_upsample_engine_path,
     get_basicvsrpp_sub_engine_paths as get_sub_engine_paths,
     all_basicvsrpp_sub_engines_exist as all_sub_engines_exist,
 )
@@ -28,8 +29,58 @@ logger = logging.getLogger(__name__)
 # DIRECTIONS imported from engine_paths
 FEATURE_SIZE = 64
 INPUT_SIZE = 256
+MID_CHANNELS = 64
 MAX_DYNAMIC_BATCH = 180
 OPT_DYNAMIC_BATCH = 60
+
+_CUDAGRAPHS_ENV = "JASNA_TRT_CUDAGRAPHS"
+
+
+def _loop_body_cudagraphs_enabled() -> bool:
+    return os.environ.get(_CUDAGRAPHS_ENV, "1") != "0"
+
+
+def _set_trt_cudagraphs_mode(enabled: bool) -> None:
+    import torch_tensorrt  # type: ignore[import-not-found]
+
+    torch_tensorrt.runtime.set_cudagraphs_mode(enabled)
+
+
+def _warmup_capture_loop_body_graphs(
+    loop_body_engines: dict[str, nn.Module],
+    mid_channels: int,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> None:
+    """Capture CUDA graphs for the static-shape loop_body engines.
+
+    Must run before the pipeline worker threads start issuing CUDA work:
+    graph capture poisons concurrent CUDA calls from other threads, while
+    graph replay is thread-safe. loop_body shapes are static, so no
+    re-capture can happen mid-run.
+    """
+    fs = FEATURE_SIZE
+    _set_trt_cudagraphs_mode(True)
+    try:
+        with torch.inference_mode():
+            for i, direction in enumerate(DIRECTIONS):
+                inputs = [
+                    torch.randn(1, mid_channels, fs, fs, dtype=dtype, device=device),
+                    torch.randn(1, fs, fs, 2, dtype=dtype, device=device),
+                    torch.randn(1, mid_channels, fs, fs, dtype=dtype, device=device),
+                    torch.randn(1, fs, fs, 2, dtype=dtype, device=device),
+                    torch.randn(1, mid_channels, fs, fs, dtype=dtype, device=device),
+                    torch.randn(1, 2, fs, fs, dtype=dtype, device=device),
+                    torch.randn(1, 2, fs, fs, dtype=dtype, device=device),
+                    torch.randn(1, (1 + i) * mid_channels, fs, fs, dtype=dtype, device=device),
+                ]
+                engine = loop_body_engines[direction]
+                engine(*inputs)
+                engine(*inputs)
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
+    finally:
+        _set_trt_cudagraphs_mode(False)
 
 
 class _PropagateBodyWrapper(nn.Module):
@@ -355,6 +406,10 @@ def load_sub_engines(
 ) -> tuple[dict[str, nn.Module], nn.Module, nn.Module] | None:
     """Returns ``(loop_body_engines, preprocess, upsample)`` or *None*."""
     paths = get_sub_engine_paths(model_weights_path, fp16, max_clip_size)
+    upsample_override = os.environ.get("JASNA_UPSAMPLE_ENGINE_OVERRIDE")
+    if upsample_override:
+        logger.warning("Experimental: upsample sub-engine overridden with %s", upsample_override)
+        paths["upsample"] = upsample_override
     if not all(os.path.isfile(p) for p in paths.values()):
         return None
 
@@ -366,10 +421,55 @@ def load_sub_engines(
     preprocess_engine = load_torchtrt_export(
         checkpoint_path=paths["preprocess"], device=device,
     )
-    upsample_engine = load_torchtrt_export(
-        checkpoint_path=paths["upsample"], device=device,
+    upsample_engine = _load_upsample_engine(
+        paths["upsample"], model_weights_path, device, max_clip_size,
+        upsample_overridden=bool(upsample_override),
     )
     return loop_body_engines, preprocess_engine, upsample_engine
+
+
+class _Fp8UpsampleEngine(nn.Module):
+    """Adapts a raw-TensorRT FP8 upsample engine to the torch-TRT module call style."""
+
+    def __init__(self, engine_path: str, max_clip_size: int, device: torch.device):
+        super().__init__()
+        from pathlib import Path
+
+        from jasna.trt.trt_runner import TrtRunner
+
+        self._runner = TrtRunner(
+            Path(engine_path),
+            [(max_clip_size, 5 * MID_CHANNELS, FEATURE_SIZE, FEATURE_SIZE)],
+            device,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        runner = self._runner
+        return runner.infer({runner.input_names[0]: x})[runner.output_names[0]]
+
+    def close(self) -> None:
+        if self._runner is not None:
+            self._runner.context = None
+            self._runner.engine = None
+            self._runner = None
+
+
+def _load_upsample_engine(
+    fp16_path: str,
+    model_weights_path: str,
+    device: torch.device,
+    max_clip_size: int,
+    upsample_overridden: bool,
+) -> nn.Module:
+    if not upsample_overridden:
+        fp8_path = get_basicvsrpp_fp8_upsample_engine_path(model_weights_path, max_clip_size)
+        if os.path.isfile(fp8_path):
+            from jasna.accelerator import supports_fp8
+
+            if supports_fp8(device):
+                logger.info("BasicVSR++ upsample using FP8 engine: %s", fp8_path)
+                return _Fp8UpsampleEngine(fp8_path, max_clip_size, device)
+    return load_torchtrt_export(checkpoint_path=fp16_path, device=device)
 
 
 def _release_torchtrt_module(module: nn.Module) -> None:
@@ -408,6 +508,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         self._loop_body_engines = loop_body_engines
         self._preprocess_engine = preprocess_engine
         self._upsample_engine = upsample_engine
+        self._loop_body_cudagraphs = _loop_body_cudagraphs_enabled()
 
     def close(self) -> None:
         engines = []
@@ -418,7 +519,10 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         if self._upsample_engine is not None:
             engines.append(self._upsample_engine)
         for eng in engines:
-            _release_torchtrt_module(eng)
+            if hasattr(eng, "close"):
+                eng.close()
+            else:
+                _release_torchtrt_module(eng)
 
         self._loop_body_engines = None
         self._preprocess_engine = None
@@ -527,18 +631,49 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         flows_grid: torch.Tensor,
         acc_grids: dict[int, torch.Tensor],
     ) -> dict[str, list[torch.Tensor]]:
-        n, t, _, h, w = flows.size()
+        n, _t, _, h, w = flows.size()
         mid = self.mid_channels
-
-        mapping_idx = list(range(0, len(feats["spatial"])))
-        mapping_idx += mapping_idx[::-1]
-
-        lbe = self._loop_body_engines[module_name]
-        backbone_pt = self.backbone[module_name]
-        other_keys = [k for k in feats if k not in ["spatial", module_name]]
 
         zero_feat = flows.new_zeros(n, mid, h, w)
         zero_flow = flows.new_zeros(n, 2, h, w)
+
+        if self._loop_body_cudagraphs:
+            _set_trt_cudagraphs_mode(True)
+        try:
+            feats = self._propagate_frames(
+                feats, flows, module_name, grid, frame_idx, flow_idx,
+                acc_flows, flows_grid, acc_grids, zero_feat, zero_flow,
+            )
+        finally:
+            if self._loop_body_cudagraphs:
+                _set_trt_cudagraphs_mode(False)
+
+        if "backward" in module_name:
+            feats[module_name] = feats[module_name][::-1]
+
+        return feats
+
+    def _propagate_frames(
+        self,
+        feats: dict[str, list[torch.Tensor]],
+        flows: torch.Tensor,
+        module_name: str,
+        grid: torch.Tensor,
+        frame_idx: list[int],
+        flow_idx: list[int],
+        acc_flows: dict[int, torch.Tensor],
+        flows_grid: torch.Tensor,
+        acc_grids: dict[int, torch.Tensor],
+        zero_feat: torch.Tensor,
+        zero_flow: torch.Tensor,
+    ) -> dict[str, list[torch.Tensor]]:
+        n, _t, _, h, w = flows.size()
+        mid = self.mid_channels
+        mapping_idx = list(range(0, len(feats["spatial"])))
+        mapping_idx += mapping_idx[::-1]
+        lbe = self._loop_body_engines[module_name]
+        backbone_pt = self.backbone[module_name]
+        other_keys = [k for k in feats if k not in ["spatial", module_name]]
 
         feat_prop = flows.new_zeros(n, mid, h, w)
         for i, idx in enumerate(frame_idx):
@@ -565,9 +700,6 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
                 feat = torch.cat([backbone_prefix, feat_prop], dim=1)
                 feat_prop = feat_prop + backbone_pt(feat)
             feats[module_name].append(feat_prop)
-
-        if "backward" in module_name:
-            feats[module_name] = feats[module_name][::-1]
 
         return feats
 
@@ -650,6 +782,11 @@ def create_split_forward(
         return None
     loop_body_engines, preprocess_engine, upsample_engine = result
     generator = _get_inference_generator(model)
+    if _loop_body_cudagraphs_enabled():
+        _warmup_capture_loop_body_graphs(
+            loop_body_engines, generator.mid_channels, device,
+            torch.float16 if fp16 else torch.float32,
+        )
     split = BasicVSRPlusPlusNetSplit(
         generator, loop_body_engines, preprocess_engine, upsample_engine,
     )

@@ -76,6 +76,13 @@ def is_nvidia_device(device: torch.device | str | None = None) -> bool:
     return vendor_for_device(device) is AcceleratorVendor.NVIDIA
 
 
+def supports_fp8(device: torch.device | str | None = None) -> bool:
+    """FP8 (E4M3) TensorRT engines need SM 8.9+ (Ada / Hopper / Blackwell)."""
+    if not is_nvidia_device(device):
+        return False
+    return torch.cuda.get_device_capability(torch.device(device) if device is not None else None) >= (8, 9)
+
+
 def is_amd_device(device: torch.device | str | None = None) -> bool:
     return vendor_for_device(device) is AcceleratorVendor.AMD
 

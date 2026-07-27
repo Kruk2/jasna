@@ -78,6 +78,147 @@ def test_load_sub_engines_returns_none_when_missing(tmp_path: Path) -> None:
     assert result is None
 
 
+def _make_engine_files(model_path: str) -> dict[str, str]:
+    paths = get_sub_engine_paths(model_path, fp16=True)
+    for p in paths.values():
+        Path(p).parent.mkdir(parents=True, exist_ok=True)
+        Path(p).write_text("x", encoding="utf-8")
+    return paths
+
+
+def test_load_sub_engines_upsample_override_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_path = str(tmp_path / "model.pth")
+    _make_engine_files(model_path)
+    override = tmp_path / "custom_upsample.engine"
+    override.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("JASNA_UPSAMPLE_ENGINE_OVERRIDE", str(override))
+    loaded_paths: list[str] = []
+    monkeypatch.setattr(
+        "jasna.restorer.basicvsrpp_sub_engines.load_torchtrt_export",
+        lambda *, checkpoint_path, device: loaded_paths.append(checkpoint_path) or MagicMock(),
+    )
+    result = load_sub_engines(model_path, torch.device("cpu"), fp16=True)
+    assert result is not None
+    assert str(override) in loaded_paths
+
+
+def test_load_sub_engines_upsample_override_missing_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    model_path = str(tmp_path / "model.pth")
+    _make_engine_files(model_path)
+    monkeypatch.setenv("JASNA_UPSAMPLE_ENGINE_OVERRIDE", str(tmp_path / "nope.engine"))
+    assert load_sub_engines(model_path, torch.device("cpu"), fp16=True) is None
+
+
+def test_warmup_capture_loop_body_graphs_toggles_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from jasna.restorer.basicvsrpp_sub_engines import _warmup_capture_loop_body_graphs
+
+    fake_trt = MagicMock()
+    monkeypatch.setitem(sys.modules, "torch_tensorrt", fake_trt)
+    engines = {d: MagicMock(return_value=torch.zeros(1)) for d in DIRECTIONS}
+    _warmup_capture_loop_body_graphs(engines, 16, torch.device("cpu"), torch.float32)
+    for i, d in enumerate(DIRECTIONS):
+        assert engines[d].call_count == 2
+        prefix = engines[d].call_args.args[7]
+        assert prefix.shape == (1, (1 + i) * 16, FEATURE_SIZE, FEATURE_SIZE)
+    modes = [c.args[0] for c in fake_trt.runtime.set_cudagraphs_mode.call_args_list]
+    assert modes == [True, False]
+
+
+def test_create_split_forward_cudagraphs_env_gates_warmup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jasna.restorer import basicvsrpp_sub_engines as mod
+
+    model_path = str(tmp_path / "model.pth")
+    _make_engine_files(model_path)
+    monkeypatch.setattr(
+        mod, "load_torchtrt_export",
+        lambda *, checkpoint_path, device: MagicMock(),
+    )
+    warmups: list[int] = []
+    monkeypatch.setattr(
+        mod, "_warmup_capture_loop_body_graphs",
+        lambda *a, **k: warmups.append(1),
+    )
+    generator = MagicMock(mid_channels=16)
+    model = MagicMock(generator_ema=generator)
+
+    monkeypatch.setenv("JASNA_TRT_CUDAGRAPHS", "0")
+    split = mod.create_split_forward(model, model_path, torch.device("cpu"), fp16=True)
+    assert split is not None
+    assert not warmups
+    assert split._loop_body_cudagraphs is False
+
+    monkeypatch.delenv("JASNA_TRT_CUDAGRAPHS", raising=False)
+    split = mod.create_split_forward(model, model_path, torch.device("cpu"), fp16=True)
+    assert split is not None
+    assert warmups == [1]
+    assert split._loop_body_cudagraphs is True
+
+
+def test_load_sub_engines_prefers_fp8_upsample_when_supported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jasna.engine_paths import get_basicvsrpp_fp8_upsample_engine_path
+    from jasna.restorer import basicvsrpp_sub_engines as mod
+
+    model_path = str(tmp_path / "model.pth")
+    _make_engine_files(model_path)
+    fp8_path = get_basicvsrpp_fp8_upsample_engine_path(model_path)
+    Path(fp8_path).write_text("x", encoding="utf-8")
+    monkeypatch.setattr("jasna.accelerator.supports_fp8", lambda device: True)
+    monkeypatch.setattr(
+        mod, "load_torchtrt_export", lambda *, checkpoint_path, device: MagicMock(),
+    )
+    fp8_engine = MagicMock()
+    monkeypatch.setattr(mod, "_Fp8UpsampleEngine", lambda *a, **k: fp8_engine)
+    result = mod.load_sub_engines(model_path, torch.device("cpu"), fp16=True)
+    assert result is not None
+    _, _, upsample = result
+    assert upsample is fp8_engine
+
+
+def test_load_sub_engines_fp8_skipped_on_unsupported_gpu(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jasna.engine_paths import get_basicvsrpp_fp8_upsample_engine_path
+    from jasna.restorer import basicvsrpp_sub_engines as mod
+
+    model_path = str(tmp_path / "model.pth")
+    _make_engine_files(model_path)
+    Path(get_basicvsrpp_fp8_upsample_engine_path(model_path)).write_text("x", encoding="utf-8")
+    monkeypatch.setattr("jasna.accelerator.supports_fp8", lambda device: False)
+    loaded = MagicMock()
+    monkeypatch.setattr(
+        mod, "load_torchtrt_export", lambda *, checkpoint_path, device: loaded,
+    )
+    result = mod.load_sub_engines(model_path, torch.device("cpu"), fp16=True)
+    assert result is not None
+    assert result[2] is loaded
+
+
+def test_fp8_upsample_paths() -> None:
+    from jasna.engine_paths import (
+        get_basicvsrpp_fp8_upsample_engine_path,
+        get_basicvsrpp_fp8_upsample_onnx_path,
+    )
+
+    onnx = get_basicvsrpp_fp8_upsample_onnx_path("model_weights/model_v1.2.pth")
+    assert onnx.endswith("model_v1.2_upsample_fp8.onnx")
+    engine = get_basicvsrpp_fp8_upsample_engine_path("model_weights/model_v1.2.pth", 180)
+    assert "model_v1.2_sub_engines" in engine
+    assert engine.endswith(".engine")
+    assert "upsample_dyn_b180.trt_fp8" in engine
+
+
 def test_propagate_body_wrapper_forward_shape() -> None:
     from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 
