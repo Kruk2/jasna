@@ -18,6 +18,8 @@ import torch
 from jasna.accelerator import is_nvidia_device
 from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
 from jasna.media.rgb_to_nv12 import (
+    NV12_VARIANTS,
+    _chw_rgb_to_nv12_into,
     chw_rgb_to_nv12_bt601_full,
     chw_rgb_to_nv12_bt601_limited,
     chw_rgb_to_nv12_bt709_full,
@@ -26,6 +28,8 @@ from jasna.media.rgb_to_nv12 import (
     chw_rgb_to_nv12_bt2020_limited,
 )
 from jasna.media.rgb_to_p010 import (
+    P010_VARIANTS,
+    _chw_rgb_to_p010_into,
     chw_rgb_to_p010_bt601_full,
     chw_rgb_to_p010_bt601_limited,
     chw_rgb_to_p010_bt709_full,
@@ -33,6 +37,7 @@ from jasna.media.rgb_to_p010 import (
     chw_rgb_to_p010_bt2020_full,
     chw_rgb_to_p010_bt2020_limited,
 )
+from jasna.media.yuv_scratch import YuvScratch
 
 _FATBIN = "rgb_to_yuv.fatbin"
 
@@ -114,7 +119,8 @@ class RgbToYuvConverter:
     """Converts a ``(3, H, W)`` planar RGB frame into a packed NV12/P010 frame.
 
     ``convert_into`` writes the two planes into caller-owned buffers; ``convert``
-    allocates a single packed frame and is what the Torch fallback produces.
+    allocates a single packed frame around it. Neither allocates per frame on the
+    eager path: its float32 working set is built once per frame size and reused.
     """
 
     def __init__(self, variant: str, *, device: torch.device):
@@ -124,15 +130,17 @@ class RgbToYuvConverter:
         self.ten_bit = variant.startswith("p010")
         self.sample_dtype = torch.int16 if self.ten_bit else torch.uint8
         self._torch_convert = _TORCH_CONVERTERS[variant]
+        self._eager_rows, self._eager_full_range = (
+            P010_VARIANTS[variant] if self.ten_bit else NV12_VARIANTS[variant]
+        )
         self._kernel = _RgbToYuvKernel(variant) if is_nvidia_device(device) else None
+        self._scratch: YuvScratch | None = None
 
     @property
     def uses_kernel(self) -> bool:
         return self._kernel is not None
 
     def convert(self, frame: torch.Tensor) -> torch.Tensor:
-        if self._kernel is None:
-            return self._torch_convert(frame)
         _, height, width = frame.shape
         packed = torch.empty(
             (height + height // 2, width), dtype=self.sample_dtype, device=frame.device
@@ -143,8 +151,6 @@ class RgbToYuvConverter:
     def convert_into(
         self, frame: torch.Tensor, luma: torch.Tensor, chroma: torch.Tensor
     ) -> None:
-        if self._kernel is None:
-            raise RuntimeError("convert_into requires the CUDA kernel path")
         _, height, width = frame.shape
         if height % 2 or width % 2:
             raise ValueError(f"4:2:0 conversion requires even dimensions, got {height}x{width}")
@@ -152,7 +158,26 @@ class RgbToYuvConverter:
             raise ValueError(f"Expected a uint8 RGB frame, got {frame.dtype}")
         if frame.stride(2) != 1:
             raise ValueError("RGB frame rows must be contiguous")
+        if self._kernel is None:
+            convert_into = _chw_rgb_to_p010_into if self.ten_bit else _chw_rgb_to_nv12_into
+            convert_into(
+                frame,
+                luma,
+                chroma,
+                self._scratch_for(frame),
+                self._eager_rows,
+                full_range=self._eager_full_range,
+            )
+            return
         if self.ten_bit:
             luma = luma.view(torch.uint16)
             chroma = chroma.view(torch.uint16)
         self._kernel.launch(frame, luma, chroma)
+
+    def _scratch_for(self, frame: torch.Tensor) -> YuvScratch:
+        _, height, width = frame.shape
+        scratch = self._scratch
+        if scratch is None or not scratch.matches(height, width, frame.device):
+            scratch = YuvScratch(height, width, frame.device)
+            self._scratch = scratch
+        return scratch

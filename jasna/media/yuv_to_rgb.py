@@ -200,14 +200,23 @@ class YuvToRgbConverter:
             [-b * chroma_scale, -c * chroma_scale],
             [d * chroma_scale, 0.0],
         ]
-        chroma_matrix = [[value / raw_div for value in row] for row in chroma_matrix]
-        offset = [
+        self._chroma_matrix = [[value / raw_div for value in row] for row in chroma_matrix]
+        self._offset = [
             -luma_offset * luma_scale - a * chroma_center * chroma_scale,
             -luma_offset * luma_scale + (b + c) * chroma_center * chroma_scale,
             -luma_offset * luma_scale - d * chroma_center * chroma_scale,
         ]
-        self._chroma_matrix = torch.tensor(chroma_matrix, dtype=torch.float32, device=device)
-        self._offset = torch.tensor(offset, dtype=torch.float32, device=device).view(3, 1, 1)
+        # See jasna/media/yuv_scratch.py for why the eager path allocates its
+        # working set once instead of per frame.
+        self._rgb = torch.empty((3, height, width), dtype=torch.float32, device=device)
+        self._chroma = torch.empty(
+            (3, height // 2, width // 2), dtype=torch.float32, device=device
+        )
+        self._codes = (
+            torch.empty((3, height, width), dtype=torch.int32, device=device)
+            if is_10bit
+            else None
+        )
 
         if is_10bit:
             bayer = torch.tensor(_BAYER8, device=device, dtype=torch.float32)
@@ -357,17 +366,25 @@ class YuvToRgbConverter:
 
     def _convert_eager(self, y: torch.Tensor, uv: torch.Tensor, out: torch.Tensor) -> None:
         H, W = self.height, self.width
-        yf = y.to(torch.float32)
-        uvf = uv.to(torch.float32).reshape(-1, 2)
+        u, v = uv[..., 0], uv[..., 1]
 
-        chroma = self._chroma_matrix.mm(uvf.T).reshape(1, 3, H // 2, W // 2)
-        chroma_up = torch.nn.functional.interpolate(chroma, scale_factor=2, mode="nearest")
+        chroma = self._chroma
+        for plane, (cu, cv) in enumerate(self._chroma_matrix):
+            torch.mul(u, cu, out=chroma[plane])
+            chroma[plane].add_(v, alpha=cv)
 
-        rgb = chroma_up.squeeze(0).add_(self._offset)
-        rgb.add_(yf, alpha=self._luma_scale)
+        # Nearest 2x upsample: broadcasting a copy into the split view of the
+        # destination replaces interpolate() and its per-frame allocation.
+        rgb = self._rgb
+        rgb.view(3, H // 2, 2, W // 2, 2).copy_(chroma.unsqueeze(2).unsqueeze(4))
+        for plane, offset in enumerate(self._offset):
+            rgb[plane].add_(offset)
+        rgb.add_(y, alpha=self._luma_scale)
 
         if self.is_10bit:
-            rgb10 = rgb.round_().clamp_(0, 1023).to(torch.int32)
-            out.copy_(((rgb10 + self._dither2) >> 2).clamp_(0, 255))
+            codes = self._codes
+            codes.copy_(rgb.round_().clamp_(0, 1023))
+            codes.add_(self._dither2).bitwise_right_shift_(2).clamp_(0, 255)
+            out.copy_(codes)
         else:
             out.copy_(rgb.round_().clamp_(0, 255))

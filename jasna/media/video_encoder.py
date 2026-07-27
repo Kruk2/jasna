@@ -440,6 +440,10 @@ class NvidiaVideoEncoder:
 
         self.BUFFER_MAX_SIZE = 8
         self._lut_flags: deque[bool] = deque()
+        # Set on AMD in __enter__, where the frame size is known; NVIDIA leaves
+        # them None and allocates per frame (NVENC outlives encode()).
+        self._packed: torch.Tensor | None = None
+        self._cas_luma: torch.Tensor | None = None
 
     def __enter__(self):
         try:
@@ -502,7 +506,16 @@ class NvidiaVideoEncoder:
         # initialized it; current_ctx leaves the context and its flags alone.
         # Keeping conversion and NVENC in one context also avoids a ~500 MiB
         # secondary CUDA context and cross-context scheduling overhead.
-        self.stream = new_stream(self.device)
+        # NVENC consumes device memory, so conversion runs on its own stream and
+        # overlaps the rest of the pipeline. AMF consumes host memory and the
+        # conversion is eager Torch math, so on AMD everything stays on the
+        # current stream: a private stream there let ROCm recycle in-flight
+        # conversion buffers into the restorer's allocations (issue #252).
+        self.stream = (
+            current_stream(self.device)
+            if self.vendor is AcceleratorVendor.AMD
+            else new_stream(self.device)
+        )
         self._cuda_ctx = None
         if self.vendor is AcceleratorVendor.NVIDIA:
             from av.video.frame import CudaContext
@@ -513,15 +526,22 @@ class NvidiaVideoEncoder:
                 current_ctx=True,
                 cuda_stream=self.stream.cuda_stream,
             )
+        height = self.metadata.video_height
+        width = self.metadata.video_width
+        self._packed = None
+        self._cas_luma = None
         self._host_yuv = None
         if self.vendor is AcceleratorVendor.AMD:
+            self._packed = torch.empty(
+                (height + height // 2, width),
+                dtype=self._converter.sample_dtype,
+                device=self.device,
+            )
+            if self._cas is not None:
+                self._cas_luma = torch.empty_like(self._packed[:height])
             dtype = torch.uint16 if self.spec.ten_bit else torch.uint8
             self._host_yuv = torch.empty(
-                (
-                    self.metadata.video_height
-                    + self.metadata.video_height // 2,
-                    self.metadata.video_width,
-                ),
+                (height + height // 2, width),
                 dtype=dtype,
                 pin_memory=True,
             )
@@ -741,29 +761,33 @@ class NvidiaVideoEncoder:
             )
         return RuntimeError(message)
 
+    def _packed_frame(self, height: int, width: int) -> torch.Tensor:
+        # NVENC takes the device frame by pointer and still owns it after
+        # encode() returns, so NVIDIA hands it a fresh one every time. AMF has
+        # no zero-copy path: the AMD branch below copies this buffer into pinned
+        # host memory and synchronizes, so one buffer can serve every frame.
+        if self._packed is not None:
+            return self._packed
+        return torch.empty(
+            (height + height // 2, width),
+            dtype=self._converter.sample_dtype,
+            device=self.device,
+        )
+
     def _to_yuv(self, frame: torch.Tensor, height: int) -> torch.Tensor:
         # Sharpening happens here rather than after, because it must see a
         # contiguous plane: pitch alignment can hand back a strided view into a
         # wider buffer, and the AMD path copies straight to host memory.
-        if not self._converter.uses_kernel:
-            packed = self._converter.convert(frame)
-            if self._cas is not None:
-                self._cas.apply_luma_(packed, height)
-            return packed
-
-        width = frame.shape[2]
-        packed = torch.empty(
-            (height + height // 2, width),
-            dtype=self._converter.sample_dtype,
-            device=frame.device,
-        )
+        packed = self._packed_frame(height, frame.shape[2])
         if self._cas is None:
             self._converter.convert_into(frame, packed[:height], packed[height:])
             return packed
-        # CAS is a 3x3 stencil, so it cannot run in place. Writing luma to a
-        # scratch plane and sharpening from there into the final frame costs one
-        # allocation; sharpening in place would cost that plus a full copy back.
-        luma = torch.empty_like(packed[:height])
+        # CAS is a 3x3 stencil, so it cannot run in place: the conversion writes
+        # luma to a scratch plane and sharpening reads from there into the frame
+        # the encoder receives, instead of copying a whole plane back.
+        luma = self._cas_luma
+        if luma is None:
+            luma = torch.empty_like(packed[:height])
         self._converter.convert_into(frame, luma, packed[height:])
         self._cas.sharpen_into(luma, packed[:height])
         return packed

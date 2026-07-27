@@ -362,9 +362,14 @@ class TestSharpening:
 
     def test_zero_strength_leaves_the_converted_frame_untouched(self, tmp_path, monkeypatch):
         enc = _make_encoder(tmp_path, codec="h264")  # nv12, so planes stay uint8
-        packed = torch.arange(24, dtype=torch.uint8).reshape(6, 4)
+        packed = torch.arange(24, dtype=torch.uint8, device=enc.device).reshape(6, 4)
         enc._converter = SimpleNamespace(
-            uses_kernel=False, convert=lambda frame: packed.clone()
+            sample_dtype=torch.uint8,
+            uses_kernel=False,
+            convert_into=lambda frame, luma, chroma: (
+                luma.copy_(packed[:4]),
+                chroma.copy_(packed[4:]),
+            ),
         )
         enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
@@ -396,15 +401,17 @@ class TestSharpening:
             sharpen_strength=0.4,
         )
         enc._converter = SimpleNamespace(
-            uses_kernel=False, convert=lambda frame: torch.zeros((6, 4), dtype=torch.uint8)
+            sample_dtype=torch.uint8,
+            uses_kernel=False,
+            convert_into=lambda frame, luma, chroma: None,
         )
         enc.stream = SimpleNamespace(cuda_stream=1234, synchronize=lambda: None)
         enc.metadata = _fake_metadata(video_height=4, video_width=4)
         enc._cuda_ctx = None
         order = []
         enc._cas = SimpleNamespace(
-            apply_luma_=lambda packed, height: order.append(
-                ("sharpen", packed.is_contiguous())
+            sharpen_into=lambda source, destination: order.append(
+                ("sharpen", destination.is_contiguous())
             )
         )
 
@@ -533,7 +540,9 @@ class TestEncodeBuffer:
         enc._cuda_ctx = object()
         enc._lut_applier = None
         enc._converter = SimpleNamespace(
-            uses_kernel=False, convert=lambda frame: torch.zeros((3, 2), dtype=torch.uint8)
+            sample_dtype=torch.int16,
+            uses_kernel=False,
+            convert_into=lambda frame, luma, chroma: None,
         )
         enc.out_stream = MagicMock()
         enc.out_stream.encode.return_value = []
@@ -563,10 +572,12 @@ class TestEncodeBuffer:
         enc.vendor = video_encoder_module.AcceleratorVendor.AMD
         enc.stream = MagicMock()
         enc._host_yuv = torch.empty((3, 2), dtype=torch.uint8)
+        enc._packed = torch.zeros((3, 2), dtype=torch.uint8)
         enc._lut_applier = None
         enc._converter = SimpleNamespace(
+            sample_dtype=torch.uint8,
             uses_kernel=False,
-            convert=lambda frame: torch.zeros((3, 2), dtype=torch.uint8),
+            convert_into=lambda frame, luma, chroma: None,
         )
         enc.out_stream = MagicMock()
         enc.out_stream.encode.return_value = []
