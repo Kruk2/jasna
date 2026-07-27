@@ -64,6 +64,7 @@ dev = [
   "scikit-build",
   "cmake",
   "ninja",
+  "delvewheel; sys_platform == 'win32'",
 ]
 
 [tool.setuptools]
