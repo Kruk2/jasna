@@ -42,12 +42,44 @@ Upsample engine, 180 frames of work either way:
 | **30** | **1400 MiB** | **14.69 ms** |
 | 16 | 1118 MiB | 14.85 ms |
 
-Same work, same speed, −3.3 GB. The FP8 engine is worse at every batch: its
-`device_memory_size` is 5670 MiB at b180 and 945 MiB at b30 (vs ~790 MiB for
-fp16 b30), and b30 runs at 15.20 ms vs fp16's 14.69 ms. Rebuilding it with a
-4 GB workspace cap fails outright (`Could not find any implementation for node
-{ForeignNode[input_QuantizeLinear.../conv_last/Conv]}`), so the scratch is
-intrinsic to the fused FP8 node. **FP8 is strictly dominated and was removed.**
+Same work, same speed, −3.3 GB.
+
+### FP8, properly re-tested at small batch
+
+Two different FP8 build routes exist and they are not interchangeable:
+
+| upsample engine | route | resident | ms/180 f (CUDA events) | full-model PSNR vs fp32 |
+|---|---|---:|---:|---:|
+| fp16 b30 (**shipping**) | torch-TRT | 748 MiB | 15.06 / 15.11 | 74.42 dB, SSIM 1.0000 |
+| fp16 b60 | torch-TRT | 1392 MiB | 15.27 | 74.42 dB |
+| fp16 b180 (old) | torch-TRT | 4422 MiB | 15.1 | 74.42 dB |
+| fp8 b30 | modelopt + torch-TRT | **560 MiB** | **13.56 / 13.94** | 64.21 dB, SSIM 0.9998 |
+| fp8 b60 | modelopt + torch-TRT | 1018 MiB | 13.87 / 14.01 | 64.21 dB |
+| fp8 b30 | prebaked QDQ ONNX + OnnxParser (**what v0.9.1 shipped**) | ~960 MiB | 15.36 | — |
+| fp8 b180 | prebaked QDQ ONNX + OnnxParser | ~5700 MiB | — | — |
+
+So the modelopt/torch-TRT FP8 engine *is* genuinely better in isolation at
+b30: **−188 MiB and −8 % on the upsample stage**. The ONNX route we can
+actually ship is worse than fp16 on both counts — its
+`_build_serialized_engine` sets `BuilderFlag.FP16` on an fp32-typed QDQ
+network and TensorRT collapses the whole graph into one Myelin ForeignNode
+(`ForeignNode[input_QuantizeLinear.../conv_last/Conv]`), whose scratch is the
+5670 MiB. Rebuilding under a 4 GB workspace cap fails outright; building
+`STRONGLY_TYPED` instead gives 945 MiB / 18.66 ms, still worse than fp16 b30.
+
+E2E is what settles it. 1080p h264, clip 180, fp8 b30 wired in place of fp16
+b30, two runs each:
+
+| | wall | vram med | vram peak |
+|---|---:|---:|---:|
+| fp16 b30 | 33.97 / 33.77 s | 4919 / 5039 | 5689 / 5785 |
+| fp8 b30 | 34.01 / 33.83 s | 4789 / 4705 | 5579 / 5583 |
+
+**No wall-clock difference at all** (the stage is ~6 % of restoration and
+restoration overlaps decode/encode), −232 MiB median, and −10 dB of model
+accuracy. Getting even that would mean shipping nvidia-modelopt plus
+calibration clips to every user, because the shippable ONNX route does not
+produce this engine. **Not worth it — FP8 stays removed.**
 
 Whole six-engine set, resident above the CUDA context:
 
@@ -117,3 +149,24 @@ with it.
   engine layer takes a clip size any more.
 - The GUI max-clip-size slider now runs to 720 instead of 180 (the CLI never
   capped it); a long clip costs activation memory only.
+
+## Clip size after the change (1080p h264, overlap 8)
+
+`2026-07-28_clip_size_sweep.csv`. Engines are constant now, so this is purely
+activation memory — and it corrects two claims the tuning docs had been making:
+
+| clip size | wall | vram med | vram peak |
+|---:|---:|---:|---:|
+| 30 | 51.4 s | 3411 | 3487 |
+| 60 | 40.2 s | 3743 | 3907 |
+| 90 | 34.4 s | 4095 | 4551 |
+| 180 | 35.0 s | 5047 | 5591 |
+| 360 | 32.0 s | 6307 | 7667 |
+| 720 | 33.0 s | 8159 | 10957 |
+
+- Small clips are **slower**, not faster: overlap frames are reprocessed per
+  clip, so clip 30 costs 1.5× the wall of clip 90. The docs said the opposite.
+- Past ~180 the wall stops improving and only VRAM grows.
+- `--no-compile-basicvsrpp` at clip 180 now measures 106.8 s / 4605 MiB versus
+  33.2 s / 4977 MiB compiled. It used to be the recommended VRAM escape hatch;
+  it now buys 372 MiB for 3.2× the runtime, so the docs no longer suggest it.
