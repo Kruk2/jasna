@@ -150,6 +150,42 @@ with it.
 - The GUI max-clip-size slider now runs to 720 instead of 180 (the CLI never
   capped it); a long clip costs activation memory only.
 
+## Where the restoration time actually goes, and why quantizing it fails
+
+Full forward of one 180-frame clip on the shipping engine set, CUDA events,
+CUDA graphs on:
+
+| stage | time | share |
+|---|---:|---:|
+| propagate loop (720 × loop_body, batch 1) | ~193 ms (by difference) | **88 %** |
+| upsample (6 × b30) | 14.5 ms | 6.6 % |
+| preprocess (one clip) | 11.0 ms | 5.0 % |
+| **full forward** | **218.5 ms** | |
+
+So the upsample stage FP8 was aimed at is 6.6 % of restoration — the ceiling on
+any upsample-only optimization. The stage worth attacking is the propagate
+loop. Quantizing it does the opposite of helping. Swapping only the four
+loop_body engines for the study's quantized ones:
+
+| loop_body engines | full forward, graphs on | graphs off | resident |
+|---|---:|---:|---:|
+| fp16 (shipping) | **218.5 ms** | 255.1 ms | 3214 MiB |
+| fp8 | 414.4 ms (**1.90×**) | 454.3 ms | 3234 MiB |
+| int8 | 420.0 ms (1.92×) | — | 3234 MiB |
+
+Nearly 2× slower and **zero** VRAM saved, with or without CUDA graphs, so this
+is intrinsic to the quantized engine rather than a capture failure. The reason
+is in `2026-07-27_quantization_basicvsrpp.md`: loop_body is a sequential chain
+of batch-1 64×64×64 convolutions that already under-occupies the GPU, and TRT
+cannot fuse the Q/DQ pairs away at that size — they land as extra pointwise
+Myelin layers on top of a kernel-execution floor. There is also nothing to gain
+on memory: all four loop_body engines together are only ~184 MiB of the ~916 MiB
+engine set.
+
+The known lever for this stage is not precision but occupancy — batching
+independent clips (measured 1.4× on loop_body at 4 clips) — and that needs a
+pipeline restructure.
+
 ## Clip size after the change (1080p h264, overlap 8)
 
 `2026-07-28_clip_size_sweep.csv`. Engines are constant now, so this is purely
