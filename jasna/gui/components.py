@@ -295,6 +295,12 @@ class AutoHidingScrollableFrame(ctk.CTkScrollableFrame):
     def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
         self._scrollbar_visible = True
+        # The scrollbar's default 200px height request joins the panel's size
+        # negotiation, so under height shortage gridding it in/out re-splits the
+        # space and flips the overflow state back — an endless <Configure> storm
+        # that froze the GUI at 200% display scaling (#253). A token request
+        # keeps show/hide geometry-neutral vertically; sticky="ns" sizes it.
+        self._scrollbar.configure(height=8)
         self._parent_canvas.configure(yscrollcommand=self._update_scrollbar)
         self.after_idle(lambda: self._update_scrollbar(*self._parent_canvas.yview()))
 
