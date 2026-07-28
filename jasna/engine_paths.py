@@ -91,38 +91,37 @@ def expected_unet4x_engine_path(fp16: bool = True) -> Path:
 
 BASICVSRPP_DIRECTIONS = ("backward_1", "forward_1", "backward_2", "forward_2")
 
+# The preprocess and upsample stages run in fixed-size batches instead of one
+# call per clip. TensorRT sizes an engine's scratch for its largest profile
+# shape and that scratch scales linearly with the batch, so a clip-sized engine
+# reserves gigabytes the batched one does not: at 180 frames, b180 upsample
+# costs 3.2 GB more than b30 (identical speed) and b180 preprocess 0.8 GB more
+# than b60 (+2 ms per clip). Both are also independent of the clip length, so
+# changing the max clip size no longer recompiles any engine.
+BASICVSRPP_UPSAMPLE_BATCH = 30
+BASICVSRPP_PREPROCESS_BATCH = 60
+
 
 def _basicvsrpp_sub_engine_dir(model_weights_path: str) -> str:
     stem = os.path.splitext(os.path.basename(model_weights_path))[0]
     return os.path.join(os.path.dirname(model_weights_path), f"{stem}_sub_engines")
 
 
-def get_basicvsrpp_sub_engine_paths(
-    model_weights_path: str, fp16: bool, max_clip_size: int = 60,
-) -> dict[str, str]:
+def get_basicvsrpp_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict[str, str]:
     engine_dir = _basicvsrpp_sub_engine_dir(model_weights_path)
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
     paths: dict[str, str] = {}
     for d in BASICVSRPP_DIRECTIONS:
         paths[f"loop_body_{d}"] = os.path.join(engine_dir, f"loop_body_{d}.trt_{prec}{suf}.engine")
-    paths["preprocess"] = os.path.join(engine_dir, f"preprocess_b{max_clip_size}.trt_{prec}{suf}.engine")
-    paths["upsample"] = os.path.join(engine_dir, f"upsample_dyn_b{max_clip_size}.trt_{prec}{suf}.engine")
+    paths["preprocess"] = os.path.join(
+        engine_dir, f"preprocess_b{BASICVSRPP_PREPROCESS_BATCH}.trt_{prec}{suf}.engine"
+    )
+    paths["upsample"] = os.path.join(
+        engine_dir, f"upsample_dyn_b{BASICVSRPP_UPSAMPLE_BATCH}.trt_{prec}{suf}.engine"
+    )
     return paths
 
 
-def all_basicvsrpp_sub_engines_exist(
-    model_weights_path: str, fp16: bool, max_clip_size: int = 60,
-) -> bool:
-    return all(os.path.isfile(p) for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16, max_clip_size).values())
-
-
-def get_basicvsrpp_fp8_upsample_onnx_path(model_weights_path: str) -> str:
-    """Bundled QDQ ONNX with dev-side-baked FP8 calibration for the upsample stage."""
-    stem = os.path.splitext(os.path.basename(model_weights_path))[0]
-    return os.path.join(os.path.dirname(model_weights_path), f"{stem}_upsample_fp8.onnx")
-
-
-def get_basicvsrpp_fp8_upsample_engine_path(model_weights_path: str, max_clip_size: int = 60) -> str:
-    engine_dir = _basicvsrpp_sub_engine_dir(model_weights_path)
-    return os.path.join(engine_dir, f"upsample_dyn_b{max_clip_size}.trt_fp8{engine_system_suffix()}.engine")
+def all_basicvsrpp_sub_engines_exist(model_weights_path: str, fp16: bool) -> bool:
+    return all(os.path.isfile(p) for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16).values())

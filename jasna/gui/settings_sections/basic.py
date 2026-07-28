@@ -12,6 +12,23 @@ from jasna.gui.settings_sections.widgets import (
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 
+# The sub-engines no longer depend on the clip length, so a long clip costs
+# activation memory only — high values stay usable on a large GPU.
+MIN_CLIP_SIZE = 10
+MAX_CLIP_SIZE = 720
+CLIP_SIZE_STEP = 10
+
+
+def build_max_clip_size_slider(slider_class, parent, on_change, **kwargs):
+    return slider_class(
+        parent,
+        from_=MIN_CLIP_SIZE,
+        to=MAX_CLIP_SIZE,
+        number_of_steps=(MAX_CLIP_SIZE - MIN_CLIP_SIZE) // CLIP_SIZE_STEP,
+        command=on_change,
+        **kwargs,
+    )
+
 
 class BasicSection:
     def __init__(self, parent, widgets: dict, on_modified, on_max_clip_size_change):
@@ -27,7 +44,7 @@ class BasicSection:
         inner = ctk.CTkFrame(content, fg_color="transparent")
         inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
 
-        # Max Clip Size slider (10-180, step 10)
+        # Max Clip Size slider
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
@@ -41,10 +58,10 @@ class BasicSection:
             row1, "90", 4, Colors.BG_PANEL
         )
         self._widgets["max_clip_size_val"].pack(side="right")
-        self._widgets["max_clip_size"] = ctk.CTkSlider(
-            row1, from_=10, to=180, number_of_steps=17,
-            fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=200, command=self._on_max_clip_size_slider
+        self._widgets["max_clip_size"] = build_max_clip_size_slider(
+            ctk.CTkSlider, row1, self._on_max_clip_size_slider,
+            fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY,
+            button_color=Colors.PRIMARY, width=200,
         )
         self._widgets["max_clip_size"].pack(side="right", padx=(0, 8))
         self._widgets["max_clip_size"].set(90)

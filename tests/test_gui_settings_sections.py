@@ -240,3 +240,28 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
         assert panel.get_settings() == AppSettings()
     finally:
         root.destroy()
+
+
+def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty() -> None:
+    """The sub-engines stopped depending on the clip length, so the slider is no
+    longer capped at the largest clip an engine had been compiled for."""
+    from jasna.gui.settings_sections import basic
+
+    captured: dict = {}
+
+    class _Slider:
+        def __init__(self, _parent, **kwargs):
+            captured.update(kwargs)
+
+        def pack(self, **_kwargs) -> None:
+            pass
+
+        def set(self, _value) -> None:
+            pass
+
+    basic.build_max_clip_size_slider(_Slider, None, lambda _value: None)
+
+    assert captured["from_"] == 10
+    assert captured["to"] == 720
+    assert (captured["to"] - captured["from_"]) % captured["number_of_steps"] == 0
+    assert (captured["to"] - captured["from_"]) // captured["number_of_steps"] == 10

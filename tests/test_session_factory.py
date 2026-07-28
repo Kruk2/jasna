@@ -86,7 +86,6 @@ def test_session_without_secondary() -> None:
     request = compiled.call_args.args[0]
     assert request.basicvsrpp is True
     assert request.basicvsrpp_model_path == "restore.pth"
-    assert request.basicvsrpp_max_clip_size == 90
     assert request.detection is True
     assert request.detection_model_name == "rfdetr-v5"
     assert request.detection_batch_size == 4

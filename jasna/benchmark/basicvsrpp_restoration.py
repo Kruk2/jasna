@@ -170,7 +170,6 @@ def benchmark_basicvsrpp_restoration(
         device=device,
         fp16=fp16,
         compile_basicvsrpp=compile_basicvsrpp,
-        max_clip_size=CLIP_LENGTH,
     )
     restorer = BasicvsrppMosaicRestorer(
         checkpoint_path=str(path),

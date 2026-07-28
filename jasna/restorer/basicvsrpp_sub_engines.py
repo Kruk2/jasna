@@ -11,10 +11,11 @@ import torchvision
 
 from jasna.engine_paths import (
     BASICVSRPP_DIRECTIONS as DIRECTIONS,
+    BASICVSRPP_PREPROCESS_BATCH as PREPROCESS_BATCH,
+    BASICVSRPP_UPSAMPLE_BATCH as UPSAMPLE_BATCH,
     _basicvsrpp_sub_engine_dir as _sub_engine_dir,
     engine_precision_name,
     engine_system_suffix,
-    get_basicvsrpp_fp8_upsample_engine_path,
     get_basicvsrpp_sub_engine_paths as get_sub_engine_paths,
     all_basicvsrpp_sub_engines_exist as all_sub_engines_exist,
 )
@@ -30,8 +31,6 @@ logger = logging.getLogger(__name__)
 FEATURE_SIZE = 64
 INPUT_SIZE = 256
 MID_CHANNELS = 64
-MAX_DYNAMIC_BATCH = 180
-OPT_DYNAMIC_BATCH = 60
 
 _CUDAGRAPHS_ENV = "JASNA_TRT_CUDAGRAPHS"
 
@@ -262,16 +261,16 @@ def _loop_body_engine_path(engine_dir: str, direction: str, fp16: bool) -> str:
     return os.path.join(engine_dir, f"loop_body_{direction}.trt_{prec}{suf}.engine")
 
 
-def _upsample_engine_path(engine_dir: str, fp16: bool, max_clip_size: int) -> str:
+def _upsample_engine_path(engine_dir: str, fp16: bool) -> str:
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
-    return os.path.join(engine_dir, f"upsample_dyn_b{max_clip_size}.trt_{prec}{suf}.engine")
+    return os.path.join(engine_dir, f"upsample_dyn_b{UPSAMPLE_BATCH}.trt_{prec}{suf}.engine")
 
 
-def _preprocess_engine_path(engine_dir: str, fp16: bool, max_clip_size: int) -> str:
+def _preprocess_engine_path(engine_dir: str, fp16: bool) -> str:
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
-    return os.path.join(engine_dir, f"preprocess_b{max_clip_size}.trt_{prec}{suf}.engine")
+    return os.path.join(engine_dir, f"preprocess_b{PREPROCESS_BATCH}.trt_{prec}{suf}.engine")
 
 
 def _get_inference_generator(model: nn.Module) -> nn.Module:
@@ -285,7 +284,6 @@ def compile_basicvsrpp_sub_engines(
     device: torch.device,
     fp16: bool,
     model_weights_path: str,
-    max_clip_size: int = 60,
     optimization_level: int = 5,
 ) -> dict[str, str]:
     import torch_tensorrt  # type: ignore[import-not-found]
@@ -334,7 +332,7 @@ def compile_basicvsrpp_sub_engines(
         del wrapper, inp_fp, inp_g1, inp_fn2, inp_g2, inp_fc, inp_f1, inp_f2, inp_bp
 
     # ── preprocess engine (feat_extract + downsample + bidirectional SPyNet, dynamic batch) ──
-    path = _preprocess_engine_path(engine_dir, fp16, max_clip_size)
+    path = _preprocess_engine_path(engine_dir, fp16)
     paths["preprocess"] = path
     if os.path.isfile(path):
         logger.info("Sub-engine already exists: %s", path)
@@ -344,8 +342,8 @@ def compile_basicvsrpp_sub_engines(
         ).to(device=device, dtype=dtype).eval()
         dyn_input = torch_tensorrt.Input(
             min_shape=[3, 3, INPUT_SIZE, INPUT_SIZE],
-            opt_shape=[max_clip_size, 3, INPUT_SIZE, INPUT_SIZE],
-            max_shape=[max_clip_size, 3, INPUT_SIZE, INPUT_SIZE],
+            opt_shape=[PREPROCESS_BATCH, 3, INPUT_SIZE, INPUT_SIZE],
+            max_shape=[PREPROCESS_BATCH, 3, INPUT_SIZE, INPUT_SIZE],
             dtype=dtype,
         )
         compile_and_save_torchtrt_dynamo(
@@ -354,14 +352,14 @@ def compile_basicvsrpp_sub_engines(
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
-            message=f"Compiling sub-engine 5/6: preprocess (batch=3..{max_clip_size})",
+            message=f"Compiling sub-engine 5/6: preprocess (batch=3..{PREPROCESS_BATCH})",
             device=device,
             optimization_level=optimization_level,
         )
         del wrapper
 
-    # ── upsample engine (dynamic batch – called once for all frames) ──
-    path = _upsample_engine_path(engine_dir, fp16, max_clip_size)
+    # ── upsample engine (per-frame stage, run in UPSAMPLE_BATCH-sized batches) ──
+    path = _upsample_engine_path(engine_dir, fp16)
     paths["upsample"] = path
     if os.path.isfile(path):
         logger.info("Sub-engine already exists: %s", path)
@@ -376,8 +374,8 @@ def compile_basicvsrpp_sub_engines(
         ).to(device=device, dtype=dtype).eval()
         dyn_input = torch_tensorrt.Input(
             min_shape=[1, in_ch, FEATURE_SIZE, FEATURE_SIZE],
-            opt_shape=[max_clip_size, in_ch, FEATURE_SIZE, FEATURE_SIZE],
-            max_shape=[max_clip_size, in_ch, FEATURE_SIZE, FEATURE_SIZE],
+            opt_shape=[UPSAMPLE_BATCH, in_ch, FEATURE_SIZE, FEATURE_SIZE],
+            max_shape=[UPSAMPLE_BATCH, in_ch, FEATURE_SIZE, FEATURE_SIZE],
             dtype=dtype,
         )
         compile_and_save_torchtrt_dynamo(
@@ -386,7 +384,7 @@ def compile_basicvsrpp_sub_engines(
             output_path=path,
             dtype=dtype,
             workspace_size_bytes=workspace_size,
-            message=f"Compiling sub-engine 6/6: upsample (batch=1..{max_clip_size})",
+            message=f"Compiling sub-engine 6/6: upsample (batch=1..{UPSAMPLE_BATCH})",
             device=device,
             optimization_level=optimization_level,
         )
@@ -402,14 +400,9 @@ def load_sub_engines(
     model_weights_path: str,
     device: torch.device,
     fp16: bool,
-    max_clip_size: int = 60,
 ) -> tuple[dict[str, nn.Module], nn.Module, nn.Module] | None:
     """Returns ``(loop_body_engines, preprocess, upsample)`` or *None*."""
-    paths = get_sub_engine_paths(model_weights_path, fp16, max_clip_size)
-    upsample_override = os.environ.get("JASNA_UPSAMPLE_ENGINE_OVERRIDE")
-    if upsample_override:
-        logger.warning("Experimental: upsample sub-engine overridden with %s", upsample_override)
-        paths["upsample"] = upsample_override
+    paths = get_sub_engine_paths(model_weights_path, fp16)
     if not all(os.path.isfile(p) for p in paths.values()):
         return None
 
@@ -421,55 +414,10 @@ def load_sub_engines(
     preprocess_engine = load_torchtrt_export(
         checkpoint_path=paths["preprocess"], device=device,
     )
-    upsample_engine = _load_upsample_engine(
-        paths["upsample"], model_weights_path, device, max_clip_size,
-        upsample_overridden=bool(upsample_override),
+    upsample_engine = load_torchtrt_export(
+        checkpoint_path=paths["upsample"], device=device,
     )
     return loop_body_engines, preprocess_engine, upsample_engine
-
-
-class _Fp8UpsampleEngine(nn.Module):
-    """Adapts a raw-TensorRT FP8 upsample engine to the torch-TRT module call style."""
-
-    def __init__(self, engine_path: str, max_clip_size: int, device: torch.device):
-        super().__init__()
-        from pathlib import Path
-
-        from jasna.trt.trt_runner import TrtRunner
-
-        self._runner = TrtRunner(
-            Path(engine_path),
-            [(max_clip_size, 5 * MID_CHANNELS, FEATURE_SIZE, FEATURE_SIZE)],
-            device,
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        runner = self._runner
-        return runner.infer({runner.input_names[0]: x})[runner.output_names[0]]
-
-    def close(self) -> None:
-        if self._runner is not None:
-            self._runner.context = None
-            self._runner.engine = None
-            self._runner = None
-
-
-def _load_upsample_engine(
-    fp16_path: str,
-    model_weights_path: str,
-    device: torch.device,
-    max_clip_size: int,
-    upsample_overridden: bool,
-) -> nn.Module:
-    if not upsample_overridden:
-        fp8_path = get_basicvsrpp_fp8_upsample_engine_path(model_weights_path, max_clip_size)
-        if os.path.isfile(fp8_path):
-            from jasna.accelerator import supports_fp8
-
-            if supports_fp8(device):
-                logger.info("BasicVSR++ upsample using FP8 engine: %s", fp8_path)
-                return _Fp8UpsampleEngine(fp8_path, max_clip_size, device)
-    return load_torchtrt_export(checkpoint_path=fp16_path, device=device)
 
 
 def _release_torchtrt_module(module: nn.Module) -> None:
@@ -710,18 +658,65 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         mapping_idx = list(range(0, len(feats["spatial"])))
         mapping_idx += mapping_idx[::-1]
 
+        lqs_flat = lqs.squeeze(0)
+        out_batch = torch.empty_like(lqs_flat)
         hr_list: list[torch.Tensor] = []
+        start = 0
         for i in range(t):
             hr = [feats[k].pop(0) for k in feats if k != "spatial"]
             hr.insert(0, feats["spatial"][mapping_idx[i]])
             hr_list.append(torch.cat(hr, dim=1))
+            if len(hr_list) < UPSAMPLE_BATCH and i < t - 1:
+                continue
+            stop = i + 1
+            torch.add(
+                self._upsample_engine(torch.cat(hr_list, dim=0)),
+                lqs_flat[start:stop],
+                out=out_batch[start:stop],
+            )
+            hr_list.clear()
+            start = stop
 
-        hr_batch = torch.cat(hr_list, dim=0)
-        out_batch = self._upsample_engine(hr_batch)
-        out_batch = out_batch + lqs.squeeze(0)
         return out_batch.unsqueeze(0)
 
     _PREPROCESS_MIN_BATCH = 3
+
+    def _preprocess(
+        self, lqs_flat: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Run the preprocess engine in PREPROCESS_BATCH-sized batches.
+
+        SPyNet consumes consecutive frame pairs, so successive batches overlap
+        by one frame: batch [a, b) yields the flows for pairs a..b-2, and the
+        pair (b-1, b) comes from the next batch's first pair. Every batch keeps
+        at least ``_PREPROCESS_MIN_BATCH`` frames, the engine profile minimum.
+        """
+        n = lqs_flat.size(0)
+        if n <= PREPROCESS_BATCH:
+            return self._preprocess_engine(lqs_flat)
+
+        feats_parts: list[torch.Tensor] = []
+        forward_parts: list[torch.Tensor] = []
+        backward_parts: list[torch.Tensor] = []
+        start = 0
+        covered = 0
+        while True:
+            stop = min(start + PREPROCESS_BATCH, n)
+            feats, flows_fwd, flows_bwd = self._preprocess_engine(lqs_flat[start:stop])
+            first_new_pair = max(covered - 1, start) - start
+            feats_parts.append(feats[covered - start : stop - start])
+            forward_parts.append(flows_fwd[first_new_pair:])
+            backward_parts.append(flows_bwd[first_new_pair:])
+            covered = stop
+            if stop >= n:
+                break
+            start = min(stop - 1, n - self._PREPROCESS_MIN_BATCH)
+
+        return (
+            torch.cat(feats_parts),
+            torch.cat(forward_parts),
+            torch.cat(backward_parts),
+        )
 
     def forward(self, lqs: torch.Tensor) -> torch.Tensor:
         n, t, c, h, w = lqs.size()
@@ -737,7 +732,7 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
         else:
             t_engine = t
 
-        feats_, flows_fwd, flows_bwd = self._preprocess_engine(lqs_flat)
+        feats_, flows_fwd, flows_bwd = self._preprocess(lqs_flat)
         h_f, w_f = feats_.shape[2:]
 
         feats_ = feats_[:t]
@@ -775,9 +770,8 @@ def create_split_forward(
     model_weights_path: str,
     device: torch.device,
     fp16: bool,
-    max_clip_size: int = 60,
 ) -> BasicVSRPlusPlusNetSplit | None:
-    result = load_sub_engines(model_weights_path, device, fp16, max_clip_size)
+    result = load_sub_engines(model_weights_path, device, fp16)
     if result is None:
         return None
     loop_body_engines, preprocess_engine, upsample_engine = result

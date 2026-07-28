@@ -26,11 +26,12 @@ Limited testing guidance:
 | -------------:| ----------------:| ----- |
 | 60            | 6                | Lower VRAM option. |
 | 90            | 8                | Current default-style balance. |
-| 180           | 15               | Needs 12 GB+ VRAM with BasicVSR++ compilation enabled; less with compilation disabled. |
+| 180           | 15               | Needs 8 GB+ VRAM at 1080p, more at 4K. |
 
-4K videos use more VRAM. A lower clip size may produce similar quality and
-process faster. Clip sizes below `60` can work on some videos, but `60` is
-preferred even if you need to disable model compilation.
+You can go up to `720` if your GPU has the memory for it. 4K videos use more
+VRAM. A lower clip size may produce similar quality and process faster. Clip
+sizes below `60` can work on some videos, but `60` is preferred even if you
+need to disable model compilation.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overlap 8 --enable-crossfade
@@ -58,5 +59,8 @@ Compiled engine VRAM only, not total processing VRAM:
 
 |                               | Clip 60 | Clip 180 |
 | ----------------------------- | -------:| --------:|
-| Engine VRAM, compiled         | ~1.9 GB | ~5.4 GB  |
+| Engine VRAM, compiled         | ~0.9 GB | ~0.9 GB  |
 | Engine VRAM, no compilation   | ~1.2 GB | ~1.2 GB  |
+
+The engines are the same whatever max clip size you pick, so changing that
+setting never makes Jasna compile them again.

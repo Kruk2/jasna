@@ -97,7 +97,6 @@ def build_restoration_session(
             fp16=bool(config.fp16),
             basicvsrpp=bool(config.compile_basicvsrpp) and not disable_basicvsrpp_tensorrt and not amd,
             basicvsrpp_model_path=str(config.restoration_model_path),
-            basicvsrpp_max_clip_size=int(config.max_clip_size),
             detection=True,
             detection_model_name=config.detection_model_name,
             detection_model_path=str(config.detection_model_path),
