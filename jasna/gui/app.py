@@ -273,13 +273,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         body = ctk.CTkFrame(self, fg_color="transparent")
         body.pack(fill="both", expand=True)
 
+        # Not sashcursor: Tk applies it to the whole panedwindow window, and the
+        # cursorless panes inherit it, showing resize arrows everywhere. The
+        # widget cursor covers only the exposed sash strip, and the panes mask
+        # inheritance with an explicit "arrow".
         self._workspace = tk.PanedWindow(
             body,
             orient=tk.HORIZONTAL,
             background=Colors.BORDER,
             borderwidth=0,
+            cursor="sb_h_double_arrow",
             opaqueresize=True,
-            sashcursor="sb_h_double_arrow",
             sashpad=0,
             sashrelief=tk.FLAT,
             sashwidth=scaling.raw_tk_size(body, 4),
@@ -287,9 +291,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._workspace.pack(fill="both", expand=True)
 
         self._queue_panel = QueuePanel(self._workspace)
+        self._queue_panel.configure(cursor="arrow")
         self._queue_panel.set_on_jobs_changed(self._on_jobs_changed)
 
         self._settings_panel = SettingsPanel(self._workspace)
+        self._settings_panel.configure(cursor="arrow")
         self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
 
         self._workspace.add(

@@ -92,6 +92,32 @@ def test_segment_button_only_appears_for_pending_video_jobs() -> None:
         root.destroy()
 
 
+def test_workspace_sash_cursor_stays_on_the_sash() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        root.geometry("1200x800")
+        root._on_jobs_changed = lambda: None
+        root._open_interactive_image_restore = lambda: None
+        root._processor = None
+        root._set_preview_gpu_busy = lambda _busy: None
+        root._on_output_changed = lambda *_args: None
+        root.TkdndVersion = None
+
+        JasnaApp._build_main_body(root)
+        root.update_idletasks()
+
+        assert root._workspace.cget("sashcursor") == ""
+        assert root._workspace.cget("cursor") == "sb_h_double_arrow"
+        assert root._queue_panel.cget("cursor") == "arrow"
+        assert root._settings_panel.cget("cursor") == "arrow"
+    finally:
+        root.destroy()
+
+
 @pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)
 def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi) -> None:
     try:
