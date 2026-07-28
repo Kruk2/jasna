@@ -289,6 +289,27 @@ class StatusPill(ctk.CTkFrame):
         self._indicator.configure(fg_color=color)
 
 
+class AutoHidingScrollableFrame(ctk.CTkScrollableFrame):
+    """Scrollable frame whose scrollbar is gridded only while the content overflows."""
+
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+        self._scrollbar_visible = True
+        self._parent_canvas.configure(yscrollcommand=self._update_scrollbar)
+        self.after_idle(lambda: self._update_scrollbar(*self._parent_canvas.yview()))
+
+    def _update_scrollbar(self, first: str | float, last: str | float) -> None:
+        self._scrollbar.set(first, last)
+        should_show = float(first) > 0.0 or float(last) < 1.0
+        if should_show == self._scrollbar_visible:
+            return
+        if should_show:
+            self._scrollbar.grid()
+        else:
+            self._scrollbar.grid_remove()
+        self._scrollbar_visible = should_show
+
+
 class CollapsibleSection(ctk.CTkFrame):
     """Accordion-style collapsible section for settings."""
     

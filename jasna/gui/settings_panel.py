@@ -7,7 +7,13 @@ from dataclasses import asdict
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import AppSettings, PresetManager
-from jasna.gui.components import ConfirmDialog, PresetDialog, Toast, Tooltip
+from jasna.gui.components import (
+    AutoHidingScrollableFrame,
+    ConfirmDialog,
+    PresetDialog,
+    Toast,
+    Tooltip,
+)
 from jasna.gui.icons import NativeIconButton
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.advanced import (
@@ -207,10 +213,10 @@ class SettingsPanel(ctk.CTkFrame):
         toast.place(relx=0.5, rely=0.9, anchor="center")
 
     def _build_scrollable(self):
-        self._scroll = ctk.CTkScrollableFrame(
+        self._scroll = AutoHidingScrollableFrame(
             self,
             fg_color="transparent",
-            scrollbar_button_color=Colors.BG_PANEL,
+            scrollbar_button_color=Colors.BORDER_LIGHT,
             scrollbar_button_hover_color=Colors.BORDER_LIGHT,
         )
         self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))

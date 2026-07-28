@@ -11,7 +11,7 @@ from tkinterdnd2 import DND_FILES
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import JobItem, JobStatus
-from jasna.gui.components import JobListItem, Tooltip
+from jasna.gui.components import AutoHidingScrollableFrame, JobListItem, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
 
@@ -20,25 +20,6 @@ from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing
 logger = logging.getLogger(__name__)
 from jasna.media.image_io import is_image_path
 from jasna.segments import SegmentRange
-
-
-class _AutoHidingScrollableFrame(ctk.CTkScrollableFrame):
-    def __init__(self, master, **kwargs):
-        super().__init__(master, **kwargs)
-        self._scrollbar_visible = True
-        self._parent_canvas.configure(yscrollcommand=self._update_scrollbar)
-        self.after_idle(lambda: self._update_scrollbar(*self._parent_canvas.yview()))
-
-    def _update_scrollbar(self, first: str | float, last: str | float) -> None:
-        self._scrollbar.set(first, last)
-        should_show = float(first) > 0.0 or float(last) < 1.0
-        if should_show == self._scrollbar_visible:
-            return
-        if should_show:
-            self._scrollbar.grid()
-        else:
-            self._scrollbar.grid_remove()
-        self._scrollbar_visible = should_show
 
 
 class QueuePanel(ctk.CTkFrame):
@@ -100,7 +81,7 @@ class QueuePanel(ctk.CTkFrame):
         self._add_folder_btn.pack(side="right")
         
     def _build_list_area(self):
-        self._list_frame = _AutoHidingScrollableFrame(
+        self._list_frame = AutoHidingScrollableFrame(
             self,
             fg_color="transparent",
             scrollbar_button_color=Colors.BORDER_LIGHT,
