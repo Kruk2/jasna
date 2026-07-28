@@ -86,33 +86,6 @@ def _make_engine_files(model_path: str) -> dict[str, str]:
     return paths
 
 
-def test_load_sub_engines_upsample_override_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    model_path = str(tmp_path / "model.pth")
-    _make_engine_files(model_path)
-    override = tmp_path / "custom_upsample.engine"
-    override.write_text("x", encoding="utf-8")
-    monkeypatch.setenv("JASNA_UPSAMPLE_ENGINE_OVERRIDE", str(override))
-    loaded_paths: list[str] = []
-    monkeypatch.setattr(
-        "jasna.restorer.basicvsrpp_sub_engines.load_torchtrt_export",
-        lambda *, checkpoint_path, device: loaded_paths.append(checkpoint_path) or MagicMock(),
-    )
-    result = load_sub_engines(model_path, torch.device("cpu"), fp16=True)
-    assert result is not None
-    assert str(override) in loaded_paths
-
-
-def test_load_sub_engines_upsample_override_missing_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    model_path = str(tmp_path / "model.pth")
-    _make_engine_files(model_path)
-    monkeypatch.setenv("JASNA_UPSAMPLE_ENGINE_OVERRIDE", str(tmp_path / "nope.engine"))
-    assert load_sub_engines(model_path, torch.device("cpu"), fp16=True) is None
-
-
 def test_warmup_capture_loop_body_graphs_toggles_mode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -162,61 +135,6 @@ def test_create_split_forward_cudagraphs_env_gates_warmup(
     assert split is not None
     assert warmups == [1]
     assert split._loop_body_cudagraphs is True
-
-
-def test_load_sub_engines_prefers_fp8_upsample_when_supported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from jasna.engine_paths import get_basicvsrpp_fp8_upsample_engine_path
-    from jasna.restorer import basicvsrpp_sub_engines as mod
-
-    model_path = str(tmp_path / "model.pth")
-    _make_engine_files(model_path)
-    fp8_path = get_basicvsrpp_fp8_upsample_engine_path(model_path)
-    Path(fp8_path).write_text("x", encoding="utf-8")
-    monkeypatch.setattr("jasna.accelerator.supports_fp8", lambda device: True)
-    monkeypatch.setattr(
-        mod, "load_torchtrt_export", lambda *, checkpoint_path, device: MagicMock(),
-    )
-    fp8_engine = MagicMock()
-    monkeypatch.setattr(mod, "_Fp8UpsampleEngine", lambda *a, **k: fp8_engine)
-    result = mod.load_sub_engines(model_path, torch.device("cpu"), fp16=True)
-    assert result is not None
-    _, _, upsample = result
-    assert upsample is fp8_engine
-
-
-def test_load_sub_engines_fp8_skipped_on_unsupported_gpu(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from jasna.engine_paths import get_basicvsrpp_fp8_upsample_engine_path
-    from jasna.restorer import basicvsrpp_sub_engines as mod
-
-    model_path = str(tmp_path / "model.pth")
-    _make_engine_files(model_path)
-    Path(get_basicvsrpp_fp8_upsample_engine_path(model_path)).write_text("x", encoding="utf-8")
-    monkeypatch.setattr("jasna.accelerator.supports_fp8", lambda device: False)
-    loaded = MagicMock()
-    monkeypatch.setattr(
-        mod, "load_torchtrt_export", lambda *, checkpoint_path, device: loaded,
-    )
-    result = mod.load_sub_engines(model_path, torch.device("cpu"), fp16=True)
-    assert result is not None
-    assert result[2] is loaded
-
-
-def test_fp8_upsample_paths() -> None:
-    from jasna.engine_paths import (
-        get_basicvsrpp_fp8_upsample_engine_path,
-        get_basicvsrpp_fp8_upsample_onnx_path,
-    )
-
-    onnx = get_basicvsrpp_fp8_upsample_onnx_path("model_weights/model_v1.2.pth")
-    assert onnx.endswith("model_v1.2_upsample_fp8.onnx")
-    engine = get_basicvsrpp_fp8_upsample_engine_path("model_weights/model_v1.2.pth", 180)
-    assert "model_v1.2_sub_engines" in engine
-    assert engine.endswith(".engine")
-    assert "upsample_dyn_b180.trt_fp8" in engine
 
 
 def test_propagate_body_wrapper_forward_shape() -> None:
@@ -318,7 +236,7 @@ def _build_split_from_net(net):
     )
 
 
-@pytest.mark.parametrize("T", [1, 2, 3, 60])
+@pytest.mark.parametrize("T", [1, 2, 3, 60, 71])
 def test_split_forward_matches_pytorch_forward(T: int) -> None:
     """Verify that BasicVSRPlusPlusNetSplit produces the same output as the
     original BasicVSRPlusPlusNet.  T=1 and T=2 exercise the short-clip
@@ -342,3 +260,79 @@ def test_split_forward_matches_pytorch_forward(T: int) -> None:
     assert ref.shape == out.shape
     assert torch.allclose(ref, out, atol=1e-5, rtol=1e-5), \
         f"T={T} max diff: {(ref - out).abs().max().item()}"
+
+
+def test_upsample_runs_in_fixed_size_batches() -> None:
+    """The upsample stage is per-frame, so it is called in UPSAMPLE_BATCH-sized
+    batches; a b180 TensorRT engine would reserve ~3.2 GB more scratch than b30
+    for the same work."""
+    from jasna.restorer.basicvsrpp_sub_engines import UPSAMPLE_BATCH
+
+    batch_sizes: list[int] = []
+
+    class _RecordingUpsample(nn.Module):
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            batch_sizes.append(x.shape[0])
+            return torch.zeros(x.shape[0], 3, 8, 8)
+
+    split = BasicVSRPlusPlusNetSplit.__new__(BasicVSRPlusPlusNetSplit)
+    nn.Module.__init__(split)
+    split._upsample_engine = _RecordingUpsample()
+
+    t = 2 * UPSAMPLE_BATCH + 11
+    lqs = torch.randn(1, t, 3, 8, 8)
+    feats = {
+        "spatial": [torch.randn(1, 4, 2, 2) for _ in range(t)],
+        "forward_1": [torch.randn(1, 4, 2, 2) for _ in range(t)],
+    }
+
+    out = split.upsample(lqs, feats)
+
+    assert batch_sizes == [UPSAMPLE_BATCH, UPSAMPLE_BATCH, 11]
+    assert out.shape == lqs.shape
+    assert torch.equal(out, lqs)
+
+
+def test_preprocess_runs_in_overlapping_batches() -> None:
+    """Batches overlap by one frame so every consecutive pair still gets a flow,
+    and each batch stays at the engine's minimum size."""
+    from jasna.restorer.basicvsrpp_sub_engines import PREPROCESS_BATCH
+
+    calls: list[tuple[int, int]] = []
+
+    class _RecordingPreprocess(nn.Module):
+        def forward(self, x: torch.Tensor):
+            n = int(x[0, 0, 0, 0].item())
+            calls.append((n, x.shape[0]))
+            frames = torch.arange(n, n + x.shape[0], dtype=torch.float32)
+            feats = frames.view(-1, 1, 1, 1)
+            flows = frames[:-1].view(-1, 1, 1, 1)
+            return feats, flows, flows.clone()
+
+    split = BasicVSRPlusPlusNetSplit.__new__(BasicVSRPlusPlusNetSplit)
+    nn.Module.__init__(split)
+    split._preprocess_engine = _RecordingPreprocess()
+
+    t = 2 * PREPROCESS_BATCH + 1
+    lqs_flat = torch.arange(t, dtype=torch.float32).view(t, 1, 1, 1).expand(t, 3, 1, 1)
+
+    feats, flows_fwd, flows_bwd = split._preprocess(lqs_flat)
+
+    assert [start for start, _ in calls] == [0, PREPROCESS_BATCH - 1, t - 3]
+    assert all(size >= split._PREPROCESS_MIN_BATCH for _, size in calls)
+    assert torch.equal(feats.flatten(), torch.arange(t, dtype=torch.float32))
+    assert torch.equal(flows_fwd.flatten(), torch.arange(t - 1, dtype=torch.float32))
+    assert torch.equal(flows_bwd, flows_fwd)
+
+
+def test_preprocess_single_batch_calls_engine_once() -> None:
+    from jasna.restorer.basicvsrpp_sub_engines import PREPROCESS_BATCH
+
+    engine = MagicMock(return_value=("f", "fwd", "bwd"))
+    split = BasicVSRPlusPlusNetSplit.__new__(BasicVSRPlusPlusNetSplit)
+    nn.Module.__init__(split)
+    split._preprocess_engine = engine
+
+    lqs_flat = torch.zeros(PREPROCESS_BATCH, 3, 4, 4)
+    assert split._preprocess(lqs_flat) == ("f", "fwd", "bwd")
+    assert engine.call_count == 1
