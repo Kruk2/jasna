@@ -211,23 +211,19 @@ activation memory — and it corrects two claims the tuning docs had been making
 
 The README v0.9.1 column only carries the three H.264 rows. Outstanding:
 
-1. **SONE 1080p HEVC 10-bit, 2160p HEVC 10-bit, 2160p AV1** — 3 repeats each,
-   ~10 min:
-   ```bash
-   ~/.virtualenvs/jasna-linux/bin/python scripts/benchmark_decode_backends.py \
-     --clips assets/benchmark/SONE-610_bench_{1080p_hevc_10bit,2160p_hevc_10bit,2160p_av1_10bit}.mp4 \
-     --backends vali --repeats 3 --csv <out>.csv
-   ```
-2. **8K VR** (`vr1_8k_vr_hevc_8bit_60fps.mp4`, 900 frames) — same harness.
-3. **HUBLK-063** for the legacy full-video table (~16 min). The last figure,
-   15:40.8 / 11789 MiB, predates this change and must not be published as v0.9.1.
+1. **8K VR** (`vr1_8k_vr_hevc_8bit_60fps.mp4`, 900 frames), 3 repeats, ~2 min.
+2. **HUBLK-063** for the legacy full-video table, ~16 min. The last figure,
+   15:40.8 / 11789 MiB, predates this change and must not be published as
+   v0.9.1.
 
 Then fill both README tables (en/ja/zh) and drop the `—` placeholders. VRAM
-ratios in that table are median-based against v0.4.1 (v0.8.1 on the 8K row).
+ratios there are median-based against v0.4.1, and against v0.9.0 on the 8K row.
 
-## Is the six-clip suite worth its runtime?
+## Trimming the clip suite
 
-Checked against the recorded history rather than assumed.
+Checked against the recorded history rather than assumed, then trimmed to
+**one input per resolution (H.264 8-bit) plus the 8K VR clip** — see
+`docs/en/development.md`.
 
 **Codec variants are redundant for restoration-side work.** Across five version
 steps at two resolutions, a codec variant never disagreed in sign with the H.264
@@ -236,21 +232,16 @@ variant at the same resolution, and magnitudes agreed within a few points in
 −0.3 %, AV1 +0.1 %, but HEVC 10-bit −5.6 %. This is expected — the model sees
 identical 256² crops whatever the container held.
 
-**They are not redundant for decode work.** From
+**They do carry the decode-path signal.** From
 `2026-07-21_v0.8.2_e2e_decode_backends.csv`, H.264 is nearly flat across
 backends (2160p: vali 80.7 s, pyav-hw 80.7 s, pyav-sw 84.4 s) while AV1 spreads
-19 % (79.7 → 94.9 s) and HEVC 10-bit 19 %. An H.264-only suite would have hidden
-the AV1 NVDEC regression (#237) completely.
+19 % (79.7 → 94.9 s) and HEVC 10-bit 19 %. An H.264-only run would have hidden
+the AV1 NVDEC regression (#237) completely, so add those clips back by hand when
+the change is in decode, encode or pixel-format code.
 
-**VRAM at 4K does vary by codec**: 2.5–10.8 % median spread across the three
+**VRAM at 4K also varies by codec**: 2.5–10.8 % median spread across the three
 2160p encodings within a single release, since decoder surface pools differ.
 
-Suggested split:
-
-| tier | clips | repeats | cost | when |
-|---|---|---:|---:|---|
-| perf | 720p / 1080p / 2160p H.264 8-bit | 3 | ~7 min | every perf change; feeds the README |
-| decode coverage | 1080p HEVC 10-bit, 2160p AV1, 8K VR | 1 | ~3 min | only when decode/encode/pixel-format changed |
-
-H.264 is also the *more* sensitive probe for restoration work: its decode is the
-cheapest, so it hides the least of whatever changed downstream.
+Cost: 4 clips × 3 repeats ≈ 8 min, against ≈ 15 min for the old six-clip suite.
+H.264 is also the *more* sensitive probe for restoration work — its decode is
+the cheapest, so it hides the least of whatever changed downstream.
