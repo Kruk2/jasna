@@ -121,17 +121,19 @@ VR clip contains 900 frames (15 s).
 | 8K VR HEVC 8-bit 60 fps | — | — | — | — | — | 00:45 (8K baseline) | 00:34 (1.3x faster) | — |
 
 GPU memory is median/peak GiB for the measured benchmark target; `—` means
-not run.
+not run. Parenthetical ratios compare the median against v0.4.1, or against
+v0.8.1 on the 8K row that v0.4.1 never ran. Lada is left out of the comparison:
+it uses less GPU memory than any Jasna build.
 
 | Input | Lada | v0.4.1 | v0.5.0 | v0.6.2 | v0.7.2 | v0.8.1 | v0.9.0 | **v0.9.1** |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| 720p H.264 8-bit | 1.8/3.1 | 17.6/19.9 | 8.6/9.0 | 8.8/9.1 | 8.8/9.2 | 8.6/9.2 | 8.6/9.1 | **4.2/4.6** |
-| 1080p H.264 8-bit | 2.0/3.3 | 18.9/21.4 | 9.5/10.2 | 9.7/10.3 | 9.7/10.5 | 9.6/10.1 | 9.3/10.1 | **4.8/5.6** |
-| 1080p HEVC 10-bit | 2.0/3.5 | 19.1/21.5 | 9.9/10.6 | 10.0/10.7 | 10.0/10.7 | 9.6/10.3 | 9.4/10.3 | — |
-| 2160p H.264 8-bit | 2.6/4.1 | 26.0/30.5 | 12.9/15.0 | 12.4/15.3 | 12.5/15.2 | 11.8/15.0 | 11.4/15.4 | **7.2/10.9** |
-| 2160p HEVC 10-bit | 2.6/4.0 | 26.6/30.5 | 14.0/15.9 | 13.8/16.1 | 13.5/16.2 | 12.1/15.4 | 12.0/15.9 | — |
-| 2160p AV1 10-bit | 2.6/3.8 | 26.6/30.1 | 13.8/16.2 | 13.5/16.2 | 13.5/16.2 | — | 11.8/15.8 | — |
-| 8K VR HEVC 8-bit 60 fps | — | — | — | — | — | 18.5/18.9 | 17.1/18.3 | — |
+| 720p H.264 8-bit | 1.8/3.1 | 17.6/19.9 (baseline) | 8.6/9.0 (2.0x less) | 8.8/9.1 (2.0x less) | 8.8/9.2 (2.0x less) | 8.6/9.2 (2.0x less) | 8.6/9.1 (2.0x less) | **4.2/4.6 (4.2x less)** |
+| 1080p H.264 8-bit | 2.0/3.3 | 18.9/21.4 (baseline) | 9.5/10.2 (2.0x less) | 9.7/10.3 (1.9x less) | 9.7/10.5 (1.9x less) | 9.6/10.1 (2.0x less) | 9.3/10.1 (2.0x less) | **4.8/5.6 (3.9x less)** |
+| 1080p HEVC 10-bit | 2.0/3.5 | 19.1/21.5 (baseline) | 9.9/10.6 (1.9x less) | 10.0/10.7 (1.9x less) | 10.0/10.7 (1.9x less) | 9.6/10.3 (2.0x less) | 9.4/10.3 (2.0x less) | — |
+| 2160p H.264 8-bit | 2.6/4.1 | 26.0/30.5 (baseline) | 12.9/15.0 (2.0x less) | 12.4/15.3 (2.1x less) | 12.5/15.2 (2.1x less) | 11.8/15.0 (2.2x less) | 11.4/15.4 (2.3x less) | **7.2/10.9 (3.6x less)** |
+| 2160p HEVC 10-bit | 2.6/4.0 | 26.6/30.5 (baseline) | 14.0/15.9 (1.9x less) | 13.8/16.1 (1.9x less) | 13.5/16.2 (2.0x less) | 12.1/15.4 (2.2x less) | 12.0/15.9 (2.2x less) | — |
+| 2160p AV1 10-bit | 2.6/3.8 | 26.6/30.1 (baseline) | 13.8/16.2 (1.9x less) | 13.5/16.2 (2.0x less) | 13.5/16.2 (2.0x less) | — | 11.8/15.8 (2.3x less) | — |
+| 8K VR HEVC 8-bit 60 fps | — | — | — | — | — | 18.5/18.9 (baseline) | 17.1/18.3 (1.1x less) | — |
 
 The v0.9.1 drop in GPU memory comes from building the restoration sub-engines
 at fixed batch sizes instead of at the clip size — see the
