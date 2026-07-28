@@ -1,7 +1,8 @@
 # BasicVSR++ sub-engine PTQ investigation (INT8 / FP8 / FP4)
 
 Date: 2026-07-27. GPU: RTX 5090 (SM 12.0), TRT 10.16.1.11, torch-tensorrt 2.12.1,
-nvidia-modelopt 0.45.0, driver 595.84. Harness: `scripts/quantize_basicvsrpp.py`.
+nvidia-modelopt 0.45.0, driver 595.84. Harness: `scripts/quantize_basicvsrpp.py`
+(removed once the investigation closed — `git log -- scripts/quantize_basicvsrpp.py`).
 Calibration/eval: 48 synthetic mosaic clips (T=30, 256², from CAWD-166-1080p),
 32 calib / 16 held-out. Quality vs fp32 PyTorch reference. `max_clip_size=60`
 engines, timings at T=30, median of 20+ iters.
@@ -43,7 +44,8 @@ engines, timings at T=30, median of 20+ iters.
 
 ## Structural follow-up (same date): loop_body sequential-call optimization
 
-Tested with `scripts/loop_body_fusion.py` + scratch experiments:
+Tested with `scripts/loop_body_fusion.py` (also since removed; recover it from
+git history) + scratch experiments:
 
 | approach | full fwd T=30 | per loop_body step | notes |
 |---|---|---|---|
@@ -59,7 +61,7 @@ Tested with `scripts/loop_body_fusion.py` + scratch experiments:
   (~36 convs at 1×64×64×64) under-occupies the GPU; launch overhead is NOT the
   bottleneck, so loop-in-engine (unroll/ILoop) cannot help.
 - `deform_conv2d` decomposes exactly into 9× grid_sample + mask + 1×1 conv
-  (TRT/ONNX-native; `scripts/loop_body_fusion.py`), which removes the
+  (TRT/ONNX-native), which removes the
   per-call TRT→torch→TRT partition break and unlocks ONNX export of the whole
   loop (`torch._higher_order_ops.scan` → ONNX `Scan` → TRT ILoop) — kept as a
   reference even though it gives no speedup today.
@@ -117,7 +119,10 @@ call, and the measured win is small (~5-12% of the upsample stage = 1-3% e2e
 without CUDA graphs; quality 63.9 dB). Baked asset ships as `model_weights/<stem>_upsample_fp8.onnx`
 (regenerate with `scripts/export_upsample_fp8_onnx.py`).
 
-## Reproduction
+## Reproduction (historical)
+
+Both harnesses were deleted after this investigation closed and FP8 was dropped
+from the product; restore them from git history first.
 
 ```bash
 PY=~/.virtualenvs/model-opt/bin/python   # needs CC=gcc-15 CXX=g++-15 for modelopt cuda_ext JIT

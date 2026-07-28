@@ -10,7 +10,8 @@ Source tree v0.9.1+, RTX 5090, driver 595.84. Canonical setup: vali,
 `2026-07-27_v0.9.1_e2e_cudagraphs.md` recorded the FP8 upsample sub-engine as
 **−1 GB VRAM**. Re-measuring the shipped code showed the opposite: the FP8 path
 *added* 1.8 GB. The study measured engines built by
-`scripts/quantize_basicvsrpp.py compile`; what shipped is compiled from the
+`scripts/quantize_basicvsrpp.py compile` (since removed); what shipped is
+compiled from the
 prebaked QDQ ONNX with `dynamic_batch=True` at the clip size, which is a
 different artifact.
 
