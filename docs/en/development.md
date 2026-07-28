@@ -140,37 +140,33 @@ it, and the unit tests use it as the reference implementation.
 
 ## Benchmarks
 
-Run by the maintainer only, on an otherwise idle GPU — anything else on the card
-makes the numbers incomparable. The suite is deliberately small: **one input per
-resolution plus the 8K VR clip**, all H.264 8-bit.
+Run by the maintainer only, on an otherwise idle GPU — anything else on the
+card makes the numbers incomparable. The suite is deliberately small: **one
+input per resolution plus the 8K VR clip**, all H.264 8-bit.
 
 ```bash
-~/.virtualenvs/jasna-linux/bin/python scripts/benchmark_decode_backends.py \
-    --clips assets/benchmark/SONE-610_bench_{720p,1080p,2160p}_h264_8bit.mp4 \
-             assets/benchmark/vr1_8k_vr_hevc_8bit_60fps.mp4 \
-    --backends vali --repeats 3 --csv benchmarks/<date>_<topic>.csv
+scripts/run_benchmarks.sh benchmarks/scratch            # ~8 min
+scripts/run_benchmarks.sh benchmarks/scratch --codecs   # + HEVC 10-bit and AV1
+scripts/run_benchmarks.sh benchmarks/scratch --scan     # + the GUI mosaic scan
 ```
 
 It discards a warmup run, then reports the median of three per clip with RAM and
 per-process VRAM sampled throughout (`scripts/bench_memory.py`). Fixed settings:
 `--max-clip-size 180 --temporal-overlap 15 --secondary-restoration none`.
 
-Why only H.264: across five release steps a HEVC-10-bit or AV1 encoding of the
-same resolution never disagreed in sign with its H.264 sibling, because the
-model sees identical 256² crops whatever the container held. H.264 also has the
-cheapest decode, so it hides the least of whatever changed downstream. The other
-encodings do carry the decode-path signal — H.264 is nearly flat across decode
-backends while AV1 and HEVC 10-bit spread ~19 % — so add them back by hand when
-the change is in decode, encode or pixel-format code:
-
-```bash
---clips assets/benchmark/SONE-610_bench_{1080p_hevc_10bit,2160p_hevc_10bit,2160p_av1_10bit}.mp4
-```
+Why only H.264 by default: across five release steps a HEVC-10-bit or AV1
+encoding of the same resolution never disagreed in sign with its H.264 sibling,
+because the model sees identical 256² crops whatever the container held. H.264
+also has the cheapest decode, so it hides the least of whatever changed
+downstream. The other encodings do carry the decode-path signal — H.264 is
+nearly flat across decode backends while AV1 and HEVC 10-bit spread ~19 % — so
+pass `--codecs` when the change is in decode, encode or pixel-format code.
 
 Write results to `benchmarks/<date>_<topic>.{csv,md}` and keep old CSVs intact —
-the README tables are a summary and drop releases where nothing moved, so the
+the README tables are a summary that drops releases where nothing moved, so the
 CSVs are the only full record. `scripts/benchmark_releases.py` compares frozen
-release archives instead of the working tree.
+release archives instead of the working tree, and
+`scripts/benchmark_lada_flatpak.py` refreshes the Lada baseline column.
 
 ## AMD release builds
 
