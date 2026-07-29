@@ -596,13 +596,24 @@ class NvidiaVideoReader:
         color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
         H, W = self.height, self.width
 
-        # One packed pinned host batch and one packed device staging frame bound
-        # the fallback's extra memory: H2D copies and conversion kernels are
-        # ordered on the same stream, so the next H2D overwrite of the staging
-        # frame starts only after the prior conversion kernel consumed it.
+        # Pinned host batch is shared. Device staging strategy is vendor-gated:
+        # NVIDIA keeps one staging frame on a private stream (H2D+convert ordered
+        # so the next overwrite starts only after the prior kernel consumed it).
+        # AMD (issue #252 / Phase 0): allocate device YUV for the full batch and
+        # convert on current_stream. Isolated D1 was clean; residual glitches are
+        # pipeline-contended. Per-frame staging reuse under multi-thread load can
+        # race; batch staging removes overwrite races. Extra VRAM ≈
+        # (batch_size - 1) × (1.5 × H × W × bytes) — a few MiB at batch 4 @ 1080p8.
         pinned = torch.empty((self.batch_size, H + H // 2, W), dtype=dtype, pin_memory=True)
-        staging = torch.empty((H + H // 2, W), dtype=dtype, device=self.device)
-        stream = new_stream(self.device)
+        amd_path = self.vendor is AcceleratorVendor.AMD
+        if amd_path:
+            device_yuv = torch.empty(
+                (self.batch_size, H + H // 2, W), dtype=dtype, device=self.device
+            )
+            stream = current_stream(self.device)
+        else:
+            staging = torch.empty((H + H // 2, W), dtype=dtype, device=self.device)
+            stream = new_stream(self.device)
 
         while group:
             batch = torch.empty((len(group), 3, H, W), device=self.device, dtype=torch.uint8)
@@ -632,13 +643,25 @@ class NvidiaVideoReader:
                 pinned[i, H:].copy_(uv)
 
             with stream_context(stream):
-                for i in range(len(group)):
-                    staging.copy_(pinned[i], non_blocking=True)
-                    converter.convert_into(
-                        staging[:H], staging[H:].view(H // 2, W // 2, 2), batch[i]
-                    )
+                if amd_path:
+                    for i in range(len(group)):
+                        device_yuv[i].copy_(pinned[i], non_blocking=True)
+                    for i in range(len(group)):
+                        plane = device_yuv[i]
+                        converter.convert_into(
+                            plane[:H],
+                            plane[H:].view(H // 2, W // 2, 2),
+                            batch[i],
+                        )
+                else:
+                    for i in range(len(group)):
+                        staging.copy_(pinned[i], non_blocking=True)
+                        converter.convert_into(
+                            staging[:H], staging[H:].view(H // 2, W // 2, 2), batch[i]
+                        )
 
             next_group = self._read_group(decoded)
+            # Sync before yield so other pipeline threads never see in-flight planes.
             stream.synchronize()
             group = next_group
             yield batch, pts
