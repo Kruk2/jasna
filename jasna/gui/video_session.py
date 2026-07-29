@@ -36,6 +36,7 @@ def video_session_key(settings: AppSettings) -> tuple:
             settings.tvai_scale,
             settings.tvai_workers,
             settings.tvai_args,
+            settings.tvai_denoise,
         )
     elif settings.secondary_restoration == "rtx-super-res":
         key += (
@@ -80,6 +81,9 @@ def video_session_config(
         tvai_scale=int(settings.tvai_scale),
         tvai_args=settings.tvai_args,
         tvai_workers=int(settings.tvai_workers),
+        tvai_denoise=bool(
+            settings.tvai_denoise and settings.secondary_restoration == "tvai"
+        ),
         rtx_scale=int(settings.rtx_scale),
         rtx_quality=settings.rtx_quality.lower(),
         rtx_denoise=settings.rtx_denoise.lower(),

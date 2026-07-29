@@ -133,6 +133,35 @@ class SecondarySection:
         self._widgets["tvai_scale"].pack(side="right")
         self._widgets["tvai_scale"].set("4x")
 
+        # TVAI Denoise Operation
+        tvai_denoise_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
+        tvai_denoise_row.pack(fill="x", pady=(0, 8))
+        tvai_denoise_label = ctk.CTkLabel(
+            tvai_denoise_row,
+            text=t("tvai_denoise"),
+            text_color=Colors.TEXT_PRIMARY,
+        )
+        tvai_denoise_label.pack(side="left")
+        tvai_denoise_tip = ctk.CTkLabel(
+            tvai_denoise_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        tvai_denoise_tip.pack(side="left", padx=4)
+        Tooltip(tvai_denoise_tip, get_tooltip("tvai_denoise"))
+        self._widgets["tvai_denoise"] = ctk.BooleanVar(value=False)
+        ctk.CTkSwitch(
+            tvai_denoise_row,
+            text="",
+            variable=self._widgets["tvai_denoise"],
+            fg_color=Colors.BG_PANEL,
+            progress_color=Colors.PRIMARY,
+            button_color=Colors.TEXT_PRIMARY,
+            width=42,
+        ).pack(side="right")
+
         # TVAI workers
         tvai_workers_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_workers_row.pack(fill="x")
@@ -252,6 +281,7 @@ class SecondarySection:
         self._widgets["tvai_scale"].set(f"{preset.tvai_scale}x")
         self._widgets["tvai_workers"].set(preset.tvai_workers)
         self._widgets["tvai_workers_val"].configure(text=str(preset.tvai_workers))
+        self._widgets["tvai_denoise"].set(preset.tvai_denoise)
 
         self._widgets["rtx_scale"].set(f"{preset.rtx_scale}x")
         self._widgets["rtx_quality"].set(preset.rtx_quality.capitalize())
@@ -267,6 +297,7 @@ class SecondarySection:
             "tvai_model": self._widgets["tvai_model"].get(),
             "tvai_scale": int(self._widgets["tvai_scale"].get().replace("x", "")),
             "tvai_workers": int(self._widgets["tvai_workers"].get()),
+            "tvai_denoise": bool(self._widgets["tvai_denoise"].get()),
             "rtx_scale": int(self._widgets["rtx_scale"].get().replace("x", "")),
             "rtx_quality": self._widgets["rtx_quality"].get().lower(),
             "rtx_denoise": self._widgets["rtx_denoise"].get().lower(),

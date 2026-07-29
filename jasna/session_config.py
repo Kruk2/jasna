@@ -59,3 +59,4 @@ class SessionConfig:
     vr_projection: VrProjectionName = "auto"
     fmp4: bool = False
     sharpen_strength: float = 0.0
+    tvai_denoise: bool = False
