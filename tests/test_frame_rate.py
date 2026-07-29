@@ -44,6 +44,26 @@ def test_other_frame_rates_are_unchanged(source: Fraction):
     assert retarget.output_fps == source
 
 
+def test_near_standard_container_rate_is_halved_exactly():
+    """ffprobe reports 19001/317 for 59.94 fps footage whose timestamps drift off the grid."""
+    source = Fraction(19_001, 317)
+
+    retarget = resolve_frame_rate_retarget(source, enabled=True, measured_fps=59.94)
+
+    assert retarget.active is True
+    assert retarget.frame_stride == 2
+    assert retarget.output_fps == Fraction(19_001, 634)
+    assert retarget.rate_mismatch is False
+
+
+@pytest.mark.parametrize("source", [Fraction(50, 1), Fraction(120, 1), Fraction(30, 1)])
+def test_rates_outside_the_tolerance_are_not_halved(source: Fraction):
+    retarget = resolve_frame_rate_retarget(source, enabled=True, measured_fps=float(source))
+
+    assert retarget.active is False
+    assert retarget.output_fps == source
+
+
 def test_disabled_retarget_keeps_60_fps():
     retarget = resolve_frame_rate_retarget(Fraction(60, 1), enabled=False, measured_fps=60.0)
 
