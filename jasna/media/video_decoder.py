@@ -596,14 +596,17 @@ class NvidiaVideoReader:
         color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
         H, W = self.height, self.width
 
-        # Pinned host batch is shared. Device staging strategy is vendor-gated:
-        # NVIDIA keeps one staging frame on a private stream (H2D+convert ordered
-        # so the next overwrite starts only after the prior kernel consumed it).
-        # AMD (issue #252 / Phase 0): allocate device YUV for the full batch and
-        # convert on current_stream. Isolated D1 was clean; residual glitches are
-        # pipeline-contended. Per-frame staging reuse under multi-thread load can
-        # race; batch staging removes overwrite races. Extra VRAM ≈
-        # (batch_size - 1) × (1.5 × H × W × bytes) — a few MiB at batch 4 @ 1080p8.
+        # Pinned host batch is shared. Device staging is gated on
+        # AcceleratorVendor.AMD (not "if not NVIDIA") so Intel/CPU keep the
+        # historical single-staging private-stream fallback unless AMD-specific.
+        # NVIDIA: one staging frame on a private stream (H2D+convert ordered so
+        # the next overwrite starts only after the prior kernel consumed it).
+        # AMD (issue #252): batch device YUV on current_stream. Isolated D1 was
+        # clean; residual glitches are pipeline-contended (Phase 0). Per-frame
+        # staging reuse under multi-thread load can race; batch staging removes
+        # overwrite races. Phase 4 on gfx1201 cleared full-pipeline static.
+        # Extra VRAM ≈ (batch_size - 1) × (1.5 × H × W × bytes) — a few MiB at
+        # batch 4 @ 1080p8.
         pinned = torch.empty((self.batch_size, H + H // 2, W), dtype=dtype, pin_memory=True)
         amd_path = self.vendor is AcceleratorVendor.AMD
         if amd_path:

@@ -815,12 +815,12 @@ class NvidiaVideoEncoder:
                 )
 
         if self.vendor is AcceleratorVendor.AMD:
-            # Issue #252 / Phase 0: isolated E1/E2 were clean; residual glitches
-            # under full pipeline load matched AMF reading host planes while a
-            # non-blocking D2H was still in flight. Finish convert on the stream,
-            # then blocking-copy into pinned host so from_dlpack sees complete
-            # planes. Prefer stream sync over full device.synchronize(); escalate
-            # only if post-fix P1 still glitches.
+            # Issue #252: isolated E1/E2 were clean; residual glitches under full
+            # pipeline load matched AMF reading host planes while a non-blocking
+            # D2H was still in flight. Finish convert on the stream, then
+            # blocking-copy into pinned host so from_dlpack sees complete planes.
+            # Phase 4 (gfx1201): stream.synchronize() + blocking copy cleared P1;
+            # do not escalate to full device.synchronize() unless field reports return.
             self.stream.synchronize()
             self._host_yuv.copy_(
                 _amf_host_input(packed, ten_bit=self.spec.ten_bit),
