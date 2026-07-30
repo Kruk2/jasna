@@ -23,6 +23,7 @@ dependencies = [
   "tqdm",
   "customtkinter==6.0.0",
   "tkinterdnd2",
+  "python-vlc==3.0.21203",
   "ultralytics",
   "onnx",
   "cryptography>=42",

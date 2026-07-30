@@ -120,6 +120,15 @@ def render_icon(name: str, size: int, color: str) -> Image.Image:
             outline=color,
             width=line_width,
         )
+    elif name == "play":
+        draw.polygon(
+            [
+                (point(5), point(3)),
+                (point(15), point(9)),
+                (point(5), point(15)),
+            ],
+            fill=color,
+        )
     else:
         raise ValueError(f"Unknown GUI icon: {name}")
 

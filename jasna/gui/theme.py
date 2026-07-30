@@ -23,6 +23,12 @@ class Colors:
     PRIMARY = "#4f46e5"      # Indigo-600
     PRIMARY_HOVER = "#4338ca"# Indigo-700
     PRIMARY_DARK = "#3730a3" # Indigo-800
+
+    # Video player call to action
+    PLAYER = "#0284c7"       # Sky-600
+    PLAYER_HOVER = "#0369a1" # Sky-700
+    PLAYER_BORDER = "#38bdf8"# Sky-400
+    PLAYER_TEXT = "#ffffff"
     
     # Text
     TEXT_PRIMARY = "#cbd5e1"   # Slate-300

@@ -8,6 +8,9 @@ whole file first. Seeking is supported.
 Streaming mode is CLI-only for now. It opens a player in your browser — pick
 a video file and start watching:
 
+The GUI's **Video Player** is separate: it displays restored frames directly
+in the Jasna window and does not use HLS or a browser.
+
 ```bash
 jasna --stream
 ```

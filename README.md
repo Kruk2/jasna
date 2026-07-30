@@ -32,6 +32,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - Reduces clip-boundary flicker with temporal overlap and crossfade.
 - Detects hard scene cuts and ends tracked clips at the boundary, so restoration never blends content across a cut.
 - Can further improve quality with optional [secondary restoration models](docs/en/models.md#secondary-restoration) — **unet-4x**, **RTX Super Resolution**, or **Topaz Video AI** — which sharpen restored regions, especially large mosaics, close-ups, and 4K video.
+- Includes a native GUI video player with full-screen playback and seeking through restored frames without creating an output file.
 - Can stream restored video to the built-in browser player or a supported Stash fork.
 
 ## Community
@@ -86,7 +87,7 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 
 ## Learn More
 
-- **[Using the GUI](docs/en/gui.md)** — the queue (drag & drop, reordering), presets, output patterns and file conflicts, and other easy-to-miss features.
+- **[Using the GUI](docs/en/gui.md)** — the restored video player, queue, presets, output patterns, file conflicts, and other easy-to-miss features.
 - **[Choosing models](docs/en/models.md)** — which detection model to pick, sharper results with secondary restoration (unet-4x / RTX Super Resolution / Topaz), and SD 1.5 still-image restoration.
 - **[Restoring only parts of a video](docs/en/segments.md)** — the Segment Editor, built-in mosaic scanning, suggesting better masks, and the `--segments` CLI flag.
 - **[VR180 videos](docs/en/vr180.md)** — how Jasna handles side-by-side VR and picks the right settings per studio.

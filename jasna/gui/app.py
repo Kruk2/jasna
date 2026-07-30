@@ -21,7 +21,7 @@ from jasna.gui.branding import (
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
-from jasna.gui.icons import create_native_icon_image
+from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.engine_paths import UNET4X_ONNX_ENC_PATH
@@ -93,6 +93,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._job_start_times: dict[int, float] = {}
         self._processing_start_time: float = 0.0
         self._preview_gpu_busy = False
+        self._video_player_dialog = None
+        self._closing_after_player = False
         self._preset_manager = PresetManager()
 
         self._system_stats_stop = threading.Event()
@@ -215,6 +217,27 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
         self._lang_dropdown.pack(side="left", padx=(0, 12))
         self._lang_dropdown.set(current_lang_name)
+
+        self._video_player_icon = create_icon("play", 16, Colors.PLAYER_TEXT)
+        self._video_player_btn = ctk.CTkButton(
+            right,
+            text=t("btn_video_player"),
+            image=self._video_player_icon,
+            compound="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL, "bold"),
+            fg_color=Colors.PLAYER,
+            hover_color=Colors.PLAYER_HOVER,
+            border_color=Colors.PLAYER_BORDER,
+            border_width=1,
+            border_spacing=6,
+            text_color=Colors.PLAYER_TEXT,
+            text_color_disabled=Colors.STATUS_PENDING,
+            corner_radius=8,
+            width=145,
+            height=34,
+            command=self._open_video_player,
+        )
+        self._video_player_btn.pack(side="left", padx=(0, 12))
         
         # Support buttons — back the project on Buy Me a Coffee or Unifans
         self._bmc_btn = BuyMeCoffeeButton(right, compact=False)
@@ -393,6 +416,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._system_stats_thread = None
 
     def _on_close(self):
+        if self._video_player_dialog is not None:
+            self._closing_after_player = True
+            self._video_player_dialog.request_close()
+            return
         try:
             if self._processor:
                 self._processor.stop()
@@ -469,6 +496,32 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._queue_panel.get_output_pattern(),
             on_log=lambda level, message: self._log_panel.add_log(level, message),
         )
+
+    def _open_video_player(self):
+        if self._preview_gpu_busy or (
+            self._processor is not None and self._processor.is_running()
+        ):
+            return
+        from jasna.gui.video_player import VideoPlayerDialog
+
+        self._set_preview_gpu_busy(True)
+        try:
+            self._video_player_dialog = VideoPlayerDialog(
+                self,
+                self._settings_panel.get_settings(),
+                on_closed=self._video_player_closed,
+            )
+        except Exception:
+            self._video_player_dialog = None
+            self._set_preview_gpu_busy(False)
+            raise
+
+    def _video_player_closed(self):
+        self._video_player_dialog = None
+        self._set_preview_gpu_busy(False)
+        if self._closing_after_player:
+            self._closing_after_player = False
+            self.after(0, self._on_close)
         
     def _update_start_button_state(self):
         jobs = self._queue_panel.get_jobs()
@@ -479,6 +532,19 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._control_bar.set_start_enabled(False, t("segments_restore_restoring"))
         else:
             self._control_bar.set_start_enabled(False, t("toast_no_files"))
+        self._update_video_player_button_state()
+
+    def _update_video_player_button_state(self) -> None:
+        video_player_btn = self.__dict__.get("_video_player_btn")
+        if video_player_btn is None:
+            return
+        processing = self._processor is not None and self._processor.is_running()
+        disabled = self._preview_gpu_busy or processing
+        video_player_btn.configure(
+            state="disabled" if disabled else "normal",
+            fg_color=Colors.BG_CARD if disabled else Colors.PLAYER,
+            border_color=Colors.BORDER_LIGHT if disabled else Colors.PLAYER_BORDER,
+        )
 
     def _set_preview_gpu_busy(self, busy: bool) -> None:
         self._preview_gpu_busy = bool(busy)
@@ -544,6 +610,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         
         self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)
         self._control_bar.set_running(True)
+        self._video_player_btn.configure(state="disabled")
         
         # Disable settings and output controls while running
         self._settings_panel.set_enabled(False)
@@ -564,6 +631,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             output_pattern,
             disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
         )
+        self._update_video_player_button_state()
                 
     def _on_stop(self):
         if self._processor:
@@ -678,6 +746,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # Update header buttons
         self._help_btn.configure(text=t("btn_help"))
         self._about_btn.configure(text=t("btn_about"))
+        self._video_player_btn.configure(text=t("btn_video_player"))
         # Note: Other panels would need their own refresh methods
         # For a full implementation, each panel should listen to locale changes
         

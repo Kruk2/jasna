@@ -13,7 +13,10 @@ from jasna.gui.icons import CompactSwitch, NativeIconButton, render_icon, render
 from jasna.gui.theme import Colors
 
 
-@pytest.mark.parametrize("name", ["create", "delete", "folder", "globe", "reset", "save"])
+@pytest.mark.parametrize(
+    "name",
+    ["create", "delete", "folder", "globe", "play", "reset", "save"],
+)
 def test_gui_icons_render_without_font_glyphs(name: str) -> None:
     image = render_icon(name, 18, Colors.TEXT_PRIMARY)
 
