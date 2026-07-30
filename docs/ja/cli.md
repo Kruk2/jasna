@@ -67,6 +67,7 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | `--tvai-scale` | `4` | 出力サイズは `256*scale`。`1` = 拡大なし。 |
 | `--tvai-args` | `--help` を参照 | 追加の `tvai_up` パラメータ。 |
 | `--tvai-workers` | `2` | 並列で動かす TVAI ffmpeg ワーカー数。 |
+| `--tvai-denoise` | オフ | TVAI の高画質化処理の前にノイズ除去を適用します。 |
 
 ## SD 1.5 画像復元
 

@@ -67,6 +67,7 @@ jasna --input input_folder --output output_folder
 | `--tvai-scale` | `4` | 输出尺寸为 `256*scale`；`1` = 不放大。 |
 | `--tvai-args` | 见 `--help` | 额外的 `tvai_up` 参数。 |
 | `--tvai-workers` | `2` | 并行的 TVAI ffmpeg 工作进程数。 |
+| `--tvai-denoise` | 关闭 | 在 TVAI 增强处理前应用降噪。 |
 
 ## SD 1.5 图像修复
 

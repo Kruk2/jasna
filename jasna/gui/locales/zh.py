@@ -330,6 +330,7 @@ ZH = {
         "model": "模型",
         "scale": "缩放",
         "workers": "工作线程数",
+        "tvai_denoise": "降噪",
         
         # Encoding
         "codec": "编解码器",
@@ -430,6 +431,7 @@ ZH = {
         "tip_tvai_model": "用于放大的 Topaz AI 模型。\n\niris-2：推荐默认值，质量均衡。\niris-3、prob-4、nyx-1：可尝试不同模型看哪个效果最好。\n默认值：iris-2",
         "tip_tvai_scale": "修复区域的放大倍数。\n1x = 不放大（256px）。2x = 512px。4x = 1024px。\n倍数越高越清晰，但文件更大、速度更慢。\n\n默认值：4x",
         "tip_tvai_workers": "同时运行的 Topaz 放大任务数。越多越快，但占用更多 CPU/GPU 资源。\n\n默认值：2",
+        "tip_tvai_denoise": "在所选增强模型之前运行基于 Nyx 的降噪操作。它可以清理修复区域中的噪点并保留增强模型的细节，但会增加两次 AI 处理，并占用更多 GPU 时间和显存。\n\n默认值：关闭",
         "tip_rtx_scale": "修复区域的放大倍数。\n2x = 512px。4x = 1024px。\n倍数越高越清晰，但速度更慢。\n\n默认值：4x",
         "tip_rtx_quality": "放大质量。越高画面越好，但速度越慢。\n\n默认值：High",
         "tip_rtx_denoise": "使用 RTX 硬件去除噪点。设为 None 跳过降噪。\n\n默认值：Medium",

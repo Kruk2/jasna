@@ -65,6 +65,7 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.tvai_model == "iris-2"
     assert config.tvai_scale == 4
     assert config.tvai_workers == 2
+    assert config.tvai_denoise is False
     assert config.rtx_scale == 4
     assert config.rtx_quality == "high"
     assert config.rtx_denoise == "medium"

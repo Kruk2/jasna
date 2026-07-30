@@ -310,6 +310,7 @@ KO = {
         "model": "모델",
         "scale": "스케일",
         "workers": "워커 수",
+        "tvai_denoise": "노이즈 제거",
 
         # Encoding
         "codec": "코덱",
@@ -410,6 +411,7 @@ KO = {
         "tip_tvai_model": "업스케일에 사용할 Topaz AI 모델.\n\niris-2: 권장 기본값, 균형 잡힌 품질.\niris-3, prob-4, nyx-1: 여러 모델을 시도해서 가장 좋은 결과를 찾아보세요.\n기본값: iris-2",
         "tip_tvai_scale": "복원 영역의 확대 배율.\n1x = 확대 없음 (256px). 2x = 512px. 4x = 1024px.\n높을수록 선명하지만 파일이 크고 느려집니다.\n\n기본값: 4x",
         "tip_tvai_workers": "동시에 실행할 Topaz 업스케일 작업 수. 많을수록 빠르지만 CPU/GPU 사용량이 증가합니다.\n\n기본값: 2",
+        "tip_tvai_denoise": "선택한 향상 모델 전에 Nyx 기반 노이즈 제거 작업을 실행합니다. 복원 영역의 노이즈를 정리하면서 디테일을 유지할 수 있지만 AI 패스가 두 번 추가되어 GPU 시간과 메모리를 더 사용합니다.\n\n기본값: 끔",
         "tip_rtx_scale": "복원 영역의 확대 배율.\n2x = 512px. 4x = 1024px.\n높을수록 선명하지만 느려집니다.\n\n기본값: 4x",
         "tip_rtx_quality": "업스케일 품질. 높을수록 결과가 좋지만 느려집니다.\n\n기본값: High",
         "tip_rtx_denoise": "RTX 하드웨어로 노이즈를 제거합니다. None으로 건너뛰기.\n\n기본값: Medium",

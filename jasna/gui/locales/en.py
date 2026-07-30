@@ -330,6 +330,7 @@ EN = {
         "model": "Model",
         "scale": "Scale",
         "workers": "Workers",
+        "tvai_denoise": "Denoise",
         
         # Encoding
         "codec": "Codec",
@@ -430,6 +431,7 @@ EN = {
         "tip_tvai_model": "Which Topaz AI model to use for upscaling.\n\niris-2: good default, balanced quality.\niris-3, prob-4, nyx-1: experiment to see which looks best for your videos.\nDefault: iris-2",
         "tip_tvai_scale": "How much to enlarge the restored area.\n1x = no enlargement (256px). 2x = 512px. 4x = 1024px.\nHigher scale = sharper result but larger file and slower.\n\nDefault: 4x",
         "tip_tvai_workers": "How many Topaz upscale tasks run in parallel. More = faster overall but uses more CPU/GPU.\n\nDefault: 2",
+        "tip_tvai_denoise": "Runs the Nyx-based Denoise operation before the selected enhancement model. It can clean noise in restored regions while retaining the enhancement model's detail, but performs two additional AI passes and uses more GPU time and memory.\n\nDefault: Off",
         "tip_rtx_scale": "How much to enlarge the restored area.\n2x = 512px. 4x = 1024px.\nHigher = sharper but slower.\n\nDefault: 4x",
         "tip_rtx_quality": "Upscaling quality. Higher = better looking but slower.\n\nDefault: High",
         "tip_rtx_denoise": "Removes noise using RTX hardware. Set to None to skip.\n\nDefault: Medium",

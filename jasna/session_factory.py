@@ -50,6 +50,7 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
         return TvaiSecondaryRestorer(
             ffmpeg_path=config.tvai_ffmpeg_path,
             tvai_args=tvai_args,
+            tvai_denoise=bool(config.tvai_denoise),
             scale=int(config.tvai_scale),
             num_workers=int(config.tvai_workers),
         )
@@ -86,6 +87,8 @@ def build_restoration_session(
 
     device = torch.device(config.device)
     amd = is_amd_device(device)
+    if config.tvai_denoise and config.secondary_restoration != "tvai":
+        raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
     if amd and config.secondary_restoration != "none":
         raise ValueError(
             f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"

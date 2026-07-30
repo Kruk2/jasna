@@ -97,7 +97,7 @@ def test_session_without_secondary() -> None:
 
 def test_session_selects_tvai_secondary() -> None:
     session, _, _, pipeline_cls, tvai_cls, *_ = _build_session(
-        _config(secondary_restoration="tvai", tvai_scale=2, tvai_workers=1)
+        _config(secondary_restoration="tvai", tvai_scale=2, tvai_workers=1, tvai_denoise=True)
     )
 
     assert session.secondary_restorer is tvai_cls.return_value
@@ -106,7 +106,13 @@ def test_session_selects_tvai_secondary() -> None:
     assert kwargs["tvai_args"] == "model=iris-2:scale=2:noise=0"
     assert kwargs["scale"] == 2
     assert kwargs["num_workers"] == 1
+    assert kwargs["tvai_denoise"] is True
     assert pipeline_cls.call_args.kwargs["secondary_restorer"] is tvai_cls.return_value
+
+
+def test_tvai_denoise_requires_tvai_secondary() -> None:
+    with pytest.raises(ValueError, match="requires secondary restoration 'tvai'"):
+        _build_session(_config(tvai_denoise=True))
 
 
 def test_session_selects_unet_secondary() -> None:
