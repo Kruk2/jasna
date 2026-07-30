@@ -1,5 +1,6 @@
 import ctypes
 import logging
+import os
 import sys
 from typing import Iterator
 
@@ -23,7 +24,7 @@ log = logging.getLogger(__name__)
 CORRUPT_PACKET_TOLERANCE = 10
 _libcuda: ctypes.CDLL | None = None
 
-# Decode backend selection (benchmark toggle, flip in code for now):
+# Decode backend selection (`JASNA_DECODE_BACKEND` overrides the default):
 # - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
 #              software, when VALI cannot open or decode the first frame. AMD
 #              keeps its AMF -> software escalation.
@@ -31,6 +32,7 @@ _libcuda: ctypes.CDLL | None = None
 # - "pyav-hw": skip VALI, use the PyAV hwaccel path with its software fallback.
 # - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
 DECODE_BACKEND = "auto"
+DECODE_BACKEND_ENV = "JASNA_DECODE_BACKEND"
 _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
 
 # PyAV's avcodec_find_decoder returns libdav1d for AV1, which carries no NVDEC
@@ -43,6 +45,16 @@ _NVDEC_MIN_CODED_SIZE = {"av1": (128, 128)}
 
 class VideoDecodeError(RuntimeError):
     pass
+
+
+def _decode_backend() -> str:
+    backend = os.environ.get(DECODE_BACKEND_ENV, DECODE_BACKEND)
+    if backend not in _DECODE_BACKENDS:
+        raise ValueError(
+            f"Unknown decode backend {backend!r} from {DECODE_BACKEND_ENV}/DECODE_BACKEND, "
+            f"expected {_DECODE_BACKENDS}"
+        )
+    return backend
 
 
 def _cuda_driver() -> ctypes.CDLL:
@@ -247,9 +259,7 @@ class NvidiaVideoReader:
         self._amd_hardware_decode = False
         self._vali_source = None
         current_stream(self.device)
-        backend = DECODE_BACKEND
-        if backend not in _DECODE_BACKENDS:
-            raise ValueError(f"Unknown DECODE_BACKEND {backend!r}, expected {_DECODE_BACKENDS}")
+        backend = _decode_backend()
         if backend in ("auto", "vali"):
             if self.vendor is AcceleratorVendor.NVIDIA:
                 try:

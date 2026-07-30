@@ -17,6 +17,11 @@ from jasna.media import VideoMetadata
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 
 
+@pytest.fixture(autouse=True)
+def _clear_decode_backend_env(monkeypatch) -> None:
+    monkeypatch.delenv(module.DECODE_BACKEND_ENV, raising=False)
+
+
 def _metadata() -> VideoMetadata:
     return VideoMetadata(
         video_file="input.mp4",
@@ -72,6 +77,18 @@ def test_auto_backend_falls_back_to_pyav_when_vali_fails(monkeypatch, caplog) ->
     assert "hwaccel" in module.av.open.call_args.kwargs
 
 
+@pytest.mark.parametrize("backend", module._DECODE_BACKENDS)
+def test_decode_backend_env_override(monkeypatch, backend: str) -> None:
+    monkeypatch.setattr(module, "DECODE_BACKEND", "auto")
+    monkeypatch.setenv(module.DECODE_BACKEND_ENV, backend)
+    assert module._decode_backend() == backend
+
+
+def test_decode_backend_defaults_to_auto(monkeypatch) -> None:
+    monkeypatch.setattr(module, "DECODE_BACKEND", "auto")
+    assert module._decode_backend() == "auto"
+
+
 def test_forced_vali_backend_raises_on_failure(monkeypatch) -> None:
     monkeypatch.setattr(module, "DECODE_BACKEND", "vali")
 
@@ -125,9 +142,9 @@ def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
 
 
 def test_unknown_backend_raises(monkeypatch) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "cpu-only")
+    monkeypatch.setenv(module.DECODE_BACKEND_ENV, "cpu-only")
     reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
-    with pytest.raises(ValueError, match="DECODE_BACKEND"):
+    with pytest.raises(ValueError, match="JASNA_DECODE_BACKEND"):
         reader.__enter__()
 
 

@@ -96,6 +96,10 @@ Developer setup also requires:
   VALI decode backend needs; with the stock PyPI wheel the reader falls back to PyAV for
   every video.
 
+Set `JASNA_DECODE_BACKEND` to `vali`, `pyav-hw`, or `pyav-sw` to force a
+decoder backend. The default is `auto`, which prefers VALI on NVIDIA and falls
+back to PyAV.
+
 Then install Jasna in editable mode:
 
 ```bash
