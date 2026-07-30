@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 import tkinter as tk
 from tkinter import TclError
 
@@ -116,6 +117,48 @@ def test_workspace_sash_cursor_stays_on_the_sash() -> None:
         assert root._settings_panel.cget("cursor") == "arrow"
     finally:
         root.destroy()
+
+
+def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
+    control_updates = []
+    row_updates = []
+    jobs = [
+        SimpleNamespace(id=index, status=JobStatus.PENDING)
+        for index in range(25)
+    ]
+    widgets = [
+        SimpleNamespace(
+            set_removable=lambda value: row_updates.append(("removable", value)),
+            set_segments_editable=lambda value: row_updates.append(("segments", value)),
+        )
+        for _ in jobs
+    ]
+
+    def control():
+        return SimpleNamespace(configure=lambda **kwargs: control_updates.append(kwargs))
+
+    panel = SimpleNamespace(
+        _running=False,
+        _processing_job_id=None,
+        _clear_btn=control(),
+        _clear_completed_btn=control(),
+        _output_browse_btn=control(),
+        _pattern_entry=control(),
+        _add_files_btn=control(),
+        _add_folder_btn=control(),
+        _jobs=jobs,
+        _job_widgets=widgets,
+        _find_job_index_by_id=lambda job_id: job_id,
+    )
+
+    QueuePanel.set_running(panel, True, processing_job_id=0)
+    control_updates.clear()
+    row_updates.clear()
+
+    QueuePanel.set_running(panel, True, processing_job_id=0)
+
+    assert control_updates == []
+    assert row_updates == []
 
 
 @pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)

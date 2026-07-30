@@ -39,6 +39,7 @@ class QueuePanel(ctk.CTkFrame):
         self._job_widgets: list[JobListItem] = []
         self._on_jobs_changed: callable = None
         self._on_output_changed: callable = None
+        self._running = False
         self._processing_job_id: int | None = None
         self._segment_editor = None
         self._get_settings: callable = None
@@ -586,6 +587,11 @@ class QueuePanel(ctk.CTkFrame):
         disabled except the add buttons and removing jobs (except the
         currently processing item which is protected).
         """
+        if self._running == running and (
+            not running or self._processing_job_id == processing_job_id
+        ):
+            return
+        self._running = running
         self._processing_job_id = processing_job_id if running else None
         if running:
             # Disable controls we don't want interactive while running
