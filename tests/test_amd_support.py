@@ -81,6 +81,13 @@ def test_amf_encoder_settings_are_vendor_specific() -> None:
         )
 
 
+def test_amf_hevc_uses_compatible_defaults() -> None:
+    from jasna.media.video_encoder import AMF_ENCODER_SPECS
+
+    options = AMF_ENCODER_SPECS["hevc"].default_options
+    assert (options["rc"], options["preanalysis"]) == ("cbr", "0")
+
+
 def test_video_encoder_selects_amf_and_normalizes_cq(monkeypatch, tmp_path) -> None:
     import jasna.media.video_encoder as module
 

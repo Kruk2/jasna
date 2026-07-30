@@ -122,10 +122,10 @@ DEFAULT_AMF_H264_ENCODER_OPTIONS: dict[str, str] = {
 DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
-    "rc": "qvbr",
+    "rc": "cbr",
     "qvbr_quality_level": "25",
     "g": "250",
-    "preanalysis": "1",
+    "preanalysis": "0",
     "vbaq": "1",
     "profile": "main10",
     "bitdepth": "10",
