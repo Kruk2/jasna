@@ -731,6 +731,19 @@ class TestStreamingFrameWriter:
         mock_server.update_production.assert_called_once_with(5)
         mock_server.wait_for_demand.assert_called_once()
 
+    def test_after_write_propagates_encoder_failure(self):
+        from jasna.streaming_pipeline import _StreamingFrameWriter
+        mock_enc = MagicMock()
+        mock_enc.raise_if_failed.side_effect = RuntimeError("writer failed")
+        mock_server = MagicMock()
+        mock_server.frames_per_segment.return_value = 120
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5)
+
+        with pytest.raises(RuntimeError, match="writer failed"):
+            writer.after_write(1)
+
+        mock_server.update_production.assert_not_called()
+
     def test_after_write_segment_calculation(self):
         from jasna.streaming_pipeline import _StreamingFrameWriter
         mock_enc = MagicMock()
@@ -803,7 +816,7 @@ class TestRunStreamingPass:
 
         mock_server = MagicMock()
         mock_server.video_change = threading.Event()
-        mock_server.consume_seek.return_value = None
+        mock_server.consume_seek_for_pass.return_value = None
         mock_server.frames_per_segment.return_value = 120
         mock_enc = MagicMock()
         cancel = threading.Event()
@@ -872,7 +885,7 @@ class TestRunStreamingPass:
 
         mock_server = MagicMock()
         mock_server.video_change = threading.Event()
-        mock_server.consume_seek.return_value = 10
+        mock_server.consume_seek_for_pass.return_value = 10
         mock_server.frames_per_segment.return_value = 120
         mock_enc = MagicMock()
         cancel = threading.Event()
@@ -1027,6 +1040,31 @@ class TestStreamingLoop:
 
         assert call_count[0] == 2
         enc.flush_and_restart.assert_called_once_with(start_number=5)
+
+    def test_seek_to_segment_zero_restarts_encoder(self):
+        from jasna.streaming_pipeline import _streaming_loop
+        pipeline, server, enc = self._make_mocks()
+
+        call_count = [0]
+
+        def _fake_pass(**kwargs):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return 0
+            server.video_change.set()
+            return None
+
+        with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
+            _streaming_loop(
+                pipeline=pipeline,
+                device=torch.device("cpu"),
+                metadata=MagicMock(),
+                hls_server=server,
+                streaming_encoder=enc,
+            )
+
+        enc.start.assert_called_once_with(start_number=0)
+        enc.flush_and_restart.assert_called_once_with(start_number=0)
 
     def test_completion_then_seek(self):
         from jasna.streaming_pipeline import _streaming_loop

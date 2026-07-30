@@ -469,6 +469,16 @@ class HlsStreamingServer:
             self.seek_requested.clear()
             return target
 
+    def consume_seek_for_pass(self, start_segment: int) -> int | None:
+        target = self.consume_seek()
+        if target == start_segment:
+            log.debug(
+                "[stream-server] ignoring seek to active segment %d",
+                start_segment,
+            )
+            return None
+        return target
+
     def notify_segment_requested(self, segment_index: int) -> None:
         with self._demand_lock:
             if segment_index > self._highest_requested_segment:

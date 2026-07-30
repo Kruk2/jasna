@@ -130,6 +130,13 @@ class TestHlsStreamingServer:
         target = server.consume_seek()
         assert target == 2
 
+    def test_seek_to_active_pass_is_ignored(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.request_seek(5)
+
+        assert server.consume_seek_for_pass(5) is None
+        assert not server.seek_requested.is_set()
+
     def test_url_property(self):
         server = HlsStreamingServer(segment_duration=4.0, port=9999)
         assert server.url == "http://localhost:9999/stream.m3u8"
@@ -338,6 +345,22 @@ def _mock_ffmpeg_process():
     return proc
 
 
+class _CloseWriteRaceStdin:
+    def __init__(self):
+        self.closed = False
+        self.write_entered = threading.Event()
+        self.release_write = threading.Event()
+
+    def write(self, _item):
+        self.write_entered.set()
+        self.release_write.wait(timeout=2.0)
+        if self.closed:
+            raise ValueError("write to closed file")
+
+    def close(self):
+        self.closed = True
+
+
 class TestStreamingEncoder:
     def _make_encoder(self, tmp_path):
         from jasna.streaming_encoder import StreamingEncoder
@@ -421,12 +444,57 @@ class TestStreamingEncoder:
         mock_popen.return_value = _mock_ffmpeg_process()
         enc = self._make_encoder(tmp_path)
         enc.start(start_number=0)
+        old_queue = enc._write_queue
         enc.flush_and_restart(start_number=5)
         assert enc._started
+        assert enc._write_queue is not old_queue
         assert mock_popen.call_count == 2
         cmd = mock_popen.call_args[0][0]
         idx = cmd.index('-start_number')
         assert cmd[idx + 1] == '5'
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_restart_waits_for_writer_before_closing_pipe(
+        self, mock_popen, monkeypatch, tmp_path
+    ):
+        old_proc = _mock_ffmpeg_process()
+        racing_stdin = _CloseWriteRaceStdin()
+        old_proc.stdin = racing_stdin
+        new_proc = _mock_ffmpeg_process()
+        mock_popen.side_effect = [old_proc, new_proc]
+        uncaught = []
+        monkeypatch.setattr(
+            threading,
+            "excepthook",
+            lambda args: uncaught.append(args.exc_value),
+        )
+
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        enc.write_frame(_make_rgb_frame(), pts=0)
+        assert racing_stdin.write_entered.wait(timeout=2.0)
+        threading.Timer(0.05, racing_stdin.release_write.set).start()
+
+        enc.flush_and_restart(start_number=5)
+
+        assert uncaught == []
+        assert enc._writer_thread is not None
+        assert enc._writer_thread.is_alive()
+        enc.write_frame(_make_rgb_frame(), pts=1)
+        deadline = time.monotonic() + 2.0
+        while not new_proc.stdin.write.called and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert new_proc.stdin.write.called
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_start_rejects_active_encoder(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        with pytest.raises(RuntimeError, match="already started"):
+            enc.start(start_number=1)
         enc.stop()
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
@@ -568,7 +636,7 @@ class TestStreamingEncoderLifecycle:
         )
         enc._writer_thread = MagicMock()
         enc._writer_thread.is_alive.return_value = False
-        enc._stop_writer(drain=False)
+        enc._stop_writer(discard_pending=False)
         assert enc._writer_thread is None
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
@@ -638,6 +706,26 @@ class TestStreamingEncoderLifecycle:
         enc._kill_ffmpeg()
         proc.kill.assert_called_once()
         assert enc._process is None
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_kill_ffmpeg_terminates_before_closing_stdin(self, mock_popen, tmp_path):
+        events = []
+        proc = _mock_ffmpeg_process()
+        proc.kill.side_effect = lambda: events.append("kill")
+        proc.wait.side_effect = lambda: events.append("wait")
+        proc.stdin.close.side_effect = lambda: events.append("close")
+        mock_popen.return_value = proc
+
+        from jasna.streaming_encoder import StreamingEncoder
+        meta = _make_metadata(duration=20.0, fps=30.0)
+        enc = StreamingEncoder(
+            segments_dir=tmp_path, segment_duration=4.0,
+            metadata=meta, source_video="nonexistent.mp4",
+        )
+        enc.start(start_number=0)
+        enc._kill_ffmpeg()
+
+        assert events == ["kill", "wait", "close"]
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
     def test_kill_ffmpeg_stdin_oserror(self, mock_popen, tmp_path):
@@ -718,7 +806,7 @@ class TestStreamingEncoderWriterLoop:
         )
         enc._process = proc
         enc._write_queue.put(b"some data")
-        enc._writer_loop()
+        enc._writer_loop(proc, enc._write_queue, enc._stop_sentinel)
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
     def test_writer_loop_no_process(self, mock_popen, tmp_path):
@@ -731,7 +819,7 @@ class TestStreamingEncoderWriterLoop:
         enc._process = None
         enc._write_queue.put(b"data")
         enc._write_queue.put(enc._stop_sentinel)
-        enc._writer_loop()
+        enc._writer_loop(_mock_ffmpeg_process(), enc._write_queue, enc._stop_sentinel)
 
 
 class TestMainParserStreamingArgs:
@@ -1157,14 +1245,20 @@ class TestStreamingEncoderWriterDeath:
 
         # More frames than the write queue holds: with a dead writer thread
         # nothing drains it, so an encoder that still looks started blocks here.
+        errors = []
+
         def flood():
-            for pts in range(1, 40):
-                enc.write_frame(_make_rgb_frame(), pts=pts)
+            try:
+                for pts in range(1, 40):
+                    enc.write_frame(_make_rgb_frame(), pts=pts)
+            except RuntimeError as exc:
+                errors.append(exc)
 
         writer = threading.Thread(target=flood, daemon=True)
         writer.start()
         writer.join(timeout=5.0)
         assert not writer.is_alive()
+        assert errors
         enc.stop()
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
@@ -1184,4 +1278,30 @@ class TestStreamingEncoderWriterDeath:
         enc.flush_and_restart(start_number=1)
         assert enc.failed is False
         assert enc._started is True
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_closed_pipe_failure_is_propagated(
+        self, mock_popen, monkeypatch, tmp_path
+    ):
+        proc = _mock_ffmpeg_process()
+        proc.stdin.write.side_effect = ValueError("write to closed file")
+        mock_popen.return_value = proc
+        uncaught = []
+        monkeypatch.setattr(
+            threading,
+            "excepthook",
+            lambda args: uncaught.append(args.exc_value),
+        )
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        enc.write_frame(_make_rgb_frame(), pts=0)
+        deadline = time.monotonic() + 2.0
+        while enc._writer_thread.is_alive() and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+        assert uncaught == []
+        assert enc.failed is True
+        with pytest.raises(RuntimeError, match="writer failed"):
+            enc.write_frame(_make_rgb_frame(), pts=1)
         enc.stop()

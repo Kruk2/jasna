@@ -15,6 +15,13 @@ from jasna.os_utils import find_executable, get_subprocess_startup_info
 
 log = logging.getLogger(__name__)
 
+_WRITE_QUEUE_SIZE = 16
+_WRITER_STOP_TIMEOUT = 5.0
+
+
+class StreamingEncodeError(RuntimeError):
+    pass
+
 
 class StreamingEncoder:
     """Encodes RGB frames to HLS MPEGTS segments with the active GPU backend."""
@@ -51,40 +58,63 @@ class StreamingEncoder:
             )
         self._process: subprocess.Popen | None = None
         self._stderr_thread: threading.Thread | None = None
-        self._write_queue: queue.Queue = queue.Queue(maxsize=16)
+        self._write_queue: queue.Queue = queue.Queue(maxsize=_WRITE_QUEUE_SIZE)
         self._writer_thread: threading.Thread | None = None
         self._stop_sentinel = object()
         self._started = False
         self.failed = False
+        self._writer_error: BaseException | None = None
 
     def start(self, start_number: int = 0) -> None:
-        self._launch_ffmpeg(start_number)
-        self._started = True
+        if self._process is not None or (
+            self._writer_thread is not None and self._writer_thread.is_alive()
+        ):
+            raise RuntimeError("Streaming encoder is already started")
+        self._write_queue = queue.Queue(maxsize=_WRITE_QUEUE_SIZE)
+        self._stop_sentinel = object()
+        self._writer_error = None
         self.failed = False
+        self._launch_ffmpeg(start_number)
+        process = self._process
+        if process is None or process.stdin is None:
+            raise RuntimeError("FFmpeg streaming process has no stdin")
+        self._started = True
         self._writer_thread = threading.Thread(
-            target=self._writer_loop, daemon=True, name="StreamingWriterThread",
+            target=self._writer_loop,
+            args=(process, self._write_queue, self._stop_sentinel),
+            daemon=True,
+            name="StreamingWriterThread",
         )
         self._writer_thread.start()
         log.debug("[stream-enc] started at segment %d", start_number)
 
     def write_frame(self, frame: torch.Tensor, pts: int) -> None:
+        self.raise_if_failed()
         if not self._started:
             return
         if frame.dim() == 3 and frame.shape[0] == 3:
             raw = frame.permute(1, 2, 0).contiguous().cpu().numpy().tobytes()
         else:
             raw = frame.cpu().numpy().tobytes()
-        while self._started:
+        write_queue = self._write_queue
+        while self._started and write_queue is self._write_queue:
+            self.raise_if_failed()
             try:
-                self._write_queue.put(raw, timeout=0.1)
+                write_queue.put(raw, timeout=0.1)
                 return
             except queue.Full:
                 continue
+        self.raise_if_failed()
+
+    def raise_if_failed(self) -> None:
+        error = self._writer_error
+        if error is not None:
+            raise StreamingEncodeError("Streaming writer failed") from error
 
     def flush_and_restart(self, start_number: int) -> None:
         self._started = False
+        self._stop_writer(discard_pending=True)
         self._kill_ffmpeg()
-        self._stop_writer(drain=False)
         self._cleanup_segments()
         self.start(start_number=start_number)
 
@@ -96,7 +126,7 @@ class StreamingEncoder:
 
     def stop(self) -> None:
         self._started = False
-        self._stop_writer(drain=False)
+        self._stop_writer(discard_pending=False)
         self._close_ffmpeg()
         log.debug("[stream-enc] stopped")
 
@@ -201,35 +231,50 @@ class StreamingEncoder:
             if text:
                 log.warning("[stream-enc ffmpeg] %s", text)
 
-    def _writer_loop(self) -> None:
+    def _writer_loop(
+        self,
+        process: subprocess.Popen,
+        write_queue: queue.Queue,
+        stop_sentinel: object,
+    ) -> None:
         while True:
-            item = self._write_queue.get()
-            if item is self._stop_sentinel:
+            item = write_queue.get()
+            if item is stop_sentinel:
                 return
-            if self._process is None or self._process.stdin is None:
-                continue
             try:
-                self._process.stdin.write(item)
-            except (BrokenPipeError, OSError):
+                process.stdin.write(item)
+            except (BrokenPipeError, OSError, ValueError) as exc:
                 log.warning("[stream-enc] pipe broken, writer exiting")
-                # Nothing drains the queue any more, so write_frame's retry
-                # loop would spin forever waiting for room.
-                self._started = False
-                self.failed = True
+                if self._write_queue is write_queue:
+                    self._writer_error = exc
+                    self._started = False
+                    self.failed = True
                 return
 
-    def _stop_writer(self, drain: bool) -> None:
-        if self._writer_thread is None or not self._writer_thread.is_alive():
+    def _stop_writer(self, discard_pending: bool) -> None:
+        writer_thread = self._writer_thread
+        if writer_thread is None or not writer_thread.is_alive():
             self._writer_thread = None
             return
-        if drain:
+        write_queue = self._write_queue
+        if discard_pending:
             while True:
                 try:
-                    self._write_queue.get_nowait()
+                    write_queue.get_nowait()
                 except queue.Empty:
                     break
-        self._write_queue.put(self._stop_sentinel)
-        self._writer_thread.join(timeout=5.0)
+        try:
+            write_queue.put(self._stop_sentinel, timeout=_WRITER_STOP_TIMEOUT)
+        except queue.Full:
+            log.warning("[stream-enc] writer queue did not drain, killing ffmpeg")
+            self._kill_ffmpeg()
+        writer_thread.join(timeout=_WRITER_STOP_TIMEOUT)
+        if writer_thread.is_alive():
+            log.warning("[stream-enc] writer did not stop, killing ffmpeg")
+            self._kill_ffmpeg()
+            writer_thread.join(timeout=_WRITER_STOP_TIMEOUT)
+        if writer_thread.is_alive():
+            raise RuntimeError("Streaming writer thread did not stop")
         self._writer_thread = None
 
     def _close_ffmpeg(self) -> None:
@@ -239,7 +284,7 @@ class StreamingEncoder:
         if proc.stdin and not proc.stdin.closed:
             try:
                 proc.stdin.close()
-            except OSError:
+            except (OSError, ValueError):
                 pass
         try:
             proc.wait(timeout=10.0)
@@ -259,13 +304,13 @@ class StreamingEncoder:
         proc = self._process
         if proc is None:
             return
+        proc.kill()
+        proc.wait()
         if proc.stdin and not proc.stdin.closed:
             try:
                 proc.stdin.close()
-            except OSError:
+            except (OSError, ValueError):
                 pass
-        proc.kill()
-        proc.wait()
         if self._stderr_thread is not None:
             self._stderr_thread.join(timeout=2.0)
             self._stderr_thread = None

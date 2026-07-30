@@ -15,7 +15,7 @@ from jasna.media import UnsupportedColorspaceError, get_video_meta_data
 from jasna.pipeline_items import FrameMeta, _SENTINEL
 from jasna.pipeline_threads import decode_detect_loop, primary_restore_loop, secondary_restore_loop, blend_encode_loop
 from jasna.streaming import HlsStreamingServer
-from jasna.streaming_encoder import StreamingEncoder
+from jasna.streaming_encoder import StreamingEncoder, StreamingEncodeError
 from jasna.vram_offloader import VramOffloader
 
 log = logging.getLogger(__name__)
@@ -44,6 +44,7 @@ class _StreamingFrameWriter:
         self._encoder.write_frame(frame, pts)
 
     def after_write(self, frames_written: int) -> None:
+        self._encoder.raise_if_failed()
         if frames_written == 1:
             log.debug("[stream-blend-encode] first frame encoded: %.2fs", time.monotonic() - self._t0)
         elif frames_written % 100 == 0:
@@ -127,6 +128,7 @@ def _streaming_loop(
     streaming_encoder: StreamingEncoder,
 ) -> None:
     start_segment = 0
+    first_pass = True
 
     while True:
         start_time = hls_server.segment_start_time(start_segment)
@@ -137,7 +139,11 @@ def _streaming_loop(
         hls_server.reset_demand(start_segment)
         if start_segment > 0:
             hls_server.notify_segment_requested(start_segment)
-        streaming_encoder.flush_and_restart(start_number=start_segment) if start_segment > 0 else streaming_encoder.start(start_number=0)
+        if first_pass:
+            streaming_encoder.start(start_number=start_segment)
+            first_pass = False
+        else:
+            streaming_encoder.flush_and_restart(start_number=start_segment)
 
         cancel_event = threading.Event()
         seek_result = _run_streaming_pass(
@@ -160,6 +166,7 @@ def _streaming_loop(
 
         if seek_result is None:
             streaming_encoder.stop()
+            streaming_encoder.raise_if_failed()
             hls_server.mark_finished()
             log.info("[stream] pass finished, all segments produced — waiting for seek requests")
             while True:
@@ -294,7 +301,13 @@ def _run_streaming_pass(
             log.info("[stream] video change detected, cancelling current pass")
             cancel_event.set()
             break
-        target = hls_server.consume_seek()
+        try:
+            streaming_encoder.raise_if_failed()
+        except StreamingEncodeError as exc:
+            error_holder.append(exc)
+            cancel_event.set()
+            break
+        target = hls_server.consume_seek_for_pass(start_segment)
         if target is not None:
             log.info("[stream] seek requested to segment %d, cancelling current pass", target)
             seek_target = target
