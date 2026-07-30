@@ -59,8 +59,8 @@ Jasna manages VRAM automatically: when it runs low, waiting frames are temporari
 4. Add a video or image, choose settings, and start processing.
 
 Every setting in the GUI has a tooltip — hover the ⓘ icon next to it. The
-[GUI guide](docs/en/gui.md) tours the rest: queue reordering, presets, output
-patterns, and more.
+[GUI guide](docs/en/gui.md) tours the rest: full-queue reruns, queue
+reordering, presets, output patterns, and more.
 
 Prefer the command line?
 

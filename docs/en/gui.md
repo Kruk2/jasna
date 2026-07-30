@@ -13,9 +13,12 @@ Every setting has a tooltip: hover the ⓘ icon next to it.
   [Segment Editor](segments.md) to restore only parts of that video, and the
   cross removes it from the queue.
 - While processing, each item shows live progress, FPS, and time remaining.
-- **Stop** ends the run. The item you stopped goes back to **Pending**, so
-  the next start processes it again from the beginning; the half-written
-  output file is left on disk for you to delete.
+- Every time you press **Start**, Jasna processes every item still in the
+  queue from top to bottom, including finished or failed items. Change your
+  settings and press Start again without adding the files again.
+- **Stop** ends the run. The interrupted item goes back to **Pending**, and
+  the next Start begins the whole queue again. A half-written output file is
+  left on disk; the **File conflict** setting below decides what happens to it.
 - **Clear Done** removes finished jobs; **Clear** empties the queue.
 
 ## Output settings

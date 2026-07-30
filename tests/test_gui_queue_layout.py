@@ -1,17 +1,72 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 import tkinter as tk
 from tkinter import TclError
+from unittest.mock import MagicMock
 
 import customtkinter as ctk
 import pytest
 
 from jasna.gui.app import JasnaApp
-from jasna.gui.models import JobStatus
+from jasna.gui.models import JobItem, JobStatus
 from jasna.gui.queue_panel import QueuePanel
+from jasna.segments import SegmentRange
 from jasna.gui.theme import Colors, Sizing
+
+
+def test_reset_jobs_for_run_prepares_every_status_and_preserves_job_options(
+    tmp_path: Path,
+) -> None:
+    statuses = (
+        JobStatus.PENDING,
+        JobStatus.COMPLETED,
+        JobStatus.ERROR,
+        JobStatus.SKIPPED,
+        JobStatus.PAUSED,
+    )
+    jobs = [
+        JobItem(
+            tmp_path / f"video-{index}.mp4",
+            status=status,
+            progress=0.75,
+            error_message="old error",
+            segments=(SegmentRange(index, index + 1),),
+            detection_model="rfdetr-v6",
+            detection_score_threshold=0.4,
+            vr_projection="fisheye",
+        )
+        for index, status in enumerate(statuses)
+    ]
+    original_ids = [job.id for job in jobs]
+    original_segments = [job.segments for job in jobs]
+    widgets = [MagicMock() for _ in jobs]
+    conflict_path = tmp_path / "video-0-restored.mp4"
+    conflict_path.touch()
+
+    panel = SimpleNamespace(
+        _jobs=jobs,
+        _job_widgets=widgets,
+        _find_job_index_by_id=lambda job_id: next(
+            index for index, job in enumerate(jobs) if job.id == job_id
+        ),
+        _get_output_path=lambda path: tmp_path / f"{path.stem}-restored.mp4",
+    )
+    panel.update_job_status = MethodType(QueuePanel.update_job_status, panel)
+    panel._refresh_conflicts = MethodType(QueuePanel._refresh_conflicts, panel)
+
+    QueuePanel.reset_jobs_for_run(panel)
+
+    assert [job.id for job in jobs] == original_ids
+    assert [job.segments for job in jobs] == original_segments
+    assert all(job.status is JobStatus.PENDING for job in jobs)
+    assert all(job.progress == 0.0 for job in jobs)
+    assert all(job.error_message == "" for job in jobs)
+    assert jobs[0].has_conflict
+    assert not any(job.has_conflict for job in jobs[1:])
+    for widget in widgets:
+        widget.set_segments_editable.assert_called_with(True)
 
 
 def test_queue_footer_stacks_count_above_action_buttons() -> None:

@@ -418,6 +418,12 @@ class QueuePanel(ctk.CTkFrame):
         can observe additions/removals while processing is running.
         Use with care: this returns the internal list, not a defensive copy."""
         return self._jobs
+
+    def reset_jobs_for_run(self) -> None:
+        for job in self._jobs:
+            job.error_message = ""
+            self.update_job_status(job.id, JobStatus.PENDING)
+        self._refresh_conflicts()
         
     def get_output_folder(self) -> str:
         return self._output_entry.get() or ""

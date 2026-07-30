@@ -559,7 +559,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         toast.place(relx=0.5, rely=0.9, anchor="center")
         
     def _on_start(self):
-        if self._preview_gpu_busy:
+        if self._preview_gpu_busy or (
+            self._processor is not None and self._processor.is_running()
+        ):
             return
         jobs = self._queue_panel.get_jobs()
         if not jobs:
@@ -607,6 +609,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 self._log_panel.warning(msg)
         except Exception as e:
             self._log_panel.warning(f"Engine preflight warning failed: {e}")
+
+        self._queue_panel.reset_jobs_for_run()
         
         self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)
         self._control_bar.set_running(True)

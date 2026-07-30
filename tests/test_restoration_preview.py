@@ -4,7 +4,7 @@ import queue
 import threading
 from fractions import Fraction
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -417,3 +417,47 @@ def test_app_start_guard_blocks_preview_gpu_overlap() -> None:
     app._on_start()
 
     app._queue_panel.get_jobs.assert_not_called()
+
+
+def test_app_start_guard_blocks_running_queue_reset() -> None:
+    app = JasnaApp.__new__(JasnaApp)
+    app._preview_gpu_busy = False
+    app._processor = MagicMock()
+    app._processor.is_running.return_value = True
+    app._queue_panel = MagicMock()
+
+    app._on_start()
+
+    app._queue_panel.get_jobs.assert_not_called()
+
+
+def test_app_prepares_entire_queue_before_starting_processor() -> None:
+    app = JasnaApp.__new__(JasnaApp)
+    app._preview_gpu_busy = False
+    app._processor = MagicMock()
+    app._processor.is_running.return_value = False
+    app._queue_panel = MagicMock()
+    app._queue_panel.get_jobs.return_value = [object(), object()]
+    app._queue_panel.get_jobs_ref.return_value = [object(), object()]
+    app._queue_panel.get_output_folder.return_value = ""
+    app._queue_panel.get_output_pattern.return_value = "{original}_restored.mp4"
+    app._settings_panel = MagicMock()
+    app._settings_panel.get_settings.return_value = AppSettings()
+    app._status_pill = MagicMock()
+    app._control_bar = MagicMock()
+    app._video_player_btn = MagicMock()
+    app._log_panel = MagicMock()
+    app._job_start_times = {}
+    app._processing_start_time = 0.0
+    calls = []
+    app._queue_panel.reset_jobs_for_run.side_effect = lambda: calls.append("reset")
+    app._processor.start.side_effect = lambda *args, **kwargs: calls.append("start")
+    preflight = SimpleNamespace(missing=(), should_warn_first_run_slow=False)
+
+    with (
+        patch("jasna.gui.validation.validate_gui_start", return_value=[]),
+        patch("jasna.gui.engine_preflight.run_engine_preflight", return_value=preflight),
+    ):
+        app._on_start()
+
+    assert calls == ["reset", "start"]
