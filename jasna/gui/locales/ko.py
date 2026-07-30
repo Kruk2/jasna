@@ -38,6 +38,7 @@ KO = {
         "player_loading_models": "복원 모델 불러오는 중…",
         "player_restoring": "프레임 복원 중…",
         "player_playing": "재생 중",
+        "player_playing_buffer": "재생 중 · 버퍼 {seconds}초",
         "player_buffering": "복원 프레임 버퍼링 중…",
         "player_finished": "완료",
         "player_paused": "일시 정지",

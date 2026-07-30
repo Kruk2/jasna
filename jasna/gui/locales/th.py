@@ -39,6 +39,7 @@ TH = {
         "player_loading_models": "กำลังโหลดโมเดลกู้คืน…",
         "player_restoring": "กำลังกู้คืนเฟรม…",
         "player_playing": "กำลังเล่น",
+        "player_playing_buffer": "กำลังเล่น · บัฟเฟอร์ {seconds} วิ",
         "player_buffering": "กำลังบัฟเฟอร์เฟรมที่กู้คืน…",
         "player_finished": "เสร็จแล้ว",
         "player_paused": "หยุดชั่วคราว",

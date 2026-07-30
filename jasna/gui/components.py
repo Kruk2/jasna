@@ -261,10 +261,12 @@ class StatusPill(ctk.CTkFrame):
             master,
             fg_color=Colors.BG_CARD,
             corner_radius=16,
+            width=1,
             height=28,
             **kwargs
         )
-        self.grid_propagate(False)
+        self.grid_propagate(True)
+        self._status_key = "idle"
         
         self._indicator = ctk.CTkLabel(
             self,
@@ -274,19 +276,24 @@ class StatusPill(ctk.CTkFrame):
             fg_color=Colors.STATUS_PENDING,
             corner_radius=4,
         )
-        self._indicator.grid(row=0, column=0, padx=(12, 6), pady=8)
+        self._indicator.grid(row=0, column=0, padx=(10, 5), pady=8)
         
         self._label = ctk.CTkLabel(
             self,
-            text=t("status_idle"),
+            text=t(f"status_{self._status_key}"),
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL, "bold"),
             text_color=Colors.TEXT_PRIMARY,
+            height=20,
         )
-        self._label.grid(row=0, column=1, padx=(0, 12), pady=4)
+        self._label.grid(row=0, column=1, padx=(0, 10), pady=4)
         
     def set_status(self, status: str, color: str):
-        self._label.configure(text=status.upper())
+        self._status_key = status.lower()
+        self.refresh_text()
         self._indicator.configure(fg_color=color)
+
+    def refresh_text(self) -> None:
+        self._label.configure(text=t(f"status_{self._status_key}").upper())
 
 
 class AutoHidingScrollableFrame(ctk.CTkScrollableFrame):

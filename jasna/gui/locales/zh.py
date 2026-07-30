@@ -39,6 +39,7 @@ ZH = {
         "player_loading_models": "正在加载修复模型…",
         "player_restoring": "正在修复画面…",
         "player_playing": "正在播放",
+        "player_playing_buffer": "正在播放 · 缓冲 {seconds}秒",
         "player_buffering": "正在缓冲修复画面…",
         "player_finished": "播放完毕",
         "player_paused": "已暂停",

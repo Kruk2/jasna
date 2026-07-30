@@ -45,6 +45,7 @@ _PLAYER_ASPECT = (16, 9)
 _PLAYER_CHROME_SIZE = (32, 270)
 _SEEK_STEP_SECONDS = 30.0
 _FULLSCREEN_EDGE_PX = 8
+_BUFFER_STATUS_INTERVAL_SECONDS = 0.25
 
 
 def next_player_tick(previous_deadline: float, now: float) -> tuple[float, int]:
@@ -163,6 +164,10 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._close_after_stop = False
         self._failed_message = ""
         self._last_frame_image = None
+        self._view_size = (2, 2)
+        self._last_status: tuple[str, str] | None = None
+        self._last_time_text: str | None = None
+        self._next_buffer_status_at = 0.0
 
         self.title(t("player_title"))
         self.configure(fg_color=Colors.BG_MAIN)
@@ -555,6 +560,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._buffering = bool(autoplay)
         self._eof = False
         self._current_seconds = seconds
+        self._next_buffer_status_at = 0.0
         self._play_btn.configure(state="normal", text="⏸" if autoplay else "▶")
         self._seek.configure(state="normal")
         self._mute.configure(state="normal" if self._has_audio else "disabled")
@@ -632,7 +638,10 @@ class VideoPlayerDialog(ctk.CTkToplevel):
                 self._playing = True
                 self._buffering = False
                 self._play_btn.configure(text="⏸")
-                self._set_status(t("player_playing"), Colors.STATUS_COMPLETED)
+                self._update_playing_buffer_status(
+                    self._current_seconds,
+                    force=True,
+                )
             elif first is not None:
                 self._buffering = True
                 self._set_status(t("player_buffering"), Colors.STATUS_PAUSED)
@@ -649,6 +658,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         if due is not None:
             self._show_frame(due)
         self._current_seconds = now
+        self._update_playing_buffer_status(now)
         if not self._seek_dragging:
             self._seek.set(now)
             self._update_time_label(now)
@@ -704,6 +714,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             return
         self._desired_playing = True
         self._buffering = not self._frame_buffer.ready(PREROLL_SECONDS)
+        self._next_buffer_status_at = 0.0
         self._play_btn.configure(text="⏸")
 
     def _space_pressed(self, _event=None):
@@ -741,6 +752,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._buffering = self._desired_playing
         self._eof = False
         self._current_seconds = seconds
+        self._next_buffer_status_at = 0.0
         self._generation = self._worker.play_from(seconds)
         self._aligned_generation = -1
         self._video_surface.configure(image="", text=t("player_restoring"))
@@ -773,6 +785,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._playing = False
         self._buffering = self._desired_playing
         self._eof = False
+        self._next_buffer_status_at = 0.0
         self._generation = self._worker.reload_from(
             self._playback_settings(),
             seconds,
@@ -797,6 +810,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             (area_width, area_height),
             video_display_aspect(self._metadata),
         )
+        self._view_size = (width, height)
         self._video_surface.place_configure(width=width, height=height)
         if self._worker is not None:
             self._worker.set_max_size((width, height))
@@ -868,10 +882,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._fullscreen_controls_visible = False
 
     def _surface_size(self) -> tuple[int, int]:
-        return (
-            max(2, self._video_surface.winfo_width()),
-            max(2, self._video_surface.winfo_height()),
-        )
+        return self._view_size
 
     def _begin_stop(self) -> None:
         if self._stopping:
@@ -933,13 +944,35 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._secondary.configure(state=state)
 
     def _set_status(self, text: str, color: str) -> None:
+        value = (text, color)
+        if value == self._last_status:
+            return
+        self._last_status = value
         self._status.configure(text=text, text_color=color)
+
+    def _update_playing_buffer_status(
+        self,
+        seconds: float,
+        *,
+        force: bool = False,
+    ) -> None:
+        now = time.monotonic()
+        if not force and now < self._next_buffer_status_at:
+            return
+        self._next_buffer_status_at = now + _BUFFER_STATUS_INTERVAL_SECONDS
+        buffered = self._frame_buffer.buffered_ahead(seconds)
+        self._set_status(
+            t("player_playing_buffer", seconds=f"{buffered:.1f}"),
+            Colors.STATUS_COMPLETED,
+        )
 
     def _update_time_label(self, seconds: float) -> None:
         duration = float(self._metadata.duration) if self._metadata is not None else 0.0
-        self._time_label.configure(
-            text=f"{format_player_time(seconds)} / {format_player_time(duration)}"
-        )
+        text = f"{format_player_time(seconds)} / {format_player_time(duration)}"
+        if text == self._last_time_text:
+            return
+        self._last_time_text = text
+        self._time_label.configure(text=text)
 
     def request_close(self) -> None:
         if self._closed:

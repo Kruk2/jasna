@@ -130,6 +130,12 @@ class TimestampFrameBuffer:
                 return True
             return self._span_locked() >= float(minimum_seconds)
 
+    def buffered_ahead(self, seconds: float) -> float:
+        with self._condition:
+            if not self._frames:
+                return 0.0
+            return max(0.0, self._frames[-1].seconds - float(seconds))
+
     def empty(self) -> bool:
         with self._condition:
             return not self._frames

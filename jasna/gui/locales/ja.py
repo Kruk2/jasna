@@ -39,6 +39,7 @@ JA = {
         "player_loading_models": "復元モデルを読み込み中…",
         "player_restoring": "フレームを復元中…",
         "player_playing": "再生中",
+        "player_playing_buffer": "再生中 · バッファ {seconds}秒",
         "player_buffering": "復元フレームをバッファ中…",
         "player_finished": "再生終了",
         "player_paused": "一時停止",

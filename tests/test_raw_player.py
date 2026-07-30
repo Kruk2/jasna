@@ -110,6 +110,17 @@ def test_timestamp_buffer_returns_newest_due_frame() -> None:
     assert frame_buffer.peek().seconds == pytest.approx(1.2)
 
 
+def test_timestamp_buffer_reports_seconds_ahead_of_playhead() -> None:
+    frame_buffer = TimestampFrameBuffer()
+    frame_buffer.reset(1)
+    cancel = threading.Event()
+    frame_buffer.put(_player_frame(4.0), cancel)
+    frame_buffer.put(_player_frame(5.5), cancel)
+
+    assert frame_buffer.buffered_ahead(3.0) == pytest.approx(2.5)
+    assert frame_buffer.buffered_ahead(6.0) == 0.0
+
+
 def test_timestamp_buffer_preroll_accepts_short_eof_tail() -> None:
     frame_buffer = TimestampFrameBuffer()
     frame_buffer.reset(3)

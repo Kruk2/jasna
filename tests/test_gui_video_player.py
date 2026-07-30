@@ -47,6 +47,45 @@ def test_player_tick_schedule_keeps_absolute_frame_cadence(
     assert delay == expected_delay
 
 
+def test_playing_status_reports_buffer_without_redrawing_every_tick(
+    monkeypatch,
+) -> None:
+    now = [10.0]
+    monkeypatch.setattr(video_player_module.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        video_player_module,
+        "t",
+        lambda key, **values: f"{key}:{values.get('seconds')}",
+    )
+    dialog = SimpleNamespace(
+        _frame_buffer=SimpleNamespace(buffered_ahead=lambda _seconds: 2.34),
+        _next_buffer_status_at=0.0,
+        _set_status=MagicMock(),
+    )
+
+    VideoPlayerDialog._update_playing_buffer_status(dialog, 4.0)
+    now[0] = 10.1
+    VideoPlayerDialog._update_playing_buffer_status(dialog, 4.1)
+
+    dialog._set_status.assert_called_once_with(
+        "player_playing_buffer:2.3",
+        Colors.STATUS_COMPLETED,
+    )
+
+
+def test_time_label_skips_unchanged_text() -> None:
+    dialog = SimpleNamespace(
+        _metadata=SimpleNamespace(duration=60.0),
+        _time_label=MagicMock(),
+        _last_time_text=None,
+    )
+
+    VideoPlayerDialog._update_time_label(dialog, 1.1)
+    VideoPlayerDialog._update_time_label(dialog, 1.2)
+
+    dialog._time_label.configure.assert_called_once_with(text="0:01 / 1:00")
+
+
 @pytest.mark.parametrize(
     ("bounds", "expected"),
     [

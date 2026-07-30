@@ -39,6 +39,7 @@ EN = {
         "player_loading_models": "Loading restoration models…",
         "player_restoring": "Restoring frames…",
         "player_playing": "Playing",
+        "player_playing_buffer": "Playing · Buffer {seconds}s",
         "player_buffering": "Buffering restored frames…",
         "player_finished": "Finished",
         "player_paused": "Paused",

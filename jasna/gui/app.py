@@ -747,6 +747,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._help_btn.configure(text=t("btn_help"))
         self._about_btn.configure(text=t("btn_about"))
         self._video_player_btn.configure(text=t("btn_video_player"))
+        self._status_pill.refresh_text()
         # Note: Other panels would need their own refresh methods
         # For a full implementation, each panel should listen to locale changes
         

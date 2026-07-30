@@ -55,7 +55,10 @@ moving outside that panel hides it again.
 **Choose video** is the only file action. Selecting it during playback stops
 the current restoration before opening the picker. Changing the detection
 model, confidence, or secondary restoration also reloads the restoration
-pipeline at the current playback position.
+pipeline at the current playback position. While playing, the status displays
+how many seconds of restored video are buffered ahead of the playhead. A buffer
+that repeatedly falls to zero means restoration cannot sustain real-time
+playback with the current settings.
 
 The player does not create an output file. If restoration is slower than the
 video, audio pauses while more restored frames are prepared. It is available
