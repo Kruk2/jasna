@@ -308,11 +308,8 @@ def build_parser() -> argparse.ArgumentParser:
     tvai.add_argument(
         "--tvai-denoise",
         default=False,
-        action=argparse.BooleanOptionalAction,
-        help=(
-            "Apply Topaz Video's GUI-style Denoise operation before TVAI "
-            "upscaling. Requires --secondary-restoration tvai. (default: %(default)s)"
-        ),
+        action="store_true",
+        help=CLI_HELP["tvai_denoise"],
     )
 
     detection = parser.add_argument_group("Detection")

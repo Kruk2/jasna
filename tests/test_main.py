@@ -131,6 +131,7 @@ class TestBuildParser:
         assert args.tvai_model == "iris-2"
         assert args.tvai_scale == 4
         assert args.tvai_workers == 2
+        assert args.tvai_denoise is False
 
     def test_rtx_defaults(self):
         args = build_parser().parse_args(["--input", "a.mp4", "--output", "b.mp4"])
@@ -230,12 +231,14 @@ class TestSecondaryRestorers:
                 "--tvai-scale", "2",
                 "--tvai-workers", "1",
                 "--tvai-args", "noise=5",
+                "--tvai-denoise",
             ]))
         mock_tvai.assert_called_once()
         kw = mock_tvai.call_args
         assert kw.kwargs["ffmpeg_path"] == "fake_ffmpeg.exe"
         assert kw.kwargs["scale"] == 2
         assert kw.kwargs["num_workers"] == 1
+        assert kw.kwargs["tvai_denoise"] is True
         assert "model=prob-4:scale=2:noise=5" in kw.kwargs["tvai_args"]
 
     def test_unet4x_secondary(self, tmp_path):
