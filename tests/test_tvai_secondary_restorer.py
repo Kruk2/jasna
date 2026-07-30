@@ -106,6 +106,40 @@ class TestTvaiBuildFfmpegCmd:
         cmd = r.build_ffmpeg_cmd()
         assert "tvai_up=model=iris-2:scale=2" in cmd
 
+    def test_denoise_disabled_keeps_single_enhancement_filter(self):
+        r = TvaiSecondaryRestorer(
+            ffmpeg_path="ffmpeg.exe",
+            tvai_args="model=iris-2:noise=0",
+            scale=2,
+            num_workers=1,
+            tvai_denoise=False,
+        )
+
+        assert r._build_filter_complex() == "tvai_up=model=iris-2:scale=2:noise=0"
+
+    def test_denoise_enabled_builds_nyx_noise_map_before_enhancement(self):
+        r = TvaiSecondaryRestorer(
+            ffmpeg_path="ffmpeg.exe",
+            tvai_args="model=iris-2:noise=0",
+            scale=2,
+            num_workers=1,
+            tvai_denoise=True,
+        )
+        nyx = (
+            "tvai_up=model=nyx-3:scale=1:preblur=-1:noise=-0.10:details=-1:"
+            "halo=-1:blur=-1:compression=-1:estimate=8:device=-2:vram=1:instances=0"
+        )
+
+        assert r._build_filter_complex() == (
+            "split=3[i0][i1][i2];"
+            f"[i0]{nyx}[d1p];"
+            "[i1][d1p]blend=all_mode=grainextract,split[nm1][nm1_copy];"
+            f"[nm1]{nyx}[dnm];"
+            "[dnm][nm1_copy]blend=all_mode=grainextract[temp];"
+            "[i2][temp]blend=all_mode=grainmerge,"
+            "tvai_up=model=iris-2:scale=2:noise=0"
+        )
+
 
 class TestTvaiValidateEnvironment:
     def test_missing_data_dir(self, monkeypatch, tmp_path):
@@ -489,6 +523,29 @@ class TestFlushAll:
         filler = workers[0].push_frames.call_args[0][0]
         assert filler.shape[0] == TVAI_MIN_STREAM_FRAMES_TO_EMIT - 1
         assert 0 in r._completed
+        assert len(r._completed[0]) == 1
+
+    def test_denoise_short_stream_uses_three_pass_padding(self):
+        r = TvaiSecondaryRestorer(
+            ffmpeg_path="ffmpeg.exe",
+            tvai_args="model=iris-2",
+            scale=1,
+            num_workers=1,
+            tvai_denoise=True,
+        )
+        r._validated = True
+        workers = _setup_mock_workers(r)
+        out = _make_frame()
+        workers[0].frames_pushed = 1
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=1))
+        minimum_frames = TVAI_MIN_STREAM_FRAMES_TO_EMIT * 3
+        workers[0].close_stdin_and_drain.return_value = [out] * minimum_frames
+
+        r.flush_all()
+
+        workers[0].push_frames.assert_called_once()
+        filler = workers[0].push_frames.call_args.args[0]
+        assert filler.shape[0] == minimum_frames - 1
         assert len(r._completed[0]) == 1
 
     def test_long_stream_not_padded(self):

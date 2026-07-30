@@ -56,6 +56,7 @@ def _session_config_from_args(
         tvai_scale=int(args.tvai_scale),
         tvai_args=str(args.tvai_args),
         tvai_workers=int(args.tvai_workers),
+        tvai_denoise=bool(args.tvai_denoise),
         rtx_scale=int(args.rtx_scale),
         rtx_quality=str(args.rtx_quality).lower(),
         rtx_denoise=str(args.rtx_denoise).lower(),
@@ -303,6 +304,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help=CLI_HELP["tvai_workers"],
+    )
+    tvai.add_argument(
+        "--tvai-denoise",
+        default=False,
+        action="store_true",
+        help=CLI_HELP["tvai_denoise"],
     )
 
     detection = parser.add_argument_group("Detection")

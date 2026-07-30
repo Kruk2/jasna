@@ -67,6 +67,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | `--tvai-scale` | `4` | Output size is `256*scale`; `1` = no scale. |
 | `--tvai-args` | see `--help` | Extra `tvai_up` parameters. |
 | `--tvai-workers` | `2` | Parallel TVAI ffmpeg workers. |
+| `--tvai-denoise` | off | Apply TVAI Denoise before enhancement. |
 
 ## SD 1.5 image restoration
 

@@ -80,6 +80,7 @@ def _fake_section_widgets() -> dict:
         "tvai_model": _FakeWidget("iris-3"),
         "tvai_scale": _FakeWidget("2x"),
         "tvai_workers": _FakeWidget(3),
+        "tvai_denoise": _FakeWidget(1),
         "rtx_scale": _FakeWidget("4x"),
         "rtx_quality": _FakeWidget("Ultra"),
         "rtx_denoise": _FakeWidget("None"),
@@ -129,6 +130,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["post_export_command"] == "echo done"
     assert values["secondary_restoration"] == "tvai"
     assert values["tvai_scale"] == 2
+    assert values["tvai_denoise"] is True
     assert values["rtx_quality"] == "ultra"
     assert values["image_restore_seed"] == 0
     assert values["lut_path"] == "/luts/a.cube"

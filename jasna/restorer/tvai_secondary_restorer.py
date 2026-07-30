@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 TVAI_PIPELINE_DELAY = 20
 TVAI_MIN_STREAM_FRAMES_TO_EMIT = 8
+_TVAI_DENOISE_ARGS = (
+    "model=nyx-3:preblur=-1:noise=-0.10:details=-1:halo=-1:blur=-1:"
+    "compression=-1:estimate=8:device=-2:vram=1:instances=0"
+)
 
 
 def _parse_tvai_args_kv(args: str) -> dict[str, str]:
@@ -39,6 +43,19 @@ def _parse_tvai_args_kv(args: str) -> dict[str, str]:
             raise ValueError(f"Invalid --tvai-args item: {part!r} (empty key)")
         out[k] = v
     return out
+
+
+def _build_tvai_filter_args(args: str, *, scale: int) -> str:
+    kv = _parse_tvai_args_kv(args)
+    parts: list[tuple[str, str]] = []
+    if "model" in kv:
+        parts.append(("model", kv["model"]))
+    parts.append(("scale", str(scale)))
+    for key, value in kv.items():
+        if key in {"model", "scale", "w", "h"}:
+            continue
+        parts.append((key, value))
+    return ":".join(f"{key}={value}" for key, value in parts)
 
 
 @dataclass
@@ -227,23 +244,22 @@ class TvaiSecondaryRestorer:
     prefers_cpu_input = True
     _INPUT_SIZE = 256
 
-    def __init__(self, *, ffmpeg_path: str, tvai_args: str, scale: int, num_workers: int, max_clip_size: int = 180) -> None:
+    def __init__(self, *, ffmpeg_path: str, tvai_args: str, scale: int, num_workers: int, max_clip_size: int = 180, tvai_denoise: bool = False) -> None:
         self.ffmpeg_path = str(ffmpeg_path)
         self.tvai_args = str(tvai_args)
         self.scale = int(scale)
         self.num_workers = int(num_workers)
         if self.scale not in (1, 2, 4):
             raise ValueError(f"Invalid tvai scale: {self.scale} (valid: 1, 2, 4)")
-        kv = _parse_tvai_args_kv(self.tvai_args)
-        parts: list[tuple[str, str]] = []
-        if "model" in kv:
-            parts.append(("model", kv["model"]))
-        parts.append(("scale", str(self.scale)))
-        for key, value in kv.items():
-            if key in {"model", "scale", "w", "h"}:
-                continue
-            parts.append((key, value))
-        self.tvai_filter_args = ":".join(f"{key}={value}" for key, value in parts)
+        self.tvai_filter_args = _build_tvai_filter_args(self.tvai_args, scale=self.scale)
+        self.tvai_denoise_filter_args = (
+            _build_tvai_filter_args(_TVAI_DENOISE_ARGS, scale=1)
+            if tvai_denoise
+            else None
+        )
+        self._minimum_stream_frames = TVAI_MIN_STREAM_FRAMES_TO_EMIT * (
+            3 if self.tvai_denoise_filter_args else 1
+        )
         self._out_size = self._INPUT_SIZE * self.scale
         self._in_frame_bytes = self._INPUT_SIZE * self._INPUT_SIZE * 3
         self._out_frame_bytes = self._out_size * self._out_size * 3
@@ -313,13 +329,27 @@ class TvaiSecondaryRestorer:
             "-sws_flags",
             "spline+accurate_rnd+full_chroma_int",
             "-filter_complex",
-            f"tvai_up={self.tvai_filter_args}",
+            self._build_filter_complex(),
             "-f",
             "rawvideo",
             "-pix_fmt",
             "rgb24",
             "pipe:1",
         ]
+
+    def _build_filter_complex(self) -> str:
+        enhance = f"tvai_up={self.tvai_filter_args}"
+        if self.tvai_denoise_filter_args is None:
+            return enhance
+        denoise = f"tvai_up={self.tvai_denoise_filter_args}"
+        return (
+            "split=3[i0][i1][i2];"
+            f"[i0]{denoise}[d1p];"
+            "[i1][d1p]blend=all_mode=grainextract,split[nm1][nm1_copy];"
+            f"[nm1]{denoise}[dnm];"
+            "[dnm][nm1_copy]blend=all_mode=grainextract[temp];"
+            f"[i2][temp]blend=all_mode=grainmerge,{enhance}"
+        )
 
     @staticmethod
     def _to_numpy_hwc(frames_nchw: np.ndarray) -> np.ndarray:
@@ -452,7 +482,7 @@ class TvaiSecondaryRestorer:
 
     def _pad_stream_too_short_for_tvai_to_emit(self, wi: int) -> None:
         worker = self._workers[wi]
-        deficit = TVAI_MIN_STREAM_FRAMES_TO_EMIT - worker.frames_pushed
+        deficit = self._minimum_stream_frames - worker.frames_pushed
         if deficit <= 0 or not self._has_pending_clips(wi):
             return
         filler = np.zeros((deficit, self._INPUT_SIZE, self._INPUT_SIZE, 3), dtype=np.uint8)

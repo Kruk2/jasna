@@ -26,6 +26,7 @@ CLI_HELP: dict[str, str] = {
     "tvai_model": 'Topaz model name for tvai_up (e.g. "iris-2", "prob-4", "iris-3") (default: %(default)s)',
     "tvai_scale": "Topaz tvai_up scale (1=no scale). Output size is 256*scale (default: %(default)s)",
     "tvai_workers": "Number of parallel TVAI ffmpeg workers (default: %(default)s)",
+    "tvai_denoise": "Apply TVAI Denoise before enhancement.",
     "detection_score_threshold": "Detection score threshold. When unset, uses the selected model's recommended value (rfdetr-v6: 0.35, rfdetr-v6-large: 0.40).",
     "max_detection_gap": "Fill detection dropouts up to N frames when the mosaic reappears at the same spot. 0 disables (default: %(default)s)",
     "min_detection_duration": "Drop detections shorter than N frames as false positives. 0 disables (default: %(default)s)",
