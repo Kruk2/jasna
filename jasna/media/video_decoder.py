@@ -606,13 +606,28 @@ class NvidiaVideoReader:
         color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
         H, W = self.height, self.width
 
-        # One packed pinned host batch and one packed device staging frame bound
-        # the fallback's extra memory: H2D copies and conversion kernels are
-        # ordered on the same stream, so the next H2D overwrite of the staging
-        # frame starts only after the prior conversion kernel consumed it.
+        # Pinned host batch is shared. Device staging is gated on
+        # AcceleratorVendor.AMD (not "if not NVIDIA") so Intel/CPU keep the
+        # historical single-staging private-stream fallback unless AMD-specific.
+        # NVIDIA: one staging frame on a private stream (H2D+convert ordered so
+        # the next overwrite starts only after the prior kernel consumed it).
+        # AMD (issue #252): batch device YUV on current_stream. Isolated D1 was
+        # clean; residual glitches are pipeline-contended (Phase 0). Per-frame
+        # staging reuse under multi-thread load can race; batch staging removes
+        # overwrite races. Phase 4 on gfx1201 cleared full-pipeline static.
+        # Extra VRAM ≈ (batch_size - 1) × (1.5 × H × W × bytes) — a few MiB at
+        # batch 4 @ 1080p8.
         pinned = torch.empty((self.batch_size, H + H // 2, W), dtype=dtype, pin_memory=True)
-        staging = torch.empty((H + H // 2, W), dtype=dtype, device=self.device)
-        stream = new_stream(self.device)
+        if self.vendor is AcceleratorVendor.AMD:
+            device_yuv = torch.empty(
+                (self.batch_size, H + H // 2, W), dtype=dtype, device=self.device
+            )
+            staging = None
+            stream = current_stream(self.device)
+        else:
+            device_yuv = None
+            staging = torch.empty((H + H // 2, W), dtype=dtype, device=self.device)
+            stream = new_stream(self.device)
 
         while group:
             batch = torch.empty((len(group), 3, H, W), device=self.device, dtype=torch.uint8)
@@ -642,13 +657,21 @@ class NvidiaVideoReader:
                 pinned[i, H:].copy_(uv)
 
             with stream_context(stream):
+                # Shared copy/convert loop: AMD uses a per-frame plane from the
+                # batch device buffer; NVIDIA reuses the single staging frame
+                # (H2D + convert ordered on the private stream so the next
+                # overwrite starts only after the prior kernel consumed it).
                 for i in range(len(group)):
-                    staging.copy_(pinned[i], non_blocking=True)
+                    plane = staging if staging is not None else device_yuv[i]
+                    plane.copy_(pinned[i], non_blocking=True)
                     converter.convert_into(
-                        staging[:H], staging[H:].view(H // 2, W // 2, 2), batch[i]
+                        plane[:H],
+                        plane[H:].view(H // 2, W // 2, 2),
+                        batch[i],
                     )
 
             next_group = self._read_group(decoded)
+            # Sync before yield so other pipeline threads never see in-flight planes.
             stream.synchronize()
             group = next_group
             yield batch, pts

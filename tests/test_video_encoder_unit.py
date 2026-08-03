@@ -535,6 +535,8 @@ class TestEncodeBuffer:
         self, tmp_path, monkeypatch
     ):
         enc = _make_encoder(tmp_path, codec="hevc", video_width=2, video_height=2)
+        # Force NVIDIA contracts even when the host GPU is AMD/ROCm.
+        enc.vendor = video_encoder_module.AcceleratorVendor.NVIDIA
         enc.stream = MagicMock()
         enc.stream.cuda_stream = 1234
         enc._cuda_ctx = object()
@@ -553,7 +555,10 @@ class TestEncodeBuffer:
             "VideoFrame",
             SimpleNamespace(from_dlpack=from_dlpack),
         )
-        monkeypatch.setattr(video_encoder_module.torch.cuda, "stream", lambda stream: nullcontext())
+        monkeypatch.setattr(
+            video_encoder_module, "stream_context", lambda _stream: nullcontext()
+        )
+        monkeypatch.setattr(video_encoder_module, "_align_yuv_pitch", lambda p: p)
 
         enc._encode_frame(torch.zeros((3, 2, 2), dtype=torch.uint8), 7)
 
@@ -571,7 +576,14 @@ class TestEncodeBuffer:
         enc = _make_encoder(tmp_path, codec="h264", video_width=2, video_height=2)
         enc.vendor = video_encoder_module.AcceleratorVendor.AMD
         enc.stream = MagicMock()
-        enc._host_yuv = torch.empty((3, 2), dtype=torch.uint8)
+        order: list = []
+        enc.stream.synchronize = MagicMock(side_effect=lambda: order.append("sync"))
+        enc._host_yuv = MagicMock(name="host_yuv")
+
+        def _track_copy(*args, **kwargs):
+            order.append(("copy", kwargs.get("non_blocking")))
+
+        enc._host_yuv.copy_ = MagicMock(side_effect=_track_copy)
         enc._packed = torch.zeros((3, 2), dtype=torch.uint8)
         enc._lut_applier = None
         enc._converter = SimpleNamespace(
@@ -595,6 +607,11 @@ class TestEncodeBuffer:
         enc._encode_frame(torch.zeros((3, 2, 2), dtype=torch.uint8), 7)
 
         enc.stream.synchronize.assert_called_once_with()
+        enc._host_yuv.copy_.assert_called_once()
+        _, copy_kwargs = enc._host_yuv.copy_.call_args
+        assert copy_kwargs.get("non_blocking") is False
+        # Finish device work before filling host planes AMF will read (issue #252).
+        assert order == ["sync", ("copy", False)]
         _, kwargs = from_dlpack.call_args
         assert kwargs == {"format": "nv12"}
 

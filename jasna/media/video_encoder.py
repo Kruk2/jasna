@@ -764,8 +764,8 @@ class NvidiaVideoEncoder:
     def _packed_frame(self, height: int, width: int) -> torch.Tensor:
         # NVENC takes the device frame by pointer and still owns it after
         # encode() returns, so NVIDIA hands it a fresh one every time. AMF has
-        # no zero-copy path: the AMD branch below copies this buffer into pinned
-        # host memory and synchronizes, so one buffer can serve every frame.
+        # no zero-copy path: the AMD branch synchronizes then blocking-copies
+        # this buffer into pinned host memory, so one buffer can serve every frame.
         if self._packed is not None:
             return self._packed
         return torch.empty(
@@ -813,14 +813,19 @@ class NvidiaVideoEncoder:
                     stream=self.stream.cuda_stream,
                     cuda_context=self._cuda_ctx,
                 )
-            else:
-                self._host_yuv.copy_(
-                    _amf_host_input(packed, ten_bit=self.spec.ten_bit),
-                    non_blocking=True,
-                )
 
         if self.vendor is AcceleratorVendor.AMD:
+            # Issue #252: isolated E1/E2 were clean; residual glitches under full
+            # pipeline load matched AMF reading host planes while a non-blocking
+            # D2H was still in flight. Finish convert on the stream, then
+            # blocking-copy into pinned host so from_dlpack sees complete planes.
+            # Phase 4 (gfx1201): stream.synchronize() + blocking copy cleared P1;
+            # do not escalate to full device.synchronize() unless field reports return.
             self.stream.synchronize()
+            self._host_yuv.copy_(
+                _amf_host_input(packed, ten_bit=self.spec.ten_bit),
+                non_blocking=False,
+            )
             planes = [self._host_yuv[:height], self._host_yuv[height:]]
             hw_frame = av.VideoFrame.from_dlpack(
                 planes,
