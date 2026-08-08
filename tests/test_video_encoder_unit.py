@@ -9,6 +9,7 @@ from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import av
 import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
@@ -24,6 +25,7 @@ from jasna.media.video_encoder import (
     _CODEC_MAP,
     _align_yuv_pitch,
     _mov_container_options,
+    _normalized_audio_layout,
     NvidiaVideoEncoder,
 )
 
@@ -165,6 +167,22 @@ class TestContainerOptions:
         assert fragmented.encoder_options == default.encoder_options
 
 
+def test_normalizes_count_only_stereo_layout():
+    layout = av.AudioLayout("2 channels")
+
+    normalized = _normalized_audio_layout(layout)
+
+    assert normalized.name == "stereo"
+    assert [channel.name for channel in normalized.channels] == ["FL", "FR"]
+
+
+@pytest.mark.parametrize("name", ["stereo", "5.1"])
+def test_preserves_named_audio_layout(name):
+    layout = av.AudioLayout(name)
+
+    assert _normalized_audio_layout(layout) is layout
+
+
 def _source_stream(
     index: int,
     stream_type: str,
@@ -178,7 +196,7 @@ def _source_stream(
         codec_context = SimpleNamespace(
             name=codec_name,
             sample_rate=48_000,
-            layout="stereo",
+            layout=av.AudioLayout("stereo"),
         )
     return SimpleNamespace(
         index=index,

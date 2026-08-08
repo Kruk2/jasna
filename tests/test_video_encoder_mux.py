@@ -6,11 +6,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import wave
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
 import av
+import numpy as np
 import pytest
 import torch
 
@@ -91,6 +93,48 @@ def _make_source(
     cmd.append(str(out))
     subprocess.run(cmd, check=True)
     return out
+
+
+def _make_count_only_stereo_pcm_source(tmp_path: Path) -> Path:
+    duration = 0.5
+    sample_rate = 48_000
+    audio = tmp_path / "count-only-stereo.wav"
+    with wave.open(str(audio), "wb") as wav:
+        wav.setnchannels(2)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(bytes(int(duration * sample_rate) * 2 * 2))
+
+    source = tmp_path / "count-only-stereo.mkv"
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"),
+            "-y",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc2=size=256x256:rate=12:duration={duration}",
+            "-guess_layout_max",
+            "0",
+            "-i",
+            str(audio),
+            "-map",
+            "0:v:0",
+            "-map",
+            "1:a:0",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-c:a",
+            "copy",
+            str(source),
+        ],
+        check=True,
+    )
+    return source
 
 
 def _make_rich_source(tmp_path: Path) -> Path:
@@ -360,6 +404,32 @@ def test_audio_copy_when_compatible(tmp_path):
         assert len(c.streams.audio) == 1
         assert c.streams.audio[0].codec_context.name == "aac"
         assert float(c.streams.audio[0].duration * c.streams.audio[0].time_base) == pytest.approx(2.0, abs=0.15)
+
+
+def test_count_only_stereo_pcm_copies_to_mp4_with_explicit_layout(tmp_path):
+    src = _make_count_only_stereo_pcm_source(tmp_path)
+    dst = tmp_path / "out.mp4"
+
+    with av.open(str(src)) as container:
+        audio = container.streams.audio[0]
+        assert audio.codec_context.layout.name == "2 channels"
+        source_samples = np.concatenate(
+            [frame.to_ndarray() for frame in container.decode(audio)], axis=1
+        )
+
+    _transcode(src, dst, codec="h264")
+
+    with av.open(str(dst)) as container:
+        audio = container.streams.audio[0]
+        assert audio.codec_context.name == "pcm_s16le"
+        assert audio.codec_context.layout.name == "stereo"
+        output_samples = np.concatenate(
+            [frame.to_ndarray() for frame in container.decode(audio)], axis=1
+        )
+
+    assert np.array_equal(output_samples, source_samples)
+    data = dst.read_bytes()
+    assert data.index(b"moov") < data.index(b"mdat")
 
 
 def test_audio_reencoded_when_incompatible(tmp_path):

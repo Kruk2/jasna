@@ -357,6 +357,12 @@ def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
     return {"movflags": flags}
 
 
+def _normalized_audio_layout(layout: av.AudioLayout) -> av.AudioLayout:
+    if layout.name == "2 channels":
+        return av.AudioLayout("stereo")
+    return layout
+
+
 class NvidiaVideoEncoder:
     def __init__(
         self,
@@ -641,6 +647,16 @@ class NvidiaVideoEncoder:
                     )
                     continue
 
+            source_audio_layout = (
+                in_stream.codec_context.layout
+                if in_stream.type == "audio"
+                else None
+            )
+            audio_layout = (
+                _normalized_audio_layout(source_audio_layout)
+                if source_audio_layout is not None
+                else None
+            )
             if in_stream.type == "audio" and needs_audio_reencode(
                 in_stream.codec_context.name, self.output_path.suffix
             ):
@@ -652,11 +668,11 @@ class NvidiaVideoEncoder:
                 out_stream = self.dst.add_stream(
                     "aac", rate=in_stream.codec_context.sample_rate
                 )
-                out_stream.codec_context.layout = in_stream.codec_context.layout
+                out_stream.codec_context.layout = audio_layout
                 out_stream.bit_rate = 256_000
                 resampler = av.AudioResampler(
                     format="fltp",
-                    layout=in_stream.codec_context.layout,
+                    layout=audio_layout,
                     rate=in_stream.codec_context.sample_rate,
                 )
                 kind = "transcode"
@@ -698,6 +714,11 @@ class NvidiaVideoEncoder:
                     resampler = None
                     kind = "subtitle_transcode"
                 else:
+                    if (
+                        audio_layout is not None
+                        and audio_layout is not source_audio_layout
+                    ):
+                        out_stream.codec_context.layout = audio_layout
                     resampler = None
                     kind = "copy"
 
