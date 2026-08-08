@@ -404,6 +404,25 @@ class TestFlushPending:
         workers[1].push_frames.assert_not_called()
         assert isinstance(r._worker_segments[0][-1], _FillerSegment)
 
+    def test_denoise_flushes_all_three_ai_stages(self):
+        r = TvaiSecondaryRestorer(
+            ffmpeg_path="ffmpeg.exe",
+            tvai_args="model=iris-2",
+            scale=1,
+            num_workers=1,
+            tvai_denoise=True,
+        )
+        workers = _setup_mock_workers(r)
+        r._worker_segments[0].append(_ClipSegment(seq=0, expected=5))
+
+        r.flush_pending()
+
+        filler = workers[0].push_frames.call_args.args[0]
+        assert filler.shape[0] == TVAI_PIPELINE_DELAY * 3
+        segment = r._worker_segments[0][-1]
+        assert isinstance(segment, _FillerSegment)
+        assert segment.remaining == TVAI_PIPELINE_DELAY * 3
+
     def test_skips_workers_without_clips(self):
         r = _make_restorer(num_workers=2)
         workers = _setup_mock_workers(r)

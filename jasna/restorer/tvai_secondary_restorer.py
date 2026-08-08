@@ -257,9 +257,9 @@ class TvaiSecondaryRestorer:
             if tvai_denoise
             else None
         )
-        self._minimum_stream_frames = TVAI_MIN_STREAM_FRAMES_TO_EMIT * (
-            3 if self.tvai_denoise_filter_args else 1
-        )
+        filter_passes = 3 if self.tvai_denoise_filter_args else 1
+        self._pipeline_delay = TVAI_PIPELINE_DELAY * filter_passes
+        self._minimum_stream_frames = TVAI_MIN_STREAM_FRAMES_TO_EMIT * filter_passes
         self._out_size = self._INPUT_SIZE * self.scale
         self._in_frame_bytes = self._INPUT_SIZE * self._INPUT_SIZE * 3
         self._out_frame_bytes = self._out_size * self._out_size * 3
@@ -451,7 +451,7 @@ class TvaiSecondaryRestorer:
         if not self._started:
             return False
         filler = np.zeros(
-            (TVAI_PIPELINE_DELAY, self._INPUT_SIZE, self._INPUT_SIZE, 3),
+            (self._pipeline_delay, self._INPUT_SIZE, self._INPUT_SIZE, 3),
             dtype=np.uint8,
         )
         flushed = False
@@ -467,12 +467,12 @@ class TvaiSecondaryRestorer:
                 if not has_target:
                     continue
                 if segs and isinstance(segs[-1], _FillerSegment):
-                    segs[-1].remaining += TVAI_PIPELINE_DELAY
+                    segs[-1].remaining += self._pipeline_delay
                 else:
-                    segs.append(_FillerSegment(remaining=TVAI_PIPELINE_DELAY))
+                    segs.append(_FillerSegment(remaining=self._pipeline_delay))
                 self._workers[wi].push_frames(filler)
                 flushed = True
-                logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", TVAI_PIPELINE_DELAY, wi, target_seqs)
+                logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", self._pipeline_delay, wi, target_seqs)
             finally:
                 self._worker_locks[wi].release()
         return flushed
