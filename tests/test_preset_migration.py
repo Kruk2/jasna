@@ -1,5 +1,6 @@
 """Old settings.json presets (PyNvVideoCodec-era) must survive loading: unknown
 fields dropped, encoder custom args translated to hevc_nvenc names."""
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.models import AppSettings, _migrate_encoder_custom_args, _migrate_preset_dict
 from jasna.media import parse_encoder_settings, validate_encoder_settings
 
@@ -78,7 +79,10 @@ def test_gui_codec_label_maps_round_trip():
         if canonical != "av1":
             assert label.lower() != canonical
 
-    assert translate_cq_for_codec(22, "hevc", "av1") == 29
-    assert translate_cq_for_codec(29, "av1", "hevc") == 22
-    assert translate_cq_for_codec(22, "hevc", "h264") == 22
-    assert translate_cq_for_codec(35, "hevc", "av1") == 35
+    assert translate_cq_for_codec(28, "hevc", "h264", AcceleratorVendor.NVIDIA) == 25
+    assert translate_cq_for_codec(25, "h264", "hevc", AcceleratorVendor.NVIDIA) == 28
+    assert translate_cq_for_codec(25, "h264", "av1", AcceleratorVendor.NVIDIA) == 35
+    assert translate_cq_for_codec(35, "av1", "h264", AcceleratorVendor.NVIDIA) == 25
+    assert translate_cq_for_codec(28, "hevc", "h264", AcceleratorVendor.AMD) == 28
+    assert translate_cq_for_codec(28, "hevc", "av1", AcceleratorVendor.AMD) == 35
+    assert translate_cq_for_codec(35, "hevc", "av1", AcceleratorVendor.NVIDIA) == 35

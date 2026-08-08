@@ -123,7 +123,7 @@ against the active encoder — an unsupported key fails with a clear error
 listing what the encoder accepts. You rarely need more than `cq`:
 
 ```bash
-# Higher quality (bigger file): lower cq. Default is 28 (HEVC), 27 (H.264), 35 (AV1).
+# Higher quality (bigger file): lower cq. NVIDIA defaults: H.264 25, HEVC 28, AV1 35.
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"
 
 # Multiple keys
@@ -134,7 +134,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Target quality for VBR. **The main quality knob.** Lower = better quality and bigger file. Scale 0–51 for H.264/HEVC (defaults 27/28), 0–63 for AV1 (default 35). |
+| `cq` | Target quality for VBR. **The main quality knob.** Lower = better quality and bigger file. Scale 0–51 for H.264/HEVC (NVIDIA defaults 25/28), 0–63 for AV1 (NVIDIA default 35). The automatic size ceiling can make nearby values behave alike. |
 | `preset` | Speed/quality trade-off, `p1` (fastest) to `p7` (best). Default `p5`. |
 | `tune` | `hq` (default), `ll`, `ull`, or `lossless`. |
 | `rc` | Rate-control mode: `vbr` (default), `cbr`, `constqp`. |
@@ -162,14 +162,16 @@ encoded source gets re-encoded well above its own quality point and grows severa
 times larger. To bound that, Jasna derives `maxrate` from the source video bitrate
 and sets `bufsize` to twice it:
 
-| Source codec | Ceiling |
-| ------------ | ------- |
-| HEVC | 1.25 x source video bitrate |
-| Everything else (H.264, ...) | 1.0 x source video bitrate |
+| Case | Ceiling |
+| ---- | ------- |
+| NVIDIA H.264 output | 2.0 x source video bitrate |
+| Other output from an HEVC source | 1.25 x source video bitrate |
+| Other combinations | 1.0 x source video bitrate |
 
-HEVC sources get headroom because restoration legitimately adds detail the source
-never had. The ceiling only binds on sources that were cheaply encoded; a
-generously encoded source is unaffected and comes out below it anyway.
+NVIDIA H.264 gets more room because it needs more bits to retain restored detail.
+The ceiling only binds on sources that were cheaply encoded; a generously encoded
+source is unaffected and comes out below it anyway. When it binds, CQ remains a
+quality target, but nearby values can produce the same bitrate and file size.
 
 Pass your own `maxrate` to replace this, or set it very high to effectively disable
 it. If the source reports no bitrate at all, Jasna logs a warning and encodes

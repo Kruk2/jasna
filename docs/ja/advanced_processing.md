@@ -95,7 +95,8 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 **カスタム引数**フィールド（`--encoder-settings`）は、ハードウェア動画
 エンコーダーを細かく調整します — 品質レベル、ビットレート上限、
 キーフレーム間隔など。主な調整項目は `cq` です（低いほど高品質で
-ファイルが大きくなります）:
+ファイルが大きくなります）。Jasna は出力サイズも制限するため、上限に達すると
+近い CQ 値で同じ結果になる場合があります:
 
 ```bash
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"

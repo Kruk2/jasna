@@ -74,8 +74,8 @@ DEFAULT_H264_ENCODER_OPTIONS: dict[str, str] = {
     "tune": "hq",
     "profile": "high",
     "rc": "vbr",
-    # CQ 27 matches HEVC CQ 28 on the same one-below-HEVC scale.
-    "cq": "27",
+    # CQ 25 kept representative capped and uncapped H.264 encodes above VMAF 95.
+    "cq": "25",
     "qmin": "17",
     "qmax": "34",
     "nonref_p": "1",
@@ -260,25 +260,34 @@ _NVENC_PITCH_ALIGNMENT = 16
 # bounds that without measurably costing quality: across 27 clips (1080p to 8K,
 # VR and flat) capped encodes landed on the uncapped quality-vs-bitrate curve to
 # within 0.07 VMAF, and the ceiling stays inert on sources that were already
-# generously encoded. HEVC sources get headroom because restoration legitimately
-# adds detail the source never had; other codecs re-encode smaller regardless.
+# generously encoded. HEVC sources get restoration headroom; NVIDIA H.264 output
+# gets a larger ceiling because the old 1x limit flattened CQ values (issue #282).
 SOURCE_BITRATE_CAP_FACTORS: dict[str, float] = {"hevc": 1.25}
 DEFAULT_SOURCE_BITRATE_CAP_FACTOR = 1.0
+NVENC_H264_SOURCE_BITRATE_CAP_FACTOR = 2.0
 # Any VBV buffer of roughly a second or more never becomes the binding
 # constraint; only sub-second buffers throttle, which is the #243 unit trap.
 SOURCE_BITRATE_CAP_BUFFER_RATIO = 2
 
 
-def source_bitrate_cap_options(metadata: VideoMetadata) -> dict[str, str]:
+def source_bitrate_cap_options(
+    metadata: VideoMetadata,
+    *,
+    output_codec: str,
+    vendor: AcceleratorVendor,
+) -> dict[str, str]:
     if metadata.video_bitrate <= 0:
         logger.warning(
             "No source bitrate for %s; encoding without a source-tied bitrate ceiling",
             metadata.video_file,
         )
         return {}
-    factor = SOURCE_BITRATE_CAP_FACTORS.get(
-        metadata.codec_name.lower(), DEFAULT_SOURCE_BITRATE_CAP_FACTOR
-    )
+    if vendor is AcceleratorVendor.NVIDIA and output_codec == "h264":
+        factor = NVENC_H264_SOURCE_BITRATE_CAP_FACTOR
+    else:
+        factor = SOURCE_BITRATE_CAP_FACTORS.get(
+            metadata.codec_name.lower(), DEFAULT_SOURCE_BITRATE_CAP_FACTOR
+        )
     maxrate = int(metadata.video_bitrate * factor)
     return {
         "maxrate": str(maxrate),
@@ -429,7 +438,13 @@ class NvidiaVideoEncoder:
 
         self.encoder_options = dict(spec.default_options)
         if "maxrate" not in encoder_settings:
-            self.encoder_options.update(source_bitrate_cap_options(metadata))
+            self.encoder_options.update(
+                source_bitrate_cap_options(
+                    metadata,
+                    output_codec=codec,
+                    vendor=self.vendor,
+                )
+            )
         if encoder_settings:
             overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
             # FFmpeg accepts both spellings for HEVC/H.264, but their defaults

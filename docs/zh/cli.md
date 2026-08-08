@@ -120,7 +120,7 @@ jasna --input input_folder --output output_folder
 参数。通常你只需要 `cq`:
 
 ```bash
-# Higher quality (bigger file): lower cq. Default is 28 (HEVC), 27 (H.264), 35 (AV1).
+# Higher quality (bigger file): lower cq. NVIDIA defaults: H.264 25, HEVC 28, AV1 35.
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"
 
 # Multiple keys
@@ -131,7 +131,7 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | VBR 的目标质量。**最主要的质量参数。**越低 = 质量越好、文件越大。H.264/HEVC 范围 0–51（默认 27/28），AV1 范围 0–63（默认 35）。 |
+| `cq` | VBR 的目标质量。**最主要的质量参数。**越低 = 质量越好、文件越大。H.264/HEVC 范围 0–51（NVIDIA 默认 25/28），AV1 范围 0–63（NVIDIA 默认 35）。输出体积自动上限可能让相近的数值得到相同结果。 |
 | `preset` | 速度/质量权衡，从 `p1`（最快）到 `p7`（最佳）。默认 `p5`。 |
 | `tune` | `hq`（默认）、`ll`、`ull` 或 `lossless`。 |
 | `rc` | 码率控制模式: `vbr`（默认）、`cbr`、`constqp`。 |
@@ -158,13 +158,15 @@ jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,
 其自身质量的水平，体积膨胀数倍。为此，Jasna 会根据源视频码率推导 `maxrate`，并将
 `bufsize` 设为其两倍：
 
-| 源编码 | 上限 |
-| ------ | ---- |
-| HEVC | 源视频码率的 1.25 倍 |
-| 其他（H.264 等） | 源视频码率的 1.0 倍 |
+| 情况 | 上限 |
+| ---- | ---- |
+| NVIDIA H.264 输出 | 源视频码率的 2.0 倍 |
+| 其他输出，HEVC 源 | 源视频码率的 1.25 倍 |
+| 其他组合 | 源视频码率的 1.0 倍 |
 
-HEVC 源获得额外余量，因为修复确实会加入源中原本没有的细节。该上限只对低码率保存的源
-生效；码率充足的源不受影响，本来就低于上限。
+NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码率。该上限只对低码率保存的源
+生效；码率充足的源不受影响。达到上限时，CQ 仍是目标质量，但相近的数值可能得到相同的
+码率和文件大小。
 
 自行指定 `maxrate` 即可替换；设为很大的值可实际停用。若源完全没有报告码率，Jasna 会
 记录警告并在无上限的情况下编码。

@@ -80,7 +80,8 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 
 **自定义参数**输入框（`--encoder-settings`）可微调硬件视频编码器 —
 质量等级、码率上限、关键帧间隔等。最主要的参数是 `cq`（越低 = 质量
-越好，文件越大）:
+越好，文件越大）。Jasna 还会限制输出大小，因此达到上限时，相近的 CQ 值
+可能得到相同结果:
 
 ```bash
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"

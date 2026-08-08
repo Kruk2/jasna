@@ -92,7 +92,7 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 - **[Restoring only parts of a video](docs/en/segments.md)** — the Segment Editor, built-in mosaic scanning, suggesting better masks, and the `--segments` CLI flag.
 - **[VR180 videos](docs/en/vr180.md)** — how Jasna handles side-by-side VR and picks the right settings per studio.
 - **[Tuning VRAM and GPU usage](docs/en/tuning.md)** — clip size, temporal overlap, model compilation, and what to do when VRAM runs out.
-- **[Advanced processing](docs/en/advanced_processing.md)** — denoising, 60→30 FPS export, color LUTs, sharpening, custom encoder settings, and post-export actions.
+- **[Advanced processing](docs/en/advanced_processing.md)** — denoising, 60→30 FPS export, color LUTs, sharpening, codec-aware quality controls, custom encoder settings, and post-export actions.
 - **[Streaming](docs/en/streaming.md)** — watch restored video on the fly in your browser or through Stash.
 - **[CLI reference](docs/en/cli.md)** — every command-line option, including output templates, encoder settings per codec, and post-export actions.
 - **[Running from source](docs/en/development.md)** — developer setup and build notes.

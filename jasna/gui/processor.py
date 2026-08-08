@@ -343,9 +343,11 @@ class Processor:
     def _build_encoder_settings(self, codec: str) -> dict:
         # Built per job (not cached in the video session) so a codec change
         # between queued jobs is always validated against the selected codec.
+        from jasna.accelerator import vendor_for_device
         from jasna.media import parse_encoder_settings, validate_encoder_settings
 
         settings = self._settings
+        vendor = vendor_for_device()
         encoder_settings = {}
         if settings.encoder_cq:
             from jasna.gui.settings_sections.encoding import translate_cq_for_codec
@@ -353,10 +355,11 @@ class Processor:
                 settings.encoder_cq,
                 settings.codec,
                 codec,
+                vendor,
             )
         if settings.encoder_custom_args:
             encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
-        return validate_encoder_settings(encoder_settings, codec=codec)
+        return validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
 
     def _run_video_job(
         self,

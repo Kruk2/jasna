@@ -94,7 +94,9 @@ in the preview.
 
 The **Encoder custom args** field (`--encoder-settings`) fine-tunes the
 hardware video encoder — quality level, bitrate caps, keyframe interval, and
-more. The main knob is `cq` (lower = better quality, bigger file):
+more. The main knob is `cq` (lower = better quality, bigger file). Jasna also
+limits output size, so nearby CQ values can give the same result when that limit
+is reached:
 
 ```bash
 jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"

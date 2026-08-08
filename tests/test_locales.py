@@ -6,7 +6,11 @@ import sys
 import pytest
 
 from jasna.gui.locales import TRANSLATIONS
-from jasna.media.video_encoder import DEFAULT_AV1_ENCODER_OPTIONS, DEFAULT_ENCODER_OPTIONS
+from jasna.media.video_encoder import (
+    DEFAULT_AV1_ENCODER_OPTIONS,
+    DEFAULT_ENCODER_OPTIONS,
+    DEFAULT_H264_ENCODER_OPTIONS,
+)
 
 _FULL_LOCALES = ["zh", "ja"]
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
@@ -301,6 +305,7 @@ def test_cq_tooltip_mentions_codec_relative_values(lang: str) -> None:
     assert "AV1" in tip
     # The quoted starting values must track the encoder defaults, not drift from them.
     assert DEFAULT_ENCODER_OPTIONS["cq"] in tip
+    assert DEFAULT_H264_ENCODER_OPTIONS["cq"] in tip
     assert DEFAULT_AV1_ENCODER_OPTIONS["cq"] in tip
 
 

@@ -90,7 +90,7 @@ jasna --input input_folder --output output_folder
 - **[動画の一部だけを復元する](docs/ja/segments.md)** — 区間エディター、内蔵モザイクスキャン、より良いマスクの提案、CLI の `--segments` フラグ。
 - **[VR180 動画](docs/ja/vr180.md)** — Jasna がサイドバイサイド VR をどう扱うか、スタジオ別の自動設定。
 - **[VRAM と GPU 使用量の調整](docs/ja/tuning.md)** — クリップサイズ、テンポラルオーバーラップ、モデルコンパイル、VRAM 不足時の対処。
-- **[高度な処理](docs/ja/advanced_processing.md)** — ノイズ除去、60→30 FPS 書き出し、カラー LUT、シャープネス、カスタムエンコーダー設定、エクスポート後のアクション。
+- **[高度な処理](docs/ja/advanced_processing.md)** — ノイズ除去、60→30 FPS 書き出し、カラー LUT、シャープネス、コーデック別の品質設定、カスタムエンコーダー設定、エクスポート後のアクション。
 - **[ストリーミング](docs/ja/streaming.md)** — 復元した動画をブラウザや Stash でリアルタイムに視聴。
 - **[CLI リファレンス](docs/ja/cli.md)** — 出力テンプレート、コーデック別エンコーダー設定、エクスポート後のアクションを含む、すべてのコマンドラインオプション。
 - **[ソースから実行](docs/en/development.md)** — 開発者向けセットアップとビルドメモ（英語）。

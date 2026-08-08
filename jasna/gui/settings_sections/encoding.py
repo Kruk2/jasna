@@ -3,6 +3,7 @@
 import customtkinter as ctk
 from tkinter import filedialog
 
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_compact_switch, create_icon
 from jasna.gui.locales import t
@@ -22,19 +23,28 @@ CODEC_LABEL_TO_CANONICAL = {
 }
 CODEC_CANONICAL_TO_LABEL = {v: k for k, v in CODEC_LABEL_TO_CANONICAL.items()}
 
-_AV1_CQ_OFFSET = 7
+_CQ_OFFSETS = {"hevc": 0, "h264": 0, "av1": 7}
+_NVIDIA_CQ_OFFSETS = {"hevc": 0, "h264": -3, "av1": 7}
 _CQ_MIN = 15
 _CQ_MAX = 35
 
 
-def translate_cq_for_codec(cq: int, old_codec: str, new_codec: str) -> int:
-    """Keep roughly equal quality when the user visibly switches codec scales."""
+def translate_cq_for_codec(
+    cq: int,
+    old_codec: str,
+    new_codec: str,
+    vendor: AcceleratorVendor,
+) -> int:
+    """Translate the visible CQ scale when switching output codecs."""
     if old_codec == new_codec:
         return cq
-    if old_codec == "av1":
-        cq -= _AV1_CQ_OFFSET
-    if new_codec == "av1":
-        cq += _AV1_CQ_OFFSET
+    offsets = (
+        _NVIDIA_CQ_OFFSETS
+        if vendor is AcceleratorVendor.NVIDIA
+        else _CQ_OFFSETS
+    )
+    cq -= offsets[old_codec]
+    cq += offsets[new_codec]
     return max(_CQ_MIN, min(_CQ_MAX, cq))
 
 
@@ -236,7 +246,10 @@ class EncodingSection:
 
     def _on_codec_changed(self, new_codec: str):
         cq = translate_cq_for_codec(
-            int(self._widgets["encoder_cq"].get()), self._active_codec, new_codec
+            int(self._widgets["encoder_cq"].get()),
+            self._active_codec,
+            new_codec,
+            vendor_for_device(),
         )
         self._widgets["encoder_cq"].set(cq)
         self._widgets["encoder_cq_val"].configure(text=str(cq))

@@ -14,6 +14,7 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 import jasna.media.video_encoder as video_encoder_module
+from jasna.accelerator import AcceleratorVendor
 from jasna.media import VideoMetadata
 from jasna.media.video_encoder import (
     DEFAULT_AV1_ENCODER_OPTIONS,
@@ -93,7 +94,7 @@ class TestCodecSpecs:
     def test_h264_defaults_snapshot(self):
         expected = dict(_HEVC_OPTIONS_SNAPSHOT)
         expected["profile"] = "high"
-        expected["cq"] = "27"
+        expected["cq"] = "25"
         del expected["lookahead_level"]
         assert DEFAULT_H264_ENCODER_OPTIONS == expected
 
@@ -501,14 +502,41 @@ class TestEncoderOptions:
         assert enc.encoder_options["maxrate"] == "20000000"
         assert enc.encoder_options["bufsize"] == "40000000"
 
+    def test_nvenc_h264_output_gets_two_x_ceiling(self, tmp_path):
+        enc = _make_encoder(
+            tmp_path,
+            codec="h264",
+            codec_name="h264",
+            video_bitrate=20_000_000,
+        )
+        assert enc.encoder_options["maxrate"] == "40000000"
+        assert enc.encoder_options["bufsize"] == "80000000"
+
+    def test_amf_h264_output_keeps_source_codec_ceiling(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            video_encoder_module,
+            "vendor_for_device",
+            lambda _device: AcceleratorVendor.AMD,
+        )
+        enc = _make_encoder(
+            tmp_path,
+            codec="h264",
+            codec_name="h264",
+            video_bitrate=20_000_000,
+        )
+        assert enc.encoder_options["maxrate"] == "20000000"
+        assert enc.encoder_options["bufsize"] == "40000000"
+
     def test_no_ceiling_without_source_bitrate(self, tmp_path):
         enc = _make_encoder(tmp_path, video_bitrate=0)
         assert "maxrate" not in enc.encoder_options
         assert "bufsize" not in enc.encoder_options
 
-    def test_explicit_maxrate_replaces_derived_ceiling(self, tmp_path):
+    @pytest.mark.parametrize("codec", ["hevc", "h264"])
+    def test_explicit_maxrate_replaces_derived_ceiling(self, tmp_path, codec):
         enc = _make_encoder(
             tmp_path,
+            codec=codec,
             encoder_settings={"maxrate": "3000000"},
             codec_name="hevc",
             video_bitrate=20_000_000,

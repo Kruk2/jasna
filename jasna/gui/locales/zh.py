@@ -439,7 +439,7 @@ ZH = {
         "tip_detection_model": "用于寻找需要修复区域的默认 AI 模型。\nrfdetr-v6：最新、快速 — 推荐使用（默认，内置）。\nrfdetr-v6-large：质量更高、速度更慢 — 可选的单独下载。\nrfdetr-vr-v1：VR180 模型（内置）— 推荐用于 VR。\nLada YOLO 模型可能更适合 2D 动画。\nzelefans-vr-yolo-v2：备用 VR180 模型 — 可选的单独下载。\n\n区间编辑器可以为每个视频单独覆盖并记住此设置。\n\n默认值：rfdetr-v6",
         "tip_detection_score_threshold": "AI 标记修复区域所需的默认置信度。\n数值越低 = 检测更多区域（可能误检）。\n数值越高 = 检测更少区域（可能漏检）。\n\n区间编辑器可以为每个视频单独覆盖并记住此设置。\n\n默认值：各模型的推荐值（rfdetr-v6：0.35，rfdetr-v6-large：0.40）",
         "tip_codec": "输出视频格式。\nH.264 (AVC)：兼容性最好，文件较大。\nHEVC (H.265)：较小文件体积下提供优秀画质。\nAV1：压缩率最高，需要较新的播放器；编码需要较新的 NVIDIA 显卡。",
-        "tip_encoder_cq": "视频质量等级（恒定质量模式）。数值越低画质越好，但文件越大。\nCQ 值因编解码器而异。切换到或离开 AV1 时，Jasna 会将显示值调整 7，以保持大致相同的画质。\n起始值：HEVC/H.264 为 28，AV1 为 35。",
+        "tip_encoder_cq": "视频目标质量（CQ）。数值越低，质量越高，但文件越大。Jasna 还会限制输出大小，因此达到上限时，相近的数值可能得到相同结果。\nNVIDIA 起始值：H.264 为 25，HEVC 为 28，AV1 为 35。",
         "tip_encoder_custom_args": "高级编码器参数，以逗号分隔的 key=value 格式。\n如果不清楚用途，请留空。\n\n示例：rc-lookahead=32",
         "tip_post_export_action": "整个队列完成后的可选操作。\n\n无：不执行任何操作。\n关闭电脑：关闭计算机。\n自定义命令：在系统 shell 中运行下方命令。",
         "tip_output_location": "处理后视频的保存文件夹。\n留空则保存在原始文件旁边。",
