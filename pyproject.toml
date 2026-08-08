@@ -42,7 +42,7 @@ nvidia = [
   # The VALI decode backend needs the corruption-tolerant fork (~/k-drive/vali,
   # DecodeSingleSurfaceAsyncDetailed); with the stock PyPI wheel the reader
   # falls back to PyAV at open time. Release builds use the fork wheel.
-  "python_vali==4.8.7",
+  "python_vali==4.8.8",
 ]
 amd = [
   "torch==2.9.1",
