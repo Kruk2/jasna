@@ -147,6 +147,9 @@ DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "bitdepth": "10",
 }
 
+NVENC_SMART_FRAGMENT_OPTIONS = MappingProxyType({"forced-idr": "1"})
+AMF_SMART_FRAGMENT_OPTIONS = MappingProxyType({"forced_idr": "1"})
+
 
 @dataclass(frozen=True)
 class EncoderSpec:
@@ -155,6 +158,7 @@ class EncoderSpec:
     frame_format: str  # PyAV hardware-frame software format: "nv12" or "p010le"
     default_options: Mapping[str, str]
     ten_bit: bool
+    smart_fragment_options: Mapping[str, str]
     supported_settings: frozenset[str] = field(default_factory=frozenset)
 
 
@@ -165,6 +169,7 @@ ENCODER_SPECS: dict[str, EncoderSpec] = {
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_ENCODER_OPTIONS),
         ten_bit=True,
+        smart_fragment_options=NVENC_SMART_FRAGMENT_OPTIONS,
         supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["hevc"],
     ),
     "h264": EncoderSpec(
@@ -173,6 +178,7 @@ ENCODER_SPECS: dict[str, EncoderSpec] = {
         frame_format="nv12",
         default_options=MappingProxyType(DEFAULT_H264_ENCODER_OPTIONS),
         ten_bit=False,
+        smart_fragment_options=NVENC_SMART_FRAGMENT_OPTIONS,
         supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["h264"],
     ),
     "av1": EncoderSpec(
@@ -181,6 +187,7 @@ ENCODER_SPECS: dict[str, EncoderSpec] = {
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_AV1_ENCODER_OPTIONS),
         ten_bit=True,
+        smart_fragment_options=NVENC_SMART_FRAGMENT_OPTIONS,
         supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["av1"],
     ),
 }
@@ -192,6 +199,7 @@ AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_AMF_HEVC_ENCODER_OPTIONS),
         ten_bit=True,
+        smart_fragment_options=AMF_SMART_FRAGMENT_OPTIONS,
         supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["hevc"],
     ),
     "h264": EncoderSpec(
@@ -200,6 +208,7 @@ AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
         frame_format="nv12",
         default_options=MappingProxyType(DEFAULT_AMF_H264_ENCODER_OPTIONS),
         ten_bit=False,
+        smart_fragment_options=AMF_SMART_FRAGMENT_OPTIONS,
         supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["h264"],
     ),
     "av1": EncoderSpec(
@@ -208,6 +217,7 @@ AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_AMF_AV1_ENCODER_OPTIONS),
         ten_bit=True,
+        smart_fragment_options=AMF_SMART_FRAGMENT_OPTIONS,
         supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["av1"],
     ),
 }
@@ -376,6 +386,7 @@ class NvidiaVideoEncoder:
                 frame_format="nv12",
                 default_options=MappingProxyType(options),
                 ten_bit=False,
+                smart_fragment_options=spec.smart_fragment_options,
                 supported_settings=spec.supported_settings,
             )
         color_variant = _COLOR_VARIANTS.get((metadata.color_space, metadata.color_range))
@@ -389,9 +400,6 @@ class NvidiaVideoEncoder:
                 codec=codec,
                 vendor=self.vendor,
             )
-        if smart_fragment and self.vendor is AcceleratorVendor.AMD:
-            raise ValueError("Smart rendering is currently supported only with NVENC")
-
         self.metadata = metadata
         self.file = file
         self.output_path = Path(file)
@@ -440,7 +448,7 @@ class NvidiaVideoEncoder:
                 _drop_unsupported_nvenc_overrides(codec, overrides, self.encoder_options)
             self.encoder_options.update(overrides)
         if self.smart_fragment:
-            self.encoder_options["forced-idr"] = "1"
+            self.encoder_options.update(spec.smart_fragment_options)
 
         self.BUFFER_MAX_SIZE = 8
         self._lut_flags: deque[bool] = deque()

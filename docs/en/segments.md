@@ -61,9 +61,10 @@ restored — this is required to splice the video back together seamlessly.
 
 What works with segment processing:
 
-- NVIDIA GPUs only for now.
+- NVIDIA and AMD GPUs.
 - One video at a time (no folders, images, or streaming).
 - H.264, HEVC, or AV1 input with constant frame rate; MP4, MOV, or MKV output.
+- On AMD, H.264 sources with more than three consecutive B-frames are not supported.
 - The output codec always matches the input codec.
 - Cannot be combined with `--retarget-high-fps`.
 - Cannot be combined with `--fmp4`; the output is assembled after processing finishes.

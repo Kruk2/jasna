@@ -200,7 +200,7 @@ HEVC 源获得额外余量，因为修复确实会加入源中原本没有的细
 | 编解码器 | 额外参数 |
 | ----- | ---------- |
 | `hevc` | `tier`、`bitdepth`（默认 10） |
-| `h264` | `coder` |
+| `h264` | `coder`、`bf_ref`（B 帧引用）、`pa_adaptive_mini_gop`（自适应 B 帧排列） |
 | `av1` | `bitdepth`（默认 10） |
 
 ## 流媒体

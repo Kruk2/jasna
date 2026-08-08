@@ -16,6 +16,7 @@ from jasna.frame_queue import FrameQueue
 import psutil
 import torch
 
+from jasna.accelerator import vendor_for_device
 from jasna.media import UnsupportedColorspaceError, get_video_meta_data
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
@@ -619,6 +620,7 @@ class Pipeline:
             metadata,
             index,
             self.encoder_settings,
+            vendor=vendor_for_device(self.device),
         )
         total_frames = max(
             1,

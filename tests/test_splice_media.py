@@ -7,6 +7,7 @@ import av
 import numpy as np
 import pytest
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media import get_video_meta_data
 from jasna.media.splice import (
     SpliceSpan,
@@ -54,6 +55,7 @@ def test_h264_probe_resolves_source_compatible_smart_settings(tmp_path: Path) ->
         metadata,
         index,
         {"cq": 22, "profile": "high", "g": 250, "bf": 4, "b_ref_mode": "middle"},
+        vendor=AcceleratorVendor.NVIDIA,
     )
 
     assert metadata.profile == "Main"

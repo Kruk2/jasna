@@ -206,7 +206,7 @@ Per-codec extras:
 | Codec | Extra keys |
 | ----- | ---------- |
 | `hevc` | `tier`, `bitdepth` (default 10) |
-| `h264` | `coder` |
+| `h264` | `coder`, `bf_ref` (B-frame references), `pa_adaptive_mini_gop` (adaptive B-frame placement) |
 | `av1` | `bitdepth` (default 10) |
 
 ## Streaming

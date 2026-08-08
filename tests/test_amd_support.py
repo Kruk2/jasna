@@ -119,7 +119,12 @@ def test_amf_p010_host_input_reinterprets_signed_storage() -> None:
     assert torch.equal(host_input, packed.view(torch.uint16))
 
 
-def test_smart_render_is_rejected_on_amd(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("codec", ["h264", "hevc", "av1"])
+def test_smart_render_uses_amf_fragment_options(
+    monkeypatch,
+    tmp_path,
+    codec: str,
+) -> None:
     import jasna.media.video_encoder as module
 
     monkeypatch.setattr(
@@ -127,15 +132,28 @@ def test_smart_render_is_rejected_on_amd(monkeypatch, tmp_path) -> None:
         "vendor_for_device",
         lambda _device: AcceleratorVendor.AMD,
     )
-    with pytest.raises(ValueError, match="only with NVENC"):
-        module.NvidiaVideoEncoder(
-            str(tmp_path / "out.mp4"),
-            torch.device("cuda:0"),
-            _metadata(),
-            codec="h264",
-            encoder_settings={},
-            smart_fragment=True,
-        )
+    encoder = module.NvidiaVideoEncoder(
+        str(tmp_path / "out.mp4"),
+        torch.device("cuda:0"),
+        _metadata(),
+        codec=codec,
+        encoder_settings={},
+        smart_fragment=True,
+    )
+
+    assert encoder.encoder_name == f"{codec}_amf"
+    assert encoder.encoder_options["forced_idr"] == "1"
+    assert "forced-idr" not in encoder.encoder_options
+
+
+def test_amf_h264_smart_settings_are_accepted() -> None:
+    settings = {"bf": 3, "bf_ref": 1, "pa_adaptive_mini_gop": 0}
+
+    assert validate_encoder_settings(
+        settings,
+        codec="h264",
+        vendor=AcceleratorVendor.AMD,
+    ) == settings
 
 
 def test_streaming_encoder_selects_amf(monkeypatch, tmp_path) -> None:
@@ -276,12 +294,12 @@ def test_amf_8bit_downgrade_drops_bitdepth(monkeypatch, tmp_path) -> None:
         codec="hevc",
         encoder_settings={},
         match_input_bit_depth=True,
+        smart_fragment=True,
     )
     assert encoder.spec.frame_format == "nv12"
     assert encoder.encoder_options["profile"] == "main"
+    assert encoder.encoder_options["forced_idr"] == "1"
     assert "bitdepth" not in encoder.encoder_options
-
-
 
 def test_rfdetr_torch_runner_maps_outputs(monkeypatch, tmp_path) -> None:
     import jasna.mosaic.rfdetr_torch_runner as module

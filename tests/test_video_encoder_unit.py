@@ -128,6 +128,10 @@ class TestCodecSpecs:
         assert ENCODER_SPECS["av1"].frame_format == "p010le"
         assert ENCODER_SPECS["av1"].ten_bit is True
 
+    def test_nvenc_smart_fragment_options_are_unchanged(self):
+        for spec in ENCODER_SPECS.values():
+            assert dict(spec.smart_fragment_options) == {"forced-idr": "1"}
+
 
 class TestContainerOptions:
     @pytest.mark.parametrize("suffix", [".mp4", ".MP4", ".mov"])

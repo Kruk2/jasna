@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media.splice import KeyframeIndex, SplicePlan, SpliceSpan
 from jasna.pipeline import Pipeline
 from jasna.segments import SegmentRange
@@ -56,6 +57,10 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     pipeline.splice_plan = plan
 
     with (
+        patch(
+            "jasna.pipeline.vendor_for_device",
+            return_value=AcceleratorVendor.NVIDIA,
+        ),
         patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch("jasna.pipeline.probe_keyframes") as probe_keyframes,
         patch("jasna.pipeline.build_splice_plan") as build_splice_plan,

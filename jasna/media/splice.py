@@ -11,6 +11,7 @@ from pathlib import Path
 
 import av
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media import VideoMetadata, resolve_video_start_pts
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.container_utils import (
@@ -29,6 +30,11 @@ H264_SMART_PROFILES = {
     "constrained baseline": "baseline",
     "main": "main",
     "high": "high",
+}
+_AMF_H264_SMART_PROFILES = {
+    **H264_SMART_PROFILES,
+    "baseline": "constrained_baseline",
+    "constrained baseline": "constrained_baseline",
 }
 
 
@@ -126,7 +132,7 @@ def validate_smart_render(
     if field_order not in {"", "unknown", "progressive"}:
         raise SmartRenderCompatibilityError("Smart rendering currently requires progressive video")
     if input_codec == "h264" and metadata.is_10bit:
-        raise SmartRenderCompatibilityError("10-bit H.264 smart rendering is not supported by this NVENC path")
+        raise SmartRenderCompatibilityError("10-bit H.264 smart rendering is not supported")
     if input_codec == "h264" and str(metadata.profile or "").strip().lower() not in H264_SMART_PROFILES:
         raise SmartRenderCompatibilityError(
             f"Smart rendering cannot match H.264 profile {metadata.profile!r}"
@@ -171,11 +177,51 @@ def _source_gop_size(index: KeyframeIndex, video_fps: Fraction) -> int | None:
     return max(1, round(max(intervals) * index.time_base * video_fps))
 
 
+def _nvenc_h264_settings(
+    profile: str,
+    index: KeyframeIndex,
+) -> dict[str, object]:
+    return {
+        "profile": H264_SMART_PROFILES[profile],
+        "bf": index.max_b_frames,
+        "b_ref_mode": (
+            "middle"
+            if index.uses_b_references and index.max_b_frames >= 2
+            else "disabled"
+        ),
+    }
+
+
+def _amf_h264_settings(
+    profile: str,
+    index: KeyframeIndex,
+) -> dict[str, object]:
+    if index.max_b_frames > 3:
+        raise SmartRenderCompatibilityError(
+            "AMF H.264 smart rendering supports at most 3 consecutive B-frames; "
+            f"source uses {index.max_b_frames}"
+        )
+    return {
+        "profile": _AMF_H264_SMART_PROFILES[profile],
+        "bf": index.max_b_frames,
+        "bf_ref": int(index.uses_b_references and index.max_b_frames >= 2),
+        "pa_adaptive_mini_gop": 0,
+    }
+
+
+_H264_SETTINGS_BY_VENDOR = {
+    AcceleratorVendor.NVIDIA: _nvenc_h264_settings,
+    AcceleratorVendor.AMD: _amf_h264_settings,
+}
+
+
 def resolve_smart_encoder_settings(
     codec: str,
     metadata: VideoMetadata,
     index: KeyframeIndex,
     settings: dict[str, object],
+    *,
+    vendor: AcceleratorVendor,
 ) -> dict[str, object]:
     resolved = dict(settings)
     source_gop_size = _source_gop_size(index, metadata.video_fps_exact)
@@ -190,13 +236,13 @@ def resolve_smart_encoder_settings(
         raise SmartRenderCompatibilityError(
             f"Smart rendering cannot match H.264 profile {metadata.profile!r}"
         )
-    resolved["profile"] = H264_SMART_PROFILES[profile]
-    resolved["bf"] = index.max_b_frames
-    resolved["b_ref_mode"] = (
-        "middle"
-        if index.uses_b_references and index.max_b_frames >= 2
-        else "disabled"
-    )
+    try:
+        h264_settings = _H264_SETTINGS_BY_VENDOR[vendor](profile, index)
+    except KeyError as exc:
+        raise SmartRenderCompatibilityError(
+            f"Smart rendering is not supported on {vendor.value} encoders"
+        ) from exc
+    resolved.update(h264_settings)
     return resolved
 
 

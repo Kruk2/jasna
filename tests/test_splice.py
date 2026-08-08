@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call, patch
 import pytest
 from av.video.reformatter import ColorRange, Colorspace
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media import VideoMetadata
 from jasna.media.splice import (
     KeyframeIndex,
@@ -107,6 +108,7 @@ def test_smart_h264_settings_match_source_structure() -> None:
         _metadata("h264", profile="Main"),
         index,
         {"cq": 22, "profile": "high", "g": 250, "bf": 4, "b_ref_mode": "middle"},
+        vendor=AcceleratorVendor.NVIDIA,
     )
 
     assert settings == {
@@ -118,13 +120,88 @@ def test_smart_h264_settings_match_source_structure() -> None:
     }
 
 
+@pytest.mark.parametrize("uses_b_references", [False, True])
+def test_smart_h264_amf_settings_match_source_structure(
+    uses_b_references: bool,
+) -> None:
+    index = KeyframeIndex(
+        (0, 60, 120),
+        Fraction(1, 30),
+        0,
+        180,
+        max_b_frames=3,
+        uses_b_references=uses_b_references,
+    )
+
+    settings = resolve_smart_encoder_settings(
+        "h264",
+        _metadata("h264", profile="Main"),
+        index,
+        {"cq": 22, "profile": "high", "g": 250, "bf": 2},
+        vendor=AcceleratorVendor.AMD,
+    )
+
+    assert settings == {
+        "cq": 22,
+        "profile": "main",
+        "g": 60,
+        "bf": 3,
+        "bf_ref": int(uses_b_references),
+        "pa_adaptive_mini_gop": 0,
+    }
+
+
+@pytest.mark.parametrize("source_profile", ["Baseline", "Constrained Baseline"])
+def test_smart_h264_amf_uses_amf_baseline_profile(source_profile: str) -> None:
+    settings = resolve_smart_encoder_settings(
+        "h264",
+        _metadata("h264", profile=source_profile),
+        _index(),
+        {},
+        vendor=AcceleratorVendor.AMD,
+    )
+
+    assert settings["profile"] == "constrained_baseline"
+
+
+def test_smart_h264_amf_rejects_more_than_three_b_frames() -> None:
+    index = KeyframeIndex(
+        (0, 60, 120),
+        Fraction(1, 30),
+        0,
+        180,
+        max_b_frames=4,
+        uses_b_references=True,
+    )
+
+    with pytest.raises(
+        SmartRenderCompatibilityError,
+        match="AMF H.264 smart rendering supports at most 3 consecutive B-frames; source uses 4",
+    ):
+        resolve_smart_encoder_settings(
+            "h264",
+            _metadata("h264"),
+            index,
+            {},
+            vendor=AcceleratorVendor.AMD,
+        )
+
+
 @pytest.mark.parametrize("codec", ["hevc", "av1"])
-def test_smart_settings_match_source_gop_for_other_codecs(codec: str) -> None:
+@pytest.mark.parametrize(
+    "vendor",
+    [AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD],
+)
+def test_smart_settings_match_source_gop_for_other_codecs(
+    codec: str,
+    vendor: AcceleratorVendor,
+) -> None:
     settings = resolve_smart_encoder_settings(
         codec,
         _metadata(codec),
         _index(),
         {"cq": 22, "g": 250, "bf": 4},
+        vendor=vendor,
     )
 
     assert settings == {"cq": 22, "g": 60, "bf": 4}
@@ -137,6 +214,7 @@ def test_smart_h264_settings_reject_unknown_source_profile() -> None:
             _metadata("h264", profile="Extended"),
             _index(),
             {},
+            vendor=AcceleratorVendor.NVIDIA,
         )
 
 
