@@ -34,6 +34,10 @@ from jasna.media import (
 )
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.cas import GpuCasSharpener
+from jasna.media.container_utils import (
+    is_mov_chapter_stream,
+    subtitle_transcode_codec,
+)
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
 
@@ -454,12 +458,12 @@ class NvidiaVideoEncoder:
                 f"bundled FFmpeg libraries: {exc}"
             ) from exc
         self._src = av.open(self.metadata.video_file)
+        in_v = self._src.streams.video[0]
 
         container_options = _mov_container_options(
             self.output_path.suffix, fmp4=self.fmp4
         )
         self.dst = av.open(str(self.output_path), "w", container_options=container_options)
-        self.dst.metadata.update(self._src.metadata)
 
         stream_kwargs = {
             "rate": self.output_fps,
@@ -499,7 +503,8 @@ class NvidiaVideoEncoder:
         ctx.color_trc = transfer
         self.out_stream = out_v
 
-        self._setup_audio()
+        self._copy_source_metadata(in_v, out_v)
+        self._setup_source_streams(in_v)
 
         # Wrap torch's already-current primary context.  FFmpeg's primary_ctx
         # mode tries to change its scheduling flags and fails once torch has
@@ -560,34 +565,121 @@ class NvidiaVideoEncoder:
         self._encode_thread.start()
         return self
 
-    def _setup_audio(self):
-        self._audio_pipes: dict[int, tuple[str, object, object]] = {}
-        self._audio_backlog: deque = deque()
-        self._audio_iter = None
-        if not self.mux_audio:
+    def _copy_source_metadata(self, in_v, out_v) -> None:
+        self.dst.metadata.update(self._src.metadata)
+        out_v.metadata.update(in_v.metadata)
+        out_v.disposition = in_v.disposition
+        if not self.smart_fragment:
+            self._source_chapters = self._src.chapters()
+            self.dst.set_chapters(self._source_chapters)
+
+    def _setup_source_streams(self, in_v) -> None:
+        self._source_pipes: dict[int, tuple[str, object, object]] = {}
+        self._source_backlog: deque = deque()
+        self._source_iter = None
+        if self.smart_fragment:
             return
-        audio_streams = list(self._src.streams.audio)
-        if not audio_streams:
-            return
-        for in_a in audio_streams:
-            if needs_audio_reencode(in_a.codec_context.name, self.output_path.suffix):
-                logger.info("re-encoding audio %s -> aac for %s", in_a.codec_context.name, self.output_path.suffix)
-                out_a = self.dst.add_stream("aac", rate=in_a.codec_context.sample_rate)
-                out_a.codec_context.layout = in_a.codec_context.layout
-                out_a.bit_rate = 256_000
+
+        packet_streams = []
+        output_formats = set(self.dst.format.name.split(","))
+        source_formats = set(self._src.format.name.split(","))
+        source_chapters = getattr(self, "_source_chapters", ())
+        for in_stream in self._src.streams:
+            if in_stream.index == in_v.index:
+                continue
+            if in_stream.type == "audio" and not self.mux_audio:
+                continue
+            if is_mov_chapter_stream(
+                in_stream,
+                source_formats=source_formats,
+                chapters=source_chapters,
+            ):
+                continue
+            if in_stream.type == "attachment" and "matroska" not in output_formats:
+                logger.warning(
+                    "Skipping attachment stream %s: %s output does not support attachments",
+                    in_stream.index,
+                    self.output_path.suffix,
+                )
+                continue
+            if in_stream.codec_context is None and in_stream.type != "attachment":
+                if in_stream.type != "data" or not source_formats & output_formats:
+                    logger.warning(
+                        "Skipping %s stream %s: it has no copyable codec",
+                        in_stream.type,
+                        in_stream.index,
+                    )
+                    continue
+
+            if in_stream.type == "audio" and needs_audio_reencode(
+                in_stream.codec_context.name, self.output_path.suffix
+            ):
+                logger.info(
+                    "re-encoding audio %s -> aac for %s",
+                    in_stream.codec_context.name,
+                    self.output_path.suffix,
+                )
+                out_stream = self.dst.add_stream(
+                    "aac", rate=in_stream.codec_context.sample_rate
+                )
+                out_stream.codec_context.layout = in_stream.codec_context.layout
+                out_stream.bit_rate = 256_000
                 resampler = av.AudioResampler(
                     format="fltp",
-                    layout=in_a.codec_context.layout,
-                    rate=in_a.codec_context.sample_rate,
+                    layout=in_stream.codec_context.layout,
+                    rate=in_stream.codec_context.sample_rate,
                 )
-                self._audio_pipes[in_a.index] = ("transcode", out_a, resampler)
+                kind = "transcode"
             else:
-                out_a = self.dst.add_stream_from_template(in_a)
-                self._audio_pipes[in_a.index] = ("copy", out_a, None)
-            # add_stream_from_template copies neither of these
-            out_a.metadata.update(in_a.metadata)
-            out_a.disposition = in_a.disposition
-        self._audio_iter = self._src.demux(audio_streams)
+                try:
+                    out_stream = self.dst.add_stream_from_template(
+                        in_stream, opaque=True
+                    )
+                except ValueError as exc:
+                    transcode_codec = subtitle_transcode_codec(
+                        in_stream.codec_context.name,
+                        output_formats=output_formats,
+                        supported_codecs=getattr(
+                            self.dst, "supported_codecs", frozenset()
+                        ),
+                    )
+                    if in_stream.type != "subtitle" or transcode_codec is None:
+                        logger.warning(
+                            "Skipping %s stream %s: %s",
+                            in_stream.type,
+                            in_stream.index,
+                            exc,
+                        )
+                        continue
+                    logger.info(
+                        "re-encoding subtitle %s -> %s for %s",
+                        in_stream.codec_context.name,
+                        transcode_codec,
+                        self.output_path.suffix,
+                    )
+                    out_stream = self.dst.add_stream(transcode_codec)
+                    subtitle_time_base = (
+                        getattr(in_stream, "time_base", None)
+                        or Fraction(1, 1_000)
+                    )
+                    out_stream.time_base = subtitle_time_base
+                    out_stream.codec_context.time_base = subtitle_time_base
+                    out_stream.codec_context.subtitle_header = b""
+                    resampler = None
+                    kind = "subtitle_transcode"
+                else:
+                    resampler = None
+                    kind = "copy"
+
+            out_stream.metadata.update(in_stream.metadata)
+            out_stream.disposition = in_stream.disposition
+            if in_stream.type == "attachment":
+                continue
+            self._source_pipes[in_stream.index] = (kind, out_stream, resampler)
+            packet_streams.append(in_stream)
+
+        if packet_streams:
+            self._source_iter = self._src.demux(packet_streams)
 
     def __exit__(self, exc_type, exc_value, traceback):
         try:
@@ -601,8 +693,7 @@ class NvidiaVideoEncoder:
             if exc_type is None and self._worker_error is None and self.out_stream.codec_context.is_open:
                 for packet in self.out_stream.encode(None):
                     self._mux_video(packet)
-                if self.mux_audio:
-                    self._drain_audio()
+                self._drain_source_streams()
         finally:
             self.dst.close()
             self._src.close()
@@ -675,52 +766,80 @@ class NvidiaVideoEncoder:
         if not self._options_validated:
             self._validate_encoder_options()
         if threshold is not None:
-            self._pump_audio(threshold)
+            self._pump_source_streams(threshold)
 
-    def _produce_audio_packets(self, in_packet) -> list:
-        kind, out_a, resampler = self._audio_pipes[in_packet.stream.index]
+    def _produce_source_packets(self, in_packet) -> list:
+        kind, out_stream, resampler = self._source_pipes[in_packet.stream.index]
         if kind == "copy":
-            if in_packet.dts is None and in_packet.pts is None:
+            if in_packet.size == 0:
                 return []
-            in_packet.stream = out_a
+            in_packet.stream = out_stream
             return [in_packet]
+        if kind == "subtitle_transcode":
+            if in_packet.size == 0:
+                return []
+            subtitle = in_packet.stream.codec_context.decode2(in_packet)
+            if subtitle is None:
+                return []
+            packet = out_stream.codec_context.encode_subtitle(subtitle)
+            output_time_base = (
+                out_stream.time_base
+                or out_stream.codec_context.time_base
+                or in_packet.time_base
+                or Fraction(1, 1_000)
+            )
+
+            def rescale(value):
+                if value is None or in_packet.time_base is None:
+                    return value
+                return round(value * in_packet.time_base / output_time_base)
+
+            packet.stream = out_stream
+            packet.pts = rescale(in_packet.pts)
+            packet.dts = rescale(
+                in_packet.dts if in_packet.dts is not None else in_packet.pts
+            )
+            packet.duration = rescale(in_packet.duration)
+            packet.time_base = output_time_base
+            return [packet]
         out_packets = []
         for aframe in in_packet.decode():
             for rframe in resampler.resample(aframe):
-                out_packets.extend(out_a.encode(rframe))
+                out_packets.extend(out_stream.encode(rframe))
         return out_packets
 
-    def _pump_audio(self, upto_seconds: float | None):
-        if self._audio_iter is None:
+    def _pump_source_streams(self, upto_seconds: float | None):
+        if self._source_iter is None:
             return
         while True:
-            if self._audio_backlog:
-                packet = self._audio_backlog[0]
+            if self._source_backlog:
+                packet = self._source_backlog[0]
                 ts = packet.dts if packet.dts is not None else packet.pts
                 if (
                     upto_seconds is not None
                     and ts is not None
+                    and packet.time_base is not None
                     and float(ts * packet.time_base) > upto_seconds
                 ):
                     return
-                self._audio_backlog.popleft()
+                self._source_backlog.popleft()
                 self.dst.mux(packet)
                 continue
-            in_packet = next(self._audio_iter, None)
+            in_packet = next(self._source_iter, None)
             if in_packet is None:
-                self._audio_iter = None
+                self._source_iter = None
                 return
-            self._audio_backlog.extend(self._produce_audio_packets(in_packet))
+            self._source_backlog.extend(self._produce_source_packets(in_packet))
 
-    def _drain_audio(self):
-        self._pump_audio(None)
-        for kind, out_a, resampler in self._audio_pipes.values():
+    def _drain_source_streams(self):
+        self._pump_source_streams(None)
+        for kind, out_stream, resampler in self._source_pipes.values():
             if kind != "transcode":
                 continue
             packets = []
             for rframe in resampler.resample(None):
-                packets.extend(out_a.encode(rframe))
-            packets.extend(out_a.encode(None))
+                packets.extend(out_stream.encode(rframe))
+            packets.extend(out_stream.encode(None))
             for packet in packets:
                 self.dst.mux(packet)
 

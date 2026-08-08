@@ -160,6 +160,248 @@ class TestContainerOptions:
         assert fragmented.encoder_options == default.encoder_options
 
 
+def _source_stream(
+    index: int,
+    stream_type: str,
+    codec_name: str | None,
+    *,
+    metadata: dict[str, str] | None = None,
+    disposition: int = 0,
+):
+    codec_context = None
+    if codec_name is not None:
+        codec_context = SimpleNamespace(
+            name=codec_name,
+            sample_rate=48_000,
+            layout="stereo",
+        )
+    return SimpleNamespace(
+        index=index,
+        type=stream_type,
+        codec_context=codec_context,
+        metadata=dict(metadata or {}),
+        disposition=disposition,
+    )
+
+
+class TestSourceContainerPreservation:
+    def test_copies_container_chapters_and_primary_video_metadata(self, tmp_path):
+        encoder = _make_encoder(tmp_path)
+        chapters = [
+            {
+                "id": 1,
+                "start": 0,
+                "end": 2_000,
+                "time_base": Fraction(1, 1_000),
+                "metadata": {"title": "Opening"},
+            }
+        ]
+        encoder._src = SimpleNamespace(
+            metadata={"title": "Source title"},
+            chapters=MagicMock(return_value=chapters),
+        )
+        encoder.dst = SimpleNamespace(metadata={}, set_chapters=MagicMock())
+        input_video = _source_stream(
+            0,
+            "video",
+            "h264",
+            metadata={"language": "jpn", "title": "Main video"},
+            disposition=3,
+        )
+        output_video = SimpleNamespace(metadata={}, disposition=0)
+
+        encoder._copy_source_metadata(input_video, output_video)
+
+        assert encoder.dst.metadata == {"title": "Source title"}
+        encoder.dst.set_chapters.assert_called_once_with(chapters)
+        assert output_video.metadata == {
+            "language": "jpn",
+            "title": "Main video",
+        }
+        assert output_video.disposition == 3
+
+    def test_smart_fragment_does_not_copy_chapters(self, tmp_path):
+        encoder = NvidiaVideoEncoder(
+            file=str(tmp_path / "part.nut"),
+            device=torch.device("cuda:0"),
+            metadata=_fake_metadata(),
+            codec="hevc",
+            encoder_settings={},
+            smart_fragment=True,
+            mux_audio=False,
+        )
+        encoder._src = SimpleNamespace(
+            metadata={"title": "Source title"},
+            chapters=MagicMock(return_value=[{"id": 1}]),
+        )
+        encoder.dst = SimpleNamespace(metadata={}, set_chapters=MagicMock())
+        input_video = _source_stream(0, "video", "h264")
+        output_video = SimpleNamespace(metadata={}, disposition=0)
+
+        encoder._copy_source_metadata(input_video, output_video)
+
+        encoder.dst.set_chapters.assert_not_called()
+
+    def test_sets_up_all_compatible_source_streams(self, tmp_path):
+        encoder = _make_encoder(tmp_path)
+        primary_video = _source_stream(0, "video", "h264")
+        audio = _source_stream(
+            1,
+            "audio",
+            "aac",
+            metadata={"language": "eng"},
+            disposition=1,
+        )
+        subtitle = _source_stream(
+            2,
+            "subtitle",
+            "ass",
+            metadata={"language": "pol", "title": "Signs"},
+            disposition=2,
+        )
+        alternate_video = _source_stream(
+            3,
+            "video",
+            "h264",
+            metadata={"title": "Alternate angle"},
+        )
+        attachment = _source_stream(
+            4,
+            "attachment",
+            None,
+            metadata={"filename": "font.ttf", "mimetype": "font/ttf"},
+        )
+        packet_streams = [audio, subtitle, alternate_video]
+        demux_result = iter(())
+        encoder._src = SimpleNamespace(
+            streams=[primary_video, audio, subtitle, alternate_video, attachment],
+            format=SimpleNamespace(name="matroska"),
+            demux=MagicMock(return_value=demux_result),
+        )
+        outputs: dict[int, SimpleNamespace] = {}
+
+        def add_stream_from_template(stream, **_kwargs):
+            output = SimpleNamespace(metadata={}, disposition=0)
+            outputs[stream.index] = output
+            return output
+
+        encoder.dst = SimpleNamespace(
+            format=SimpleNamespace(name="matroska"),
+            add_stream=MagicMock(),
+            add_stream_from_template=MagicMock(side_effect=add_stream_from_template),
+        )
+
+        encoder._setup_source_streams(primary_video)
+
+        assert set(encoder._source_pipes) == {1, 2, 3}
+        encoder._src.demux.assert_called_once_with(packet_streams)
+        assert encoder._source_iter is demux_result
+        assert outputs[1].metadata == {"language": "eng"}
+        assert outputs[1].disposition == 1
+        assert outputs[2].metadata == {"language": "pol", "title": "Signs"}
+        assert outputs[2].disposition == 2
+        assert outputs[3].metadata == {"title": "Alternate angle"}
+        assert 4 in outputs
+
+    def test_skips_streams_the_output_container_cannot_copy(
+        self, tmp_path, caplog
+    ):
+        encoder = _make_encoder(tmp_path)
+        primary_video = _source_stream(0, "video", "h264")
+        subtitle = _source_stream(1, "subtitle", "pgssub")
+        attachment = _source_stream(2, "attachment", None)
+        encoder._src = SimpleNamespace(
+            streams=[primary_video, subtitle, attachment],
+            format=SimpleNamespace(name="matroska"),
+            demux=MagicMock(),
+        )
+        encoder.dst = SimpleNamespace(
+            format=SimpleNamespace(name="mp4"),
+            add_stream=MagicMock(),
+            add_stream_from_template=MagicMock(
+                side_effect=ValueError("mp4 does not support pgssub")
+            ),
+        )
+
+        encoder._setup_source_streams(primary_video)
+
+        assert encoder._source_pipes == {}
+        encoder._src.demux.assert_not_called()
+        assert "Skipping subtitle stream 1" in caplog.text
+        assert "Skipping attachment stream 2" in caplog.text
+
+    def test_transcodes_text_subtitle_when_container_cannot_copy(self, tmp_path):
+        encoder = _make_encoder(tmp_path)
+        encoder.output_path = tmp_path / "result.mp4"
+        primary_video = _source_stream(0, "video", "h264")
+        subtitle = _source_stream(
+            1,
+            "subtitle",
+            "ass",
+            metadata={"language": "pol", "title": "Signs"},
+            disposition=3,
+        )
+        encoder._src = SimpleNamespace(
+            streams=[primary_video, subtitle],
+            format=SimpleNamespace(name="matroska"),
+            demux=MagicMock(return_value=iter(())),
+        )
+        output_codec = SimpleNamespace(
+            time_base=None,
+            subtitle_header=None,
+        )
+        output_subtitle = SimpleNamespace(
+            type="subtitle",
+            codec_context=output_codec,
+            time_base=None,
+            metadata={},
+            disposition=0,
+        )
+        encoder.dst = SimpleNamespace(
+            format=SimpleNamespace(name="mp4"),
+            supported_codecs={"mov_text"},
+            add_stream=MagicMock(return_value=output_subtitle),
+            add_stream_from_template=MagicMock(
+                side_effect=ValueError("mp4 does not support ass")
+            ),
+        )
+
+        encoder._setup_source_streams(primary_video)
+
+        encoder.dst.add_stream.assert_called_once_with("mov_text")
+        assert encoder._source_pipes[1] == (
+            "subtitle_transcode",
+            output_subtitle,
+            None,
+        )
+        assert output_codec.subtitle_header == b""
+        assert output_subtitle.metadata == {"language": "pol", "title": "Signs"}
+        assert output_subtitle.disposition == 3
+
+    def test_does_not_copy_mp4_chapter_carrier_as_a_data_stream(self, tmp_path):
+        encoder = _make_encoder(tmp_path)
+        primary_video = _source_stream(0, "video", "h264")
+        chapter_carrier = _source_stream(1, "data", None)
+        chapter_carrier.name = "bin_data"
+        chapter_carrier.metadata["handler_name"] = "SubtitleHandler"
+        encoder._source_chapters = [{"id": 0}]
+        encoder._src = SimpleNamespace(
+            streams=[primary_video, chapter_carrier],
+            format=SimpleNamespace(name="mov,mp4,m4a,3gp,3g2,mj2"),
+            demux=MagicMock(),
+        )
+        encoder.dst = SimpleNamespace(
+            format=SimpleNamespace(name="mp4"),
+            add_stream=MagicMock(),
+            add_stream_from_template=MagicMock(),
+        )
+
+        encoder._setup_source_streams(primary_video)
+
+        encoder.dst.add_stream_from_template.assert_not_called()
+        encoder._src.demux.assert_not_called()
+
+
 class TestEncoderOptions:
     def test_smart_fragment_preserves_normal_closed_gop_settings(self, tmp_path):
         enc = NvidiaVideoEncoder(
@@ -709,49 +951,90 @@ class TestWorkerErrorChannel:
         assert enc._handle_encode_item.call_count == 1
 
 
-def _packet(stream_index, dts, time_base=Fraction(1, 1000)):
+def _packet(stream_index, dts, time_base=Fraction(1, 1000), duration=0):
     return SimpleNamespace(
         stream=SimpleNamespace(index=stream_index),
         dts=dts,
         pts=dts,
         time_base=time_base,
+        duration=duration,
+        size=1,
     )
 
 
-class TestAudioPump:
-    def _audio_encoder(self, tmp_path, packets):
+class TestSourceStreamPump:
+    def _source_encoder(self, tmp_path, packets):
         enc = _make_encoder(tmp_path)
         out_a = MagicMock()
-        enc._audio_pipes = {1: ("copy", out_a, None)}
-        enc._audio_backlog = deque()
-        enc._audio_iter = iter(packets)
+        enc._source_pipes = {1: ("copy", out_a, None)}
+        enc._source_backlog = deque()
+        enc._source_iter = iter(packets)
         enc.dst = MagicMock()
         return enc, out_a
 
     def test_copy_reassigns_stream_and_skips_flush_packet(self, tmp_path):
-        enc, out_a = self._audio_encoder(tmp_path, [])
+        enc, out_a = self._source_encoder(tmp_path, [])
         pkt = _packet(1, dts=0)
-        assert enc._produce_audio_packets(pkt) == [pkt]
+        assert enc._produce_source_packets(pkt) == [pkt]
         assert pkt.stream is out_a
 
-        flush = SimpleNamespace(stream=SimpleNamespace(index=1), dts=None, pts=None, time_base=None)
-        assert enc._produce_audio_packets(flush) == []
+        flush = SimpleNamespace(
+            stream=SimpleNamespace(index=1),
+            dts=None,
+            pts=None,
+            time_base=None,
+            size=0,
+        )
+        assert enc._produce_source_packets(flush) == []
 
     def test_pump_respects_threshold(self, tmp_path):
         packets = [_packet(1, dts=0), _packet(1, dts=500), _packet(1, dts=1500)]
-        enc, _ = self._audio_encoder(tmp_path, packets)
+        enc, _ = self._source_encoder(tmp_path, packets)
 
-        enc._pump_audio(1.0)
+        enc._pump_source_streams(1.0)
         assert enc.dst.mux.call_count == 2
-        assert len(enc._audio_backlog) == 1  # dts=1500 held back
+        assert len(enc._source_backlog) == 1  # dts=1500 held back
 
-        enc._pump_audio(None)
+        enc._pump_source_streams(None)
         assert enc.dst.mux.call_count == 3
 
-    def test_pump_without_audio_is_noop(self, tmp_path):
+    def test_pump_without_source_streams_is_noop(self, tmp_path):
         enc = _make_encoder(tmp_path)
-        enc._audio_iter = None
-        enc._pump_audio(1.0)
+        enc._source_iter = None
+        enc._pump_source_streams(1.0)
+
+    def test_text_subtitle_transcode_preserves_packet_timing(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        subtitle_set = object()
+        input_codec = SimpleNamespace(decode2=MagicMock(return_value=subtitle_set))
+        output_packet = SimpleNamespace(
+            stream=None,
+            pts=None,
+            dts=None,
+            duration=0,
+            time_base=None,
+        )
+        output_codec = SimpleNamespace(
+            encode_subtitle=MagicMock(return_value=output_packet)
+        )
+        output_stream = SimpleNamespace(
+            codec_context=output_codec,
+            time_base=Fraction(1, 1_000),
+        )
+        enc._source_pipes = {1: ("subtitle_transcode", output_stream, None)}
+        packet = _packet(1, dts=45_000, time_base=Fraction(1, 90_000), duration=90_000)
+        packet.dts = None
+        packet.stream.codec_context = input_codec
+
+        assert enc._produce_source_packets(packet) == [output_packet]
+
+        input_codec.decode2.assert_called_once_with(packet)
+        output_codec.encode_subtitle.assert_called_once_with(subtitle_set)
+        assert output_packet.stream is output_stream
+        assert output_packet.pts == 500
+        assert output_packet.dts == 500
+        assert output_packet.duration == 1_000
+        assert output_packet.time_base == Fraction(1, 1_000)
 
 
 class TestDropUnsupportedNvencOverrides:
