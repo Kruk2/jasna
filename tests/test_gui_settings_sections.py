@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 from tkinter import TclError
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -216,39 +216,84 @@ def test_apply_keeps_installed_model_and_threshold(_basic_section_panel) -> None
     assert panel._widgets["detection_score_threshold"].get() == pytest.approx(0.55)
 
 
-def test_default_encoder_cq_matches_hevc_encoder_default() -> None:
-    # The GUI always sends an explicit cq, so a stale default here silently
-    # overrides the measured encoder default for every GUI job.
-    from jasna.media.video_encoder import DEFAULT_ENCODER_OPTIONS
-
-    assert str(AppSettings().encoder_cq) == DEFAULT_ENCODER_OPTIONS["cq"]
+def test_default_encoder_cq_uses_portable_native_default_sentinel() -> None:
+    assert AppSettings().encoder_cq is None
 
 
-def test_nvidia_codec_change_uses_h264_starting_cq(monkeypatch) -> None:
-    import jasna.gui.settings_sections.encoding as encoding_module
+def test_nvidia_codec_change_recalls_literal_cq() -> None:
+    slider = MagicMock()
+    slider.get.return_value = 30
+    label = MagicMock()
+    section = SimpleNamespace(
+        _widgets={"encoder_cq": slider, "encoder_cq_val": label},
+        _active_codec="hevc",
+        _cq_vendor=AcceleratorVendor.NVIDIA,
+        _cq_values={"hevc": 28, "h264": 25, "av1": 35},
+        _on_modified=MagicMock(),
+    )
 
+    EncodingSection._on_codec_changed(section, "h264")
+
+    assert section._cq_values["hevc"] == 30
+    slider.configure.assert_called_once_with(
+        from_=1,
+        to=51,
+        number_of_steps=50,
+    )
+    slider.set.assert_called_once_with(25)
+    label.configure.assert_called_once_with(text="25")
+    assert section._active_codec == "h264"
+
+    slider.reset_mock()
+    label.reset_mock()
+    slider.get.return_value = 26
+    EncodingSection._on_codec_changed(section, "hevc")
+
+    assert section._cq_values["h264"] == 26
+    slider.set.assert_called_once_with(30)
+    label.configure.assert_called_once_with(text="30")
+
+
+def test_nvidia_av1_codec_change_uses_native_range() -> None:
     slider = MagicMock()
     slider.get.return_value = 28
     label = MagicMock()
     section = SimpleNamespace(
         _widgets={"encoder_cq": slider, "encoder_cq_val": label},
         _active_codec="hevc",
+        _cq_vendor=AcceleratorVendor.NVIDIA,
+        _cq_values={"hevc": 28, "h264": 25, "av1": 35},
         _on_modified=MagicMock(),
     )
-    monkeypatch.setattr(
-        encoding_module,
-        "vendor_for_device",
-        lambda: AcceleratorVendor.NVIDIA,
+
+    EncodingSection._on_codec_changed(section, "av1")
+
+    slider.configure.assert_called_once_with(
+        from_=1,
+        to=63,
+        number_of_steps=62,
+    )
+    slider.set.assert_called_once_with(35)
+
+
+def test_cq_slider_updates_only_active_codec() -> None:
+    label = MagicMock()
+    on_modified = MagicMock()
+    section = SimpleNamespace(
+        _widgets={"encoder_cq_val": label},
+        _active_codec="h264",
+        _cq_values={"hevc": 28, "h264": 25, "av1": 35},
+        _on_modified=on_modified,
     )
 
-    EncodingSection._on_codec_changed(section, "h264")
+    EncodingSection._on_cq_changed(section, 31.0)
 
-    slider.set.assert_called_once_with(25)
-    label.configure.assert_called_once_with(text="25")
-    assert section._active_codec == "h264"
+    assert section._cq_values == {"hevc": 28, "h264": 31, "av1": 35}
+    label.configure.assert_called_once_with(text="31")
+    on_modified.assert_called_once_with()
 
 
-def test_processor_translates_nvidia_hevc_cq_for_h264(monkeypatch) -> None:
+def test_processor_passes_literal_cq_for_forced_codec(monkeypatch) -> None:
     import jasna.accelerator as accelerator
     from jasna.gui.processor import Processor
 
@@ -260,7 +305,38 @@ def test_processor_translates_nvidia_hevc_cq_for_h264(monkeypatch) -> None:
         lambda: AcceleratorVendor.NVIDIA,
     )
 
+    assert processor._build_encoder_settings("h264") == {"cq": 28}
+
+
+def test_processor_resolves_native_default_for_codec(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(codec="h264")
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.NVIDIA,
+    )
+
     assert processor._build_encoder_settings("h264") == {"cq": 25}
+
+
+def test_processor_rejects_cq_in_custom_args(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(encoder_cq=28, encoder_custom_args="cq=22")
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.NVIDIA,
+    )
+
+    with pytest.raises(ValueError, match="CQ.*custom encoder settings"):
+        processor._build_encoder_settings("hevc")
 
 
 def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path) -> None:
@@ -280,7 +356,8 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
         from jasna.gui.settings_panel import SettingsPanel
 
         panel = SettingsPanel(root)
-        assert panel.get_settings() == AppSettings()
+        assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
+        assert panel._saved_preset_settings == panel.get_settings()
     finally:
         root.destroy()
 

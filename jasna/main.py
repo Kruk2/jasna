@@ -79,6 +79,65 @@ def _path_collision_key(path: Path) -> str:
     return key.casefold() if sys.platform == "win32" else key
 
 
+def _resolve_cli_encoder_settings(
+    raw_settings: str,
+    *,
+    cq: int | None,
+    codec: str,
+    vendor,
+) -> dict[str, object]:
+    from jasna.accelerator import AcceleratorVendor
+    from jasna.media import parse_encoder_settings, validate_encoder_settings
+    from jasna.media.encoder_quality import encoder_cq_spec, validate_encoder_cq
+
+    resolved_vendor = AcceleratorVendor(str(vendor))
+    settings = parse_encoder_settings(raw_settings)
+    cq_aliases = {"cq"}
+    if resolved_vendor is AcceleratorVendor.AMD:
+        cq_aliases.add("qvbr_quality_level")
+    duplicates = sorted(cq_aliases & settings.keys())
+    if len(duplicates) > 1:
+        raise ValueError(
+            "--encoder-settings contains multiple CQ controls: "
+            f"{', '.join(duplicates)}; use only one"
+        )
+    if cq is not None and duplicates:
+        raise ValueError(
+            "--cq conflicts with --encoder-settings "
+            f"{', '.join(duplicates)}; use only one CQ control"
+        )
+
+    if cq is not None:
+        settings["cq"] = validate_encoder_cq(
+            cq,
+            codec=codec,
+            vendor=resolved_vendor,
+        )
+    elif "cq" in settings:
+        validate_encoder_cq(
+            settings["cq"],
+            codec=codec,
+            vendor=resolved_vendor,
+        )
+    elif (
+        resolved_vendor is AcceleratorVendor.AMD
+        and "qvbr_quality_level" in settings
+    ):
+        validate_encoder_cq(
+            settings["qvbr_quality_level"],
+            codec=codec,
+            vendor=resolved_vendor,
+        )
+    else:
+        settings["cq"] = encoder_cq_spec(codec, resolved_vendor).default
+
+    return validate_encoder_settings(
+        settings,
+        codec=codec,
+        vendor=resolved_vendor,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="jasna")
     parser.add_argument("--version", action="version", version=__version__)
@@ -397,6 +456,12 @@ def build_parser() -> argparse.ArgumentParser:
         help=CLI_HELP["codec"],
     )
     encoding.add_argument(
+        "--cq",
+        type=int,
+        default=None,
+        help=CLI_HELP["cq"],
+    )
+    encoding.add_argument(
         "--encoder-settings",
         type=str,
         default="",
@@ -554,7 +619,6 @@ def main() -> None:
     import torch
 
     from jasna.pipeline import Pipeline
-    from jasna.media import parse_encoder_settings, validate_encoder_settings
 
     input_video = Path(args.input) if args.input else None
     if input_video is not None and not input_video.exists():
@@ -704,7 +768,14 @@ def main() -> None:
     if codec not in {"hevc", "h264", "av1"}:
         raise ValueError(f"Unsupported codec: {codec} (supported: hevc, h264, av1)")
 
-    encoder_settings = validate_encoder_settings(parse_encoder_settings(str(args.encoder_settings)), codec=codec)
+    from jasna.accelerator import vendor_for_device
+
+    encoder_settings = _resolve_cli_encoder_settings(
+        str(args.encoder_settings),
+        cq=args.cq,
+        codec=codec,
+        vendor=vendor_for_device(str(args.device)),
+    )
 
     batch_size = int(args.batch_size)
     if batch_size <= 0:

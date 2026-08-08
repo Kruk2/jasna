@@ -3,7 +3,7 @@
 import customtkinter as ctk
 from tkinter import filedialog
 
-from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.accelerator import vendor_for_device
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_compact_switch, create_icon
 from jasna.gui.locales import t
@@ -13,6 +13,7 @@ from jasna.gui.settings_sections.widgets import (
     get_tooltip,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.media.encoder_quality import encoder_cq_spec, validate_encoder_cq
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
 # from these maps, never from .lower() on the label.
@@ -22,30 +23,6 @@ CODEC_LABEL_TO_CANONICAL = {
     "AV1": "av1",
 }
 CODEC_CANONICAL_TO_LABEL = {v: k for k, v in CODEC_LABEL_TO_CANONICAL.items()}
-
-_CQ_OFFSETS = {"hevc": 0, "h264": 0, "av1": 7}
-_NVIDIA_CQ_OFFSETS = {"hevc": 0, "h264": -3, "av1": 7}
-_CQ_MIN = 15
-_CQ_MAX = 35
-
-
-def translate_cq_for_codec(
-    cq: int,
-    old_codec: str,
-    new_codec: str,
-    vendor: AcceleratorVendor,
-) -> int:
-    """Translate the visible CQ scale when switching output codecs."""
-    if old_codec == new_codec:
-        return cq
-    offsets = (
-        _NVIDIA_CQ_OFFSETS
-        if vendor is AcceleratorVendor.NVIDIA
-        else _CQ_OFFSETS
-    )
-    cq -= offsets[old_codec]
-    cq += offsets[new_codec]
-    return max(_CQ_MIN, min(_CQ_MAX, cq))
 
 
 class EncodingSection:
@@ -81,6 +58,11 @@ class EncodingSection:
         self._widgets["codec"].pack(side="right")
         self._widgets["codec"].set_value("hevc")
         self._active_codec = "hevc"
+        self._cq_vendor = vendor_for_device()
+        self._cq_values = {
+            codec: encoder_cq_spec(codec, self._cq_vendor).default
+            for codec in CODEC_CANONICAL_TO_LABEL
+        }
 
         # Quality/CQ
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -92,17 +74,23 @@ class EncodingSection:
         cq_tip.pack(side="left", padx=4)
         Tooltip(cq_tip, get_tooltip("encoder_cq"))
 
+        initial_cq = self._cq_values[self._active_codec]
+        initial_spec = encoder_cq_spec(self._active_codec, self._cq_vendor)
         self._widgets["encoder_cq_val"] = create_slider_value_label(
-            row2, "22", 3, Colors.BG_PANEL
+            row2, str(initial_cq), 3, Colors.BG_PANEL
         )
         self._widgets["encoder_cq_val"].pack(side="right")
         self._widgets["encoder_cq"] = ctk.CTkSlider(
-            row2, from_=15, to=35, number_of_steps=20,
+            row2,
+            from_=initial_spec.minimum,
+            to=initial_spec.maximum,
+            number_of_steps=initial_spec.maximum - initial_spec.minimum,
             fg_color=Colors.BG_CARD, progress_color=Colors.PRIMARY, button_color=Colors.PRIMARY,
-            width=160, command=lambda v: self._widgets["encoder_cq_val"].configure(text=str(int(v)))
+            width=160,
+            command=self._on_cq_changed,
         )
         self._widgets["encoder_cq"].pack(side="right", padx=(0, 8))
-        self._widgets["encoder_cq"].set(22)
+        self._widgets["encoder_cq"].set(initial_cq)
 
         # Sharpening
         sharpen_row = ctk.CTkFrame(inner, fg_color="transparent")
@@ -245,15 +233,25 @@ class EncodingSection:
         working_dir_browse_btn.pack(side="right")
 
     def _on_codec_changed(self, new_codec: str):
-        cq = translate_cq_for_codec(
-            int(self._widgets["encoder_cq"].get()),
-            self._active_codec,
-            new_codec,
-            vendor_for_device(),
+        self._cq_values[self._active_codec] = int(
+            self._widgets["encoder_cq"].get()
         )
+        self._active_codec = new_codec
+        spec = encoder_cq_spec(new_codec, self._cq_vendor)
+        self._widgets["encoder_cq"].configure(
+            from_=spec.minimum,
+            to=spec.maximum,
+            number_of_steps=spec.maximum - spec.minimum,
+        )
+        cq = self._cq_values[new_codec]
         self._widgets["encoder_cq"].set(cq)
         self._widgets["encoder_cq_val"].configure(text=str(cq))
-        self._active_codec = new_codec
+        self._on_modified()
+
+    def _on_cq_changed(self, value: float):
+        cq = int(value)
+        self._cq_values[self._active_codec] = cq
+        self._widgets["encoder_cq_val"].configure(text=str(cq))
         self._on_modified()
 
     def _browse_lut_path(self):
@@ -274,8 +272,27 @@ class EncodingSection:
     def apply(self, preset):
         self._widgets["codec"].set_value(preset.codec)
         self._active_codec = self._widgets["codec"].get_value()
-        self._widgets["encoder_cq"].set(preset.encoder_cq)
-        self._widgets["encoder_cq_val"].configure(text=str(preset.encoder_cq))
+        self._cq_values = {
+            codec: encoder_cq_spec(codec, self._cq_vendor).default
+            for codec in CODEC_CANONICAL_TO_LABEL
+        }
+        spec = encoder_cq_spec(self._active_codec, self._cq_vendor)
+        cq = spec.default if preset.encoder_cq is None else preset.encoder_cq
+        validate_encoder_cq(
+            cq,
+            codec=self._active_codec,
+            vendor=self._cq_vendor,
+        )
+        if not isinstance(cq, int) or isinstance(cq, bool):
+            raise ValueError(f"GUI CQ must be an integer (got {cq!r})")
+        self._cq_values[self._active_codec] = cq
+        self._widgets["encoder_cq"].configure(
+            from_=spec.minimum,
+            to=spec.maximum,
+            number_of_steps=spec.maximum - spec.minimum,
+        )
+        self._widgets["encoder_cq"].set(cq)
+        self._widgets["encoder_cq_val"].configure(text=str(cq))
         self._widgets["encoder_custom_args"].delete(0, "end")
         self._widgets["encoder_custom_args"].insert(0, preset.encoder_custom_args)
         self._widgets["sharpen_strength"].set(preset.sharpen_strength)

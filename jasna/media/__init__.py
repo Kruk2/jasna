@@ -55,8 +55,8 @@ SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
     *SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values()
 )
 
-# User-facing AMF settings. ``cq`` is kept as a portable Jasna option and is
-# translated to AMF's qvbr_quality_level by the encoder.
+# User-facing AMF settings. ``cq`` is kept as a portable Jasna option; the
+# encoder changes only its key to ``qvbr_quality_level``, preserving the value.
 _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
         "preset",

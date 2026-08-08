@@ -343,22 +343,34 @@ class Processor:
     def _build_encoder_settings(self, codec: str) -> dict:
         # Built per job (not cached in the video session) so a codec change
         # between queued jobs is always validated against the selected codec.
-        from jasna.accelerator import vendor_for_device
+        from jasna.accelerator import AcceleratorVendor, vendor_for_device
         from jasna.media import parse_encoder_settings, validate_encoder_settings
+        from jasna.media.encoder_quality import (
+            encoder_cq_spec,
+            validate_encoder_cq,
+        )
 
         settings = self._settings
         vendor = vendor_for_device()
-        encoder_settings = {}
-        if settings.encoder_cq:
-            from jasna.gui.settings_sections.encoding import translate_cq_for_codec
-            encoder_settings["cq"] = translate_cq_for_codec(
-                settings.encoder_cq,
-                settings.codec,
-                codec,
-                vendor,
-            )
+        cq = (
+            encoder_cq_spec(codec, vendor).default
+            if settings.encoder_cq is None
+            else settings.encoder_cq
+        )
+        validate_encoder_cq(cq, codec=codec, vendor=vendor)
+        encoder_settings = {"cq": cq}
         if settings.encoder_custom_args:
-            encoder_settings.update(parse_encoder_settings(settings.encoder_custom_args))
+            custom_settings = parse_encoder_settings(settings.encoder_custom_args)
+            cq_aliases = {"cq"}
+            if vendor is AcceleratorVendor.AMD:
+                cq_aliases.add("qvbr_quality_level")
+            duplicates = sorted(cq_aliases & custom_settings.keys())
+            if duplicates:
+                raise ValueError(
+                    "CQ is controlled by the quality slider; remove "
+                    f"{', '.join(duplicates)} from custom encoder settings"
+                )
+            encoder_settings.update(custom_settings)
         return validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
 
     def _run_video_job(

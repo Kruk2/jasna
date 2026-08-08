@@ -90,9 +90,9 @@ jasna --input input_folder --output output_folder
 - **[只修复视频的一部分](docs/zh/segments.md)** — 区间编辑器、内置马赛克扫描、提交更好的遮罩，以及 `--segments` CLI 参数。
 - **[VR180 视频](docs/zh/vr180.md)** — Jasna 如何处理并排 VR，以及按片商的自动设置。
 - **[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)** — 片段大小、时间重叠、模型编译，以及显存不足时该怎么办。
-- **[高级处理](docs/zh/advanced_processing.md)** — 降噪、60→30 FPS 导出、色彩 LUT、锐化、按编解码器调整质量、自定义编码器设置和导出后操作。
+- **[高级处理](docs/zh/advanced_processing.md)** — 降噪、60→30 FPS 导出、色彩 LUT、锐化、原样传给编码器的 CQ 质量设置、自定义编码器设置和导出后操作。
 - **[流媒体](docs/zh/streaming.md)** — 在浏览器中或通过 Stash 实时观看修复后的视频。
-- **[CLI 参考](docs/zh/cli.md)** — 所有命令行选项，包括输出模板、各编解码器的编码器设置和导出后操作。
+- **[CLI 参考](docs/zh/cli.md)** — 所有命令行选项，包括 `--cq`、输出模板、各编解码器的编码器设置和导出后操作。
 - **[从源代码运行](docs/en/development.md)** — 开发者环境搭建和构建说明。
 
 ## 基准测试

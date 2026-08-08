@@ -86,6 +86,7 @@ class TestBuildParser:
         assert args.denoise_step == "after_primary"
         assert args.secondary_restoration == "none"
         assert args.codec == "hevc"
+        assert args.cq is None
         assert args.encoder_settings == ""
         assert args.retarget_high_fps is False
         assert args.sharpen == 0.0
@@ -428,6 +429,31 @@ class TestArgForwarding:
     def test_encoder_settings_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--encoder-settings", "cq=22,rc-lookahead=32"])
         assert pipe["encoder_settings"] == {"cq": 22, "rc-lookahead": 32}
+
+    def test_default_cq_follows_codec(self, tmp_path):
+        hevc, _ = self._capture_run(tmp_path, [])
+        h264, _ = self._capture_run(tmp_path, ["--codec", "h264"])
+        av1, _ = self._capture_run(tmp_path, ["--codec", "av1"])
+
+        assert hevc["encoder_settings"] == {"cq": 28}
+        assert h264["encoder_settings"] == {"cq": 25}
+        assert av1["encoder_settings"] == {"cq": 35}
+
+    def test_direct_cq_forwarded_unchanged(self, tmp_path):
+        pipe, _ = self._capture_run(tmp_path, ["--codec", "h264", "--cq", "31"])
+
+        assert pipe["encoder_settings"] == {"cq": 31}
+
+    def test_direct_cq_conflicts_with_advanced_cq(self, tmp_path):
+        with pytest.raises(ValueError, match="--cq.*--encoder-settings"):
+            self._capture_run(
+                tmp_path,
+                ["--cq", "28", "--encoder-settings", "cq=22"],
+            )
+
+    def test_direct_cq_validated_for_codec(self, tmp_path):
+        with pytest.raises(ValueError, match=r"h264.*1\.\.51"):
+            self._capture_run(tmp_path, ["--codec", "h264", "--cq", "52"])
 
     def test_batch_size_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--batch-size", "8"])

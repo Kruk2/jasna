@@ -5,12 +5,9 @@ import sys
 
 import pytest
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.locales import TRANSLATIONS
-from jasna.media.video_encoder import (
-    DEFAULT_AV1_ENCODER_OPTIONS,
-    DEFAULT_ENCODER_OPTIONS,
-    DEFAULT_H264_ENCODER_OPTIONS,
-)
+from jasna.media.encoder_quality import encoder_cq_spec
 
 _FULL_LOCALES = ["zh", "ja"]
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
@@ -297,16 +294,19 @@ def test_codec_tooltip_covers_all_three_codecs(lang: str) -> None:
 
 
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
-def test_cq_tooltip_mentions_codec_relative_values(lang: str) -> None:
+def test_cq_tooltip_mentions_literal_native_values(lang: str) -> None:
     tip = TRANSLATIONS[lang].get("tip_encoder_cq")
     if tip is None:
         pytest.skip(f"{lang} has no tip_encoder_cq override")
     assert "CQ" in tip
     assert "AV1" in tip
-    # The quoted starting values must track the encoder defaults, not drift from them.
-    assert DEFAULT_ENCODER_OPTIONS["cq"] in tip
-    assert DEFAULT_H264_ENCODER_OPTIONS["cq"] in tip
-    assert DEFAULT_AV1_ENCODER_OPTIONS["cq"] in tip
+    # Quoted defaults and ranges must track the shared native CQ specification.
+    for vendor in (AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD):
+        for codec in ("h264", "hevc", "av1"):
+            spec = encoder_cq_spec(codec, vendor)
+            assert str(spec.default) in tip
+            assert str(spec.minimum) in tip
+            assert str(spec.maximum) in tip
 
 
 @pytest.mark.parametrize("lang", sorted(TRANSLATIONS))

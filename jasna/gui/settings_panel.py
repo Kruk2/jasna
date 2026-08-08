@@ -274,6 +274,12 @@ class SettingsPanel(ctk.CTkFrame):
 
         for section in self._sections:
             section.apply(preset)
+        if self._saved_preset_settings.encoder_cq is None:
+            # ``None`` is the portable preset sentinel; modification tracking
+            # compares against the literal value currently displayed by this GPU.
+            self._saved_preset_settings.encoder_cq = int(
+                self._widgets["encoder_cq"].get()
+            )
         self._sync_temporal_filter_limits(int(self._widgets["max_clip_size"].get()))
 
         self._applying_preset = False  # Re-enable modification tracking

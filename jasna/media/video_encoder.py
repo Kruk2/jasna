@@ -38,6 +38,7 @@ from jasna.media.container_utils import (
     is_mov_chapter_stream,
     subtitle_transcode_codec,
 )
+from jasna.media.encoder_quality import encoder_cq_spec
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
 
@@ -50,7 +51,7 @@ DEFAULT_ENCODER_OPTIONS: dict[str, str] = {
     "tune": "hq",
     "profile": "main10",
     "rc": "vbr",
-    "cq": "28",
+    "cq": str(encoder_cq_spec("hevc", AcceleratorVendor.NVIDIA).default),
     "qmin": "17",
     "qmax": "34",
     "nonref_p": "1",
@@ -75,7 +76,7 @@ DEFAULT_H264_ENCODER_OPTIONS: dict[str, str] = {
     "profile": "high",
     "rc": "vbr",
     # CQ 25 kept representative capped and uncapped H.264 encodes above VMAF 95.
-    "cq": "25",
+    "cq": str(encoder_cq_spec("h264", AcceleratorVendor.NVIDIA).default),
     "qmin": "17",
     "qmax": "34",
     "nonref_p": "1",
@@ -100,7 +101,7 @@ DEFAULT_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "preset": "p5",
     "tune": "hq",
     "rc": "vbr",
-    "cq": "35",
+    "cq": str(encoder_cq_spec("av1", AcceleratorVendor.NVIDIA).default),
     "nonref_p": "1",
     "g": "250",
     "temporal-aq": "1",
@@ -116,7 +117,9 @@ DEFAULT_AMF_H264_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
     "rc": "qvbr",
-    "qvbr_quality_level": "24",
+    "qvbr_quality_level": str(
+        encoder_cq_spec("h264", AcceleratorVendor.AMD).default
+    ),
     "g": "250",
     "preanalysis": "1",
     "vbaq": "1",
@@ -127,7 +130,9 @@ DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
     "rc": "cbr",
-    "qvbr_quality_level": "25",
+    "qvbr_quality_level": str(
+        encoder_cq_spec("hevc", AcceleratorVendor.AMD).default
+    ),
     "g": "250",
     "preanalysis": "0",
     "vbaq": "1",
@@ -139,7 +144,9 @@ DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
     "rc": "qvbr",
-    "qvbr_quality_level": "32",
+    "qvbr_quality_level": str(
+        encoder_cq_spec("av1", AcceleratorVendor.AMD).default
+    ),
     "g": "250",
     "preanalysis": "1",
     "vbaq": "1",

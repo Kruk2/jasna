@@ -165,7 +165,7 @@ class AppSettings:
 
     # Encoding
     codec: str = "hevc"
-    encoder_cq: int = 28
+    encoder_cq: int | None = None
     encoder_custom_args: str = ""
     sharpen_strength: float = 0.0
     lut_path: str = ""
@@ -262,7 +262,30 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
     migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
     custom_args = migrated.get("encoder_custom_args")
     if custom_args:
-        migrated["encoder_custom_args"] = _migrate_encoder_custom_args(custom_args)
+        from jasna.media import parse_encoder_settings
+
+        migrated_args = _migrate_encoder_custom_args(custom_args)
+        try:
+            parsed_args = parse_encoder_settings(migrated_args)
+        except (ValueError, json.JSONDecodeError):
+            migrated["encoder_custom_args"] = migrated_args
+        else:
+            cq_key = next(
+                (
+                    key
+                    for key in ("cq", "qvbr_quality_level")
+                    if key in parsed_args
+                ),
+                None,
+            )
+            if cq_key is not None:
+                cq = parsed_args[cq_key]
+                if isinstance(cq, int) and not isinstance(cq, bool):
+                    migrated["encoder_cq"] = cq
+                    del parsed_args[cq_key]
+            migrated["encoder_custom_args"] = ",".join(
+                f"{key}={value}" for key, value in parsed_args.items()
+            )
     if "codec" in migrated:
         migrated["codec"] = _normalize_preset_codec(migrated["codec"])
     return migrated

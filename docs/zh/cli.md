@@ -93,7 +93,8 @@ jasna --input input_folder --output output_folder
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | 离线输出可选 `hevc`、`h264` 或 `av1`。HLS 流媒体始终使用 H.264。 |
-| `--encoder-settings` | — | JSON 对象或逗号分隔的 `key=value`，例如 `{"cq":22}` 或 `cq=22,rc-lookahead=32`。见下文。 |
+| `--cq` | 根据 GPU/编解码器 | 原样传给编码器的质量目标。越低质量越好、文件越大。NVIDIA 默认值：H.264 25、HEVC 28、AV1 35；AMD 默认值：H.264 24、HEVC 25、AV1 32。 |
+| `--encoder-settings` | — | JSON 对象或逗号分隔的高级 `key=value` 设置，例如 `{"rc-lookahead":32}` 或 `rc-lookahead=32,bf=4`。见下文。 |
 | `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），编码前由 GPU 应用。也可在 GUI 的编码设置部分设置。 |
 | `--sharpen` | `0` | 编码前锐化画面，取值 `0`（关闭）到 `1`（最强）。与 ffmpeg 的 `cas` 滤镜一致，无需二次转码。见[高级处理](advanced_processing.md)。 |
 | `--retarget-high-fps` | 关闭 | 通过每两帧处理一帧实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频时序保持不变。 |
@@ -115,23 +116,37 @@ jasna --input input_folder --output output_folder
 
 ### 编码器设置
 
-`--encoder-settings` 用于微调硬件编码器。参数会根据当前编码器进行
-校验 — 不支持的参数会失败，并给出清晰的错误提示，列出该编码器接受的
-参数。通常你只需要 `cq`:
+`--cq` 是主要的质量控制。GUI 显示或命令行输入的数值会原样传给当前编码器；
+切换编解码器不会转换数值。数值越低，质量越好，文件越大。
+
+| GPU | H.264 默认值 | HEVC 默认值 | AV1 默认值 | 允许范围 |
+| --- | ---: | ---: | ---: | --- |
+| NVIDIA | 25 | 28 | 35 | H.264/HEVC 为 1–51；AV1 为 1–63 |
+| AMD | 24 | 25 | 32 | 0–51 |
+
+NVIDIA 将 CQ 0 保留为自动值，因此 Jasna 要求显式质量目标从 1 开始。在编辑当前
+任务期间，GUI 会分别记住每个编解码器的原始数值。
+
+`--encoder-settings` 用于微调其他硬件编码器设置。参数会根据当前编码器进行
+校验 — 不支持的参数会失败，并给出清晰的错误提示，列出该编码器接受的参数:
 
 ```bash
-# Higher quality (bigger file): lower cq. NVIDIA defaults: H.264 25, HEVC 28, AV1 35.
-jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"
+# 要提高质量（并增大文件），请降低 CQ。
+jasna --input in.mp4 --output out.mkv --cq 22
 
-# Multiple keys
-jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,bf=4"
+# CQ 与高级设置
+jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=32,bf=4"
 ```
+
+为保持兼容，省略 `--cq` 时仍可在 `--encoder-settings` 中使用 `cq=22`。若通过
+两个入口同时指定 CQ，Jasna 会报错，而不会静默选择其中一个。GUI 中的 CQ 控件是
+唯一入口，因此**自定义参数**不接受 CQ 别名。
 
 #### NVIDIA (NVENC) 参数 — 所有编解码器
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | VBR 的目标质量。**最主要的质量参数。**越低 = 质量越好、文件越大。H.264/HEVC 范围 0–51（NVIDIA 默认 25/28），AV1 范围 0–63（NVIDIA 默认 35）。输出体积自动上限可能让相近的数值得到相同结果。 |
+| `cq` | VBR 的目标质量。越低 = 质量越好、文件越大。H.264/HEVC 的原值范围为 1–51（默认 25/28），AV1 为 1–63（默认 35）。输出体积自动上限可能让相近的数值得到相同结果。 |
 | `preset` | 速度/质量权衡，从 `p1`（最快）到 `p7`（最佳）。默认 `p5`。 |
 | `tune` | `hq`（默认）、`ll`、`ull` 或 `lossless`。 |
 | `rc` | 码率控制模式: `vbr`（默认）、`cbr`、`constqp`。 |
@@ -184,8 +199,8 @@ NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码�
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | 通用质量参数，自动转换为 AMF 的 `qvbr_quality_level`。越低越好。默认 27（H.264）、28（HEVC）、35（AV1）。 |
-| `qvbr_quality_level` | AMF 原生质量级别，如果你想直接设置它。 |
+| `cq` | 数值不变、作为 AMF `qvbr_quality_level` 传递的质量目标。越低越好。范围 0–51；默认 24（H.264）、25（HEVC）、32（AV1）。 |
+| `qvbr_quality_level` | AMF 原生别名。省略 `--cq` 时可用于 CLI 高级设置；GUI 自定义参数中不接受。 |
 | `usage` | 编码器用途配置。默认 `high_quality`。 |
 | `quality` | 速度/质量预设: `speed`、`balanced`、`quality`（默认）。 |
 | `rc` | 码率控制模式。默认 `qvbr`。 |

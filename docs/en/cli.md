@@ -93,7 +93,8 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 | Option | Default | Notes |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | `hevc`, `h264`, or `av1` for offline output. HLS streaming always uses H.264. |
-| `--encoder-settings` | — | JSON object or comma-separated `key=value` pairs, e.g. `{"cq":22}` or `cq=22,rc-lookahead=32`. See below. |
+| `--cq` | GPU/codec-specific | Literal encoder quality target. Lower is better quality and a larger file. NVIDIA defaults: H.264 25, HEVC 28, AV1 35. AMD defaults: H.264 24, HEVC 25, AV1 32. |
+| `--encoder-settings` | — | Advanced settings as a JSON object or comma-separated `key=value` pairs, e.g. `{"rc-lookahead":32}` or `rc-lookahead=32,bf=4`. See below. |
 | `--lut` | — | `.cube` color LUT (1D or 3D) applied on GPU before encoding. Also available in the GUI's Encoding section. |
 | `--sharpen` | `0` | Sharpen the picture before encoding, from `0` (off) to `1` (strongest). Matches ffmpeg's `cas` filter, so no second pass is needed. See [Advanced processing](advanced_processing.md). |
 | `--retarget-high-fps` | off | 60 → 30 FPS (and 59.94 → 29.97) by processing every second frame. Other rates unchanged; audio timing preserved. |
@@ -118,23 +119,41 @@ With `--segments`, the codec is locked to the input video's codec and
 
 ### Encoder settings
 
-`--encoder-settings` fine-tunes the hardware encoder. Keys are validated
-against the active encoder — an unsupported key fails with a clear error
-listing what the encoder accepts. You rarely need more than `cq`:
+`--cq` is the main quality control. The number shown in the GUI or supplied on
+the command line is sent to the active encoder unchanged; switching codecs does
+not translate it. Lower values improve quality and increase file size.
+
+| GPU | H.264 default | HEVC default | AV1 default | Accepted range |
+| --- | ---: | ---: | ---: | --- |
+| NVIDIA | 25 | 28 | 35 | 1–51 for H.264/HEVC; 1–63 for AV1 |
+| AMD | 24 | 25 | 32 | 0–51 |
+
+NVIDIA reserves CQ 0 as an automatic value, so Jasna requires an explicit
+quality target starting at 1. The GUI remembers a separate literal value for
+each codec while you edit the current job.
+
+`--encoder-settings` fine-tunes other hardware encoder options. Keys are
+validated against the active encoder — an unsupported key fails with a clear
+error listing what the encoder accepts:
 
 ```bash
-# Higher quality (bigger file): lower cq. NVIDIA defaults: H.264 25, HEVC 28, AV1 35.
-jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22"
+# Higher quality (bigger file): lower CQ.
+jasna --input in.mp4 --output out.mkv --cq 22
 
-# Multiple keys
-jasna --input in.mp4 --output out.mkv --encoder-settings "cq=22,rc-lookahead=32,bf=4"
+# CQ plus advanced keys
+jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=32,bf=4"
 ```
+
+For compatibility, `cq=22` inside `--encoder-settings` is still accepted when
+`--cq` is omitted. Supplying CQ through both interfaces is rejected instead of
+silently choosing one. In the GUI, the CQ control is authoritative, so CQ
+aliases are not accepted in **Encoder custom args**.
 
 #### NVIDIA (NVENC) keys — all codecs
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Target quality for VBR. **The main quality knob.** Lower = better quality and bigger file. Scale 0–51 for H.264/HEVC (NVIDIA defaults 25/28), 0–63 for AV1 (NVIDIA default 35). The automatic size ceiling can make nearby values behave alike. |
+| `cq` | Target quality for VBR. Lower = better quality and bigger file. Literal range 1–51 for H.264/HEVC (defaults 25/28), 1–63 for AV1 (default 35). The automatic size ceiling can make nearby values behave alike. |
 | `preset` | Speed/quality trade-off, `p1` (fastest) to `p7` (best). Default `p5`. |
 | `tune` | `hq` (default), `ll`, `ull`, or `lossless`. |
 | `rc` | Rate-control mode: `vbr` (default), `cbr`, `constqp`. |
@@ -190,8 +209,8 @@ Per-codec extras:
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Portable quality knob, automatically translated to AMF's `qvbr_quality_level`. Lower = better. Defaults 27 (H.264), 28 (HEVC), 35 (AV1). |
-| `qvbr_quality_level` | The native AMF quality level, if you prefer to set it directly. |
+| `cq` | Quality target passed unchanged as AMF's `qvbr_quality_level`. Lower = better. Range 0–51; defaults 24 (H.264), 25 (HEVC), 32 (AV1). |
+| `qvbr_quality_level` | AMF's native alias. Accepted in CLI advanced settings when `--cq` is omitted; not accepted in the GUI custom-args field. |
 | `usage` | Encoder usage profile. Default `high_quality`. |
 | `quality` | Speed/quality preset: `speed`, `balanced`, `quality` (default). |
 | `rc` | Rate-control mode. Default `qvbr`. |

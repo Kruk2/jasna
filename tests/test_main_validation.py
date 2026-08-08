@@ -57,6 +57,7 @@ class TestMainValidation:
             pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2"])
 
         assert pipeline_cls.call_args.kwargs["codec"] == "h264"
+        assert pipeline_cls.call_args.kwargs["encoder_settings"] == {"cq": 25}
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
         assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
 
