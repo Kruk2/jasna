@@ -602,7 +602,6 @@ class JobListItem(ctk.CTkFrame):
             command=self._show_action_menu,
         )
         self._overflow_btn.pack(side="right")
-        Tooltip(self._overflow_btn, t("queue_more_actions_tooltip"))
 
         self._fps_label = ctk.CTkLabel(
             self._stats_frame,
@@ -761,7 +760,13 @@ class JobListItem(ctk.CTkFrame):
     def _show_action_menu(self, event=None):
         if not getattr(self, "_action_menu_visible", True):
             return "break"
-        menu = tkinter.Menu(self, tearoff=False)
+        menu = getattr(self, "_action_menu", None)
+        if menu is None:
+            menu = tkinter.Menu(self, tearoff=False)
+            menu.bind("<Unmap>", lambda _event: menu.grab_release())
+            self._action_menu = menu
+        else:
+            menu.delete(0, "end")
         menu.add_command(
             label=t("open_containing_folder"),
             command=self._handle_open_containing_folder,
@@ -780,11 +785,7 @@ class JobListItem(ctk.CTkFrame):
             y = self._overflow_btn.winfo_rooty() + self._overflow_btn.winfo_height()
         else:
             x, y = event.x_root, event.y_root
-        try:
-            menu.tk_popup(x, y)
-        finally:
-            menu.grab_release()
-            menu.destroy()
+        menu.tk_popup(x, y)
         return "break"
 
     def set_segment_summary(self, text: str, *, selected: bool = False) -> None:

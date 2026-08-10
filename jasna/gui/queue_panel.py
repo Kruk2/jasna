@@ -401,7 +401,7 @@ class QueuePanel(ctk.CTkFrame):
 
     def _requeue_job(self, job: JobItem) -> None:
         terminal_statuses = {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
-        if self._running or job.status not in terminal_statuses:
+        if job.status not in terminal_statuses:
             return
         index = self._find_job_index_by_id(job.id)
         if index is None:
@@ -431,8 +431,7 @@ class QueuePanel(ctk.CTkFrame):
                 job.status is JobStatus.COMPLETED and job.output_path is not None
             ),
             requeueable=(
-                not self._running
-                and job.status in {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
+                job.status in {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
             ),
         )
 

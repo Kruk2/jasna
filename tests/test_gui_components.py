@@ -46,14 +46,15 @@ def test_queue_overflow_menu_uses_button_and_right_click_coordinates(monkeypatch
         def add_separator(self):
             self.commands.append(None)
 
+        def bind(self, *_args):
+            pass
+
+        def delete(self, *_args):
+            self.commands.clear()
+
         def tk_popup(self, x, y):
             self.popup = (x, y)
 
-        def grab_release(self):
-            self.released = True
-
-        def destroy(self):
-            self.destroyed = True
 
     monkeypatch.setattr(components.tkinter, "Menu", Menu)
     monkeypatch.setattr(components, "t", lambda key: key)
@@ -73,12 +74,9 @@ def test_queue_overflow_menu_uses_button_and_right_click_coordinates(monkeypatch
     assert JobListItem._show_action_menu(item) == "break"
     assert menus[0].popup == (10, 42)
     assert menus[0].commands[0]["label"] == "open_containing_folder"
-    assert menus[0].released
-    assert menus[0].destroyed
 
     assert JobListItem._show_action_menu(item, SimpleNamespace(x_root=30, y_root=40)) == "break"
-    assert menus[1].popup == (30, 40)
-    assert menus[1].destroyed
+    assert menus[0].popup == (30, 40)
 
 
 def test_queue_overflow_menu_includes_completed_actions(monkeypatch) -> None:
@@ -95,13 +93,13 @@ def test_queue_overflow_menu_includes_completed_actions(monkeypatch) -> None:
         def add_separator(self):
             self.commands.append(None)
 
+        def bind(self, *_args):
+            pass
+
+        def delete(self, *_args):
+            self.commands.clear()
+
         def tk_popup(self, *_args):
-            pass
-
-        def grab_release(self):
-            pass
-
-        def destroy(self):
             pass
 
     monkeypatch.setattr(components.tkinter, "Menu", Menu)

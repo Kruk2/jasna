@@ -268,6 +268,10 @@ def test_completed_job_menu_copies_output_and_requeues(monkeypatch, tmp_path: Pa
         assert widget._has_restored_output
         assert widget._requeueable
 
+        panel.set_running(True, processing_job_id=panel._jobs[1].id)
+        assert widget._requeueable
+        panel.set_running(False)
+
         clipboard = MagicMock()
         monkeypatch.setattr(panel, "winfo_toplevel", lambda: clipboard)
         panel._copy_job_path(job)
