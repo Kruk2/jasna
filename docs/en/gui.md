@@ -11,7 +11,10 @@ Every setting has a tooltip: hover the ⓘ icon next to it.
   top to bottom.
 - Each video has **scissors** for the [Segment Editor](segments.md) and a
   **play** button that opens it in the restored player, ready but paused. Use
-  the **three-dot** menu (or right-click a row) to open its containing folder.
+  the **three-dot** menu (or right-click a row) to open its input folder.
+  Completed videos reveal their output file when the file manager supports it.
+  The menu can also copy the relevant path, open a completed output, or
+  requeue a finished, failed, or skipped item at the end of the queue.
   Image rows have the folder menu too; the cross removes any item from the queue.
 - While processing, each item shows live progress, FPS, and time remaining.
 - Every time you press **Start**, Jasna processes every item still in the

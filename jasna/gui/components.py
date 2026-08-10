@@ -431,6 +431,9 @@ class JobListItem(ctk.CTkFrame):
         on_edit_segments: callable = None,
         on_play: callable = None,
         on_open_containing_folder: callable = None,
+        on_copy_path: callable = None,
+        on_open_restored_output: callable = None,
+        on_requeue: callable = None,
         **kwargs
     ):
         super().__init__(
@@ -446,6 +449,9 @@ class JobListItem(ctk.CTkFrame):
         self._on_edit_segments = on_edit_segments
         self._on_play = on_play
         self._on_open_containing_folder = on_open_containing_folder
+        self._on_copy_path = on_copy_path
+        self._on_open_restored_output = on_open_restored_output
+        self._on_requeue = on_requeue
         # Drag callbacks (set by QueuePanel)
         self._on_drag_start = on_drag_start
         self._on_drag_move = on_drag_move
@@ -454,6 +460,9 @@ class JobListItem(ctk.CTkFrame):
         self._conflict_visible = False
         self._segments_editable = True
         self._player_enabled = True
+        self._action_menu_visible = True
+        self._has_restored_output = False
+        self._requeueable = False
         self._segment_tooltips: list[Tooltip] = []
         
         # Main content container
@@ -737,12 +746,35 @@ class JobListItem(ctk.CTkFrame):
         if self._on_open_containing_folder:
             self._on_open_containing_folder()
 
+    def _handle_copy_path(self) -> None:
+        if self._on_copy_path:
+            self._on_copy_path()
+
+    def _handle_open_restored_output(self) -> None:
+        if self._on_open_restored_output:
+            self._on_open_restored_output()
+
+    def _handle_requeue(self) -> None:
+        if self._on_requeue:
+            self._on_requeue()
+
     def _show_action_menu(self, event=None):
+        if not getattr(self, "_action_menu_visible", True):
+            return "break"
         menu = tkinter.Menu(self, tearoff=False)
         menu.add_command(
             label=t("open_containing_folder"),
             command=self._handle_open_containing_folder,
         )
+        menu.add_command(label=t("copy_path"), command=self._handle_copy_path)
+        if self._has_restored_output:
+            menu.add_command(
+                label=t("open_restored_output"),
+                command=self._handle_open_restored_output,
+            )
+        if self._requeueable:
+            menu.add_separator()
+            menu.add_command(label=t("requeue"), command=self._handle_requeue)
         if event is None:
             x = self._overflow_btn.winfo_rootx()
             y = self._overflow_btn.winfo_rooty() + self._overflow_btn.winfo_height()
@@ -777,7 +809,29 @@ class JobListItem(ctk.CTkFrame):
     def set_player_enabled(self, enabled: bool) -> None:
         if self._on_play:
             self._player_enabled = bool(enabled)
-            self._play_btn.configure(state="normal" if enabled else "disabled")
+            if enabled:
+                self._play_btn.configure(state="normal")
+                if not self._play_btn.winfo_manager():
+                    pack_options = {"side": "right", "padx": (0, 6)}
+                    if self._overflow_btn.winfo_manager():
+                        pack_options["before"] = self._overflow_btn
+                    self._play_btn.pack(**pack_options)
+            else:
+                self._play_btn.pack_forget()
+
+    def set_action_menu_visible(self, visible: bool) -> None:
+        self._action_menu_visible = bool(visible)
+        if visible:
+            if not self._overflow_btn.winfo_manager():
+                self._overflow_btn.pack(side="right")
+        else:
+            self._overflow_btn.pack_forget()
+
+    def set_action_options(
+        self, *, has_restored_output: bool, requeueable: bool
+    ) -> None:
+        self._has_restored_output = bool(has_restored_output)
+        self._requeueable = bool(requeueable)
 
     # Internal drag event proxies to allow QueuePanel to handle reordering
     def _internal_drag_start(self, event):

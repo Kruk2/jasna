@@ -64,6 +64,7 @@ def test_completed_job_stays_completed(tmp_path):
     processor._run()
 
     assert job.status is JobStatus.COMPLETED
+    assert job.output_path == tmp_path / "clip_restored.mp4"
     assert updates[-1].status is JobStatus.COMPLETED
 
 

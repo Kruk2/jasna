@@ -260,6 +260,7 @@ class Processor:
             if not is_image:
                 self._run_post_export_video_command(input_path, output_path)
 
+            job.output_path = output_path
             job.status = JobStatus.COMPLETED
             self._progress(ProgressUpdate(
                 job_id=job.id,

@@ -14,6 +14,7 @@ from jasna.gui.models import JobItem, JobStatus
 from jasna.gui.components import AutoHidingScrollableFrame, JobListItem, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.file_actions import open_containing_folder
+from jasna.gui.file_actions import open_file
 from jasna.gui.locales import t
 
 from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order
@@ -355,10 +356,14 @@ class QueuePanel(ctk.CTkFrame):
             on_edit_segments=(None if is_image_path(path) else lambda j=job: self._edit_segments(j)),
             on_play=(None if is_image_path(path) else lambda j=job: self._play_job(j)),
             on_open_containing_folder=lambda j=job: self._open_containing_folder(j),
+            on_copy_path=lambda j=job: self._copy_job_path(j),
+            on_open_restored_output=lambda j=job: self._open_restored_output(j),
+            on_requeue=lambda j=job: self._requeue_job(j),
         )
         widget.pack(fill="x", pady=(0, 4))
         self._job_widgets.append(widget)
         widget.set_player_enabled(not self._running)
+        self._set_widget_action_options(job, widget)
         widget.set_segment_summary(t("segments_full_video"))
         
         # Show conflict indicator if needed
@@ -375,7 +380,61 @@ class QueuePanel(ctk.CTkFrame):
             self._on_play(job.path)
 
     def _open_containing_folder(self, job: JobItem) -> None:
-        open_containing_folder(job.path, parent=self.winfo_toplevel())
+        completed = job.status is JobStatus.COMPLETED
+        path = job.output_path if completed and job.output_path is not None else job.path
+        open_containing_folder(
+            path,
+            parent=self.winfo_toplevel(),
+            select_file=completed,
+        )
+
+    def _copy_job_path(self, job: JobItem) -> None:
+        path = self._action_path(job)
+        window = self.winfo_toplevel()
+        window.clipboard_clear()
+        window.clipboard_append(str(path))
+        window.update_idletasks()
+
+    def _open_restored_output(self, job: JobItem) -> None:
+        if job.status is JobStatus.COMPLETED and job.output_path is not None:
+            open_file(job.output_path, parent=self.winfo_toplevel())
+
+    def _requeue_job(self, job: JobItem) -> None:
+        terminal_statuses = {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
+        if self._running or job.status not in terminal_statuses:
+            return
+        index = self._find_job_index_by_id(job.id)
+        if index is None:
+            return
+        widget = self._job_widgets.pop(index)
+        self._jobs.pop(index)
+        self._jobs.append(job)
+        self._job_widgets.append(widget)
+        job.error_message = ""
+        job.output_path = None
+        self.update_job_status(job.id, JobStatus.PENDING)
+        for item in self._job_widgets:
+            item.pack_forget()
+            item.pack(fill="x", pady=(0, 4))
+        self._refresh_conflicts()
+        if self._on_jobs_changed:
+            self._on_jobs_changed()
+
+    def _action_path(self, job: JobItem) -> Path:
+        if job.status is JobStatus.COMPLETED and job.output_path is not None:
+            return job.output_path
+        return job.path
+
+    def _set_widget_action_options(self, job: JobItem, widget: JobListItem) -> None:
+        widget.set_action_options(
+            has_restored_output=(
+                job.status is JobStatus.COMPLETED and job.output_path is not None
+            ),
+            requeueable=(
+                not self._running
+                and job.status in {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
+            ),
+        )
 
     def _edit_segments(self, job: JobItem) -> None:
         if job.status is not JobStatus.PENDING:
@@ -467,6 +526,7 @@ class QueuePanel(ctk.CTkFrame):
     def reset_jobs_for_run(self) -> None:
         for job in self._jobs:
             job.error_message = ""
+            job.output_path = None
             self.update_job_status(job.id, JobStatus.PENDING)
         self._refresh_conflicts()
         
@@ -541,6 +601,8 @@ class QueuePanel(ctk.CTkFrame):
         if status != JobStatus.PENDING:
             widget.set_conflict(False)
         widget.set_segments_editable(status is JobStatus.PENDING)
+        widget.set_action_menu_visible(status is not JobStatus.PROCESSING)
+        self._set_widget_action_options(job, widget)
                 
     def _refresh_conflicts(self):
         """Re-check all jobs for output file conflicts."""
@@ -662,6 +724,11 @@ class QueuePanel(ctk.CTkFrame):
                 widget.set_removable(i != processing_idx)
                 widget.set_segments_editable(self._jobs[i].status is JobStatus.PENDING)
                 widget.set_player_enabled(False)
+                widget.set_action_menu_visible(
+                    i != processing_idx
+                    and self._jobs[i].status is not JobStatus.PROCESSING
+                )
+                self._set_widget_action_options(self._jobs[i], widget)
         else:
             # Restore normal appearance and enable controls
             self._clear_btn.configure(state="normal")
@@ -676,6 +743,8 @@ class QueuePanel(ctk.CTkFrame):
                 widget.set_removable(True)
                 widget.set_segments_editable(job.status is JobStatus.PENDING)
                 widget.set_player_enabled(True)
+                widget.set_action_menu_visible(job.status is not JobStatus.PROCESSING)
+                self._set_widget_action_options(job, widget)
 
     def enable_file_drop(self):
         """Register the list area as an OS file drop target."""

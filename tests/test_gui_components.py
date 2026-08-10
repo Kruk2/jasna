@@ -34,14 +34,17 @@ def test_queue_overflow_menu_uses_button_and_right_click_coordinates(monkeypatch
 
     class Menu:
         def __init__(self, *_args, **_kwargs):
-            self.command = None
+            self.commands = []
             self.popup = None
             self.released = False
             self.destroyed = False
             menus.append(self)
 
         def add_command(self, **kwargs):
-            self.command = kwargs
+            self.commands.append(kwargs)
+
+        def add_separator(self):
+            self.commands.append(None)
 
         def tk_popup(self, x, y):
             self.popup = (x, y)
@@ -62,17 +65,75 @@ def test_queue_overflow_menu_uses_button_and_right_click_coordinates(monkeypatch
             winfo_height=lambda: 22,
         ),
         _handle_open_containing_folder=handler,
+        _handle_copy_path=MagicMock(),
+        _has_restored_output=False,
+        _requeueable=False,
     )
 
     assert JobListItem._show_action_menu(item) == "break"
     assert menus[0].popup == (10, 42)
-    assert menus[0].command["label"] == "open_containing_folder"
+    assert menus[0].commands[0]["label"] == "open_containing_folder"
     assert menus[0].released
     assert menus[0].destroyed
 
     assert JobListItem._show_action_menu(item, SimpleNamespace(x_root=30, y_root=40)) == "break"
     assert menus[1].popup == (30, 40)
     assert menus[1].destroyed
+
+
+def test_queue_overflow_menu_includes_completed_actions(monkeypatch) -> None:
+    menus = []
+
+    class Menu:
+        def __init__(self, *_args, **_kwargs):
+            self.commands = []
+            menus.append(self)
+
+        def add_command(self, **kwargs):
+            self.commands.append(kwargs)
+
+        def add_separator(self):
+            self.commands.append(None)
+
+        def tk_popup(self, *_args):
+            pass
+
+        def grab_release(self):
+            pass
+
+        def destroy(self):
+            pass
+
+    monkeypatch.setattr(components.tkinter, "Menu", Menu)
+    monkeypatch.setattr(components, "t", lambda key: key)
+    item = SimpleNamespace(
+        _overflow_btn=SimpleNamespace(
+            winfo_rootx=lambda: 10,
+            winfo_rooty=lambda: 20,
+            winfo_height=lambda: 22,
+        ),
+        _handle_open_containing_folder=MagicMock(),
+        _handle_copy_path=MagicMock(),
+        _handle_open_restored_output=MagicMock(),
+        _handle_requeue=MagicMock(),
+        _has_restored_output=True,
+        _requeueable=True,
+    )
+
+    JobListItem._show_action_menu(item)
+
+    assert [entry["label"] for entry in menus[0].commands if entry] == [
+        "open_containing_folder",
+        "copy_path",
+        "open_restored_output",
+        "requeue",
+    ]
+
+
+def test_queue_overflow_menu_is_suppressed_when_hidden() -> None:
+    item = SimpleNamespace(_action_menu_visible=False)
+
+    assert JobListItem._show_action_menu(item) == "break"
 
 
 def test_enabling_start_button_hides_disabled_tooltip() -> None:

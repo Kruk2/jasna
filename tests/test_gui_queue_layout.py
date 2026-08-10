@@ -11,6 +11,7 @@ import pytest
 
 from jasna.gui.app import JasnaApp
 from jasna.gui.models import JobItem, JobStatus
+from jasna.gui import queue_panel as queue_panel_module
 from jasna.gui.queue_panel import QueuePanel
 from jasna.segments import SegmentRange
 from jasna.gui.theme import Colors, Sizing
@@ -52,6 +53,7 @@ def test_reset_jobs_for_run_prepares_every_status_and_preserves_job_options(
             index for index, job in enumerate(jobs) if job.id == job_id
         ),
         _get_output_path=lambda path: tmp_path / f"{path.stem}-restored.mp4",
+        _set_widget_action_options=lambda *_args: None,
     )
     panel.update_job_status = MethodType(QueuePanel.update_job_status, panel)
     panel._refresh_conflicts = MethodType(QueuePanel._refresh_conflicts, panel)
@@ -175,7 +177,13 @@ def test_queue_rows_offer_video_player_and_folder_actions() -> None:
         played.assert_called_once_with(Path("/tmp/video.mp4"))
 
         panel.set_running(True, processing_job_id=panel._jobs[0].id)
-        assert video._play_btn.cget("state") == "disabled"
+        assert not video._play_btn.winfo_ismapped()
+        assert not video._overflow_btn.winfo_ismapped()
+
+        panel.set_running(False)
+        root.update()
+        assert video._play_btn.winfo_ismapped()
+        assert video._overflow_btn.winfo_ismapped()
     finally:
         root.destroy()
 
@@ -196,9 +204,80 @@ def test_video_added_during_processing_has_disabled_player() -> None:
         panel.add_job(Path("/tmp/later.mp4"))
         video = panel._job_widgets[0]
 
-        assert video._play_btn.cget("state") == "disabled"
+        assert not video._play_btn.winfo_ismapped()
         video._handle_play()
         played.assert_not_called()
+    finally:
+        root.destroy()
+
+
+def test_queue_folder_action_uses_input_or_completed_output(monkeypatch, tmp_path: Path) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        opened = MagicMock()
+        monkeypatch.setattr(queue_panel_module, "open_containing_folder", opened)
+        input_path = tmp_path / "input.mp4"
+        output_path = tmp_path / "output.mp4"
+        panel.add_job(input_path)
+        job = panel._jobs[0]
+        widget = panel._job_widgets[0]
+
+        widget._handle_open_containing_folder()
+        opened.assert_called_once_with(
+            input_path, parent=panel.winfo_toplevel(), select_file=False
+        )
+
+        opened.reset_mock()
+        job.output_path = output_path
+        panel.update_job_status(job.id, JobStatus.PROCESSING)
+        root.update()
+        assert not widget._overflow_btn.winfo_ismapped()
+
+        panel.update_job_status(job.id, JobStatus.COMPLETED)
+        root.update()
+        assert widget._overflow_btn.winfo_ismapped()
+        widget._handle_open_containing_folder()
+        opened.assert_called_once_with(
+            output_path, parent=panel.winfo_toplevel(), select_file=True
+        )
+    finally:
+        root.destroy()
+
+
+def test_completed_job_menu_copies_output_and_requeues(monkeypatch, tmp_path: Path) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        panel.add_job(tmp_path / "first.mp4")
+        panel.add_job(tmp_path / "second.mp4")
+        job = panel._jobs[0]
+        job.output_path = tmp_path / "first_restored.mp4"
+        panel.update_job_status(job.id, JobStatus.COMPLETED)
+        widget = panel._job_widgets[0]
+        assert widget._has_restored_output
+        assert widget._requeueable
+
+        clipboard = MagicMock()
+        monkeypatch.setattr(panel, "winfo_toplevel", lambda: clipboard)
+        panel._copy_job_path(job)
+        clipboard.clipboard_append.assert_called_once_with(str(job.output_path))
+
+        panel._requeue_job(job)
+        assert panel._jobs[-1] is job
+        assert job.status is JobStatus.PENDING
+        assert job.output_path is None
+        assert not panel._job_widgets[-1]._requeueable
     finally:
         root.destroy()
 
@@ -276,9 +355,11 @@ def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
     ]
     widgets = [
         SimpleNamespace(
-            set_removable=lambda value: row_updates.append(("removable", value)),
-            set_segments_editable=lambda value: row_updates.append(("segments", value)),
-            set_player_enabled=lambda value: row_updates.append(("player", value)),
+                set_removable=lambda value: row_updates.append(("removable", value)),
+                set_segments_editable=lambda value: row_updates.append(("segments", value)),
+                set_player_enabled=lambda value: row_updates.append(("player", value)),
+                set_action_menu_visible=lambda value: row_updates.append(("menu", value)),
+                set_action_options=lambda **values: row_updates.append(("options", values)),
         )
         for _ in jobs
     ]
@@ -300,6 +381,7 @@ def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
         _jobs=jobs,
         _job_widgets=widgets,
         _find_job_index_by_id=lambda job_id: job_id,
+        _set_widget_action_options=lambda *_args: None,
     )
 
     QueuePanel.set_running(panel, True, processing_job_id=0)

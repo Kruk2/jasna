@@ -39,6 +39,7 @@ class JobProcessingSnapshot:
 @dataclass
 class JobItem:
     path: Path
+    output_path: Path | None = None
     id: int = field(default_factory=lambda: next(_job_id_counter))
     status: JobStatus = JobStatus.PENDING
     duration_seconds: float | None = None
