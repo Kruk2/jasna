@@ -56,7 +56,7 @@ SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
 )
 
 # User-facing AMF settings. ``cq`` is kept as a portable Jasna option; the
-# encoder changes only its key to ``qvbr_quality_level``, preserving the value.
+# encoder maps it to QVBR for H.264/AV1 and constant QP for HEVC.
 _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
         "preset",

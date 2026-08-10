@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -85,7 +86,12 @@ def test_amf_hevc_uses_compatible_defaults() -> None:
     from jasna.media.video_encoder import AMF_ENCODER_SPECS
 
     options = AMF_ENCODER_SPECS["hevc"].default_options
-    assert (options["rc"], options["preanalysis"]) == ("cbr", "0")
+    assert options["rc"] == "cqp"
+    assert options["preanalysis"] == "0"
+    assert options["vbaq"] == "0"
+    assert options["qp_i"] == "25"
+    assert options["qp_p"] == "25"
+    assert "qvbr_quality_level" not in options
 
 
 def test_video_encoder_selects_amf_and_normalizes_cq(monkeypatch, tmp_path) -> None:
@@ -107,6 +113,92 @@ def test_video_encoder_selects_amf_and_normalizes_cq(monkeypatch, tmp_path) -> N
     assert encoder.spec.frame_format == "nv12"
     assert encoder.encoder_options["qvbr_quality_level"] == "21"
     assert "cq" not in encoder.encoder_options
+
+
+def test_amf_hevc_maps_cq_to_constant_qp(monkeypatch, tmp_path) -> None:
+    import jasna.media.video_encoder as module
+
+    monkeypatch.setattr(
+        module,
+        "vendor_for_device",
+        lambda _device: AcceleratorVendor.AMD,
+    )
+    encoder = module.NvidiaVideoEncoder(
+        str(tmp_path / "out.mp4"),
+        torch.device("cuda:0"),
+        _metadata(),
+        codec="hevc",
+        encoder_settings={"cq": 21},
+    )
+    assert encoder.spec.frame_format == "p010le"
+    assert encoder.encoder_options["rc"] == "cqp"
+    assert encoder.encoder_options["qp_i"] == "21"
+    assert encoder.encoder_options["qp_p"] == "21"
+    assert "cq" not in encoder.encoder_options
+    assert "qvbr_quality_level" not in encoder.encoder_options
+
+
+def test_amf_hevc_cqp_skips_source_bitrate_cap(monkeypatch, tmp_path) -> None:
+    import jasna.media.video_encoder as module
+
+    monkeypatch.setattr(
+        module,
+        "vendor_for_device",
+        lambda _device: AcceleratorVendor.AMD,
+    )
+    encoder = module.NvidiaVideoEncoder(
+        str(tmp_path / "out.mp4"),
+        torch.device("cuda:0"),
+        replace(_metadata(), video_bitrate=20_000_000),
+        codec="hevc",
+        encoder_settings={"cq": 21},
+    )
+    assert "maxrate" not in encoder.encoder_options
+    assert "bufsize" not in encoder.encoder_options
+
+
+@pytest.mark.parametrize("rc", ["qvbr", "hqvbr", 4, 5])
+def test_amf_hevc_rejects_qvbr_for_main10(
+    monkeypatch, tmp_path, rc: str | int
+) -> None:
+    import jasna.media.video_encoder as module
+
+    monkeypatch.setattr(
+        module,
+        "vendor_for_device",
+        lambda _device: AcceleratorVendor.AMD,
+    )
+    with pytest.raises(ValueError, match="AMD HEVC Main10.*QVBR"):
+        module.NvidiaVideoEncoder(
+            str(tmp_path / "out.mp4"),
+            torch.device("cuda:0"),
+            _metadata(),
+            codec="hevc",
+            encoder_settings={"cq": 21, "rc": rc},
+        )
+
+
+def test_amf_hevc_8bit_allows_qvbr(monkeypatch, tmp_path) -> None:
+    import jasna.media.video_encoder as module
+
+    monkeypatch.setattr(
+        module,
+        "vendor_for_device",
+        lambda _device: AcceleratorVendor.AMD,
+    )
+    encoder = module.NvidiaVideoEncoder(
+        str(tmp_path / "out.mp4"),
+        torch.device("cuda:0"),
+        _metadata(),
+        codec="hevc",
+        encoder_settings={"cq": 21, "rc": "qvbr"},
+        match_input_bit_depth=True,
+    )
+    assert encoder.spec.frame_format == "nv12"
+    assert encoder.encoder_options["rc"] == "qvbr"
+    assert encoder.encoder_options["qvbr_quality_level"] == "21"
+    assert "qp_i" not in encoder.encoder_options
+    assert "qp_p" not in encoder.encoder_options
 
 
 def test_amf_p010_host_input_reinterprets_signed_storage() -> None:

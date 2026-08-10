@@ -77,7 +77,7 @@ def test_cli_legacy_amf_quality_alias_suppresses_default() -> None:
         cq=None,
         codec="hevc",
         vendor="amd",
-    ) == {"qvbr_quality_level": 30, "g": 120}
+    ) == {"g": 120, "cq": 30}
 
 
 def test_cli_legacy_amf_quality_alias_uses_native_range() -> None:

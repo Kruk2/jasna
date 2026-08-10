@@ -123,8 +123,8 @@ def _resolve_cli_encoder_settings(
         resolved_vendor is AcceleratorVendor.AMD
         and "qvbr_quality_level" in settings
     ):
-        validate_encoder_cq(
-            settings["qvbr_quality_level"],
+        settings["cq"] = validate_encoder_cq(
+            settings.pop("qvbr_quality_level"),
             codec=codec,
             vendor=resolved_vendor,
         )
