@@ -192,9 +192,9 @@ class QueuePanel(ctk.CTkFrame):
             border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY,
             height=Sizing.INPUT_HEIGHT,
-            state="disabled",
         )
         self._output_entry.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self._output_entry.bind("<KeyRelease>", self._on_output_entry_changed)
         
         self._output_browse_btn = ctk.CTkButton(
             output_row,
@@ -240,6 +240,12 @@ class QueuePanel(ctk.CTkFrame):
         self._refresh_conflicts()
         if self._on_output_changed:
             self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
+
+    def _on_output_entry_changed(self, event=None) -> None:
+        self._update_same_as_input_style()
+        self._refresh_conflicts()
+        if self._on_output_changed:
+            self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
         
     def _on_add_files(self):
         files = filedialog.askopenfilenames(
@@ -275,17 +281,19 @@ class QueuePanel(ctk.CTkFrame):
         self._output_entry.delete(0, "end")
         if folder:
             self._output_entry.insert(0, folder)
-        self._output_entry.configure(state="disabled")
-        same_as_input = not folder
-        self._same_as_input_btn.configure(
-            fg_color=Colors.PRIMARY if same_as_input else Colors.BG_CARD,
-            hover_color=Colors.PRIMARY_HOVER if same_as_input else Colors.BORDER_LIGHT,
-        )
+        self._update_same_as_input_style()
         self._refresh_conflicts()
         if self._on_jobs_changed:
             self._on_jobs_changed()
         if self._on_output_changed:
             self._on_output_changed(self.get_output_folder(), self.get_output_pattern())
+
+    def _update_same_as_input_style(self) -> None:
+        same_as_input = not self.get_output_folder()
+        self._same_as_input_btn.configure(
+            fg_color=Colors.PRIMARY if same_as_input else Colors.BG_CARD,
+            hover_color=Colors.PRIMARY_HOVER if same_as_input else Colors.BORDER_LIGHT,
+        )
 
     def _on_clear_queue(self):
         self._jobs.clear()
@@ -545,6 +553,7 @@ class QueuePanel(ctk.CTkFrame):
     def set_output_enabled(self, enabled: bool):
         """Enable or disable output location controls (but not queue add/remove)."""
         state = "normal" if enabled else "disabled"
+        self._output_entry.configure(state=state)
         self._output_browse_btn.configure(state=state)
         self._same_as_input_btn.configure(state=state)
         self._pattern_entry.configure(state=state)
@@ -642,6 +651,7 @@ class QueuePanel(ctk.CTkFrame):
             self._clear_btn.configure(state="disabled")
             self._clear_completed_btn.configure(state="disabled")
             self._output_browse_btn.configure(state="disabled")
+            self._output_entry.configure(state="disabled")
             self._same_as_input_btn.configure(state="disabled")
             self._pattern_entry.configure(state="disabled")
             # Allow adding files/folders
@@ -657,6 +667,7 @@ class QueuePanel(ctk.CTkFrame):
             self._clear_btn.configure(state="normal")
             self._clear_completed_btn.configure(state="normal")
             self._output_browse_btn.configure(state="normal")
+            self._output_entry.configure(state="normal")
             self._same_as_input_btn.configure(state="normal")
             self._pattern_entry.configure(state="normal")
             self._add_files_btn.configure(state="normal")

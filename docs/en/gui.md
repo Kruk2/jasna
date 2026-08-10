@@ -26,6 +26,8 @@ Every setting has a tooltip: hover the ⓘ icon next to it.
 
 - **Same as input** writes each result next to its original file. Click its
   button beside Output location to return to this mode after choosing a folder.
+- Type a folder path directly, or use the folder button. Either choice turns
+  off **Same as input**.
 - The **filename pattern** controls output names — `{original}` stands for
   the input name. If a pattern would overwrite something, the affected queue
   items are highlighted immediately.

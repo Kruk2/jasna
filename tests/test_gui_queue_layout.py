@@ -227,6 +227,14 @@ def test_same_as_input_clears_output_and_refreshes_conflicts(tmp_path: Path) -> 
         assert panel._same_as_input_btn.cget("state") == "normal"
         changed.assert_called_once_with("", panel.get_output_pattern())
 
+        changed.reset_mock()
+        panel._output_entry.insert(0, str(tmp_path / "manual"))
+        panel._on_output_entry_changed()
+
+        assert panel.get_output_folder() == str(tmp_path / "manual")
+        assert panel._same_as_input_btn.cget("fg_color") == Colors.BG_CARD
+        changed.assert_called_once_with(str(tmp_path / "manual"), panel.get_output_pattern())
+
         panel.set_running(True, processing_job_id=panel._jobs[0].id)
         assert panel._same_as_input_btn.cget("state") == "disabled"
     finally:
@@ -284,6 +292,7 @@ def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
         _clear_btn=control(),
         _clear_completed_btn=control(),
         _output_browse_btn=control(),
+        _output_entry=control(),
         _same_as_input_btn=control(),
         _pattern_entry=control(),
         _add_files_btn=control(),
