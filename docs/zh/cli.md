@@ -235,10 +235,12 @@ NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码�
 | ------ | ------- | ----- |
 | `--post-export-action` | `none` | `shutdown` 或 `command`，在所有导出完成后运行。 |
 | `--post-export-command` | — | `--post-export-action command` 使用的 shell 命令。 |
+| `--post-export-video-command` | — | 每个视频成功导出后运行的 shell 命令。支持 `{input}`、`{output}`、`{output_dir}`、`{output_stem}` 和 `{output_suffix}`。 |
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
+jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
 
 ## 许可证

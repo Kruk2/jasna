@@ -39,6 +39,10 @@ CLI_HELP: dict[str, str] = {
     ),
     "encoder_settings": 'Advanced encoder settings, as a JSON object or comma-separated key=value pairs (e.g. {"rc-lookahead":32} or rc-lookahead=32,bf=4)',
     "post_export_action": "Action to run after all non-streaming exports finish.",
+    "post_export_video_command": (
+        "Shell command to run after each successful video export. Supports "
+        "{input}, {output}, {output_dir}, {output_stem}, and {output_suffix}."
+    ),
 }
 
 
@@ -65,4 +69,5 @@ GUI_TOOLTIP_KEY_BY_DEST: dict[str, str] = {
     "cq": "encoder_cq",
     "encoder_settings": "encoder_custom_args",
     "post_export_action": "post_export_action",
+    "post_export_video_command": "post_export_video_command",
 }

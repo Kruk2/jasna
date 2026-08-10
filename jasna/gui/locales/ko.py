@@ -321,6 +321,8 @@ KO = {
         "post_export_shutdown": "PC 종료",
         "post_export_command": "사용자 정의 명령",
         "post_export_command_placeholder": "모든 작업 완료 후 실행할 명령",
+        "post_export_video_command": "각 비디오 후 명령",
+        "post_export_video_command_placeholder": "{input} 및 {output}을 사용하는 선택 명령",
 
         # Control Bar
         "btn_start": "▶ 시작",
@@ -422,6 +424,7 @@ KO = {
         "tip_encoder_cq": "비디오 목표 품질(CQ)입니다. 표시된 숫자는 변경 없이 인코더로 전달됩니다. 숫자가 낮을수록 화질이 좋아지지만 파일이 커집니다. Jasna는 출력 크기도 제한하므로 한도에 도달하면 가까운 값이 같은 결과를 낼 수 있습니다.\nNVIDIA 기본값: H.264 25, HEVC 28, AV1 35. 범위: H.264/HEVC 1–51, AV1 1–63.\nAMD 기본값: H.264 24, HEVC 25, AV1 32. 범위: 0–51.",
         "tip_encoder_custom_args": "고급 인코더 매개변수 (쉼표로 구분된 key=value 형식).\n잘 모르겠으면 비워두세요.\n\n예: rc-lookahead=32",
         "tip_post_export_action": "전체 대기열이 완료된 뒤 실행할 선택 작업입니다.\n\n없음: 아무 작업도 하지 않습니다.\nPC 종료: 컴퓨터 전원을 끕니다.\n사용자 정의 명령: 아래 명령을 시스템 셸에서 실행합니다.",
+        "tip_post_export_video_command": "각 비디오 내보내기가 성공한 뒤 시스템 셸에서 실행하고 완료될 때까지 기다립니다. 비워 두면 사용하지 않습니다. 경로는 이미 따옴표로 보호됩니다.\n\n자리표시자: {input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
         "tip_output_location": "처리된 동영상을 저장할 폴더.\n비워두면 원본 파일 옆에 저장됩니다.",
         "tip_output_pattern": "출력 파일의 이름 템플릿.\n{original}은 입력 파일명(확장자 제외)의 자리 표시자입니다.\n\n예: {original}_restored.mp4 → my_video_restored.mp4",
 

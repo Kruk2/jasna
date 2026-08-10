@@ -117,3 +117,18 @@ Post-export section or via CLI:
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 ```
+
+To run a command after every successful video instead, fill **Command after
+each video** or use `--post-export-video-command`. Jasna waits for it to finish;
+if it fails, that video is marked as failed. The path placeholders are already
+quoted:
+
+```bash
+jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
+```
+
+Available placeholders are `{input}`, `{output}`, `{output_dir}`,
+`{output_stem}`, and `{output_suffix}`. The example keeps the original output;
+use a script with a temporary file if you want to replace it safely. `ffmpeg`
+must be on `PATH`, or replace it with its full path. The command's working
+folder is the output folder.

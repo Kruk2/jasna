@@ -99,3 +99,16 @@ CQ 别名。各编解码器支持的参数、原生范围和默认值均记录�
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 ```
+
+要在每个视频成功导出后运行命令，请填写**每个视频完成后的命令**，或使用
+`--post-export-video-command`。Jasna 会等待命令完成；如果命令失败，该视频会被
+标记为错误。路径占位符已自动添加引号:
+
+```bash
+jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
+```
+
+可用占位符为 `{input}`、`{output}`、`{output_dir}`、`{output_stem}` 和
+`{output_suffix}`。此示例会保留原始输出；如需安全替换，请使用先写入临时文件的
+脚本。`ffmpeg` 必须位于 `PATH` 中，也可以改用完整路径。
+命令的工作目录是输出文件夹。

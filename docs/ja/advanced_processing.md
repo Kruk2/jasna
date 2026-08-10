@@ -117,3 +117,18 @@ jasna --input in.mp4 --output out.mkv --cq 22
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 ```
+
+正常に書き出された各動画の後にコマンドを実行するには、**動画ごとのコマンド**を
+入力するか、`--post-export-video-command` を使います。Jasna はコマンドの完了を
+待機し、失敗した場合はその動画をエラーにします。パスのプレースホルダーは
+自動的に引用符で保護されます:
+
+```bash
+jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
+```
+
+使用できるプレースホルダーは `{input}`、`{output}`、`{output_dir}`、
+`{output_stem}`、`{output_suffix}` です。この例では元の出力を残します。
+安全に置き換える場合は一時ファイルを使うスクリプトを指定してください。
+`ffmpeg` は `PATH` に追加するか、フルパスで指定します。コマンドの作業フォルダーは
+出力フォルダーです。

@@ -341,6 +341,8 @@ JA = {
         "post_export_shutdown": "PC をシャットダウン",
         "post_export_command": "カスタムコマンド",
         "post_export_command_placeholder": "すべてのジョブ完了後に実行するコマンド",
+        "post_export_video_command": "動画ごとのコマンド",
+        "post_export_video_command_placeholder": "任意のコマンド（{input} と {output} を使用）",
 
         # Control Bar
         "btn_start": "▶ 開始",
@@ -442,6 +444,7 @@ JA = {
         "tip_encoder_cq": "動画の目標品質（CQ）。表示された数値は変更せずエンコーダーへ渡されます。低いほど高品質ですが、ファイルは大きくなります。Jasna は出力サイズも制限するため、上限に達すると近い値で同じ結果になることがあります。\nNVIDIA のデフォルト：H.264 は 25、HEVC は 28、AV1 は 35。範囲：H.264/HEVC は 1–51、AV1 は 1–63。\nAMD のデフォルト：H.264 は 24、HEVC は 25、AV1 は 32。範囲：0–51。",
         "tip_encoder_custom_args": "上級者向けのエンコーダーパラメータ（カンマ区切りの key=value 形式）。\nよくわからない場合は空欄のままにしてください。\n\n例：rc-lookahead=32",
         "tip_post_export_action": "キュー全体が完了した後に実行する任意のアクションです。\n\nなし：何もしません。\nPC をシャットダウン：コンピューターの電源を切ります。\nカスタムコマンド：下のコマンドをシステムシェルで実行します。",
+        "tip_post_export_video_command": "各動画の書き出しが正常に完了した後、システムシェルで実行し、終了するまで待機します。空欄にすると無効です。パスは引用符で保護されています。\n\nプレースホルダー：{input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
         "tip_output_location": "処理済み動画の保存先フォルダ。\n空欄の場合、元のファイルと同じ場所に保存されます。",
         "tip_output_pattern": "出力ファイルの名前テンプレート。\n{original} は入力ファイル名（拡張子なし）のプレースホルダーです。\n\n例：{original}_restored.mp4 → my_video_restored.mp4",
 

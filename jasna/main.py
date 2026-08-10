@@ -523,6 +523,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Shell command to run when --post-export-action=command.",
     )
+    post_export.add_argument(
+        "--post-export-video-command",
+        type=str,
+        default="",
+        help=CLI_HELP["post_export_video_command"],
+    )
 
     benchmark_group = parser.add_argument_group("Benchmark")
     benchmark_group.add_argument(
@@ -559,8 +565,14 @@ def main() -> None:
         parser.error("--retarget-high-fps is only supported for offline exports")
     if is_streaming and args.fmp4:
         parser.error("--fmp4 is only supported for offline exports")
-    from jasna.post_export_action import validate_post_export_action, run_post_export_action_safely
+    from jasna.post_export_action import (
+        PostExportVideoCommandError,
+        run_post_export_action_safely,
+        run_post_export_video_command,
+        validate_post_export_action,
+    )
     validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
+    post_export_video_command = str(args.post_export_video_command).strip()
 
     def _run_post_export_action() -> None:
         run_post_export_action_safely(
@@ -864,6 +876,7 @@ def main() -> None:
             return output_video or vid.with_stem(vid.stem + "_out")
 
         pipeline: Pipeline | None = None
+        post_export_video_failed = False
         try:
             if is_streaming and input_video is None:
                 from jasna.streaming import HlsStreamingServer
@@ -909,8 +922,10 @@ def main() -> None:
                     if input_is_dir:
                         print(f"[{i}/{video_total}] Processing {vid.name} -> {out_path.name}")
                     pipeline = _make_pipeline(vid, out_path)
+                    export_succeeded = False
                     try:
                         pipeline.run()
+                        export_succeeded = True
                     except UnsupportedColorspaceError as e:
                         # In a folder batch, skip the bad file and keep going.
                         print(f"Error processing {vid.name}: {e}")
@@ -919,7 +934,23 @@ def main() -> None:
                     finally:
                         pipeline.close()
                         pipeline = None
+                    if export_succeeded and post_export_video_command:
+                        print(f"Running post-export command for {out_path.name}")
+                        try:
+                            run_post_export_video_command(
+                                post_export_video_command,
+                                vid,
+                                out_path,
+                                lambda: False,
+                            )
+                        except PostExportVideoCommandError as e:
+                            print(f"Error post-processing {vid.name}: {e}")
+                            if not input_is_dir:
+                                sys.exit(1)
+                            post_export_video_failed = True
                 _run_post_export_action()
+                if post_export_video_failed:
+                    sys.exit(1)
         except UnsupportedColorspaceError as e:
             print(f"Error: {e}")
             sys.exit(1)

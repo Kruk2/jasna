@@ -243,10 +243,12 @@ NVIDIA H.264 は復元されたディテールを保つためにより多くの�
 | ------ | ------- | ----- |
 | `--post-export-action` | `none` | `shutdown` または `command`。すべてのエクスポート完了後に実行されます。 |
 | `--post-export-command` | — | `--post-export-action command` 用のシェルコマンド。 |
+| `--post-export-video-command` | — | 正常に書き出された各動画の後に実行するシェルコマンド。`{input}`、`{output}`、`{output_dir}`、`{output_stem}`、`{output_suffix}` を使用できます。 |
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
+jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
 
 ## ライセンス

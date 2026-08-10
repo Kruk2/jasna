@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobItem, JobStatus, AppSettings
+from jasna.post_export_action import PostExportVideoCommandError
 
 
 def _make_jobs(*names: str) -> list[JobItem]:
@@ -178,6 +179,145 @@ class TestProcessorPullLoop:
             p._run()
 
         assert calls == []
+
+    def test_runs_post_export_video_command_after_each_video(self, tmp_path):
+        calls: list[tuple[str, Path, Path]] = []
+        p = Processor()
+        jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch(
+                "jasna.post_export_action.run_post_export_video_command",
+                lambda command, input_path, output_path, _cancel: calls.append(
+                    (command, input_path, output_path)
+                ),
+            ),
+        ):
+            p.start(
+                jobs,
+                AppSettings(post_export_video_command="remux {output}"),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        assert calls == [
+            (
+                "remux {output}",
+                tmp_path / "a.mp4",
+                tmp_path / "a_restored.mp4",
+            ),
+            (
+                "remux {output}",
+                tmp_path / "b.mp4",
+                tmp_path / "b_restored.mp4",
+            ),
+        ]
+        assert all(job.status is JobStatus.COMPLETED for job in jobs)
+
+    def test_post_export_video_command_failure_marks_job_error_and_continues(self, tmp_path):
+        p = Processor()
+        jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
+
+        def run_command(_command, _input_path, output_path, _cancel):
+            if output_path.name == "a_restored.mp4":
+                raise PostExportVideoCommandError("exit code 7")
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch(
+                "jasna.post_export_action.run_post_export_video_command",
+                side_effect=run_command,
+            ),
+        ):
+            p.start(
+                jobs,
+                AppSettings(post_export_video_command="remux {output}"),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        assert jobs[0].status is JobStatus.ERROR
+        assert jobs[1].status is JobStatus.COMPLETED
+
+    def test_post_export_video_command_skips_images(self, tmp_path):
+        command = MagicMock()
+        p = Processor()
+        jobs = _make_jobs(str(tmp_path / "image.png"))
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch("jasna.post_export_action.run_post_export_video_command", command),
+        ):
+            p.start(
+                jobs,
+                AppSettings(post_export_video_command="remux {output}"),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        command.assert_not_called()
+
+    def test_post_export_video_command_receives_auto_renamed_output(self, tmp_path):
+        (tmp_path / "clip_restored.mp4").touch()
+        command = MagicMock()
+        p = Processor()
+        jobs = _make_jobs(str(tmp_path / "clip.mp4"))
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch("jasna.post_export_action.run_post_export_video_command", command),
+        ):
+            p.start(
+                jobs,
+                AppSettings(
+                    post_export_video_command="remux {output}",
+                    file_conflict="auto_rename",
+                ),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        assert command.call_args.args[2] == tmp_path / "clip_restored (1).mp4"
+
+    def test_per_video_and_queue_wide_actions_both_run(self, tmp_path):
+        calls: list[str] = []
+        p = Processor()
+        jobs = _make_jobs(str(tmp_path / "clip.mp4"))
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch(
+                "jasna.post_export_action.run_post_export_video_command",
+                side_effect=lambda *_args: calls.append("video"),
+            ),
+            patch(
+                "jasna.post_export_action.run_post_export_action",
+                side_effect=lambda *_args: calls.append("queue"),
+            ),
+        ):
+            p.start(
+                jobs,
+                AppSettings(
+                    post_export_video_command="remux {output}",
+                    post_export_action="command",
+                    post_export_command="notify",
+                ),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        assert calls == ["video", "queue"]
 
 
 class TestJobItemId:

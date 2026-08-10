@@ -323,6 +323,8 @@ TH = {
         "post_export_shutdown": "ปิดเครื่อง PC",
         "post_export_command": "คำสั่งกำหนดเอง",
         "post_export_command_placeholder": "คำสั่งที่จะเรียกใช้หลังงานทั้งหมดเสร็จ",
+        "post_export_video_command": "คำสั่งหลังวิดีโอแต่ละไฟล์",
+        "post_export_video_command_placeholder": "คำสั่งเสริมที่ใช้ {input} และ {output}",
 
         # Control Bar
         "btn_start": "▶ เริ่ม",
@@ -424,6 +426,7 @@ TH = {
         "tip_encoder_cq": "เป้าหมายคุณภาพวิดีโอ (CQ) ตัวเลขที่แสดงจะถูกส่งไปยังตัวเข้ารหัสโดยไม่เปลี่ยนแปลง ค่าที่ต่ำกว่าให้คุณภาพดีกว่าแต่ไฟล์ใหญ่ขึ้น Jasna จำกัดขนาดเอาต์พุตด้วย ดังนั้นค่าที่ใกล้กันอาจให้ผลเหมือนกันเมื่อถึงขีดจำกัด\nค่าเริ่มต้น NVIDIA: H.264 25, HEVC 28, AV1 35 ช่วง: H.264/HEVC 1–51, AV1 1–63\nค่าเริ่มต้น AMD: H.264 24, HEVC 25, AV1 32 ช่วง: 0–51",
         "tip_encoder_custom_args": "พารามิเตอร์ encoder ขั้นสูง ในรูปแบบ key=value คั่นด้วยจุลภาค\nเว้นว่างไว้หากไม่แน่ใจ\n\nตัวอย่าง: rc-lookahead=32",
         "tip_post_export_action": "การทำงานเสริมหลังคิวทั้งหมดเสร็จ\n\nไม่มี: ไม่ทำอะไร\nปิดเครื่อง PC: ปิดคอมพิวเตอร์\nคำสั่งกำหนดเอง: เรียกใช้คำสั่งด้านล่างใน system shell",
+        "tip_post_export_video_command": "เรียกใช้ใน system shell หลังส่งออกวิดีโอแต่ละไฟล์สำเร็จ และรอจนคำสั่งเสร็จ เว้นว่างไว้เพื่อปิดใช้งาน พาธถูกใส่เครื่องหมายคำพูดไว้แล้ว\n\nตัวยึดตำแหน่ง: {input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
         "tip_output_location": "โฟลเดอร์ที่ใช้บันทึกวิดีโอที่ประมวลผลแล้ว\nเว้นว่างเพื่อบันทึกไว้ข้างไฟล์ต้นฉบับ",
         "tip_output_pattern": "รูปแบบชื่อไฟล์เอาต์พุต\nใช้ {original} เป็นตัวแทนชื่อไฟล์อินพุต (ไม่รวมนามสกุล)\n\nตัวอย่าง: {original}_restored.mp4 → my_video_restored.mp4",
 

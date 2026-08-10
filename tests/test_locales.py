@@ -126,7 +126,10 @@ _POST_EXPORT_KEYS = {
     "post_export_shutdown",
     "post_export_command",
     "post_export_command_placeholder",
+    "post_export_video_command",
+    "post_export_video_command_placeholder",
     "tip_post_export_action",
+    "tip_post_export_video_command",
     "error_post_export_command_required",
 }
 

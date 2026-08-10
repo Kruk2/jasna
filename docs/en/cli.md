@@ -245,10 +245,12 @@ Per-codec extras:
 | ------ | ------- | ----- |
 | `--post-export-action` | `none` | `shutdown` or `command`, run after all exports finish. |
 | `--post-export-command` | — | Shell command for `--post-export-action command`. |
+| `--post-export-video-command` | — | Shell command run after each successful video. Supports `{input}`, `{output}`, `{output_dir}`, `{output_stem}`, and `{output_suffix}`. |
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
+jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
 
 ## License

@@ -101,6 +101,7 @@ class TestBuildParser:
         assert args.benchmark is False
         assert args.post_export_action == "none"
         assert args.post_export_command == ""
+        assert args.post_export_video_command == ""
         assert args.working_directory is None
 
     def test_working_directory(self):
@@ -151,6 +152,14 @@ class TestBuildParser:
         assert args.post_export_action == "command"
         assert args.post_export_command == "echo done"
 
+    def test_post_export_video_command(self):
+        args = build_parser().parse_args([
+            "--input", "a.mp4",
+            "--output", "b.mp4",
+            "--post-export-video-command", "remux {output}",
+        ])
+        assert args.post_export_video_command == "remux {output}"
+
 
 # ---------------------------------------------------------------------------
 # Benchmark path
@@ -184,6 +193,33 @@ class TestOutputPath:
                 main()
 
         assert pipeline_kwargs["output_video"] == out
+
+    def test_post_export_video_command_runs_after_output_closes(self, tmp_path):
+        inp, out, rest, det = _make_model_files(tmp_path)
+        events: list[str] = []
+        pipeline = MagicMock()
+        pipeline.run.side_effect = lambda: events.append("run")
+        pipeline.close.side_effect = lambda: events.append("close")
+
+        with patch(
+            "jasna.post_export_action.run_post_export_video_command",
+            side_effect=lambda *_args: events.append("command"),
+        ) as command:
+            _run_main(
+                _base_argv(
+                    inp,
+                    out,
+                    rest,
+                    det,
+                    ["--post-export-video-command", "remux {output}"],
+                ),
+                pipeline_side_effect=lambda **_kwargs: pipeline,
+            )
+
+        assert events == ["run", "close", "command"]
+        args = command.call_args.args
+        assert args[:3] == ("remux {output}", inp, out)
+        assert callable(args[3])
 
     def test_streaming_without_output_uses_derived(self, tmp_path):
         inp, _, rest, det = _make_model_files(tmp_path)
@@ -641,6 +677,41 @@ class TestFolderBatchProgress:
         inp, out, rest, det = _make_model_files(tmp_path)
         _run_main(_base_argv(inp, out, rest, det))
         assert "Processing" not in capsys.readouterr().out
+
+    def test_post_export_video_command_failure_continues_folder_and_exits_1(
+        self, tmp_path, capsys
+    ):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "a.mp4").touch()
+        (in_dir / "b.mp4").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(tmp_path / "out"),
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+            "--post-export-video-command", "remux {output}",
+        ]
+
+        from jasna.post_export_action import PostExportVideoCommandError
+
+        command = MagicMock(
+            side_effect=[PostExportVideoCommandError("exit code 7"), None]
+        )
+        with patch(
+            "jasna.post_export_action.run_post_export_video_command", command
+        ):
+            with pytest.raises(SystemExit) as exc:
+                _run_main(argv)
+
+        assert exc.value.code == 1
+        assert command.call_count == 2
+        assert "Error post-processing a.mp4" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------

@@ -102,6 +102,7 @@ def _fake_section_widgets() -> dict:
         "working_directory": _FakeWidget(""),
         "post_export_action": _FakeValueMenu({"none": "何も", "command": "コマンド"}, "command"),
         "post_export_command": _FakeWidget("echo done "),
+        "post_export_video_command": _FakeWidget("remux {output} "),
     }
 
 
@@ -130,6 +131,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["codec"] == "av1"
     assert values["post_export_action"] == "command"
     assert values["post_export_command"] == "echo done"
+    assert values["post_export_video_command"] == "remux {output}"
     assert values["secondary_restoration"] == "tvai"
     assert values["tvai_scale"] == 2
     assert values["tvai_denoise"] is True

@@ -257,6 +257,8 @@ class Processor:
                 output_path,
                 **pipeline_options,
             )
+            if not is_image:
+                self._run_post_export_video_command(input_path, output_path)
 
             job.status = JobStatus.COMPLETED
             self._progress(ProgressUpdate(
@@ -295,6 +297,31 @@ class Processor:
             _cleanup_torch(torch)
         except Exception:
             logger.warning("Torch cleanup failed after job", exc_info=True)
+
+    def _run_post_export_video_command(self, input_path: Path, output_path: Path) -> None:
+        settings = self._settings
+        if settings is None:
+            return
+        command = settings.post_export_video_command.strip()
+        if not command:
+            return
+        if self._stop_event.is_set():
+            raise ProcessingStopped("Processing stopped")
+        from jasna.post_export_action import (
+            PostExportVideoCommandCancelled,
+            run_post_export_video_command,
+        )
+
+        self._log("INFO", f"Running post-export command for {output_path.name}")
+        try:
+            run_post_export_video_command(
+                command,
+                input_path,
+                output_path,
+                self._stop_event.is_set,
+            )
+        except PostExportVideoCommandCancelled as exc:
+            raise ProcessingStopped("Processing stopped") from exc
 
     def _mark_stopped(self, job: JobItem):
         job.status = JobStatus.PENDING

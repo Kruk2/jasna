@@ -123,7 +123,11 @@ def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
 
     mgr = PresetManager()
-    settings = AppSettings(post_export_action="command", post_export_command="echo done")
+    settings = AppSettings(
+        post_export_action="command",
+        post_export_command="echo done",
+        post_export_video_command="remux {output}",
+    )
     assert mgr.create_preset("WithAction", settings)
 
     mgr2 = PresetManager()
@@ -131,6 +135,7 @@ def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path)
     assert loaded is not None
     assert loaded.post_export_action == "command"
     assert loaded.post_export_command == "echo done"
+    assert loaded.post_export_video_command == "remux {output}"
 
 
 def test_preset_manager_resolve_falls_back_to_default(monkeypatch, tmp_path: Path) -> None:

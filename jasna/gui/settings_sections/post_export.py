@@ -67,6 +67,36 @@ class PostExportSection:
         self._widgets["post_export_command"].pack(fill="x")
         self._widgets["post_export_command"].bind("<KeyRelease>", lambda _event: self._on_modified())
 
+        video_command_label_row = ctk.CTkFrame(inner, fg_color="transparent")
+        video_command_label_row.pack(fill="x", pady=(Sizing.PADDING_MEDIUM, 4))
+        video_command_label = ctk.CTkLabel(
+            video_command_label_row,
+            text=t("post_export_video_command"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        video_command_label.pack(side="left")
+        video_command_tip = ctk.CTkLabel(
+            video_command_label_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        video_command_tip.pack(side="left", padx=4)
+        Tooltip(video_command_tip, get_tooltip("post_export_video_command"))
+        self._widgets["post_export_video_command"] = ctk.CTkEntry(
+            inner,
+            fg_color=Colors.BG_CARD,
+            border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY,
+            placeholder_text=t("post_export_video_command_placeholder"),
+        )
+        self._widgets["post_export_video_command"].pack(fill="x")
+        self._widgets["post_export_video_command"].bind(
+            "<KeyRelease>", lambda _event: self._on_modified()
+        )
+
     def _on_action_changed(self, value: str):
         if value == "command":
             self._command_frame.pack(fill="x")
@@ -78,10 +108,17 @@ class PostExportSection:
         self._widgets["post_export_action"].set_value(preset.post_export_action)
         self._widgets["post_export_command"].delete(0, "end")
         self._widgets["post_export_command"].insert(0, preset.post_export_command or "")
+        self._widgets["post_export_video_command"].delete(0, "end")
+        self._widgets["post_export_video_command"].insert(
+            0, preset.post_export_video_command or ""
+        )
         self._on_action_changed(self._widgets["post_export_action"].get_value())
 
     def collect(self) -> dict:
         return {
             "post_export_action": self._widgets["post_export_action"].get_value(),
             "post_export_command": self._widgets["post_export_command"].get().strip(),
+            "post_export_video_command": self._widgets[
+                "post_export_video_command"
+            ].get().strip(),
         }

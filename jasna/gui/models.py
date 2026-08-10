@@ -175,6 +175,7 @@ class AppSettings:
     # Post-export action
     post_export_action: str = "none"  # none, shutdown, command
     post_export_command: str = ""
+    post_export_video_command: str = ""
     
     # Output
     output_same_as_input: bool = True
