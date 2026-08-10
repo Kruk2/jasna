@@ -429,6 +429,8 @@ class JobListItem(ctk.CTkFrame):
         on_drag_move: callable = None,
         on_drag_end: callable = None,
         on_edit_segments: callable = None,
+        on_play: callable = None,
+        on_open_containing_folder: callable = None,
         **kwargs
     ):
         super().__init__(
@@ -442,6 +444,8 @@ class JobListItem(ctk.CTkFrame):
         
         self._on_remove = on_remove
         self._on_edit_segments = on_edit_segments
+        self._on_play = on_play
+        self._on_open_containing_folder = on_open_containing_folder
         # Drag callbacks (set by QueuePanel)
         self._on_drag_start = on_drag_start
         self._on_drag_move = on_drag_move
@@ -449,6 +453,7 @@ class JobListItem(ctk.CTkFrame):
         self._progress_visible = False
         self._conflict_visible = False
         self._segments_editable = True
+        self._player_enabled = True
         self._segment_tooltips: list[Tooltip] = []
         
         # Main content container
@@ -561,6 +566,35 @@ class JobListItem(ctk.CTkFrame):
                 Tooltip(self._segment_summary, t("segments_edit_tooltip")),
             ]
 
+        self._play_btn = ctk.CTkButton(
+            bottom_row,
+            text="▶",
+            width=30,
+            height=22,
+            fg_color=Colors.BG_PANEL,
+            hover_color=Colors.BORDER_LIGHT,
+            text_color=Colors.TEXT_PRIMARY,
+            cursor="hand2",
+            command=self._handle_play,
+        )
+        if self._on_play:
+            self._play_btn.pack(side="right", padx=(0, 6))
+            Tooltip(self._play_btn, t("queue_play_tooltip"))
+
+        self._overflow_btn = ctk.CTkButton(
+            bottom_row,
+            text="⋯",
+            width=24,
+            height=22,
+            fg_color=Colors.BG_PANEL,
+            hover_color=Colors.BORDER_LIGHT,
+            text_color=Colors.TEXT_PRIMARY,
+            cursor="hand2",
+            command=self._show_action_menu,
+        )
+        self._overflow_btn.pack(side="right")
+        Tooltip(self._overflow_btn, t("queue_more_actions_tooltip"))
+
         self._fps_label = ctk.CTkLabel(
             self._stats_frame,
             text="",
@@ -611,19 +645,24 @@ class JobListItem(ctk.CTkFrame):
         self._hide_after_id = None
 
         child_widgets = [
-            self._handle, self._info, self._filename, self._duration,
-            self._status_frame, self._status_label, self._top_row, self._bottom_row,
-            self._segment_summary, self._segments_btn,
+            content, self._handle, self._info, self._filename, self._duration,
+            self._conflict_dot, self._status_frame, self._status_icon,
+            self._status_label, self._stats_frame, self._fps_label, self._eta_label,
+            self._top_row, self._bottom_row, self._segment_summary, self._segments_btn,
+            self._play_btn, self._overflow_btn, self._progress,
         ]
         for child in child_widgets:
             try:
                 child.bind("<Enter>", self._on_enter)
                 child.bind("<Leave>", self._on_leave)
+                child.bind("<Button-3>", self._show_action_menu)
             except Exception:
                 logger.debug("Failed to bind hover events on child widget", exc_info=True)
         # Ensure remove button keeps the enter binding so moving onto it still shows
         self._remove_btn.bind("<Enter>", self._on_enter)
         self._remove_btn.bind("<Leave>", self._on_leave)
+        self._remove_btn.bind("<Button-3>", self._show_action_menu)
+        self.bind("<Button-3>", self._show_action_menu)
         
     def _on_enter(self, event=None):
         # Only show remove button if the pointer is actually inside this widget
@@ -690,6 +729,32 @@ class JobListItem(ctk.CTkFrame):
                 tooltip.hide()
             self._on_edit_segments()
 
+    def _handle_play(self) -> None:
+        if self._on_play and self._player_enabled:
+            self._on_play()
+
+    def _handle_open_containing_folder(self) -> None:
+        if self._on_open_containing_folder:
+            self._on_open_containing_folder()
+
+    def _show_action_menu(self, event=None):
+        menu = tkinter.Menu(self, tearoff=False)
+        menu.add_command(
+            label=t("open_containing_folder"),
+            command=self._handle_open_containing_folder,
+        )
+        if event is None:
+            x = self._overflow_btn.winfo_rootx()
+            y = self._overflow_btn.winfo_rooty() + self._overflow_btn.winfo_height()
+        else:
+            x, y = event.x_root, event.y_root
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+            menu.destroy()
+        return "break"
+
     def set_segment_summary(self, text: str, *, selected: bool = False) -> None:
         self._segment_summary.configure(
             text=text,
@@ -708,6 +773,11 @@ class JobListItem(ctk.CTkFrame):
                     tooltip.hide()
                 self._segments_btn.pack_forget()
             self._segment_summary.configure(cursor="hand2" if editable else "arrow")
+
+    def set_player_enabled(self, enabled: bool) -> None:
+        if self._on_play:
+            self._player_enabled = bool(enabled)
+            self._play_btn.configure(state="normal" if enabled else "disabled")
 
     # Internal drag event proxies to allow QueuePanel to handle reordering
     def _internal_drag_start(self, event):

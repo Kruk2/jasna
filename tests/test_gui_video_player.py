@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
+from pathlib import Path
 
 import customtkinter as ctk
 import pytest
@@ -464,6 +465,77 @@ def test_video_player_dialog_starts_in_file_picker_state() -> None:
         assert closed == [True]
     finally:
         root.destroy()
+
+
+def test_initial_path_uses_shared_probe_flow_without_autoplay(monkeypatch) -> None:
+    path = Path("/tmp/queued.mp4")
+    metadata = SimpleNamespace(duration=60.0)
+    probed = MagicMock()
+
+    class ImmediateThread:
+        def __init__(self, *, target, **_kwargs):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(video_player_module, "get_video_meta_data", lambda value: metadata)
+    monkeypatch.setattr(video_player_module.threading, "Thread", ImmediateThread)
+    dialog = SimpleNamespace(
+        _path=None,
+        _metadata=object(),
+        _probe_generation=0,
+        _file_label=MagicMock(),
+        _video_surface=MagicMock(),
+        _photo=object(),
+        _photo_size=(1, 1),
+        _last_frame_image=object(),
+        _play_btn=MagicMock(),
+        _set_status=MagicMock(),
+        _ui_after=lambda callback: callback(),
+        _video_probed=probed,
+    )
+
+    VideoPlayerDialog._load_path(dialog, path)
+
+    assert dialog._path == path
+    dialog._file_label.configure.assert_called_once()
+    dialog._play_btn.configure.assert_called_once_with(state="disabled", text="▶")
+    probed.assert_called_once_with(1, metadata, "")
+
+
+def test_queue_player_path_uses_existing_busy_guard(monkeypatch) -> None:
+    created = MagicMock()
+    monkeypatch.setattr(video_player_module, "VideoPlayerDialog", created)
+    settings = MagicMock()
+    app = SimpleNamespace(
+        _preview_gpu_busy=False,
+        _processor=None,
+        _set_preview_gpu_busy=MagicMock(),
+        _settings_panel=SimpleNamespace(get_settings=settings),
+        _video_player_closed=MagicMock(),
+    )
+    path = Path("/tmp/queued.mp4")
+
+    JasnaApp._open_video_player(app, path)
+
+    created.assert_called_once_with(
+        app,
+        settings.return_value,
+        initial_path=path,
+        on_closed=app._video_player_closed,
+    )
+    app._set_preview_gpu_busy.assert_called_once_with(True)
+
+    app._preview_gpu_busy = True
+    JasnaApp._open_video_player(app)
+    assert created.call_count == 1
+
+    app._preview_gpu_busy = False
+    app._processor = MagicMock()
+    app._processor.is_running.return_value = True
+    JasnaApp._open_video_player(app, path)
+    assert created.call_count == 1
 
 
 def test_play_button_starts_selected_video_before_worker_exists() -> None:

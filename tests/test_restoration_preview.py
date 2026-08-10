@@ -451,6 +451,7 @@ def test_app_prepares_entire_queue_before_starting_processor() -> None:
     app._processing_start_time = 0.0
     calls = []
     app._queue_panel.reset_jobs_for_run.side_effect = lambda: calls.append("reset")
+    app._queue_panel.set_running.side_effect = lambda *_args: calls.append("running")
     app._processor.start.side_effect = lambda *args, **kwargs: calls.append("start")
     preflight = SimpleNamespace(missing=(), should_warn_first_run_slow=False)
 
@@ -460,4 +461,4 @@ def test_app_prepares_entire_queue_before_starting_processor() -> None:
     ):
         app._on_start()
 
-    assert calls == ["reset", "start"]
+    assert calls == ["reset", "running", "start"]

@@ -148,6 +148,91 @@ def test_segment_button_only_appears_for_pending_video_jobs() -> None:
         root.destroy()
 
 
+def test_queue_rows_offer_video_player_and_folder_actions() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        played = MagicMock()
+        panel.set_on_play(played)
+        panel.add_job(Path("/tmp/video.mp4"))
+        panel.add_job(Path("/tmp/image.png"))
+        root.update()
+
+        video, image = panel._job_widgets
+        assert video._segments_btn.winfo_ismapped()
+        assert video._play_btn.winfo_ismapped()
+        assert video._overflow_btn.winfo_ismapped()
+        assert not image._segments_btn.winfo_ismapped()
+        assert not image._play_btn.winfo_ismapped()
+        assert image._overflow_btn.winfo_ismapped()
+
+        video._handle_play()
+        played.assert_called_once_with(Path("/tmp/video.mp4"))
+
+        panel.set_running(True, processing_job_id=panel._jobs[0].id)
+        assert video._play_btn.cget("state") == "disabled"
+    finally:
+        root.destroy()
+
+
+def test_video_added_during_processing_has_disabled_player() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        played = MagicMock()
+        panel.set_on_play(played)
+        panel.set_running(True)
+
+        panel.add_job(Path("/tmp/later.mp4"))
+        video = panel._job_widgets[0]
+
+        assert video._play_btn.cget("state") == "disabled"
+        video._handle_play()
+        played.assert_not_called()
+    finally:
+        root.destroy()
+
+
+def test_same_as_input_clears_output_and_refreshes_conflicts(tmp_path: Path) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        changed = MagicMock()
+        panel.set_on_output_changed(changed)
+        source = tmp_path / "clip.mp4"
+        (tmp_path / "clip_restored.mp4").touch()
+        panel.add_job(source)
+        panel._set_output_folder(str(tmp_path / "elsewhere"))
+        changed.reset_mock()
+
+        panel._on_same_as_input()
+
+        assert panel.get_output_folder() == ""
+        assert panel._jobs[0].has_conflict
+        assert panel._same_as_input_btn.cget("state") == "normal"
+        changed.assert_called_once_with("", panel.get_output_pattern())
+
+        panel.set_running(True, processing_job_id=panel._jobs[0].id)
+        assert panel._same_as_input_btn.cget("state") == "disabled"
+    finally:
+        root.destroy()
+
+
 def test_workspace_sash_cursor_stays_on_the_sash() -> None:
     try:
         root = ctk.CTk()
@@ -185,6 +270,7 @@ def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
         SimpleNamespace(
             set_removable=lambda value: row_updates.append(("removable", value)),
             set_segments_editable=lambda value: row_updates.append(("segments", value)),
+            set_player_enabled=lambda value: row_updates.append(("player", value)),
         )
         for _ in jobs
     ]
@@ -198,6 +284,7 @@ def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
         _clear_btn=control(),
         _clear_completed_btn=control(),
         _output_browse_btn=control(),
+        _same_as_input_btn=control(),
         _pattern_entry=control(),
         _add_files_btn=control(),
         _add_folder_btn=control(),

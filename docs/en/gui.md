@@ -9,9 +9,10 @@ Every setting has a tooltip: hover the ⓘ icon next to it.
   to it adds a whole folder), or just **drag & drop** them onto the queue.
 - **Reorder jobs by dragging** a queue item by its handle — processing runs
   top to bottom.
-- Each queue item has its own buttons: the **scissors** opens the
-  [Segment Editor](segments.md) to restore only parts of that video, and the
-  cross removes it from the queue.
+- Each video has **scissors** for the [Segment Editor](segments.md) and a
+  **play** button that opens it in the restored player, ready but paused. Use
+  the **three-dot** menu (or right-click a row) to open its containing folder.
+  Image rows have the folder menu too; the cross removes any item from the queue.
 - While processing, each item shows live progress, FPS, and time remaining.
 - Every time you press **Start**, Jasna processes every item still in the
   queue from top to bottom, including finished or failed items. Change your
@@ -23,8 +24,8 @@ Every setting has a tooltip: hover the ⓘ icon next to it.
 
 ## Output settings
 
-- **Same as input** writes each result next to its original file. Turn it
-  off to pick one output folder for everything.
+- **Same as input** writes each result next to its original file. Click its
+  button beside Output location to return to this mode after choosing a folder.
 - The **filename pattern** controls output names — `{original}` stands for
   the input name. If a pattern would overwrite something, the affected queue
   items are highlighted immediately.
@@ -55,8 +56,8 @@ Full screen expands the video to the largest size that preserves its source
 aspect ratio. Move the pointer to the bottom edge to reveal the playback panel;
 moving outside that panel hides it again.
 
-**Choose video** is the only file action. Selecting it during playback stops
-the current restoration before opening the picker. Changing the detection
+In the header player, **Choose video** opens the file picker. Selecting it
+during playback stops the current restoration first. Changing the detection
 model, confidence, or secondary restoration also reloads the restoration
 pipeline at the current playback position. While playing, the status displays
 how many seconds of restored video are buffered ahead of the playhead. A buffer

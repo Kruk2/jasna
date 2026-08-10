@@ -131,6 +131,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         master,
         settings: AppSettings,
         *,
+        initial_path: Path | None = None,
         on_closed,
     ) -> None:
         super().__init__(master)
@@ -187,6 +188,8 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self.bind("<Motion>", self._fullscreen_mouse_moved, add="+")
         self._next_tick_at = time.monotonic() + _TICK_SECONDS
         self.after(_TICK_MS, self._tick)
+        if initial_path is not None:
+            self._load_path(initial_path)
 
     def _size_and_center(self, master) -> None:
         rect = scaling.screen_rect(master)
@@ -459,8 +462,10 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         )
         if not selected:
             return
-        self._path = Path(selected)
-        path = self._path
+        self._load_path(Path(selected))
+
+    def _load_path(self, path: Path) -> None:
+        self._path = path
         self._metadata = None
         self._probe_generation += 1
         generation = self._probe_generation

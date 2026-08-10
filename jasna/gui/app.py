@@ -343,6 +343,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._settings_panel.get_last_output_pattern(),
         )
         self._queue_panel.set_on_output_changed(self._on_output_changed)
+        self._queue_panel.set_on_play(
+            lambda path: JasnaApp._open_video_player(self, path)
+        )
         if self.TkdndVersion is not None:
             self._queue_panel.enable_file_drop()
         
@@ -497,7 +500,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             on_log=lambda level, message: self._log_panel.add_log(level, message),
         )
 
-    def _open_video_player(self):
+    def _open_video_player(self, path: Path | None = None):
         if self._preview_gpu_busy or (
             self._processor is not None and self._processor.is_running()
         ):
@@ -509,6 +512,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._video_player_dialog = VideoPlayerDialog(
                 self,
                 self._settings_panel.get_settings(),
+                initial_path=path,
                 on_closed=self._video_player_closed,
             )
         except Exception:
@@ -619,6 +623,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # Disable settings and output controls while running
         self._settings_panel.set_enabled(False)
         self._queue_panel.set_output_enabled(False)
+        self._queue_panel.set_running(True)
         
         self._log_panel.info("Processing started by user")
         self._log_panel.info(f"Output folder: {output_folder}")

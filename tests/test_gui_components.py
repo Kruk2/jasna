@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import customtkinter as ctk
@@ -26,6 +27,52 @@ def test_segment_tooltips_hide_before_editor_opens() -> None:
     for tooltip in item._segment_tooltips:
         tooltip.hide.assert_called_once_with()
     item._on_edit_segments.assert_called_once_with()
+
+
+def test_queue_overflow_menu_uses_button_and_right_click_coordinates(monkeypatch) -> None:
+    menus = []
+
+    class Menu:
+        def __init__(self, *_args, **_kwargs):
+            self.command = None
+            self.popup = None
+            self.released = False
+            self.destroyed = False
+            menus.append(self)
+
+        def add_command(self, **kwargs):
+            self.command = kwargs
+
+        def tk_popup(self, x, y):
+            self.popup = (x, y)
+
+        def grab_release(self):
+            self.released = True
+
+        def destroy(self):
+            self.destroyed = True
+
+    monkeypatch.setattr(components.tkinter, "Menu", Menu)
+    monkeypatch.setattr(components, "t", lambda key: key)
+    handler = MagicMock()
+    item = SimpleNamespace(
+        _overflow_btn=SimpleNamespace(
+            winfo_rootx=lambda: 10,
+            winfo_rooty=lambda: 20,
+            winfo_height=lambda: 22,
+        ),
+        _handle_open_containing_folder=handler,
+    )
+
+    assert JobListItem._show_action_menu(item) == "break"
+    assert menus[0].popup == (10, 42)
+    assert menus[0].command["label"] == "open_containing_folder"
+    assert menus[0].released
+    assert menus[0].destroyed
+
+    assert JobListItem._show_action_menu(item, SimpleNamespace(x_root=30, y_root=40)) == "break"
+    assert menus[1].popup == (30, 40)
+    assert menus[1].destroyed
 
 
 def test_enabling_start_button_hides_disabled_tooltip() -> None:
