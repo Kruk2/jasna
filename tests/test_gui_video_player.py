@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 from pathlib import Path
 
 import customtkinter as ctk
@@ -29,8 +29,8 @@ def test_format_player_time_handles_minutes_and_hours() -> None:
 @pytest.mark.parametrize(
     ("previous_deadline", "now", "expected_deadline", "expected_delay"),
     [
-        (10.0, 10.012, 10.0 + 1 / 30, 22),
-        (10.0, 10.040, 10.0 + 2 / 30, 27),
+        (10.0, 10.005, 10.0 + 1 / 60, 12),
+        (10.0, 10.020, 10.0 + 2 / 60, 14),
     ],
 )
 def test_player_tick_schedule_keeps_absolute_frame_cadence(
@@ -46,6 +46,117 @@ def test_player_tick_schedule_keeps_absolute_frame_cadence(
 
     assert deadline == pytest.approx(expected_deadline)
     assert delay == expected_delay
+
+
+def test_windows_player_timer_resolution_is_scoped(monkeypatch) -> None:
+    calls = []
+    timer = SimpleNamespace(
+        timeBeginPeriod=lambda milliseconds: (
+            calls.append(("begin", milliseconds)) or 0
+        ),
+        timeEndPeriod=lambda milliseconds: calls.append(("end", milliseconds)) or 0,
+    )
+    monkeypatch.setattr(video_player_module.sys, "platform", "win32")
+    monkeypatch.setattr(
+        video_player_module,
+        "_load_windows_multimedia_timer",
+        lambda: timer,
+    )
+
+    resolution = video_player_module._WindowsTimerResolution()
+    resolution.close()
+    resolution.close()
+
+    assert calls == [("begin", 1), ("end", 1)]
+
+
+def test_player_timer_resolution_does_nothing_off_windows(monkeypatch) -> None:
+    load_timer = MagicMock()
+    monkeypatch.setattr(video_player_module.sys, "platform", "linux")
+    monkeypatch.setattr(
+        video_player_module,
+        "_load_windows_multimedia_timer",
+        load_timer,
+    )
+
+    resolution = video_player_module._WindowsTimerResolution()
+    resolution.close()
+
+    load_timer.assert_not_called()
+
+
+def test_windows_video_renderer_embeds_and_updates_native_window(monkeypatch) -> None:
+    import numpy as np
+
+    user32 = SimpleNamespace(
+        FindWindowW=MagicMock(return_value=123),
+        ShowWindow=MagicMock(),
+        SetParent=MagicMock(),
+        SetWindowLongW=MagicMock(),
+        EnableWindow=MagicMock(),
+        MoveWindow=MagicMock(),
+    )
+    cv2 = SimpleNamespace(
+        WINDOW_NORMAL=0,
+        COLOR_RGB2BGR=1,
+        namedWindow=MagicMock(),
+        cvtColor=lambda rgb, _code, *, dst: dst.__setitem__(
+            slice(None), rgb[:, :, ::-1]
+        ),
+        imshow=MagicMock(),
+        pollKey=MagicMock(),
+        destroyWindow=MagicMock(),
+    )
+    monkeypatch.setattr(
+        video_player_module,
+        "_load_windows_video_backend",
+        lambda: (cv2, np, user32),
+    )
+    host = SimpleNamespace(winfo_id=lambda: 456)
+    renderer = video_player_module._WindowsVideoRenderer(host)
+
+    renderer.display(Image.new("RGB", (4, 2), "red"), (8, 4))
+    renderer.hide()
+    renderer.close()
+
+    cv2.namedWindow.assert_called_once()
+    user32.SetParent.assert_called_once_with(123, 456)
+    user32.EnableWindow.assert_called_once_with(123, False)
+    user32.MoveWindow.assert_called_once_with(123, 0, 0, 8, 4, True)
+    shown = cv2.imshow.call_args.args[1]
+    assert shown.shape == (4, 8, 3)
+    assert shown[0, 0].tolist() == [0, 0, 255]
+    cv2.pollKey.assert_called_once_with()
+    cv2.destroyWindow.assert_called_once()
+
+
+def test_native_video_renderer_is_windows_only(monkeypatch) -> None:
+    renderer = MagicMock()
+    monkeypatch.setattr(video_player_module.sys, "platform", "linux")
+    monkeypatch.setattr(video_player_module, "_WindowsVideoRenderer", renderer)
+
+    assert video_player_module._create_native_video_renderer(object()) is None
+    renderer.assert_not_called()
+
+
+def test_destroying_player_restores_timer_resolution() -> None:
+    dialog = SimpleNamespace(
+        _closed=False,
+        _probe_generation=2,
+        _native_renderer=MagicMock(),
+        _timer_resolution=MagicMock(),
+        grab_release=MagicMock(),
+        destroy=MagicMock(),
+        _on_closed=MagicMock(),
+    )
+
+    VideoPlayerDialog._destroy_dialog(dialog)
+    VideoPlayerDialog._destroy_dialog(dialog)
+
+    dialog._native_renderer.close.assert_called_once_with()
+    dialog._timer_resolution.close.assert_called_once_with()
+    dialog.destroy.assert_called_once_with()
+    dialog._on_closed.assert_called_once_with()
 
 
 def test_playing_status_reports_buffer_without_redrawing_every_tick(
@@ -85,6 +196,23 @@ def test_time_label_skips_unchanged_text() -> None:
     VideoPlayerDialog._update_time_label(dialog, 1.2)
 
     dialog._time_label.configure.assert_called_once_with(text="0:01 / 1:00")
+
+
+def test_seek_position_redraw_is_throttled(monkeypatch) -> None:
+    now = [10.0]
+    monkeypatch.setattr(video_player_module.time, "monotonic", lambda: now[0])
+    dialog = SimpleNamespace(
+        _next_seek_update_at=0.0,
+        _seek=MagicMock(),
+    )
+
+    VideoPlayerDialog._update_seek_position(dialog, 1.0)
+    now[0] = 10.05
+    VideoPlayerDialog._update_seek_position(dialog, 1.05)
+    now[0] = 10.1
+    VideoPlayerDialog._update_seek_position(dialog, 1.1)
+
+    assert dialog._seek.set.call_args_list == [call(1.0), call(1.1)]
 
 
 @pytest.mark.parametrize(
@@ -205,6 +333,7 @@ def test_player_reuses_tk_image_for_same_sized_frames(monkeypatch) -> None:
     surface = MagicMock()
     dialog = SimpleNamespace(
         _generation=3,
+        _native_renderer=None,
         _photo=None,
         _photo_size=None,
         _last_frame_image=None,
@@ -237,6 +366,7 @@ def test_player_resizes_buffered_windowed_frame_for_fullscreen(monkeypatch) -> N
     monkeypatch.setattr(video_player_module.ImageTk, "PhotoImage", Photo)
     dialog = SimpleNamespace(
         _generation=1,
+        _native_renderer=None,
         _photo=None,
         _photo_size=None,
         _last_frame_image=None,
@@ -490,6 +620,7 @@ def test_initial_path_uses_shared_probe_flow_without_autoplay(monkeypatch) -> No
         _photo=object(),
         _photo_size=(1, 1),
         _last_frame_image=object(),
+        _native_renderer=None,
         _play_btn=MagicMock(),
         _set_status=MagicMock(),
         _ui_after=lambda callback: callback(),
@@ -562,6 +693,7 @@ def test_successful_video_probe_marks_surface_ready(monkeypatch) -> None:
         _seek=MagicMock(),
         _play_btn=MagicMock(),
         _video_surface=MagicMock(),
+        _native_renderer=None,
         _video_area=SimpleNamespace(
             winfo_width=lambda: 1280,
             winfo_height=lambda: 720,

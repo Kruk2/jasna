@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import queue
+import sys
 import threading
 import time
 import tkinter as tk
@@ -37,15 +38,111 @@ from jasna.mosaic.detection_registry import (
     recommended_score_threshold,
 )
 
-_TICK_SECONDS = 1 / 30
+_TICK_SECONDS = 1 / 60
 _TICK_MS = round(_TICK_SECONDS * 1000)
-_FRAME_TOLERANCE = 1 / 60
+_FRAME_TOLERANCE = 1 / 120
 _PLAYER_MIN_SIZE = (820, 620)
 _PLAYER_ASPECT = (16, 9)
 _PLAYER_CHROME_SIZE = (32, 270)
 _SEEK_STEP_SECONDS = 30.0
 _FULLSCREEN_EDGE_PX = 8
 _BUFFER_STATUS_INTERVAL_SECONDS = 0.25
+_SEEK_UPDATE_INTERVAL_SECONDS = 0.1
+
+
+def _load_windows_multimedia_timer():
+    import ctypes
+
+    return ctypes.WinDLL("winmm")
+
+
+class _WindowsTimerResolution:
+    def __init__(self) -> None:
+        self._timer = None
+        if sys.platform != "win32":
+            return
+        timer = _load_windows_multimedia_timer()
+        if timer.timeBeginPeriod(1) != 0:
+            raise OSError("Windows could not enable 1 ms timer resolution")
+        self._timer = timer
+
+    def close(self) -> None:
+        if self._timer is None:
+            return
+        timer = self._timer
+        self._timer = None
+        if timer.timeEndPeriod(1) != 0:
+            raise OSError("Windows could not restore timer resolution")
+
+
+def _load_windows_video_backend():
+    import ctypes
+
+    import cv2
+    import numpy as np
+
+    return cv2, np, ctypes.WinDLL("user32", use_last_error=True)
+
+
+class _WindowsVideoRenderer:
+    _SW_HIDE = 0
+    _SW_SHOWNA = 8
+    _GWL_STYLE = -16
+    _WS_CHILD = 0x40000000
+    _WS_VISIBLE = 0x10000000
+
+    def __init__(self, host) -> None:
+        self._cv2, self._np, self._user32 = _load_windows_video_backend()
+        self._title = f"JasnaVideo-{id(self):x}"
+        self._cv2.namedWindow(self._title, self._cv2.WINDOW_NORMAL)
+        self._hwnd = self._user32.FindWindowW(None, self._title)
+        if not self._hwnd:
+            self._cv2.destroyWindow(self._title)
+            raise OSError("OpenCV did not create a Windows video surface")
+        self._user32.ShowWindow(self._hwnd, self._SW_HIDE)
+        self._user32.SetParent(self._hwnd, host.winfo_id())
+        self._user32.SetWindowLongW(
+            self._hwnd,
+            self._GWL_STYLE,
+            self._WS_CHILD | self._WS_VISIBLE,
+        )
+        self._user32.EnableWindow(self._hwnd, False)
+        self._size: tuple[int, int] | None = None
+        self._bgr = None
+        self._visible = False
+
+    def display(self, image: Image.Image, size: tuple[int, int]) -> None:
+        if image.size != size:
+            image = image.resize(size, Image.Resampling.BILINEAR)
+        rgb = self._np.asarray(image)
+        if self._bgr is None or self._bgr.shape != rgb.shape:
+            self._bgr = self._np.empty_like(rgb)
+        self._cv2.cvtColor(rgb, self._cv2.COLOR_RGB2BGR, dst=self._bgr)
+        if self._size != size:
+            self._user32.MoveWindow(self._hwnd, 0, 0, *size, True)
+            self._size = size
+        self._cv2.imshow(self._title, self._bgr)
+        self._cv2.pollKey()
+        if not self._visible:
+            self._user32.ShowWindow(self._hwnd, self._SW_SHOWNA)
+            self._visible = True
+
+    def hide(self) -> None:
+        if self._visible:
+            self._user32.ShowWindow(self._hwnd, self._SW_HIDE)
+            self._visible = False
+
+    def close(self) -> None:
+        if not self._hwnd:
+            return
+        self._cv2.destroyWindow(self._title)
+        self._hwnd = 0
+
+
+def _create_native_video_renderer(host):
+    if sys.platform != "win32":
+        return None
+    return _WindowsVideoRenderer(host)
 
 
 def next_player_tick(previous_deadline: float, now: float) -> tuple[float, int]:
@@ -169,6 +266,8 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._last_status: tuple[str, str] | None = None
         self._last_time_text: str | None = None
         self._next_buffer_status_at = 0.0
+        self._next_seek_update_at = 0.0
+        self._native_renderer = None
 
         self.title(t("player_title"))
         self.configure(fg_color=Colors.BG_MAIN)
@@ -177,6 +276,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._build_ui()
         self.update_idletasks()
         self._show_centered(master)
+        self._native_renderer = _create_native_video_renderer(self._video_surface)
         self.grab_set()
         self.lift()
         self.focus_force()
@@ -186,6 +286,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self.bind("<Right>", lambda event: self._seek_relative(_SEEK_STEP_SECONDS, event))
         self.bind("<space>", self._space_pressed)
         self.bind("<Motion>", self._fullscreen_mouse_moved, add="+")
+        self._timer_resolution = _WindowsTimerResolution()
         self._next_tick_at = time.monotonic() + _TICK_SECONDS
         self.after(_TICK_MS, self._tick)
         if initial_path is not None:
@@ -473,6 +574,8 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             text=self._path.name,
             text_color=Colors.TEXT_PRIMARY,
         )
+        if self._native_renderer is not None:
+            self._native_renderer.hide()
         self._video_surface.configure(image="", text=t("player_loading_video"))
         self._photo = None
         self._photo_size = None
@@ -515,6 +618,8 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         )
         self._seek.set(0)
         self._update_time_label(0)
+        if self._native_renderer is not None:
+            self._native_renderer.hide()
         self._video_surface.configure(
             image="",
             text=t("player_ready_to_play"),
@@ -566,6 +671,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._eof = False
         self._current_seconds = seconds
         self._next_buffer_status_at = 0.0
+        self._next_seek_update_at = 0.0
         self._play_btn.configure(state="normal", text="⏸" if autoplay else "▶")
         self._seek.configure(state="normal")
         self._mute.configure(state="normal" if self._has_audio else "disabled")
@@ -665,7 +771,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._current_seconds = now
         self._update_playing_buffer_status(now)
         if not self._seek_dragging:
-            self._seek.set(now)
+            self._update_seek_position(now)
             self._update_time_label(now)
 
         if self._frame_buffer.empty():
@@ -691,6 +797,9 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         image: Image.Image,
         size: tuple[int, int] | None = None,
     ) -> None:
+        if self._native_renderer is not None:
+            self._native_renderer.display(image, size or image.size)
+            return
         if size is not None and image.size != size:
             image = image.resize(size, Image.Resampling.BILINEAR)
         if self._photo is not None and self._photo_size == image.size:
@@ -758,8 +867,11 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._eof = False
         self._current_seconds = seconds
         self._next_buffer_status_at = 0.0
+        self._next_seek_update_at = 0.0
         self._generation = self._worker.play_from(seconds)
         self._aligned_generation = -1
+        if self._native_renderer is not None:
+            self._native_renderer.hide()
         self._video_surface.configure(image="", text=t("player_restoring"))
         self._photo = None
         self._photo_size = None
@@ -791,6 +903,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._buffering = self._desired_playing
         self._eof = False
         self._next_buffer_status_at = 0.0
+        self._next_seek_update_at = 0.0
         self._generation = self._worker.reload_from(
             self._playback_settings(),
             seconds,
@@ -979,6 +1092,13 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._last_time_text = text
         self._time_label.configure(text=text)
 
+    def _update_seek_position(self, seconds: float) -> None:
+        now = time.monotonic()
+        if now < self._next_seek_update_at:
+            return
+        self._next_seek_update_at = now + _SEEK_UPDATE_INTERVAL_SECONDS
+        self._seek.set(seconds)
+
     def request_close(self) -> None:
         if self._closed:
             return
@@ -997,6 +1117,9 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             self.grab_release()
         except tk.TclError:
             pass
+        if self._native_renderer is not None:
+            self._native_renderer.close()
+        self._timer_resolution.close()
         self.destroy()
         self._on_closed()
 
