@@ -159,12 +159,19 @@ def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, monkeypatch)
 
 def test_activate_static_dpi_is_a_no_op_off_windows(monkeypatch) -> None:
     monkeypatch.setattr(scaling.sys, "platform", "darwin")
+    original = (
+        ctk.ScalingTracker.deactivate_automatic_dpi_awareness,
+        ctk.ScalingTracker.widget_scaling,
+        ctk.ScalingTracker.window_scaling,
+    )
 
     scaling.activate_static_dpi((900, 580))
 
-    assert not ctk.ScalingTracker.deactivate_automatic_dpi_awareness
-    assert ctk.ScalingTracker.widget_scaling == 1
-    assert ctk.ScalingTracker.window_scaling == 1
+    assert (
+        ctk.ScalingTracker.deactivate_automatic_dpi_awareness,
+        ctk.ScalingTracker.widget_scaling,
+        ctk.ScalingTracker.window_scaling,
+    ) == original
 
 
 def test_activate_static_dpi_windows_path(monkeypatch) -> None:
@@ -206,10 +213,15 @@ def test_scaling_helpers_are_identity_without_scaling(static_ctk_scaling):
 def test_main_window_fits_screen_at_hidpi(hidpi, monkeypatch) -> None:
     root = _root()
     try:
+        screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+        monkeypatch.setattr(
+            scaling,
+            "screen_rect",
+            lambda _window: (0, 0, screen_w, screen_h),
+        )
         requested = _record_geometry(root, monkeypatch)
         JasnaApp._size_and_center(root)
 
-        screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
         width, height = _physical_size(requested[-1], hidpi)
         assert width <= screen_w and height <= screen_h
 

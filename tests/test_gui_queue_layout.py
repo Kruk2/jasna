@@ -10,6 +10,7 @@ import customtkinter as ctk
 import pytest
 
 from jasna.gui.app import JasnaApp
+from jasna.gui import scaling
 from jasna.gui.models import JobItem, JobStatus
 from jasna.gui import queue_panel as queue_panel_module
 from jasna.gui.queue_panel import QueuePanel
@@ -81,7 +82,7 @@ def test_queue_footer_stacks_count_above_action_buttons() -> None:
         root.geometry("320x800")
         panel = QueuePanel(root)
         panel.pack(fill="both", expand=True)
-        root.update_idletasks()
+        root.update()
 
         count_bottom = panel._queue_count.winfo_rooty() + panel._queue_count.winfo_height()
         actions_top = min(
@@ -90,7 +91,10 @@ def test_queue_footer_stacks_count_above_action_buttons() -> None:
         )
         assert count_bottom <= actions_top
 
-        empty_content_width = panel._empty_state.winfo_width() - 40
+        empty_content_width = panel._empty_state.winfo_width() - scaling.raw_tk_size(
+            panel._empty_label,
+            40,
+        )
         assert panel._empty_label.winfo_reqwidth() <= empty_content_width
     finally:
         root.destroy()

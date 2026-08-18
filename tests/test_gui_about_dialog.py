@@ -7,6 +7,7 @@ from tkinter import TclError
 import customtkinter as ctk
 import pytest
 
+from jasna.gui import scaling
 from jasna.gui.app import JasnaApp
 from jasna.gui.locales import get_locale
 
@@ -31,7 +32,8 @@ def test_about_dialog_fits_content(root, lang):
         try:
             dialog.update_idletasks()
             geometry_height = int(dialog.geometry().split("+")[0].split("x")[1])
-            assert geometry_height >= dialog.winfo_reqheight()
+            physical_height = scaling.to_physical(dialog, 0, geometry_height)[1]
+            assert physical_height >= dialog.winfo_reqheight()
         finally:
             dialog.destroy()
     finally:
