@@ -87,6 +87,7 @@ class Processor:
         
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
+        self._completion_lock = threading.Lock()
         self._pause_event = threading.Event()
         self._pause_event.set()  # Not paused by default
         
@@ -124,7 +125,8 @@ class Processor:
         self._output_pattern = output_pattern
         self._disable_basicvsrpp_tensorrt_for_run = bool(disable_basicvsrpp_tensorrt)
         
-        self._stop_event.clear()
+        with self._completion_lock:
+            self._stop_event.clear()
         self._pause_event.set()
         
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -143,7 +145,8 @@ class Processor:
         return not self._pause_event.is_set()
         
     def stop(self):
-        self._stop_event.set()
+        with self._completion_lock:
+            self._stop_event.set()
         self._pause_event.set()  # Unpause to allow thread to exit
         pipeline = self._current_pipeline
         if pipeline is not None:
@@ -480,6 +483,26 @@ class Processor:
         if output_path.stat().st_size <= 0:
             raise ValueError(f"completed output is empty: {output_path}")
 
+    def _begin_isolated_job_unless_stopped(self, job: JobItem):
+        with self._completion_lock:
+            if self._stop_event.is_set():
+                return None
+            return job.begin_processing()
+
+    def _commit_isolated_completed_job(
+        self,
+        job: JobItem,
+        output_path: Path,
+        *,
+        processing_path: str,
+    ) -> None:
+        with self._completion_lock:
+            if self._stop_event.is_set():
+                raise ProcessingStopped("Processing stopped")
+            self._completed_processing_paths[job.id] = processing_path
+            job.output_path = output_path
+            job.status = JobStatus.COMPLETED
+
     def completed_processing_path(self, job_id: int) -> str | None:
         return self._completed_processing_paths.get(job_id)
 
@@ -547,8 +570,11 @@ class Processor:
             if self._stop_event.is_set():
                 raise ProcessingStopped("Processing stopped")
             self._run_post_export_video_command(job.path, expected_output_path)
-            if self._stop_event.is_set():
-                raise ProcessingStopped("Processing stopped")
+            self._commit_isolated_completed_job(
+                job,
+                expected_output_path,
+                processing_path=result.processing_path,
+            )
         except ProcessingStopped:
             self._mark_stopped(job)
             return
@@ -556,9 +582,6 @@ class Processor:
             self._fail_isolated_video_job(job, str(error))
             return
 
-        self._completed_processing_paths[job.id] = result.processing_path
-        job.output_path = expected_output_path
-        job.status = JobStatus.COMPLETED
         self._progress(ProgressUpdate(
             job_id=job.id,
             status=JobStatus.COMPLETED,
@@ -613,7 +636,7 @@ class Processor:
         raise ValueError(f"unknown isolated video job event type: {event_type!r}")
 
     def _process_isolated_video_job(self, job: JobItem) -> None:
-        snapshot = job.begin_processing()
+        snapshot = self._begin_isolated_job_unless_stopped(job)
         if snapshot is None:
             return
         if self._stop_event.is_set():
