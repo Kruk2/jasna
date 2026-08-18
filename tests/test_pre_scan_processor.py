@@ -214,6 +214,7 @@ def test_automatic_ranges_fall_back_when_smart_render_is_incompatible(tmp_path):
             "jasna.media.splice.validate_smart_render",
             side_effect=SmartRenderCompatibilityError("unsupported"),
         ),
+        patch("jasna.media.splice.commit_video_output", create=True),
         patch("jasna.gui.processor.video_session_config", return_value=MagicMock()),
         patch("jasna.gui.processor.build_pipeline", return_value=pipeline) as build,
     ):
