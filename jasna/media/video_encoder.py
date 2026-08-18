@@ -658,6 +658,7 @@ class NvidiaVideoEncoder:
         self._source_pipes: dict[int, tuple[str, object, object]] = {}
         self._source_backlog: deque = deque()
         self._source_iter = None
+        self._last_source_dts: dict[int, int] = {}
         if self.smart_fragment:
             return
 
@@ -919,7 +920,7 @@ class NvidiaVideoEncoder:
                 ):
                     return
                 self._source_backlog.popleft()
-                self.dst.mux(packet)
+                self._mux_source_packet(packet)
                 continue
             in_packet = next(self._source_iter, None)
             if in_packet is None:
@@ -937,7 +938,26 @@ class NvidiaVideoEncoder:
                 packets.extend(out_stream.encode(rframe))
             packets.extend(out_stream.encode(None))
             for packet in packets:
-                self.dst.mux(packet)
+                self._mux_source_packet(packet)
+
+    def _mux_source_packet(self, packet):
+        # Sloppy sources (e.g. web remuxes with 1/1000 audio time bases) can
+        # carry duplicate/backwards DTS; the mp4 muxer hard-fails on them, so
+        # nudge forward like ffmpeg's CLI does instead of crashing the job.
+        if packet.dts is not None:
+            last = self._last_source_dts.get(packet.stream.index)
+            if last is not None and packet.dts <= last:
+                logger.warning(
+                    "Non-monotonic DTS %s (last %s) in source output stream %s; nudging forward",
+                    packet.dts,
+                    last,
+                    packet.stream.index,
+                )
+                packet.dts = last + 1
+                if packet.pts is not None and packet.pts < packet.dts:
+                    packet.pts = packet.dts
+            self._last_source_dts[packet.stream.index] = packet.dts
+        self.dst.mux(packet)
 
     def _clamp_pts_monotonic(self, pts: int) -> int:
         last = self._last_emitted_pts
