@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, replace
 from typing import Callable
+from uuid import uuid4
 
 from jasna.gui.models import JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_config
@@ -215,6 +216,50 @@ class Processor:
             job.output_path = output_path
             job.status = JobStatus.COMPLETED
 
+    def _begin_job_unless_stopped(self, job: JobItem):
+        """Claim a pending job in the same ordering domain as ``stop()``."""
+
+        with self._completion_lock:
+            if self._stop_event.is_set():
+                return None
+            return job.begin_processing()
+
+    def _create_output_parent_unless_stopped(self, output_path: Path) -> None:
+        """Create job output directories only while the job may still start."""
+
+        with self._completion_lock:
+            if self._stop_event.is_set():
+                raise ProcessingStopped("Processing stopped")
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    @staticmethod
+    def _full_render_staging_path(output_path: Path) -> Path:
+        return output_path.with_name(
+            f".{output_path.stem}.jasna-full-{uuid4().hex}{output_path.suffix}"
+        )
+
+    def _publish_full_render_unless_stopped(
+        self,
+        staging_path: Path,
+        output_path: Path,
+        *,
+        input_path: Path,
+        codec: str,
+    ) -> None:
+        """Atomically publish a full render in the same ordering domain as Stop."""
+
+        from jasna.media.splice import commit_video_output
+
+        with self._completion_lock:
+            if self._stop_event.is_set():
+                raise ProcessingStopped("Processing stopped")
+            commit_video_output(
+                staging_path,
+                output_path,
+                source=input_path,
+                codec=codec,
+            )
+
     def _run(self):
         self._log("INFO", "Processing started")
 
@@ -258,7 +303,7 @@ class Processor:
         run_post_export_action_safely(action, command, lambda message: self._log("ERROR", message))
             
     def _process_job(self, job: JobItem):
-        snapshot = job.begin_processing()
+        snapshot = self._begin_job_unless_stopped(job)
         if snapshot is None:
             return
         segments = snapshot.segments
@@ -315,7 +360,7 @@ class Processor:
             # "overwrite" - just proceed and let the file be replaced
         
         try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            self._create_output_parent_unless_stopped(output_path)
             previous_output_fingerprint = (
                 self._output_fingerprint(output_path) if not is_image else None
             )
@@ -549,12 +594,16 @@ class Processor:
             ))
 
         pipeline = None
+        full_render_staging = (
+            self._full_render_staging_path(output_path) if not segments else None
+        )
+        pipeline_output = full_render_staging or output_path
         try:
             pipeline = build_pipeline(
                 config,
                 s,
                 input_path,
-                output_path,
+                pipeline_output,
                 progress_callback=progress_callback,
                 segments=tuple(segments) or None,
                 splice_plan=splice_plan,
@@ -565,10 +614,25 @@ class Processor:
             pipeline.run()
             if _pipeline_was_stopped(pipeline):
                 raise ProcessingStopped("Processing stopped")
+            if full_render_staging is not None:
+                self._publish_full_render_unless_stopped(
+                    full_render_staging,
+                    output_path,
+                    input_path=input_path,
+                    codec=codec,
+                )
         finally:
             self._current_pipeline = None
             if pipeline is not None:
                 pipeline.close()
+            if full_render_staging is not None:
+                try:
+                    full_render_staging.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning(
+                        "Could not remove full-render staging output %s",
+                        full_render_staging,
+                    )
 
     def _prepare_job_detector(
         self,

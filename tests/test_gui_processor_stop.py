@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from jasna.gui.models import AppSettings, JobItem, JobStatus
-from jasna.gui.processor import Processor, ProgressUpdate
+from jasna.gui.processor import ProcessingStopped, Processor, ProgressUpdate
 
 
 class _FakePipeline:
@@ -235,6 +235,122 @@ def test_image_jobs_do_not_require_video_output_validation(tmp_path):
     assert job.status is JobStatus.COMPLETED
     assert job.output_path == tmp_path / "image_restored.png"
     processor._validate_completed_video_output.assert_not_called()
+
+
+def test_stop_after_job_selection_does_not_claim_job_or_create_output_directory(
+    tmp_path,
+):
+    nested_output = tmp_path / "not-created" / "nested"
+    processor, job, _updates = _processor_with_job(
+        tmp_path,
+        MagicMock(),
+    )
+    processor._output_folder = str(nested_output)
+    original_next_pending_job = processor._next_pending_job
+
+    def select_then_stop():
+        selected = original_next_pending_job()
+        processor.stop()
+        return selected
+
+    processor._next_pending_job = select_then_stop
+
+    processor._run()
+
+    assert job.status is JobStatus.PENDING
+    assert not nested_output.exists()
+    processor._run_pipeline.assert_not_called()
+
+
+def test_stop_after_job_claim_does_not_create_output_directory(tmp_path):
+    nested_output = tmp_path / "not-created" / "nested"
+    processor, job, updates = _processor_with_job(
+        tmp_path,
+        MagicMock(),
+    )
+    processor._output_folder = str(nested_output)
+    original_create_parent = processor._create_output_parent_unless_stopped
+
+    def stop_then_create_parent(output_path):
+        processor.stop()
+        original_create_parent(output_path)
+
+    processor._create_output_parent_unless_stopped = stop_then_create_parent
+
+    processor._run()
+
+    assert job.status is JobStatus.PENDING
+    assert updates[-1].status is JobStatus.PENDING
+    assert not nested_output.exists()
+    processor._run_pipeline.assert_not_called()
+
+
+def test_full_render_is_published_from_same_directory_staging(tmp_path):
+    input_path = tmp_path / "input.mp4"
+    output_path = tmp_path / "output.mp4"
+    staging_path = tmp_path / ".output.jasna-full-test.mp4"
+    pipeline = MagicMock(cancel_requested=False, completed=True)
+    pipeline.run.side_effect = lambda: staging_path.write_bytes(b"complete video")
+    processor = Processor()
+    processor._settings = AppSettings(codec="hevc")
+    processor._video_session = MagicMock()
+    processor._ensure_video_session = MagicMock()
+    processor._prepare_job_detector = MagicMock()
+    processor._build_encoder_settings = MagicMock(return_value={})
+    processor._full_render_staging_path = MagicMock(return_value=staging_path)
+
+    def publish(staging, destination, **_kwargs):
+        staging.replace(destination)
+
+    with (
+        patch("jasna.gui.processor.video_session_config", return_value=MagicMock()),
+        patch("jasna.gui.processor.build_pipeline", return_value=pipeline) as build,
+        patch("jasna.media.splice.commit_video_output", side_effect=publish) as commit,
+    ):
+        processor._run_video_job(1, input_path, output_path)
+
+    assert build.call_args.args[3] == staging_path
+    commit.assert_called_once_with(
+        staging_path,
+        output_path,
+        source=input_path,
+        codec="hevc",
+    )
+    assert output_path.read_bytes() == b"complete video"
+    assert not staging_path.exists()
+
+
+def test_stop_before_full_render_publish_keeps_existing_output(tmp_path):
+    input_path = tmp_path / "input.mp4"
+    output_path = tmp_path / "output.mp4"
+    output_path.write_bytes(b"previous complete video")
+    staging_path = tmp_path / ".output.jasna-full-test.mp4"
+    pipeline = MagicMock(cancel_requested=False, completed=True)
+    processor = Processor()
+    processor._settings = AppSettings(codec="hevc")
+    processor._video_session = MagicMock()
+    processor._ensure_video_session = MagicMock()
+    processor._prepare_job_detector = MagicMock()
+    processor._build_encoder_settings = MagicMock(return_value={})
+    processor._full_render_staging_path = MagicMock(return_value=staging_path)
+
+    def finish_after_stop():
+        staging_path.write_bytes(b"partial replacement")
+        processor.stop()
+
+    pipeline.run.side_effect = finish_after_stop
+
+    with (
+        patch("jasna.gui.processor.video_session_config", return_value=MagicMock()),
+        patch("jasna.gui.processor.build_pipeline", return_value=pipeline),
+        patch("jasna.media.splice.commit_video_output") as commit,
+        pytest.raises(ProcessingStopped, match="Processing stopped"),
+    ):
+        processor._run_video_job(1, input_path, output_path)
+
+    commit.assert_not_called()
+    assert output_path.read_bytes() == b"previous complete video"
+    assert not staging_path.exists()
 
 
 def test_stop_cancels_the_running_pipeline(tmp_path):
