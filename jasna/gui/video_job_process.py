@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 import json
 import logging
 import os
@@ -24,7 +24,15 @@ from jasna.segments import SegmentRange
 
 EVENT_PREFIX = "JASNA_JOB_EVENT\t"
 REQUEST_SCHEMA_VERSION = 1
+RESULT_SCHEMA_VERSION = 1
 _EVENT_WRITE_LOCK = threading.Lock()
+
+
+@dataclass(frozen=True)
+class VideoJobResult:
+    status: JobStatus
+    output_path: Path | None
+    processing_path: str | None
 
 
 def build_video_job_request(
@@ -75,6 +83,74 @@ def parse_event_line(line: str) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         raise ValueError("isolated video job event must be a JSON object")
     return payload
+
+
+def parse_video_job_result(
+    event: dict[str, Any],
+    *,
+    expected_output_path: Path,
+) -> VideoJobResult:
+    """Validate a terminal child result before the parent trusts it."""
+
+    if event.get("type") != "result":
+        raise ValueError("isolated video job result event has the wrong type")
+    if event.get("schema_version") != RESULT_SCHEMA_VERSION:
+        raise ValueError("unsupported isolated video job result schema")
+
+    raw_status = event.get("status")
+    if not isinstance(raw_status, str):
+        raise ValueError("isolated video job result is missing a status")
+    try:
+        status = JobStatus(raw_status)
+    except ValueError as error:
+        raise ValueError(
+            f"isolated video job result has an invalid status: {raw_status!r}"
+        ) from error
+    if status not in {
+        JobStatus.COMPLETED,
+        JobStatus.ERROR,
+        JobStatus.PENDING,
+        JobStatus.SKIPPED,
+    }:
+        raise ValueError(
+            f"isolated video job result has a non-terminal status: {raw_status!r}"
+        )
+
+    raw_output_path = event.get("output_path")
+    if status is not JobStatus.COMPLETED:
+        if raw_output_path is not None:
+            raise ValueError(
+                "non-completed isolated video job result must not report an output path"
+            )
+        if event.get("processing_path") is not None:
+            raise ValueError(
+                "non-completed isolated video job result must not report a processing path"
+            )
+        return VideoJobResult(
+            status=status,
+            output_path=None,
+            processing_path=None,
+        )
+
+    if not isinstance(raw_output_path, str) or not raw_output_path:
+        raise ValueError("completed isolated video job result is missing an output path")
+    processing_path = event.get("processing_path")
+    if processing_path not in {"full", "smart", "copy"}:
+        raise ValueError(
+            "completed isolated video job result has an invalid processing path: "
+            f"{processing_path!r}"
+        )
+    output_path = Path(raw_output_path)
+    if output_path.resolve(strict=False) != expected_output_path.resolve(strict=False):
+        raise ValueError(
+            "isolated video job reported an unexpected output path: "
+            f"{output_path} (expected {expected_output_path})"
+        )
+    return VideoJobResult(
+        status=status,
+        output_path=output_path,
+        processing_path=str(processing_path),
+    )
 
 
 def _emit_event(stream: IO[str], event: dict[str, Any]) -> None:
@@ -152,6 +228,7 @@ def run_video_job_file(
             settings,
             post_export_action="none",
             post_export_command="",
+            post_export_video_command="",
         )
 
         from jasna.gui.processor import Processor, ProgressUpdate
@@ -214,6 +291,7 @@ def run_video_job_file(
             output_stream,
             {
                 "type": "result",
+                "schema_version": RESULT_SCHEMA_VERSION,
                 "status": job.status.value,
                 "output_path": (
                     str(job.output_path) if job.output_path is not None else None
