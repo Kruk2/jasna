@@ -344,6 +344,10 @@ def test_processor_rejects_cq_in_custom_args(monkeypatch) -> None:
 def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(
+        "jasna.gui.settings_sections.encoding.vendor_for_device",
+        lambda: AcceleratorVendor.NVIDIA,
+    )
 
     from jasna.gui.locales import get_locale
 
