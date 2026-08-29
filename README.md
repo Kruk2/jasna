@@ -1,3 +1,7 @@
+> **The only places to get a genuine key for the paid models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2) and [Unifans](https://app.unifans.io/c/kruk2).**
+>
+> **付费模型的正版密钥只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2) 或 [Unifans](https://app.unifans.io/c/kruk2) 获取。**
+
 [**English**](README.md) | [日本語](README.ja.md) | [中文](README.zh.md)
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna 

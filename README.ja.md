@@ -1,3 +1,5 @@
+> **有料モデルの正規キーを入手できるのは、[Buy Me a Coffee](https://buymeacoffee.com/kruk2) と [Unifans](https://app.unifans.io/c/kruk2) だけです。**
+
 [English](README.md) | [**日本語**](README.ja.md) | [中文](README.zh.md)
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna 
