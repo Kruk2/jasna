@@ -35,7 +35,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - Supports frame-accurate ranges on NVIDIA and AMD GPUs, restoration previews, and zoom/pan inspection in the Segment Editor.
 - Reduces clip-boundary flicker with temporal overlap and crossfade.
 - Detects hard scene cuts and ends tracked clips at the boundary, so restoration never blends content across a cut.
-- Can further improve quality with optional [secondary restoration models](docs/en/models.md#secondary-restoration) — **unet-4x**, **RTX Super Resolution**, or **Topaz Video AI** — which sharpen restored regions, especially large mosaics, close-ups, and 4K video.
+- Can further improve quality on NVIDIA GPUs with optional [secondary restoration models](docs/en/models.md#secondary-restoration) — **unet-4x**, **RTX Super Resolution**, or **Topaz Video AI** — which sharpen restored regions, especially large mosaics, close-ups, and 4K video. Secondary restoration is currently unavailable on AMD.
 - Includes a native GUI video player with full-screen playback and seeking through restored frames without creating an output file.
 - Can stream restored video to the built-in browser player or a supported Stash fork.
 

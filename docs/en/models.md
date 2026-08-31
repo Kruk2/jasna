@@ -41,6 +41,9 @@ close-ups, and 4K videos can therefore look blurry after the primary
 restoration. A secondary model upscales the restored crop to 512x512 or
 1024x1024 before blending it back, making it noticeably sharper.
 
+Secondary restoration is currently available only on NVIDIA GPUs. AMD builds
+support primary restoration only.
+
 - **unet-4x**: supporter model. Faster than TVAI with similar quality in
   current testing. Trained on an in-domain dataset and visually close to
   TVAI `iris-2`. See
