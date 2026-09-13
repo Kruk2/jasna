@@ -39,7 +39,7 @@ nvidia = [
   "tensorrt==10.16.1.11",
   "torch-tensorrt==2.12.0",
   "nvidia-vfx",
-  # The VALI decode backend needs the corruption-tolerant fork (~/k-drive/vali,
+  # The VALI decode backend needs the corruption-tolerant fork (~/tools/vali,
   # DecodeSingleSurfaceAsyncDetailed); with the stock PyPI wheel the reader
   # falls back to PyAV at open time. Release builds install the fork wheel from
   # keytool/wheels/ on top of this pin (see keytool/build_linux.sh).
