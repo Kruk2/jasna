@@ -267,6 +267,7 @@ def test_color_tags_and_frame_count(tmp_path):
     with av.open(str(dst)) as c:
         v = c.streams.video[0]
         assert v.codec_context.name == "hevc"
+        assert v.codec_tag == "hvc1"
         assert int(v.codec_context.color_range) == 1  # tv/mpeg
         assert int(v.codec_context.colorspace) == 1  # bt709
         assert int(v.codec_context.color_primaries) == 1
@@ -550,6 +551,8 @@ def test_fmp4_writes_moov_up_front_then_fragments(tmp_path):
     data = dst.read_bytes()
     assert data.index(b"moov") < data.index(b"moof")
     assert len(_box_offsets(data, b"moof")) > 1
+    with av.open(str(dst)) as container:
+        assert container.streams.video[0].codec_tag == "hvc1"
 
 
 def test_fmp4_truncated_output_still_decodes(tmp_path):

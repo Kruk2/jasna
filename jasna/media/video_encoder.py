@@ -562,6 +562,8 @@ class NvidiaVideoEncoder:
                 is_hw_owned=False,
             )
         out_v = self.dst.add_stream(self.encoder_name, **stream_kwargs)
+        if self.codec == "hevc" and self.output_path.suffix.lower() in {".mp4", ".mov"}:
+            out_v.codec_tag = "hvc1"
         out_v.width = self.metadata.video_width
         out_v.height = self.metadata.video_height
         out_v.time_base = self.metadata.time_base
