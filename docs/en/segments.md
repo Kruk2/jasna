@@ -55,7 +55,7 @@ The CLI counterpart of the editor. Times accept seconds or `HH:MM:SS.s`:
 jasna --input input.mp4 --output output.mp4 --segments "10-25,01:10-01:30.5"
 ```
 
-Jasna restores the listed ranges and copies everything else. A short
+Jasna restores the listed ranges and usually copies everything else. A short
 transition around the nearest safe video cut points is re-encoded but not
 restored — this is required to splice the video back together seamlessly.
 
@@ -64,7 +64,7 @@ What works with segment processing:
 - NVIDIA and AMD GPUs.
 - One video at a time (no folders, images, or streaming).
 - H.264, HEVC, or AV1 input with constant frame rate; MP4, MOV, or MKV output.
-- On AMD, H.264 sources with more than three consecutive B-frames are not supported.
+- On AMD, some H.264 files are fully re-encoded; only the selected ranges are restored.
 - The output codec always matches the input codec.
 - Cannot be combined with `--retarget-high-fps`.
 - Cannot be combined with `--fmp4`; the output is assembled after processing finishes.
