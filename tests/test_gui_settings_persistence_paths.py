@@ -165,3 +165,19 @@ def test_preset_manager_saves_and_loads_last_output_pattern(monkeypatch, tmp_pat
 
     mgr2 = PresetManager()
     assert mgr2.get_last_output_pattern() == "{original}_done.mkv"
+
+
+def test_preset_manager_saves_do_not_overwrite_keys_changed_elsewhere(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    panel_mgr = PresetManager()
+    app_mgr = PresetManager()
+    assert panel_mgr.create_preset("MyPreset", AppSettings())
+    app_mgr.set_system_check_passed_version("9.9.9")
+    panel_mgr.set_last_selected("MyPreset")
+
+    reloaded = PresetManager()
+    assert reloaded.get_preset("MyPreset") is not None
+    assert reloaded.get_system_check_passed_version() == "9.9.9"
+    assert reloaded.get_last_selected() == "MyPreset"

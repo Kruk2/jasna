@@ -10,7 +10,7 @@ import pytest
 
 from jasna import os_utils
 from jasna.accelerator import AcceleratorVendor
-from jasna.gui.models import AppSettings
+from jasna.gui.models import AppSettings, PresetManager
 from jasna.gui.settings_sections.advanced import AdvancedSection
 from jasna.gui.settings_sections.basic import BasicSection
 from jasna.gui.settings_sections.encoding import EncodingSection
@@ -183,7 +183,7 @@ def _basic_section_panel(monkeypatch, tmp_path):
 
     from jasna.gui.settings_panel import SettingsPanel
 
-    panel = SettingsPanel(root)
+    panel = SettingsPanel(root, PresetManager())
     try:
         yield panel, panel._sections[0]
     finally:
@@ -357,7 +357,7 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
     try:
         from jasna.gui.settings_panel import SettingsPanel
 
-        panel = SettingsPanel(root)
+        panel = SettingsPanel(root, PresetManager())
         assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
         assert panel._saved_preset_settings == panel.get_settings()
     finally:
