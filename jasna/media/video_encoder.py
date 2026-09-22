@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import heapq
 import logging
+import math
 import queue
 import threading
 from collections import deque
@@ -661,6 +662,7 @@ class NvidiaVideoEncoder:
         self._source_pipes: dict[int, tuple[str, object, object]] = {}
         self._source_backlog: deque = deque()
         self._source_iter = None
+        self._last_source_dts: dict[int, tuple[int, Fraction]] = {}
         if self.smart_fragment:
             return
 
@@ -922,7 +924,7 @@ class NvidiaVideoEncoder:
                 ):
                     return
                 self._source_backlog.popleft()
-                self.dst.mux(packet)
+                self._mux_source_packet(packet)
                 continue
             in_packet = next(self._source_iter, None)
             if in_packet is None:
@@ -940,7 +942,32 @@ class NvidiaVideoEncoder:
                 packets.extend(out_stream.encode(rframe))
             packets.extend(out_stream.encode(None))
             for packet in packets:
-                self.dst.mux(packet)
+                self._mux_source_packet(packet)
+
+    def _mux_source_packet(self, packet):
+        if packet.dts is not None:
+            last = self._last_source_dts.get(packet.stream.index)
+            if last is not None:
+                time_base = Fraction(packet.time_base or packet.stream.time_base)
+                minimum_time = (last[0] + 1) * last[1]
+                if packet.dts * time_base < minimum_time:
+                    logger.warning(
+                        "Source DTS %s at %s overlaps last muxed DTS %s at %s in output stream %s; nudging forward",
+                        packet.dts,
+                        time_base,
+                        last[0],
+                        last[1],
+                        packet.stream.index,
+                    )
+                    packet.dts = math.ceil(minimum_time / time_base)
+                    if packet.pts is not None and packet.pts < packet.dts:
+                        packet.pts = packet.dts
+        self.dst.mux(packet)
+        if packet.dts is not None:
+            self._last_source_dts[packet.stream.index] = (
+                packet.dts,
+                Fraction(packet.time_base or packet.stream.time_base),
+            )
 
     def _clamp_pts_monotonic(self, pts: int) -> int:
         last = self._last_emitted_pts

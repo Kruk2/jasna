@@ -1019,6 +1019,7 @@ class TestSourceStreamPump:
         enc._source_pipes = {1: ("copy", out_a, None)}
         enc._source_backlog = deque()
         enc._source_iter = iter(packets)
+        enc._last_source_dts = {}
         enc.dst = MagicMock()
         return enc, out_a
 
@@ -1047,6 +1048,33 @@ class TestSourceStreamPump:
 
         enc._pump_source_streams(None)
         assert enc.dst.mux.call_count == 3
+
+    def test_pump_nudges_non_monotonic_dts(self, tmp_path):
+        packets = [_packet(1, dts=0), _packet(1, dts=370390), _packet(1, dts=370390)]
+        enc, _ = self._source_encoder(tmp_path, packets)
+
+        enc._pump_source_streams(None)
+
+        muxed = [call.args[0] for call in enc.dst.mux.call_args_list]
+        assert [p.dts for p in muxed] == [0, 370390, 370391]
+        assert muxed[-1].pts == 370391
+
+    def test_copy_nudges_dts_in_output_time_base(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        enc._last_source_dts = {}
+        packets = []
+        with av.open(str(tmp_path / "audio.mkv"), "w") as enc.dst:
+            stream = enc.dst.add_stream("aac", rate=44_100)
+            stream.time_base = Fraction(1, 44_100)
+            for dts in (0, 1024, 1024, 2048):
+                packet = av.Packet(b"\x21\x10\x04\x60")
+                packet.stream = stream
+                packet.time_base = Fraction(1, 44_100)
+                packet.pts = packet.dts = dts
+                enc._mux_source_packet(packet)
+                packets.append(packet)
+
+        assert [packet.dts for packet in packets] == [0, 23, 24, 46]
 
     def test_pump_without_source_streams_is_noop(self, tmp_path):
         enc = _make_encoder(tmp_path)
