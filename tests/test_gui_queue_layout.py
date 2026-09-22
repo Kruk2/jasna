@@ -10,7 +10,7 @@ import customtkinter as ctk
 import pytest
 
 from jasna.gui.app import JasnaApp
-from jasna.gui.models import JobItem, JobStatus
+from jasna.gui.models import JobItem, JobStatus, PresetManager
 from jasna.gui import queue_panel as queue_panel_module
 from jasna.gui.queue_panel import QueuePanel
 from jasna.segments import SegmentRange
@@ -380,6 +380,7 @@ def test_workspace_sash_cursor_stays_on_the_sash() -> None:
         root._processor = None
         root._set_preview_gpu_busy = lambda _busy: None
         root._on_output_changed = lambda *_args: None
+        root._preset_manager = PresetManager()
         root.TkdndVersion = None
 
         JasnaApp._build_main_body(root)
@@ -455,6 +456,7 @@ def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi) -> None:
         root._processor = None
         root._set_preview_gpu_busy = lambda _busy: None
         root._on_output_changed = lambda *_args: None
+        root._preset_manager = PresetManager()
         root.TkdndVersion = None
 
         JasnaApp._build_main_body(root)

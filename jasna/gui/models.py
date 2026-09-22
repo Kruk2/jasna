@@ -325,13 +325,13 @@ class PresetManager:
             for name, preset_dict in data.get("user_presets", {}).items():
                 try:
                     self._user_presets[name] = AppSettings(**_migrate_preset_dict(preset_dict))
-                except (TypeError, ValueError):
-                    pass  # Skip invalid presets
-        except (json.JSONDecodeError, IOError):
-            pass
-            
-    def _save(self):
-        """Save user presets to settings.json."""
+                except (TypeError, ValueError) as e:
+                    logger.warning("Skipping invalid preset %r in %s: %s", name, path, e)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("Could not read settings from %s: %s", path, e)
+
+    def _save(self, **values) -> None:
+        """Write only the given keys, so keys changed by other writers survive."""
         path = get_settings_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {}
@@ -339,20 +339,17 @@ class PresetManager:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, IOError):
-                data = {}
-
-        data["last_selected"] = self._last_selected
-        data["user_presets"] = {name: asdict(preset) for name, preset in self._user_presets.items()}
-        data["last_output_folder"] = self._last_output_folder
-        data["last_output_pattern"] = self._last_output_pattern
-        data["system_check_passed_version"] = self._system_check_passed_version
-        
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Could not read settings from %s, rewriting it: %s", path, e)
+        data.update(values)
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
-        except IOError:
-            pass
+        except OSError as e:
+            logger.warning("Could not save settings to %s: %s", path, e)
+
+    def _save_user_presets(self) -> None:
+        self._save(user_presets={name: asdict(preset) for name, preset in self._user_presets.items()})
             
     def get_all_preset_names(self) -> tuple[list[str], list[str]]:
         """Return (factory_names, user_names)."""
@@ -381,7 +378,7 @@ class PresetManager:
         if not name or name in self.FACTORY_PRESETS:
             return False
         self._user_presets[name] = settings
-        self._save()
+        self._save_user_presets()
         return True
     
     def update_preset(self, name: str, settings: AppSettings) -> bool:
@@ -389,7 +386,7 @@ class PresetManager:
         if name in self.FACTORY_PRESETS or name not in self._user_presets:
             return False
         self._user_presets[name] = settings
-        self._save()
+        self._save_user_presets()
         return True
     
     def delete_preset(self, name: str) -> bool:
@@ -397,7 +394,7 @@ class PresetManager:
         if name in self.FACTORY_PRESETS or name not in self._user_presets:
             return False
         del self._user_presets[name]
-        self._save()
+        self._save_user_presets()
         return True
     
     def get_last_selected(self) -> str:
@@ -410,25 +407,25 @@ class PresetManager:
     def set_last_selected(self, name: str):
         """Set last selected preset name."""
         self._last_selected = name
-        self._save()
+        self._save(last_selected=name)
 
     def get_last_output_folder(self) -> str:
         return self._last_output_folder
 
     def set_last_output_folder(self, path: str):
         self._last_output_folder = path or ""
-        self._save()
+        self._save(last_output_folder=self._last_output_folder)
 
     def get_last_output_pattern(self) -> str:
         return self._last_output_pattern
 
     def set_last_output_pattern(self, pattern: str):
         self._last_output_pattern = pattern or "{original}_restored.mp4"
-        self._save()
+        self._save(last_output_pattern=self._last_output_pattern)
 
     def get_system_check_passed_version(self) -> str:
         return self._system_check_passed_version
 
     def set_system_check_passed_version(self, version: str):
         self._system_check_passed_version = version or ""
-        self._save()
+        self._save(system_check_passed_version=self._system_check_passed_version)

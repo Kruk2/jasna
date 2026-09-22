@@ -320,7 +320,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._queue_panel.configure(cursor="arrow")
         self._queue_panel.set_on_jobs_changed(self._on_jobs_changed)
 
-        self._settings_panel = SettingsPanel(self._workspace)
+        self._settings_panel = SettingsPanel(self._workspace, self._preset_manager)
         self._settings_panel.configure(cursor="arrow")
         self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
 
@@ -342,8 +342,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._set_preview_gpu_busy,
         )
         self._queue_panel.set_initial_output(
-            self._settings_panel.get_last_output_folder(),
-            self._settings_panel.get_last_output_pattern(),
+            self._preset_manager.get_last_output_folder(),
+            self._preset_manager.get_last_output_pattern(),
         )
         self._queue_panel.set_on_output_changed(self._on_output_changed)
         self._queue_panel.set_on_play(
@@ -476,8 +476,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._update_start_button_state()
 
     def _on_output_changed(self, folder: str, pattern: str):
-        self._settings_panel.set_last_output_folder(folder)
-        self._settings_panel.set_last_output_pattern(pattern)
+        self._preset_manager.set_last_output_folder(folder)
+        self._preset_manager.set_last_output_pattern(pattern)
 
     def _open_interactive_image_restore(self):
         from tkinter import filedialog

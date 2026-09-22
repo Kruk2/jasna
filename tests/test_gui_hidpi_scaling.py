@@ -17,6 +17,7 @@ import pytest
 from jasna.gui import scaling
 from jasna.gui.app import JasnaApp
 from jasna.gui.icons import CompactSwitch, NativeIconButton
+from jasna.gui.models import PresetManager
 from jasna.gui.settings_sections.widgets import create_slider_value_label
 from jasna.gui.theme import Colors, Fonts
 
@@ -50,6 +51,7 @@ def _stub_main_body_callbacks(root) -> None:
     root._processor = None
     root._set_preview_gpu_busy = lambda _busy: None
     root._on_output_changed = lambda *_args: None
+    root._preset_manager = PresetManager()
     root.TkdndVersion = None
 
 
