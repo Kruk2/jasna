@@ -1059,6 +1059,23 @@ class TestSourceStreamPump:
         assert [p.dts for p in muxed] == [0, 370390, 370391]
         assert muxed[-1].pts == 370391
 
+    def test_copy_nudges_dts_in_output_time_base(self, tmp_path):
+        enc = _make_encoder(tmp_path)
+        enc._last_source_dts = {}
+        packets = []
+        with av.open(str(tmp_path / "audio.mkv"), "w") as enc.dst:
+            stream = enc.dst.add_stream("aac", rate=44_100)
+            stream.time_base = Fraction(1, 44_100)
+            for dts in (0, 1024, 1024, 2048):
+                packet = av.Packet(b"\x21\x10\x04\x60")
+                packet.stream = stream
+                packet.time_base = Fraction(1, 44_100)
+                packet.pts = packet.dts = dts
+                enc._mux_source_packet(packet)
+                packets.append(packet)
+
+        assert [packet.dts for packet in packets] == [0, 23, 24, 46]
+
     def test_pump_without_source_streams_is_noop(self, tmp_path):
         enc = _make_encoder(tmp_path)
         enc._source_iter = None
