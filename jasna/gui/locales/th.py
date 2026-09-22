@@ -60,6 +60,8 @@ TH = {
         "btn_add_files": "เพิ่มไฟล์",
         "queue_empty": "ลากและวางไฟล์ที่นี่\nหรือใช้ปุ่มด้านบน",
         "items_queued": "{count} รายการในคิว",
+        "queue_previous_page": "หน้าคิวก่อนหน้า",
+        "queue_next_page": "หน้าคิวถัดไป",
         "btn_clear": "ล้าง",
         "btn_clear_completed": "✓ ล้างที่เสร็จแล้ว",
         "output_location": "ตำแหน่งเอาต์พุต",

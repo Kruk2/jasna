@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 from jasna.media.image_io import is_image_path
 from jasna.segments import SegmentRange
 
+_PAGE_SIZE = 40
+
 
 class QueuePanel(ctk.CTkFrame):
     """Left panel containing the job queue and output settings."""
@@ -38,7 +40,8 @@ class QueuePanel(ctk.CTkFrame):
         self.pack_propagate(False)
         
         self._jobs: list[JobItem] = []
-        self._job_widgets: list[JobListItem] = []
+        self._job_widgets: list[JobListItem | None] = []
+        self._page = 0
         self._on_jobs_changed: callable = None
         self._on_output_changed: callable = None
         self._on_play: callable = None
@@ -125,6 +128,24 @@ class QueuePanel(ctk.CTkFrame):
             text_color=Colors.TEXT_PRIMARY,
         )
         self._queue_count.pack(side="left")
+
+        self._page_row = ctk.CTkFrame(footer, fg_color="transparent")
+        self._page_row.pack(fill="x", pady=(4, 0))
+        self._prev_page_btn = ctk.CTkButton(
+            self._page_row, text="◀", width=32, height=24,
+            command=lambda: self._change_page(-1),
+        )
+        self._prev_page_btn.pack(side="left")
+        Tooltip(self._prev_page_btn, t("queue_previous_page"))
+        self._page_label = ctk.CTkLabel(self._page_row, text="1 / 1")
+        self._page_label.pack(side="left", expand=True)
+        self._next_page_btn = ctk.CTkButton(
+            self._page_row, text="▶", width=32, height=24,
+            command=lambda: self._change_page(1),
+        )
+        self._next_page_btn.pack(side="right")
+        Tooltip(self._next_page_btn, t("queue_next_page"))
+        self._page_row.pack_forget()
 
         actions_row = ctk.CTkFrame(footer, fg_color="transparent")
         actions_row.pack(fill="x", pady=(4, Sizing.PADDING_SMALL))
@@ -299,8 +320,10 @@ class QueuePanel(ctk.CTkFrame):
     def _on_clear_queue(self):
         self._jobs.clear()
         for w in self._job_widgets:
-            w.destroy()
+            if w is not None:
+                w.destroy()
         self._job_widgets.clear()
+        self._page = 0
         self._update_empty_state()
         self._update_count()
         if self._on_jobs_changed:
@@ -309,15 +332,8 @@ class QueuePanel(ctk.CTkFrame):
     def _on_clear_completed(self):
         """Clear completed, errored, and skipped jobs from the queue."""
         completed_statuses = {JobStatus.COMPLETED, JobStatus.ERROR, JobStatus.SKIPPED}
-        indices_to_remove = [
-            i for i, job in enumerate(self._jobs)
-            if job.status in completed_statuses
-        ]
-        # Remove in reverse order to preserve indices
-        for i in reversed(indices_to_remove):
-            self._jobs.pop(i)
-            widget = self._job_widgets.pop(i)
-            widget.destroy()
+        self._jobs[:] = [job for job in self._jobs if job.status not in completed_statuses]
+        self._render_page()
         self._update_empty_state()
         self._update_count()
         if self._on_jobs_changed:
@@ -332,18 +348,37 @@ class QueuePanel(ctk.CTkFrame):
     def _update_count(self):
         count = len(self._jobs)
         self._queue_count.configure(text=t("items_queued", count=count))
-        
-    def add_job(self, path: Path):
-        if any(j.path == path for j in self._jobs):
+        pages = max(1, (count + _PAGE_SIZE - 1) // _PAGE_SIZE)
+        self._page_label.configure(text=f"{self._page + 1} / {pages}")
+        self._prev_page_btn.configure(state="normal" if self._page else "disabled")
+        self._next_page_btn.configure(state="normal" if self._page + 1 < pages else "disabled")
+        if pages > 1:
+            self._page_row.pack(fill="x", pady=(4, 0))
+        else:
+            self._page_row.pack_forget()
+
+    def _change_page(self, step: int) -> None:
+        pages = max(1, (len(self._jobs) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+        page = min(max(self._page + step, 0), pages - 1)
+        if page == self._page:
             return
-            
-        job = JobItem(path=path)
-        self._jobs.append(job)
-        
-        # Check for output file conflict
-        output_path = self._get_output_path(path)
-        job.has_conflict = output_path.exists() if output_path else False
-        
+        self._page = page
+        self._render_page()
+        self._list_frame._parent_canvas.yview_moveto(0)
+        self._update_count()
+
+    def _render_page(self) -> None:
+        for widget in self._job_widgets:
+            if widget is not None:
+                widget.destroy()
+        self._page = min(self._page, max(0, (len(self._jobs) - 1) // _PAGE_SIZE))
+        self._job_widgets = [None] * len(self._jobs)
+        for index in range(self._page * _PAGE_SIZE, min(len(self._jobs), (self._page + 1) * _PAGE_SIZE)):
+            self._create_job_widget(index)
+
+    def _create_job_widget(self, index: int) -> None:
+        job = self._jobs[index]
+        path = job.path
         widget = JobListItem(
             self._list_frame,
             filename=job.filename,
@@ -361,15 +396,28 @@ class QueuePanel(ctk.CTkFrame):
             on_requeue=lambda j=job: self._requeue_job(j),
         )
         widget.pack(fill="x", pady=(0, 4))
-        self._job_widgets.append(widget)
+        self._job_widgets[index] = widget
         widget.set_player_enabled(not self._running)
-        self._set_widget_action_options(job, widget)
-        widget.set_segment_summary(t("segments_full_video"))
-        
-        # Show conflict indicator if needed
-        if job.has_conflict:
+        widget.set_removable(not self._running or job.id != self._processing_job_id)
+        widget.set_segment_summary(self._segment_summary(job), selected=bool(job.segments))
+        self.update_job_status(job.id, job.status, job.progress, elapsed_seconds=job.elapsed_seconds)
+        if job.has_conflict and job.status is JobStatus.PENDING:
             widget.set_conflict(True, t("conflict_tooltip"))
-        
+
+    def add_job(self, path: Path):
+        if any(j.path == path for j in self._jobs):
+            return
+
+        job = JobItem(path=path)
+        self._jobs.append(job)
+
+        # Check for output file conflict
+        output_path = self._get_output_path(path)
+        job.has_conflict = output_path.exists() if output_path else False
+        self._job_widgets.append(None)
+        if len(self._jobs) <= (self._page + 1) * _PAGE_SIZE and len(self._jobs) > self._page * _PAGE_SIZE:
+            self._create_job_widget(len(self._jobs) - 1)
+
         self._update_empty_state()
         self._update_count()
         if self._on_jobs_changed:
@@ -406,16 +454,14 @@ class QueuePanel(ctk.CTkFrame):
         index = self._find_job_index_by_id(job.id)
         if index is None:
             return
-        widget = self._job_widgets.pop(index)
         self._jobs.pop(index)
         self._jobs.append(job)
-        self._job_widgets.append(widget)
         job.error_message = ""
         job.output_path = None
-        self.update_job_status(job.id, JobStatus.PENDING)
-        for item in self._job_widgets:
-            item.pack_forget()
-            item.pack(fill="x", pady=(0, 4))
+        job.status = JobStatus.PENDING
+        job.progress = 0.0
+        job.elapsed_seconds = None
+        self._render_page()
         self._refresh_conflicts()
         if self._on_jobs_changed:
             self._on_jobs_changed()
@@ -467,20 +513,22 @@ class QueuePanel(ctk.CTkFrame):
         idx = self._find_job_index_by_id(job.id)
         if idx is None:
             return
-        if segments:
-            duration = sum(segment.duration for segment in segments)
+        widget = self._job_widgets[idx]
+        if widget is not None:
+            widget.set_segment_summary(self._segment_summary(job), selected=bool(segments))
+
+    def _segment_summary(self, job: JobItem) -> str:
+        if job.segments:
+            duration = sum(segment.duration for segment in job.segments)
             if job.duration_seconds:
-                summary = t(
+                return t(
                     "segments_summary_percent",
-                    count=len(segments),
+                    count=len(job.segments),
                     seconds=duration,
                     percent=duration / job.duration_seconds * 100,
                 )
-            else:
-                summary = t("segments_summary", count=len(segments), seconds=duration)
-        else:
-            summary = t("segments_full_video")
-        self._job_widgets[idx].set_segment_summary(summary, selected=bool(segments))
+            return t("segments_summary", count=len(job.segments), seconds=duration)
+        return t("segments_full_video")
             
     def _get_output_path(self, input_path: Path) -> Path | None:
         """Get the output path for a given input file based on current settings."""
@@ -502,10 +550,8 @@ class QueuePanel(ctk.CTkFrame):
             
     def _remove_job(self, job: JobItem):
         if job in self._jobs:
-            idx = self._jobs.index(job)
             self._jobs.remove(job)
-            self._job_widgets[idx].destroy()
-            self._job_widgets.pop(idx)
+            self._render_page()
             self._update_empty_state()
             self._update_count()
             if self._on_jobs_changed:
@@ -526,6 +572,7 @@ class QueuePanel(ctk.CTkFrame):
         for job in self._jobs:
             job.error_message = ""
             job.output_path = None
+            job.elapsed_seconds = None
             self.update_job_status(job.id, JobStatus.PENDING)
         self._refresh_conflicts()
         
@@ -570,10 +617,14 @@ class QueuePanel(ctk.CTkFrame):
         idx = self._find_job_index_by_id(job_id)
         if idx is None:
             return
-        widget = self._job_widgets[idx]
         job = self._jobs[idx]
         job.status = status
         job.progress = progress
+        if status is JobStatus.COMPLETED and elapsed_seconds is not None:
+            job.elapsed_seconds = elapsed_seconds
+        widget = self._job_widgets[idx]
+        if widget is None:
+            return
         
         status_map = {
             JobStatus.PENDING: (t("job_pending"), "", Colors.STATUS_PENDING),
@@ -609,7 +660,8 @@ class QueuePanel(ctk.CTkFrame):
             if job.status == JobStatus.PENDING:
                 output_path = self._get_output_path(job.path)
                 job.has_conflict = output_path.exists() if output_path else False
-                widget.set_conflict(job.has_conflict, t("conflict_tooltip") if job.has_conflict else "")
+                if widget is not None:
+                    widget.set_conflict(job.has_conflict, t("conflict_tooltip") if job.has_conflict else "")
     
     def set_output_enabled(self, enabled: bool):
         """Enable or disable output location controls (but not queue add/remove)."""
@@ -657,6 +709,8 @@ class QueuePanel(ctk.CTkFrame):
         # Compute new index among widgets based on center positions
         new_index = 0
         for w in self._job_widgets:
+            if w is None:
+                continue
             if w is widget:
                 continue
             center = (w.winfo_rooty() + w.winfo_height() / 2) - lf.winfo_rooty()
@@ -668,6 +722,7 @@ class QueuePanel(ctk.CTkFrame):
         except ValueError:
             return
 
+        new_index += self._page * _PAGE_SIZE
         if new_index != current_index:
             # Remove and reinsert data + widget and repack
             job = self._jobs.pop(current_index)
@@ -676,8 +731,12 @@ class QueuePanel(ctk.CTkFrame):
             self._job_widgets.insert(new_index, widget)
             # Repack in order
             for w in self._job_widgets:
+                if w is None:
+                    continue
                 w.pack_forget()
             for w in self._job_widgets:
+                if w is None:
+                    continue
                 w.pack(fill="x", pady=(0, 4))
             if self._on_jobs_changed:
                 self._on_jobs_changed()
@@ -688,8 +747,12 @@ class QueuePanel(ctk.CTkFrame):
         except Exception:
             logger.debug("cursor reset failed on drag end", exc_info=True)
         for w in self._job_widgets:
+            if w is None:
+                continue
             w.pack_forget()
         for w in self._job_widgets:
+            if w is None:
+                continue
             w.pack(fill="x", pady=(0, 4))
         if self._on_jobs_changed:
             self._on_jobs_changed()
@@ -720,6 +783,8 @@ class QueuePanel(ctk.CTkFrame):
             self._add_folder_btn.configure(state="normal")
             processing_idx = self._find_job_index_by_id(processing_job_id) if processing_job_id is not None else None
             for i, widget in enumerate(self._job_widgets):
+                if widget is None:
+                    continue
                 widget.set_removable(i != processing_idx)
                 widget.set_segments_editable(self._jobs[i].status is JobStatus.PENDING)
                 widget.set_player_enabled(False)
@@ -739,6 +804,8 @@ class QueuePanel(ctk.CTkFrame):
             self._add_files_btn.configure(state="normal")
             self._add_folder_btn.configure(state="normal")
             for job, widget in zip(self._jobs, self._job_widgets):
+                if widget is None:
+                    continue
                 widget.set_removable(True)
                 widget.set_segments_editable(job.status is JobStatus.PENDING)
                 widget.set_player_enabled(True)

@@ -60,6 +60,8 @@ JA = {
         "btn_add_files": "ファイル追加",
         "queue_empty": "ここにファイルをドラッグ＆ドロップ\nまたは上のボタンを使用",
         "items_queued": "{count} 件がキューに追加済み",
+        "queue_previous_page": "前のキューページ",
+        "queue_next_page": "次のキューページ",
         "btn_clear": "クリア",
         "btn_clear_completed": "✓ 完了済みを削除",
         "output_location": "出力先",

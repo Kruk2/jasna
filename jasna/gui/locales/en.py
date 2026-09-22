@@ -60,6 +60,8 @@ EN = {
         "btn_add_files": "Add Files",
         "queue_empty": "Drag and drop files here\nor use buttons above",
         "items_queued": "{count} item(s) queued",
+        "queue_previous_page": "Previous queue page",
+        "queue_next_page": "Next queue page",
         "btn_clear": "Clear",
         "btn_clear_completed": "✓ Clear Done",
         "output_location": "OUTPUT LOCATION",

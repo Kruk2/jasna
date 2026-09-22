@@ -119,6 +119,49 @@ def test_queue_scrollbar_only_appears_when_jobs_overflow() -> None:
         root.destroy()
 
 
+def test_large_queue_renders_one_page_and_restores_job_state() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        for index in range(200):
+            panel.add_job(Path(f"/tmp/video-{index}.mp4"))
+        root.update()
+
+        assert sum(widget is not None for widget in panel._job_widgets) == 40
+        assert panel._page_label.cget("text") == "1 / 5"
+
+        def widget_count(widget):
+            return 1 + sum(widget_count(child) for child in widget.winfo_children())
+
+        assert widget_count(root) < 3000
+
+        processing_job = panel._jobs[170]
+        completed_job = panel._jobs[171]
+        panel.update_job_status(completed_job.id, JobStatus.COMPLETED, 1.0, elapsed_seconds=65)
+        panel.set_running(True, processing_job_id=processing_job.id)
+        panel._change_page(4)
+        root.update()
+
+        assert not panel._job_widgets[170]._removable
+        widget = panel._job_widgets[171]
+        assert widget is not None
+        assert widget._status_label.cget("text").endswith("1m 5s")
+        assert widget._requeueable
+        assert widget_count(root) < 3000
+        panel.set_running(False)
+        panel._requeue_job(completed_job)
+        assert panel._jobs[-1] is completed_job
+        assert panel._job_widgets[-1] is not None
+        assert panel._job_widgets[-1]._status_label.cget("text") == queue_panel_module.t("job_pending")
+    finally:
+        root.destroy()
+
+
 def test_segment_button_only_appears_for_pending_video_jobs() -> None:
     try:
         root = ctk.CTk()

@@ -60,6 +60,8 @@ ZH = {
         "btn_add_files": "添加文件",
         "queue_empty": "拖放文件到这里\n或使用上方按钮",
         "items_queued": "队列中有 {count} 个项目",
+        "queue_previous_page": "上一页队列",
+        "queue_next_page": "下一页队列",
         "btn_clear": "清空",
         "btn_clear_completed": "✓ 清除已完成",
         "output_location": "输出位置",

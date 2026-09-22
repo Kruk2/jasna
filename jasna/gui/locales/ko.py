@@ -59,6 +59,8 @@ KO = {
         "btn_add_files": "파일 추가",
         "queue_empty": "여기에 파일을 드래그 앤 드롭하거나\n위의 버튼을 사용하세요",
         "items_queued": "{count}개 항목 대기 중",
+        "queue_previous_page": "이전 대기열 페이지",
+        "queue_next_page": "다음 대기열 페이지",
         "btn_clear": "비우기",
         "btn_clear_completed": "✓ 완료 항목 제거",
         "output_location": "출력 위치",

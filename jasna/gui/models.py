@@ -44,6 +44,7 @@ class JobItem:
     status: JobStatus = JobStatus.PENDING
     duration_seconds: float | None = None
     progress: float = 0.0
+    elapsed_seconds: float | None = None
     error_message: str = ""
     has_conflict: bool = False  # True if output file already exists
     segments: tuple[SegmentRange, ...] = ()

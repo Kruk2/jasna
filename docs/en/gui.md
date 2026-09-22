@@ -7,6 +7,8 @@ Every setting has a tooltip: hover the ⓘ icon next to it.
 
 - Add videos or images with the **Add Files** button (the folder icon next
   to it adds a whole folder), or just **drag & drop** them onto the queue.
+- For more than 40 items, use the arrows below the queue to view another page.
+  All pages process in order; dragging changes order within the shown page.
 - **Reorder jobs by dragging** a queue item by its handle — processing runs
   top to bottom.
 - Each video has **scissors** for the [Segment Editor](segments.md) and a
