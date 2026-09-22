@@ -28,11 +28,15 @@ def _status(
 
 
 def test_linux_theme_uses_fontconfig_generic_families():
-    assert _font_families_for_platform("linux") == ("sans-serif", "monospace")
+    assert _font_families_for_platform("linux", "zh") == ("sans-serif", "monospace")
 
 
-def test_windows_theme_keeps_existing_families():
-    assert _font_families_for_platform("win32") == ("Segoe UI", "Consolas")
+def test_windows_theme_uses_chinese_ui_font_for_chinese_language():
+    assert _font_families_for_platform("win32", "zh") == ("Microsoft YaHei UI", "Consolas")
+
+
+def test_windows_theme_keeps_existing_families_for_other_languages():
+    assert _font_families_for_platform("win32", "en") == ("Segoe UI", "Consolas")
 
 
 def test_healthy_linux_font_backend_has_no_problem():

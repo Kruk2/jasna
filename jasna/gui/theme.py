@@ -3,9 +3,11 @@
 import sys
 
 
-def _font_families_for_platform(platform: str) -> tuple[str, str]:
+def _font_families_for_platform(platform: str, language: str) -> tuple[str, str]:
     if platform.startswith("linux"):
         return "sans-serif", "monospace"
+    if platform == "win32" and language == "zh":
+        return "Microsoft YaHei UI", "Consolas"
     return "Segoe UI", "Consolas"
 
 
@@ -58,7 +60,7 @@ class Colors:
 
 
 class Fonts:
-    FAMILY, FAMILY_MONO = _font_families_for_platform(sys.platform)
+    FAMILY, FAMILY_MONO = _font_families_for_platform(sys.platform, "en")
     
     # Typography hierarchy per spec (+1px from original)
     SIZE_TITLE = 16      # App title "JASNA GUI" - bold
