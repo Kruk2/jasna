@@ -474,6 +474,9 @@ class NvidiaVideoEncoder:
         self.output_fps = Fraction(
             metadata.video_fps_exact if output_fps is None else output_fps
         )
+        self._wmv_cfr_rate = self._vc1_wmv_cfr_rate(metadata)
+        self._wmv_first_pts: int | None = None
+        self._wmv_frame_index = 0
 
         self._lut_applier: GpuLutApplier | None = None
         if lut_path:
@@ -529,6 +532,24 @@ class NvidiaVideoEncoder:
         # them None and allocates per frame (NVENC outlives encode()).
         self._packed: torch.Tensor | None = None
         self._cas_luma: torch.Tensor | None = None
+
+    @staticmethod
+    def _vc1_wmv_cfr_rate(metadata: VideoMetadata) -> Fraction | None:
+        if (
+            metadata.codec_name != "vc1"
+            or Path(metadata.video_file).suffix.lower() not in {".wmv", ".asf"}
+        ):
+            return None
+        rate = Fraction(30_000, 1_001)
+        if abs(metadata.video_fps - float(rate)) >= 0.04:
+            return None
+        duration_rate = metadata.num_frames / metadata.duration if metadata.duration > 0 else 0
+        if (
+            abs(metadata.average_fps - float(rate)) >= 0.01
+            and abs(duration_rate - float(rate)) >= 0.01
+        ):
+            return None
+        return rate
 
     def __enter__(self):
         try:
@@ -1057,10 +1078,22 @@ class NvidiaVideoEncoder:
         for packet in packets:
             self._mux_video(packet)
 
+    def _output_pts(self, pts: int) -> int:
+        pts = int(pts) - self.pts_origin
+        if self._wmv_cfr_rate is None:
+            return pts
+        if self._wmv_first_pts is None:
+            self._wmv_first_pts = pts
+        output_pts = self._wmv_first_pts + round(
+            self._wmv_frame_index / (self._wmv_cfr_rate * self.metadata.time_base)
+        )
+        self._wmv_frame_index += 1
+        return output_pts
+
     def encode(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
         if self._worker_error is not None:
             raise self._worker_error
-        pts = int(pts) - self.pts_origin
+        pts = self._output_pts(pts)
         while pts in self.pts_set:
             pts += 1
         heapq.heappush(self.pts_heap, pts)

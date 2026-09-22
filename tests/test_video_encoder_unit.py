@@ -769,8 +769,8 @@ class TestColorHandling:
             _make_encoder(tmp_path, codec=codec, color_range=AvColorRange.UNSPECIFIED)
 
 
-def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
-    enc = _make_encoder(tmp_path)
+def _buffered_encoder(tmp_path, **meta_overrides) -> NvidiaVideoEncoder:
+    enc = _make_encoder(tmp_path, **meta_overrides)
     enc.pts_heap = []
     enc.frame_buffer = deque()
     enc.pts_set = set()
@@ -782,6 +782,50 @@ def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
 
 
 class TestEncodeBuffer:
+    @pytest.mark.parametrize(
+        ("reported_fps", "average_fps"),
+        [
+            (Fraction(30), 30.0),
+            (Fraction(30), 30_000 / 1_001),
+            (Fraction(30_000, 1_001), 30_000 / 1_001),
+        ],
+    )
+    def test_vc1_wmv_2997_output_pts_follow_source_duration(
+        self, tmp_path, reported_fps, average_fps
+    ):
+        enc = _buffered_encoder(
+            tmp_path,
+            video_file="source.wmv",
+            codec_name="vc1",
+            video_fps=float(reported_fps),
+            video_fps_exact=reported_fps,
+            average_fps=average_fps,
+            num_frames=215_552,
+            duration=7192.241,
+            time_base=Fraction(1, 1000),
+        )
+        for index in range(301):
+            enc.encode("frame", 46 + round(index * 1000 / 30))
+
+        assert max(enc.pts_heap) == 46 + round(300 * 1001 / 30)
+
+    def test_vc1_wmv_other_rates_keep_source_pts(self, tmp_path):
+        enc = _buffered_encoder(
+            tmp_path,
+            video_file="source.wmv",
+            codec_name="vc1",
+            video_fps=25.0,
+            video_fps_exact=Fraction(25),
+            average_fps=25.0,
+            num_frames=1451,
+            duration=58.04,
+            time_base=Fraction(1, 1000),
+        )
+        enc.encode("frame", 100)
+        enc.encode("frame", 141)
+
+        assert sorted(enc.pts_heap) == [100, 141]
+
     @pytest.mark.parametrize(
         ("dtype", "width", "expected_pitch"),
         [
