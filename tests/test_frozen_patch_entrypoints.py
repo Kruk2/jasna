@@ -1,10 +1,34 @@
 import importlib
+import logging
 import sys
 from unittest.mock import patch
 
 import pytest
 
 from test_main import _base_argv, _main_patches, _make_model_files
+
+
+def test_frozen_config_scan_skips_source(caplog, monkeypatch):
+    import torch.jit
+    from torch.utils import _config_module
+    from jasna import _frozen
+
+    monkeypatch.setattr(_frozen, "_patched", False)
+    monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
+    with (
+        patch.object(torch.jit, "interface"),
+        patch.object(
+            _config_module,
+            "get_assignments_with_compile_ignored_comments",
+            side_effect=KeyError("torch._inductor.config_comms"),
+        ) as scan,
+        caplog.at_level(logging.DEBUG, logger="jasna._frozen"),
+    ):
+        _frozen.patch_frozen_torch()
+        assert _config_module.get_assignments_with_compile_ignored_comments(object()) == set()
+
+    scan.assert_not_called()
+    assert not caplog.records
 
 
 def test_importing_pipeline_does_not_patch_frozen_torch():

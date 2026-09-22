@@ -46,6 +46,8 @@ def patch_frozen_torch() -> None:
     _assignments = _config_module.get_assignments_with_compile_ignored_comments
 
     def get_assignments_with_compile_ignored_comments(module):
+        if is_frozen():
+            return set()
         try:
             return _assignments(module)
         except Exception:
