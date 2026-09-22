@@ -153,6 +153,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._size_and_center()
         self._build_loading()
         self._bind_shortcuts()
+        self.bind("<FocusIn>", self._restore_if_unmapped, add="+")
         self.update_idletasks()
         self.wait_visibility()
         self._take_focus()
@@ -187,6 +188,10 @@ class SegmentEditor(ctk.CTkToplevel):
             self.focus_force()
         except tk.TclError:
             pass
+
+    def _restore_if_unmapped(self, _event) -> None:
+        if not self.winfo_ismapped():
+            self.deiconify()
 
     def _build_loading(self) -> None:
         self._loading = ctk.CTkFrame(self, fg_color="transparent")
