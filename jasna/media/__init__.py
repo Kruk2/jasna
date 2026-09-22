@@ -56,7 +56,7 @@ SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
 )
 
 # User-facing AMF settings. ``cq`` is kept as a portable Jasna option; the
-# encoder maps it to QVBR for H.264/AV1 and constant QP for HEVC.
+# encoder maps it to QVBR for H.264 and constant QP for HEVC/AV1.
 _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
         "preset",
@@ -68,7 +68,6 @@ _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
         "g",
         "bf",
         "preanalysis",
-        "vbaq",
         "maxrate",
         "bufsize",
         "profile",
@@ -77,10 +76,10 @@ _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
 )
 
 AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC: dict[str, frozenset[str]] = {
-    "hevc": _COMMON_AMF_ENCODER_SETTINGS | {"tier", "bitdepth"},
+    "hevc": _COMMON_AMF_ENCODER_SETTINGS | {"tier", "bitdepth", "vbaq"},
     "h264": _COMMON_AMF_ENCODER_SETTINGS
-    | {"coder", "bf_ref", "pa_adaptive_mini_gop"},
-    "av1": _COMMON_AMF_ENCODER_SETTINGS | {"bitdepth"},
+    | {"coder", "bf_ref", "pa_adaptive_mini_gop", "vbaq"},
+    "av1": _COMMON_AMF_ENCODER_SETTINGS | {"bitdepth", "aq_mode"},
 }
 
 AMF_SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(

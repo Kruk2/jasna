@@ -1,4 +1,4 @@
-"""Literal encoder quality defaults and native ranges."""
+"""Literal encoder quality defaults and supported ranges."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ _ENCODER_CQ_SPECS: dict[
     AcceleratorVendor.AMD: {
         "h264": EncoderCqSpec(default=24, minimum=0, maximum=51),
         "hevc": EncoderCqSpec(default=25, minimum=0, maximum=51),
-        "av1": EncoderCqSpec(default=32, minimum=0, maximum=51),
+        "av1": EncoderCqSpec(default=32, minimum=1, maximum=51),
     },
 }
 

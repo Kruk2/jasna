@@ -15,10 +15,10 @@ from jasna.media.encoder_quality import encoder_cq_spec, validate_encoder_cq
         (AcceleratorVendor.NVIDIA, "av1", 35, 1, 63),
         (AcceleratorVendor.AMD, "h264", 24, 0, 51),
         (AcceleratorVendor.AMD, "hevc", 25, 0, 51),
-        (AcceleratorVendor.AMD, "av1", 32, 0, 51),
+        (AcceleratorVendor.AMD, "av1", 32, 1, 51),
     ],
 )
-def test_encoder_cq_specs_follow_native_vendor_scales(
+def test_encoder_cq_specs_follow_supported_vendor_ranges(
     vendor: AcceleratorVendor,
     codec: str,
     default: int,
@@ -44,7 +44,7 @@ def test_validate_encoder_cq_returns_literal_value(value: int) -> None:
 
 
 @pytest.mark.parametrize("value", [0, 52])
-def test_validate_encoder_cq_rejects_values_outside_native_range(value: int) -> None:
+def test_validate_encoder_cq_rejects_values_outside_supported_range(value: int) -> None:
     with pytest.raises(ValueError, match=r"h264.*NVIDIA.*1\.\.51"):
         validate_encoder_cq(
             value,
@@ -80,7 +80,7 @@ def test_cli_legacy_amf_quality_alias_suppresses_default() -> None:
     ) == {"g": 120, "cq": 30}
 
 
-def test_cli_legacy_amf_quality_alias_uses_native_range() -> None:
+def test_cli_legacy_amf_quality_alias_uses_supported_range() -> None:
     with pytest.raises(ValueError, match=r"hevc.*AMD.*0\.\.51"):
         _resolve_cli_encoder_settings(
             "qvbr_quality_level=52",

@@ -157,6 +157,57 @@ def test_amf_hevc_cqp_skips_source_bitrate_cap(monkeypatch, tmp_path) -> None:
     assert "bufsize" not in encoder.encoder_options
 
 
+@pytest.mark.parametrize(
+    ("settings", "expected_qp"),
+    [({}, "32"), ({"cq": 21}, "21"), ({"qvbr_quality_level": 21}, "21")],
+)
+def test_amf_av1_p010_uses_constant_qp(monkeypatch, tmp_path, settings, expected_qp) -> None:
+    import jasna.media.video_encoder as module
+
+    monkeypatch.setattr(
+        module,
+        "vendor_for_device",
+        lambda _device: AcceleratorVendor.AMD,
+    )
+    metadata = replace(_metadata(), video_bitrate=20_000_000)
+    encoder = module.NvidiaVideoEncoder(
+        str(tmp_path / "out.mp4"),
+        torch.device("cuda:0"),
+        metadata,
+        codec="av1",
+        encoder_settings=settings,
+    )
+    assert encoder.spec.frame_format == "p010le"
+    assert encoder.encoder_options["rc"] == "cqp"
+    assert encoder.encoder_options["preanalysis"] == "0"
+    assert encoder.encoder_options["aq_mode"] == "none"
+    assert all(
+        encoder.encoder_options[key] == expected_qp for key in ("qp_i", "qp_p", "qp_b")
+    )
+    assert "qvbr_quality_level" not in encoder.encoder_options
+    assert "maxrate" not in encoder.encoder_options
+    assert "bufsize" not in encoder.encoder_options
+
+
+@pytest.mark.parametrize("rc", ["qvbr", "hqvbr", 4, 5])
+def test_amf_av1_p010_rejects_qvbr(monkeypatch, tmp_path, rc: str | int) -> None:
+    import jasna.media.video_encoder as module
+
+    monkeypatch.setattr(
+        module,
+        "vendor_for_device",
+        lambda _device: AcceleratorVendor.AMD,
+    )
+    with pytest.raises(ValueError, match="AMD AV1 Main10.*QVBR"):
+        module.NvidiaVideoEncoder(
+            str(tmp_path / "out.mp4"),
+            torch.device("cuda:0"),
+            _metadata(),
+            codec="av1",
+            encoder_settings={"cq": 21, "rc": rc},
+        )
+
+
 @pytest.mark.parametrize("rc", ["qvbr", "hqvbr", 4, 5])
 def test_amf_hevc_rejects_qvbr_for_main10(
     monkeypatch, tmp_path, rc: str | int

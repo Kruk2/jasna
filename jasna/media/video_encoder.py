@@ -142,13 +142,13 @@ DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
 DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
-    "rc": "qvbr",
-    "qvbr_quality_level": str(
-        encoder_cq_spec("av1", AcceleratorVendor.AMD).default
-    ),
+    "rc": "cqp",
+    "qp_i": str(encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
+    "qp_p": str(encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
+    "qp_b": str(encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
     "g": "250",
-    "preanalysis": "1",
-    "vbaq": "1",
+    "preanalysis": "0",
+    "aq_mode": "none",
     "profile": "main",
     "bitdepth": "10",
 }
@@ -334,12 +334,13 @@ def _normalize_amf_cq(
     rc = overrides.get("rc", defaults["rc"])
     cqp_modes = {"cqp", "0"}
     qvbr_modes = {"qvbr", "hqvbr", "4", "5"}
-    if codec == "hevc" and rc not in cqp_modes:
+    if codec in {"hevc", "av1"} and rc not in cqp_modes:
         defaults.pop("qp_i", None)
         defaults.pop("qp_p", None)
-    if codec == "hevc" and ten_bit and rc in qvbr_modes:
+        defaults.pop("qp_b", None)
+    if codec in {"hevc", "av1"} and ten_bit and rc in qvbr_modes:
         raise ValueError(
-            "AMD HEVC Main10 does not support QVBR or HQVBR; use the default CQP mode"
+            f"AMD {codec.upper()} Main10 does not support QVBR or HQVBR; use the default CQP mode"
         )
 
     aliases = [key for key in ("cq", "qvbr_quality_level") if key in overrides]
@@ -352,14 +353,16 @@ def _normalize_amf_cq(
         return
 
     value = overrides.pop(aliases[0])
-    if codec == "hevc":
+    if codec in {"hevc", "av1"}:
         if rc in cqp_modes:
             overrides["qp_i"] = value
             overrides["qp_p"] = value
+            if codec == "av1":
+                overrides["qp_b"] = value
         elif not ten_bit and rc in qvbr_modes:
             overrides["qvbr_quality_level"] = value
         else:
-            raise ValueError("AMD HEVC CQ requires rc=cqp")
+            raise ValueError(f"AMD {codec.upper()} CQ requires rc=cqp")
     else:
         overrides["qvbr_quality_level"] = value
 
@@ -506,12 +509,12 @@ class NvidiaVideoEncoder:
                 )
             else:
                 _drop_unsupported_nvenc_overrides(codec, overrides, self.encoder_options)
-        uses_amf_hevc_cqp = (
+        uses_amf_cqp = (
             self.vendor is AcceleratorVendor.AMD
-            and codec == "hevc"
+            and codec in {"hevc", "av1"}
             and overrides.get("rc", self.encoder_options["rc"]) in {"cqp", "0"}
         )
-        if "maxrate" not in overrides and not uses_amf_hevc_cqp:
+        if "maxrate" not in overrides and not uses_amf_cqp:
             self.encoder_options.update(
                 source_bitrate_cap_options(
                     metadata,
