@@ -25,6 +25,8 @@ class JobStatus(Enum):
     SKIPPED = "skipped"
 
 
+DEFAULT_OUTPUT_PATTERN = "{original}_restored.mp4"
+
 _job_id_counter = itertools.count(1)
 
 
@@ -182,7 +184,7 @@ class AppSettings:
     # Output
     output_same_as_input: bool = True
     output_folder: str = ""
-    output_pattern: str = "{original}_restored.mp4"
+    output_pattern: str = DEFAULT_OUTPUT_PATTERN
     file_conflict: str = "auto_rename"  # auto_rename, overwrite, skip
     working_directory: str = ""  # empty = same directory as the output video
 
@@ -303,7 +305,7 @@ class PresetManager:
         self._user_presets: dict[str, AppSettings] = {}
         self._last_selected: str = "Default"
         self._last_output_folder: str = ""
-        self._last_output_pattern: str = "{original}_restored.mp4"
+        self._last_output_pattern: str = DEFAULT_OUTPUT_PATTERN
         self._system_check_passed_version: str = ""
         self._load()
         
@@ -319,7 +321,7 @@ class PresetManager:
             
             self._last_selected = data.get("last_selected", "Default")
             self._last_output_folder = data.get("last_output_folder", "")
-            self._last_output_pattern = data.get("last_output_pattern", "{original}_restored.mp4")
+            self._last_output_pattern = data.get("last_output_pattern", DEFAULT_OUTPUT_PATTERN)
             self._system_check_passed_version = data.get("system_check_passed_version", "")
             
             for name, preset_dict in data.get("user_presets", {}).items():
@@ -420,7 +422,7 @@ class PresetManager:
         return self._last_output_pattern
 
     def set_last_output_pattern(self, pattern: str):
-        self._last_output_pattern = pattern or "{original}_restored.mp4"
+        self._last_output_pattern = pattern or DEFAULT_OUTPUT_PATTERN
         self._save(last_output_pattern=self._last_output_pattern)
 
     def get_system_check_passed_version(self) -> str:

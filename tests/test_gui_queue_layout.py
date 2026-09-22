@@ -484,3 +484,13 @@ def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi) -> None:
         assert root._settings_panel.winfo_width() < settings_width
     finally:
         root.destroy()
+
+
+def test_queue_output_path_keeps_image_extension(tmp_path: Path) -> None:
+    panel = SimpleNamespace(
+        _output_entry=SimpleNamespace(get=lambda: str(tmp_path)),
+        _pattern_entry=SimpleNamespace(get=lambda: "{original}_restored.mp4"),
+    )
+
+    assert QueuePanel._get_output_path(panel, Path("/in/photo.png")) == tmp_path / "photo_restored.png"
+    assert QueuePanel._get_output_path(panel, Path("/in/clip.mkv")) == tmp_path / "clip_restored.mp4"
