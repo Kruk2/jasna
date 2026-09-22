@@ -987,6 +987,7 @@ class TestRunStreaming:
 class TestStreamingLoop:
     def _make_mocks(self):
         mock_server = MagicMock()
+        mock_server.initial_start_segment = 0
         mock_server.video_change = threading.Event()
         mock_server.segment_start_time.return_value = 0.0
         mock_server.segment_start_frame.return_value = 0
@@ -994,6 +995,27 @@ class TestStreamingLoop:
         mock_enc = MagicMock()
         mock_pipeline = MagicMock()
         return mock_pipeline, mock_server, mock_enc
+
+    def test_first_pass_uses_requested_start(self):
+        from jasna.streaming_pipeline import _streaming_loop
+        pipeline, server, enc = self._make_mocks()
+        server.initial_start_segment = 10
+
+        def _fake_pass(**kwargs):
+            server.video_change.set()
+            assert kwargs["start_segment"] == 10
+            return None
+
+        with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
+            _streaming_loop(
+                pipeline=pipeline,
+                device=torch.device("cpu"),
+                metadata=MagicMock(),
+                hls_server=server,
+                streaming_encoder=enc,
+            )
+
+        enc.start.assert_called_once_with(start_number=10)
 
     def test_video_change_during_pass(self):
         from jasna.streaming_pipeline import _streaming_loop

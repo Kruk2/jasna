@@ -137,6 +137,21 @@ class TestHlsStreamingServer:
         assert server.consume_seek_for_pass(5) is None
         assert not server.seek_requested.is_set()
 
+    def test_evicted_pass_start_is_not_ignored(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.reset_demand(0)
+        server.update_production(18)
+        server.notify_segment_requested(18)
+        server.request_seek(0)
+
+        assert server.consume_seek_for_pass(0) == 0
+
+    def test_stale_playback_cannot_request_seek(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.request_seek(10, new_playback=True)
+        assert not server.request_seek(1, expected_epoch=0)
+        assert server.seek_target_segment == 10
+
     def test_url_property(self):
         server = HlsStreamingServer(segment_duration=4.0, port=9999)
         assert server.url == "http://localhost:9999/stream.m3u8"
@@ -299,6 +314,14 @@ class TestDemandFlowControl:
         server.reset_demand(start_segment=50)
         server.update_production(55)
         assert server.needs_seek(10)
+
+    def test_evicted_segment_triggers_seek(self, tmp_path):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.segments_dir = tmp_path
+        server.reset_demand()
+        server.update_production(18)
+        server.notify_segment_requested(18)
+        assert server.needs_seek(8)
 
     def test_evicts_old_segments(self, tmp_path):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
@@ -984,6 +1007,7 @@ class TestHttpManifestTrimming:
             assert status == 200
             assert "#EXT-X-MEDIA-SEQUENCE:0" in body
             assert "seg_00000.ts" in body
+            assert "seg_00000.ts?epoch=0" in body
         finally:
             server.stop()
 
@@ -997,6 +1021,87 @@ class TestHttpManifestTrimming:
             assert status == 200
             assert "#EXT-X-MEDIA-SEQUENCE:0" in body
             assert "seg_00000.ts" in body
+        finally:
+            server.stop()
+
+
+class TestHttpSegments:
+    def test_old_playback_cannot_restart_new_seek(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server._current_video_path = video_file
+        server.load_video(_make_metadata(duration=120.0))
+        try:
+            assert "seg_00000.ts?epoch=0" in _get(port, "/stream.m3u8")[1]
+            assert _post(port, "/open", {"path": str(video_file), "start": 40.0})[0] == 200
+            assert "seg_00010.ts?epoch=1" in _get(port, "/stream.m3u8?start=40")[1]
+            assert server.consume_seek() == 10
+            assert _get(port, "/seg_00001.ts?epoch=0")[0] == 404
+            assert not server.seek_requested.is_set()
+        finally:
+            server.stop()
+
+    def test_evicted_segment_restarts_and_serves(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(_make_metadata(duration=120.0))
+        server.reset_demand()
+        server.update_production(18)
+        server.notify_segment_requested(18)
+        result = []
+        thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00008.ts?epoch=0")))
+        try:
+            thread.start()
+            assert server.seek_requested.wait(timeout=2)
+            assert server.seek_target_segment == 8
+            server.reset_demand(8)
+            (server.segments_dir / "seg_00008.ts").write_bytes(b"complete")
+            (server.segments_dir / "_hls_internal.m3u8").write_text("#EXTINF:4.000,\nseg_00008.ts\n")
+            thread.join(timeout=2)
+            assert result[0][0:2] == (200, "complete")
+        finally:
+            server.stop()
+
+    def test_wait_ends_when_pass_moves_away(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(_make_metadata(duration=800.0))
+        server.reset_demand(10)
+        server.update_production(10)
+        result = []
+        thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00011.ts?epoch=0")[0]))
+        try:
+            thread.start()
+            deadline = time.monotonic() + 2
+            while server._highest_requested_segment < 11 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert server._highest_requested_segment == 11
+            server.reset_demand(100)
+            thread.join(timeout=2)
+            assert result == [404]
+        finally:
+            server.stop()
+
+    def test_segment_waits_for_playlist_finalization(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(_make_metadata(duration=20.0))
+        server.reset_demand()
+        segment = server.segments_dir / "seg_00000.ts"
+        segment.write_bytes(b"partial")
+        result = []
+        thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00000.ts?epoch=0")))
+        try:
+            thread.start()
+            time.sleep(0.4)
+            assert thread.is_alive()
+            segment.write_bytes(b"complete")
+            (server.segments_dir / "_hls_internal.m3u8").write_text("#EXTINF:4.000,\nseg_00000.ts\n")
+            thread.join(timeout=2)
+            assert result[0][0:2] == (200, "complete")
+            assert result[0][2]["content-length"] == "8"
         finally:
             server.stop()
 
@@ -1056,6 +1161,32 @@ class TestHttpStopEndpoint:
 
 
 class TestHttpOpenEndpoint:
+    def test_open_rejects_non_finite_start(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            status, body, _ = _post(port, "/open", {"path": str(video_file), "start": "nan"})
+            assert status == 400
+            assert body["error"] == "Invalid start time"
+        finally:
+            server.stop()
+
+    def test_new_video_start_is_used_for_first_pass(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            with patch.object(server, "wait_until_first_segment", return_value=True):
+                status, body, _ = _post(port, "/open", {"path": str(video_file), "start": 40.0})
+            assert status == 200
+            assert body["status"] == "ready"
+            assert server.initial_start_segment == 10
+        finally:
+            server.stop()
+
     def test_open_file_not_found(self):
         server = HlsStreamingServer(segment_duration=4.0)
         port = _start_server_on_free_port(server)
