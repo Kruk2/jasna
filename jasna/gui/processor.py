@@ -9,9 +9,10 @@ from pathlib import Path
 from dataclasses import dataclass, replace
 from typing import Callable
 
-from jasna.gui.models import JobItem, JobStatus, AppSettings
+from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_config
 from jasna.media import UnsupportedColorspaceError
+from jasna.media.media_files import folder_output_path, unique_path
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession, build_pipeline
 
@@ -70,7 +71,7 @@ class Processor:
         self._jobs: list[JobItem] = []
         self._settings: AppSettings | None = None
         self._output_folder: str = ""
-        self._output_pattern: str = "{original}_restored.mp4"
+        self._output_pattern: str = DEFAULT_OUTPUT_PATTERN
         self._disable_basicvsrpp_tensorrt_for_run = False
 
         # Heavy models are loaded once and reused across consecutive jobs of the
@@ -209,17 +210,7 @@ class Processor:
             if overrides:
                 job_settings = replace(job_settings, **overrides)
 
-        # Determine output path
-        if self._output_folder:
-            output_dir = Path(self._output_folder)
-        else:
-            output_dir = input_path.parent
-
-        output_name = self._output_pattern.replace("{original}", input_path.stem)
-        output_path = output_dir / output_name
-        if is_image:
-            # The video output pattern carries a video extension; images keep their own.
-            output_path = output_path.with_suffix(input_path.suffix)
+        output_path = folder_output_path(self._output_folder or input_path.parent, input_path, self._output_pattern)
         
         # Handle file conflict based on settings
         file_conflict = self._settings.file_conflict if self._settings else "auto_rename"
@@ -235,7 +226,7 @@ class Processor:
                 self._log("WARNING", f"Skipped {job.filename}: output file already exists")
                 return
             elif file_conflict == "auto_rename":
-                output_path = self._get_unique_output_path(output_path)
+                output_path = unique_path(output_path)
                 self._log("INFO", f"Renamed output to {output_path.name} to avoid overwrite")
             # "overwrite" - just proceed and let the file be replaced
         
@@ -612,21 +603,3 @@ class Processor:
         _cleanup_torch(torch)
         self._log("INFO", "SD 1.5 model unloaded")
 
-    def _get_unique_output_path(self, output_path: Path) -> Path:
-        """Find a unique output path by adding a counter suffix if file exists."""
-        if not output_path.exists():
-            return output_path
-            
-        stem = output_path.stem
-        suffix = output_path.suffix
-        parent = output_path.parent
-        
-        counter = 1
-        while True:
-            new_name = f"{stem} ({counter}){suffix}"
-            new_path = parent / new_name
-            if not new_path.exists():
-                return new_path
-            counter += 1
-            if counter > 9999:
-                raise RuntimeError(f"Could not find unique filename after 9999 attempts: {output_path}")
