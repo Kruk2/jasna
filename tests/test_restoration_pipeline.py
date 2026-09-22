@@ -31,23 +31,21 @@ def restore_clip(
     keep_start: int,
     keep_end: int,
 ) -> RestoredClip:
-    resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = pipeline._prepare_from_raw_crops(raw_crops)
-    primary_raw = pipeline.restorer.raw_process(resized_crops)
-    if pipeline._denoise_step is DenoiseStep.AFTER_PRIMARY:
-        primary_raw = pipeline._apply_denoise(primary_raw)
-    restored_frames = pipeline._run_secondary(primary_raw, int(keep_start), int(keep_end))
+    pr = pipeline.prepare_and_run_primary(clip, raw_crops, frame_shape, int(keep_start), int(keep_end), None)
+    restored_frames = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
+    sr = pipeline.build_secondary_result(pr, restored_frames)
     scaled_pad_offsets: list[tuple[int, int]] = []
     scaled_resize_shapes: list[tuple[int, int]] = []
-    for frame_u8, po, rs in zip(restored_frames, pad_offsets, resize_shapes):
+    for frame_u8, po, rs in zip(sr.restored_frames, sr.pad_offsets, sr.resize_shapes):
         pad_offset, resize_shape = scale_offsets(frame_u8, po, rs)
         scaled_pad_offsets.append(pad_offset)
         scaled_resize_shapes.append(resize_shape)
     return RestoredClip(
-        restored_frames=restored_frames,
-        masks=clip.masks,
+        restored_frames=sr.restored_frames,
+        masks=sr.masks,
         frame_shape=frame_shape,
-        enlarged_bboxes=enlarged_bboxes,
-        crop_shapes=crop_shapes,
+        enlarged_bboxes=sr.enlarged_bboxes,
+        crop_shapes=sr.crop_shapes,
         pad_offsets=scaled_pad_offsets,
         resize_shapes=scaled_resize_shapes,
     )
@@ -703,3 +701,28 @@ def test_build_secondary_result_with_denoise(monkeypatch) -> None:
 
 
 
+
+
+def test_after_secondary_denoise_runs_once_per_clip(monkeypatch) -> None:
+    import jasna.restorer.restoration_pipeline as rp
+
+    calls = []
+    real_denoise = rp.apply_denoise_u8
+
+    def counting_denoise(frames, strength):
+        calls.append(frames.shape[0])
+        return real_denoise(frames, strength)
+
+    monkeypatch.setattr(rp, "apply_denoise_u8", counting_denoise)
+    clip, frames, raw_crops = _make_clip_and_frames(monkeypatch)
+    pipeline = RestorationPipeline(
+        restorer=_IdentityRestorer(),  # type: ignore[arg-type]
+        denoise_strength=DenoiseStrength.MEDIUM,
+        denoise_step=DenoiseStep.AFTER_SECONDARY,
+    )
+
+    pr = pipeline.prepare_and_run_primary(clip, raw_crops, (30, 40), 0, 3, None)
+    restored_frames = pipeline._run_secondary(pr.primary_raw, pr.keep_start, pr.keep_end)
+    pipeline.build_secondary_result(pr, restored_frames)
+
+    assert calls == [3]
