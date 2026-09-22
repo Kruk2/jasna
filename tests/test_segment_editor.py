@@ -86,6 +86,10 @@ def test_segment_editor_maps_before_taking_modal_grab(monkeypatch) -> None:
 
         assert editor.winfo_viewable()
         assert editor.grab_current() == editor
+        editor.withdraw()
+        editor.event_generate("<FocusIn>")
+        root.update()
+        assert editor.winfo_viewable()
     finally:
         if editor is not None:
             editor._finish_close()
