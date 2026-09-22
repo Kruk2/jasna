@@ -81,11 +81,6 @@ class RestorationPipeline:
             kept = primary_raw[keep_start:keep_end]
             restored_frames = list(kept.clamp(0, 1).mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0))
 
-        if self._denoise_step is DenoiseStep.AFTER_SECONDARY:
-            batch_u8 = torch.stack(restored_frames, dim=0)
-            batch_u8 = apply_denoise_u8(batch_u8, self._denoise_strength)
-            restored_frames = list(batch_u8.unbind(0))
-
         return restored_frames
 
     def prepare_and_run_primary(
