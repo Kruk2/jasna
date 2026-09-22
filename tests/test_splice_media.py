@@ -288,3 +288,28 @@ def test_final_mux_rebuilds_mp4_chapter_carrier_only_once(tmp_path: Path) -> Non
             "Main",
         ]
         assert len(container.streams.data) == 1
+
+
+def test_final_mux_skips_mp4_timecode_stream_without_codec(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12:duration=1",
+        "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        "-timecode", "00:00:00:00",
+        str(source),
+    )
+    with av.open(str(source)) as container:
+        assert container.streams.data[0].codec_context is None
+
+    assembled = tmp_path / "assembled.mp4"
+    _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "copy", str(assembled))
+    output = tmp_path / "output.mp4"
+
+    mux_final_output(assembled, source, output, codec="h264")
+
+    with av.open(str(output)) as container:
+        assert len(container.streams.video) == 1
+        assert len(container.streams.audio) == 1
+        assert container.streams.video[0].metadata["timecode"] == "00:00:00:00"
