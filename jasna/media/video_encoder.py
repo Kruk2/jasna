@@ -742,7 +742,7 @@ class NvidiaVideoEncoder:
                 )
                 out_stream.codec_context.layout = audio_layout
                 out_stream.bit_rate = 256_000
-                resampler = av.AudioResampler(
+                processor = av.AudioResampler(
                     format="fltp",
                     layout=audio_layout,
                     rate=in_stream.codec_context.sample_rate,
@@ -783,7 +783,7 @@ class NvidiaVideoEncoder:
                     out_stream.time_base = subtitle_time_base
                     out_stream.codec_context.time_base = subtitle_time_base
                     out_stream.codec_context.subtitle_header = b""
-                    resampler = None
+                    processor = None
                     kind = "subtitle_transcode"
                 else:
                     if (
@@ -791,18 +791,31 @@ class NvidiaVideoEncoder:
                         and audio_layout is not source_audio_layout
                     ):
                         out_stream.codec_context.layout = audio_layout
-                    resampler = None
+                    processor = self._aac_copy_filter(
+                        in_stream, out_stream, output_formats
+                    )
                     kind = "copy"
 
             out_stream.metadata.update(in_stream.metadata)
             out_stream.disposition = in_stream.disposition
             if in_stream.type == "attachment":
                 continue
-            self._source_pipes[in_stream.index] = (kind, out_stream, resampler)
+            self._source_pipes[in_stream.index] = (kind, out_stream, processor)
             packet_streams.append(in_stream)
 
         if packet_streams:
             self._source_iter = self._src.demux(packet_streams)
+
+    @staticmethod
+    def _aac_copy_filter(in_stream, out_stream, output_formats):
+        if (
+            in_stream.type == "audio"
+            and in_stream.codec_context.name == "aac"
+            and output_formats & {"mp4", "mov"}
+            and out_stream.codec_context.extradata
+        ):
+            return av.bitstream.BitStreamFilterContext("aac_adtstoasc", in_stream)
+        return None
 
     def __exit__(self, exc_type, exc_value, traceback):
         try:
@@ -892,12 +905,9 @@ class NvidiaVideoEncoder:
             self._pump_source_streams(threshold)
 
     def _produce_source_packets(self, in_packet) -> list:
-        kind, out_stream, resampler = self._source_pipes[in_packet.stream.index]
+        kind, out_stream, processor = self._source_pipes[in_packet.stream.index]
         if kind == "copy":
-            if in_packet.size == 0:
-                return []
-            in_packet.stream = out_stream
-            return [in_packet]
+            return self._copy_source_packets(in_packet, out_stream, processor)
         if kind == "subtitle_transcode":
             if in_packet.size == 0:
                 return []
@@ -927,9 +937,21 @@ class NvidiaVideoEncoder:
             return [packet]
         out_packets = []
         for aframe in in_packet.decode():
-            for rframe in resampler.resample(aframe):
+            for rframe in processor.resample(aframe):
                 out_packets.extend(out_stream.encode(rframe))
         return out_packets
+
+    @staticmethod
+    def _copy_source_packets(in_packet, out_stream, bitstream_filter):
+        if in_packet is not None and in_packet.size == 0:
+            return []
+        if bitstream_filter is None:
+            packets = [in_packet]
+        else:
+            packets = bitstream_filter.filter(in_packet)
+        for packet in packets:
+            packet.stream = out_stream
+        return packets
 
     def _pump_source_streams(self, upto_seconds: float | None):
         if self._source_iter is None:
@@ -956,11 +978,15 @@ class NvidiaVideoEncoder:
 
     def _drain_source_streams(self):
         self._pump_source_streams(None)
-        for kind, out_stream, resampler in self._source_pipes.values():
+        for kind, out_stream, processor in self._source_pipes.values():
+            if kind == "copy":
+                if processor is not None:
+                    self.dst.mux(self._copy_source_packets(None, out_stream, processor))
+                continue
             if kind != "transcode":
                 continue
             packets = []
-            for rframe in resampler.resample(None):
+            for rframe in processor.resample(None):
                 packets.extend(out_stream.encode(rframe))
             packets.extend(out_stream.encode(None))
             for packet in packets:
