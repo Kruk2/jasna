@@ -19,7 +19,7 @@ from jasna.gui.branding import (
     install_window_icon,
 )
 from jasna.gui import scaling
-from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.gui.theme import Colors, Fonts, Sizing, _font_families_for_platform
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
@@ -60,6 +60,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     
     def __init__(self, skip_wizard: bool = False):
         super().__init__()
+        Fonts.FAMILY, Fonts.FAMILY_MONO = _font_families_for_platform(
+            sys.platform, get_locale().current_language
+        )
         font_status = inspect_font_backend(self)
         font_problem = font_backend_problem(font_status)
         if font_problem is not None:
