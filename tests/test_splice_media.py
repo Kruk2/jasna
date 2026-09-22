@@ -135,6 +135,8 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         assert len(container.streams.video) == 1
         assert len(container.streams.audio) == 1
         assert container.streams.video[0].codec_context.name in {codec, "libdav1d"}
+        if codec == "hevc":
+            assert container.streams.video[0].codec_tag == "hvc1"
         output_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
         assert len(output_frames) == 36
         assert float(container.duration / av.time_base) == pytest.approx(3.0, abs=0.01)

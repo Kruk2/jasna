@@ -654,7 +654,7 @@ def mux_final_output(
             if transcode_codec is not None:
                 args += [f"-c:s:{output_index}", transcode_codec]
     if destination.suffix.lower() in {".mp4", ".mov"}:
-        tag = {"h264": "avc3", "hevc": "hev1", "av1": "av01"}[codec]
+        tag = {"h264": "avc3", "hevc": "hvc1", "av1": "av01"}[codec]
         args += ["-tag:v:0", tag, "-movflags", "+faststart"]
     args.append(str(temporary))
     try:
