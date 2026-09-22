@@ -142,6 +142,52 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     assert pipeline.output_video.parent.is_dir()
 
 
+def test_amf_h264_full_reencode_preserves_selected_ranges(tmp_path) -> None:
+    pipeline = object.__new__(Pipeline)
+    pipeline.input_video = tmp_path / "input.mp4"
+    pipeline.output_video = tmp_path / "output.mp4"
+    pipeline.codec = "h264"
+    pipeline.encoder_settings = {"cq": 22}
+    pipeline.device = torch.device("cuda:0")
+    pipeline.disable_progress = True
+    pipeline.progress_callback = None
+    pipeline.lut_path = None
+    pipeline.sharpen_strength = 0.0
+    pipeline.retarget_high_fps = False
+    pipeline.fmp4 = False
+    pipeline.segments = (SegmentRange(2.5, 3.0),)
+    pipeline._run_pass = MagicMock()
+
+    metadata = MagicMock(
+        video_fps=30.0,
+        video_fps_exact=Fraction(30, 1),
+        average_fps=30.0,
+        num_frames=180,
+        duration=6.0,
+    )
+    index = KeyframeIndex(
+        (0, 60, 120), Fraction(1, 30), 0, 180, max_b_frames=4
+    )
+    pipeline.splice_plan = SplicePlan(
+        index=index,
+        spans=(
+            SpliceSpan("copy", 0, 60),
+            SpliceSpan("render", 60, 120, ((75, 90),)),
+            SpliceSpan("copy", 120, 180),
+        ),
+        segments=pipeline.segments,
+    )
+
+    with (
+        patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.AMD),
+        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
+        patch("jasna.pipeline.NvidiaVideoEncoder"),
+    ):
+        pipeline._run_smart(metadata)
+
+    assert pipeline._run_pass.call_args.kwargs["effect_ranges"] == ((75, 90),)
+
+
 def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
     pipeline = object.__new__(Pipeline)
     pipeline.input_video = Path("input.mp4")

@@ -354,6 +354,44 @@ def test_amf_decoder_context_is_created(monkeypatch) -> None:
     assert reader._amd_hardware_decode is True
 
 
+def test_amf_decoder_accepts_missing_source_rationals(monkeypatch) -> None:
+    import jasna.media.video_decoder as module
+
+    class FakeDecoder:
+        def __setattr__(self, name, value):
+            if name in {"framerate", "sample_aspect_ratio"} and value is None:
+                raise AttributeError("'NoneType' object has no attribute 'numerator'")
+            object.__setattr__(self, name, value)
+
+        def open(self, strict=False):
+            self.opened = True
+
+    decoder = FakeDecoder()
+    monkeypatch.setattr(
+        module.av,
+        "CodecContext",
+        SimpleNamespace(create=MagicMock(return_value=decoder)),
+    )
+    reader = module.NvidiaVideoReader(
+        "input.mp4", 4, torch.device("cuda:0"), _metadata()
+    )
+    source = SimpleNamespace(
+        name="h264",
+        extradata=b"header",
+        width=16,
+        height=16,
+        framerate=None,
+        sample_aspect_ratio=None,
+        thread_type=None,
+    )
+
+    reader._setup_amf_decoder(source)
+
+    assert decoder.sample_aspect_ratio == Fraction(1, 1)
+    assert decoder.opened is True
+    assert reader._amd_hardware_decode is True
+
+
 def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
     import jasna.media.video_decoder as module
 
