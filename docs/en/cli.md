@@ -126,7 +126,7 @@ not translate it. Lower values improve quality and increase file size.
 | GPU | H.264 default | HEVC default | AV1 default | Accepted range |
 | --- | ---: | ---: | ---: | --- |
 | NVIDIA | 25 | 28 | 35 | 1–51 for H.264/HEVC; 1–63 for AV1 |
-| AMD | 24 | 25 | 32 | 0–51 |
+| AMD | 24 | 25 | 32 | H.264/HEVC: 0–51; AV1: 1–51 |
 
 NVIDIA reserves CQ 0 as an automatic value, so Jasna requires an explicit
 quality target starting at 1. The GUI remembers a separate literal value for
@@ -195,6 +195,7 @@ quality target, but nearby values can produce the same bitrate and file size.
 Pass your own `maxrate` to replace this, or set it very high to effectively disable
 it. If the source reports no bitrate at all, Jasna logs a warning and encodes
 without a ceiling.
+AMD HEVC and AV1 10-bit output use constant QP and have no automatic size ceiling.
 
 
 Per-codec extras:
@@ -209,26 +210,25 @@ Per-codec extras:
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Quality target passed unchanged as AMF's `qvbr_quality_level`. Lower = better. Range 0–51; defaults 24 (H.264), 25 (HEVC), 32 (AV1). |
-| `qvbr_quality_level` | AMF's native alias. Accepted in CLI advanced settings when `--cq` is omitted; not accepted in the GUI custom-args field. |
+| `cq` | Quality value passed unchanged to AMF: QVBR for H.264, constant QP for 10-bit HEVC/AV1. Lower = better. Defaults: 24, 25, and 32 respectively. |
+| `qvbr_quality_level` | Legacy CQ alias in CLI advanced settings when `--cq` is omitted; not accepted in the GUI custom-args field. |
 | `usage` | Encoder usage profile. Default `high_quality`. |
 | `quality` | Speed/quality preset: `speed`, `balanced`, `quality` (default). |
-| `rc` | Rate-control mode. Default `qvbr`. |
+| `rc` | Rate-control mode. H.264 defaults to `qvbr`; 10-bit HEVC/AV1 default to `cqp`. |
 | `preset` | AMF preset. |
 | `g` | Keyframe interval in frames. Default 250. |
 | `bf` | Max consecutive B-frames. |
-| `preanalysis` | Pre-analysis pass, enabled by default. |
-| `vbaq` | Variance-based adaptive quantization, enabled by default. |
-| `maxrate` / `bufsize` | Bitrate cap and VBV buffer size, in bits per second. Set automatically from the source bitrate unless you pass `maxrate`. |
+| `preanalysis` | Pre-analysis pass. Enabled for H.264, disabled for 10-bit HEVC/AV1 by default. |
+| `maxrate` / `bufsize` | Bitrate cap and VBV buffer size, in bits per second. Set automatically from the source bitrate except in CQP mode. |
 | `profile` / `level` | Codec profile and level. |
 
 Per-codec extras:
 
 | Codec | Extra keys |
 | ----- | ---------- |
-| `hevc` | `tier`, `bitdepth` (default 10) |
-| `h264` | `coder`, `bf_ref` (B-frame references), `pa_adaptive_mini_gop` (adaptive B-frame placement) |
-| `av1` | `bitdepth` (default 10) |
+| `hevc` | `tier`, `bitdepth` (default 10), `vbaq` (off by default) |
+| `h264` | `coder`, `bf_ref` (B-frame references), `pa_adaptive_mini_gop` (adaptive B-frame placement), `vbaq` (on by default) |
+| `av1` | `bitdepth` (default 10), `aq_mode` (off by default) |
 
 ## Streaming
 

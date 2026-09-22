@@ -122,7 +122,7 @@ jasna --input input_folder --output output_folder
 | GPU | H.264 默认值 | HEVC 默认值 | AV1 默认值 | 允许范围 |
 | --- | ---: | ---: | ---: | --- |
 | NVIDIA | 25 | 28 | 35 | H.264/HEVC 为 1–51；AV1 为 1–63 |
-| AMD | 24 | 25 | 32 | 0–51 |
+| AMD | 24 | 25 | 32 | H.264/HEVC 为 0–51；AV1 为 1–51 |
 
 NVIDIA 将 CQ 0 保留为自动值，因此 Jasna 要求显式质量目标从 1 开始。在编辑当前
 任务期间，GUI 会分别记住每个编解码器的原始数值。
@@ -185,6 +185,7 @@ NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码�
 
 自行指定 `maxrate` 即可替换；设为很大的值可实际停用。若源完全没有报告码率，Jasna 会
 记录警告并在无上限的情况下编码。
+AMD 的 10-bit HEVC/AV1 输出使用固定 QP，因此没有自动体积上限。
 
 
 各编解码器额外参数:
@@ -199,26 +200,25 @@ NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码�
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | 数值不变、作为 AMF `qvbr_quality_level` 传递的质量目标。越低越好。范围 0–51；默认 24（H.264）、25（HEVC）、32（AV1）。 |
-| `qvbr_quality_level` | AMF 原生别名。省略 `--cq` 时可用于 CLI 高级设置；GUI 自定义参数中不接受。 |
+| `cq` | 原样传给 AMF 的质量值：H.264 使用 QVBR，10-bit HEVC/AV1 使用固定 QP。越低越好；默认值依次为 24、25、32。 |
+| `qvbr_quality_level` | 旧版 CQ 别名。省略 `--cq` 时可用于 CLI 高级设置；GUI 自定义参数中不接受。 |
 | `usage` | 编码器用途配置。默认 `high_quality`。 |
 | `quality` | 速度/质量预设: `speed`、`balanced`、`quality`（默认）。 |
-| `rc` | 码率控制模式。默认 `qvbr`。 |
+| `rc` | 码率控制模式。H.264 默认 `qvbr`；10-bit HEVC/AV1 默认 `cqp`。 |
 | `preset` | AMF 预设。 |
 | `g` | 关键帧间隔（帧数）。默认 250。 |
 | `bf` | 最大连续 B 帧数。 |
-| `preanalysis` | 预分析，默认开启。 |
-| `vbaq` | 基于方差的自适应量化，默认开启。 |
-| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。除非指定 `maxrate`，否则会根据源码率自动设置。 |
+| `preanalysis` | 预分析。H.264 默认开启，10-bit HEVC/AV1 默认关闭。 |
+| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。除 CQP 模式外，会根据源码率自动设置。 |
 | `profile` / `level` | 编解码器 profile 和 level。 |
 
 各编解码器额外参数:
 
 | 编解码器 | 额外参数 |
 | ----- | ---------- |
-| `hevc` | `tier`、`bitdepth`（默认 10） |
-| `h264` | `coder`、`bf_ref`（B 帧引用）、`pa_adaptive_mini_gop`（自适应 B 帧排列） |
-| `av1` | `bitdepth`（默认 10） |
+| `hevc` | `tier`、`bitdepth`（默认 10）、`vbaq`（默认关闭） |
+| `h264` | `coder`、`bf_ref`（B 帧引用）、`pa_adaptive_mini_gop`（自适应 B 帧排列）、`vbaq`（默认开启） |
+| `av1` | `bitdepth`（默认 10）、`aq_mode`（默认关闭） |
 
 ## 流媒体
 
