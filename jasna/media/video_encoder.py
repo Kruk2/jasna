@@ -691,13 +691,12 @@ class NvidiaVideoEncoder:
                 )
                 continue
             if in_stream.codec_context is None and in_stream.type != "attachment":
-                if in_stream.type != "data" or not source_formats & output_formats:
-                    logger.warning(
-                        "Skipping %s stream %s: it has no copyable codec",
-                        in_stream.type,
-                        in_stream.index,
-                    )
-                    continue
+                logger.warning(
+                    "Skipping %s stream %s: it has no copyable codec",
+                    in_stream.type,
+                    in_stream.index,
+                )
+                continue
 
             source_audio_layout = (
                 in_stream.codec_context.layout

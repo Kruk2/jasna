@@ -407,6 +407,28 @@ def test_audio_copy_when_compatible(tmp_path):
         assert float(c.streams.audio[0].duration * c.streams.audio[0].time_base) == pytest.approx(2.0, abs=0.15)
 
 
+def test_hevc_source_with_timecode_track_muxes(tmp_path):
+    src = _make_source(
+        tmp_path,
+        "timecode.mp4",
+        extra=[
+            "-c:v", "libx265", "-x265-params", "log-level=error",
+            "-timecode", "01:00:00:00",
+        ],
+    )
+    with av.open(str(src)) as source:
+        assert source.streams.video[0].codec_context.name == "hevc"
+        assert any(stream.type == "data" for stream in source.streams)
+
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as output:
+        assert len(output.streams.video) == 1
+        assert len(output.streams.audio) == 1
+        assert sum(1 for _ in output.decode(video=0)) == 24
+
+
 def test_count_only_stereo_pcm_copies_to_mp4_with_explicit_layout(tmp_path):
     src = _make_count_only_stereo_pcm_source(tmp_path)
     dst = tmp_path / "out.mp4"
