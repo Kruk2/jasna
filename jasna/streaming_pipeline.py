@@ -127,7 +127,7 @@ def _streaming_loop(
     hls_server: HlsStreamingServer,
     streaming_encoder: StreamingEncoder,
 ) -> None:
-    start_segment = 0
+    start_segment = hls_server.initial_start_segment
     first_pass = True
 
     while True:
@@ -135,7 +135,7 @@ def _streaming_loop(
         start_frame = hls_server.segment_start_frame(start_segment)
         log.info("[stream] starting pass from segment %d (frame %d, t=%.1fs)", start_segment, start_frame, start_time)
 
-        seek_t0 = time.monotonic()
+        pass_t0 = time.monotonic()
         hls_server.reset_demand(start_segment)
         if start_segment > 0:
             hls_server.notify_segment_requested(start_segment)
@@ -158,7 +158,7 @@ def _streaming_loop(
             cancel_event=cancel_event,
         )
 
-        log.info("[stream] pass teardown took %.2fs", time.monotonic() - seek_t0)
+        log.info("[stream] pass ran for %.2fs", time.monotonic() - pass_t0)
 
         if hls_server.video_change.is_set():
             log.info("[stream] video change requested, exiting streaming loop")

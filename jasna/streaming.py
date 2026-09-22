@@ -194,12 +194,16 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             if not self._state.is_loaded:
                 self.send_error(404)
                 return
+            epoch = parse_qs(urlparse(self.path).query).get("epoch", [None])[0]
+            if epoch != str(self._state.playback_epoch):
+                self.send_error(404)
+                return
             seg_name = path.lstrip("/")
             seg_path = self._state.segments_dir / seg_name
             seg_num = self._parse_segment_number(seg_name)
             if seg_num is not None:
                 self._state.notify_segment_requested(seg_num)
-            if seg_path.exists() and seg_path.stat().st_size > 0:
+            if self._state.segment_is_ready(seg_path):
                 self._serve_file(seg_path)
                 return
 
@@ -207,19 +211,22 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 self.send_error(404)
                 return
 
-            if self._state.needs_seek(seg_num):
-                self._state.request_seek(seg_num)
+            generation = self._state.pass_generation
+            seeking = self._state.needs_seek(seg_num)
+            if seeking and not self._state.request_seek(seg_num, expected_epoch=int(epoch)):
+                self.send_error(404)
+                return
 
             deadline = time.monotonic() + 30.0
             while time.monotonic() < deadline:
                 if not self._state.is_loaded:
                     self.send_error(404)
                     return
-                try:
+                if not self._state.can_wait_for_segment(seg_num, generation, seeking):
+                    self.send_error(404)
+                    return
+                if self._state.segment_is_ready(seg_path):
                     sz = seg_path.stat().st_size
-                except OSError:
-                    sz = -1
-                if sz > 0:
                     log.debug("[stream-server] serving %s (%d bytes, waited %.1fs)",
                               seg_name, sz, 30.0 - (deadline - time.monotonic()))
                     self._serve_file(seg_path)
@@ -253,7 +260,14 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             if not video_path or not Path(video_path).is_file():
                 self._send_json({"error": "File not found"}, status=400)
                 return
-            start = float(body.get("start", 0))
+            try:
+                start = float(body.get("start", 0))
+            except (TypeError, ValueError):
+                self._send_json({"error": "Invalid start time"}, status=400)
+                return
+            if not math.isfinite(start):
+                self._send_json({"error": "Invalid start time"}, status=400)
+                return
             same_video = (
                 self._state.is_loaded
                 and self._state._current_video_path == Path(video_path)
@@ -262,10 +276,10 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 if same_video:
                     if start > 0:
                         target_seg = int(start / self._state.segment_duration)
-                        self._state.request_seek(target_seg)
+                        self._state.request_seek(target_seg, new_playback=True)
                     self._send_json({"status": "ready"})
                 else:
-                    self._state.select_video(Path(video_path))
+                    self._state.select_video(Path(video_path), start)
                     ok = self._state.wait_until_first_segment(timeout=30.0)
                     if ok:
                         self._send_json({"status": "ready"})
@@ -351,6 +365,8 @@ class HlsStreamingServer:
         self._finished = False
 
         self._pending_video: Path | None = None
+        self.initial_start_segment = 0
+        self.playback_epoch = 0
         self._current_video_path: Path | None = None
         self._video_selected = threading.Event()
         self.video_change = threading.Event()
@@ -367,6 +383,7 @@ class HlsStreamingServer:
         self._highest_requested_segment: int = -1
         self._current_pass_start: int = 0
         self._produced_segment: int = -1
+        self._pass_generation = 0
 
         self._httpd: HTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -380,8 +397,11 @@ class HlsStreamingServer:
         self._vod_playlist = ""
         self.video_change.set()
 
-    def select_video(self, path: Path) -> None:
+    def select_video(self, path: Path, start: float = 0.0) -> None:
         self._pending_video = path
+        self.initial_start_segment = max(0, int(start / self.segment_duration))
+        with self._seek_lock:
+            self.playback_epoch += 1
         self._current_video_path = path
         self._first_segment_ready.clear()
         if self.metadata is not None:
@@ -403,6 +423,7 @@ class HlsStreamingServer:
             total_duration=metadata.duration,
             segment_duration=self.segment_duration,
         )
+        self.initial_start_segment = min(self.initial_start_segment, self.segment_count - 1)
         self._finished = False
         self.video_change.clear()
         self.seek_requested.clear()
@@ -411,6 +432,7 @@ class HlsStreamingServer:
             self._highest_requested_segment = -1
             self._current_pass_start = 0
             self._produced_segment = -1
+            self._pass_generation += 1
 
     def unload_video(self) -> None:
         self.metadata = None
@@ -426,16 +448,53 @@ class HlsStreamingServer:
 
     @property
     def playlist_text(self) -> str:
-        return self._vod_playlist
+        return self._vod_playlist.replace(".ts\n", f".ts?epoch={self.playback_epoch}\n")
 
     def playlist_text_from(self, start_segment: int) -> str:
         if start_segment <= 0 or self.metadata is None:
-            return self._vod_playlist
+            return self.playlist_text
         text, _ = _generate_vod_playlist(self.metadata.duration, self.segment_duration, start_segment)
-        return text
+        return text.replace(".ts\n", f".ts?epoch={self.playback_epoch}\n")
 
     def mark_finished(self) -> None:
         self._finished = True
+
+    def segment_is_ready(self, segment_path: Path) -> bool:
+        if not segment_path.is_file():
+            return False
+        try:
+            playlist = (self.segments_dir / "_hls_internal.m3u8").read_text()
+        except FileNotFoundError:
+            return False
+        return segment_path.name in playlist.splitlines()
+
+    @property
+    def pass_generation(self) -> int:
+        with self._demand_lock:
+            return self._pass_generation
+
+    def can_wait_for_segment(self, segment: int, generation: int, seeking: bool) -> bool:
+        with self._seek_lock:
+            pending_target = self.seek_target_segment if self.seek_requested.is_set() else None
+            latest_target = self.seek_target_segment
+        with self._demand_lock:
+            if self._pass_generation != generation:
+                return (
+                    seeking
+                    and self._pass_generation == generation + 1
+                    and self._current_pass_start == segment
+                    and pending_target in (None, segment)
+                    and latest_target == segment
+                )
+            if pending_target is not None and pending_target != segment:
+                return False
+            if (
+                segment < self._current_pass_start
+                or segment < self._highest_requested_segment - self._max_segments_kept
+                or self._finished
+            ):
+                return seeking and latest_target == segment
+            return True
 
     def wait_until_first_segment(self, timeout: float = 30.0) -> bool:
         return self._first_segment_ready.wait(timeout=timeout)
@@ -454,12 +513,23 @@ class HlsStreamingServer:
     def frames_per_segment(self) -> int:
         return max(1, int(self.metadata.video_fps * self.segment_duration))
 
-    def request_seek(self, segment_index: int) -> None:
+    def request_seek(
+        self,
+        segment_index: int,
+        *,
+        new_playback: bool = False,
+        expected_epoch: int | None = None,
+    ) -> bool:
         with self._seek_lock:
+            if expected_epoch is not None and expected_epoch != self.playback_epoch:
+                return False
+            if new_playback:
+                self.playback_epoch += 1
             now = time.monotonic()
             self.seek_target_segment = segment_index
             self._last_seek_time = now
             self.seek_requested.set()
+            return True
 
     def consume_seek(self) -> int | None:
         with self._seek_lock:
@@ -471,7 +541,9 @@ class HlsStreamingServer:
 
     def consume_seek_for_pass(self, start_segment: int) -> int | None:
         target = self.consume_seek()
-        if target == start_segment:
+        with self._demand_lock:
+            evicted = target is not None and target < self._highest_requested_segment - self._max_segments_kept
+        if target == start_segment and not evicted:
             log.debug(
                 "[stream-server] ignoring seek to active segment %d",
                 start_segment,
@@ -532,7 +604,10 @@ class HlsStreamingServer:
 
     def needs_seek(self, segment: int) -> bool:
         with self._demand_lock:
-            if segment < self._current_pass_start:
+            if segment < max(
+                self._current_pass_start,
+                self._highest_requested_segment - self._max_segments_kept,
+            ) or self._finished:
                 return True
             if segment > self._produced_segment + _FORWARD_SEEK_THRESHOLD:
                 return True
@@ -544,6 +619,8 @@ class HlsStreamingServer:
             self._highest_requested_segment = start_segment - 1
             self._current_pass_start = start_segment
             self._produced_segment = start_segment - 1
+            self._pass_generation += 1
+            self._finished = False
             self._demand_lock.notify_all()
 
     def start(self) -> str:
