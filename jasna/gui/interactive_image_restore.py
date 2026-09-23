@@ -11,7 +11,8 @@ from PIL import Image
 
 from jasna.gui import scaling
 from jasna.gui.locales import t
-from jasna.gui.models import AppSettings
+from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings
+from jasna.media.media_files import folder_output_path, unique_path
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 logger = logging.getLogger(__name__)
@@ -19,22 +20,7 @@ logger = logging.getLogger(__name__)
 
 def interactive_output_path(input_path: Path, output_folder: str, output_pattern: str) -> Path:
     input_path = Path(input_path)
-    output_dir = Path(output_folder) if output_folder else input_path.parent
-    pattern = output_pattern or "{original}_restored.mp4"
-    output_name = pattern.replace("{original}", input_path.stem)
-    candidate = (output_dir / output_name).with_suffix(input_path.suffix)
-    return _unique_path(candidate)
-
-
-def _unique_path(path: Path) -> Path:
-    if not path.exists():
-        return path
-
-    for counter in range(1, 10000):
-        candidate = path.with_name(f"{path.stem} ({counter}){path.suffix}")
-        if not candidate.exists():
-            return candidate
-    raise RuntimeError(f"Could not find unique filename after 9999 attempts: {path}")
+    return unique_path(folder_output_path(output_folder or input_path.parent, input_path, output_pattern or DEFAULT_OUTPUT_PATTERN))
 
 
 def _dialog_geometry_for_image(image_size: tuple[int, int], screen_size: tuple[int, int]) -> tuple[int, int, int, int]:

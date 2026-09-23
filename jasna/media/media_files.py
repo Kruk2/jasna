@@ -61,3 +61,14 @@ def folder_output_path(output_dir: str | Path, input_path: str | Path, output_pa
     if is_image(input_path) or not output_path.suffix:
         output_path = output_path.with_suffix(input_path.suffix)
     return output_path
+
+
+def unique_path(path: Path) -> Path:
+    """Return ``path``, or ``<stem> (N)<suffix>`` for the first N that does not exist."""
+    if not path.exists():
+        return path
+    for counter in range(1, 10000):
+        candidate = path.with_name(f"{path.stem} ({counter}){path.suffix}")
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Could not find unique filename after 9999 attempts: {path}")

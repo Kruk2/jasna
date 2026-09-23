@@ -10,14 +10,14 @@ from tkinter import messagebox
 from tkinterdnd2 import DND_FILES
 
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.models import JobItem, JobStatus
+from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus
 from jasna.gui.components import AutoHidingScrollableFrame, JobListItem, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.file_actions import open_containing_folder
 from jasna.gui.file_actions import open_file
 from jasna.gui.locales import t
 
-from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order
+from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order, folder_output_path
 
 logger = logging.getLogger(__name__)
 from jasna.media.image_io import is_image_path
@@ -247,7 +247,7 @@ class QueuePanel(ctk.CTkFrame):
         Tooltip(pattern_tip, t("tip_output_pattern"))
         self._pattern_entry = ctk.CTkEntry(
             footer,
-            placeholder_text="{original}_restored.mp4",
+            placeholder_text=DEFAULT_OUTPUT_PATTERN,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             fg_color=Colors.BG_CARD,
             border_color=Colors.BORDER,
@@ -255,7 +255,7 @@ class QueuePanel(ctk.CTkFrame):
             height=Sizing.INPUT_HEIGHT,
         )
         self._pattern_entry.pack(fill="x", pady=(4, 0))
-        self._pattern_entry.insert(0, "{original}_restored.mp4")
+        self._pattern_entry.insert(0, DEFAULT_OUTPUT_PATTERN)
         self._pattern_entry.bind("<KeyRelease>", self._on_pattern_or_conflicts)
 
     def _on_pattern_or_conflicts(self, event=None):
@@ -532,16 +532,8 @@ class QueuePanel(ctk.CTkFrame):
             
     def _get_output_path(self, input_path: Path) -> Path | None:
         """Get the output path for a given input file based on current settings."""
-        output_folder = self._output_entry.get()
-        pattern = self._pattern_entry.get() or "{original}_restored.mp4"
-        
-        if not output_folder:
-            # Use same folder as input
-            output_folder = str(input_path.parent)
-            
-        original_stem = input_path.stem
-        output_name = pattern.replace("{original}", original_stem)
-        return Path(output_folder) / output_name
+        output_folder = self._output_entry.get() or input_path.parent
+        return folder_output_path(output_folder, input_path, self._pattern_entry.get() or DEFAULT_OUTPUT_PATTERN)
         
         self._update_empty_state()
         self._update_count()
@@ -580,7 +572,7 @@ class QueuePanel(ctk.CTkFrame):
         return self._output_entry.get() or ""
         
     def get_output_pattern(self) -> str:
-        return self._pattern_entry.get() or "{original}_restored.mp4"
+        return self._pattern_entry.get() or DEFAULT_OUTPUT_PATTERN
         
     def set_on_jobs_changed(self, callback: callable):
         self._on_jobs_changed = callback
