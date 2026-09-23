@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping
 from contextlib import nullcontext
-from dataclasses import dataclass
 from enum import StrEnum
 import os
 from typing import Any
@@ -34,57 +33,18 @@ def configure_rocm_process_env() -> None:
 class AcceleratorVendor(StrEnum):
     NVIDIA = "nvidia"
     AMD = "amd"
-    INTEL = "intel"
     CPU = "cpu"
-
-
-@dataclass(frozen=True)
-class AcceleratorCapabilities:
-    vendor: AcceleratorVendor
-    pytorch_device_type: str
-    tensorrt: bool
-    nvcodec: bool
-    amf: bool
-    xpu: bool
 
 
 def vendor_for_device(device: torch.device | str | None = None) -> AcceleratorVendor:
     resolved = torch.device(device) if device is not None else None
     if resolved is not None and resolved.type == "cpu":
         return AcceleratorVendor.CPU
-    if resolved is not None and resolved.type == "xpu":
-        return AcceleratorVendor.INTEL
-    if getattr(torch.version, "hip", None):
+    if torch.version.hip:
         return AcceleratorVendor.AMD
-    if resolved is None:
-        xpu = getattr(torch, "xpu", None)
-        if xpu is not None and xpu.is_available():
-            return AcceleratorVendor.INTEL
-    if getattr(torch.version, "cuda", None):
+    if torch.version.cuda:
         return AcceleratorVendor.NVIDIA
     return AcceleratorVendor.CPU
-
-
-def capabilities_for_device(
-    device: torch.device | str | None = None,
-) -> AcceleratorCapabilities:
-    vendor = vendor_for_device(device)
-    device_type = (
-        torch.device(device).type
-        if device is not None
-        else "xpu" if vendor is AcceleratorVendor.INTEL else "cuda" if vendor in {
-            AcceleratorVendor.NVIDIA,
-            AcceleratorVendor.AMD,
-        } else "cpu"
-    )
-    return AcceleratorCapabilities(
-        vendor=vendor,
-        pytorch_device_type=device_type,
-        tensorrt=vendor is AcceleratorVendor.NVIDIA,
-        nvcodec=vendor is AcceleratorVendor.NVIDIA,
-        amf=vendor is AcceleratorVendor.AMD,
-        xpu=vendor is AcceleratorVendor.INTEL,
-    )
 
 
 def is_nvidia_device(device: torch.device | str | None = None) -> bool:
