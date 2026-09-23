@@ -45,7 +45,12 @@ from jasna.gui.mosaic_scan import (
     ScanStatus,
     segments_from_scores,
 )
-from jasna.gui.segment_editor_state import SegmentEditorState
+from jasna.gui.segment_editor_state import (
+    PREVIEW_ZOOM_MAX,
+    PREVIEW_ZOOM_STEP,
+    PreviewView,
+    SegmentEditorState,
+)
 from jasna.gui.segment_preview import (
     PreviewEnded,
     PreviewFailed,
@@ -68,10 +73,6 @@ logger = logging.getLogger(__name__)
 
 class SegmentEditor(ctk.CTkToplevel):
     """Modal, frame-aware editor for per-job restoration ranges."""
-
-    _PREVIEW_ZOOM_MIN = 1.0
-    _PREVIEW_ZOOM_MAX = 8.0
-    _PREVIEW_ZOOM_STEP = 0.25
 
     def __init__(
         self,
@@ -102,10 +103,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_image = None
         self._preview_generation = 0
         self._preview_left_eye = False
-        self._preview_zoom = self._PREVIEW_ZOOM_MIN
-        self._preview_center = (0.5, 0.5)
+        self._preview_view = PreviewView()
         self._preview_pan_anchor: tuple[int, int] | None = None
-        self._reset_view_visible = False
         self.vr_resolution = None
         self._vr_projection = job.vr_projection or "auto"
         self._restore_active = False
@@ -369,7 +368,7 @@ class SegmentEditor(ctk.CTkToplevel):
             height=26,
             fg_color=Colors.BG_PANEL,
             hover_color=Colors.BORDER_LIGHT,
-            command=lambda: self._adjust_preview_zoom(-self._PREVIEW_ZOOM_STEP),
+            command=lambda: self._adjust_preview_zoom(-PREVIEW_ZOOM_STEP),
         )
         self._zoom_out_btn.pack(side="left")
         Tooltip(self._zoom_out_btn, t("segments_preview_zoom_out"))
@@ -388,7 +387,7 @@ class SegmentEditor(ctk.CTkToplevel):
             height=26,
             fg_color=Colors.BG_PANEL,
             hover_color=Colors.BORDER_LIGHT,
-            command=lambda: self._adjust_preview_zoom(self._PREVIEW_ZOOM_STEP),
+            command=lambda: self._adjust_preview_zoom(PREVIEW_ZOOM_STEP),
         )
         self._zoom_in_btn.pack(side="left")
         Tooltip(self._zoom_in_btn, t("segments_preview_zoom_in"))
@@ -971,17 +970,6 @@ class SegmentEditor(ctk.CTkToplevel):
     def _active_preview_source(self) -> Image.Image | None:
         return self._restored_source if self._restore_active else self._preview_source
 
-    @staticmethod
-    def _clamp_preview_center(
-        center: tuple[float, float],
-        zoom: float,
-    ) -> tuple[float, float]:
-        half_visible = 0.5 / zoom
-        return (
-            min(1.0 - half_visible, max(half_visible, float(center[0]))),
-            min(1.0 - half_visible, max(half_visible, float(center[1]))),
-        )
-
     def _preview_image_geometry(
         self,
         source: Image.Image,
@@ -1004,46 +992,20 @@ class SegmentEditor(ctk.CTkToplevel):
         )
 
     def _preview_crop(self, source: Image.Image) -> Image.Image:
-        zoom = max(self._PREVIEW_ZOOM_MIN, float(getattr(self, "_preview_zoom", 1.0)))
-        if zoom <= self._PREVIEW_ZOOM_MIN:
-            self._preview_center = (0.5, 0.5)
-            return source
-        center = self._clamp_preview_center(self._preview_center, zoom)
-        self._preview_center = center
-        crop_width = max(1, min(source.width, round(source.width / zoom)))
-        crop_height = max(1, min(source.height, round(source.height / zoom)))
-        left = round(center[0] * source.width - crop_width / 2)
-        top = round(center[1] * source.height - crop_height / 2)
-        left = min(source.width - crop_width, max(0, left))
-        top = min(source.height - crop_height, max(0, top))
-        return source.crop((left, top, left + crop_width, top + crop_height))
+        box = self._preview_view.crop_box(source.width, source.height)
+        return source if box is None else source.crop(box)
 
     def _update_preview_zoom_controls(self) -> None:
-        zoom = float(getattr(self, "_preview_zoom", self._PREVIEW_ZOOM_MIN))
-        center = getattr(self, "_preview_center", (0.5, 0.5))
-        if hasattr(self, "_zoom_label"):
-            self._zoom_label.configure(text=f"{round(zoom * 100)}%")
-        if hasattr(self, "_zoom_out_btn"):
-            self._zoom_out_btn.configure(
-                state="disabled" if zoom <= self._PREVIEW_ZOOM_MIN else "normal"
-            )
-        if hasattr(self, "_zoom_in_btn"):
-            self._zoom_in_btn.configure(
-                state="disabled" if zoom >= self._PREVIEW_ZOOM_MAX else "normal"
-            )
-        if hasattr(self, "_reset_view_btn"):
-            reset_needed = zoom > self._PREVIEW_ZOOM_MIN or center != (0.5, 0.5)
-            reset_visible = bool(getattr(self, "_reset_view_visible", False))
-            if reset_needed and not reset_visible:
-                self._reset_view_btn.pack(side="left", padx=(6, 0))
-                self._reset_view_visible = True
-            elif not reset_needed and reset_visible:
-                self._reset_view_btn.pack_forget()
-                self._reset_view_visible = False
-        if hasattr(self, "_preview"):
-            self._preview.configure(
-                cursor="fleur" if zoom > self._PREVIEW_ZOOM_MIN else ""
-            )
+        view = self._preview_view
+        self._zoom_label.configure(text=f"{round(view.zoom * 100)}%")
+        self._zoom_out_btn.configure(state="normal" if view.zoomed else "disabled")
+        self._zoom_in_btn.configure(state="disabled" if view.zoom >= PREVIEW_ZOOM_MAX else "normal")
+        reset_needed = not view.is_reset
+        if reset_needed and not self._reset_view_btn.winfo_manager():
+            self._reset_view_btn.pack(side="left", padx=(6, 0))
+        elif not reset_needed and self._reset_view_btn.winfo_manager():
+            self._reset_view_btn.pack_forget()
+        self._preview.configure(cursor="fleur" if view.zoomed else "")
 
     def _set_preview_zoom(
         self,
@@ -1051,37 +1013,24 @@ class SegmentEditor(ctk.CTkToplevel):
         *,
         anchor: tuple[float, float] | None = None,
     ) -> None:
-        old_zoom = float(self._preview_zoom)
-        new_zoom = min(
-            self._PREVIEW_ZOOM_MAX,
-            max(self._PREVIEW_ZOOM_MIN, float(zoom)),
-        )
-        if new_zoom == old_zoom:
-            self._update_preview_zoom_controls()
-            return
-        center = self._clamp_preview_center(self._preview_center, old_zoom)
+        anchor_fraction = None
         source = self._active_preview_source() if anchor is not None else None
-        if anchor is not None and source is not None:
+        if source is not None:
             left, top, width, height = self._preview_image_geometry(source)
-            fx = min(1.0, max(0.0, (anchor[0] - left) / width))
-            fy = min(1.0, max(0.0, (anchor[1] - top) / height))
-            source_x = center[0] + (fx - 0.5) / old_zoom
-            source_y = center[1] + (fy - 0.5) / old_zoom
-            center = (
-                source_x - (fx - 0.5) / new_zoom,
-                source_y - (fy - 0.5) / new_zoom,
+            anchor_fraction = (
+                min(1.0, max(0.0, (anchor[0] - left) / width)),
+                min(1.0, max(0.0, (anchor[1] - top) / height)),
             )
-        self._preview_zoom = new_zoom
-        self._preview_center = self._clamp_preview_center(center, new_zoom)
+        changed = self._preview_view.zoom_to(zoom, anchor_fraction)
         self._update_preview_zoom_controls()
-        self._refresh_preview_image()
+        if changed:
+            self._refresh_preview_image()
 
     def _adjust_preview_zoom(self, amount: float) -> None:
-        self._set_preview_zoom(self._preview_zoom + float(amount))
+        self._set_preview_zoom(self._preview_view.zoom + float(amount))
 
     def _reset_preview_view(self, event=None):
-        self._preview_zoom = self._PREVIEW_ZOOM_MIN
-        self._preview_center = (0.5, 0.5)
+        self._preview_view.reset()
         self._preview_pan_anchor = None
         self._update_preview_zoom_controls()
         self._refresh_preview_image()
@@ -1094,13 +1043,13 @@ class SegmentEditor(ctk.CTkToplevel):
         if not direction:
             return None
         self._set_preview_zoom(
-            self._preview_zoom + direction * self._PREVIEW_ZOOM_STEP,
+            self._preview_view.zoom + direction * PREVIEW_ZOOM_STEP,
             anchor=(float(event.x), float(event.y)),
         )
         return "break"
 
     def _preview_pan_start(self, event):
-        if self._preview_zoom <= self._PREVIEW_ZOOM_MIN:
+        if not self._preview_view.zoomed:
             self._preview_pan_anchor = None
             return None
         self._preview_pan_anchor = (int(event.x), int(event.y))
@@ -1109,21 +1058,12 @@ class SegmentEditor(ctk.CTkToplevel):
     def _preview_pan_drag(self, event):
         anchor = self._preview_pan_anchor
         source = self._active_preview_source()
-        if (
-            anchor is None
-            or source is None
-            or self._preview_zoom <= self._PREVIEW_ZOOM_MIN
-        ):
+        if anchor is None or source is None or not self._preview_view.zoomed:
             return None
         _, _, display_width, display_height = self._preview_image_geometry(source)
-        dx = int(event.x) - anchor[0]
-        dy = int(event.y) - anchor[1]
-        self._preview_center = self._clamp_preview_center(
-            (
-                self._preview_center[0] - dx / display_width / self._preview_zoom,
-                self._preview_center[1] - dy / display_height / self._preview_zoom,
-            ),
-            self._preview_zoom,
+        self._preview_view.pan(
+            (int(event.x) - anchor[0]) / display_width,
+            (int(event.y) - anchor[1]) / display_height,
         )
         self._preview_pan_anchor = (int(event.x), int(event.y))
         self._refresh_preview_image()
