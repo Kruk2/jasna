@@ -5,7 +5,7 @@ from tkinter import filedialog
 
 from jasna.accelerator import vendor_for_device
 from jasna.gui.components import CollapsibleSection, Tooltip
-from jasna.gui.icons import create_compact_switch, create_icon
+from jasna.gui.icons import CompactSwitch, create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
     ValueOptionMenu,
@@ -134,7 +134,7 @@ class EncodingSection:
         )
         retarget_tip.pack(side="left", padx=4)
         Tooltip(retarget_tip, get_tooltip("retarget_high_fps"))
-        self._widgets["retarget_high_fps"] = create_compact_switch(
+        self._widgets["retarget_high_fps"] = CompactSwitch(
             retarget_row,
             self._on_modified,
             Colors.BG_PANEL,
@@ -160,7 +160,7 @@ class EncodingSection:
         )
         fmp4_tip.pack(side="left", padx=4)
         Tooltip(fmp4_tip, get_tooltip("fmp4"))
-        self._widgets["fmp4"] = create_compact_switch(
+        self._widgets["fmp4"] = CompactSwitch(
             fmp4_row,
             self._on_modified,
             Colors.BG_PANEL,

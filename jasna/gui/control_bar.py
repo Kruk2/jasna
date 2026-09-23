@@ -208,7 +208,6 @@ class ControlBar(ctk.CTkFrame):
         self._on_toggle_logs: callable = None
         self._start_disabled_tooltip = None
         
-        self._is_running = False
         
         self._build_controls()
         self._build_progress()
@@ -384,7 +383,6 @@ class ControlBar(ctk.CTkFrame):
                 self._start_disabled_tooltip = Tooltip(self._start_btn, disabled_tooltip)
         
     def set_running(self, running: bool):
-        self._is_running = running
         
         if running:
             self._start_btn.pack_forget()

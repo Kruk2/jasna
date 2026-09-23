@@ -44,30 +44,3 @@ CLI_HELP: dict[str, str] = {
         "{input}, {output}, {output_dir}, {output_stem}, and {output_suffix}."
     ),
 }
-
-
-# Maps a CLI argument dest to the GUI tooltip key that reuses its help text.
-GUI_TOOLTIP_KEY_BY_DEST: dict[str, str] = {
-    "fp16": "fp16_mode",
-    "compile_basicvsrpp": "compile_basicvsrpp",
-    "max_clip_size": "max_clip_size",
-    "temporal_overlap": "temporal_overlap",
-    "enable_crossfade": "enable_crossfade",
-    "vr_mode": "vr_mode",
-    "denoise": "denoise_strength",
-    "denoise_step": "denoise_step",
-    "secondary_restoration": "secondary_restoration",
-    "tvai_ffmpeg_path": "tvai_ffmpeg_path",
-    "tvai_model": "tvai_model",
-    "tvai_scale": "tvai_scale",
-    "tvai_workers": "tvai_workers",
-    "detection_score_threshold": "detection_score_threshold",
-    "max_detection_gap": "max_detection_gap",
-    "min_detection_duration": "min_detection_duration",
-    "scene_detection": "scene_detection",
-    "codec": "codec",
-    "cq": "encoder_cq",
-    "encoder_settings": "encoder_custom_args",
-    "post_export_action": "post_export_action",
-    "post_export_video_command": "post_export_video_command",
-}

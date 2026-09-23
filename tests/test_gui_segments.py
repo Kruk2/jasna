@@ -12,7 +12,9 @@ from jasna.session_factory import RestorationSession
 def test_pending_job_segments_can_be_replaced() -> None:
     job = JobItem(Path("video.mp4"))
     segments = (SegmentRange(1, 2),)
-    assert job.try_set_segments(segments)
+    assert job.try_set_video_options(
+        segments, detection_model="rfdetr-v6", detection_score_threshold=0.35, vr_projection="auto"
+    )
     assert job.snapshot_segments() == segments
 
 
@@ -30,7 +32,9 @@ def test_begin_processing_atomically_freezes_segments() -> None:
     assert snapshot.detection_score_threshold == 0.4
     assert snapshot.vr_projection == "gnomonic"
     assert job.status is JobStatus.PROCESSING
-    assert not job.try_set_segments((SegmentRange(3, 4),))
+    assert not job.try_set_video_options(
+        (SegmentRange(3, 4),), detection_model="rfdetr-v6", detection_score_threshold=0.35, vr_projection="auto"
+    )
     assert job.begin_processing() is None
 
 

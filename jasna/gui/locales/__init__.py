@@ -3,9 +3,7 @@
 import json
 import locale as _locale
 import logging
-from typing import Callable
 
-from jasna.cli_help import CLI_HELP, GUI_TOOLTIP_KEY_BY_DEST
 from jasna.gui.paths import get_settings_path
 
 from jasna.gui.locales.en import EN
@@ -15,29 +13,6 @@ from jasna.gui.locales.ko import KO
 from jasna.gui.locales.th import TH
 
 logger = logging.getLogger(__name__)
-
-
-def _get_cli_descriptions() -> dict[str, str]:
-    """Build GUI tooltip descriptions from the shared CLI help table."""
-    descriptions = {}
-    for dest, gui_key in GUI_TOOLTIP_KEY_BY_DEST.items():
-        help_text = CLI_HELP[dest]
-        if "%(default)s" in help_text:
-            help_text = help_text.replace(" (default: %(default)s)", "")
-            help_text = help_text.replace("(default: %(default)s)", "")
-        descriptions[gui_key] = help_text
-    return descriptions
-
-
-_CLI_DESCRIPTIONS = None
-
-
-def get_cli_descriptions() -> dict[str, str]:
-    """Lazy load CLI descriptions."""
-    global _CLI_DESCRIPTIONS
-    if _CLI_DESCRIPTIONS is None:
-        _CLI_DESCRIPTIONS = _get_cli_descriptions()
-    return _CLI_DESCRIPTIONS
 
 
 TRANSLATIONS = {
@@ -74,7 +49,6 @@ class LocaleManager:
             return
         self._initialized = True
         self._current_lang = "en"
-        self._listeners: list[Callable[[], None]] = []
         self._load()
 
     def _load(self):
@@ -130,26 +104,12 @@ class LocaleManager:
     def available_languages(self) -> list[str]:
         return list(LANGUAGE_NAMES.keys())
 
-    def get_language_name(self, code: str) -> str:
-        return LANGUAGE_NAMES.get(code, code)
-
     def set_language(self, lang: str):
-        """Set current language and notify listeners."""
+        """Set and persist the current language."""
         if lang not in TRANSLATIONS:
             lang = "en"
         self._current_lang = lang
         self._save()
-        for listener in self._listeners:
-            listener()
-
-    def add_listener(self, callback: Callable[[], None]):
-        """Add a callback to be called when language changes."""
-        self._listeners.append(callback)
-
-    def remove_listener(self, callback: Callable[[], None]):
-        """Remove a language change listener."""
-        if callback in self._listeners:
-            self._listeners.remove(callback)
 
     def get(self, key: str, **kwargs) -> str:
         """Get translation for key. Falls back to English if not found."""

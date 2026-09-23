@@ -382,39 +382,6 @@ class CollapsibleSection(ctk.CTkFrame):
         return self._content
 
 
-class SettingRow(ctk.CTkFrame):
-    """A row containing a label and a control widget."""
-    
-    def __init__(self, master, label: str, tooltip: str = "", **kwargs):
-        super().__init__(master, fg_color="transparent", **kwargs)
-        
-        self._label = ctk.CTkLabel(
-            self,
-            text=label,
-            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-            text_color=Colors.TEXT_PRIMARY,
-            anchor="w",
-        )
-        self._label.pack(side="left", padx=(0, 8))
-        
-        if tooltip:
-            self._tooltip_icon = ctk.CTkLabel(
-                self,
-                text="ⓘ",
-                font=(Fonts.FAMILY, Fonts.SIZE_TINY),
-                text_color=Colors.TEXT_PRIMARY,
-                cursor="hand2",
-            )
-            self._tooltip_icon.pack(side="left")
-            
-        self._control_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self._control_frame.pack(side="right")
-        
-    @property  
-    def control_frame(self) -> ctk.CTkFrame:
-        return self._control_frame
-
-
 class JobListItem(ctk.CTkFrame):
     """Individual job item in the queue list."""
     
@@ -956,50 +923,6 @@ class JobListItem(ctk.CTkFrame):
         if hasattr(self, '_tooltip'):
             self._tooltip.destroy()
             del self._tooltip
-
-
-class LogEntry(ctk.CTkFrame):
-    """Single log entry with timestamp and colored level."""
-    
-    def __init__(self, master, timestamp: str, level: str, message: str, **kwargs):
-        super().__init__(master, fg_color="transparent", height=20, **kwargs)
-        self.pack_propagate(False)
-        
-        level_colors = {
-            "INFO": Colors.LOG_INFO,
-            "WARNING": Colors.LOG_WARNING,
-            "ERROR": Colors.LOG_ERROR,
-            "DEBUG": Colors.LOG_DEBUG,
-        }
-        
-        self._time = ctk.CTkLabel(
-            self,
-            text=timestamp,
-            font=(Fonts.FAMILY_MONO, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_PRIMARY,
-            width=80,
-            anchor="w",
-        )
-        self._time.pack(side="left")
-        
-        self._level = ctk.CTkLabel(
-            self,
-            text=level,
-            font=(Fonts.FAMILY_MONO, Fonts.SIZE_TINY, "bold"),
-            text_color=level_colors.get(level, Colors.TEXT_PRIMARY),
-            width=60,
-            anchor="w",
-        )
-        self._level.pack(side="left")
-        
-        self._message = ctk.CTkLabel(
-            self,
-            text=message,
-            font=(Fonts.FAMILY_MONO, Fonts.SIZE_TINY),
-            text_color=Colors.TEXT_PRIMARY,
-            anchor="w",
-        )
-        self._message.pack(side="left", fill="x", expand=True)
 
 
 class Toast(ctk.CTkFrame):

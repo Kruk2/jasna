@@ -152,7 +152,6 @@ def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
         "batch_size",
         "tvai_args",
         "vr_projection",
-        "output_same_as_input",
         "output_folder",
         "output_pattern",
     }

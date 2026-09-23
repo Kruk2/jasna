@@ -42,27 +42,6 @@ def test_no_locale_defines_keys_outside_english(lang: str) -> None:
     assert not extra, f"{lang} defines keys absent from English (en): {sorted(extra)}"
 
 
-def test_gui_tooltip_lookup_uses_help_table_not_argparse(monkeypatch) -> None:
-    import jasna.gui.locales as loc
-    from jasna.cli_help import CLI_HELP, GUI_TOOLTIP_KEY_BY_DEST
-
-    # Break the CLI parser import: tooltip lookup must not depend on argparse internals.
-    monkeypatch.setitem(sys.modules, "jasna.main", None)
-    monkeypatch.setattr(loc, "_CLI_DESCRIPTIONS", None)
-
-    descriptions = loc.get_cli_descriptions()
-
-    assert set(descriptions) == set(GUI_TOOLTIP_KEY_BY_DEST.values())
-    assert descriptions["fp16_mode"] == CLI_HELP["fp16"]
-    assert descriptions["max_clip_size"] == "Maximum clip size for tracking"
-    assert descriptions["max_detection_gap"] == (
-        "Fill detection dropouts up to N frames when the mosaic reappears at the same spot. 0 disables"
-    )
-    assert descriptions["min_detection_duration"] == (
-        "Drop detections shorter than N frames as false positives. 0 disables"
-    )
-
-
 @pytest.mark.parametrize("lang", _FULL_LOCALES)
 def test_locale_values_are_not_empty(lang: str) -> None:
     empty = [key for key, value in TRANSLATIONS[lang].items() if not value.strip()]

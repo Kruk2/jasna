@@ -434,8 +434,7 @@ class MosaicScanWorker:
             if self._on_stopped is not None:
                 self._on_stopped()
         finally:
-            if hasattr(detector, "close"):
-                detector.close()
+            detector.close()
             import gc
 
             import torch
@@ -481,15 +480,6 @@ class MosaicScanWorker:
             if self.vr_resolution.is_sbs
             else detector
         )
-
-    def _prepare_detection_batch(self, batch):
-        # Detection runs on the source projection; the SBS adapter splits the
-        # eyes internally, so no whole-frame reprojection is applied here.
-        return batch
-
-    def _source_projection_masks(self, masks):
-        # Scan masks already come back in full-SBS source space.
-        return masks
 
     def _scan(self, detector) -> None:
         import torch
@@ -594,11 +584,7 @@ class MosaicScanWorker:
                 if batch.shape[0] < batch_size:
                     pad = batch[-1:].expand(batch_size - batch.shape[0], -1, -1, -1)
                     batch = torch.cat((batch, pad))
-                detection_batch = self._prepare_detection_batch(batch)
-                batch_scores, batch_masks = detector.scan_scores_masks(
-                    detection_batch, mask_hw=SCAN_MASK_HW
-                )
-                batch_masks = self._source_projection_masks(batch_masks)
+                batch_scores, batch_masks = detector.scan_scores_masks(batch, mask_hw=SCAN_MASK_HW)
                 if collectors[index] is None:
                     collectors[index] = _ScanTensorCollector(
                         torch,
@@ -698,12 +684,7 @@ class MosaicScanWorker:
             if batch.shape[0] < batch_size:
                 pad = batch[-1:].expand(batch_size - batch.shape[0], -1, -1, -1)
                 batch = torch.cat((batch, pad))
-            detection_batch = self._prepare_detection_batch(batch)
-            scores, masks = detector.scan_scores_masks(
-                detection_batch,
-                mask_hw=SCAN_MASK_HW,
-            )
-            masks = self._source_projection_masks(masks)
+            scores, masks = detector.scan_scores_masks(batch, mask_hw=SCAN_MASK_HW)
             start_pts = reader.start_pts
             seconds = max(
                 0.0,

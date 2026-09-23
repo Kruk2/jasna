@@ -3,7 +3,7 @@
 import customtkinter as ctk
 
 from jasna.gui.components import CollapsibleSection, Tooltip
-from jasna.gui.icons import create_compact_switch
+from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
     ValueOptionMenu,
@@ -122,7 +122,7 @@ class BasicSection:
         fp16_tip = ctk.CTkLabel(fp16_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         fp16_tip.pack(side="left")
         Tooltip(fp16_tip, get_tooltip("fp16_mode"))
-        self._widgets["fp16_mode"] = create_compact_switch(
+        self._widgets["fp16_mode"] = CompactSwitch(
             fp16_frame,
             self._on_modified,
             Colors.BG_CARD,
@@ -137,7 +137,7 @@ class BasicSection:
         compile_tip = ctk.CTkLabel(compile_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         compile_tip.pack(side="left")
         Tooltip(compile_tip, get_tooltip("compile_basicvsrpp"))
-        self._widgets["compile_basicvsrpp"] = create_compact_switch(
+        self._widgets["compile_basicvsrpp"] = CompactSwitch(
             compile_frame,
             self._on_modified,
             Colors.BG_CARD,
