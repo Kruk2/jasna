@@ -8,6 +8,7 @@ from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.log_export import export_log_entries_txt
 from jasna.gui.log_filter import should_include_log_entry
+from jasna.gui.settings_sections.widgets import ValueOptionMenu
 
 
 class LogPanel(ctk.CTkFrame):
@@ -52,9 +53,14 @@ class LogPanel(ctk.CTkFrame):
         )
         filter_icon.pack(side="left", padx=(8, 2))
         
-        self._filter_dropdown = ctk.CTkOptionMenu(
+        self._filter_dropdown = ValueOptionMenu(
             toolbar,
-            values=[t("filter_debug"), t("filter_info"), t("filter_warn"), t("filter_error")],
+            options={
+                "debug": t("filter_debug"),
+                "info": t("filter_info"),
+                "warning": t("filter_warn"),
+                "error": t("filter_error"),
+            },
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
             fg_color=Colors.BG_PANEL,
             button_color=Colors.BG_PANEL,
@@ -67,8 +73,8 @@ class LogPanel(ctk.CTkFrame):
             command=self._on_filter_changed,
         )
         self._filter_dropdown.pack(side="left")
-        self._filter_dropdown.set(t("filter_info"))
-        self._filter_level = "info"  # Default to Info
+        self._filter_dropdown.set_value("info")
+        self._filter_level = "info"
         
         # Right side buttons
         self._export_btn = ctk.CTkButton(
@@ -103,15 +109,8 @@ class LogPanel(ctk.CTkFrame):
         self._log_text._textbox.tag_config("timestamp", foreground=Colors.TEXT_PRIMARY)
         self._log_text._textbox.tag_config("message", foreground=Colors.TEXT_PRIMARY)
         
-    def _on_filter_changed(self, value: str):
-        # Map translated values to internal filter levels
-        filter_map = {
-            t("filter_debug"): "debug",
-            t("filter_error"): "error",
-            t("filter_warn"): "warning",
-            t("filter_info"): "info",
-        }
-        self._filter_level = filter_map.get(value, "debug")
+    def _on_filter_changed(self, level: str):
+        self._filter_level = level
         if self._filter_changed_callback is not None:
             self._filter_changed_callback(self._filter_level)
         self._refresh_display()

@@ -39,7 +39,7 @@ class ValueOptionMenu(ctk.CTkOptionMenu):
     reading the selection never requires a reverse lookup through translations.
     """
 
-    def __init__(self, master, *, options: dict[str, str], command, **kwargs):
+    def __init__(self, master, *, options: dict[str, str], command=None, **kwargs):
         self._value_to_label = dict(options)
         self._label_to_value = {label: value for value, label in options.items()}
         self._value_command = command
@@ -51,7 +51,8 @@ class ValueOptionMenu(ctk.CTkOptionMenu):
         )
 
     def _on_label_selected(self, label: str):
-        self._value_command(self._label_to_value[label])
+        if self._value_command is not None:
+            self._value_command(self._label_to_value[label])
 
     def get_value(self) -> str:
         return self._label_to_value[self.get()]

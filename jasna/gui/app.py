@@ -31,6 +31,7 @@ from jasna.gui.log_filter import runtime_log_level_for_filter
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
+from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.font_backend import (
     GuiFontBackendError,
     font_backend_error,
@@ -201,12 +202,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         lang_label.pack(side="left", padx=(0, 4))
         
         locale = get_locale()
-        lang_values = [LANGUAGE_NAMES[code] for code in locale.available_languages]
-        current_lang_name = LANGUAGE_NAMES.get(locale.current_language, "English")
-        
-        self._lang_dropdown = ctk.CTkOptionMenu(
+        self._lang_dropdown = ValueOptionMenu(
             right,
-            values=lang_values,
+            options={code: LANGUAGE_NAMES[code] for code in locale.available_languages},
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             fg_color=Colors.BG_CARD,
             button_color=Colors.BG_CARD,
@@ -219,7 +217,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             command=self._on_language_changed,
         )
         self._lang_dropdown.pack(side="left", padx=(0, 12))
-        self._lang_dropdown.set(current_lang_name)
+        self._lang_dropdown.set_value(locale.current_language)
 
         self._video_player_icon = create_icon("play", 16, Colors.PLAYER_TEXT)
         self._video_player_btn = ctk.CTkButton(
@@ -735,21 +733,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         except Exception:
             logger.warning("Failed to clear queue panel running state", exc_info=True)
         
-    def _on_language_changed(self, lang_name: str):
-        """Handle language selection change."""
+    def _on_language_changed(self, code: str):
         locale = get_locale()
-        # Convert display name back to language code
-        for code, name in LANGUAGE_NAMES.items():
-            if name == lang_name:
-                if code != locale.current_language:
-                    locale.set_language(code)
-                    self._refresh_ui_text()
-                    from tkinter import messagebox
-                    messagebox.showinfo(
-                        t("dialog_language_changed"),
-                        t("dialog_language_restart"),
-                    )
-                break
+        if code == locale.current_language:
+            return
+        locale.set_language(code)
+        self._refresh_ui_text()
+        from tkinter import messagebox
+        messagebox.showinfo(t("dialog_language_changed"), t("dialog_language_restart"))
                 
     def _refresh_ui_text(self):
         """Refresh UI text after language change."""
