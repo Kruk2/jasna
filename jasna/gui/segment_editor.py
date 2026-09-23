@@ -199,6 +199,29 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._job.duration_seconds = self._state.duration
 
+        self._build_header(metadata)
+        body = ctk.CTkFrame(self, fg_color="transparent")
+        body.pack(fill="both", expand=True, padx=16)
+        body.grid_columnconfigure(0, weight=7, uniform="editor")
+        body.grid_columnconfigure(1, weight=4, uniform="editor")
+        body.grid_rowconfigure(0, weight=1)
+        # Let the preview/range area absorb small-window height changes instead
+        # of allowing its requested size to push the timeline/footer off-screen.
+        body.grid_propagate(False)
+
+        self._build_preview_card(body)
+        self._build_range_panel(body)
+        self._build_scan_and_timeline(metadata)
+        self._build_footer()
+
+        initial = self._state.selected_segment
+        if initial is not None:
+            self._current = initial.start
+        self._refresh_all()
+        self.update_idletasks()
+        self._preview_generation = self._preview_worker.seek(self._current)
+
+    def _build_header(self, metadata: VideoMetadata) -> None:
         header = ctk.CTkFrame(self, fg_color="transparent")
         header.pack(fill="x", padx=16, pady=(12, 8))
         title_column = ctk.CTkFrame(header, fg_color="transparent")
@@ -233,15 +256,7 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         title_column.pack(side="left", fill="x", expand=True)
 
-        body = ctk.CTkFrame(self, fg_color="transparent")
-        body.pack(fill="both", expand=True, padx=16)
-        body.grid_columnconfigure(0, weight=7, uniform="editor")
-        body.grid_columnconfigure(1, weight=4, uniform="editor")
-        body.grid_rowconfigure(0, weight=1)
-        # Let the preview/range area absorb small-window height changes instead
-        # of allowing its requested size to push the timeline/footer off-screen.
-        body.grid_propagate(False)
-
+    def _build_preview_card(self, body: ctk.CTkFrame) -> None:
         preview_card = ctk.CTkFrame(
             body,
             fg_color=Colors.BG_CARD,
@@ -428,6 +443,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._vr_projection_menu.set_value(self._vr_projection)
         Tooltip(self._vr_projection_label, t("segments_vr_projection_hint"))
         Tooltip(self._vr_projection_menu, t("segments_vr_projection_hint"))
+
+    def _build_range_panel(self, body: ctk.CTkFrame) -> None:
         range_panel = ctk.CTkFrame(
             body,
             fg_color=Colors.BG_CARD,
@@ -533,6 +550,7 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._range_action.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(5, 0))
 
+    def _build_scan_and_timeline(self, metadata: VideoMetadata) -> None:
         self._timeline = SegmentTimeline(
             self,
             duration=self._state.duration,
@@ -627,6 +645,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 text_color=Colors.STATUS_PENDING,
             ).pack(side="left")
 
+    def _build_footer(self) -> None:
         footer = ctk.CTkFrame(self, fg_color="transparent")
         footer.pack(fill="x", padx=16, pady=(3, 12))
         info_column = ctk.CTkFrame(footer, fg_color="transparent")
@@ -661,13 +680,6 @@ class SegmentEditor(ctk.CTkToplevel):
             command=self._save,
         )
         self._apply_btn.pack(side="right", padx=8)
-
-        initial = self._state.selected_segment
-        if initial is not None:
-            self._current = initial.start
-        self._refresh_all()
-        self.update_idletasks()
-        self._preview_generation = self._preview_worker.seek(self._current)
 
     def _poll_workers(self) -> None:
         if self._closed.is_set():
