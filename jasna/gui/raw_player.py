@@ -389,14 +389,13 @@ class RawPlayerWorker:
         finally:
             release_session_memory(session.device)
 
-    def _build_pipeline(self, settings: AppSettings | None = None):
+    def _build_pipeline(self, settings: AppSettings):
         from jasna.gui.video_session import (
             build_video_session,
             video_session_config,
         )
         from jasna.session_factory import build_pipeline
 
-        settings = settings or self.settings
         session = build_video_session(
             settings,
             log=logger.info,
@@ -423,7 +422,7 @@ class RawPlayerWorker:
     def _run_pass(self, command: _Play, pipeline, session) -> bool:
         cancel_event = threading.Event()
         lut_applier = None
-        lut_path = (self.settings.lut_path or "").strip()
+        lut_path = (command.settings.lut_path or "").strip()
         if lut_path:
             from jasna.media.lut import GpuLutApplier, parse_cube_file
 

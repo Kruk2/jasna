@@ -296,40 +296,37 @@ def test_cq_slider_updates_only_active_codec() -> None:
 
 def test_processor_passes_literal_cq_for_forced_codec(monkeypatch) -> None:
     import jasna.accelerator as accelerator
-    from jasna.gui.processor import Processor
+    from jasna.gui.processor import build_job_encoder_settings
 
-    processor = Processor.__new__(Processor)
-    processor._settings = AppSettings(codec="hevc", encoder_cq=28)
+    settings = AppSettings(codec="hevc", encoder_cq=28)
     monkeypatch.setattr(
         accelerator,
         "vendor_for_device",
         lambda: AcceleratorVendor.NVIDIA,
     )
 
-    assert processor._build_encoder_settings("h264") == {"cq": 28}
+    assert build_job_encoder_settings(settings, "h264") == {"cq": 28}
 
 
 def test_processor_resolves_native_default_for_codec(monkeypatch) -> None:
     import jasna.accelerator as accelerator
-    from jasna.gui.processor import Processor
+    from jasna.gui.processor import build_job_encoder_settings
 
-    processor = Processor.__new__(Processor)
-    processor._settings = AppSettings(codec="h264")
+    settings = AppSettings(codec="h264")
     monkeypatch.setattr(
         accelerator,
         "vendor_for_device",
         lambda: AcceleratorVendor.NVIDIA,
     )
 
-    assert processor._build_encoder_settings("h264") == {"cq": 25}
+    assert build_job_encoder_settings(settings, "h264") == {"cq": 25}
 
 
 def test_processor_rejects_cq_in_custom_args(monkeypatch) -> None:
     import jasna.accelerator as accelerator
-    from jasna.gui.processor import Processor
+    from jasna.gui.processor import build_job_encoder_settings
 
-    processor = Processor.__new__(Processor)
-    processor._settings = AppSettings(encoder_cq=28, encoder_custom_args="cq=22")
+    settings = AppSettings(encoder_cq=28, encoder_custom_args="cq=22")
     monkeypatch.setattr(
         accelerator,
         "vendor_for_device",
@@ -337,7 +334,7 @@ def test_processor_rejects_cq_in_custom_args(monkeypatch) -> None:
     )
 
     with pytest.raises(ValueError, match="CQ.*custom encoder settings"):
-        processor._build_encoder_settings("hevc")
+        build_job_encoder_settings(settings, "hevc")
 
 
 def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path) -> None:

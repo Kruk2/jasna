@@ -51,6 +51,40 @@ def _cleanup_torch(torch_mod) -> None:
         torch_mod.cuda.reset_peak_memory_stats()
 
 
+def build_job_encoder_settings(settings: AppSettings, codec: str) -> dict:
+    # Built per job (not cached in the video session) so a codec change
+    # between queued jobs is always validated against the selected codec.
+    from jasna.accelerator import AcceleratorVendor, vendor_for_device
+    from jasna.media.encoder_settings import (
+        encoder_cq_spec,
+        parse_encoder_settings,
+        validate_encoder_cq,
+        validate_encoder_settings,
+    )
+
+    vendor = vendor_for_device()
+    cq = (
+        encoder_cq_spec(codec, vendor).default
+        if settings.encoder_cq is None
+        else settings.encoder_cq
+    )
+    validate_encoder_cq(cq, codec=codec, vendor=vendor)
+    encoder_settings = {"cq": cq}
+    if settings.encoder_custom_args:
+        custom_settings = parse_encoder_settings(settings.encoder_custom_args)
+        cq_aliases = {"cq"}
+        if vendor is AcceleratorVendor.AMD:
+            cq_aliases.add("qvbr_quality_level")
+        duplicates = sorted(cq_aliases & custom_settings.keys())
+        if duplicates:
+            raise ValueError(
+                "CQ is controlled by the quality slider; remove "
+                f"{', '.join(duplicates)} from custom encoder settings"
+            )
+        encoder_settings.update(custom_settings)
+    return validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
+
+
 class Processor:
     """Handles video processing in a background thread."""
     
@@ -150,8 +184,6 @@ class Processor:
 
     def _run_post_export_action(self):
         settings = self._settings
-        if settings is None:
-            return
         from jasna.post_export_action import run_post_export_action_safely
 
         action = settings.post_export_action
@@ -191,9 +223,8 @@ class Processor:
         output_path = folder_output_path(self._output_folder or input_path.parent, input_path, self._output_pattern)
         
         # Handle file conflict based on settings
-        file_conflict = self._settings.file_conflict if self._settings else "auto_rename"
-        
         if output_path.exists():
+            file_conflict = self._settings.file_conflict
             if file_conflict == "skip":
                 job.status = JobStatus.SKIPPED
                 self._progress(ProgressUpdate(
@@ -215,17 +246,7 @@ class Processor:
                 self._close_video_session()
             else:
                 self._close_image_session()
-            pipeline_options = {}
-            if segments:
-                pipeline_options["segments"] = segments
-            if job_settings is not self._settings:
-                pipeline_options["settings"] = job_settings
-            self._run_pipeline(
-                job.id,
-                input_path,
-                output_path,
-                **pipeline_options,
-            )
+            self._run_pipeline(job.id, input_path, output_path, segments=segments, settings=job_settings)
             if not is_image:
                 self._run_post_export_video_command(input_path, output_path)
 
@@ -269,10 +290,7 @@ class Processor:
             logger.warning("Torch cleanup failed after job", exc_info=True)
 
     def _run_post_export_video_command(self, input_path: Path, output_path: Path) -> None:
-        settings = self._settings
-        if settings is None:
-            return
-        command = settings.post_export_video_command.strip()
+        command = self._settings.post_export_video_command.strip()
         if not command:
             return
         if self._stop_event.is_set():
@@ -307,66 +325,25 @@ class Processor:
         input_path: Path,
         output_path: Path,
         *,
-        segments=(),
-        settings: AppSettings | None = None,
+        segments: tuple,
+        settings: AppSettings,
     ):
         """Run one job; raises ProcessingStopped when the user stopped it."""
-
         if media_files.is_image(input_path):
             self._run_image_job(job_id, input_path, output_path)
-            return
-        self._run_video_job(
-            job_id,
-            input_path,
-            output_path,
-            segments=segments,
-            settings=settings or self._settings,
-        )
+        else:
+            self._run_video_job(job_id, input_path, output_path, segments=segments, settings=settings)
 
-
-    def _ensure_video_session(self, settings: AppSettings | None = None):
+    def _ensure_video_session(self, settings: AppSettings):
         """Compile engines + build the BasicVSR++ (and optional secondary) restorer
         once; reused across consecutive video jobs."""
         if self._video_session is not None:
             return
         self._video_session = build_video_session(
-            settings or self._settings,
+            settings,
             log=lambda msg: self._log("INFO", msg),
         )
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
-
-    def _build_encoder_settings(self, codec: str) -> dict:
-        # Built per job (not cached in the video session) so a codec change
-        # between queued jobs is always validated against the selected codec.
-        from jasna.accelerator import AcceleratorVendor, vendor_for_device
-        from jasna.media.encoder_settings import parse_encoder_settings, validate_encoder_settings
-        from jasna.media.encoder_settings import (
-            encoder_cq_spec,
-            validate_encoder_cq,
-        )
-
-        settings = self._settings
-        vendor = vendor_for_device()
-        cq = (
-            encoder_cq_spec(codec, vendor).default
-            if settings.encoder_cq is None
-            else settings.encoder_cq
-        )
-        validate_encoder_cq(cq, codec=codec, vendor=vendor)
-        encoder_settings = {"cq": cq}
-        if settings.encoder_custom_args:
-            custom_settings = parse_encoder_settings(settings.encoder_custom_args)
-            cq_aliases = {"cq"}
-            if vendor is AcceleratorVendor.AMD:
-                cq_aliases.add("qvbr_quality_level")
-            duplicates = sorted(cq_aliases & custom_settings.keys())
-            if duplicates:
-                raise ValueError(
-                    "CQ is controlled by the quality slider; remove "
-                    f"{', '.join(duplicates)} from custom encoder settings"
-                )
-            encoder_settings.update(custom_settings)
-        return validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
 
     def _run_video_job(
         self,
@@ -374,10 +351,9 @@ class Processor:
         input_path: Path,
         output_path: Path,
         *,
-        segments=(),
-        settings: AppSettings | None = None,
+        segments: tuple,
+        settings: AppSettings,
     ):
-        settings = settings or self._settings
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
         codec = settings.codec
@@ -398,7 +374,7 @@ class Processor:
                 probe_keyframes(input_path, metadata),
                 duration=metadata.duration,
             )
-        encoder_settings = self._build_encoder_settings(codec)
+        encoder_settings = build_job_encoder_settings(settings, codec)
         config = video_session_config(settings, codec=codec, encoder_settings=encoder_settings)
         self._ensure_video_session(settings)
         s = self._video_session

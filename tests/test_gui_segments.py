@@ -100,8 +100,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     processor._video_session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
     processor._ensure_video_session = MagicMock()
     processor._prepare_job_detector = MagicMock()
-    processor._build_encoder_settings = MagicMock(return_value={})
-
+    
     with (
         patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
         patch("jasna.media.splice.validate_smart_render"),
@@ -117,7 +116,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
         ),
         patch("jasna.pipeline.Pipeline", return_value=pipeline) as pipeline_cls,
     ):
-        processor._run_video_job(1, input_path, output_path, segments=segments)
+        processor._run_video_job(1, input_path, output_path, segments=segments, settings=AppSettings())
 
     assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
 
@@ -128,8 +127,8 @@ def test_ensure_video_session_delegates_to_factory_and_close_unloads() -> None:
     session = MagicMock()
 
     with patch("jasna.gui.processor.build_video_session", return_value=session) as build:
-        processor._ensure_video_session()
-        processor._ensure_video_session()
+        processor._ensure_video_session(processor._settings)
+        processor._ensure_video_session(processor._settings)
 
     build.assert_called_once()
     assert processor._video_session is session

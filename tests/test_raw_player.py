@@ -329,7 +329,7 @@ def test_raw_worker_releases_session_when_pipeline_construction_fails(
     )
 
     with pytest.raises(RuntimeError, match="pipeline failed"):
-        worker._build_pipeline()
+        worker._build_pipeline(AppSettings())
 
     session.close.assert_called_once_with()
     release.assert_called_once_with(session.device)
