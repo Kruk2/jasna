@@ -17,7 +17,15 @@ from jasna.gui.file_actions import open_containing_folder
 from jasna.gui.file_actions import open_file
 from jasna.gui.locales import t
 
-from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order, folder_output_path, is_image
+from jasna.media.media_files import (
+    IMAGE_EXTENSIONS,
+    MEDIA_EXTENSIONS,
+    VIDEO_EXTENSIONS,
+    file_dialog_patterns,
+    folder_media_in_processing_order,
+    folder_output_path,
+    is_image,
+)
 
 logger = logging.getLogger(__name__)
 from jasna.segments import SegmentRange
@@ -272,11 +280,10 @@ class QueuePanel(ctk.CTkFrame):
         files = filedialog.askopenfilenames(
             title=t("select_video_files"),
             filetypes=[
-                ("Media files", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm "
-                                "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"),
-                ("Video files", "*.mp4 *.mkv *.avi *.mov *.wmv *.flv *.webm"),
-                ("Image files", "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"),
-                ("All files", "*.*"),
+                (t("file_type_media"), file_dialog_patterns(MEDIA_EXTENSIONS)),
+                (t("file_type_video"), file_dialog_patterns(VIDEO_EXTENSIONS)),
+                (t("file_type_image"), file_dialog_patterns(IMAGE_EXTENSIONS)),
+                (t("file_type_all"), "*.*"),
             ]
         )
         for f in files:

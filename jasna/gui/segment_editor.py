@@ -218,7 +218,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._loading_label.pack(pady=12)
         ctk.CTkButton(
             self._loading,
-            text=t("segments_cancel"),
+            text=t("btn_cancel"),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
             command=self._finish_close,
@@ -872,7 +872,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._notice.pack(fill="x")
         self._cancel_btn = ctk.CTkButton(
             footer,
-            text=t("segments_cancel"),
+            text=t("btn_cancel"),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
             command=self._request_close,

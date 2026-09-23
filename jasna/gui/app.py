@@ -32,6 +32,7 @@ from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
+from jasna.media.media_files import IMAGE_EXTENSIONS, file_dialog_patterns
 from jasna.gui.font_backend import (
     GuiFontBackendError,
     font_backend_error,
@@ -483,8 +484,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         files = filedialog.askopenfilenames(
             title=t("interactive_select_images"),
             filetypes=[
-                ("Image files", "*.jpg *.jpeg *.png *.bmp *.webp *.tif *.tiff"),
-                ("All files", "*.*"),
+                (t("file_type_image"), file_dialog_patterns(IMAGE_EXTENSIONS)),
+                (t("file_type_all"), "*.*"),
             ],
         )
         if not files:

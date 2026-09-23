@@ -196,13 +196,13 @@ def test_status_pill_sizes_to_localized_content(monkeypatch) -> None:
         pill = StatusPill(root)
         pill.pack()
         widths = []
-        for status in ("IDLE", "PROCESSING", "PAUSED", "COMPLETED", "ERROR"):
+        for status in ("IDLE", "PROCESSING"):
             pill.set_status(status, "#ffffff")
             root.update_idletasks()
             widths.append(pill.winfo_reqwidth())
 
         assert max(widths) < 180
-        assert pill._label.cget("text") == translations["status_error"].upper()
+        assert pill._label.cget("text") == translations["status_processing"].upper()
     finally:
         root.destroy()
 

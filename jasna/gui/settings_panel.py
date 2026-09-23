@@ -192,7 +192,7 @@ class SettingsPanel(ctk.CTkFrame):
 
         display_name = self._display_name(self._current_preset)
         if self._is_modified:
-            display_name += " (Modified)*"
+            display_name = t("preset_modified", name=display_name)
         self._preset_dropdown.set(display_name)
 
     def _show_toast(self, message: str, type_: str = "info"):
@@ -238,11 +238,9 @@ class SettingsPanel(ctk.CTkFrame):
             self._on_interactive_image_restore()
 
     def _on_preset_changed(self, preset_display_name: str):
-        # Strip modified indicator if present
-        if preset_display_name.endswith(" (Modified)*"):
-            return  # User re-selected current modified preset
-        # Convert display name to actual name
-        preset_name = self._display_to_name.get(preset_display_name, preset_display_name)
+        if preset_display_name not in self._display_to_name:
+            return
+        preset_name = self._display_to_name[preset_display_name]
         self._apply_preset(preset_name)
 
     def _apply_preset(self, preset_name: str):

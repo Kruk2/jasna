@@ -11,6 +11,10 @@ VIDEO_EXTENSIONS: frozenset[str] = frozenset(
 MEDIA_EXTENSIONS: frozenset[str] = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 
 
+def file_dialog_patterns(extensions: frozenset[str]) -> str:
+    return " ".join(f"*{extension}" for extension in sorted(extensions))
+
+
 def is_image(path: str | Path) -> bool:
     return Path(path).suffix.lower() in IMAGE_EXTENSIONS
 
