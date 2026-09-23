@@ -35,9 +35,9 @@ FALLBACK_MARKERS = ("falling back", "software decoding")
 FAILURE_FLAGS = frozenset({"FAILED", "TIMEOUT"})
 
 SOURCE_RUNNER_SHIM = """
+import os
 import sys
-import jasna.media.video_decoder as video_decoder
-video_decoder.DECODE_BACKEND = "vali"
+os.environ["JASNA_DECODE_BACKEND"] = "vali"
 sys.argv = ["jasna"] + sys.argv[1:]
 from jasna.main import main
 main()

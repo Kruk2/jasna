@@ -62,7 +62,7 @@ def _fake_container(is_hwaccel: bool) -> MagicMock:
 
 
 def test_auto_backend_falls_back_to_pyav_when_vali_fails(monkeypatch, caplog) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "auto")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
 
     def broken_vali(*args, **kwargs):
         raise module.VideoDecodeError("vali is broken")
@@ -79,18 +79,18 @@ def test_auto_backend_falls_back_to_pyav_when_vali_fails(monkeypatch, caplog) ->
 
 @pytest.mark.parametrize("backend", module._DECODE_BACKENDS)
 def test_decode_backend_env_override(monkeypatch, backend: str) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "auto")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
     monkeypatch.setenv(module.DECODE_BACKEND_ENV, backend)
     assert module._decode_backend() == backend
 
 
 def test_decode_backend_defaults_to_auto(monkeypatch) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "auto")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
     assert module._decode_backend() == "auto"
 
 
 def test_forced_vali_backend_raises_on_failure(monkeypatch) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "vali")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "vali")
 
     def broken_vali(*args, **kwargs):
         raise RuntimeError("no decoder")
@@ -102,14 +102,14 @@ def test_forced_vali_backend_raises_on_failure(monkeypatch) -> None:
 
 
 def test_forced_vali_backend_requires_nvidia(monkeypatch) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "vali")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "vali")
     reader = _reader(monkeypatch, AcceleratorVendor.AMD)
     with pytest.raises(module.VideoDecodeError, match="NVIDIA"):
         reader.__enter__()
 
 
 def test_auto_backend_skips_vali_on_amd(monkeypatch) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "auto")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
     vali_factory = MagicMock()
     monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
     monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(False)))
@@ -122,7 +122,7 @@ def test_auto_backend_skips_vali_on_amd(monkeypatch) -> None:
 
 
 def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
-    monkeypatch.setattr(module, "DECODE_BACKEND", "pyav-sw")
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-sw")
     vali_factory = MagicMock()
     monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
     for vendor in (AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD):
@@ -299,7 +299,7 @@ def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
     device = torch.device("cuda", 0)
 
     def first_batch(backend):
-        monkeypatch.setattr(module, "DECODE_BACKEND", backend)
+        monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
         with module.NvidiaVideoReader(
             str(TEST_CLIP), batch_size=4, device=device, metadata=metadata
         ) as reader:
