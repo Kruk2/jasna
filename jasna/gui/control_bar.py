@@ -4,7 +4,7 @@ import logging
 
 import customtkinter as ctk
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.components import Tooltip
+from jasna.gui.components import Tooltip, format_duration
 from jasna.gui.locales import t
 from jasna.gui.system_stats import SystemStats
 
@@ -19,16 +19,6 @@ _COLOR_STOPS = (
     (0.5, (251, 191, 36)),   # amber-400
     (1.0, (251, 113, 133)),  # rose-400
 )
-
-
-def _format_duration(seconds: float) -> str:
-    mins, secs = divmod(int(seconds), 60)
-    hours, mins = divmod(mins, 60)
-    if hours:
-        return f"{hours}h {mins}m"
-    if mins:
-        return f"{mins}m {secs}s"
-    return f"{secs}s"
 
 
 def _color_for_percent(pct: int) -> str:
@@ -406,15 +396,7 @@ class ControlBar(ctk.CTkFrame):
         self._fps_label.configure(text=f"FPS: {fps:.1f}" if fps > 0 else "FPS: --")
         
         if eta_seconds > 0:
-            mins, secs = divmod(int(eta_seconds), 60)
-            hours, mins = divmod(mins, 60)
-            if hours:
-                eta_str = f"{hours}h {mins}m"
-            elif mins:
-                eta_str = f"{mins}m {secs}s"
-            else:
-                eta_str = f"{secs}s"
-            self._eta_label.configure(text=f"ETA: {eta_str}")
+            self._eta_label.configure(text=f"ETA: {format_duration(eta_seconds)}")
         else:
             self._eta_label.configure(text="ETA: --")
             
@@ -424,7 +406,7 @@ class ControlBar(ctk.CTkFrame):
         self.set_running(False)
         self._progress_bar.set(1.0)
         self._percent_label.configure(text="100%")
-        text = f"{t('completed_in')} {_format_duration(elapsed_seconds)}"
+        text = f"{t('completed_in')} {format_duration(elapsed_seconds)}"
         self._fps_label.configure(text=text)
         self._eta_label.configure(text="")
 

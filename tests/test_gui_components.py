@@ -243,3 +243,14 @@ def test_header_keeps_about_button_visible_at_default_width(monkeypatch) -> None
         assert status_right < header_right_left
     finally:
         root.destroy()
+
+
+def test_grab_modal_waits_for_visibility_before_grabbing() -> None:
+    from unittest.mock import MagicMock
+
+    from jasna.gui.components import grab_modal
+
+    dialog = MagicMock()
+    grab_modal(dialog)
+
+    assert [call[0] for call in dialog.method_calls] == ["wait_visibility", "grab_set", "lift", "focus_force"]

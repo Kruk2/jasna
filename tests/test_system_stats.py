@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import subprocess
 
 from jasna.gui import system_stats
-from jasna.gui.control_bar import _color_for_percent, _format_duration
+from jasna.gui.components import format_duration as _format_duration
+from jasna.gui.control_bar import _color_for_percent
 
 
 def test_format_duration_seconds_only() -> None:

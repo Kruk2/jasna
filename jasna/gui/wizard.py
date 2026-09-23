@@ -14,7 +14,7 @@ from jasna import os_utils
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
-from jasna.gui.components import BuyMeCoffeeButton, UnifansButton
+from jasna.gui.components import BuyMeCoffeeButton, UnifansButton, grab_modal
 
 logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
@@ -61,8 +61,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         self.configure(fg_color=Colors.BG_MAIN)
 
         self.transient(master)
-        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
-        self.grab_set()
+        grab_modal(self)
         # The wizard is modal, so closing it must always be possible - otherwise a check
         # that never finishes leaves the whole app unusable.
         self.protocol("WM_DELETE_WINDOW", self._on_exit)

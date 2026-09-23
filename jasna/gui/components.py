@@ -16,6 +16,24 @@ BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
 
+def grab_modal(dialog) -> None:
+    """Make a toplevel modal and focused; X11 refuses a grab until the window is viewable."""
+    dialog.wait_visibility()
+    dialog.grab_set()
+    dialog.lift()
+    dialog.focus_force()
+
+
+def format_duration(seconds: float) -> str:
+    mins, secs = divmod(int(seconds), 60)
+    hours, mins = divmod(mins, 60)
+    if hours:
+        return f"{hours}h {mins}m"
+    if mins:
+        return f"{mins}m {secs}s"
+    return f"{secs}s"
+
+
 class Tooltip:
     """Simple tooltip implementation for CustomTkinter widgets."""
 
@@ -175,10 +193,7 @@ class LicenseDialog(ctk.CTkToplevel):
         self.resizable(False, False)
         self.configure(fg_color=Colors.BG_MAIN)
         self.transient(master)
-        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
-        self.grab_set()
-        self.lift()
-        self.focus_force()
+        grab_modal(self)
 
         outer = ctk.CTkFrame(self, fg_color="transparent")
         outer.pack(fill="both", expand=True, padx=24, pady=24)
@@ -857,28 +872,12 @@ class JobListItem(ctk.CTkFrame):
             self._fps_label.configure(text="")
 
         if eta_seconds and eta_seconds > 0:
-            mins, secs = divmod(int(eta_seconds), 60)
-            hours, mins = divmod(mins, 60)
-            if hours:
-                eta_str = f"{hours}h {mins}m"
-            elif mins:
-                eta_str = f"{mins}m {secs}s"
-            else:
-                eta_str = f"{secs}s"
-            self._eta_label.configure(text=f"ETA: {eta_str}")
+            self._eta_label.configure(text=f"ETA: {format_duration(eta_seconds)}")
         else:
             self._eta_label.configure(text="")
 
     def set_completed(self, elapsed_seconds: float):
-        mins, secs = divmod(int(elapsed_seconds), 60)
-        hours, mins = divmod(mins, 60)
-        if hours:
-            duration_str = f"{hours}h {mins}m"
-        elif mins:
-            duration_str = f"{mins}m {secs}s"
-        else:
-            duration_str = f"{secs}s"
-        self._status_label.configure(text=f"{t('completed_in')} {duration_str}")
+        self._status_label.configure(text=f"{t('completed_in')} {format_duration(elapsed_seconds)}")
         self._fps_label.configure(text="")
         self._eta_label.configure(text="")
         
@@ -977,8 +976,7 @@ class PresetDialog(ctk.CTkToplevel):
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
         self.transient(master)
-        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
-        self.grab_set()
+        grab_modal(self)
         
         self._on_create = on_create
         self._existing_names = [n.lower() for n in existing_names]
@@ -1070,8 +1068,7 @@ class ConfirmDialog(ctk.CTkToplevel):
         self.configure(fg_color=Colors.BG_MAIN)
         self.resizable(False, False)
         self.transient(master)
-        self.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
-        self.grab_set()
+        grab_modal(self)
         
         self._on_confirm = on_confirm
         

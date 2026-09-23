@@ -9,6 +9,7 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image
 
+from jasna.gui.components import grab_modal
 from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings
@@ -89,10 +90,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
         self._build_ui()
         self._center(master)
-        self.wait_visibility()
-        self.grab_set()
-        self.lift()
-        self.focus_force()
+        grab_modal(self)
 
         self._worker.start()
         self._request_render()

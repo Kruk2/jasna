@@ -24,6 +24,7 @@ import tkinter as tk
 import customtkinter as ctk
 from PIL import Image, ImageTk
 
+from jasna.gui.components import grab_modal
 from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.theme import Colors, Fonts
@@ -400,10 +401,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         self.bind("<Escape>", lambda _e: self._cancel())
 
         self.update_idletasks()
-        self.wait_visibility()
-        self.grab_set()
-        self.lift()
-        self.focus_force()
+        grab_modal(self)
         self._redraw()
 
     def _canvas_size(self) -> tuple[int, int]:
