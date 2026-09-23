@@ -1,7 +1,5 @@
-import ctypes
 import logging
 import os
-import sys
 from fractions import Fraction
 from typing import Iterator
 
@@ -18,12 +16,12 @@ from jasna.accelerator import (
     vendor_for_device,
 )
 from jasna.media import VideoMetadata, resolve_video_start_pts
+from jasna.media.cuda_kernel import create_stream, destroy_stream
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 log = logging.getLogger(__name__)
 
 CORRUPT_PACKET_TOLERANCE = 10
-_libcuda: ctypes.CDLL | None = None
 
 # Decode backend selection (`JASNA_DECODE_BACKEND` overrides the default):
 # - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
@@ -58,28 +56,12 @@ def _decode_backend() -> str:
     return backend
 
 
-def _cuda_driver() -> ctypes.CDLL:
-    global _libcuda
-    if _libcuda is None:
-        loader = ctypes.WinDLL if sys.platform == "win32" else ctypes.CDLL
-        lib = loader("nvcuda.dll" if sys.platform == "win32" else "libcuda.so.1")
-        lib.cuStreamCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
-        lib.cuStreamCreate.restype = ctypes.c_int
-        lib.cuStreamDestroy.argtypes = [ctypes.c_void_p]
-        lib.cuStreamDestroy.restype = ctypes.c_int
-        _libcuda = lib
-    return _libcuda
-
-
 def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.ExternalStream]:
     # cuStreamCreate needs a current CUDA context; threads other than the one
     # torch initialized on have none until torch binds them to the device.
     torch.cuda.set_device(device)
-    handle = ctypes.c_void_p()
-    result = _cuda_driver().cuStreamCreate(ctypes.byref(handle), 0)
-    if result != 0 or handle.value is None:
-        raise RuntimeError(f"cuStreamCreate failed (CUDA error {result})")
-    return handle.value, torch.cuda.ExternalStream(handle.value, device=device)
+    handle = create_stream()
+    return handle, torch.cuda.ExternalStream(handle, device=device)
 
 
 class _ValiFrameSource:
@@ -226,9 +208,7 @@ class _ValiFrameSource:
         if self._raw_stream is None:
             return
         raw_stream, self._raw_stream = self._raw_stream, None
-        result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(raw_stream))
-        if result != 0:
-            raise RuntimeError(f"cuStreamDestroy failed (CUDA error {result})")
+        destroy_stream(raw_stream)
 
 
 class NvidiaVideoReader:
@@ -449,9 +429,12 @@ class NvidiaVideoReader:
         self._decoder_ctx = None
         if self._raw_stream is None:
             return
-        result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
-        if result != 0 and exc_type is None:
-            raise RuntimeError(f"cuStreamDestroy failed (CUDA error {result})")
+        try:
+            destroy_stream(self._raw_stream)
+        except RuntimeError:
+            if exc_type is None:
+                raise
+            log.warning("Could not destroy the decode stream while handling another error", exc_info=True)
 
     def _decode_packet(self, packet, consecutive_errors: int) -> tuple[list, int]:
         try:

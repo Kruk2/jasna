@@ -16,7 +16,7 @@ import ctypes
 import torch
 
 from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
+from jasna.media.cuda_kernel import Kernel, grid_size
 from jasna.media.rgb_to_nv12 import (
     NV12_VARIANTS,
     _chw_rgb_to_nv12_into,
@@ -62,57 +62,29 @@ _TORCH_CONVERTERS = {
 }
 
 
-class _RgbToYuvKernel:
-    def __init__(self, function_name: str):
-        self.function_name = function_name
-        self._function: ctypes.c_void_p | None = None
-        self._values = [
-            ctypes.c_uint64(),  # RGB pointer
-            ctypes.c_int64(),   # RGB channel stride, in samples
-            ctypes.c_int64(),   # RGB row stride, in samples
-            ctypes.c_uint64(),  # luma pointer
-            ctypes.c_int64(),   # luma row stride, in samples
-            ctypes.c_uint64(),  # chroma pointer
-            ctypes.c_int64(),   # chroma row stride, in samples
-            ctypes.c_int(),     # height
-            ctypes.c_int(),     # width
-        ]
-        self._params = (ctypes.c_void_p * len(self._values))(
-            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
-        )
+_RGB_TO_YUV_ARG_TYPES = (
+    ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64,
+    ctypes.c_uint64, ctypes.c_int64,
+    ctypes.c_uint64, ctypes.c_int64,
+    ctypes.c_int, ctypes.c_int,
+)
 
-    def launch(self, rgb: torch.Tensor, luma: torch.Tensor, chroma: torch.Tensor) -> None:
-        if self._function is None:
-            self._function = resolve_function(_FATBIN, self.function_name)
-        height, width = luma.shape
-        values = self._values
-        values[0].value = rgb.data_ptr()
-        values[1].value = rgb.stride(0)
-        values[2].value = rgb.stride(1)
-        values[3].value = luma.data_ptr()
-        values[4].value = luma.stride(0)
-        values[5].value = chroma.data_ptr()
-        values[6].value = chroma.stride(0)
-        values[7].value = height
-        values[8].value = width
-        quads_x = (width + 1) // 2
-        quads_y = (height + 1) // 2
-        check_cuda(
-            cuda_driver().cuLaunchKernel(
-                self._function,
-                (quads_x + _BLOCK_WIDTH - 1) // _BLOCK_WIDTH,
-                (quads_y + _BLOCK_HEIGHT - 1) // _BLOCK_HEIGHT,
-                1,
-                _BLOCK_WIDTH,
-                _BLOCK_HEIGHT,
-                1,
-                0,
-                ctypes.c_void_p(torch.cuda.current_stream(rgb.device).cuda_stream),
-                self._params,
-                None,
-            ),
-            f"cuLaunchKernel({self.function_name})",
-        )
+
+def _launch_rgb_to_yuv(kernel: Kernel, rgb: torch.Tensor, luma: torch.Tensor, chroma: torch.Tensor) -> None:
+    height, width = luma.shape
+    quads_x = (width + 1) // 2
+    quads_y = (height + 1) // 2
+    kernel.launch(
+        (grid_size(quads_x, _BLOCK_WIDTH), grid_size(quads_y, _BLOCK_HEIGHT), 1),
+        (_BLOCK_WIDTH, _BLOCK_HEIGHT, 1),
+        (
+            rgb.data_ptr(), rgb.stride(0), rgb.stride(1),
+            luma.data_ptr(), luma.stride(0),
+            chroma.data_ptr(), chroma.stride(0),
+            height, width,
+        ),
+        torch.cuda.current_stream(rgb.device).cuda_stream,
+    )
 
 
 class RgbToYuvConverter:
@@ -133,7 +105,7 @@ class RgbToYuvConverter:
         self._eager_rows, self._eager_full_range = (
             P010_VARIANTS[variant] if self.ten_bit else NV12_VARIANTS[variant]
         )
-        self._kernel = _RgbToYuvKernel(variant) if is_nvidia_device(device) else None
+        self._kernel = Kernel(_FATBIN, variant, _RGB_TO_YUV_ARG_TYPES) if is_nvidia_device(device) else None
         self._scratch: YuvScratch | None = None
 
     @property
@@ -172,7 +144,7 @@ class RgbToYuvConverter:
         if self.ten_bit:
             luma = luma.view(torch.uint16)
             chroma = chroma.view(torch.uint16)
-        self._kernel.launch(frame, luma, chroma)
+        _launch_rgb_to_yuv(self._kernel, frame, luma, chroma)
 
     def _scratch_for(self, frame: torch.Tensor) -> YuvScratch:
         _, height, width = frame.shape

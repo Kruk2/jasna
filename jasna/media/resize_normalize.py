@@ -14,7 +14,7 @@ import ctypes
 import torch
 
 from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
+from jasna.media.cuda_kernel import Kernel, grid_size
 
 _FATBIN = "resize_normalize.fatbin"
 _BLOCK_WIDTH = 16
@@ -23,75 +23,39 @@ _BLOCK_HEIGHT = 16
 _FUNCTIONS = {torch.float16: "resize_normalize_fp16", torch.float32: "resize_normalize_fp32"}
 
 
-class _ResizeNormalizeKernel:
-    def __init__(self, function_name: str):
-        self.function_name = function_name
-        self._function: ctypes.c_void_p | None = None
-        self._values = [
-            ctypes.c_uint64(),  # source pointer
-            ctypes.c_int64(),   # source batch stride
-            ctypes.c_int64(),   # source channel stride
-            ctypes.c_int64(),   # source row stride
-            ctypes.c_uint64(),  # destination pointer
-            ctypes.c_int64(),   # destination batch stride
-            ctypes.c_int64(),   # destination channel stride
-            ctypes.c_int64(),   # destination row stride
-            ctypes.c_int(),     # batch
-            ctypes.c_int(),     # source height
-            ctypes.c_int(),     # source width
-            ctypes.c_int(),     # output height
-            ctypes.c_int(),     # output width
-            ctypes.c_int(),     # content left
-            ctypes.c_int(),     # content top
-            ctypes.c_int(),     # content width
-            ctypes.c_int(),     # content height
-            ctypes.c_uint64(),  # mean pointer
-            ctypes.c_uint64(),  # standard deviation pointer
-            ctypes.c_uint64(),  # fill pointer
-        ]
-        self._params = (ctypes.c_void_p * len(self._values))(
-            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
-        )
+_RESIZE_NORMALIZE_ARG_TYPES = (
+    ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+    ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64,
+)
 
-    def launch(
-        self,
-        frames: torch.Tensor,
-        out: torch.Tensor,
-        content: tuple[int, int, int, int],
-        mean: torch.Tensor,
-        std: torch.Tensor,
-        fill: torch.Tensor,
-    ) -> None:
-        if self._function is None:
-            self._function = resolve_function(_FATBIN, self.function_name)
-        batch, _, src_height, src_width = frames.shape
-        out_height, out_width = out.shape[2], out.shape[3]
-        left, top, content_width, content_height = content
-        values = self._values
-        for index, value in enumerate((
+
+def _launch_resize_normalize(
+    kernel: Kernel,
+    frames: torch.Tensor,
+    out: torch.Tensor,
+    content: tuple[int, int, int, int],
+    mean: torch.Tensor,
+    std: torch.Tensor,
+    fill: torch.Tensor,
+) -> None:
+    batch, _, src_height, src_width = frames.shape
+    out_height, out_width = out.shape[2], out.shape[3]
+    left, top, content_width, content_height = content
+    kernel.launch(
+        (grid_size(out_width, _BLOCK_WIDTH), grid_size(out_height, _BLOCK_HEIGHT), batch),
+        (_BLOCK_WIDTH, _BLOCK_HEIGHT, 1),
+        (
             frames.data_ptr(), frames.stride(0), frames.stride(1), frames.stride(2),
             out.data_ptr(), out.stride(0), out.stride(1), out.stride(2),
             batch, src_height, src_width, out_height, out_width,
             left, top, content_width, content_height,
             mean.data_ptr(), std.data_ptr(), fill.data_ptr(),
-        )):
-            values[index].value = value
-        check_cuda(
-            cuda_driver().cuLaunchKernel(
-                self._function,
-                (out_width + _BLOCK_WIDTH - 1) // _BLOCK_WIDTH,
-                (out_height + _BLOCK_HEIGHT - 1) // _BLOCK_HEIGHT,
-                batch,
-                _BLOCK_WIDTH,
-                _BLOCK_HEIGHT,
-                1,
-                0,
-                ctypes.c_void_p(torch.cuda.current_stream(frames.device).cuda_stream),
-                self._params,
-                None,
-            ),
-            f"cuLaunchKernel({self.function_name})",
-        )
+        ),
+        torch.cuda.current_stream(frames.device).cuda_stream,
+    )
 
 
 class ResizeNormalizer:
@@ -117,7 +81,7 @@ class ResizeNormalizer:
         self._fill = torch.tensor(fill, dtype=torch.float32, device=device)
         function = _FUNCTIONS.get(dtype)
         self._kernel = (
-            _ResizeNormalizeKernel(function)
+            Kernel(_FATBIN, function, _RESIZE_NORMALIZE_ARG_TYPES)
             if function is not None and is_nvidia_device(device)
             else None
         )
@@ -149,5 +113,5 @@ class ResizeNormalizer:
         out = torch.empty(
             (frames.shape[0], 3, out_hw[0], out_hw[1]), dtype=self.dtype, device=self.device
         )
-        self._kernel.launch(frames, out, content, self._mean, self._std, self._fill)
+        _launch_resize_normalize(self._kernel, frames, out, content, self._mean, self._std, self._fill)
         return out
