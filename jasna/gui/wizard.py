@@ -269,8 +269,6 @@ class FirstRunWizard(ctk.CTkToplevel):
 
         if self._has_required_failure:
             self._continue_btn.configure(text=t("btn_exit"), state="normal", command=self._on_exit)
-        elif self._checks_passed:
-            self._continue_btn.configure(text=t("btn_get_started"), state="normal")
         else:
             self._continue_btn.configure(text=t("btn_get_started"), state="normal")
         

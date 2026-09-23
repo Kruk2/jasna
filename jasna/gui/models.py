@@ -73,13 +73,6 @@ class JobItem:
         with self._state_lock:
             return self.segments
 
-    def try_set_segments(self, segments: tuple[SegmentRange, ...]) -> bool:
-        with self._state_lock:
-            if self.status is not JobStatus.PENDING:
-                return False
-            self.segments = tuple(segments)
-            return True
-
     def try_set_video_options(
         self,
         segments: tuple[SegmentRange, ...],
@@ -168,7 +161,6 @@ class AppSettings:
     post_export_video_command: str = ""
     
     # Output
-    output_same_as_input: bool = True
     output_folder: str = ""
     output_pattern: str = DEFAULT_OUTPUT_PATTERN
     file_conflict: str = "auto_rename"  # auto_rename, overwrite, skip

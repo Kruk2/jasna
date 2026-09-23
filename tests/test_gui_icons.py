@@ -40,18 +40,6 @@ def test_toggle_switch_renders_without_customtkinter_shape_glyphs(selected: bool
     assert image.getbbox() == (0, 0, 36, 18)
 
 
-def test_compact_switch_uses_image_backed_control(monkeypatch) -> None:
-    constructor = MagicMock(return_value=object())
-    monkeypatch.setattr(icons, "CompactSwitch", constructor)
-    master = object()
-    command = MagicMock()
-
-    result = icons.create_compact_switch(master, command, Colors.BG_CARD)
-
-    assert result is constructor.return_value
-    constructor.assert_called_once_with(master, command, Colors.BG_CARD)
-
-
 def test_compact_switch_preserves_switch_state_and_callback() -> None:
     try:
         root = ctk.CTk()

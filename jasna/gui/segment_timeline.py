@@ -97,10 +97,6 @@ class SegmentTimeline(ctk.CTkFrame):
         self._canvas.bind("<Button-4>", lambda event: self._on_wheel(event, delta=120))
         self._canvas.bind("<Button-5>", lambda event: self._on_wheel(event, delta=-120))
 
-    @property
-    def view_range(self) -> tuple[float, float]:
-        return self._view_start, self._view_end
-
     def set_data(
         self,
         *,

@@ -15,7 +15,7 @@ from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.components import Tooltip
-from jasna.gui.icons import create_compact_switch
+from jasna.gui.icons import CompactSwitch
 from jasna.gui.restoration_preview import (
     RestorationClip,
     RestorationFailed,
@@ -407,7 +407,7 @@ class SegmentEditor(ctk.CTkToplevel):
         preview_options.grid(row=3, column=0, sticky="ew", padx=8, pady=(2, 8))
         restore_control = ctk.CTkFrame(preview_options, fg_color="transparent")
         restore_control.pack(side="right")
-        self._restore_toggle = create_compact_switch(
+        self._restore_toggle = CompactSwitch(
             restore_control,
             self._toggle_restoration_preview,
             Colors.BG_CARD,
@@ -759,7 +759,7 @@ class SegmentEditor(ctk.CTkToplevel):
             scan_activity_row,
             fg_color="transparent",
         )
-        self._scan_overlay_toggle = create_compact_switch(
+        self._scan_overlay_toggle = CompactSwitch(
             self._scan_overlay_box,
             self._toggle_scan_overlay,
             Colors.BG_PANEL,

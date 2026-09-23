@@ -3,7 +3,7 @@
 import customtkinter as ctk
 
 from jasna.gui.components import CollapsibleSection, Tooltip
-from jasna.gui.icons import create_compact_switch
+from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.sd15_download_worker import start_sd15_download
 from jasna.gui.settings_sections.widgets import create_slider_value_label, get_tooltip
@@ -139,7 +139,7 @@ class ImageRestorationSection:
         freeu_tip = ctk.CTkLabel(freeu_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         freeu_tip.pack(side="left")
         Tooltip(freeu_tip, get_tooltip("image_restore_freeu"))
-        self._widgets["image_restore_freeu"] = create_compact_switch(
+        self._widgets["image_restore_freeu"] = CompactSwitch(
             freeu_frame,
             self._on_modified,
             Colors.BG_CARD,

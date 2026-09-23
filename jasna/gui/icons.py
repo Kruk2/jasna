@@ -325,5 +325,3 @@ class CompactSwitch(tk.Label):
         return super().cget(key)
 
 
-def create_compact_switch(master, command: callable, background: str) -> CompactSwitch:
-    return CompactSwitch(master, command, background)

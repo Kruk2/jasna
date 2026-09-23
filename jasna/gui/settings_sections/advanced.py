@@ -3,7 +3,7 @@
 import customtkinter as ctk
 
 from jasna.gui.components import CollapsibleSection, Tooltip
-from jasna.gui.icons import create_compact_switch
+from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
     ValueOptionMenu,
@@ -107,7 +107,7 @@ class AdvancedSection:
         scene_tip = ctk.CTkLabel(scene_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         scene_tip.pack(side="left")
         Tooltip(scene_tip, get_tooltip("scene_detection"))
-        self._widgets["scene_detection"] = create_compact_switch(
+        self._widgets["scene_detection"] = CompactSwitch(
             scene_frame,
             self._on_modified,
             Colors.BG_CARD,
@@ -126,7 +126,7 @@ class AdvancedSection:
         crossfade_tip = ctk.CTkLabel(crossfade_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         crossfade_tip.pack(side="left")
         Tooltip(crossfade_tip, get_tooltip("enable_crossfade"))
-        self._widgets["enable_crossfade"] = create_compact_switch(
+        self._widgets["enable_crossfade"] = CompactSwitch(
             crossfade_frame,
             self._on_modified,
             Colors.BG_CARD,

@@ -533,11 +533,6 @@ class QueuePanel(ctk.CTkFrame):
         """Get the output path for a given input file based on current settings."""
         output_folder = self._output_entry.get() or input_path.parent
         return folder_output_path(output_folder, input_path, self._pattern_entry.get() or DEFAULT_OUTPUT_PATTERN)
-        
-        self._update_empty_state()
-        self._update_count()
-        if self._on_jobs_changed:
-            self._on_jobs_changed()
             
     def _remove_job(self, job: JobItem):
         if job in self._jobs:
