@@ -666,6 +666,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             settings,
             self._frame_buffer,
             max_size=self._surface_size(),
+            on_stopped=lambda: self._main_thread.post(self._finish_stop),
         )
         self._worker.start()
         self._generation = self._worker.play_from(seconds)
@@ -1019,18 +1020,11 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         if self._clock is not None:
             self._clock.close()
             self._clock = None
-        worker = self._worker
-        worker.close()
+        self._worker.close()
         self._set_status(t("player_stopping"), Colors.STATUS_PENDING)
         self._set_config_enabled(False)
         self._play_btn.configure(state="disabled")
         self._seek.configure(state="disabled")
-
-        def join_worker() -> None:
-            worker.join()
-            self._main_thread.post(self._finish_stop)
-
-        threading.Thread(target=join_worker, name="player-stop", daemon=True).start()
 
     def _finish_stop(self) -> None:
         self._worker = None
