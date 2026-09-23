@@ -7,7 +7,7 @@ import os
 import warnings
 from pathlib import Path
 
-from jasna.engine_paths import get_yolo_tensorrt_engine_path  # noqa: F401
+from jasna.engine_paths import get_yolo_tensorrt_engine_path
 
 
 def compile_yolo_to_tensorrt_engine(

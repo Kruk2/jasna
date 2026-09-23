@@ -18,7 +18,7 @@ from jasna.pipeline_processing import process_frame_batch, finalize_processing
 from jasna.pipeline_timing import LoopTimer
 from jasna.progressbar import Progressbar
 from jasna.restorer import RestorationPipeline
-from jasna.tracking import ClipTracker
+from jasna.tracking.clip_tracker import ClipTracker
 from jasna.tracking.scene_detector import SceneCutDetector
 
 log = logging.getLogger(__name__)
