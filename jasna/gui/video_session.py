@@ -3,7 +3,7 @@
 Maps ``AppSettings`` to the core ``SessionConfig`` (the only place a
 GUI-settings-to-internal-value mapping may live) and builds the heavy video
 restoration session for both the background job Processor and the
-segment-editor restoration preview.
+segment-editor restoration preview, plus the still-image session.
 """
 
 from pathlib import Path
@@ -112,6 +112,41 @@ def build_video_session(
 
     config = video_session_config(settings, codec=settings.codec, encoder_settings={})
     return build_restoration_session(config, log_callback=log)
+
+
+def build_image_session(
+    settings: AppSettings,
+    *,
+    log: Callable[[str], None] | None,
+) -> tuple:
+    """Load the mosaic detector and SD 1.5 inpaint restorer used for still images."""
+    import torch
+
+    from jasna._suppress_noise import install as _install_noise_filters
+    from jasna.engine_paths import SD15_DIR
+    from jasna.gui.locales import t
+    from jasna.mosaic.detection_registry import resolve_detection_model
+    from jasna.restorer.sd15_download import bundle_present
+    from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
+    from jasna.session_factory import build_compiled_detection_model
+
+    _install_noise_filters()
+    if not bundle_present(SD15_DIR):
+        raise FileNotFoundError(t("interactive_model_missing"))
+    device = torch.device("cuda:0")
+    detection_model_name, detection_model_path, _ = resolve_detection_model(
+        str(settings.detection_model), "", None
+    )
+    detector = build_compiled_detection_model(
+        detection_model_name,
+        detection_model_path,
+        device=device,
+        batch_size=settings.batch_size,
+        fp16=settings.fp16_mode,
+        score_threshold=settings.detection_score_threshold,
+        log_callback=log,
+    )
+    return detector, Sd15InpaintRestorer(SD15_DIR, device, settings.fp16_mode), device
 
 
 def release_session_memory(device: "torch.device") -> None:
