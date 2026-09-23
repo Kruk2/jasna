@@ -220,12 +220,12 @@ def test_smart_h264_settings_reject_unknown_source_profile() -> None:
 
 @pytest.mark.parametrize("codec", ["h264", "hevc", "av1"])
 def test_validation_accepts_supported_source_matched_codecs(codec: str) -> None:
-    assert validate_smart_render(_metadata(codec), output_path="out.mp4", codec=codec) == codec
+    assert validate_smart_render(_metadata(codec), output_path="out.mp4", codec=codec, retarget_high_fps=False) == codec
 
 
 def test_validation_rejects_codec_mismatch() -> None:
     with pytest.raises(SmartRenderCompatibilityError, match="match the input codec"):
-        validate_smart_render(_metadata("h264"), output_path="out.mp4", codec="hevc")
+        validate_smart_render(_metadata("h264"), output_path="out.mp4", codec="hevc", retarget_high_fps=False)
 
 
 def test_validation_rejects_unsupported_h264_profile() -> None:
@@ -234,6 +234,7 @@ def test_validation_rejects_unsupported_h264_profile() -> None:
             _metadata("h264", profile="Extended"),
             output_path="out.mp4",
             codec="h264",
+            retarget_high_fps=False,
         )
 
 
@@ -243,6 +244,7 @@ def test_validation_rejects_vfr_and_retargeting() -> None:
             _metadata(average_fps=29.0),
             output_path="out.mp4",
             codec="h264",
+            retarget_high_fps=False,
         )
     with pytest.raises(SmartRenderCompatibilityError, match="frame-rate retargeting"):
         validate_smart_render(

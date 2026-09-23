@@ -30,6 +30,7 @@ from jasna.accelerator import (
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.cas import GpuCasSharpener
 from jasna.media.container_utils import (
+    MOV_SUFFIXES,
     is_mov_chapter_stream,
     subtitle_transcode_codec,
 )
@@ -354,7 +355,7 @@ def _align_yuv_pitch(packed: torch.Tensor) -> torch.Tensor:
 
 
 def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
-    if suffix.lower() not in {".mp4", ".mov"}:
+    if suffix.lower() not in MOV_SUFFIXES:
         return {}
     # A fragmented MP4 writes a sample-free moov up front and one moof+mdat per
     # keyframe, so the growing file stays playable; +faststart instead relocates
@@ -537,7 +538,7 @@ class NvidiaVideoEncoder:
         else:
             pix_fmt = "cuda"
         out_v = self.dst.add_stream(self.encoder_name, **stream_kwargs)
-        if self.codec == "hevc" and self.output_path.suffix.lower() in {".mp4", ".mov"}:
+        if self.codec == "hevc" and self.output_path.suffix.lower() in MOV_SUFFIXES:
             out_v.codec_tag = "hvc1"
         out_v.width = self.metadata.video_width
         out_v.height = self.metadata.video_height
@@ -699,9 +700,7 @@ class NvidiaVideoEncoder:
                     transcode_codec = subtitle_transcode_codec(
                         in_stream.codec_context.name,
                         output_formats=output_formats,
-                        supported_codecs=getattr(
-                            self.dst, "supported_codecs", frozenset()
-                        ),
+                        supported_codecs=self.dst.supported_codecs,
                     )
                     if in_stream.type != "subtitle" or transcode_codec is None:
                         logger.warning(

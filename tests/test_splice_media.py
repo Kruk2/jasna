@@ -100,8 +100,12 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
     assert len(index.pts) >= 3
 
     raw_parts = [tmp_path / f"raw-{i}.nut" for i in range(3)]
-    create_copy_fragment(source, SpliceSpan("copy", index.start_pts, index.pts[1]), index, raw_parts[0])
-    create_copy_fragment(source, SpliceSpan("copy", index.pts[2], index.end_pts), index, raw_parts[2])
+    create_copy_fragment(
+        source, SpliceSpan("copy", index.start_pts, index.pts[1]), index, raw_parts[0], codec=metadata.codec_name
+    )
+    create_copy_fragment(
+        source, SpliceSpan("copy", index.pts[2], index.end_pts), index, raw_parts[2], codec=metadata.codec_name
+    )
     _ffmpeg(
         "-ss", "1",
         "-i", str(source),
