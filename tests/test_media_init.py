@@ -5,12 +5,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.media import (
+from jasna.media.encoder_settings import (
     SUPPORTED_ENCODER_SETTINGS,
     SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
     _parse_encoder_setting_scalar,
     parse_encoder_settings,
     validate_encoder_settings,
+)
+from jasna.media.probe import (
     is_stream_10bit,
     get_video_meta_data,
     parse_sample_aspect_ratio,
@@ -268,8 +270,8 @@ class TestGetVideoMetaData:
         stream.update(overrides)
         return json.dumps({"streams": [stream], "format": {"duration": "4.17"}}).encode()
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_basic_metadata_extraction(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (self._make_ffprobe_output(), b"")
@@ -287,8 +289,8 @@ class TestGetVideoMetaData:
         assert meta.color_range == AvColorRange.MPEG
         assert meta.color_space == AvColorspace.ITU709
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_10bit_stream(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -301,8 +303,8 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.is_10bit is True
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_preserves_color_primaries_and_transfer_names(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -320,8 +322,8 @@ class TestGetVideoMetaData:
         assert meta.color_primaries == "bt2020"
         assert meta.color_transfer == "smpte2084"
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_ffprobe_failure_raises(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (b"", b"error message")
@@ -331,8 +333,8 @@ class TestGetVideoMetaData:
         with pytest.raises(Exception, match="error running ffprobe"):
             get_video_meta_data("test.mp4")
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_fps_fraction(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (self._make_ffprobe_output(), b"")
@@ -344,8 +346,8 @@ class TestGetVideoMetaData:
         assert meta.video_fps_exact == Fraction(24000, 1001)
         assert meta.time_base == Fraction(1, 24000)
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_missing_nb_frames_falls_back_to_counting(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -355,13 +357,13 @@ class TestGetVideoMetaData:
         proc.returncode = 0
         mock_popen.return_value = proc
 
-        with patch("jasna.media._get_frame_count_by_counting", return_value=50) as mock_count:
+        with patch("jasna.media.probe._get_frame_count_by_counting", return_value=50) as mock_count:
             meta = get_video_meta_data("test.mp4")
             mock_count.assert_called_once_with("test.mp4")
             assert meta.num_frames == 50
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_color_space_bt601(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -374,8 +376,8 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.color_space == AvColorspace.ITU601
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_color_space_bt470bg(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -388,8 +390,8 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.color_space == AvColorspace.ITU601
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_color_space_smpte170m(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -402,8 +404,8 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.color_space == AvColorspace.ITU601
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_color_range_jpeg(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -416,8 +418,8 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.color_range == AvColorRange.JPEG
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_missing_color_fields_default_to_bt709_mpeg(self, mock_popen, mock_resolve):
         output = self._make_ffprobe_output()
         data = json.loads(output)
@@ -434,8 +436,8 @@ class TestGetVideoMetaData:
         assert meta.color_range == AvColorRange.MPEG
         assert meta.color_space == AvColorspace.ITU709
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_sample_aspect_ratio(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -448,8 +450,8 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.sample_aspect_ratio == Fraction(8, 9)
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_missing_sample_aspect_ratio_defaults_to_square(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (self._make_ffprobe_output(), b"")
@@ -459,8 +461,8 @@ class TestGetVideoMetaData:
         meta = get_video_meta_data("test.mp4")
         assert meta.sample_aspect_ratio == Fraction(1, 1)
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_spatial_side_data(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (
@@ -486,8 +488,8 @@ class TestGetVideoMetaData:
         assert meta.stereo_layout == "side by side"
         assert meta.spherical_projection == "equirectangular"
 
-    @patch("jasna.media.resolve_executable", return_value="ffprobe")
-    @patch("jasna.media.subprocess.Popen")
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
     def test_spatial_metadata_tag_fallback(self, mock_popen, mock_resolve):
         proc = MagicMock()
         proc.communicate.return_value = (

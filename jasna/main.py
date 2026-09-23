@@ -6,7 +6,7 @@ from pathlib import Path
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
 from jasna.engine_paths import model_weights_dir
-from jasna.media import UnsupportedColorspaceError
+from jasna.media.probe import UnsupportedColorspaceError
 from jasna.os_utils import (
     MIN_DRIVER_VERSION,
     check_ascii_install_path,
@@ -87,8 +87,8 @@ def _resolve_cli_encoder_settings(
     vendor,
 ) -> dict[str, object]:
     from jasna.accelerator import AcceleratorVendor
-    from jasna.media import parse_encoder_settings, validate_encoder_settings
-    from jasna.media.encoder_quality import encoder_cq_spec, validate_encoder_cq
+    from jasna.media.encoder_settings import parse_encoder_settings, validate_encoder_settings
+    from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
 
     resolved_vendor = AcceleratorVendor(str(vendor))
     settings = parse_encoder_settings(raw_settings)
@@ -741,7 +741,7 @@ def main() -> None:
     splice_plan = None
     codec = str(args.codec).lower()
     if segments_spec:
-        from jasna.media import get_video_meta_data
+        from jasna.media.probe import get_video_meta_data
         from jasna.media.splice import (
             SmartRenderCompatibilityError,
             build_splice_plan,

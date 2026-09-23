@@ -14,7 +14,7 @@ import torch
 from av.codec.hwaccel import HWAccel
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 

@@ -4,7 +4,7 @@ import pytest
 
 from jasna.accelerator import AcceleratorVendor
 from jasna.main import _resolve_cli_encoder_settings
-from jasna.media.encoder_quality import encoder_cq_spec, validate_encoder_cq
+from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
 
 
 @pytest.mark.parametrize(

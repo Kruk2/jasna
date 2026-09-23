@@ -12,7 +12,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 import jasna.media.video_decoder as module
 from jasna.accelerator import AcceleratorVendor
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 
@@ -293,7 +293,7 @@ def _vali_fork_available() -> bool:
     reason="needs a GPU, the test clip and the python_vali fork",
 )
 def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
-    from jasna.media import get_video_meta_data
+    from jasna.media.probe import get_video_meta_data
 
     metadata = get_video_meta_data(str(TEST_CLIP))
     device = torch.device("cuda", 0)

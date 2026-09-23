@@ -8,7 +8,7 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 from jasna.crop_buffer import RawCrop
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.pipeline import Pipeline
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.tracking.clip_tracker import TrackedClip

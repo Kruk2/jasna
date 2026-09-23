@@ -10,7 +10,7 @@ import torch
 import pytest
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.pipeline import Pipeline
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
@@ -129,7 +129,7 @@ class TestPipelineColorspaceCheck:
         mock_meta.return_value = meta
         p = _make_pipeline()
 
-        from jasna.media import UnsupportedColorspaceError
+        from jasna.media.probe import UnsupportedColorspaceError
         with pytest.raises(
             UnsupportedColorspaceError,
             match="Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported",

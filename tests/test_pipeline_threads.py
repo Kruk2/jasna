@@ -16,7 +16,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer, RawCrop
 from jasna.frame_queue import FrameQueue
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.pipeline_threads import (
     FrameWriter,

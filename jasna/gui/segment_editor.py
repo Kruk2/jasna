@@ -57,7 +57,7 @@ from jasna.gui.settings_sections.encoding import CODEC_CANONICAL_TO_LABEL
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.segments import SegmentRange, format_timestamp, parse_timestamp
 
 

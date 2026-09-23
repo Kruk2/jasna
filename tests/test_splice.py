@@ -8,7 +8,7 @@ import pytest
 from av.video.reformatter import ColorRange, Colorspace
 
 from jasna.accelerator import AcceleratorVendor
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.media.splice import (
     KeyframeIndex,
     SpliceSpan,

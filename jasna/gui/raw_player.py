@@ -18,7 +18,7 @@ from PIL import Image
 
 from jasna._frozen import is_frozen
 from jasna.gui.models import AppSettings
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
 logger = logging.getLogger(__name__)

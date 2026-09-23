@@ -13,7 +13,7 @@ from jasna.gui.settings_sections.widgets import (
     get_tooltip,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.media.encoder_quality import encoder_cq_spec, validate_encoder_cq
+from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
 
 # Display labels contain punctuation ("H.264 (AVC)"), so canonical values come
 # from these maps, never from .lower() on the label.

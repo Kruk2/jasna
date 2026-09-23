@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 
 from jasna.benchmark.harness import run_repeatedly
-from jasna.media import get_video_meta_data
+from jasna.media.probe import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.mosaic.detection_registry import (
     DEFAULT_DETECTION_MODEL_NAME,

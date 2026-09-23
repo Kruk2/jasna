@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.media import get_video_meta_data
+from jasna.media.probe import get_video_meta_data
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.splice import probe_keyframes
 from jasna.media.video_decoder import NvidiaVideoReader

@@ -31,7 +31,7 @@ from jasna.gui.raw_player import (
 )
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.media import VideoMetadata, get_video_meta_data
+from jasna.media.probe import VideoMetadata, get_video_meta_data
 from jasna.media.media_files import VIDEO_EXTENSIONS
 from jasna.mosaic.detection_registry import (
     detection_model_choices,

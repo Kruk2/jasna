@@ -17,7 +17,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 import jasna.media.video_encoder as video_encoder_module
 from jasna.accelerator import AcceleratorVendor
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.media.video_encoder import (
     DEFAULT_AV1_ENCODER_OPTIONS,
     DEFAULT_ENCODER_OPTIONS,

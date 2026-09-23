@@ -2,7 +2,7 @@
 import time
 import pytest
 import torch
-from jasna.media import get_video_meta_data
+from jasna.media.probe import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 
 SAMPLE_VIDEOS = [

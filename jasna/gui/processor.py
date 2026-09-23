@@ -11,7 +11,7 @@ from typing import Callable
 
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_config
-from jasna.media import UnsupportedColorspaceError
+from jasna.media.probe import UnsupportedColorspaceError
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession, build_pipeline
@@ -363,8 +363,8 @@ class Processor:
         # Built per job (not cached in the video session) so a codec change
         # between queued jobs is always validated against the selected codec.
         from jasna.accelerator import AcceleratorVendor, vendor_for_device
-        from jasna.media import parse_encoder_settings, validate_encoder_settings
-        from jasna.media.encoder_quality import (
+        from jasna.media.encoder_settings import parse_encoder_settings, validate_encoder_settings
+        from jasna.media.encoder_settings import (
             encoder_cq_spec,
             validate_encoder_cq,
         )
@@ -407,7 +407,7 @@ class Processor:
         codec = settings.codec
         splice_plan = None
         if segments:
-            from jasna.media import get_video_meta_data
+            from jasna.media.probe import get_video_meta_data
             from jasna.media.splice import build_splice_plan, probe_keyframes, validate_smart_render
             metadata = get_video_meta_data(str(input_path))
             codec = {

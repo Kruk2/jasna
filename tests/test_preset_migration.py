@@ -1,7 +1,7 @@
 """Old settings.json presets (PyNvVideoCodec-era) must survive loading: unknown
 fields dropped, encoder custom args translated to hevc_nvenc names."""
 from jasna.gui.models import AppSettings, _migrate_encoder_custom_args, _migrate_preset_dict
-from jasna.media import parse_encoder_settings, validate_encoder_settings
+from jasna.media.encoder_settings import parse_encoder_settings, validate_encoder_settings
 
 
 def test_unknown_fields_are_dropped():

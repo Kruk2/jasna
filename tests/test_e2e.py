@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.media import get_video_meta_data, VideoMetadata
+from jasna.media.probe import get_video_meta_data, VideoMetadata
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 REQUIRES_TEST_CLIP = pytest.mark.skipif(not TEST_CLIP.exists(), reason="test clip not found")
