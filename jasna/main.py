@@ -6,7 +6,7 @@ from pathlib import Path
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
 from jasna.engine_paths import model_weights_dir
-from jasna.media import UnsupportedColorspaceError
+from jasna.media.probe import UnsupportedColorspaceError
 from jasna.os_utils import (
     MIN_DRIVER_VERSION,
     check_ascii_install_path,
@@ -87,8 +87,8 @@ def _resolve_cli_encoder_settings(
     vendor,
 ) -> dict[str, object]:
     from jasna.accelerator import AcceleratorVendor
-    from jasna.media import parse_encoder_settings, validate_encoder_settings
-    from jasna.media.encoder_quality import encoder_cq_spec, validate_encoder_cq
+    from jasna.media.encoder_settings import parse_encoder_settings, validate_encoder_settings
+    from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
 
     resolved_vendor = AcceleratorVendor(str(vendor))
     settings = parse_encoder_settings(raw_settings)
@@ -640,8 +640,8 @@ def main() -> None:
 
     output_video = Path(args.output) if args.output else (input_video.with_stem(input_video.stem + "_out") if input_video else None)
 
-    from jasna.media.image_io import is_image_path
-    input_is_image = input_video is not None and is_image_path(input_video)
+    from jasna.media.media_files import is_image
+    input_is_image = input_video is not None and is_image(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
     segments_spec = str(args.segments).strip()
     if segments_spec:
@@ -741,7 +741,7 @@ def main() -> None:
     splice_plan = None
     codec = str(args.codec).lower()
     if segments_spec:
-        from jasna.media import get_video_meta_data
+        from jasna.media.probe import get_video_meta_data
         from jasna.media.splice import (
             SmartRenderCompatibilityError,
             build_splice_plan,

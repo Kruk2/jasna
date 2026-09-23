@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.media import get_video_meta_data, VideoMetadata
+from jasna.media.probe import get_video_meta_data, VideoMetadata
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 REQUIRES_TEST_CLIP = pytest.mark.skipif(not TEST_CLIP.exists(), reason="test clip not found")
@@ -87,10 +87,10 @@ class TestVideoMetadataE2E:
 class TestVideoDecoderE2E:
     def test_decode_first_batch(self):
         meta = get_video_meta_data(str(TEST_CLIP))
-        from jasna.media.video_decoder import NvidiaVideoReader
+        from jasna.media.video_decoder import VideoReader
 
         device = torch.device("cuda:0")
-        with NvidiaVideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=meta) as reader:
+        with VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=meta) as reader:
             for frames, pts_list in reader.frames():
                 assert frames.shape == (4, 3, 1080, 1920)
                 assert frames.dtype == torch.uint8
@@ -100,21 +100,21 @@ class TestVideoDecoderE2E:
 
     def test_decode_all_frames_count(self):
         meta = get_video_meta_data(str(TEST_CLIP))
-        from jasna.media.video_decoder import NvidiaVideoReader
+        from jasna.media.video_decoder import VideoReader
 
         device = torch.device("cuda:0")
         total = 0
-        with NvidiaVideoReader(str(TEST_CLIP), batch_size=8, device=device, metadata=meta) as reader:
+        with VideoReader(str(TEST_CLIP), batch_size=8, device=device, metadata=meta) as reader:
             for frames, pts_list in reader.frames():
                 total += len(pts_list)
         assert total == 300
 
     def test_decode_batch_size_1(self):
         meta = get_video_meta_data(str(TEST_CLIP))
-        from jasna.media.video_decoder import NvidiaVideoReader
+        from jasna.media.video_decoder import VideoReader
 
         device = torch.device("cuda:0")
-        with NvidiaVideoReader(str(TEST_CLIP), batch_size=1, device=device, metadata=meta) as reader:
+        with VideoReader(str(TEST_CLIP), batch_size=1, device=device, metadata=meta) as reader:
             for frames, pts_list in reader.frames():
                 assert frames.shape[0] == 1
                 assert len(pts_list) == 1
@@ -137,7 +137,7 @@ class TestDetectionE2E:
             pytest.skip("rfdetr-v5 model weights not found")
 
         meta = get_video_meta_data(str(TEST_CLIP))
-        from jasna.media.video_decoder import NvidiaVideoReader
+        from jasna.media.video_decoder import VideoReader
 
         device = torch.device("cuda:0")
         bs = 4
@@ -150,7 +150,7 @@ class TestDetectionE2E:
             fp16=True,
         )
 
-        with NvidiaVideoReader(str(TEST_CLIP), batch_size=bs, device=device, metadata=meta) as reader:
+        with VideoReader(str(TEST_CLIP), batch_size=bs, device=device, metadata=meta) as reader:
             for frames, pts_list in reader.frames():
                 det = model(frames, target_hw=(meta.video_height, meta.video_width))
                 assert len(det.boxes_xyxy) == bs
@@ -166,14 +166,14 @@ class TestDetectionE2E:
 class TestEncoderE2E:
     def test_encode_decoded_frames(self, tmp_path):
         meta = get_video_meta_data(str(TEST_CLIP))
-        from jasna.media.video_decoder import NvidiaVideoReader
-        from jasna.media.video_encoder import NvidiaVideoEncoder
+        from jasna.media.video_decoder import VideoReader
+        from jasna.media.video_encoder import VideoEncoder
 
         device = torch.device("cuda:0")
         output_path = tmp_path / "out.mkv"
 
-        with NvidiaVideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=meta) as reader:
-            with NvidiaVideoEncoder(
+        with VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=meta) as reader:
+            with VideoEncoder(
                 str(output_path),
                 device=device,
                 metadata=meta,
@@ -325,10 +325,10 @@ class TestFullPipelineE2E:
         assert meta.codec_name == "hevc"
         assert meta.video_fps == pytest.approx(30.0)
 
-        from jasna.media.video_decoder import NvidiaVideoReader
+        from jasna.media.video_decoder import VideoReader
 
         device = torch.device("cuda:0")
-        with NvidiaVideoReader(str(output), batch_size=4, device=device, metadata=meta) as reader:
+        with VideoReader(str(output), batch_size=4, device=device, metadata=meta) as reader:
             for frames, pts_list in reader.frames():
                 assert frames.dtype == torch.uint8
                 assert frames.any(), "decoded output frames should not be all black"
@@ -454,10 +454,10 @@ def _make_restorer(device: torch.device):
 
 
 def _decode_frames(device: torch.device, n: int = NUM_CLIP_FRAMES) -> list[torch.Tensor]:
-    from jasna.media.video_decoder import NvidiaVideoReader
+    from jasna.media.video_decoder import VideoReader
     meta = get_video_meta_data(str(TEST_CLIP))
     frames: list[torch.Tensor] = []
-    with NvidiaVideoReader(str(TEST_CLIP), batch_size=n, device=device, metadata=meta) as reader:
+    with VideoReader(str(TEST_CLIP), batch_size=n, device=device, metadata=meta) as reader:
         for batch, pts_list in reader.frames():
             for i in range(len(pts_list)):
                 frames.append(batch[i])

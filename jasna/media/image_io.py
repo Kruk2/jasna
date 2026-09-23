@@ -5,15 +5,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-IMAGE_EXTENSIONS: frozenset[str] = frozenset(
-    {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
-)
-
-
-def is_image_path(path: str | Path) -> bool:
-    return Path(path).suffix.lower() in IMAGE_EXTENSIONS
-
-
 def read_image_rgb_chw(path: str | Path) -> np.ndarray:
     """Read an image as a ``(C, H, W)`` uint8 RGB array.
 

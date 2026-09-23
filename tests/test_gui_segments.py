@@ -105,7 +105,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     processor._build_encoder_settings = MagicMock(return_value={})
 
     with (
-        patch("jasna.media.get_video_meta_data", return_value=metadata),
+        patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
         patch("jasna.media.splice.validate_smart_render"),
         patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
         patch("jasna.media.splice.build_splice_plan", return_value=splice_plan),

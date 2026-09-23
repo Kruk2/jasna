@@ -7,7 +7,7 @@ import pytest
 
 from jasna.accelerator import AcceleratorVendor
 from jasna.gui.locales import TRANSLATIONS
-from jasna.media.encoder_quality import encoder_cq_spec
+from jasna.media.encoder_settings import encoder_cq_spec
 
 _FULL_LOCALES = ["zh", "ja"]
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")

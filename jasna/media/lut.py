@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 
 from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
+from jasna.media.cuda_kernel import Kernel, grid_size
 
 _FATBIN = "lut.fatbin"
 _BLOCK_WIDTH = 32
@@ -111,69 +111,35 @@ def parse_cube_text(text: str) -> CubeLut:
     )
 
 
-class _LutKernel:
-    def __init__(self, function_name: str):
-        self.function_name = function_name
-        self._function: ctypes.c_void_p | None = None
-        self._values = [
-            ctypes.c_uint64(),  # RGB pointer
-            ctypes.c_int64(),   # RGB channel stride
-            ctypes.c_int64(),   # RGB row stride
-            ctypes.c_uint64(),  # output pointer
-            ctypes.c_int64(),   # output channel stride
-            ctypes.c_int64(),   # output row stride
-            ctypes.c_int(),     # height
-            ctypes.c_int(),     # width
-            ctypes.c_uint64(),  # LUT table pointer
-            ctypes.c_int(),     # LUT size
-            ctypes.c_uint64(),  # domain minimum pointer
-            ctypes.c_uint64(),  # domain scale pointer
-        ]
-        self._params = (ctypes.c_void_p * len(self._values))(
-            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
-        )
+_LUT_ARG_TYPES = (
+    ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64,
+    ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64,
+    ctypes.c_int, ctypes.c_int,
+    ctypes.c_uint64, ctypes.c_int, ctypes.c_uint64, ctypes.c_uint64,
+)
 
-    def launch(
-        self,
-        frame: torch.Tensor,
-        out: torch.Tensor,
-        table: torch.Tensor,
-        lut_size: int,
-        domain_min: torch.Tensor,
-        domain_scale: torch.Tensor,
-    ) -> None:
-        if self._function is None:
-            self._function = resolve_function(_FATBIN, self.function_name)
-        _, height, width = frame.shape
-        values = self._values
-        values[0].value = frame.data_ptr()
-        values[1].value = frame.stride(0)
-        values[2].value = frame.stride(1)
-        values[3].value = out.data_ptr()
-        values[4].value = out.stride(0)
-        values[5].value = out.stride(1)
-        values[6].value = height
-        values[7].value = width
-        values[8].value = table.data_ptr()
-        values[9].value = lut_size
-        values[10].value = domain_min.data_ptr()
-        values[11].value = domain_scale.data_ptr()
-        check_cuda(
-            cuda_driver().cuLaunchKernel(
-                self._function,
-                (width + _BLOCK_WIDTH - 1) // _BLOCK_WIDTH,
-                (height + _BLOCK_HEIGHT - 1) // _BLOCK_HEIGHT,
-                1,
-                _BLOCK_WIDTH,
-                _BLOCK_HEIGHT,
-                1,
-                0,
-                ctypes.c_void_p(torch.cuda.current_stream(frame.device).cuda_stream),
-                self._params,
-                None,
-            ),
-            f"cuLaunchKernel({self.function_name})",
-        )
+
+def _launch_lut(
+    kernel: Kernel,
+    frame: torch.Tensor,
+    out: torch.Tensor,
+    table: torch.Tensor,
+    lut_size: int,
+    domain_min: torch.Tensor,
+    domain_scale: torch.Tensor,
+) -> None:
+    _, height, width = frame.shape
+    kernel.launch(
+        (grid_size(width, _BLOCK_WIDTH), grid_size(height, _BLOCK_HEIGHT), 1),
+        (_BLOCK_WIDTH, _BLOCK_HEIGHT, 1),
+        (
+            frame.data_ptr(), frame.stride(0), frame.stride(1),
+            out.data_ptr(), out.stride(0), out.stride(1),
+            height, width,
+            table.data_ptr(), lut_size, domain_min.data_ptr(), domain_scale.data_ptr(),
+        ),
+        torch.cuda.current_stream(frame.device).cuda_stream,
+    )
 
 
 class GpuLutApplier:
@@ -205,7 +171,7 @@ class GpuLutApplier:
             self._table = self._lut_1d.contiguous()
 
         self._kernel = (
-            _LutKernel("lut3d_u8" if lut.is_3d else "lut1d_u8")
+            Kernel(_FATBIN, "lut3d_u8" if lut.is_3d else "lut1d_u8", _LUT_ARG_TYPES)
             if is_nvidia_device(device)
             else None
         )
@@ -224,7 +190,8 @@ class GpuLutApplier:
             and frame_chw.stride(2) == 1
         ):
             out = torch.empty_like(frame_chw)
-            self._kernel.launch(
+            _launch_lut(
+                self._kernel,
                 frame_chw,
                 out,
                 self._table,

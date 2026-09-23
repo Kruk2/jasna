@@ -1,9 +1,9 @@
-"""Test NvidiaVideoReader seek behavior on sample videos."""
+"""Test VideoReader seek behavior on sample videos."""
 import time
 import pytest
 import torch
-from jasna.media import get_video_meta_data
-from jasna.media.video_decoder import NvidiaVideoReader
+from jasna.media.probe import get_video_meta_data
+from jasna.media.video_decoder import VideoReader
 
 SAMPLE_VIDEOS = [
     "assets/test_clip1_1080p.mp4",
@@ -33,7 +33,7 @@ class TestSeekBehavior:
     def test_sequential_read_speed(self, video_path, metadata):
         """Baseline: read first 5 batches sequentially from start."""
         device = torch.device("cuda:0")
-        with NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
             t0 = time.monotonic()
             frames_read = 0
             for batch, pts in reader.frames():
@@ -50,7 +50,7 @@ class TestSeekBehavior:
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 2
         seek_ts = seek_frame / metadata.video_fps
-        with NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
             t0 = time.monotonic()
             frames_read = 0
             first_batch_time = None
@@ -72,7 +72,7 @@ class TestSeekBehavior:
         seek_frame = metadata.num_frames // 3
         seek_ts = seek_frame / metadata.video_fps
         all_pts = []
-        with NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
             for batch, pts in reader.frames(seek_ts=seek_ts):
                 all_pts.extend(pts)
                 if len(all_pts) >= 72:
@@ -88,8 +88,8 @@ class TestSeekBehavior:
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 2
         with (
-            NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as r1,
-            NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as r2,
+            VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as r1,
+            VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as r2,
         ):
             t0 = time.monotonic()
             frames1 = 0
@@ -117,7 +117,7 @@ class TestSeekBehavior:
         seek_frame = metadata.num_frames // 2
         seek_ts = seek_frame / metadata.video_fps
         batch_times = []
-        with NvidiaVideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
             for batch, pts in reader.frames(seek_ts=seek_ts):
                 batch_times.append(time.monotonic())
                 if len(batch_times) >= 5:
@@ -148,7 +148,7 @@ class TestSeekBehavior:
         shifted_meta = get_video_meta_data(str(shifted))
         device = torch.device("cuda:0")
         seek_ts = 2.5
-        with NvidiaVideoReader(str(shifted), batch_size=8, device=device, metadata=shifted_meta) as reader:
+        with VideoReader(str(shifted), batch_size=8, device=device, metadata=shifted_meta) as reader:
             _, pts = next(iter(reader.frames(seek_ts=seek_ts)))
 
         first_seconds = float(pts[0] * shifted_meta.time_base)

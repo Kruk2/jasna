@@ -102,7 +102,7 @@ def _fake_metadata(*, width: int = 1920, height: int = 1080) -> object:
     from av.video.reformatter import ColorRange as AvColorRange
     from av.video.reformatter import Colorspace as AvColorspace
 
-    from jasna.media import VideoMetadata
+    from jasna.media.probe import VideoMetadata
 
     return VideoMetadata(
         video_file="video.mp4",
