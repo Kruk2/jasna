@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: AGPL-3.0
 
 import logging
-import os
 import warnings
 
 import torch

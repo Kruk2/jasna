@@ -6,8 +6,12 @@ import logging
 import os
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from jasna.engine_paths import get_yolo_tensorrt_engine_path
+
+if TYPE_CHECKING:
+    import torch
 
 
 def compile_yolo_to_tensorrt_engine(

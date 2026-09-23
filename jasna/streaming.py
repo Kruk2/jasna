@@ -4,7 +4,6 @@ import atexit
 import json
 import logging
 import math
-import os
 import shutil
 import tempfile
 import threading
