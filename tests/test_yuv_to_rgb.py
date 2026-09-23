@@ -3,10 +3,7 @@ import numpy as np
 import torch
 from av.video.reformatter import Colorspace as AvColorspace
 
-from jasna.media.rgb_to_p010 import (
-    chw_rgb_to_p010_bt601_limited,
-    chw_rgb_to_p010_bt709_limited,
-)
+from jasna.media.rgb_to_yuv import RgbToYuvConverter
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 CPU = torch.device("cpu")
@@ -66,7 +63,7 @@ def test_round_trip_uniform_colors_bt709():
         img = torch.empty(3, 8, 8, dtype=torch.uint8)
         for c, val in enumerate(rgb):
             img[c] = val
-        y, uv = _p010_to_planes(chw_rgb_to_p010_bt709_limited(img), 8, 8)
+        y, uv = _p010_to_planes(RgbToYuvConverter("p010_bt709_limited", device=CPU).convert(img), 8, 8)
         out = YuvToRgbConverter(8, 8, AvColorspace.ITU709, False, True, CPU).convert(y, uv)
         assert (out.to(torch.int16) - img.to(torch.int16)).abs().max() <= 2
 
@@ -75,7 +72,7 @@ def test_round_trip_uniform_colors_bt601():
     img = torch.empty(3, 8, 8, dtype=torch.uint8)
     for c, val in enumerate((60, 180, 240)):
         img[c] = val
-    y, uv = _p010_to_planes(chw_rgb_to_p010_bt601_limited(img), 8, 8)
+    y, uv = _p010_to_planes(RgbToYuvConverter("p010_bt601_limited", device=CPU).convert(img), 8, 8)
     out = YuvToRgbConverter(8, 8, AvColorspace.ITU601, False, True, CPU).convert(y, uv)
     assert (out.to(torch.int16) - img.to(torch.int16)).abs().max() <= 2
 

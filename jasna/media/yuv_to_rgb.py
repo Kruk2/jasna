@@ -44,68 +44,44 @@ _CUDA_CONVERSION_BATCH = 8
 _FATBIN = "yuv_to_rgb.fatbin"
 
 
-class _CudaYuvKernel:
-    def __init__(self, function_name: str):
-        self._kernel = Kernel(
-            _FATBIN,
-            function_name,
-            (
-                *(ctypes.c_uint64 for _ in range(2 * _CUDA_CONVERSION_BATCH)),
-                ctypes.c_int, ctypes.c_int,
-                ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
-                ctypes.c_int, ctypes.c_int, ctypes.c_int,
-            ),
-        )
+_YUV_TO_RGB_ARG_TYPES = (
+    *(ctypes.c_uint64 for _ in range(2 * _CUDA_CONVERSION_BATCH)),
+    ctypes.c_int, ctypes.c_int,
+    ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+    ctypes.c_int, ctypes.c_int, ctypes.c_int,
+)
 
-    def launch(self, y: torch.Tensor, uv: torch.Tensor, out: torch.Tensor) -> None:
-        self.launch_ptrs(
-            [y.data_ptr()],
-            y.stride(0),
-            [uv.data_ptr()],
-            uv.stride(0),
-            out,
-        )
 
-    def launch_ptr(
-        self,
-        y_ptr: int,
-        y_stride: int,
-        uv_ptr: int,
-        uv_stride: int,
-        out: torch.Tensor,
-        stream: int | None = None,
-    ) -> None:
-        self.launch_ptrs([y_ptr], y_stride, [uv_ptr], uv_stride, out, stream)
-
-    def launch_ptrs(
-        self,
-        y_ptrs: list[int],
-        y_stride: int,
-        uv_ptrs: list[int],
-        uv_stride: int,
-        out: torch.Tensor,
-        stream: int | None = None,
-    ) -> None:
-        batch_size = len(y_ptrs)
-        if batch_size != len(uv_ptrs) or not 1 <= batch_size <= _CUDA_CONVERSION_BATCH:
-            raise ValueError(f"CUDA YUV conversion batch must contain 1-{_CUDA_CONVERSION_BATCH} frames")
-        unused = [0] * (_CUDA_CONVERSION_BATCH - batch_size)
-        threads = 256
-        pixels = batch_size * out.shape[-2] * out.shape[-1]
-        if stream is None:
-            stream = torch.cuda.current_stream(out.device).cuda_stream
-        self._kernel.launch(
-            (grid_size(pixels, threads), 1, 1),
-            (threads, 1, 1),
-            (
-                *y_ptrs, *unused,
-                *uv_ptrs, *unused,
-                y_stride, uv_stride,
-                out.data_ptr(), out.stride(0) if out.ndim == 4 else 0, out.stride(-3), out.stride(-2),
-                batch_size, out.shape[-2], out.shape[-1],
-            ),
-            stream,
-        )
+def _launch_yuv_to_rgb(
+    kernel: Kernel,
+    y_ptrs: list[int],
+    y_stride: int,
+    uv_ptrs: list[int],
+    uv_stride: int,
+    out: torch.Tensor,
+    stream: int | None,
+) -> None:
+    """Convert up to ``_CUDA_CONVERSION_BATCH`` frames given raw plane pointers."""
+    batch_size = len(y_ptrs)
+    if batch_size != len(uv_ptrs) or not 1 <= batch_size <= _CUDA_CONVERSION_BATCH:
+        raise ValueError(f"CUDA YUV conversion batch must contain 1-{_CUDA_CONVERSION_BATCH} frames")
+    unused = [0] * (_CUDA_CONVERSION_BATCH - batch_size)
+    threads = 256
+    pixels = batch_size * out.shape[-2] * out.shape[-1]
+    if stream is None:
+        stream = torch.cuda.current_stream(out.device).cuda_stream
+    kernel.launch(
+        (grid_size(pixels, threads), 1, 1),
+        (threads, 1, 1),
+        (
+            *y_ptrs, *unused,
+            *uv_ptrs, *unused,
+            y_stride, uv_stride,
+            out.data_ptr(), out.stride(0) if out.ndim == 4 else 0, out.stride(-3), out.stride(-2),
+            batch_size, out.shape[-2], out.shape[-1],
+        ),
+        stream,
+    )
 
 
 class YuvToRgbConverter:
@@ -142,7 +118,7 @@ class YuvToRgbConverter:
         if is_nvidia_device(device):
             bits = 10 if is_10bit else 8
             value_range = "full" if full_range else "limited"
-            self._cuda_kernel = _CudaYuvKernel(f"yuv{bits}_{name}_{value_range}")
+            self._cuda_kernel = Kernel(_FATBIN, f"yuv{bits}_{name}_{value_range}", _YUV_TO_RGB_ARG_TYPES)
             return
 
         a, b, c, d = _rgb_from_yuv_coeffs(name)
@@ -200,35 +176,6 @@ class YuvToRgbConverter:
         self.convert_into(y, uv, out)
         return out
 
-    def convert_frame_into(
-        self, frame, out: torch.Tensor, stream: int | None = None
-    ) -> None:
-        """Convert a PyAV CUDA frame without constructing per-plane Torch tensors."""
-        if self._cuda_kernel is None:
-            raise RuntimeError("CUDA frame conversion requires a CUDA converter")
-        if len(frame.planes) != 2:
-            raise ValueError(f"Expected a two-plane NV12/P010 frame, got {len(frame.planes)}")
-        y_plane, uv_plane = frame.planes
-        bytes_per_sample = 2 if self.is_10bit else 1
-        if y_plane.line_size % bytes_per_sample or uv_plane.line_size % bytes_per_sample:
-            raise ValueError("YUV plane pitch is not aligned to its sample size")
-        if y_plane.line_size < self.width * bytes_per_sample:
-            raise ValueError("Luma plane pitch is smaller than the visible width")
-        if uv_plane.line_size < self.width * bytes_per_sample:
-            raise ValueError("Chroma plane pitch is smaller than the visible width")
-        if out.shape != (3, self.height, self.width) or out.dtype != torch.uint8:
-            raise ValueError(f"Unexpected RGB destination: {tuple(out.shape)} {out.dtype}")
-        if not out.is_cuda or out.stride(2) != 1:
-            raise ValueError("RGB destination must be a CUDA tensor with contiguous pixels")
-        self._cuda_kernel.launch_ptr(
-            y_plane.buffer_ptr,
-            y_plane.line_size // bytes_per_sample,
-            uv_plane.buffer_ptr,
-            uv_plane.line_size // bytes_per_sample,
-            out,
-            stream,
-        )
-
     def convert_surface_into(
         self,
         y_ptr: int,
@@ -254,7 +201,7 @@ class YuvToRgbConverter:
         if not out.is_cuda or out.stride(2) != 1:
             raise ValueError("RGB destination must be a CUDA tensor with contiguous pixels")
         stride = pitch // bytes_per_sample
-        self._cuda_kernel.launch_ptr(y_ptr, stride, uv_ptr, stride, out, stream)
+        _launch_yuv_to_rgb(self._cuda_kernel, [y_ptr], stride, [uv_ptr], stride, out, stream)
 
     def convert_frames_into(
         self, frames: list, out: torch.Tensor, stream: int | None = None
@@ -292,7 +239,8 @@ class YuvToRgbConverter:
                 y_ptrs.append(y_plane.buffer_ptr)
                 uv_ptrs.append(uv_plane.buffer_ptr)
 
-            self._cuda_kernel.launch_ptrs(
+            _launch_yuv_to_rgb(
+                self._cuda_kernel,
                 y_ptrs,
                 y_stride,
                 uv_ptrs,
@@ -326,7 +274,7 @@ class YuvToRgbConverter:
                 raise ValueError(f"Unexpected RGB destination: {tuple(out.shape)} {out.dtype}")
             if y.stride(1) != 1 or uv.stride(1) != 2 or uv.stride(2) != 1 or out.stride(2) != 1:
                 raise ValueError("YUV/RGB tensors have unsupported pixel strides")
-            self._cuda_kernel.launch(y, uv, out)
+            _launch_yuv_to_rgb(self._cuda_kernel, [y.data_ptr()], y.stride(0), [uv.data_ptr()], uv.stride(0), out, None)
             return
 
         if self._cuda_kernel is not None:

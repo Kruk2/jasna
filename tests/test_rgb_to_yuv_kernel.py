@@ -1,11 +1,21 @@
 import pytest
 import torch
 
-from jasna.media.rgb_to_yuv import _TORCH_CONVERTERS, RgbToYuvConverter
+from jasna.media.rgb_to_yuv import RgbToYuvConverter
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
-VARIANTS = sorted(_TORCH_CONVERTERS)
+VARIANTS = [
+    f"{pixel_format}_{standard}_{value_range}"
+    for pixel_format in ("nv12", "p010")
+    for standard in ("bt601", "bt709", "bt2020")
+    for value_range in ("limited", "full")
+]
+
+
+def _torch_reference(variant: str, frame: torch.Tensor) -> torch.Tensor:
+    # A converter built for a non-NVIDIA device takes the Torch path on the frame's own device.
+    return RgbToYuvConverter(variant, device=torch.device("cpu")).convert(frame)
 
 
 def _device() -> torch.device:
@@ -26,7 +36,7 @@ def test_matches_the_torch_reference_within_one_code(variant):
     assert converter.uses_kernel
 
     ours = converter.convert(frame)
-    reference = _TORCH_CONVERTERS[variant](frame)
+    reference = _torch_reference(variant, frame)
 
     assert ours.shape == reference.shape
     assert ours.dtype == reference.dtype
@@ -42,7 +52,7 @@ def test_flat_colours_match_the_torch_reference_exactly(variant):
         frame = torch.empty((3, 8, 8), device=_device(), dtype=torch.uint8)
         for channel, value in enumerate(colour):
             frame[channel] = value
-        assert torch.equal(converter.convert(frame), _TORCH_CONVERTERS[variant](frame))
+        assert torch.equal(converter.convert(frame), _torch_reference(variant, frame))
 
 
 def test_output_is_a_contiguous_packed_frame():
