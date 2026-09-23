@@ -79,6 +79,23 @@ class BlendBuffer:
                 return True
             return all(tid in self._results for tid in pending)
 
+    def debug_lines(self) -> list[str]:
+        """Human-readable state for stall diagnostics: pending frames and missing clips."""
+        with self._lock:
+            lines = [
+                f"blend_buffer: pending_frames={len(self.pending_map)} results={len(self._results)}"
+                f" result_track_ids={list(self._results)}"
+            ]
+            if self.pending_map:
+                lines.append(f"blend_buffer: frame_range=[{min(self.pending_map)}..{max(self.pending_map)}]")
+            waiting = [
+                (frame_idx, [tid for tid in tids if tid not in self._results])
+                for frame_idx, tids in sorted(self.pending_map.items())
+                if not all(tid in self._results for tid in tids)
+            ][:5]
+        lines.extend(f"blend_buffer: frame {frame_idx} waiting for tracks {missing}" for frame_idx, missing in waiting)
+        return lines
+
     def blend_frame(self, frame_idx: int, original_frame: torch.Tensor) -> torch.Tensor:
         with self._lock:
             pending = self.pending_map.pop(frame_idx, None)

@@ -328,3 +328,18 @@ def test_apply_blend_skips_out_of_range_frame() -> None:
     original = torch.zeros((3, 8, 8), dtype=torch.uint8)
     blended = bb.blend_frame(0, original)
     assert torch.equal(blended, original)
+
+
+def test_debug_lines_name_frames_waiting_for_missing_tracks() -> None:
+    bb = BlendBuffer(device=torch.device("cpu"))
+    bb.register_frame(4, {1, 2})
+    bb.register_frame(5, {2})
+
+    lines = bb.debug_lines()
+
+    assert lines[0].startswith("blend_buffer: pending_frames=2 results=0")
+    assert "frame_range=[4..5]" in lines[1]
+    assert lines[2:] == [
+        "blend_buffer: frame 4 waiting for tracks [1, 2]",
+        "blend_buffer: frame 5 waiting for tracks [2]",
+    ]
