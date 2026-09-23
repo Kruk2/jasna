@@ -72,8 +72,8 @@ def _cpu_group(n: int = BATCH) -> list:
     return frames
 
 
-def _reader(vendor: AcceleratorVendor) -> module.NvidiaVideoReader:
-    reader = module.NvidiaVideoReader(
+def _reader(vendor: AcceleratorVendor) -> module.VideoReader:
+    reader = module.VideoReader(
         "soft.mkv",
         BATCH,
         torch.device("cpu"),

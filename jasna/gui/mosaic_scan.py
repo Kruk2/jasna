@@ -343,7 +343,7 @@ class _ScanTensorCollector:
 class MosaicScanWorker:
     """One-shot background scan of a whole video with the detection model.
 
-    Decodes with ``NvidiaVideoReader(frame_stride=N)``, runs the configured
+    Decodes with ``VideoReader(frame_stride=N)``, runs the configured
     detector on every sampled frame at the ``SCAN_SCORE_FLOOR`` threshold, and
     collects per-sample scores plus merged low-res masks into preallocated
     tensors. A 750 MiB VRAM reserve switches collection to a reusable GPU
@@ -508,7 +508,7 @@ class MosaicScanWorker:
         import torch
 
         from jasna.accelerator import is_amd_device
-        from jasna.media.video_decoder import NvidiaVideoReader
+        from jasna.media.video_decoder import VideoReader
 
         metadata = self.metadata
         device = torch.device("cuda:0")
@@ -540,7 +540,7 @@ class MosaicScanWorker:
             start_s, end_s = bounds[index], bounds[index + 1]
             is_last = index == decoders - 1
             try:
-                reader = NvidiaVideoReader(
+                reader = VideoReader(
                     str(self.path),
                     batch_size,
                     device,
@@ -692,12 +692,12 @@ class MosaicScanWorker:
     def _detect_mask(self, detector, command: _MaskRequest) -> ScanMaskReady:
         import torch
 
-        from jasna.media.video_decoder import NvidiaVideoReader
+        from jasna.media.video_decoder import VideoReader
 
         metadata = self.metadata
         device = torch.device("cuda:0")
         batch_size = int(self.settings.batch_size)
-        reader = NvidiaVideoReader(
+        reader = VideoReader(
             str(self.path),
             batch_size,
             device,

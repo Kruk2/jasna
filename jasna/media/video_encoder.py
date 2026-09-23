@@ -425,7 +425,7 @@ def resolve_encoder_options(
     return spec, encoder_options
 
 
-class NvidiaVideoEncoder:
+class VideoEncoder:
     def __init__(
         self,
         file: str,
@@ -614,7 +614,7 @@ class NvidiaVideoEncoder:
 
         self._stop_sentinel = object()
         self._encode_queue: queue.Queue = queue.Queue(maxsize=ENCODE_BUFFER_SIZE)
-        self._encode_thread = threading.Thread(target=self._encode_worker, name="NvidiaVideoEncoderWorker", daemon=True)
+        self._encode_thread = threading.Thread(target=self._encode_worker, name="VideoEncoderWorker", daemon=True)
         self._encode_thread.start()
         return self
 

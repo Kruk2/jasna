@@ -1,4 +1,4 @@
-"""Unit tests for NvidiaVideoEncoder internals (options, color guard, buffer, worker, audio pump)."""
+"""Unit tests for VideoEncoder internals (options, color guard, buffer, worker, audio pump)."""
 from __future__ import annotations
 
 import queue
@@ -28,7 +28,7 @@ from jasna.media.video_encoder import (
     _align_yuv_pitch,
     _mov_container_options,
     _normalized_audio_layout,
-    NvidiaVideoEncoder,
+    VideoEncoder,
 )
 from jasna.os_utils import resolve_executable
 
@@ -54,8 +54,8 @@ def _fake_metadata(**overrides) -> VideoMetadata:
     return VideoMetadata(**defaults)
 
 
-def _make_encoder(tmp_path, encoder_settings=None, codec="hevc", **meta_overrides) -> NvidiaVideoEncoder:
-    return NvidiaVideoEncoder(
+def _make_encoder(tmp_path, encoder_settings=None, codec="hevc", **meta_overrides) -> VideoEncoder:
+    return VideoEncoder(
         file=str(tmp_path / "result.mkv"),
         device=torch.device("cuda:0"),
         metadata=_fake_metadata(**meta_overrides),
@@ -158,7 +158,7 @@ class TestContainerOptions:
 
     def test_fmp4_defaults_off_and_leaves_encoder_options_alone(self, tmp_path):
         default = _make_encoder(tmp_path)
-        fragmented = NvidiaVideoEncoder(
+        fragmented = VideoEncoder(
             file=str(tmp_path / "result.mp4"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(),
@@ -248,7 +248,7 @@ class TestSourceContainerPreservation:
         assert output_video.disposition == 3
 
     def test_smart_fragment_does_not_copy_chapters(self, tmp_path):
-        encoder = NvidiaVideoEncoder(
+        encoder = VideoEncoder(
             file=str(tmp_path / "part.nut"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(),
@@ -431,7 +431,7 @@ class TestSourceContainerPreservation:
 
 class TestEncoderOptions:
     def test_smart_fragment_preserves_normal_closed_gop_settings(self, tmp_path):
-        enc = NvidiaVideoEncoder(
+        enc = VideoEncoder(
             file=str(tmp_path / "part.nut"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(),
@@ -445,7 +445,7 @@ class TestEncoderOptions:
         assert enc.encoder_options["b_ref_mode"] == DEFAULT_ENCODER_OPTIONS["b_ref_mode"]
 
     def test_smart_fragment_preserves_custom_gop_size(self, tmp_path):
-        enc = NvidiaVideoEncoder(
+        enc = VideoEncoder(
             file=str(tmp_path / "part.nut"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(),
@@ -458,7 +458,7 @@ class TestEncoderOptions:
 
     @pytest.mark.parametrize("codec", ["hevc", "av1"])
     def test_smart_fragment_can_match_eight_bit_source(self, tmp_path, codec):
-        enc = NvidiaVideoEncoder(
+        enc = VideoEncoder(
             file=str(tmp_path / "part.nut"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(is_10bit=False),
@@ -476,7 +476,7 @@ class TestEncoderOptions:
         assert enc.output_fps == Fraction(24, 1)
 
     def test_output_fps_can_override_source_rate(self, tmp_path):
-        enc = NvidiaVideoEncoder(
+        enc = VideoEncoder(
             file=str(tmp_path / "result.mkv"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(video_fps_exact=Fraction(60_000, 1_001)),
@@ -566,7 +566,7 @@ class TestEncoderOptions:
 
     def test_unsupported_codec_raises(self, tmp_path):
         with pytest.raises(ValueError, match="Unsupported codec"):
-            NvidiaVideoEncoder(
+            VideoEncoder(
                 file=str(tmp_path / "o.mkv"),
                 device=torch.device("cuda:0"),
                 metadata=_fake_metadata(),
@@ -617,7 +617,7 @@ class TestSharpening:
         assert _make_encoder(tmp_path)._cas is None
 
     def test_sharpener_built_when_requested(self, tmp_path):
-        enc = NvidiaVideoEncoder(
+        enc = VideoEncoder(
             file=str(tmp_path / "result.mkv"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(),
@@ -629,7 +629,7 @@ class TestSharpening:
         assert enc._cas.weight_scale == pytest.approx(-1.0 / (16.0 - 12.0 * 0.4))
 
     def test_sharpener_follows_the_encoder_bit_depth(self, tmp_path):
-        ten_bit = NvidiaVideoEncoder(
+        ten_bit = VideoEncoder(
             file=str(tmp_path / "a.mkv"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(),
@@ -637,7 +637,7 @@ class TestSharpening:
             encoder_settings={},
             sharpen_strength=0.4,
         )
-        eight_bit = NvidiaVideoEncoder(
+        eight_bit = VideoEncoder(
             file=str(tmp_path / "b.nut"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(is_10bit=False),
@@ -683,7 +683,7 @@ class TestSharpening:
         assert torch.equal(torch.cat(seen[0]), packed)
 
     def test_sharpening_runs_before_pitch_alignment(self, tmp_path, monkeypatch):
-        enc = NvidiaVideoEncoder(
+        enc = VideoEncoder(
             file=str(tmp_path / "result.mkv"),
             device=torch.device("cuda:0"),
             metadata=_fake_metadata(),
@@ -768,7 +768,7 @@ class TestColorHandling:
             _make_encoder(tmp_path, codec=codec, color_range=AvColorRange.UNSPECIFIED)
 
 
-def _buffered_encoder(tmp_path, **meta_overrides) -> NvidiaVideoEncoder:
+def _buffered_encoder(tmp_path, **meta_overrides) -> VideoEncoder:
     enc = _make_encoder(tmp_path, **meta_overrides)
     enc.pts_heap = []
     enc.frame_buffer = deque()
@@ -1082,7 +1082,7 @@ class TestSourceStreamPump:
             av.open(str(template)) as mp4,
             av.open(str(destination), "w") as output,
         ):
-            encoder = object.__new__(NvidiaVideoEncoder)
+            encoder = object.__new__(VideoEncoder)
             encoder.output_path = destination
             encoder.smart_fragment = False
             encoder._source_chapters = ()

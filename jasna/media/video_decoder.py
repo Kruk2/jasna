@@ -223,7 +223,7 @@ class _ValiFrameSource:
         destroy_stream(raw_stream)
 
 
-class NvidiaVideoReader:
+class VideoReader:
     def __init__(
         self,
         file: str,

@@ -103,7 +103,7 @@ def test_video_encoder_selects_amf_and_normalizes_cq(monkeypatch, tmp_path) -> N
         "vendor_for_device",
         lambda _device: AcceleratorVendor.AMD,
     )
-    encoder = module.NvidiaVideoEncoder(
+    encoder = module.VideoEncoder(
         str(tmp_path / "out.mp4"),
         torch.device("cuda:0"),
         _metadata(),
@@ -124,7 +124,7 @@ def test_amf_hevc_maps_cq_to_constant_qp(monkeypatch, tmp_path) -> None:
         "vendor_for_device",
         lambda _device: AcceleratorVendor.AMD,
     )
-    encoder = module.NvidiaVideoEncoder(
+    encoder = module.VideoEncoder(
         str(tmp_path / "out.mp4"),
         torch.device("cuda:0"),
         _metadata(),
@@ -147,7 +147,7 @@ def test_amf_hevc_cqp_skips_source_bitrate_cap(monkeypatch, tmp_path) -> None:
         "vendor_for_device",
         lambda _device: AcceleratorVendor.AMD,
     )
-    encoder = module.NvidiaVideoEncoder(
+    encoder = module.VideoEncoder(
         str(tmp_path / "out.mp4"),
         torch.device("cuda:0"),
         replace(_metadata(), video_bitrate=20_000_000),
@@ -171,7 +171,7 @@ def test_amf_av1_p010_uses_constant_qp(monkeypatch, tmp_path, settings, expected
         lambda _device: AcceleratorVendor.AMD,
     )
     metadata = replace(_metadata(), video_bitrate=20_000_000)
-    encoder = module.NvidiaVideoEncoder(
+    encoder = module.VideoEncoder(
         str(tmp_path / "out.mp4"),
         torch.device("cuda:0"),
         metadata,
@@ -200,7 +200,7 @@ def test_amf_av1_p010_rejects_qvbr(monkeypatch, tmp_path, rc: str | int) -> None
         lambda _device: AcceleratorVendor.AMD,
     )
     with pytest.raises(ValueError, match="AMD AV1 Main10.*QVBR"):
-        module.NvidiaVideoEncoder(
+        module.VideoEncoder(
             str(tmp_path / "out.mp4"),
             torch.device("cuda:0"),
             _metadata(),
@@ -221,7 +221,7 @@ def test_amf_hevc_rejects_qvbr_for_main10(
         lambda _device: AcceleratorVendor.AMD,
     )
     with pytest.raises(ValueError, match="AMD HEVC Main10.*QVBR"):
-        module.NvidiaVideoEncoder(
+        module.VideoEncoder(
             str(tmp_path / "out.mp4"),
             torch.device("cuda:0"),
             _metadata(),
@@ -238,7 +238,7 @@ def test_amf_hevc_8bit_allows_qvbr(monkeypatch, tmp_path) -> None:
         "vendor_for_device",
         lambda _device: AcceleratorVendor.AMD,
     )
-    encoder = module.NvidiaVideoEncoder(
+    encoder = module.VideoEncoder(
         str(tmp_path / "out.mp4"),
         torch.device("cuda:0"),
         _metadata(),
@@ -266,7 +266,7 @@ def test_smart_render_uses_amf_fragment_options(
         "vendor_for_device",
         lambda _device: AcceleratorVendor.AMD,
     )
-    encoder = module.NvidiaVideoEncoder(
+    encoder = module.VideoEncoder(
         str(tmp_path / "out.mp4"),
         torch.device("cuda:0"),
         _metadata(),
@@ -321,7 +321,7 @@ def test_amf_decoder_context_is_created(monkeypatch) -> None:
         "CodecContext",
         SimpleNamespace(create=MagicMock(return_value=decoder)),
     )
-    reader = module.NvidiaVideoReader(
+    reader = module.VideoReader(
         "input.mp4",
         4,
         torch.device("cuda:0"),
@@ -362,7 +362,7 @@ def test_amf_decoder_accepts_missing_source_rationals(monkeypatch) -> None:
         "CodecContext",
         SimpleNamespace(create=MagicMock(return_value=decoder)),
     )
-    reader = module.NvidiaVideoReader(
+    reader = module.VideoReader(
         "input.mp4", 4, torch.device("cuda:0"), _metadata()
     )
     source = SimpleNamespace(
@@ -402,7 +402,7 @@ def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
         "CodecContext",
         SimpleNamespace(create=MagicMock(return_value=decoder)),
     )
-    reader = module.NvidiaVideoReader(
+    reader = module.VideoReader(
         "input.mp4",
         4,
         torch.device("cuda:0"),
@@ -456,7 +456,7 @@ def test_amf_8bit_downgrade_drops_bitdepth(monkeypatch, tmp_path) -> None:
         "vendor_for_device",
         lambda _device: AcceleratorVendor.AMD,
     )
-    encoder = module.NvidiaVideoEncoder(
+    encoder = module.VideoEncoder(
         str(tmp_path / "out.mp4"),
         torch.device("cuda:0"),
         _metadata(),
