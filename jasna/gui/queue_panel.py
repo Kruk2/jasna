@@ -17,10 +17,9 @@ from jasna.gui.file_actions import open_containing_folder
 from jasna.gui.file_actions import open_file
 from jasna.gui.locales import t
 
-from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order, folder_output_path
+from jasna.media.media_files import MEDIA_EXTENSIONS, folder_media_in_processing_order, folder_output_path, is_image
 
 logger = logging.getLogger(__name__)
-from jasna.media.image_io import is_image_path
 from jasna.segments import SegmentRange
 
 _PAGE_SIZE = 40
@@ -388,8 +387,8 @@ class QueuePanel(ctk.CTkFrame):
             on_drag_start=self._on_widget_drag_start,
             on_drag_move=self._on_widget_drag_move,
             on_drag_end=self._on_widget_drag_end,
-            on_edit_segments=(None if is_image_path(path) else lambda j=job: self._edit_segments(j)),
-            on_play=(None if is_image_path(path) else lambda j=job: self._play_job(j)),
+            on_edit_segments=(None if is_image(path) else lambda j=job: self._edit_segments(j)),
+            on_play=(None if is_image(path) else lambda j=job: self._play_job(j)),
             on_open_containing_folder=lambda j=job: self._open_containing_folder(j),
             on_copy_path=lambda j=job: self._copy_job_path(j),
             on_open_restored_output=lambda j=job: self._open_restored_output(j),

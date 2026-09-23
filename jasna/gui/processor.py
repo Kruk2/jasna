@@ -12,6 +12,7 @@ from typing import Callable
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_config
 from jasna.media.probe import UnsupportedColorspaceError
+from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession, build_pipeline
@@ -196,8 +197,7 @@ class Processor:
         ))
         
         input_path = job.path
-        from jasna.media.image_io import IMAGE_EXTENSIONS
-        is_image = input_path.suffix.lower() in IMAGE_EXTENSIONS
+        is_image = media_files.is_image(input_path)
         job_settings = self._settings
         if not is_image:
             overrides = {}
@@ -333,9 +333,8 @@ class Processor:
         settings: AppSettings | None = None,
     ):
         """Run one job; raises ProcessingStopped when the user stopped it."""
-        from jasna.media.image_io import IMAGE_EXTENSIONS
 
-        if input_path.suffix.lower() in IMAGE_EXTENSIONS:
+        if media_files.is_image(input_path):
             self._run_image_job(job_id, input_path, output_path)
             return
         self._run_video_job(
