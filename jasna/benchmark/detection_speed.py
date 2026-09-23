@@ -7,7 +7,7 @@ import torch
 
 from jasna.benchmark.harness import run_repeatedly
 from jasna.media.probe import get_video_meta_data
-from jasna.media.video_decoder import NvidiaVideoReader
+from jasna.media.video_decoder import VideoReader
 from jasna.mosaic.detection_registry import (
     DEFAULT_DETECTION_MODEL_NAME,
     build_detection_model,
@@ -50,7 +50,7 @@ def _run_single(
     total_detections = 0
 
     with (
-        NvidiaVideoReader(
+        VideoReader(
             str(path),
             batch_size=batch_size,
             device=device,

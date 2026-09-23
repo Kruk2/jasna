@@ -19,7 +19,7 @@ import torch
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.probe import UnsupportedColorspaceError, get_video_meta_data
-from jasna.media.video_encoder import NvidiaVideoEncoder
+from jasna.media.video_encoder import VideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.splice import (
     SplicePlan,
@@ -51,7 +51,7 @@ log = logging.getLogger(__name__)
 
 
 class _OfflineFrameWriter:
-    def __init__(self, encoder_ctx: NvidiaVideoEncoder, encode_heartbeat: list[float]):
+    def __init__(self, encoder_ctx: VideoEncoder, encode_heartbeat: list[float]):
         self._encoder_ctx = encoder_ctx
         self._encode_heartbeat = encode_heartbeat
         self._entered = False
@@ -343,7 +343,7 @@ class Pipeline:
         self,
         *,
         metadata,
-        encoder_ctx: NvidiaVideoEncoder,
+        encoder_ctx: VideoEncoder,
         progress: Progressbar,
         seek_ts: float | None = None,
         end_pts: int | None = None,
@@ -582,7 +582,7 @@ class Pipeline:
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
                 self.output_video.suffix,
             )
-        encoder_ctx = NvidiaVideoEncoder(
+        encoder_ctx = VideoEncoder(
             str(self.output_video),
             device=self.device,
             metadata=metadata,
@@ -682,7 +682,7 @@ class Pipeline:
                     normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
                     duration = float((span.end_pts - span.start_pts) * index.time_base)
                     if span.is_render:
-                        encoder_ctx = NvidiaVideoEncoder(
+                        encoder_ctx = VideoEncoder(
                             str(raw),
                             device=self.device,
                             metadata=metadata,

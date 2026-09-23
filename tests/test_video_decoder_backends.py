@@ -41,10 +41,10 @@ def _metadata() -> VideoMetadata:
     )
 
 
-def _reader(monkeypatch, vendor: AcceleratorVendor) -> module.NvidiaVideoReader:
+def _reader(monkeypatch, vendor: AcceleratorVendor) -> module.VideoReader:
     monkeypatch.setattr(module, "vendor_for_device", lambda _device: vendor)
     monkeypatch.setattr(module, "current_stream", lambda _device: None)
-    return module.NvidiaVideoReader("input.mp4", 4, torch.device("cuda:0"), _metadata())
+    return module.VideoReader("input.mp4", 4, torch.device("cuda:0"), _metadata())
 
 
 def _fake_container(is_hwaccel: bool) -> MagicMock:
@@ -300,7 +300,7 @@ def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
 
     def first_batch(backend):
         monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
-        with module.NvidiaVideoReader(
+        with module.VideoReader(
             str(TEST_CLIP), batch_size=4, device=device, metadata=metadata
         ) as reader:
             batch, pts = next(reader.frames())
@@ -315,7 +315,7 @@ def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
 def test_start_pts_uses_metadata_for_vali_and_stream_for_pyav() -> None:
     import dataclasses
 
-    reader = module.NvidiaVideoReader.__new__(module.NvidiaVideoReader)
+    reader = module.VideoReader.__new__(module.VideoReader)
     reader.metadata = dataclasses.replace(_metadata(), start_pts=1500)
     reader._vali_source = object()
     assert reader.start_pts == 1500

@@ -15,7 +15,7 @@ from av.codec.hwaccel import HWAccel
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 from jasna.media.probe import VideoMetadata
-from jasna.media.video_decoder import NvidiaVideoReader
+from jasna.media.video_decoder import VideoReader
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -128,7 +128,7 @@ def test_fallback_off_rejects_software_only_codec(ffv1_video):
 
 def test_ffv1_returns_cuda_uint8_rgb_batches(ffv1_video):
     path, metadata = ffv1_video
-    with NvidiaVideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
         all_pts = []
         for batch, pts in reader.frames():
             assert batch.is_cuda
@@ -143,7 +143,7 @@ def test_pts_and_frame_count_match_direct_decode(ffv1_video):
     path, metadata = ffv1_video
     with av.open(str(path)) as c:
         direct_pts = [f.pts for p in c.demux(c.streams.video[0]) for f in p.decode()]
-    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         reader_pts = [p for _, pts in reader.frames() for p in pts]
     assert reader_pts == direct_pts
 
@@ -151,7 +151,7 @@ def test_pts_and_frame_count_match_direct_decode(ffv1_video):
 def test_software_pixel_values_match_reference(ffv1_video):
     path, metadata = ffv1_video
     expected = _reference_rgb(120, 90, 200, 128, 96, AvColorspace.ITU709, False, False)
-    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         batch, _ = next(iter(reader.frames()))
     diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
     assert diff <= 1.0, f"maxdiff {diff}"
@@ -176,7 +176,7 @@ def test_software_matrix_and_range_pixel_reference(tmp_path, color_space, color_
     metadata = _metadata(path, w, h, 4, color_space=color_space, color_range=color_range)
     full = color_range == AvColorRange.JPEG
     expected = _reference_rgb(140, 100, 180, w, h, color_space, full, False)
-    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         batch, _ = next(iter(reader.frames()))
     diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
     assert diff <= 1.0, f"maxdiff {diff}"
@@ -189,7 +189,7 @@ def test_10bit_software_source_normalizes_to_p010(tmp_path):
     _write_video(path, "ffv1", "yuv420p10le", frames)
     metadata = _metadata(path, w, h, 4, is_10bit=True)
     expected = _reference_rgb(700, 400, 600, w, h, AvColorspace.ITU709, False, True)
-    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         batch, _ = next(iter(reader.frames()))
     assert batch.dtype == torch.uint8
     diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
@@ -205,7 +205,7 @@ def test_pitched_plane_padding_is_discarded(tmp_path):
     _write_video(path, "ffv1", "yuv420p", frames)
     metadata = _metadata(path, w, h, 4)
     expected = _reference_rgb(120, 90, 200, w, h, AvColorspace.ITU709, False, False)
-    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         batch, _ = next(iter(reader.frames()))
     diff = (batch[0].cpu().float() - expected.float()).abs().max().item()
     assert diff <= 1.0, f"maxdiff {diff}"
@@ -219,7 +219,7 @@ def test_seek_into_software_video_lands_at_or_after_target(ffv1_video):
         all_pts = [f.pts for p in c.demux(c.streams.video[0]) for f in p.decode()]
     target = round(seek_ts / stream_tb)
     expected_first = min(p for p in all_pts if p >= target)
-    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         _, pts = next(iter(reader.frames(seek_ts=seek_ts)))
     assert pts[0] == expected_first
 
@@ -227,7 +227,7 @@ def test_seek_into_software_video_lands_at_or_after_target(ffv1_video):
 def test_software_selection_logged_once(ffv1_video, caplog):
     path, metadata = ffv1_video
     with caplog.at_level(logging.WARNING, logger="jasna.media.video_decoder"):
-        with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+        with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
             for _ in reader.frames():
                 pass
     fallback_logs = [r for r in caplog.records if "software decoding" in r.getMessage()]
@@ -247,7 +247,7 @@ def test_h264_444_with_b_frames_falls_back_and_keeps_all_frames(tmp_path):
     path = tmp_path / "h264_444.mp4"
     _write_video(path, "libx264", "yuv444p", frames, options={"bf": "2", "g": "12"})
     metadata = _metadata(path, w, h, n, codec_name="h264")
-    with NvidiaVideoReader(str(path), batch_size=5, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=5, device=DEVICE, metadata=metadata) as reader:
         all_pts = [p for _, pts in reader.frames() for p in pts]
     assert len(all_pts) == n
     assert all_pts == sorted(all_pts)
@@ -263,8 +263,8 @@ def test_hardware_input_never_enters_software_path(tmp_path, monkeypatch):
     def _boom(self, decoded, group):
         raise AssertionError("hardware-decodable input entered the software path")
 
-    monkeypatch.setattr(NvidiaVideoReader, "_frames_software", _boom)
-    with NvidiaVideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
+    monkeypatch.setattr(VideoReader, "_frames_software", _boom)
+    with VideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
         total = sum(len(pts) for _, pts in reader.frames())
     assert total == n
 
@@ -300,8 +300,8 @@ def test_av1_decodes_on_nvdec_not_software(tmp_path, monkeypatch):
     def _boom(self, decoded, group):
         raise AssertionError("AV1 input entered the software path instead of NVDEC")
 
-    monkeypatch.setattr(NvidiaVideoReader, "_frames_software", _boom)
-    with NvidiaVideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
+    monkeypatch.setattr(VideoReader, "_frames_software", _boom)
+    with VideoReader(str(path), batch_size=6, device=DEVICE, metadata=metadata) as reader:
         batches = [(batch, pts) for batch, pts in reader.frames()]
     assert batches
     assert all(batch.is_cuda and batch.dtype == torch.uint8 for batch, _ in batches)
@@ -316,7 +316,7 @@ def test_subminimum_av1_uses_software_decoder(tmp_path):
     _write_video(path, "libsvtav1", "yuv420p", frames, options={"preset": "8", "crf": "40"})
     metadata = _metadata(path, w, h, n, codec_name="av1")
 
-    with NvidiaVideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(path), batch_size=4, device=DEVICE, metadata=metadata) as reader:
         assert reader._decoder_ctx is None
         total = sum(len(pts) for _, pts in reader.frames())
     assert total == n

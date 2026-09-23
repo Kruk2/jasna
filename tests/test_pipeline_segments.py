@@ -64,7 +64,7 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
         patch("jasna.pipeline.validate_smart_render", return_value="h264"),
         patch("jasna.pipeline.probe_keyframes") as probe_keyframes,
         patch("jasna.pipeline.build_splice_plan") as build_splice_plan,
-        patch("jasna.pipeline.NvidiaVideoEncoder") as encoder,
+        patch("jasna.pipeline.VideoEncoder") as encoder,
         patch("jasna.pipeline.create_copy_fragment") as copy_fragment,
         patch("jasna.pipeline.normalize_fragment"),
         patch("jasna.pipeline.concatenate_fragments") as concatenate,
@@ -127,7 +127,7 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
 
     with (
         patch("jasna.pipeline.validate_smart_render", return_value="h264"),
-        patch("jasna.pipeline.NvidiaVideoEncoder"),
+        patch("jasna.pipeline.VideoEncoder"),
         patch("jasna.pipeline.create_copy_fragment"),
         patch("jasna.pipeline.normalize_fragment"),
         patch("jasna.pipeline.concatenate_fragments"),
@@ -180,7 +180,7 @@ def test_amf_h264_full_reencode_preserves_selected_ranges(tmp_path) -> None:
     with (
         patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.AMD),
         patch("jasna.pipeline.validate_smart_render", return_value="h264"),
-        patch("jasna.pipeline.NvidiaVideoEncoder"),
+        patch("jasna.pipeline.VideoEncoder"),
     ):
         pipeline._run_smart(metadata)
 

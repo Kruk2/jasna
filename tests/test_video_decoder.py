@@ -10,13 +10,13 @@ import pytest
 from jasna.accelerator import AcceleratorVendor
 from jasna.media.video_decoder import (
     CORRUPT_PACKET_TOLERANCE,
-    NvidiaVideoReader,
+    VideoReader,
     VideoDecodeError,
 )
 
 
 def _reader():
-    reader = NvidiaVideoReader.__new__(NvidiaVideoReader)
+    reader = VideoReader.__new__(VideoReader)
     reader.file = "broken.mp4"
     reader._decoder_ctx = None
     return reader
@@ -83,7 +83,7 @@ def test_backend_dispatch_releases_outer_first_group_reference():
     class Frame:
         format = SimpleNamespace(name="cuda")
 
-    reader = NvidiaVideoReader.__new__(NvidiaVideoReader)
+    reader = VideoReader.__new__(VideoReader)
     reader._vali_source = None
     reader.vendor = AcceleratorVendor.NVIDIA
     reader._decoded_frames = lambda seek_ts: iter(())

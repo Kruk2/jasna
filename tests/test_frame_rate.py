@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from jasna.media.frame_rate import resolve_frame_rate_retarget
-from jasna.media.video_decoder import NvidiaVideoReader
+from jasna.media.video_decoder import VideoReader
 
 
 @pytest.mark.parametrize(
@@ -115,7 +115,7 @@ def test_rate_mismatch_is_not_reported_for_rates_that_are_never_halved():
 
 
 def test_reader_selects_every_second_decoded_frame_before_batching():
-    reader = NvidiaVideoReader(
+    reader = VideoReader(
         "unused.mp4",
         batch_size=4,
         device=torch.device("cpu"),
@@ -131,7 +131,7 @@ def test_reader_selects_every_second_decoded_frame_before_batching():
 
 def test_reader_rejects_invalid_frame_stride():
     with pytest.raises(ValueError, match="frame_stride must be > 0"):
-        NvidiaVideoReader(
+        VideoReader(
             "unused.mp4",
             batch_size=4,
             device=torch.device("cpu"),
@@ -141,7 +141,7 @@ def test_reader_rejects_invalid_frame_stride():
 
 
 def test_strided_selection_reanchors_at_the_first_frame_after_seek():
-    reader = NvidiaVideoReader(
+    reader = VideoReader(
         "unused.mp4",
         batch_size=4,
         device=torch.device("cpu"),
