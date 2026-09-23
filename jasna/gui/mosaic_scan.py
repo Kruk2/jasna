@@ -449,35 +449,22 @@ class MosaicScanWorker:
         _install_noise_filters()
         import torch
 
-        from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
-        from jasna.mosaic.detection_registry import (
-            build_detection_model,
-            coerce_detection_model_name,
-            require_detection_model_weights,
-        )
+        from jasna.mosaic.detection_registry import resolve_detection_model
+        from jasna.session_factory import build_compiled_detection_model
 
         settings = self.settings
         device = torch.device("cuda:0")
-        det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = require_detection_model_weights(det_name)
-        ensure_engines_compiled(
-            EngineCompilationRequest(
-                device=str(device),
-                fp16=settings.fp16_mode,
-                detection=True,
-                detection_model_name=det_name,
-                detection_model_path=str(detection_model_path),
-                detection_batch_size=settings.batch_size,
-            ),
-            log_callback=lambda message: self.events.put(ScanStatus(message)),
+        detection_model_name, detection_model_path, _ = resolve_detection_model(
+            str(settings.detection_model), "", None
         )
-        detector = build_detection_model(
-            det_name,
+        detector = build_compiled_detection_model(
+            detection_model_name,
             detection_model_path,
-            batch_size=settings.batch_size,
             device=device,
-            score_threshold=SCAN_SCORE_FLOOR,
+            batch_size=settings.batch_size,
             fp16=bool(settings.fp16_mode),
+            score_threshold=SCAN_SCORE_FLOOR,
+            log_callback=lambda message: self.events.put(ScanStatus(message)),
         )
         from jasna.vr180 import (
             SbsDetectionAdapter,

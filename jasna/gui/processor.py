@@ -505,10 +505,10 @@ class Processor:
         from jasna._suppress_noise import install as _install_noise_filters
         _install_noise_filters()
         import torch
-        from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.engine_paths import SD15_DIR
-        from jasna.mosaic.detection_registry import build_detection_model, coerce_detection_model_name, require_detection_model_weights
+        from jasna.mosaic.detection_registry import resolve_detection_model
         from jasna.restorer.sd15_download import bundle_present
+        from jasna.session_factory import build_compiled_detection_model
         from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
 
         settings = self._settings
@@ -519,26 +519,17 @@ class Processor:
                 "Image Restoration settings."
             )
 
-        det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = require_detection_model_weights(det_name)
-        ensure_engines_compiled(
-            EngineCompilationRequest(
-                device=str(device),
-                fp16=settings.fp16_mode,
-                detection=True,
-                detection_model_name=det_name,
-                detection_model_path=str(detection_model_path),
-                detection_batch_size=settings.batch_size,
-            ),
-            log_callback=lambda msg: self._log("INFO", msg),
+        detection_model_name, detection_model_path, _ = resolve_detection_model(
+            str(settings.detection_model), "", None
         )
-        detector = build_detection_model(
-            det_name,
+        detector = build_compiled_detection_model(
+            detection_model_name,
             detection_model_path,
-            batch_size=settings.batch_size,
             device=device,
-            score_threshold=settings.detection_score_threshold,
+            batch_size=settings.batch_size,
             fp16=settings.fp16_mode,
+            score_threshold=settings.detection_score_threshold,
+            log_callback=lambda msg: self._log("INFO", msg),
         )
         restorer = Sd15InpaintRestorer(SD15_DIR, device, settings.fp16_mode)
         self._img_session = (detector, restorer, device)
