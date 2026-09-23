@@ -197,7 +197,7 @@ class _TvaiWorker:
             try:
                 self._proc.stdin.close()
             except OSError:
-                pass
+                logger.debug("TVAI ffmpeg stdin already closed", exc_info=True)
         if self._reader is not None:
             self._reader.join(timeout=timeout)
         if self._stderr_reader is not None:
@@ -220,7 +220,7 @@ class _TvaiWorker:
             try:
                 self._proc.kill()
             except OSError:
-                pass
+                logger.debug("TVAI ffmpeg already exited", exc_info=True)
             self._proc.wait(timeout=5)
             self._proc = None
         if self._writer is not None:
@@ -272,10 +272,6 @@ class TvaiSecondaryRestorer:
         self._completed: dict[int, list[np.ndarray]] = {}
         self._seq_lock = threading.Lock()
         self._worker_locks: list[threading.Lock] = []
-
-    @property
-    def preferred_queue_size(self) -> int:
-        return 2
 
     def _validate_environment(self) -> None:
         data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")

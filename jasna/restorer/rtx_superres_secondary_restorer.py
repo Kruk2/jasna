@@ -78,7 +78,6 @@ def _resolve_deblur(name: str):
 class RtxSuperresSecondaryRestorer:
     name = "rtx-super-res"
     num_workers = 1
-    preferred_queue_size = 2
     prefers_cpu_input = False
 
     def __init__(

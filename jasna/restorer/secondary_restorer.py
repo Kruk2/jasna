@@ -9,6 +9,7 @@ import torch
 @runtime_checkable
 class SecondaryRestorer(Protocol):
     name: str
+    prefers_cpu_input: bool
 
     @property
     def num_workers(self) -> int:

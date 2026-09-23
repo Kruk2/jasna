@@ -95,11 +95,11 @@ class _Upscale2xSecondary:
     name = "upscale2x"
     num_workers = 1
 
-    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> torch.Tensor:
+    def restore(self, frames_256: torch.Tensor, *, keep_start: int, keep_end: int) -> list[torch.Tensor]:
         del keep_start, keep_end
         x = frames_256.to(dtype=torch.float32)
         y = F.interpolate(x, scale_factor=2.0, mode="bilinear", align_corners=False).clamp(0, 1)
-        return y.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8)
+        return list(y.mul(255.0).round().clamp(0, 255).to(dtype=torch.uint8).unbind(0))
 
 
 class _Upscale2xSecondaryList:
