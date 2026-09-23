@@ -325,34 +325,9 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         if detector is not None and restorer is not None:
             return detector, restorer, self._device
 
-        import torch
+        from jasna.gui.video_session import build_image_session
 
-        from jasna._suppress_noise import install as _install_noise_filters
-        from jasna.engine_paths import SD15_DIR
-        from jasna.mosaic.detection_registry import resolve_detection_model
-        from jasna.restorer.sd15_download import bundle_present
-        from jasna.session_factory import build_compiled_detection_model
-        from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
-
-        _install_noise_filters()
-        if not bundle_present(SD15_DIR):
-            raise FileNotFoundError(t("interactive_model_missing"))
-
-        settings = self._settings
-        self._device = torch.device("cuda:0")
-        detection_model_name, detection_model_path, _ = resolve_detection_model(
-            str(settings.detection_model), "", None
-        )
-        detector = build_compiled_detection_model(
-            detection_model_name,
-            detection_model_path,
-            device=self._device,
-            batch_size=settings.batch_size,
-            fp16=settings.fp16_mode,
-            score_threshold=settings.detection_score_threshold,
-            log_callback=None,
-        )
-        restorer = Sd15InpaintRestorer(SD15_DIR, self._device, settings.fp16_mode)
+        detector, restorer, self._device = build_image_session(self._settings, log=None)
         return detector, restorer, self._device
 
     def _prepare(self, path: Path, detector, device):

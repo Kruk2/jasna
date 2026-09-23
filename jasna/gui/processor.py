@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from typing import Callable
 
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
-from jasna.gui.video_session import build_video_session, release_session_memory, video_session_config
+from jasna.gui.video_session import build_image_session, build_video_session, release_session_memory, video_session_config
 from jasna.media.probe import UnsupportedColorspaceError
 from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
@@ -453,37 +453,10 @@ class Processor:
         """Load the rf-detr detector + SD 1.5 restorer once; reused across image jobs."""
         if self._img_session is not None:
             return
-        from jasna._suppress_noise import install as _install_noise_filters
-        _install_noise_filters()
-        import torch
-        from jasna.engine_paths import SD15_DIR
-        from jasna.mosaic.detection_registry import resolve_detection_model
-        from jasna.restorer.sd15_download import bundle_present
-        from jasna.session_factory import build_compiled_detection_model
-        from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
-
-        settings = self._settings
-        device = torch.device("cuda:0")
-        if not bundle_present(SD15_DIR):
-            raise FileNotFoundError(
-                f"SD 1.5 model not found at {SD15_DIR}. Use 'Download model' in the "
-                "Image Restoration settings."
-            )
-
-        detection_model_name, detection_model_path, _ = resolve_detection_model(
-            str(settings.detection_model), "", None
+        self._img_session = build_image_session(
+            self._settings,
+            log=lambda msg: self._log("INFO", msg),
         )
-        detector = build_compiled_detection_model(
-            detection_model_name,
-            detection_model_path,
-            device=device,
-            batch_size=settings.batch_size,
-            fp16=settings.fp16_mode,
-            score_threshold=settings.detection_score_threshold,
-            log_callback=lambda msg: self._log("INFO", msg),
-        )
-        restorer = Sd15InpaintRestorer(SD15_DIR, device, settings.fp16_mode)
-        self._img_session = (detector, restorer, device)
         self._log("INFO", "SD 1.5 model loaded (reused across image jobs)")
 
     def _run_image_job(self, job_id: int, input_path: Path, output_path: Path):

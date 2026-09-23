@@ -4,8 +4,10 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from jasna.gui.models import AppSettings
-from jasna.gui.video_session import video_session_config
+from jasna.gui.video_session import build_image_session, video_session_config
 from jasna.main import _session_config_from_args, build_parser
 from jasna.mosaic.detection_registry import recommended_score_threshold
 
@@ -147,3 +149,13 @@ def test_gui_config_maps_settings_fields() -> None:
     assert config.denoise_strength == "low"
     assert config.scene_detection is False
     assert config.disable_progress is True
+
+
+def test_gui_image_session_requires_installed_sd15_bundle(monkeypatch) -> None:
+    from jasna.gui.locales import t
+    from jasna.restorer import sd15_download
+
+    monkeypatch.setattr(sd15_download, "bundle_present", lambda _path: False)
+
+    with pytest.raises(FileNotFoundError, match=t("interactive_model_missing")):
+        build_image_session(AppSettings(), log=None)
