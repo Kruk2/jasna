@@ -17,10 +17,12 @@ from jasna.restorer.basicvsrpp_sub_engines import (
     _SPyNetWrapper,
     _UpsampleWrapper,
     _get_inference_generator,
-    _sub_engine_dir,
-    all_sub_engines_exist,
-    get_sub_engine_paths,
     load_sub_engines,
+)
+from jasna.engine_paths import (
+    all_basicvsrpp_sub_engines_exist as all_sub_engines_exist,
+    basicvsrpp_sub_engine_dir as _sub_engine_dir,
+    get_basicvsrpp_sub_engine_paths as get_sub_engine_paths,
 )
 
 

@@ -50,7 +50,7 @@ def test_amd_basicvsrpp_skips_tensorrt_compilation(monkeypatch) -> None:
     monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
     monkeypatch.setattr(
         compiler,
-        "_basicvsrpp_engines_exist",
+        "all_basicvsrpp_sub_engines_exist",
         MagicMock(side_effect=AssertionError("TensorRT probe on AMD")),
     )
     result = compiler.ensure_engines_compiled(
