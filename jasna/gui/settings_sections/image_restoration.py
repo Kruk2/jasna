@@ -5,6 +5,7 @@ import customtkinter as ctk
 from jasna.gui.components import CollapsibleSection
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
+from jasna.gui.queues import MainThreadCalls
 from jasna.gui.sd15_download_worker import start_sd15_download
 from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -161,15 +162,17 @@ class ImageRestorationSection:
 
         btn = self._widgets["image_restore_download_btn"]
         btn.configure(state="disabled", text=t("image_restore_downloading"))
+        main_thread = MainThreadCalls(btn, 100)
 
         def on_percent(percent: int):
-            btn.after(
-                0,
-                lambda: btn.configure(text=f"{t('image_restore_downloading')} {percent}%"),
-            )
+            main_thread.post(lambda: btn.configure(text=f"{t('image_restore_downloading')} {percent}%"))
 
         def on_done(error: str | None):
-            btn.after(0, lambda: self._finish_download(error))
+            def finish():
+                main_thread.close()
+                self._finish_download(error)
+
+            main_thread.post(finish)
 
         start_sd15_download(SD15_DIR, SD15_HF_REPO, on_percent, on_done)
 

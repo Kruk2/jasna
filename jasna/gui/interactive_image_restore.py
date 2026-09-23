@@ -13,6 +13,7 @@ from jasna.gui.components import grab_modal
 from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, AppSettings
+from jasna.gui.queues import MainThreadCalls
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.gui.theme import Colors, Fonts, Sizing
 
@@ -53,6 +54,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         on_log: callable | None = None,
     ):
         super().__init__(master)
+        self._main_thread = MainThreadCalls(self, 50)
         self._paths = [Path(p) for p in image_paths]
         self._settings = settings
         self._output_folder = output_folder
@@ -304,9 +306,9 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
                         prepared_by_path[path] = prepared
                     result = self._render(prepared, restorer, seed)
                     mask = self._mask(prepared)
-                    self._after(lambda: self._finish_render(token, index, seed, prepared.img_chw_u8, mask, result))
+                    self._main_thread.post(lambda: self._finish_render(token, index, seed, prepared.img_chw_u8, mask, result))
                 except Exception as exc:
-                    self._after(lambda e=exc, tk=token: self._fail_render(tk, e))
+                    self._main_thread.post(lambda e=exc, tk=token: self._fail_render(tk, e))
         finally:
             if detector is not None:
                 detector.close()
@@ -430,17 +432,10 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
         if self._on_log:
             self._on_log("INFO", f"Wrote {path}")
 
-    def _after(self, callback: callable) -> None:
-        if self._closed:
-            return
-        try:
-            self.after(0, callback)
-        except Exception:
-            logger.debug("Failed to schedule callback (widget gone)", exc_info=True)
-
     def _close(self) -> None:
         self._closed = True
         self._requests.put(None)
+        self._main_thread.close()
         self.destroy()
 
 
