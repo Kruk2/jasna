@@ -132,7 +132,7 @@ class StreamingEncoder:
 
     def _launch_ffmpeg(self, start_number: int) -> None:
         seek_time = start_number * self.segment_duration
-        fps_str = f"{self._fps.numerator}/{self._fps.denominator}" if hasattr(self._fps, 'numerator') else str(float(self._fps))
+        fps_str = f"{self._fps.numerator}/{self._fps.denominator}"
 
         cmd: list[str] = [self._ffmpeg, '-y', '-hide_banner', '-loglevel', 'warning']
 
@@ -283,7 +283,7 @@ class StreamingEncoder:
             try:
                 proc.stdin.close()
             except (OSError, ValueError):
-                pass
+                log.debug("[stream-enc] ffmpeg stdin already closed", exc_info=True)
         try:
             proc.wait(timeout=10.0)
         except subprocess.TimeoutExpired:
@@ -294,7 +294,7 @@ class StreamingEncoder:
             self._stderr_thread.join(timeout=2.0)
             self._stderr_thread = None
         rc = proc.returncode
-        if rc and rc != 0:
+        if rc:
             log.warning("[stream-enc] ffmpeg exited with code %d", rc)
         self._process = None
 
@@ -308,7 +308,7 @@ class StreamingEncoder:
             try:
                 proc.stdin.close()
             except (OSError, ValueError):
-                pass
+                log.debug("[stream-enc] ffmpeg stdin already closed", exc_info=True)
         if self._stderr_thread is not None:
             self._stderr_thread.join(timeout=2.0)
             self._stderr_thread = None
