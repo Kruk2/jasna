@@ -61,7 +61,7 @@ class TestProcessorPullLoop:
         p = Processor()
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
-        def fake_pipeline(job_id, inp, out):
+        def fake_pipeline(job_id, inp, out, **_kwargs):
             processed_ids.append(job_id)
 
         with patch.object(p, "_run_pipeline", side_effect=fake_pipeline):
@@ -83,7 +83,7 @@ class TestProcessorPullLoop:
 
         call_count = [0]
 
-        def fake_pipeline(job_id, inp, out):
+        def fake_pipeline(job_id, inp, out, **_kwargs):
             processed_ids.append(job_id)
             call_count[0] += 1
             if call_count[0] == 1:
@@ -128,7 +128,7 @@ class TestProcessorPullLoop:
 
         call_count = [0]
 
-        def fake_pipeline(job_id, inp, out):
+        def fake_pipeline(job_id, inp, out, **_kwargs):
             processed_filenames.append(inp.name)
             call_count[0] += 1
             if call_count[0] == 1:
