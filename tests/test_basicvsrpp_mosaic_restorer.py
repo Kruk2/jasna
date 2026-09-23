@@ -24,66 +24,35 @@ def _make_restorer(monkeypatch, model, *, use_tensorrt=False, fp16=False, config
     )
 
 
-def test_restore_identity_returns_rgb_uint8(monkeypatch) -> None:
-    import jasna.restorer.basicvsrpp_mosaic_restorer as br
-
+def test_raw_process_normalizes_frames_to_unit_range(monkeypatch) -> None:
     model = _CaptureIdentityModel()
     restorer = _make_restorer(monkeypatch, model)
 
-    frame = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
+    frame = torch.randint(0, 256, (3, 256, 256), dtype=torch.uint8)
 
-    out = restorer.restore([frame])
-    assert len(out) == 1
-    assert out[0].shape == (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3)
-    assert out[0].dtype == torch.uint8
+    out = restorer.raw_process([frame])
 
-    expected = (
-        frame.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32).div(255.0)
-        .mul(255.0)
-        .round()
-        .clamp(0, 255)
-        .to(dtype=torch.uint8)
-        .squeeze(0)
-        .permute(1, 2, 0)
-    )
-    assert torch.equal(out[0], expected)
-
-    assert model.captured_inputs is not None
-    assert model.captured_inputs.shape == (1, 1, 3, br.INFERENCE_SIZE, br.INFERENCE_SIZE)
+    assert out.shape == (1, 3, 256, 256)
+    assert model.captured_inputs.shape == (1, 1, 3, 256, 256)
     assert model.captured_inputs.dtype == torch.float32
-    assert model.captured_inputs.device.type == "cpu"
+    assert torch.equal(model.captured_inputs[0, 0], frame.to(torch.float32).div(255.0))
 
-    expected_inputs = frame.permute(2, 0, 1).unsqueeze(0).to(dtype=torch.float32).div(255.0)
-    assert torch.equal(model.captured_inputs[0], expected_inputs)
-
-
-def test_restore_multiple_frames(monkeypatch) -> None:
-    import jasna.restorer.basicvsrpp_mosaic_restorer as br
-
+def test_raw_process_stacks_frames_into_one_clip(monkeypatch) -> None:
     model = _CaptureIdentityModel()
     restorer = _make_restorer(monkeypatch, model)
 
-    f0 = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
-    f1 = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
-    out = restorer.restore([f0, f1])
+    frames = [torch.randint(0, 256, (3, 256, 256), dtype=torch.uint8) for _ in range(2)]
+    restorer.raw_process(frames)
 
-    assert len(out) == 2
-    assert out[0].shape == (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3)
-    assert out[1].shape == (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3)
-
-    assert model.captured_inputs is not None
     assert model.captured_inputs.shape[:2] == (1, 2)
 
-
-def test_restore_empty_video_raises(monkeypatch) -> None:
+def test_raw_process_empty_video_raises(monkeypatch) -> None:
     import pytest
-    import jasna.restorer.basicvsrpp_mosaic_restorer as br
 
     restorer = _make_restorer(monkeypatch, _CaptureIdentityModel())
 
     with pytest.raises(RuntimeError):
-        restorer.restore([])
-
+        restorer.raw_process([])
 
 def test_init_sets_device_dtype_and_loads_model(monkeypatch) -> None:
     import jasna.restorer.basicvsrpp_mosaic_restorer as br
@@ -109,7 +78,7 @@ def test_init_sets_device_dtype_and_loads_model(monkeypatch) -> None:
     )
 
     assert restorer.device.type == "cpu"
-    assert restorer.dtype == torch.float16
+    assert restorer.input_dtype == torch.float16
     assert isinstance(restorer.model, _CaptureIdentityModel)
 
     assert captured["checkpoint_path"] == "ckpt.pth"
@@ -118,24 +87,13 @@ def test_init_sets_device_dtype_and_loads_model(monkeypatch) -> None:
     assert captured["config"] == {"x": 1}
 
 
-def test_restore_fails_on_invalid_frame_rank(monkeypatch) -> None:
-    import pytest
-    import jasna.restorer.basicvsrpp_mosaic_restorer as br
-
-    restorer = _make_restorer(monkeypatch, _CaptureIdentityModel())
-
-    frame_hw = torch.zeros((10, 10), dtype=torch.uint8)
-    with pytest.raises(RuntimeError):
-        restorer.restore([frame_hw])
-
-
 def test_raw_process_produces_contiguous_nchw_input(monkeypatch) -> None:
     import jasna.restorer.basicvsrpp_mosaic_restorer as br
 
     model = _CaptureIdentityModel()
     restorer = _make_restorer(monkeypatch, model)
 
-    frames = [torch.randint(0, 256, (3, br.INFERENCE_SIZE, br.INFERENCE_SIZE), dtype=torch.uint8) for _ in range(3)]
+    frames = [torch.randint(0, 256, (3, 256, 256), dtype=torch.uint8) for _ in range(3)]
     restorer.raw_process(frames)
 
     assert model.captured_inputs is not None
@@ -157,9 +115,9 @@ def test_split_forward_path_used_when_available(monkeypatch) -> None:
     restorer = _make_restorer(monkeypatch, model)
     restorer._split_forward = _FakeSplit()
 
-    frame = torch.randint(0, 256, (br.INFERENCE_SIZE, br.INFERENCE_SIZE, 3), dtype=torch.uint8)
-    restorer.restore([frame])
+    frame = torch.randint(0, 256, (3, 256, 256), dtype=torch.uint8)
+    restorer.raw_process([frame])
 
     assert len(captured) == 1
-    assert captured[0].shape == (1, 1, 3, br.INFERENCE_SIZE, br.INFERENCE_SIZE)
+    assert captured[0].shape == (1, 1, 3, 256, 256)
     assert model.captured_inputs is None

@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from jasna.restorer.basicvrspp_tenorrt_compilation import basicvsrpp_startup_policy
+from jasna.restorer.basicvsrpp_sub_engines import compile_basicvsrpp_engines
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.basicvsrpp_sub_engines import BasicVSRPlusPlusNetSplit
 
@@ -165,12 +165,7 @@ def benchmark_basicvsrpp_restoration(
         return
     path = restoration_model_path.resolve()
 
-    use_tensorrt = basicvsrpp_startup_policy(
-        restoration_model_path=str(path),
-        device=device,
-        fp16=fp16,
-        compile_basicvsrpp=compile_basicvsrpp,
-    )
+    use_tensorrt = compile_basicvsrpp and compile_basicvsrpp_engines(str(path), device, fp16)
     restorer = BasicvsrppMosaicRestorer(
         checkpoint_path=str(path),
         device=device,

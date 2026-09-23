@@ -199,7 +199,6 @@ class TestOutputPath:
         events: list[str] = []
         pipeline = MagicMock()
         pipeline.run.side_effect = lambda: events.append("run")
-        pipeline.close.side_effect = lambda: events.append("close")
 
         with patch(
             "jasna.post_export_action.run_post_export_video_command",
@@ -216,12 +215,12 @@ class TestOutputPath:
                 pipeline_side_effect=lambda **_kwargs: pipeline,
             )
 
-        assert events == ["run", "close", "command"]
+        assert events == ["run", "command"]
         args = command.call_args.args
         assert args[:3] == ("remux {output}", inp, out)
         assert callable(args[3])
 
-    def test_streaming_without_output_uses_derived(self, tmp_path):
+    def test_streaming_builds_a_pipeline_for_the_input(self, tmp_path):
         inp, _, rest, det = _make_model_files(tmp_path)
         pipeline_kwargs = {}
 
@@ -230,7 +229,7 @@ class TestOutputPath:
             mock = MagicMock()
             return mock
 
-        with _main_patches(pipeline_side_effect=capture):
+        with _main_patches(pipeline_side_effect=capture), _streaming_patches():
             argv = [
                 "jasna",
                 "--stream",
@@ -243,7 +242,7 @@ class TestOutputPath:
                 from jasna.main import main
                 main()
 
-        assert pipeline_kwargs["output_video"] == inp.with_stem(inp.stem + "_out")
+        assert pipeline_kwargs["input_video"] == inp
 
 
 # ---------------------------------------------------------------------------
@@ -325,21 +324,21 @@ class TestDetectionThresholdResolution:
     def test_default_threshold_uses_fast_model_recommended(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         pipeline_cls = _run_main(_base_argv(inp, out, rest, det))
-        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.35
+        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.35
 
     def test_default_threshold_uses_large_model_recommended(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         pipeline_cls = _run_main(
             _base_argv(inp, out, rest, det, ["--detection-model", "rfdetr-v6-large"])
         )
-        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.40
+        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.40
 
     def test_explicit_threshold_overrides_recommended(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         pipeline_cls = _run_main(
             _base_argv(inp, out, rest, det, ["--detection-score-threshold", "0.5"])
         )
-        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.5
+        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +429,7 @@ class TestArgForwarding:
         captured = {}
 
         def capture_pipeline(**kw):
-            captured.update(kw)
+            captured.update(vars(kw["config"]))
             return MagicMock()
 
         rest_pipeline_captured = {}
@@ -718,6 +717,16 @@ class TestFolderBatchProgress:
 # Streaming paths
 # ---------------------------------------------------------------------------
 
+@contextmanager
+def _streaming_patches():
+    with (
+        patch("jasna.streaming.HlsStreamingServer") as server_cls,
+        patch("jasna.streaming_pipeline.run_streaming") as run_streaming,
+    ):
+        server_cls.return_value.start.return_value = "http://localhost/stream.m3u8"
+        yield server_cls, run_streaming
+
+
 class TestStreamingPaths:
     def test_streaming_with_input_calls_run_streaming(self, tmp_path):
         inp, _, rest, det = _make_model_files(tmp_path)
@@ -726,7 +735,7 @@ class TestStreamingPaths:
         def make_pipeline(**kw):
             return pipeline_mock
 
-        with _main_patches(pipeline_side_effect=make_pipeline):
+        with _main_patches(pipeline_side_effect=make_pipeline), _streaming_patches() as (server_cls, run_streaming):
             argv = [
                 "jasna",
                 "--stream",
@@ -741,13 +750,14 @@ class TestStreamingPaths:
                 from jasna.main import main
                 main()
 
-        pipeline_mock.run_streaming.assert_called_once_with(port=9999, segment_duration=2.0)
-        pipeline_mock.close.assert_called_once()
+        server_cls.assert_called_once_with(segment_duration=2.0, port=9999)
+        run_streaming.assert_called_once_with(pipeline_mock, server_cls.return_value)
+        server_cls.return_value.stop.assert_called_once()
 
     def test_streaming_with_input_opens_browser(self, tmp_path):
         inp, _, rest, det = _make_model_files(tmp_path)
 
-        with _main_patches():
+        with _main_patches(), _streaming_patches():
             with patch("webbrowser.open") as wb_open:
                 argv = [
                     "jasna",
@@ -766,7 +776,7 @@ class TestStreamingPaths:
     def test_streaming_with_input_no_browser(self, tmp_path):
         inp, _, rest, det = _make_model_files(tmp_path)
 
-        with _main_patches():
+        with _main_patches(), _streaming_patches():
             with patch("webbrowser.open") as wb_open:
                 argv = [
                     "jasna",
@@ -803,8 +813,17 @@ class TestStreamingPaths:
 
         mock_hls.wait_for_video.side_effect = wait_for_video_side_effect
 
-        with _main_patches(pipeline_side_effect=make_pipeline):
-            with patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls):
+        pipeline_kwargs = {}
+
+        def capture(**kw):
+            pipeline_kwargs.update(kw)
+            return pipeline_mock
+
+        with _main_patches(pipeline_side_effect=capture):
+            with (
+                patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls),
+                patch("jasna.streaming_pipeline.run_streaming") as run_streaming,
+            ):
                 argv = [
                     "jasna",
                     "--stream",
@@ -821,8 +840,8 @@ class TestStreamingPaths:
         mock_hls.start.assert_called_once()
         mock_hls.stop.assert_called_once()
         mock_hls.unload_video.assert_called_once()
-        pipeline_mock.run_streaming.assert_called_once()
-        assert pipeline_mock.input_video == video_path
+        run_streaming.assert_called_once_with(pipeline_mock, mock_hls)
+        assert pipeline_kwargs["input_video"] == video_path
 
     def test_serverless_streaming_opens_browser(self, tmp_path):
         _, _, rest, det = _make_model_files(tmp_path)
@@ -863,12 +882,17 @@ class TestStreamingPaths:
                 raise KeyboardInterrupt
             return tmp_path / "vid.mp4"
 
-        pipeline_mock.run_streaming.side_effect = UnsupportedColorspaceError("bt2020 not supported")
         mock_hls = MagicMock()
         mock_hls.wait_for_video.side_effect = wait_side_effect
 
         with _main_patches(pipeline_side_effect=make_pipeline):
-            with patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls):
+            with (
+                patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls),
+                patch(
+                    "jasna.streaming_pipeline.run_streaming",
+                    side_effect=UnsupportedColorspaceError("bt2020 not supported"),
+                ),
+            ):
                 argv = [
                     "jasna",
                     "--stream",
@@ -939,7 +963,6 @@ class TestCleanup:
                 from jasna.main import main
                 main()
 
-        pipeline_mock.close.assert_called_once()
         restorer_mock.close.assert_called_once()
 
     def test_secondary_restorer_closed(self, tmp_path):
@@ -961,12 +984,15 @@ class TestCleanup:
         def make_pipeline(**kw):
             return pipeline_mock
 
-        with pytest.raises(RuntimeError, match="boom"):
+        with (
+            patch("jasna.session_factory.RestorationSession.close") as session_close,
+            pytest.raises(RuntimeError, match="boom"),
+        ):
             _run_main(
                 _base_argv(inp, out, rest, det),
                 pipeline_side_effect=make_pipeline,
             )
-        pipeline_mock.close.assert_called_once()
+        session_close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1080,5 +1106,6 @@ class TestNonStreamingRun:
 
     def test_run_streaming_not_called(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
-        pipeline_cls = _run_main(_base_argv(inp, out, rest, det))
-        pipeline_cls.return_value.run_streaming.assert_not_called()
+        with patch("jasna.streaming_pipeline.run_streaming") as run_streaming:
+            _run_main(_base_argv(inp, out, rest, det))
+        run_streaming.assert_not_called()

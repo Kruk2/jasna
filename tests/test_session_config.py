@@ -7,6 +7,7 @@ from unittest.mock import patch
 from jasna.gui.models import AppSettings
 from jasna.gui.video_session import video_session_config
 from jasna.main import _session_config_from_args, build_parser
+from jasna.mosaic.detection_registry import recommended_score_threshold
 
 _DETECTION_PATH = Path("mw") / "rfdetr-v6.onnx"
 _RESTORATION_PATH = Path("mw") / "lada_mosaic_restoration_model_generic_v1.2.pth"
@@ -16,12 +17,14 @@ def _cli_config(extra_args: list[str] | None = None):
     args = build_parser().parse_args(
         ["--input", "a.mp4", "--output", "b.mp4", *(extra_args or [])]
     )
+    threshold = args.detection_score_threshold
     return _session_config_from_args(
         args,
         codec="hevc",
         encoder_settings={},
         detection_model_name="rfdetr-v6",
         detection_model_path=_DETECTION_PATH,
+        detection_score_threshold=recommended_score_threshold("rfdetr-v6") if threshold is None else threshold,
         restoration_model_path=_RESTORATION_PATH,
         lut_path=None,
     )

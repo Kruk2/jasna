@@ -56,8 +56,8 @@ class TestMainValidation:
         ):
             pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2"])
 
-        assert pipeline_cls.call_args.kwargs["codec"] == "h264"
-        assert pipeline_cls.call_args.kwargs["encoder_settings"] == {"cq": 25}
+        assert pipeline_cls.call_args.kwargs["config"].codec == "h264"
+        assert pipeline_cls.call_args.kwargs["config"].encoder_settings == {"cq": 25}
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
         assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
 
@@ -86,37 +86,37 @@ class TestMainValidation:
             _run_main_with_args(tmp_path, ["--codec", "av1", "--encoder-settings", "profile=main"])
 
     def test_batch_size_zero_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="batch-size must be > 0"):
+        with pytest.raises(ValueError, match="Batch size must be > 0"):
             _run_main_with_args(tmp_path, ["--batch-size", "0"])
 
     def test_max_clip_size_zero_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="max-clip-size must be > 0"):
+        with pytest.raises(ValueError, match="Max clip size must be > 0"):
             _run_main_with_args(tmp_path, ["--max-clip-size", "0"])
 
     def test_temporal_overlap_negative_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="temporal-overlap must be >= 0"):
+        with pytest.raises(ValueError, match="Temporal overlap must be >= 0"):
             _run_main_with_args(tmp_path, ["--temporal-overlap", "-1"])
 
     def test_temporal_overlap_ge_max_clip_size_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="temporal-overlap must be < --max-clip-size"):
+        with pytest.raises(ValueError, match="Temporal overlap must satisfy"):
             _run_main_with_args(tmp_path, ["--max-clip-size", "10", "--temporal-overlap", "10"])
 
     def test_temporal_overlap_too_large_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="2\\*--temporal-overlap < --max-clip-size"):
+        with pytest.raises(ValueError, match="Temporal overlap must satisfy"):
             _run_main_with_args(tmp_path, ["--max-clip-size", "10", "--temporal-overlap", "5"])
 
     def test_detection_score_threshold_out_of_range_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="detection-score-threshold must be in"):
+        with pytest.raises(ValueError, match="Detection score threshold must be in"):
             _run_main_with_args(tmp_path, ["--detection-score-threshold", "1.5"])
 
     @pytest.mark.parametrize("value", ["1.5", "-0.1"])
     def test_sharpen_out_of_range_raises(self, tmp_path, value):
-        with pytest.raises(ValueError, match="sharpen must be in"):
+        with pytest.raises(ValueError, match="Sharpening must be in"):
             _run_main_with_args(tmp_path, ["--sharpen", value])
 
     def test_sharpen_is_forwarded_to_the_pipeline(self, tmp_path):
         pipeline_cls = _run_main_with_args(tmp_path, ["--sharpen", "0.4"])
-        assert pipeline_cls.call_args.kwargs["sharpen_strength"] == 0.4
+        assert pipeline_cls.call_args.kwargs["config"].sharpen_strength == 0.4
 
     def test_missing_input_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):

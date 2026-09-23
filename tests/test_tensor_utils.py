@@ -1,34 +1,9 @@
 import pytest
 import torch
 
-from jasna.tensor_utils import to_device, pad_batch_with_last
+from jasna.tensor_utils import pad_batch_with_last
 
 REQUIRES_CUDA = pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
-
-
-def test_to_device_same_device_returns_same_tensor() -> None:
-    t = torch.randn(3, 4)
-    result = to_device(t, torch.device("cpu"))
-    assert result is t
-
-
-@REQUIRES_CUDA
-def test_to_device_cpu_to_cuda_contiguous() -> None:
-    src = torch.randn(3, 4)
-    result = to_device(src, torch.device("cuda:0"))
-    assert result.device.type == "cuda"
-    assert result.is_contiguous()
-    assert torch.equal(result.cpu(), src)
-
-
-@REQUIRES_CUDA
-def test_to_device_cpu_to_cuda_non_contiguous() -> None:
-    src = torch.randn(4, 4).t()
-    assert not src.is_contiguous()
-    result = to_device(src, torch.device("cuda:0"))
-    assert result.device.type == "cuda"
-    assert result.is_contiguous()
-    assert torch.equal(result.cpu(), src)
 
 
 def test_pad_batch_with_last_no_padding() -> None:

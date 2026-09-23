@@ -13,11 +13,9 @@ from jasna.engine_paths import (
     BASICVSRPP_DIRECTIONS as DIRECTIONS,
     BASICVSRPP_PREPROCESS_BATCH as PREPROCESS_BATCH,
     BASICVSRPP_UPSAMPLE_BATCH as UPSAMPLE_BATCH,
-    _basicvsrpp_sub_engine_dir as _sub_engine_dir,
-    engine_precision_name,
-    engine_system_suffix,
-    get_basicvsrpp_sub_engine_paths as get_sub_engine_paths,
-    all_basicvsrpp_sub_engines_exist as all_sub_engines_exist,
+    all_basicvsrpp_sub_engines_exist,
+    basicvsrpp_sub_engine_dir,
+    get_basicvsrpp_sub_engine_paths,
 )
 from jasna.trt.torch_tensorrt_export import (
     compile_and_save_torchtrt_dynamo,
@@ -27,7 +25,6 @@ from jasna.trt.torch_tensorrt_export import (
 
 logger = logging.getLogger(__name__)
 
-# DIRECTIONS imported from engine_paths
 FEATURE_SIZE = 64
 INPUT_SIZE = 256
 MID_CHANNELS = 64
@@ -255,24 +252,6 @@ class _PreprocessWrapper(nn.Module):
         return feats, flows_fwd, flows_bwd
 
 
-def _loop_body_engine_path(engine_dir: str, direction: str, fp16: bool) -> str:
-    prec = engine_precision_name(fp16=fp16)
-    suf = engine_system_suffix()
-    return os.path.join(engine_dir, f"loop_body_{direction}.trt_{prec}{suf}.engine")
-
-
-def _upsample_engine_path(engine_dir: str, fp16: bool) -> str:
-    prec = engine_precision_name(fp16=fp16)
-    suf = engine_system_suffix()
-    return os.path.join(engine_dir, f"upsample_dyn_b{UPSAMPLE_BATCH}.trt_{prec}{suf}.engine")
-
-
-def _preprocess_engine_path(engine_dir: str, fp16: bool) -> str:
-    prec = engine_precision_name(fp16=fp16)
-    suf = engine_system_suffix()
-    return os.path.join(engine_dir, f"preprocess_b{PREPROCESS_BATCH}.trt_{prec}{suf}.engine")
-
-
 def _get_inference_generator(model: nn.Module) -> nn.Module:
     if hasattr(model, "generator_ema") and model.generator_ema is not None:
         return model.generator_ema
@@ -289,8 +268,8 @@ def compile_basicvsrpp_sub_engines(
     import torch_tensorrt  # type: ignore[import-not-found]
 
     dtype = torch.float16 if fp16 else torch.float32
-    engine_dir = _sub_engine_dir(model_weights_path)
-    os.makedirs(engine_dir, exist_ok=True)
+    os.makedirs(basicvsrpp_sub_engine_dir(model_weights_path), exist_ok=True)
+    engine_paths = get_basicvsrpp_sub_engine_paths(model_weights_path, fp16)
     workspace_size = get_workspace_size_bytes()
 
     generator = _get_inference_generator(model)
@@ -299,9 +278,8 @@ def compile_basicvsrpp_sub_engines(
     paths: dict[str, str] = {}
 
     # ── loop_body engines (fused deform_align + backbone, static batch=1) ──
-    cond_channels = 3 * mid
     for i, direction in enumerate(DIRECTIONS):
-        path = _loop_body_engine_path(engine_dir, direction, fp16)
+        path = engine_paths[f"loop_body_{direction}"]
         paths[f"loop_body_{direction}"] = path
         if os.path.isfile(path):
             logger.info("Sub-engine already exists: %s", path)
@@ -332,7 +310,7 @@ def compile_basicvsrpp_sub_engines(
         del wrapper, inp_fp, inp_g1, inp_fn2, inp_g2, inp_fc, inp_f1, inp_f2, inp_bp
 
     # ── preprocess engine (feat_extract + downsample + bidirectional SPyNet, dynamic batch) ──
-    path = _preprocess_engine_path(engine_dir, fp16)
+    path = engine_paths["preprocess"]
     paths["preprocess"] = path
     if os.path.isfile(path):
         logger.info("Sub-engine already exists: %s", path)
@@ -359,7 +337,7 @@ def compile_basicvsrpp_sub_engines(
         del wrapper
 
     # ── upsample engine (per-frame stage, run in UPSAMPLE_BATCH-sized batches) ──
-    path = _upsample_engine_path(engine_dir, fp16)
+    path = engine_paths["upsample"]
     paths["upsample"] = path
     if os.path.isfile(path):
         logger.info("Sub-engine already exists: %s", path)
@@ -402,9 +380,9 @@ def load_sub_engines(
     fp16: bool,
 ) -> tuple[dict[str, nn.Module], nn.Module, nn.Module] | None:
     """Returns ``(loop_body_engines, preprocess, upsample)`` or *None*."""
-    paths = get_sub_engine_paths(model_weights_path, fp16)
-    if not all(os.path.isfile(p) for p in paths.values()):
+    if not all_basicvsrpp_sub_engines_exist(model_weights_path, fp16):
         return None
+    paths = get_basicvsrpp_sub_engine_paths(model_weights_path, fp16)
 
     loop_body_engines: dict[str, nn.Module] = {}
     for d in DIRECTIONS:
@@ -728,9 +706,6 @@ class BasicVSRPlusPlusNetSplit(nn.Module):
             lqs_flat = torch.cat(
                 [lqs_flat, lqs_flat[-1:].expand(pad_count, -1, -1, -1)], dim=0,
             )
-            t_engine = self._PREPROCESS_MIN_BATCH
-        else:
-            t_engine = t
 
         feats_, flows_fwd, flows_bwd = self._preprocess(lqs_flat)
         h_f, w_f = feats_.shape[2:]
@@ -785,3 +760,31 @@ def create_split_forward(
         generator, loop_body_engines, preprocess_engine, upsample_engine,
     )
     return split
+
+
+def _gpu_vram_gb(device: torch.device) -> float:
+    idx = torch.cuda.current_device() if device.index is None else int(device.index)
+    return float(torch.cuda.get_device_properties(idx).total_memory) / (1024**3)
+
+
+def compile_basicvsrpp_engines(model_weights_path: str, device: torch.device, fp16: bool) -> bool:
+    """Compile the six BasicVSR++ TensorRT sub-engines if missing; True when they all exist."""
+    if all_basicvsrpp_sub_engines_exist(model_weights_path, fp16):
+        return True
+    if device.type != "cuda" or not torch.cuda.is_available():
+        return False
+    if _gpu_vram_gb(device) < 4:
+        logger.info("Skipping TRT compilation: GPU VRAM < 4 GB.")
+        return False
+    if not fp16:
+        logger.info("Skipping TRT compilation: FP32 is not recommended for TensorRT. Consider using FP16 instead.")
+        return False
+
+    from jasna.models.basicvsrpp.inference import load_model
+
+    model = load_model(None, model_weights_path, device, fp16)
+    compile_basicvsrpp_sub_engines(model=model, device=device, fp16=fp16, model_weights_path=model_weights_path)
+    del model
+    gc.collect()
+    torch.cuda.empty_cache()
+    return all_basicvsrpp_sub_engines_exist(model_weights_path, fp16)

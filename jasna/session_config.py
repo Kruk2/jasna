@@ -56,7 +56,25 @@ class SessionConfig:
     retarget_high_fps: bool
     disable_progress: bool
     working_dir: Path | None
-    vr_projection: VrProjectionName = "auto"
-    fmp4: bool = False
-    sharpen_strength: float = 0.0
-    tvai_denoise: bool = False
+    vr_projection: VrProjectionName
+    fmp4: bool
+    sharpen_strength: float
+    tvai_denoise: bool
+
+    def __post_init__(self) -> None:
+        if self.batch_size <= 0:
+            raise ValueError("Batch size must be > 0")
+        if self.max_clip_size <= 0:
+            raise ValueError("Max clip size must be > 0")
+        if self.temporal_overlap < 0:
+            raise ValueError("Temporal overlap must be >= 0")
+        if self.temporal_overlap > 0 and 2 * self.temporal_overlap >= self.max_clip_size:
+            raise ValueError("Temporal overlap must satisfy 2 * temporal overlap < max clip size")
+        if not 0 <= self.max_detection_gap < self.max_clip_size:
+            raise ValueError("Max detection gap must be >= 0 and < max clip size")
+        if not 0 <= self.min_detection_duration < self.max_clip_size:
+            raise ValueError("Min detection duration must be >= 0 and < max clip size")
+        if not 0.0 <= self.detection_score_threshold <= 1.0:
+            raise ValueError("Detection score threshold must be in [0, 1]")
+        if not 0.0 <= self.sharpen_strength <= 1.0:
+            raise ValueError("Sharpening must be in [0, 1]")

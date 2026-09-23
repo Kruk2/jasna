@@ -261,7 +261,7 @@ class TestFullPipelineE2E:
         denoise_strength=None,
         denoise_step=None,
     ):
-        from jasna.pipeline import Pipeline
+        from factories import make_pipeline
         from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
         from jasna.restorer.denoise import DenoiseStrength, DenoiseStep
         from jasna.restorer.restoration_pipeline import RestorationPipeline
@@ -286,11 +286,19 @@ class TestFullPipelineE2E:
             denoise_step=dstep,
         )
 
-        pipeline = Pipeline(
+        from jasna.mosaic.detection_registry import build_detection_model
+
+        pipeline = make_pipeline(
             input_video=TEST_CLIP,
             output_video=output,
-            detection_model_name="rfdetr-v5",
-            detection_model_path=RFDETR_ONNX,
+            detection_model=build_detection_model(
+                "rfdetr-v5",
+                RFDETR_ONNX,
+                batch_size=self.BATCH_SIZE,
+                device=device,
+                score_threshold=0.25,
+                fp16=True,
+            ),
             detection_score_threshold=0.25,
             restoration_pipeline=rp,
             codec="hevc",
