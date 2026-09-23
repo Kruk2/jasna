@@ -189,7 +189,9 @@ H.264/HEVC/AV1 decode and encode. RF-DETR runs the trained checkpoint through th
 `rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
 per-model engine precompile step. NVIDIA builds keep the ONNX → TensorRT path
 (`rfdetr-v6.onnx`). Decode falls back to FFmpeg software decoding when AMF cannot
-handle the source. Secondary restoration and segment smart rendering remain
+handle the source. Segment smart rendering works on AMF; H.264 sources with
+more than three consecutive B-frames are fully re-encoded there, with
+restoration still limited to the selected ranges. Secondary restoration remains
 NVIDIA-only.
 
 `--device cuda:N` selects the PyTorch GPU (ROCm reuses the CUDA device API).
