@@ -101,7 +101,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._preview_center = (0.5, 0.5)
         self._preview_pan_anchor: tuple[int, int] | None = None
         self._reset_view_visible = False
-        self._vr_resolution = None
+        self.vr_resolution = None
         self._vr_projection = job.vr_projection or "auto"
         self._restore_active = False
         self._restore_after: str | None = None
@@ -428,10 +428,10 @@ class SegmentEditor(ctk.CTkToplevel):
         projection_control = ctk.CTkFrame(preview_options, fg_color="transparent")
         projection_control.pack(side="right", padx=(0, 16))
         projection_label_text = t("segments_vr_projection")
-        if self._vr_resolution.is_sbs:
+        if self.vr_resolution.is_sbs:
             projection_label_text = t(
                 "segments_vr_projection_resolved",
-                projection=projection_names[self._vr_resolution.projection],
+                projection=projection_names[self.vr_resolution.projection],
             )
         self._vr_projection_label = ctk.CTkLabel(
             projection_control,
@@ -454,7 +454,7 @@ class SegmentEditor(ctk.CTkToplevel):
             dropdown_hover_color=Colors.PRIMARY,
             text_color=Colors.TEXT_PRIMARY,
             width=150,
-            state="normal" if self._vr_resolution.is_sbs else "disabled",
+            state="normal" if self.vr_resolution.is_sbs else "disabled",
         )
         self._vr_projection_menu.pack(side="left")
         self._vr_projection_menu.set_value(self._vr_projection)
@@ -901,12 +901,12 @@ class SegmentEditor(ctk.CTkToplevel):
                     if self._state is None:
                         from jasna.vr180 import resolve_vr_mode
 
-                        self._vr_resolution = resolve_vr_mode(
+                        self.vr_resolution = resolve_vr_mode(
                             self._get_settings().vr_mode,
                             event.metadata,
                             self._job.path,
                         )
-                        self._preview_left_eye = self._vr_resolution.is_sbs
+                        self._preview_left_eye = self.vr_resolution.is_sbs
                         self._build_editor(event.metadata)
                 elif isinstance(event, PreviewFrame):
                     self._show_frame(event)

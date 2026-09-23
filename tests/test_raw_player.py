@@ -337,7 +337,7 @@ def test_raw_worker_releases_session_when_pipeline_construction_fails(
 
 
 def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
-    from jasna import pipeline_threads, vram_offloader
+    from jasna import pipeline_threads
 
     class ImmediateThread:
         def __init__(self, *, target, **_kwargs):
@@ -359,7 +359,7 @@ def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
     monkeypatch.setattr(pipeline_threads, "secondary_restore_loop", MagicMock())
     monkeypatch.setattr(pipeline_threads, "blend_encode_loop", blend)
     monkeypatch.setattr(raw_player.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(vram_offloader, "VramOffloader", MagicMock())
+    monkeypatch.setattr(pipeline_threads, "VramOffloader", MagicMock())
     pipeline = SimpleNamespace(
         input_video=Path("video.mp4"),
         device=torch.device("cpu"),
@@ -374,9 +374,9 @@ def test_raw_pass_forwards_seek_and_player_writer(monkeypatch) -> None:
         min_detection_duration=2,
         enable_crossfade=True,
         scene_detection=False,
-        _vr_projector=None,
-        _job_detection_model=MagicMock(),
-        _vr_resolution=SimpleNamespace(resolved="off"),
+        vr_projector=None,
+        job_detection_model=MagicMock(),
+        vr_resolution=SimpleNamespace(resolved="off"),
     )
     writer = MagicMock()
 

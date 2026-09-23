@@ -64,14 +64,12 @@ class VramOffloader:
         device: torch.device,
         blend_buffer: BlendBuffer,
         crop_buffers: dict[int, CropBuffer],
-        crop_lock: threading.Lock,
         vram_limit: float | None = VRAM_LIMIT,
         safetynet: int = VRAM_SAFETYNET,
     ) -> None:
         self._device = device
         self._blend_buffer = blend_buffer
         self._crop_buffers = crop_buffers
-        self._crop_lock = crop_lock
 
         if vram_limit is not None:
             gpu_total = int(vram_limit * 1024 * 1024 * 1024)
@@ -209,9 +207,8 @@ class VramOffloader:
 
         # Crop buffers
         try:
-            with self._crop_lock:
-                crop_ids = list(self._crop_buffers.keys())
-                crop_sizes = {k: v.frame_count for k, v in self._crop_buffers.items()}
+            crop_sizes = {k: v.frame_count for k, v in list(self._crop_buffers.items())}
+            crop_ids = list(crop_sizes)
             lines.append(f"  crop_buffers: track_ids={crop_ids} sizes={crop_sizes}")
         except Exception as e:
             lines.append(f"  crop_buffers: <error: {e}>")
@@ -263,8 +260,7 @@ class VramOffloader:
                     sr.masks[i] = mask.cpu()
                     freed += nbytes
 
-        with self._crop_lock:
-            buffers = list(self._crop_buffers.values())
+        buffers = list(self._crop_buffers.values())
         buffers.sort(key=lambda cb: cb.frame_count, reverse=True)
 
         for cb in buffers:

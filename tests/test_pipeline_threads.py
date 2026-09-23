@@ -29,6 +29,29 @@ from jasna.pipeline_threads import (
 from jasna.tracking.clip_tracker import TrackedClip
 
 
+
+def _loop_defaults() -> dict:
+    return dict(cancel_event=threading.Event(), debug_memory=MagicMock())
+
+
+def _decode_defaults() -> dict:
+    return _loop_defaults() | dict(
+        vr_mode="off",
+        vr_projector=None,
+        seek_ts=None,
+        end_pts=None,
+        effect_ranges=None,
+        frame_stride=1,
+        output_frame_count=None,
+        output_fps=None,
+        progress=None,
+    )
+
+
+def _blend_defaults() -> dict:
+    return dict(cancel_event=threading.Event(), vram_offloader=MagicMock(), seek_ts=None, frame_stride=1)
+
+
 def _fake_metadata(num_frames=4, fps=24.0) -> VideoMetadata:
     return VideoMetadata(
         video_file="fake.mkv",
@@ -115,7 +138,7 @@ class TestDecodeDetectLoop:
             patch("jasna.pipeline_threads.process_frame_batch", side_effect=_process) as process,
             patch("jasna.pipeline_threads.finalize_processing") as finalize,
         ):
-            decode_detect_loop(
+            decode_detect_loop(**_decode_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=6,
                 device=torch.device("cpu"),
@@ -132,11 +155,10 @@ class TestDecodeDetectLoop:
                 clip_queue=clip_queue,
                 metadata_queue=metadata_queue,
                 error_holder=[],
-                frame_shape=frame_shape,
                 seek_ts=2.5,
                 end_pts=64,
                 effect_ranges=((61, 63),),
-            )
+            ))
 
         assert process.call_count == 1
         assert process.call_args.kwargs["pts_list"] == [61, 62]
@@ -182,7 +204,7 @@ class TestDecodeDetectLoop:
             patch("jasna.pipeline_threads.process_frame_batch", return_value=BatchProcessResult(next_frame_idx=2, clips_emitted=0)),
             patch("jasna.pipeline_threads.finalize_processing"),
         ):
-            decode_detect_loop(
+            decode_detect_loop(**_decode_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=2,
                 device=torch.device("cpu"),
@@ -199,9 +221,8 @@ class TestDecodeDetectLoop:
                 clip_queue=clip_queue,
                 metadata_queue=metadata_queue,
                 error_holder=error_holder,
-                frame_shape=frame_shape,
                 cancel_event=cancel,
-            )
+            ))
 
         assert not error_holder
         assert call_count < 10
@@ -224,7 +245,7 @@ class TestDecodeDetectLoop:
             patch("jasna.pipeline_threads.process_frame_batch", return_value=BatchProcessResult(next_frame_idx=50, clips_emitted=0)) as mock_pfb,
             patch("jasna.pipeline_threads.finalize_processing"),
         ):
-            decode_detect_loop(
+            decode_detect_loop(**_decode_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=2,
                 device=torch.device("cpu"),
@@ -241,9 +262,8 @@ class TestDecodeDetectLoop:
                 clip_queue=clip_queue,
                 metadata_queue=metadata_queue,
                 error_holder=[],
-                frame_shape=frame_shape,
                 seek_ts=2.0,
-            )
+            ))
 
         assert received_seek == [2.0]
         call_kwargs = mock_pfb.call_args.kwargs
@@ -276,7 +296,7 @@ class TestDecodeDetectLoop:
             patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
             patch("jasna.pipeline_threads.process_frame_batch", return_value=BatchProcessResult(next_frame_idx=2, clips_emitted=0)),
         ):
-            decode_detect_loop(
+            decode_detect_loop(**_decode_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=2,
                 device=torch.device("cpu"),
@@ -293,8 +313,7 @@ class TestDecodeDetectLoop:
                 clip_queue=clip_queue,
                 metadata_queue=metadata_queue,
                 error_holder=error_holder,
-                frame_shape=[],
-            )
+            ))
 
         assert len(error_holder) == 2
         assert call_count == 1
@@ -320,7 +339,7 @@ class TestPrimaryRestoreLoop:
         t.start()
 
         with patch("jasna.pipeline_threads.torch.cuda.set_device"):
-            primary_restore_loop(
+            primary_restore_loop(**_loop_defaults() | dict(
                 device=torch.device("cpu"),
                 restoration_pipeline=MagicMock(),
                 clip_queue=clip_queue,
@@ -328,7 +347,7 @@ class TestPrimaryRestoreLoop:
                 error_holder=error_holder,
                 primary_idle_event=primary_idle,
                 cancel_event=cancel,
-            )
+            ))
 
         t.join(timeout=3)
         assert not error_holder
@@ -364,14 +383,14 @@ class TestPrimaryRestoreLoop:
         mock_pipeline.prepare_and_run_primary.return_value = pr_result
 
         with patch("jasna.pipeline_threads.torch.cuda.set_device"):
-            primary_restore_loop(
+            primary_restore_loop(**_loop_defaults() | dict(
                 device=torch.device("cpu"),
                 restoration_pipeline=mock_pipeline,
                 clip_queue=clip_queue,
                 secondary_queue=secondary_queue,
                 error_holder=error_holder,
                 primary_idle_event=primary_idle,
-            )
+            ))
 
         assert not error_holder
         item = secondary_queue.get()
@@ -387,14 +406,14 @@ class TestPrimaryRestoreLoop:
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
             caplog.at_level(logging.INFO, logger="jasna.pipeline_threads"),
         ):
-            primary_restore_loop(
+            primary_restore_loop(**_loop_defaults() | dict(
                 device=torch.device("cpu"),
                 restoration_pipeline=MagicMock(),
                 clip_queue=clip_queue,
                 secondary_queue=secondary_queue,
                 error_holder=[],
                 primary_idle_event=threading.Event(),
-            )
+            ))
 
         assert "[timing] primary" in caplog.text
 
@@ -418,14 +437,14 @@ class TestSecondaryRestoreLoop:
         t.start()
 
         with patch("jasna.pipeline_threads.torch.cuda.set_device"):
-            secondary_restore_loop(
+            secondary_restore_loop(**_loop_defaults() | dict(
                 device=torch.device("cpu"),
                 restoration_pipeline=MagicMock(),
                 secondary_queue=secondary_queue,
                 encode_queue=encode_queue,
                 error_holder=error_holder,
                 cancel_event=cancel,
-            )
+            ))
 
         t.join(timeout=3)
         assert not error_holder
@@ -459,12 +478,16 @@ class TestBlendEncodeLoop:
             error_holder = []
         if frame_writer is None:
             frame_writer = _RecordingWriter()
+        if cancel_event is None:
+            cancel_event = threading.Event()
+        if vram_offloader is None:
+            vram_offloader = MagicMock()
 
         with (
             patch("jasna.pipeline_threads.VideoReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
-            blend_encode_loop(
+            blend_encode_loop(**_blend_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=2,
                 device=torch.device("cpu"),
@@ -477,7 +500,7 @@ class TestBlendEncodeLoop:
                 cancel_event=cancel_event,
                 seek_ts=seek_ts,
                 vram_offloader=vram_offloader,
-            )
+            ))
 
         return frame_writer, error_holder
 
@@ -518,7 +541,7 @@ class TestBlendEncodeLoop:
             patch("jasna.pipeline_threads.VideoReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
-            blend_encode_loop(
+            blend_encode_loop(**_blend_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=2,
                 device=torch.device("cpu"),
@@ -529,7 +552,7 @@ class TestBlendEncodeLoop:
                 error_holder=[],
                 frame_writer=_RecordingWriter(),
                 seek_ts=5.0,
-            )
+            ))
 
         assert received_seek == [5.0]
 
@@ -558,7 +581,7 @@ class TestBlendEncodeLoop:
             patch("jasna.pipeline_threads.VideoReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
-            blend_encode_loop(
+            blend_encode_loop(**_blend_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=1,
                 device=torch.device("cpu"),
@@ -568,7 +591,7 @@ class TestBlendEncodeLoop:
                 metadata_queue=metadata_queue,
                 error_holder=error_holder,
                 frame_writer=_RecordingWriter(),
-            )
+            ))
 
         t.join(timeout=3)
         assert len(error_holder) >= 1
@@ -592,7 +615,7 @@ class TestBlendEncodeLoop:
             patch("jasna.pipeline_threads.VideoReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
-            blend_encode_loop(
+            blend_encode_loop(**_blend_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=1,
                 device=torch.device("cpu"),
@@ -602,7 +625,7 @@ class TestBlendEncodeLoop:
                 metadata_queue=metadata_queue,
                 error_holder=[],
                 frame_writer=writer,
-            )
+            ))
 
         assert len(writer.written) == 1
 
@@ -624,7 +647,7 @@ class TestBlendEncodeLoop:
             patch("jasna.pipeline_threads.VideoReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
-            blend_encode_loop(
+            blend_encode_loop(**_blend_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=1,
                 device=torch.device("cpu"),
@@ -634,7 +657,7 @@ class TestBlendEncodeLoop:
                 metadata_queue=metadata_queue,
                 error_holder=[],
                 frame_writer=writer,
-            )
+            ))
 
         blend_buffer.blend_frame.assert_called_once()
         assert blend_buffer.blend_frame.call_args.args[0] == 0
@@ -711,7 +734,7 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_server.frames_per_segment.return_value = 120
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
         frame = torch.zeros(3, 8, 8)
         writer.write(frame, pts=42)
 
@@ -724,8 +747,7 @@ class TestStreamingFrameWriter:
         mock_server.frames_per_segment.return_value = 120
 
         cancel = threading.Event()
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5)
-        writer.set_cancel_event(cancel)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5, cancel_event=cancel)
 
         writer.after_write(1)
         mock_server.update_production.assert_called_once_with(5)
@@ -737,7 +759,7 @@ class TestStreamingFrameWriter:
         mock_enc.raise_if_failed.side_effect = RuntimeError("writer failed")
         mock_server = MagicMock()
         mock_server.frames_per_segment.return_value = 120
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5, cancel_event=threading.Event())
 
         with pytest.raises(RuntimeError, match="writer failed"):
             writer.after_write(1)
@@ -750,7 +772,7 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_server.frames_per_segment.return_value = 10
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=3)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=3, cancel_event=threading.Event())
 
         writer.after_write(25)
         mock_server.update_production.assert_called_with(5)
@@ -761,7 +783,7 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_server.frames_per_segment.return_value = 120
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
         writer.after_write(1)
 
         mock_server.update_production.assert_called_once()
@@ -772,7 +794,7 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_server.frames_per_segment.return_value = 120
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
         writer.after_write(100)
 
         mock_server.update_production.assert_called_once()
@@ -803,6 +825,9 @@ class TestRunStreamingPass:
         mock_pipeline.restoration_pipeline.secondary_num_workers = 1
         mock_pipeline.restoration_pipeline.secondary_prefers_cpu_input = False
         mock_pipeline.detection_model = MagicMock()
+        mock_pipeline.device = torch.device("cpu")
+        mock_pipeline.vr_projector = None
+        mock_pipeline.vr_resolution.resolved = "off"
 
         def fake_pfb(**kwargs):
             bb = kwargs["blend_buffer"]
@@ -827,16 +852,14 @@ class TestRunStreamingPass:
             patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
             patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_pfb),
             patch("jasna.pipeline_threads.finalize_processing"),
-            patch("jasna.streaming_pipeline.VramOffloader"),
+            patch("jasna.pipeline_threads.VramOffloader"),
         ):
             result = _run_streaming_pass(
                 pipeline=mock_pipeline,
-                device=torch.device("cpu"),
                 metadata=_fake_metadata(),
                 hls_server=mock_server,
                 streaming_encoder=mock_enc,
                 start_segment=0,
-                start_frame=0,
                 start_time=0.0,
                 cancel_event=cancel,
             )
@@ -872,6 +895,9 @@ class TestRunStreamingPass:
         mock_pipeline.restoration_pipeline.secondary_num_workers = 1
         mock_pipeline.restoration_pipeline.secondary_prefers_cpu_input = False
         mock_pipeline.detection_model = MagicMock()
+        mock_pipeline.device = torch.device("cpu")
+        mock_pipeline.vr_projector = None
+        mock_pipeline.vr_resolution.resolved = "off"
 
         def fake_pfb(**kwargs):
             bb = kwargs["blend_buffer"]
@@ -896,16 +922,14 @@ class TestRunStreamingPass:
             patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
             patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_pfb),
             patch("jasna.pipeline_threads.finalize_processing"),
-            patch("jasna.streaming_pipeline.VramOffloader"),
+            patch("jasna.pipeline_threads.VramOffloader"),
         ):
             result = _run_streaming_pass(
                 pipeline=mock_pipeline,
-                device=torch.device("cpu"),
                 metadata=_fake_metadata(num_frames=200),
                 hls_server=mock_server,
                 streaming_encoder=mock_enc,
                 start_segment=0,
-                start_frame=0,
                 start_time=0.0,
                 cancel_event=cancel,
             )
@@ -1009,7 +1033,6 @@ class TestStreamingLoop:
         with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
             _streaming_loop(
                 pipeline=pipeline,
-                device=torch.device("cpu"),
                 metadata=MagicMock(),
                 hls_server=server,
                 streaming_encoder=enc,
@@ -1028,7 +1051,6 @@ class TestStreamingLoop:
         with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
             _streaming_loop(
                 pipeline=pipeline,
-                device=torch.device("cpu"),
                 metadata=MagicMock(),
                 hls_server=server,
                 streaming_encoder=enc,
@@ -1054,7 +1076,6 @@ class TestStreamingLoop:
         with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
             _streaming_loop(
                 pipeline=pipeline,
-                device=torch.device("cpu"),
                 metadata=MagicMock(),
                 hls_server=server,
                 streaming_encoder=enc,
@@ -1079,7 +1100,6 @@ class TestStreamingLoop:
         with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
             _streaming_loop(
                 pipeline=pipeline,
-                device=torch.device("cpu"),
                 metadata=MagicMock(),
                 hls_server=server,
                 streaming_encoder=enc,
@@ -1110,7 +1130,6 @@ class TestStreamingLoop:
         with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
             _streaming_loop(
                 pipeline=pipeline,
-                device=torch.device("cpu"),
                 metadata=MagicMock(),
                 hls_server=server,
                 streaming_encoder=enc,
@@ -1135,7 +1154,6 @@ class TestStreamingLoop:
         with patch("jasna.streaming_pipeline._run_streaming_pass", side_effect=_fake_pass):
             _streaming_loop(
                 pipeline=pipeline,
-                device=torch.device("cpu"),
                 metadata=MagicMock(),
                 hls_server=server,
                 streaming_encoder=enc,

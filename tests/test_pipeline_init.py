@@ -137,9 +137,9 @@ class TestPipelineInit:
 
         pipeline.configure_vr(metadata)
 
-        assert pipeline._vr_resolution.resolved == "sbs"
-        assert isinstance(pipeline._job_detection_model, SbsDetectionAdapter)
-        assert pipeline._vr_projector is None
+        assert pipeline.vr_resolution.resolved == "sbs"
+        assert isinstance(pipeline.job_detection_model, SbsDetectionAdapter)
+        assert pipeline.vr_projector is None
 
     def test_configure_vr_builds_fisheye_projector(self):
         pipeline = _make_pipeline(
@@ -156,11 +156,11 @@ class TestPipelineInit:
 
         pipeline.configure_vr(metadata)
 
-        assert pipeline._vr_resolution.resolved == "sbs"
-        assert pipeline._vr_resolution.projection == "fisheye"
-        assert isinstance(pipeline._job_detection_model, SbsDetectionAdapter)
-        assert isinstance(pipeline._vr_projector, FisheyeProjector)
-        assert pipeline._vr_projector.eye_width == 100
+        assert pipeline.vr_resolution.resolved == "sbs"
+        assert pipeline.vr_resolution.projection == "fisheye"
+        assert isinstance(pipeline.job_detection_model, SbsDetectionAdapter)
+        assert isinstance(pipeline.vr_projector, FisheyeProjector)
+        assert pipeline.vr_projector.eye_width == 100
 
     def test_configure_vr_builds_gnomonic_projector_for_routed_studio(self):
         pipeline = _make_pipeline(
@@ -177,8 +177,8 @@ class TestPipelineInit:
 
         pipeline.configure_vr(metadata)
 
-        assert pipeline._vr_resolution.projection == "gnomonic"
-        assert isinstance(pipeline._vr_projector, GnomonicProjector)
+        assert pipeline.vr_resolution.projection == "gnomonic"
+        assert isinstance(pipeline.vr_projector, GnomonicProjector)
 
     def test_configure_vr_honors_per_job_projection_override(self):
         pipeline = _make_pipeline(
@@ -196,5 +196,5 @@ class TestPipelineInit:
 
         pipeline.configure_vr(metadata)
 
-        assert pipeline._vr_resolution.projection == "fisheye"
-        assert isinstance(pipeline._vr_projector, FisheyeProjector)
+        assert pipeline.vr_resolution.projection == "fisheye"
+        assert isinstance(pipeline.vr_projector, FisheyeProjector)
