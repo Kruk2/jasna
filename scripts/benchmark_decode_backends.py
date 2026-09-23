@@ -1,7 +1,7 @@
 """Benchmark full jasna e2e restoration across decode backends.
 
 Runs the jasna CLI once per (clip, backend) in a subprocess with
-``jasna.media.video_decoder.DECODE_BACKEND`` patched, and reports wall time +
+``JASNA_DECODE_BACKEND`` set, and reports wall time +
 throughput. Fixed settings: ``--max-clip-size 180 --temporal-overlap 15
 --secondary-restoration none``.
 
@@ -27,9 +27,9 @@ DEFAULT_CLIP_DIR = REPO_ROOT / "assets" / "benchmark"
 BACKENDS = ("vali", "pyav-hw", "pyav-sw")
 
 RUNNER_SHIM = """
+import os
 import sys
-import jasna.media.video_decoder as video_decoder
-video_decoder.DECODE_BACKEND = sys.argv[1]
+os.environ["JASNA_DECODE_BACKEND"] = sys.argv[1]
 sys.argv = ["jasna"] + sys.argv[2:]
 from jasna.main import main
 main()

@@ -23,14 +23,13 @@ log = logging.getLogger(__name__)
 
 CORRUPT_PACKET_TOLERANCE = 10
 
-# Decode backend selection (`JASNA_DECODE_BACKEND` overrides the default):
+# Decode backend selection through `JASNA_DECODE_BACKEND`:
 # - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
 #              software, when VALI cannot open or decode the first frame. AMD
 #              keeps its AMF -> software escalation.
 # - "vali":    VALI only; any failure raises (NVIDIA only).
 # - "pyav-hw": skip VALI, use the PyAV hwaccel path with its software fallback.
 # - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
-DECODE_BACKEND = "auto"
 DECODE_BACKEND_ENV = "JASNA_DECODE_BACKEND"
 _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
 
@@ -47,10 +46,10 @@ class VideoDecodeError(RuntimeError):
 
 
 def _decode_backend() -> str:
-    backend = os.environ.get(DECODE_BACKEND_ENV, DECODE_BACKEND)
+    backend = os.environ.get(DECODE_BACKEND_ENV, "auto")
     if backend not in _DECODE_BACKENDS:
         raise ValueError(
-            f"Unknown decode backend {backend!r} from {DECODE_BACKEND_ENV}/DECODE_BACKEND, "
+            f"Unknown decode backend {backend!r} from {DECODE_BACKEND_ENV}, "
             f"expected {_DECODE_BACKENDS}"
         )
     return backend
