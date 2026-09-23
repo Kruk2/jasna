@@ -407,13 +407,9 @@ class Processor:
         splice_plan = None
         if segments:
             from jasna.media.probe import get_video_meta_data
-            from jasna.media.splice import build_splice_plan, probe_keyframes, validate_smart_render
+            from jasna.media.splice import build_splice_plan, canonical_codec, probe_keyframes, validate_smart_render
             metadata = get_video_meta_data(str(input_path))
-            codec = {
-                "avc": "h264",
-                "h265": "hevc",
-                "av01": "av1",
-            }.get(metadata.codec_name.lower(), metadata.codec_name.lower())
+            codec = canonical_codec(metadata.codec_name)
             validate_smart_render(
                 metadata,
                 output_path=output_path,

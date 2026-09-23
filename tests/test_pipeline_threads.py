@@ -942,40 +942,7 @@ class TestRunStreamingPass:
 # ---------------------------------------------------------------------------
 
 class TestRunStreaming:
-    def test_run_streaming_creates_server_when_none(self):
-        from jasna.streaming_pipeline import run_streaming
-
-        mock_pipeline = MagicMock()
-        mock_pipeline.device = torch.device("cpu")
-        mock_pipeline.input_video = MagicMock()
-        mock_pipeline.input_video.name = "fake.mkv"
-
-        meta = _fake_metadata()
-        meta.color_space = AvColorspace.ITU709
-
-        with (
-            patch("jasna.streaming_pipeline.get_video_meta_data", return_value=meta),
-            patch("jasna.streaming_pipeline.HlsStreamingServer") as mock_server_cls,
-            patch("jasna.streaming_pipeline.StreamingEncoder") as mock_enc_cls,
-            patch("jasna.streaming_pipeline._streaming_loop") as mock_loop,
-            patch("jasna.streaming_pipeline.torch.cuda.empty_cache"),
-            patch("jasna.streaming_pipeline.torch.cuda.ipc_collect"),
-            patch("jasna.streaming_pipeline.torch.cuda.reset_peak_memory_stats"),
-        ):
-            server_inst = mock_server_cls.return_value
-            server_inst.segments_dir = "/tmp/segs"
-            server_inst.start.return_value = "http://localhost:8765/stream.m3u8"
-
-            run_streaming(mock_pipeline, port=8765, segment_duration=4.0)
-
-            mock_server_cls.assert_called_once_with(segment_duration=4.0, port=8765, max_segments_ahead=3)
-            server_inst.load_video.assert_called_once_with(meta)
-            server_inst.start.assert_called_once()
-            mock_loop.assert_called_once()
-            mock_enc_cls.return_value.stop.assert_called_once()
-            server_inst.stop.assert_called_once()
-
-    def test_run_streaming_uses_provided_server(self):
+    def test_run_streaming_loads_video_into_the_given_server(self):
         from jasna.streaming_pipeline import run_streaming
 
         mock_pipeline = MagicMock()
@@ -988,20 +955,22 @@ class TestRunStreaming:
 
         mock_server = MagicMock()
         mock_server.segments_dir = "/tmp/segs"
+        mock_server.segment_duration = 2.0
 
         with (
             patch("jasna.streaming_pipeline.get_video_meta_data", return_value=meta),
             patch("jasna.streaming_pipeline.StreamingEncoder") as mock_enc_cls,
-            patch("jasna.streaming_pipeline._streaming_loop"),
-            patch("jasna.streaming_pipeline.torch.cuda.empty_cache"),
-            patch("jasna.streaming_pipeline.torch.cuda.ipc_collect"),
-            patch("jasna.streaming_pipeline.torch.cuda.reset_peak_memory_stats"),
+            patch("jasna.streaming_pipeline._streaming_loop") as mock_loop,
         ):
-            run_streaming(mock_pipeline, hls_server=mock_server)
+            run_streaming(mock_pipeline, mock_server)
 
-            mock_server.load_video.assert_called_once_with(meta)
-            mock_server.start.assert_not_called()
-            mock_server.stop.assert_not_called()
+        mock_pipeline.validate_metadata.assert_called_once_with(meta)
+        mock_server.load_video.assert_called_once_with(meta)
+        assert mock_enc_cls.call_args.kwargs["segment_duration"] == 2.0
+        mock_loop.assert_called_once()
+        mock_enc_cls.return_value.stop.assert_called_once()
+        mock_server.start.assert_not_called()
+        mock_server.stop.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1160,36 +1129,3 @@ class TestStreamingLoop:
             )
 
         server.mark_finished.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# Pipeline.run_streaming thin wrapper
-# ---------------------------------------------------------------------------
-
-class TestPipelineRunStreamingWrapper:
-    def test_delegates_to_streaming_pipeline(self):
-        from factories import make_pipeline
-
-        with (
-            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
-            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
-        ):
-            p = make_pipeline(
-                input_video=MagicMock(),
-                output_video=MagicMock(),
-                detection_score_threshold=0.25,
-                restoration_pipeline=MagicMock(secondary_restorer=None, secondary_num_workers=1),
-                codec="hevc",
-                encoder_settings={},
-                batch_size=2,
-                device=torch.device("cpu"),
-                max_clip_size=60,
-                temporal_overlap=8,
-                max_detection_gap=0,
-                min_detection_duration=0,
-                fp16=True,
-            )
-
-        with patch("jasna.streaming_pipeline.run_streaming") as mock_rs:
-            p.run_streaming(port=9999, segment_duration=2.0, hls_server="fake_server")
-            mock_rs.assert_called_once_with(p, port=9999, segment_duration=2.0, hls_server="fake_server")
