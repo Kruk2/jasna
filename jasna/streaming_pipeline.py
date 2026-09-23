@@ -49,39 +49,19 @@ class _StreamingFrameWriter:
         self._hls_server.wait_for_demand(current_seg, _MAX_SEGMENTS_AHEAD, self._cancel_event)
 
 
-def run_streaming(
-    pipeline,
-    port: int = 8765,
-    segment_duration: float = 4.0,
-    hls_server: HlsStreamingServer | None = None,
-) -> None:
-    device = pipeline.device
+def run_streaming(pipeline, hls_server: HlsStreamingServer) -> None:
     metadata = get_video_meta_data(str(pipeline.input_video))
     pipeline.validate_metadata(metadata)
     pipeline.configure_vr(metadata)
-
-    own_server = hls_server is None
-    if own_server:
-        hls_server = HlsStreamingServer(
-            segment_duration=segment_duration,
-            port=port,
-            max_segments_ahead=_MAX_SEGMENTS_AHEAD,
-        )
-        hls_server.load_video(metadata)
-        url = hls_server.start()
-        print(f"HLS stream: {url}")
-        print(f"Browser:    http://localhost:{port}/")
-    else:
-        hls_server.load_video(metadata)
+    hls_server.load_video(metadata)
 
     streaming_encoder = StreamingEncoder(
         segments_dir=hls_server.segments_dir,
-        segment_duration=segment_duration,
+        segment_duration=hls_server.segment_duration,
         metadata=metadata,
         source_video=str(pipeline.input_video),
-        device=device,
+        device=pipeline.device,
     )
-
     try:
         _streaming_loop(
             pipeline=pipeline,
@@ -91,8 +71,6 @@ def run_streaming(
         )
     finally:
         streaming_encoder.stop()
-        if own_server:
-            hls_server.stop()
 
 
 def _streaming_loop(

@@ -402,14 +402,3 @@ class Pipeline:
         else:
             self._run_full(metadata)
         self.completed = not self._cancel_event.is_set()
-
-    def run_streaming(
-        self,
-        port: int = 8765,
-        segment_duration: float = 4.0,
-        hls_server=None,
-    ) -> None:
-        if self.segments:
-            raise ValueError("Segment processing is not supported in streaming mode")
-        from jasna.streaming_pipeline import run_streaming
-        run_streaming(self, port=port, segment_duration=segment_duration, hls_server=hls_server)

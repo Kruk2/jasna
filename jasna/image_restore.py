@@ -262,12 +262,7 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.engine_paths import SD15_DIR
     from jasna.media import image_io
-    from jasna.mosaic.detection_registry import (
-        build_detection_model,
-        coerce_detection_model_name,
-        recommended_score_threshold,
-        require_detection_model_weights,
-    )
+    from jasna.mosaic.detection_registry import build_detection_model, resolve_detection_model
     from jasna.restorer.sd15_download import ensure_sd15_bundle
     from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU, Sd15InpaintRestorer
 
@@ -284,20 +279,9 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
 
     ensure_sd15_bundle(SD15_DIR)
 
-    detection_model_name = coerce_detection_model_name(str(args.detection_model))
-    score_threshold = float(
-        recommended_score_threshold(detection_model_name)
-        if args.detection_score_threshold is None
-        else args.detection_score_threshold
+    detection_model_name, detection_model_path, score_threshold = resolve_detection_model(
+        str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
     )
-    has_explicit_path = bool(str(args.detection_model_path).strip())
-    detection_model_path = (
-        Path(str(args.detection_model_path))
-        if has_explicit_path
-        else require_detection_model_weights(detection_model_name)
-    )
-    if not detection_model_path.exists():
-        raise FileNotFoundError(str(detection_model_path))
 
     ensure_engines_compiled(EngineCompilationRequest(
         device=str(device),
