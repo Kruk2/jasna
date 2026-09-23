@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import av
 import pytest
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media.video_decoder import (
     CORRUPT_PACKET_TOLERANCE,
     NvidiaVideoReader,
@@ -17,6 +18,7 @@ from jasna.media.video_decoder import (
 def _reader():
     reader = NvidiaVideoReader.__new__(NvidiaVideoReader)
     reader.file = "broken.mp4"
+    reader._decoder_ctx = None
     return reader
 
 
@@ -83,6 +85,7 @@ def test_backend_dispatch_releases_outer_first_group_reference():
 
     reader = NvidiaVideoReader.__new__(NvidiaVideoReader)
     reader._vali_source = None
+    reader.vendor = AcceleratorVendor.NVIDIA
     reader._decoded_frames = lambda seek_ts: iter(())
     calls = 0
 

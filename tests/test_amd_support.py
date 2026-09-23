@@ -341,7 +341,6 @@ def test_amf_decoder_context_is_created(monkeypatch) -> None:
     assert create.call_args.args[:2] == ("h264_amf", "r")
     decoder.open.assert_called_once_with(strict=False)
     assert reader._decoder_ctx is decoder
-    assert reader._amd_hardware_decode is True
 
 
 def test_amf_decoder_accepts_missing_source_rationals(monkeypatch) -> None:
@@ -379,7 +378,6 @@ def test_amf_decoder_accepts_missing_source_rationals(monkeypatch) -> None:
 
     assert decoder.sample_aspect_ratio == Fraction(1, 1)
     assert decoder.opened is True
-    assert reader._amd_hardware_decode is True
 
 
 def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
@@ -422,7 +420,6 @@ def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
     reader._setup_amf_decoder(source)
     assert decoder.opened is True
     assert reader._decoder_ctx is decoder
-    assert reader._amd_hardware_decode is True
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

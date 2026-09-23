@@ -55,6 +55,19 @@ def _decode_backend() -> str:
     return backend
 
 
+def _cuda_hwaccel(device: torch.device) -> HWAccel:
+    hwaccel = HWAccel(
+        "cuda",
+        device=str(device.index or 0),
+        allow_software_fallback=True,
+        is_hw_owned=True,
+    )
+    # Reuse torch's current primary context without changing its scheduling flags.
+    hwaccel.options["primary_ctx"] = "0"
+    hwaccel.options["current_ctx"] = "1"
+    return hwaccel
+
+
 def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.ExternalStream]:
     # cuStreamCreate needs a current CUDA context; threads other than the one
     # torch initialized on have none until torch binds them to the device.
@@ -230,14 +243,10 @@ class NvidiaVideoReader:
         self.frame_stride = frame_stride
         self.vendor = vendor_for_device(device)
         self._decoder_ctx = None
-        self._amd_hardware_decode = False
         self._vali_source: _ValiFrameSource | None = None
         self._software_only = False
 
     def __enter__(self):
-        self._decoder_ctx = None
-        self._amd_hardware_decode = False
-        self._vali_source = None
         current_stream(self.device)
         backend = _decode_backend()
         if backend in ("auto", "vali"):
@@ -270,17 +279,7 @@ class NvidiaVideoReader:
         self._software_only = software_only
         try:
             if not software_only and self.vendor is AcceleratorVendor.NVIDIA:
-                hwaccel = HWAccel(
-                    "cuda",
-                    device=str(self.device.index or 0),
-                    allow_software_fallback=True,
-                    is_hw_owned=True,
-                )
-                # Reuse torch's current primary context without changing its
-                # scheduling flags.
-                hwaccel.options["primary_ctx"] = "0"
-                hwaccel.options["current_ctx"] = "1"
-                self.container = av.open(self.file, hwaccel=hwaccel)
+                self.container = av.open(self.file, hwaccel=_cuda_hwaccel(self.device))
             else:
                 self.container = av.open(self.file)
             self.video_stream = self.container.streams.video[0]
@@ -355,7 +354,6 @@ class NvidiaVideoReader:
                 decoder.sample_aspect_ratio = Fraction(1, 1)
             decoder.open(strict=False)
             self._decoder_ctx = decoder
-            self._amd_hardware_decode = True
             log.info("Using AMF hardware decoder %s for %s", decoder_name, self.file)
         except (ValueError, AttributeError, av.FFmpegError, RuntimeError) as exc:
             source_ctx.thread_type = "AUTO"
@@ -385,19 +383,11 @@ class NvidiaVideoReader:
                 min_height,
             )
             return
-        hwaccel = HWAccel(
-            "cuda",
-            device=str(self.device.index or 0),
-            allow_software_fallback=True,
-            is_hw_owned=True,
-        )
-        hwaccel.options["primary_ctx"] = "0"
-        hwaccel.options["current_ctx"] = "1"
         try:
             decoder = av.CodecContext.create(
                 decoder_name,
                 "r",
-                hwaccel=hwaccel,
+                hwaccel=_cuda_hwaccel(self.device),
             )
             decoder.extradata = source_ctx.extradata
             decoder.width = source_ctx.width
@@ -439,7 +429,7 @@ class NvidiaVideoReader:
         try:
             frames = (
                 self._decoder_ctx.decode(packet)
-                if getattr(self, "_decoder_ctx", None) is not None
+                if self._decoder_ctx is not None
                 else packet.decode()
             )
         except av.error.InvalidDataError as e:
@@ -513,7 +503,7 @@ class NvidiaVideoReader:
         group = self._read_group(decoded)
         if not group:
             return
-        vendor = getattr(self, "vendor", AcceleratorVendor.NVIDIA)
+        vendor = self.vendor
         if (
             vendor is AcceleratorVendor.NVIDIA
             and group[0].format.name == "cuda"
