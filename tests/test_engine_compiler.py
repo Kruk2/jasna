@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import subprocess
+import warnings
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -174,7 +176,11 @@ def test_subprocess_compile_patches_frozen_torch(monkeypatch) -> None:
     # compiles nothing, so this only exercises the early import-torch + patch path.
     called = []
     monkeypatch.setattr("jasna._frozen.patch_frozen_torch", lambda: called.append(True))
-    _subprocess_compile(EngineCompilationRequest(device="cpu", fp16=False))
+    try:
+        with warnings.catch_warnings():
+            _subprocess_compile(EngineCompilationRequest(device="cpu", fp16=False))
+    finally:
+        logging.disable(logging.NOTSET)
     assert called, "patch_frozen_torch must run before any torch_tensorrt/_inductor import"
 
 

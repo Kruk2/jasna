@@ -38,3 +38,9 @@ def hidpi(request):
     finally:
         ctk.set_widget_scaling(1.0)
         ctk.set_window_scaling(1.0)
+
+
+@pytest.fixture
+def no_gpu_cleanup(monkeypatch):
+    """Skip the per-job torch cleanup: it initializes CUDA, which can outlast thread joins in a busy run."""
+    monkeypatch.setattr("jasna.gui.processor._cleanup_torch", lambda torch_mod: None)
