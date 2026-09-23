@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from ultralytics.utils import nms, ops
 
 from jasna.accelerator import is_nvidia_device
+from jasna.engine_paths import get_yolo_tensorrt_engine_path
 from jasna.media.resize_normalize import ResizeNormalizer
 from jasna.mosaic.detections import Detections
 
@@ -17,14 +18,6 @@ logger = logging.getLogger(__name__)
 
 _YOLO_LETTERBOX_PAD_VALUE = 114.0 / 255.0
 _MASK_MAX_SIDE = 256
-
-
-def get_yolo_tensorrt_engine_path(*args, **kwargs):
-    from jasna.mosaic.yolo_tensorrt_compilation import (
-        get_yolo_tensorrt_engine_path as resolve,
-    )
-
-    return resolve(*args, **kwargs)
 
 
 def TrtRunner(*args, **kwargs):
