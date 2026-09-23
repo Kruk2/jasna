@@ -157,7 +157,7 @@ class BasicSection:
 
         # Warning icon for overwrite (hidden by default)
         self._widgets["conflict_warning"] = ctk.CTkLabel(
-            row5, text="⚠️", text_color=Colors.STATUS_PAUSED, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL)
+            row5, text="⚠️", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL)
         )
 
         self._widgets["file_conflict"] = ValueOptionMenu(

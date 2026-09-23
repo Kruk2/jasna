@@ -1021,7 +1021,7 @@ class Toast(ctk.CTkFrame):
         colors = {
             "success": Colors.STATUS_COMPLETED,
             "error": Colors.STATUS_ERROR,
-            "warning": Colors.STATUS_PAUSED,
+            "warning": Colors.STATUS_WARNING,
             "info": Colors.PRIMARY,
         }
         accent = colors.get(type_, Colors.PRIMARY)

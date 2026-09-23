@@ -25,7 +25,6 @@ def test_reset_jobs_for_run_prepares_every_status_and_preserves_job_options(
         JobStatus.COMPLETED,
         JobStatus.ERROR,
         JobStatus.SKIPPED,
-        JobStatus.PAUSED,
     )
     jobs = [
         JobItem(

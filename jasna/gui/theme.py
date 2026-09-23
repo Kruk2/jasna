@@ -38,7 +38,7 @@ class Colors:
     # Status indicators
     STATUS_PROCESSING = "#34d399" # Emerald-400
     STATUS_ERROR = "#fb7185"      # Rose-400
-    STATUS_PAUSED = "#fbbf24"     # Amber-400
+    STATUS_WARNING = "#fbbf24"     # Amber-400
     STATUS_COMPLETED = "#22c55e"  # Green-500
     STATUS_PENDING = "#94a3b8"    # Slate-400
     STATUS_CONFLICT = "#fbbf24"   # Amber-400 (output file exists)

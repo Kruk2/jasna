@@ -14,7 +14,6 @@ from jasna.session_factory import RestorationSession, build_pipeline, build_rest
 def _build_session(
     config: SessionConfig,
     *,
-    disable_basicvsrpp_tensorrt: bool = False,
     amd: bool = False,
 ):
     compile_result = MagicMock(use_basicvsrpp_tensorrt=True)
@@ -32,7 +31,6 @@ def _build_session(
     ):
         session = build_restoration_session(
             config,
-            disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
             log_callback=None,
         )
     return session, compiled, restorer_cls, pipeline_cls, tvai_cls, unet_cls, rtx_cls
@@ -94,12 +92,6 @@ def test_session_selects_rtx_secondary_and_maps_none_levels() -> None:
     assert kwargs["quality"] == "high"
     assert kwargs["denoise"] is None
     assert kwargs["deblur"] == "low"
-
-
-def test_disable_basicvsrpp_tensorrt_gates_compilation() -> None:
-    _, compiled, *_ = _build_session(session_config(), disable_basicvsrpp_tensorrt=True)
-
-    assert compiled.call_args.args[0].basicvsrpp is False
 
 
 def test_amd_rejects_secondary_restoration() -> None:

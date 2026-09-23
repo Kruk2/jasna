@@ -248,7 +248,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             subtitle_color = Colors.STATUS_ERROR
         else:
             subtitle_text = t("wizard_warnings_only")
-            subtitle_color = Colors.STATUS_PAUSED
+            subtitle_color = Colors.STATUS_WARNING
         self._subtitle.configure(text=subtitle_text, text_color=subtitle_color)
 
         for key, (status_label, info_label, help_label) in self._check_labels.items():
@@ -256,7 +256,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             if passed:
                 icon, color = "✓", Colors.STATUS_COMPLETED
             elif key in _WARNING_ONLY_CHECKS:
-                icon, color = "⚠", Colors.STATUS_PAUSED
+                icon, color = "⚠", Colors.STATUS_WARNING
             else:
                 icon, color = "✕", Colors.STATUS_ERROR
             status_label.configure(text=icon, text_color=color)

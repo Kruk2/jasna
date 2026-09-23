@@ -128,7 +128,6 @@ def test_ensure_video_session_delegates_to_factory_and_close_unloads() -> None:
         processor._ensure_video_session()
 
     build.assert_called_once()
-    assert build.call_args.kwargs["disable_basicvsrpp_tensorrt"] is False
     assert processor._video_session is session
 
     with patch("jasna.gui.processor.release_session_memory") as release:

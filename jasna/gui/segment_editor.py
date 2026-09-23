@@ -258,7 +258,7 @@ class SegmentEditor(ctk.CTkToplevel):
             title_column,
             text="",
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-            text_color=Colors.STATUS_PAUSED,
+            text_color=Colors.STATUS_WARNING,
             anchor="w",
             justify="left",
             wraplength=840,
@@ -829,7 +829,7 @@ class SegmentEditor(ctk.CTkToplevel):
         legend.pack(fill="x", padx=20, pady=(0, 2))
         for color, label in (
             (Colors.PRIMARY, t("segments_legend_selected")),
-            (Colors.STATUS_PAUSED, t("segments_legend_detected")),
+            (Colors.STATUS_WARNING, t("segments_legend_detected")),
             ("#f8fafc", t("segments_legend_playhead")),
         ):
             item = ctk.CTkFrame(legend, fg_color="transparent")
@@ -1583,7 +1583,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._scan_stop_btn.configure(state="disabled")
         self._set_scan_activity_status(
             t("segments_scan_stopping"),
-            dot_color=Colors.STATUS_PAUSED,
+            dot_color=Colors.STATUS_WARNING,
         )
 
     def _scan_lockable_widgets(self) -> tuple:
@@ -1654,7 +1654,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._scan_low_vram = True
             self._set_scan_activity_status(
                 t("segments_scan_low_vram"),
-                dot_color=Colors.STATUS_PAUSED,
+                dot_color=Colors.STATUS_WARNING,
             )
         elif isinstance(event, ScanFailed):
             if self._scan_worker is not None:
@@ -1739,7 +1739,7 @@ class SegmentEditor(ctk.CTkToplevel):
                     count=len(proposals),
                     duration=format_timestamp(total_seconds, milliseconds=False),
                 ),
-                dot_color=Colors.STATUS_PAUSED,
+                dot_color=Colors.STATUS_WARNING,
             )
         self._set_scan_ui_state("results")
         if self._scan_overlay:
@@ -2194,7 +2194,7 @@ class SegmentEditor(ctk.CTkToplevel):
         elif self._edit_notice:
             self._notice.configure(
                 text=self._edit_notice,
-                text_color=Colors.STATUS_PAUSED if self._edit_notice_warning else Colors.STATUS_ERROR,
+                text_color=Colors.STATUS_WARNING if self._edit_notice_warning else Colors.STATUS_ERROR,
             )
         else:
             self._notice.configure(text="")

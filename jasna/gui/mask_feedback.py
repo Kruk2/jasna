@@ -623,7 +623,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
             if len(points) > 1:
                 canvas.create_line(
                     [coord for point in points for coord in point],
-                    fill=Colors.STATUS_PAUSED,
+                    fill=Colors.STATUS_WARNING,
                     width=2,
                 )
             for index, (cx, cy) in enumerate(points):
@@ -633,7 +633,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
                     cy - radius,
                     cx + radius,
                     cy + radius,
-                    fill=Colors.STATUS_PAUSED if index == 0 else "#e0e7ff",
+                    fill=Colors.STATUS_WARNING if index == 0 else "#e0e7ff",
                     outline="",
                 )
 

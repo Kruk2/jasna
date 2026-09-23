@@ -66,14 +66,11 @@ class Processor:
         
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-        self._pause_event = threading.Event()
-        self._pause_event.set()  # Not paused by default
         
         self._jobs: list[JobItem] = []
         self._settings: AppSettings | None = None
         self._output_folder: str = ""
         self._output_pattern: str = DEFAULT_OUTPUT_PATTERN
-        self._disable_basicvsrpp_tensorrt_for_run = False
 
         # Heavy models are loaded once and reused across consecutive jobs of the
         # same type; the other session is unloaded when the type switches.
@@ -87,8 +84,6 @@ class Processor:
         settings: AppSettings,
         output_folder: str,
         output_pattern: str,
-        *,
-        disable_basicvsrpp_tensorrt: bool,
     ):
         if self._thread and self._thread.is_alive():
             return
@@ -97,26 +92,13 @@ class Processor:
         self._settings = settings
         self._output_folder = output_folder
         self._output_pattern = output_pattern
-        self._disable_basicvsrpp_tensorrt_for_run = bool(disable_basicvsrpp_tensorrt)
-        
         self._stop_event.clear()
-        self._pause_event.set()
         
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
         
-    def pause(self):
-        if self._pause_event.is_set():
-            self._pause_event.clear()
-        else:
-            self._pause_event.set()
-            
-    def is_paused(self) -> bool:
-        return not self._pause_event.is_set()
-        
     def stop(self):
         self._stop_event.set()
-        self._pause_event.set()  # Unpause to allow thread to exit
         pipeline = self._current_pipeline
         if pipeline is not None:
             pipeline.cancel()
@@ -147,10 +129,6 @@ class Processor:
 
         try:
             while not self._stop_event.is_set():
-                self._pause_event.wait()
-                if self._stop_event.is_set():
-                    break
-
                 job = self._next_pending_job()
                 if job is None:
                     break
@@ -353,7 +331,6 @@ class Processor:
             return
         self._video_session = build_video_session(
             settings or self._settings,
-            disable_basicvsrpp_tensorrt=self._disable_basicvsrpp_tensorrt_for_run,
             log=lambda msg: self._log("INFO", msg),
         )
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
@@ -436,7 +413,6 @@ class Processor:
                 return
             last_update_time[0] = current_time
 
-            self._pause_event.wait()
             if self._stop_event.is_set():
                 raise ProcessingStopped("Processing stopped")
 
@@ -545,7 +521,6 @@ class Processor:
         detector, restorer, device = self._img_session
         settings = self._settings
 
-        self._pause_event.wait()
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
         self._progress(ProgressUpdate(job_id=job_id, status=JobStatus.PROCESSING, progress=20.0, message="Detecting mosaics"))

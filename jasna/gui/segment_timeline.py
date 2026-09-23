@@ -166,7 +166,7 @@ class SegmentTimeline(ctk.CTkFrame):
                 width,
                 top=_MAIN_BOTTOM - 6,
                 bottom=_MAIN_BOTTOM - 1,
-                fill=Colors.STATUS_PAUSED,
+                fill=Colors.STATUS_WARNING,
             )
 
         for index, segment in enumerate(self._segments):
@@ -188,7 +188,7 @@ class SegmentTimeline(ctk.CTkFrame):
                 width,
                 top=_MAIN_TOP + 5,
                 bottom=_MAIN_BOTTOM - 5,
-                fill=Colors.STATUS_PAUSED,
+                fill=Colors.STATUS_WARNING,
                 stipple="gray50",
             )
 
@@ -272,7 +272,7 @@ class SegmentTimeline(ctk.CTkFrame):
                 _OVERVIEW_BOTTOM - 4,
                 max(x1 + 1, x2),
                 _OVERVIEW_BOTTOM - 1,
-                fill=Colors.STATUS_PAUSED,
+                fill=Colors.STATUS_WARNING,
                 outline="",
             )
         x1 = _PAD_X + self._view_start / self.duration * usable

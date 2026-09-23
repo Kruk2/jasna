@@ -736,7 +736,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             self._aligned_generation = self._generation
             self._update_time_label(first.seconds)
             if not self._desired_playing:
-                self._set_status(t("player_paused"), Colors.STATUS_PAUSED)
+                self._set_status(t("player_paused"), Colors.STATUS_WARNING)
 
         if self._desired_playing and not self._playing:
             if self._frame_buffer.ready(PREROLL_SECONDS):
@@ -755,7 +755,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
                 )
             elif first is not None:
                 self._buffering = True
-                self._set_status(t("player_buffering"), Colors.STATUS_PAUSED)
+                self._set_status(t("player_buffering"), Colors.STATUS_WARNING)
 
         if not self._playing:
             return
@@ -784,7 +784,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
                 self._set_status(t("player_finished"), Colors.STATUS_COMPLETED)
             else:
                 self._buffering = True
-                self._set_status(t("player_buffering"), Colors.STATUS_PAUSED)
+                self._set_status(t("player_buffering"), Colors.STATUS_WARNING)
 
     def _show_frame(self, frame) -> None:
         if frame.generation != self._generation:
@@ -820,7 +820,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             self._buffering = False
             self._clock.pause()
             self._play_btn.configure(text="▶")
-            self._set_status(t("player_paused"), Colors.STATUS_PAUSED)
+            self._set_status(t("player_paused"), Colors.STATUS_WARNING)
             return
         if (self._eof or self._frame_buffer.eof) and self._frame_buffer.empty():
             self._desired_playing = True
