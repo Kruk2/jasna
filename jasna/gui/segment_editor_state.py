@@ -222,3 +222,76 @@ class SegmentEditorState:
         self.segments = snapshot.segments
         self.selected_index = snapshot.selected_index
         self.clear_marks()
+
+
+PREVIEW_ZOOM_MIN = 1.0
+PREVIEW_ZOOM_MAX = 8.0
+PREVIEW_ZOOM_STEP = 0.25
+
+
+def _clamp_center(center: tuple[float, float], zoom: float) -> tuple[float, float]:
+    half_visible = 0.5 / zoom
+    return (
+        min(1.0 - half_visible, max(half_visible, float(center[0]))),
+        min(1.0 - half_visible, max(half_visible, float(center[1]))),
+    )
+
+
+@dataclass
+class PreviewView:
+    """Zoom and pan of the editor preview; ``center`` is the visible middle as source fractions."""
+
+    zoom: float = PREVIEW_ZOOM_MIN
+    center: tuple[float, float] = (0.5, 0.5)
+
+    @property
+    def zoomed(self) -> bool:
+        return self.zoom > PREVIEW_ZOOM_MIN
+
+    @property
+    def is_reset(self) -> bool:
+        return not self.zoomed and self.center == (0.5, 0.5)
+
+    def reset(self) -> None:
+        self.zoom = PREVIEW_ZOOM_MIN
+        self.center = (0.5, 0.5)
+
+    def zoom_to(self, zoom: float, anchor: tuple[float, float] | None) -> bool:
+        """Change the zoom, keeping the source point under ``anchor`` (fractions of the shown image) still.
+
+        Returns whether the zoom changed.
+        """
+        new_zoom = min(PREVIEW_ZOOM_MAX, max(PREVIEW_ZOOM_MIN, float(zoom)))
+        if new_zoom == self.zoom:
+            return False
+        center = _clamp_center(self.center, self.zoom)
+        if anchor is not None:
+            fx, fy = anchor
+            center = (
+                center[0] + (fx - 0.5) / self.zoom - (fx - 0.5) / new_zoom,
+                center[1] + (fy - 0.5) / self.zoom - (fy - 0.5) / new_zoom,
+            )
+        self.zoom = new_zoom
+        self.center = _clamp_center(center, new_zoom)
+        return True
+
+    def pan(self, dx: float, dy: float) -> None:
+        """Follow a drag of ``dx``/``dy`` fractions of the shown image."""
+        self.center = _clamp_center(
+            (self.center[0] - dx / self.zoom, self.center[1] - dy / self.zoom),
+            self.zoom,
+        )
+
+    def crop_box(self, width: int, height: int) -> tuple[int, int, int, int] | None:
+        """Source box to show for a ``width`` x ``height`` image, or None when not zoomed."""
+        if not self.zoomed:
+            self.center = (0.5, 0.5)
+            return None
+        self.center = _clamp_center(self.center, self.zoom)
+        crop_width = max(1, min(width, round(width / self.zoom)))
+        crop_height = max(1, min(height, round(height / self.zoom)))
+        left = round(self.center[0] * width - crop_width / 2)
+        top = round(self.center[1] * height - crop_height / 2)
+        left = min(width - crop_width, max(0, left))
+        top = min(height - crop_height, max(0, top))
+        return left, top, left + crop_width, top + crop_height
