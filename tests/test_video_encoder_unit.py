@@ -1234,3 +1234,30 @@ class TestDropUnsupportedNvencOverrides:
 
     def test_av1_weighted_pred_always_dropped(self):
         assert self._drop("av1", {"weighted_pred": "1", "bf": "0"}) == {"bf": "0"}
+
+
+class TestResolveEncoderOptions:
+    def test_eight_bit_smart_fragment_matches_source_depth(self):
+        from jasna.accelerator import AcceleratorVendor
+        from jasna.media.video_encoder import resolve_encoder_options
+
+        spec, options = resolve_encoder_options(
+            AcceleratorVendor.NVIDIA, "hevc", _fake_metadata(is_10bit=False), {}, smart_fragment=True
+        )
+
+        assert spec.frame_format == "nv12"
+        assert options["profile"] == "main"
+        assert options["forced-idr"] == "1"
+
+    def test_amd_hevc_cq_maps_to_cqp_quantizers_without_bitrate_cap(self):
+        from jasna.accelerator import AcceleratorVendor
+        from jasna.media.video_encoder import resolve_encoder_options
+
+        spec, options = resolve_encoder_options(
+            AcceleratorVendor.AMD, "hevc", _fake_metadata(), {"cq": 21}, smart_fragment=False
+        )
+
+        assert spec.encoder_name == "hevc_amf"
+        assert (options["qp_i"], options["qp_p"]) == ("21", "21")
+        assert "cq" not in options
+        assert "maxrate" not in options
