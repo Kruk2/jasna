@@ -270,7 +270,7 @@ def test_queue_folder_action_uses_input_or_completed_output(monkeypatch, tmp_pat
         job = panel._jobs[0]
         widget = panel._job_widgets[0]
 
-        widget._handle_open_containing_folder()
+        widget._on_open_containing_folder()
         opened.assert_called_once_with(
             input_path, parent=panel.winfo_toplevel(), select_file=False
         )
@@ -284,7 +284,7 @@ def test_queue_folder_action_uses_input_or_completed_output(monkeypatch, tmp_pat
         panel.update_job_status(job.id, JobStatus.COMPLETED)
         root.update()
         assert widget._overflow_btn.winfo_ismapped()
-        widget._handle_open_containing_folder()
+        widget._on_open_containing_folder()
         opened.assert_called_once_with(
             output_path, parent=panel.winfo_toplevel(), select_file=True
         )

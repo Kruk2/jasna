@@ -11,7 +11,8 @@ from tkinterdnd2 import DND_FILES
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus
-from jasna.gui.components import AutoHidingScrollableFrame, JobListItem, Tooltip
+from jasna.gui.components import AutoHidingScrollableFrame, Tooltip
+from jasna.gui.job_list_item import JobListItem
 from jasna.gui.icons import create_icon
 from jasna.gui.file_actions import open_containing_folder
 from jasna.gui.file_actions import open_file
@@ -408,7 +409,7 @@ class QueuePanel(ctk.CTkFrame):
         widget.set_segment_summary(self._segment_summary(job), selected=bool(job.segments))
         self.update_job_status(job.id, job.status, job.progress, elapsed_seconds=job.elapsed_seconds)
         if job.has_conflict and job.status is JobStatus.PENDING:
-            widget.set_conflict(True, t("conflict_tooltip"))
+            widget.set_conflict(True)
 
     def add_job(self, path: Path):
         if any(j.path == path for j in self._jobs):
@@ -653,7 +654,7 @@ class QueuePanel(ctk.CTkFrame):
                 output_path = self._get_output_path(job.path)
                 job.has_conflict = output_path.exists() if output_path else False
                 if widget is not None:
-                    widget.set_conflict(job.has_conflict, t("conflict_tooltip") if job.has_conflict else "")
+                    widget.set_conflict(job.has_conflict)
     
     def set_output_enabled(self, enabled: bool):
         """Enable or disable output location controls (but not queue add/remove)."""

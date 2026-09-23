@@ -8,119 +8,101 @@ import pytest
 from tkinter import TclError
 
 from jasna.gui import app as app_module
-from jasna.gui import components
+from jasna.gui import components, job_list_item
 from jasna.gui.app import JasnaApp
-from jasna.gui.components import JobListItem, StatusPill
+from jasna.gui.components import StatusPill
+from jasna.gui.job_list_item import JobListItem
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.locales import t
 from jasna.gui.locales.th import TH
 
 
-def test_segment_tooltips_hide_before_editor_opens() -> None:
-    item = object.__new__(JobListItem)
-    item._segments_editable = True
-    item._on_edit_segments = MagicMock()
+@pytest.fixture
+def tk_root():
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    yield root
+    root.destroy()
+
+
+def _job_item(root, **callbacks) -> JobListItem:
+    handlers = {
+        name: MagicMock()
+        for name in (
+            "on_remove", "on_drag_start", "on_drag_move", "on_drag_end", "on_edit_segments",
+            "on_play", "on_open_containing_folder", "on_copy_path", "on_open_restored_output", "on_requeue",
+        )
+    }
+    handlers.update(callbacks)
+    return JobListItem(root, filename="clip.mp4", duration="1m 0s", status="pending", **handlers)
+
+
+class _RecordingMenu:
+    instances: list["_RecordingMenu"] = []
+
+    def __init__(self, *_args, **_kwargs):
+        self.commands = []
+        self.popup = None
+        _RecordingMenu.instances.append(self)
+
+    def add_command(self, **kwargs):
+        self.commands.append(kwargs)
+
+    def add_separator(self):
+        self.commands.append(None)
+
+    def bind(self, *_args):
+        pass
+
+    def delete(self, *_args):
+        self.commands.clear()
+
+    def tk_popup(self, x, y):
+        self.popup = (x, y)
+
+
+@pytest.fixture
+def recording_menu(monkeypatch):
+    _RecordingMenu.instances = []
+    monkeypatch.setattr(job_list_item.tkinter, "Menu", _RecordingMenu)
+    monkeypatch.setattr(job_list_item, "t", lambda key, **_kwargs: key)
+    return _RecordingMenu.instances
+
+
+def test_segment_tooltips_hide_before_editor_opens(tk_root) -> None:
+    on_edit_segments = MagicMock()
+    item = _job_item(tk_root, on_edit_segments=on_edit_segments)
     item._segment_tooltips = [MagicMock(), MagicMock()]
 
-    JobListItem._handle_edit_segments(item)
+    item._handle_edit_segments()
 
     for tooltip in item._segment_tooltips:
         tooltip.hide.assert_called_once_with()
-    item._on_edit_segments.assert_called_once_with()
+    on_edit_segments.assert_called_once_with()
 
 
-def test_queue_overflow_menu_uses_button_and_right_click_coordinates(monkeypatch) -> None:
-    menus = []
+def test_queue_overflow_menu_uses_button_and_right_click_coordinates(tk_root, recording_menu) -> None:
+    item = _job_item(tk_root)
+    tk_root.update()
+    button = item._overflow_btn
 
-    class Menu:
-        def __init__(self, *_args, **_kwargs):
-            self.commands = []
-            self.popup = None
-            self.released = False
-            self.destroyed = False
-            menus.append(self)
+    assert item._show_action_menu() == "break"
+    assert recording_menu[0].popup == (button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
+    assert recording_menu[0].commands[0]["label"] == "open_containing_folder"
 
-        def add_command(self, **kwargs):
-            self.commands.append(kwargs)
-
-        def add_separator(self):
-            self.commands.append(None)
-
-        def bind(self, *_args):
-            pass
-
-        def delete(self, *_args):
-            self.commands.clear()
-
-        def tk_popup(self, x, y):
-            self.popup = (x, y)
+    assert item._show_action_menu(SimpleNamespace(x_root=30, y_root=40)) == "break"
+    assert recording_menu[0].popup == (30, 40)
 
 
-    monkeypatch.setattr(components.tkinter, "Menu", Menu)
-    monkeypatch.setattr(components, "t", lambda key: key)
-    handler = MagicMock()
-    item = SimpleNamespace(
-        _overflow_btn=SimpleNamespace(
-            winfo_rootx=lambda: 10,
-            winfo_rooty=lambda: 20,
-            winfo_height=lambda: 22,
-        ),
-        _handle_open_containing_folder=handler,
-        _handle_copy_path=MagicMock(),
-        _has_restored_output=False,
-        _requeueable=False,
-    )
+def test_queue_overflow_menu_includes_completed_actions(tk_root, recording_menu) -> None:
+    item = _job_item(tk_root)
+    item.set_action_options(has_restored_output=True, requeueable=True)
 
-    assert JobListItem._show_action_menu(item) == "break"
-    assert menus[0].popup == (10, 42)
-    assert menus[0].commands[0]["label"] == "open_containing_folder"
+    item._show_action_menu()
 
-    assert JobListItem._show_action_menu(item, SimpleNamespace(x_root=30, y_root=40)) == "break"
-    assert menus[0].popup == (30, 40)
-
-
-def test_queue_overflow_menu_includes_completed_actions(monkeypatch) -> None:
-    menus = []
-
-    class Menu:
-        def __init__(self, *_args, **_kwargs):
-            self.commands = []
-            menus.append(self)
-
-        def add_command(self, **kwargs):
-            self.commands.append(kwargs)
-
-        def add_separator(self):
-            self.commands.append(None)
-
-        def bind(self, *_args):
-            pass
-
-        def delete(self, *_args):
-            self.commands.clear()
-
-        def tk_popup(self, *_args):
-            pass
-
-    monkeypatch.setattr(components.tkinter, "Menu", Menu)
-    monkeypatch.setattr(components, "t", lambda key: key)
-    item = SimpleNamespace(
-        _overflow_btn=SimpleNamespace(
-            winfo_rootx=lambda: 10,
-            winfo_rooty=lambda: 20,
-            winfo_height=lambda: 22,
-        ),
-        _handle_open_containing_folder=MagicMock(),
-        _handle_copy_path=MagicMock(),
-        _handle_open_restored_output=MagicMock(),
-        _handle_requeue=MagicMock(),
-        _has_restored_output=True,
-        _requeueable=True,
-    )
-
-    JobListItem._show_action_menu(item)
-
-    assert [entry["label"] for entry in menus[0].commands if entry] == [
+    assert [entry["label"] for entry in recording_menu[0].commands if entry] == [
         "open_containing_folder",
         "copy_path",
         "open_restored_output",
@@ -128,10 +110,21 @@ def test_queue_overflow_menu_includes_completed_actions(monkeypatch) -> None:
     ]
 
 
-def test_queue_overflow_menu_is_suppressed_when_hidden() -> None:
-    item = SimpleNamespace(_action_menu_visible=False)
+def test_queue_overflow_menu_is_suppressed_when_hidden(tk_root, recording_menu) -> None:
+    item = _job_item(tk_root)
+    item.set_action_menu_visible(False)
 
-    assert JobListItem._show_action_menu(item) == "break"
+    assert item._show_action_menu() == "break"
+    assert recording_menu == []
+
+
+def test_conflict_dot_toggles(tk_root) -> None:
+    item = _job_item(tk_root)
+
+    item.set_conflict(True)
+    assert item._conflict_dot.winfo_manager() == "pack"
+    item.set_conflict(False)
+    assert item._conflict_dot.winfo_manager() == ""
 
 
 def test_enabling_start_button_hides_disabled_tooltip() -> None:
@@ -163,19 +156,15 @@ def test_updating_disabled_start_button_hides_previous_tooltip() -> None:
     tooltip.hide.assert_called_once_with()
 
 
-def test_completed_job_combines_status_and_elapsed_time() -> None:
-    item = object.__new__(JobListItem)
-    item._status_label = MagicMock()
-    item._fps_label = MagicMock()
-    item._eta_label = MagicMock()
+def test_completed_job_combines_status_and_elapsed_time(tk_root) -> None:
+    item = _job_item(tk_root)
+    item.set_fps_eta(fps=30.0, eta_seconds=10.0)
 
-    JobListItem.set_completed(item, 2.6)
+    item.set_completed(2.6)
 
-    item._status_label.configure.assert_called_once_with(
-        text=f"{t('completed_in')} 2s",
-    )
-    item._fps_label.configure.assert_called_once_with(text="")
-    item._eta_label.configure.assert_called_once_with(text="")
+    assert item._status_label.cget("text") == f"{t('completed_in')} 2s"
+    assert item._fps_label.cget("text") == ""
+    assert item._eta_label.cget("text") == ""
 
 
 def test_status_pill_sizes_to_localized_content(monkeypatch) -> None:
