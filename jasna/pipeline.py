@@ -30,7 +30,6 @@ from jasna.media.splice import (
 )
 from jasna.pipeline_threads import run_restoration_pass
 from jasna.progressbar import Progressbar
-from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange
 from jasna.session_config import SessionConfig
