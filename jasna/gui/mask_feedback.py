@@ -411,10 +411,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
 
     def _on_resize(self, _event=None) -> None:
         if self._resize_after is not None:
-            try:
-                self.after_cancel(self._resize_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._resize_after)
         self._resize_after = self.after(60, self._redraw)
 
     def _view(self) -> tuple[float, float, float]:
@@ -517,10 +514,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
     def _on_alpha(self, value: float) -> None:
         self._mask_alpha = float(value)
         if self._alpha_after is not None:
-            try:
-                self.after_cancel(self._alpha_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._alpha_after)
         self._alpha_after = self.after(40, self._redraw)
 
     def _toggle_shapes(self) -> None:
@@ -661,10 +655,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         if self._done:
             return
         self._done = True
-        try:
-            self.grab_release()
-        except tk.TclError:
-            pass
+        self.grab_release()
         if self._on_closed is not None:
             self._on_closed()
         self.destroy()

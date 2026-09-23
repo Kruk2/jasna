@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import queue
 import sys
@@ -48,6 +49,8 @@ _SEEK_STEP_SECONDS = 30.0
 _FULLSCREEN_EDGE_PX = 8
 _BUFFER_STATUS_INTERVAL_SECONDS = 0.25
 _SEEK_UPDATE_INTERVAL_SECONDS = 0.1
+
+logger = logging.getLogger(__name__)
 
 
 def _load_windows_multimedia_timer():
@@ -1113,10 +1116,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
             return
         self._closed = True
         self._probe_generation += 1
-        try:
-            self.grab_release()
-        except tk.TclError:
-            pass
+        self.grab_release()
         if self._native_renderer is not None:
             self._native_renderer.close()
         self._timer_resolution.close()
@@ -1129,4 +1129,4 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         try:
             self.after(0, callback)
         except (tk.TclError, RuntimeError):
-            pass
+            logger.debug("Player window closed before a worker callback ran", exc_info=True)

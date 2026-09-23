@@ -10,6 +10,7 @@ from typing import Iterator
 import av
 from PIL import Image
 
+from jasna.gui.queues import replace_pending
 from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
 
 
@@ -108,10 +109,8 @@ class SegmentPreviewWorker:
     def next_frame(self) -> None:
         if self._closed.is_set():
             return
-        try:
+        if self._commands.empty():
             self._commands.put_nowait(_Next(self._generation))
-        except queue.Full:
-            pass
 
     def previous_frame(self, seconds: float) -> int:
         self._generation += 1
@@ -133,15 +132,7 @@ class SegmentPreviewWorker:
     def _replace_command(self, command: _Command, *, allow_closed: bool = False) -> None:
         if self._closed.is_set() and not allow_closed:
             return
-        try:
-            while True:
-                self._commands.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            self._commands.put_nowait(command)
-        except queue.Full:
-            pass
+        replace_pending(self._commands, command)
 
     def _run(self) -> None:
         try:

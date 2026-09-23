@@ -558,7 +558,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         try:
             self.after(0, self._update_start_button_state)
         except (tk.TclError, RuntimeError):
-            pass
+            logger.debug("Window closed before the GPU-busy state could be shown", exc_info=True)
         
     def _show_toast(self, message: str, type_: str = "info"):
         """Show a toast notification."""
@@ -836,7 +836,7 @@ class GUILogHandler(logging.Handler):
             # Use after_idle to thread-safely update GUI
             self._log_panel.after_idle(self._log_panel.add_log, record.levelname, msg)
         except Exception:
-            pass  # Ignore errors in log handler
+            self.handleError(record)
 
 
 def run_gui():

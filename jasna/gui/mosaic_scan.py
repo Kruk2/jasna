@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
 from jasna.media.probe import VideoMetadata
 from jasna.segments import SegmentRange, normalize_segments
@@ -404,15 +405,7 @@ class MosaicScanWorker:
     ) -> None:
         if self._closed.is_set() and not allow_closed:
             return
-        try:
-            while True:
-                self._commands.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            self._commands.put_nowait(command)
-        except queue.Full:
-            pass
+        replace_pending(self._commands, command)
 
     def _run(self) -> None:
         try:
