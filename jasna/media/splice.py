@@ -15,6 +15,7 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.container_utils import (
+    MOV_SUFFIXES,
     is_mov_chapter_stream,
     subtitle_transcode_codec,
 )
@@ -96,7 +97,7 @@ def validate_smart_render(
     *,
     output_path: str | Path,
     codec: str,
-    retarget_high_fps: bool = False,
+    retarget_high_fps: bool,
 ) -> str:
     input_codec = _canonical_codec(metadata.codec_name)
     output_codec = _canonical_codec(codec)
@@ -122,13 +123,13 @@ def validate_smart_render(
     if find_executable("ffmpeg") is None:
         raise SmartRenderCompatibilityError("Smart rendering requires ffmpeg")
 
-    pixel_format = str(getattr(metadata, "pixel_format", "") or "").lower()
+    pixel_format = metadata.pixel_format.lower()
     supported_formats = {"", "yuv420p", "yuvj420p", "nv12", "yuv420p10le", "p010le"}
     if pixel_format not in supported_formats:
         raise SmartRenderCompatibilityError(
             f"Smart rendering requires 4:2:0 input; pixel format {pixel_format!r} is unsupported"
         )
-    field_order = str(getattr(metadata, "field_order", "") or "").lower()
+    field_order = metadata.field_order.lower()
     if field_order not in {"", "unknown", "progressive"}:
         raise SmartRenderCompatibilityError("Smart rendering currently requires progressive video")
     if input_codec == "h264" and metadata.is_10bit:
@@ -442,11 +443,11 @@ def create_copy_fragment(
     index: KeyframeIndex,
     destination: Path,
     *,
-    codec: str | None = None,
+    codec: str,
 ) -> None:
     if destination.exists():
         destination.unlink()
-    if _canonical_codec(codec or _codec_name(source)) == "av1":
+    if _canonical_codec(codec) == "av1":
         start = index.seconds_for_pts(span.start_pts)
         duration = float((span.end_pts - span.start_pts) * index.time_base)
         args: list[str] = []
@@ -476,11 +477,6 @@ def create_copy_fragment(
                 packet.dts -= span.start_pts
             packet.stream = out_stream
             dst.mux(packet)
-
-
-def _codec_name(path: Path) -> str:
-    with av.open(str(path)) as container:
-        return container.streams.video[0].codec_context.codec.canonical_name
 
 
 def normalize_fragment(source: Path, destination: Path, *, codec: str) -> None:
@@ -655,7 +651,7 @@ def mux_final_output(
             transcode_codec = transcoded_subtitles.get(stream.index)
             if transcode_codec is not None:
                 args += [f"-c:s:{output_index}", transcode_codec]
-    if destination.suffix.lower() in {".mp4", ".mov"}:
+    if destination.suffix.lower() in MOV_SUFFIXES:
         tag = {"h264": "avc3", "hevc": "hvc1", "av1": "av01"}[codec]
         args += ["-tag:v:0", tag, "-movflags", "+faststart"]
     args.append(str(temporary))

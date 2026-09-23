@@ -343,6 +343,7 @@ class TestSourceContainerPreservation:
         )
         encoder.dst = SimpleNamespace(
             format=SimpleNamespace(name="mp4"),
+            supported_codecs=frozenset({"h264", "aac", "mov_text"}),
             add_stream=MagicMock(),
             add_stream_from_template=MagicMock(
                 side_effect=ValueError("mp4 does not support pgssub")

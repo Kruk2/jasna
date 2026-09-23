@@ -7,6 +7,7 @@ from av.codec.codec import Properties
 
 
 _MOV_FORMATS = frozenset({"mov", "mp4", "m4a", "3gp", "3g2", "mj2"})
+MOV_SUFFIXES = frozenset({".mp4", ".mov"})
 
 
 def is_mov_chapter_stream(

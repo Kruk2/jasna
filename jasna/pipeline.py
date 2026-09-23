@@ -17,6 +17,7 @@ import psutil
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.probe import UnsupportedColorspaceError, get_video_meta_data
 from jasna.media.video_encoder import NvidiaVideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
@@ -576,7 +577,7 @@ class Pipeline:
             disable=self.disable_progress,
             callback=self.progress_callback,
         )
-        if self.fmp4 and self.output_video.suffix.lower() not in {".mp4", ".mov"}:
+        if self.fmp4 and self.output_video.suffix.lower() not in MOV_SUFFIXES:
             log.info(
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
                 self.output_video.suffix,
