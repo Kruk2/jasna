@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from jasna.gui.wizard import FirstRunWizard
+from jasna.gui.system_checks import check_gpu
 
 
 def _make_fake_torch(
@@ -37,8 +37,7 @@ def _call_check_gpu(monkeypatch, fake_torch) -> tuple[bool, str]:
         "vendor_for_device",
         lambda _device: accelerator.AcceleratorVendor.NVIDIA,
     )
-    stub = types.SimpleNamespace()
-    return FirstRunWizard._check_gpu(stub)
+    return check_gpu()
 
 
 def test_check_gpu_passes_when_cuda_available_and_compute_75(monkeypatch):

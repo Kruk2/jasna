@@ -3,7 +3,6 @@
 import logging
 import threading
 import traceback
-import queue
 import time
 from pathlib import Path
 from dataclasses import dataclass, replace

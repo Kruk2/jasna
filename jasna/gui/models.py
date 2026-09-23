@@ -8,7 +8,6 @@ import threading
 from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 from jasna.gui.paths import get_settings_path
 from jasna.segments import SegmentRange

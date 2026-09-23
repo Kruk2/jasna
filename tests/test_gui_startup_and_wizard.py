@@ -2,7 +2,7 @@ import sys
 import types
 
 from jasna import startup_timing
-from jasna.gui.wizard import _evaluate_check_results
+from jasna.gui.system_checks import evaluate_check_results
 
 
 def test_elapsed_ms_is_monotonic_nonnegative():
@@ -14,7 +14,7 @@ def test_elapsed_ms_is_monotonic_nonnegative():
 
 def test_evaluate_all_passed():
     results = {"ascii_path": (True, ""), "gpu": (True, ""), "sysmem": (True, "")}
-    all_passed, required_failure = _evaluate_check_results(results, results.keys())
+    all_passed, required_failure = evaluate_check_results(results, results.keys())
     assert all_passed is True
     assert required_failure is False
 
@@ -22,7 +22,7 @@ def test_evaluate_all_passed():
 def test_evaluate_missing_check_counts_as_required_failure():
     # gpu/cuda never ran (e.g. check thread died) -> must read as failure, never "ready".
     results = {"ascii_path": (True, "")}
-    all_passed, required_failure = _evaluate_check_results(
+    all_passed, required_failure = evaluate_check_results(
         results, ["ascii_path", "gpu", "cuda"]
     )
     assert all_passed is False
@@ -31,7 +31,7 @@ def test_evaluate_missing_check_counts_as_required_failure():
 
 def test_evaluate_sysmem_only_failure_is_warning_not_required():
     results = {"gpu": (True, ""), "sysmem": (False, "")}
-    all_passed, required_failure = _evaluate_check_results(results, results.keys())
+    all_passed, required_failure = evaluate_check_results(results, results.keys())
     assert all_passed is False  # a warning still means "not all passed"
     assert required_failure is False  # but sysmem is warning-only, not blocking
 
