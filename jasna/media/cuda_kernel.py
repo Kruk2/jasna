@@ -8,6 +8,7 @@ import ctypes
 import os
 import sys
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 from jasna._frozen import is_frozen
@@ -60,6 +61,10 @@ def cuda_driver() -> ctypes.CDLL:
     lib.cuGetErrorName.restype = ctypes.c_int
     lib.cuGetErrorString.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
     lib.cuGetErrorString.restype = ctypes.c_int
+    lib.cuStreamCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
+    lib.cuStreamCreate.restype = ctypes.c_int
+    lib.cuStreamDestroy.argtypes = [ctypes.c_void_p]
+    lib.cuStreamDestroy.restype = ctypes.c_int
     _driver = lib
     return lib
 
@@ -82,6 +87,17 @@ def current_context() -> ctypes.c_void_p:
     context = ctypes.c_void_p()
     check_cuda(lib.cuCtxGetCurrent(ctypes.byref(context)), "cuCtxGetCurrent")
     return context
+
+
+def create_stream() -> int:
+    """Create a blocking CUDA stream in the current context and return its handle."""
+    handle = ctypes.c_void_p()
+    check_cuda(cuda_driver().cuStreamCreate(ctypes.byref(handle), 0), "cuStreamCreate")
+    return handle.value
+
+
+def destroy_stream(stream: int) -> None:
+    check_cuda(cuda_driver().cuStreamDestroy(ctypes.c_void_p(stream)), "cuStreamDestroy")
 
 
 def load_module(fatbin_name: str) -> ctypes.c_void_p:
@@ -110,9 +126,6 @@ def load_module(fatbin_name: str) -> ctypes.c_void_p:
 
 
 def resolve_function(fatbin_name: str, function_name: str) -> ctypes.c_void_p:
-    context = current_context()
-    if not context.value:
-        raise RuntimeError(f"No current CUDA context while resolving {function_name}")
     module = load_module(fatbin_name)
     function = ctypes.c_void_p()
     check_cuda(
@@ -122,3 +135,45 @@ def resolve_function(fatbin_name: str, function_name: str) -> ctypes.c_void_p:
         f"cuModuleGetFunction({function_name})",
     )
     return function
+
+
+def grid_size(extent: int, block: int) -> int:
+    return (extent + block - 1) // block
+
+
+class Kernel:
+    """One fatbin function launched through a reused argument buffer.
+
+    ``arg_types`` are the ctypes of the kernel parameters in order; ``launch``
+    fills them from plain Python ints/floats. The lock keeps one instance safe
+    to share between threads.
+    """
+
+    def __init__(self, fatbin_name: str, function_name: str, arg_types: Sequence[type]):
+        self.fatbin_name = fatbin_name
+        self.function_name = function_name
+        self._function: ctypes.c_void_p | None = None
+        self._values = [arg_type() for arg_type in arg_types]
+        self._params = (ctypes.c_void_p * len(self._values))(
+            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
+        )
+        self._lock = threading.Lock()
+
+    def launch(
+        self,
+        grid: tuple[int, int, int],
+        block: tuple[int, int, int],
+        args: Sequence[int | float],
+        stream: int,
+    ) -> None:
+        with self._lock:
+            if self._function is None:
+                self._function = resolve_function(self.fatbin_name, self.function_name)
+            for value, arg in zip(self._values, args, strict=True):
+                value.value = arg
+            check_cuda(
+                cuda_driver().cuLaunchKernel(
+                    self._function, *grid, *block, 0, ctypes.c_void_p(stream), self._params, None
+                ),
+                f"cuLaunchKernel({self.function_name})",
+            )

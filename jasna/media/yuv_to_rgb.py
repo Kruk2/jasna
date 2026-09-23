@@ -5,7 +5,7 @@ import torch
 from av.video.reformatter import Colorspace as AvColorspace
 
 from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
+from jasna.media.cuda_kernel import Kernel, grid_size
 
 # YUV->RGB from standard luma coefficients (Kr, Kb):
 #   R = Y' + 2(1-Kr) * V'
@@ -46,28 +46,16 @@ _FATBIN = "yuv_to_rgb.fatbin"
 
 class _CudaYuvKernel:
     def __init__(self, function_name: str):
-        self.function_name = function_name
-        self._function: ctypes.c_void_p | None = None
-        self._values = [
-            *(ctypes.c_uint64() for _ in range(2 * _CUDA_CONVERSION_BATCH)),
-            ctypes.c_int(),       # y stride
-            ctypes.c_int(),       # uv stride
-            ctypes.c_uint64(),    # output pointer
-            ctypes.c_int64(),     # output batch stride
-            ctypes.c_int64(),     # output channel stride
-            ctypes.c_int64(),     # output row stride
-            ctypes.c_int(),       # batch size
-            ctypes.c_int(),       # height
-            ctypes.c_int(),       # width
-        ]
-        self._params = (ctypes.c_void_p * len(self._values))(
-            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
+        self._kernel = Kernel(
+            _FATBIN,
+            function_name,
+            (
+                *(ctypes.c_uint64 for _ in range(2 * _CUDA_CONVERSION_BATCH)),
+                ctypes.c_int, ctypes.c_int,
+                ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                ctypes.c_int, ctypes.c_int, ctypes.c_int,
+            ),
         )
-
-    def _resolve(self) -> ctypes.c_void_p:
-        if self._function is None:
-            self._function = resolve_function(_FATBIN, self.function_name)
-        return self._function
 
     def launch(self, y: torch.Tensor, uv: torch.Tensor, out: torch.Tensor) -> None:
         self.launch_ptrs(
@@ -101,41 +89,22 @@ class _CudaYuvKernel:
         batch_size = len(y_ptrs)
         if batch_size != len(uv_ptrs) or not 1 <= batch_size <= _CUDA_CONVERSION_BATCH:
             raise ValueError(f"CUDA YUV conversion batch must contain 1-{_CUDA_CONVERSION_BATCH} frames")
-        function = self._resolve()
-        values = self._values
-        for i in range(_CUDA_CONVERSION_BATCH):
-            values[i].value = y_ptrs[i] if i < batch_size else 0
-            values[_CUDA_CONVERSION_BATCH + i].value = uv_ptrs[i] if i < batch_size else 0
-        base = 2 * _CUDA_CONVERSION_BATCH
-        values[base].value = y_stride
-        values[base + 1].value = uv_stride
-        values[base + 2].value = out.data_ptr()
-        values[base + 3].value = out.stride(0) if out.ndim == 4 else 0
-        values[base + 4].value = out.stride(-3)
-        values[base + 5].value = out.stride(-2)
-        values[base + 6].value = batch_size
-        values[base + 7].value = out.shape[-2]
-        values[base + 8].value = out.shape[-1]
+        unused = [0] * (_CUDA_CONVERSION_BATCH - batch_size)
         threads = 256
         pixels = batch_size * out.shape[-2] * out.shape[-1]
-        blocks = (pixels + threads - 1) // threads
         if stream is None:
             stream = torch.cuda.current_stream(out.device).cuda_stream
-        check_cuda(
-            cuda_driver().cuLaunchKernel(
-                function,
-                blocks,
-                1,
-                1,
-                threads,
-                1,
-                1,
-                0,
-                ctypes.c_void_p(stream),
-                self._params,
-                None,
+        self._kernel.launch(
+            (grid_size(pixels, threads), 1, 1),
+            (threads, 1, 1),
+            (
+                *y_ptrs, *unused,
+                *uv_ptrs, *unused,
+                y_stride, uv_stride,
+                out.data_ptr(), out.stride(0) if out.ndim == 4 else 0, out.stride(-3), out.stride(-2),
+                batch_size, out.shape[-2], out.shape[-1],
             ),
-            f"cuLaunchKernel({self.function_name})",
+            stream,
         )
 
 
