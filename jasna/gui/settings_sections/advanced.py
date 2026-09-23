@@ -6,6 +6,7 @@ from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
+    add_setting_label,
     ValueOptionMenu,
     create_slider_value_label,
     get_tooltip,
@@ -32,11 +33,7 @@ class AdvancedSection:
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        overlap_label = ctk.CTkLabel(row1, text=t("temporal_overlap"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        overlap_label.pack(side="left")
-        overlap_tooltip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        overlap_tooltip.pack(side="left", padx=4)
-        Tooltip(overlap_tooltip, get_tooltip("temporal_overlap"))
+        add_setting_label(row1, "temporal_overlap")
 
         self._widgets["temporal_overlap_val"] = create_slider_value_label(
             row1, "8", 3, Colors.BG_PANEL
@@ -54,11 +51,7 @@ class AdvancedSection:
         gap_row = ctk.CTkFrame(inner, fg_color="transparent")
         gap_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        gap_label = ctk.CTkLabel(gap_row, text=t("max_detection_gap"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        gap_label.pack(side="left")
-        gap_tooltip = ctk.CTkLabel(gap_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        gap_tooltip.pack(side="left", padx=4)
-        Tooltip(gap_tooltip, get_tooltip("max_detection_gap"))
+        add_setting_label(gap_row, "max_detection_gap")
 
         self._widgets["max_detection_gap_val"] = create_slider_value_label(
             gap_row, "2", 3, Colors.BG_PANEL
@@ -77,11 +70,7 @@ class AdvancedSection:
         mindur_row = ctk.CTkFrame(inner, fg_color="transparent")
         mindur_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        mindur_label = ctk.CTkLabel(mindur_row, text=t("min_detection_duration"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        mindur_label.pack(side="left")
-        mindur_tooltip = ctk.CTkLabel(mindur_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        mindur_tooltip.pack(side="left", padx=4)
-        Tooltip(mindur_tooltip, get_tooltip("min_detection_duration"))
+        add_setting_label(mindur_row, "min_detection_duration")
 
         self._widgets["min_detection_duration_val"] = create_slider_value_label(
             mindur_row, "2", 3, Colors.BG_PANEL
@@ -102,11 +91,7 @@ class AdvancedSection:
 
         scene_frame = ctk.CTkFrame(scene_row, fg_color=Colors.BG_CARD, corner_radius=6)
         scene_frame.pack(fill="x")
-        scene_label = ctk.CTkLabel(scene_frame, text=t("scene_detection"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        scene_label.pack(side="left", padx=12, pady=8)
-        scene_tip = ctk.CTkLabel(scene_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        scene_tip.pack(side="left")
-        Tooltip(scene_tip, get_tooltip("scene_detection"))
+        add_setting_label(scene_frame, "scene_detection", in_card=True)
         self._widgets["scene_detection"] = CompactSwitch(
             scene_frame,
             self._on_modified,
@@ -121,11 +106,7 @@ class AdvancedSection:
 
         crossfade_frame = ctk.CTkFrame(row2, fg_color=Colors.BG_CARD, corner_radius=6)
         crossfade_frame.pack(fill="x")
-        crossfade_label = ctk.CTkLabel(crossfade_frame, text=t("enable_crossfade"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        crossfade_label.pack(side="left", padx=12, pady=8)
-        crossfade_tip = ctk.CTkLabel(crossfade_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        crossfade_tip.pack(side="left")
-        Tooltip(crossfade_tip, get_tooltip("enable_crossfade"))
+        add_setting_label(crossfade_frame, "enable_crossfade", in_card=True)
         self._widgets["enable_crossfade"] = CompactSwitch(
             crossfade_frame,
             self._on_modified,
@@ -176,11 +157,7 @@ class AdvancedSection:
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        strength_label = ctk.CTkLabel(row3, text=t("denoise_strength"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        strength_label.pack(side="left")
-        strength_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        strength_tip.pack(side="left", padx=4)
-        Tooltip(strength_tip, get_tooltip("denoise_strength"))
+        add_setting_label(row3, "denoise_strength")
 
         self._widgets["denoise_strength"] = ValueOptionMenu(
             row3,
@@ -203,11 +180,7 @@ class AdvancedSection:
         row4 = ctk.CTkFrame(inner, fg_color="transparent")
         row4.pack(fill="x")
 
-        step_label = ctk.CTkLabel(row4, text=t("denoise_step"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        step_label.pack(side="left")
-        step_tip = ctk.CTkLabel(row4, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        step_tip.pack(side="left", padx=4)
-        Tooltip(step_tip, get_tooltip("denoise_step"))
+        add_setting_label(row4, "denoise_step")
 
         self._widgets["denoise_step"] = ValueOptionMenu(
             row4,

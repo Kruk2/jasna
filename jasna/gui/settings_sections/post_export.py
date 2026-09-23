@@ -4,7 +4,7 @@ import customtkinter as ctk
 
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import ValueOptionMenu, get_tooltip
+from jasna.gui.settings_sections.widgets import add_setting_label, ValueOptionMenu, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -24,11 +24,7 @@ class PostExportSection:
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x")
 
-        action_label = ctk.CTkLabel(row1, text=t("post_export_action"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        action_label.pack(side="left")
-        action_tip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        action_tip.pack(side="left", padx=4)
-        Tooltip(action_tip, get_tooltip("post_export_action"))
+        add_setting_label(row1, "post_export_action")
 
         self._widgets["post_export_action"] = ValueOptionMenu(
             row1,

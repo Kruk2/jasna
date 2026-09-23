@@ -5,6 +5,7 @@ import tkinter as tk
 import customtkinter as ctk
 
 from jasna.gui import scaling
+from jasna.gui.components import Tooltip
 from jasna.gui.locales import t
 from jasna.gui.theme import Colors, Fonts
 
@@ -12,6 +13,19 @@ from jasna.gui.theme import Colors, Fonts
 def get_tooltip(key: str) -> str:
     """Get localized tooltip for a setting key."""
     return t(f"tip_{key}")
+
+
+def add_setting_label(row, label_key: str, tooltip_key: str | None = None, *, in_card: bool = False) -> None:
+    """Pack a setting's name and its ⓘ tooltip icon at the left of ``row``."""
+    label = ctk.CTkLabel(row, text=t(label_key), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+    tip = ctk.CTkLabel(row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+    if in_card:
+        label.pack(side="left", padx=12, pady=8)
+        tip.pack(side="left")
+    else:
+        label.pack(side="left")
+        tip.pack(side="left", padx=4)
+    Tooltip(tip, get_tooltip(tooltip_key or label_key))
 
 
 def create_slider_value_label(

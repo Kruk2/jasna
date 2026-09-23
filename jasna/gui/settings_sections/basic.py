@@ -6,9 +6,9 @@ from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
+    add_setting_label,
     ValueOptionMenu,
     create_slider_value_label,
-    get_tooltip,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 
@@ -48,11 +48,7 @@ class BasicSection:
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        clip_label = ctk.CTkLabel(row1, text=t("max_clip_size"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        clip_label.pack(side="left")
-        clip_tooltip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        clip_tooltip.pack(side="left", padx=4)
-        Tooltip(clip_tooltip, get_tooltip("max_clip_size"))
+        add_setting_label(row1, "max_clip_size")
 
         self._widgets["max_clip_size_val"] = create_slider_value_label(
             row1, "90", 4, Colors.BG_PANEL
@@ -70,11 +66,7 @@ class BasicSection:
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
         row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        model_label = ctk.CTkLabel(row2, text=t("detection_model"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        model_label.pack(side="left")
-        model_tip = ctk.CTkLabel(row2, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        model_tip.pack(side="left", padx=4)
-        Tooltip(model_tip, get_tooltip("detection_model"))
+        add_setting_label(row2, "detection_model")
 
         from jasna.mosaic.detection_registry import detection_model_choices
         available_models = detection_model_choices()
@@ -93,11 +85,7 @@ class BasicSection:
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
         row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        thresh_label = ctk.CTkLabel(row3, text=t("detection_threshold"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        thresh_label.pack(side="left")
-        thresh_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        thresh_tip.pack(side="left", padx=4)
-        Tooltip(thresh_tip, get_tooltip("detection_score_threshold"))
+        add_setting_label(row3, "detection_threshold", "detection_score_threshold")
 
         self._widgets["detection_threshold_val"] = create_slider_value_label(
             row3, "0.35", 4, Colors.BG_PANEL
@@ -117,11 +105,7 @@ class BasicSection:
 
         fp16_frame = ctk.CTkFrame(row4, fg_color=Colors.BG_CARD, corner_radius=6)
         fp16_frame.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        fp16_label = ctk.CTkLabel(fp16_frame, text=t("fp16_mode"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        fp16_label.pack(side="left", padx=12, pady=8)
-        fp16_tip = ctk.CTkLabel(fp16_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        fp16_tip.pack(side="left")
-        Tooltip(fp16_tip, get_tooltip("fp16_mode"))
+        add_setting_label(fp16_frame, "fp16_mode", in_card=True)
         self._widgets["fp16_mode"] = CompactSwitch(
             fp16_frame,
             self._on_modified,
@@ -132,11 +116,7 @@ class BasicSection:
 
         compile_frame = ctk.CTkFrame(row4, fg_color=Colors.BG_CARD, corner_radius=6)
         compile_frame.pack(side="right", fill="x", expand=True, padx=(4, 0))
-        compile_label = ctk.CTkLabel(compile_frame, text=t("compile_basicvsrpp"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        compile_label.pack(side="left", padx=12, pady=8)
-        compile_tip = ctk.CTkLabel(compile_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        compile_tip.pack(side="left")
-        Tooltip(compile_tip, get_tooltip("compile_basicvsrpp"))
+        add_setting_label(compile_frame, "compile_basicvsrpp", in_card=True)
         self._widgets["compile_basicvsrpp"] = CompactSwitch(
             compile_frame,
             self._on_modified,
@@ -149,11 +129,7 @@ class BasicSection:
         row5 = ctk.CTkFrame(inner, fg_color="transparent")
         row5.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
-        conflict_label = ctk.CTkLabel(row5, text=t("file_conflict"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        conflict_label.pack(side="left")
-        conflict_tip = ctk.CTkLabel(row5, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        conflict_tip.pack(side="left", padx=4)
-        Tooltip(conflict_tip, get_tooltip("file_conflict"))
+        add_setting_label(row5, "file_conflict")
 
         # Warning icon for overwrite (hidden by default)
         self._widgets["conflict_warning"] = ctk.CTkLabel(
