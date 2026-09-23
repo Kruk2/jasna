@@ -9,7 +9,7 @@ import threading
 import time
 import tkinter as tk
 
-from tkinterdnd2 import TkinterDnD, DND_FILES
+from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
 from jasna import startup_timing

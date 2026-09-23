@@ -2,19 +2,17 @@
 
 import logging
 import os
-import subprocess
 import threading
 import time
 import webbrowser
-from collections.abc import Iterable
 
 import customtkinter as ctk
 
-from jasna import os_utils
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
 from jasna.gui.components import BuyMeCoffeeButton, UnifansButton, grab_modal
+from jasna.gui.system_checks import WARNING_ONLY_CHECKS, evaluate_check_results, run_system_checks
 
 logger = logging.getLogger(__name__)
 _WINDOW_WIDTH = 820
@@ -23,24 +21,6 @@ _CHECKS_TIMEOUT_SECONDS = 30.0
 _HELP_URLS = {
     "sysmem": "https://docs.cognex.com/deep-learning_420/web/EN/deep-learning/Content/Topics/optimization/gpu-disable-shared.htm?TocPath=Optimization%20Guidelines%7CNVIDIA%C2%AE%20GPU%20Guidelines%7C_____6",
 }
-
-_WARNING_ONLY_CHECKS = {"sysmem"}
-
-
-def _evaluate_check_results(
-    results: dict[str, tuple[bool, str]], keys: Iterable[str]
-) -> tuple[bool, bool]:
-    """Return ``(all_passed, has_required_failure)`` for the displayed check keys.
-
-    A key missing from ``results`` counts as a failure: a check that never ran (e.g. the
-    check thread died early) must read as failed, never as passed — otherwise the wizard
-    shows red rows while still reporting "ready to use" and enabling Get Started."""
-    passed = {key: results.get(key, (False, ""))[0] for key in keys}
-    all_passed = all(passed.values())
-    has_required_failure = any(
-        not ok and key not in _WARNING_ONLY_CHECKS for key, ok in passed.items()
-    )
-    return all_passed, has_required_failure
 
 
 class FirstRunWizard(ctk.CTkToplevel):
@@ -205,13 +185,11 @@ class FirstRunWizard(ctk.CTkToplevel):
         
     def _start_checks_in_background(self) -> None:
         self._checks_deadline = time.monotonic() + _CHECKS_TIMEOUT_SECONDS
-        self._checks_thread = threading.Thread(target=self._run_checks_blocking, daemon=True)
+        self._checks_thread = threading.Thread(target=run_system_checks, args=(self._check_results,), daemon=True)
         self._checks_thread.start()
         self.after(50, self._poll_checks_thread)
 
     def _poll_checks_thread(self) -> None:
-        if not getattr(self, "_checks_thread", None):
-            return
         if self._checks_thread.is_alive():
             if time.monotonic() < self._checks_deadline:
                 self.after(100, self._poll_checks_thread)
@@ -229,7 +207,7 @@ class FirstRunWizard(ctk.CTkToplevel):
         if not self.winfo_exists():
             return
 
-        self._checks_passed, self._has_required_failure = _evaluate_check_results(
+        self._checks_passed, self._has_required_failure = evaluate_check_results(
             self._check_results, self._check_labels.keys()
         )
 
@@ -248,7 +226,7 @@ class FirstRunWizard(ctk.CTkToplevel):
             passed, info = self._check_results.get(key, (False, t("wizard_not_checked")))
             if passed:
                 icon, color = "✓", Colors.STATUS_COMPLETED
-            elif key in _WARNING_ONLY_CHECKS:
+            elif key in WARNING_ONLY_CHECKS:
                 icon, color = "⚠", Colors.STATUS_WARNING
             else:
                 icon, color = "✕", Colors.STATUS_ERROR
@@ -265,77 +243,6 @@ class FirstRunWizard(ctk.CTkToplevel):
         else:
             self._continue_btn.configure(text=t("btn_get_started"), state="normal")
         
-    def _run_checks_blocking(self):
-        """Run all dependency checks (blocking)."""
-        self._check_results["ascii_path"] = os_utils.check_ascii_install_path()
-        self._check_results["ffprobe"] = self._check_executable("ffprobe")
-        self._check_results["gpu"] = self._check_gpu()
-        self._check_results["cuda"] = self._check_cuda()
-        self._check_results["driver"] = os_utils.check_gpu_driver_version()
-        if os.name == "nt":
-            self._check_results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
-
-    def _check_executable(self, name: str) -> tuple[bool, str]:
-        path = os_utils.find_executable(name)
-        if not path:
-            return False, t("wizard_not_found")
-        if name == "ffprobe":
-            completed = subprocess.run(
-                [path, "-version"],
-                capture_output=True,
-                text=True,
-                check=False,
-                **os_utils.subprocess_no_window_kwargs(),
-            )
-            if completed.returncode != 0:
-                logger.error(
-                    "%s failed (exit code %s). stdout:\n%s\nstderr:\n%s",
-                    name,
-                    completed.returncode,
-                    completed.stdout or "",
-                    completed.stderr or "",
-                )
-                return False, t("wizard_not_callable", path=path)
-            try:
-                major = os_utils._parse_ffmpeg_major_version((completed.stdout or "") + (completed.stderr or ""))
-            except ValueError:
-                return False, t("wizard_found_no_major", path=path)
-            if major != 8:
-                return False, t("wizard_found_bad_major", path=path, major=major)
-            return True, t("wizard_found_major", path=path, major=major)
-
-        return True, t("wizard_found", path=path)
-        
-    def _check_gpu(self) -> tuple[bool, str]:
-        try:
-            ok, result = os_utils.check_supported_gpu()
-            if ok:
-                return True, result
-            if result == "no_cuda":
-                return False, t("wizard_no_cuda")
-            _, major, minor = result
-            return False, t("wizard_gpu_compute_too_low", major=major, minor=minor)
-        except Exception as e:
-            return False, str(e)
-            
-    def _check_cuda(self) -> tuple[bool, str]:
-        try:
-            import torch
-            if torch.cuda.is_available():
-                version = torch.version.hip or torch.version.cuda
-                if torch.version.hip:
-                    return True, f"ROCm {version}"
-                capability = torch.cuda.get_device_capability(0)
-                return True, t(
-                    "wizard_cuda_version_compute",
-                    version=version,
-                    major=capability[0],
-                    minor=capability[1],
-                )
-            return False, t("wizard_not_available")
-        except Exception as e:
-            return False, str(e)
-            
     def _on_exit(self):
         self.grab_release()
         self.destroy()
