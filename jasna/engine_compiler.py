@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import subprocess
 import sys
 import typing
@@ -11,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jasna._frozen import is_frozen
+from jasna.os_utils import subprocess_no_window_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -180,10 +180,7 @@ def ensure_engines_compiled(
         "text": True,
         "bufsize": 1,
     }
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-
-    proc = subprocess.Popen(cmd, **kwargs)
+    proc = subprocess.Popen(cmd, **kwargs, **subprocess_no_window_kwargs())
     assert proc.stdout is not None
     for line in proc.stdout:
         line = line.rstrip("\n\r")

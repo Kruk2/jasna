@@ -79,8 +79,6 @@ def resolve_projection(input_path: Path, requested: str = "auto") -> str:
         return routed
     if _studio_matches(input_path, FISHEYE_STUDIO_TOKENS):
         return "fisheye"
-    if _studio_matches(input_path, DIRECT_STUDIO_TOKENS):
-        return "raw"
     return "raw"
 
 

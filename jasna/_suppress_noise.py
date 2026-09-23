@@ -73,22 +73,11 @@ def install() -> None:
     ):
         logging.getLogger(_name).setLevel(logging.ERROR)
 
-    class _SuppressRedirectsWarning(logging.Filter):
-        def filter(self, record: logging.LogRecord) -> bool:
-            return "Redirects are currently not supported" not in record.getMessage()
-
-    logging.getLogger("torch.distributed.elastic.multiprocessing.redirects").addFilter(
-        _SuppressRedirectsWarning()
+    _add_message_drop_filter(
+        "torch.distributed.elastic.multiprocessing.redirects", "Redirects are currently not supported"
     )
-
-    # torch._logging resets logger levels when torch is imported, so a level
-    # change here would not stick; a filter on the source logger does.
-    class _SuppressDeserializedSymbolWarning(logging.Filter):
-        def filter(self, record: logging.LogRecord) -> bool:
-            return "did not appear in the graph that was deserialized" not in record.getMessage()
-
-    logging.getLogger("torch._export.serde.serialize").addFilter(
-        _SuppressDeserializedSymbolWarning()
+    _add_message_drop_filter(
+        "torch._export.serde.serialize", "did not appear in the graph that was deserialized"
     )
 
     # torch_tensorrt logs the CUDA/TRT-LLM-plugin note at ERROR level (so the level bump

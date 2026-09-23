@@ -11,7 +11,7 @@ import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media import VideoMetadata
-from jasna.os_utils import find_executable, get_subprocess_startup_info
+from jasna.os_utils import find_executable, subprocess_no_window_kwargs
 
 log = logging.getLogger(__name__)
 
@@ -208,14 +208,12 @@ class StreamingEncoder:
 
         log.debug("[stream-enc] cmd: %s", ' '.join(cmd))
 
-        creationflags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         self._process = subprocess.Popen(
             cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
-            startupinfo=get_subprocess_startup_info(),
-            creationflags=creationflags,
+            **subprocess_no_window_kwargs(),
         )
         self._stderr_thread = threading.Thread(
             target=self._drain_stderr, daemon=True, name="StreamingStderrThread",
