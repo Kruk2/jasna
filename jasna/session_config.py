@@ -56,10 +56,10 @@ class SessionConfig:
     retarget_high_fps: bool
     disable_progress: bool
     working_dir: Path | None
-    vr_projection: VrProjectionName = "auto"
-    fmp4: bool = False
-    sharpen_strength: float = 0.0
-    tvai_denoise: bool = False
+    vr_projection: VrProjectionName
+    fmp4: bool
+    sharpen_strength: float
+    tvai_denoise: bool
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0:

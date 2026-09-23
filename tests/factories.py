@@ -46,6 +46,10 @@ def session_config(**overrides) -> SessionConfig:
         retarget_high_fps=False,
         disable_progress=False,
         working_dir=None,
+        vr_projection="auto",
+        fmp4=False,
+        sharpen_strength=0.0,
+        tvai_denoise=False,
     )
     base.update(overrides)
     return SessionConfig(**base)
