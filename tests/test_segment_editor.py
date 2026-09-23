@@ -16,6 +16,7 @@ from PIL import Image
 from jasna.gui import segment_editor
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings, JobItem
+from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.gui.segment_editor_state import PREVIEW_ZOOM_MAX, PreviewView, SegmentEditorState
 from jasna.media.splice import KeyframeIndex
@@ -135,7 +136,7 @@ def test_preview_surface_selects_original_or_restored_from_toggle_state(monkeypa
     editor = None
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
-        editor._scan_overlay = False
+        editor._scan_panel._overlay = False
         editor._preview_source = Image.new("RGB", (160, 90), "red")
         editor._restored_source = Image.new("RGB", (160, 90), "blue")
 
@@ -365,19 +366,19 @@ def test_scan_bar_builds_with_editor(monkeypatch) -> None:
     editor = None
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
-        assert editor._scan_btn.cget("text") == t("segments_scan")
-        assert editor._scan_stop_btn.cget("state") == "disabled"
-        assert editor._scan_add_btn.cget("state") == "disabled"
-        assert not editor._scan_activity.winfo_ismapped()
-        assert editor._scan_interval.get() == t("segments_scan_frequency_one")
+        assert editor._scan_panel._scan_btn.cget("text") == t("segments_scan")
+        assert editor._scan_panel._stop_btn.cget("state") == "disabled"
+        assert editor._scan_panel._add_btn.cget("state") == "disabled"
+        assert not editor._scan_panel._activity.winfo_ismapped()
+        assert editor._scan_panel._interval.get() == t("segments_scan_frequency_one")
         assert (
-            editor._scan_interval.cget("values")[0]
+            editor._scan_panel._interval.cget("values")[0]
             == t("segments_scan_frequency_every_frame")
         )
-        assert editor._scan_model.get() == AppSettings().detection_model
-        assert editor._scan_thr_label.cget("text") == f"{AppSettings().detection_score_threshold:.2f}"
-        assert editor._scan_overlay
-        assert editor._scan_overlay_toggle.get() == 1
+        assert editor._scan_panel._model.get() == AppSettings().detection_model
+        assert editor._scan_panel._threshold_label.cget("text") == f"{AppSettings().detection_score_threshold:.2f}"
+        assert editor._scan_panel._overlay
+        assert editor._scan_panel._overlay_toggle.get() == 1
     finally:
         if editor is not None:
             editor._finish_close()
@@ -393,11 +394,11 @@ def test_scan_model_change_applies_recommended_threshold(monkeypatch) -> None:
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
 
-        editor._on_scan_model_changed("rfdetr-v6-large")
+        editor._scan_panel._on_model_changed("rfdetr-v6-large")
 
-        assert editor._scan_threshold == pytest.approx(0.40)
-        assert editor._scan_thr_slider.get() == pytest.approx(0.40)
-        assert editor._scan_thr_label.cget("text") == "0.40"
+        assert editor._scan_panel._threshold == pytest.approx(0.40)
+        assert editor._scan_panel._threshold_slider.get() == pytest.approx(0.40)
+        assert editor._scan_panel._threshold_label.cget("text") == "0.40"
     finally:
         if editor is not None:
             editor._finish_close()
@@ -451,18 +452,18 @@ def test_scan_card_stays_compact_and_visible_at_minimum_size(monkeypatch) -> Non
         editor.geometry("900x640")
         editor.update()
 
-        assert editor._scan_card.winfo_reqheight() < 100
+        assert editor._scan_panel.winfo_reqheight() < 100
         assert (
-            editor._scan_model.winfo_rootx() + editor._scan_model.winfo_width()
-            < editor._scan_interval.winfo_rootx()
+            editor._scan_panel._model.winfo_rootx() + editor._scan_panel._model.winfo_width()
+            < editor._scan_panel._interval.winfo_rootx()
         )
         assert (
-            editor._scan_interval.winfo_rootx() + editor._scan_interval.winfo_width()
-            < editor._scan_thr_slider.winfo_rootx()
+            editor._scan_panel._interval.winfo_rootx() + editor._scan_panel._interval.winfo_width()
+            < editor._scan_panel._threshold_slider.winfo_rootx()
         )
         assert (
-            editor._scan_btn.winfo_rootx() + editor._scan_btn.winfo_width()
-            <= editor._scan_card.winfo_rootx() + editor._scan_card.winfo_width()
+            editor._scan_panel._scan_btn.winfo_rootx() + editor._scan_panel._scan_btn.winfo_width()
+            <= editor._scan_panel.winfo_rootx() + editor._scan_panel.winfo_width()
         )
         assert (
             editor._apply_btn.winfo_rooty() + editor._apply_btn.winfo_height()
@@ -482,20 +483,20 @@ def test_scan_lock_disables_everything_but_stop(monkeypatch) -> None:
     editor = None
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
-        editor._set_scan_locked(True)
+        editor._scan_panel._set_locked(True)
         editor.update()
-        for widget in editor._scan_lockable_widgets():
+        for widget in (*editor._lockable_widgets(), *editor._scan_panel.lockable_widgets()):
             assert widget.cget("state") == "disabled"
-        assert editor._scan_stop_btn.cget("state") == "normal"
-        assert editor._scan_stop_btn.winfo_ismapped()
-        assert editor._scan_progress.winfo_ismapped()
+        assert editor._scan_panel._stop_btn.cget("state") == "normal"
+        assert editor._scan_panel._stop_btn.winfo_ismapped()
+        assert editor._scan_panel._progress.winfo_ismapped()
         assert not editor._timeline._enabled
 
-        editor._set_scan_locked(False)
+        editor._scan_panel._set_locked(False)
         editor.update()
-        assert editor._scan_btn.cget("state") == "normal"
-        assert editor._scan_stop_btn.cget("state") == "disabled"
-        assert not editor._scan_activity.winfo_ismapped()
+        assert editor._scan_panel._scan_btn.cget("state") == "normal"
+        assert editor._scan_panel._stop_btn.cget("state") == "disabled"
+        assert not editor._scan_panel._activity.winfo_ismapped()
         assert editor._apply_btn.cget("state") == "normal"
         assert editor._timeline._enabled
     finally:
@@ -512,7 +513,7 @@ def test_scan_completed_populates_detections_and_add_button(monkeypatch) -> None
     editor = None
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
-        result = segment_editor.MosaicScanResult(
+        result = MosaicScanResult(
             times=(0.0, 1.0, 2.0, 3.0),
             scores=(0.0, 0.8, 0.9, 0.0),
             masks=[None] * 4,
@@ -520,32 +521,32 @@ def test_scan_completed_populates_detections_and_add_button(monkeypatch) -> None
             duration=60.0,
             completed_until=3.0,
         )
-        editor._scan_threshold = 0.5
-        editor._scan_worker = MagicMock()
-        editor._set_scan_locked(True)
-        editor._handle_scan_event(segment_editor.ScanCompleted(result, stopped=False))
+        editor._scan_panel._threshold = 0.5
+        editor._scan_panel._worker = MagicMock()
+        editor._scan_panel._set_locked(True)
+        editor._scan_panel._handle_event(ScanCompleted(result, stopped=False))
         editor.update_idletasks()
 
-        assert editor._scan_worker is not None
-        assert editor._scan_result is result
+        assert editor._scan_panel._worker is not None
+        assert editor._scan_panel._result is result
         assert editor._timeline._detections
-        assert editor._scan_proposals
-        assert editor._scan_add_btn.cget("state") == "normal"
-        assert editor._scan_activity.winfo_ismapped()
-        assert editor._scan_add_btn.winfo_ismapped()
-        assert editor._scan_btn.cget("text") == t("segments_scan_again")
-        assert editor._scan_status.cget("text") == t(
+        assert editor._scan_panel._proposals
+        assert editor._scan_panel._add_btn.cget("state") == "normal"
+        assert editor._scan_panel._activity.winfo_ismapped()
+        assert editor._scan_panel._add_btn.winfo_ismapped()
+        assert editor._scan_panel._scan_btn.cget("text") == t("segments_scan_again")
+        assert editor._scan_panel._status.cget("text") == t(
             "segments_scan_result",
             count=1,
             duration="00:00:03",
         )
 
-        editor._add_detected_ranges()
+        editor._scan_panel._add_detected_ranges()
         assert editor._state.segments
         assert editor._state.segments[0].start == pytest.approx(0.5)
         assert editor._state.segments[0].end == pytest.approx(3.5)
-        assert editor._scan_add_btn.cget("state") == "disabled"
-        assert not editor._scan_add_btn.winfo_ismapped()
+        assert editor._scan_panel._add_btn.cget("state") == "disabled"
+        assert not editor._scan_panel._add_btn.winfo_ismapped()
     finally:
         if editor is not None:
             editor._finish_close()
@@ -560,7 +561,7 @@ def test_scan_threshold_updates_ranges_and_add_button(monkeypatch) -> None:
     editor = None
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
-        result = segment_editor.MosaicScanResult(
+        result = MosaicScanResult(
             times=(0.0, 1.0, 2.0),
             scores=(0.0, 0.8, 0.0),
             masks=torch.zeros((3, 90, 160), dtype=torch.uint8),
@@ -568,45 +569,55 @@ def test_scan_threshold_updates_ranges_and_add_button(monkeypatch) -> None:
             duration=60.0,
             completed_until=2.0,
         )
-        editor._scan_threshold = 0.5
-        editor._scan_worker = MagicMock()
-        editor._handle_scan_event(segment_editor.ScanCompleted(result, stopped=False))
+        editor._scan_panel._threshold = 0.5
+        editor._scan_panel._worker = MagicMock()
+        editor._scan_panel._handle_event(ScanCompleted(result, stopped=False))
         assert editor._timeline._detections
-        assert editor._scan_add_btn.cget("state") == "normal"
+        assert editor._scan_panel._add_btn.cget("state") == "normal"
 
-        editor._on_scan_threshold(0.9)
-        editor.after_cancel(editor._scan_thr_after)
-        editor._apply_scan_threshold()
+        editor._scan_panel._on_threshold(0.9)
+        editor._scan_panel.after_cancel(editor._scan_panel._threshold_after)
+        editor._scan_panel._apply_threshold()
 
         assert editor._timeline._detections == ()
-        assert editor._scan_add_btn.cget("state") == "disabled"
-        assert not editor._scan_add_btn.winfo_ismapped()
+        assert editor._scan_panel._add_btn.cget("state") == "disabled"
+        assert not editor._scan_panel._add_btn.winfo_ismapped()
     finally:
         if editor is not None:
             editor._finish_close()
         root.destroy()
 
 
-def test_scan_overlay_respects_dynamic_threshold() -> None:
-    editor = object.__new__(SegmentEditor)
-    editor._state = SegmentEditorState(duration=10.0, fps=30.0)
-    editor._current = 1.0
-    editor._scan_threshold = 0.8
-    editor._scan_result = segment_editor.MosaicScanResult(
-        times=(1.0,),
-        scores=(0.7,),
-        masks=torch.ones((1, 90, 160), dtype=torch.uint8),
-        stride=1.0,
-        duration=10.0,
-        completed_until=1.0,
-    )
-    image = Image.new("RGB", (160, 90), "black")
+def test_scan_overlay_respects_dynamic_threshold(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        panel = editor._scan_panel
+        editor._current = 1.0
+        panel._threshold = 0.8
+        panel._result = MosaicScanResult(
+            times=(1.0,),
+            scores=(0.7,),
+            masks=torch.ones((1, 90, 160), dtype=torch.uint8),
+            stride=1.0,
+            duration=10.0,
+            completed_until=1.0,
+        )
+        image = Image.new("RGB", (160, 90), "black")
 
-    assert editor._apply_scan_overlay(image) is image
+        assert panel.apply_overlay(image) is image
 
-    editor._scan_threshold = 0.6
-    overlaid = editor._apply_scan_overlay(image)
-    assert overlaid.getpixel((80, 45))[0] > 0
+        panel._threshold = 0.6
+        overlaid = panel.apply_overlay(image)
+        assert overlaid.getpixel((80, 45))[0] > 0
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
 
 
 def test_smart_render_error_is_explained_once(monkeypatch) -> None:
@@ -645,8 +656,8 @@ def test_save_remembers_detection_and_projection_settings_on_video(monkeypatch) 
     editor = None
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
-        editor._scan_model.set("lada-yolo-v4")
-        editor._scan_threshold = 0.55
+        editor._scan_panel._model.set("lada-yolo-v4")
+        editor._scan_panel._threshold = 0.55
         editor._vr_projection = "gnomonic"
         editor._finish_close = MagicMock()
 
@@ -671,10 +682,10 @@ def test_suggest_mask_button_locked_during_scan(monkeypatch) -> None:
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
         assert editor._suggest_btn.cget("text") == t("segments_suggest_mask")
-        assert editor._suggest_btn in editor._scan_lockable_widgets()
-        editor._set_scan_locked(True)
+        assert editor._suggest_btn in editor._lockable_widgets()
+        editor._scan_panel._set_locked(True)
         assert editor._suggest_btn.cget("state") == "disabled"
-        editor._set_scan_locked(False)
+        editor._scan_panel._set_locked(False)
         assert editor._suggest_btn.cget("state") == "normal"
     finally:
         if editor is not None:

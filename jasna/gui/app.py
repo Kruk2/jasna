@@ -553,10 +553,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def _set_preview_gpu_busy(self, busy: bool) -> None:
         self._preview_gpu_busy = bool(busy)
-        try:
-            self.after(0, self._update_start_button_state)
-        except (tk.TclError, RuntimeError):
-            logger.debug("Window closed before the GPU-busy state could be shown", exc_info=True)
+        self._main_thread.post(self._update_start_button_state)
         
     def _show_toast(self, message: str, type_: str = "info"):
         """Show a toast notification."""
