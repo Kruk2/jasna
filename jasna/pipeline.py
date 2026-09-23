@@ -4,8 +4,10 @@ import logging
 import os
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import TYPE_CHECKING
 
 import psutil
 import torch
@@ -26,17 +28,20 @@ from jasna.media.splice import (
     resolve_smart_encoder_settings,
     validate_smart_render,
 )
-from jasna.mosaic.detection_registry import build_detection_model
 from jasna.pipeline_threads import run_restoration_pass
 from jasna.progressbar import Progressbar
 from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange
+from jasna.session_config import SessionConfig
 from jasna.vr180 import (
     SbsDetectionAdapter,
     resolve_vr_mode,
 )
 from jasna.vr_projection import build_vr_projector
+
+if TYPE_CHECKING:
+    from jasna.session_factory import RestorationSession
 
 log = logging.getLogger(__name__)
 
@@ -67,66 +72,37 @@ class Pipeline:
     def __init__(
         self,
         *,
+        config: SessionConfig,
+        session: RestorationSession,
         input_video: Path,
         output_video: Path,
-        detection_model_name: str,
-        detection_model_path: Path,
-        detection_score_threshold: float,
-        restoration_pipeline: RestorationPipeline,
-        codec: str,
-        encoder_settings: dict[str, object],
-        batch_size: int,
-        device: torch.device,
-        max_clip_size: int,
-        temporal_overlap: int,
-        max_detection_gap: int,
-        min_detection_duration: int,
-        enable_crossfade: bool = True,
-        scene_detection: bool = True,
-        vr_mode: str = "auto",
-        vr_projection: str = "auto",
-        fp16: bool,
-        disable_progress: bool = False,
-        progress_callback: callable | None = None,
-        lut_path: str | Path | None = None,
-        sharpen_strength: float = 0.0,
-        retarget_high_fps: bool = False,
-        fmp4: bool = False,
-        segments: tuple[SegmentRange, ...] | None = None,
-        splice_plan: SplicePlan | None = None,
-        working_dir: Path | None = None,
+        progress_callback: Callable[[dict], None] | None,
+        segments: tuple[SegmentRange, ...] | None,
+        splice_plan: SplicePlan | None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
-        self.working_dir = working_dir
-        self.codec = str(codec)
-        self.encoder_settings = dict(encoder_settings)
-        self.batch_size = int(batch_size)
-        self.device = device
-        self.max_clip_size = int(max_clip_size)
-        self.temporal_overlap = int(temporal_overlap)
-        self.max_detection_gap = int(max_detection_gap)
-        self.min_detection_duration = int(min_detection_duration)
-        self.enable_crossfade = bool(enable_crossfade)
-        self.scene_detection = bool(scene_detection)
-        self.vr_mode = str(vr_mode)
-        self.vr_projection = str(vr_projection)
-
-        self.detection_model = build_detection_model(
-            detection_model_name,
-            detection_model_path,
-            batch_size=self.batch_size,
-            device=self.device,
-            score_threshold=float(detection_score_threshold),
-            fp16=bool(fp16),
-        )
-        self.restoration_pipeline = restoration_pipeline
-        self.disable_progress = bool(disable_progress)
+        self.working_dir = config.working_dir
+        self.codec = config.codec
+        self.encoder_settings = dict(config.encoder_settings)
+        self.batch_size = config.batch_size
+        self.device = session.device
+        self.max_clip_size = config.max_clip_size
+        self.temporal_overlap = config.temporal_overlap
+        self.max_detection_gap = config.max_detection_gap
+        self.min_detection_duration = config.min_detection_duration
+        self.enable_crossfade = config.enable_crossfade
+        self.scene_detection = config.scene_detection
+        self.vr_mode = config.vr_mode
+        self.vr_projection = config.vr_projection
+        self.detection_model = session.detection_model_for(config)
+        self.restoration_pipeline = session.restoration_pipeline
+        self.disable_progress = config.disable_progress
         self.progress_callback = progress_callback
-        self.lut_path = lut_path
-        self.sharpen_strength = float(sharpen_strength)
-        self.retarget_high_fps = bool(retarget_high_fps)
-        self.fmp4 = bool(fmp4)
+        self.lut_path = config.lut_path
+        self.sharpen_strength = config.sharpen_strength
+        self.retarget_high_fps = config.retarget_high_fps
+        self.fmp4 = config.fmp4
         self.segments = tuple(segments) if segments else None
         self.splice_plan = splice_plan
         self.vr_resolution = None
@@ -165,12 +141,6 @@ class Pipeline:
             if self.vr_resolution.is_sbs
             else None
         )
-
-    def close(self) -> None:
-        if self.detection_model is not None:
-            self.detection_model.close()
-            self.detection_model = None
-        self.restoration_pipeline = None
 
     def _run_pass(
         self,

@@ -1,8 +1,8 @@
 """Shared composition root for the video restoration pipeline.
 
 Builds the heavy restoration session (engine compilation, primary and
-secondary restorers) and per-video ``Pipeline`` instances from one
-``SessionConfig``. Consumed by both the CLI (``jasna.main``) and the GUI
+secondary restorers, and a detector cached across videos) and per-video
+``Pipeline`` instances from one ``SessionConfig``. Consumed by both the CLI (``jasna.main``) and the GUI
 (``jasna.gui.video_session`` / ``jasna.gui.processor``).
 
 All heavy imports (torch, restorers, pipeline) stay inside the functions.
@@ -20,24 +20,54 @@ if TYPE_CHECKING:
     import torch
 
     from jasna.media.splice import SplicePlan
+    from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
+    from jasna.mosaic.yolo import YoloMosaicDetectionModel
     from jasna.pipeline import Pipeline
     from jasna.restorer.restoration_pipeline import RestorationPipeline
-    from jasna.restorer.secondary_restorer import SecondaryRestorer
     from jasna.segments import SegmentRange
+
+    DetectionModel = RfDetrMosaicDetectionModel | YoloMosaicDetectionModel
 
 
 @dataclass
 class RestorationSession:
     device: "torch.device"
-    detection_model_name: str
-    detection_model_path: Path
     restoration_pipeline: "RestorationPipeline"
-    secondary_restorer: "SecondaryRestorer | None"
+    _detection_key: tuple | None = None
+    _detection_model: "DetectionModel | None" = None
+
+    def detection_model_for(self, config: SessionConfig) -> "DetectionModel":
+        """The detector for ``config``, reused across videos until its settings change."""
+        from jasna.mosaic.detection_registry import build_detection_model
+
+        key = (
+            config.detection_model_name,
+            config.detection_model_path,
+            config.detection_score_threshold,
+            config.batch_size,
+            config.fp16,
+        )
+        if key != self._detection_key:
+            if self._detection_model is not None:
+                self._detection_model.close()
+            self._detection_model = build_detection_model(
+                config.detection_model_name,
+                config.detection_model_path,
+                batch_size=config.batch_size,
+                device=self.device,
+                score_threshold=config.detection_score_threshold,
+                fp16=config.fp16,
+            )
+            self._detection_key = key
+        return self._detection_model
 
     def close(self) -> None:
+        if self._detection_model is not None:
+            self._detection_model.close()
+            self._detection_model = None
         self.restoration_pipeline.restorer.close()
-        if self.secondary_restorer is not None and hasattr(self.secondary_restorer, "close"):
-            self.secondary_restorer.close()
+        if self.restoration_pipeline.secondary_restorer is not None:
+            self.restoration_pipeline.secondary_restorer.close()
 
 
 def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
@@ -123,13 +153,7 @@ def build_restoration_session(
         denoise_step=DenoiseStep(config.denoise_step),
     )
 
-    return RestorationSession(
-        device=device,
-        detection_model_name=config.detection_model_name,
-        detection_model_path=Path(config.detection_model_path),
-        restoration_pipeline=restoration_pipeline,
-        secondary_restorer=secondary_restorer,
-    )
+    return RestorationSession(device=device, restoration_pipeline=restoration_pipeline)
 
 
 def build_pipeline(
@@ -145,32 +169,11 @@ def build_pipeline(
     from jasna.pipeline import Pipeline
 
     return Pipeline(
+        config=config,
+        session=session,
         input_video=input_video,
         output_video=output_video,
-        detection_model_name=config.detection_model_name,
-        detection_model_path=config.detection_model_path,
-        detection_score_threshold=float(config.detection_score_threshold),
-        restoration_pipeline=session.restoration_pipeline,
-        codec=config.codec,
-        encoder_settings=dict(config.encoder_settings),
-        batch_size=int(config.batch_size),
-        device=session.device,
-        max_clip_size=int(config.max_clip_size),
-        temporal_overlap=int(config.temporal_overlap),
-        max_detection_gap=int(config.max_detection_gap),
-        min_detection_duration=int(config.min_detection_duration),
-        enable_crossfade=bool(config.enable_crossfade),
-        scene_detection=bool(config.scene_detection),
-        vr_mode=config.vr_mode,
-        vr_projection=config.vr_projection,
-        fp16=bool(config.fp16),
-        disable_progress=bool(config.disable_progress),
         progress_callback=progress_callback,
-        lut_path=config.lut_path,
-        sharpen_strength=config.sharpen_strength,
-        retarget_high_fps=bool(config.retarget_high_fps),
-        fmp4=bool(config.fmp4),
         segments=segments,
         splice_plan=splice_plan,
-        working_dir=config.working_dir,
     )

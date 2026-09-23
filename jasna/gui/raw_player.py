@@ -359,8 +359,8 @@ class RawPlayerWorker:
 
                     command_session_key = video_session_key(command.settings)
                     if session is None or command_session_key != session_key:
-                        if pipeline is not None or session is not None:
-                            self._release_pipeline(pipeline, session)
+                        if session is not None:
+                            self._release_session(session)
                             pipeline = None
                             session = None
                             session_key = None
@@ -379,23 +379,19 @@ class RawPlayerWorker:
                     if not self._closed.is_set() and self._commands.empty():
                         self.events.put(PlayerFailed(str(exc), command.generation))
         finally:
-            self._release_pipeline(pipeline, session)
+            if session is not None:
+                self._release_session(session)
             if self._on_stopped is not None:
                 self._on_stopped()
 
     @staticmethod
-    def _release_pipeline(pipeline, session) -> None:
-        try:
-            if pipeline is not None:
-                pipeline.close()
-        finally:
-            if session is not None:
-                from jasna.gui.video_session import release_session_memory
+    def _release_session(session) -> None:
+        from jasna.gui.video_session import release_session_memory
 
-                try:
-                    session.close()
-                finally:
-                    release_session_memory(session.device)
+        try:
+            session.close()
+        finally:
+            release_session_memory(session.device)
 
     def _build_pipeline(self, settings: AppSettings | None = None):
         from jasna.gui.video_session import (
@@ -410,7 +406,6 @@ class RawPlayerWorker:
             disable_basicvsrpp_tensorrt=False,
             log=logger.info,
         )
-        pipeline = None
         try:
             config = video_session_config(
                 settings,
@@ -427,12 +422,7 @@ class RawPlayerWorker:
             pipeline.configure_vr(self.metadata)
             return session, pipeline
         except Exception:
-            if pipeline is not None:
-                pipeline.close()
-            session.close()
-            from jasna.gui.video_session import release_session_memory
-
-            release_session_memory(session.device)
+            self._release_session(session)
             raise
 
     def _run_pass(self, command: _Play, pipeline, session) -> bool:

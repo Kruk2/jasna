@@ -56,8 +56,8 @@ class TestMainValidation:
         ):
             pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2"])
 
-        assert pipeline_cls.call_args.kwargs["codec"] == "h264"
-        assert pipeline_cls.call_args.kwargs["encoder_settings"] == {"cq": 25}
+        assert pipeline_cls.call_args.kwargs["config"].codec == "h264"
+        assert pipeline_cls.call_args.kwargs["config"].encoder_settings == {"cq": 25}
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
         assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
 
@@ -116,7 +116,7 @@ class TestMainValidation:
 
     def test_sharpen_is_forwarded_to_the_pipeline(self, tmp_path):
         pipeline_cls = _run_main_with_args(tmp_path, ["--sharpen", "0.4"])
-        assert pipeline_cls.call_args.kwargs["sharpen_strength"] == 0.4
+        assert pipeline_cls.call_args.kwargs["config"].sharpen_strength == 0.4
 
     def test_missing_input_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):

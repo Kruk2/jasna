@@ -89,9 +89,7 @@ def _build(settings: AppSettings):
 def test_build_video_session_without_secondary() -> None:
     session, compiled, restorer_cls, pipeline_cls, _unet_cls = _build(AppSettings())
 
-    assert session.detection_model_name == AppSettings().detection_model
-    assert session.detection_model_path == Path("det.engine")
-    assert session.secondary_restorer is None
+    assert session.restoration_pipeline is pipeline_cls.return_value
     assert restorer_cls.call_args.kwargs["use_tensorrt"] is True
     assert pipeline_cls.call_args.kwargs["secondary_restorer"] is None
     assert compiled.call_args.args[0].unet4x is False
@@ -101,7 +99,6 @@ def test_build_video_session_selects_unet_secondary() -> None:
     settings = replace(AppSettings(), secondary_restoration="unet-4x")
     session, compiled, _restorer_cls, pipeline_cls, unet_cls = _build(settings)
 
-    assert session.secondary_restorer is unet_cls.return_value
     assert pipeline_cls.call_args.kwargs["secondary_restorer"] is unet_cls.return_value
     assert compiled.call_args.args[0].unet4x is True
 
@@ -112,4 +109,4 @@ def test_video_session_close_closes_restorers() -> None:
     session.close()
 
     session.restoration_pipeline.restorer.close.assert_called_once_with()
-    session.secondary_restorer.close.assert_called_once_with()
+    session.restoration_pipeline.secondary_restorer.close.assert_called_once_with()
