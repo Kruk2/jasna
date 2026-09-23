@@ -1,7 +1,5 @@
-import ctypes
 import logging
 import os
-import sys
 from fractions import Fraction
 from typing import Iterator
 
@@ -17,22 +15,21 @@ from jasna.accelerator import (
     stream_context,
     vendor_for_device,
 )
-from jasna.media import VideoMetadata, resolve_video_start_pts
+from jasna.media.probe import VideoMetadata, resolve_video_start_pts
+from jasna.media.cuda_kernel import create_stream, destroy_stream
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 log = logging.getLogger(__name__)
 
 CORRUPT_PACKET_TOLERANCE = 10
-_libcuda: ctypes.CDLL | None = None
 
-# Decode backend selection (`JASNA_DECODE_BACKEND` overrides the default):
+# Decode backend selection through `JASNA_DECODE_BACKEND`:
 # - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
 #              software, when VALI cannot open or decode the first frame. AMD
 #              keeps its AMF -> software escalation.
 # - "vali":    VALI only; any failure raises (NVIDIA only).
 # - "pyav-hw": skip VALI, use the PyAV hwaccel path with its software fallback.
 # - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
-DECODE_BACKEND = "auto"
 DECODE_BACKEND_ENV = "JASNA_DECODE_BACKEND"
 _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
 
@@ -49,37 +46,34 @@ class VideoDecodeError(RuntimeError):
 
 
 def _decode_backend() -> str:
-    backend = os.environ.get(DECODE_BACKEND_ENV, DECODE_BACKEND)
+    backend = os.environ.get(DECODE_BACKEND_ENV, "auto")
     if backend not in _DECODE_BACKENDS:
         raise ValueError(
-            f"Unknown decode backend {backend!r} from {DECODE_BACKEND_ENV}/DECODE_BACKEND, "
+            f"Unknown decode backend {backend!r} from {DECODE_BACKEND_ENV}, "
             f"expected {_DECODE_BACKENDS}"
         )
     return backend
 
 
-def _cuda_driver() -> ctypes.CDLL:
-    global _libcuda
-    if _libcuda is None:
-        loader = ctypes.WinDLL if sys.platform == "win32" else ctypes.CDLL
-        lib = loader("nvcuda.dll" if sys.platform == "win32" else "libcuda.so.1")
-        lib.cuStreamCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint]
-        lib.cuStreamCreate.restype = ctypes.c_int
-        lib.cuStreamDestroy.argtypes = [ctypes.c_void_p]
-        lib.cuStreamDestroy.restype = ctypes.c_int
-        _libcuda = lib
-    return _libcuda
+def _cuda_hwaccel(device: torch.device) -> HWAccel:
+    hwaccel = HWAccel(
+        "cuda",
+        device=str(device.index or 0),
+        allow_software_fallback=True,
+        is_hw_owned=True,
+    )
+    # Reuse torch's current primary context without changing its scheduling flags.
+    hwaccel.options["primary_ctx"] = "0"
+    hwaccel.options["current_ctx"] = "1"
+    return hwaccel
 
 
 def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.ExternalStream]:
     # cuStreamCreate needs a current CUDA context; threads other than the one
     # torch initialized on have none until torch binds them to the device.
     torch.cuda.set_device(device)
-    handle = ctypes.c_void_p()
-    result = _cuda_driver().cuStreamCreate(ctypes.byref(handle), 0)
-    if result != 0 or handle.value is None:
-        raise RuntimeError(f"cuStreamCreate failed (CUDA error {result})")
-    return handle.value, torch.cuda.ExternalStream(handle.value, device=device)
+    handle = create_stream()
+    return handle, torch.cuda.ExternalStream(handle, device=device)
 
 
 class _ValiFrameSource:
@@ -180,7 +174,7 @@ class _ValiFrameSource:
         seek_ctx = None
         if seek_ts is not None:
             start_seconds = float(
-                resolve_video_start_pts(None, self.metadata.start_pts) * self.metadata.time_base
+                self.metadata.start_pts * self.metadata.time_base
             )
             seek_ctx = self._vali.SeekContext(seek_ts=seek_ts + start_seconds)
         pending_pts = self._first_pts if seek_ctx is None else None
@@ -226,12 +220,10 @@ class _ValiFrameSource:
         if self._raw_stream is None:
             return
         raw_stream, self._raw_stream = self._raw_stream, None
-        result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(raw_stream))
-        if result != 0:
-            raise RuntimeError(f"cuStreamDestroy failed (CUDA error {result})")
+        destroy_stream(raw_stream)
 
 
-class NvidiaVideoReader:
+class VideoReader:
     def __init__(
         self,
         file: str,
@@ -251,14 +243,10 @@ class NvidiaVideoReader:
         self.frame_stride = frame_stride
         self.vendor = vendor_for_device(device)
         self._decoder_ctx = None
-        self._amd_hardware_decode = False
         self._vali_source: _ValiFrameSource | None = None
         self._software_only = False
 
     def __enter__(self):
-        self._decoder_ctx = None
-        self._amd_hardware_decode = False
-        self._vali_source = None
         current_stream(self.device)
         backend = _decode_backend()
         if backend in ("auto", "vali"):
@@ -291,17 +279,7 @@ class NvidiaVideoReader:
         self._software_only = software_only
         try:
             if not software_only and self.vendor is AcceleratorVendor.NVIDIA:
-                hwaccel = HWAccel(
-                    "cuda",
-                    device=str(self.device.index or 0),
-                    allow_software_fallback=True,
-                    is_hw_owned=True,
-                )
-                # Reuse torch's current primary context without changing its
-                # scheduling flags.
-                hwaccel.options["primary_ctx"] = "0"
-                hwaccel.options["current_ctx"] = "1"
-                self.container = av.open(self.file, hwaccel=hwaccel)
+                self.container = av.open(self.file, hwaccel=_cuda_hwaccel(self.device))
             else:
                 self.container = av.open(self.file)
             self.video_stream = self.container.streams.video[0]
@@ -332,7 +310,7 @@ class NvidiaVideoReader:
     @property
     def start_pts(self) -> int:
         if self._vali_source is not None:
-            return resolve_video_start_pts(None, self.metadata.start_pts)
+            return self.metadata.start_pts
         return resolve_video_start_pts(
             self.video_stream.start_time,
             self.metadata.start_pts,
@@ -376,7 +354,6 @@ class NvidiaVideoReader:
                 decoder.sample_aspect_ratio = Fraction(1, 1)
             decoder.open(strict=False)
             self._decoder_ctx = decoder
-            self._amd_hardware_decode = True
             log.info("Using AMF hardware decoder %s for %s", decoder_name, self.file)
         except (ValueError, AttributeError, av.FFmpegError, RuntimeError) as exc:
             source_ctx.thread_type = "AUTO"
@@ -406,19 +383,11 @@ class NvidiaVideoReader:
                 min_height,
             )
             return
-        hwaccel = HWAccel(
-            "cuda",
-            device=str(self.device.index or 0),
-            allow_software_fallback=True,
-            is_hw_owned=True,
-        )
-        hwaccel.options["primary_ctx"] = "0"
-        hwaccel.options["current_ctx"] = "1"
         try:
             decoder = av.CodecContext.create(
                 decoder_name,
                 "r",
-                hwaccel=hwaccel,
+                hwaccel=_cuda_hwaccel(self.device),
             )
             decoder.extradata = source_ctx.extradata
             decoder.width = source_ctx.width
@@ -449,15 +418,18 @@ class NvidiaVideoReader:
         self._decoder_ctx = None
         if self._raw_stream is None:
             return
-        result = _cuda_driver().cuStreamDestroy(ctypes.c_void_p(self._raw_stream))
-        if result != 0 and exc_type is None:
-            raise RuntimeError(f"cuStreamDestroy failed (CUDA error {result})")
+        try:
+            destroy_stream(self._raw_stream)
+        except RuntimeError:
+            if exc_type is None:
+                raise
+            log.warning("Could not destroy the decode stream while handling another error", exc_info=True)
 
     def _decode_packet(self, packet, consecutive_errors: int) -> tuple[list, int]:
         try:
             frames = (
                 self._decoder_ctx.decode(packet)
-                if getattr(self, "_decoder_ctx", None) is not None
+                if self._decoder_ctx is not None
                 else packet.decode()
             )
         except av.error.InvalidDataError as e:
@@ -531,7 +503,7 @@ class NvidiaVideoReader:
         group = self._read_group(decoded)
         if not group:
             return
-        vendor = getattr(self, "vendor", AcceleratorVendor.NVIDIA)
+        vendor = self.vendor
         if (
             vendor is AcceleratorVendor.NVIDIA
             and group[0].format.name == "cuda"

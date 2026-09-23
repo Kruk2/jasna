@@ -14,15 +14,12 @@ implementation here, which produces identical results.
 from __future__ import annotations
 
 import ctypes
-import logging
 
 import torch
 import torch.nn.functional as F
 
 from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
-
-logger = logging.getLogger(__name__)
+from jasna.media.cuda_kernel import Kernel, grid_size
 
 # FFmpeg maps strength onto the CAS weight as -1 / lerp(16, 4, strength).
 _WEIGHT_DIVISOR_AT_ZERO = 16.0
@@ -138,51 +135,19 @@ def sharpen_luma(
     return out
 
 
-class _CasKernel:
-    def __init__(self, function_name: str):
-        self.function_name = function_name
-        self._function: ctypes.c_void_p | None = None
-        self._values = [
-            ctypes.c_uint64(),  # source pointer
-            ctypes.c_uint64(),  # destination pointer
-            ctypes.c_int(),     # source row stride, in samples
-            ctypes.c_int(),     # destination row stride, in samples
-            ctypes.c_int(),     # height
-            ctypes.c_int(),     # width
-            ctypes.c_float(),   # weight scale
-        ]
-        self._params = (ctypes.c_void_p * len(self._values))(
-            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
-        )
+_CAS_ARG_TYPES = (
+    ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_float,
+)
 
-    def launch(self, src: torch.Tensor, dst: torch.Tensor, weight_scale: float) -> None:
-        if self._function is None:
-            self._function = resolve_function(_FATBIN, self.function_name)
-        height, width = src.shape
-        values = self._values
-        values[0].value = src.data_ptr()
-        values[1].value = dst.data_ptr()
-        values[2].value = src.stride(0)
-        values[3].value = dst.stride(0)
-        values[4].value = height
-        values[5].value = width
-        values[6].value = weight_scale
-        check_cuda(
-            cuda_driver().cuLaunchKernel(
-                self._function,
-                (width + _BLOCK_WIDTH - 1) // _BLOCK_WIDTH,
-                (height + _BLOCK_HEIGHT - 1) // _BLOCK_HEIGHT,
-                1,
-                _BLOCK_WIDTH,
-                _BLOCK_HEIGHT,
-                1,
-                0,
-                ctypes.c_void_p(torch.cuda.current_stream(src.device).cuda_stream),
-                self._params,
-                None,
-            ),
-            f"cuLaunchKernel({self.function_name})",
-        )
+
+def _launch_cas(kernel: Kernel, src: torch.Tensor, dst: torch.Tensor, weight_scale: float) -> None:
+    height, width = src.shape
+    kernel.launch(
+        (grid_size(width, _BLOCK_WIDTH), grid_size(height, _BLOCK_HEIGHT), 1),
+        (_BLOCK_WIDTH, _BLOCK_HEIGHT, 1),
+        (src.data_ptr(), dst.data_ptr(), src.stride(0), dst.stride(0), height, width, weight_scale),
+        torch.cuda.current_stream(src.device).cuda_stream,
+    )
 
 
 class GpuCasSharpener:
@@ -197,20 +162,10 @@ class GpuCasSharpener:
         self.headroom = float(_HEADROOM_MULTIPLIER << depth)
         self.peak = float((1 << depth) - 1)
         self._kernel = (
-            _CasKernel("cas_luma10" if ten_bit else "cas_luma8")
+            Kernel(_FATBIN, "cas_luma10" if ten_bit else "cas_luma8", _CAS_ARG_TYPES)
             if is_nvidia_device(device)
             else None
         )
-
-    def _disable_kernel(self, exc: Exception) -> None:
-        # The Torch path is correct but roughly 30x slower, so a broken install
-        # must not degrade to it quietly.
-        logger.warning(
-            "CUDA sharpening kernel unavailable (%s); falling back to the "
-            "much slower Torch implementation",
-            exc,
-        )
-        self._kernel = None
 
     def _sharpen_torch_(self, luma: torch.Tensor) -> None:
         plane = luma.to(torch.float32)
@@ -236,12 +191,8 @@ class GpuCasSharpener:
             source_luma = source_luma.view(torch.uint16)
             destination_luma = destination_luma.view(torch.uint16)
         if self._kernel is not None:
-            try:
-                self._kernel.launch(source_luma, destination_luma, self.weight_scale)
-            except RuntimeError as exc:
-                self._disable_kernel(exc)
-            else:
-                return
+            _launch_cas(self._kernel, source_luma, destination_luma, self.weight_scale)
+            return
 
         destination_luma.copy_(source_luma)
         self._sharpen_torch_(destination_luma)
@@ -252,12 +203,8 @@ class GpuCasSharpener:
             luma = luma.view(torch.uint16)
         if self._kernel is not None:
             sharpened = torch.empty_like(luma)
-            try:
-                self._kernel.launch(luma, sharpened, self.weight_scale)
-            except RuntimeError as exc:
-                self._disable_kernel(exc)
-            else:
-                luma.copy_(sharpened)
-                return
+            _launch_cas(self._kernel, luma, sharpened, self.weight_scale)
+            luma.copy_(sharpened)
+            return
 
         self._sharpen_torch_(luma)

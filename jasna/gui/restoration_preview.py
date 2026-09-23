@@ -19,7 +19,7 @@ from PIL import Image
 from jasna.gui.models import AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
 from jasna.session_factory import RestorationSession
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,4 @@
-import logging
 import math
-from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -164,22 +162,6 @@ def test_sharpener_sharpens_the_luma_plane() -> None:
 
     assert packed[4, 4].item() > 200
     assert packed[4, 3].item() < 100
-
-
-def test_kernel_failure_on_nvidia_warns_and_falls_back(caplog) -> None:
-    sharpener = GpuCasSharpener(0.5, ten_bit=False, device=torch.device("cpu"))
-    sharpener._kernel = SimpleNamespace(
-        launch=lambda *args: (_ for _ in ()).throw(RuntimeError("no fatbin"))
-    )
-    packed = torch.full((12, 8), 100, dtype=torch.uint8)
-    packed[4, 4] = 200
-
-    with caplog.at_level(logging.WARNING, logger="jasna.media.cas"):
-        sharpener.apply_luma_(packed, 8)
-
-    assert "falling back to the much slower Torch implementation" in caplog.text
-    assert sharpener._kernel is None
-    assert packed[4, 4].item() > 200  # the fallback still sharpened the plane
 
 
 requires_cuda = pytest.mark.skipif(

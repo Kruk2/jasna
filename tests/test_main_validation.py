@@ -49,7 +49,7 @@ class TestMainValidation:
         metadata = MagicMock(codec_name="h264", duration=10.0)
         splice_plan = MagicMock()
         with (
-            patch("jasna.media.get_video_meta_data", return_value=metadata),
+            patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
             patch("jasna.media.splice.validate_smart_render"),
             patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
             patch("jasna.media.splice.build_splice_plan", return_value=splice_plan),
@@ -63,7 +63,7 @@ class TestMainValidation:
 
     def test_segments_reject_explicit_codec_mismatch(self, tmp_path):
         metadata = MagicMock(codec_name="h264", duration=10.0)
-        with patch("jasna.media.get_video_meta_data", return_value=metadata):
+        with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
             with pytest.raises(SystemExit):
                 _run_main_with_args(
                     tmp_path,

@@ -1,4 +1,4 @@
-"""Behavioral tests for the PyAV-based NvidiaVideoEncoder muxing: color tags,
+"""Behavioral tests for the PyAV-based VideoEncoder muxing: color tags,
 audio copy vs aac fallback, metadata/disposition, faststart, pts passthrough.
 Requires a CUDA GPU and an ffmpeg binary for fixture generation."""
 from __future__ import annotations
@@ -16,11 +16,11 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.media import get_video_meta_data
+from jasna.media.probe import get_video_meta_data
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.splice import probe_keyframes
-from jasna.media.video_decoder import NvidiaVideoReader
-from jasna.media.video_encoder import NvidiaVideoEncoder
+from jasna.media.video_decoder import VideoReader
+from jasna.media.video_encoder import VideoEncoder
 from jasna.os_utils import resolve_executable
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -44,7 +44,7 @@ def _av1_probe(tmp_path_factory) -> str | None:
     metadata = get_video_meta_data(str(src))
     frame = torch.zeros((3, 256, 256), dtype=torch.uint8, device=DEVICE)
     try:
-        with NvidiaVideoEncoder(
+        with VideoEncoder(
             str(tmp / "probe.mp4"), device=DEVICE, metadata=metadata, codec="av1", encoder_settings={}
         ) as enc:
             for i in range(8):
@@ -190,8 +190,8 @@ def _make_rich_source(tmp_path: Path) -> Path:
 def _transcode(src: Path, dst: Path, codec: str = "hevc") -> None:
     metadata = get_video_meta_data(str(src))
     with (
-        NvidiaVideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
-        NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as encoder,
+        VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as encoder,
     ):
         for frames, pts_list in reader.frames():
             for i, pts in enumerate(pts_list):
@@ -206,13 +206,12 @@ def _run_unaligned_pitch_probe(src: str, dst: str, codec: str, width: int) -> No
         num_frames=12,
     )
     frame = _gradient_frame(0, 480, width)
-    with NvidiaVideoEncoder(
+    with VideoEncoder(
         dst,
         device=DEVICE,
         metadata=metadata,
         codec=codec,
         encoder_settings={},
-        mux_audio=False,
     ) as encoder:
         for index in range(12):
             encoder.encode(frame.clone(), index * 512)
@@ -282,15 +281,14 @@ def test_smart_fragment_keeps_periodic_random_access_points(tmp_path):
     dst = tmp_path / "smart-part.nut"
 
     with (
-        NvidiaVideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
-        NvidiaVideoEncoder(
+        VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        VideoEncoder(
             str(dst),
             device=DEVICE,
             metadata=metadata,
             codec="hevc",
             encoder_settings={"g": "12"},
             smart_fragment=True,
-            mux_audio=False,
         ) as encoder,
     ):
         for frames, pts_list in reader.frames():
@@ -329,14 +327,14 @@ def test_half_rate_output_preserves_duration_and_audio_sync(
     dst = tmp_path / "out.mp4"
 
     with (
-        NvidiaVideoReader(
+        VideoReader(
             str(src),
             batch_size=8,
             device=DEVICE,
             metadata=metadata,
             frame_stride=2,
         ) as reader,
-        NvidiaVideoEncoder(
+        VideoEncoder(
             str(dst),
             device=DEVICE,
             metadata=metadata,
@@ -541,8 +539,8 @@ def test_faststart_moov_before_mdat(tmp_path):
 def _transcode_fragmented(src: Path, dst: Path, gop: int) -> None:
     metadata = get_video_meta_data(str(src))
     with (
-        NvidiaVideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
-        NvidiaVideoEncoder(
+        VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        VideoEncoder(
             str(dst),
             device=DEVICE,
             metadata=metadata,
@@ -630,11 +628,11 @@ def test_zero_frame_job_closes_cleanly(tmp_path):
     metadata = get_video_meta_data(str(src))
     dst = tmp_path / "out.mp4"
 
-    with NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={}):
+    with VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={}):
         pass
 
     # constructing without entering must not leak containers or threads
-    NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={})
+    VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="hevc", encoder_settings={})
 
 
 def test_mkv_output_supported(tmp_path):
@@ -671,7 +669,7 @@ def _encode_synthetic_vfr(tmp_path: Path, codec: str, suffix: str) -> tuple[Path
     for step in _VFR_PTS_STEPS + _VFR_PTS_STEPS:
         pts_list.append(pts)
         pts += step
-    with NvidiaVideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as enc:
+    with VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as enc:
         assert enc._cuda_ctx.cuda_stream == enc.stream.cuda_stream
         for i, p in enumerate(pts_list):
             enc.encode(_gradient_frame(i, h, w), p)
@@ -732,7 +730,7 @@ def test_codec_round_trip_pixels(tmp_path, codec, require_codec):
     ref_meta = get_video_meta_data(str(src))
     h, w = ref_meta.video_height, ref_meta.video_width
 
-    with NvidiaVideoReader(str(dst), batch_size=8, device=DEVICE, metadata=metadata) as reader:
+    with VideoReader(str(dst), batch_size=8, device=DEVICE, metadata=metadata) as reader:
         batch, _ = next(iter(reader.frames()))
     decoded = batch[0].float()
     expected = _gradient_frame(0, h, w).float()

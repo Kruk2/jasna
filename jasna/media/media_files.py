@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from jasna.media.image_io import IMAGE_EXTENSIONS
-
+IMAGE_EXTENSIONS: frozenset[str] = frozenset(
+    {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
+)
 VIDEO_EXTENSIONS: frozenset[str] = frozenset(
     {".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm"}
 )

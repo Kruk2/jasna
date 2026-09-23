@@ -213,7 +213,7 @@ _OLD_TUNING_INFO_VALUES = {
 
 
 def _migrate_encoder_custom_args(value: str) -> str:
-    from jasna.media import parse_encoder_settings
+    from jasna.media.encoder_settings import parse_encoder_settings
 
     try:
         settings = parse_encoder_settings(value)
@@ -267,7 +267,7 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
     migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
     custom_args = migrated.get("encoder_custom_args")
     if custom_args:
-        from jasna.media import parse_encoder_settings
+        from jasna.media.encoder_settings import parse_encoder_settings
 
         migrated_args = _migrate_encoder_custom_args(custom_args)
         try:

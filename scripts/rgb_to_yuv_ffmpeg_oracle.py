@@ -2,7 +2,7 @@
 
 Pipes a deterministic RGB field through real ``rgb24 -> nv12/p010le`` scaling at
 every colour space and range we support, and compares it to both jasna
-implementations: the Torch reference in ``rgb_to_nv12.py`` / ``rgb_to_p010.py``
+implementations: the Torch reference in ``RgbToYuvConverter``
 and the fused CUDA kernel in ``rgb_to_yuv.cu``. This is the forward counterpart
 to the swscale check on the reverse direction in ``tests/test_yuv_to_rgb.py``.
 
@@ -26,7 +26,7 @@ import sys
 import numpy as np
 import torch
 
-from jasna.media.rgb_to_yuv import _TORCH_CONVERTERS, RgbToYuvConverter
+from jasna.media.rgb_to_yuv import RgbToYuvConverter
 
 WIDTH = 128
 HEIGHT = 192
@@ -141,7 +141,7 @@ def main() -> int:
                 print(f"{variant}:")
                 reference = run_ffmpeg(field, ffmpeg_format, matrix, ffmpeg_range)
 
-                torch_packed = _TORCH_CONVERTERS[variant](frame).cpu().numpy()
+                torch_packed = RgbToYuvConverter(variant, device=torch.device("cpu")).convert(frame).cpu().numpy()
                 kernel_packed = (
                     RgbToYuvConverter(variant, device=device).convert(frame).cpu().numpy()
                 )

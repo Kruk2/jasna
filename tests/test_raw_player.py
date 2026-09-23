@@ -22,7 +22,7 @@ from jasna.gui.raw_player import (
     run_raw_restoration_pass,
 )
 from jasna.gui.models import AppSettings
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 
 
 def _metadata() -> VideoMetadata:

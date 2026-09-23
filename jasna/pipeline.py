@@ -17,8 +17,9 @@ import psutil
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
-from jasna.media import UnsupportedColorspaceError, get_video_meta_data
-from jasna.media.video_encoder import NvidiaVideoEncoder
+from jasna.media.container_utils import MOV_SUFFIXES
+from jasna.media.probe import UnsupportedColorspaceError, get_video_meta_data
+from jasna.media.video_encoder import VideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.splice import (
     SplicePlan,
@@ -50,7 +51,7 @@ log = logging.getLogger(__name__)
 
 
 class _OfflineFrameWriter:
-    def __init__(self, encoder_ctx: NvidiaVideoEncoder, encode_heartbeat: list[float]):
+    def __init__(self, encoder_ctx: VideoEncoder, encode_heartbeat: list[float]):
         self._encoder_ctx = encoder_ctx
         self._encode_heartbeat = encode_heartbeat
         self._entered = False
@@ -342,7 +343,7 @@ class Pipeline:
         self,
         *,
         metadata,
-        encoder_ctx: NvidiaVideoEncoder,
+        encoder_ctx: VideoEncoder,
         progress: Progressbar,
         seek_ts: float | None = None,
         end_pts: int | None = None,
@@ -576,12 +577,12 @@ class Pipeline:
             disable=self.disable_progress,
             callback=self.progress_callback,
         )
-        if self.fmp4 and self.output_video.suffix.lower() not in {".mp4", ".mov"}:
+        if self.fmp4 and self.output_video.suffix.lower() not in MOV_SUFFIXES:
             log.info(
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
                 self.output_video.suffix,
             )
-        encoder_ctx = NvidiaVideoEncoder(
+        encoder_ctx = VideoEncoder(
             str(self.output_video),
             device=self.device,
             metadata=metadata,
@@ -681,7 +682,7 @@ class Pipeline:
                     normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
                     duration = float((span.end_pts - span.start_pts) * index.time_base)
                     if span.is_render:
-                        encoder_ctx = NvidiaVideoEncoder(
+                        encoder_ctx = VideoEncoder(
                             str(raw),
                             device=self.device,
                             metadata=metadata,
@@ -690,9 +691,7 @@ class Pipeline:
                             lut_path=self.lut_path,
                             sharpen_strength=self.sharpen_strength,
                             output_fps=metadata.video_fps_exact,
-                            mux_audio=False,
                             pts_origin=span.start_pts,
-                            match_input_bit_depth=True,
                             smart_fragment=True,
                         )
                         self._run_pass(

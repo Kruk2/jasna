@@ -853,7 +853,7 @@ class TestStreamingPaths:
         def make_pipeline(**kw):
             return pipeline_mock
 
-        from jasna.media import UnsupportedColorspaceError
+        from jasna.media.probe import UnsupportedColorspaceError
         call_count = 0
 
         def wait_side_effect():
@@ -892,7 +892,7 @@ class TestStreamingPaths:
 class TestColorspaceError:
     def test_colorspace_error_exits_1(self, tmp_path, capsys):
         inp, out, rest, det = _make_model_files(tmp_path)
-        from jasna.media import UnsupportedColorspaceError
+        from jasna.media.probe import UnsupportedColorspaceError
 
         pipeline_mock = MagicMock()
         pipeline_mock.run.side_effect = UnsupportedColorspaceError("yuv422 unsupported")

@@ -15,7 +15,7 @@ from pathlib import Path
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 
 log = logging.getLogger(__name__)
 
