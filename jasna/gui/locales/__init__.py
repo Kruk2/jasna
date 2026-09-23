@@ -36,18 +36,7 @@ LANGUAGE_NAMES = {
 class LocaleManager:
     """Manages language selection and translation lookup."""
 
-    _instance = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
-
     def __init__(self):
-        if self._initialized:
-            return
-        self._initialized = True
         self._current_lang = "en"
         self._load()
 
@@ -131,16 +120,15 @@ class LocaleManager:
         return self.get(key, **kwargs)
 
 
-# Global instance
-_locale = None
+_manager: LocaleManager | None = None
 
 
 def get_locale() -> LocaleManager:
     """Get the global LocaleManager instance."""
-    global _locale
-    if _locale is None:
-        _locale = LocaleManager()
-    return _locale
+    global _manager
+    if _manager is None:
+        _manager = LocaleManager()
+    return _manager
 
 
 def t(key: str, **kwargs) -> str:
