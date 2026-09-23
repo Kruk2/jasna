@@ -139,7 +139,6 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
 def build_restoration_session(
     config: SessionConfig,
     *,
-    disable_basicvsrpp_tensorrt: bool,
     log_callback: Callable[[str], None] | None,
 ) -> RestorationSession:
     import torch
@@ -163,7 +162,7 @@ def build_restoration_session(
         EngineCompilationRequest(
             device=str(device),
             fp16=bool(config.fp16),
-            basicvsrpp=bool(config.compile_basicvsrpp) and not disable_basicvsrpp_tensorrt and not amd,
+            basicvsrpp=config.compile_basicvsrpp and not amd,
             basicvsrpp_model_path=str(config.restoration_model_path),
             detection=True,
             detection_model_name=config.detection_model_name,

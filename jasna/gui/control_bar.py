@@ -383,7 +383,7 @@ class ControlBar(ctk.CTkFrame):
             if disabled_tooltip:
                 self._start_disabled_tooltip = Tooltip(self._start_btn, disabled_tooltip)
         
-    def set_running(self, running: bool, paused: bool = False):
+    def set_running(self, running: bool):
         self._is_running = running
         
         if running:

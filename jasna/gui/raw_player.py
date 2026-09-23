@@ -403,7 +403,6 @@ class RawPlayerWorker:
         settings = settings or self.settings
         session = build_video_session(
             settings,
-            disable_basicvsrpp_tensorrt=False,
             log=logger.info,
         )
         try:

@@ -82,7 +82,7 @@ def _build(settings: AppSettings):
         patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,
     ):
         det_path.return_value = "det.engine"
-        session = build_video_session(settings, disable_basicvsrpp_tensorrt=False, log=lambda _msg: None)
+        session = build_video_session(settings, log=lambda _msg: None)
     return session, compiled, restorer_cls, pipeline_cls, unet_cls
 
 

@@ -622,7 +622,6 @@ class QueuePanel(ctk.CTkFrame):
             JobStatus.PROCESSING: (t("job_processing"), "○", Colors.STATUS_PROCESSING),
             JobStatus.COMPLETED: (t("job_completed"), "✓", Colors.STATUS_COMPLETED),
             JobStatus.ERROR: (t("job_error"), "✕", Colors.STATUS_ERROR),
-            JobStatus.PAUSED: (t("job_paused"), "⏸", Colors.STATUS_PAUSED),
             JobStatus.SKIPPED: (t("job_skipped"), "⊘", Colors.STATUS_CONFLICT),
         }
         text, icon, color = status_map.get(status, ("", "", Colors.STATUS_PENDING))

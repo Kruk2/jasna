@@ -439,7 +439,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         licensed = license_store.is_licensed()
         self._license_chip.configure(
             text=t("license_chip_active") if licensed else t("license_chip_inactive"),
-            text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_PAUSED,
+            text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_WARNING,
         )
 
     def _open_license_dialog(self):
@@ -589,7 +589,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             messagebox.showerror(t("error_invalid_tvai"), msg)
             return
 
-        disable_basicvsrpp_tensorrt = False
         try:
             from jasna.gui.engine_preflight import run_engine_preflight
 
@@ -641,7 +640,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             settings,
             output_folder,
             output_pattern,
-            disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
         )
         self._update_video_player_button_state()
                 

@@ -104,7 +104,6 @@ def video_session_config(
 def build_video_session(
     settings: AppSettings,
     *,
-    disable_basicvsrpp_tensorrt: bool,
     log: Callable[[str], None],
 ) -> RestorationSession:
     from jasna._suppress_noise import install as _install_noise_filters
@@ -112,11 +111,7 @@ def build_video_session(
     from jasna.session_factory import build_restoration_session
 
     config = video_session_config(settings, codec=settings.codec, encoder_settings={})
-    return build_restoration_session(
-        config,
-        disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
-        log_callback=log,
-    )
+    return build_restoration_session(config, log_callback=log)
 
 
 def release_session_memory(device: "torch.device") -> None:

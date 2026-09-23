@@ -884,7 +884,7 @@ def main() -> None:
     from jasna.session_factory import build_pipeline, build_restoration_session
 
     with device_context(config.device):
-        session = build_restoration_session(config, disable_basicvsrpp_tensorrt=False, log_callback=None)
+        session = build_restoration_session(config, log_callback=None)
 
         def make_pipeline(vid_input: Path, out_path: Path):
             return build_pipeline(config, session, vid_input, out_path, segments=segments, splice_plan=splice_plan)

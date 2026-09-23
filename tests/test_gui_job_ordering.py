@@ -70,7 +70,6 @@ class TestProcessorPullLoop:
                 AppSettings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -97,7 +96,6 @@ class TestProcessorPullLoop:
                 AppSettings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -116,7 +114,6 @@ class TestProcessorPullLoop:
                 AppSettings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -148,7 +145,6 @@ class TestProcessorPullLoop:
                 AppSettings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -168,7 +164,6 @@ class TestProcessorPullLoop:
                 AppSettings(post_export_action="command", post_export_command="echo done"),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -204,7 +199,6 @@ class TestProcessorPullLoop:
                 AppSettings(post_export_video_command="remux {output}"),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -242,7 +236,6 @@ class TestProcessorPullLoop:
                 AppSettings(post_export_video_command="remux {output}"),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -263,7 +256,6 @@ class TestProcessorPullLoop:
                 AppSettings(post_export_video_command="remux {output}"),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -287,7 +279,6 @@ class TestProcessorPullLoop:
                 ),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 
@@ -318,7 +309,6 @@ class TestProcessorPullLoop:
                 ),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
-                disable_basicvsrpp_tensorrt=False,
             )
             p.join(timeout=5.0)
 

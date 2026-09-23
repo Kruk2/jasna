@@ -21,7 +21,6 @@ class JobStatus(Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     ERROR = "error"
-    PAUSED = "paused"
     SKIPPED = "skipped"
 
 
@@ -109,19 +108,6 @@ class JobItem:
                 detection_score_threshold=self.detection_score_threshold,
                 vr_projection=self.vr_projection,
             )
-
-
-@dataclass
-class ProcessingState:
-    is_running: bool = False
-    is_paused: bool = False
-    current_job_index: int = -1
-    current_filename: str = ""
-    progress_percent: float = 0.0
-    fps: float = 0.0
-    eta_seconds: float = 0.0
-    frames_processed: int = 0
-    total_frames: int = 0
 
 
 @dataclass

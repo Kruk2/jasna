@@ -343,7 +343,6 @@ class RestorationPreviewWorker:
                         self.events.put(RestorationStatus("loading_models", command.generation))
                         session = build_video_session(
                             command.settings,
-                            disable_basicvsrpp_tensorrt=False,
                             log=lambda msg: self.events.put(RestorationStatus(msg, command.generation)),
                         )
                         session_key = key

@@ -74,7 +74,6 @@ def test_processor_error_logs_full_traceback():
             settings,
             output_folder="",
             output_pattern="{original}_restored.mp4",
-            disable_basicvsrpp_tensorrt=False,
         )
         p.join(timeout=5.0)
 
