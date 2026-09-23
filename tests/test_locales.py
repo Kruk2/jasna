@@ -320,3 +320,14 @@ _MASK_FEEDBACK_KEYS = [
 @pytest.mark.parametrize("key", _MASK_FEEDBACK_KEYS)
 def test_all_languages_define_mask_feedback_keys(lang: str, key: str) -> None:
     assert TRANSLATIONS[lang][key].strip()
+
+
+def test_first_run_language_follows_system_locale(monkeypatch, tmp_path) -> None:
+    import locale
+
+    import jasna.gui.locales as locales
+
+    monkeypatch.setattr(locales, "get_settings_path", lambda: tmp_path / "missing.json")
+    monkeypatch.setattr(locale, "getdefaultlocale", lambda: ("ja_JP", "UTF-8"))
+
+    assert locales.LocaleManager()._current_lang == "ja"
