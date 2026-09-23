@@ -77,7 +77,6 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
     assert copy_fragment.call_count == 2
     encoder.assert_called_once()
     assert encoder.call_args.kwargs["codec"] == "h264"
-    assert encoder.call_args.kwargs["mux_audio"] is False
     assert encoder.call_args.kwargs["pts_origin"] == 60
     assert encoder.call_args.kwargs["smart_fragment"] is True
     assert encoder.call_args.kwargs["encoder_settings"] == {

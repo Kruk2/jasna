@@ -23,7 +23,8 @@ from jasna.media.video_encoder import (
     DEFAULT_ENCODER_OPTIONS,
     DEFAULT_H264_ENCODER_OPTIONS,
     ENCODER_SPECS,
-    _CODEC_MAP,
+    ENCODE_BUFFER_SIZE,
+    NVENC_SMART_FRAGMENT_OPTIONS,
     _align_yuv_pitch,
     _mov_container_options,
     _normalized_audio_layout,
@@ -89,7 +90,9 @@ _HEVC_OPTIONS_SNAPSHOT = {
 
 class TestCodecSpecs:
     def test_public_to_ffmpeg_codec_mapping(self):
-        assert _CODEC_MAP == {"hevc": "hevc_nvenc", "h264": "h264_nvenc", "av1": "av1_nvenc"}
+        assert {codec: spec.encoder_name for codec, spec in ENCODER_SPECS.items()} == {
+            "hevc": "hevc_nvenc", "h264": "h264_nvenc", "av1": "av1_nvenc"
+        }
 
     def test_hevc_defaults_snapshot_unchanged(self):
         assert DEFAULT_ENCODER_OPTIONS == _HEVC_OPTIONS_SNAPSHOT
@@ -134,8 +137,7 @@ class TestCodecSpecs:
         assert ENCODER_SPECS["av1"].ten_bit is True
 
     def test_nvenc_smart_fragment_options_are_unchanged(self):
-        for spec in ENCODER_SPECS.values():
-            assert dict(spec.smart_fragment_options) == {"forced-idr": "1"}
+        assert dict(NVENC_SMART_FRAGMENT_OPTIONS) == {"forced-idr": "1"}
 
 
 class TestContainerOptions:
@@ -253,7 +255,6 @@ class TestSourceContainerPreservation:
             codec="hevc",
             encoder_settings={},
             smart_fragment=True,
-            mux_audio=False,
         )
         encoder._src = SimpleNamespace(
             metadata={"title": "Source title"},
@@ -436,13 +437,11 @@ class TestEncoderOptions:
             codec="hevc",
             encoder_settings={},
             smart_fragment=True,
-            mux_audio=False,
         )
         assert enc.encoder_options["g"] == DEFAULT_ENCODER_OPTIONS["g"]
         assert enc.encoder_options["bf"] == DEFAULT_ENCODER_OPTIONS["bf"]
         assert enc.encoder_options["forced-idr"] == "1"
         assert enc.encoder_options["b_ref_mode"] == DEFAULT_ENCODER_OPTIONS["b_ref_mode"]
-        assert enc.mux_audio is False
 
     def test_smart_fragment_preserves_custom_gop_size(self, tmp_path):
         enc = NvidiaVideoEncoder(
@@ -452,7 +451,6 @@ class TestEncoderOptions:
             codec="hevc",
             encoder_settings={"g": "180"},
             smart_fragment=True,
-            mux_audio=False,
         )
 
         assert enc.encoder_options["g"] == "180"
@@ -465,7 +463,7 @@ class TestEncoderOptions:
             metadata=_fake_metadata(is_10bit=False),
             codec=codec,
             encoder_settings={},
-            match_input_bit_depth=True,
+            smart_fragment=True,
         )
         assert enc.spec.frame_format == "nv12"
         assert enc.spec.ten_bit is False
@@ -502,7 +500,7 @@ class TestEncoderOptions:
     def test_defaults_per_codec(self, tmp_path, codec, defaults):
         enc = _make_encoder(tmp_path, codec=codec)
         assert enc.encoder_options == defaults
-        assert enc.encoder_name == _CODEC_MAP[codec]
+        assert enc.encoder_name == ENCODER_SPECS[codec].encoder_name
 
     @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
     def test_settings_override_and_stringify(self, tmp_path, codec):
@@ -645,9 +643,7 @@ class TestSharpening:
             codec="hevc",
             encoder_settings={},
             sharpen_strength=0.4,
-            match_input_bit_depth=True,
             smart_fragment=True,
-            mux_audio=False,
         )
         assert ten_bit._cas.ten_bit is True
         assert ten_bit._cas.peak == 1023.0
@@ -779,7 +775,7 @@ def _buffered_encoder(tmp_path, **meta_overrides) -> NvidiaVideoEncoder:
     enc._last_emitted_pts = None
     enc._worker_error = None
     enc._encode_queue = MagicMock()
-    enc._build_encode_item = MagicMock(side_effect=lambda frame, pts: (frame, pts, None))
+    enc._build_encode_item = MagicMock(side_effect=lambda frame, pts, apply_lut: (frame, pts, None))
     return enc
 
 
@@ -980,7 +976,7 @@ class TestEncodeBuffer:
 
     def test_flush_starts_above_half_buffer(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
-        for i in range(enc.BUFFER_MAX_SIZE // 2):
+        for i in range(ENCODE_BUFFER_SIZE // 2):
             enc.encode(f"f{i}", i)
         enc._encode_queue.put.assert_not_called()
         enc.encode("one-more", 99)
@@ -1032,19 +1028,20 @@ class TestWorkerErrorChannel:
         enc._worker_error = None
         enc._encode_queue = queue.Queue()
         enc._stop_sentinel = object()
-        enc._handle_encode_item = MagicMock(side_effect=RuntimeError("mux failed"))
+        enc.stream = MagicMock()
+        enc._encode_frame = MagicMock(side_effect=RuntimeError("mux failed"))
 
         worker = threading.Thread(target=enc._encode_worker, daemon=True)
         worker.start()
-        enc._encode_queue.put(("frame", 0, None))
-        enc._encode_queue.put(("frame", 1, None))
+        enc._encode_queue.put((MagicMock(), 0, True, None))
+        enc._encode_queue.put((MagicMock(), 1, True, None))
         enc._encode_queue.join()
         enc._encode_queue.put(enc._stop_sentinel)
         worker.join(timeout=5)
 
         assert not worker.is_alive()
         assert isinstance(enc._worker_error, RuntimeError)
-        assert enc._handle_encode_item.call_count == 1
+        assert enc._encode_frame.call_count == 1
 
 
 def _packet(stream_index, dts, time_base=Fraction(1, 1000), duration=0):
@@ -1086,7 +1083,6 @@ class TestSourceStreamPump:
         ):
             encoder = object.__new__(NvidiaVideoEncoder)
             encoder.output_path = destination
-            encoder.mux_audio = True
             encoder.smart_fragment = False
             encoder._source_chapters = ()
             encoder._src = mp4
