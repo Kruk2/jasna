@@ -71,25 +71,9 @@ def compile_unet4x_engine(
         del onnx_bytes
 
 
-def encrypted_unet4x_engine_is_usable(fp16: bool = True) -> bool:
-    if use_plaintext_unet4x():
-        return get_unet4x_engine_path(UNET4X_ONNX_PATH, fp16=bool(fp16)).exists()
-    engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16))
-    if not engine_path.exists():
-        return False
-
-    from jasna.protection import protected_model
-    try:
-        protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, engine_path.read_bytes())
-    except ProtectionError:
-        return False
-    return True
-
-
 class Unet4xSecondaryRestorer:
     name = "unet-4x"
     num_workers = 1
-    preferred_queue_size = 2
     prefers_cpu_input = False
 
     def __init__(self, *, device: torch.device, fp16: bool = True) -> None:

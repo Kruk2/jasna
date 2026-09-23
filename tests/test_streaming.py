@@ -113,7 +113,6 @@ class TestHlsStreamingServer:
         server.request_seek(3)
         assert server.seek_requested.is_set()
 
-        server._last_seek_time = 0.0
         target = server.consume_seek()
         assert target == 3
         assert not server.seek_requested.is_set()
@@ -126,7 +125,6 @@ class TestHlsStreamingServer:
         server.request_seek(3)
         server.request_seek(2)
 
-        server._last_seek_time = 0.0
         target = server.consume_seek()
         assert target == 2
 

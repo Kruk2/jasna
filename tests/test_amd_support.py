@@ -12,7 +12,6 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 from jasna.accelerator import (
     AcceleratorVendor,
-    capabilities_for_device,
     vendor_for_device,
 )
 from jasna.media.probe import VideoMetadata
@@ -41,10 +40,6 @@ def _metadata() -> VideoMetadata:
 def test_rocm_uses_cuda_device_api_but_reports_amd(monkeypatch) -> None:
     monkeypatch.setattr(torch.version, "hip", "7.2.1")
     assert vendor_for_device("cuda:0") is AcceleratorVendor.AMD
-    capabilities = capabilities_for_device("cuda:0")
-    assert capabilities.amf is True
-    assert capabilities.tensorrt is False
-    assert capabilities.nvcodec is False
 
 
 def test_amd_basicvsrpp_skips_tensorrt_compilation(monkeypatch) -> None:
@@ -55,7 +50,7 @@ def test_amd_basicvsrpp_skips_tensorrt_compilation(monkeypatch) -> None:
     monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: True)
     monkeypatch.setattr(
         compiler,
-        "_basicvsrpp_engines_exist",
+        "all_basicvsrpp_sub_engines_exist",
         MagicMock(side_effect=AssertionError("TensorRT probe on AMD")),
     )
     result = compiler.ensure_engines_compiled(

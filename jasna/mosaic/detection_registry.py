@@ -175,6 +175,22 @@ def require_detection_model_weights(name: str) -> Path:
     return path
 
 
+def resolve_detection_model(
+    name: str, explicit_path: str, score_threshold: float | None
+) -> tuple[str, Path, float]:
+    """Canonical name, existing weights path and score threshold for user detector options.
+
+    An empty ``explicit_path`` means the bundled weights for ``name``; a missing
+    ``score_threshold`` means the model's recommended one.
+    """
+    name = coerce_detection_model_name(name)
+    path = Path(explicit_path) if explicit_path.strip() else require_detection_model_weights(name)
+    if not path.exists():
+        raise FileNotFoundError(str(path))
+    threshold = recommended_score_threshold(name) if score_threshold is None else float(score_threshold)
+    return name, path, threshold
+
+
 def build_detection_model(
     detection_model_name: str,
     detection_model_path: Path,

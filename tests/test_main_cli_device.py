@@ -77,4 +77,4 @@ def test_cli_creates_stream_on_chosen_device(tmp_path: Path) -> None:
 
     assert any(d == torch.device("cuda:1") for d in device_capture)
     check_gpu.assert_called_once_with("cuda:1")
-    assert pipeline_capture["device"] == torch.device("cuda:1")
+    assert pipeline_capture["session"].device == torch.device("cuda:1")

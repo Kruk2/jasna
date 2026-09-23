@@ -81,7 +81,7 @@ class SplicePlan:
         return tuple(span for span in self.spans if span.is_render)
 
 
-def _canonical_codec(name: str) -> str:
+def canonical_codec(name: str) -> str:
     value = str(name).lower()
     if value in {"h265", "h.265"}:
         return "hevc"
@@ -99,8 +99,8 @@ def validate_smart_render(
     codec: str,
     retarget_high_fps: bool,
 ) -> str:
-    input_codec = _canonical_codec(metadata.codec_name)
-    output_codec = _canonical_codec(codec)
+    input_codec = canonical_codec(metadata.codec_name)
+    output_codec = canonical_codec(codec)
     if input_codec not in SUPPORTED_SMART_CODECS:
         raise SmartRenderCompatibilityError(
             f"Smart rendering does not support input codec {metadata.codec_name!r}; "
@@ -229,7 +229,7 @@ def resolve_smart_encoder_settings(
     if source_gop_size is not None:
         resolved["g"] = source_gop_size
 
-    if _canonical_codec(codec) != "h264":
+    if canonical_codec(codec) != "h264":
         return resolved
 
     profile = str(metadata.profile or "").strip().lower()
@@ -252,7 +252,7 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
     packet_pts: list[int] = []
     with av.open(str(path)) as container:
         stream = container.streams.video[0]
-        codec = _canonical_codec(metadata.codec_name)
+        codec = canonical_codec(metadata.codec_name)
         extradata = bytes(stream.codec_context.extradata or b"")
         length_size = 4
         length_prefixed = codec == "h264" and len(extradata) > 4 and extradata[0] == 1
@@ -447,7 +447,7 @@ def create_copy_fragment(
 ) -> None:
     if destination.exists():
         destination.unlink()
-    if _canonical_codec(codec) == "av1":
+    if canonical_codec(codec) == "av1":
         start = index.seconds_for_pts(span.start_pts)
         duration = float((span.end_pts - span.start_pts) * index.time_base)
         args: list[str] = []

@@ -25,21 +25,17 @@ def _session_config_from_args(
     encoder_settings: dict[str, object],
     detection_model_name: str,
     detection_model_path: Path,
+    detection_score_threshold: float,
     restoration_model_path: Path,
     lut_path: str | None,
 ) -> SessionConfig:
-    from jasna.mosaic.detection_registry import recommended_score_threshold
-
-    threshold = args.detection_score_threshold
-    if threshold is None:
-        threshold = recommended_score_threshold(detection_model_name)
     return SessionConfig(
         device=str(args.device),
         fp16=bool(args.fp16),
         batch_size=int(args.batch_size),
         detection_model_name=detection_model_name,
         detection_model_path=detection_model_path,
-        detection_score_threshold=float(threshold),
+        detection_score_threshold=detection_score_threshold,
         max_detection_gap=int(args.max_detection_gap),
         min_detection_duration=int(args.min_detection_duration),
         scene_detection=bool(args.scene_detection),
@@ -62,6 +58,7 @@ def _session_config_from_args(
         rtx_denoise=str(args.rtx_denoise).lower(),
         rtx_deblur=str(args.rtx_deblur).lower(),
         vr_mode=str(args.vr_mode),
+        vr_projection="auto",
         codec=codec,
         encoder_settings=encoder_settings,
         lut_path=lut_path,
@@ -547,48 +544,10 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-    codec_was_explicit = any(
-        value == "--codec" or value.startswith("--codec=")
-        for value in sys.argv[1:]
-    )
-
-    if args.benchmark:
-        from jasna.benchmark import run_benchmark_cli
-        run_benchmark_cli(args)
-        return
-
-    is_streaming = bool(args.stream)
-    if is_streaming and args.retarget_high_fps:
-        parser.error("--retarget-high-fps is only supported for offline exports")
-    if is_streaming and args.fmp4:
-        parser.error("--fmp4 is only supported for offline exports")
-    from jasna.post_export_action import (
-        PostExportVideoCommandError,
-        run_post_export_action_safely,
-        run_post_export_video_command,
-        validate_post_export_action,
-    )
-    validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
-    post_export_video_command = str(args.post_export_video_command).strip()
-
-    def _run_post_export_action() -> None:
-        run_post_export_action_safely(
-            str(args.post_export_action),
-            str(args.post_export_command),
-            lambda message: print(f"Warning: {message}"),
-        )
-
-    if args.input is None and not is_streaming:
-        parser.error("--input is required when not using --benchmark or --stream")
-    if args.output is None and not is_streaming:
-        parser.error("--output is required when not using --benchmark or --stream")
-
+def _check_system(args: argparse.Namespace) -> None:
     path_ok, path_info = check_ascii_install_path()
     if not path_ok:
-        print(f"Error: Jasna must be installed in a path with ASCII characters only.")
+        print("Error: Jasna must be installed in a path with ASCII characters only.")
         print(f"Current path: {path_info}")
         sys.exit(1)
 
@@ -617,6 +576,8 @@ def main() -> None:
         if not sysmem_ok:
             print(f"Warning: CUDA Sysmem Fallback Policy: {sysmem_info}")
 
+
+def _configure_runtime(args: argparse.Namespace) -> None:
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format="%(asctime)s %(name)s %(levelname)s: %(message)s",
@@ -630,17 +591,200 @@ def main() -> None:
     patch_frozen_torch()
     from jasna.accelerator import configure_rocm_process_env
     configure_rocm_process_env()
-    import torch
 
-    from jasna.pipeline import Pipeline
+
+def _plan_folder(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    input_dir: Path,
+    output_dir: Path | None,
+) -> tuple[list[Path], list[Path], Path]:
+    """Validate a folder batch and return its images, videos and output folder."""
+    from jasna.media.media_files import classify_folder, folder_output_path, is_media
+
+    images, videos = classify_folder(input_dir)
+    if not images and not videos:
+        parser.error(f"No image or video files found in folder: {input_dir}")
+    if output_dir is None:
+        parser.error("--output (a folder) is required when --input is a folder")
+    if output_dir.exists() and not output_dir.is_dir():
+        parser.error(f"--output must be a folder when --input is a folder (got existing file: {output_dir})")
+    if not output_dir.exists() and is_media(output_dir):
+        parser.error(f"--output must be a folder when --input is a folder; got a media filename: {output_dir}")
+    inputs = [*images, *videos]
+    planned_outputs: dict[str, tuple[Path, Path]] = {}
+    input_keys = {_path_collision_key(path) for path in inputs}
+    for path in inputs:
+        out_path = folder_output_path(output_dir, path, args.output_pattern)
+        out_key = _path_collision_key(out_path)
+        if out_key in planned_outputs:
+            other_input, other_output = planned_outputs[out_key]
+            parser.error(
+                "--output-pattern maps multiple inputs to the same output: "
+                f"{other_input.name} and {path.name} -> {other_output}"
+            )
+        if out_key in input_keys:
+            parser.error(f"--output-pattern would overwrite an input file: {out_path}")
+        planned_outputs[out_key] = (path, out_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return images, videos, output_dir
+
+
+def _resolve_segments(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    input_video: Path,
+    output_video: Path,
+    *,
+    codec_was_explicit: bool,
+):
+    """Parse --segments and return (codec, segments, splice_plan); smart rendering keeps the input codec."""
+    from jasna.media.probe import get_video_meta_data
+    from jasna.media.splice import (
+        SmartRenderCompatibilityError,
+        build_splice_plan,
+        canonical_codec,
+        probe_keyframes,
+        validate_smart_render,
+    )
+    from jasna.segments import parse_segments
+
+    metadata = get_video_meta_data(str(input_video))
+    try:
+        segments = parse_segments(str(args.segments).strip(), duration=metadata.duration)
+    except ValueError as exc:
+        parser.error(f"invalid --segments: {exc}")
+    input_codec = canonical_codec(metadata.codec_name)
+    if codec_was_explicit and str(args.codec).lower() != input_codec:
+        parser.error(f"with --segments output codec must match input; pass --codec {input_codec}")
+    try:
+        validate_smart_render(
+            metadata,
+            output_path=output_video,
+            codec=input_codec,
+            retarget_high_fps=bool(args.retarget_high_fps),
+        )
+        splice_plan = build_splice_plan(
+            segments,
+            probe_keyframes(input_video, metadata),
+            duration=metadata.duration,
+        )
+    except SmartRenderCompatibilityError as exc:
+        parser.error(str(exc))
+    return input_codec, segments, splice_plan
+
+
+def _run_streaming(args: argparse.Namespace, make_pipeline, input_video: Path | None) -> None:
+    from jasna.streaming import HlsStreamingServer
+    from jasna.streaming_pipeline import run_streaming
+
+    hls_server = HlsStreamingServer(
+        segment_duration=float(args.stream_segment_duration),
+        port=int(args.stream_port),
+    )
+    print(f"HLS stream: {hls_server.start()}")
+    print(f"Browser:    http://localhost:{args.stream_port}/")
+    if not args.no_browser:
+        import webbrowser
+        webbrowser.open(f"http://localhost:{args.stream_port}/")
+    try:
+        if input_video is not None:
+            run_streaming(make_pipeline(input_video, input_video), hls_server)
+            return
+        while True:
+            video_path = hls_server.wait_for_video()
+            try:
+                run_streaming(make_pipeline(video_path, video_path), hls_server)
+            except UnsupportedColorspaceError as e:
+                print(f"Error: {e}")
+            hls_server.unload_video()
+    except KeyboardInterrupt:
+        print("Streaming stopped")
+    finally:
+        hls_server.stop()
+
+
+def _run_videos(
+    args: argparse.Namespace,
+    make_pipeline,
+    videos: list[Path],
+    output_path_for,
+    *,
+    in_folder: bool,
+    first_index: int,
+    total: int,
+) -> bool:
+    """Process videos one by one; returns False when a per-video command failed in a folder batch."""
+    from jasna.post_export_action import PostExportVideoCommandError, run_post_export_video_command
+
+    post_export_video_command = str(args.post_export_video_command).strip()
+    all_commands_ok = True
+    for i, vid in enumerate(videos, start=first_index):
+        out_path = output_path_for(vid)
+        if in_folder:
+            print(f"[{i}/{total}] Processing {vid.name} -> {out_path.name}")
+        try:
+            make_pipeline(vid, out_path).run()
+        except UnsupportedColorspaceError as e:
+            print(f"Error processing {vid.name}: {e}")
+            if not in_folder:
+                sys.exit(1)
+            continue
+        if not post_export_video_command:
+            continue
+        print(f"Running post-export command for {out_path.name}")
+        try:
+            run_post_export_video_command(post_export_video_command, vid, out_path, lambda: False)
+        except PostExportVideoCommandError as e:
+            print(f"Error post-processing {vid.name}: {e}")
+            if not in_folder:
+                sys.exit(1)
+            all_commands_ok = False
+    return all_commands_ok
+
+
+def main() -> None:
+    parser = build_parser()
+    args = parser.parse_args()
+    codec_was_explicit = any(
+        value == "--codec" or value.startswith("--codec=")
+        for value in sys.argv[1:]
+    )
+
+    if args.benchmark:
+        from jasna.benchmark import run_benchmark_cli
+        run_benchmark_cli(args)
+        return
+
+    is_streaming = bool(args.stream)
+    if is_streaming and args.retarget_high_fps:
+        parser.error("--retarget-high-fps is only supported for offline exports")
+    if is_streaming and args.fmp4:
+        parser.error("--fmp4 is only supported for offline exports")
+    from jasna.post_export_action import run_post_export_action_safely, validate_post_export_action
+    validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
+
+    def _run_post_export_action() -> None:
+        run_post_export_action_safely(
+            str(args.post_export_action),
+            str(args.post_export_command),
+            lambda message: print(f"Warning: {message}"),
+        )
+
+    if args.input is None and not is_streaming:
+        parser.error("--input is required when not using --benchmark or --stream")
+    if args.output is None and not is_streaming:
+        parser.error("--output is required when not using --benchmark or --stream")
+
+    _check_system(args)
+    _configure_runtime(args)
 
     input_video = Path(args.input) if args.input else None
     if input_video is not None and not input_video.exists():
         raise FileNotFoundError(str(input_video))
-
     output_video = Path(args.output) if args.output else (input_video.with_stem(input_video.stem + "_out") if input_video else None)
 
-    from jasna.media.media_files import is_image
+    from jasna.media.media_files import folder_output_path, is_image
     input_is_image = input_video is not None and is_image(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
     segments_spec = str(args.segments).strip()
@@ -654,42 +798,13 @@ def main() -> None:
         if args.fmp4:
             parser.error("--fmp4 cannot be combined with --segments")
 
+    folder_images: list[Path] = []
     folder_videos: list[Path] = []
     folder_output_dir: Path | None = None
     if input_is_dir:
         if is_streaming:
             parser.error("--stream does not support folder input")
-        from jasna.media.media_files import classify_folder, folder_output_path, is_media
-        folder_images, folder_videos = classify_folder(input_video)
-        folder_total = len(folder_images) + len(folder_videos)
-        if not folder_images and not folder_videos:
-            parser.error(f"No image or video files found in folder: {input_video}")
-        if output_video is None:
-            parser.error("--output (a folder) is required when --input is a folder")
-        folder_output_dir = output_video
-        if folder_output_dir.exists() and not folder_output_dir.is_dir():
-            parser.error(f"--output must be a folder when --input is a folder (got existing file: {folder_output_dir})")
-        if not folder_output_dir.exists() and is_media(folder_output_dir):
-            parser.error(
-                f"--output must be a folder when --input is a folder; got a media filename: {folder_output_dir}"
-            )
-        folder_inputs = [*folder_images, *folder_videos]
-        planned_outputs: dict[str, tuple[Path, Path]] = {}
-        input_keys = {_path_collision_key(path) for path in folder_inputs}
-        for path in folder_inputs:
-            out_path = folder_output_path(folder_output_dir, path, args.output_pattern)
-            out_key = _path_collision_key(out_path)
-            if out_key in planned_outputs:
-                other_input, other_output = planned_outputs[out_key]
-                parser.error(
-                    "--output-pattern maps multiple inputs to the same output: "
-                    f"{other_input.name} and {path.name} -> {other_output}"
-                )
-            if out_key in input_keys:
-                parser.error(f"--output-pattern would overwrite an input file: {out_path}")
-            planned_outputs[out_key] = (path, out_path)
-        folder_output_dir.mkdir(parents=True, exist_ok=True)
-        # Images first, then videos.
+        folder_images, folder_videos, folder_output_dir = _plan_folder(parser, args, input_video, output_video)
         if folder_images:
             from jasna.image_restore import run_image_restoration_folder
             run_image_restoration_folder(
@@ -697,7 +812,7 @@ def main() -> None:
                 folder_images,
                 folder_output_dir,
                 output_pattern=args.output_pattern,
-                progress_total=folder_total,
+                progress_total=len(folder_images) + len(folder_videos),
             )
         if not folder_videos:
             _run_post_export_action()
@@ -714,25 +829,18 @@ def main() -> None:
     from jasna.mosaic.detection_registry import (
         coerce_detection_model_name,
         discover_available_detection_models,
-        recommended_score_threshold,
-        require_detection_model_weights,
+        resolve_detection_model,
     )
 
-    detection_model_name = coerce_detection_model_name(str(args.detection_model))
-    has_explicit_path = bool(str(args.detection_model_path).strip())
-    if not has_explicit_path:
+    if not str(args.detection_model_path).strip():
         available = discover_available_detection_models()
-        if available and detection_model_name not in available:
-            print(f"Warning: detection model '{detection_model_name}' not found in model_weights/. Available: {', '.join(available)}")
-    detection_model_path = (
-        Path(str(args.detection_model_path))
-        if has_explicit_path
-        else require_detection_model_weights(detection_model_name)
+        requested = coerce_detection_model_name(str(args.detection_model))
+        if available and requested not in available:
+            print(f"Warning: detection model '{requested}' not found in model_weights/. Available: {', '.join(available)}")
+    detection_model_name, detection_model_path, detection_score_threshold = resolve_detection_model(
+        str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
     )
-    if not detection_model_path.exists():
-        raise FileNotFoundError(str(detection_model_path))
 
-    restoration_model_name = str(args.restoration_model_name)
     restoration_model_path = Path(args.restoration_model_path)
     if not restoration_model_path.exists():
         raise FileNotFoundError(str(restoration_model_path))
@@ -741,48 +849,11 @@ def main() -> None:
     splice_plan = None
     codec = str(args.codec).lower()
     if segments_spec:
-        from jasna.media.probe import get_video_meta_data
-        from jasna.media.splice import (
-            SmartRenderCompatibilityError,
-            build_splice_plan,
-            probe_keyframes,
-            validate_smart_render,
+        codec, segments, splice_plan = _resolve_segments(
+            parser, args, input_video, output_video, codec_was_explicit=codec_was_explicit
         )
-        from jasna.segments import parse_segments
 
-        metadata = get_video_meta_data(str(input_video))
-        try:
-            segments = parse_segments(segments_spec, duration=metadata.duration)
-        except ValueError as exc:
-            parser.error(f"invalid --segments: {exc}")
-        input_codec = {
-            "avc": "h264",
-            "h265": "hevc",
-            "av01": "av1",
-        }.get(metadata.codec_name.lower(), metadata.codec_name.lower())
-        if codec_was_explicit and codec != input_codec:
-            parser.error(
-                f"with --segments output codec must match input; pass --codec {input_codec}"
-            )
-        codec = input_codec
-        try:
-            validate_smart_render(
-                metadata,
-                output_path=output_video,
-                codec=codec,
-                retarget_high_fps=bool(args.retarget_high_fps),
-            )
-            splice_plan = build_splice_plan(
-                segments,
-                probe_keyframes(input_video, metadata),
-                duration=metadata.duration,
-            )
-        except SmartRenderCompatibilityError as exc:
-            parser.error(str(exc))
-    if codec not in {"hevc", "h264", "av1"}:
-        raise ValueError(f"Unsupported codec: {codec} (supported: hevc, h264, av1)")
-
-    from jasna.accelerator import vendor_for_device
+    from jasna.accelerator import device_context, vendor_for_device
 
     encoder_settings = _resolve_cli_encoder_settings(
         str(args.encoder_settings),
@@ -790,48 +861,6 @@ def main() -> None:
         codec=codec,
         vendor=vendor_for_device(str(args.device)),
     )
-
-    batch_size = int(args.batch_size)
-    if batch_size <= 0:
-        raise ValueError("--batch-size must be > 0")
-
-    max_clip_size = int(args.max_clip_size)
-    if max_clip_size <= 0:
-        raise ValueError("--max-clip-size must be > 0")
-
-    temporal_overlap = int(args.temporal_overlap)
-    if temporal_overlap < 0:
-        raise ValueError("--temporal-overlap must be >= 0")
-    if temporal_overlap >= max_clip_size:
-        raise ValueError("--temporal-overlap must be < --max-clip-size")
-    if temporal_overlap > 0 and (2 * temporal_overlap) >= max_clip_size:
-        raise ValueError("--temporal-overlap must satisfy 2*--temporal-overlap < --max-clip-size")
-
-    max_detection_gap = int(args.max_detection_gap)
-    if max_detection_gap < 0:
-        raise ValueError("--max-detection-gap must be >= 0")
-    if max_detection_gap >= max_clip_size:
-        raise ValueError("--max-detection-gap must be < --max-clip-size")
-
-    min_detection_duration = int(args.min_detection_duration)
-    if min_detection_duration < 0:
-        raise ValueError("--min-detection-duration must be >= 0")
-    if min_detection_duration >= max_clip_size:
-        raise ValueError("--min-detection-duration must be < --max-clip-size")
-    if not (0.0 <= float(args.sharpen) <= 1.0):
-        raise ValueError("--sharpen must be in [0, 1]")
-
-    device = torch.device(str(args.device))
-    from jasna.accelerator import device_context
-
-    if args.detection_score_threshold is None:
-        args.detection_score_threshold = recommended_score_threshold(detection_model_name)
-    detection_score_threshold = float(args.detection_score_threshold)
-    if not (0.0 <= detection_score_threshold <= 1.0):
-        raise ValueError("--detection-score-threshold must be in [0, 1]")
-
-    if restoration_model_name != "basicvsrpp":
-        raise ValueError(f"Unsupported restoration model: {restoration_model_name}")
 
     if args.license_email and args.license_key:
         from jasna.protection import license_store
@@ -847,118 +876,44 @@ def main() -> None:
         encoder_settings=encoder_settings,
         detection_model_name=detection_model_name,
         detection_model_path=detection_model_path,
+        detection_score_threshold=detection_score_threshold,
         restoration_model_path=restoration_model_path,
         lut_path=lut_arg or None,
     )
 
     from jasna.session_factory import build_pipeline, build_restoration_session
 
-    with device_context(device):
-        session = build_restoration_session(
-            config,
-            disable_basicvsrpp_tensorrt=False,
-            log_callback=None,
-        )
+    with device_context(config.device):
+        session = build_restoration_session(config, disable_basicvsrpp_tensorrt=False, log_callback=None)
 
-        def _make_pipeline(vid_input: Path, out_path: Path) -> Pipeline:
-            return build_pipeline(
-                config,
-                session,
-                vid_input,
-                out_path,
-                segments=segments,
-                splice_plan=splice_plan,
-            )
+        def make_pipeline(vid_input: Path, out_path: Path):
+            return build_pipeline(config, session, vid_input, out_path, segments=segments, splice_plan=splice_plan)
 
-        video_inputs = folder_videos if input_is_dir else ([input_video] if input_video is not None else [])
-
-        def _video_output_path(vid: Path) -> Path:
+        def output_path_for(vid: Path) -> Path:
             if input_is_dir:
                 return folder_output_path(folder_output_dir, vid, args.output_pattern)
-            return output_video or vid.with_stem(vid.stem + "_out")
+            return output_video
 
-        pipeline: Pipeline | None = None
-        post_export_video_failed = False
         try:
-            if is_streaming and input_video is None:
-                from jasna.streaming import HlsStreamingServer
-                pipeline = _make_pipeline(Path("__streaming__"), Path("__streaming___out__"))
-                hls_server = HlsStreamingServer(
-                    segment_duration=float(args.stream_segment_duration),
-                    port=int(args.stream_port),
-                )
-                hls_server.start()
-                if not args.no_browser:
-                    import webbrowser
-                    webbrowser.open(f"http://localhost:{args.stream_port}/")
-                try:
-                    while True:
-                        video_path = hls_server.wait_for_video()
-                        pipeline.input_video = video_path
-                        try:
-                            pipeline.run_streaming(
-                                hls_server=hls_server,
-                                segment_duration=float(args.stream_segment_duration),
-                            )
-                        except UnsupportedColorspaceError as e:
-                            print(f"Error: {e}")
-                        hls_server.unload_video()
-                except KeyboardInterrupt:
-                    pass
-                finally:
-                    hls_server.stop()
-            elif is_streaming:
-                pipeline = _make_pipeline(input_video, _video_output_path(input_video))
-                if not args.no_browser:
-                    import webbrowser
-                    webbrowser.open(f"http://localhost:{args.stream_port}/")
-                pipeline.run_streaming(
-                    port=int(args.stream_port),
-                    segment_duration=float(args.stream_segment_duration),
-                )
-            else:
-                video_start = len(folder_images) + 1 if input_is_dir else 1
-                video_total = len(folder_images) + len(video_inputs) if input_is_dir else len(video_inputs)
-                for i, vid in enumerate(video_inputs, start=video_start):
-                    out_path = _video_output_path(vid)
-                    if input_is_dir:
-                        print(f"[{i}/{video_total}] Processing {vid.name} -> {out_path.name}")
-                    pipeline = _make_pipeline(vid, out_path)
-                    export_succeeded = False
-                    try:
-                        pipeline.run()
-                        export_succeeded = True
-                    except UnsupportedColorspaceError as e:
-                        # In a folder batch, skip the bad file and keep going.
-                        print(f"Error processing {vid.name}: {e}")
-                        if not input_is_dir:
-                            sys.exit(1)
-                    finally:
-                        pipeline.close()
-                        pipeline = None
-                    if export_succeeded and post_export_video_command:
-                        print(f"Running post-export command for {out_path.name}")
-                        try:
-                            run_post_export_video_command(
-                                post_export_video_command,
-                                vid,
-                                out_path,
-                                lambda: False,
-                            )
-                        except PostExportVideoCommandError as e:
-                            print(f"Error post-processing {vid.name}: {e}")
-                            if not input_is_dir:
-                                sys.exit(1)
-                            post_export_video_failed = True
-                _run_post_export_action()
-                if post_export_video_failed:
-                    sys.exit(1)
+            if is_streaming:
+                _run_streaming(args, make_pipeline, input_video)
+                return
+            all_commands_ok = _run_videos(
+                args,
+                make_pipeline,
+                folder_videos if input_is_dir else [input_video],
+                output_path_for,
+                in_folder=input_is_dir,
+                first_index=len(folder_images) + 1,
+                total=len(folder_images) + len(folder_videos) if input_is_dir else 1,
+            )
+            _run_post_export_action()
+            if not all_commands_ok:
+                sys.exit(1)
         except UnsupportedColorspaceError as e:
             print(f"Error: {e}")
             sys.exit(1)
         finally:
-            if pipeline is not None:
-                pipeline.close()
             session.close()
 
 

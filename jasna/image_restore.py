@@ -114,9 +114,6 @@ def prepare_image_restore(
     *,
     device: torch.device,
     fp16: bool,
-    iou_threshold: float = SD15_IOU_THRESHOLD,
-    expand_pixels: int = SD15_EXPAND_PIXELS,
-    restoration_size: int = SD15_RESTORATION_SIZE,
 ) -> PreparedImageRestore:
     from jasna.sd15_crop_utils import compute_crop_bbox, crop_and_resize_np
 
@@ -135,12 +132,12 @@ def prepare_image_restore(
         return PreparedImageRestore(img_chw_u8=img_chw_u8.copy(), img_rgb=img_rgb, groups=[])
 
     groups = []
-    for indices in group_boxes_by_iou(boxes, iou_threshold):
-        group_mask = _build_group_mask(masks, indices, h, w, expand_pixels)
+    for indices in group_boxes_by_iou(boxes, SD15_IOU_THRESHOLD):
+        group_mask = _build_group_mask(masks, indices, h, w, SD15_EXPAND_PIXELS)
         merged = _union_bbox(boxes, indices)
-        crop_bbox = compute_crop_bbox(merged, w, h, restoration_size)
-        crop_rgb, content_h, content_w = crop_and_resize_np(img_rgb, crop_bbox, restoration_size)
-        crop_mask, _, _ = crop_and_resize_np(group_mask, crop_bbox, restoration_size)
+        crop_bbox = compute_crop_bbox(merged, w, h, SD15_RESTORATION_SIZE)
+        crop_rgb, content_h, content_w = crop_and_resize_np(img_rgb, crop_bbox, SD15_RESTORATION_SIZE)
+        crop_mask, _, _ = crop_and_resize_np(group_mask, crop_bbox, SD15_RESTORATION_SIZE)
         mosaic_01 = torch.from_numpy(crop_rgb).permute(2, 0, 1).unsqueeze(0).to(device=device, dtype=dtype) / 255.0
         mask_01 = torch.from_numpy(crop_mask).unsqueeze(0).unsqueeze(0).to(device=device, dtype=dtype) / 255.0
         groups.append(PreparedImageRestoreGroup(
@@ -202,9 +199,6 @@ def restore_image(
     seed: int,
     num_variants: int,
     freeu: dict | None,
-    iou_threshold: float = SD15_IOU_THRESHOLD,
-    expand_pixels: int = SD15_EXPAND_PIXELS,
-    restoration_size: int = SD15_RESTORATION_SIZE,
 ) -> list[np.ndarray]:
     """Detect mosaics, SDEdit-inpaint each group, composite back.
 
@@ -217,9 +211,6 @@ def restore_image(
     prepared = prepare_image_restore(
         img_chw_u8, detector,
         device=device, fp16=fp16,
-        iou_threshold=iou_threshold,
-        expand_pixels=expand_pixels,
-        restoration_size=restoration_size,
     )
 
     outputs: list[np.ndarray] = []
@@ -259,15 +250,10 @@ def run_image_restoration_folder(
 
 
 def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None) -> None:
-    from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.engine_paths import SD15_DIR
     from jasna.media import image_io
-    from jasna.mosaic.detection_registry import (
-        build_detection_model,
-        coerce_detection_model_name,
-        recommended_score_threshold,
-        require_detection_model_weights,
-    )
+    from jasna.mosaic.detection_registry import resolve_detection_model
+    from jasna.session_factory import build_compiled_detection_model
     from jasna.restorer.sd15_download import ensure_sd15_bundle
     from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU, Sd15InpaintRestorer
 
@@ -284,41 +270,22 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
 
     ensure_sd15_bundle(SD15_DIR)
 
-    detection_model_name = coerce_detection_model_name(str(args.detection_model))
-    score_threshold = float(
-        recommended_score_threshold(detection_model_name)
-        if args.detection_score_threshold is None
-        else args.detection_score_threshold
+    detection_model_name, detection_model_path, score_threshold = resolve_detection_model(
+        str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
     )
-    has_explicit_path = bool(str(args.detection_model_path).strip())
-    detection_model_path = (
-        Path(str(args.detection_model_path))
-        if has_explicit_path
-        else require_detection_model_weights(detection_model_name)
-    )
-    if not detection_model_path.exists():
-        raise FileNotFoundError(str(detection_model_path))
-
-    ensure_engines_compiled(EngineCompilationRequest(
-        device=str(device),
-        fp16=fp16,
-        detection=True,
-        detection_model_name=detection_model_name,
-        detection_model_path=str(detection_model_path),
-        detection_batch_size=batch_size,
-    ))
 
     num_variants = max(1, int(args.sd15_variants))
     freeu = dict(DEFAULT_FREEU) if bool(args.sd15_freeu) else None
     strength = clamp_strength(args.sd15_strength)
 
-    detector = build_detection_model(
+    detector = build_compiled_detection_model(
         detection_model_name,
         detection_model_path,
-        batch_size=batch_size,
         device=device,
-        score_threshold=score_threshold,
+        batch_size=batch_size,
         fp16=fp16,
+        score_threshold=score_threshold,
+        log_callback=None,
     )
     restorer = Sd15InpaintRestorer(SD15_DIR, device, fp16)
     try:

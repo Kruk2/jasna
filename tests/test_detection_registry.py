@@ -382,3 +382,26 @@ def test_discover_lists_torch_rfdetr_weights_on_amd(monkeypatch, tmp_path) -> No
 
     monkeypatch.setattr(registry, "is_amd_device", lambda: False)
     assert registry.discover_available_detection_models(tmp_path) == ["rfdetr-v6-large"]
+
+
+def test_resolve_detection_model_uses_explicit_path_and_recommended_threshold(tmp_path) -> None:
+    from jasna.mosaic.detection_registry import recommended_score_threshold, resolve_detection_model
+
+    weights = tmp_path / "custom.onnx"
+    weights.write_bytes(b"x")
+
+    name, path, threshold = resolve_detection_model("RFDETR-V6", str(weights), None)
+
+    assert name == "rfdetr-v6"
+    assert path == weights
+    assert threshold == recommended_score_threshold("rfdetr-v6")
+    assert resolve_detection_model("rfdetr-v6", str(weights), 0.5)[2] == 0.5
+
+
+def test_resolve_detection_model_rejects_a_missing_explicit_path(tmp_path) -> None:
+    import pytest
+
+    from jasna.mosaic.detection_registry import resolve_detection_model
+
+    with pytest.raises(FileNotFoundError):
+        resolve_detection_model("rfdetr-v6", str(tmp_path / "missing.onnx"), None)

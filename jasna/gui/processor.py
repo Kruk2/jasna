@@ -407,13 +407,9 @@ class Processor:
         splice_plan = None
         if segments:
             from jasna.media.probe import get_video_meta_data
-            from jasna.media.splice import build_splice_plan, probe_keyframes, validate_smart_render
+            from jasna.media.splice import build_splice_plan, canonical_codec, probe_keyframes, validate_smart_render
             metadata = get_video_meta_data(str(input_path))
-            codec = {
-                "avc": "h264",
-                "h265": "hevc",
-                "av01": "av1",
-            }.get(metadata.codec_name.lower(), metadata.codec_name.lower())
+            codec = canonical_codec(metadata.codec_name)
             validate_smart_render(
                 metadata,
                 output_path=output_path,
@@ -473,20 +469,12 @@ class Processor:
                 raise ProcessingStopped("Processing stopped")
         finally:
             self._current_pipeline = None
-            if pipeline is not None:
-                pipeline.close()
 
     def _prepare_job_detector(
         self,
         config: SessionConfig,
         session: RestorationSession,
     ) -> None:
-        if (
-            config.detection_model_name == session.detection_model_name
-            and config.detection_model_path == session.detection_model_path
-        ):
-            return
-
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
 
         ensure_engines_compiled(
@@ -517,10 +505,10 @@ class Processor:
         from jasna._suppress_noise import install as _install_noise_filters
         _install_noise_filters()
         import torch
-        from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
         from jasna.engine_paths import SD15_DIR
-        from jasna.mosaic.detection_registry import build_detection_model, coerce_detection_model_name, require_detection_model_weights
+        from jasna.mosaic.detection_registry import resolve_detection_model
         from jasna.restorer.sd15_download import bundle_present
+        from jasna.session_factory import build_compiled_detection_model
         from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
 
         settings = self._settings
@@ -531,26 +519,17 @@ class Processor:
                 "Image Restoration settings."
             )
 
-        det_name = coerce_detection_model_name(str(settings.detection_model))
-        detection_model_path = require_detection_model_weights(det_name)
-        ensure_engines_compiled(
-            EngineCompilationRequest(
-                device=str(device),
-                fp16=settings.fp16_mode,
-                detection=True,
-                detection_model_name=det_name,
-                detection_model_path=str(detection_model_path),
-                detection_batch_size=settings.batch_size,
-            ),
-            log_callback=lambda msg: self._log("INFO", msg),
+        detection_model_name, detection_model_path, _ = resolve_detection_model(
+            str(settings.detection_model), "", None
         )
-        detector = build_detection_model(
-            det_name,
+        detector = build_compiled_detection_model(
+            detection_model_name,
             detection_model_path,
-            batch_size=settings.batch_size,
             device=device,
-            score_threshold=settings.detection_score_threshold,
+            batch_size=settings.batch_size,
             fp16=settings.fp16_mode,
+            score_threshold=settings.detection_score_threshold,
+            log_callback=lambda msg: self._log("INFO", msg),
         )
         restorer = Sd15InpaintRestorer(SD15_DIR, device, settings.fp16_mode)
         self._img_session = (detector, restorer, device)

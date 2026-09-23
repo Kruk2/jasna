@@ -44,7 +44,7 @@ def test_request_defaults() -> None:
 
 
 def test_ensure_no_subprocess_when_basicvsrpp_exists(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: True)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: True)
     req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
     assert ensure_engines_compiled(req).use_basicvsrpp_tensorrt is True
 
@@ -56,7 +56,7 @@ def test_ensure_no_subprocess_when_not_requested() -> None:
 
 
 def test_ensure_all_exist_no_subprocess(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: True)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: True)
     monkeypatch.setattr("jasna.engine_compiler._detection_engine_exists", lambda *_a, **_kw: True)
     monkeypatch.setattr("jasna.engine_compiler._unet4x_engine_exists", lambda *_a, **_kw: True)
     req = EngineCompilationRequest(
@@ -80,7 +80,7 @@ def test_ensure_spawns_subprocess_on_missing(monkeypatch) -> None:
     def engines_exist_after_compile(*_a, **_kw):
         call_count[0] += 1
         return call_count[0] > 1
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", engines_exist_after_compile)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", engines_exist_after_compile)
 
     log_messages = []
     req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="model.pth")
@@ -94,7 +94,7 @@ def test_ensure_spawns_subprocess_on_missing(monkeypatch) -> None:
 
 
 def test_ensure_subprocess_failure_raises(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
     monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *a, **kw: _mock_proc(["error\n"], returncode=1))
 
     req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
@@ -103,7 +103,7 @@ def test_ensure_subprocess_failure_raises(monkeypatch) -> None:
 
 
 def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
     monkeypatch.setattr("jasna.engine_compiler.is_frozen", lambda: True)
     fake_sys = type("FakeSys", (), {"executable": "C:/app/jasna.exe"})()
     monkeypatch.setattr("jasna.engine_compiler.sys", fake_sys)
@@ -122,7 +122,7 @@ def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
 
 
 def test_ensure_create_no_window_on_windows(monkeypatch) -> None:
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
     monkeypatch.setattr(
         "jasna.engine_compiler.subprocess_no_window_kwargs", lambda: {"creationflags": 0x08000000}
     )
@@ -142,7 +142,7 @@ def test_ensure_does_not_print_when_log_callback_given(monkeypatch) -> None:
     # The frozen GUI drops its console (FreeConsole), so stdout is invalid — an
     # unconditional print() would raise WinError 6. With a log_callback (GUI path), the
     # progress message must go to the callback and never to print().
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
     monkeypatch.setattr("jasna.engine_compiler.subprocess.Popen", lambda *a, **kw: _mock_proc(["Done.\n"]))
     printed: list = []
     monkeypatch.setattr("jasna.engine_compiler.print", lambda *a, **kw: printed.append(a), raising=False)
@@ -157,7 +157,7 @@ def test_ensure_does_not_print_when_log_callback_given(monkeypatch) -> None:
 
 def test_ensure_popen_stdin_is_devnull(monkeypatch) -> None:
     # The detached GUI's stdin handle is invalid; the child must not inherit it.
-    monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
+    monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
     popen_kwargs: dict = {}
     monkeypatch.setattr(
         "jasna.engine_compiler.subprocess.Popen",

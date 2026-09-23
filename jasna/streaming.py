@@ -375,7 +375,6 @@ class HlsStreamingServer:
         self._seek_lock = threading.Lock()
         self.seek_requested = threading.Event()
         self.seek_target_segment: int = -1
-        self._last_seek_time: float = 0.0
 
         self._max_segments_kept: int = 2 * max_segments_ahead
 
@@ -525,9 +524,7 @@ class HlsStreamingServer:
                 return False
             if new_playback:
                 self.playback_epoch += 1
-            now = time.monotonic()
             self.seek_target_segment = segment_index
-            self._last_seek_time = now
             self.seek_requested.set()
             return True
 

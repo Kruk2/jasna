@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from pathlib import Path
 from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -239,7 +240,6 @@ def test_restoration_worker_marks_playback_requests() -> None:
 
 def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
     from jasna import pipeline_threads
-    from jasna import vram_offloader
 
     class ImmediateThread:
         def __init__(self, *, target, **_kwargs):
@@ -260,19 +260,32 @@ def test_preview_pass_forwards_scene_detection(monkeypatch) -> None:
     monkeypatch.setattr(pipeline_threads, "secondary_restore_loop", MagicMock())
     monkeypatch.setattr(pipeline_threads, "blend_encode_loop", MagicMock())
     monkeypatch.setattr(restoration_preview.threading, "Thread", ImmediateThread)
-    monkeypatch.setattr(vram_offloader, "VramOffloader", MagicMock())
-    monkeypatch.setattr(torch.cuda, "empty_cache", MagicMock())
+    monkeypatch.setattr(pipeline_threads, "VramOffloader", MagicMock())
     worker = RestorationPreviewWorker("video.mp4", _metadata())
     settings = AppSettings(scene_detection=False)
     worker.request(2.0, settings, projection="raw")
     command = worker._commands.get_nowait()
-    session = SimpleNamespace(
+    pipeline = SimpleNamespace(
+        input_video=Path("video.mp4"),
         device=torch.device("cpu"),
         restoration_pipeline=SimpleNamespace(secondary_num_workers=1),
+        max_clip_size=settings.max_clip_size,
+        batch_size=settings.batch_size,
+        temporal_overlap=settings.temporal_overlap,
+        max_detection_gap=settings.max_detection_gap,
+        min_detection_duration=settings.min_detection_duration,
+        enable_crossfade=settings.enable_crossfade,
+        scene_detection=settings.scene_detection,
+        vr_projection="auto",
+        vr_projector=None,
+        job_detection_model=MagicMock(),
+        vr_resolution=SimpleNamespace(resolved="off", is_sbs=False),
+        configure_vr=lambda metadata: None,
     )
 
-    worker._run_preview_pass(command, session, MagicMock())
+    worker._run_preview_pass(command, pipeline)
 
+    assert pipeline.vr_projection == "raw"
     assert decode_detect.call_args.kwargs["scene_detection"] is False
     worker.close()
 

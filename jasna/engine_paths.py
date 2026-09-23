@@ -102,13 +102,13 @@ BASICVSRPP_UPSAMPLE_BATCH = 30
 BASICVSRPP_PREPROCESS_BATCH = 60
 
 
-def _basicvsrpp_sub_engine_dir(model_weights_path: str) -> str:
+def basicvsrpp_sub_engine_dir(model_weights_path: str) -> str:
     stem = os.path.splitext(os.path.basename(model_weights_path))[0]
     return os.path.join(os.path.dirname(model_weights_path), f"{stem}_sub_engines")
 
 
 def get_basicvsrpp_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict[str, str]:
-    engine_dir = _basicvsrpp_sub_engine_dir(model_weights_path)
+    engine_dir = basicvsrpp_sub_engine_dir(model_weights_path)
     prec = engine_precision_name(fp16=fp16)
     suf = engine_system_suffix()
     paths: dict[str, str] = {}
