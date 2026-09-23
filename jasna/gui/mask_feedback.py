@@ -322,7 +322,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
         self._interactive_widgets.append(self._submit_btn)
         cancel_btn = ctk.CTkButton(
             footer,
-            text=t("segments_cancel"),
+            text=t("btn_cancel"),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
             command=self._cancel,

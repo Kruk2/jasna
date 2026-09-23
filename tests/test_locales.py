@@ -181,7 +181,6 @@ _SEGMENT_EDITOR_KEYS = {
     "segments_scan_help_title",
     "segments_scan_help_body",
     "segments_scan_progress",
-    "segments_scan_stopped",
     "segments_scan_low_vram",
     "segments_scan_low_vram_short",
     "segments_scan_failed",
@@ -312,7 +311,6 @@ _MASK_FEEDBACK_KEYS = [
     "mask_editor_quick_help",
     "mask_editor_opacity",
     "mask_editor_loading_frame",
-    "mask_editor_frame_failed",
     "mask_feedback_uploaded",
     "mask_feedback_upload_failed",
 ]

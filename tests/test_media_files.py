@@ -4,6 +4,7 @@ from pathlib import Path
 
 from jasna.media.media_files import (
     classify_folder,
+    file_dialog_patterns,
     folder_output_path,
     folder_media_in_processing_order,
     is_image,
@@ -78,3 +79,7 @@ class TestFolderOutputPath:
     def test_pattern_without_suffix_preserves_input_extension(self):
         out = folder_output_path(Path("/out"), Path("/in/clip.mkv"), "{original}_restored")
         assert out == Path("/out/clip_restored.mkv")
+
+
+def test_file_dialog_patterns_are_sorted_globs():
+    assert file_dialog_patterns(frozenset({".png", ".jpg"})) == "*.jpg *.png"
