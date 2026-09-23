@@ -2,11 +2,11 @@
 
 import customtkinter as ctk
 
-from jasna.gui.components import CollapsibleSection, Tooltip
+from jasna.gui.components import CollapsibleSection
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.sd15_download_worker import start_sd15_download
-from jasna.gui.settings_sections.widgets import create_slider_value_label, get_tooltip
+from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -58,11 +58,7 @@ class ImageRestorationSection:
         # Steps slider (5-60, step 5)
         row_steps = ctk.CTkFrame(inner, fg_color="transparent")
         row_steps.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        steps_label = ctk.CTkLabel(row_steps, text=t("image_restore_steps"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        steps_label.pack(side="left")
-        steps_tip = ctk.CTkLabel(row_steps, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        steps_tip.pack(side="left", padx=4)
-        Tooltip(steps_tip, get_tooltip("image_restore_steps"))
+        add_setting_label(row_steps, "image_restore_steps")
         self._widgets["image_restore_steps_val"] = create_slider_value_label(
             row_steps, "25", 4, Colors.BG_PANEL
         )
@@ -78,11 +74,7 @@ class ImageRestorationSection:
         # Strength slider (0.1-0.7, step 0.05)
         row_str = ctk.CTkFrame(inner, fg_color="transparent")
         row_str.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        str_label = ctk.CTkLabel(row_str, text=t("image_restore_strength"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        str_label.pack(side="left")
-        str_tip = ctk.CTkLabel(row_str, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        str_tip.pack(side="left", padx=4)
-        Tooltip(str_tip, get_tooltip("image_restore_strength"))
+        add_setting_label(row_str, "image_restore_strength")
         self._widgets["image_restore_strength_val"] = create_slider_value_label(
             row_str, "0.60", 4, Colors.BG_PANEL
         )
@@ -98,11 +90,7 @@ class ImageRestorationSection:
         # Variants slider (1-8, step 1)
         row_var = ctk.CTkFrame(inner, fg_color="transparent")
         row_var.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
-        var_label = ctk.CTkLabel(row_var, text=t("image_restore_variants"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        var_label.pack(side="left")
-        var_tip = ctk.CTkLabel(row_var, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        var_tip.pack(side="left", padx=4)
-        Tooltip(var_tip, get_tooltip("image_restore_variants"))
+        add_setting_label(row_var, "image_restore_variants")
         self._widgets["image_restore_variants_val"] = create_slider_value_label(
             row_var, "1", 4, Colors.BG_PANEL
         )
@@ -121,11 +109,7 @@ class ImageRestorationSection:
 
         seed_frame = ctk.CTkFrame(row_last, fg_color=Colors.BG_CARD, corner_radius=6)
         seed_frame.pack(side="left", fill="x", expand=True, padx=(0, 4))
-        seed_label = ctk.CTkLabel(seed_frame, text=t("image_restore_seed"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        seed_label.pack(side="left", padx=(12, 4), pady=8)
-        seed_tip = ctk.CTkLabel(seed_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        seed_tip.pack(side="left")
-        Tooltip(seed_tip, get_tooltip("image_restore_seed"))
+        add_setting_label(seed_frame, "image_restore_seed", in_card=True)
         self._widgets["image_restore_seed"] = ctk.CTkEntry(
             seed_frame, width=70, fg_color=Colors.BG_PANEL, text_color=Colors.TEXT_PRIMARY, border_color=Colors.BORDER_LIGHT,
         )
@@ -134,11 +118,7 @@ class ImageRestorationSection:
 
         freeu_frame = ctk.CTkFrame(row_last, fg_color=Colors.BG_CARD, corner_radius=6)
         freeu_frame.pack(side="right", fill="x", expand=True, padx=(4, 0))
-        freeu_label = ctk.CTkLabel(freeu_frame, text=t("image_restore_freeu"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        freeu_label.pack(side="left", padx=12, pady=8)
-        freeu_tip = ctk.CTkLabel(freeu_frame, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        freeu_tip.pack(side="left")
-        Tooltip(freeu_tip, get_tooltip("image_restore_freeu"))
+        add_setting_label(freeu_frame, "image_restore_freeu", in_card=True)
         self._widgets["image_restore_freeu"] = CompactSwitch(
             freeu_frame,
             self._on_modified,

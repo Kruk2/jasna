@@ -6,7 +6,7 @@ from tkinter import filedialog
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import create_slider_value_label, get_tooltip
+from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
 
 
@@ -77,11 +77,7 @@ class SecondarySection:
         # TVAI ffmpeg path
         tvai_path_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_path_row.pack(fill="x", pady=(0, 8))
-        tvai_path_label = ctk.CTkLabel(tvai_path_row, text=t("ffmpeg_path"), text_color=Colors.TEXT_PRIMARY)
-        tvai_path_label.pack(side="left")
-        tvai_path_tip = ctk.CTkLabel(tvai_path_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        tvai_path_tip.pack(side="left", padx=4)
-        Tooltip(tvai_path_tip, get_tooltip("tvai_ffmpeg_path"))
+        add_setting_label(tvai_path_row, "ffmpeg_path", "tvai_ffmpeg_path")
 
         tvai_path_input_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_path_input_row.pack(fill="x", pady=(0, 8))
@@ -102,11 +98,7 @@ class SecondarySection:
         # TVAI model
         tvai_model_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_model_row.pack(fill="x", pady=(0, 8))
-        tvai_model_label = ctk.CTkLabel(tvai_model_row, text=t("model"), text_color=Colors.TEXT_PRIMARY)
-        tvai_model_label.pack(side="left")
-        tvai_model_tip = ctk.CTkLabel(tvai_model_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        tvai_model_tip.pack(side="left", padx=4)
-        Tooltip(tvai_model_tip, get_tooltip("tvai_model"))
+        add_setting_label(tvai_model_row, "model", "tvai_model")
         self._widgets["tvai_model"] = ctk.CTkOptionMenu(
             tvai_model_row, values=["iris-2", "iris-3", "prob-4", "nyx-1"],
             fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
@@ -119,11 +111,7 @@ class SecondarySection:
         # TVAI scale
         tvai_scale_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_scale_row.pack(fill="x", pady=(0, 8))
-        tvai_scale_label = ctk.CTkLabel(tvai_scale_row, text=t("scale"), text_color=Colors.TEXT_PRIMARY)
-        tvai_scale_label.pack(side="left")
-        tvai_scale_tip = ctk.CTkLabel(tvai_scale_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        tvai_scale_tip.pack(side="left", padx=4)
-        Tooltip(tvai_scale_tip, get_tooltip("tvai_scale"))
+        add_setting_label(tvai_scale_row, "scale", "tvai_scale")
         self._widgets["tvai_scale"] = ctk.CTkOptionMenu(
             tvai_scale_row, values=["1x", "2x", "4x"],
             fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
@@ -165,11 +153,7 @@ class SecondarySection:
         # TVAI workers
         tvai_workers_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
         tvai_workers_row.pack(fill="x")
-        tvai_workers_label = ctk.CTkLabel(tvai_workers_row, text=t("workers"), text_color=Colors.TEXT_PRIMARY)
-        tvai_workers_label.pack(side="left")
-        tvai_workers_tip = ctk.CTkLabel(tvai_workers_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        tvai_workers_tip.pack(side="left", padx=4)
-        Tooltip(tvai_workers_tip, get_tooltip("tvai_workers"))
+        add_setting_label(tvai_workers_row, "workers", "tvai_workers")
         self._widgets["tvai_workers_val"] = create_slider_value_label(
             tvai_workers_row, "2", 2, Colors.BG_CARD
         )

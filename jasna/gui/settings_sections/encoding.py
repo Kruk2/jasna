@@ -8,6 +8,7 @@ from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch, create_icon
 from jasna.gui.locales import t
 from jasna.gui.settings_sections.widgets import (
+    add_setting_label,
     ValueOptionMenu,
     create_slider_value_label,
     get_tooltip,
@@ -42,11 +43,7 @@ class EncodingSection:
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
         row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        codec_label = ctk.CTkLabel(row1, text=t("codec"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        codec_label.pack(side="left")
-        codec_tip = ctk.CTkLabel(row1, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        codec_tip.pack(side="left", padx=4)
-        Tooltip(codec_tip, get_tooltip("codec"))
+        add_setting_label(row1, "codec")
         self._widgets["codec"] = ValueOptionMenu(
             row1,
             options=CODEC_CANONICAL_TO_LABEL,
@@ -68,11 +65,7 @@ class EncodingSection:
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
         row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        cq_label = ctk.CTkLabel(row2, text=t("quality_cq"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        cq_label.pack(side="left")
-        cq_tip = ctk.CTkLabel(row2, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        cq_tip.pack(side="left", padx=4)
-        Tooltip(cq_tip, get_tooltip("encoder_cq"))
+        add_setting_label(row2, "quality_cq", "encoder_cq")
 
         initial_cq = self._cq_values[self._active_codec]
         initial_spec = encoder_cq_spec(self._active_codec, self._cq_vendor)
@@ -96,11 +89,7 @@ class EncodingSection:
         sharpen_row = ctk.CTkFrame(inner, fg_color="transparent")
         sharpen_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        sharpen_label = ctk.CTkLabel(sharpen_row, text=t("sharpen_strength"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        sharpen_label.pack(side="left")
-        sharpen_tip = ctk.CTkLabel(sharpen_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        sharpen_tip.pack(side="left", padx=4)
-        Tooltip(sharpen_tip, get_tooltip("sharpen_strength"))
+        add_setting_label(sharpen_row, "sharpen_strength")
 
         self._widgets["sharpen_strength_val"] = create_slider_value_label(
             sharpen_row, "0.00", 4, Colors.BG_PANEL
@@ -188,11 +177,7 @@ class EncodingSection:
         # LUT (color correction)
         lut_row = ctk.CTkFrame(inner, fg_color="transparent")
         lut_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
-        lut_label = ctk.CTkLabel(lut_row, text=t("lut_path"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        lut_label.pack(side="left")
-        lut_tip = ctk.CTkLabel(lut_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        lut_tip.pack(side="left", padx=4)
-        Tooltip(lut_tip, get_tooltip("lut_path"))
+        add_setting_label(lut_row, "lut_path")
 
         lut_input_row = ctk.CTkFrame(inner, fg_color="transparent")
         lut_input_row.pack(fill="x", pady=(4, 0))
@@ -211,11 +196,7 @@ class EncodingSection:
 
         working_dir_row = ctk.CTkFrame(inner, fg_color="transparent")
         working_dir_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
-        working_dir_label = ctk.CTkLabel(working_dir_row, text=t("working_directory"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
-        working_dir_label.pack(side="left")
-        working_dir_tip = ctk.CTkLabel(working_dir_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
-        working_dir_tip.pack(side="left", padx=4)
-        Tooltip(working_dir_tip, get_tooltip("working_directory"))
+        add_setting_label(working_dir_row, "working_directory")
 
         working_dir_input_row = ctk.CTkFrame(inner, fg_color="transparent")
         working_dir_input_row.pack(fill="x", pady=(4, 0))
