@@ -297,16 +297,13 @@ def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
 
 
 def check_gpu_driver_version() -> tuple[bool, str]:
-    try:
-        import torch
+    import torch
 
-        hip_version = getattr(torch.version, "hip", None)
-        if hip_version:
-            if not torch.cuda.is_available():
-                return False, f"ROCm {hip_version} is installed but no AMD GPU is available"
-            return True, f"ROCm {hip_version}"
-    except ImportError:
-        pass
+    hip_version = torch.version.hip
+    if hip_version:
+        if not torch.cuda.is_available():
+            return False, f"ROCm {hip_version} is installed but no AMD GPU is available"
+        return True, f"ROCm {hip_version}"
 
     nvidia_smi = find_executable("nvidia-smi")
     if not nvidia_smi:

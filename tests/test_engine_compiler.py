@@ -123,10 +123,9 @@ def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
 
 def test_ensure_create_no_window_on_windows(monkeypatch) -> None:
     monkeypatch.setattr("jasna.engine_compiler._basicvsrpp_engines_exist", lambda *_a, **_kw: False)
-    monkeypatch.setattr("jasna.engine_compiler.os.name", "nt")
-    # CREATE_NO_WINDOW is a Windows-only subprocess attribute; inject it so the nt branch
-    # is exercisable on a Linux test host.
-    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(
+        "jasna.engine_compiler.subprocess_no_window_kwargs", lambda: {"creationflags": 0x08000000}
+    )
 
     popen_kwargs = {}
     monkeypatch.setattr(
@@ -136,7 +135,7 @@ def test_ensure_create_no_window_on_windows(monkeypatch) -> None:
 
     req = EngineCompilationRequest(device="cuda:0", fp16=True, basicvsrpp=True, basicvsrpp_model_path="x")
     ensure_engines_compiled(req)
-    assert popen_kwargs.get("creationflags") == subprocess.CREATE_NO_WINDOW
+    assert popen_kwargs.get("creationflags") == 0x08000000
 
 
 def test_ensure_does_not_print_when_log_callback_given(monkeypatch) -> None:
