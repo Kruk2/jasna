@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 class SettingsPanel(ctk.CTkFrame):
     """Right panel composing the settings sections; widgets live in the sections."""
 
-    def __init__(self, master, **kwargs):
+    def __init__(self, master, preset_manager: PresetManager, **kwargs):
         super().__init__(
             master,
             fg_color=Colors.BG_PANEL,
@@ -40,7 +40,7 @@ class SettingsPanel(ctk.CTkFrame):
             **kwargs
         )
 
-        self._preset_manager = PresetManager()
+        self._preset_manager = preset_manager
         self._current_preset = self._preset_manager.get_last_selected()
         self._saved_preset_settings: AppSettings | None = None  # Snapshot of preset when loaded
         self._is_modified = False
@@ -160,18 +160,6 @@ class SettingsPanel(ctk.CTkFrame):
         """Refresh dropdown with current presets."""
         self._update_dropdown_values()
         self._preset_dropdown.configure(values=self._dropdown_values)
-
-    def get_last_output_folder(self) -> str:
-        return self._preset_manager.get_last_output_folder()
-
-    def set_last_output_folder(self, path: str):
-        self._preset_manager.set_last_output_folder(path)
-
-    def get_last_output_pattern(self) -> str:
-        return self._preset_manager.get_last_output_pattern()
-
-    def set_last_output_pattern(self, pattern: str):
-        self._preset_manager.set_last_output_pattern(pattern)
 
     def _update_button_states(self):
         """Update button states based on current preset."""

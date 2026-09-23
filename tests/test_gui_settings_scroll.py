@@ -6,12 +6,13 @@ import customtkinter as ctk
 import pytest
 
 from jasna.gui.components import CollapsibleSection
+from jasna.gui.models import PresetManager
 from jasna.gui.settings_panel import SettingsPanel
 from jasna.gui.theme import Colors
 
 
 def _settings_panel(root: ctk.CTk) -> SettingsPanel:
-    panel = SettingsPanel(root)
+    panel = SettingsPanel(root, PresetManager())
     panel.pack(fill="both", expand=True)
     root.update()
     return panel
