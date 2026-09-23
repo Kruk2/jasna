@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox
 from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
+from jasna.gui.queues import MainThreadCalls
 from jasna.gui.raw_player import (
     PREROLL_SECONDS,
     PlaybackClock,
@@ -235,6 +236,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         on_closed,
     ) -> None:
         super().__init__(master)
+        self._main_thread = MainThreadCalls(self, 50)
         self.withdraw()
         self._base_settings = settings
         self._on_closed = on_closed
@@ -592,7 +594,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
                 result = (metadata, "")
             except Exception as exc:
                 result = (None, str(exc))
-            self._ui_after(lambda: self._video_probed(generation, *result))
+            self._main_thread.post(lambda: self._video_probed(generation, *result))
 
         threading.Thread(
             target=probe,
@@ -1026,7 +1028,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
 
         def join_worker() -> None:
             worker.join()
-            self._ui_after(self._finish_stop)
+            self._main_thread.post(self._finish_stop)
 
         threading.Thread(target=join_worker, name="player-stop", daemon=True).start()
 
@@ -1120,13 +1122,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         if self._native_renderer is not None:
             self._native_renderer.close()
         self._timer_resolution.close()
+        self._main_thread.close()
         self.destroy()
         self._on_closed()
 
-    def _ui_after(self, callback) -> None:
-        if self._closed:
-            return
-        try:
-            self.after(0, callback)
-        except (tk.TclError, RuntimeError):
-            logger.debug("Player window closed before a worker callback ran", exc_info=True)

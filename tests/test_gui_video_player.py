@@ -145,6 +145,7 @@ def test_destroying_player_restores_timer_resolution() -> None:
         _probe_generation=2,
         _native_renderer=MagicMock(),
         _timer_resolution=MagicMock(),
+        _main_thread=MagicMock(),
         grab_release=MagicMock(),
         destroy=MagicMock(),
         _on_closed=MagicMock(),
@@ -155,6 +156,7 @@ def test_destroying_player_restores_timer_resolution() -> None:
 
     dialog._native_renderer.close.assert_called_once_with()
     dialog._timer_resolution.close.assert_called_once_with()
+    dialog._main_thread.close.assert_called_once_with()
     dialog.destroy.assert_called_once_with()
     dialog._on_closed.assert_called_once_with()
 
@@ -623,7 +625,7 @@ def test_initial_path_uses_shared_probe_flow_without_autoplay(monkeypatch) -> No
         _native_renderer=None,
         _play_btn=MagicMock(),
         _set_status=MagicMock(),
-        _ui_after=lambda callback: callback(),
+        _main_thread=SimpleNamespace(post=lambda callback: callback()),
         _video_probed=probed,
     )
 

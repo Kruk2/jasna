@@ -29,6 +29,7 @@ from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
 from jasna.gui.processor import Processor, ProgressUpdate
+from jasna.gui.queues import MainThreadCalls
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
@@ -62,6 +63,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     
     def __init__(self, skip_wizard: bool = False):
         super().__init__()
+        self._main_thread = MainThreadCalls(self, 50)
         Fonts.FAMILY, Fonts.FAMILY_MONO = _font_families_for_platform(
             sys.platform, get_locale().current_language
         )
@@ -404,11 +406,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             from jasna.gui.system_stats import read_system_stats
             while not self._system_stats_stop.is_set():
                 stats = read_system_stats()
-                try:
-                    self.after(0, lambda s=stats: self._control_bar.set_system_stats(s))
-                except Exception:
-                    logger.debug("System stats poller stopping (widget gone)", exc_info=True)
-                    return
+                self._main_thread.post(lambda s=stats: self._control_bar.set_system_stats(s))
                 self._system_stats_stop.wait(1.5)
 
         self._system_stats_thread = threading.Thread(target=_loop, daemon=True)
@@ -431,6 +429,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 self._processor.join(timeout=5.0)
         finally:
             self._stop_system_stats_poller()
+            self._main_thread.close()
             self.destroy()
         
     def _refresh_license_chip(self):
@@ -665,8 +664,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._log_panel.pack_forget()
             
     def _on_processor_progress(self, update: ProgressUpdate):
-        # Schedule UI update on main thread
-        self.after(0, lambda: self._handle_progress(update))
+        self._main_thread.post(lambda: self._handle_progress(update))
         
     def _handle_progress(self, update: ProgressUpdate):
         jobs = self._queue_panel.get_jobs()
@@ -713,10 +711,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             logger.warning("Failed to update job status in queue panel", exc_info=True)
             
     def _on_processor_log(self, level: str, message: str):
-        self.after(0, lambda: self._log_panel.add_log(level, message))
+        self._main_thread.post(lambda: self._log_panel.add_log(level, message))
         
     def _on_processor_complete(self):
-        self.after(0, self._handle_complete)
+        self._main_thread.post(self._handle_complete)
         
     def _handle_complete(self):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
