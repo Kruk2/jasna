@@ -47,32 +47,25 @@ class VideoMetadata:
     video_bitrate: int = 0
 
 
-def resolve_video_start_pts(
-    stream_start_time: int | None,
-    metadata_start_pts: int | None,
-) -> int:
+def resolve_video_start_pts(stream_start_time: int | None, metadata_start_pts: int) -> int:
     if stream_start_time is not None:
         return int(stream_start_time)
-    return int(metadata_start_pts or 0)
+    return metadata_start_pts
 
-def _get_frame_count_by_counting(path: str) -> int:
+def _frame_count_from_container(path: str) -> int:
     import cv2
     cap = cv2.VideoCapture(path)
     frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
     cap.release()
-    return frame_count
+    return int(frame_count)
 
 
 def is_stream_10bit(json_video_stream: dict) -> bool:
     bprs = json_video_stream.get('bits_per_raw_sample')
     if isinstance(bprs, (int, float)):
         return int(bprs) == 10
-    if isinstance(bprs, str):
-        try:
-            if int(bprs) == 10:
-                return True
-        except ValueError:
-            pass
+    if isinstance(bprs, str) and bprs.strip() == "10":
+        return True
     pix_fmt = (json_video_stream.get('pix_fmt') or '').lower()
     ten_bit_markers = (
         'p10',
@@ -162,23 +155,18 @@ def get_video_meta_data(path: str) -> VideoMetadata:
             stdout_text,
             stderr_text,
         )
-        raise Exception(f"error running ffprobe: {err.strip()}. Code: {p.returncode}, cmd: {cmd}")
+        raise RuntimeError(f"error running ffprobe: {err.strip()}. Code: {p.returncode}, cmd: {cmd}")
     json_output = json.loads(out)
     json_video_stream = json_output["streams"][0]
     json_video_format = json_output["format"]
 
-    value = [int(num) for num in json_video_stream['avg_frame_rate'].split("/")]
-    # Can be 0/0 for some files for ffprobe isn't able to determine the number of frames nb_frames
-    average_fps = value[0]/value[1] if len(value) == 2 and value[1] != 0 else value[0]
-
-    value = [int(num) for num in json_video_stream['r_frame_rate'].split("/")]
-    fps = value[0]/value[1] if len(value) == 2 else value[0]
-    fps_exact = Fraction(value[0], value[1])
-
-    value = [int(num) for num in json_video_stream['time_base'].split("/")]
-    time_base = Fraction(value[0], value[1])
-
-    start_pts = json_video_stream.get('start_pts')
+    # avg_frame_rate is 0/0 when ffprobe cannot count the frames.
+    avg_num, avg_den = (int(num) for num in json_video_stream['avg_frame_rate'].split("/"))
+    average_fps = avg_num / avg_den if avg_den else float(avg_num)
+    fps_exact = Fraction(json_video_stream['r_frame_rate'])
+    fps = float(fps_exact)
+    time_base = Fraction(json_video_stream['time_base'])
+    start_pts = int(json_video_stream.get('start_pts') or 0)
     range_name = (json_video_stream.get("color_range") or "").lower()
     color_range = (
         AvColorRange.JPEG
@@ -196,7 +184,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
 
     num_frames = int(json_video_stream.get('nb_frames', 0))
     if num_frames == 0:
-        num_frames = _get_frame_count_by_counting(path)
+        num_frames = _frame_count_from_container(path)
     is_10bit = is_stream_10bit(json_video_stream)
     stereo_layout, spherical_projection = parse_spatial_metadata(json_video_stream)
 

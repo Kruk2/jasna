@@ -6,7 +6,7 @@ import json
 import math
 from dataclasses import dataclass
 
-from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.accelerator import AcceleratorVendor
 
 
 @dataclass(frozen=True)
@@ -110,10 +110,6 @@ SUPPORTED_ENCODER_SETTINGS_BY_CODEC: dict[str, frozenset[str]] = {
     "av1": _COMMON_ENCODER_SETTINGS | {"tier", "spatial-aq", "tile-rows", "tile-columns"},
 }
 
-SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
-    *SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values()
-)
-
 # User-facing AMF settings. ``cq`` is kept as a portable Jasna option; the
 # encoder maps it to QVBR for H.264 and constant QP for HEVC/AV1.
 _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
@@ -141,9 +137,6 @@ AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC: dict[str, frozenset[str]] = {
     "av1": _COMMON_AMF_ENCODER_SETTINGS | {"bitdepth", "aq_mode"},
 }
 
-AMF_SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
-    *AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values()
-)
 
 
 def _parse_encoder_setting_scalar(value: str) -> object:
@@ -192,43 +185,28 @@ def parse_encoder_settings(value: str) -> dict[str, object]:
 
 def validate_encoder_settings(
     settings: dict[str, object],
-    codec: str | None = None,
     *,
-    vendor: AcceleratorVendor | str | None = None,
+    codec: str,
+    vendor: AcceleratorVendor | str,
 ) -> dict[str, object]:
-    resolved_vendor = (
-        vendor_for_device()
-        if vendor is None
-        else AcceleratorVendor(str(vendor))
-    )
     by_codec = (
         AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC
-        if resolved_vendor is AcceleratorVendor.AMD
+        if AcceleratorVendor(str(vendor)) is AcceleratorVendor.AMD
         else SUPPORTED_ENCODER_SETTINGS_BY_CODEC
-    )
-    supported_all = (
-        AMF_SUPPORTED_ENCODER_SETTINGS
-        if resolved_vendor is AcceleratorVendor.AMD
-        else SUPPORTED_ENCODER_SETTINGS
     )
     if "spatial_aq" in settings and "spatial-aq" in settings:
         raise ValueError(
             "Conflicting encoder settings: spatial_aq and spatial-aq are aliases; use only one"
         )
-    if codec is None:
-        supported = supported_all
-        scope = "Supported"
-    else:
-        if codec not in by_codec:
-            raise ValueError(f"Unsupported codec: {codec}")
-        supported = by_codec[codec]
-        scope = f"Supported for {codec}"
+    if codec not in by_codec:
+        raise ValueError(f"Unsupported codec: {codec}")
+    supported = by_codec[codec]
     invalid = sorted(set(settings.keys()) - set(supported))
     if invalid:
         raise ValueError(
-            f"Unsupported encoder setting(s){'' if codec is None else f' for codec {codec}'}: "
+            f"Unsupported encoder setting(s) for codec {codec}: "
             + ", ".join(invalid)
-            + f". {scope}: "
+            + f". Supported for {codec}: "
             + ", ".join(sorted(supported))
         )
     return settings

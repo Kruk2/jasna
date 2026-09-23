@@ -174,7 +174,7 @@ class _ValiFrameSource:
         seek_ctx = None
         if seek_ts is not None:
             start_seconds = float(
-                resolve_video_start_pts(None, self.metadata.start_pts) * self.metadata.time_base
+                self.metadata.start_pts * self.metadata.time_base
             )
             seek_ctx = self._vali.SeekContext(seek_ts=seek_ts + start_seconds)
         pending_pts = self._first_pts if seek_ctx is None else None
@@ -310,7 +310,7 @@ class NvidiaVideoReader:
     @property
     def start_pts(self) -> int:
         if self._vali_source is not None:
-            return resolve_video_start_pts(None, self.metadata.start_pts)
+            return self.metadata.start_pts
         return resolve_video_start_pts(
             self.video_stream.start_time,
             self.metadata.start_pts,

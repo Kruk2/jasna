@@ -5,8 +5,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media.encoder_settings import (
-    SUPPORTED_ENCODER_SETTINGS,
     SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
     _parse_encoder_setting_scalar,
     parse_encoder_settings,
@@ -28,7 +28,6 @@ from jasna.media.probe import (
         (900, 300, 900),
         (0, 300, 0),
         (None, 300, 300),
-        (None, None, 0),
     ],
 )
 def test_resolve_video_start_pts(stream_start, metadata_start, expected) -> None:
@@ -121,78 +120,77 @@ class TestParseEncoderSettings:
         assert result == {"cq": 22}
 
 
+def _validate(settings, codec="hevc"):
+    return validate_encoder_settings(settings, codec=codec, vendor=AcceleratorVendor.NVIDIA)
+
+
 class TestValidateEncoderSettings:
     def test_valid_settings(self):
         settings = {"cq": 22, "rc-lookahead": 32, "preset": "p5"}
-        assert validate_encoder_settings(settings) == settings
+        assert _validate(settings) == settings
 
     def test_empty_settings(self):
-        assert validate_encoder_settings({}) == {}
+        assert _validate({}) == {}
 
     def test_invalid_key_raises(self):
         with pytest.raises(ValueError, match="Unsupported encoder setting"):
-            validate_encoder_settings({"cq": 22, "bad_key": 1})
+            _validate({"cq": 22, "bad_key": 1})
 
-    def test_all_supported_keys_accepted(self):
+    @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
+    def test_all_supported_keys_accepted(self, codec):
         # spatial_aq/spatial-aq are aliases and may not be combined.
-        settings = {k: 0 for k in SUPPORTED_ENCODER_SETTINGS if k != "spatial-aq"}
-        assert validate_encoder_settings(settings) == settings
-        settings = {k: 0 for k in SUPPORTED_ENCODER_SETTINGS if k != "spatial_aq"}
-        assert validate_encoder_settings(settings) == settings
+        supported = SUPPORTED_ENCODER_SETTINGS_BY_CODEC[codec]
+        for alias in ("spatial-aq", "spatial_aq"):
+            settings = {k: 0 for k in supported if k != alias}
+            assert _validate(settings, codec) == settings
 
 
 class TestValidateEncoderSettingsPerCodec:
-    def test_union_is_union_of_codec_sets(self):
-        union = frozenset().union(*SUPPORTED_ENCODER_SETTINGS_BY_CODEC.values())
-        assert union == SUPPORTED_ENCODER_SETTINGS
-
     @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
     def test_common_settings_accepted_for_all_codecs(self, codec):
         settings = {"preset": "p5", "cq": 25, "rc-lookahead": 32, "bf": 4, "maxrate": "10M"}
-        assert validate_encoder_settings(settings, codec=codec) == settings
+        assert _validate(settings, codec) == settings
 
     @pytest.mark.parametrize("codec", ["hevc", "h264"])
     def test_profile_accepted_for_hevc_and_h264(self, codec):
-        assert validate_encoder_settings({"profile": "x"}, codec=codec) == {"profile": "x"}
+        assert _validate({"profile": "x"}, codec) == {"profile": "x"}
 
     def test_profile_rejected_for_av1(self):
         with pytest.raises(ValueError, match="for codec av1.*profile"):
-            validate_encoder_settings({"profile": "main"}, codec="av1")
+            _validate({"profile": "main"}, "av1")
 
     @pytest.mark.parametrize("codec", ["hevc", "h264"])
     def test_underscore_aq_alias_accepted_for_hevc_and_h264(self, codec):
-        assert validate_encoder_settings({"spatial_aq": 1}, codec=codec)
-        assert validate_encoder_settings({"spatial-aq": 1}, codec=codec)
+        assert _validate({"spatial_aq": 1}, codec)
+        assert _validate({"spatial-aq": 1}, codec)
 
     def test_av1_requires_hyphen_aq_spelling(self):
-        assert validate_encoder_settings({"spatial-aq": 1}, codec="av1")
+        assert _validate({"spatial-aq": 1}, "av1")
         with pytest.raises(ValueError, match="for codec av1.*spatial_aq"):
-            validate_encoder_settings({"spatial_aq": 1}, codec="av1")
+            _validate({"spatial_aq": 1}, "av1")
 
     def test_av1_tile_options_accepted(self):
         settings = {"tile-rows": 2, "tile-columns": 2}
-        assert validate_encoder_settings(settings, codec="av1") == settings
+        assert _validate(settings, "av1") == settings
         with pytest.raises(ValueError, match="for codec hevc"):
-            validate_encoder_settings(settings, codec="hevc")
+            _validate(settings, "hevc")
 
     def test_h264_coder_accepted_only_for_h264(self):
-        assert validate_encoder_settings({"coder": "cabac"}, codec="h264")
+        assert _validate({"coder": "cabac"}, "h264")
         with pytest.raises(ValueError, match="for codec hevc"):
-            validate_encoder_settings({"coder": "cabac"}, codec="hevc")
+            _validate({"coder": "cabac"}, "hevc")
 
     def test_error_message_names_selected_codec(self):
         with pytest.raises(ValueError, match=r"for codec h264.*tier.*Supported for h264"):
-            validate_encoder_settings({"tier": "high"}, codec="h264")
+            _validate({"tier": "high"}, "h264")
 
     def test_conflicting_aq_aliases_rejected(self):
         with pytest.raises(ValueError, match="Conflicting encoder settings.*spatial"):
-            validate_encoder_settings({"spatial_aq": 1, "spatial-aq": 1}, codec="hevc")
-        with pytest.raises(ValueError, match="Conflicting encoder settings.*spatial"):
-            validate_encoder_settings({"spatial_aq": 1, "spatial-aq": 1})
+            _validate({"spatial_aq": 1, "spatial-aq": 1}, "hevc")
 
     def test_unknown_codec_rejected(self):
         with pytest.raises(ValueError, match="Unsupported codec: vp9"):
-            validate_encoder_settings({}, codec="vp9")
+            _validate({}, "vp9")
 
 
 class TestIsStream10bit:
@@ -357,7 +355,7 @@ class TestGetVideoMetaData:
         proc.returncode = 0
         mock_popen.return_value = proc
 
-        with patch("jasna.media.probe._get_frame_count_by_counting", return_value=50) as mock_count:
+        with patch("jasna.media.probe._frame_count_from_container", return_value=50) as mock_count:
             meta = get_video_meta_data("test.mp4")
             mock_count.assert_called_once_with("test.mp4")
             assert meta.num_frames == 50
