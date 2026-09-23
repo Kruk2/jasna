@@ -70,6 +70,41 @@ class RestorationSession:
             self.restoration_pipeline.secondary_restorer.close()
 
 
+def build_compiled_detection_model(
+    detection_model_name: str,
+    detection_model_path: Path,
+    *,
+    device: "torch.device",
+    batch_size: int,
+    fp16: bool,
+    score_threshold: float,
+    log_callback: Callable[[str], None] | None,
+) -> "DetectionModel":
+    """Compile the detector's TensorRT engine if it is missing, then load the detector."""
+    from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
+    from jasna.mosaic.detection_registry import build_detection_model
+
+    ensure_engines_compiled(
+        EngineCompilationRequest(
+            device=str(device),
+            fp16=fp16,
+            detection=True,
+            detection_model_name=detection_model_name,
+            detection_model_path=str(detection_model_path),
+            detection_batch_size=batch_size,
+        ),
+        log_callback=log_callback,
+    )
+    return build_detection_model(
+        detection_model_name,
+        detection_model_path,
+        batch_size=batch_size,
+        device=device,
+        score_threshold=score_threshold,
+        fp16=fp16,
+    )
+
+
 def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
     if config.secondary_restoration == "none":
         return None
