@@ -12,11 +12,18 @@ from PIL import Image
 
 from jasna.gui.queues import replace_pending
 from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
+from jasna.media.splice import KeyframeIndex, probe_keyframes
 
 
 @dataclass(frozen=True)
 class PreviewLoaded:
     metadata: VideoMetadata
+
+
+@dataclass(frozen=True)
+class PreviewKeyframes:
+    index: KeyframeIndex | None
+    error: str | None
 
 
 @dataclass(frozen=True)
@@ -70,7 +77,7 @@ class _Stop:
     pass
 
 
-PreviewEvent = PreviewLoaded | PreviewFrame | PreviewFullFrame | PreviewEnded | PreviewFailed
+PreviewEvent = PreviewLoaded | PreviewKeyframes | PreviewFrame | PreviewFullFrame | PreviewEnded | PreviewFailed
 _Command = _Seek | _Next | _Previous | _GrabFull | _Stop
 
 
@@ -147,6 +154,12 @@ class SegmentPreviewWorker:
                 self.path,
             ).is_sbs
             self.events.put(PreviewLoaded(metadata))
+            threading.Thread(
+                target=self._probe_keyframes,
+                args=(metadata,),
+                name=f"segment-keyframes-{self.path.name}",
+                daemon=True,
+            ).start()
             with av.open(str(self.path)) as container:
                 stream = container.streams.video[0]
                 start_pts = resolve_video_start_pts(stream.start_time, metadata.start_pts)
@@ -201,6 +214,14 @@ class SegmentPreviewWorker:
         except Exception as exc:
             if not self._closed.is_set():
                 self.events.put(PreviewFailed(str(exc)))
+
+    def _probe_keyframes(self, metadata: VideoMetadata) -> None:
+        try:
+            event = PreviewKeyframes(probe_keyframes(self.path, metadata), None)
+        except Exception as exc:
+            event = PreviewKeyframes(None, str(exc))
+        if not self._closed.is_set():
+            self.events.put(event)
 
     def _seek(self, container, stream, seconds: float, start_pts: int):
         target_pts = start_pts + round(float(seconds) / stream.time_base)

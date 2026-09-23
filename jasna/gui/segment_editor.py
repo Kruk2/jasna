@@ -51,6 +51,7 @@ from jasna.gui.segment_preview import (
     PreviewFailed,
     PreviewFrame,
     PreviewFullFrame,
+    PreviewKeyframes,
     PreviewLoaded,
     SegmentPreviewWorker,
 )
@@ -120,7 +121,6 @@ class SegmentEditor(ctk.CTkToplevel):
         self._compatibility_error: str | None = None
         self._edit_notice: str | None = None
         self._edit_notice_warning = False
-        self._analysis_events: queue.Queue[object] = queue.Queue()
         self._scan_worker: MosaicScanWorker | None = None
         self._scan_active = False
         self._scan_low_vram = False
@@ -891,7 +891,6 @@ class SegmentEditor(ctk.CTkToplevel):
         self._refresh_all()
         self.update_idletasks()
         self._preview_generation = self._preview_worker.seek(self._current)
-        self._start_keyframe_probe(metadata)
 
     def _poll_workers(self) -> None:
         if self._closed.is_set():
@@ -910,6 +909,10 @@ class SegmentEditor(ctk.CTkToplevel):
                         )
                         self._preview_left_eye = self.vr_resolution.is_sbs
                         self._build_editor(event.metadata)
+                elif isinstance(event, PreviewKeyframes):
+                    self._keyframe_index = event.index
+                    self._analysis_error = event.error
+                    self._refresh_workload()
                 elif isinstance(event, PreviewFrame):
                     self._show_frame(event)
                 elif isinstance(event, PreviewFullFrame):
@@ -919,18 +922,6 @@ class SegmentEditor(ctk.CTkToplevel):
                         self._set_playing(False)
                 elif isinstance(event, PreviewFailed):
                     self._show_preview_error(event.message)
-        except queue.Empty:
-            pass
-
-        try:
-            while True:
-                result = self._analysis_events.get_nowait()
-                if isinstance(result, Exception):
-                    self._analysis_error = str(result)
-                else:
-                    self._keyframe_index = result
-                    self._analysis_error = None
-                self._refresh_workload()
         except queue.Empty:
             pass
 
@@ -955,23 +946,6 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._state is not None:
             self._refresh_restore_toggle()
         self.after(25, self._poll_workers)
-
-    def _start_keyframe_probe(self, metadata: VideoMetadata) -> None:
-        def _probe() -> None:
-            try:
-                from jasna.media.splice import probe_keyframes
-
-                result = probe_keyframes(self._job.path, metadata)
-            except Exception as exc:
-                result = exc
-            if not self._closed.is_set():
-                self._analysis_events.put(result)
-
-        threading.Thread(
-            target=_probe,
-            name=f"segment-keyframes-{self._job.filename}",
-            daemon=True,
-        ).start()
 
     def _show_frame(self, event: PreviewFrame) -> None:
         if self._state is None or event.generation != self._preview_generation:
