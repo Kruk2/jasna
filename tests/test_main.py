@@ -199,7 +199,6 @@ class TestOutputPath:
         events: list[str] = []
         pipeline = MagicMock()
         pipeline.run.side_effect = lambda: events.append("run")
-        pipeline.close.side_effect = lambda: events.append("close")
 
         with patch(
             "jasna.post_export_action.run_post_export_video_command",
@@ -216,7 +215,7 @@ class TestOutputPath:
                 pipeline_side_effect=lambda **_kwargs: pipeline,
             )
 
-        assert events == ["run", "close", "command"]
+        assert events == ["run", "command"]
         args = command.call_args.args
         assert args[:3] == ("remux {output}", inp, out)
         assert callable(args[3])
@@ -325,21 +324,21 @@ class TestDetectionThresholdResolution:
     def test_default_threshold_uses_fast_model_recommended(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         pipeline_cls = _run_main(_base_argv(inp, out, rest, det))
-        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.35
+        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.35
 
     def test_default_threshold_uses_large_model_recommended(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         pipeline_cls = _run_main(
             _base_argv(inp, out, rest, det, ["--detection-model", "rfdetr-v6-large"])
         )
-        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.40
+        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.40
 
     def test_explicit_threshold_overrides_recommended(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         pipeline_cls = _run_main(
             _base_argv(inp, out, rest, det, ["--detection-score-threshold", "0.5"])
         )
-        assert pipeline_cls.call_args.kwargs["detection_score_threshold"] == 0.5
+        assert pipeline_cls.call_args.kwargs["config"].detection_score_threshold == 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +429,7 @@ class TestArgForwarding:
         captured = {}
 
         def capture_pipeline(**kw):
-            captured.update(kw)
+            captured.update(vars(kw["config"]))
             return MagicMock()
 
         rest_pipeline_captured = {}
@@ -742,7 +741,6 @@ class TestStreamingPaths:
                 main()
 
         pipeline_mock.run_streaming.assert_called_once_with(port=9999, segment_duration=2.0)
-        pipeline_mock.close.assert_called_once()
 
     def test_streaming_with_input_opens_browser(self, tmp_path):
         inp, _, rest, det = _make_model_files(tmp_path)
@@ -939,7 +937,6 @@ class TestCleanup:
                 from jasna.main import main
                 main()
 
-        pipeline_mock.close.assert_called_once()
         restorer_mock.close.assert_called_once()
 
     def test_secondary_restorer_closed(self, tmp_path):
@@ -961,12 +958,15 @@ class TestCleanup:
         def make_pipeline(**kw):
             return pipeline_mock
 
-        with pytest.raises(RuntimeError, match="boom"):
+        with (
+            patch("jasna.session_factory.RestorationSession.close") as session_close,
+            pytest.raises(RuntimeError, match="boom"),
+        ):
             _run_main(
                 _base_argv(inp, out, rest, det),
                 pipeline_side_effect=make_pipeline,
             )
-        pipeline_mock.close.assert_called_once()
+        session_close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

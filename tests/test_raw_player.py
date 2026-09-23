@@ -297,7 +297,6 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
     assert not worker.is_alive()
     assert len(set(build_threads)) == 1
     assert len(pipelines) == 2
-    pipelines[0].close.assert_called_once_with()
     sessions[0].close.assert_called_once_with()
     release_memory.assert_any_call(sessions[0].device)
 

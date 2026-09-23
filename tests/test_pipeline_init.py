@@ -5,37 +5,22 @@ from unittest.mock import MagicMock, patch
 
 import torch
 
-from jasna.pipeline import Pipeline
+from factories import make_pipeline
 from jasna.vr180 import SbsDetectionAdapter
 from jasna.vr_projection import FisheyeProjector, GnomonicProjector
 
 
 def _make_pipeline(**overrides):
     defaults = dict(
-        input_video=Path("in.mp4"),
-        output_video=Path("out.mkv"),
-        detection_model_name="rfdetr-v5",
-        detection_model_path=Path("model.onnx"),
-        detection_score_threshold=0.25,
-        restoration_pipeline=MagicMock(),
-        codec="hevc",
-        encoder_settings={},
         batch_size=4,
-        device=torch.device("cpu"),
         max_clip_size=60,
         temporal_overlap=8,
         max_detection_gap=0,
         min_detection_duration=0,
-        enable_crossfade=True,
-        fp16=True,
+        vr_mode="off",
     )
     defaults.update(overrides)
-
-    with (
-        patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
-        patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
-    ):
-        return Pipeline(**defaults)
+    return make_pipeline(**defaults)
 
 
 class TestPipelineInit:
@@ -46,56 +31,6 @@ class TestPipelineInit:
         assert p.temporal_overlap == 4
         assert p.codec == "hevc"
         assert p.enable_crossfade is True
-
-    def test_rfdetr_model_created(self):
-        with (
-            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf,
-            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel") as mock_yolo,
-        ):
-            Pipeline(
-                input_video=Path("in.mp4"),
-                output_video=Path("out.mkv"),
-                detection_model_name="rfdetr-v5",
-                detection_model_path=Path("model.onnx"),
-                detection_score_threshold=0.25,
-                restoration_pipeline=MagicMock(),
-                codec="hevc",
-                encoder_settings={},
-                batch_size=4,
-                device=torch.device("cpu"),
-                max_clip_size=60,
-                temporal_overlap=8,
-                max_detection_gap=0,
-                min_detection_duration=0,
-                fp16=True,
-            )
-            mock_rf.assert_called_once()
-            mock_yolo.assert_not_called()
-
-    def test_yolo_model_created(self):
-        with (
-            patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf,
-            patch("jasna.mosaic.yolo.YoloMosaicDetectionModel") as mock_yolo,
-        ):
-            Pipeline(
-                input_video=Path("in.mp4"),
-                output_video=Path("out.mkv"),
-                detection_model_name="lada-yolo-v4",
-                detection_model_path=Path("model.pt"),
-                detection_score_threshold=0.25,
-                restoration_pipeline=MagicMock(),
-                codec="hevc",
-                encoder_settings={},
-                batch_size=4,
-                device=torch.device("cpu"),
-                max_clip_size=60,
-                temporal_overlap=8,
-                max_detection_gap=0,
-                min_detection_duration=0,
-                fp16=True,
-            )
-            mock_yolo.assert_called_once()
-            mock_rf.assert_not_called()
 
     def test_crossfade_disabled(self):
         p = _make_pipeline(enable_crossfade=False)

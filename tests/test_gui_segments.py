@@ -93,13 +93,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     pipeline = MagicMock()
     processor = Processor()
     processor._settings = AppSettings()
-    processor._video_session = RestorationSession(
-        device=MagicMock(),
-        detection_model_name="detector",
-        detection_model_path=tmp_path / "detector.engine",
-        restoration_pipeline=MagicMock(),
-        secondary_restorer=None,
-    )
+    processor._video_session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
     processor._ensure_video_session = MagicMock()
     processor._prepare_job_detector = MagicMock()
     processor._build_encoder_settings = MagicMock(return_value={})

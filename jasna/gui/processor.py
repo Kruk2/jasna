@@ -473,20 +473,12 @@ class Processor:
                 raise ProcessingStopped("Processing stopped")
         finally:
             self._current_pipeline = None
-            if pipeline is not None:
-                pipeline.close()
 
     def _prepare_job_detector(
         self,
         config: SessionConfig,
         session: RestorationSession,
     ) -> None:
-        if (
-            config.detection_model_name == session.detection_model_name
-            and config.detection_model_path == session.detection_model_path
-        ):
-            return
-
         from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
 
         ensure_engines_compiled(

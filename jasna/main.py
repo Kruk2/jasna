@@ -933,9 +933,6 @@ def main() -> None:
                         print(f"Error processing {vid.name}: {e}")
                         if not input_is_dir:
                             sys.exit(1)
-                    finally:
-                        pipeline.close()
-                        pipeline = None
                     if export_succeeded and post_export_video_command:
                         print(f"Running post-export command for {out_path.name}")
                         try:
@@ -957,8 +954,6 @@ def main() -> None:
             print(f"Error: {e}")
             sys.exit(1)
         finally:
-            if pipeline is not None:
-                pipeline.close()
             session.close()
 
 

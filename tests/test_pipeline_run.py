@@ -13,6 +13,7 @@ from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvCol
 
 from jasna.media.probe import VideoMetadata
 from jasna import pipeline_threads
+from factories import make_pipeline
 from jasna.pipeline import Pipeline
 from jasna.pipeline_threads import earliest_blocking_seqs, run_async_secondary
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
@@ -63,11 +64,9 @@ def _make_pipeline():
         rest_pipeline.secondary_restorer = None
         rest_pipeline.secondary_num_workers = 1
         rest_pipeline.secondary_prefers_cpu_input = False
-        p = Pipeline(
+        p = make_pipeline(
             input_video=Path("in.mp4"),
             output_video=Path("out.mkv"),
-            detection_model_name="rfdetr-v5",
-            detection_model_path=Path("model.onnx"),
             detection_score_threshold=0.25,
             restoration_pipeline=rest_pipeline,
             codec="hevc",
@@ -1063,11 +1062,9 @@ class TestPipelineRun:
             rest_pipeline.secondary_num_workers = 1
             rest_pipeline.secondary_prefers_cpu_input = False
             rest_pipeline.secondary_restorer.num_workers = 2
-            p = Pipeline(
+            p = make_pipeline(
                 input_video=Path("in.mp4"),
                 output_video=Path("out.mkv"),
-                detection_model_name="rfdetr-v5",
-                detection_model_path=Path("model.onnx"),
                 detection_score_threshold=0.25,
                 restoration_pipeline=rest_pipeline,
                 codec="hevc",

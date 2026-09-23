@@ -1168,17 +1168,15 @@ class TestStreamingLoop:
 
 class TestPipelineRunStreamingWrapper:
     def test_delegates_to_streaming_pipeline(self):
-        from jasna.pipeline import Pipeline
+        from factories import make_pipeline
 
         with (
             patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel"),
             patch("jasna.mosaic.yolo.YoloMosaicDetectionModel"),
         ):
-            p = Pipeline(
+            p = make_pipeline(
                 input_video=MagicMock(),
                 output_video=MagicMock(),
-                detection_model_name="rfdetr-v5",
-                detection_model_path=MagicMock(),
                 detection_score_threshold=0.25,
                 restoration_pipeline=MagicMock(secondary_restorer=None, secondary_num_workers=1),
                 codec="hevc",

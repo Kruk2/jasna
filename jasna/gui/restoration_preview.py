@@ -334,9 +334,7 @@ class RestorationPreviewWorker:
                 try:
                     key = video_session_key(command.settings)
                     if session is None or key != session_key:
-                        if pipeline is not None:
-                            pipeline.close()
-                            pipeline = None
+                        pipeline = None
                         if session is not None:
                             session.close()
                             release_session_memory(session.device)
@@ -350,8 +348,6 @@ class RestorationPreviewWorker:
                         )
                         session_key = key
                     if pipeline is None or command.settings != pipeline_settings:
-                        if pipeline is not None:
-                            pipeline.close()
                         pipeline = self._build_pipeline(command.settings, session)
                         pipeline_settings = command.settings
                     if not self._commands.empty() or self._closed.is_set():
@@ -364,8 +360,6 @@ class RestorationPreviewWorker:
                     if not self._closed.is_set():
                         self.events.put(RestorationFailed(str(exc), command.generation))
         finally:
-            if pipeline is not None:
-                pipeline.close()
             if session is not None:
                 session.close()
                 release_session_memory(session.device)
