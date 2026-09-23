@@ -242,10 +242,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._video_player_btn.pack(side="left", padx=(0, 12))
         
         # Support buttons — back the project on Buy Me a Coffee or Unifans
-        self._bmc_btn = BuyMeCoffeeButton(right, compact=False)
+        self._bmc_btn = BuyMeCoffeeButton(right, width=100, height=28)
         self._bmc_btn.pack(side="left", padx=(0, 8))
 
-        self._unifans_btn = UnifansButton(right, compact=False)
+        self._unifans_btn = UnifansButton(right, width=110, height=28)
         self._unifans_btn.pack(side="left", padx=(0, 12))
 
         # Supporter license chip — only shown when the gated (encrypted) model ships.
