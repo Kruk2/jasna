@@ -7,8 +7,7 @@ from argparse import Namespace
 import torch
 
 from jasna.benchmark.basicvsrpp_restoration import benchmark_basicvsrpp_restoration
-from jasna.benchmark.lada_yolo_detection_speed import benchmark_lada_yolo_detection_speed
-from jasna.benchmark.rfdetr_detection_speed import benchmark_rfdetr_detection_speed
+from jasna.benchmark.detection_speed import benchmark_lada_yolo_detection_speed, benchmark_rfdetr_detection_speed
 from jasna.os_utils import check_required_executables, check_supported_gpu
 
 BENCHMARK_VIDEO_DEFAULTS: list[Path] = [

@@ -50,59 +50,37 @@ def _preload_native_libs():
     """
     if sys.platform != "linux":
         return
-    for mod in ("av",):
-        try:
-            __import__(mod)
-        except Exception:
-            logger.warning("Native preload of %s failed", mod, exc_info=True)
+    try:
+        import av  # noqa: F401
+    except Exception:
+        logger.warning("Native preload of av failed", exc_info=True)
+
+
+def _wants_cli(argv: list[str]) -> bool:
+    if sys.platform == "win32":
+        exe_stem = PureWindowsPath(argv[0]).stem.lower()
+        if exe_stem in ("jasna-cli", "jasna-gui"):
+            return exe_stem == "jasna-cli"
+    return len(argv) > 1
 
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
 
 if multiprocessing.parent_process() is None:
-    argv0_path = (
-        PureWindowsPath(sys.argv[0])
-        if sys.platform == "win32"
-        else Path(sys.argv[0])
-    )
-    argv0_stem = argv0_path.stem.lower()
+    if _wants_cli(sys.argv):
+        if len(sys.argv) == 1:
+            from jasna.main import build_parser
 
-    if sys.platform == "win32":
-        if argv0_stem == "jasna-cli":
-            if len(sys.argv) == 1:
-                from jasna.main import build_parser
+            build_parser().print_help()
+            raise SystemExit(0)
 
-                build_parser().print_help()
-                raise SystemExit(0)
+        from jasna.main import main
 
-            from jasna.main import main
-
-            main()
-        elif argv0_stem == "jasna-gui":
-            drop_console_window()
-            _preload_native_libs()
-            from jasna.gui import run_gui
-
-            run_gui()
-        else:
-            if len(sys.argv) > 1:
-                from jasna.main import main
-
-                main()
-            else:
-                drop_console_window()
-                _preload_native_libs()
-                from jasna.gui import run_gui
-
-                run_gui()
+        main()
     else:
-        if len(sys.argv) > 1:
-            from jasna.main import main
+        drop_console_window()
+        _preload_native_libs()
+        from jasna.gui import run_gui
 
-            main()
-        else:
-            _preload_native_libs()
-            from jasna.gui import run_gui
-
-            run_gui()
+        run_gui()

@@ -28,12 +28,13 @@ def test_benchmark_mode_runs_benchmark_cli() -> None:
 
 
 def test_benchmark_rfdetr_detection_speed_file_not_found() -> None:
-    from jasna.benchmark.rfdetr_detection_speed import _run_single
+    from jasna.benchmark.detection_speed import _run_single
 
     import torch
 
     with pytest.raises(FileNotFoundError, match="nonexistent"):
         _run_single(
+            "rfdetr-v6",
             device=torch.device("cuda:0"),
             batch_size=4,
             fp16=True,
@@ -71,7 +72,7 @@ def test_benchmark_cli_preserves_auto_threshold_for_each_benchmark() -> None:
 def test_rfdetr_benchmark_uses_its_model_recommended_threshold(
     tmp_path,
 ) -> None:
-    from jasna.benchmark.rfdetr_detection_speed import (
+    from jasna.benchmark.detection_speed import (
         benchmark_rfdetr_detection_speed,
     )
 
@@ -79,11 +80,11 @@ def test_rfdetr_benchmark_uses_its_model_recommended_threshold(
     video.touch()
     with (
         patch(
-            "jasna.benchmark.rfdetr_detection_speed._run_single",
+            "jasna.benchmark.detection_speed._run_single",
             return_value=(1.0, {"frames": 1}),
         ) as run_single,
         patch(
-            "jasna.benchmark.rfdetr_detection_speed.run_repeatedly",
+            "jasna.benchmark.detection_speed.run_repeatedly",
             side_effect=lambda callback, runs: (1.0, callback()[1]),
         ),
     ):

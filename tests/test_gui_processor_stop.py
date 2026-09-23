@@ -5,6 +5,8 @@ import pytest
 from jasna.gui.models import AppSettings, JobItem, JobStatus
 from jasna.gui.processor import Processor, ProgressUpdate
 
+pytestmark = pytest.mark.usefixtures("no_gpu_cleanup")
+
 
 class _FakePipeline:
     def __init__(self):

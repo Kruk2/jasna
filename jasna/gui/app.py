@@ -845,6 +845,8 @@ def run_gui():
     """Entry point to run the GUI application."""
     from jasna._frozen import patch_frozen_torch
     patch_frozen_torch()
+    from jasna.accelerator import configure_rocm_process_env
+    configure_rocm_process_env()
 
     import logging
     # Set up basic logging - will be connected to GUI after app creation

@@ -1,7 +1,7 @@
 import os
 from unittest.mock import patch
 
-from jasna.trt.torch_tensorrt_export import engine_system_suffix, engine_precision_name
+from jasna.engine_paths import engine_system_suffix, engine_precision_name
 
 
 class TestEngineSystemSuffix:

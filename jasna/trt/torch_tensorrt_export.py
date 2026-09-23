@@ -7,9 +7,6 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-
-from jasna.engine_paths import engine_precision_name, engine_system_suffix  # noqa: E402, F401
-
 _torchtrt_muted = False
 
 
