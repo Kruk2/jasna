@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from fractions import Fraction
+
 import pytest
 
-from jasna.gui.segment_editor_state import SegmentEditorState
+from jasna.gui.segment_editor_state import SegmentEditorState, smart_render_error_key
+from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange
 
 
@@ -87,3 +90,9 @@ def test_invalid_or_subframe_range_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="greater than start"):
         state.add(1.001, 1.002)
+
+
+def test_smart_render_error_key_explains_whole_video_reencode() -> None:
+    index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1), start_pts=0, end_pts=60)
+
+    assert smart_render_error_key((SegmentRange(0.0, 58.0),), index, 60.0) == "segments_smart_render_whole_video"

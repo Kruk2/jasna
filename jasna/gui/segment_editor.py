@@ -50,6 +50,7 @@ from jasna.gui.segment_editor_state import (
     PREVIEW_ZOOM_STEP,
     PreviewView,
     SegmentEditorState,
+    smart_render_error_key,
 )
 from jasna.gui.segment_preview import (
     PreviewEnded,
@@ -2067,19 +2068,8 @@ class SegmentEditor(ctk.CTkToplevel):
             self._refresh_notice()
             self._update_apply_state()
             return
-        try:
-            from jasna.media.splice import build_splice_plan
-
-            build_splice_plan(state.segments, self._keyframe_index, duration=state.duration)
-            self._compatibility_error = None
-        except Exception as exc:
-            reason = getattr(exc, "reason", "generic")
-            key = {
-                "range_too_short": "segments_smart_render_range_too_short",
-                "before_first_keyframe": "segments_smart_render_before_first_keyframe",
-                "whole_video_reencode": "segments_smart_render_whole_video",
-            }.get(reason, "segments_smart_render_unavailable")
-            self._compatibility_error = t(key)
+        error_key = smart_render_error_key(state.segments, self._keyframe_index, state.duration)
+        self._compatibility_error = None if error_key is None else t(error_key)
         self._refresh_notice()
         self._update_apply_state()
 

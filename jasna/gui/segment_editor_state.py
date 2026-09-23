@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from jasna.media.splice import KeyframeIndex, SmartRenderCompatibilityError, build_splice_plan
 from jasna.segments import SegmentRange, normalize_segments
 
 
@@ -295,3 +296,23 @@ class PreviewView:
         left = min(width - crop_width, max(0, left))
         top = min(height - crop_height, max(0, top))
         return left, top, left + crop_width, top + crop_height
+
+
+_SMART_RENDER_ERROR_KEYS = {
+    "range_too_short": "segments_smart_render_range_too_short",
+    "before_first_keyframe": "segments_smart_render_before_first_keyframe",
+    "whole_video_reencode": "segments_smart_render_whole_video",
+}
+
+
+def smart_render_error_key(
+    segments: tuple[SegmentRange, ...],
+    keyframe_index: KeyframeIndex,
+    duration: float,
+) -> str | None:
+    """Locale key explaining why ``segments`` cannot be smart-rendered, or None when they can."""
+    try:
+        build_splice_plan(segments, keyframe_index, duration=duration)
+    except SmartRenderCompatibilityError as exc:
+        return _SMART_RENDER_ERROR_KEYS.get(exc.reason, "segments_smart_render_unavailable")
+    return None
