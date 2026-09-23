@@ -15,7 +15,7 @@ from jasna.accelerator import (
     stream_context,
     vendor_for_device,
 )
-from jasna.media import VideoMetadata, resolve_video_start_pts
+from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.cuda_kernel import create_stream, destroy_stream
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 

@@ -24,7 +24,7 @@ from jasna.gui.restoration_preview import (
     preview_window,
 )
 from jasna.gui.segment_editor import SegmentEditor
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 
 
 def _metadata(*, fps=30.0, duration=10.0, time_base=Fraction(1, 90000), start_pts=0) -> VideoMetadata:

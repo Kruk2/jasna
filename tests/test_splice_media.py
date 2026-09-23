@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from jasna.accelerator import AcceleratorVendor
-from jasna.media import get_video_meta_data
+from jasna.media.probe import get_video_meta_data
 from jasna.media.splice import (
     SpliceSpan,
     concatenate_fragments,

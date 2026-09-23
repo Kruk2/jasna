@@ -15,7 +15,8 @@ from jasna.accelerator import (
     capabilities_for_device,
     vendor_for_device,
 )
-from jasna.media import VideoMetadata, validate_encoder_settings
+from jasna.media.probe import VideoMetadata
+from jasna.media.encoder_settings import validate_encoder_settings
 
 
 def _metadata() -> VideoMetadata:

@@ -10,7 +10,7 @@ from typing import Iterator
 import av
 from PIL import Image
 
-from jasna.media import VideoMetadata, get_video_meta_data, resolve_video_start_pts
+from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
 
 
 @dataclass(frozen=True)

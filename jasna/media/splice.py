@@ -12,7 +12,7 @@ from pathlib import Path
 import av
 
 from jasna.accelerator import AcceleratorVendor
-from jasna.media import VideoMetadata, resolve_video_start_pts
+from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.container_utils import (
     is_mov_chapter_stream,

@@ -34,7 +34,7 @@ import time
 os.environ["JASNA_DECODE_BACKEND"] = sys.argv[1]
 path = sys.argv[2]
 
-from jasna.media import get_video_meta_data
+from jasna.media.probe import get_video_meta_data
 from jasna.gui.models import AppSettings
 from jasna.gui.mosaic_scan import MosaicScanWorker, ScanCompleted
 

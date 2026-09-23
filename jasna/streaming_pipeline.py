@@ -11,7 +11,7 @@ import torch
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
 from jasna.frame_queue import FrameQueue
-from jasna.media import UnsupportedColorspaceError, get_video_meta_data
+from jasna.media.probe import UnsupportedColorspaceError, get_video_meta_data
 from jasna.pipeline_items import FrameMeta, _SENTINEL
 from jasna.pipeline_threads import decode_detect_loop, primary_restore_loop, secondary_restore_loop, blend_encode_loop
 from jasna.streaming import HlsStreamingServer

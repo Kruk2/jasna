@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.mosaic.detections import Detections
 from jasna.vr180 import (
     DIRECT_STUDIO_TOKENS,

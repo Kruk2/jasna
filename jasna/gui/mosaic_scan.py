@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jasna.gui.models import AppSettings
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.segments import SegmentRange, normalize_segments
 
 SCAN_SCORE_FLOOR = 0.05

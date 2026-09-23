@@ -10,7 +10,7 @@ from pathlib import Path
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
-from jasna.media import VideoMetadata
+from jasna.media.probe import VideoMetadata
 from jasna.os_utils import find_executable, subprocess_no_window_kwargs
 
 log = logging.getLogger(__name__)
