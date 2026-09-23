@@ -1,15 +1,14 @@
 """Restoration preview for the segment editor.
 
 Runs the real restoration pipeline (decode/detect -> primary -> secondary ->
-blend) over bounded still or playback windows. The pass wiring mirrors
-``jasna.streaming_pipeline._run_streaming_pass``.
+blend) over bounded still or playback windows through
+``jasna.pipeline_threads.run_restoration_pass``.
 """
 
 from __future__ import annotations
 
 import queue
 import threading
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -320,7 +319,8 @@ class RestorationPreviewWorker:
     def _run(self) -> None:
         session: RestorationSession | None = None
         session_key: tuple | None = None
-        detection_model = None
+        pipeline = None
+        pipeline_settings: AppSettings | None = None
         try:
             while not self._closed.is_set():
                 try:
@@ -334,9 +334,9 @@ class RestorationPreviewWorker:
                 try:
                     key = video_session_key(command.settings)
                     if session is None or key != session_key:
-                        if detection_model is not None and hasattr(detection_model, "close"):
-                            detection_model.close()
-                            detection_model = None
+                        if pipeline is not None:
+                            pipeline.close()
+                            pipeline = None
                         if session is not None:
                             session.close()
                             release_session_memory(session.device)
@@ -348,82 +348,46 @@ class RestorationPreviewWorker:
                             disable_basicvsrpp_tensorrt=False,
                             log=lambda msg: self.events.put(RestorationStatus(msg, command.generation)),
                         )
-                        from jasna.mosaic.detection_registry import build_detection_model
-
-                        detection_model = build_detection_model(
-                            session.detection_model_name,
-                            session.detection_model_path,
-                            batch_size=command.settings.batch_size,
-                            device=session.device,
-                            score_threshold=float(command.settings.detection_score_threshold),
-                            fp16=bool(command.settings.fp16_mode),
-                        )
                         session_key = key
+                    if pipeline is None or command.settings != pipeline_settings:
+                        if pipeline is not None:
+                            pipeline.close()
+                        pipeline = self._build_pipeline(command.settings, session)
+                        pipeline_settings = command.settings
                     if not self._commands.empty() or self._closed.is_set():
                         continue
                     self.events.put(RestorationStatus("restoring", command.generation))
-                    result = self._run_preview_pass(command, session, detection_model)
+                    result = self._run_preview_pass(command, pipeline)
                     if result is not None:
                         self.events.put(result)
                 except Exception as exc:
                     if not self._closed.is_set():
                         self.events.put(RestorationFailed(str(exc), command.generation))
         finally:
-            if detection_model is not None and hasattr(detection_model, "close"):
-                detection_model.close()
+            if pipeline is not None:
+                pipeline.close()
             if session is not None:
                 session.close()
                 release_session_memory(session.device)
             if self._on_stopped is not None:
                 self._on_stopped()
 
-    def _run_preview_pass(
-        self,
-        command: _Request,
-        session: RestorationSession,
-        detection_model,
-    ) -> RestorationFrame | RestorationClip | None:
-        from queue import Empty, Queue
+    def _build_pipeline(self, settings: AppSettings, session: RestorationSession):
+        from jasna.gui.video_session import video_session_config
+        from jasna.session_factory import build_pipeline
 
-        from jasna.blend_buffer import BlendBuffer
-        from jasna.crop_buffer import CropBuffer
-        from jasna.frame_queue import FrameQueue
-        from jasna.pipeline_threads import (
-            blend_encode_loop,
-            decode_detect_loop,
-            primary_restore_loop,
-            secondary_restore_loop,
-        )
-        from jasna.vram_offloader import VramOffloader
+        config = video_session_config(settings, codec=settings.codec, encoder_settings={})
+        pipeline = build_pipeline(config, session, self.path, self.path)
+        pipeline.validate_metadata(self.metadata)
+        return pipeline
+
+    def _run_preview_pass(self, command: _Request, pipeline) -> RestorationFrame | RestorationClip | None:
+        from jasna.pipeline_threads import run_restoration_pass
 
         settings = command.settings
-        from jasna.vr180 import (
-            SbsDetectionAdapter,
-            resolve_vr_mode,
-        )
-        from jasna.vr_projection import build_vr_projector
-
-        vr_resolution = resolve_vr_mode(
-            settings.vr_mode,
-            self.metadata,
-            self.path,
-            projection=command.projection,
-        )
-        pass_detection_model = (
-            SbsDetectionAdapter(detection_model)
-            if vr_resolution.is_sbs
-            else detection_model
-        )
-        vr_projector = (
-            build_vr_projector(
-                vr_resolution.projection,
-                eye_width=int(self.metadata.video_width) // 2,
-                height=int(self.metadata.video_height),
-                device=session.device,
-            )
-            if vr_resolution.is_sbs
-            else None
-        )
+        pipeline.vr_projection = command.projection
+        pipeline.configure_vr(self.metadata)
+        left_eye_only = pipeline.vr_resolution.is_sbs
         window = (
             playback_window(self.metadata, command.center_seconds, settings.max_clip_size)
             if command.playback
@@ -433,162 +397,36 @@ class RestorationPreviewWorker:
         with self._cancel_lock:
             self._active_cancel = cancel_event
 
-        secondary_workers = max(1, int(session.restoration_pipeline.secondary_num_workers))
-        clip_queue = FrameQueue(max_frames=settings.max_clip_size)
-        secondary_queue = FrameQueue(max_frames=settings.max_clip_size * secondary_workers)
-        encode_queue = FrameQueue(max_frames=settings.max_clip_size)
-        metadata_queue: Queue = Queue(maxsize=settings.max_clip_size * 5)
-
-        error_holder: list[BaseException] = []
-        blend_buffer = BlendBuffer(device=session.device, vr_projector=vr_projector)
-        crop_buffers: dict[int, CropBuffer] = {}
-        crop_lock = threading.Lock()
-        primary_idle_event = threading.Event()
-        frame_shape: list[tuple[int, int]] = []
-
-        vram_offloader = VramOffloader(
-            device=session.device,
-            blend_buffer=blend_buffer,
-            crop_buffers=crop_buffers,
-            crop_lock=crop_lock,
-        )
-        vram_offloader.set_pipeline_queues(clip_queue, secondary_queue, encode_queue, metadata_queue)
-
         lut_applier = None
         lut_path = (settings.lut_path or "").strip()
         if lut_path:
             from jasna.media.lut import GpuLutApplier, parse_cube_file
 
-            lut_applier = GpuLutApplier(parse_cube_file(lut_path), session.device)
+            lut_applier = GpuLutApplier(parse_cube_file(lut_path), pipeline.device)
 
         collector = (
-            _PlaybackFrameCollector(
-                self.metadata,
-                self.max_size,
-                lut_applier,
-                left_eye_only=vr_resolution.is_sbs,
-            )
+            _PlaybackFrameCollector(self.metadata, self.max_size, lut_applier, left_eye_only=left_eye_only)
             if command.playback
-            else _CenterFrameCollector(
-                window.center_pts,
-                cancel_event,
-                lut_applier,
-                left_eye_only=vr_resolution.is_sbs,
-            )
+            else _CenterFrameCollector(window.center_pts, cancel_event, lut_applier, left_eye_only=left_eye_only)
         )
-        seek_ts = window.seek_ts if window.seek_ts > 0 else None
-
-        threads = [
-            threading.Thread(
-                target=lambda: decode_detect_loop(
-                    input_video=str(self.path),
-                    batch_size=settings.batch_size,
-                    device=session.device,
-                    metadata=self.metadata,
-                    detection_model=pass_detection_model,
-                    max_clip_size=settings.max_clip_size,
-                    temporal_overlap=settings.temporal_overlap,
-                    max_detection_gap=settings.max_detection_gap,
-                    min_detection_duration=settings.min_detection_duration,
-                    enable_crossfade=settings.enable_crossfade,
-                    scene_detection=settings.scene_detection,
-                    blend_buffer=blend_buffer,
-                    crop_buffers=crop_buffers,
-                    clip_queue=clip_queue,
-                    metadata_queue=metadata_queue,
-                    error_holder=error_holder,
-                    frame_shape=frame_shape,
-                    cancel_event=cancel_event,
-                    seek_ts=seek_ts,
-                    end_pts=window.end_pts,
-                    vr_mode=vr_resolution.resolved,
-                    vr_projector=vr_projector,
-                ),
-                name="PreviewDecodeDetect", daemon=True,
-            ),
-            threading.Thread(
-                target=lambda: primary_restore_loop(
-                    device=session.device,
-                    restoration_pipeline=session.restoration_pipeline,
-                    clip_queue=clip_queue,
-                    secondary_queue=secondary_queue,
-                    error_holder=error_holder,
-                    primary_idle_event=primary_idle_event,
-                    cancel_event=cancel_event,
-                ),
-                name="PreviewPrimaryRestore", daemon=True,
-            ),
-            threading.Thread(
-                target=lambda: secondary_restore_loop(
-                    device=session.device,
-                    restoration_pipeline=session.restoration_pipeline,
-                    secondary_queue=secondary_queue,
-                    encode_queue=encode_queue,
-                    error_holder=error_holder,
-                    cancel_event=cancel_event,
-                ),
-                name="PreviewSecondaryRestore", daemon=True,
-            ),
-            threading.Thread(
-                target=lambda: blend_encode_loop(
-                    input_video=str(self.path),
-                    batch_size=settings.batch_size,
-                    device=session.device,
-                    metadata=self.metadata,
-                    blend_buffer=blend_buffer,
-                    encode_queue=encode_queue,
-                    metadata_queue=metadata_queue,
-                    error_holder=error_holder,
-                    frame_writer=collector,
-                    cancel_event=cancel_event,
-                    seek_ts=seek_ts,
-                    vram_offloader=vram_offloader,
-                ),
-                name="PreviewBlendEncode", daemon=True,
-            ),
-        ]
-        vram_offloader.start()
-        for t in threads:
-            t.start()
-
-        while any(t.is_alive() for t in threads):
-            if not self._commands.empty() or self._closed.is_set():
-                cancel_event.set()
-            if cancel_event.is_set():
-                break
-            time.sleep(0.05)
-
-        all_queues = [clip_queue, secondary_queue, encode_queue, metadata_queue]
-
-        def _drain_all_queues():
-            for q in all_queues:
-                try:
-                    while True:
-                        q.get_nowait()
-                except Empty:
-                    pass
-
-        for t in threads:
-            while t.is_alive():
-                _drain_all_queues()
-                t.join(timeout=0.02)
-        vram_offloader.stop()
-
-        with self._cancel_lock:
-            self._active_cancel = None
-
-        import gc
-
-        import torch
-
-        del clip_queue, secondary_queue, encode_queue, metadata_queue
-        del blend_buffer, crop_buffers
-        gc.collect()
-        torch.cuda.empty_cache()
+        try:
+            error = run_restoration_pass(
+                pipeline,
+                self.metadata,
+                collector,
+                cancel_event,
+                seek_ts=window.seek_ts if window.seek_ts > 0 else None,
+                use_async_secondary=False,
+                end_pts=window.end_pts,
+                poll=lambda: not self._commands.empty() or self._closed.is_set(),
+            )
+        finally:
+            with self._cancel_lock:
+                self._active_cancel = None
 
         superseded = not self._commands.empty() or self._closed.is_set()
-        if error_holder and not collector.done and not superseded:
-            raise error_holder[0]
+        if error is not None and not collector.done and not superseded:
+            raise error
         if not superseded:
             if isinstance(collector, _PlaybackFrameCollector) and collector.done:
                 return RestorationClip(collector.result_frames(), command.generation)

@@ -90,7 +90,6 @@ class TestVramOffloaderOffload:
             device=torch.device("cpu"),
             blend_buffer=bb,
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -110,7 +109,6 @@ class TestVramOffloaderOffload:
             device=torch.device("cpu"),
             blend_buffer=bb,
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -133,7 +131,6 @@ class TestVramOffloaderOffload:
             device=torch.device("cpu"),
             blend_buffer=bb,
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -155,13 +152,11 @@ class TestVramOffloaderOffload:
         crop_buf.add(RawCrop(crop=crop, enlarged_bbox=(0, 0, 40, 40), crop_shape=(40, 40)))
 
         crop_buffers = {1: crop_buf}
-        crop_lock = threading.Lock()
 
         offloader = VramOffloader(
             device=torch.device("cpu"),
             blend_buffer=bb,
             crop_buffers=crop_buffers,
-            crop_lock=crop_lock,
             vram_limit=0.001,
             safetynet=0,
         )
@@ -180,7 +175,6 @@ class TestVramOffloaderOffload:
             device=torch.device("cpu"),
             blend_buffer=bb,
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -197,7 +191,6 @@ class TestVramOffloaderThreshold:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=2.0,
             safetynet=750_000_000,
         )
@@ -208,7 +201,6 @@ class TestVramOffloaderThreshold:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=1.0,
             safetynet=0,
         )
@@ -221,7 +213,6 @@ class TestVramOffloaderLifecycle:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -242,7 +233,6 @@ class TestVramOffloaderLifecycle:
             device=torch.device("cpu"),
             blend_buffer=bb,
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -263,7 +253,6 @@ class TestEncodeStallDetection:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -276,7 +265,6 @@ class TestEncodeStallDetection:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -292,7 +280,6 @@ class TestEncodeStallDetection:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -308,7 +295,6 @@ class TestEncodeStallDetection:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )
@@ -327,7 +313,6 @@ class TestEncodeStallDetection:
             device=torch.device("cpu"),
             blend_buffer=BlendBuffer(device=torch.device("cpu")),
             crop_buffers={},
-            crop_lock=threading.Lock(),
             vram_limit=0.001,
             safetynet=0,
         )

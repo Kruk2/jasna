@@ -484,14 +484,14 @@ class MosaicScanWorker:
             resolve_vr_mode,
         )
 
-        self._vr_resolution = resolve_vr_mode(
+        self.vr_resolution = resolve_vr_mode(
             settings.vr_mode,
             self.metadata,
             self.path,
         )
         return (
             SbsDetectionAdapter(detector)
-            if self._vr_resolution.is_sbs
+            if self.vr_resolution.is_sbs
             else detector
         )
 

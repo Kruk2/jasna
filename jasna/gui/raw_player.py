@@ -423,7 +423,7 @@ class RawPlayerWorker:
                 self.path,
                 self.path,
             )
-            pipeline._validate_metadata(self.metadata)
+            pipeline.validate_metadata(self.metadata)
             pipeline.configure_vr(self.metadata)
             return session, pipeline
         except Exception:
@@ -477,151 +477,19 @@ def run_raw_restoration_pass(
     *,
     seek_seconds: float,
 ) -> None:
-    from queue import Empty, Queue
-
-    from jasna.blend_buffer import BlendBuffer
-    from jasna.crop_buffer import CropBuffer
-    from jasna.frame_queue import FrameQueue
-    from jasna.pipeline_threads import (
-        blend_encode_loop,
-        decode_detect_loop,
-        primary_restore_loop,
-        secondary_restore_loop,
-    )
+    from jasna.pipeline_threads import run_restoration_pass
     from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
-    from jasna.vram_offloader import VramOffloader
 
     if isinstance(pipeline.restoration_pipeline.secondary_restorer, AsyncSecondaryRestorer):
         raise ValueError("Topaz Video AI is not available in the video player")
-
-    device = pipeline.device
-    secondary_workers = max(1, int(pipeline.restoration_pipeline.secondary_num_workers))
-    clip_queue = FrameQueue(max_frames=pipeline.max_clip_size)
-    secondary_queue = FrameQueue(max_frames=pipeline.max_clip_size * secondary_workers)
-    encode_queue = FrameQueue(max_frames=pipeline.max_clip_size)
-    metadata_queue = Queue(maxsize=pipeline.max_clip_size * 5)
-    error_holder: list[BaseException] = []
-    blend_buffer = BlendBuffer(device=device, vr_projector=pipeline._vr_projector)
-    crop_buffers: dict[int, CropBuffer] = {}
-    crop_lock = threading.Lock()
-    primary_idle_event = threading.Event()
-    frame_shape: list[tuple[int, int]] = []
-    vram_offloader = VramOffloader(
-        device=device,
-        blend_buffer=blend_buffer,
-        crop_buffers=crop_buffers,
-        crop_lock=crop_lock,
+    error = run_restoration_pass(
+        pipeline,
+        metadata,
+        frame_writer,
+        cancel_event,
+        seek_ts=float(seek_seconds) if seek_seconds > 0 else None,
+        use_async_secondary=False,
     )
-    vram_offloader.set_pipeline_queues(
-        clip_queue,
-        secondary_queue,
-        encode_queue,
-        metadata_queue,
-    )
-    seek_ts = float(seek_seconds) if seek_seconds > 0 else None
-
-    threads = [
-        threading.Thread(
-            target=lambda: decode_detect_loop(
-                input_video=str(pipeline.input_video),
-                batch_size=pipeline.batch_size,
-                device=device,
-                metadata=metadata,
-                detection_model=pipeline._job_detection_model,
-                max_clip_size=pipeline.max_clip_size,
-                temporal_overlap=pipeline.temporal_overlap,
-                max_detection_gap=pipeline.max_detection_gap,
-                min_detection_duration=pipeline.min_detection_duration,
-                enable_crossfade=pipeline.enable_crossfade,
-                scene_detection=pipeline.scene_detection,
-                blend_buffer=blend_buffer,
-                crop_buffers=crop_buffers,
-                clip_queue=clip_queue,
-                metadata_queue=metadata_queue,
-                error_holder=error_holder,
-                frame_shape=frame_shape,
-                cancel_event=cancel_event,
-                seek_ts=seek_ts,
-                vr_mode=pipeline._vr_resolution.resolved,
-                vr_projector=pipeline._vr_projector,
-            ),
-            name="PlayerDecodeDetect",
-            daemon=True,
-        ),
-        threading.Thread(
-            target=lambda: primary_restore_loop(
-                device=device,
-                restoration_pipeline=pipeline.restoration_pipeline,
-                clip_queue=clip_queue,
-                secondary_queue=secondary_queue,
-                error_holder=error_holder,
-                primary_idle_event=primary_idle_event,
-                cancel_event=cancel_event,
-            ),
-            name="PlayerPrimaryRestore",
-            daemon=True,
-        ),
-        threading.Thread(
-            target=lambda: secondary_restore_loop(
-                device=device,
-                restoration_pipeline=pipeline.restoration_pipeline,
-                secondary_queue=secondary_queue,
-                encode_queue=encode_queue,
-                error_holder=error_holder,
-                cancel_event=cancel_event,
-            ),
-            name="PlayerSecondaryRestore",
-            daemon=True,
-        ),
-        threading.Thread(
-            target=lambda: blend_encode_loop(
-                input_video=str(pipeline.input_video),
-                batch_size=pipeline.batch_size,
-                device=device,
-                metadata=metadata,
-                blend_buffer=blend_buffer,
-                encode_queue=encode_queue,
-                metadata_queue=metadata_queue,
-                error_holder=error_holder,
-                frame_writer=frame_writer,
-                cancel_event=cancel_event,
-                seek_ts=seek_ts,
-                vram_offloader=vram_offloader,
-            ),
-            name="PlayerBlend",
-            daemon=True,
-        ),
-    ]
-
-    vram_offloader.start()
-    for thread in threads:
-        thread.start()
-    while any(thread.is_alive() for thread in threads) and not cancel_event.wait(0.05):
-        pass
-
-    queues = (clip_queue, secondary_queue, encode_queue, metadata_queue)
-    for thread in threads:
-        while thread.is_alive():
-            for pipeline_queue in queues:
-                try:
-                    while True:
-                        pipeline_queue.get_nowait()
-                except Empty:
-                    pass
-            thread.join(timeout=0.02)
-    vram_offloader.stop()
-
-    error = error_holder[0] if error_holder else None
-    del clip_queue, secondary_queue, encode_queue, metadata_queue
-    del blend_buffer, crop_buffers
-    import gc
-
-    gc.collect()
-    if getattr(device, "type", None) != "cpu":
-        from jasna.accelerator import empty_cache, ipc_collect
-
-        empty_cache(device)
-        ipc_collect(device)
     if error is not None and not cancel_event.is_set():
         raise error
 
