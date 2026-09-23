@@ -640,8 +640,8 @@ def main() -> None:
 
     output_video = Path(args.output) if args.output else (input_video.with_stem(input_video.stem + "_out") if input_video else None)
 
-    from jasna.media.image_io import is_image_path
-    input_is_image = input_video is not None and is_image_path(input_video)
+    from jasna.media.media_files import is_image
+    input_is_image = input_video is not None and is_image(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
     segments_spec = str(args.segments).strip()
     if segments_spec:

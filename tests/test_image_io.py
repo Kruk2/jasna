@@ -5,22 +5,18 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jasna.media.image_io import (
-    IMAGE_EXTENSIONS,
-    is_image_path,
-    read_image_rgb_chw,
-    write_image_rgb_chw,
-)
+from jasna.media.image_io import read_image_rgb_chw, write_image_rgb_chw
+from jasna.media.media_files import IMAGE_EXTENSIONS, is_image
 
 
 class TestIsImagePath:
     @pytest.mark.parametrize("name", ["a.png", "b.JPG", "c.jpeg", "d.webp", "e.tif", "f.tiff", "g.bmp"])
     def test_image_suffixes(self, name: str):
-        assert is_image_path(name) is True
+        assert is_image(name) is True
 
     @pytest.mark.parametrize("name", ["a.mp4", "b.mkv", "c.txt"])
     def test_non_image_suffixes(self, name: str):
-        assert is_image_path(name) is False
+        assert is_image(name) is False
 
     def test_extension_set(self):
         assert ".png" in IMAGE_EXTENSIONS and ".jpg" in IMAGE_EXTENSIONS
