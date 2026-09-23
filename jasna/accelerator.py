@@ -25,8 +25,10 @@ def apply_rocm_env_defaults(environ: MutableMapping[str, str]) -> None:
     environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:False")
 
 
-if getattr(torch.version, "hip", None):
-    apply_rocm_env_defaults(os.environ)
+def configure_rocm_process_env() -> None:
+    """Apply the ROCm defaults to this process; call at entry points before GPU work."""
+    if torch.version.hip:
+        apply_rocm_env_defaults(os.environ)
 
 
 class AcceleratorVendor(StrEnum):

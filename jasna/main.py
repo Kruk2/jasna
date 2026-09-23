@@ -628,6 +628,8 @@ def main() -> None:
 
     from jasna._frozen import patch_frozen_torch
     patch_frozen_torch()
+    from jasna.accelerator import configure_rocm_process_env
+    configure_rocm_process_env()
     import torch
 
     from jasna.pipeline import Pipeline
