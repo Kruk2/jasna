@@ -58,6 +58,7 @@ def _session_config_from_args(
         rtx_denoise=str(args.rtx_denoise).lower(),
         rtx_deblur=str(args.rtx_deblur).lower(),
         vr_mode=str(args.vr_mode),
+        vr_projection="auto",
         codec=codec,
         encoder_settings=encoder_settings,
         lut_path=lut_path,
