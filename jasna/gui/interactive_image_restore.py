@@ -60,7 +60,12 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
         self._index = 0
         self._seed = int(settings.image_restore_seed)
-        self._view = t("interactive_view_restored")
+        self._view = "restored"
+        self._view_by_label = {
+            t("interactive_view_restored"): "restored",
+            t("interactive_view_mask"): "mask",
+            t("interactive_view_raw"): "raw",
+        }
         self._token = 0
         self._closed = False
         self._current_result = None
@@ -194,8 +199,8 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
         self._view_selector = ctk.CTkSegmentedButton(
             controls,
-            values=[t("interactive_view_restored"), t("interactive_view_mask"), t("interactive_view_raw")],
-            command=self._set_view,
+            values=list(self._view_by_label),
+            command=lambda label: self._set_view(self._view_by_label[label]),
             selected_color=Colors.PRIMARY,
             selected_hover_color=Colors.PRIMARY_HOVER,
             unselected_color=Colors.BG_CARD,
@@ -203,7 +208,7 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
             text_color=Colors.TEXT_PRIMARY,
         )
         self._view_selector.pack(side="left")
-        self._view_selector.set(self._view)
+        self._view_selector.set(t("interactive_view_restored"))
 
         self._save = ctk.CTkButton(
             controls,
@@ -402,9 +407,9 @@ class InteractiveImageRestoreDialog(ctk.CTkToplevel):
 
     def _show_current_view(self) -> None:
         image = self._current_result
-        if self._view == t("interactive_view_mask"):
+        if self._view == "mask":
             image = self._current_mask
-        elif self._view == t("interactive_view_raw"):
+        elif self._view == "raw":
             image = self._current_raw
 
         if image is None:

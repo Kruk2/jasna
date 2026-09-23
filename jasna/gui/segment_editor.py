@@ -59,6 +59,7 @@ from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.probe import VideoMetadata
+from jasna.media.splice import canonical_codec
 from jasna.segments import SegmentRange, format_timestamp, parse_timestamp
 
 logger = logging.getLogger(__name__)
@@ -616,14 +617,6 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._scan_detection_model not in available_models:
             available_models.insert(0, self._scan_detection_model)
 
-        self._scan_interval_seconds_by_label = {
-            t("segments_scan_frequency_every_frame"): 0.0,
-            t("segments_scan_frequency_quarter"): 0.25,
-            t("segments_scan_frequency_half"): 0.5,
-            t("segments_scan_frequency_one"): 1.0,
-            t("segments_scan_frequency_two"): 2.0,
-        }
-
         scan_settings = ctk.CTkFrame(scan_card, fg_color="transparent")
         scan_settings.pack(fill="x", padx=12, pady=(3, 7))
         scan_settings.grid_columnconfigure(3, weight=1)
@@ -660,13 +653,19 @@ class SegmentEditor(ctk.CTkToplevel):
             height=16,
         )
         frequency_label.pack(anchor="w", pady=(0, 1))
-        self._scan_interval = ctk.CTkOptionMenu(
+        self._scan_interval = ValueOptionMenu(
             frequency_field,
-            values=list(self._scan_interval_seconds_by_label),
+            options={
+                "0": t("segments_scan_frequency_every_frame"),
+                "0.25": t("segments_scan_frequency_quarter"),
+                "0.5": t("segments_scan_frequency_half"),
+                "1": t("segments_scan_frequency_one"),
+                "2": t("segments_scan_frequency_two"),
+            },
             width=210,
             height=26,
         )
-        self._scan_interval.set(t("segments_scan_frequency_one"))
+        self._scan_interval.set_value("1")
         self._scan_interval.pack(anchor="w")
         Tooltip(frequency_label, t("segments_scan_interval_hint"))
         Tooltip(self._scan_interval, t("segments_scan_interval_hint"))
@@ -1535,7 +1534,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._scan_worker = None
         self._set_playing(False)
         self._set_preview_gpu_busy(True)
-        stride_seconds = self._scan_interval_seconds_by_label[self._scan_interval.get()]
+        stride_seconds = float(self._scan_interval.get_value())
         settings = self._current_video_settings()
         try:
             worker = MosaicScanWorker(
@@ -2127,8 +2126,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._refresh_timeline()
             self._update_apply_state()
             return
-        codec = str(self._metadata.codec_name).lower()
-        codec = {"avc": "h264", "h265": "hevc", "av01": "av1"}.get(codec, codec)
+        codec = canonical_codec(self._metadata.codec_name)
         self._codec_notice.configure(
             text=t(
                 "segments_source_codec_notice",
