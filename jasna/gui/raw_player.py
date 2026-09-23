@@ -267,7 +267,7 @@ class RawPlayerWorker:
         frame_buffer: TimestampFrameBuffer,
         *,
         max_size: tuple[int, int],
-        on_stopped: Callable[[], None] | None = None,
+        on_stopped: Callable[[], None],
     ) -> None:
         self.path = Path(path)
         self.metadata = metadata
@@ -377,8 +377,7 @@ class RawPlayerWorker:
         finally:
             if session is not None:
                 self._release_session(session)
-            if self._on_stopped is not None:
-                self._on_stopped()
+            self._on_stopped()
 
     @staticmethod
     def _release_session(session) -> None:

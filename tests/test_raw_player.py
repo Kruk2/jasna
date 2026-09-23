@@ -203,6 +203,7 @@ def test_raw_worker_coalesces_seeks_and_invalidates_buffer() -> None:
         settings,
         frame_buffer,
         max_size=(640, 360),
+        on_stopped=lambda: None,
     )
 
     first = worker.play_from(1.0)
@@ -217,6 +218,23 @@ def test_raw_worker_coalesces_seeks_and_invalidates_buffer() -> None:
     worker.close()
 
 
+def test_raw_worker_reports_stop_after_close() -> None:
+    stopped = threading.Event()
+    worker = RawPlayerWorker(
+        "video.mp4",
+        _metadata(),
+        AppSettings(),
+        TimestampFrameBuffer(),
+        max_size=(640, 360),
+        on_stopped=stopped.set,
+    )
+    worker.start()
+
+    worker.close()
+
+    assert stopped.wait(timeout=5)
+
+
 def test_raw_worker_reload_reuses_worker_with_new_settings() -> None:
     frame_buffer = TimestampFrameBuffer()
     initial = AppSettings(secondary_restoration="none")
@@ -227,6 +245,7 @@ def test_raw_worker_reload_reuses_worker_with_new_settings() -> None:
         initial,
         frame_buffer,
         max_size=(640, 360),
+        on_stopped=lambda: None,
     )
 
     generation = worker.reload_from(changed, 4.0)
@@ -253,6 +272,7 @@ def test_raw_worker_rebuilds_changed_settings_on_same_owner_thread(
         initial,
         TimestampFrameBuffer(),
         max_size=(640, 360),
+        on_stopped=lambda: None,
     )
     build_threads: list[int] = []
     pipelines: list[SimpleNamespace] = []
@@ -326,6 +346,7 @@ def test_raw_worker_releases_session_when_pipeline_construction_fails(
         AppSettings(),
         TimestampFrameBuffer(),
         max_size=(640, 360),
+        on_stopped=lambda: None,
     )
 
     with pytest.raises(RuntimeError, match="pipeline failed"):
