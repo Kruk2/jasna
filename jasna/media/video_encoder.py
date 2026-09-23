@@ -6,7 +6,7 @@ import math
 import queue
 import threading
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
@@ -27,12 +27,7 @@ from jasna.accelerator import (
     stream_context,
     vendor_for_device,
 )
-from jasna.media import (
-    AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
-    SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
-    VideoMetadata,
-    validate_encoder_settings,
-)
+from jasna.media import VideoMetadata, validate_encoder_settings
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.cas import GpuCasSharpener
 from jasna.media.container_utils import (
@@ -158,76 +153,50 @@ AMF_SMART_FRAGMENT_OPTIONS = MappingProxyType({"forced_idr": "1"})
 
 @dataclass(frozen=True)
 class EncoderSpec:
-    name: str
     encoder_name: str
     frame_format: str  # PyAV hardware-frame software format: "nv12" or "p010le"
     default_options: Mapping[str, str]
-    ten_bit: bool
-    smart_fragment_options: Mapping[str, str]
-    supported_settings: frozenset[str] = field(default_factory=frozenset)
+
+    @property
+    def ten_bit(self) -> bool:
+        return self.frame_format == "p010le"
 
 
 ENCODER_SPECS: dict[str, EncoderSpec] = {
     "hevc": EncoderSpec(
-        name="hevc",
         encoder_name="hevc_nvenc",
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_ENCODER_OPTIONS),
-        ten_bit=True,
-        smart_fragment_options=NVENC_SMART_FRAGMENT_OPTIONS,
-        supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["hevc"],
     ),
     "h264": EncoderSpec(
-        name="h264",
         encoder_name="h264_nvenc",
         frame_format="nv12",
         default_options=MappingProxyType(DEFAULT_H264_ENCODER_OPTIONS),
-        ten_bit=False,
-        smart_fragment_options=NVENC_SMART_FRAGMENT_OPTIONS,
-        supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["h264"],
     ),
     "av1": EncoderSpec(
-        name="av1",
         encoder_name="av1_nvenc",
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_AV1_ENCODER_OPTIONS),
-        ten_bit=True,
-        smart_fragment_options=NVENC_SMART_FRAGMENT_OPTIONS,
-        supported_settings=SUPPORTED_ENCODER_SETTINGS_BY_CODEC["av1"],
     ),
 }
 
 AMF_ENCODER_SPECS: dict[str, EncoderSpec] = {
     "hevc": EncoderSpec(
-        name="hevc",
         encoder_name="hevc_amf",
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_AMF_HEVC_ENCODER_OPTIONS),
-        ten_bit=True,
-        smart_fragment_options=AMF_SMART_FRAGMENT_OPTIONS,
-        supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["hevc"],
     ),
     "h264": EncoderSpec(
-        name="h264",
         encoder_name="h264_amf",
         frame_format="nv12",
         default_options=MappingProxyType(DEFAULT_AMF_H264_ENCODER_OPTIONS),
-        ten_bit=False,
-        smart_fragment_options=AMF_SMART_FRAGMENT_OPTIONS,
-        supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["h264"],
     ),
     "av1": EncoderSpec(
-        name="av1",
         encoder_name="av1_amf",
         frame_format="p010le",
         default_options=MappingProxyType(DEFAULT_AMF_AV1_ENCODER_OPTIONS),
-        ten_bit=True,
-        smart_fragment_options=AMF_SMART_FRAGMENT_OPTIONS,
-        supported_settings=AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC["av1"],
     ),
 }
-
-_CODEC_MAP = {spec.name: spec.encoder_name for spec in ENCODER_SPECS.values()}
 
 # ITU-T H.273 matrix, primaries, and transfer-characteristic code points.
 _COLOR_TAGS = {
@@ -258,6 +227,7 @@ _COLOR_VARIANTS = {
 }
 
 _NVENC_PITCH_ALIGNMENT = 16
+ENCODE_BUFFER_SIZE = 8
 
 # `cq` alone targets a fixed quality and ignores how the source was stored, so a
 # cheaply encoded source is re-encoded far above its own quality point and grows
@@ -383,10 +353,6 @@ def _align_yuv_pitch(packed: torch.Tensor) -> torch.Tensor:
     return storage[:, :width]
 
 
-def _amf_host_input(packed: torch.Tensor, *, ten_bit: bool) -> torch.Tensor:
-    return packed.view(torch.uint16) if ten_bit else packed
-
-
 def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
     if suffix.lower() not in {".mp4", ".mov"}:
         return {}
@@ -416,9 +382,7 @@ class NvidiaVideoEncoder:
         lut_path: str | Path | None = None,
         sharpen_strength: float = 0.0,
         output_fps: Fraction | None = None,
-        mux_audio: bool = True,
         pts_origin: int = 0,
-        match_input_bit_depth: bool = False,
         smart_fragment: bool = False,
         fmp4: bool = False,
     ):
@@ -436,22 +400,16 @@ class NvidiaVideoEncoder:
         if codec not in specs:
             raise ValueError(f"Unsupported codec: {codec}")
         spec = specs[codec]
-        if match_input_bit_depth and codec in {"hevc", "av1"} and not metadata.is_10bit:
+        # Smart-render fragments are spliced between copied source spans, so they
+        # keep the source bit depth instead of the codec's 10-bit default.
+        if smart_fragment and codec in {"hevc", "av1"} and not metadata.is_10bit:
             options = dict(spec.default_options)
             if codec == "hevc":
                 options["profile"] = "main"
             # AMF pins output depth via "bitdepth"; dropping it lets FFmpeg
             # derive 8-bit from the nv12 input instead of conflicting with it.
             options.pop("bitdepth", None)
-            spec = EncoderSpec(
-                name=spec.name,
-                encoder_name=spec.encoder_name,
-                frame_format="nv12",
-                default_options=MappingProxyType(options),
-                ten_bit=False,
-                smart_fragment_options=spec.smart_fragment_options,
-                supported_settings=spec.supported_settings,
-            )
+            spec = replace(spec, frame_format="nv12", default_options=MappingProxyType(options))
         color_variant = _COLOR_VARIANTS.get((metadata.color_space, metadata.color_range))
         if color_variant is None:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
@@ -464,12 +422,10 @@ class NvidiaVideoEncoder:
                 vendor=self.vendor,
             )
         self.metadata = metadata
-        self.file = file
         self.output_path = Path(file)
         self.codec = codec
         self.spec = spec
         self.encoder_name = spec.encoder_name
-        self.mux_audio = bool(mux_audio)
         self.pts_origin = int(pts_origin)
         self.smart_fragment = bool(smart_fragment)
         self.fmp4 = bool(fmp4)
@@ -526,14 +482,18 @@ class NvidiaVideoEncoder:
             )
         self.encoder_options.update(overrides)
         if self.smart_fragment:
-            self.encoder_options.update(spec.smart_fragment_options)
+            self.encoder_options.update(
+                AMF_SMART_FRAGMENT_OPTIONS
+                if self.vendor is AcceleratorVendor.AMD
+                else NVENC_SMART_FRAGMENT_OPTIONS
+            )
 
-        self.BUFFER_MAX_SIZE = 8
         self._lut_flags: deque[bool] = deque()
-        # Set on AMD in __enter__, where the frame size is known; NVIDIA leaves
-        # them None and allocates per frame (NVENC outlives encode()).
+        # Only AMD reuses one packed frame (set in __enter__); NVENC still holds
+        # its input frame after encode() returns, so NVIDIA allocates per frame.
         self._packed: torch.Tensor | None = None
         self._cas_luma: torch.Tensor | None = None
+        self._source_chapters = ()
 
     @staticmethod
     def _vc1_wmv_cfr_rate(metadata: VideoMetadata) -> Fraction | None:
@@ -639,8 +599,6 @@ class NvidiaVideoEncoder:
             )
         height = self.metadata.video_height
         width = self.metadata.video_width
-        self._packed = None
-        self._cas_luma = None
         self._host_yuv = None
         if self.vendor is AcceleratorVendor.AMD:
             self._packed = torch.empty(
@@ -666,7 +624,7 @@ class NvidiaVideoEncoder:
         self._worker_error: Exception | None = None
 
         self._stop_sentinel = object()
-        self._encode_queue: queue.Queue = queue.Queue(maxsize=self.BUFFER_MAX_SIZE)
+        self._encode_queue: queue.Queue = queue.Queue(maxsize=ENCODE_BUFFER_SIZE)
         self._encode_thread = threading.Thread(target=self._encode_worker, name="NvidiaVideoEncoderWorker", daemon=True)
         self._encode_thread.start()
         return self
@@ -690,11 +648,9 @@ class NvidiaVideoEncoder:
         packet_streams = []
         output_formats = set(self.dst.format.name.split(","))
         source_formats = set(self._src.format.name.split(","))
-        source_chapters = getattr(self, "_source_chapters", ())
+        source_chapters = self._source_chapters
         for in_stream in self._src.streams:
             if in_stream.index == in_v.index:
-                continue
-            if in_stream.type == "audio" and not self.mux_audio:
                 continue
             if is_mov_chapter_stream(
                 in_stream,
@@ -843,12 +799,10 @@ class NvidiaVideoEncoder:
                 if item is self._stop_sentinel:
                     return
                 if self._worker_error is None:
-                    if len(item) == 3:
-                        frame, pts, ready_event = item
-                        apply_lut = True
-                    else:
-                        frame, pts, apply_lut, ready_event = item
-                    self._handle_encode_item(frame, pts, apply_lut, ready_event)
+                    frame, pts, apply_lut, ready_event = item
+                    self.stream.wait_event(ready_event)
+                    frame.record_stream(self.stream)
+                    self._encode_frame(frame, pts, apply_lut=apply_lut)
             except Exception as exc:
                 self._worker_error = exc
                 logger.exception("[encoder-worker] crashed")
@@ -859,23 +813,12 @@ class NvidiaVideoEncoder:
         self,
         frame: torch.Tensor,
         pts: int,
-        apply_lut: bool = True,
+        apply_lut: bool,
     ) -> tuple[torch.Tensor, int, bool, object]:
         producer_stream = current_stream(self.device)
         ready_event = new_event(self.device)
         producer_stream.record_event(ready_event)
-        return frame, pts, bool(apply_lut), ready_event
-
-    def _handle_encode_item(
-        self,
-        frame: torch.Tensor,
-        pts: int,
-        apply_lut: bool,
-        ready_event: object,
-    ) -> None:
-        self.stream.wait_event(ready_event)
-        frame.record_stream(self.stream)
-        self._encode_frame(frame, pts, apply_lut=apply_lut)
+        return frame, pts, apply_lut, ready_event
 
     def _validate_encoder_options(self):
         leftover = dict(self.out_stream.codec_context.options)
@@ -895,8 +838,7 @@ class NvidiaVideoEncoder:
             raise RuntimeError(
                 f"Failed to mux {self.codec} video into '{self.output_path.suffix}' output: {exc}"
             ) from exc
-        if not self._video_started:
-            self._video_started = True
+        self._video_started = True
         if not self._options_validated:
             self._validate_encoder_options()
         if threshold is not None:
@@ -1023,26 +965,19 @@ class NvidiaVideoEncoder:
         return pts
 
     def _process_buffer(self, flush_all=False):
-        if len(self.frame_buffer) > (self.BUFFER_MAX_SIZE // 2) or (flush_all and self.frame_buffer):
+        if len(self.frame_buffer) > (ENCODE_BUFFER_SIZE // 2) or (flush_all and self.frame_buffer):
             frame_to_encode = self.frame_buffer.popleft()
             pts_to_assign = heapq.heappop(self.pts_heap)
             self.pts_set.remove(pts_to_assign)
             pts_to_assign = self._clamp_pts_monotonic(pts_to_assign)
-            apply_lut = self._lut_flags.popleft() if self._lut_flags else True
-            if apply_lut:
-                item = self._build_encode_item(frame_to_encode, pts_to_assign)
-            else:
-                item = self._build_encode_item(frame_to_encode, pts_to_assign, False)
-            self._encode_queue.put(item)
+            self._encode_queue.put(
+                self._build_encode_item(frame_to_encode, pts_to_assign, self._lut_flags.popleft())
+            )
 
     def _encoder_open_error(self, exc: Exception) -> RuntimeError:
-        try:
-            gpu = device_name(self.device)
-        except Exception:
-            gpu = str(self.device)
         message = (
             f"Failed to open {self.codec} encoder ({self.encoder_name}) for "
-            f"'{self.output_path.suffix}' output on {gpu}: {exc}"
+            f"'{self.output_path.suffix}' output on {device_name(self.device)}: {exc}"
         )
         if self.codec == "av1":
             backend = "AMF" if self.vendor is AcceleratorVendor.AMD else "NVENC"
@@ -1106,15 +1041,12 @@ class NvidiaVideoEncoder:
                 )
 
         if self.vendor is AcceleratorVendor.AMD:
-            # Issue #252: isolated E1/E2 were clean; residual glitches under full
-            # pipeline load matched AMF reading host planes while a non-blocking
-            # D2H was still in flight. Finish convert on the stream, then
-            # blocking-copy into pinned host so from_dlpack sees complete planes.
-            # Phase 4 (gfx1201): stream.synchronize() + blocking copy cleared P1;
-            # do not escalate to full device.synchronize() unless field reports return.
+            # AMF reads host planes, and reading them while a non-blocking copy
+            # was still in flight corrupted frames (issue #252): finish the
+            # conversion, then blocking-copy into pinned memory.
             self.stream.synchronize()
             self._host_yuv.copy_(
-                _amf_host_input(packed, ten_bit=self.spec.ten_bit),
+                packed.view(torch.uint16) if self.spec.ten_bit else packed,
                 non_blocking=False,
             )
             planes = [self._host_yuv[:height], self._host_yuv[height:]]

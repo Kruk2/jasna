@@ -212,7 +212,6 @@ def _run_unaligned_pitch_probe(src: str, dst: str, codec: str, width: int) -> No
         metadata=metadata,
         codec=codec,
         encoder_settings={},
-        mux_audio=False,
     ) as encoder:
         for index in range(12):
             encoder.encode(frame.clone(), index * 512)
@@ -290,7 +289,6 @@ def test_smart_fragment_keeps_periodic_random_access_points(tmp_path):
             codec="hevc",
             encoder_settings={"g": "12"},
             smart_fragment=True,
-            mux_audio=False,
         ) as encoder,
     ):
         for frames, pts_list in reader.frames():

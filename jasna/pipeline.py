@@ -690,9 +690,7 @@ class Pipeline:
                             lut_path=self.lut_path,
                             sharpen_strength=self.sharpen_strength,
                             output_fps=metadata.video_fps_exact,
-                            mux_audio=False,
                             pts_origin=span.start_pts,
-                            match_input_bit_depth=True,
                             smart_fragment=True,
                         )
                         self._run_pass(

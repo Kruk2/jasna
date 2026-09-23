@@ -243,23 +243,13 @@ def test_amf_hevc_8bit_allows_qvbr(monkeypatch, tmp_path) -> None:
         _metadata(),
         codec="hevc",
         encoder_settings={"cq": 21, "rc": "qvbr"},
-        match_input_bit_depth=True,
+        smart_fragment=True,
     )
     assert encoder.spec.frame_format == "nv12"
     assert encoder.encoder_options["rc"] == "qvbr"
     assert encoder.encoder_options["qvbr_quality_level"] == "21"
     assert "qp_i" not in encoder.encoder_options
     assert "qp_p" not in encoder.encoder_options
-
-
-def test_amf_p010_host_input_reinterprets_signed_storage() -> None:
-    import jasna.media.video_encoder as module
-
-    packed = torch.tensor([-32768, -1, 0, 32767], dtype=torch.int16)
-    host_input = module._amf_host_input(packed, ten_bit=True)
-
-    assert host_input.dtype is torch.uint16
-    assert torch.equal(host_input, packed.view(torch.uint16))
 
 
 @pytest.mark.parametrize("codec", ["h264", "hevc", "av1"])
@@ -474,7 +464,6 @@ def test_amf_8bit_downgrade_drops_bitdepth(monkeypatch, tmp_path) -> None:
         _metadata(),
         codec="hevc",
         encoder_settings={},
-        match_input_bit_depth=True,
         smart_fragment=True,
     )
     assert encoder.spec.frame_format == "nv12"
