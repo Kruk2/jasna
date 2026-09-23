@@ -370,6 +370,60 @@ def _normalized_audio_layout(layout: av.AudioLayout) -> av.AudioLayout:
     return layout
 
 
+def resolve_encoder_options(
+    vendor: AcceleratorVendor,
+    codec: str,
+    metadata: VideoMetadata,
+    encoder_settings: dict[str, object],
+    *,
+    smart_fragment: bool,
+) -> tuple[EncoderSpec, dict[str, str]]:
+    """Pick the encoder spec and the final FFmpeg options for one output."""
+    specs = AMF_ENCODER_SPECS if vendor is AcceleratorVendor.AMD else ENCODER_SPECS
+    if codec not in specs:
+        raise ValueError(f"Unsupported codec: {codec}")
+    spec = specs[codec]
+    # Smart-render fragments are spliced between copied source spans, so they
+    # keep the source bit depth instead of the codec's 10-bit default.
+    if smart_fragment and codec in {"hevc", "av1"} and not metadata.is_10bit:
+        options = dict(spec.default_options)
+        if codec == "hevc":
+            options["profile"] = "main"
+        # AMF pins output depth via "bitdepth"; dropping it lets FFmpeg
+        # derive 8-bit from the nv12 input instead of conflicting with it.
+        options.pop("bitdepth", None)
+        spec = replace(spec, frame_format="nv12", default_options=MappingProxyType(options))
+    if encoder_settings:
+        validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
+
+    encoder_options = dict(spec.default_options)
+    overrides: dict[str, str] = {}
+    if encoder_settings:
+        overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
+        # FFmpeg accepts both spellings for HEVC/H.264, but their defaults
+        # use the underscore key. Normalize the alias so a user override
+        # replaces that default instead of passing two conflicting options.
+        if "spatial-aq" in overrides and "spatial_aq" in encoder_options:
+            overrides["spatial_aq"] = overrides.pop("spatial-aq")
+        if vendor is AcceleratorVendor.AMD:
+            _normalize_amf_cq(codec, overrides, encoder_options, ten_bit=spec.ten_bit)
+        else:
+            _drop_unsupported_nvenc_overrides(codec, overrides, encoder_options)
+    uses_amf_cqp = (
+        vendor is AcceleratorVendor.AMD
+        and codec in {"hevc", "av1"}
+        and overrides.get("rc", encoder_options["rc"]) in {"cqp", "0"}
+    )
+    if "maxrate" not in overrides and not uses_amf_cqp:
+        encoder_options.update(source_bitrate_cap_options(metadata, output_codec=codec, vendor=vendor))
+    encoder_options.update(overrides)
+    if smart_fragment:
+        encoder_options.update(
+            AMF_SMART_FRAGMENT_OPTIONS if vendor is AcceleratorVendor.AMD else NVENC_SMART_FRAGMENT_OPTIONS
+        )
+    return spec, encoder_options
+
+
 class NvidiaVideoEncoder:
     def __init__(
         self,
@@ -392,35 +446,13 @@ class NvidiaVideoEncoder:
             raise RuntimeError(
                 f"GPU video encoding is not supported on {self.vendor.value}"
             )
-        specs = (
-            AMF_ENCODER_SPECS
-            if self.vendor is AcceleratorVendor.AMD
-            else ENCODER_SPECS
+        spec, self.encoder_options = resolve_encoder_options(
+            self.vendor, codec, metadata, encoder_settings, smart_fragment=smart_fragment
         )
-        if codec not in specs:
-            raise ValueError(f"Unsupported codec: {codec}")
-        spec = specs[codec]
-        # Smart-render fragments are spliced between copied source spans, so they
-        # keep the source bit depth instead of the codec's 10-bit default.
-        if smart_fragment and codec in {"hevc", "av1"} and not metadata.is_10bit:
-            options = dict(spec.default_options)
-            if codec == "hevc":
-                options["profile"] = "main"
-            # AMF pins output depth via "bitdepth"; dropping it lets FFmpeg
-            # derive 8-bit from the nv12 input instead of conflicting with it.
-            options.pop("bitdepth", None)
-            spec = replace(spec, frame_format="nv12", default_options=MappingProxyType(options))
         color_variant = _COLOR_VARIANTS.get((metadata.color_space, metadata.color_range))
         if color_variant is None:
             raise ValueError(f"Unsupported color space or color range: {metadata.color_space} {metadata.color_range}")
-        pixel_format = "p010" if spec.frame_format == "p010le" else "nv12"
-        converter_variant = f"{pixel_format}_{color_variant}"
-        if encoder_settings:
-            validate_encoder_settings(
-                encoder_settings,
-                codec=codec,
-                vendor=self.vendor,
-            )
+        pixel_format = "p010" if spec.ten_bit else "nv12"
         self.metadata = metadata
         self.output_path = Path(file)
         self.codec = codec
@@ -447,46 +479,7 @@ class NvidiaVideoEncoder:
                 sharpen_strength, ten_bit=spec.ten_bit, device=self.device
             )
 
-        self._converter = RgbToYuvConverter(converter_variant, device=self.device)
-
-        self.encoder_options = dict(spec.default_options)
-        overrides: dict[str, str] = {}
-        if encoder_settings:
-            overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
-            # FFmpeg accepts both spellings for HEVC/H.264, but their defaults
-            # use the underscore key. Normalize the alias so a user override
-            # replaces that default instead of passing two conflicting options.
-            if "spatial-aq" in overrides and "spatial_aq" in self.encoder_options:
-                overrides["spatial_aq"] = overrides.pop("spatial-aq")
-            if self.vendor is AcceleratorVendor.AMD:
-                _normalize_amf_cq(
-                    codec,
-                    overrides,
-                    self.encoder_options,
-                    ten_bit=spec.ten_bit,
-                )
-            else:
-                _drop_unsupported_nvenc_overrides(codec, overrides, self.encoder_options)
-        uses_amf_cqp = (
-            self.vendor is AcceleratorVendor.AMD
-            and codec in {"hevc", "av1"}
-            and overrides.get("rc", self.encoder_options["rc"]) in {"cqp", "0"}
-        )
-        if "maxrate" not in overrides and not uses_amf_cqp:
-            self.encoder_options.update(
-                source_bitrate_cap_options(
-                    metadata,
-                    output_codec=codec,
-                    vendor=self.vendor,
-                )
-            )
-        self.encoder_options.update(overrides)
-        if self.smart_fragment:
-            self.encoder_options.update(
-                AMF_SMART_FRAGMENT_OPTIONS
-                if self.vendor is AcceleratorVendor.AMD
-                else NVENC_SMART_FRAGMENT_OPTIONS
-            )
+        self._converter = RgbToYuvConverter(f"{pixel_format}_{color_variant}", device=self.device)
 
         self._lut_flags: deque[bool] = deque()
         # Only AMD reuses one packed frame (set in __enter__); NVENC still holds
@@ -540,6 +533,9 @@ class NvidiaVideoEncoder:
                 allow_software_fallback=False,
                 is_hw_owned=False,
             )
+            pix_fmt = self.spec.frame_format
+        else:
+            pix_fmt = "cuda"
         out_v = self.dst.add_stream(self.encoder_name, **stream_kwargs)
         if self.codec == "hevc" and self.output_path.suffix.lower() in {".mp4", ".mov"}:
             out_v.codec_tag = "hvc1"
@@ -549,11 +545,7 @@ class NvidiaVideoEncoder:
         ctx = out_v.codec_context
         ctx.time_base = self.metadata.time_base
         ctx.framerate = self.output_fps
-        ctx.pix_fmt = (
-            self.spec.frame_format
-            if self.vendor is AcceleratorVendor.AMD
-            else "cuda"
-        )
+        ctx.pix_fmt = pix_fmt
         if self.smart_fragment:
             from av.codec.context import Flags
 
@@ -582,25 +574,22 @@ class NvidiaVideoEncoder:
         # conversion is eager Torch math, so on AMD everything stays on the
         # current stream: a private stream there let ROCm recycle in-flight
         # conversion buffers into the restorer's allocations (issue #252).
-        self.stream = (
-            current_stream(self.device)
-            if self.vendor is AcceleratorVendor.AMD
-            else new_stream(self.device)
-        )
+        height = self.metadata.video_height
+        width = self.metadata.video_width
         self._cuda_ctx = None
+        self._host_yuv = None
         if self.vendor is AcceleratorVendor.NVIDIA:
             from av.video.frame import CudaContext
 
+            self.stream = new_stream(self.device)
             self._cuda_ctx = CudaContext(
                 device_id=self.device.index or 0,
                 primary_ctx=False,
                 current_ctx=True,
                 cuda_stream=self.stream.cuda_stream,
             )
-        height = self.metadata.video_height
-        width = self.metadata.video_width
-        self._host_yuv = None
-        if self.vendor is AcceleratorVendor.AMD:
+        else:
+            self.stream = current_stream(self.device)
             self._packed = torch.empty(
                 (height + height // 2, width),
                 dtype=self._converter.sample_dtype,
@@ -608,10 +597,9 @@ class NvidiaVideoEncoder:
             )
             if self._cas is not None:
                 self._cas_luma = torch.empty_like(self._packed[:height])
-            dtype = torch.uint16 if self.spec.ten_bit else torch.uint8
             self._host_yuv = torch.empty(
                 (height + height // 2, width),
-                dtype=dtype,
+                dtype=torch.uint16 if self.spec.ten_bit else torch.uint8,
                 pin_memory=True,
             )
         self.pts_heap: list[int] = []
