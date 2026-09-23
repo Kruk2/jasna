@@ -221,6 +221,8 @@ class _ScanTensorCollector:
         self._spilling = False
         self._cpu_masks = None
         self._cpu_scores = None
+        self._gpu_masks = None
+        self._gpu_scores = None
 
         sample_bytes = self.mask_h * self.mask_w + 4
         required_bytes = self.capacity * sample_bytes
@@ -273,7 +275,7 @@ class _ScanTensorCollector:
         if self._spilling:
             return
         self._allocate_cpu()
-        if hasattr(self, "_gpu_masks"):
+        if self._gpu_masks is not None:
             if self.count:
                 self._cpu_masks[: self.count].copy_(self._gpu_masks[: self.count])
                 self._cpu_scores[: self.count].copy_(self._gpu_scores[: self.count])

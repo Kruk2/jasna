@@ -358,8 +358,7 @@ class SettingsPanel(ctk.CTkFrame):
         self._create_btn.configure(state=state)
         self._save_btn.configure(state=state)
         self._reset_btn.configure(state=state)
-        if hasattr(self, "_delete_btn"):
-            self._delete_btn.configure(state=state)
+        self._delete_btn.configure(state=state)
 
         # All interactive widgets
         for key, widget in self._widgets.items():
