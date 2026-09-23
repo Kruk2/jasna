@@ -9,16 +9,17 @@ from jasna.benchmark.harness import run_repeatedly
 from jasna.media import get_video_meta_data
 from jasna.media.video_decoder import NvidiaVideoReader
 from jasna.mosaic.detection_registry import (
+    DEFAULT_DETECTION_MODEL_NAME,
+    build_detection_model,
     detection_model_weights_path,
     recommended_score_threshold,
 )
-from jasna.mosaic.yolo import YoloMosaicDetectionModel
-from jasna.tensor_utils import pad_batch_with_last
 
 LADA_YOLO_FAST_MODEL = "lada-yolo-v4"
 
 
 def _run_single(
+    model_name: str,
     *,
     device: torch.device,
     batch_size: int,
@@ -31,12 +32,13 @@ def _run_single(
         raise FileNotFoundError(str(path))
 
     metadata = get_video_meta_data(str(path))
-    model_path = detection_model_weights_path(LADA_YOLO_FAST_MODEL)
+    model_path = detection_model_weights_path(model_name)
     if not model_path.exists():
         raise FileNotFoundError(str(model_path))
 
-    detection_model = YoloMosaicDetectionModel(
-        model_path=model_path,
+    detection_model = build_detection_model(
+        model_name,
+        model_path,
         batch_size=batch_size,
         device=device,
         score_threshold=score_threshold,
@@ -62,9 +64,10 @@ def _run_single(
             if effective_bs == 0:
                 continue
 
-            frames_eff = frames[:effective_bs]
-            frames_in = pad_batch_with_last(frames_eff, batch_size=batch_size)
-            detections = detection_model(frames_in, target_hw=target_hw)
+            detections = detection_model(
+                frames[:effective_bs],
+                target_hw=target_hw,
+            )
 
             total_frames += effective_bs
             for i in range(effective_bs):
@@ -75,13 +78,14 @@ def _run_single(
 
     return duration, {
         "video": str(path),
-        "model": LADA_YOLO_FAST_MODEL,
+        "model": model_name,
         "frames": total_frames,
         "total_detections": total_detections,
     }
 
 
-def benchmark_lada_yolo_detection_speed(
+def _benchmark_detection_speed(
+    model_name: str,
     *,
     device: torch.device,
     batch_size: int,
@@ -92,7 +96,7 @@ def benchmark_lada_yolo_detection_speed(
 ) -> dict[str, tuple[float, float]]:
     results: dict[str, tuple[float, float]] = {}
     score_threshold = (
-        recommended_score_threshold(LADA_YOLO_FAST_MODEL)
+        recommended_score_threshold(model_name)
         if detection_score_threshold is None
         else float(detection_score_threshold)
     )
@@ -102,6 +106,7 @@ def benchmark_lada_yolo_detection_speed(
             continue
         median_duration, result = run_repeatedly(
             lambda vp=path: _run_single(
+                model_name,
                 device=device,
                 batch_size=batch_size,
                 fp16=fp16,
@@ -113,3 +118,11 @@ def benchmark_lada_yolo_detection_speed(
         fps = result["frames"] / median_duration if median_duration > 0 else 0.0
         results[path.name] = (median_duration, fps)
     return results
+
+
+def benchmark_rfdetr_detection_speed(**kwargs) -> dict[str, tuple[float, float]]:
+    return _benchmark_detection_speed(DEFAULT_DETECTION_MODEL_NAME, **kwargs)
+
+
+def benchmark_lada_yolo_detection_speed(**kwargs) -> dict[str, tuple[float, float]]:
+    return _benchmark_detection_speed(LADA_YOLO_FAST_MODEL, **kwargs)
