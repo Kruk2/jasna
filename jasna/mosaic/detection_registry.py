@@ -68,11 +68,6 @@ RFDETR_MODEL_NAMES: frozenset[str] = frozenset(
         "rfdetr-vr-v1",
     }
 )
-YOLO_MODEL_NAMES: frozenset[str] = frozenset(
-    name
-    for name, spec in DETECTION_MODEL_SPECS.items()
-    if spec.backend == "yolo"
-)
 
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 

@@ -505,7 +505,7 @@ def test_scan_lock_disables_everything_but_stop(monkeypatch) -> None:
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
         editor._set_scan_locked(True)
-        editor.update_idletasks()
+        editor.update()
         for widget in editor._scan_lockable_widgets():
             assert widget.cget("state") == "disabled"
         assert editor._scan_stop_btn.cget("state") == "normal"
@@ -514,6 +514,7 @@ def test_scan_lock_disables_everything_but_stop(monkeypatch) -> None:
         assert not editor._timeline._enabled
 
         editor._set_scan_locked(False)
+        editor.update()
         assert editor._scan_btn.cget("state") == "normal"
         assert editor._scan_stop_btn.cget("state") == "disabled"
         assert not editor._scan_activity.winfo_ismapped()

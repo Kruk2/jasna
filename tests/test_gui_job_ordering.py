@@ -4,9 +4,14 @@ import threading
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
+import pytest
+
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobItem, JobStatus, AppSettings
 from jasna.post_export_action import PostExportVideoCommandError
+
+
+pytestmark = pytest.mark.usefixtures("no_gpu_cleanup")
 
 
 def _make_jobs(*names: str) -> list[JobItem]:

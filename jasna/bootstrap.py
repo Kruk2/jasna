@@ -6,9 +6,6 @@ from pathlib import Path
 
 
 def sanitize_sys_path_for_local_dev(package_dir: Path) -> None:
-    import warnings
-    warnings.filterwarnings("ignore", message=r".*isinstance\(treespec, LeafSpec\).*", category=FutureWarning)
-
     package_dir = package_dir.resolve()
     repo_root = package_dir.parent.resolve()
 

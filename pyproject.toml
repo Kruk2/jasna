@@ -15,7 +15,6 @@ dependencies = [
   "numpy>=1.26",
   "psutil",
   "diffusers",
-  "accelerate",
   "huggingface-hub",
   "mmengine==0.10.7",
   "opencv-python<5",
@@ -25,6 +24,7 @@ dependencies = [
   "tkinterdnd2",
   "python-vlc==3.0.21203",
   "ultralytics",
+  # Not imported directly; ultralytics needs it to export YOLO models for TensorRT.
   "onnx",
   "cryptography>=42",
 ]
