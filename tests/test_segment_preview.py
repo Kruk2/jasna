@@ -8,6 +8,7 @@ import pytest
 from jasna.gui.segment_preview import (
     PreviewFrame,
     PreviewFullFrame,
+    PreviewKeyframes,
     PreviewLoaded,
     SegmentPreviewWorker,
 )
@@ -162,5 +163,19 @@ def test_preview_worker_uses_left_eye_for_explicit_sbs(tmp_path) -> None:
         frame = _next_event(worker, PreviewFrame)
 
         assert frame.image.size == (70, 80)
+    finally:
+        worker.close()
+
+
+def test_preview_worker_reports_keyframe_probe_failure(tmp_path) -> None:
+    source = tmp_path / "preview.mp4"
+    _make_preview_source(source)
+    worker = SegmentPreviewWorker(source, max_size=(80, 80))
+    worker.start()
+
+    try:
+        keyframes = _next_event(worker, PreviewKeyframes)
+        assert keyframes.index is None
+        assert keyframes.error == "No random-access video keyframes were found"
     finally:
         worker.close()
