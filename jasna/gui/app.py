@@ -20,7 +20,7 @@ from jasna.gui.branding import (
 )
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing, _font_families_for_platform
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -762,8 +762,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         dialog.resizable(False, False)
         dialog.configure(fg_color=Colors.BG_MAIN)
         dialog.transient(self)
-        dialog.wait_visibility()  # X11: window must be viewable before grab_set, else TclError
-        dialog.grab_set()
+        grab_modal(dialog)
 
         ctk.CTkLabel(
             dialog,
