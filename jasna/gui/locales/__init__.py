@@ -59,8 +59,8 @@ class LocaleManager:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 self._current_lang = data.get("language", "en")
-            except (json.JSONDecodeError, IOError):
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Could not read the language setting from %s: %s", path, e)
         else:
             # If settings.json is missing, try to autodetect system language
             try:
@@ -85,16 +85,16 @@ class LocaleManager:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-            except (json.JSONDecodeError, IOError):
-                pass
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("Could not read settings from %s, rewriting it: %s", path, e)
 
         data["language"] = self._current_lang
 
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-        except IOError:
-            pass
+        except OSError as e:
+            logger.warning("Could not save the language setting to %s: %s", path, e)
 
     @property
     def current_language(self) -> str:
@@ -122,10 +122,7 @@ class LocaleManager:
 
         # Format with kwargs
         if kwargs:
-            try:
-                text = text.format(**kwargs)
-            except (KeyError, ValueError):
-                pass
+            text = text.format(**kwargs)
 
         return text
 

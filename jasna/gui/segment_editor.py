@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import tkinter as tk
@@ -59,6 +60,8 @@ from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.probe import VideoMetadata
 from jasna.segments import SegmentRange, format_timestamp, parse_timestamp
+
+logger = logging.getLogger(__name__)
 
 
 class SegmentEditor(ctk.CTkToplevel):
@@ -187,7 +190,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self.lift()
             self.focus_force()
         except tk.TclError:
-            pass
+            logger.debug("Segment editor could not grab focus yet", exc_info=True)
 
     def _restore_if_unmapped(self, _event) -> None:
         if not self.winfo_ismapped():
@@ -989,10 +992,7 @@ class SegmentEditor(ctk.CTkToplevel):
 
     def _preview_resized(self, _event=None) -> None:
         if self._resize_after is not None:
-            try:
-                self.after_cancel(self._resize_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._resize_after)
         self._resize_after = self.after(60, self._refresh_preview_image)
 
     def _active_preview_source(self) -> Image.Image | None:
@@ -1278,10 +1278,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if hasattr(self, "_play"):
             self._play.configure(text="⏸" if self._playing else "▶")
         if not self._playing and self._next_frame_after is not None:
-            try:
-                self.after_cancel(self._next_frame_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._next_frame_after)
             self._next_frame_after = None
 
     def _request_next_frame(self) -> None:
@@ -1341,10 +1338,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restored_clip = ()
         self._set_playing(False)
         if self._restore_after is not None:
-            try:
-                self.after_cancel(self._restore_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._restore_after)
             self._restore_after = None
         self._restored_source = None
         self._preview_image = None
@@ -1354,10 +1348,7 @@ class SegmentEditor(ctk.CTkToplevel):
     def _schedule_restoration_preview(self) -> None:
         self._restore_generation = -1
         if self._restore_after is not None:
-            try:
-                self.after_cancel(self._restore_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._restore_after)
         self._restore_after = self.after(400, self._request_restoration_preview)
 
     def _request_restoration_preview(self) -> None:
@@ -1382,10 +1373,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if not self._restore_active or self._closed.is_set():
             return
         if self._restore_after is not None:
-            try:
-                self.after_cancel(self._restore_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._restore_after)
             self._restore_after = None
         self._set_playing(False)
         self._restore_play_pending = True
@@ -1749,10 +1737,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._scan_threshold = float(value)
         self._scan_thr_label.configure(text=f"{self._scan_threshold:.2f}")
         if self._scan_thr_after is not None:
-            try:
-                self.after_cancel(self._scan_thr_after)
-            except tk.TclError:
-                pass
+            self.after_cancel(self._scan_thr_after)
         self._scan_thr_after = self.after(60, self._apply_scan_threshold)
 
     def _apply_scan_threshold(self) -> None:
@@ -2248,10 +2233,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._restoration_worker.close()
         if self._scan_worker is not None:
             self._scan_worker.close()
-        try:
-            self.grab_release()
-        except tk.TclError:
-            pass
+        self.grab_release()
         if self._on_closed is not None:
             self._on_closed()
         self.destroy()

@@ -54,7 +54,7 @@ def test_queue_button_text_does_not_depend_on_emoji_fonts(lang: str, key: str) -
     assert not TRANSLATIONS[lang][key].startswith(("📁", "🗑"))
 
 
-@pytest.mark.parametrize("lang", _FULL_LOCALES)
+@pytest.mark.parametrize("lang", sorted(TRANSLATIONS))
 def test_format_placeholders_match(lang: str) -> None:
     mismatches: list[str] = []
     for key in TRANSLATIONS["en"]:

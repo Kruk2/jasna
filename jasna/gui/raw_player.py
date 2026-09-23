@@ -16,6 +16,7 @@ from typing import Protocol
 
 from PIL import Image
 
+from jasna.gui.queues import replace_pending
 from jasna._frozen import is_frozen
 from jasna.gui.models import AppSettings
 from jasna.media.probe import VideoMetadata
@@ -335,12 +336,7 @@ class RawPlayerWorker:
     def _replace_command(self, command: _Play | _Stop, *, allow_closed: bool = False) -> None:
         if self._closed.is_set() and not allow_closed:
             return
-        try:
-            while True:
-                self._commands.get_nowait()
-        except queue.Empty:
-            pass
-        self._commands.put_nowait(command)
+        replace_pending(self._commands, command)
 
     def _run(self) -> None:
         session = None

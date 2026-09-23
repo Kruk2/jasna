@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
 from jasna.session_factory import RestorationSession
@@ -306,15 +307,7 @@ class RestorationPreviewWorker:
     ) -> None:
         if self._closed.is_set() and not allow_closed:
             return
-        try:
-            while True:
-                self._commands.get_nowait()
-        except queue.Empty:
-            pass
-        try:
-            self._commands.put_nowait(command)
-        except queue.Full:
-            pass
+        replace_pending(self._commands, command)
 
     def _run(self) -> None:
         session: RestorationSession | None = None
