@@ -223,6 +223,8 @@ def _subprocess_compile(req: EngineCompilationRequest) -> None:
     # In the compiled (Nuitka) binary that introspection raises; patch before any such import.
     from jasna._frozen import patch_frozen_torch
     patch_frozen_torch()
+    from jasna.accelerator import configure_rocm_process_env
+    configure_rocm_process_env()
 
     device = torch.device(req.device)
     nvidia = is_nvidia_device(device)

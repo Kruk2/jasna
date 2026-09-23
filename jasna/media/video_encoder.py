@@ -43,8 +43,6 @@ from jasna.media.encoder_quality import encoder_cq_spec
 from jasna.media.lut import GpuLutApplier, parse_cube_file
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
 
-av.logging.set_level(logging.ERROR)
-
 logger = logging.getLogger(__name__)
 
 DEFAULT_ENCODER_OPTIONS: dict[str, str] = {

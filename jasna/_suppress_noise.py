@@ -8,6 +8,8 @@ from importlib.util import find_spec
 import logging
 import warnings
 
+import av
+
 _installed = False
 
 
@@ -48,6 +50,7 @@ def install() -> None:
         "ignore",
         message=r"^TensorRT-LLM is not installed\..*",
     )
+    warnings.filterwarnings("ignore", message=r".*isinstance\(treespec, LeafSpec\).*", category=FutureWarning)
     warnings.filterwarnings(
         "ignore",
         message=r"^Unable to execute the generated python source code from the graph\..*",
@@ -61,6 +64,7 @@ def install() -> None:
         module=r"^torch_tensorrt\.dynamo\._exporter$",
     )
 
+    av.logging.set_level(logging.ERROR)
     logging.getLogger("torch.export.pt2_archive._package").setLevel(logging.ERROR)
     for _name in (
         "torch_tensorrt",
