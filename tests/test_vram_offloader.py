@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from unittest.mock import patch, MagicMock
 
+import pytest
 import torch
 
 from jasna.blend_buffer import BlendBuffer
@@ -248,6 +249,12 @@ class TestVramOffloaderLifecycle:
 
 
 class TestEncodeStallDetection:
+    @pytest.fixture(autouse=True)
+    def _gpu_memory_queries(self, monkeypatch):
+        monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (0, 0))
+        monkeypatch.setattr(torch.cuda, "memory_allocated", lambda device: 0)
+        monkeypatch.setattr(torch.cuda, "memory_reserved", lambda device: 0)
+
     def test_no_warning_without_heartbeat(self):
         offloader = VramOffloader(
             device=torch.device("cpu"),

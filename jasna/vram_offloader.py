@@ -161,73 +161,25 @@ class VramOffloader:
     def _dump_stall_diagnostics(self, elapsed: float) -> None:
         lines: list[str] = [f"=== ENCODE STALL DIAGNOSTICS (stalled {elapsed:.0f}s) ==="]
 
-        # Queue sizes and frame counts
         if self._pipeline_queues:
             for name, q in self._pipeline_queues.items():
-                try:
-                    lines.append(
-                        f"  {name}: items={q.qsize()} frames={q.current_frames} max_frames={q._max_frames}"
-                    )
-                except Exception:
-                    lines.append(f"  {name}: <error reading>")
+                lines.append(f"  {name}: items={q.qsize()} frames={q.current_frames} max_frames={q._max_frames}")
         if self._metadata_queue is not None:
-            try:
-                lines.append(
-                    f"  metadata_queue: items~={self._metadata_queue.qsize()} maxsize={self._metadata_queue.maxsize}"
-                )
-            except Exception:
-                lines.append("  metadata_queue: <error reading>")
-
-        # Blend buffer state
-        try:
-            bb = self._blend_buffer
-            with bb._lock:
-                pending_count = len(bb.pending_map)
-                results_count = len(bb._results)
-                result_track_ids = list(bb._results.keys())
-                earliest_pending = min(bb.pending_map.keys()) if bb.pending_map else None
-                latest_pending = max(bb.pending_map.keys()) if bb.pending_map else None
-                waiting_frames = [
-                    (fidx, tids)
-                    for fidx, tids in sorted(bb.pending_map.items())
-                    if not all(tid in bb._results for tid in tids)
-                ][:5]
             lines.append(
-                f"  blend_buffer: pending_frames={pending_count} results={results_count}"
-                f" result_track_ids={result_track_ids}"
+                f"  metadata_queue: items~={self._metadata_queue.qsize()} maxsize={self._metadata_queue.maxsize}"
             )
-            if earliest_pending is not None:
-                lines.append(f"  blend_buffer: frame_range=[{earliest_pending}..{latest_pending}]")
-            if waiting_frames:
-                for fidx, tids in waiting_frames:
-                    missing = [t for t in tids if t not in (bb._results if hasattr(bb, '_results') else {})]
-                    lines.append(f"  blend_buffer: frame {fidx} waiting for tracks {missing}")
-        except Exception as e:
-            lines.append(f"  blend_buffer: <error: {e}>")
+        lines.extend(f"  {line}" for line in self._blend_buffer.debug_lines())
+        crop_sizes = {k: v.frame_count for k, v in list(self._crop_buffers.items())}
+        lines.append(f"  crop_buffers: track_ids={list(crop_sizes)} sizes={crop_sizes}")
 
-        # Crop buffers
-        try:
-            crop_sizes = {k: v.frame_count for k, v in list(self._crop_buffers.items())}
-            crop_ids = list(crop_sizes)
-            lines.append(f"  crop_buffers: track_ids={crop_ids} sizes={crop_sizes}")
-        except Exception as e:
-            lines.append(f"  crop_buffers: <error: {e}>")
+        free, total = torch.cuda.mem_get_info(self._device)
+        lines.append(
+            f"  VRAM: used={((total - free) / _MIB):.0f} MiB"
+            f" allocated={torch.cuda.memory_allocated(self._device) / _MIB:.0f} MiB"
+            f" reserved={torch.cuda.memory_reserved(self._device) / _MIB:.0f} MiB"
+            f" free={free / _MIB:.0f} MiB"
+        )
 
-        # VRAM
-        try:
-            free, total = torch.cuda.mem_get_info(self._device)
-            alloc = torch.cuda.memory_allocated(self._device)
-            reserved = torch.cuda.memory_reserved(self._device)
-            lines.append(
-                f"  VRAM: used={((total - free) / _MIB):.0f} MiB"
-                f" allocated={alloc / _MIB:.0f} MiB"
-                f" reserved={reserved / _MIB:.0f} MiB"
-                f" free={free / _MIB:.0f} MiB"
-            )
-        except Exception as e:
-            lines.append(f"  VRAM: <error: {e}>")
-
-        # Thread stack traces
         lines.append("  --- Thread stacks ---")
         thread_names = {t.ident: t.name for t in threading.enumerate()}
         for tid, frame in sys._current_frames().items():
