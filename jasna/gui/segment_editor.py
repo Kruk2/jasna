@@ -108,6 +108,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._edit_notice: str | None = None
         self._edit_notice_warning = False
         self._scan_panel: ScanPanel | None = None
+        self._play: ctk.CTkButton | None = None
         self._segment_action_widgets: list = []
         self._timeline_zoom_buttons: list = []
         self._mask_feedback_worker = MaskFeedbackWorker()
@@ -960,7 +961,7 @@ class SegmentEditor(ctk.CTkToplevel):
 
     def _set_playing(self, playing: bool) -> None:
         self._playing = bool(playing)
-        if hasattr(self, "_play"):
+        if self._play is not None:
             self._play.configure(text="⏸" if self._playing else "▶")
         if not self._playing and self._next_frame_after is not None:
             self.after_cancel(self._next_frame_after)
@@ -1514,7 +1515,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._notice.configure(text="")
 
     def _update_apply_state(self) -> None:
-        if self._state is None or not hasattr(self, "_apply_btn"):
+        if self._state is None:
             return
         enabled = not self._compatibility_error and not self._scanning()
         self._apply_btn.configure(state="normal" if enabled else "disabled")
