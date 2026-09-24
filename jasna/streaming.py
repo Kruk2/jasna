@@ -207,9 +207,8 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             seg_name = path.lstrip("/")
             seg_path = self._state.segments_dir / seg_name
             seg_num = self._parse_segment_number(seg_name)
-            if seg_num is not None:
-                self._state.notify_segment_requested(seg_num)
             if self._state.segment_is_ready(seg_path):
+                self._state.notify_segment_requested(seg_num)
                 self._serve_file(seg_path)
                 return
 
@@ -219,10 +218,10 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
 
             generation = self._state.pass_generation
             seeking = self._state.needs_seek(seg_num)
-            expected_epoch = None if epoch is None else int(epoch)
-            if seeking and not self._state.request_seek(seg_num, expected_epoch=expected_epoch):
+            if seeking and (epoch is None or not self._state.request_seek(seg_num, expected_epoch=int(epoch))):
                 self.send_error(404)
                 return
+            self._state.notify_segment_requested(seg_num)
 
             deadline = time.monotonic() + 30.0
             while time.monotonic() < deadline:
@@ -379,6 +378,7 @@ class HlsStreamingServer:
         self._highest_requested_segment: int = -1
         self._current_pass_start: int = 0
         self._produced_segment: int = -1
+        self._evicted_through: int = -1
         self._pass_generation = 0
 
         self._httpd: HTTPServer | None = None
@@ -428,6 +428,7 @@ class HlsStreamingServer:
             self._highest_requested_segment = -1
             self._current_pass_start = 0
             self._produced_segment = -1
+            self._evicted_through = -1
             self._pass_generation += 1
 
     def unload_video(self) -> None:
@@ -486,7 +487,7 @@ class HlsStreamingServer:
                 return False
             if (
                 segment < self._current_pass_start
-                or segment < self._highest_requested_segment - self._max_segments_kept
+                or segment <= self._evicted_through
                 or self._finished
             ):
                 return seeking and latest_target == segment
@@ -536,7 +537,7 @@ class HlsStreamingServer:
     def consume_seek_for_pass(self, start_segment: int) -> int | None:
         target = self.consume_seek()
         with self._demand_lock:
-            evicted = target is not None and target < self._highest_requested_segment - self._max_segments_kept
+            evicted = target is not None and target <= self._evicted_through
         if target == start_segment and not evicted:
             log.debug(
                 "[stream-server] ignoring seek to active segment %d",
@@ -566,6 +567,8 @@ class HlsStreamingServer:
                 continue
             if num < min_keep:
                 f.unlink(missing_ok=True)
+                with self._demand_lock:
+                    self._evicted_through = max(self._evicted_through, num)
 
     def wait_for_demand(
         self,
@@ -598,10 +601,7 @@ class HlsStreamingServer:
 
     def needs_seek(self, segment: int) -> bool:
         with self._demand_lock:
-            if segment < max(
-                self._current_pass_start,
-                self._highest_requested_segment - self._max_segments_kept,
-            ) or self._finished:
+            if segment < self._current_pass_start or segment <= self._evicted_through or self._finished:
                 return True
             if segment > self._produced_segment + _FORWARD_SEEK_THRESHOLD:
                 return True
@@ -613,6 +613,7 @@ class HlsStreamingServer:
             self._highest_requested_segment = start_segment - 1
             self._current_pass_start = start_segment
             self._produced_segment = start_segment - 1
+            self._evicted_through = -1
             self._pass_generation += 1
             self._finished = False
             self._demand_lock.notify_all()
