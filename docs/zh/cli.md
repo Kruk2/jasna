@@ -200,7 +200,7 @@ AMD 的 10-bit HEVC/AV1 输出使用固定 QP，因此没有自动体积上限�
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | 原样传给 AMF 的质量值：H.264 使用 QVBR，10-bit HEVC/AV1 使用固定 QP。越低越好；默认值依次为 24、25、32。 |
+| `cq` | AMF 的质量值：H.264 使用 QVBR，10-bit HEVC/AV1 使用固定 QP（AV1 内部刻度更细，CQ 会乘以 5 后传入）。越低越好；默认值依次为 24、25、32。 |
 | `qvbr_quality_level` | 旧版 CQ 别名。省略 `--cq` 时可用于 CLI 高级设置；GUI 自定义参数中不接受。 |
 | `usage` | 编码器用途配置。默认 `high_quality`。 |
 | `quality` | 速度/质量预设: `speed`、`balanced`、`quality`（默认）。 |
