@@ -51,3 +51,15 @@ def subtitle_transcode_codec(
     else:
         return None
     return candidate if candidate in supported_codecs else None
+
+
+def demux_video(container, stream):
+    # ASF video packets carry only a decode timestamp. VC-1 Advanced cannot
+    # signal whether it uses B-frames, so FFmpeg assumes a one-frame delay and
+    # fills each pts with the next packet's dts: video would start one frame
+    # late. Windows Media encoders write each frame's own time, as VALI reads it.
+    restamp = container.format.name == "asf" and stream.codec_context.name == "vc1"
+    for packet in container.demux(stream):
+        if restamp:
+            packet.pts = packet.dts
+        yield packet
