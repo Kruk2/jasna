@@ -483,6 +483,7 @@ def test_scan_lock_disables_everything_but_stop(monkeypatch) -> None:
     editor = None
     try:
         editor = _build_editor_with_ui(root, monkeypatch)
+        editor.geometry("900x640")
         editor._scan_panel._set_locked(True)
         editor.update()
         for widget in (*editor._lockable_widgets(), *editor._scan_panel.lockable_widgets()):
