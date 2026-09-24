@@ -201,7 +201,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 self.send_error(404)
                 return
             epoch = parse_qs(urlparse(self.path).query).get("epoch", [None])[0]
-            if epoch != str(self._state.playback_epoch):
+            if epoch is not None and epoch != str(self._state.playback_epoch):
                 self.send_error(404)
                 return
             seg_name = path.lstrip("/")
@@ -219,7 +219,8 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
 
             generation = self._state.pass_generation
             seeking = self._state.needs_seek(seg_num)
-            if seeking and not self._state.request_seek(seg_num, expected_epoch=int(epoch)):
+            expected_epoch = None if epoch is None else int(epoch)
+            if seeking and not self._state.request_seek(seg_num, expected_epoch=expected_epoch):
                 self.send_error(404)
                 return
 

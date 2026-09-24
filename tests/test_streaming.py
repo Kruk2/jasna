@@ -1050,6 +1050,18 @@ class TestHttpSegments:
         finally:
             server.stop()
 
+    def test_segment_without_epoch_is_served_for_proxies(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(_make_metadata(duration=20.0))
+        server.reset_demand()
+        (server.segments_dir / "seg_00000.ts").write_bytes(b"complete")
+        (server.segments_dir / "_hls_internal.m3u8").write_text("#EXTINF:4.000,\nseg_00000.ts\n")
+        try:
+            assert _get(port, "/seg_00000.ts")[0:2] == (200, "complete")
+        finally:
+            server.stop()
+
     def test_evicted_segment_restarts_and_serves(self):
         server = HlsStreamingServer(segment_duration=4.0)
         port = _start_server_on_free_port(server)
