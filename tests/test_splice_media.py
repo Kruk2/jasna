@@ -20,6 +20,8 @@ from jasna.media.splice import (
 )
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
+from factories import write_double_adts_aac_source
+
 
 def _ffmpeg(*args: str) -> None:
     completed = subprocess.run(
@@ -323,3 +325,15 @@ def test_final_mux_skips_mp4_timecode_stream_without_codec(tmp_path: Path) -> No
         assert len(container.streams.video) == 1
         assert len(container.streams.audio) == 1
         assert container.streams.video[0].metadata["timecode"] == "00:00:00:00"
+
+
+def test_final_mux_copies_double_adts_aac_into_mp4(tmp_path: Path) -> None:
+    source = write_double_adts_aac_source(tmp_path)
+    assembled = tmp_path / "assembled.mp4"
+    _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "copy", str(assembled))
+    output = tmp_path / "output.mp4"
+
+    mux_final_output(assembled, source, output, codec="h264")
+
+    with av.open(str(output)) as container:
+        assert sum(1 for _ in container.decode(audio=0)) > 1
