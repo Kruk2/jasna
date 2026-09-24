@@ -74,7 +74,7 @@ def test_h264_probe_resolves_source_compatible_smart_settings(tmp_path: Path) ->
     ("codec", "encoder", "source_options", "render_options"),
     [
         ("h264", "libx264", ["-g", "12", "-keyint_min", "12", "-sc_threshold", "0"], ["-g", "12", "-bf", "3", "-flags", "+cgop"]),
-        ("hevc", "libx265", ["-x265-params", "keyint=12:min-keyint=12:scenecut=0:open-gop=0"], ["-x265-params", "keyint=12:bframes=4:open-gop=0"]),
+        ("hevc", "libx265", ["-x265-params", "keyint=12:min-keyint=12:scenecut=0:open-gop=0"], ["-x265-params", "keyint=12:bframes=4:open-gop=0:ref=5"]),
         ("av1", "libsvtav1", ["-preset", "10", "-g", "12", "-svtav1-params", "scd=0"], ["-preset", "10", "-g", "12"]),
     ],
 )
@@ -140,7 +140,7 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         assert len(container.streams.audio) == 1
         assert container.streams.video[0].codec_context.name in {codec, "libdav1d"}
         if codec == "hevc":
-            assert container.streams.video[0].codec_tag == "hvc1"
+            assert container.streams.video[0].codec_tag == "hev1"
         output_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
         assert len(output_frames) == 36
         assert float(container.duration / av.time_base) == pytest.approx(3.0, abs=0.01)
@@ -148,6 +148,10 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         source_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
     for frame_index in [*range(12), *range(24, 36)]:
         assert np.array_equal(output_frames[frame_index], source_frames[frame_index])
+    with av.open(str(raw_parts[1])) as container:
+        render_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    for frame_index in range(12):
+        assert np.array_equal(output_frames[12 + frame_index], render_frames[frame_index])
 
 
 @pytest.mark.parametrize(
