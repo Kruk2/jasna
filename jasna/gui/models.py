@@ -3,7 +3,6 @@
 import itertools
 import json
 import logging
-import re
 import threading
 from dataclasses import dataclass, field, fields, asdict
 from enum import Enum
@@ -170,55 +169,6 @@ class AppSettings:
 DEFAULT_SETTINGS = AppSettings()
 
 
-# Old presets carry PyNvVideoCodec-era encoder option names; the encoder now
-# speaks ffmpeg hevc_nvenc. Renames plus the two one-to-many expansions below.
-_OLD_ENCODER_ARG_RENAMES = {
-    "nonrefp": "nonref_p",
-    "gop": "g",
-    "maxbitrate": "maxrate",
-    "vbvbufsize": "bufsize",
-    "temporalaq": "temporal-aq",
-    "lookahead": "rc-lookahead",
-    "tflevel": "tf_level",
-}
-_OLD_TUNING_INFO_VALUES = {
-    "high_quality": "hq",
-    "low_latency": "ll",
-    "ultra_low_latency": "ull",
-    "lossless": "lossless",
-}
-
-
-def _migrate_encoder_custom_args(value: str) -> str:
-    from jasna.media.encoder_settings import parse_encoder_settings
-
-    try:
-        settings = parse_encoder_settings(value)
-    except (ValueError, json.JSONDecodeError):
-        return value
-
-    migrated: dict[str, object] = {}
-    for key, v in settings.items():
-        if key == "aq":
-            migrated["spatial_aq"] = 1
-            migrated["aq-strength"] = v
-        elif key == "initqp":
-            migrated["init_qpI"] = v
-            migrated["init_qpP"] = v
-            migrated["init_qpB"] = v
-        elif key == "tuning_info":
-            migrated["tune"] = _OLD_TUNING_INFO_VALUES.get(str(v), str(v))
-        elif key == "preset" and isinstance(v, str) and re.fullmatch(r"P[1-7]", v):
-            migrated["preset"] = v.lower()
-        elif key == "vbvinit":
-            continue  # no hevc_nvenc equivalent
-        elif key in _OLD_ENCODER_ARG_RENAMES:
-            migrated[_OLD_ENCODER_ARG_RENAMES[key]] = v
-        else:
-            migrated[key] = v
-    return ",".join(f"{k}={v}" for k, v in migrated.items())
-
-
 _LEGACY_CODEC_SPELLINGS = {
     "hevc": "hevc",
     "h265": "hevc",
@@ -246,11 +196,10 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
     if custom_args:
         from jasna.media.encoder_settings import parse_encoder_settings
 
-        migrated_args = _migrate_encoder_custom_args(custom_args)
         try:
-            parsed_args = parse_encoder_settings(migrated_args)
+            parsed_args = parse_encoder_settings(custom_args)
         except (ValueError, json.JSONDecodeError):
-            migrated["encoder_custom_args"] = migrated_args
+            logger.warning("Preset has unreadable custom encoder settings %r; keeping them as they are", custom_args)
         else:
             cq_key = next(
                 (
