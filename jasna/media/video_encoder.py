@@ -880,7 +880,7 @@ class VideoEncoder:
 
     @staticmethod
     def _copy_source_packets(in_packet, out_stream, bitstream_filter):
-        if in_packet is not None and in_packet.size == 0:
+        if in_packet.size == 0:
             return []
         if bitstream_filter is None:
             packets = [in_packet]
@@ -916,10 +916,6 @@ class VideoEncoder:
     def _drain_source_streams(self):
         self._pump_source_streams(None)
         for kind, out_stream, processor in self._source_pipes.values():
-            if kind == "copy":
-                if processor is not None:
-                    self.dst.mux(self._copy_source_packets(None, out_stream, processor))
-                continue
             if kind != "transcode":
                 continue
             packets = []

@@ -639,6 +639,8 @@ def mux_final_output(
                 args += [f"-c:a:{output_index}", "aac", f"-b:a:{output_index}", "256k"]
             else:
                 args += [f"-c:a:{output_index}", "copy"]
+                if name == "aac" and destination.suffix.lower() in MOV_SUFFIXES:
+                    args += [f"-bsf:a:{output_index}", "aac_adtstoasc"]
         subtitle_streams = [
             stream for stream in copied_streams if stream.type == "subtitle"
         ]

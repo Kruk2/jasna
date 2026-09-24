@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import queue
-import subprocess
 import threading
 from contextlib import nullcontext
 from collections import deque
@@ -31,7 +30,8 @@ from jasna.media.video_encoder import (
     _normalized_audio_layout,
     VideoEncoder,
 )
-from jasna.os_utils import resolve_executable
+
+from factories import write_double_adts_aac_source
 
 
 def _fake_metadata(**overrides) -> VideoMetadata:
@@ -1058,52 +1058,24 @@ def _packet(stream_index, dts, time_base=Fraction(1, 1000), duration=0):
 
 
 class TestSourceStreamPump:
-    def test_adts_aac_is_filtered_for_mp4_copy(self, tmp_path):
-        source = tmp_path / "source.aac"
-        template = tmp_path / "template.mp4"
-        subprocess.run(
-            [
-                resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
-                "-f", "lavfi", "-i", "sine=frequency=440:duration=0.1",
-                "-c:a", "aac", str(source),
-            ],
-            check=True,
-        )
-        subprocess.run(
-            [
-                resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
-                "-i", str(source), "-c", "copy", str(template),
-            ],
-            check=True,
-        )
-
+    def test_double_adts_aac_is_filtered_for_mp4_copy(self, tmp_path):
+        source = write_double_adts_aac_source(tmp_path)
         destination = tmp_path / "result.mp4"
-        with (
-            av.open(str(source)) as adts,
-            av.open(str(template)) as mp4,
-            av.open(str(destination), "w") as output,
-        ):
-            encoder = object.__new__(VideoEncoder)
-            encoder.output_path = destination
-            encoder.smart_fragment = False
-            encoder._source_chapters = ()
-            encoder._src = mp4
-            encoder.dst = output
-            encoder._setup_source_streams(SimpleNamespace(index=-1))
-
-            packet = next(
-                packet for packet in adts.demux(adts.streams.audio[0]) if packet.size
+        with av.open(str(source)) as src, av.open(str(destination), "w") as dst:
+            in_stream = src.streams.audio[0]
+            out_stream = dst.add_stream_from_template(in_stream, opaque=True)
+            bitstream_filter = VideoEncoder._aac_copy_filter(
+                in_stream, out_stream, {"mp4"}
             )
-            assert bytes(packet).startswith(b"\xff\xf1")
-            packet.stream = mp4.streams.audio[0]
-            adts_bytes = bytes(packet)
-            filtered = encoder._produce_source_packets(packet)
-            assert len(filtered) == 1
-            assert bytes(filtered[0]) == adts_bytes[7:]
-            output.mux(filtered)
+            for packet in src.demux(in_stream):
+                dst.mux(
+                    VideoEncoder._copy_source_packets(
+                        packet, out_stream, bitstream_filter
+                    )
+                )
 
         with av.open(str(destination)) as result:
-            assert sum(1 for _ in result.decode(audio=0)) == 1
+            assert sum(1 for _ in result.decode(audio=0)) > 1
 
     def _source_encoder(self, tmp_path, packets):
         enc = _make_encoder(tmp_path)

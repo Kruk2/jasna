@@ -1,13 +1,16 @@
-"""Builders shared by tests that need a SessionConfig or a Pipeline."""
+"""Builders shared by tests that need a SessionConfig, a Pipeline, or test media."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import av
 import torch
 
 from jasna.pipeline import Pipeline
+from jasna.os_utils import resolve_executable
 from jasna.session_config import SessionConfig
 
 
@@ -95,3 +98,48 @@ def make_pipeline(
         segments=segments,
         splice_plan=splice_plan,
     )
+
+
+def _adts_header(frame_length: int) -> bytes:
+    return bytes([
+        0xFF, 0xF1,
+        0x50,
+        0x40 | (frame_length >> 11),
+        (frame_length >> 3) & 0xFF,
+        ((frame_length & 7) << 5) | 0x1F,
+        0xFC,
+    ])
+
+
+def write_double_adts_aac_source(tmp_path: Path) -> Path:
+    """H.264 + AAC (LC, 44.1 kHz, mono) NUT file whose audio packets each carry two ADTS headers."""
+    plain = tmp_path / "plain_aac.mp4"
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12:duration=1",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-ar", "44100", "-ac", "1",
+            "-c:v", "libx264", "-c:a", "aac", str(plain),
+        ],
+        check=True,
+    )
+    source = tmp_path / "double_adts.nut"
+    with av.open(str(plain)) as src, av.open(str(source), "w") as dst:
+        video_out = dst.add_stream_from_template(src.streams.video[0])
+        audio_out = dst.add_stream_from_template(src.streams.audio[0])
+        for packet in src.demux():
+            if not packet.size:
+                continue
+            if packet.stream.type == "audio":
+                payload = bytes(packet)
+                doubled = av.Packet(_adts_header(len(payload) + 14) * 2 + payload)
+                doubled.pts, doubled.dts = packet.pts, packet.dts
+                doubled.time_base, doubled.duration = packet.time_base, packet.duration
+                doubled.is_keyframe = True
+                doubled.stream = audio_out
+                dst.mux(doubled)
+            else:
+                packet.stream = video_out
+                dst.mux(packet)
+    return source
