@@ -135,9 +135,11 @@ class TestHlsStreamingServer:
         assert server.consume_seek_for_pass(5) is None
         assert not server.seek_requested.is_set()
 
-    def test_evicted_pass_start_is_not_ignored(self):
+    def test_evicted_pass_start_is_not_ignored(self, tmp_path):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.segments_dir = tmp_path
         server.reset_demand(0)
+        (tmp_path / "seg_00000.ts").write_bytes(b"data")
         server.update_production(18)
         server.notify_segment_requested(18)
         server.request_seek(0)
@@ -318,8 +320,19 @@ class TestDemandFlowControl:
         server.segments_dir = tmp_path
         server.reset_demand()
         server.update_production(18)
+        (tmp_path / "seg_00008.ts").write_bytes(b"data")
         server.notify_segment_requested(18)
         assert server.needs_seek(8)
+
+    def test_late_request_does_not_restart_segments_not_yet_written(self, tmp_path):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.segments_dir = tmp_path
+        server.reset_demand(10)
+        server.update_production(11)
+        (tmp_path / "seg_00010.ts").write_bytes(b"data")
+        server.notify_segment_requested(20)
+        assert server.needs_seek(10)
+        assert not server.needs_seek(12)
 
     def test_evicts_old_segments(self, tmp_path):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
@@ -1062,12 +1075,31 @@ class TestHttpSegments:
         finally:
             server.stop()
 
+    def test_segment_without_epoch_never_restarts_open_seek(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(_make_metadata(duration=200.0))
+        server.request_seek(10, new_playback=True)
+        server.consume_seek()
+        server.reset_demand(10)
+        server.update_production(10)
+        (server.segments_dir / "seg_00010.ts").write_bytes(b"complete")
+        (server.segments_dir / "_hls_internal.m3u8").write_text("#EXTINF:4.000,\nseg_00010.ts\n")
+        try:
+            assert _get(port, "/seg_00002.ts")[0] == 404
+            assert _get(port, "/seg_00040.ts")[0] == 404
+            assert not server.seek_requested.is_set()
+            assert _get(port, "/seg_00010.ts")[0:2] == (200, "complete")
+        finally:
+            server.stop()
+
     def test_evicted_segment_restarts_and_serves(self):
         server = HlsStreamingServer(segment_duration=4.0)
         port = _start_server_on_free_port(server)
         server.load_video(_make_metadata(duration=120.0))
         server.reset_demand()
         server.update_production(18)
+        (server.segments_dir / "seg_00008.ts").write_bytes(b"old")
         server.notify_segment_requested(18)
         result = []
         thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00008.ts?epoch=0")))
