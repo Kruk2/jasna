@@ -7,10 +7,7 @@ where the original calls succeed (the wrappers only swallow the missing-source e
 """
 from __future__ import annotations
 
-import logging
 import sys
-
-logger = logging.getLogger(__name__)
 
 _patched = False
 
@@ -42,16 +39,6 @@ def patch_frozen_torch() -> None:
 
     torch.jit.interface = interface
 
-    from torch.utils import _config_module
-    _assignments = _config_module.get_assignments_with_compile_ignored_comments
-
-    def get_assignments_with_compile_ignored_comments(module):
-        if is_frozen():
-            return set()
-        try:
-            return _assignments(module)
-        except Exception:
-            logger.debug("Compile-ignored-comment scan failed (no source); returning empty", exc_info=True)
-            return set()
-
-    _config_module.get_assignments_with_compile_ignored_comments = get_assignments_with_compile_ignored_comments
+    if is_frozen():
+        from torch.utils import _config_module
+        _config_module.get_assignments_with_compile_ignored_comments = lambda module: set()
