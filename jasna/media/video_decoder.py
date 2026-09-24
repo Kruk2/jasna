@@ -15,6 +15,7 @@ from jasna.accelerator import (
     stream_context,
     vendor_for_device,
 )
+from jasna.media.container_utils import demux_video
 from jasna.media.probe import VideoMetadata, resolve_video_start_pts
 from jasna.media.cuda_kernel import create_stream, destroy_stream
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
@@ -460,7 +461,7 @@ class VideoReader:
                 self._decoder_ctx.flush_buffers()
 
         consecutive_errors = 0
-        for packet in self.container.demux(self.video_stream):
+        for packet in demux_video(self.container, self.video_stream):
             frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
             for frame in frames:
                 if target_pts is not None and frame.pts is not None and frame.pts < target_pts:

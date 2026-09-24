@@ -11,8 +11,13 @@ import av
 from PIL import Image
 
 from jasna.gui.queues import replace_pending
+from jasna.media.container_utils import demux_video
 from jasna.media.probe import VideoMetadata, get_video_meta_data, resolve_video_start_pts
 from jasna.media.splice import KeyframeIndex, probe_keyframes
+
+
+def _decode_video(container, stream) -> Iterator[av.VideoFrame]:
+    return (frame for packet in demux_video(container, stream) for frame in packet.decode())
 
 
 @dataclass(frozen=True)
@@ -226,7 +231,7 @@ class SegmentPreviewWorker:
     def _seek(self, container, stream, seconds: float, start_pts: int):
         target_pts = start_pts + round(float(seconds) / stream.time_base)
         container.seek(target_pts, stream=stream, backward=True)
-        decoded = container.decode(stream)
+        decoded = _decode_video(container, stream)
         closest = None
         for frame in decoded:
             closest = frame
@@ -242,7 +247,7 @@ class SegmentPreviewWorker:
             stream=stream,
             backward=True,
         )
-        decoded = container.decode(stream)
+        decoded = _decode_video(container, stream)
         previous = None
         for frame in decoded:
             if frame.pts is None or frame.pts >= target_pts:
