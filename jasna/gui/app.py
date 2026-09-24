@@ -810,15 +810,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 class GUILogHandler(logging.Handler):
     """Custom logging handler that forwards logs to the GUI log panel."""
     
-    def __init__(self, log_panel: LogPanel):
+    def __init__(self, main_thread: MainThreadCalls, log_panel: LogPanel):
         super().__init__()
+        self._main_thread = main_thread
         self._log_panel = log_panel
-        
+
     def emit(self, record):
         try:
             msg = self.format(record)
-            # Use after_idle to thread-safely update GUI
-            self._log_panel.after_idle(self._log_panel.add_log, record.levelname, msg)
+            self._main_thread.post(lambda: self._log_panel.add_log(record.levelname, msg))
         except Exception:
             self.handleError(record)
 
@@ -856,7 +856,7 @@ def run_gui():
         return
     
     # Replace console handler with GUI handler for all jasna loggers
-    gui_handler = GUILogHandler(app._log_panel)
+    gui_handler = GUILogHandler(app._main_thread, app._log_panel)
     gui_handler.setFormatter(logging.Formatter('%(message)s'))
     
     # Set up root logger to capture all logs

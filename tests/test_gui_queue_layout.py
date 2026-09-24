@@ -131,8 +131,8 @@ def test_large_queue_renders_one_page_and_restores_job_state() -> None:
             panel.add_job(Path(f"/tmp/video-{index}.mp4"))
         root.update()
 
-        assert sum(widget is not None for widget in panel._job_widgets) == 40
-        assert panel._page_label.cget("text") == "1 / 5"
+        assert sum(widget is not None for widget in panel._job_widgets) == 20
+        assert panel._page_label.cget("text") == "1 / 10"
 
         def widget_count(widget):
             return 1 + sum(widget_count(child) for child in widget.winfo_children())
@@ -143,7 +143,7 @@ def test_large_queue_renders_one_page_and_restores_job_state() -> None:
         completed_job = panel._jobs[171]
         panel.update_job_status(completed_job.id, JobStatus.COMPLETED, 1.0, elapsed_seconds=65)
         panel.set_running(True, processing_job_id=processing_job.id)
-        panel._change_page(4)
+        panel._change_page(8)
         root.update()
 
         assert not panel._job_widgets[170]._removable
@@ -155,8 +155,134 @@ def test_large_queue_renders_one_page_and_restores_job_state() -> None:
         panel.set_running(False)
         panel._requeue_job(completed_job)
         assert panel._jobs[-1] is completed_job
+        panel._change_page(1)
         assert panel._job_widgets[-1] is not None
         assert panel._job_widgets[-1]._status_label.cget("text") == queue_panel_module.t("job_pending")
+    finally:
+        root.destroy()
+
+
+def _paged_panel(root, job_count: int) -> QueuePanel:
+    panel = QueuePanel(root)
+    panel.pack(fill="both", expand=True)
+    for index in range(job_count):
+        panel.add_job(Path(f"/tmp/video-{index}.mp4"))
+    return panel
+
+
+def _shown_jobs(panel: QueuePanel) -> list[JobItem]:
+    shown = [job for job, widget in zip(panel._jobs, panel._job_widgets) if widget is not None]
+    packed = [panel._job_widgets.index(widget) for widget in panel._list_frame.pack_slaves() if widget in panel._job_widgets]
+    assert [panel._jobs[index] for index in packed] == shown
+    return shown
+
+
+def test_removing_a_row_keeps_other_rows_and_pulls_up_the_next_one() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = _paged_panel(root, 50)
+        panel._change_page(1)
+        kept_rows = {id(panel._jobs[index]): panel._job_widgets[index] for index in range(20, 40) if index != 23}
+
+        panel._remove_job(panel._jobs[23])
+
+        assert _shown_jobs(panel) == panel._jobs[20:40]
+        for job, widget in zip(panel._jobs[20:39], panel._job_widgets[20:39]):
+            assert widget is kept_rows[id(job)]
+        assert panel._page_label.cget("text") == "2 / 3"
+    finally:
+        root.destroy()
+
+
+def test_requeue_keeps_other_rows_and_moves_the_job_to_the_last_page() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = _paged_panel(root, 50)
+        job = panel._jobs[2]
+        panel.update_job_status(job.id, JobStatus.COMPLETED)
+        kept_rows = {id(panel._jobs[index]): panel._job_widgets[index] for index in range(20) if index != 2}
+
+        panel._requeue_job(job)
+
+        assert panel._jobs[-1] is job
+        assert _shown_jobs(panel) == panel._jobs[:20]
+        for shown_job, widget in zip(panel._jobs[:19], panel._job_widgets[:19]):
+            assert widget is kept_rows[id(shown_job)]
+        panel._change_page(2)
+        assert _shown_jobs(panel) == panel._jobs[40:]
+        assert panel._job_widgets[-1]._status_label.cget("text") == queue_panel_module.t("job_pending")
+    finally:
+        root.destroy()
+
+
+def test_removing_the_only_row_of_the_last_page_shows_the_previous_page() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = _paged_panel(root, 21)
+        panel._change_page(1)
+
+        panel._remove_job(panel._jobs[20])
+
+        assert panel._page == 0
+        assert _shown_jobs(panel) == panel._jobs
+        assert panel._page_label.cget("text") == "1 / 1"
+    finally:
+        root.destroy()
+
+
+def test_clear_completed_on_the_last_page_shows_the_new_last_page() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = _paged_panel(root, 45)
+        panel._change_page(2)
+        for job in panel._jobs[40:]:
+            panel.update_job_status(job.id, JobStatus.COMPLETED)
+
+        panel._on_clear_completed()
+
+        assert panel._page == 1
+        assert _shown_jobs(panel) == panel._jobs[20:40]
+        assert panel._page_label.cget("text") == "2 / 2"
+    finally:
+        root.destroy()
+
+
+def test_dragging_on_a_later_page_reorders_within_that_page() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = _paged_panel(root, 50)
+        panel._change_page(1)
+        root.update()
+        dragged_job = panel._jobs[20]
+        dragged = panel._job_widgets[20]
+        target = panel._job_widgets[22]
+        event = SimpleNamespace(y_root=target.winfo_rooty() + target.winfo_height() // 2 + 1)
+
+        panel._on_widget_drag_move(dragged, event)
+
+        assert panel._jobs[22] is dragged_job
+        assert panel._job_widgets[22] is dragged
+        assert _shown_jobs(panel) == panel._jobs[20:40]
     finally:
         root.destroy()
 
