@@ -13,7 +13,7 @@ from tkinter import messagebox
 from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings, JobItem
-from jasna.gui.components import Tooltip
+from jasna.gui.components import Tooltip, grab_modal
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.restoration_preview import (
     RestorationClip,
@@ -121,9 +121,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._size_and_center()
         self._build_loading()
         self._bind_shortcuts()
-        self.bind("<FocusIn>", self._restore_if_unmapped, add="+")
         self.update_idletasks()
-        self.wait_visibility()
         self._take_focus()
 
         self._preview_worker = SegmentPreviewWorker(
@@ -151,15 +149,9 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._closed.is_set():
             return
         try:
-            self.grab_set()
-            self.lift()
-            self.focus_force()
+            grab_modal(self)
         except tk.TclError:
             logger.debug("Segment editor could not grab focus yet", exc_info=True)
-
-    def _restore_if_unmapped(self, _event) -> None:
-        if not self.winfo_ismapped():
-            self.deiconify()
 
     def _build_loading(self) -> None:
         self._loading = ctk.CTkFrame(self, fg_color="transparent")

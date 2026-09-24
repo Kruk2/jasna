@@ -13,12 +13,29 @@ BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
 
+_MODAL_BINDTAG = "JasnaModal"
+
+
 def grab_modal(dialog) -> None:
-    """Make a toplevel modal and focused; X11 refuses a grab until the window is viewable."""
-    dialog.wait_visibility()
+    """Make a toplevel modal and focused; X11 refuses a grab until the window is viewable.
+
+    A modal hidden by Win+D would otherwise keep its grab invisibly, so it reappears on focus.
+    """
+    if not dialog.winfo_viewable():
+        dialog.wait_visibility()
     dialog.grab_set()
     dialog.lift()
     dialog.focus_force()
+    bindtags = dialog.bindtags()
+    if _MODAL_BINDTAG not in bindtags:
+        dialog.bindtags((_MODAL_BINDTAG, *bindtags))
+    if not dialog.bind_class(_MODAL_BINDTAG, "<FocusIn>"):
+        dialog.bind_class(_MODAL_BINDTAG, "<FocusIn>", _restore_hidden_modal)
+
+
+def _restore_hidden_modal(event) -> None:
+    if not event.widget.winfo_ismapped():
+        event.widget.deiconify()
 
 
 def format_duration(seconds: float) -> str:

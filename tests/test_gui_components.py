@@ -235,11 +235,27 @@ def test_header_keeps_about_button_visible_at_default_width(monkeypatch) -> None
 
 
 def test_grab_modal_waits_for_visibility_before_grabbing() -> None:
-    from unittest.mock import MagicMock
-
     from jasna.gui.components import grab_modal
 
     dialog = MagicMock()
+    dialog.winfo_viewable.return_value = False
     grab_modal(dialog)
 
-    assert [call[0] for call in dialog.method_calls] == ["wait_visibility", "grab_set", "lift", "focus_force"]
+    grabbing = [call[0] for call in dialog.method_calls if call[0] in ("wait_visibility", "grab_set", "lift", "focus_force")]
+    assert grabbing == ["wait_visibility", "grab_set", "lift", "focus_force"]
+
+
+def test_grab_modal_restores_minimized_dialog_on_focus(tk_root) -> None:
+    from jasna.gui.components import grab_modal
+
+    dialog = ctk.CTkToplevel(tk_root)
+    dialog.transient(tk_root)
+    grab_modal(dialog)
+    focus_bindings = dialog.bind("<FocusIn>")
+    grab_modal(dialog)
+    assert dialog.bind("<FocusIn>") == focus_bindings
+
+    dialog.withdraw()
+    dialog.event_generate("<FocusIn>")
+    tk_root.update()
+    assert dialog.winfo_ismapped()
