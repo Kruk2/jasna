@@ -179,7 +179,7 @@ class TestHlsStreamingServer:
         t = threading.Thread(target=_waiter)
         t.start()
         time.sleep(0.1)
-        server.select_video(Path("test.mp4"))
+        server.select_video(Path("test.mp4"), 0.0)
         t.join(timeout=2.0)
         assert result[0] == Path("test.mp4")
         assert not server.video_change.is_set()
@@ -188,7 +188,7 @@ class TestHlsStreamingServer:
         meta = _make_metadata(duration=20.0)
         server = HlsStreamingServer(segment_duration=4.0, port=0)
         server.load_video(meta)
-        server.select_video(Path("other.mp4"))
+        server.select_video(Path("other.mp4"), 0.0)
         assert server.video_change.is_set()
         assert not server.is_loaded
         server._cleanup_segments()
@@ -913,6 +913,15 @@ def _get(port: int, path: str) -> tuple[int, dict | str, dict]:
         return e.code, e.read().decode(), headers
 
 
+def _request(port: int, path: str, method: str) -> tuple[int, dict | str, dict]:
+    req = urllib.request.Request(f"http://localhost:{port}{path}", method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status, json.loads(resp.read().decode()), {k.lower(): v for k, v in resp.getheaders()}
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode(), {k.lower(): v for k, v in e.headers.items()}
+
+
 def _post(port: int, path: str, body: dict | None = None, timeout: float = 35.0) -> tuple[int, dict | str, dict]:
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(
@@ -1131,29 +1140,27 @@ class TestHttpStatusEndpoint:
 
 
 class TestHttpStopEndpoint:
-    def test_post_stop(self):
+    def test_delete_open_stops_the_stream(self):
         meta = _make_metadata(duration=20.0)
         server = HlsStreamingServer(segment_duration=4.0)
         port = _start_server_on_free_port(server)
         server.load_video(meta)
         try:
             assert server.is_loaded
-            status, body, _ = _post(port, "/stop")
+            status, body, _ = _request(port, "/open", "DELETE")
             assert status == 200
-            assert body["ok"] is True
+            assert body == {"status": "stopped"}
             assert not server.is_loaded
         finally:
             server.stop()
 
-    def test_api_stop_alias(self):
-        meta = _make_metadata(duration=20.0)
+    @pytest.mark.parametrize("path", ["/stop", "/api/stop", "/api/load"])
+    def test_legacy_aliases_are_gone(self, path):
         server = HlsStreamingServer(segment_duration=4.0)
         port = _start_server_on_free_port(server)
-        server.load_video(meta)
         try:
-            status, body, _ = _post(port, "/api/stop")
-            assert status == 200
-            assert body["ok"] is True
+            status, _, _ = _post(port, path)
+            assert status == 404
         finally:
             server.stop()
 
@@ -1294,20 +1301,6 @@ class TestHttpOpenEndpoint:
         finally:
             server.stop()
 
-    def test_api_load_alias_returns_immediately(self, tmp_path):
-        video_file = tmp_path / "test.mp4"
-        video_file.write_bytes(b"fake")
-
-        server = HlsStreamingServer(segment_duration=4.0)
-        port = _start_server_on_free_port(server)
-        try:
-            status, body, _ = _post(port, "/api/load", {"path": str(video_file)})
-            assert status == 200
-            assert body["ok"] is True
-            assert "filename" in body
-        finally:
-            server.stop()
-
 
 class TestWaitUntilFirstSegment:
     def test_returns_true_when_set(self):
@@ -1331,14 +1324,14 @@ class TestWaitUntilFirstSegment:
     def test_select_video_clears_first_segment_ready(self):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
         server._first_segment_ready.set()
-        server.select_video(Path("new.mp4"))
+        server.select_video(Path("new.mp4"), 0.0)
         assert not server._first_segment_ready.is_set()
 
 
 class TestCurrentVideoPath:
     def test_select_video_sets_current_path(self):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
-        server.select_video(Path("/a/b.mp4"))
+        server.select_video(Path("/a/b.mp4"), 0.0)
         assert server._current_video_path == Path("/a/b.mp4")
 
     def test_initial_current_path_is_none(self):
