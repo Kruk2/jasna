@@ -31,7 +31,7 @@ from jasna.media.media_files import (
 logger = logging.getLogger(__name__)
 from jasna.segments import SegmentRange
 
-_PAGE_SIZE = 40
+_PAGE_SIZE = 20
 
 
 class QueuePanel(ctk.CTkFrame):
@@ -461,14 +461,15 @@ class QueuePanel(ctk.CTkFrame):
         index = self._find_job_index_by_id(job.id)
         if index is None:
             return
-        self._jobs.pop(index)
-        self._jobs.append(job)
+        self._jobs.append(self._jobs.pop(index))
+        self._job_widgets.pop(index).destroy()
+        self._job_widgets.append(None)
         job.error_message = ""
         job.output_path = None
         job.status = JobStatus.PENDING
         job.progress = 0.0
         job.elapsed_seconds = None
-        self._render_page()
+        self._show_last_page_row()
         self._refresh_conflicts()
         if self._on_jobs_changed:
             self._on_jobs_changed()
@@ -544,14 +545,24 @@ class QueuePanel(ctk.CTkFrame):
             
     def _remove_job(self, job: JobItem):
         if job in self._jobs:
-            self._jobs.remove(job)
-            self._render_page()
+            index = self._jobs.index(job)
+            self._jobs.pop(index)
+            self._job_widgets.pop(index).destroy()
+            if self._page and self._page * _PAGE_SIZE >= len(self._jobs):
+                self._page -= 1
+                self._render_page()
+            else:
+                self._show_last_page_row()
             self._update_empty_state()
             self._update_count()
             if self._on_jobs_changed:
                 self._on_jobs_changed()
-        
-                
+
+    def _show_last_page_row(self) -> None:
+        last_index = min(len(self._jobs), (self._page + 1) * _PAGE_SIZE) - 1
+        if last_index >= 0 and self._job_widgets[last_index] is None:
+            self._create_job_widget(last_index)
+
     def get_jobs(self) -> list[JobItem]:
         # Return a shallow copy for callers that should not modify the queue
         return self._jobs.copy()
