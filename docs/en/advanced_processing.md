@@ -93,7 +93,7 @@ in the preview.
 ## Encoder quality and custom settings
 
 Use the GUI's **CQ** control or `--cq` for encoder quality. The displayed or
-entered number is passed to the encoder unchanged; lower means better quality
+entered number is passed to the encoder unchanged (AMD AV1 multiplies it by 5); lower means better quality
 and a bigger file. When Jasna limits output size, nearby CQ values can give
 the same result when that limit is reached:
 

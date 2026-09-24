@@ -93,7 +93,8 @@ after a driver update or when something misbehaves.
 - **Language**: the first start follows your system language. Switch it any
   time from the header dropdown (restart for the full effect).
 - **Logs**: the Logs button in the bottom bar shows live logs with level
-  filters and an export button — attach an export when reporting a problem.
+  filters and an export button (the newest 5000 entries) — attach an export when
+  reporting a problem.
 - **System stats**: GPU, VRAM, RAM, and CPU usage are shown in the bottom
   bar while processing.
 - **License**: enter your supporter key from the header; the chip shows
