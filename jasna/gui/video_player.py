@@ -15,6 +15,7 @@ from PIL import Image, ImageTk
 from tkinter import filedialog, messagebox
 
 from jasna.gui import scaling
+from jasna.gui.components import grab_modal
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
 from jasna.gui.queues import MainThreadCalls
@@ -282,9 +283,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self.update_idletasks()
         self._show_centered(master)
         self._native_renderer = _create_native_video_renderer(self._video_surface)
-        self.grab_set()
-        self.lift()
-        self.focus_force()
+        grab_modal(self)
         self.bind("<F11>", self._toggle_fullscreen)
         self.bind("<Escape>", self._exit_fullscreen)
         self.bind("<Left>", lambda event: self._seek_relative(-_SEEK_STEP_SECONDS, event))
