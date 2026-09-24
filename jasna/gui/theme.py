@@ -2,12 +2,22 @@
 
 import sys
 
+import customtkinter as ctk
 
-def _font_families_for_platform(platform: str, language: str) -> tuple[str, str]:
+
+_WINDOWS_UI_FAMILY_BY_LANGUAGE = {
+    "zh": "Microsoft YaHei UI",
+    "ja": "Yu Gothic UI",
+    "ko": "Malgun Gothic",
+    "th": "Leelawadee UI",
+}
+
+
+def font_families_for_platform(platform: str, language: str) -> tuple[str, str]:
     if platform.startswith("linux"):
         return "sans-serif", "monospace"
-    if platform == "win32" and language == "zh":
-        return "Microsoft YaHei UI", "Consolas"
+    if platform == "win32":
+        return _WINDOWS_UI_FAMILY_BY_LANGUAGE.get(language, "Segoe UI"), "Consolas"
     return "Segoe UI", "Consolas"
 
 
@@ -60,7 +70,7 @@ class Colors:
 
 
 class Fonts:
-    FAMILY, FAMILY_MONO = _font_families_for_platform(sys.platform, "en")
+    FAMILY, FAMILY_MONO = font_families_for_platform(sys.platform, "en")
     
     # Typography hierarchy per spec (+1px from original)
     SIZE_TITLE = 16      # App title "JASNA GUI" - bold
@@ -70,6 +80,11 @@ class Fonts:
     SIZE_HEADING = 14    # Section headings - bold (small caps style)
     SIZE_SMALL = 13      # Secondary text, logs (mono)
     SIZE_TINY = 12       # Small caps labels "QUEUE", "SYSTEM OUTPUT" - bold
+
+
+def apply_ui_fonts(platform: str, language: str) -> None:
+    Fonts.FAMILY, Fonts.FAMILY_MONO = font_families_for_platform(platform, language)
+    ctk.ThemeManager.theme["CTkFont"]["family"] = Fonts.FAMILY
 
 
 class Sizing:

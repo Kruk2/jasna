@@ -19,7 +19,7 @@ from jasna.gui.branding import (
     install_window_icon,
 )
 from jasna.gui import scaling
-from jasna.gui.theme import Colors, Fonts, Sizing, _font_families_for_platform
+from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
@@ -64,9 +64,6 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def __init__(self, skip_wizard: bool = False):
         super().__init__()
         self._main_thread = MainThreadCalls(self, 50)
-        Fonts.FAMILY, Fonts.FAMILY_MONO = _font_families_for_platform(
-            sys.platform, get_locale().current_language
-        )
         font_status = inspect_font_backend(self)
         font_problem = font_backend_problem(font_status)
         if font_problem is not None:
@@ -94,6 +91,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         # Set appearance
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
+        apply_ui_fonts(sys.platform, get_locale().current_language)
         
         self._logs_visible = False
         self._processor: Processor | None = None
