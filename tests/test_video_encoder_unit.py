@@ -1,6 +1,7 @@
 """Unit tests for VideoEncoder internals (options, color guard, buffer, worker, audio pump)."""
 from __future__ import annotations
 
+import logging
 import queue
 import subprocess
 import threading
@@ -1111,6 +1112,7 @@ class TestSourceStreamPump:
         enc._source_backlog = deque()
         enc._source_iter = iter(packets)
         enc._last_source_dts = {}
+        enc._warned_source_dts = set()
         enc.dst = MagicMock()
         return enc, out_a
 
@@ -1150,9 +1152,20 @@ class TestSourceStreamPump:
         assert [p.dts for p in muxed] == [0, 370390, 370391]
         assert muxed[-1].pts == 370391
 
+    def test_nudge_warns_once_per_stream(self, tmp_path, caplog):
+        packets = [_packet(1, dts=100), _packet(1, dts=0), _packet(1, dts=0), _packet(1, dts=0)]
+        enc, _ = self._source_encoder(tmp_path, packets)
+
+        with caplog.at_level(logging.DEBUG, logger="jasna.media.video_encoder"):
+            enc._pump_source_streams(None)
+
+        nudges = [r for r in caplog.records if "nudging forward" in r.getMessage()]
+        assert [r.levelno for r in nudges] == [logging.WARNING, logging.DEBUG, logging.DEBUG]
+
     def test_copy_nudges_dts_in_output_time_base(self, tmp_path):
         enc = _make_encoder(tmp_path)
         enc._last_source_dts = {}
+        enc._warned_source_dts = set()
         packets = []
         with av.open(str(tmp_path / "audio.mkv"), "w") as enc.dst:
             stream = enc.dst.add_stream("aac", rate=44_100)
