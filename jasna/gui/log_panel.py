@@ -1,5 +1,6 @@
 """Log panel - collapsible bottom section for processing logs."""
 
+from collections import deque
 from collections.abc import Callable
 import customtkinter as ctk
 from datetime import datetime
@@ -9,6 +10,8 @@ from jasna.gui.locales import t
 from jasna.gui.log_export import export_log_entries_txt
 from jasna.gui.log_filter import should_include_log_entry
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
+
+_MAX_LOG_ENTRIES = 5000
 
 
 class LogPanel(ctk.CTkFrame):
@@ -24,7 +27,7 @@ class LogPanel(ctk.CTkFrame):
         )
         self.pack_propagate(False)
         
-        self._entries: list[tuple[str, str, str]] = []  # (timestamp, level, message)
+        self._entries: deque[tuple[str, str, str]] = deque(maxlen=_MAX_LOG_ENTRIES)  # (timestamp, level, message)
         self._filter_level = "all"
         self._filter_changed_callback: Callable[[str], None] | None = None
         
@@ -151,13 +154,18 @@ class LogPanel(ctk.CTkFrame):
     def add_log(self, level: str, message: str):
         timestamp = datetime.now().strftime("%I:%M:%S %p")
         level = level.upper()
+        self._log_text.configure(state="normal")
+        if len(self._entries) == self._entries.maxlen:
+            _, oldest_level, oldest_message = self._entries[0]
+            if should_include_log_entry(level=oldest_level, filter_level=self._filter_level):
+                oldest_line_count = oldest_message.count("\n") + 1
+                self._log_text._textbox.delete("1.0", f"{oldest_line_count + 1}.0")
         self._entries.append((timestamp, level, message))
 
         if should_include_log_entry(level=level, filter_level=self._filter_level):
-            self._log_text.configure(state="normal")
             self._insert_entry(timestamp, level, message)
-            self._log_text.configure(state="disabled")
             self._log_text.see("end")
+        self._log_text.configure(state="disabled")
             
     def info(self, message: str):
         self.add_log("INFO", message)
