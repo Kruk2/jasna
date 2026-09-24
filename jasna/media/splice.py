@@ -590,12 +590,7 @@ def mux_final_output(
                 if stream.codec_context is not None
                 else None
             )
-            same_container_family = output_format in source_formats
-            if codec_name in supported_codecs or (
-                stream.type == "data"
-                and codec_name is not None
-                and same_container_family
-            ):
+            if codec_name in supported_codecs:
                 copied_streams.append(stream)
                 continue
             transcode_codec = subtitle_transcode_codec(
