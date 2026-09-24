@@ -631,6 +631,7 @@ class VideoEncoder:
         self._source_backlog: deque = deque()
         self._source_iter = None
         self._last_source_dts: dict[int, tuple[int, Fraction]] = {}
+        self._warned_source_dts: set[int] = set()
         if self.smart_fragment:
             return
 
@@ -926,7 +927,10 @@ class VideoEncoder:
                 time_base = Fraction(packet.time_base or packet.stream.time_base)
                 minimum_time = (last[0] + 1) * last[1]
                 if packet.dts * time_base < minimum_time:
-                    logger.warning(
+                    first_nudge = packet.stream.index not in self._warned_source_dts
+                    self._warned_source_dts.add(packet.stream.index)
+                    logger.log(
+                        logging.WARNING if first_nudge else logging.DEBUG,
                         "Source DTS %s at %s overlaps last muxed DTS %s at %s in output stream %s; nudging forward",
                         packet.dts,
                         time_base,
