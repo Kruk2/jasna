@@ -154,35 +154,34 @@ def test_amf_hevc_cqp_skips_source_bitrate_cap(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("settings", "expected_qp"),
-    [({}, "32"), ({"cq": 21}, "21"), ({"qvbr_quality_level": 21}, "21")],
+    ("settings", "smart_fragment", "frame_format", "expected_qindex"),
+    [
+        ({}, False, "p010le", "160"),
+        ({"cq": 21}, False, "p010le", "105"),
+        ({"qvbr_quality_level": 51}, False, "p010le", "255"),
+        ({"cq": 1}, True, "nv12", "5"),
+    ],
 )
-def test_amf_av1_p010_uses_constant_qp(monkeypatch, tmp_path, settings, expected_qp) -> None:
-    import jasna.media.video_encoder as module
+def test_amf_av1_maps_cq_to_constant_qindex(
+    settings, smart_fragment, frame_format, expected_qindex
+) -> None:
+    from jasna.media.video_encoder import resolve_encoder_options
 
-    monkeypatch.setattr(
-        module,
-        "vendor_for_device",
-        lambda _device: AcceleratorVendor.AMD,
+    spec, options = resolve_encoder_options(
+        AcceleratorVendor.AMD,
+        "av1",
+        replace(_metadata(), video_bitrate=20_000_000),
+        settings,
+        smart_fragment=smart_fragment,
     )
-    metadata = replace(_metadata(), video_bitrate=20_000_000)
-    encoder = module.VideoEncoder(
-        str(tmp_path / "out.mp4"),
-        torch.device("cuda:0"),
-        metadata,
-        codec="av1",
-        encoder_settings=settings,
-    )
-    assert encoder.spec.frame_format == "p010le"
-    assert encoder.encoder_options["rc"] == "cqp"
-    assert encoder.encoder_options["preanalysis"] == "0"
-    assert encoder.encoder_options["aq_mode"] == "none"
-    assert all(
-        encoder.encoder_options[key] == expected_qp for key in ("qp_i", "qp_p", "qp_b")
-    )
-    assert "qvbr_quality_level" not in encoder.encoder_options
-    assert "maxrate" not in encoder.encoder_options
-    assert "bufsize" not in encoder.encoder_options
+    assert spec.frame_format == frame_format
+    assert options["rc"] == "cqp"
+    assert options["preanalysis"] == "0"
+    assert options["aq_mode"] == "none"
+    assert all(options[key] == expected_qindex for key in ("qp_i", "qp_p", "qp_b"))
+    assert "qvbr_quality_level" not in options
+    assert "maxrate" not in options
+    assert "bufsize" not in options
 
 
 @pytest.mark.parametrize("rc", ["qvbr", "hqvbr", 4, 5])
