@@ -84,7 +84,7 @@ function startHls(){
   if(Hls.isSupported()){hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30});hls.loadSource('/stream.m3u8');hls.attachMedia(v)}
   else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src='/stream.m3u8'}}
 async function changeVideo(){
-  await fetch('/stop',{method:'POST'});
+  await fetch('/open',{method:'DELETE'});
   if(hls){hls.destroy();hls=null}
   document.getElementById('v').removeAttribute('src');
   document.getElementById('player').style.display='none';
@@ -129,7 +129,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         super().end_headers()
 
@@ -148,6 +148,13 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             self._handle_post()
         except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
             pass
+
+    def do_DELETE(self):
+        if self.path.split("?")[0] != "/open":
+            self.send_error(404)
+            return
+        self._state.stop_current()
+        self._send_json({"status": "stopped"})
 
     def _handle_get(self):
         path = self.path.split("?")[0]
@@ -247,12 +254,7 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
             self._send_json({"path": selected})
             return
 
-        if path in ("/api/stop", "/stop"):
-            self._state.stop_current()
-            self._send_json({"ok": True})
-            return
-
-        if path in ("/api/load", "/open"):
+        if path == "/open":
             length = int(self.headers.get("Content-Length", 0))
             body = json.loads(self.rfile.read(length)) if length > 0 else {}
             video_path = str(body.get("path", "")).strip()
@@ -271,22 +273,17 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 self._state.is_loaded
                 and self._state._current_video_path == Path(video_path)
             )
-            if path == "/open":
-                if same_video:
-                    if start > 0:
-                        target_seg = int(start / self._state.segment_duration)
-                        self._state.request_seek(target_seg, new_playback=True)
+            if same_video:
+                if start > 0:
+                    target_seg = int(start / self._state.segment_duration)
+                    self._state.request_seek(target_seg, new_playback=True)
+                self._send_json({"status": "ready"})
+            else:
+                self._state.select_video(Path(video_path), start)
+                if self._state.wait_until_first_segment(timeout=30.0):
                     self._send_json({"status": "ready"})
                 else:
-                    self._state.select_video(Path(video_path), start)
-                    ok = self._state.wait_until_first_segment(timeout=30.0)
-                    if ok:
-                        self._send_json({"status": "ready"})
-                    else:
-                        self._send_json({"error": "Timed out waiting for stream to be ready"}, status=500)
-            else:
-                self._state.select_video(Path(video_path))
-                self._send_json({"ok": True, "filename": Path(video_path).name})
+                    self._send_json({"error": "Timed out waiting for stream to be ready"}, status=500)
             return
 
         self.send_error(404)
@@ -395,7 +392,7 @@ class HlsStreamingServer:
         self._vod_playlist = ""
         self.video_change.set()
 
-    def select_video(self, path: Path, start: float = 0.0) -> None:
+    def select_video(self, path: Path, start: float) -> None:
         self._pending_video = path
         self.initial_start_segment = max(0, int(start / self.segment_duration))
         with self._seek_lock:
