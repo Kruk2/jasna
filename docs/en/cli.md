@@ -210,7 +210,7 @@ Per-codec extras:
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Quality value passed unchanged to AMF: QVBR for H.264, constant QP for 10-bit HEVC/AV1. Lower = better. Defaults: 24, 25, and 32 respectively. |
+| `cq` | Quality value for AMF: QVBR for H.264, constant QP for 10-bit HEVC/AV1 (AV1 uses a finer internal scale, so CQ is multiplied by 5). Lower = better. Defaults: 24, 25, and 32 respectively. |
 | `qvbr_quality_level` | Legacy CQ alias in CLI advanced settings when `--cq` is omitted; not accepted in the GUI custom-args field. |
 | `usage` | Encoder usage profile. Default `high_quality`. |
 | `quality` | Speed/quality preset: `speed`, `balanced`, `quality` (default). |

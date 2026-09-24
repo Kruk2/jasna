@@ -134,13 +134,21 @@ DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
     "bitdepth": "10",
 }
 
+
+def _amf_av1_qindex(cq: int) -> int:
+    # AMF AV1 frame QPs are AV1 qindex 0..255; CQ uses the H.264/HEVC QP scale 0..51.
+    return cq * 255 // 51
+
+
+_AMF_AV1_DEFAULT_QINDEX = str(_amf_av1_qindex(encoder_cq_spec("av1", AcceleratorVendor.AMD).default))
+
 DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
     "rc": "cqp",
-    "qp_i": str(encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
-    "qp_p": str(encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
-    "qp_b": str(encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
+    "qp_i": _AMF_AV1_DEFAULT_QINDEX,
+    "qp_p": _AMF_AV1_DEFAULT_QINDEX,
+    "qp_b": _AMF_AV1_DEFAULT_QINDEX,
     "g": "250",
     "preanalysis": "0",
     "aq_mode": "none",
@@ -324,11 +332,12 @@ def _normalize_amf_cq(
 
     value = overrides.pop(aliases[0])
     if codec in {"hevc", "av1"}:
-        if rc in cqp_modes:
+        if rc in cqp_modes and codec == "av1":
+            qindex = str(_amf_av1_qindex(int(value)))
+            overrides.update(qp_i=qindex, qp_p=qindex, qp_b=qindex)
+        elif rc in cqp_modes:
             overrides["qp_i"] = value
             overrides["qp_p"] = value
-            if codec == "av1":
-                overrides["qp_b"] = value
         elif not ten_bit and rc in qvbr_modes:
             overrides["qvbr_quality_level"] = value
         else:
