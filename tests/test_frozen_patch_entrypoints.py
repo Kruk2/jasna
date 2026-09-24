@@ -31,6 +31,19 @@ def test_frozen_config_scan_skips_source(caplog, monkeypatch):
     assert not caplog.records
 
 
+def test_source_build_keeps_config_scan(monkeypatch):
+    import torch.jit
+    from torch.utils import _config_module
+    from jasna import _frozen
+
+    monkeypatch.setattr(_frozen, "_patched", False)
+    monkeypatch.setattr(_frozen, "is_frozen", lambda: False)
+    scan = _config_module.get_assignments_with_compile_ignored_comments
+    with patch.object(torch.jit, "interface"):
+        _frozen.patch_frozen_torch()
+    assert _config_module.get_assignments_with_compile_ignored_comments is scan
+
+
 def test_importing_pipeline_does_not_patch_frozen_torch():
     orig = sys.modules.pop("jasna.pipeline", None)
     try:
