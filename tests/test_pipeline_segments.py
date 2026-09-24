@@ -187,6 +187,46 @@ def test_amf_h264_full_reencode_preserves_selected_ranges(tmp_path) -> None:
     assert pipeline._run_pass.call_args.kwargs["effect_ranges"] == ((75, 90),)
 
 
+class _SmartRenderReached(Exception):
+    pass
+
+
+@pytest.mark.parametrize(
+    ("vendor", "max_b_frames"),
+    [(AcceleratorVendor.AMD, 3), (AcceleratorVendor.NVIDIA, 4)],
+)
+def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
+    vendor, max_b_frames
+) -> None:
+    pipeline = object.__new__(Pipeline)
+    pipeline.input_video = Path("input.mp4")
+    pipeline.output_video = Path("output.mp4")
+    pipeline.codec = "h264"
+    pipeline.encoder_settings = {}
+    pipeline.device = torch.device("cuda:0")
+    pipeline.retarget_high_fps = False
+    pipeline.segments = (SegmentRange(2.5, 3.0),)
+    pipeline.splice_plan = SplicePlan(
+        index=KeyframeIndex((0, 60), Fraction(1, 30), 0, 120, max_b_frames=max_b_frames),
+        spans=(SpliceSpan("render", 0, 60, ((15, 30),)), SpliceSpan("copy", 60, 120)),
+        segments=pipeline.segments,
+    )
+    pipeline._run_full = MagicMock()
+
+    with (
+        patch("jasna.pipeline.vendor_for_device", return_value=vendor),
+        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
+        patch(
+            "jasna.pipeline.resolve_smart_encoder_settings",
+            side_effect=_SmartRenderReached,
+        ),
+        pytest.raises(_SmartRenderReached),
+    ):
+        pipeline._run_smart(MagicMock(duration=4.0, video_fps=30.0))
+
+    pipeline._run_full.assert_not_called()
+
+
 def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
     pipeline = object.__new__(Pipeline)
     pipeline.input_video = Path("input.mp4")

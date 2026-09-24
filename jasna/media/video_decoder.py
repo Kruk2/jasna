@@ -355,7 +355,7 @@ class VideoReader:
             decoder.open(strict=False)
             self._decoder_ctx = decoder
             log.info("Using AMF hardware decoder %s for %s", decoder_name, self.file)
-        except (ValueError, AttributeError, av.FFmpegError, RuntimeError) as exc:
+        except (ValueError, av.FFmpegError, RuntimeError) as exc:
             source_ctx.thread_type = "AUTO"
             log.warning(
                 "AMF cannot decode %s (codec %s): %s; using FFmpeg software "
