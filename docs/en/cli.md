@@ -120,7 +120,7 @@ With `--segments`, the codec is locked to the input video's codec and
 ### Encoder settings
 
 `--cq` is the main quality control. The number shown in the GUI or supplied on
-the command line is sent to the active encoder unchanged; switching codecs does
+the command line is sent to the active encoder unchanged (AMD AV1 multiplies it by 5); switching codecs does
 not translate it. Lower values improve quality and increase file size.
 
 | GPU | H.264 default | HEVC default | AV1 default | Accepted range |
