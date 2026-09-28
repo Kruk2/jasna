@@ -44,6 +44,14 @@ Jasna's `jasna/models/basicvsrpp/mmagic/` directory is an inference-only
 subset derived from OpenMMLab MMagic. Its existing copyright headers and
 Apache-2.0 terms are retained.
 
+Jasna's `jasna/models/ltx_vae/` directory is an inference-only subset of the
+video VAE in [Lightricks LTX-2.5](https://github.com/Lightricks/LTX-2) `ltx-core`
+(commit `6ea1527869a5ce57452e215595eae189a7cf65cc`), and
+`jasna/ltx/transformer.py` is a port of its video transformer. Both are covered
+by the LTX-2.x Community License (`assets/licenses/LTX-2.x-Community-License.txt`).
+`jasna/models/ltx_vae/eager_na.py` originates from Comfy Org comfy-kitchen and
+keeps its Apache-2.0 header.
+
 Jasna also contains code derived from
 [Lada](https://codeberg.org/ladaapp/lada), licensed under AGPL-3.0. Jasna's
 root `LICENSE` contains the complete AGPL-3.0 text.

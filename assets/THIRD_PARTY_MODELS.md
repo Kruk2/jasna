@@ -27,6 +27,21 @@ This checkpoint is redistributed unmodified.
 
 This checkpoint is redistributed unmodified.
 
+## LTX restoration (LTX-2.5 video VAE and fine-tuned transformer)
+
+- Jasna model name: `ltx`
+- Folder: `model_weights/ltx-restore/`
+- `vae.safetensors`: Lightricks `ltx-2.5-video-vae-bf16.safetensors`, redistributed unmodified
+- `vae.safetensors` SHA-256: `847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3`
+- `vae-decoder.safetensors`: Jasna fine-tune of the LTX-2.5 video VAE decoder
+- `transformer.safetensors`: Jasna fine-tune of the LTX-2.5 22B transformer (video path only, INT8)
+- Upstream: [Lightricks LTX-2.5](https://huggingface.co/Lightricks/LTX-2.5)
+- License: LTX-2.x Community License (`assets/licenses/LTX-2.x-Community-License.txt`)
+- Copyright: Lightricks Ltd.; fine-tunes 2026 Kruk2
+
+These files are not part of release packages yet; hashes for the fine-tuned
+files are added when they are.
+
 ## Jasna RF-DETR v6
 
 - Jasna model name: `rfdetr-v6`

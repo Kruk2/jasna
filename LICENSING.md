@@ -14,7 +14,10 @@ copyright and license notices.
 Jasna includes code and model weights from
 [Lada](https://codeberg.org/ladaapp/lada). Those components remain covered by
 their applicable AGPL-3.0 notices. The vendored MMagic subset retains its
-OpenMMLab copyright and Apache-2.0 notices.
+OpenMMLab copyright and Apache-2.0 notices. The LTX restoration code ported
+from Lightricks LTX-2.5 (`jasna/ltx/transformer.py`, `jasna/models/ltx_vae/`)
+and the LTX restoration model weights are covered by the LTX-2.x Community
+License.
 
 The complete Jasna license is in [LICENSE](LICENSE). Copyright and attribution
 notices are in [NOTICE](NOTICE),

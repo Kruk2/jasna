@@ -7,6 +7,19 @@ them when turning a help string into a tooltip.
 """
 
 CLI_HELP: dict[str, str] = {
+    "restoration_model_name": (
+        "Restoration model for video input: basicvsrpp (fast) or ltx (diffusion model, much "
+        "slower, best quality; no streaming, segments, secondary restoration or denoise). "
+        "(default: %(default)s)"
+    ),
+    "restoration_model_path": (
+        "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
+    ),
+    "ltx_seed": "ltx: noise seed. Another seed gives another take on the same restoration. (default: %(default)s)",
+    "ltx_large_canvas": (
+        "ltx: restore large mosaics at 768 px instead of 512 px. Sharper, about 3x slower for "
+        "those mosaics and needs more VRAM. (default: %(default)s)"
+    ),
     "fp16": "Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
     "compile_basicvsrpp": "Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes. (default: %(default)s)",
     "max_clip_size": "Maximum clip size for tracking (default: %(default)s)",

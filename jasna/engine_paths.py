@@ -20,6 +20,16 @@ def model_weights_dir() -> Path:
     return Path("model_weights")
 
 
+_DEFAULT_RESTORATION_MODELS = {
+    "basicvsrpp": "lada_mosaic_restoration_model_generic_v1.2.pth",
+    "ltx": "ltx-restore",
+}
+
+
+def default_restoration_model_path(model_name: str) -> Path:
+    return model_weights_dir() / _DEFAULT_RESTORATION_MODELS[model_name]
+
+
 def engine_system_suffix() -> str:
     return ".win" if os.name == "nt" else ".linux"
 

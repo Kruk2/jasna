@@ -6,6 +6,7 @@ from argparse import Namespace
 
 import torch
 
+from jasna.engine_paths import default_restoration_model_path
 from jasna.benchmark.basicvsrpp_restoration import benchmark_basicvsrpp_restoration
 from jasna.benchmark.detection_speed import benchmark_lada_yolo_detection_speed, benchmark_rfdetr_detection_speed
 from jasna.os_utils import check_required_executables, check_supported_gpu, gpu_check_error
@@ -114,7 +115,7 @@ def run_benchmark_cli(args: Namespace) -> None:
             if args.detection_score_threshold is None
             else float(args.detection_score_threshold)
         ),
-        restoration_model_path=Path(args.restoration_model_path),
+        restoration_model_path=Path(args.restoration_model_path or default_restoration_model_path("basicvsrpp")),
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         benchmark_filter=getattr(args, "benchmark_filter", None),
     )

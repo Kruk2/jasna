@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
 from jasna.gui.models import AppSettings
-from jasna.session_config import SessionConfig
+from jasna.session_config import LTX_DEFAULT_SEED, SessionConfig
 from jasna.session_factory import RestorationSession
 
 if TYPE_CHECKING:
@@ -54,7 +54,7 @@ def video_session_config(
     codec: str,
     encoder_settings: Mapping[str, object],
 ) -> SessionConfig:
-    from jasna.engine_paths import model_weights_dir
+    from jasna.engine_paths import default_restoration_model_path
     from jasna.mosaic.detection_registry import coerce_detection_model_name, require_detection_model_weights
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
@@ -68,7 +68,10 @@ def video_session_config(
         max_detection_gap=int(settings.max_detection_gap),
         min_detection_duration=int(settings.min_detection_duration),
         scene_detection=bool(settings.scene_detection),
-        restoration_model_path=model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth",
+        restoration_model_name="basicvsrpp",
+        restoration_model_path=default_restoration_model_path("basicvsrpp"),
+        ltx_large_canvas=True,
+        ltx_seed=LTX_DEFAULT_SEED,
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),

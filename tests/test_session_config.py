@@ -120,6 +120,25 @@ def test_cli_non_default_args_are_mapped() -> None:
     assert config.scene_detection is False
 
 
+def test_cli_ltx_args_are_mapped() -> None:
+    defaults = _cli_config()
+    assert defaults.restoration_model_name == "basicvsrpp"
+    assert defaults.ltx_large_canvas is True
+    assert defaults.ltx_seed == 20260923
+
+    config = _cli_config(["--restoration-model-name", "ltx", "--no-ltx-large-canvas", "--ltx-seed", "7"])
+    assert config.restoration_model_name == "ltx"
+    assert config.ltx_large_canvas is False
+    assert config.ltx_seed == 7
+
+
+def test_restoration_model_path_defaults_per_model() -> None:
+    from jasna.engine_paths import default_restoration_model_path
+
+    assert default_restoration_model_path("basicvsrpp").name == "lada_mosaic_restoration_model_generic_v1.2.pth"
+    assert default_restoration_model_path("ltx").name == "ltx-restore"
+
+
 def test_gui_defaults_match_cli_defaults() -> None:
     cli = _cli_config()
     gui = _gui_config(AppSettings())
