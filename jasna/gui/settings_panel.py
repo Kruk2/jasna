@@ -28,6 +28,8 @@ from jasna.gui.settings_sections.secondary import SecondarySection
 
 logger = logging.getLogger(__name__)
 
+_EDITABLE_WHILE_PROCESSING = frozenset({"post_export_action", "post_export_command"})
+
 
 class SettingsPanel(ctk.CTkFrame):
     """Right panel composing the settings sections; widgets live in the sections."""
@@ -350,7 +352,7 @@ class SettingsPanel(ctk.CTkFrame):
         )
 
     def set_enabled(self, enabled: bool):
-        """Enable or disable all settings controls."""
+        """Enable or disable the settings; the queue-wide post-export action stays editable while processing."""
         state = "normal" if enabled else "disabled"
 
         # Preset bar buttons
@@ -362,7 +364,7 @@ class SettingsPanel(ctk.CTkFrame):
 
         # All interactive widgets
         for key, widget in self._widgets.items():
-            if key.endswith("_val"):  # Skip value labels
+            if key.endswith("_val") or key in _EDITABLE_WHILE_PROCESSING:
                 continue
             try:
                 widget.configure(state=state)

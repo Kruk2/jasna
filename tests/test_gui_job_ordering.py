@@ -150,35 +150,31 @@ class TestProcessorPullLoop:
 
         assert processed_filenames == ["a.mp4", "c.mp4", "b.mp4"]
 
-    def test_runs_post_export_action_after_queue_completes(self):
-        calls: list[tuple[str, str]] = []
-        p = Processor()
+    def test_reports_finished_queue_on_complete(self):
+        finished: list[bool] = []
+        p = Processor(on_complete=finished.append)
         jobs = _make_jobs("a.mp4")
 
-        with (
-            patch.object(p, "_run_pipeline"),
-            patch("jasna.post_export_action.run_post_export_action", lambda action, command: calls.append((action, command))),
-        ):
+        with patch.object(p, "_run_pipeline"):
             p.start(
                 jobs,
-                AppSettings(post_export_action="command", post_export_command="echo done"),
+                AppSettings(post_export_action="shutdown"),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
             )
             p.join(timeout=5.0)
 
-        assert calls == [("command", "echo done")]
+        assert finished == [True]
 
-    def test_skips_post_export_action_when_stopped(self):
-        calls: list[tuple[str, str]] = []
-        p = Processor()
+    def test_reports_stopped_queue_on_complete(self):
+        finished: list[bool] = []
+        p = Processor(on_complete=finished.append)
         p._settings = AppSettings(post_export_action="shutdown")
         p._stop_event.set()
 
-        with patch("jasna.post_export_action.run_post_export_action", lambda action, command: calls.append((action, command))):
-            p._run()
+        p._run()
 
-        assert calls == []
+        assert finished == [False]
 
     def test_runs_post_export_video_command_after_each_video(self, tmp_path):
         calls: list[tuple[str, Path, Path]] = []
@@ -283,36 +279,6 @@ class TestProcessorPullLoop:
             p.join(timeout=5.0)
 
         assert command.call_args.args[2] == tmp_path / "clip_restored (1).mp4"
-
-    def test_per_video_and_queue_wide_actions_both_run(self, tmp_path):
-        calls: list[str] = []
-        p = Processor()
-        jobs = _make_jobs(str(tmp_path / "clip.mp4"))
-
-        with (
-            patch.object(p, "_run_pipeline"),
-            patch(
-                "jasna.post_export_action.run_post_export_video_command",
-                side_effect=lambda *_args: calls.append("video"),
-            ),
-            patch(
-                "jasna.post_export_action.run_post_export_action",
-                side_effect=lambda *_args: calls.append("queue"),
-            ),
-        ):
-            p.start(
-                jobs,
-                AppSettings(
-                    post_export_video_command="remux {output}",
-                    post_export_action="command",
-                    post_export_command="notify",
-                ),
-                output_folder=str(tmp_path),
-                output_pattern="{original}_restored.mp4",
-            )
-            p.join(timeout=5.0)
-
-        assert calls == ["video", "queue"]
 
 
 class TestJobItemId:

@@ -100,6 +100,9 @@ jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 ```
 
+在 GUI 中，任务运行时也可以更改或关闭此操作。**关闭电脑**前，GUI 会倒计时
+60 秒；按**取消**即可不关机。
+
 要在每个视频成功导出后运行命令，请填写**每个视频完成后的命令**，或使用
 `--post-export-video-command`。Jasna 会等待命令完成；如果命令失败，该视频会被
 标记为错误。路径占位符已自动添加引号:

@@ -326,6 +326,8 @@ ZH = {
         "post_export_shutdown": "关闭电脑",
         "post_export_command": "自定义命令",
         "post_export_command_placeholder": "所有任务完成后运行的命令",
+        "shutdown_countdown_title": "即将关机",
+        "shutdown_countdown_message": "所有任务已完成。电脑将在 {seconds} 秒后关机。",
         "post_export_video_command": "每个视频完成后的命令",
         "post_export_video_command_placeholder": "可选命令，可使用 {input} 和 {output}",
         
@@ -409,7 +411,7 @@ ZH = {
         "tip_codec": "输出视频格式。\nH.264 (AVC)：兼容性最好，文件较大。\nHEVC (H.265)：较小文件体积下提供优秀画质。\nAV1：压缩率最高，需要较新的播放器；编码需要较新的 NVIDIA 显卡。",
         "tip_encoder_cq": "视频目标质量（CQ）。显示的数值会原样传给编码器（AMD AV1 会乘以 5）；数值越低，质量越高，但文件越大。Jasna 限制输出大小时，达到上限后相近的数值可能得到相同结果。\nNVIDIA 默认值：H.264 为 25，HEVC 为 28，AV1 为 35。范围：H.264/HEVC 为 1–51，AV1 为 1–63。\nAMD 默认值：H.264 为 24，HEVC 为 25，AV1 为 32。范围：H.264/HEVC 为 0–51，AV1 为 1–51。",
         "tip_encoder_custom_args": "高级编码器参数，以逗号分隔的 key=value 格式。\n如果不清楚用途，请留空。\n\n示例：rc-lookahead=32",
-        "tip_post_export_action": "整个队列完成后的可选操作。\n\n无：不执行任何操作。\n关闭电脑：关闭计算机。\n自定义命令：在系统 shell 中运行下方命令。",
+        "tip_post_export_action": "整个队列完成后的可选操作。\n\n无：不执行任何操作。\n关闭电脑：60 秒倒计时后关闭计算机，倒计时期间可取消。\n自定义命令：在系统 shell 中运行下方命令。\n\n任务运行时也可以更改此项。",
         "tip_post_export_video_command": "每个视频成功导出后在系统 shell 中运行，并等待命令完成。留空即可禁用。路径已自动加引号。\n\n占位符：{input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
         "tip_output_location": "处理后视频的保存文件夹。\n留空则保存在原始文件旁边。",
         "tip_output_pattern": "输出文件的命名模板。\n使用 {original} 作为输入文件名（不含扩展名）的占位符。\n\n示例：{original}_restored.mp4 → my_video_restored.mp4",
