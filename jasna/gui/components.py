@@ -261,7 +261,10 @@ class LicenseDialog(ctk.CTkToplevel):
         )
 
     def _activate(self):
-        from jasna.protection import ForgedLicenseError, ProtectionError, RetiredLicenseError, license_store
+        from jasna.protection import (
+            ForgedLicenseError, LicenseError, MalformedLicenseError,
+            ProtectionError, RetiredLicenseError, license_store,
+        )
         email = self._email.get().strip()
         key = self._key.get().strip()
         try:
@@ -271,6 +274,12 @@ class LicenseDialog(ctk.CTkToplevel):
             return
         except RetiredLicenseError:
             self._show_error(t("license_retired"))
+            return
+        except MalformedLicenseError:
+            self._show_error(t("license_malformed"))
+            return
+        except LicenseError:
+            self._show_error(t("license_invalid"))
             return
         except ProtectionError as exc:
             self._show_error(str(exc))
