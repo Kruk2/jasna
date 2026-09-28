@@ -36,6 +36,8 @@ def test_wizard_names_the_official_sellers(monkeypatch):
 @pytest.mark.parametrize("error_name, message_key", [
     ("ForgedLicenseError", "license_forged"),
     ("RetiredLicenseError", "license_retired"),
+    ("LicenseError", "license_invalid"),
+    ("MalformedLicenseError", "license_malformed"),
 ])
 def test_license_dialog_explains_rejected_keys(monkeypatch, error_name, message_key):
     protection = pytest.importorskip("jasna.protection")

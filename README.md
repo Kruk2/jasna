@@ -161,6 +161,9 @@ Support pays for training extra models, mainly GPU rental and compute time for l
 - **unet-4x** secondary upscaler for sharper 256->1024 restoration.
 - **SD 1.5 image restoration**, the experimental still-image model.
 
+Existing keys keep unlocking these models in v0.11. LTX versions require an upgraded key
+for the requested version; ask your official seller about eligibility.
+
 Example results:
 
 - [unet-4x / secondary restoration examples on SLS Discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260)
@@ -174,6 +177,9 @@ How to get a key:
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**, including **crypto**: sent to the email or handle used for the contribution. The key is tied to that email or handle.
 
 Keys are sold **only** on these two pages. Anyone else selling Jasna, keys or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub.
+
+If activation fails, check the exact purchase email or handle and copy the full key again.
+An invalid key alone does not prove fraud; Jasna identifies keys from known unofficial sellers separately.
 
 ## Acknowledgments
 
