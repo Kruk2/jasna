@@ -25,11 +25,15 @@ class TestBundlePresent:
         (tmp_path / "unet" / "config.json").write_text("{}")
         assert dl.bundle_present(tmp_path) is False
 
-    def test_absent_with_only_retired_checkpoint(self, tmp_path: Path):
+    def test_original_download_is_reused_without_network_or_prompt(self, tmp_path: Path):
         (tmp_path / "unet").mkdir()
         (tmp_path / "unet" / "config.json").write_text("{}")
         (tmp_path / "sd15-200000.ckpt.enc").write_bytes(b"x")
-        assert dl.bundle_present(tmp_path) is False
+        assert dl.bundle_present(tmp_path) is True
+        with patch.object(dl, "download_sd15_bundle") as download, patch("builtins.input") as prompt:
+            dl.ensure_sd15_bundle(tmp_path)
+            download.assert_not_called()
+            prompt.assert_not_called()
 
     def test_absent_without_config(self, tmp_path: Path):
         (tmp_path / SD15_CKPT_ENC_PATH.name).write_bytes(b"x")
@@ -78,7 +82,7 @@ class TestDownloadBundle:
             dl.download_sd15_bundle(tmp_path)
 
         ignored = mock_snapshot.call_args.kwargs["ignore_patterns"]
-        assert any(fnmatch("sd15-200000.ckpt.enc", pattern) for pattern in ignored)
+        assert any(fnmatch("sd15-200000.v2.ckpt.enc", pattern) for pattern in ignored)
         assert not any(fnmatch(SD15_CKPT_ENC_PATH.name, pattern) for pattern in ignored)
 
     def test_callback_uses_silent_byte_progress_class(self, tmp_path: Path):
