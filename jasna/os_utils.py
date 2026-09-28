@@ -27,11 +27,27 @@ def check_supported_gpu(
     if not torch.cuda.is_available():
         return False, "no_cuda"
     if vendor_for_device(device) is AcceleratorVendor.AMD:
+        # A ROCm build has no kernels for a GPU arch it was not compiled for, and on
+        # Windows the first kernel launch then crashes the process (issue #408).
+        arch = torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]
+        built_archs = {a.split(":")[0] for a in torch.cuda.get_arch_list()}
+        if built_archs and arch not in built_archs:
+            return False, ("arch_unsupported", arch)
         return True, torch.cuda.get_device_name(device)
     capability = torch.cuda.get_device_capability(device)
     if capability < MIN_GPU_COMPUTE:
         return False, ("compute_too_low", capability[0], capability[1])
     return True, torch.cuda.get_device_name(device)
+
+
+def gpu_check_error(result: str | tuple) -> str:
+    """English CLI message for a failed check_supported_gpu result."""
+    if result == "no_cuda":
+        return "No compatible GPU was found for this Jasna build."
+    if result[0] == "arch_unsupported":
+        return f"This AMD GPU ({result[1]}) is not supported by this Jasna build."
+    _, major, minor = result
+    return f"Compute capability 7.5+ required (GPU: {major}.{minor})."
 def _bundled_exe_filename(name: str) -> str:
     if os.name == "nt" and not name.lower().endswith(".exe"):
         return f"{name}.exe"

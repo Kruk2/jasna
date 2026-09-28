@@ -52,10 +52,14 @@ _SHUTDOWN_COUNTDOWN_SECONDS = 60
 
 def _warm_up_cuda() -> None:
     """Import torch and create the CUDA context. Run off the UI thread after the window
-    paints, so the window shows first and the first job skips cold torch/CUDA init."""
-    import torch
+    paints, so the window shows first and the first job skips cold torch/CUDA init.
+    An unsupported GPU gets no kernel launch; the system check reports it instead."""
+    from jasna.os_utils import check_supported_gpu
 
-    if torch.cuda.is_available():
+    gpu_ok, _ = check_supported_gpu()
+    if gpu_ok:
+        import torch
+
         torch.zeros(1, device="cuda")
 
 
