@@ -82,6 +82,16 @@ def test_check_gpu_fails_when_compute_61(monkeypatch):
     assert "6.1" in msg
 
 
+def test_check_gpu_names_unsupported_amd_arch(monkeypatch):
+    from jasna import os_utils
+
+    monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: (False, ("arch_unsupported", "gfx1103")))
+    passed, msg = check_gpu()
+    assert passed is False
+    assert "gfx1103" in msg
+    assert "AMD" in msg
+
+
 def test_check_gpu_fails_when_no_cuda(monkeypatch):
     fake_torch = _make_fake_torch(False)
     passed, msg = _call_check_gpu(monkeypatch, fake_torch)

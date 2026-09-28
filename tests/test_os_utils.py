@@ -428,6 +428,54 @@ def test_check_supported_gpu_returns_compute_too_low_when_below_min(monkeypatch)
     assert result == ("compute_too_low", 6, 1)
 
 
+def _fake_rocm_torch(gcn_arch_name: str, arch_list: list[str]):
+    def _no_kernels(*_args, **_kwargs):
+        raise AssertionError("the GPU check must not launch a kernel")
+
+    return types.SimpleNamespace(
+        cuda=types.SimpleNamespace(
+            is_available=lambda: True,
+            get_device_properties=lambda device: types.SimpleNamespace(gcnArchName=gcn_arch_name),
+            get_arch_list=lambda: arch_list,
+            get_device_name=lambda device: "AMD Radeon 780M Graphics",
+        ),
+        zeros=_no_kernels,
+    )
+
+
+def _as_amd_build(monkeypatch, fake_torch) -> None:
+    import jasna.accelerator as accelerator
+
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(accelerator, "vendor_for_device", lambda _device: accelerator.AcceleratorVendor.AMD)
+
+
+def test_check_supported_gpu_rejects_amd_arch_missing_from_build(monkeypatch) -> None:
+    _as_amd_build(monkeypatch, _fake_rocm_torch("gfx1103", ["gfx1100", "gfx1101", "gfx1102", "gfx1201"]))
+    ok, result = os_utils.check_supported_gpu()
+    assert ok is False
+    assert result == ("arch_unsupported", "gfx1103")
+
+
+def test_check_supported_gpu_accepts_amd_arch_ignoring_feature_suffixes(monkeypatch) -> None:
+    _as_amd_build(monkeypatch, _fake_rocm_torch("gfx90a:sramecc+:xnack-", ["gfx90a:xnack-", "gfx1100"]))
+    ok, result = os_utils.check_supported_gpu()
+    assert ok is True
+    assert result == "AMD Radeon 780M Graphics"
+
+
+def test_check_supported_gpu_accepts_amd_when_build_reports_no_arch_list(monkeypatch) -> None:
+    _as_amd_build(monkeypatch, _fake_rocm_torch("gfx1103", []))
+    ok, _ = os_utils.check_supported_gpu()
+    assert ok is True
+
+
+def test_gpu_check_error_names_each_failure() -> None:
+    assert "No compatible GPU" in os_utils.gpu_check_error("no_cuda")
+    assert "gfx1103" in os_utils.gpu_check_error(("arch_unsupported", "gfx1103"))
+    assert "6.1" in os_utils.gpu_check_error(("compute_too_low", 6, 1))
+
+
 def test_check_supported_gpu_returns_ok_at_exactly_min_compute(monkeypatch) -> None:
     import types
 

@@ -465,6 +465,7 @@ ZH = {
         "wizard_found_major": "已找到：{path}（主版本={major}）",
         "wizard_no_cuda": "无兼容 GPU",
         "wizard_gpu_compute_too_low": "需要计算能力 7.5 或更高（当前 GPU：{major}.{minor}）",
+        "wizard_gpu_arch_unsupported": "此版本 Jasna 不支持这块 AMD GPU（{arch}）",
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}，计算能力 {major}.{minor}",
         "wizard_not_available": "不可用",
