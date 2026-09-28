@@ -31,35 +31,35 @@ Install runtime dependencies for the active vendor:
 # NVIDIA (CUDA 13 wheels)
 uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu130
 
-# AMD Linux (inside a ROCm 7.2 environment; torch/torchvision+rocm come from the
-# rocm/pytorch base image, the find-links only backfills any missing rocm wheel)
-uv pip install ".[amd]" \
-  --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/
+# AMD Linux (inside the rocm/pytorch ROCm 10.0 image; torch/torchvision+rocm come
+# from the image, see jasna/protection/keytool/Dockerfile.amd)
+uv pip install ".[amd]"
 ```
 
-**AMD Windows** (ROCm 7.2.1 — Python 3.12, Adrenalin ≥ 26.2.2). Install the ROCm
-SDK + torch/torchvision ROCm wheels FIRST, with `--no-deps` so pip cannot silently
-replace them with the CPU `torch==2.9.1` from PyPI when a later dependency
-(torchvision, rfdetr, …) pulls torch — that swap is the usual cause of a
-"non-ROCm torch/torchvision" env:
+**AMD Windows** (ROCm 10.0.0 — Python 3.12, Adrenalin ≥ 26.8.1). Install torch and
+torchvision from AMD's ROCm index FIRST, with the GPU kernel packs the release
+ships, so pip cannot silently replace them with the CPU `torch==2.12.0` from PyPI
+when a later dependency (rfdetr, …) pulls torch — that swap is the usual cause of
+a "non-ROCm torch/torchvision" env:
 
 ```powershell
-$R = "https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1"
-pip install --no-deps `
-  "$R/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl" `
-  "$R/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl" `
-  "$R/torch-2.9.1+rocm7.2.1-cp312-cp312-win_amd64.whl" `
-  "$R/torchvision-0.24.1+rocm7.2.1-cp312-cp312-win_amd64.whl"
+$I = "https://stable.repo.amd.com/rocm/whl-next/"
+$D = "device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1150,device-gfx1151,device-gfx1200,device-gfx1201"
+pip install --index-url $I "torch[$D]==2.12.0+rocm10.0.0" "torchvision[$D]==0.27.0+rocm10.0.0"
 # then the remaining AMD deps (torch/torchvision above already satisfy the pins)
 uv pip install ".[amd]"
 ```
 
-The `rocm_sdk_core` / `rocm_sdk_libraries_*` wheels are the ROCm runtime itself.
-`import torch` reaches them through `rocm_sdk`, which resolves the package name at
-call time, so Nuitka sees no import and bundles nothing — the release build copies
-both wheel trees into the dist verbatim and then asserts that every library torch
-preloads resolves there. Without that, the frozen app dies at startup with
-`UnboundLocalError: cannot access local variable 'py_module'` (upstream
+Adding a GPU target means adding its `device-gfx*` extra here and keeping it in
+the `Dockerfile.amd` keep-list, so both OSes ship the same targets.
+
+The `rocm_sdk_core` / `rocm_sdk_libraries` / `rocm_sdk_device_gfx*` wheels are the
+ROCm runtime itself, and torch's own GPU kernels sit in `torch/.kpack`.
+`import torch` reaches the runtime through `rocm_sdk`, which resolves the package
+name at call time, so Nuitka sees no import and bundles nothing — both AMD release
+builds copy the wheel trees into the dist verbatim and then assert that every
+library torch preloads resolves there. Without that, the frozen app dies at startup
+with `UnboundLocalError: cannot access local variable 'py_module'` (upstream
 `rocm_sdk.find_libraries` reports an absent payload package that way).
 
 Verify ROCm actually stuck on either OS (the Linux Docker build asserts the same):
@@ -68,12 +68,9 @@ Verify ROCm actually stuck on either OS (the Linux Docker build asserts the same
 python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK', torch.__version__, torchvision.__version__)"
 ```
 
-`jasna[amd]` pins `torch==2.9.1` as a plain version on purpose: the ROCm wheels
-(`2.9.1+rocm7.2.1`) satisfy it, and a `+rocm7.2.1` *local-version* pin can't be
-shared across OSes. torchvision is pinned per OS (`0.24.0` on Linux, `0.24.1`
-on Windows) because the ROCm channels ship different versions — the Linux
-manylinux channel and the `rocm/pytorch` base image only have `0.24.0`, so a
-shared `0.24.1` pin would make pip/uv silently install the PyPI CUDA build,
+`jasna[amd]` pins `torch==2.12.0` and `torchvision==0.27.0` as plain versions, which
+the ROCm wheels (`2.12.0+rocm10.0.0`, `0.27.0+rocm10.0.0`) satisfy on both OSes. A
+pin no ROCm wheel satisfies makes pip/uv silently install the PyPI CUDA build,
 which breaks `torchvision.ops.nms` (and with it RF-DETR) at runtime. The
 ROCm-build assertion above is the fail-loud guard on top.
 

@@ -48,7 +48,7 @@ Join the [SLS Discord](https://discord.gg/uNwQ4mHqgv) for examples, support, and
 
 - An NVIDIA **GTX 16-series / RTX 20-series or newer** GPU. GTX 10-series and older cards (GTX 1050/1060/1070/1080) won't work. Not sure about yours? Check NVIDIA's [GPU table](https://developer.nvidia.com/cuda/gpus) — compute capability 7.5+ is required.
 - Nvidia driver **610 or newer** on Windows, **580 or newer** on Linux.
-- AMD support is experimental and needs a ROCm-supported GPU.
+- AMD support is experimental and needs a ROCm-supported GPU (Radeon RX 7000/9000, Radeon 780M/760M/740M, Ryzen AI iGPUs). On Windows, update the AMD Adrenalin driver to 26.8.1 or newer.
 - Install Jasna into a folder whose path contains only English letters and numbers.
 
 Jasna manages VRAM automatically: when it runs low, waiting frames are temporarily moved to system RAM. No configuration needed.

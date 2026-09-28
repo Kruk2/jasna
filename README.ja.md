@@ -46,7 +46,7 @@ Jasna は無料です。支援者には、このプロジェクト用に訓練�
 
 - NVIDIA の **GTX 16 シリーズ / RTX 20 シリーズ以降**の GPU。GTX 10 シリーズ以前のカード（GTX 1050/1060/1070/1080）では動作しません。自分の GPU が対応か分からない場合は、NVIDIA の [GPU 一覧](https://developer.nvidia.com/cuda/gpus)で確認してください — コンピュート能力 7.5 以上が必要です。
 - Nvidia ドライバーは Windows で **610 以上**、Linux で **580 以上**。
-- AMD 対応は実験的で、ROCm 対応 GPU が必要です。
+- AMD 対応は実験的で、ROCm 対応 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI の内蔵 GPU）が必要です。Windows では AMD Adrenalin ドライバーを 26.8.1 以降に更新してください。
 - Jasna は、パスに英語の文字と数字のみを含むフォルダにインストールしてください。
 
 Jasna は VRAM を自動管理します。VRAM が不足すると、待機中のフレームを一時的にシステム RAM へ移します。設定は不要です。
