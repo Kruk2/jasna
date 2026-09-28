@@ -214,6 +214,10 @@ class LicenseDialog(ctk.CTkToplevel):
         ctk.CTkLabel(
             outer, text=t("license_crypto_info"), text_color=Colors.STATUS_PENDING,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+        ).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(
+            outer, text=t("license_official_sellers"), text_color=Colors.STATUS_PENDING,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
         self._email = ctk.CTkEntry(
@@ -257,16 +261,25 @@ class LicenseDialog(ctk.CTkToplevel):
         )
 
     def _activate(self):
-        from jasna.protection import ProtectionError, license_store
+        from jasna.protection import ForgedLicenseError, ProtectionError, RetiredLicenseError, license_store
         email = self._email.get().strip()
         key = self._key.get().strip()
         try:
             license_store.set_license(email, key)
+        except ForgedLicenseError:
+            self._show_error(t("license_forged"))
+            return
+        except RetiredLicenseError:
+            self._show_error(t("license_retired"))
+            return
         except ProtectionError as exc:
-            self._status.configure(text=str(exc), text_color=Colors.STATUS_ERROR)
+            self._show_error(str(exc))
             return
         self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
         self._on_activated()
+
+    def _show_error(self, text: str) -> None:
+        self._status.configure(text=text, text_color=Colors.STATUS_ERROR, wraplength=220, justify="left")
 
 
 class StatusPill(ctk.CTkFrame):

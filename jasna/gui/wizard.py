@@ -159,6 +159,15 @@ class FirstRunWizard(ctk.CTkToplevel):
         self._footer = ctk.CTkFrame(self, fg_color="transparent")
         self._footer.pack(fill="x", side="bottom", padx=40, pady=(20, 40))
         
+        ctk.CTkLabel(
+            self._footer,
+            text=t("official_sellers_notice"),
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+            text_color=Colors.STATUS_PENDING,
+            wraplength=_WINDOW_WIDTH - 80,
+            justify="center",
+        ).pack(pady=(0, 12))
+
         # Button container for centering both buttons
         btn_container = ctk.CTkFrame(self._footer, fg_color="transparent")
         btn_container.pack()

@@ -173,6 +173,8 @@ How to get a key:
    - **[Unifans](https://app.unifans.io/c/kruk2)**: sent by platform message. There might be a slight delay.
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**, including **crypto**: sent to the email or handle used for the contribution. The key is tied to that email or handle.
 
+Keys are sold **only** on these two pages. Anyone else selling Jasna, keys or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub.
+
 ## Acknowledgments
 
 - **[Lada](https://codeberg.org/ladaapp/lada) (Codeberg)** — Jasna is inspired

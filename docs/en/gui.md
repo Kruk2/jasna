@@ -99,3 +99,5 @@ after a driver update or when something misbehaves.
   bar while processing.
 - **License**: enter your supporter key from the header; the chip shows
   whether it's active.
+  Keys are sold only on Buy Me a Coffee and Unifans (kruk2); keys from other
+  sellers are fake and do not work.

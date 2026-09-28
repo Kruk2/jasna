@@ -164,6 +164,8 @@ Jasna 的公开应用程序源代码采用 AGPL-3.0。模型和捆绑依赖项�
    - **[Unifans](https://app.unifans.io/c/kruk2)**: 通过平台消息发送，可能会有轻微延迟。
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**，包括**加密货币**: 发送到贡献时使用的邮箱或账号。密钥与该邮箱或账号绑定。
 
+密钥**仅**在以上两个页面出售。其他任何出售 Jasna、密钥或修改版文件的人都是骗子：他们的密钥无法用于官方版本，他们的文件可能会在你的电脑上运行隐藏代码。请只从 GitHub 下载 Jasna。
+
 ## 致谢
 
 - **[Lada](https://codeberg.org/ladaapp/lada)（Codeberg）** — Jasna 受 Lada 启发，

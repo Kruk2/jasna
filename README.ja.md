@@ -170,6 +170,8 @@ Jasna の公開アプリケーションソースは AGPL-3.0 です。モデル�
    - **[Unifans](https://app.unifans.io/c/kruk2)**: プラットフォームメッセージで送信されます。少し遅れる場合があります。
    - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**、**暗号通貨**を含む: 支援時に使ったメールアドレスまたはハンドルへ送信されます。キーはそのメールアドレスまたはハンドルに紐付きます。
 
+キーは上記の2つのページで**のみ**販売しています。それ以外で Jasna、キー、改変ファイルを販売している人は詐欺です。そのキーは公式版では使えず、そのファイルはPC上で隠れたコードを実行する可能性があります。Jasna は GitHub からのみダウンロードしてください。
+
 ## 謝辞
 
 - **[Lada](https://codeberg.org/ladaapp/lada)（Codeberg）** — Jasna は Lada に
