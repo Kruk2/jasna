@@ -11,7 +11,7 @@ notices, and full license texts.
 | --- | --- |
 | Jasna | Git tag `v0.11.0`; the tag and package version must match |
 | Protection component | The private gitlink revision recorded by the `v0.11.0` tag; source is not published |
-| PyAV | [`f6f0a5e3d975aab851e12ca881bdadfdd8f9ec74`](https://github.com/PyAV-Org/PyAV/commit/f6f0a5e3d975aab851e12ca881bdadfdd8f9ec74) |
+| PyAV | Unmodified PyPI `av` 18.1.0, tag [`v18.1.0`](https://github.com/PyAV-Org/PyAV/commit/7e3d950a8b72062502c1a60d672f8ca565313af5) |
 | VALI | [`0e5c01ee57222a8ef4f9c7591284c4324bb3fba5`](https://codeberg.org/Kruk2/vali/commit/0e5c01ee57222a8ef4f9c7591284c4324bb3fba5) in the public Kruk2 fork |
 | RF-DETR | [`1.8.3` / `3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86`](https://github.com/roboflow/rf-detr/commit/3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86) |
 | MMagic compatibility patch | [`patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff`](patches/fix_loading_mmengine_weights_on_torch26_and_higher.diff) |
@@ -22,7 +22,7 @@ It is licensed under Apache-2.0.
 
 ## FFmpeg in the PyAV and VALI wheels
 
-The Linux wheels link against the
+The PyAV wheels and the Linux VALI wheel link against the
 [`pyav-ffmpeg` 8.1.2-1](https://github.com/PyAV-Org/pyav-ffmpeg/releases/tag/8.1.2-1)
 build of FFmpeg 8.1.2. The source is FFmpeg tag `n8.1.2`, commit
 [`38b88335f99e76ed89ff3c93f877fdefce736c13`](https://github.com/FFmpeg/FFmpeg/commit/38b88335f99e76ed89ff3c93f877fdefce736c13).

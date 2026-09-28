@@ -89,7 +89,6 @@ Developer setup also requires:
 - `ffmpeg` and `ffprobe` on `PATH`; `ffmpeg` major version must be **8**.
 - libVLC 3 installed for GUI player audio. The Python binding is installed
   from `pyproject.toml`; on Ubuntu install `libvlc5` and `vlc-plugin-base`.
-- PyAV built from main branch. Currently released 18.0.0 doesn't ship some CUDA context improvements.
 - Optional: a `python_vali` wheel built from <https://codeberg.org/Kruk2/vali>. Only that
   fork has `DecodeSingleSurfaceAsyncDetailed` and its corrupt-packet tolerance, which the
   VALI decode backend needs; with the stock PyPI wheel the reader falls back to PyAV for
