@@ -91,7 +91,7 @@ class Processor:
         self,
         on_progress: Callable[[ProgressUpdate], None] = None,
         on_log: Callable[[str, str], None] = None,
-        on_complete: Callable[[], None] = None,
+        on_complete: Callable[[bool], None] = None,
     ):
         self._on_progress = on_progress
         self._on_log = on_log
@@ -173,26 +173,14 @@ class Processor:
             self._close_image_session()
             self._close_video_session()
 
-        if self._stop_event.is_set():
-            self._log("INFO", "Processing stopped by user")
-        else:
+        queue_finished = not self._stop_event.is_set()
+        if queue_finished:
             self._log("INFO", "Processing completed")
-            self._run_post_export_action()
+        else:
+            self._log("INFO", "Processing stopped by user")
         if self._on_complete:
-            self._on_complete()
+            self._on_complete(queue_finished)
 
-    def _run_post_export_action(self):
-        settings = self._settings
-        from jasna.post_export_action import run_post_export_action_safely
-
-        action = settings.post_export_action
-        command = settings.post_export_command
-        if action == "none":
-            return
-
-        self._log("INFO", f"Running post-export action: {action}")
-        run_post_export_action_safely(action, command, lambda message: self._log("ERROR", message))
-            
     def _process_job(self, job: JobItem):
         snapshot = job.begin_processing()
         if snapshot is None:
