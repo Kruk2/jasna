@@ -172,16 +172,17 @@ class TestContainerOptions:
         assert fragmented.encoder_options == default.encoder_options
 
 
-def test_normalizes_count_only_stereo_layout():
-    layout = av.AudioLayout("2 channels")
+@pytest.mark.parametrize(
+    ("count_only", "expected"),
+    [("1 channels", "mono"), ("2 channels", "stereo"), ("6 channels", "5.1"), ("8 channels", "7.1")],
+)
+def test_normalizes_count_only_layout_to_default_layout(count_only, expected):
+    normalized = _normalized_audio_layout(av.AudioLayout(count_only))
 
-    normalized = _normalized_audio_layout(layout)
-
-    assert normalized.name == "stereo"
-    assert [channel.name for channel in normalized.channels] == ["FL", "FR"]
+    assert normalized.name == expected
 
 
-@pytest.mark.parametrize("name", ["stereo", "5.1"])
+@pytest.mark.parametrize("name", ["stereo", "5.1", "9 channels"])
 def test_preserves_named_audio_layout(name):
     layout = av.AudioLayout(name)
 
@@ -314,6 +315,7 @@ class TestSourceContainerPreservation:
 
         encoder.dst = SimpleNamespace(
             format=SimpleNamespace(name="matroska"),
+            supported_codecs=frozenset({"aac", "ass", "h264"}),
             add_stream=MagicMock(),
             add_stream_from_template=MagicMock(side_effect=add_stream_from_template),
         )
