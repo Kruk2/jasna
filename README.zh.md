@@ -46,7 +46,7 @@ Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目�
 
 - NVIDIA **GTX 16 系列 / RTX 20 系列或更新**的 GPU。GTX 10 系列及更旧的显卡（GTX 1050/1060/1070/1080）无法使用。不确定自己的显卡？请查看 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus) — 需要计算能力 7.5 或更高。
 - Nvidia 驱动: Windows 需 **610 或更新**，Linux 需 **580 或更新**。
-- AMD 支持是实验性的，需要 ROCm 支持的 GPU。
+- AMD 支持是实验性的，需要 ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI 核显）。Windows 上请把 AMD Adrenalin 驱动更新到 26.8.1 或更高版本。
 - 请把 Jasna 安装到路径只包含英文字母和数字的文件夹中。
 
 Jasna 会自动管理 VRAM: 显存不足时，等待中的帧会临时移动到系统内存。无需任何配置。
