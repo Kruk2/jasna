@@ -104,3 +104,4 @@ after a driver update or when something misbehaves.
   If verification fails, check the exact purchase email or handle and paste the complete
   key again. Known unofficial keys get a separate warning. Existing keys still unlock
   UNet and SD; a newer LTX version needs an upgraded key for that version.
+  Updating Jasna does not change which models your key includes.
