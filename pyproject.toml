@@ -33,8 +33,8 @@ jasna = "jasna.main:main"
 
 [project.optional-dependencies]
 nvidia = [
-  "torch==2.12.0+cu130",
-  "torchvision==0.27.0+cu130",
+  "torch==2.12.1+cu130",
+  "torchvision==0.27.1+cu130",
   "tensorrt==10.16.1.11",
   "torch-tensorrt==2.12.0",
   "nvidia-vfx",
