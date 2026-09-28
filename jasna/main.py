@@ -14,6 +14,7 @@ from jasna.os_utils import (
     check_required_executables,
     check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
+    gpu_check_error,
 )
 from jasna.session_config import SessionConfig
 
@@ -555,11 +556,7 @@ def _check_system(args: argparse.Namespace) -> None:
 
     gpu_ok, gpu_result = check_supported_gpu(str(args.device))
     if not gpu_ok:
-        if gpu_result == "no_cuda":
-            print("Error: No compatible GPU was found for this Jasna build.")
-        else:
-            _, major, minor = gpu_result
-            print(f"Error: Compute capability 7.5+ required (GPU: {major}.{minor}).")
+        print(f"Error: {gpu_check_error(gpu_result)}")
         sys.exit(1)
 
     driver_ok, driver_info = check_gpu_driver_version()

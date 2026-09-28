@@ -1,6 +1,8 @@
 import sys
 import types
 
+import pytest
+
 from jasna import startup_timing
 from jasna.gui.system_checks import evaluate_check_results
 
@@ -36,27 +38,28 @@ def test_evaluate_sysmem_only_failure_is_warning_not_required():
     assert required_failure is False  # but sysmem is warning-only, not blocking
 
 
-def test_warm_up_cuda_inits_context_when_available(monkeypatch):
+def _warm_up_with_gpu_check(monkeypatch, gpu_check_result) -> dict:
+    from jasna import os_utils
+
     calls = {}
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(is_available=lambda: True),
-        zeros=lambda *a, **k: calls.setdefault("device", k.get("device")),
-    )
+    fake_torch = types.SimpleNamespace(zeros=lambda *a, **k: calls.setdefault("device", k.get("device")))
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: gpu_check_result)
     from jasna.gui.app import _warm_up_cuda
 
     _warm_up_cuda()
+    return calls
+
+
+def test_warm_up_cuda_inits_context_when_gpu_supported(monkeypatch):
+    calls = _warm_up_with_gpu_check(monkeypatch, (True, "RTX 4090"))
     assert calls["device"] == "cuda"
 
 
-def test_warm_up_cuda_skips_when_no_gpu(monkeypatch):
-    calls = {}
-    fake_torch = types.SimpleNamespace(
-        cuda=types.SimpleNamespace(is_available=lambda: False),
-        zeros=lambda *a, **k: calls.setdefault("called", True),
-    )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
-    from jasna.gui.app import _warm_up_cuda
-
-    _warm_up_cuda()
-    assert "called" not in calls
+@pytest.mark.parametrize(
+    "gpu_check_result",
+    [(False, "no_cuda"), (False, ("arch_unsupported", "gfx1103"))],
+)
+def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_check_result):
+    calls = _warm_up_with_gpu_check(monkeypatch, gpu_check_result)
+    assert calls == {}
