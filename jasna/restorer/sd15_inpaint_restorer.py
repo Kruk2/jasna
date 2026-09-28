@@ -47,7 +47,7 @@ def _read_checkpoint(model_dir: Path) -> dict:
 
 class Sd15InpaintRestorer:
     # AES-GCM subkey id — must match the id used by keytool encrypt-model that
-    # produced sd15-200000.ckpt.enc (verified against the shipped file: "sd-15-jav").
+    # produced the SD15 .enc checkpoint (verified against the shipped file: "sd-15-jav").
     MODEL_ID = "sd-15-jav"
     LATENT_SCALE = 0.18215
 
