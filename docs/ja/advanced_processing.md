@@ -118,6 +118,10 @@ jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 ```
 
+GUI では、ジョブの実行中でもこのアクションを変更したりオフにしたりできます。
+**PC をシャットダウン**の前に GUI は 60 秒のカウントダウンを表示します。
+PC をつけたままにするには **キャンセル** を押します。
+
 正常に書き出された各動画の後にコマンドを実行するには、**動画ごとのコマンド**を
 入力するか、`--post-export-video-command` を使います。Jasna はコマンドの完了を
 待機し、失敗した場合はその動画をエラーにします。パスのプレースホルダーは

@@ -20,7 +20,7 @@ from jasna.gui.branding import (
 )
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog, grab_modal
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog, ShutdownCountdownDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_WINDOW_SIZE = (1320, 960)
 _MIN_WINDOW_SIZE = (900, 580)
+_SHUTDOWN_COUNTDOWN_SECONDS = 60
 
 
 def _warm_up_cuda() -> None:
@@ -708,10 +709,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _on_processor_log(self, level: str, message: str):
         self._main_thread.post(lambda: self._log_panel.add_log(level, message))
         
-    def _on_processor_complete(self):
-        self._main_thread.post(self._handle_complete)
-        
-    def _handle_complete(self):
+    def _on_processor_complete(self, queue_finished: bool):
+        self._main_thread.post(lambda: self._handle_complete(queue_finished))
+
+    def _handle_complete(self, queue_finished: bool):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
         self._control_bar.set_completed(elapsed_seconds)
@@ -726,7 +727,32 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._queue_panel.set_running(False)
         except Exception:
             logger.warning("Failed to clear queue panel running state", exc_info=True)
-        
+        if queue_finished:
+            self._run_post_export_action()
+
+    def _run_post_export_action(self):
+        from jasna.post_export_action import (
+            POST_EXPORT_ACTION_NONE,
+            POST_EXPORT_ACTION_SHUTDOWN,
+            run_post_export_action_safely,
+        )
+
+        settings = self._settings_panel.get_settings()
+        action = settings.post_export_action
+        if action == POST_EXPORT_ACTION_NONE:
+            return
+        if action == POST_EXPORT_ACTION_SHUTDOWN:
+            self._log_panel.info(f"Shutting down in {_SHUTDOWN_COUNTDOWN_SECONDS} seconds")
+            ShutdownCountdownDialog(
+                self,
+                _SHUTDOWN_COUNTDOWN_SECONDS,
+                on_expired=lambda: run_post_export_action_safely(action, "", self._log_panel.error),
+                on_cancelled=lambda: self._log_panel.info("Shutdown cancelled by user"),
+            )
+            return
+        self._log_panel.info(f"Running post-export action: {action}")
+        run_post_export_action_safely(action, settings.post_export_command, self._log_panel.error)
+
     def _on_language_changed(self, code: str):
         locale = get_locale()
         if code == locale.current_language:

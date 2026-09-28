@@ -118,6 +118,9 @@ jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 ```
 
+In the GUI you can change or turn off this action while jobs are running. Before
+**Shutdown PC**, the GUI counts down 60 seconds; press **Cancel** to keep the PC on.
+
 To run a command after every successful video instead, fill **Command after
 each video** or use `--post-export-video-command`. Jasna waits for it to finish;
 if it fails, that video is marked as failed. The path placeholders are already

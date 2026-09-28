@@ -326,6 +326,8 @@ EN = {
         "post_export_shutdown": "Shutdown PC",
         "post_export_command": "Custom Command",
         "post_export_command_placeholder": "Command to run after all jobs finish",
+        "shutdown_countdown_title": "Shutting down",
+        "shutdown_countdown_message": "All jobs are done. The PC will shut down in {seconds} seconds.",
         "post_export_video_command": "Command after each video",
         "post_export_video_command_placeholder": "Optional command using {input} and {output}",
         
@@ -409,7 +411,7 @@ EN = {
         "tip_codec": "Output video format.\nH.264 (AVC): plays everywhere, larger files.\nHEVC (H.265): excellent quality at smaller file sizes.\nAV1: best compression, needs newer players; encoding requires a recent NVIDIA GPU generation.",
         "tip_encoder_cq": "Video quality target (CQ). The displayed number is sent unchanged to the encoder (AMD AV1 multiplies it by 5); lower numbers give better quality but larger files. Jasna may also limit output size, so nearby values can give the same result when that limit is reached.\nNVIDIA defaults: H.264 25, HEVC 28, AV1 35. Ranges: 1–51 for H.264/HEVC, 1–63 for AV1.\nAMD defaults: H.264 24, HEVC 25, AV1 32. Ranges: 0–51 for H.264/HEVC, 1–51 for AV1.",
         "tip_encoder_custom_args": "Advanced encoder parameters as comma-separated key=value pairs.\nLeave empty unless you know what you're doing.\n\nExample: rc-lookahead=32",
-        "tip_post_export_action": "Optional action after the whole queue finishes.\n\nNone: do nothing.\nShutdown PC: powers off the computer.\nCustom Command: runs the command below in the system shell.",
+        "tip_post_export_action": "Optional action after the whole queue finishes.\n\nNone: do nothing.\nShutdown PC: powers off the computer after a 60-second countdown you can cancel.\nCustom Command: runs the command below in the system shell.\n\nYou can change this while jobs are running.",
         "tip_post_export_video_command": "Runs in the system shell after each successful video export and waits for it to finish. Leave empty to disable. Paths are already quoted.\n\nPlaceholders: {input}, {output}, {output_dir}, {output_stem}, {output_suffix}",
         "tip_output_location": "Folder where processed videos are saved.\nLeave empty to save next to the original file.",
         "tip_output_pattern": "Filename template for output files.\nUse {original} as a placeholder for the input filename (without extension).\n\nExample: {original}_restored.mp4 → my_video_restored.mp4",
