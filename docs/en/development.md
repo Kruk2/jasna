@@ -171,6 +171,25 @@ CSVs are the only full record. `scripts/benchmark_releases.py` compares frozen
 release archives instead of the working tree, and
 `scripts/benchmark_lada_flatpak.py` refreshes the Lada baseline column.
 
+## Release licensing checklist
+
+Before publishing any platform archive:
+
+1. Set the same version in `pyproject.toml`, `jasna/__init__.py`, the git tag,
+   and `RELEASE_SOURCES.md`.
+2. Confirm `RELEASE_SOURCES.md` matches the PyAV, VALI, FFmpeg, Python, and
+   protection revisions used by the build.
+3. Verify the unpacked package contains `LICENSE`, `LICENSING.md`, `NOTICE`,
+   `RELEASE_SOURCES.md`, `assets/THIRD_PARTY_*.md`, and `licenses/`.
+4. Recalculate every bundled model hash and compare it with
+   `assets/THIRD_PARTY_MODELS.md`.
+5. Upload every archive part **and** its generated `.sha256` file to the same
+   GitHub release.
+
+The release builder copies maintained license texts plus the license files
+from all installed Python distributions. The public VALI fork is the source
+for Jasna's modified `python_vali` wheel.
+
 ## AMD release builds
 
 These scripts live in the private protection submodule and are for the
