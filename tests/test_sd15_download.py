@@ -25,6 +25,12 @@ class TestBundlePresent:
         (tmp_path / "unet" / "config.json").write_text("{}")
         assert dl.bundle_present(tmp_path) is False
 
+    def test_absent_with_only_retired_checkpoint(self, tmp_path: Path):
+        (tmp_path / "unet").mkdir()
+        (tmp_path / "unet" / "config.json").write_text("{}")
+        (tmp_path / "sd15-200000.ckpt.enc").write_bytes(b"x")
+        assert dl.bundle_present(tmp_path) is False
+
     def test_absent_without_config(self, tmp_path: Path):
         (tmp_path / SD15_CKPT_ENC_PATH.name).write_bytes(b"x")
         assert dl.bundle_present(tmp_path) is False
@@ -64,6 +70,16 @@ class TestDownloadBundle:
         kwargs = mock_snapshot.call_args.kwargs
         assert kwargs["local_dir"] == str(tmp_path)
         assert "tqdm_class" not in kwargs
+
+    def test_skips_retired_checkpoint_but_not_the_current_one(self, tmp_path: Path):
+        from fnmatch import fnmatch
+
+        with patch("huggingface_hub.snapshot_download") as mock_snapshot:
+            dl.download_sd15_bundle(tmp_path)
+
+        ignored = mock_snapshot.call_args.kwargs["ignore_patterns"]
+        assert any(fnmatch("sd15-200000.ckpt.enc", pattern) for pattern in ignored)
+        assert not any(fnmatch(SD15_CKPT_ENC_PATH.name, pattern) for pattern in ignored)
 
     def test_callback_uses_silent_byte_progress_class(self, tmp_path: Path):
         events: list[tuple[int, int | None]] = []

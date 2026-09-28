@@ -62,7 +62,7 @@ UNET4X_ONNX_ENC_PATH = model_weights_dir() / "unet-4x.onnx.enc"
 SD15_HF_REPO = "Kruk2/sd-15-jav"
 SD15_DIR = model_weights_dir() / "sd-15-jav"
 SD15_CKPT_PATH = SD15_DIR / "sd15-200000.ckpt"
-SD15_CKPT_ENC_PATH = SD15_DIR / "sd15-200000.ckpt.enc"
+SD15_CKPT_ENC_PATH = SD15_DIR / "sd15-200000.v2.ckpt.enc"
 
 
 def get_unet4x_engine_path(onnx_path: str | Path | None = None, fp16: bool = True) -> Path:

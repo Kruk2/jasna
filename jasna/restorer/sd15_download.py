@@ -10,6 +10,9 @@ from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH, SD15_HF_REPO
 
 logger = logging.getLogger(__name__)
 
+# Checkpoints encrypted under retired keys; they stay on the HF repo for older app versions.
+RETIRED_CKPT_ENC_NAMES = ["sd15-200000.ckpt.enc"]
+
 
 def bundle_present(model_dir: Path) -> bool:
     """True when a usable SD15 bundle already exists at ``model_dir``.
@@ -106,7 +109,12 @@ def download_sd15_bundle(
     from huggingface_hub import snapshot_download
 
     logger.info("Downloading SD15 bundle %s -> %s", repo_id, model_dir)
-    kwargs: dict[str, Any] = {"repo_id": repo_id, "repo_type": "model", "local_dir": str(model_dir)}
+    kwargs: dict[str, Any] = {
+        "repo_id": repo_id,
+        "repo_type": "model",
+        "local_dir": str(model_dir),
+        "ignore_patterns": RETIRED_CKPT_ENC_NAMES,
+    }
     if progress_callback is not None:
         kwargs["tqdm_class"] = _progress_tqdm_class(progress_callback)
     snapshot_download(**kwargs)
