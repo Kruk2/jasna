@@ -102,6 +102,5 @@ after a driver update or when something misbehaves.
   Keys are sold only on Buy Me a Coffee and Unifans (kruk2); keys from other
   sellers are fake and do not work.
   If verification fails, check the exact purchase email or handle and paste the complete
-  key again. Known unofficial keys get a separate warning. Existing keys still unlock
-  UNet and SD; a newer LTX version needs an upgraded key for that version.
+  key again. Known unofficial keys get a separate warning.
   Updating Jasna does not change which models your key includes.
