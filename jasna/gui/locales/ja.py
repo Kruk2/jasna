@@ -465,6 +465,7 @@ JA = {
         "wizard_found_major": "検出: {path}（major={major}）",
         "wizard_no_cuda": "対応 GPU なし",
         "wizard_gpu_compute_too_low": "Compute capability 7.5 以上が必要です（GPU: {major}.{minor}）",
+        "wizard_gpu_arch_unsupported": "この AMD GPU（{arch}）はこのバージョンの Jasna では使えません",
         "wizard_cuda_version": "CUDA {version}",
         "wizard_cuda_version_compute": "CUDA {version}、compute {major}.{minor}",
         "wizard_not_available": "利用不可",
