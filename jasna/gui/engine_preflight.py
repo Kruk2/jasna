@@ -36,11 +36,11 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
 
     from jasna.accelerator import is_amd_device
     from jasna.engine_paths import (
+        default_restoration_model_path,
         expected_unet4x_engine_path,
         get_basicvsrpp_sub_engine_paths,
         get_onnx_tensorrt_engine_path,
         get_yolo_tensorrt_engine_path,
-        model_weights_dir,
     )
     from jasna.mosaic.detection_registry import (
         coerce_detection_model_name,
@@ -93,7 +93,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
             )
         )
 
-    restoration_model_path = model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth"
+    restoration_model_path = default_restoration_model_path("basicvsrpp")
     if bool(settings.compile_basicvsrpp) and not amd:
         sub_paths = get_basicvsrpp_sub_engine_paths(str(restoration_model_path), bool(settings.fp16_mode))
         all_engine_paths = tuple(Path(p) for p in sub_paths.values())

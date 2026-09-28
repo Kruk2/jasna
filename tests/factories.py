@@ -25,7 +25,10 @@ def session_config(**overrides) -> SessionConfig:
         max_detection_gap=2,
         min_detection_duration=2,
         scene_detection=True,
+        restoration_model_name="basicvsrpp",
         restoration_model_path=Path("restore.pth"),
+        ltx_large_canvas=True,
+        ltx_seed=0,
         compile_basicvsrpp=True,
         max_clip_size=90,
         temporal_overlap=8,
@@ -63,6 +66,7 @@ def fake_session(*, device: torch.device, restoration_pipeline, detection_model=
     return SimpleNamespace(
         device=device,
         restoration_pipeline=restoration_pipeline,
+        ltx_files=None,
         detection_model_for=lambda config: detection_model,
     )
 

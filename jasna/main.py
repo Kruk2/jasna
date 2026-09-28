@@ -5,7 +5,7 @@ from pathlib import Path
 
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
-from jasna.engine_paths import model_weights_dir
+from jasna.engine_paths import default_restoration_model_path
 from jasna.media.probe import UnsupportedColorspaceError
 from jasna.os_utils import (
     MIN_DRIVER_VERSION,
@@ -16,7 +16,8 @@ from jasna.os_utils import (
     check_windows_nvidia_sysmem_fallback_policy,
     gpu_check_error,
 )
-from jasna.session_config import SessionConfig
+from jasna.session_config import LTX_DEFAULT_SEED, SessionConfig
+
 
 
 def _session_config_from_args(
@@ -40,7 +41,10 @@ def _session_config_from_args(
         max_detection_gap=int(args.max_detection_gap),
         min_detection_duration=int(args.min_detection_duration),
         scene_detection=bool(args.scene_detection),
+        restoration_model_name=str(args.restoration_model_name),
         restoration_model_path=restoration_model_path,
+        ltx_large_canvas=bool(args.ltx_large_canvas),
+        ltx_seed=int(args.ltx_seed),
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
         temporal_overlap=int(args.temporal_overlap),
@@ -190,14 +194,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--restoration-model-name",
         type=str,
         default="basicvsrpp",
-        choices=["basicvsrpp"],
-        help='Restoration model for video input (only "basicvsrpp" supported for now).',
+        choices=["basicvsrpp", "ltx"],
+        help=CLI_HELP["restoration_model_name"],
     )
     restoration.add_argument(
         "--restoration-model-path",
         type=str,
-        default=str(model_weights_dir() / "lada_mosaic_restoration_model_generic_v1.2.pth"),
-        help="Path to restoration model (default: %(default)s)",
+        default=None,
+        help=CLI_HELP["restoration_model_path"],
+    )
+    restoration.add_argument(
+        "--ltx-large-canvas",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help=CLI_HELP["ltx_large_canvas"],
+    )
+    restoration.add_argument(
+        "--ltx-seed",
+        type=int,
+        default=LTX_DEFAULT_SEED,
+        help=CLI_HELP["ltx_seed"],
     )
     restoration.add_argument(
         "--compile-basicvsrpp",
@@ -838,7 +854,14 @@ def main() -> None:
         str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
     )
 
-    restoration_model_path = Path(args.restoration_model_path)
+    if args.restoration_model_name == "ltx":
+        if is_streaming or segments_spec:
+            parser.error("--restoration-model-name ltx does not support --stream or --segments")
+        if args.secondary_restoration != "none" or args.denoise != "none":
+            parser.error("--restoration-model-name ltx does not support --secondary-restoration or --denoise")
+    restoration_model_path = Path(
+        args.restoration_model_path or default_restoration_model_path(args.restoration_model_name)
+    )
     if not restoration_model_path.exists():
         raise FileNotFoundError(str(restoration_model_path))
 

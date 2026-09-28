@@ -96,6 +96,9 @@ class Pipeline:
         self.vr_projection = config.vr_projection
         self.detection_model = session.detection_model_for(config)
         self.restoration_pipeline = session.restoration_pipeline
+        self.ltx_files = session.ltx_files
+        self.ltx_large_canvas = config.ltx_large_canvas
+        self.ltx_seed = config.ltx_seed
         self.disable_progress = config.disable_progress
         self.progress_callback = progress_callback
         self.lut_path = config.lut_path
@@ -203,9 +206,7 @@ class Pipeline:
                 "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
             )
 
-    def _run_full(
-        self, metadata, *, effect_ranges: tuple[tuple[int, int], ...] | None = None
-    ) -> None:
+    def _resolve_frame_rate(self, metadata):
         frame_rate = resolve_frame_rate_retarget(
             metadata.video_fps_exact,
             enabled=self.retarget_high_fps,
@@ -230,19 +231,15 @@ class Pipeline:
                 "Frame-rate retargeting requested, but %s fps is not a supported source rate; keeping source rate",
                 frame_rate.source_fps,
             )
-        output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
-        progress = Progressbar(
-            total_frames=output_frame_count,
-            video_fps=float(frame_rate.output_fps),
-            disable=self.disable_progress,
-            callback=self.progress_callback,
-        )
+        return frame_rate
+
+    def _video_encoder(self, metadata, frame_rate) -> VideoEncoder:
         if self.fmp4 and self.output_video.suffix.lower() not in MOV_SUFFIXES:
             log.info(
                 "Fragmented MP4 has no effect on %s output; it is already playable while it grows",
                 self.output_video.suffix,
             )
-        encoder_ctx = VideoEncoder(
+        return VideoEncoder(
             str(self.output_video),
             device=self.device,
             metadata=metadata,
@@ -253,6 +250,19 @@ class Pipeline:
             output_fps=frame_rate.output_fps,
             fmp4=self.fmp4,
         )
+
+    def _run_full(
+        self, metadata, *, effect_ranges: tuple[tuple[int, int], ...] | None = None
+    ) -> None:
+        frame_rate = self._resolve_frame_rate(metadata)
+        output_frame_count = frame_rate.output_frame_count(metadata.num_frames)
+        progress = Progressbar(
+            total_frames=output_frame_count,
+            video_fps=float(frame_rate.output_fps),
+            disable=self.disable_progress,
+            callback=self.progress_callback,
+        )
+        encoder_ctx = self._video_encoder(metadata, frame_rate)
         try:
             self._run_pass(
                 metadata=metadata,
@@ -263,6 +273,43 @@ class Pipeline:
             )
         finally:
             progress.close(ensure_completed_bar=True)
+
+    def _run_ltx(self, metadata) -> None:
+        from jasna.ltx.restore import Cancelled, Progress, restore_video
+        from jasna.media.video_decoder import VideoReader
+
+        if self.vr_resolution.is_sbs:
+            raise ValueError("LTX restoration does not support VR180 side-by-side video")
+        frame_rate = self._resolve_frame_rate(metadata)
+        writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate), [time.monotonic()])
+
+        def frames():
+            with VideoReader(
+                str(self.input_video), self.batch_size, self.device, metadata, frame_stride=frame_rate.frame_stride
+            ) as reader:
+                yield from reader.frames(None)
+
+        try:
+            restore_video(
+                frames,
+                writer.write,
+                detector=self.job_detection_model,
+                files=self.ltx_files,
+                frame_h=int(metadata.video_height),
+                frame_w=int(metadata.video_width),
+                large_canvas=self.ltx_large_canvas,
+                seed=self.ltx_seed,
+                device=self.device,
+                work_dir=self.working_dir or self.output_video.parent,
+                progress=Progress(
+                    frames=frame_rate.output_frame_count(metadata.num_frames), disable=self.disable_progress
+                ),
+                cancel=self._cancel_event,
+            )
+        except Cancelled:
+            log.info("LTX restoration cancelled")
+        finally:
+            writer.close()
 
     def _run_smart(self, metadata) -> None:
         codec = validate_smart_render(
@@ -390,7 +437,9 @@ class Pipeline:
         metadata = get_video_meta_data(str(self.input_video))
         self.validate_metadata(metadata)
         self.configure_vr(metadata)
-        if self.segments:
+        if self.ltx_files is not None:
+            self._run_ltx(metadata)
+        elif self.segments:
             if self.fmp4:
                 log.warning(
                     "Fragmented MP4 is not available with segment processing; "

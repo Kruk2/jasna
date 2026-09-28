@@ -11,6 +11,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Mapping
 
+RestorationModelName = Literal["basicvsrpp", "ltx"]
+
+LTX_DEFAULT_SEED = 20260923
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 DenoiseStepName = Literal["after_primary", "after_secondary"]
@@ -32,7 +35,10 @@ class SessionConfig:
     max_detection_gap: int
     min_detection_duration: int
     scene_detection: bool
+    restoration_model_name: RestorationModelName
     restoration_model_path: Path
+    ltx_large_canvas: bool
+    ltx_seed: int
     compile_basicvsrpp: bool
     max_clip_size: int
     temporal_overlap: int
