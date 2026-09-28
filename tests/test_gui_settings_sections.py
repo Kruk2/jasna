@@ -383,3 +383,14 @@ def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty() -> None:
     assert captured["to"] == 720
     assert (captured["to"] - captured["from_"]) % captured["number_of_steps"] == 0
     assert (captured["to"] - captured["from_"]) // captured["number_of_steps"] == 10
+
+
+def test_only_queue_wide_post_export_action_stays_editable_while_processing(_basic_section_panel) -> None:
+    panel, _basic = _basic_section_panel
+
+    panel.set_enabled(False)
+
+    assert panel._widgets["post_export_action"].cget("state") == "normal"
+    assert panel._widgets["post_export_command"].cget("state") == "normal"
+    assert panel._widgets["post_export_video_command"].cget("state") == "disabled"
+    assert panel._widgets["max_clip_size"].cget("state") == "disabled"

@@ -588,3 +588,62 @@ class ConfirmDialog(ctk.CTkToplevel):
     def _do_confirm(self):
         self._on_confirm()
         self.destroy()
+
+
+class ShutdownCountdownDialog(ctk.CTkToplevel):
+    """Counts down before shutting the PC down; Cancel or closing the window aborts it."""
+
+    def __init__(self, master, seconds: int, on_expired, on_cancelled):
+        super().__init__(master)
+        self._remaining = seconds
+        self._on_expired = on_expired
+        self._on_cancelled = on_cancelled
+
+        self.title(t("shutdown_countdown_title"))
+        self.configure(fg_color=Colors.BG_MAIN)
+        self.resizable(False, False)
+        self.transient(master)
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        self._message = ctk.CTkLabel(
+            content,
+            text=t("shutdown_countdown_message", seconds=seconds),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text_color=Colors.TEXT_PRIMARY,
+            wraplength=280,
+        )
+        self._message.pack(pady=(0, 16))
+        self.cancel_button = ctk.CTkButton(
+            content,
+            text=t("btn_cancel"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color=Colors.BG_CARD,
+            hover_color=Colors.BORDER_LIGHT,
+            text_color=Colors.TEXT_PRIMARY,
+            command=self.cancel,
+        )
+        self.cancel_button.pack()
+
+        self.update_idletasks()
+        minimum_width, _ = scaling.to_physical(self, 320, 0)
+        scaling.place_centered_on_parent(
+            self, master, max(minimum_width, self.winfo_reqwidth()), self.winfo_reqheight()
+        )
+        grab_modal(self)
+        self._tick_id = self.after(1000, self._tick)
+
+    def _tick(self):
+        self._remaining -= 1
+        if self._remaining > 0:
+            self._message.configure(text=t("shutdown_countdown_message", seconds=self._remaining))
+            self._tick_id = self.after(1000, self._tick)
+            return
+        self.destroy()
+        self._on_expired()
+
+    def cancel(self):
+        self.after_cancel(self._tick_id)
+        self.destroy()
+        self._on_cancelled()
