@@ -1,0 +1,19 @@
+Jasna
+Copyright 2026 Kruk2 and contributors
+
+Except where an individual file or bundled component states otherwise, Jasna
+is licensed under the GNU Affero General Public License version 3.0. The full
+license is in LICENSE.
+
+Jasna incorporates or distributes work from Lada, OpenMMLab MMagic,
+Roboflow RF-DETR, PyAV, VALI, FFmpeg, VideoLAN, Python, and other projects.
+Their copyright, attribution, source, and license information is retained in:
+
+- LICENSING.md
+- RELEASE_SOURCES.md
+- assets/THIRD_PARTY_LICENSES.md
+- assets/THIRD_PARTY_MODELS.md
+- assets/licenses/
+
+Official binary packages also contain license files collected from the exact
+installed Python distributions under licenses/python-packages/.

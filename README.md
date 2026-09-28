@@ -22,6 +22,7 @@ Jasna is free. Supporters get a key that unlocks the extra models trained for th
 - [First Run](#first-run)
 - [Learn More](#learn-more)
 - [Benchmarks](#benchmarks)
+- [Licensing](#licensing)
 - [Supporting the Project](#supporting-the-project)
 - [Acknowledgments](#acknowledgments)
 - [TODO](#todo)
@@ -145,6 +146,13 @@ the [full benchmark report](benchmarks/2026-07-26_release_matrix.md).
 
 Older full-length video results are in the
 [legacy benchmark report](benchmarks/2026-07-26_legacy_videos.md).
+
+## Licensing
+
+Jasna's public application source is AGPL-3.0. Models and bundled dependencies
+retain their own terms. See [licensing and source availability](LICENSING.md),
+[model notices](assets/THIRD_PARTY_MODELS.md), and the
+[release source correspondence](RELEASE_SOURCES.md).
 
 ## Supporting the Project
 
