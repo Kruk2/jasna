@@ -163,6 +163,7 @@ Support pays for training extra models, mainly GPU rental and compute time for l
 
 Existing keys keep unlocking these models in v0.11. LTX versions require an upgraded key
 for the requested version; ask your official seller about eligibility.
+Updating Jasna does not add or remove the models included in your key.
 
 Example results:
 

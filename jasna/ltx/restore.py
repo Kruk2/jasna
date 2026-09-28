@@ -24,6 +24,7 @@ from tqdm import tqdm
 
 from jasna.ltx.camera import WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
+from jasna.ltx.model_files import LtxModelFiles
 from jasna.ltx.plan import Region, TrackPlan, Window, crossfade_weights, feather_pixels, plan_video
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
@@ -34,25 +35,6 @@ logger = logging.getLogger(__name__)
 
 FrameBatches = Iterator[tuple[torch.Tensor, list[int]]]
 FrameSource = Callable[[], FrameBatches]
-
-
-@dataclass(frozen=True)
-class LtxModelFiles:
-    transformer: Path
-    vae: Path
-    tuned_decoder: Path
-
-    @classmethod
-    def from_dir(cls, directory: Path) -> LtxModelFiles:
-        files = cls(
-            transformer=directory / "transformer.safetensors",
-            vae=directory / "vae.safetensors",
-            tuned_decoder=directory / "vae-decoder.safetensors",
-        )
-        missing = [str(path) for path in (files.transformer, files.vae, files.tuned_decoder) if not path.is_file()]
-        if missing:
-            raise FileNotFoundError(f"LTX model files missing: {', '.join(missing)}")
-        return files
 
 
 class Cancelled(Exception):

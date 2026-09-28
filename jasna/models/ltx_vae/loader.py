@@ -7,11 +7,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
 
-import safetensors
 import torch
-from safetensors.torch import load_file
 from torch import nn
 
+from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.video_encoder import VideoEncoder
 
@@ -25,7 +24,7 @@ _Model = TypeVar("_Model", bound=nn.Module)
 
 
 def read_vae_config(vae_path: Path) -> dict:
-    with safetensors.safe_open(str(vae_path), framework="pt") as handle:
+    with open_tensors(vae_path) as handle:
         config = json.loads(handle.metadata()["config"])["vae"]
     if config.get("_class_name") != _VAE_CLASS_NAME:
         raise ValueError(f"{vae_path}: VAE class {config.get('_class_name')!r} is not supported")
@@ -78,7 +77,7 @@ def decoder_kwargs(config: dict) -> dict:
 
 
 def _read_tensors(path: Path, prefixes: tuple[str, ...]) -> dict[str, torch.Tensor]:
-    with safetensors.safe_open(str(path), framework="pt", device="cpu") as handle:
+    with open_tensors(path) as handle:
         return {key: handle.get_tensor(key) for key in handle.keys() if key.startswith(prefixes)}
 
 
@@ -142,7 +141,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
     state = decoder_state_dict(_read_tensors(vae_path, ("decoder.", "per_channel_statistics.")))
     decoder = _build_bf16(lambda: DiffusionVideoDecoder(**kwargs), state, device)
 
-    tuned = load_file(str(tuned_decoder_path))
+    tuned = _read_tensors(tuned_decoder_path, ("",))
     own = decoder.state_dict()
     unknown = sorted(set(tuned) - set(own))
     if unknown:

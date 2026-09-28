@@ -19,7 +19,7 @@ from jasna.session_config import SessionConfig
 if TYPE_CHECKING:
     import torch
 
-    from jasna.ltx.restore import LtxModelFiles
+    from jasna.ltx.model_files import LtxModelFiles
     from jasna.media.splice import SplicePlan
     from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
     from jasna.mosaic.yolo import YoloMosaicDetectionModel
@@ -201,12 +201,13 @@ def _build_ltx_session(
 ) -> RestorationSession:
     from jasna.accelerator import is_nvidia_device
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
-    from jasna.ltx.restore import LtxModelFiles
+    from jasna.ltx.model_files import LtxModelFiles
 
     if not is_nvidia_device(device):
         raise ValueError("LTX restoration needs an NVIDIA GPU")
     if config.secondary_restoration != "none" or config.denoise_strength != "none":
         raise ValueError("LTX restoration does not support secondary restoration or denoise")
+    files = LtxModelFiles.from_dir(config.restoration_model_path)
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
@@ -221,7 +222,7 @@ def _build_ltx_session(
     return RestorationSession(
         device=device,
         restoration_pipeline=None,
-        ltx_files=LtxModelFiles.from_dir(config.restoration_model_path),
+        ltx_files=files,
     )
 
 

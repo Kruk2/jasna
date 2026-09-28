@@ -15,10 +15,10 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import torch
-from safetensors import safe_open
 
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore
+from jasna.ltx.model_files import open_tensors
 from jasna.ltx.plan import FUSION_RAMP, LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENTS
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class LtxTransformer:
     def __init__(self, path: Path, device: torch.device, *, sigmas: Sequence[float] = LOWTAIL15_SIGMAS) -> None:
         self.device = device
         self.sigmas = torch.tensor(sigmas, dtype=torch.float32)
-        with safe_open(str(path), framework="pt", device="cpu") as handle:
+        with open_tensors(path) as handle:
             keys = list(handle.keys())
             top_keys = [k for k in keys if not k.startswith("blocks.") and k != "prompt_context"]
             top = {k: handle.get_tensor(k).to(device) for k in top_keys}
