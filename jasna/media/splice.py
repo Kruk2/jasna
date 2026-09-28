@@ -635,7 +635,7 @@ def mux_final_output(
         ]
         for output_index, stream in enumerate(audio_streams):
             name = stream.codec_context.name
-            if needs_audio_reencode(name, destination.suffix):
+            if needs_audio_reencode(name, destination.suffix, supported_codecs):
                 args += [f"-c:a:{output_index}", "aac", f"-b:a:{output_index}", "256k"]
             else:
                 args += [f"-c:a:{output_index}", "copy"]

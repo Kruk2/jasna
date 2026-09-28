@@ -375,8 +375,9 @@ def _mov_container_options(suffix: str, *, fmp4: bool) -> dict[str, str]:
 
 
 def _normalized_audio_layout(layout: av.AudioLayout) -> av.AudioLayout:
-    if layout.name == "2 channels":
-        return av.AudioLayout("stereo")
+    channels = layout.nb_channels
+    if layout.name == f"{channels} channels" and channels <= 8:
+        return av.AudioLayout(f"{channels}c")
     return layout
 
 
@@ -662,7 +663,9 @@ class VideoEncoder:
                 else None
             )
             if in_stream.type == "audio" and needs_audio_reencode(
-                in_stream.codec_context.name, self.output_path.suffix
+                in_stream.codec_context.name,
+                self.output_path.suffix,
+                self.dst.supported_codecs,
             ):
                 logger.info(
                     "re-encoding audio %s -> aac for %s",
@@ -852,7 +855,11 @@ class VideoEncoder:
             packet.time_base = output_time_base
             return [packet]
         out_packets = []
+        sample_time_base = Fraction(1, out_stream.codec_context.sample_rate)
         for aframe in in_packet.decode():
+            if aframe.pts is not None:
+                aframe.pts = round(aframe.pts * aframe.time_base / sample_time_base)
+            aframe.time_base = sample_time_base
             for rframe in processor.resample(aframe):
                 out_packets.extend(out_stream.encode(rframe))
         return out_packets
