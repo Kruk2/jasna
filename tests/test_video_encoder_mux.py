@@ -446,8 +446,34 @@ def test_count_only_stereo_pcm_copies_to_mp4_with_explicit_layout(tmp_path):
     assert data.index(b"moov") < data.index(b"mdat")
 
 
+@pytest.mark.parametrize("suffix", [".mkv", ".mp4"])
+def test_wma_audio_the_container_cannot_hold_is_reencoded_to_aac(tmp_path, suffix):
+    src = _make_source(tmp_path, "src.avi", acodec="wmav2")
+    dst = tmp_path / f"out{suffix}"
+    _transcode(src, dst)
+
+    with av.open(str(dst)) as c:
+        assert len(c.streams.audio) == 1
+        a = c.streams.audio[0]
+        assert a.codec_context.name == "aac"
+        assert a.codec_context.layout.name == "mono"
+        packet_times = [
+            float(packet.pts * a.time_base)
+            for packet in c.demux(a)
+            if packet.pts is not None
+        ]
+        c.seek(0)
+        samples = sum(frame.samples for frame in c.decode(a))
+    aac_frame_seconds = 1024 / a.codec_context.sample_rate
+    assert samples / a.codec_context.sample_rate == pytest.approx(2.0, abs=0.2)
+    assert all(
+        later - earlier == pytest.approx(aac_frame_seconds, abs=0.002)
+        for earlier, later in zip(packet_times, packet_times[1:])
+    )
+
+
 def test_audio_reencoded_when_incompatible(tmp_path):
-    assert needs_audio_reencode("vorbis", ".mp4")
+    assert needs_audio_reencode("vorbis", ".mp4", {"vorbis", "aac"})
     src = _make_source(tmp_path, "src.mkv", acodec="libvorbis")
     dst = tmp_path / "out.mp4"
     _transcode(src, dst)
