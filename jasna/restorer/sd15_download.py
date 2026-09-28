@@ -11,7 +11,7 @@ from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH, SD15_HF_REPO
 logger = logging.getLogger(__name__)
 
 # Checkpoints encrypted under retired keys; they stay on the HF repo for older app versions.
-RETIRED_CKPT_ENC_NAMES = ["sd15-200000.ckpt.enc"]
+RETIRED_CKPT_ENC_NAMES = ["sd15-200000.v2.ckpt.enc", "sd15-200000.v2.ckpt.enc.manifest.json"]
 
 
 def bundle_present(model_dir: Path) -> bool:
