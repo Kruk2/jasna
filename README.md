@@ -161,9 +161,6 @@ Support pays for training extra models, mainly GPU rental and compute time for l
 - **unet-4x** secondary upscaler for sharper 256->1024 restoration.
 - **SD 1.5 image restoration**, the experimental still-image model.
 
-Existing keys keep unlocking these models in v0.11. LTX versions require an upgraded key
-for the requested version; ask your official seller about eligibility.
-
 Example results:
 
 - [unet-4x / secondary restoration examples on SLS Discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260)
