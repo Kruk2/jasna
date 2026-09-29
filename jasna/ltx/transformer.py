@@ -21,6 +21,7 @@ import importlib.util
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -104,11 +105,16 @@ def quantize_rows(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 def int8_linear(
     x: torch.Tensor, qdata: torch.Tensor, scales: torch.Tensor, bias: torch.Tensor | None
 ) -> torch.Tensor:
-    """ConvRot W8A8: rotate, quantize per token, INT8 tensor-core GEMM, rescale.
-    Rows run in chunks of ``CHUNK_ROWS``; every step is per row, so chunking only caps
-    the fp32/int32 temporaries."""
+    """ConvRot W8A8: rotate, quantize per token, INT8 tensor-core GEMM, rescale. With the
+    Triton kernels on, one fused quantize pass and one GEMM with the rescale in its epilogue;
+    otherwise rows run in chunks of ``CHUNK_ROWS`` (every step is per row, so chunking only
+    caps the fp32/int32 temporaries)."""
     out_features, in_features = qdata.shape
     flat = x.reshape(-1, in_features)
+    if _quant_kernels is not None and x.is_cuda:
+        codes, act_scales = _quant_kernels.int8_rotate_quantize(flat)
+        out = _quant_kernels.int8_scaled_mm(codes, act_scales, qdata, scales, bias, False)
+        return out.reshape(*x.shape[:-1], out_features)
     out = torch.empty(flat.shape[0], out_features, dtype=x.dtype, device=x.device)
     for start in range(0, flat.shape[0], CHUNK_ROWS):
         chunk = flat[start : start + CHUNK_ROWS]
@@ -158,6 +164,30 @@ def quantize_fp4(x: torch.Tensor, tensor_scale: torch.Tensor) -> tuple[torch.Ten
     return packed, swizzle_block_scales(block_scales)
 
 
+def _fp4_mm(
+    packed: torch.Tensor,
+    act_blocks: torch.Tensor,
+    act_scale: torch.Tensor,
+    weight: torch.Tensor,
+    block_scales: torch.Tensor,
+    tensor_scale: torch.Tensor,
+    bias: torch.Tensor | None,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    return F.scaled_mm(
+        packed.view(torch.float4_e2m1fn_x2),
+        weight.view(torch.float4_e2m1fn_x2).t(),
+        scale_a=[act_blocks, act_scale.reshape(1)],
+        scale_recipe_a=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+        scale_b=[block_scales, tensor_scale.reshape(1)],
+        scale_recipe_b=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+        swizzle_a=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+        swizzle_b=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+        bias=bias,
+        output_dtype=dtype,
+    )
+
+
 def nvfp4_linear(
     x: torch.Tensor,
     weight: torch.Tensor,
@@ -170,22 +200,17 @@ def nvfp4_linear(
     covers whole pairs, so the order only permutes each dot product's terms."""
     out_features = weight.shape[0]
     flat = x.reshape(-1, weight.shape[1] * 2)
-    out = torch.empty(flat.shape[0], out_features, dtype=x.dtype, device=x.device)
     act_scale = fp4_tensor_scale(flat)
+    if _quant_kernels is not None and x.is_cuda:
+        packed, act_blocks = _quant_kernels.quantize_fp4(flat, act_scale)
+        out = _fp4_mm(packed, act_blocks, act_scale, weight, block_scales, tensor_scale, bias, x.dtype)
+        return out.reshape(*x.shape[:-1], out_features)
+    out = torch.empty(flat.shape[0], out_features, dtype=x.dtype, device=x.device)
     for start in range(0, flat.shape[0], CHUNK_ROWS):
         chunk = flat[start : start + CHUNK_ROWS]
         packed, act_blocks = quantize_fp4(chunk, act_scale)
-        out[start : start + chunk.shape[0]] = F.scaled_mm(
-            packed.view(torch.float4_e2m1fn_x2),
-            weight.view(torch.float4_e2m1fn_x2).t(),
-            scale_a=[act_blocks, act_scale.reshape(1)],
-            scale_recipe_a=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
-            scale_b=[block_scales, tensor_scale.reshape(1)],
-            scale_recipe_b=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
-            swizzle_a=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
-            swizzle_b=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
-            bias=bias,
-            output_dtype=x.dtype,
+        out[start : start + chunk.shape[0]] = _fp4_mm(
+            packed, act_blocks, act_scale, weight, block_scales, tensor_scale, bias, x.dtype
         )
     return out.reshape(*x.shape[:-1], out_features)
 
@@ -198,6 +223,75 @@ def linear(w: Weights, name: str, x: torch.Tensor) -> torch.Tensor:
     if weight.dtype == torch.uint8:
         return nvfp4_linear(x, weight, w[f"{name}.weight_scale"], w[f"{name}.weight_scale_2"], bias)
     return F.linear(x, weight, bias)
+
+
+def gelu_linear(w: Weights, name: str, x: torch.Tensor) -> torch.Tensor:
+    """``gelu_tanh(linear(...))``; the GELU runs in the int8 GEMM's epilogue when the Triton
+    kernels are on."""
+    if _quant_kernels is not None and x.is_cuda and f"{name}.qdata" in w:
+        qdata = w[f"{name}.qdata"]
+        codes, act_scales = _quant_kernels.int8_rotate_quantize(x.reshape(-1, qdata.shape[1]))
+        out = _quant_kernels.int8_scaled_mm(codes, act_scales, qdata, w[f"{name}.scales"], w.get(f"{name}.bias"), True)
+        return out.reshape(*x.shape[:-1], qdata.shape[0])
+    return F.gelu(linear(w, name, x), approximate="tanh")
+
+
+_quant_kernels = None
+
+
+def enable_quant_kernels(device: torch.device) -> bool:
+    """Route the INT8 and NVFP4 linears through the fused Triton kernels (``kernels.py``,
+    tuned on consumer Blackwell, SM 12.x) as opaque ops, so they compile as calls. Returns
+    whether they are in use."""
+    global _quant_kernels
+    if (
+        _quant_kernels is None
+        and device.type == "cuda"
+        and torch.version.cuda is not None
+        and torch.cuda.get_device_capability(device)[0] == 12
+        and importlib.util.find_spec("triton") is not None
+    ):
+        from jasna.ltx import kernels
+
+        @torch.library.custom_op("jasna::int8_rotate_quantize", mutates_args=())
+        def int8_rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return kernels.rotate_quantize(x.contiguous())
+
+        @int8_rotate_quantize.register_fake
+        def _(x):
+            return x.new_empty(x.shape, dtype=torch.int8), x.new_empty(x.shape[0], dtype=torch.float32)
+
+        @torch.library.custom_op("jasna::int8_scaled_mm", mutates_args=())
+        def int8_scaled_mm(
+            codes: torch.Tensor,
+            act_scales: torch.Tensor,
+            qdata: torch.Tensor,
+            scales: torch.Tensor,
+            bias: torch.Tensor | None,
+            gelu: bool,
+        ) -> torch.Tensor:
+            return kernels.int8_scaled_mm(codes, act_scales, qdata, scales, bias, gelu)
+
+        @int8_scaled_mm.register_fake
+        def _(codes, act_scales, qdata, scales, bias, gelu):
+            return codes.new_empty(codes.shape[0], qdata.shape[0], dtype=torch.bfloat16)
+
+        @torch.library.custom_op("jasna::quantize_fp4", mutates_args=())
+        def quantize_fp4_op(x: torch.Tensor, tensor_scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            return kernels.quantize_fp4(x.contiguous(), tensor_scale)
+
+        @quantize_fp4_op.register_fake
+        def _(x, tensor_scale):
+            rows, k = x.shape
+            return (
+                x.new_empty(rows, k // 2, dtype=torch.uint8),
+                x.new_empty(-(-rows // 128) * 128, -(-(k // FP4_BLOCK) // 4) * 4, dtype=torch.float8_e4m3fn),
+            )
+
+        _quant_kernels = SimpleNamespace(
+            int8_rotate_quantize=int8_rotate_quantize, int8_scaled_mm=int8_scaled_mm, quantize_fp4=quantize_fp4_op
+        )
+    return _quant_kernels is not None
 
 
 _sage_attention = None
@@ -399,7 +493,7 @@ def block_forward(
     ff_in = _modulate(rms_norm(x), ada[:, :, 3], ada[:, :, 4])
     ff_out = torch.empty_like(ff_in)
     for start in range(0, ff_in.shape[1], CHUNK_ROWS):
-        hidden = F.gelu(linear(w, "ff.net.0.proj", ff_in[:, start : start + CHUNK_ROWS]), approximate="tanh")
+        hidden = gelu_linear(w, "ff.net.0.proj", ff_in[:, start : start + CHUNK_ROWS])
         ff_out[:, start : start + CHUNK_ROWS] = linear(w, "ff.net.2", hidden)
     return x + _gate(ff_out, ada[:, :, 5])
 
