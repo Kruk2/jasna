@@ -113,15 +113,13 @@ def crop_edge_ramp(box: tuple[int, int, int, int], shape: tuple[int, int], feath
 
 
 def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tuple[int, int], device: torch.device) -> torch.Tensor:
-    """Bool ``[h, w]`` fill of ``polygons`` inside the region at ``offset`` (x, y)."""
+    """Bool ``[h, w]`` union of ``polygons`` inside the region at ``offset`` (x, y)."""
     mask = np.zeros(shape, dtype=np.uint8)
-    contours = [
-        (np.asarray(polygon, dtype=np.float32).round().astype(np.int32) - np.asarray(offset, dtype=np.int32))
-        for polygon in polygons
-        if len(polygon) >= 3
-    ]
-    if contours:
-        cv2.fillPoly(mask, contours, 255)
+    for polygon in polygons:
+        if len(polygon) >= 3:
+            contour = np.asarray(polygon, dtype=np.float32).round().astype(np.int32) - np.asarray(offset, dtype=np.int32)
+            # One fillPoly call per polygon: a single call uses the even-odd rule and punches holes where polygons overlap.
+            cv2.fillPoly(mask, [contour], 255)
     return torch.from_numpy(mask).to(device) > 0
 
 

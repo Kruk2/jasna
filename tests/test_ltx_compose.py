@@ -3,7 +3,14 @@ import numpy as np
 import torch
 
 from jasna.ltx.camera import letterbox
-from jasna.ltx.compose import Candidate, canvas_to_source, composite_frame, crop_to_canvas, feather_alpha
+from jasna.ltx.compose import (
+    Candidate,
+    canvas_to_source,
+    composite_frame,
+    crop_to_canvas,
+    feather_alpha,
+    polygon_mask,
+)
 
 
 def _frame(seed: int = 0) -> torch.Tensor:
@@ -48,6 +55,15 @@ def test_composite_touches_only_the_feathered_mask():
     assert changed[230, 330]
     assert xs.min() >= 300 - 2 * 8 - 1 and xs.max() <= 360 + 2 * 8 + 1
     assert ys.min() >= 200 - 2 * 8 - 1 and ys.max() <= 260 + 2 * 8 + 1
+
+
+def test_polygon_mask_is_the_union_of_overlapping_polygons():
+    outer = [[0.0, 0.0], [99.0, 0.0], [99.0, 99.0], [0.0, 99.0]]
+    nested = [[20.0, 20.0], [60.0, 20.0], [60.0, 60.0], [20.0, 60.0]]
+    crossing = [[50.0, 50.0], [150.0, 50.0], [150.0, 150.0], [50.0, 150.0]]
+    mask = polygon_mask([outer, nested, crossing], (160, 160), (0, 0), torch.device("cpu"))
+    assert mask[40, 40] and mask[55, 55] and mask[80, 80] and mask[140, 140]
+    assert mask.sum() == 100 * 100 + 101 * 101 - 50 * 50
 
 
 def test_zero_weight_and_no_candidates_keep_the_source():
