@@ -161,6 +161,21 @@ downstream. The other encodings do carry the decode-path signal — H.264 is
 nearly flat across decode backends while AV1 and HEVC 10-bit spread ~19 % — so
 pass `--codecs` when the change is in decode, encode or pixel-format code.
 
+LTX denoise (about 80 % of an LTX run) has its own script. It uses the trial's
+random weights, which run at the same speed as the real model:
+
+```bash
+P=~/.virtualenvs/jasna-linux/bin/python
+$P scripts/benchmark_ltx_denoise.py --model undistilled --csv benchmarks/scratch/ltx.csv  # ~8 min
+$P scripts/benchmark_ltx_denoise.py --fast --canvas 768 --csv benchmarks/scratch/ltx.csv
+$P scripts/benchmark_ltx_denoise.py --profile        # kernel-time split of one step
+$P scripts/benchmark_ltx_denoise.py --fresh-cache    # time autotuning on an empty cache
+$P scripts/benchmark_ltx_denoise.py --inductor force_fuse_int_mm_with_mul=True --label fuse
+```
+
+It reports seconds per window and per window-step (the median of `--repeats`),
+the compile time and the peak VRAM.
+
 Write results to `benchmarks/<date>_<topic>.{csv,md}` and keep old CSVs intact —
 the README tables are a summary that drops releases where nothing moved, so the
 CSVs are the only full record. `scripts/benchmark_releases.py` compares frozen
