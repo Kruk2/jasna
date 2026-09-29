@@ -158,3 +158,18 @@ def test_window_state_halves_without_stg():
     from jasna.ltx import sampler
 
     assert sampler._window_state_bytes(100, stg=True) == 2 * sampler._window_state_bytes(100, stg=False)
+
+
+def test_block_forward_compiles_without_timing_kernels(monkeypatch):
+    import importlib.util
+
+    from jasna.ltx import sampler
+
+    if importlib.util.find_spec("triton") is None:
+        pytest.skip("needs Triton")
+
+    calls = []
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or fn)
+
+    assert sampler.compiled_block_forward() is T.block_forward
+    assert calls == [{"dynamic": False, "options": {"deterministic": True}}]
