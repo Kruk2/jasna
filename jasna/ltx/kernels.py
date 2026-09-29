@@ -269,11 +269,15 @@ def int8_feed_forward(
 
 
 @triton.jit
-def _quantize_fp4_kernel(x_ptr, ts_ptr, q_ptr, s_ptr, M, K, stride_x, BM: tl.constexpr, BK: tl.constexpr):
+def _quantize_fp4_kernel(
+    x_ptr, ts_ptr, q_ptr, s_ptr, M, K, stride_x, GELU: tl.constexpr, BM: tl.constexpr, BK: tl.constexpr
+):
     rows = tl.program_id(0) * BM + tl.arange(0, BM)
     cols = tl.program_id(1) * BK + tl.arange(0, BK)
     row_mask = rows < M
     x = tl.load(x_ptr + rows[:, None] * stride_x + cols[None, :], mask=row_mask[:, None], other=0.0).to(tl.float32)
+    if GELU:
+        x = (0.5 * x * (1 + libdevice.tanh(0.7978845608028654 * (x + 0.044715 * x * x * x)))).to(tl.bfloat16).to(tl.float32)
     tensor_scale = tl.load(ts_ptr)
     blocks = tl.reshape(x, (BM, BK // 16, 16))
     block_amax = tl.max(tl.abs(blocks), axis=2)
@@ -301,9 +305,10 @@ def _quantize_fp4_kernel(x_ptr, ts_ptr, q_ptr, s_ptr, M, K, stride_x, BM: tl.con
     tl.store(s_ptr + offsets, scale8.to(tl.uint8, bitcast=True), mask=row_mask[:, None])
 
 
-def quantize_fp4(x: torch.Tensor, tensor_scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def quantize_fp4(x: torch.Tensor, tensor_scale: torch.Tensor, gelu: bool) -> tuple[torch.Tensor, torch.Tensor]:
     """``(rows, k)`` -> (packed uint8 ``(rows, k/2)``, float8 block scales in the zero-padded
-    cuBLAS 128x4 tiled layout), like ``transformer.quantize_fp4``."""
+    cuBLAS 128x4 tiled layout), like ``transformer.quantize_fp4``; with ``gelu``, of ``gelu_tanh(x)`` rounded
+    to bf16."""
     m, k = x.shape
     if k % 256:
         raise ValueError(f"quantize_fp4 needs a width divisible by 256, got {k}")
@@ -311,6 +316,6 @@ def quantize_fp4(x: torch.Tensor, tensor_scale: torch.Tensor) -> tuple[torch.Ten
     scales = torch.zeros(-(-m // 128) * 128, -(-(k // 16) // 4) * 4, dtype=torch.uint8, device=x.device)
     block_rows, block_k = 32, 256
     _quantize_fp4_kernel[(triton.cdiv(m, block_rows), k // block_k)](
-        x, tensor_scale, packed, scales, m, k, x.stride(0), BM=block_rows, BK=block_k, num_warps=4
+        x, tensor_scale, packed, scales, m, k, x.stride(0), GELU=gelu, BM=block_rows, BK=block_k, num_warps=4
     )
     return packed, scales.view(torch.float8_e4m3fn)

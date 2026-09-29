@@ -92,8 +92,12 @@ def test_quantize_fp4_is_bit_exact(kernels):
     for rows, cols in ((100, 512), (256, 16384)):
         x = _activations(rows, cols, generator)
         tensor_scale = T.fp4_tensor_scale(x)
-        packed, block_scales = kernels.quantize_fp4(x, tensor_scale)
+        packed, block_scales = kernels.quantize_fp4(x, tensor_scale, False)
         expected_packed, expected_scales = T.quantize_fp4(x, tensor_scale)
+        assert torch.equal(packed, expected_packed)
+        assert torch.equal(block_scales.view(torch.uint8), expected_scales.view(torch.uint8))
+        packed, block_scales = kernels.quantize_fp4(x, tensor_scale, True)
+        expected_packed, expected_scales = T.quantize_fp4(F.gelu(x, approximate="tanh"), tensor_scale)
         assert torch.equal(packed, expected_packed)
         assert torch.equal(block_scales.view(torch.uint8), expected_scales.view(torch.uint8))
 
@@ -155,7 +159,7 @@ def test_kernels_reject_widths_they_would_compute_wrong(kernels):
     with pytest.raises(ValueError):
         kernels.rotate_quantize(x)
     with pytest.raises(ValueError):
-        kernels.quantize_fp4(x, torch.ones((), device="cuda"))
+        kernels.quantize_fp4(x, torch.ones((), device="cuda"), False)
     codes = torch.zeros(8, 320, dtype=torch.int8, device="cuda")
     weights = torch.zeros(256, 320, dtype=torch.int8, device="cuda")
     with pytest.raises(ValueError):

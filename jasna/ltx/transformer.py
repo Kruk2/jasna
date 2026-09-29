@@ -203,7 +203,7 @@ def nvfp4_linear(
     flat = x.reshape(-1, weight.shape[1] * 2)
     act_scale = fp4_tensor_scale(flat)
     if _quant_kernels is not None and x.is_cuda:
-        packed, act_blocks = _quant_kernels.quantize_fp4(flat, act_scale)
+        packed, act_blocks = _quant_kernels.quantize_fp4(flat, act_scale, False)
         out = _fp4_mm(packed, act_blocks, act_scale, weight, block_scales, tensor_scale, bias, x.dtype)
         return out.reshape(*x.shape[:-1], out_features)
     out = torch.empty(flat.shape[0], out_features, dtype=x.dtype, device=x.device)
@@ -214,6 +214,21 @@ def nvfp4_linear(
             packed, act_blocks, act_scale, weight, block_scales, tensor_scale, bias, x.dtype
         )
     return out.reshape(*x.shape[:-1], out_features)
+
+
+def gelu_linear(w: Weights, name: str, h: torch.Tensor) -> torch.Tensor:
+    """``linear(w, name, gelu_tanh(h))``; the NVFP4 kernels quantize straight from ``h``."""
+    weight = w.get(f"{name}.weight")
+    if _quant_kernels is not None and h.is_cuda and weight is not None and weight.dtype == torch.uint8:
+        flat = h.reshape(-1, weight.shape[1] * 2)
+        act_scale = fp4_tensor_scale(F.gelu(flat, approximate="tanh"))
+        packed, act_blocks = _quant_kernels.quantize_fp4(flat, act_scale, True)
+        out = _fp4_mm(
+            packed, act_blocks, act_scale, weight, w[f"{name}.weight_scale"], w[f"{name}.weight_scale_2"],
+            w.get(f"{name}.bias"), h.dtype,
+        )
+        return out.reshape(*h.shape[:-1], weight.shape[0])
+    return linear(w, name, F.gelu(h, approximate="tanh"))
 
 
 class QuantizedRows(NamedTuple):
@@ -309,11 +324,13 @@ def enable_quant_kernels(device: torch.device) -> bool:
             return torch.empty_like(residual, memory_format=torch.contiguous_format)
 
         @torch.library.custom_op("jasna::quantize_fp4", mutates_args=())
-        def quantize_fp4_op(x: torch.Tensor, tensor_scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return kernels.quantize_fp4(x.contiguous(), tensor_scale)
+        def quantize_fp4_op(
+            x: torch.Tensor, tensor_scale: torch.Tensor, gelu: bool
+        ) -> tuple[torch.Tensor, torch.Tensor]:
+            return kernels.quantize_fp4(x.contiguous(), tensor_scale, gelu)
 
         @quantize_fp4_op.register_fake
-        def _(x, tensor_scale):
+        def _(x, tensor_scale, gelu):
             rows, k = x.shape
             return (
                 x.new_empty(rows, k // 2, dtype=torch.uint8),
@@ -546,8 +563,8 @@ def block_forward(
         )[None]
     ff_out = torch.empty_like(ff_in)
     for start in range(0, ff_in.shape[1], CHUNK_ROWS):
-        hidden = F.gelu(linear(w, "ff.net.0.proj", ff_in[:, start : start + CHUNK_ROWS]), approximate="tanh")
-        ff_out[:, start : start + CHUNK_ROWS] = linear(w, "ff.net.2", hidden)
+        hidden = linear(w, "ff.net.0.proj", ff_in[:, start : start + CHUNK_ROWS])
+        ff_out[:, start : start + CHUNK_ROWS] = gelu_linear(w, "ff.net.2", hidden)
     return x + _gate(ff_out, ada[:, :, 5])
 
 
