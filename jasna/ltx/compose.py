@@ -18,6 +18,7 @@ import torch.nn.functional as F
 
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.plan import Polygon
+from jasna.tracking.blending import dilate_ellipse
 
 COLOUR_MATCH_STRENGTH = 0.75
 
@@ -72,12 +73,6 @@ def canvas_to_source(canvas: torch.Tensor, crop: CropFrame) -> torch.Tensor:
 
 
 @functools.cache
-def _ellipse(radius: int, device: torch.device) -> torch.Tensor:
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1,) * 2)
-    return torch.from_numpy(kernel.astype(np.float32)).to(device)[None, None]
-
-
-@functools.cache
 def _gaussian(radius: int, device: torch.device) -> torch.Tensor:
     kernel = cv2.getGaussianKernel(2 * radius + 1, 0.0, cv2.CV_32F)[:, 0]
     return torch.from_numpy(kernel).to(device)
@@ -86,7 +81,7 @@ def _gaussian(radius: int, device: torch.device) -> torch.Tensor:
 def feather_alpha(mask: torch.Tensor, feather: int) -> torch.Tensor:
     """Dilate a bool ``[H, W]`` mask by an ellipse of ``feather`` px and Gaussian-blur it
     (kernel ``2*feather+1``, reflect-101 border) into a [0, 1] alpha."""
-    dilated = F.conv2d(F.pad(mask[None, None].float(), (feather,) * 4), _ellipse(feather, mask.device)) > 0
+    dilated = dilate_ellipse(mask, feather)[None, None]
     kernel = _gaussian(feather, mask.device)
     x = F.pad(dilated.float(), (feather, feather, 0, 0), mode="reflect")
     x = F.conv2d(x, kernel.view(1, 1, 1, -1))

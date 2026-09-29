@@ -5,10 +5,11 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
-import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+from jasna.tracking.blending import dilate_ellipse
 
 logger = logging.getLogger(__name__)
 
@@ -97,15 +98,13 @@ def _union_bbox(boxes: np.ndarray, indices: list[int]) -> np.ndarray:
 
 
 def _build_group_mask(masks: torch.Tensor, indices: list[int], h: int, w: int, dilate_px: int) -> np.ndarray:
-    acc = np.zeros((h, w), dtype=np.uint8)
+    union = torch.zeros((h, w), dtype=torch.bool, device=masks.device)
     for idx in indices:
         m = masks[idx].unsqueeze(0).unsqueeze(0).float()
-        up = F.interpolate(m, size=(h, w), mode="bilinear", align_corners=False)[0, 0] > 0.5
-        acc = np.maximum(acc, (up.cpu().numpy() * 255).astype(np.uint8))
+        union |= F.interpolate(m, size=(h, w), mode="bilinear", align_corners=False)[0, 0] > 0.5
     if dilate_px > 0:
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_px * 2 + 1, dilate_px * 2 + 1))
-        acc = cv2.dilate(acc, kernel, iterations=1)
-    return acc
+        union = dilate_ellipse(union, dilate_px)
+    return union.to(torch.uint8).mul_(255).cpu().numpy()
 
 
 def prepare_image_restore(

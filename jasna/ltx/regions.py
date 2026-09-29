@@ -14,9 +14,9 @@ import torch.nn.functional as F
 
 from jasna.ltx.plan import Region
 from jasna.mosaic.detections import Detections
+from jasna.tracking.blending import dilate_ellipse
 
 EXPAND_PIXELS = 20
-_KERNEL = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * EXPAND_PIXELS + 1,) * 2)
 
 
 def trace_region(box: np.ndarray, mask: torch.Tensor, frame_h: int, frame_w: int) -> Region | None:
@@ -29,8 +29,8 @@ def trace_region(box: np.ndarray, mask: torch.Tensor, frame_h: int, frame_w: int
     y1 = min(frame_h, int(rows[-1]) + EXPAND_PIXELS + 2)
     x0 = max(0, int(cols[0]) - EXPAND_PIXELS - 1)
     x1 = min(frame_w, int(cols[-1]) + EXPAND_PIXELS + 2)
-    crop = full[y0:y1, x0:x1].to(torch.uint8).mul_(255).cpu().numpy()
-    contours, _ = cv2.findContours(cv2.dilate(crop, _KERNEL), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    dilated = dilate_ellipse(full[y0:y1, x0:x1], EXPAND_PIXELS).to(torch.uint8).mul_(255).cpu().numpy()
+    contours, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
     largest = max(contours, key=cv2.contourArea)
