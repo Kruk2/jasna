@@ -22,8 +22,10 @@ class LtxModelFiles:
     tuned_decoder: Path
 
     @classmethod
-    def from_dir(cls, directory: Path) -> LtxModelFiles:
-        paths = [directory / f"{name}.safetensors" for name in ("transformer", "vae", "vae-decoder")]
+    def from_dir(cls, directory: Path, *, fast: bool) -> LtxModelFiles:
+        """The model bundle; ``fast`` picks the NVFP4 transformer over the INT8 one."""
+        transformer = "transformer-fast" if fast else "transformer"
+        paths = [directory / f"{name}.safetensors" for name in (transformer, "vae", "vae-decoder")]
         paths = [path.with_name(path.name + ".enc") if is_frozen() or not path.is_file() else path for path in paths]
         if any(path.suffix == ".enc" for path in paths):
             from jasna.protection.protected_tensors import check_ltx_license

@@ -11,7 +11,7 @@ def test_source_model_bundle_and_reader(tmp_path):
     value = torch.arange(6).reshape(2, 3)
     for name in ("transformer", "vae", "vae-decoder"):
         save_file({"weight": value}, str(tmp_path / f"{name}.safetensors"), metadata={"config": "example"})
-    files = LtxModelFiles.from_dir(tmp_path)
+    files = LtxModelFiles.from_dir(tmp_path, fast=False)
     with open_tensors(files.transformer) as handle:
         assert list(handle.keys()) == ["weight"]
         assert handle.metadata() == {"config": "example"}
@@ -30,3 +30,9 @@ def test_model_check_precedes_engine_compilation(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="model unavailable"):
         session_factory._build_ltx_session(config, torch.device("cuda:0"), log_callback=None)
     compile_engines.assert_not_called()
+
+
+def test_fast_bundle_uses_the_fast_transformer(tmp_path):
+    for name in ("transformer-fast", "vae", "vae-decoder"):
+        save_file({"weight": torch.zeros(1)}, str(tmp_path / f"{name}.safetensors"))
+    assert LtxModelFiles.from_dir(tmp_path, fast=True).transformer == tmp_path / "transformer-fast.safetensors"

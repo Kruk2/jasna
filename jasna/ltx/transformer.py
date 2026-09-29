@@ -8,13 +8,16 @@ the same positions. Target tokens carry timestep ``sigma`` and reference tokens 
 every AdaLN modulation is one row per half instead of one per token.
 
 Blocks take their weights as a dict so the executor can hand in resident tensors or views
-into a streaming slot. A Linear is stored either as ``<name>.weight`` (bf16) or as ConvRot
-W8A8 (``<name>.qdata`` int8 rotated codes, ``<name>.scales`` fp32 per output channel).
+into a streaming slot. A Linear is stored as ``<name>.weight`` (bf16), as ConvRot W8A8
+(``<name>.qdata`` int8 rotated codes, ``<name>.scales`` fp32 per output channel), or as NVFP4
+W4A4 (``<name>.weight`` uint8 packed E2M1, high nibble first, ``<name>.weight_scale``
+float8_e4m3fn block scales in the cuBLAS 128x4 tiled layout, ``<name>.weight_scale_2`` fp32).
 """
 
 from __future__ import annotations
 
 import functools
+import importlib.util
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -37,6 +40,13 @@ LATENT_TEMPORAL_SCALE = 8
 LATENT_SPATIAL_SCALE = 32
 ROT_SIZE = 256
 ACT_QMAX = 127
+FP4_BLOCK = 16
+FP4_MAX = 6.0
+FP8_E4M3_MAX = 448.0
+# E2M1 magnitudes 0, .5, 1, 1.5, 2, 3, 4, 6: midpoints rounding to the even code sit below
+# the tie, the others above, so a tie lands on the even code (round half to even).
+_FP4_TIES_DOWN = (0.25, 1.25, 2.5, 5.0)
+_FP4_TIES_UP = (0.75, 1.75, 3.5)
 CHUNK_ROWS = 4096
 SDPA_PRIORITY = [
     SDPBackend.CUDNN_ATTENTION,
@@ -104,12 +114,109 @@ def int8_linear(
     return out.reshape(*x.shape[:-1], out_features)
 
 
+def fp4_codes(x: torch.Tensor) -> torch.Tensor:
+    """4-bit E2M1 codes (sign bit 3), round half to even, saturating at +-6."""
+    magnitude = x.abs()
+    index = sum((magnitude > tie).to(torch.uint8) for tie in _FP4_TIES_DOWN)
+    index = index + sum((magnitude >= tie).to(torch.uint8) for tie in _FP4_TIES_UP)
+    return index | ((x < 0).to(torch.uint8) << 3)
+
+
+def swizzle_block_scales(scales: torch.Tensor) -> torch.Tensor:
+    """``(rows, k/16)`` float8 block scales -> zero-padded cuBLAS 128x4 tiled layout."""
+    rows, cols = scales.shape
+    padded = F.pad(scales.view(torch.uint8), (0, -cols % 4, 0, -rows % 128))
+    tiled_rows, tiled_cols = padded.shape
+    tiles = padded.view(tiled_rows // 128, 4, 32, tiled_cols // 4, 4).permute(0, 3, 2, 1, 4)
+    return tiles.reshape(tiled_rows, tiled_cols).view(torch.float8_e4m3fn)
+
+
+def fp4_tensor_scale(x: torch.Tensor) -> torch.Tensor:
+    """Dynamic per-tensor decode scale ``amax / (6 * 448)`` (1 for an all-zero tensor)."""
+    scale = x.abs().amax().float() / (FP4_MAX * FP8_E4M3_MAX)
+    return torch.where(scale > 0, scale, torch.ones_like(scale))
+
+
+def quantize_fp4(x: torch.Tensor, tensor_scale: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(rows, k)`` -> (packed uint8 ``(rows, k/2)``, tiled block scales), one block scale
+    per 16 values under the given per-tensor decode scale."""
+    xf = x.float()
+    blocks = xf.view(x.shape[0], -1, FP4_BLOCK)
+    block_scales = (blocks.abs().amax(-1) / FP4_MAX / tensor_scale).clamp(max=FP8_E4M3_MAX).to(torch.float8_e4m3fn)
+    divisor = block_scales.float() * tensor_scale
+    divisor = torch.where(divisor > 0, divisor, torch.ones_like(divisor))
+    codes = fp4_codes(blocks / divisor.unsqueeze(-1)).view(x.shape[0], -1, 2)
+    packed = (codes[..., 0] << 4) | codes[..., 1]
+    return packed, swizzle_block_scales(block_scales)
+
+
+def nvfp4_linear(
+    x: torch.Tensor,
+    weight: torch.Tensor,
+    block_scales: torch.Tensor,
+    tensor_scale: torch.Tensor,
+    bias: torch.Tensor | None,
+) -> torch.Tensor:
+    """NVFP4 W4A4: activations quantized per call (one dynamic tensor scale for the call), then
+    the block-scaled FP4 tensor-core GEMM. Both operands pack high nibble first; the block scale
+    covers whole pairs, so the order only permutes each dot product's terms."""
+    out_features = weight.shape[0]
+    flat = x.reshape(-1, weight.shape[1] * 2)
+    out = torch.empty(flat.shape[0], out_features, dtype=x.dtype, device=x.device)
+    act_scale = fp4_tensor_scale(flat)
+    for start in range(0, flat.shape[0], CHUNK_ROWS):
+        chunk = flat[start : start + CHUNK_ROWS]
+        packed, act_blocks = quantize_fp4(chunk, act_scale)
+        out[start : start + chunk.shape[0]] = F.scaled_mm(
+            packed.view(torch.float4_e2m1fn_x2),
+            weight.view(torch.float4_e2m1fn_x2).t(),
+            scale_a=[act_blocks, act_scale.reshape(1)],
+            scale_recipe_a=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            scale_b=[block_scales, tensor_scale.reshape(1)],
+            scale_recipe_b=[F.ScalingType.BlockWise1x16, F.ScalingType.TensorWise],
+            swizzle_a=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            swizzle_b=[F.SwizzleType.SWIZZLE_32_4_4, F.SwizzleType.NO_SWIZZLE],
+            bias=bias,
+            output_dtype=x.dtype,
+        )
+    return out.reshape(*x.shape[:-1], out_features)
+
+
 def linear(w: Weights, name: str, x: torch.Tensor) -> torch.Tensor:
     bias = w.get(f"{name}.bias")
     weight = w.get(f"{name}.weight")
-    if weight is not None:
-        return F.linear(x, weight, bias)
-    return int8_linear(x, w[f"{name}.qdata"], w[f"{name}.scales"], bias)
+    if weight is None:
+        return int8_linear(x, w[f"{name}.qdata"], w[f"{name}.scales"], bias)
+    if weight.dtype == torch.uint8:
+        return nvfp4_linear(x, weight, w[f"{name}.weight_scale"], w[f"{name}.weight_scale_2"], bias)
+    return F.linear(x, weight, bias)
+
+
+_sage_attention = None
+
+
+def enable_sage_attention() -> bool:
+    """Route video self-attention through SageAttention 2 (an opaque op, so it compiles as
+    one call) when it is installed. Returns whether it is in use."""
+    global _sage_attention
+    if _sage_attention is None and importlib.util.find_spec("sageattention") is not None:
+        from sageattention import sageattn
+
+        @torch.library.custom_op("jasna::sage_attention", mutates_args=())
+        def sage_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+            return sageattn(q, k, v, tensor_layout="HND", is_causal=False).contiguous()
+
+        sage_attention.register_fake(lambda q, k, v: torch.empty_like(q, memory_format=torch.contiguous_format))
+        _sage_attention = sage_attention
+    return _sage_attention is not None
+
+
+def self_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """Video self-attention ``[1, heads, tokens, d]``: SageAttention 2 once enabled."""
+    if _sage_attention is not None and q.is_cuda:
+        return _sage_attention(q, k, v)
+    with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
+        return F.scaled_dot_product_attention(q, k, v)
 
 
 def rms_norm(x: torch.Tensor, weight: torch.Tensor | None = None) -> torch.Tensor:
@@ -251,8 +358,11 @@ def _attention(
             q = q.unflatten(-1, (heads, -1)).transpose(1, 2)
             k = k.unflatten(-1, (heads, -1)).transpose(1, 2)
         v_heads = v.unflatten(-1, (heads, -1)).transpose(1, 2)
-        with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
-            out = F.scaled_dot_product_attention(q, k, v_heads)
+        if rope is not None:
+            out = self_attention(q, k, v_heads)
+        else:
+            with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
+                out = F.scaled_dot_product_attention(q, k, v_heads)
         out = out.transpose(1, 2).flatten(2)
     gates = 2.0 * torch.sigmoid(linear(w, f"{prefix}.to_gate_logits", x))
     out = (out.unflatten(-1, (heads, -1)) * gates.unsqueeze(-1)).flatten(2)

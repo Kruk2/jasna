@@ -16,6 +16,10 @@ CLI_HELP: dict[str, str] = {
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
     ),
     "ltx_seed": "ltx: noise seed. Another seed gives another take on the same restoration. (default: %(default)s)",
+    "ltx_fast": (
+        "ltx: about 1.4x faster with slightly less detail. Needs an RTX 50-series (Blackwell) GPU "
+        "and the fast model file. (default: %(default)s)"
+    ),
     "ltx_large_canvas": (
         "ltx: restore large mosaics at 768 px instead of 512 px. Sharper, about 3x slower for "
         "those mosaics and needs more VRAM. (default: %(default)s)"

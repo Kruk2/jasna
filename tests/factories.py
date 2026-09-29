@@ -29,6 +29,7 @@ def session_config(**overrides) -> SessionConfig:
         restoration_model_path=Path("restore.pth"),
         ltx_large_canvas=True,
         ltx_seed=0,
+        ltx_fast=False,
         compile_basicvsrpp=True,
         max_clip_size=90,
         temporal_overlap=8,

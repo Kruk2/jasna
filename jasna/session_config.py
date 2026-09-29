@@ -39,6 +39,7 @@ class SessionConfig:
     restoration_model_path: Path
     ltx_large_canvas: bool
     ltx_seed: int
+    ltx_fast: bool
     compile_basicvsrpp: bool
     max_clip_size: int
     temporal_overlap: int

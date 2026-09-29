@@ -79,3 +79,55 @@ def test_fuse_overlaps_writes_the_same_mean_to_both_windows():
     assert torch.equal(right[:, 10:], right_before[:, 10:])
     fuse_overlaps([left, right], tokens_per_frame, [0.2, 0.4, 0.6, 0.8])
     assert torch.equal(right[:, 2:10], left[:, 24:32])
+
+
+def test_fp4_codes_round_half_to_even_and_saturate():
+    values = torch.tensor([0.0, 0.25, 0.3, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0, 5.5, 9.0, -0.5, -6.0])
+    expected = [0, 0, 1, 2, 2, 4, 4, 6, 6, 7, 7, 8 | 1, 8 | 7]
+    assert T.fp4_codes(values).tolist() == expected
+
+
+def test_block_scale_swizzle_matches_cublas_tile_addresses():
+    rows, cols = 200, 6
+    scales = torch.arange(rows * cols, dtype=torch.float32).remainder(200).view(rows, cols).to(torch.float8_e4m3fn)
+    tiled = T.swizzle_block_scales(scales).view(torch.uint8).flatten()
+    padded_cols = 8
+    for row in (0, 31, 32, 127, 128, 199):
+        for col in range(cols):
+            tile = (row // 128) * (padded_cols // 4) + col // 4
+            offset = tile * 512 + (row % 32) * 16 + ((row % 128) // 32) * 4 + col % 4
+            assert tiled[offset] == scales[row, col].view(torch.uint8)
+
+
+def test_quantize_fp4_reconstructs_within_fp4_error():
+    generator = torch.Generator().manual_seed(0)
+    x = torch.randn(130, 64, generator=generator)
+    tensor_scale = T.fp4_tensor_scale(x)
+    packed, tiled = T.quantize_fp4(x, tensor_scale)
+    assert packed.shape == (130, 32) and packed.dtype == torch.uint8
+    assert tiled.shape == (256, 4) and tiled.dtype == torch.float8_e4m3fn
+    table = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0])
+    codes = torch.stack([packed >> 4, packed & 15], dim=-1).flatten(1).long()
+    values = table[codes & 7] * (1 - 2 * (codes >> 3)).float()
+    blocks = x.view(130, 4, 16)
+    scales = (blocks.abs().amax(-1) / T.FP4_MAX / tensor_scale).clamp(max=T.FP8_E4M3_MAX)
+    scales = scales.to(torch.float8_e4m3fn).float()
+    rebuilt = values.view(130, 4, 16) * scales.unsqueeze(-1) * tensor_scale
+    assert (rebuilt - blocks).norm() / blocks.norm() < 0.15
+
+
+def test_self_attention_falls_back_to_sdpa_off_gpu():
+    generator = torch.Generator().manual_seed(0)
+    q, k, v = torch.randn(3, 1, 2, 8, 16, generator=generator).unbind(0)
+    expected = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+    assert torch.allclose(T.self_attention(q, k, v), expected)
+
+
+def test_block_forward_runs_eager_without_triton(monkeypatch):
+    import importlib.util
+
+    from jasna.ltx import sampler
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
+    assert sampler.compiled_block_forward() is T.block_forward

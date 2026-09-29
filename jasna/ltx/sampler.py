@@ -10,6 +10,7 @@ pass's hidden state up to that block.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from collections.abc import Sequence
 from pathlib import Path
@@ -85,6 +86,8 @@ class LtxTransformer:
             ]
         self.blocks = BlockStore(blocks, device, resident=self._resident_blocks(blocks))
         self._ropes: dict[tuple[int, int, int], T.Rope] = {}
+        logger.info("LTX self-attention: %s", "SageAttention 2" if T.enable_sage_attention() else "SDPA")
+        self._block_forward = compiled_block_forward()
 
     def _resident_blocks(self, blocks: list[dict[str, torch.Tensor]]) -> int:
         sizes = [sum(t.numel() * t.element_size() for t in b.values()) for b in blocks]
@@ -159,10 +162,10 @@ class LtxTransformer:
             for j in range(len(xs)):
                 if STG_SCALE and index >= STG_BLOCK:
                     source = xs[j] if index == STG_BLOCK else perturbed[j]
-                    perturbed[j] = T.block_forward(
+                    perturbed[j] = self._block_forward(
                         weights, source, cond, self.context, rope, skip_self_attention=index == STG_BLOCK
                     )
-                xs[j] = T.block_forward(weights, xs[j], cond, self.context, rope)
+                xs[j] = self._block_forward(weights, xs[j], cond, self.context, rope)
             self.blocks.release(index)
         out = []
         for lat, x, xp in zip(latents, xs, perturbed):
@@ -172,6 +175,16 @@ class LtxTransformer:
                 denoised = (denoised.float() + STG_SCALE * (denoised.float() - weak.float())).to(lat.dtype)
             out.append(denoised)
         return out
+
+
+def compiled_block_forward():
+    """``transformer.block_forward`` compiled with static shapes when Triton is available
+    (one graph per canvas and per STG variant, shared by all blocks), else eager."""
+    if importlib.util.find_spec("triton") is None:
+        return T.block_forward
+    torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
+    torch._dynamo.config.accumulated_cache_size_limit = max(torch._dynamo.config.accumulated_cache_size_limit, 1024)
+    return torch.compile(T.block_forward, dynamic=False)
 
 
 def _euler(sample: torch.Tensor, denoised: torch.Tensor, sigmas: torch.Tensor, step: int) -> torch.Tensor:

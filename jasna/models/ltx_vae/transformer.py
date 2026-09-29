@@ -1,12 +1,15 @@
 """Neighborhood-attention transformer blocks of the diffusion VAE decoder, ``chunked_eager`` path only.
 
 Ported from ``ltx_core/model/video_vae/transformer/`` (layers, qkv, rope_math, det_attn_rope,
-attention, swiglu, blocks, chunked/*): eager tiled-SDPA neighborhood attention, torch SwiGLU,
+attention, swiglu, blocks, chunked/*): NATTEN neighborhood attention when installed, else eager
+tiled SDPA (same window semantics), torch SwiGLU,
 W-chunked diffusion residual with halos and deferred stage-4 context inject.
 """
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import math
 
 import numpy as np
@@ -132,12 +135,27 @@ class QKVProjections(nn.Module):
         return self.to_q(x), self.to_k(x), self.to_v(x)
 
 
-def eager_sdpa_attention(
+@functools.cache
+def _fused_na3d():
+    """NATTEN's fused ``na3d`` when installed, else None."""
+    if importlib.util.find_spec("natten") is None:
+        return None
+    import natten
+
+    return natten.na3d
+
+
+def neighborhood_attention(
     attn: NeighborhoodAttention3D, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
 ) -> torch.Tensor:
+    """NATTEN's fused kernel on CUDA when installed, else the pure-torch ``na3d``
+    (same window semantics). Q is already scaled."""
     if q.dtype != v.dtype or k.dtype != v.dtype:
         q = q.to(dtype=v.dtype)
         k = k.to(dtype=v.dtype)
+    fused = _fused_na3d()
+    if fused is not None and q.is_cuda:
+        return fused(q, k, v, kernel_size=attn.kernel_size, scale=1.0)
     return na3d(q, k, v, kernel_size=attn.kernel_size)
 
 
@@ -183,7 +201,7 @@ class NeighborhoodAttention3D(nn.Module):
         q = q * self.scale
         q = apply_tiled_abs_rope(q, self)
         k = apply_tiled_abs_rope(k, self)
-        out = eager_sdpa_attention(self, q.contiguous(), k.contiguous(), v.contiguous())
+        out = neighborhood_attention(self, q.contiguous(), k.contiguous(), v.contiguous())
         out = out.reshape(batch, t, h, w, self.dim)
         return self.proj(out)
 
@@ -291,7 +309,7 @@ def _attn_on_w_slab(
     v = F.linear(y, attn.qkv.to_v.weight, attn.qkv.to_v.bias).view(head_shape)
     del y
 
-    out = eager_sdpa_attention(attn, q.contiguous(), k.contiguous(), v.contiguous())
+    out = neighborhood_attention(attn, q.contiguous(), k.contiguous(), v.contiguous())
     del q, k, v
     return F.linear(out.reshape(batch, t, h, ext_w, attn.dim), attn.proj.weight, attn.proj.bias)
 

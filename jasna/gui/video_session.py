@@ -72,6 +72,7 @@ def video_session_config(
         restoration_model_path=default_restoration_model_path("basicvsrpp"),
         ltx_large_canvas=True,
         ltx_seed=LTX_DEFAULT_SEED,
+        ltx_fast=False,
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),
