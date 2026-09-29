@@ -14,6 +14,10 @@ def _uses_ltx(job: JobItem, settings: AppSettings) -> bool:
     return any(segment.restoration.model == "ltx" for segment in resolve_restorations(segments, default))
 
 
+def any_job_uses_ltx(jobs: list[JobItem], settings: AppSettings) -> bool:
+    return any(_uses_ltx(job, settings) for job in jobs)
+
+
 def validate_gui_start(settings: AppSettings, jobs: list[JobItem], *, ltx_available: bool) -> list[str]:
     errors: list[str] = []
 

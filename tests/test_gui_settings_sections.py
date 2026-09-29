@@ -19,6 +19,7 @@ from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
+from factories import ltx_models
 
 
 class _FakeValueMenu:
@@ -65,6 +66,7 @@ def test_value_option_menu_falls_back_to_first_option_for_unknown_value() -> Non
 def _fake_section_widgets() -> dict:
     return {
         "restoration_model": _FakeWidget("ltx"),
+        "ltx_model": _FakeValueMenu({"distilled": "Distilled", "undistilled": "Undistilled"}, "undistilled"),
         "ltx_seed": _FakeWidget(" 123 "),
         "ltx_fast": _FakeWidget(1),
         "ltx_large_canvas": _FakeWidget(0),
@@ -150,6 +152,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["fmp4"] is True
     assert values["sharpen_strength"] == 0.35
     assert values["restoration_model"] == "ltx"
+    assert values["ltx_model"] == "undistilled"
     assert values["ltx_seed"] == 123
     assert values["ltx_fast"] is True
     assert values["ltx_large_canvas"] is False
@@ -192,7 +195,7 @@ def _basic_section_panel(monkeypatch, tmp_path):
 
     from jasna.gui.settings_panel import SettingsPanel
 
-    panel = SettingsPanel(root, PresetManager(), ltx_installed=True)
+    panel = SettingsPanel(root, PresetManager(), ltx_models=ltx_models(root, tmp_path / "ltx", installed=True))
     try:
         yield panel, next(section for section in panel._sections if isinstance(section, BasicSection))
     finally:
@@ -363,7 +366,7 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
     try:
         from jasna.gui.settings_panel import SettingsPanel
 
-        panel = SettingsPanel(root, PresetManager(), ltx_installed=True)
+        panel = SettingsPanel(root, PresetManager(), ltx_models=ltx_models(root, tmp_path / "ltx", installed=True))
         assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
         assert panel._saved_preset_settings == panel.get_settings()
     finally:
@@ -406,15 +409,6 @@ def test_only_queue_wide_post_export_action_stays_editable_while_processing(_bas
     assert panel._widgets["max_clip_size"].cget("state") == "disabled"
 
 
-def test_ltx_unavailable_reason() -> None:
-    from jasna.gui.settings_sections.restoration_model import ltx_unavailable_reason
-
-    assert ltx_unavailable_reason(installed=True, nvidia=None) is None
-    assert ltx_unavailable_reason(installed=True, nvidia=True) is None
-    assert ltx_unavailable_reason(installed=True, nvidia=False) == "model_ltx_needs_nvidia"
-    assert ltx_unavailable_reason(installed=False, nvidia=True) == "model_ltx_not_installed"
-
-
 def test_parse_seed_falls_back_to_default() -> None:
     from jasna.gui.settings_sections.restoration_model import parse_seed
     from jasna.session_config import LTX_DEFAULT_SEED
@@ -435,7 +429,9 @@ def _panel_factory(monkeypatch, tmp_path):
     from jasna.gui.settings_panel import SettingsPanel
 
     try:
-        yield lambda installed: SettingsPanel(root, PresetManager(), ltx_installed=installed)
+        yield lambda installed: SettingsPanel(
+            root, PresetManager(), ltx_models=ltx_models(root, tmp_path / "ltx", installed=installed)
+        )
     finally:
         root.destroy()
 

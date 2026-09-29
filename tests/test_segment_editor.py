@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+from dataclasses import replace
 import threading
 from fractions import Fraction
 from pathlib import Path
@@ -953,6 +954,58 @@ def test_try_seed_shows_progress_then_lets_the_user_compare_and_pick_seeds(monke
         root.destroy()
     assert _FakeSeedWorker.instances[0].closed
 
+
+
+def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(monkeypatch, tmp_path) -> None:
+    tips: dict[str, list] = {}
+    original = segment_editor.Tooltip.__init__
+
+    def record(self, widget, text):
+        tips.setdefault(text, []).append(widget)
+        original(self, widget, text)
+
+    monkeypatch.setattr(segment_editor.Tooltip, "__init__", record)
+    root = _tk_root()
+    editor = None
+    _FakeSeedWorker.instances = []
+    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    try:
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        settings = replace(AppSettings(), ltx_model="undistilled")
+        editor = _build_editor_with_ui(root, monkeypatch, job=job, settings=settings)
+        editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+        editor._select_range(0)
+        editor._preview_source = Image.new("RGB", (160, 90), "red")
+        root.update()
+        editor._try_seed_btn.invoke()
+        worker = _FakeSeedWorker.instances[0]
+        worker.events.put(segment_editor.SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
+        editor._poll_workers()
+        editor._new_range_seed()
+        root.update()
+
+        assert editor._model_radios["ltx"].cget("text") == t("model_ltx_undistilled")
+        expected = {
+            "tip_segments_restore_with": editor._restore_with_label,
+            "tip_model_basicvsrpp": editor._model_radios["basicvsrpp"],
+            "tip_segments_use_for_all": editor._use_for_all_btn,
+            "tip_ltx_seed": editor._seed_entry,
+            "tip_ltx_new_seed": editor._new_seed_btn,
+            "tip_segments_try_seed": editor._try_seed_btn,
+            "tip_segments_seed_cancel": editor._seed_cancel_btn,
+            "tip_segments_seed_show": editor._seed_view_toggle,
+        }
+        for key, widget in expected.items():
+            assert widget in tips[t(key)], key
+        chips = [w for w in editor._seed_chip_widgets if w.cget("text") == "5"]
+        use = [w for w in editor._seed_chip_widgets if w.cget("text") == t("segments_seed_use")]
+        assert chips and chips[0] in tips[t("tip_segments_seed_chip")]
+        assert use and use[0] in tips[t("tip_segments_seed_use")]
+        assert editor._ltx_radio_tooltip._text == t("tip_model_ltx_undistilled")
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
 
 def test_range_controls_fit_their_content_while_the_list_keeps_its_rows() -> None:
     assert segment_editor.range_controls_height(500, 200, 156) == 200

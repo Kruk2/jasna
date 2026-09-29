@@ -117,3 +117,10 @@ def test_seed_renderer_deletes_its_temp_dir_on_close(tmp_path) -> None:
     renderer.close()
 
     assert not temp.exists()
+
+
+def test_prepared_key_never_mixes_ltx_models() -> None:
+    segment = SegmentRange(1, 2)
+    settings = replace(AppSettings(), restoration_model="ltx")
+
+    assert prepared_key(segment, replace(settings, ltx_model="undistilled")) != prepared_key(segment, settings)

@@ -416,6 +416,7 @@ def test_app_disables_queue_start_while_preview_gpu_is_tearing_down() -> None:
     app._queue_panel = MagicMock()
     app._queue_panel.get_jobs.return_value = [object()]
     app._control_bar = MagicMock()
+    app._ltx_models = SimpleNamespace(downloading=False)
 
     app._update_start_button_state()
 

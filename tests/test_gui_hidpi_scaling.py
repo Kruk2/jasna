@@ -16,6 +16,7 @@ import pytest
 
 from jasna.gui import scaling
 from jasna.gui.app import JasnaApp
+from jasna.gui.queues import MainThreadCalls
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.models import PresetManager
 from jasna.gui.settings_sections.widgets import create_slider_value_label
@@ -53,6 +54,8 @@ def _stub_main_body_callbacks(root) -> None:
     root._on_output_changed = lambda *_args: None
     root._preset_manager = PresetManager()
     root.TkdndVersion = None
+    root._main_thread = MainThreadCalls(root, 50)
+    root._on_ltx_models_changed = lambda: None
 
 
 def _stub_footer_callbacks(root) -> None:

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
 from jasna.gui.models import AppSettings
-from jasna.session_config import LTX_DEFAULT_MODEL, SessionConfig
+from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession
 
 if TYPE_CHECKING:
@@ -29,6 +29,7 @@ def video_session_key(settings: AppSettings) -> tuple:
         settings.denoise_step,
         settings.secondary_restoration,
         settings.restoration_model,
+        settings.ltx_model,
         settings.ltx_fast,
     )
     if settings.secondary_restoration == "tvai":
@@ -77,7 +78,7 @@ def video_session_config(
         ltx_large_canvas=bool(settings.ltx_large_canvas),
         ltx_seed=int(settings.ltx_seed),
         ltx_fast=bool(settings.ltx_fast),
-        ltx_model=LTX_DEFAULT_MODEL,
+        ltx_model=settings.ltx_model,
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),

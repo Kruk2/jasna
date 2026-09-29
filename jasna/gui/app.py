@@ -330,13 +330,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._queue_panel.set_on_jobs_changed(self._on_jobs_changed)
 
         from jasna.engine_paths import default_restoration_model_path
-        from jasna.ltx.model_files import bundle_present as ltx_bundle_present
+        from jasna.gui.ltx_models import LtxModels
 
-        self._settings_panel = SettingsPanel(
-            self._workspace,
-            self._preset_manager,
-            ltx_installed=ltx_bundle_present(default_restoration_model_path("ltx")),
+        self._ltx_models = LtxModels(
+            default_restoration_model_path("ltx"), self._main_thread, self._on_ltx_models_changed
         )
+        self._settings_panel = SettingsPanel(self._workspace, self._preset_manager, ltx_models=self._ltx_models)
         self._settings_panel.configure(cursor="arrow")
         self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
 
@@ -438,7 +437,16 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._system_stats_thread.join(timeout=1.0)
             self._system_stats_thread = None
 
+    def _on_ltx_models_changed(self):
+        self._settings_panel.refresh_ltx_models()
+        self._update_start_button_state()
+
     def _on_close(self):
+        if self._ltx_models.downloading:
+            from tkinter import messagebox
+
+            if not messagebox.askyesno(t("ltx_download_title"), t("ltx_download_close_confirm")):
+                return
         if self._video_player_dialog is not None:
             self._closing_after_player = True
             self._video_player_dialog.request_close()
@@ -550,9 +558,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         
     def _update_start_button_state(self):
         jobs = self._queue_panel.get_jobs()
-        can_start = bool(jobs) and not self._preview_gpu_busy
+        downloading = self._ltx_models.downloading
+        can_start = bool(jobs) and not self._preview_gpu_busy and not downloading
         if can_start:
             self._control_bar.set_start_enabled(True)
+        elif downloading:
+            self._control_bar.set_start_enabled(False, t("ltx_downloading_short"))
         elif self._preview_gpu_busy:
             self._control_bar.set_start_enabled(False, t("segments_restore_restoring"))
         else:
@@ -594,7 +605,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         output_pattern = self._queue_panel.get_output_pattern()
         settings = self._settings_panel.get_settings()
 
-        from jasna.gui.validation import validate_gui_start
+        from jasna.gui.validation import any_job_uses_ltx, validate_gui_start
+
+        if (
+            self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded"
+            and any_job_uses_ltx(jobs, settings)
+            and self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
+        ):
+            return
         errors = validate_gui_start(
             settings, jobs, ltx_available=self._settings_panel.ltx_unavailable_reason() is None
         )

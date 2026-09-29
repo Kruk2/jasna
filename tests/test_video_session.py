@@ -157,3 +157,13 @@ def test_video_session_key_tracks_model_and_ltx_variant() -> None:
 
 def test_video_session_key_tracks_the_ltx_variant_for_ltx_ranges_of_standard_jobs() -> None:
     assert video_session_key(replace(AppSettings(), ltx_fast=True)) != video_session_key(AppSettings())
+
+
+def test_video_session_config_and_key_follow_the_ltx_model() -> None:
+    undistilled = replace(AppSettings(), restoration_model="ltx", ltx_model="undistilled")
+
+    assert _config(undistilled).ltx_model == "undistilled"
+    assert _config(replace(undistilled, ltx_model="distilled")).ltx_model == "distilled"
+    assert video_session_key(undistilled) != video_session_key(replace(undistilled, ltx_model="distilled"))
+    standard = replace(AppSettings(), ltx_model="undistilled")
+    assert video_session_key(standard) != video_session_key(AppSettings())

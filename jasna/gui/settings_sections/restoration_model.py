@@ -8,20 +8,13 @@ import customtkinter as ctk
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import add_setting_label, get_tooltip
+from jasna.gui.ltx_models import LtxModels, card_unavailable_reason, run_unavailable_reason
+from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.session_config import LTX_DEFAULT_SEED
+from jasna.ltx.model_files import LTX_MODELS
+from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 
 _MODELS = ("basicvsrpp", "ltx")
-
-
-def ltx_unavailable_reason(*, installed: bool, nvidia: bool | None) -> str | None:
-    """Locale key saying why LTX cannot be picked; ``nvidia`` is None until the GPU is known."""
-    if nvidia is False:
-        return "model_ltx_needs_nvidia"
-    if not installed:
-        return "model_ltx_not_installed"
-    return None
 
 
 def parse_seed(text: str) -> int:
@@ -34,8 +27,6 @@ def parse_seed(text: str) -> int:
 class _ModelCard(ctk.CTkFrame):
     def __init__(self, master, variable: ctk.StringVar, value: str, on_select: Callable[[str], None]):
         super().__init__(master, fg_color=Colors.BG_CARD, corner_radius=8, border_width=2, border_color=Colors.BG_CARD)
-        self._value = value
-        self._on_select = on_select
         self._enabled = True
         self.radio = ctk.CTkRadioButton(
             self,
@@ -56,11 +47,13 @@ class _ModelCard(ctk.CTkFrame):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             anchor="w",
             justify="left",
-            wraplength=260,
+            wraplength=190,
         )
         self.description.pack(fill="x", padx=(40, 12), pady=(0, 10))
         for widget in (self, self.description):
             widget.bind("<Button-1>", self._clicked)
+        for widget in (self.radio, self.description):
+            Tooltip(widget, get_tooltip(f"model_{value}"))
 
     def _clicked(self, _event) -> None:
         if self._enabled:
@@ -75,11 +68,11 @@ class _ModelCard(ctk.CTkFrame):
 
 
 class RestorationModelSection:
-    def __init__(self, parent, widgets: dict, on_modified, on_model_changed, *, ltx_installed: bool):
+    def __init__(self, parent, widgets: dict, on_modified, on_model_changed, *, ltx_models: LtxModels):
         self._widgets = widgets
         self._on_modified = on_modified
         self._on_model_changed = on_model_changed
-        self._ltx_installed = ltx_installed
+        self._ltx_models = ltx_models
         self._nvidia: bool | None = None
         self._enabled = True
 
@@ -92,16 +85,50 @@ class RestorationModelSection:
         inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
 
         self._model = self._widgets["restoration_model"] = ctk.StringVar(value="basicvsrpp")
-        cards = ctk.CTkFrame(inner, fg_color="transparent")
-        cards.pack(fill="x")
-        cards.grid_columnconfigure((0, 1), weight=1, uniform="model")
+        self._cards_frame = ctk.CTkFrame(inner, fg_color="transparent")
+        self._cards_frame.pack(fill="x")
+        self._cards_frame.grid_columnconfigure((0, 1), weight=1, uniform="model")
         self._cards = {}
         for column, value in enumerate(_MODELS):
-            card = _ModelCard(cards, self._model, value, self._on_card_selected)
+            card = _ModelCard(self._cards_frame, self._model, value, self._on_card_selected)
             card.grid(row=0, column=column, sticky="nsew", padx=(0, 4) if column == 0 else (4, 0))
             self._cards[value] = card
 
+        self._download_row = ctk.CTkFrame(inner, fg_color="transparent")
+        self._download_label = ctk.CTkLabel(
+            self._download_row, text="", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="w"
+        )
+        self._download_label.pack(fill="x")
+        self._download_bar = ctk.CTkProgressBar(self._download_row, progress_color=Colors.PRIMARY, fg_color=Colors.BG_CARD)
+        self._download_bar.pack(fill="x", pady=(2, 0))
+        for widget in (self._download_label, self._download_bar):
+            Tooltip(widget, get_tooltip("ltx_download"))
+
         self._ltx_options = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
+        model_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        model_row.pack(fill="x")
+        add_setting_label(model_row, "ltx_model", in_card=True)
+        self._ltx_model = self._widgets["ltx_model"] = ValueOptionMenu(
+            model_row,
+            options={model: t(f"ltx_model_{model}") for model in LTX_MODELS},
+            command=self._on_ltx_model_selected,
+            fg_color=Colors.BG_PANEL,
+            button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=260,
+        )
+        self._ltx_model.pack(side="right", padx=12, pady=8)
+        Tooltip(self._ltx_model, get_tooltip("ltx_model"))
+        self._set_ltx_model(LTX_DEFAULT_MODEL)
+        self._model_row = model_row
+        self._install_status = ctk.CTkLabel(
+            self._ltx_options, text="", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="e"
+        )
+        Tooltip(self._install_status, get_tooltip("ltx_download"))
+
         seed_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         seed_row.pack(fill="x")
         add_setting_label(seed_row, "ltx_seed", in_card=True)
@@ -124,23 +151,88 @@ class RestorationModelSection:
         )
         self._widgets["ltx_seed"].pack(side="right", pady=8)
         self._widgets["ltx_seed"].bind("<KeyRelease>", lambda _event: self._on_modified())
+        Tooltip(self._widgets["ltx_seed"], get_tooltip("ltx_seed"))
 
         self._fast_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(self._fast_row, "ltx_fast", in_card=True)
-        self._widgets["ltx_fast"] = CompactSwitch(self._fast_row, self._on_modified, Colors.BG_CARD)
+        self._widgets["ltx_fast"] = CompactSwitch(self._fast_row, self._on_fast_toggled, Colors.BG_CARD)
         self._widgets["ltx_fast"].pack(side="right", padx=12, pady=8)
+        Tooltip(self._widgets["ltx_fast"], get_tooltip("ltx_fast"))
 
         large_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         large_row.pack(fill="x")
         add_setting_label(large_row, "ltx_large_canvas", in_card=True)
         self._widgets["ltx_large_canvas"] = CompactSwitch(large_row, self._on_modified, Colors.BG_CARD)
         self._widgets["ltx_large_canvas"].pack(side="right", padx=12, pady=8)
+        Tooltip(self._widgets["ltx_large_canvas"], get_tooltip("ltx_large_canvas"))
         self._large_row = large_row
 
-        self._refresh_ltx_availability()
+        self._notice = ctk.CTkLabel(
+            self._ltx_options, text="", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="w"
+        )
+
+        self._refresh_widgets()
+
+    def _fast(self) -> bool:
+        return self._widgets["ltx_fast"].get() == 1
+
+    def _set_fast(self, fast: bool) -> None:
+        if fast:
+            self._widgets["ltx_fast"].select()
+        else:
+            self._widgets["ltx_fast"].deselect()
+
+    def _set_ltx_model(self, model: str) -> None:
+        self._ltx_model.set_value(model)
+        self._accepted_ltx_model = self._ltx_model.get_value()
+
+    def _show_notice(self, key: str | None) -> None:
+        if key:
+            self._notice.configure(text=t(key))
+            self._notice.pack(fill="x", padx=12, pady=(0, 8))
+        else:
+            self._notice.pack_forget()
+
+    def _ensure_variant(self, model: str, fast: bool) -> bool:
+        """Make ``(model, fast)`` usable: download it when the user agrees, else switch to an
+        installed variant with a notice. False when the user declined or nothing is installed."""
+        self._show_notice(None)
+        state = self._ltx_models.state
+        if state.installed(model, fast):
+            return True
+        if state.downloadable:
+            return self._ltx_models.ensure(model, fast, on_ready=lambda: None)
+        others = [(model, not fast)] + [(m, f) for m in LTX_MODELS if m != model for f in (fast, not fast)]
+        for other_model, other_fast in others:
+            if state.installed(other_model, other_fast):
+                self._set_ltx_model(other_model)
+                self._set_fast(other_fast)
+                if other_model != model:
+                    self._show_notice("model_ltx_variant_not_installed")
+                else:
+                    self._show_notice("model_ltx_fast_not_installed" if fast else "model_ltx_quality_not_installed")
+                return True
+        return False
 
     def _on_card_selected(self, value: str) -> None:
+        if value == "ltx" and not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
+            self._show_model("basicvsrpp")
+            return
         self._show_model(value)
+        self._on_modified()
+
+    def _on_ltx_model_selected(self, model: str) -> None:
+        if self._ensure_variant(model, self._fast()):
+            self._accepted_ltx_model = self._ltx_model.get_value()
+        else:
+            self._ltx_model.set_value(self._accepted_ltx_model)
+        self._refresh_widgets()
+        self._on_modified()
+
+    def _on_fast_toggled(self) -> None:
+        if not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
+            self._set_fast(not self._fast())
+        self._refresh_widgets()
         self._on_modified()
 
     def _show_model(self, value: str) -> None:
@@ -152,6 +244,7 @@ class RestorationModelSection:
         else:
             self._ltx_options.pack_forget()
         self._on_model_changed(value)
+        self._refresh_widgets()
 
     def _on_new_seed(self) -> None:
         self._set_seed(random.randrange(1, 2**31))
@@ -162,47 +255,90 @@ class RestorationModelSection:
         self._widgets["ltx_seed"].insert(0, str(seed))
 
     def unavailable_reason(self) -> str | None:
-        return ltx_unavailable_reason(installed=self._ltx_installed, nvidia=self._nvidia)
+        """Why the chosen LTX model cannot restore right now (None when it can)."""
+        return run_unavailable_reason(
+            self._ltx_models.state, self._ltx_model.get_value(), self._fast(), nvidia=self._nvidia
+        )
 
-    def _refresh_ltx_availability(self) -> None:
-        reason = self.unavailable_reason()
-        card = self._cards["ltx"]
-        card.set_enabled(self._enabled and reason is None)
-        card.description.configure(
+    def _refresh_widgets(self) -> None:
+        state = self._ltx_models.state
+        editable = self._enabled and not self._ltx_models.downloading
+        reason = card_unavailable_reason(state, nvidia=self._nvidia)
+        self._cards["basicvsrpp"].set_enabled(editable)
+        ltx_card = self._cards["ltx"]
+        ltx_card.set_enabled(editable and reason is None)
+        ltx_card.description.configure(
             text=t(reason) if reason else t("model_ltx_description"),
             text_color=Colors.STATUS_WARNING if reason else Colors.STATUS_PENDING,
         )
-        if reason is not None and self._model.get() == "ltx":
-            self._show_model("basicvsrpp")
+        self._ltx_model.configure(state="normal" if editable else "disabled")
+        self._new_seed_btn.configure(state="normal" if self._enabled else "disabled")
+        model, fast = self._ltx_model.get_value(), self._fast()
+        if not state.installed(model, fast) and state.downloadable:
+            self._install_status.configure(text=t("model_ltx_download_needed", size=state.download_size(model, fast)))
+            self._install_status.pack(fill="x", padx=12, pady=(0, 4), after=self._model_row)
+        else:
+            self._install_status.pack_forget()
+
+    def _usable_model(self) -> str:
+        """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed
+        precision when only that one is there."""
+        state = self._ltx_models.state
+        if self._model.get() != "ltx" or card_unavailable_reason(state, nvidia=self._nvidia) is not None:
+            return "basicvsrpp"
+        model, fast = self._ltx_model.get_value(), self._fast()
+        if not state.usable(model, fast) and state.installed(model, not fast):
+            self._set_fast(not fast)
+        return "ltx"
+
+    def _refresh_download(self) -> None:
+        percent = self._ltx_models.percent
+        if percent is None:
+            self._download_row.pack_forget()
+        else:
+            self._download_label.configure(text=t("ltx_downloading", percent=percent))
+            self._download_bar.set(percent / 100)
+            self._download_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0), after=self._cards_frame)
+
+    def refresh(self) -> None:
+        """Show the current install state and download, falling back to a usable choice."""
+        model = self._usable_model()
+        if model != self._model.get():
+            self._show_model(model)
+        else:
+            self._refresh_widgets()
+        self._refresh_download()
 
     def set_gpu_support(self, *, nvidia: bool, blackwell: bool) -> None:
         self._nvidia = nvidia
         if blackwell:
             self._fast_row.pack(fill="x", before=self._large_row)
         else:
-            self._widgets["ltx_fast"].deselect()
+            self._set_fast(False)
             self._fast_row.pack_forget()
-        self._refresh_ltx_availability()
+        self.refresh()
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled
-        self._cards["basicvsrpp"].set_enabled(enabled)
-        self._new_seed_btn.configure(state="normal" if enabled else "disabled")
-        self._refresh_ltx_availability()
+        self._refresh_widgets()
 
     def apply(self, preset) -> None:
         self._set_seed(preset.ltx_seed)
-        for key, selected in (("ltx_fast", preset.ltx_fast), ("ltx_large_canvas", preset.ltx_large_canvas)):
-            if selected:
-                self._widgets[key].select()
-            else:
-                self._widgets[key].deselect()
-        self._show_model(preset.restoration_model)
-        self._refresh_ltx_availability()
+        self._set_fast(preset.ltx_fast)
+        if preset.ltx_large_canvas:
+            self._widgets["ltx_large_canvas"].select()
+        else:
+            self._widgets["ltx_large_canvas"].deselect()
+        self._set_ltx_model(preset.ltx_model)
+        self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
+        self._show_notice(None)
+        self._show_model(self._usable_model())
+        self._refresh_download()
 
     def collect(self) -> dict:
         return {
             "restoration_model": self._widgets["restoration_model"].get(),
+            "ltx_model": self._widgets["ltx_model"].get_value(),
             "ltx_seed": parse_seed(self._widgets["ltx_seed"].get()),
             "ltx_fast": self._widgets["ltx_fast"].get() == 1,
             "ltx_large_canvas": self._widgets["ltx_large_canvas"].get() == 1,
