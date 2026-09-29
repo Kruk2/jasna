@@ -176,7 +176,7 @@ def _decode_window(decoder, latent: torch.Tensor, seed: int, device: torch.devic
     with torch.inference_mode():
         video = decode_latent(decoder, latent.to(device), free_bytes=free, generator=generator)
         video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
-    return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous()
+        return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous()
 
 
 def compose(
