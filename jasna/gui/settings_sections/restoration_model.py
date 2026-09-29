@@ -8,7 +8,7 @@ import customtkinter as ctk
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.locales import t
-from jasna.gui.ltx_models import LtxModels, card_unavailable_reason, run_unavailable_reason
+from jasna.gui.ltx_models import LtxModels, card_unavailable_reason, run_unavailable_reason, trial_only
 from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
@@ -167,6 +167,17 @@ class RestorationModelSection:
         Tooltip(self._widgets["ltx_large_canvas"], get_tooltip("ltx_large_canvas"))
         self._large_row = large_row
 
+        trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        trial_row.pack(fill="x")
+        add_setting_label(trial_row, "ltx_trial", in_card=True)
+        self._widgets["ltx_trial"] = CompactSwitch(trial_row, self._on_trial_toggled, Colors.BG_CARD)
+        self._widgets["ltx_trial"].pack(side="right", padx=12, pady=8)
+        Tooltip(self._widgets["ltx_trial"], get_tooltip("ltx_trial"))
+        self._trial_status = ctk.CTkLabel(
+            self._ltx_options, text="", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="w"
+        )
+        self._trial_row = trial_row
+
         self._notice = ctk.CTkLabel(
             self._ltx_options, text="", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="w"
         )
@@ -181,6 +192,16 @@ class RestorationModelSection:
             self._widgets["ltx_fast"].select()
         else:
             self._widgets["ltx_fast"].deselect()
+
+    def _trial(self) -> bool:
+        return self._widgets["ltx_trial"].get() == 1
+
+    def set_trial(self, trial: bool) -> None:
+        if trial:
+            self._widgets["ltx_trial"].select()
+        else:
+            self._widgets["ltx_trial"].deselect()
+        self._refresh_widgets()
 
     def _set_ltx_model(self, model: str) -> None:
         self._ltx_model.set_value(model)
@@ -198,7 +219,9 @@ class RestorationModelSection:
         installed variant with a notice. False when the user declined or nothing is installed."""
         self._show_notice(None)
         state = self._ltx_models.state
-        if state.installed(model, fast):
+        if trial_only(state):
+            self.set_trial(True)
+        if self._trial() or state.installed(model, fast):
             return True
         if state.downloadable:
             return self._ltx_models.ensure(model, fast, on_ready=lambda: None)
@@ -235,6 +258,12 @@ class RestorationModelSection:
         self._refresh_widgets()
         self._on_modified()
 
+    def _on_trial_toggled(self) -> None:
+        if not self._trial() and not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
+            self.set_trial(True)
+        self._refresh_widgets()
+        self._on_modified()
+
     def _show_model(self, value: str) -> None:
         self._model.set(value)
         for name, card in self._cards.items():
@@ -257,13 +286,13 @@ class RestorationModelSection:
     def unavailable_reason(self) -> str | None:
         """Why the chosen LTX model cannot restore right now (None when it can)."""
         return run_unavailable_reason(
-            self._ltx_models.state, self._ltx_model.get_value(), self._fast(), nvidia=self._nvidia
+            self._ltx_models.state, self._ltx_model.get_value(), self._fast(), nvidia=self._nvidia, trial=self._trial()
         )
 
     def _refresh_widgets(self) -> None:
         state = self._ltx_models.state
         editable = self._enabled and not self._ltx_models.downloading
-        reason = card_unavailable_reason(state, nvidia=self._nvidia)
+        reason = card_unavailable_reason(nvidia=self._nvidia)
         self._cards["basicvsrpp"].set_enabled(editable)
         ltx_card = self._cards["ltx"]
         ltx_card.set_enabled(editable and reason is None)
@@ -273,8 +302,17 @@ class RestorationModelSection:
         )
         self._ltx_model.configure(state="normal" if editable else "disabled")
         self._new_seed_btn.configure(state="normal" if self._enabled else "disabled")
+        locked = trial_only(state)
+        if locked:
+            self._widgets["ltx_trial"].select()
+        self._widgets["ltx_trial"].configure(state="normal" if editable and not locked else "disabled")
+        if self._trial():
+            self._trial_status.configure(text=t("model_ltx_trial_only" if locked else "ltx_trial_notice"))
+            self._trial_status.pack(fill="x", padx=12, pady=(0, 8), after=self._trial_row)
+        else:
+            self._trial_status.pack_forget()
         model, fast = self._ltx_model.get_value(), self._fast()
-        if not state.installed(model, fast) and state.downloadable:
+        if not self._trial() and not state.installed(model, fast) and state.downloadable:
             self._install_status.configure(text=t("model_ltx_download_needed", size=state.download_size(model, fast)))
             self._install_status.pack(fill="x", padx=12, pady=(0, 4), after=self._model_row)
         else:
@@ -284,10 +322,10 @@ class RestorationModelSection:
         """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed
         precision when only that one is there."""
         state = self._ltx_models.state
-        if self._model.get() != "ltx" or card_unavailable_reason(state, nvidia=self._nvidia) is not None:
+        if self._model.get() != "ltx" or card_unavailable_reason(nvidia=self._nvidia) is not None:
             return "basicvsrpp"
         model, fast = self._ltx_model.get_value(), self._fast()
-        if not state.usable(model, fast) and state.installed(model, not fast):
+        if not self._trial() and not state.usable(model, fast) and state.installed(model, not fast):
             self._set_fast(not fast)
         return "ltx"
 
@@ -329,6 +367,10 @@ class RestorationModelSection:
             self._widgets["ltx_large_canvas"].select()
         else:
             self._widgets["ltx_large_canvas"].deselect()
+        if preset.ltx_trial:
+            self._widgets["ltx_trial"].select()
+        else:
+            self._widgets["ltx_trial"].deselect()
         self._set_ltx_model(preset.ltx_model)
         self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
         self._show_notice(None)
@@ -342,4 +384,5 @@ class RestorationModelSection:
             "ltx_seed": parse_seed(self._widgets["ltx_seed"].get()),
             "ltx_fast": self._widgets["ltx_fast"].get() == 1,
             "ltx_large_canvas": self._widgets["ltx_large_canvas"].get() == 1,
+            "ltx_trial": self._widgets["ltx_trial"].get() == 1,
         }

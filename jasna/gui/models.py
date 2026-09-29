@@ -110,6 +110,7 @@ class AppSettings:
     ltx_seed: int = LTX_DEFAULT_SEED
     ltx_fast: bool = False
     ltx_large_canvas: bool = False
+    ltx_trial: bool = False
 
     # Basic processing
     batch_size: int = 4

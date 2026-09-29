@@ -253,6 +253,10 @@ class SettingsPanel(ctk.CTkFrame):
         """Locale key saying why the chosen LTX model cannot run now, or None when it can."""
         return self._model_section.unavailable_reason()
 
+    def set_ltx_trial(self, trial: bool):
+        self._model_section.set_trial(trial)
+        self._update_modified_indicator()
+
     def refresh_ltx_models(self):
         self._model_section.refresh()
         self._update_modified_indicator()
@@ -384,8 +388,6 @@ class SettingsPanel(ctk.CTkFrame):
         """Enable or disable the settings; the queue-wide post-export action stays editable while processing."""
         state = "normal" if enabled else "disabled"
 
-        self._model_section.set_enabled(enabled)
-
         # Preset bar buttons
         self._preset_dropdown.configure(state=state)
         self._create_btn.configure(state=state)
@@ -401,3 +403,4 @@ class SettingsPanel(ctk.CTkFrame):
                 widget.configure(state=state)
             except Exception:
                 logger.debug("Widget %r does not support state=%s", key, state, exc_info=True)
+        self._model_section.set_enabled(enabled)

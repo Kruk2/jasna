@@ -49,24 +49,38 @@ def read_install_state(directory: Path) -> LtxInstallState:
     )
 
 
-def card_unavailable_reason(state: LtxInstallState, *, nvidia: bool | None) -> str | None:
-    """Locale key saying why the LTX card cannot be picked; ``nvidia`` is None until the GPU is known."""
-    if nvidia is False:
-        return "model_ltx_needs_nvidia"
-    if not any(state.usable(model, fast) for model in LTX_MODELS for fast in (False, True)):
-        return "model_ltx_not_installed"
-    return None
+def card_unavailable_reason(*, nvidia: bool | None) -> str | None:
+    """Locale key saying why the LTX card cannot be picked; ``nvidia`` is None until the GPU is known.
+    Without model files LTX still runs as a trial."""
+    return "model_ltx_needs_nvidia" if nvidia is False else None
+
+
+def trial_only(state: LtxInstallState) -> bool:
+    """No LTX model is installed or downloadable, so only a trial run is possible."""
+    return not any(state.usable(model, fast) for model in LTX_MODELS for fast in (False, True))
 
 
 def run_unavailable_reason(
-    state: LtxInstallState, model: LtxModelName, fast: bool, *, nvidia: bool | None
+    state: LtxInstallState, model: LtxModelName, fast: bool, *, nvidia: bool | None, trial: bool
 ) -> str | None:
     """Locale key saying why LTX cannot restore right now with this variant."""
     if nvidia is False:
         return "model_ltx_needs_nvidia"
-    if state.installed(model, fast):
+    if trial or state.installed(model, fast):
         return None
     return "model_ltx_not_downloaded" if state.downloadable else "model_ltx_not_installed"
+
+
+def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
+    """Whether the installed ``model`` needs a license this PC lacks. Verifies the stored
+    license only; reads no model data."""
+    from jasna.protection import ProtectionError
+
+    try:
+        model_files.LtxModelFiles.from_dir(directory, model, fast=fast)
+    except ProtectionError:
+        return True
+    return False
 
 
 class LtxModels:
@@ -77,6 +91,7 @@ class LtxModels:
         self._directory = directory
         self._main_thread = main_thread
         self._on_change = on_change
+        self.directory = directory
         self.state = read_install_state(directory)
         self.percent: int | None = None
 
