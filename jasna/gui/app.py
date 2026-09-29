@@ -600,7 +600,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
             msg = t("error_cannot_start") + "\n\n" + "\n".join(f"- {e}" for e in errors)
             self._log_panel.error(msg)
-            messagebox.showerror(t("error_invalid_tvai"), msg)
+            messagebox.showerror(t("error_start_title"), msg)
             return
 
         try:

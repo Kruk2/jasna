@@ -463,7 +463,7 @@ JA = {
 
         # App messages
         "error_cannot_start": "処理を開始できません:",
-        "error_invalid_tvai": "無効な TVAI 設定",
+        "error_start_title": "開始できません",
         "error_post_export_command_required": "エクスポート後のカスタムコマンドが必要です",
         "error_ltx_segments": "LTX は動画全体を処理します。セグメントを消去するか「標準」を選んでください：{files}",
 

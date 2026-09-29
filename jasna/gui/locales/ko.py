@@ -443,7 +443,7 @@ KO = {
 
         # App messages
         "error_cannot_start": "처리를 시작할 수 없습니다:",
-        "error_invalid_tvai": "잘못된 TVAI 구성",
+        "error_start_title": "시작할 수 없음",
         "error_post_export_command_required": "내보내기 후 사용자 정의 명령이 필요합니다",
         "error_ltx_segments": "LTX는 영상 전체를 처리합니다. 구간을 지우거나 '표준'을 선택하세요: {files}",
 
