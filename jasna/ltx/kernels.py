@@ -12,6 +12,8 @@ Same arithmetic as the torch path in ``transformer.py``, which stays the referen
   cuBLAS 128x4 tiled layout; bit-exact against ``transformer.quantize_fp4``.
 """
 
+import functools
+
 import torch
 import triton
 import triton.language as tl
@@ -49,6 +51,21 @@ def rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     scales = torch.empty(m, dtype=torch.float32, device=x.device)
     _rotate_quantize_kernel[(m,)](x, codes, scales, x.stride(0), K=k, num_warps=8)
     return codes, scales
+
+
+# (BM, BN, BK, stages, warps) for the LTX-sized GEMMs, from a tile sweep over the attention,
+# FF-up and FF-down shapes on each GPU; one pick won every shape per architecture.
+INT8_MM_TILES = {
+    (8, 6): (128, 128, 64, 3, 4),  # RTX 3090
+    (8, 9): (256, 128, 128, 3, 8),  # RTX 4090
+    (12, 0): (128, 256, 128, 3, 8),  # RTX 5090
+    (12, 1): (128, 256, 128, 3, 8),
+}
+
+
+@functools.cache
+def _int8_mm_tiles(device_index: int) -> tuple[int, int, int, int, int]:
+    return INT8_MM_TILES[torch.cuda.get_device_capability(device_index)]
 
 
 @triton.jit
@@ -104,7 +121,7 @@ def int8_scaled_mm(
     m, k = codes.shape
     n = qdata.shape[0]
     out = torch.empty(m, n, dtype=torch.bfloat16, device=codes.device)
-    bm, bn, bk, stages, warps = (32, 32, 256, 3, 2) if n < 128 else (128, 256, 128, 3, 8)
+    bm, bn, bk, stages, warps = (32, 32, 256, 3, 2) if n < 128 else _int8_mm_tiles(codes.device.index)
     if k % bk:
         raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
     grid = (triton.cdiv(m, bm) * triton.cdiv(n, bn),)
