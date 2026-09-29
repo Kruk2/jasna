@@ -12,10 +12,13 @@ Same arithmetic as the torch path in ``transformer.py``, which stays the referen
   cuBLAS 128x4 tiled layout; bit-exact against ``transformer.quantize_fp4``.
 """
 
+import functools
+
 import torch
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
+from triton.tools.tensor_descriptor import TensorDescriptor
 
 EPS = tl.constexpr(1e-6)
 
@@ -79,31 +82,21 @@ def modulate_rotate_quantize(
 
 
 @triton.jit
-def _int8_mm_kernel(
-    a_ptr, b_ptr, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, K, half_rows, row_offset,
-    HAS_BIAS: tl.constexpr, GELU: tl.constexpr, RESIDUAL: tl.constexpr,
-    BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr, GROUP_M: tl.constexpr,
-):
-    pid = tl.program_id(0)
+def _tile_coords(tile, M, N, BM: tl.constexpr, BN: tl.constexpr, GROUP_M: tl.constexpr):
     grid_m = tl.cdiv(M, BM)
-    grid_n = tl.cdiv(N, BN)
-    width = GROUP_M * grid_n
-    first_m = (pid // width) * GROUP_M
+    width = GROUP_M * tl.cdiv(N, BN)
+    first_m = (tile // width) * GROUP_M
     size_m = min(grid_m - first_m, GROUP_M)
-    pid_m = first_m + (pid % width) % size_m
-    pid_n = (pid % width) // size_m
+    return first_m + (tile % width) % size_m, (tile % width) // size_m
 
+
+@triton.jit
+def _mm_epilogue(
+    acc, pid_m, pid_n, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, half_rows, row_offset,
+    HAS_BIAS: tl.constexpr, GELU: tl.constexpr, RESIDUAL: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr,
+):
     offs_m = pid_m * BM + tl.arange(0, BM)
     offs_n = pid_n * BN + tl.arange(0, BN)
-    offs_k = tl.arange(0, BK)
-    a_ptrs = a_ptr + tl.where(offs_m < M, offs_m, 0)[:, None] * K + offs_k[None, :]
-    b_ptrs = b_ptr + tl.where(offs_n < N, offs_n, 0)[None, :] * K + offs_k[:, None]
-    acc = tl.zeros((BM, BN), dtype=tl.int32)
-    for _ in range(0, K, BK):
-        acc = tl.dot(tl.load(a_ptrs), tl.load(b_ptrs), acc, out_dtype=tl.int32)
-        a_ptrs += BK
-        b_ptrs += BK
-
     m_mask = offs_m < M
     n_mask = offs_n < N
     mask = m_mask[:, None] & n_mask[None, :]
@@ -125,20 +118,110 @@ def _int8_mm_kernel(
     tl.store(c_ptr + offs_m[:, None] * N + offs_n[None, :], out, mask=mask)
 
 
+@triton.jit
+def _int8_mm_kernel(
+    a_ptr, b_ptr, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, K, half_rows, row_offset,
+    HAS_BIAS: tl.constexpr, GELU: tl.constexpr, RESIDUAL: tl.constexpr,
+    BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr, GROUP_M: tl.constexpr,
+):
+    pid_m, pid_n = _tile_coords(tl.program_id(0), M, N, BM, BN, GROUP_M)
+    offs_m = pid_m * BM + tl.arange(0, BM)
+    offs_n = pid_n * BN + tl.arange(0, BN)
+    offs_k = tl.arange(0, BK)
+    a_ptrs = a_ptr + tl.where(offs_m < M, offs_m, 0)[:, None] * K + offs_k[None, :]
+    b_ptrs = b_ptr + tl.where(offs_n < N, offs_n, 0)[None, :] * K + offs_k[:, None]
+    acc = tl.zeros((BM, BN), dtype=tl.int32)
+    for _ in range(0, K, BK):
+        acc = tl.dot(tl.load(a_ptrs), tl.load(b_ptrs), acc, out_dtype=tl.int32)
+        a_ptrs += BK
+        b_ptrs += BK
+    _mm_epilogue(
+        acc, pid_m, pid_n, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, half_rows, row_offset,
+        HAS_BIAS, GELU, RESIDUAL, BM, BN,
+    )
+
+
+@triton.jit
+def _tma_tile(a_desc, b_desc, pid_m, pid_n, k_start, k_stop, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr):
+    acc = tl.zeros((BM, BN), dtype=tl.int32)
+    for k in range(k_start, k_stop, BK):
+        acc = tl.dot(a_desc.load([pid_m * BM, k]), b_desc.load([pid_n * BN, k]).T, acc, out_dtype=tl.int32)
+    return acc
+
+
+@triton.jit
+def _int8_mm_stream_k_kernel(
+    a_desc, b_desc, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, ws_ptr, count_ptr,
+    M, N, K, half_rows, row_offset, FULL_TILES, TAIL_SPLITS,
+    HAS_BIAS: tl.constexpr, GELU: tl.constexpr, RESIDUAL: tl.constexpr,
+    BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr, GROUP_M: tl.constexpr, PROGRAMS: tl.constexpr,
+):
+    # Persistent: whole waves of tiles as usual, then the last, partial wave split along K
+    # over the idle programs. Partial int32 sums are added atomically (exact, in any order)
+    # and the last split of a tile runs its epilogue.
+    pid = tl.program_id(0)
+    for tile in range(pid, FULL_TILES, PROGRAMS):
+        pid_m, pid_n = _tile_coords(tile, M, N, BM, BN, GROUP_M)
+        acc = _tma_tile(a_desc, b_desc, pid_m, pid_n, 0, K, BM, BN, BK)
+        _mm_epilogue(
+            acc, pid_m, pid_n, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, half_rows, row_offset,
+            HAS_BIAS, GELU, RESIDUAL, BM, BN,
+        )
+    tail_units = (tl.cdiv(M, BM) * tl.cdiv(N, BN) - FULL_TILES) * TAIL_SPLITS
+    if pid < tail_units:
+        tail = pid // TAIL_SPLITS
+        split = pid % TAIL_SPLITS
+        k_steps = K // BK
+        pid_m, pid_n = _tile_coords(FULL_TILES + tail, M, N, BM, BN, GROUP_M)
+        acc = _tma_tile(
+            a_desc, b_desc, pid_m, pid_n,
+            (split * k_steps // TAIL_SPLITS) * BK, ((split + 1) * k_steps // TAIL_SPLITS) * BK, BM, BN, BK,
+        )
+        partial = ws_ptr + tail * BM * BN + tl.arange(0, BM)[:, None] * BN + tl.arange(0, BN)[None, :]
+        tl.atomic_add(partial, acc, sem="relaxed")
+        if tl.atomic_add(count_ptr + tail, 1, sem="acq_rel") == TAIL_SPLITS - 1:
+            _mm_epilogue(
+                tl.load(partial, volatile=True), pid_m, pid_n, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr,
+                M, N, half_rows, row_offset, HAS_BIAS, GELU, RESIDUAL, BM, BN,
+            )
+
+
+@functools.cache
+def _programs(device: torch.device) -> int:
+    return torch.cuda.get_device_properties(device).multi_processor_count
+
+
 def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, half_rows, row_offset):
     m, k = codes.shape
     n = qdata.shape[0]
-    bm, bn, bk, stages, warps = (32, 32, 256, 3, 2) if n < 128 else (128, 256, 128, 3, 8)
+    if n < 128:
+        bm, bn, bk, stages, warps = 32, 32, 256, 3, 2
+    elif k > 4096:
+        bm, bn, bk, stages, warps = 128, 128, 128, 3, 4
+    else:
+        bm, bn, bk, stages, warps = 128, 256, 128, 3, 8
     if k % bk:
         raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
-    grid = (triton.cdiv(m, bm) * triton.cdiv(n, bn),)
-    _int8_mm_kernel[grid](
-        codes, qdata, act_scales, scales, bias if bias is not None else scales,
+    args = (
+        act_scales, scales, bias if bias is not None else scales,
         residual if residual is not None else out, gate if gate is not None else scales, out,
-        m, n, k, half_rows, row_offset,
-        HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None,
-        BM=bm, BN=bn, BK=bk, GROUP_M=8, num_stages=stages, num_warps=warps,
     )
+    flags = dict(HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=bm, BN=bn, BK=bk, GROUP_M=8)
+    tiles = triton.cdiv(m, bm) * triton.cdiv(n, bn)
+    programs = _programs(codes.device)
+    tail = tiles % programs
+    # A short grid whose last wave is mostly idle loses most to that wave: split it along K.
+    if n >= 128 and tiles < 8 * programs and 0 < tail <= programs // 2:
+        workspace = torch.zeros(tail * bm * bn + tail, dtype=torch.int32, device=codes.device)
+        _int8_mm_stream_k_kernel[(programs,)](
+            TensorDescriptor.from_tensor(codes, [bm, bk]), TensorDescriptor.from_tensor(qdata, [bn, bk]), *args,
+            workspace, workspace[tail * bm * bn :], m, n, k, half_rows, row_offset, tiles - tail,
+            min(programs // tail, k // bk), PROGRAMS=programs, num_stages=stages, num_warps=warps, **flags,
+        )
+    else:
+        _int8_mm_kernel[(tiles,)](
+            codes, qdata, *args, m, n, k, half_rows, row_offset, num_stages=stages, num_warps=warps, **flags
+        )
     return out
 
 

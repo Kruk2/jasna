@@ -49,10 +49,11 @@ def test_rotate_quantize_matches_the_torch_reference(kernels):
 def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeypatch):
     monkeypatch.setattr(T, "_quant_kernels", None)
     generator = torch.Generator().manual_seed(0)
-    x = _activations(300, 4096, generator)
-    codes, act_scales = T.quantize_rows(T.rotate(x))
-    codes, act_scales = codes[:300].contiguous(), act_scales[:300].contiguous()
-    for out_features in (1000, 32):
+    # 8192 x 4096 leaves a mostly idle last wave, so it takes the split-K tail path
+    for rows, out_features in ((300, 1000), (300, 32), (8192, 4096)):
+        x = _activations(rows, 4096, generator)
+        codes, act_scales = T.quantize_rows(T.rotate(x))
+        codes, act_scales = codes[:rows].contiguous(), act_scales[:rows].contiguous()
         qdata = torch.randint(-127, 128, (out_features, 4096), generator=generator, dtype=torch.int8).cuda()
         scales = torch.rand(out_features, generator=generator).cuda() * 4e-4
         bias = torch.randn(out_features, generator=generator).to("cuda", torch.bfloat16)
