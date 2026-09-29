@@ -116,9 +116,8 @@ def fakes(monkeypatch):
     return budgets, bars
 
 
-def _run_spans(tmp_path, spans):
-    restore.restore_spans(
-        spans,
+def _render():
+    return restore.LtxRender(
         detector=_Detector(),
         files=FILES,
         frame_h=64,
@@ -127,6 +126,13 @@ def _run_spans(tmp_path, spans):
         large_canvas=False,
         budget=restore.segment_decode_budget,
         device=torch.device("cpu"),
+    )
+
+
+def _run_spans(tmp_path, spans):
+    restore.restore_spans(
+        spans,
+        _render(),
         work_dir=tmp_path,
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
@@ -294,3 +300,26 @@ def test_progress_without_a_report_only_drives_the_console_bar():
     progress = restore.Progress(3, disable=True, report=None)
     with progress.bar("compose", 3) as bar:
         bar.update(3)
+
+
+def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
+    video = _video(30, range(3, 28))
+    span = restore.LtxSpan(_source(video), (restore.LtxSegment(50, 150, seed=1),), _Writer)
+    progress = restore.Progress(30, disable=True, report=None)
+    cancel = threading.Event()
+    (prepared,) = restore.prepare_spans([span], _render(), tmp_path, progress=progress, cancel=cancel)
+    transformer = _Transformer(None, None)
+    _Transformer.seeds = []
+
+    for seed in (11, 22):
+        reseeded = restore.PreparedSpan(
+            restore.LtxSpan(span.frames, (restore.LtxSegment(50, 150, seed=seed),), span.open_writer),
+            prepared.plans,
+            prepared.references,
+        )
+        finals = restore.final_stores([reseeded], tmp_path / str(seed))
+        (tmp_path / str(seed)).mkdir()
+        restore.denoise_spans([reseeded], finals, transformer, keep_references=True, progress=progress, cancel=cancel)
+
+    assert _Transformer.seeds == [[11], [22]]
+    assert prepared.windows == 1

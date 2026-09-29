@@ -165,6 +165,35 @@ class LatentStore:
         self._path(index).unlink()
 
 
+def video_frames(
+    path: Path,
+    metadata,
+    *,
+    batch_size: int,
+    device: torch.device,
+    frame_stride: int,
+    seek_ts: float | None,
+    end_pts: int | None,
+) -> FrameSource:
+    """Decoded batches of ``path`` from the keyframe at ``seek_ts`` (the start when None),
+    stopping before ``end_pts`` (the end when None)."""
+    from jasna.media.video_decoder import VideoReader
+
+    def frames() -> FrameBatches:
+        with VideoReader(str(path), batch_size, device, metadata, frame_stride=frame_stride) as reader:
+            for batch, pts in reader.frames(seek_ts):
+                if end_pts is None:
+                    yield batch, pts
+                    continue
+                keep = next((i for i, p in enumerate(pts) if int(p) >= end_pts), len(pts))
+                if keep:
+                    yield batch[:keep], pts[:keep]
+                if keep < len(pts):
+                    return
+
+    return frames
+
+
 def _check(cancel: threading.Event) -> None:
     if cancel.is_set():
         raise Cancelled()
@@ -452,95 +481,158 @@ def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
     return requested
 
 
-def restore_spans(
-    spans: Sequence[LtxSpan],
-    *,
-    detector,
-    files: LtxModelFiles,
-    frame_h: int,
-    frame_w: int,
-    batch_size: int,
-    large_canvas: bool,
-    budget: DecodeBudget,
-    device: torch.device,
-    work_dir: Path,
-    progress: Progress,
-    cancel: threading.Event,
-) -> None:
-    """Restore every segment of ``spans`` and write each span's frames to a writer of its own
-    (closed once the span is written). ``large_canvas`` allows 768 px windows for large mosaics;
-    ``budget`` gives the decode memory budget per canvas size."""
+@dataclass(frozen=True)
+class LtxRender:
+    """What every pass needs besides the spans: the detector, the model files, the frame
+    size, detection batch size, the 768 px decision, the decode budget per canvas and the
+    GPU."""
+
+    detector: Callable
+    files: LtxModelFiles
+    frame_h: int
+    frame_w: int
+    batch_size: int
+    large_canvas: bool
+    budget: DecodeBudget
+    device: torch.device
+
+
+@dataclass(frozen=True)
+class PreparedSpan:
+    """A span planned and encoded: per segment its track plans and reference latents.
+    Neither depends on the seed, so one prepared span can be denoised with many seeds."""
+
+    span: LtxSpan
+    plans: tuple[list[TrackPlan], ...]
+    references: tuple[LatentStore, ...]
+
+    @property
+    def windows(self) -> int:
+        return sum(len(plan.windows) for segment_plans in self.plans for plan in segment_plans)
+
+
+def prepare_spans(
+    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
+) -> list[PreparedSpan]:
+    """Scan and VAE-encode every span; reference latents go to ``directory``."""
     with progress.bar("scan", progress.frames) as bar:
         plans = [
             scan_span(
                 span.frames,
                 span.segments,
-                detector,
-                batch_size=batch_size,
-                frame_h=frame_h,
-                frame_w=frame_w,
-                large_canvas=large_canvas,
+                render.detector,
+                batch_size=render.batch_size,
+                frame_h=render.frame_h,
+                frame_w=render.frame_w,
+                large_canvas=render.large_canvas,
                 bar=bar,
                 cancel=cancel,
             )
             for span in spans
         ]
-    windows = sum(len(plan.windows) for span_plans in plans for segment_plans in span_plans for plan in segment_plans)
+    prepared = [
+        PreparedSpan(
+            span,
+            tuple(span_plans),
+            tuple(LatentStore(directory, f"{s}-{g}.reference") for g in range(len(span.segments))),
+        )
+        for s, (span, span_plans) in enumerate(zip(spans, plans))
+    ]
+    if sum(p.windows for p in prepared):
+        encoder = load_video_encoder(render.files.vae, render.device)
+        with progress.bar("encode", progress.frames) as bar:
+            for p in prepared:
+                encode_span(
+                    p.span.frames,
+                    p.span.segments,
+                    p.plans,
+                    encoder,
+                    p.references,
+                    batch_size=render.batch_size,
+                    device=render.device,
+                    bar=bar,
+                    cancel=cancel,
+                )
+        del encoder
+        torch.cuda.empty_cache()
+    return prepared
+
+
+def final_stores(prepared: Sequence[PreparedSpan], directory: Path) -> list[tuple[LatentStore, ...]]:
+    return [
+        tuple(LatentStore(directory, f"{s}-{g}.final") for g in range(len(p.span.segments)))
+        for s, p in enumerate(prepared)
+    ]
+
+
+def denoise_spans(
+    prepared: Sequence[PreparedSpan],
+    finals: Sequence[tuple[LatentStore, ...]],
+    transformer: LtxTransformer,
+    *,
+    keep_references: bool,
+    progress: Progress,
+    cancel: threading.Event,
+) -> None:
+    """Denoise every track with its segment's seed into ``finals``; ``keep_references``
+    keeps the reference latents for another seed."""
+    windows = sum(p.windows for p in prepared)
+    with progress.bar("denoise", len(transformer.conditions) * windows, unit="step") as bar:
+        for p, span_finals in zip(prepared, finals):
+            for segment, segment_plans, references, store in zip(p.span.segments, p.plans, p.references, span_finals):
+                for plan in segment_plans:
+                    _check(cancel)
+                    latents = denoise_track(plan, transformer, references, seed=segment.seed, advance=bar.update)
+                    for window, latent in zip(plan.windows, latents):
+                        store.put(window.index, latent)
+                        if not keep_references:
+                            references.delete(window.index)
+
+
+def compose_spans(
+    prepared: Sequence[PreparedSpan],
+    finals: Sequence[tuple[LatentStore, ...]],
+    decoder,
+    render: LtxRender,
+    *,
+    progress: Progress,
+    cancel: threading.Event,
+) -> None:
+    with progress.bar("compose", progress.frames) as bar:
+        for p, span_finals in zip(prepared, finals):
+            compose_span(
+                p.span,
+                p.plans,
+                decoder,
+                span_finals,
+                frame_h=render.frame_h,
+                batch_size=render.batch_size,
+                budget=render.budget,
+                device=render.device,
+                bar=bar,
+                cancel=cancel,
+            )
+
+
+def restore_spans(
+    spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, progress: Progress, cancel: threading.Event
+) -> None:
+    """Restore every segment of ``spans`` and write each span's frames to a writer of its own
+    (closed once the span is written)."""
     with tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-") as temp:
-        stores = [
-            [
-                (LatentStore(Path(temp), f"{s}-{g}.reference"), LatentStore(Path(temp), f"{s}-{g}.final"))
-                for g in range(len(span.segments))
-            ]
-            for s, span in enumerate(spans)
-        ]
+        prepared = prepare_spans(spans, render, Path(temp), progress=progress, cancel=cancel)
+        finals = final_stores(prepared, Path(temp))
+        windows = sum(p.windows for p in prepared)
         if windows:
-            encoder = load_video_encoder(files.vae, device)
-            with progress.bar("encode", progress.frames) as bar:
-                for span, span_plans, span_stores in zip(spans, plans, stores):
-                    encode_span(
-                        span.frames,
-                        span.segments,
-                        span_plans,
-                        encoder,
-                        [references for references, _ in span_stores],
-                        batch_size=batch_size,
-                        device=device,
-                        bar=bar,
-                        cancel=cancel,
-                    )
-            del encoder
-            torch.cuda.empty_cache()
-            transformer = LtxTransformer(files.transformer, device)
+            transformer = LtxTransformer(render.files.transformer, render.device)
             try:
-                with progress.bar("denoise", len(transformer.conditions) * windows, unit="step") as bar:
-                    for span, span_plans, span_stores in zip(spans, plans, stores):
-                        for segment, segment_plans, (references, finals) in zip(span.segments, span_plans, span_stores):
-                            for plan in segment_plans:
-                                _check(cancel)
-                                latents = denoise_track(plan, transformer, references, seed=segment.seed, advance=bar.update)
-                                for window, latent in zip(plan.windows, latents):
-                                    finals.put(window.index, latent)
-                                    references.delete(window.index)
+                denoise_spans(prepared, finals, transformer, keep_references=False, progress=progress, cancel=cancel)
             finally:
                 transformer.close()
                 del transformer
                 torch.cuda.empty_cache()
-        decoder = load_video_decoder(files.vae, files.tuned_decoder, device) if windows else None
-        with progress.bar("compose", progress.frames) as bar:
-            for span, span_plans, span_stores in zip(spans, plans, stores):
-                compose_span(
-                    span,
-                    span_plans,
-                    decoder,
-                    [finals for _, finals in span_stores],
-                    frame_h=frame_h,
-                    batch_size=batch_size,
-                    budget=budget,
-                    device=device,
-                    bar=bar,
-                    cancel=cancel,
-                )
+        decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device) if windows else None
+        compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
 
 
 def restore_video(
@@ -563,14 +655,16 @@ def restore_video(
     decision and the decode tiles follow the VRAM free when they are made."""
     restore_spans(
         [LtxSpan(frames, (LtxSegment(*WHOLE_VIDEO_PTS, seed),), lambda: writer)],
-        detector=detector,
-        files=files,
-        frame_h=frame_h,
-        frame_w=frame_w,
-        batch_size=batch_size,
-        large_canvas=large_canvas_fits(large_canvas, torch.cuda.mem_get_info(device)[0]),
-        budget=free_vram_budget(device),
-        device=device,
+        LtxRender(
+            detector=detector,
+            files=files,
+            frame_h=frame_h,
+            frame_w=frame_w,
+            batch_size=batch_size,
+            large_canvas=large_canvas_fits(large_canvas, torch.cuda.mem_get_info(device)[0]),
+            budget=free_vram_budget(device),
+            device=device,
+        ),
         work_dir=work_dir,
         progress=progress,
         cancel=cancel,

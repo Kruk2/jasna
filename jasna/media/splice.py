@@ -372,6 +372,30 @@ def _is_safe_random_access_packet(
     return any(16 <= nal_type <= 20 for nal_type in nal_types)
 
 
+def segment_render_span(segment: SegmentRange, index: KeyframeIndex) -> SpliceSpan:
+    """The render span of one segment alone: from the keyframe at or before it to the
+    keyframe at or after it, with the segment as its one effect range."""
+    effect_start = index.start_pts + round(segment.start / index.time_base)
+    effect_end = index.start_pts + round(segment.end / index.time_base)
+    if effect_end <= effect_start:
+        raise SmartRenderCompatibilityError(
+            "A selected range is shorter than one video timestamp interval",
+            reason="range_too_short",
+        )
+    left_index = bisect.bisect_right(index.pts, effect_start) - 1
+    if left_index < 0:
+        raise SmartRenderCompatibilityError(
+            "The first selected segment begins before the first random-access keyframe",
+            reason="before_first_keyframe",
+        )
+    render_start = index.pts[left_index]
+    right_index = bisect.bisect_left(index.pts, effect_end)
+    render_end = index.pts[right_index] if right_index < len(index.pts) else index.end_pts
+    if render_end <= render_start:
+        render_end = index.end_pts
+    return SpliceSpan("render", render_start, render_end, ((effect_start, effect_end),))
+
+
 def build_splice_plan(
     segments: tuple[SegmentRange, ...] | list[SegmentRange],
     index: KeyframeIndex,
@@ -384,25 +408,8 @@ def build_splice_plan(
 
     expanded: list[tuple[int, int, list[tuple[int, int]]]] = []
     for segment in normalized:
-        effect_start = index.start_pts + round(segment.start / index.time_base)
-        effect_end = index.start_pts + round(segment.end / index.time_base)
-        if effect_end <= effect_start:
-            raise SmartRenderCompatibilityError(
-                "A selected range is shorter than one video timestamp interval",
-                reason="range_too_short",
-            )
-        left_index = bisect.bisect_right(index.pts, effect_start) - 1
-        if left_index < 0:
-            raise SmartRenderCompatibilityError(
-                "The first selected segment begins before the first random-access keyframe",
-                reason="before_first_keyframe",
-            )
-        render_start = index.pts[left_index]
-        right_index = bisect.bisect_left(index.pts, effect_end)
-        render_end = index.pts[right_index] if right_index < len(index.pts) else index.end_pts
-        if render_end <= render_start:
-            render_end = index.end_pts
-        expanded.append((render_start, render_end, [(effect_start, effect_end)], [segment]))
+        span = segment_render_span(segment, index)
+        expanded.append((span.start_pts, span.end_pts, list(span.effect_ranges), [segment]))
 
     merged: list[tuple[int, int, list[tuple[int, int]], list[SegmentRange]]] = []
     for start, end, effects, owners in expanded:
