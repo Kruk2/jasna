@@ -248,6 +248,10 @@ class SettingsPanel(ctk.CTkFrame):
         for section in self._model_aware_sections:
             section.set_model(model)
 
+    def ltx_unavailable_reason(self) -> str | None:
+        """Locale key saying why LTX cannot run on this PC, or None when it can."""
+        return self._model_section.unavailable_reason()
+
     def set_gpu_support(self, *, nvidia: bool, blackwell: bool):
         self._model_section.set_gpu_support(nvidia=nvidia, blackwell=blackwell)
         self._update_modified_indicator()

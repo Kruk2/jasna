@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from jasna.media.splice import KeyframeIndex, SmartRenderCompatibilityError, build_splice_plan
-from jasna.segments import SegmentRange, normalize_segments
+from jasna.segments import SegmentRange, SegmentRestoration, normalize_segments, resolve_restorations
 
 
 @dataclass(frozen=True)
@@ -21,14 +21,16 @@ class _Snapshot:
 
 
 class SegmentEditorState:
-    """UI-independent state and history for the segment editor."""
+    """UI-independent state and history for the segment editor. Every range carries its
+    own restoration; new ranges get ``default_restoration``."""
 
     def __init__(
         self,
         *,
         duration: float,
         fps: float,
-        segments: tuple[SegmentRange, ...] = (),
+        segments: tuple[SegmentRange, ...],
+        default_restoration: SegmentRestoration,
     ) -> None:
         duration = float(duration)
         fps = float(fps)
@@ -37,7 +39,8 @@ class SegmentEditorState:
         if fps <= 0:
             raise ValueError("video frame rate must be greater than zero")
 
-        normalized = normalize_segments(segments, duration=duration)
+        normalized = normalize_segments(resolve_restorations(segments, default_restoration), duration=duration)
+        self.default_restoration = default_restoration
         self.duration = duration
         self.fps = fps
         self.segments = normalized
@@ -105,7 +108,7 @@ class SegmentEditorState:
 
     def add(self, start: float, end: float) -> SegmentEditResult:
         start, end = self._validated_bounds(start, end)
-        segment = SegmentRange(start, end)
+        segment = SegmentRange(start, end, self.default_restoration)
         overlaps = sum(
             existing.start <= segment.end and segment.start <= existing.end
             for existing in self.segments
@@ -120,8 +123,8 @@ class SegmentEditorState:
         if self.selected_index is None:
             return self.add(start, end)
         start, end = self._validated_bounds(start, end)
-        replacement = SegmentRange(start, end)
         original_index = self.selected_index
+        replacement = replace(self.segments[original_index], start=start, end=end)
         remaining = [
             segment for index, segment in enumerate(self.segments)
             if index != original_index
@@ -145,7 +148,7 @@ class SegmentEditorState:
         """Add several ranges as one undoable step; returns how many were new."""
 
         fresh = [
-            candidate
+            replace(candidate, restoration=self.default_restoration)
             for candidate in ranges
             if not any(
                 existing.start <= candidate.start and existing.end >= candidate.end
@@ -161,6 +164,38 @@ class SegmentEditorState:
         self.selected_index = None
         self.clear_marks()
         return len(fresh)
+
+    def set_selected_restoration(self, restoration: SegmentRestoration) -> bool:
+        """Give the selected range ``restoration``; returns whether anything changed."""
+        selected = self.selected_segment
+        if selected is None or selected.restoration == restoration:
+            return False
+        changed = replace(selected, restoration=restoration)
+        self._record_change()
+        others = tuple(segment for index, segment in enumerate(self.segments) if index != self.selected_index)
+        self.segments = normalize_segments((*others, changed), duration=self.duration)
+        self.selected_index = self._index_containing(changed)
+        return True
+
+    def set_all_restoration(self, restoration: SegmentRestoration) -> bool:
+        """Give every range ``restoration``; returns whether anything changed."""
+        if all(segment.restoration == restoration for segment in self.segments):
+            return False
+        selected = self.selected_segment
+        self._record_change()
+        self.segments = normalize_segments(
+            tuple(replace(segment, restoration=restoration) for segment in self.segments),
+            duration=self.duration,
+        )
+        self.selected_index = None if selected is None else self._index_containing(selected)
+        return True
+
+    def restoration_at(self, seconds: float) -> SegmentRestoration:
+        """The restoration of the range holding ``seconds``, else the default."""
+        for segment in self.segments:
+            if segment.start <= seconds < segment.end:
+                return segment.restoration
+        return self.default_restoration
 
     def delete_selected(self) -> bool:
         if self.selected_index is None:
@@ -302,6 +337,7 @@ _SMART_RENDER_ERROR_KEYS = {
     "range_too_short": "segments_smart_render_range_too_short",
     "before_first_keyframe": "segments_smart_render_before_first_keyframe",
     "whole_video_reencode": "segments_smart_render_whole_video",
+    "mixed_models": "segments_mixed_models_too_close",
 }
 
 

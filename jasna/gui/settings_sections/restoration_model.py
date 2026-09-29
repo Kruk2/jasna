@@ -161,8 +161,11 @@ class RestorationModelSection:
         self._widgets["ltx_seed"].delete(0, "end")
         self._widgets["ltx_seed"].insert(0, str(seed))
 
+    def unavailable_reason(self) -> str | None:
+        return ltx_unavailable_reason(installed=self._ltx_installed, nvidia=self._nvidia)
+
     def _refresh_ltx_availability(self) -> None:
-        reason = ltx_unavailable_reason(installed=self._ltx_installed, nvidia=self._nvidia)
+        reason = self.unavailable_reason()
         card = self._cards["ltx"]
         card.set_enabled(self._enabled and reason is None)
         card.description.configure(

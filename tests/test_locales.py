@@ -192,7 +192,9 @@ _SEGMENT_EDITOR_KEYS = {
     "segments_scan_model_changed",
     "segments_timeline_title",
     "segments_timeline_hint",
-    "segments_legend_selected",
+    "segments_mixed_models_too_close",
+    "segments_restore_with",
+    "segments_use_for_all",
     "segments_legend_detected",
     "segments_legend_playhead",
 }

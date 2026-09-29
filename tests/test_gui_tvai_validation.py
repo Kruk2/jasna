@@ -9,12 +9,12 @@ from jasna.gui.validation import validate_gui_start
 
 def test_validate_gui_start_non_tvai_returns_empty() -> None:
     settings = AppSettings(secondary_restoration="none")
-    assert validate_gui_start(settings, []) == []
+    assert validate_gui_start(settings, [], ltx_available=True) == []
 
 
 def test_validate_gui_start_custom_post_export_requires_command() -> None:
     settings = AppSettings(secondary_restoration="none", post_export_action="command", post_export_command="")
-    assert t("error_post_export_command_required") in validate_gui_start(settings, [])
+    assert t("error_post_export_command_required") in validate_gui_start(settings, [], ltx_available=True)
 
 
 def test_validate_gui_start_tvai_missing_env_vars(tmp_path: Path, monkeypatch) -> None:
@@ -25,7 +25,7 @@ def test_validate_gui_start_tvai_missing_env_vars(tmp_path: Path, monkeypatch) -
     ffmpeg.write_bytes(b"")
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
 
-    errors = validate_gui_start(settings, [])
+    errors = validate_gui_start(settings, [], ltx_available=True)
     assert t("error_tvai_data_dir_not_set") in errors
     assert t("error_tvai_model_dir_not_set") in errors
 
@@ -38,7 +38,7 @@ def test_validate_gui_start_tvai_env_dirs_must_exist(tmp_path: Path, monkeypatch
     ffmpeg.write_bytes(b"")
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
 
-    errors = validate_gui_start(settings, [])
+    errors = validate_gui_start(settings, [], ltx_available=True)
     assert len(errors) == 2
     assert str(tmp_path / "missing_data") in errors[0]
     assert str(tmp_path / "missing_model") in errors[1]
@@ -53,7 +53,7 @@ def test_validate_gui_start_tvai_ffmpeg_path_must_exist(tmp_path: Path, monkeypa
     monkeypatch.setenv("TVAI_MODEL_DIR", str(model_dir))
 
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(tmp_path / "missing_ffmpeg.exe"))
-    errors = validate_gui_start(settings, [])
+    errors = validate_gui_start(settings, [], ltx_available=True)
     assert len(errors) == 1
     assert str(tmp_path / "missing_ffmpeg.exe") in errors[0]
 
@@ -70,17 +70,22 @@ def test_validate_gui_start_tvai_ok(tmp_path: Path, monkeypatch) -> None:
     ffmpeg.write_bytes(b"")
 
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
-    assert validate_gui_start(settings, []) == []
+    assert validate_gui_start(settings, [], ltx_available=True) == []
 
 
-def test_validate_gui_start_blocks_ltx_with_segmented_jobs() -> None:
+def test_validate_gui_start_blocks_ltx_ranges_only_when_ltx_cannot_run() -> None:
     from jasna.gui.models import JobItem
-    from jasna.segments import SegmentRange
+    from jasna.segments import SegmentRange, SegmentRestoration
 
     whole = JobItem(path=Path("whole.mp4"))
-    cut = JobItem(path=Path("cut.mp4"), segments=(SegmentRange(1.0, 2.0),))
+    standard = JobItem(path=Path("standard.mp4"), segments=(SegmentRange(1.0, 2.0),))
+    ltx_range = JobItem(path=Path("cut.mp4"), segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 3)),))
     ltx = AppSettings(restoration_model="ltx", secondary_restoration="tvai")
 
-    assert validate_gui_start(ltx, [whole]) == []
-    assert validate_gui_start(ltx, [whole, cut]) == [t("error_ltx_segments", files="cut.mp4")]
-    assert validate_gui_start(AppSettings(), [cut]) == []
+    assert validate_gui_start(ltx, [whole, standard, ltx_range], ltx_available=True) == []
+    assert validate_gui_start(AppSettings(), [whole, standard, ltx_range], ltx_available=False) == [
+        t("error_ltx_ranges_unavailable", files="cut.mp4")
+    ]
+    assert validate_gui_start(ltx, [whole, standard], ltx_available=False) == [
+        t("error_ltx_ranges_unavailable", files="whole.mp4, standard.mp4")
+    ]

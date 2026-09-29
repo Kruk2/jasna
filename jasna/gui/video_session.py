@@ -29,9 +29,8 @@ def video_session_key(settings: AppSettings) -> tuple:
         settings.denoise_step,
         settings.secondary_restoration,
         settings.restoration_model,
+        settings.ltx_fast,
     )
-    if settings.restoration_model == "ltx":
-        key += (settings.ltx_fast,)
     if settings.secondary_restoration == "tvai":
         key += (
             settings.tvai_ffmpeg_path,
