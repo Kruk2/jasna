@@ -952,3 +952,67 @@ def test_try_seed_shows_progress_then_lets_the_user_compare_and_pick_seeds(monke
             editor._finish_close()
         root.destroy()
     assert _FakeSeedWorker.instances[0].closed
+
+
+def test_range_controls_fit_their_content_while_the_list_keeps_its_rows() -> None:
+    assert segment_editor.range_controls_height(500, 200, 156) == 200
+    assert segment_editor.range_controls_height(320, 200, 156) == 164
+    assert segment_editor.range_controls_height(200, 200, 156) == 100
+
+
+def _visible_in(widget, viewport) -> bool:
+    top, bottom = viewport.winfo_rooty(), viewport.winfo_rooty() + viewport.winfo_height()
+    return widget.winfo_ismapped() and top <= widget.winfo_rooty() and widget.winfo_rooty() + widget.winfo_height() <= bottom
+
+
+def test_range_list_keeps_three_rows_beside_a_busy_seed_inspector(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        editor.geometry("1856x880")
+        for start in (1.0, 4.0, 7.0, 10.0):
+            editor._timeline_create(start, start + 1.0)
+        editor._select_range(0)
+        editor._model_radios["ltx"].invoke()
+        key = editor._range_key(editor._state.selected_segment)
+        editor._tried_seeds[key] = {1: (), 2: ()}
+        editor._shown_seed = (key, 2)
+        editor._seed_running = (key, 1)
+        editor._seed_status.configure(text="Seed 1: Restoring 30% · about 15s left")
+        editor._refresh_seed_controls()
+        for _ in range(5):
+            root.update()
+
+        rows = editor._segment_list.winfo_children()
+        viewport = editor._segment_list._parent_canvas
+        assert all(_visible_in(row, viewport) for row in rows[:3])
+        assert editor._range_controls._parent_canvas.yview() == (0.0, 1.0)
+        assert _visible_in(editor._seed_chips, editor._range_controls._parent_canvas)
+        assert editor._range_action.grid_info()["row"] == 0
+    finally:
+        if editor is not None:
+            editor._seed_running = None
+            editor._finish_close()
+        root.destroy()
+
+
+def test_range_times_stack_and_controls_scroll_at_minimum_size(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        editor.geometry("900x640")
+        editor._timeline_create(1.0, 2.0)
+        editor._model_radios["ltx"].invoke()
+        for _ in range(5):
+            root.update()
+
+        assert editor._end_entry.grid_info()["row"] == 1
+        assert editor._range_action.grid_info()["row"] == 2
+        assert editor._range_controls._parent_canvas.yview()[1] < 1.0
+        assert editor._segment_list._parent_canvas.winfo_height() > 0
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
