@@ -125,3 +125,15 @@ def test_block_forward_with_kernels_matches_the_torch_path(kernels, monkeypatch,
     monkeypatch.setattr(T, "_quant_kernels", None)
     expected = T.block_forward(weights, x, cond, context, rope, heads=heads)
     assert (with_kernels.float() - expected.float()).norm() / expected.float().norm() < 1e-2
+
+
+def test_kernels_reject_widths_they_would_compute_wrong(kernels):
+    x = torch.zeros(8, 384, dtype=torch.bfloat16, device="cuda")
+    with pytest.raises(ValueError):
+        kernels.rotate_quantize(x)
+    with pytest.raises(ValueError):
+        kernels.quantize_fp4(x, torch.ones((), device="cuda"))
+    codes = torch.zeros(8, 320, dtype=torch.int8, device="cuda")
+    weights = torch.zeros(256, 320, dtype=torch.int8, device="cuda")
+    with pytest.raises(ValueError):
+        kernels.int8_scaled_mm(codes, torch.ones(8, device="cuda"), weights, torch.ones(256, device="cuda"), None, False)

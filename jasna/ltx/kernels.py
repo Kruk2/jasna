@@ -43,6 +43,8 @@ def _rotate_quantize_kernel(x_ptr, q_ptr, s_ptr, stride_x, K: tl.constexpr):
 def rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """``(rows, k)`` bf16 -> (int8 codes ``(rows, k)``, fp32 row scales ``(rows,)``)."""
     m, k = x.shape
+    if k % 256 or k & (k - 1):
+        raise ValueError(f"rotate_quantize needs a power-of-two width of at least 256, got {k}")
     codes = torch.empty(m, k, dtype=torch.int8, device=x.device)
     scales = torch.empty(m, dtype=torch.float32, device=x.device)
     _rotate_quantize_kernel[(m,)](x, codes, scales, x.stride(0), K=k, num_warps=8)
@@ -103,6 +105,8 @@ def int8_scaled_mm(
     n = qdata.shape[0]
     out = torch.empty(m, n, dtype=torch.bfloat16, device=codes.device)
     bm, bn, bk, stages, warps = (32, 32, 256, 3, 2) if n < 128 else (128, 256, 128, 3, 8)
+    if k % bk:
+        raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
     grid = (triton.cdiv(m, bm) * triton.cdiv(n, bn),)
     _int8_mm_kernel[grid](
         codes, qdata, act_scales, scales, bias if bias is not None else scales, out, m, n, k,
@@ -148,6 +152,8 @@ def quantize_fp4(x: torch.Tensor, tensor_scale: torch.Tensor) -> tuple[torch.Ten
     """``(rows, k)`` -> (packed uint8 ``(rows, k/2)``, float8 block scales in the zero-padded
     cuBLAS 128x4 tiled layout), like ``transformer.quantize_fp4``."""
     m, k = x.shape
+    if k % 256:
+        raise ValueError(f"quantize_fp4 needs a width divisible by 256, got {k}")
     packed = torch.empty(m, k // 2, dtype=torch.uint8, device=x.device)
     scales = torch.zeros(-(-m // 128) * 128, -(-(k // 16) // 4) * 4, dtype=torch.uint8, device=x.device)
     block_rows, block_k = 32, 256
