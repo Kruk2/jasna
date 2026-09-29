@@ -31,6 +31,7 @@ from pathlib import Path
 
 import torch
 
+from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx import transformer as T
 from jasna.ltx.model_files import LTX_MODELS, LtxModelFiles
@@ -40,9 +41,9 @@ from jasna.ltx.sampler import LtxTransformer
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LATENT_CHANNELS = 128
 KERNEL_KINDS = (
-    ("attention", re.compile(r"qattn|sage|fmha|flash|attention|sdpa", re.I)),
-    ("gemm", re.compile(r"gemm|cutlass|nvjet|xmma|int_mm|triton_tem|gemv|cublas", re.I)),
+    ("gemm", re.compile(r"^triton_tem|gemm|cutlass|nvjet|xmma|gemv|cublas", re.I)),
     ("fused triton", re.compile(r"^triton_")),
+    ("attention", re.compile(r"attn|fmha|flash|attention|sdpa|QuantInt8Kernel|TransposePadPermute", re.I)),
 )
 
 
@@ -128,6 +129,7 @@ def main() -> None:
 
     if args.fresh_cache:
         os.environ["TORCHINDUCTOR_CACHE_DIR"] = tempfile.mkdtemp(prefix="ltx-bench-inductor-")
+    install_noise_filters()
     configure_torch_compile_cache()
     set_inductor_flags(args.inductor)
     device = torch.device("cuda")
