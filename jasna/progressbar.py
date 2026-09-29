@@ -9,6 +9,40 @@ ProgressCallback = Callable[[float, float, float, int, int, str], None]
 """``(percent, fps, eta_seconds, frames_done, total_frames, stage)``; ``stage`` names the LTX
 pass running, or is empty for frame-by-frame restoration."""
 
+LTX_WORK_PER_FRAME = 30.0
+"""Rough cost of one LTX-restored frame in frames of the standard model."""
+
+
+class JobProgress:
+    """One bar for a job made of parts that report on their own (e.g. LTX ranges, then
+    standard ranges). Each part fills its share of the bar by its estimated ``work``, in
+    the order given; time left comes from the whole job's elapsed time and fraction, so
+    it does not jump when the next part starts."""
+
+    def __init__(self, callback: ProgressCallback, work: dict[str, float]) -> None:
+        self._callback = callback
+        total = sum(work.values())
+        self._shares: dict[str, tuple[float, float]] = {}
+        offset = 0.0
+        for part, amount in work.items():
+            share = amount / total if total > 0 else 0.0
+            self._shares[part] = (offset, share)
+            offset += share
+        self._started = time.monotonic()
+        self._timed = False
+
+    def part(self, name: str) -> ProgressCallback:
+        offset, share = self._shares[name]
+
+        def report(percent: float, fps: float, eta_seconds: float, done: int, total: int, stage: str) -> None:
+            fraction = min(1.0, offset + share * percent / 100.0)
+            self._timed = self._timed or eta_seconds > 0
+            elapsed = time.monotonic() - self._started
+            eta = elapsed * (1.0 - fraction) / fraction if self._timed and fraction > 0 else 0.0
+            self._callback(fraction * 100.0, fps, eta, done, total, stage)
+
+        return report
+
 
 class Progressbar:
     """Progress bar with time remaining estimation and speed display."""

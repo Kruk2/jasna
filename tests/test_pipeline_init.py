@@ -49,7 +49,7 @@ class TestPipelineInit:
     def test_ltx_progress_reaches_the_progress_callback_with_its_stage(self):
         cb = MagicMock()
         p = _make_pipeline(progress_callback=cb, disable_progress=True)
-        with p._ltx_progress(10).bar("scan", 10) as bar:
+        with p._ltx_progress(10, cb).bar("scan", 10) as bar:
             bar.update(10)
         assert cb.call_args[0] == (pytest.approx(2.0), 0.0, 0.0, 0, 0, "scan")
 
