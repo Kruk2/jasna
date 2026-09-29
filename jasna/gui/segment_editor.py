@@ -16,7 +16,7 @@ from tkinter import messagebox
 from jasna.gui import scaling
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings, JobItem
-from jasna.gui.components import Tooltip, format_duration, grab_modal
+from jasna.gui.components import AutoHidingScrollableFrame, Tooltip, format_duration, grab_modal
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker, SeedFailed, SeedFrame, SeedProgress, SeedReady
 from jasna.gui.restoration_preview import (
@@ -67,6 +67,15 @@ from jasna.segments import (
 )
 
 logger = logging.getLogger(__name__)
+
+RANGE_LIST_MIN_HEIGHT = 3 * 44 + 24
+RANGE_TIMES_ONE_ROW_MIN_WIDTH = 520
+
+
+def range_controls_height(shared: int, content: int, list_min: int) -> int:
+    """Height of the range controls under the range list, which share ``shared`` pixels:
+    all of ``content`` while the list keeps ``list_min``, else the rest (never under half)."""
+    return max(0, min(content, max(shared - list_min, shared // 2)))
 
 
 class SegmentEditor(ctk.CTkToplevel):
@@ -478,6 +487,7 @@ class SegmentEditor(ctk.CTkToplevel):
         range_panel.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         range_panel.grid_columnconfigure(0, weight=1)
         range_panel.grid_rowconfigure(1, weight=1)
+        self._range_panel = range_panel
         range_header = ctk.CTkFrame(range_panel, fg_color="transparent")
         range_header.grid(row=0, column=0, sticky="ew", padx=10, pady=(8, 4))
         ctk.CTkLabel(
@@ -535,58 +545,86 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._clear_btn.pack(side="right")
 
-        editor = ctk.CTkFrame(range_panel, fg_color="transparent")
-        editor.grid(row=3, column=0, sticky="ew", padx=8, pady=(4, 8))
-        editor.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            editor,
-            text=t("segments_start"),
-            text_color=Colors.TEXT_PRIMARY,
-        ).grid(row=0, column=0, sticky="w", padx=(0, 6), pady=3)
-        self._start_entry = ctk.CTkEntry(editor, font=(Fonts.FAMILY_MONO, Fonts.SIZE_SMALL))
-        self._start_entry.grid(row=0, column=1, sticky="ew", pady=3)
-        self._mark_in_btn = ctk.CTkButton(
-            editor,
-            text=t("segments_mark_in_short"),
-            width=42,
-            command=self._set_mark_in,
-        )
-        self._mark_in_btn.grid(row=0, column=2, padx=(5, 0), pady=3)
-        Tooltip(self._mark_in_btn, t("segments_mark_in_hint"))
-        ctk.CTkLabel(
-            editor,
-            text=t("segments_end"),
-            text_color=Colors.TEXT_PRIMARY,
-        ).grid(row=1, column=0, sticky="w", padx=(0, 6), pady=3)
-        self._end_entry = ctk.CTkEntry(editor, font=(Fonts.FAMILY_MONO, Fonts.SIZE_SMALL))
-        self._end_entry.grid(row=1, column=1, sticky="ew", pady=3)
-        self._mark_out_btn = ctk.CTkButton(
-            editor,
-            text=t("segments_mark_out_short"),
-            width=42,
-            command=self._set_mark_out,
-        )
-        self._mark_out_btn.grid(row=1, column=2, padx=(5, 0), pady=3)
-        Tooltip(self._mark_out_btn, t("segments_mark_out_hint"))
+        self._range_controls = AutoHidingScrollableFrame(range_panel, fg_color="transparent", height=1)
+        self._range_controls.grid(row=3, column=0, sticky="nsew", padx=4, pady=(0, 4))
+        self._range_controls.grid_columnconfigure(0, weight=1)
+        range_panel.bind("<Configure>", self._fit_range_controls, add="+")
+        self._range_controls.bind("<Configure>", self._fit_range_controls, add="+")
+
+        editor = ctk.CTkFrame(self._range_controls, fg_color="transparent")
+        editor.grid(row=0, column=0, sticky="ew", padx=4, pady=(2, 4))
+        editor.bind("<Configure>", self._layout_range_times, add="+")
+        self._range_times: list[tuple[ctk.CTkLabel, ctk.CTkEntry, ctk.CTkButton]] = []
+        for column, (label, entry_name, mark_name, mark_text, mark_hint, mark_command) in enumerate(
+            (
+                ("segments_start", "_start_entry", "_mark_in_btn", "segments_mark_in_short",
+                 "segments_mark_in_hint", self._set_mark_in),
+                ("segments_end", "_end_entry", "_mark_out_btn", "segments_mark_out_short",
+                 "segments_mark_out_hint", self._set_mark_out),
+            )
+        ):
+            text = ctk.CTkLabel(editor, text=t(label), text_color=Colors.TEXT_PRIMARY)
+            entry = ctk.CTkEntry(editor, width=40, font=(Fonts.FAMILY_MONO, Fonts.SIZE_SMALL))
+            setattr(self, entry_name, entry)
+            mark = ctk.CTkButton(editor, text=t(mark_text), width=30, command=mark_command)
+            Tooltip(mark, t(mark_hint))
+            setattr(self, mark_name, mark)
+            self._range_times.append((text, entry, mark))
         self._range_action = ctk.CTkButton(
             editor,
             text=t("segments_add_range"),
             command=self._add_or_update,
         )
-        self._range_action.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(5, 0))
-        self._build_restoration_inspector(range_panel)
+        self._range_times_one_row: bool | None = None
+        self._layout_range_times()
+        self._build_restoration_inspector(self._range_controls)
 
-    def _build_restoration_inspector(self, range_panel: ctk.CTkFrame) -> None:
-        self._inspector = ctk.CTkFrame(range_panel, fg_color=Colors.BG_PANEL, corner_radius=Sizing.BORDER_RADIUS)
+    def _layout_range_times(self, event=None) -> None:
+        """Start, End and the add/update button share one row when the panel is wide enough, else stack."""
+        width = RANGE_TIMES_ONE_ROW_MIN_WIDTH if event is None else event.width
+        margin = 24 if self._range_times_one_row is False else 0
+        one_row = width >= scaling.raw_tk_size(self, RANGE_TIMES_ONE_ROW_MIN_WIDTH + margin)
+        if one_row == self._range_times_one_row:
+            return
+        self._range_times_one_row = one_row
+        editor = self._range_action.master
+        for column in range(7):
+            editor.grid_columnconfigure(column, weight=0)
+        editor.grid_columnconfigure((1, 4) if one_row else 1, weight=1)
+        for index, (text, entry, mark) in enumerate(self._range_times):
+            row, first = (0, index * 3) if one_row else (index, 0)
+            text.grid(row=row, column=first, sticky="w", padx=(0 if first == 0 else 8, 4), pady=3)
+            entry.grid(row=row, column=first + 1, sticky="ew", pady=3)
+            mark.grid(row=row, column=first + 2, padx=(3, 0), pady=3)
+        if one_row:
+            self._range_action.grid(row=0, column=6, columnspan=1, sticky="ew", padx=(8, 0), pady=3)
+        else:
+            self._range_action.grid(row=2, column=0, columnspan=3, sticky="ew", padx=0, pady=(5, 0))
+
+    def _fit_range_controls(self, _event=None) -> None:
+        """Size the range controls to their content, but keep room for about three list rows."""
+        panel = self._range_panel
+        fixed = panel.grid_bbox(0, 0)[3] + panel.grid_bbox(0, 2)[3] + scaling.raw_tk_size(panel, 4)
+        height = range_controls_height(
+            panel.winfo_height() - fixed,
+            self._range_controls.winfo_reqheight(),
+            scaling.raw_tk_size(panel, RANGE_LIST_MIN_HEIGHT),
+        )
+        logical = max(1, round(height / scaling.widget_scaling(panel)))
+        if logical != self._range_controls.cget("height"):
+            self._range_controls.configure(height=logical)
+
+    def _build_restoration_inspector(self, parent: ctk.CTkFrame) -> None:
+        self._inspector = ctk.CTkFrame(parent, fg_color=Colors.BG_PANEL, corner_radius=Sizing.BORDER_RADIUS)
         self._inspector.grid_columnconfigure(1, weight=1)
         ctk.CTkLabel(
             self._inspector,
             text=t("segments_restore_with"),
             text_color=Colors.TEXT_PRIMARY,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-        ).grid(row=0, column=0, sticky="w", padx=(8, 6), pady=6)
+        ).grid(row=0, column=0, sticky="w", padx=(8, 6), pady=4)
         models = ctk.CTkFrame(self._inspector, fg_color="transparent")
-        models.grid(row=0, column=1, sticky="w", pady=6)
+        models.grid(row=0, column=1, sticky="w", pady=4)
         self._range_model = ctk.StringVar(value="basicvsrpp")
         self._model_radios = {}
         for model in ("basicvsrpp", "ltx"):
@@ -638,25 +676,25 @@ class SegmentEditor(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             command=self._use_restoration_for_all,
         )
-        self._use_for_all_btn.grid(row=0, column=2, sticky="e", padx=(4, 8), pady=6)
+        self._use_for_all_btn.grid(row=0, column=2, columnspan=2, sticky="e", padx=(4, 8), pady=4)
         Tooltip(self._use_for_all_btn, t("tip_segments_use_for_all"))
 
         self._seed_box = ctk.CTkFrame(self._inspector, fg_color="transparent")
         self._seed_box.grid_columnconfigure(0, weight=1)
         self._try_seed_btn = ctk.CTkButton(
-            self._seed_box,
+            self._inspector,
             text=t("segments_try_seed"),
+            width=80,
             height=28,
             fg_color=Colors.MODEL_LTX,
             hover_color=Colors.PRIMARY_HOVER,
             command=self._try_seed,
         )
-        self._try_seed_btn.grid(row=0, column=0, sticky="ew")
         self._try_seed_tooltip = Tooltip(self._try_seed_btn, t("tip_segments_try_seed"))
         self._seed_cancel_btn = ctk.CTkButton(
-            self._seed_box,
+            self._inspector,
             text=t("btn_cancel"),
-            width=72,
+            width=80,
             height=28,
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
@@ -721,7 +759,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if selected is None:
             self._inspector.grid_forget()
             return
-        self._inspector.grid(row=4, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self._inspector.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
         restoration = selected.restoration
         self._range_model.set(restoration.model)
         blocked = self._ltx_blocked_reason()
@@ -732,14 +770,20 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._ltx_radio_tooltip.set_text(t(blocked) if blocked else t("model_ltx_description"))
         if restoration.model == "ltx":
-            self._seed_box.grid(row=2, column=0, columnspan=3, sticky="ew", padx=8, pady=(3, 8))
-            self._seed_label.grid(row=1, column=0, sticky="w", padx=(8, 6), pady=3)
-            self._seed_entry.grid(row=1, column=1, sticky="ew", pady=3)
-            self._new_seed_btn.grid(row=1, column=2, sticky="w", padx=(4, 8), pady=3)
+            self._seed_label.grid(row=1, column=0, sticky="w", padx=(8, 6), pady=(0, 6))
+            self._seed_entry.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+            self._new_seed_btn.grid(row=1, column=2, sticky="w", padx=4, pady=(0, 6))
             self._seed_entry.delete(0, "end")
             self._seed_entry.insert(0, str(restoration.ltx_seed))
         else:
-            for widget in (self._seed_label, self._seed_entry, self._new_seed_btn, self._seed_box):
+            for widget in (
+                self._seed_label,
+                self._seed_entry,
+                self._new_seed_btn,
+                self._try_seed_btn,
+                self._seed_cancel_btn,
+                self._seed_box,
+            ):
                 widget.grid_forget()
         state = "disabled" if locked else "normal"
         for widget in (self._seed_entry, self._new_seed_btn, self._use_for_all_btn):
@@ -772,17 +816,24 @@ class SegmentEditor(ctk.CTkToplevel):
             state="disabled" if running or reason is not None or self._scanning() else "normal"
         )
         self._try_seed_tooltip.set_text(t(reason) if reason else t("tip_segments_try_seed"))
+        seed_button, hidden_button = (
+            (self._seed_cancel_btn, self._try_seed_btn) if running else (self._try_seed_btn, self._seed_cancel_btn)
+        )
+        hidden_button.grid_forget()
+        seed_button.grid(row=1, column=3, sticky="e", padx=(0, 8), pady=(0, 6))
         if running:
-            self._seed_cancel_btn.grid(row=0, column=1, padx=(6, 0))
-            self._seed_progress.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+            self._seed_progress.grid(row=0, column=0, sticky="ew", pady=(2, 0))
         else:
-            self._seed_cancel_btn.grid_forget()
             self._seed_progress.grid_forget()
         if self._seed_status.cget("text"):
-            self._seed_status.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+            self._seed_status.grid(row=1, column=0, sticky="ew", pady=(2, 0))
         else:
             self._seed_status.grid_forget()
         self._render_seed_chips(selected)
+        if self._seed_box.grid_slaves():
+            self._seed_box.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 6))
+        else:
+            self._seed_box.grid_forget()
         self._refresh_seed_view_control()
 
     def _render_seed_chips(self, selected: SegmentRange) -> None:
@@ -793,7 +844,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if not tried:
             self._seed_chips.grid_forget()
             return
-        self._seed_chips.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        self._seed_chips.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         label = ctk.CTkLabel(
             self._seed_chips,
             text=t("segments_seed_tried"),
