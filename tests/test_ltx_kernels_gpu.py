@@ -1,22 +1,26 @@
 """The Triton kernels for the LTX quantized linears against the torch path they replace.
-Needs a consumer Blackwell GPU (SM 12.x) and Triton."""
+Needs a GPU architecture listed in ``kernels.INT8_MM_TILES`` and Triton; the NVFP4 tests
+need consumer Blackwell (SM 12.x)."""
 
 from __future__ import annotations
-
-import importlib.util
 
 import pytest
 import torch
 import torch.nn.functional as F
 
+pytest.importorskip("triton")
+
 from jasna.ltx import transformer as T
+from jasna.ltx.kernels import INT8_MM_TILES
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available()
     or torch.version.cuda is None
-    or torch.cuda.get_device_capability()[0] != 12
-    or importlib.util.find_spec("triton") is None,
-    reason="needs a consumer Blackwell GPU and Triton",
+    or torch.cuda.get_device_capability() not in INT8_MM_TILES,
+    reason="needs a GPU with tuned INT8 tiles and Triton",
+)
+needs_blackwell = pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 12, reason="NVFP4 needs consumer Blackwell"
 )
 
 
@@ -87,6 +91,7 @@ def test_fused_norm_modulation_and_feed_forward(kernels):
     assert torch.equal(kernels.int8_feed_forward(codes, scales, *up, *down, x, gate, 96), expected)
 
 
+@needs_blackwell
 def test_quantize_fp4_is_bit_exact(kernels):
     generator = torch.Generator().manual_seed(0)
     for rows, cols in ((100, 512), (256, 16384)):
@@ -135,7 +140,7 @@ def _quantized_block(dim: int, heads: int, fp4: bool, generator: torch.Generator
     return {name: tensor.cuda() for name, tensor in weights.items()}
 
 
-@pytest.mark.parametrize("fp4", [False, True], ids=["int8", "nvfp4"])
+@pytest.mark.parametrize("fp4", [False, pytest.param(True, marks=needs_blackwell)], ids=["int8", "nvfp4"])
 def test_block_forward_with_kernels_matches_the_torch_path(kernels, monkeypatch, fp4):
     generator = torch.Generator().manual_seed(0)
     dim, heads = 512, 16
@@ -160,7 +165,7 @@ def test_kernels_reject_widths_they_would_compute_wrong(kernels):
         kernels.rotate_quantize(x)
     with pytest.raises(ValueError):
         kernels.quantize_fp4(x, torch.ones((), device="cuda"), False)
-    codes = torch.zeros(8, 320, dtype=torch.int8, device="cuda")
-    weights = torch.zeros(256, 320, dtype=torch.int8, device="cuda")
+    codes = torch.zeros(8, 288, dtype=torch.int8, device="cuda")
+    weights = torch.zeros(256, 288, dtype=torch.int8, device="cuda")
     with pytest.raises(ValueError):
         kernels.int8_scaled_mm(codes, torch.ones(8, device="cuda"), weights, torch.ones(256, device="cuda"), None, False)

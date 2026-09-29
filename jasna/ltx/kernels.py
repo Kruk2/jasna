@@ -191,15 +191,33 @@ def _programs(device: torch.device) -> int:
     return torch.cuda.get_device_properties(device).multi_processor_count
 
 
+# (BM, BN, BK, stages, warps) per GPU for LTX GEMMs of width up to 4096 and wider, from tile
+# sweeps over the attention, FF-up and FF-down shapes.
+INT8_MM_TILES = {
+    (8, 6): ((128, 128, 64, 3, 4),) * 2,  # RTX 3090
+    (8, 9): ((256, 128, 128, 3, 8),) * 2,  # RTX 4090
+    (12, 0): ((128, 256, 128, 3, 8), (128, 128, 128, 3, 4)),  # RTX 5090
+    (12, 1): ((128, 256, 128, 3, 8), (128, 128, 128, 3, 4)),
+}
+
+
+@functools.cache
+def _int8_mm_tiles(device: torch.device) -> tuple[tuple[int, int, int, int, int], ...]:
+    return INT8_MM_TILES[torch.cuda.get_device_capability(device)]
+
+
+@functools.cache
+def _has_tma(device: torch.device) -> bool:
+    return torch.cuda.get_device_capability(device)[0] >= 9
+
+
 def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, half_rows, row_offset):
     m, k = codes.shape
     n = qdata.shape[0]
     if n < 128:
         bm, bn, bk, stages, warps = 32, 32, 256, 3, 2
-    elif k > 4096:
-        bm, bn, bk, stages, warps = 128, 128, 128, 3, 4
     else:
-        bm, bn, bk, stages, warps = 128, 256, 128, 3, 8
+        bm, bn, bk, stages, warps = _int8_mm_tiles(codes.device)[k > 4096]
     if k % bk:
         raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
     args = (
@@ -211,7 +229,7 @@ def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, ha
     programs = _programs(codes.device)
     tail = tiles % programs
     # A short grid whose last wave is mostly idle loses most to that wave: split it along K.
-    if n >= 128 and tiles < 8 * programs and 0 < tail <= programs // 2:
+    if n >= 128 and _has_tma(codes.device) and tiles < 8 * programs and 0 < tail <= programs // 2:
         workspace = torch.zeros(tail * bm * bn + tail, dtype=torch.int32, device=codes.device)
         _int8_mm_stream_k_kernel[(programs,)](
             TensorDescriptor.from_tensor(codes, [bm, bk]), TensorDescriptor.from_tensor(qdata, [bn, bk]), *args,
