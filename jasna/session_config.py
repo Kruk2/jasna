@@ -43,6 +43,7 @@ class SessionConfig:
     ltx_seed: int
     ltx_fast: bool
     ltx_model: LtxModelName
+    ltx_trial: bool
     compile_basicvsrpp: bool
     max_clip_size: int
     temporal_overlap: int

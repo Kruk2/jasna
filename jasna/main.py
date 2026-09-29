@@ -54,6 +54,7 @@ def _session_config_from_args(
         ltx_seed=int(args.ltx_seed),
         ltx_fast=bool(args.ltx_fast),
         ltx_model=CLI_RESTORATION_MODELS[args.restoration_model_name][1],
+        ltx_trial=bool(args.ltx_trial),
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
         temporal_overlap=int(args.temporal_overlap),
@@ -229,6 +230,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         action=argparse.BooleanOptionalAction,
         help=CLI_HELP["ltx_fast"],
+    )
+    restoration.add_argument(
+        "--ltx-trial",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help=CLI_HELP["ltx_trial"],
     )
     restoration.add_argument(
         "--compile-basicvsrpp",
@@ -779,7 +786,7 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     uses_ltx = config.restoration_model_name == "ltx" or any(
         segment.restoration is not None and segment.restoration.model == "ltx" for segment in segments or ()
     )
-    if not uses_ltx:
+    if not uses_ltx or config.ltx_trial:
         return
     directory = config.restoration_model_path if config.restoration_model_name == "ltx" else default_restoration_model_path("ltx")
     missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
@@ -902,10 +909,12 @@ def main() -> None:
             parser.error("--restoration-model-name ltx does not support --stream")
         if args.secondary_restoration != "none" or args.denoise != "none":
             parser.error("--restoration-model-name ltx does not support --secondary-restoration or --denoise")
+    elif args.ltx_trial:
+        parser.error("--ltx-trial needs --restoration-model-name ltx or ltx-undistilled")
     restoration_model_path = Path(
         args.restoration_model_path or default_restoration_model_path(restoration_backend)
     )
-    if not restoration_model_path.exists():
+    if not args.ltx_trial and not restoration_model_path.exists():
         raise FileNotFoundError(str(restoration_model_path))
 
     segments = None

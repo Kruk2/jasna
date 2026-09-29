@@ -21,6 +21,10 @@ CLI_HELP: dict[str, str] = {
         "ltx: about 1.4x faster with slightly less detail. Needs an RTX 50-series (Blackwell) GPU "
         "and the fast model file. (default: %(default)s)"
     ),
+    "ltx_trial": (
+        "Speed test without a license: runs LTX with placeholder weights, so the picture will look "
+        "wrong. Use it to see if your GPU can run LTX and how fast. (default: %(default)s)"
+    ),
     "ltx_large_canvas": (
         "ltx: restore large mosaics at 768 px instead of 512 px. Sharper, but about 3x slower for "
         "those mosaics; needs 10 GB of free VRAM (ignored below that). (default: %(default)s)"

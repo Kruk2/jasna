@@ -6,7 +6,9 @@ and tuned decoder. Every file name is unique, so all variants can sit in one fol
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
+import math
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -56,7 +58,84 @@ LTX_DOWNLOADS: dict[str, DownloadableFile] = {
 }
 
 
-def open_tensors(path: Path):
+@dataclass(frozen=True)
+class PlaceholderTensors:
+    """The trial's stand-in for one model file: the real tensor names, shapes and dtypes,
+    filled with random values. ``part`` is ``int8``/``nvfp4`` (the transformer of
+    ``model``), ``vae`` or ``vae-decoder``."""
+
+    part: str
+    model: LtxModelName
+
+
+# Chosen so a random INT8 / FP4 weight comes out near 1/sqrt(4096), like a trained one.
+_PLACEHOLDER_SCALES = {".scales": 2e-4, ".weight_scale_2": 5e-3, ".weight_scale": 1.0}
+_TORCH_DTYPES = {"BF16": "bfloat16", "F32": "float32", "I8": "int8", "U8": "uint8", "F8_E4M3": "float8_e4m3fn"}
+
+
+class _PlaceholderHandle:
+    """``safe_open``-like reader of placeholder tensors. Every tensor of one dtype is a
+    fresh copy of the same seeded random pool, so it costs what reading the file costs in
+    RAM, not what generating 13 GB of random numbers would."""
+
+    def __init__(self, source: PlaceholderTensors) -> None:
+        from jasna.ltx import trial_shapes as S
+
+        if source.part in S.TRANSFORMER:
+            parts = S.TRANSFORMER[source.part]
+            self._specs = dict(parts["top"])
+            for index in range(S.BLOCKS):
+                self._specs.update({f"blocks.{index}.{name}": spec for name, spec in parts["block"].items()})
+            steps, stg = S.STEPS[source.model]
+            self._metadata = {
+                "sigmas": json.dumps([round(1 - step / steps, 6) for step in range(steps + 1)]),
+                "stg_scale": "1.0" if stg else "0.0",
+            }
+        elif source.part == "vae":
+            self._specs, self._metadata = dict(S.VAE), {"config": json.dumps(S.VAE_CONFIG)}
+        else:
+            self._specs, self._metadata = dict(S.VAE_DECODER), {}
+        self._pools: dict = {}
+
+    def __enter__(self) -> _PlaceholderHandle:
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._pools.clear()
+
+    def metadata(self) -> dict[str, str]:
+        return self._metadata
+
+    def keys(self) -> list[str]:
+        return list(self._specs)
+
+    def get_tensor(self, name: str):
+        import torch
+
+        dtype, shape = self._specs[name]
+        scale = next((value for suffix, value in _PLACEHOLDER_SCALES.items() if name.endswith(suffix)), None)
+        if scale is not None:
+            return torch.full(shape, scale).to(getattr(torch, _TORCH_DTYPES[dtype]))
+        return self._pool(dtype)[: math.prod(shape)].view(shape).clone()
+
+    def _pool(self, dtype: str):
+        import torch
+
+        if dtype not in self._pools:
+            numel = max(math.prod(shape) for kind, shape in self._specs.values() if kind == dtype)
+            generator = torch.Generator().manual_seed(0)
+            torch_dtype = getattr(torch, _TORCH_DTYPES[dtype])
+            if dtype in ("I8", "U8"):
+                low, high = (-127, 128) if dtype == "I8" else (0, 256)
+                self._pools[dtype] = torch.randint(low, high, (numel,), generator=generator, dtype=torch_dtype)
+            else:
+                self._pools[dtype] = (torch.randn(numel, generator=generator) * 0.02).to(torch_dtype)
+        return self._pools[dtype]
+
+
+def open_tensors(path: Path | PlaceholderTensors):
+    if isinstance(path, PlaceholderTensors):
+        return _PlaceholderHandle(path)
     if not is_frozen() and path.suffix != ".enc" and path.is_file():
         from safetensors import safe_open
         return safe_open(str(path), framework="pt", device="cpu")
@@ -76,9 +155,19 @@ def _bundle_paths(directory: Path, model: LtxModelName, *, fast: bool) -> list[P
 
 @dataclass(frozen=True)
 class LtxModelFiles:
-    transformer: Path
-    vae: Path
-    tuned_decoder: Path
+    transformer: Path | PlaceholderTensors
+    vae: Path | PlaceholderTensors
+    tuned_decoder: Path | PlaceholderTensors
+
+    @classmethod
+    def placeholder(cls, model: LtxModelName, *, fast: bool) -> LtxModelFiles:
+        """Random weights shaped like ``model``'s files, for the trial: runs every pass at
+        full cost with no model files and no license, and restores nothing."""
+        return cls(
+            PlaceholderTensors("nvfp4" if fast else "int8", model),
+            PlaceholderTensors("vae", model),
+            PlaceholderTensors("vae-decoder", model),
+        )
 
     @classmethod
     def from_dir(cls, directory: Path, model: LtxModelName, *, fast: bool) -> LtxModelFiles:

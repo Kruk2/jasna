@@ -10,6 +10,7 @@ All heavy imports (torch, restorers, pipeline) stay inside the functions.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
     from jasna.segments import SegmentRange
 
     DetectionModel = RfDetrMosaicDetectionModel | YoloMosaicDetectionModel
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -240,7 +244,14 @@ def _ltx_model_files(
         raise ValueError("LTX restoration needs an NVIDIA GPU")
     if config.ltx_fast and torch.cuda.get_device_capability(device)[0] < 10:
         raise ValueError("The fast LTX model needs an RTX 50-series (Blackwell) GPU")
-    files = LtxModelFiles.from_dir(_restoration_model_path(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
+    if config.ltx_trial:
+        logger.warning(
+            "LTX trial: placeholder weights, so the output is not restored. Timings match a real run "
+            "except model loading, which skips reading and decrypting the model files."
+        )
+        files = LtxModelFiles.placeholder(config.ltx_model, fast=config.ltx_fast)
+    else:
+        files = LtxModelFiles.from_dir(_restoration_model_path(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
