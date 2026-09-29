@@ -20,7 +20,7 @@ from jasna.media.splice import (
     resolve_smart_encoder_settings,
     validate_smart_render,
 )
-from jasna.segments import SegmentRange
+from jasna.segments import SegmentRange, SegmentRestoration
 
 
 def _metadata(codec: str = "h264", **overrides) -> VideoMetadata:
@@ -70,6 +70,30 @@ def test_plan_merges_two_selections_in_one_gop_bridge() -> None:
     assert len(plan.render_spans) == 1
     assert plan.render_spans[0].effect_ranges == ((66, 72), (90, 96))
 
+
+
+def test_plan_rejects_two_models_in_one_render_span() -> None:
+    ltx = SegmentRestoration("ltx", 1)
+    with pytest.raises(SmartRenderCompatibilityError) as exc:
+        build_splice_plan(
+            [SegmentRange(2.2, 2.4, ltx), SegmentRange(3.0, 3.2, SegmentRestoration("basicvsrpp", None))],
+            _index(),
+            duration=6,
+        )
+    assert exc.value.reason == "mixed_models"
+
+
+def test_plan_keeps_each_segment_behind_its_render_span_effect_range() -> None:
+    first, third = SegmentRestoration("ltx", 1), SegmentRestoration("ltx", 3)
+    plan = build_splice_plan(
+        [SegmentRange(2.2, 2.4, first), SegmentRange(3.0, 3.2), SegmentRange(5.0, 5.5, third)],
+        _index(points=(0, 60, 120, 150)),
+        duration=6,
+    )
+    assert [[segment.restoration for segment in segments] for segments in plan.render_span_segments()] == [
+        [first, None],
+        [third],
+    ]
 
 def test_plan_offsets_effect_pts_by_stream_start_time() -> None:
     index = KeyframeIndex((900, 960, 1020), Fraction(1, 30), 900, 1080)

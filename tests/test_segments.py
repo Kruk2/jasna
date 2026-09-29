@@ -4,11 +4,14 @@ import pytest
 
 from jasna.segments import (
     SegmentRange,
+    SegmentRestoration,
     format_segments,
     format_timestamp,
+    job_restoration,
     normalize_segments,
     parse_segments,
     parse_timestamp,
+    resolve_restorations,
 )
 
 
@@ -48,3 +51,40 @@ def test_segment_formatting_is_round_trippable() -> None:
     segments = (SegmentRange(1.25, 62.5), SegmentRange(3600, 3601))
     assert parse_segments(format_segments(segments)) == segments
     assert format_timestamp(62.5) == "00:01:02.500"
+
+
+LTX_A = SegmentRestoration("ltx", 1)
+LTX_B = SegmentRestoration("ltx", 2)
+STANDARD = SegmentRestoration("basicvsrpp", None)
+
+
+def test_segment_restoration_seed_belongs_to_ltx_only() -> None:
+    assert job_restoration("basicvsrpp", 7) == STANDARD
+    assert job_restoration("ltx", 7) == SegmentRestoration("ltx", 7)
+    for model, seed in (("ltx", None), ("basicvsrpp", 3)):
+        with pytest.raises(ValueError):
+            SegmentRestoration(model, seed)
+
+
+def test_normalize_merges_only_neighbours_with_the_same_restoration() -> None:
+    assert normalize_segments(
+        (SegmentRange(0, 5, LTX_A), SegmentRange(5, 8, LTX_A), SegmentRange(8, 9, LTX_B))
+    ) == (SegmentRange(0, 8, LTX_A), SegmentRange(8, 9, LTX_B))
+
+
+def test_normalize_lets_a_later_range_cut_an_earlier_one() -> None:
+    assert normalize_segments((SegmentRange(0, 10, LTX_A), SegmentRange(3, 5, STANDARD))) == (
+        SegmentRange(0, 3, LTX_A),
+        SegmentRange(3, 5, STANDARD),
+        SegmentRange(5, 10, LTX_A),
+    )
+    assert normalize_segments((SegmentRange(3, 5, STANDARD), SegmentRange(0, 10, LTX_A))) == (
+        SegmentRange(0, 10, LTX_A),
+    )
+
+
+def test_resolve_restorations_fills_in_only_the_job_default() -> None:
+    assert resolve_restorations((SegmentRange(0, 1), SegmentRange(2, 3, LTX_B)), LTX_A) == (
+        SegmentRange(0, 1, LTX_A),
+        SegmentRange(2, 3, LTX_B),
+    )

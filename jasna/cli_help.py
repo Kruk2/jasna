@@ -9,7 +9,7 @@ them when turning a help string into a tooltip.
 CLI_HELP: dict[str, str] = {
     "restoration_model_name": (
         "Restoration model for video input: basicvsrpp (fast) or ltx (diffusion model, much "
-        "slower, best quality; no streaming, segments, secondary restoration or denoise). "
+        "slower, best quality; no streaming, secondary restoration or denoise). "
         "(default: %(default)s)"
     ),
     "restoration_model_path": (

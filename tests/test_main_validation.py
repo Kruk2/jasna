@@ -61,6 +61,28 @@ class TestMainValidation:
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
         assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
 
+    def test_ltx_accepts_segments(self, tmp_path):
+        metadata = MagicMock(codec_name="h264", duration=10.0)
+        with (
+            patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
+            patch("jasna.media.splice.validate_smart_render"),
+            patch("jasna.media.splice.probe_keyframes", return_value=MagicMock()),
+            patch("jasna.media.splice.build_splice_plan", return_value=MagicMock()),
+            patch("jasna.accelerator.is_nvidia_device", return_value=True),
+            patch("jasna.ltx.model_files.LtxModelFiles.from_dir", return_value=MagicMock()),
+        ):
+            pipeline_cls = _run_main_with_args(
+                tmp_path, ["--segments", "1-2", "--restoration-model-name", "ltx", "--ltx-seed", "3"]
+            )
+
+        config = pipeline_cls.call_args.kwargs["config"]
+        assert (config.restoration_model_name, config.ltx_seed) == ("ltx", 3)
+        assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
+
+    def test_ltx_rejects_streaming(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--stream", "--restoration-model-name", "ltx"])
+
     def test_segments_reject_explicit_codec_mismatch(self, tmp_path):
         metadata = MagicMock(codec_name="h264", duration=10.0)
         with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):

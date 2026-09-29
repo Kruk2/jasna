@@ -80,6 +80,21 @@ class SplicePlan:
     def render_spans(self) -> tuple[SpliceSpan, ...]:
         return tuple(span for span in self.spans if span.is_render)
 
+    def render_span_segments(self) -> tuple[tuple[SegmentRange, ...], ...]:
+        """Per render span, the segment behind each of its effect ranges."""
+        remaining = iter(self.segments)
+        return tuple(tuple(next(remaining) for _ in span.effect_ranges) for span in self.render_spans)
+
+
+def require_one_model(segments: tuple[SegmentRange, ...]) -> None:
+    """One render span is restored by one model; segments still on the job's model match any."""
+    if len({segment.restoration.model for segment in segments if segment.restoration is not None}) > 1:
+        raise SmartRenderCompatibilityError(
+            "Ranges restored by different models are too close together to split the video "
+            "between them; move them apart or use one model for both",
+            reason="mixed_models",
+        )
+
 
 def canonical_codec(name: str) -> str:
     value = str(name).lower()
@@ -387,19 +402,21 @@ def build_splice_plan(
         render_end = index.pts[right_index] if right_index < len(index.pts) else index.end_pts
         if render_end <= render_start:
             render_end = index.end_pts
-        expanded.append((render_start, render_end, [(effect_start, effect_end)]))
+        expanded.append((render_start, render_end, [(effect_start, effect_end)], [segment]))
 
-    merged: list[tuple[int, int, list[tuple[int, int]]]] = []
-    for start, end, effects in expanded:
+    merged: list[tuple[int, int, list[tuple[int, int]], list[SegmentRange]]] = []
+    for start, end, effects, owners in expanded:
         if merged and start <= merged[-1][1]:
-            old_start, old_end, old_effects = merged[-1]
-            merged[-1] = (old_start, max(old_end, end), old_effects + effects)
+            old_start, old_end, old_effects, old_owners = merged[-1]
+            merged[-1] = (old_start, max(old_end, end), old_effects + effects, old_owners + owners)
         else:
-            merged.append((start, end, effects))
+            merged.append((start, end, effects, owners))
+    for *_, owners in merged:
+        require_one_model(tuple(owners))
 
     spans: list[SpliceSpan] = []
     cursor = index.start_pts
-    for start, end, effects in merged:
+    for start, end, effects, _owners in merged:
         if cursor < start:
             spans.append(SpliceSpan("copy", cursor, start))
         spans.append(SpliceSpan("render", start, end, tuple(effects)))

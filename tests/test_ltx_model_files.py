@@ -28,7 +28,7 @@ def test_model_check_precedes_engine_compilation(tmp_path, monkeypatch):
     monkeypatch.setattr(LtxModelFiles, "from_dir", Mock(side_effect=ValueError("model unavailable")))
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
     with pytest.raises(ValueError, match="model unavailable"):
-        session_factory._build_ltx_session(config, torch.device("cuda:0"), log_callback=None)
+        session_factory._ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
     compile_engines.assert_not_called()
 
 
