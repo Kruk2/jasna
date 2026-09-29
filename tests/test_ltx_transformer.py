@@ -30,6 +30,18 @@ def test_rotation_is_its_own_inverse():
     assert torch.allclose(T.rotate(T.rotate(x)), x, atol=1e-5)
 
 
+
+def test_compiled_rotation_emits_no_cache_warning():
+    import warnings
+
+    torch._dynamo.reset()
+    x = torch.randn(4, 512, dtype=torch.float32)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        rotated = torch.compile(T.rotate, backend="eager")(x)
+    assert torch.equal(rotated, T.rotate(x))
+    assert not [w for w in caught if "lru_cache" in str(w.message)]
+
 def test_quantize_rows_pads_and_bounds():
     x = torch.randn(40, 64) * 3
     codes, scales = T.quantize_rows(x)
