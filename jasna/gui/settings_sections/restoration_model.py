@@ -1,4 +1,4 @@
-"""Restoration model choice (Standard BasicVSR++ or LTX) and the LTX options."""
+"""Restoration model choice (BasicVSR++ or LTX) and the LTX options."""
 
 import random
 from typing import Callable

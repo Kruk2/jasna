@@ -197,7 +197,7 @@ KO = {
         "segments_smart_render_range_too_short": "선택 구간이 비디오 한 프레임보다 짧습니다. 구간을 늘리세요.",
         "segments_smart_render_before_first_keyframe": "첫 구간이 안전한 자르기 지점보다 먼저 시작합니다. 시작 위치를 조금 뒤로 옮기세요.",
         "segments_smart_render_whole_video": "사용 가능한 안전한 자르기 지점이 남지 않아 별도 처리 시 전체 비디오를 다시 인코딩해야 합니다. 더 작은 영역을 선택하거나 모든 구간을 지워 전체 비디오를 처리하세요.",
-        "segments_mixed_models_too_close": "'표준' 구간과 LTX 구간이 너무 가깝습니다. 떨어뜨리거나 둘 다 같은 모델을 쓰세요.",
+        "segments_mixed_models_too_close": "BasicVSR++ 구간과 LTX 구간이 너무 가깝습니다. 떨어뜨리거나 둘 다 같은 모델을 쓰세요.",
         "segments_discard_title": "구간 변경 사항을 버릴까요?",
         "segments_discard_changes": "복원 구간 변경 사항을 적용하지 않고 닫을까요?",
         "segments_edit_tooltip": "이 비디오에서 복원할 부분 선택",
@@ -213,7 +213,7 @@ KO = {
         # Sections
         "section_basic": "기본 처리",
         "section_restoration_model": "복원 모델",
-        "model_basicvsrpp": "표준",
+        "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "빠릅니다. 대부분의 영상에 적합합니다.",
         "model_ltx": "LTX",
         "model_ltx_description": "가장 세밀합니다. 훨씬 느리고 고성능 NVIDIA GPU가 필요합니다.",
