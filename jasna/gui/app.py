@@ -703,6 +703,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 eta_seconds=update.eta_seconds,
                 queue_current=queue_current,
                 queue_total=len(jobs),
+                stage=update.stage,
             )
             try:
                 self._queue_panel.set_running(True, processing_job_id=job_id)

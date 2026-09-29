@@ -389,11 +389,15 @@ class ControlBar(ctk.CTkFrame):
         eta_seconds: float = 0.0,
         queue_current: int = 0,
         queue_total: int = 0,
+        stage: str = "",
     ):
         self._filename_label.configure(text=filename or t("no_file_processing"))
         self._progress_bar.set(percent / 100.0)
         self._percent_label.configure(text=f"{int(percent)}%")
-        self._fps_label.configure(text=f"FPS: {fps:.1f}" if fps > 0 else "FPS: --")
+        if stage:
+            self._fps_label.configure(text=t(f"ltx_stage_{stage}"))
+        else:
+            self._fps_label.configure(text=f"FPS: {fps:.1f}" if fps > 0 else "FPS: --")
         
         if eta_seconds > 0:
             self._eta_label.configure(text=f"ETA: {format_duration(eta_seconds)}")

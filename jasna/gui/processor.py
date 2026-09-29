@@ -29,6 +29,7 @@ class ProgressUpdate:
     frames_processed: int = 0
     total_frames: int = 0
     message: str = ""
+    stage: str = ""
 
 
 class ProcessingStopped(Exception):
@@ -370,7 +371,9 @@ class Processor:
             raise ProcessingStopped("Processing stopped")
         last_update_time = [0.0]
 
-        def progress_callback(progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int):
+        def progress_callback(
+            progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int, stage: str
+        ):
             current_time = time.time()
             if current_time - last_update_time[0] < 0.1:
                 return
@@ -387,6 +390,7 @@ class Processor:
                 eta_seconds=eta_seconds,
                 frames_processed=frames_done,
                 total_frames=total,
+                stage=stage,
             ))
 
         pipeline = None

@@ -128,7 +128,7 @@ def _run_spans(tmp_path, spans):
         budget=restore.segment_decode_budget,
         device=torch.device("cpu"),
         work_dir=tmp_path,
-        progress=restore.Progress(frames=0, disable=True),
+        progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
     )
 
@@ -234,7 +234,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         seed=5,
         device=torch.device("cpu"),
         work_dir=tmp_path,
-        progress=restore.Progress(frames=12, disable=True),
+        progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
     )
     assert budgets == [123 << 20]
@@ -269,3 +269,28 @@ def test_segment_large_canvas_follows_the_gpu_size():
     assert restore.segment_large_canvas(True, 16 * gib)
     assert not restore.segment_large_canvas(True, 12 * gib)
     assert not restore.segment_large_canvas(False, 32 * gib)
+
+
+def test_progress_reports_the_stage_and_the_share_of_the_whole_run(monkeypatch):
+    clock = iter([0.0, 100.0, 100.0, 100.0, 300.0, 300.0])
+    monkeypatch.setattr(restore.time, "monotonic", lambda: next(clock))
+    reports = []
+    progress = restore.Progress(10, disable=True, report=lambda *args: reports.append(args))
+    with progress.bar("scan", 10) as bar:
+        bar.update(10)
+    with progress.bar("denoise", 4, unit="step") as bar:
+        bar.update(2)
+    assert [(stage, round(fraction, 3)) for stage, fraction, _eta in reports] == [
+        ("scan", 0.0),
+        ("scan", 0.02),
+        ("denoise", 0.02),
+        ("denoise", 0.42),
+    ]
+    assert [eta for *_rest, eta in reports[:3]] == [0.0, 0.0, 0.0]
+    assert reports[-1][2] == pytest.approx(300.0 * 0.58 / 0.42)
+
+
+def test_progress_without_a_report_only_drives_the_console_bar():
+    progress = restore.Progress(3, disable=True, report=None)
+    with progress.bar("compose", 3) as bar:
+        bar.update(3)

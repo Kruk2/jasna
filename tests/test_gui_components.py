@@ -259,3 +259,11 @@ def test_grab_modal_restores_minimized_dialog_on_focus(tk_root) -> None:
     dialog.event_generate("<FocusIn>")
     tk_root.update()
     assert dialog.winfo_ismapped()
+
+
+def test_control_bar_shows_the_ltx_stage_instead_of_fps(tk_root) -> None:
+    control_bar = ControlBar(tk_root)
+    control_bar.update_progress(filename="a.mp4", percent=42.0, eta_seconds=90.0, stage="denoise")
+    assert control_bar._fps_label.cget("text") == t("ltx_stage_denoise")
+    control_bar.update_progress(filename="a.mp4", percent=50.0, fps=30.0)
+    assert control_bar._fps_label.cget("text") == "FPS: 30.0"
