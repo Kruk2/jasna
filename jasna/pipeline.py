@@ -43,6 +43,7 @@ from jasna.vr180 import (
 from jasna.vr_projection import build_vr_projector
 
 if TYPE_CHECKING:
+    from jasna.ltx.restore import FrameWriter, LtxRender, LtxSpan
     from jasna.session_factory import RestorationSession
 
 log = logging.getLogger(__name__)
@@ -278,25 +279,6 @@ class Pipeline:
         finally:
             progress.close(ensure_completed_bar=True)
 
-    def _ltx_frames(self, metadata, *, frame_stride: int, seek_ts: float | None, end_pts: int | None):
-        from jasna.media.video_decoder import VideoReader
-
-        def frames():
-            with VideoReader(
-                str(self.input_video), self.batch_size, self.device, metadata, frame_stride=frame_stride
-            ) as reader:
-                for batch, pts in reader.frames(seek_ts):
-                    if end_pts is None:
-                        yield batch, pts
-                        continue
-                    keep = next((i for i, p in enumerate(pts) if int(p) >= end_pts), len(pts))
-                    if keep:
-                        yield batch[:keep], pts[:keep]
-                    if keep < len(pts):
-                        return
-
-        return frames
-
     def _ltx_progress(self, frames: int):
         from jasna.ltx.restore import Progress
 
@@ -311,14 +293,22 @@ class Pipeline:
             raise ValueError("LTX restoration does not support VR180 side-by-side video")
 
     def _run_ltx(self, metadata) -> None:
-        from jasna.ltx.restore import Cancelled, restore_video
+        from jasna.ltx.restore import Cancelled, restore_video, video_frames
 
         self._require_ltx_video()
         frame_rate = self._resolve_frame_rate(metadata)
         writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate), [time.monotonic()])
         try:
             restore_video(
-                self._ltx_frames(metadata, frame_stride=frame_rate.frame_stride, seek_ts=None, end_pts=None),
+                video_frames(
+                    self.input_video,
+                    metadata,
+                    batch_size=self.batch_size,
+                    device=self.device,
+                    frame_stride=frame_rate.frame_stride,
+                    seek_ts=None,
+                    end_pts=None,
+                ),
                 writer,
                 detector=self.job_detection_model,
                 files=self.ltx_files,
@@ -337,6 +327,55 @@ class Pipeline:
         finally:
             writer.close()
 
+    def ltx_segment_render(self, metadata) -> "LtxRender":
+        """How LTX restores segments: the 768 px decision and the decode tiles follow the
+        GPU's size, never the VRAM free at that moment, so a segment renders the same in a
+        job and in a seed preview."""
+        from jasna.ltx.restore import LtxRender, segment_decode_budget, segment_large_canvas
+
+        self._require_ltx_video()
+        return LtxRender(
+            detector=self.job_detection_model,
+            files=self.ltx_files,
+            frame_h=int(metadata.video_height),
+            frame_w=int(metadata.video_width),
+            batch_size=self.batch_size,
+            large_canvas=segment_large_canvas(
+                self.ltx_large_canvas, torch.cuda.get_device_properties(self.device).total_memory
+            ),
+            budget=segment_decode_budget,
+            device=self.device,
+        )
+
+    def ltx_span(
+        self,
+        metadata,
+        index: KeyframeIndex,
+        span: SpliceSpan,
+        segments: tuple[SegmentRange, ...],
+        open_writer: Callable[[], "FrameWriter"],
+    ) -> "LtxSpan":
+        """The LTX work of one render span: decoded from its keyframe, one LTX segment per
+        effect range with that range's seed."""
+        from jasna.ltx.restore import LtxSegment, LtxSpan, video_frames
+
+        return LtxSpan(
+            video_frames(
+                self.input_video,
+                metadata,
+                batch_size=self.batch_size,
+                device=self.device,
+                frame_stride=1,
+                seek_ts=index.seconds_for_pts(span.start_pts),
+                end_pts=span.end_pts,
+            ),
+            tuple(
+                LtxSegment(start, end, segment.restoration.ltx_seed)
+                for (start, end), segment in zip(span.effect_ranges, segments)
+            ),
+            open_writer,
+        )
+
     def _run_ltx_spans(
         self,
         metadata,
@@ -345,45 +384,16 @@ class Pipeline:
         work_dir: Path,
     ) -> None:
         """Restore the LTX render spans in one batched run, so every model loads once."""
-        from jasna.ltx.restore import (
-            Cancelled,
-            LtxSegment,
-            LtxSpan,
-            restore_spans,
-            segment_decode_budget,
-            segment_large_canvas,
-        )
+        from jasna.ltx.restore import Cancelled, restore_spans
 
-        self._require_ltx_video()
-        ltx_spans = [
-            LtxSpan(
-                self._ltx_frames(
-                    metadata, frame_stride=1, seek_ts=index.seconds_for_pts(span.start_pts), end_pts=span.end_pts
-                ),
-                tuple(
-                    LtxSegment(start, end, segment.restoration.ltx_seed)
-                    for (start, end), segment in zip(span.effect_ranges, segments)
-                ),
-                open_writer,
-            )
-            for span, segments, open_writer in spans
-        ]
+        render = self.ltx_segment_render(metadata)
         frames = sum(
             round((span.end_pts - span.start_pts) * index.time_base * metadata.video_fps) for span, _, _ in spans
         )
         try:
             restore_spans(
-                ltx_spans,
-                detector=self.job_detection_model,
-                files=self.ltx_files,
-                frame_h=int(metadata.video_height),
-                frame_w=int(metadata.video_width),
-                batch_size=self.batch_size,
-                large_canvas=segment_large_canvas(
-                    self.ltx_large_canvas, torch.cuda.get_device_properties(self.device).total_memory
-                ),
-                budget=segment_decode_budget,
-                device=self.device,
+                [self.ltx_span(metadata, index, span, segments, open_writer) for span, segments, open_writer in spans],
+                render,
                 work_dir=work_dir,
                 progress=self._ltx_progress(frames),
                 cancel=self._cancel_event,

@@ -141,3 +141,23 @@ class TestPipelineInit:
 
         assert pipeline.vr_resolution.projection == "fisheye"
         assert isinstance(pipeline.vr_projector, FisheyeProjector)
+
+
+def test_ltx_span_gives_each_effect_range_its_segment_seed() -> None:
+    from jasna.ltx.restore import LtxSegment
+    from jasna.media.splice import KeyframeIndex, SpliceSpan
+    from jasna.segments import SegmentRange, SegmentRestoration
+
+    p = _make_pipeline()
+    index = KeyframeIndex(pts=(0, 2000), time_base=Fraction(1, 1000), start_pts=0, end_pts=6000)
+    span = SpliceSpan("render", 2000, 6000, ((2500, 3000), (4000, 5000)))
+    segments = (
+        SegmentRange(2.5, 3.0, SegmentRestoration("ltx", 7)),
+        SegmentRange(4.0, 5.0, SegmentRestoration("ltx", 9)),
+    )
+    opener = MagicMock()
+
+    ltx = p.ltx_span(SimpleNamespace(), index, span, segments, opener)
+
+    assert ltx.segments == (LtxSegment(2500, 3000, 7), LtxSegment(4000, 5000, 9))
+    assert ltx.open_writer is opener

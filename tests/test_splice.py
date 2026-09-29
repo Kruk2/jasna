@@ -358,3 +358,15 @@ def test_copy_fragment_seeks_before_demux(tmp_path: Path) -> None:
     ]
     assert packet.pts == 5
     assert packet.dts == 3
+
+
+def test_segment_render_span_widens_one_segment_to_its_keyframes() -> None:
+    from fractions import Fraction
+
+    from jasna.media.splice import KeyframeIndex, SpliceSpan, segment_render_span
+    from jasna.segments import SegmentRange
+
+    index = KeyframeIndex(pts=(0, 2000, 4000), time_base=Fraction(1, 1000), start_pts=0, end_pts=6000)
+
+    assert segment_render_span(SegmentRange(2.5, 3.0), index) == SpliceSpan("render", 2000, 4000, ((2500, 3000),))
+    assert segment_render_span(SegmentRange(4.5, 6.0), index) == SpliceSpan("render", 4000, 6000, ((4500, 6000),))
