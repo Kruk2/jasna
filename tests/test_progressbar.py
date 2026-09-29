@@ -92,3 +92,29 @@ class TestProgressbarLifecycle:
         for _ in range(5):
             pb.update(1)
         assert "Speed:" in pb.tqdm.desc or "?" in pb.tqdm.desc
+
+
+class TestJobProgress:
+    def test_parts_fill_their_work_share_of_one_bar(self, monkeypatch):
+        from jasna import progressbar
+
+        clock = [100.0]
+        monkeypatch.setattr(progressbar.time, "monotonic", lambda: clock[0])
+        calls = []
+        job = progressbar.JobProgress(lambda *args: calls.append(args), {"ltx": 300.0, "standard": 100.0})
+        ltx, standard = job.part("ltx"), job.part("standard")
+
+        clock[0] = 110.0
+        ltx(50.0, 0.0, 0.0, 0, 0, "scan")
+        assert calls[-1] == (37.5, 0.0, 0.0, 0, 0, "scan")
+
+        clock[0] = 130.0
+        ltx(100.0, 0.0, 5.0, 0, 0, "compose")
+        assert calls[-1][0] == 75.0
+        assert calls[-1][2] == pytest.approx(10.0)
+
+        clock[0] = 134.0
+        standard(50.0, 30.0, 0.0, 60, 120, "")
+        assert calls[-1][:2] == (87.5, 30.0)
+        assert calls[-1][2] == pytest.approx(34.0 / 7.0)
+        assert calls[-1][3:] == (60, 120, "")

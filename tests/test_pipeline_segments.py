@@ -312,11 +312,32 @@ def test_mixed_job_batches_ltx_spans_and_keeps_fragments_in_span_order(tmp_path)
 
     pipeline._run_pass.assert_called_once()
     assert pipeline._run_pass.call_args.kwargs["effect_ranges"] == ((75, 90),)
-    (_, _, ltx_spans, _), _ = pipeline._run_ltx_spans.call_args
+    (_, _, ltx_spans, _, _), _ = pipeline._run_ltx_spans.call_args
     assert [(span, segs) for span, segs, _ in ltx_spans] == [(spans[3], (SegmentRange(6.5, 7.0, ltx),))]
     fragments = concatenate.call_args.args[0]
     assert [path.name for path, _ in fragments] == ["0000.ts", "0001.ts", "0002.ts", "0003.ts"]
 
+
+
+def test_mixed_job_reports_one_bar_weighted_by_estimated_work(tmp_path) -> None:
+    ltx = SegmentRestoration("ltx", 42)
+    segments = (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, ltx))
+    spans = (
+        SpliceSpan("copy", 0, 60),
+        SpliceSpan("render", 60, 120, ((75, 90),)),
+        SpliceSpan("copy", 120, 180),
+        SpliceSpan("render", 180, 240, ((195, 210),)),
+    )
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
+    pipeline.progress_callback = MagicMock()
+
+    _run_smart_mocked(pipeline)
+
+    (*_, ltx_callback), _ = pipeline._run_ltx_spans.call_args
+    ltx_callback(100.0, 0.0, 0.0, 0, 0, "compose")
+    ltx_share = 30.0 * 60 / (30.0 * 60 + 60)
+    assert pipeline.progress_callback.call_args.args[0] == pytest.approx(100.0 * ltx_share)
+    assert pipeline._run_pass.call_args.kwargs["progress"].callback is not pipeline.progress_callback
 
 def test_segments_on_the_job_model_follow_an_ltx_job(tmp_path) -> None:
     segments = (SegmentRange(2.5, 3.0),)
@@ -326,7 +347,7 @@ def test_segments_on_the_job_model_follow_an_ltx_job(tmp_path) -> None:
     _run_smart_mocked(pipeline)
 
     pipeline._run_pass.assert_not_called()
-    (_, _, ltx_spans, _), _ = pipeline._run_ltx_spans.call_args
+    (_, _, ltx_spans, _, _), _ = pipeline._run_ltx_spans.call_args
     assert ltx_spans[0][1] == (SegmentRange(2.5, 3.0, SegmentRestoration("ltx", 5)),)
 
 

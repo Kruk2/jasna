@@ -91,6 +91,7 @@ def test_seed_preview_restores_a_range_exactly_like_a_segment_job(tmp_path) -> N
             index,
             [(span, segments, opener(span)) for span, segments in zip(plan.render_spans, plan.render_span_segments())],
             tmp_path,
+            None,
         )
     finally:
         session.close()

@@ -32,7 +32,7 @@ from jasna.media.splice import (
     validate_smart_render,
 )
 from jasna.pipeline_threads import run_restoration_pass
-from jasna.progressbar import ProgressCallback, Progressbar
+from jasna.progressbar import LTX_WORK_PER_FRAME, JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange, job_restoration, resolve_restorations
 from jasna.session_config import SessionConfig
@@ -47,6 +47,10 @@ if TYPE_CHECKING:
     from jasna.session_factory import RestorationSession
 
 log = logging.getLogger(__name__)
+
+
+def _span_frames(span: SpliceSpan, index: KeyframeIndex, metadata) -> int:
+    return round((span.end_pts - span.start_pts) * index.time_base * metadata.video_fps)
 
 
 class _OfflineFrameWriter:
@@ -279,10 +283,9 @@ class Pipeline:
         finally:
             progress.close(ensure_completed_bar=True)
 
-    def _ltx_progress(self, frames: int):
+    def _ltx_progress(self, frames: int, callback: ProgressCallback | None):
         from jasna.ltx.restore import Progress
 
-        callback = self.progress_callback
         report = None
         if callback is not None:
             report = lambda stage, fraction, eta: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
@@ -319,7 +322,9 @@ class Pipeline:
                 seed=self.ltx_seed,
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
-                progress=self._ltx_progress(frame_rate.output_frame_count(metadata.num_frames)),
+                progress=self._ltx_progress(
+                    frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
+                ),
                 cancel=self._cancel_event,
             )
         except Cancelled:
@@ -382,20 +387,19 @@ class Pipeline:
         index: KeyframeIndex,
         spans: list[tuple[SpliceSpan, tuple[SegmentRange, ...], Callable[[], _OfflineFrameWriter]]],
         work_dir: Path,
+        progress_callback: ProgressCallback | None,
     ) -> None:
         """Restore the LTX render spans in one batched run, so every model loads once."""
         from jasna.ltx.restore import Cancelled, restore_spans
 
         render = self.ltx_segment_render(metadata)
-        frames = sum(
-            round((span.end_pts - span.start_pts) * index.time_base * metadata.video_fps) for span, _, _ in spans
-        )
+        frames = sum(_span_frames(span, index, metadata) for span, _, _ in spans)
         try:
             restore_spans(
                 [self.ltx_span(metadata, index, span, segments, open_writer) for span, segments, open_writer in spans],
                 render,
                 work_dir=work_dir,
-                progress=self._ltx_progress(frames),
+                progress=self._ltx_progress(frames, progress_callback),
                 cancel=self._cancel_event,
             )
         except Cancelled:
@@ -455,19 +459,24 @@ class Pipeline:
             self.encoder_settings,
             vendor=vendor_for_device(self.device),
         )
-        total_frames = max(
-            1,
-            sum(
-                round((span.end_pts - span.start_pts) * index.time_base * metadata.video_fps)
-                for span in plan.render_spans
-                if span not in ltx_spans
-            ),
+        standard_frames = sum(
+            _span_frames(span, index, metadata) for span in plan.render_spans if span not in ltx_spans
         )
+        ltx_callback = standard_callback = self.progress_callback
+        if self.progress_callback is not None and ltx_spans and standard_frames:
+            job_progress = JobProgress(
+                self.progress_callback,
+                {
+                    "ltx": LTX_WORK_PER_FRAME * sum(_span_frames(span, index, metadata) for span in ltx_spans),
+                    "standard": float(standard_frames),
+                },
+            )
+            ltx_callback, standard_callback = job_progress.part("ltx"), job_progress.part("standard")
         progress = Progressbar(
-            total_frames=total_frames,
+            total_frames=max(1, standard_frames),
             video_fps=metadata.video_fps,
             disable=self.disable_progress,
-            callback=self.progress_callback,
+            callback=standard_callback,
         )
         self.output_video.parent.mkdir(parents=True, exist_ok=True)
         work_root = self.working_dir or self.output_video.parent
@@ -516,6 +525,7 @@ class Pipeline:
                             if span in ltx_spans
                         ],
                         work_root,
+                        ltx_callback,
                     )
                 for span_index, span in enumerate(plan.spans):
                     if self._cancel_event.is_set():
