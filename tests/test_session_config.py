@@ -126,6 +126,10 @@ def test_cli_ltx_args_are_mapped() -> None:
     assert defaults.ltx_large_canvas is False
     assert defaults.ltx_seed == 20260923
 
+    assert _cli_config(["--restoration-model-name", "ltx"]).ltx_model == "distilled"
+    teacher = _cli_config(["--restoration-model-name", "ltx-undistilled"])
+    assert (teacher.restoration_model_name, teacher.ltx_model) == ("ltx", "undistilled")
+
     config = _cli_config(["--restoration-model-name", "ltx", "--ltx-large-canvas", "--ltx-seed", "7"])
     assert config.restoration_model_name == "ltx"
     assert config.ltx_large_canvas is True
