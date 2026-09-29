@@ -101,3 +101,24 @@ def test_install_succeeds_without_tensorrt(monkeypatch) -> None:
     monkeypatch.setattr(suppress_noise, "find_spec", lambda _name: None)
 
     install()
+
+
+def test_autotune_choice_that_exceeds_shared_memory_is_filtered() -> None:
+    install()
+    logger = logging.getLogger("torch._inductor.select_algorithm")
+
+    suppressed = logger.makeRecord(
+        logger.name,
+        logging.ERROR,
+        "f",
+        1,
+        "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
+        ("No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376",),
+        None,
+    )
+    kept = logger.makeRecord(
+        logger.name, logging.ERROR, "f", 1, "Runtime error during autotuning: \n%s. \nIgnoring this choice.", ("illegal memory access",), None
+    )
+
+    assert not logger.filter(suppressed)
+    assert logger.filter(kept)

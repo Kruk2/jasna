@@ -87,6 +87,9 @@ def install() -> None:
         "torch_tensorrt._utils", "is not currently supported for TRT-LLM plugins"
     )
     _add_message_drop_filter("torch.utils.flop_counter", "triton not found")
+    # max-autotune tries Triton GEMM tiles sized for datacenter shared memory; consumer
+    # GPUs reject them, and Inductor logs each skipped choice at ERROR.
+    _add_message_drop_filter("torch._inductor.select_algorithm", "out of resource")
 
     # tensorrt.plugin logs an "experimental" warning through TensorRT's C++
     # logger at import time (triggered by torch_tensorrt). It bypasses the
