@@ -16,6 +16,10 @@ CLI_HELP: dict[str, str] = {
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
     ),
     "ltx_seed": "ltx: noise seed. Another seed gives another take on the same restoration. (default: %(default)s)",
+    "ltx_model": (
+        "ltx: distilled (8 steps, about 3x faster) or undistilled (15 steps with STG). Both look "
+        "about the same; a missing model is offered for download. (default: %(default)s)"
+    ),
     "ltx_fast": (
         "ltx: about 1.4x faster with slightly less detail. Needs an RTX 50-series (Blackwell) GPU "
         "and the fast model file. (default: %(default)s)"
