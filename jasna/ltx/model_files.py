@@ -68,6 +68,11 @@ class PlaceholderTensors:
     model: LtxModelName
 
 
+LTX_TRIAL_NOTICE = (
+    "LTX trial: placeholder weights, so the output is not restored. Timings match a real run "
+    "except model loading, which skips reading and decrypting the model files."
+)
+
 # Chosen so a random INT8 / FP4 weight comes out near 1/sqrt(4096), like a trained one.
 _PLACEHOLDER_SCALES = {".scales": 2e-4, ".weight_scale_2": 5e-3, ".weight_scale": 1.0}
 _TORCH_DTYPES = {"BF16": "bfloat16", "F32": "float32", "I8": "int8", "U8": "uint8", "F8_E4M3": "float8_e4m3fn"}

@@ -245,10 +245,9 @@ def _ltx_model_files(
     if config.ltx_fast and torch.cuda.get_device_capability(device)[0] < 10:
         raise ValueError("The fast LTX model needs an RTX 50-series (Blackwell) GPU")
     if config.ltx_trial:
-        logger.warning(
-            "LTX trial: placeholder weights, so the output is not restored. Timings match a real run "
-            "except model loading, which skips reading and decrypting the model files."
-        )
+        from jasna.ltx.model_files import LTX_TRIAL_NOTICE
+
+        logger.warning(LTX_TRIAL_NOTICE)
         files = LtxModelFiles.placeholder(config.ltx_model, fast=config.ltx_fast)
     else:
         files = LtxModelFiles.from_dir(_restoration_model_path(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
