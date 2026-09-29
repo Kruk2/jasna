@@ -2,7 +2,6 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import get_args
 
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
@@ -17,7 +16,14 @@ from jasna.os_utils import (
     check_windows_nvidia_sysmem_fallback_policy,
     gpu_check_error,
 )
-from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, SessionConfig
+from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, RestorationModelName, SessionConfig
+
+# CLI restoration model name -> (restoration backend, LTX model variant).
+CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
+    "basicvsrpp": ("basicvsrpp", LTX_DEFAULT_MODEL),
+    "ltx": ("ltx", "distilled"),
+    "ltx-undistilled": ("ltx", "undistilled"),
+}
 
 
 
@@ -42,12 +48,12 @@ def _session_config_from_args(
         max_detection_gap=int(args.max_detection_gap),
         min_detection_duration=int(args.min_detection_duration),
         scene_detection=bool(args.scene_detection),
-        restoration_model_name=str(args.restoration_model_name),
+        restoration_model_name=CLI_RESTORATION_MODELS[args.restoration_model_name][0],
         restoration_model_path=restoration_model_path,
         ltx_large_canvas=bool(args.ltx_large_canvas),
         ltx_seed=int(args.ltx_seed),
         ltx_fast=bool(args.ltx_fast),
-        ltx_model=str(args.ltx_model),
+        ltx_model=CLI_RESTORATION_MODELS[args.restoration_model_name][1],
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
         temporal_overlap=int(args.temporal_overlap),
@@ -197,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--restoration-model-name",
         type=str,
         default="basicvsrpp",
-        choices=["basicvsrpp", "ltx"],
+        choices=list(CLI_RESTORATION_MODELS),
         help=CLI_HELP["restoration_model_name"],
     )
     restoration.add_argument(
@@ -217,12 +223,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=LTX_DEFAULT_SEED,
         help=CLI_HELP["ltx_seed"],
-    )
-    restoration.add_argument(
-        "--ltx-model",
-        choices=list(get_args(LtxModelName)),
-        default=LTX_DEFAULT_MODEL,
-        help=CLI_HELP["ltx_model"],
     )
     restoration.add_argument(
         "--ltx-fast",
@@ -896,13 +896,14 @@ def main() -> None:
         str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
     )
 
-    if args.restoration_model_name == "ltx":
+    restoration_backend = CLI_RESTORATION_MODELS[args.restoration_model_name][0]
+    if restoration_backend == "ltx":
         if is_streaming:
             parser.error("--restoration-model-name ltx does not support --stream")
         if args.secondary_restoration != "none" or args.denoise != "none":
             parser.error("--restoration-model-name ltx does not support --secondary-restoration or --denoise")
     restoration_model_path = Path(
-        args.restoration_model_path or default_restoration_model_path(args.restoration_model_name)
+        args.restoration_model_path or default_restoration_model_path(restoration_backend)
     )
     if not restoration_model_path.exists():
         raise FileNotFoundError(str(restoration_model_path))

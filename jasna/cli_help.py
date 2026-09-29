@@ -8,18 +8,15 @@ them when turning a help string into a tooltip.
 
 CLI_HELP: dict[str, str] = {
     "restoration_model_name": (
-        "Restoration model for video input: basicvsrpp (fast) or ltx (diffusion model, much "
-        "slower, best quality; no streaming, secondary restoration or denoise). "
-        "(default: %(default)s)"
+        "Restoration model for video input: basicvsrpp (fast), ltx (diffusion model, much "
+        "slower, best quality; no streaming, secondary restoration or denoise) or "
+        "ltx-undistilled (the same model without the 8-step speed-up, about 3x slower, looks "
+        "about the same). A missing ltx model is offered for download. (default: %(default)s)"
     ),
     "restoration_model_path": (
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
     ),
     "ltx_seed": "ltx: noise seed. Another seed gives another take on the same restoration. (default: %(default)s)",
-    "ltx_model": (
-        "ltx: distilled (8 steps, about 3x faster) or undistilled (15 steps with STG). Both look "
-        "about the same; a missing model is offered for download. (default: %(default)s)"
-    ),
     "ltx_fast": (
         "ltx: about 1.4x faster with slightly less detail. Needs an RTX 50-series (Blackwell) GPU "
         "and the fast model file. (default: %(default)s)"
