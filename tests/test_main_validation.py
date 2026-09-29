@@ -80,7 +80,7 @@ class TestMainValidation:
         assert (config.restoration_model_name, config.ltx_seed) == ("ltx", 3)
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
 
-    def test_ltx_trial_needs_no_model_files_or_download(self, tmp_path):
+    def test_ltx_trial_needs_no_model_files_or_download(self, tmp_path, capsys):
         with (
             patch("jasna.accelerator.is_nvidia_device", return_value=True),
             patch("jasna.ltx.model_files.LtxModelFiles.from_dir", side_effect=AssertionError("reads model files")),
@@ -92,6 +92,7 @@ class TestMainValidation:
 
         config = pipeline_cls.call_args.kwargs["config"]
         assert (config.restoration_model_name, config.ltx_model, config.ltx_trial) == ("ltx", "undistilled", True)
+        assert "LTX trial: placeholder weights" in capsys.readouterr().out
 
     def test_ltx_trial_rejects_basicvsrpp(self, tmp_path):
         with pytest.raises(SystemExit):

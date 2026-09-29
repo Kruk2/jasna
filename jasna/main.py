@@ -781,12 +781,15 @@ def _run_videos(
 def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     """Offer to download the selected LTX model when the job needs it and it is missing.
     Without a terminal to ask in, fail with what to download instead of waiting."""
-    from jasna.ltx.model_files import download_files, download_size_text, missing_downloads
+    from jasna.ltx.model_files import LTX_TRIAL_NOTICE, download_files, download_size_text, missing_downloads
 
     uses_ltx = config.restoration_model_name == "ltx" or any(
         segment.restoration is not None and segment.restoration.model == "ltx" for segment in segments or ()
     )
-    if not uses_ltx or config.ltx_trial:
+    if not uses_ltx:
+        return
+    if config.ltx_trial:
+        print(LTX_TRIAL_NOTICE)
         return
     directory = config.restoration_model_path if config.restoration_model_name == "ltx" else default_restoration_model_path("ltx")
     missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
