@@ -1,18 +1,17 @@
-"""Background SD15 bundle download, kept off the widget layer."""
+"""Background model downloads, kept off the widget layer."""
 
 import threading
-from pathlib import Path
+from typing import Callable
 
-from jasna.restorer.sd15_download import download_sd15_bundle
+DownloadProgress = Callable[[int, int | None], None]
 
 
-def start_sd15_download(
-    model_dir: Path,
-    repo_id: str,
-    on_percent,
-    on_done,
+def start_download(
+    download: Callable[[DownloadProgress], None],
+    on_percent: Callable[[int], None],
+    on_done: Callable[[str | None], None],
 ) -> threading.Thread:
-    """Download the SD15 bundle on a daemon thread.
+    """Run ``download(progress_callback)`` on a daemon thread.
 
     ``on_percent(percent)`` fires on every whole-percent change and
     ``on_done(error)`` fires once with ``None`` on success or the error text on
@@ -35,7 +34,7 @@ def start_sd15_download(
     def worker():
         error = None
         try:
-            download_sd15_bundle(model_dir, repo_id, progress_callback=progress)
+            download(progress)
         except Exception as exc:  # surface failure to the user
             error = str(exc)
         on_done(error)

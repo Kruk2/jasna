@@ -18,6 +18,7 @@ from jasna.gui.locales import t
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.components import AutoHidingScrollableFrame, Tooltip, format_duration, grab_modal
 from jasna.gui.icons import CompactSwitch, NativeIconButton
+from jasna.gui.ltx_models import model_key
 from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker, SeedFailed, SeedFrame, SeedProgress, SeedReady
 from jasna.gui.restoration_preview import (
     RestorationClip,
@@ -98,6 +99,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._is_gpu_busy = is_gpu_busy
         self._set_preview_gpu_busy = set_preview_gpu_busy
         self._ltx_unavailable_reason = ltx_unavailable_reason
+        self._ltx_key = model_key("ltx", get_settings().ltx_model)
+        self._ltx_label = t(f"model_{self._ltx_key}")
         self._on_saved = on_saved
         self._on_closed = on_closed
         self._state: SegmentEditorState | None = None
@@ -437,6 +440,8 @@ class SegmentEditor(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
         )
         self._seed_view_label.pack(side="right", padx=(0, 6))
+        for widget in (self._seed_view_label, self._seed_view_toggle):
+            Tooltip(widget, t("tip_segments_seed_show"))
         projection_names = {
             "raw": t("segments_vr_projection_raw"),
             "fisheye": t("segments_vr_projection_fisheye"),
@@ -617,12 +622,14 @@ class SegmentEditor(ctk.CTkToplevel):
     def _build_restoration_inspector(self, parent: ctk.CTkFrame) -> None:
         self._inspector = ctk.CTkFrame(parent, fg_color=Colors.BG_PANEL, corner_radius=Sizing.BORDER_RADIUS)
         self._inspector.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
+        self._restore_with_label = ctk.CTkLabel(
             self._inspector,
             text=t("segments_restore_with"),
             text_color=Colors.TEXT_PRIMARY,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-        ).grid(row=0, column=0, sticky="w", padx=(8, 6), pady=4)
+        )
+        self._restore_with_label.grid(row=0, column=0, sticky="w", padx=(8, 6), pady=4)
+        Tooltip(self._restore_with_label, t("tip_segments_restore_with"))
         models = ctk.CTkFrame(self._inspector, fg_color="transparent")
         models.grid(row=0, column=1, sticky="w", pady=4)
         self._range_model = ctk.StringVar(value="basicvsrpp")
@@ -630,7 +637,7 @@ class SegmentEditor(ctk.CTkToplevel):
         for model in ("basicvsrpp", "ltx"):
             radio = ctk.CTkRadioButton(
                 models,
-                text=t(f"model_{model}"),
+                text=self._ltx_label if model == "ltx" else t("model_basicvsrpp"),
                 variable=self._range_model,
                 value=model,
                 command=self._on_range_model_changed,
@@ -642,6 +649,7 @@ class SegmentEditor(ctk.CTkToplevel):
             )
             radio.pack(side="left", padx=(0, 10))
             self._model_radios[model] = radio
+        Tooltip(self._model_radios["basicvsrpp"], t("tip_model_basicvsrpp"))
         self._ltx_radio_tooltip = Tooltip(self._model_radios["ltx"], "")
         self._seed_label = ctk.CTkLabel(
             self._inspector,
@@ -652,7 +660,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._seed_entry = ctk.CTkEntry(self._inspector, font=(Fonts.FAMILY_MONO, Fonts.SIZE_SMALL))
         self._seed_entry.bind("<Return>", self._commit_seed_entry)
         self._seed_entry.bind("<FocusOut>", self._commit_seed_entry)
-        Tooltip(self._seed_entry, t("tip_ltx_seed"))
+        for widget in (self._seed_label, self._seed_entry):
+            Tooltip(widget, t("tip_ltx_seed"))
         self._new_seed_btn = NativeIconButton(
             self._inspector,
             "reset",
@@ -700,6 +709,7 @@ class SegmentEditor(ctk.CTkToplevel):
             hover_color=Colors.BORDER_LIGHT,
             command=self._cancel_seed,
         )
+        Tooltip(self._seed_cancel_btn, t("tip_segments_seed_cancel"))
         self._seed_progress = ctk.CTkProgressBar(self._seed_box, height=8, progress_color=Colors.MODEL_LTX)
         self._seed_status = ctk.CTkLabel(
             self._seed_box,
@@ -768,7 +778,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._model_radios["ltx"].configure(
             state="disabled" if locked or (blocked is not None and restoration.model != "ltx") else "normal"
         )
-        self._ltx_radio_tooltip.set_text(t(blocked) if blocked else t("model_ltx_description"))
+        self._ltx_radio_tooltip.set_text(t(blocked) if blocked else t(f"tip_model_{self._ltx_key}"))
         if restoration.model == "ltx":
             self._seed_label.grid(row=1, column=0, sticky="w", padx=(8, 6), pady=(0, 6))
             self._seed_entry.grid(row=1, column=1, sticky="ew", pady=(0, 6))
@@ -878,6 +888,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 command=lambda value=shown: self._use_tried_seed(value),
             )
             use.pack(side="left", padx=(4, 0))
+            Tooltip(use, t("tip_segments_seed_use"))
             self._seed_chip_widgets.append(use)
 
     def _shown_seed_for(self, segment: SegmentRange) -> int | None:
@@ -1010,11 +1021,10 @@ class SegmentEditor(ctk.CTkToplevel):
                 self._seed_image = (frame, image.convert("RGB"))
         return self._seed_image[1]
 
-    @staticmethod
-    def _model_text(segment: SegmentRange) -> str:
+    def _model_text(self, segment: SegmentRange) -> str:
         restoration = segment.restoration
         if restoration.model == "ltx":
-            return f"{t('model_ltx')} {restoration.ltx_seed}"
+            return f"{self._ltx_label} {restoration.ltx_seed}"
         return t(f"model_{restoration.model}")
 
     def _build_scan_and_timeline(self, metadata: VideoMetadata) -> None:
@@ -1093,7 +1103,7 @@ class SegmentEditor(ctk.CTkToplevel):
         legend.pack(fill="x", padx=20, pady=(0, 2))
         for color, label in (
             (Colors.PRIMARY, t("model_basicvsrpp")),
-            (Colors.MODEL_LTX, t("model_ltx")),
+            (Colors.MODEL_LTX, self._ltx_label),
             (Colors.STATUS_WARNING, t("segments_legend_detected")),
             ("#f8fafc", t("segments_legend_playhead")),
         ):

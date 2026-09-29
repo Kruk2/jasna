@@ -16,6 +16,7 @@ from jasna.gui.components import (
 )
 from jasna.gui.icons import NativeIconButton
 from jasna.gui.locales import t
+from jasna.gui.ltx_models import LtxModels
 from jasna.gui.settings_sections.advanced import (
     TEMPORAL_FILTER_SLIDER_MAX,
     AdvancedSection,
@@ -35,7 +36,7 @@ _EDITABLE_WHILE_PROCESSING = frozenset({"post_export_action", "post_export_comma
 class SettingsPanel(ctk.CTkFrame):
     """Right panel composing the settings sections; widgets live in the sections."""
 
-    def __init__(self, master, preset_manager: PresetManager, *, ltx_installed: bool, **kwargs):
+    def __init__(self, master, preset_manager: PresetManager, *, ltx_models: LtxModels, **kwargs):
         super().__init__(
             master,
             fg_color=Colors.BG_PANEL,
@@ -53,7 +54,7 @@ class SettingsPanel(ctk.CTkFrame):
 
         self._build_preset_bar()
         self._build_scrollable()
-        self._build_sections(ltx_installed)
+        self._build_sections(ltx_models)
         self._apply_preset(self._current_preset)
 
     def _build_preset_bar(self):
@@ -212,13 +213,13 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
 
-    def _build_sections(self, ltx_installed: bool):
+    def _build_sections(self, ltx_models: LtxModels):
         self._model_section = RestorationModelSection(
             self._scroll,
             self._widgets,
             self._mark_modified,
             self._on_restoration_model_changed,
-            ltx_installed=ltx_installed,
+            ltx_models=ltx_models,
         )
         self._model_aware_sections = [
             BasicSection(
@@ -249,8 +250,12 @@ class SettingsPanel(ctk.CTkFrame):
             section.set_model(model)
 
     def ltx_unavailable_reason(self) -> str | None:
-        """Locale key saying why LTX cannot run on this PC, or None when it can."""
+        """Locale key saying why the chosen LTX model cannot run now, or None when it can."""
         return self._model_section.unavailable_reason()
+
+    def refresh_ltx_models(self):
+        self._model_section.refresh()
+        self._update_modified_indicator()
 
     def set_gpu_support(self, *, nvidia: bool, blackwell: bool):
         self._model_section.set_gpu_support(nvidia=nvidia, blackwell=blackwell)

@@ -6,7 +6,7 @@ from jasna.gui.components import CollapsibleSection
 from jasna.gui.icons import CompactSwitch
 from jasna.gui.locales import t
 from jasna.gui.queues import MainThreadCalls
-from jasna.gui.sd15_download_worker import start_sd15_download
+from jasna.gui.download_worker import start_download
 from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label
 from jasna.gui.theme import Colors, Fonts, Sizing
 
@@ -174,7 +174,13 @@ class ImageRestorationSection:
 
             main_thread.post(finish)
 
-        start_sd15_download(SD15_DIR, SD15_HF_REPO, on_percent, on_done)
+        from jasna.restorer.sd15_download import download_sd15_bundle
+
+        start_download(
+            lambda progress: download_sd15_bundle(SD15_DIR, SD15_HF_REPO, progress_callback=progress),
+            on_percent,
+            on_done,
+        )
 
     def _finish_download(self, error: str | None):
         btn = self._widgets["image_restore_download_btn"]

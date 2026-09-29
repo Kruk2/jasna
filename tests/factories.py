@@ -149,3 +149,18 @@ def write_double_adts_aac_source(tmp_path: Path) -> Path:
                 packet.stream = video_out
                 dst.mux(packet)
     return source
+
+
+def ltx_models(root, directory: Path, *, installed: bool, on_change=lambda: None):
+    """A real ``LtxModels`` over ``directory``; ``installed`` puts every model file there."""
+    from jasna.gui.ltx_models import LtxModels
+    from jasna.gui.queues import MainThreadCalls
+    from jasna.ltx.model_files import LTX_MODELS, bundle_names
+
+    directory.mkdir(parents=True, exist_ok=True)
+    if installed:
+        for model in LTX_MODELS:
+            for fast in (False, True):
+                for name in bundle_names(model, fast=fast):
+                    (directory / name).touch()
+    return LtxModels(directory, MainThreadCalls(root, 20), on_change)
