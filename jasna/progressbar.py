@@ -5,6 +5,10 @@ from typing import Callable
 
 from tqdm import tqdm
 
+ProgressCallback = Callable[[float, float, float, int, int, str], None]
+"""``(percent, fps, eta_seconds, frames_done, total_frames, stage)``; ``stage`` names the LTX
+pass running, or is empty for frame-by-frame restoration."""
+
 
 class Progressbar:
     """Progress bar with time remaining estimation and speed display."""
@@ -14,7 +18,7 @@ class Progressbar:
         total_frames: int,
         video_fps: float,
         disable: bool = False,
-        callback: Callable[[float, float, float, int, int], None] | None = None,
+        callback: ProgressCallback | None = None,
     ):
         """Initialize progressbar.
         
@@ -22,7 +26,7 @@ class Progressbar:
             total_frames: Total number of frames to process
             video_fps: Video FPS for buffer sizing
             disable: If True, suppress tqdm console output
-            callback: Optional callback(progress_pct, fps, eta_seconds, frames_done, total_frames)
+            callback: Optional ``ProgressCallback``
         """
         self.total_frames = total_frames
         self.callback = callback
@@ -104,7 +108,7 @@ class Progressbar:
                 fps = 1.0 / mean_duration if mean_duration > 0 else 0.0
                 remaining = self.total_frames - self.frames_processed
                 eta_seconds = remaining * mean_duration
-            self.callback(progress_pct, fps, eta_seconds, self.frames_processed, self.total_frames)
+            self.callback(progress_pct, fps, eta_seconds, self.frames_processed, self.total_frames, "")
 
     def _get_mean_processing_duration(self) -> float:
         """Calculate mean frame processing duration from the buffer."""

@@ -32,7 +32,7 @@ from jasna.media.splice import (
     validate_smart_render,
 )
 from jasna.pipeline_threads import run_restoration_pass
-from jasna.progressbar import Progressbar
+from jasna.progressbar import ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange, job_restoration, resolve_restorations
 from jasna.session_config import SessionConfig
@@ -78,7 +78,7 @@ class Pipeline:
         session: RestorationSession,
         input_video: Path,
         output_video: Path,
-        progress_callback: Callable[[dict], None] | None,
+        progress_callback: ProgressCallback | None,
         segments: tuple[SegmentRange, ...] | None,
         splice_plan: SplicePlan | None,
     ) -> None:
@@ -297,12 +297,21 @@ class Pipeline:
 
         return frames
 
+    def _ltx_progress(self, frames: int):
+        from jasna.ltx.restore import Progress
+
+        callback = self.progress_callback
+        report = None
+        if callback is not None:
+            report = lambda stage, fraction, eta: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
+        return Progress(frames, disable=self.disable_progress, report=report)
+
     def _require_ltx_video(self) -> None:
         if self.vr_resolution.is_sbs:
             raise ValueError("LTX restoration does not support VR180 side-by-side video")
 
     def _run_ltx(self, metadata) -> None:
-        from jasna.ltx.restore import Cancelled, Progress, restore_video
+        from jasna.ltx.restore import Cancelled, restore_video
 
         self._require_ltx_video()
         frame_rate = self._resolve_frame_rate(metadata)
@@ -320,9 +329,7 @@ class Pipeline:
                 seed=self.ltx_seed,
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
-                progress=Progress(
-                    frames=frame_rate.output_frame_count(metadata.num_frames), disable=self.disable_progress
-                ),
+                progress=self._ltx_progress(frame_rate.output_frame_count(metadata.num_frames)),
                 cancel=self._cancel_event,
             )
         except Cancelled:
@@ -342,7 +349,6 @@ class Pipeline:
             Cancelled,
             LtxSegment,
             LtxSpan,
-            Progress,
             restore_spans,
             segment_decode_budget,
             segment_large_canvas,
@@ -379,7 +385,7 @@ class Pipeline:
                 budget=segment_decode_budget,
                 device=self.device,
                 work_dir=work_dir,
-                progress=Progress(frames=frames, disable=self.disable_progress),
+                progress=self._ltx_progress(frames),
                 cancel=self._cancel_event,
             )
         except Cancelled:

@@ -18,10 +18,11 @@ from __future__ import annotations
 import logging
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import torch
 from tqdm import tqdm
@@ -79,15 +80,69 @@ class LtxSpan:
     open_writer: Callable[[], FrameWriter]
 
 
-@dataclass(frozen=True)
+LtxStage = Literal["scan", "encode", "denoise", "compose"]
+ProgressReport = Callable[[LtxStage, float, float], None]
+_STAGE_NUMBER = {"scan": 1, "encode": 2, "denoise": 3, "compose": 4}
+_STAGE_SHARE = {"scan": 0.02, "encode": 0.08, "denoise": 0.8, "compose": 0.1}
+
+
 class Progress:
-    """One console bar per pass; ``frames`` sizes the frame-based passes."""
+    """One console bar per pass; ``frames`` sizes the frame-based passes. ``report`` gets
+    ``(stage, fraction of the whole run, seconds left)``; seconds left is 0 until the
+    denoise pass has timed a step."""
 
-    frames: int
-    disable: bool
+    def __init__(self, frames: int, *, disable: bool, report: ProgressReport | None) -> None:
+        self.frames = frames
+        self._disable = disable
+        self._report = report
+        self._started = time.monotonic()
+        self._done_share = 0.0
+        self._timed = False
 
-    def bar(self, name: str, total: int, unit: str = "frame") -> tqdm:
-        return tqdm(total=total, desc=f"LTX {name}", unit=unit, dynamic_ncols=True, disable=self.disable)
+    def bar(self, stage: LtxStage, total: int, unit: str = "frame") -> _StageBar:
+        tqdm_bar = tqdm(
+            total=total,
+            desc=f"LTX {_STAGE_NUMBER[stage]}/4 {stage}",
+            unit=unit,
+            dynamic_ncols=True,
+            disable=self._disable,
+        )
+        return _StageBar(self, stage, tqdm_bar)
+
+    def _advanced(self, stage: LtxStage, done: int, total: int) -> None:
+        if self._report is None:
+            return
+        fraction = self._done_share + _STAGE_SHARE[stage] * (min(1.0, done / total) if total else 1.0)
+        self._timed = self._timed or (stage == "denoise" and done > 0)
+        elapsed = time.monotonic() - self._started
+        self._report(stage, fraction, elapsed * (1.0 - fraction) / fraction if self._timed else 0.0)
+
+    def _finished(self, stage: LtxStage) -> None:
+        self._done_share += _STAGE_SHARE[stage]
+
+
+class _StageBar:
+    def __init__(self, progress: Progress, stage: LtxStage, bar: tqdm) -> None:
+        self._progress = progress
+        self._stage = stage
+        self._bar = bar
+        self._done = 0
+        progress._advanced(stage, 0, bar.total)
+
+    def update(self, n: int) -> None:
+        self._bar.update(n)
+        self._done += n
+        self._progress._advanced(self._stage, self._done, self._bar.total)
+
+    def close(self) -> None:
+        self._bar.close()
+        self._progress._finished(self._stage)
+
+    def __enter__(self) -> _StageBar:
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.close()
 
 
 class LatentStore:
@@ -169,7 +224,7 @@ def scan_span(
     frame_h: int,
     frame_w: int,
     large_canvas: bool,
-    bar: tqdm,
+    bar: _StageBar,
     cancel: threading.Event,
 ) -> list[list[TrackPlan]]:
     """The track plans of each segment, frame indices counted from the segment's first frame."""
@@ -237,7 +292,7 @@ def encode_span(
     *,
     batch_size: int,
     device: torch.device,
-    bar: tqdm,
+    bar: _StageBar,
     cancel: threading.Event,
 ) -> None:
     """VAE-encode every planned window's reference crops into its segment's store."""
@@ -357,7 +412,7 @@ def compose_span(
     batch_size: int,
     budget: DecodeBudget,
     device: torch.device,
-    bar: tqdm,
+    bar: _StageBar,
     cancel: threading.Event,
 ) -> None:
     """Write every frame of ``span``: segment frames composited, the rest unchanged."""
@@ -415,7 +470,7 @@ def restore_spans(
     """Restore every segment of ``spans`` and write each span's frames to a writer of its own
     (closed once the span is written). ``large_canvas`` allows 768 px windows for large mosaics;
     ``budget`` gives the decode memory budget per canvas size."""
-    with progress.bar("1/4 scan", progress.frames) as bar:
+    with progress.bar("scan", progress.frames) as bar:
         plans = [
             scan_span(
                 span.frames,
@@ -441,7 +496,7 @@ def restore_spans(
         ]
         if windows:
             encoder = load_video_encoder(files.vae, device)
-            with progress.bar("2/4 encode", progress.frames) as bar:
+            with progress.bar("encode", progress.frames) as bar:
                 for span, span_plans, span_stores in zip(spans, plans, stores):
                     encode_span(
                         span.frames,
@@ -458,7 +513,7 @@ def restore_spans(
             torch.cuda.empty_cache()
             transformer = LtxTransformer(files.transformer, device)
             try:
-                with progress.bar("3/4 denoise", len(transformer.conditions) * windows, unit="step") as bar:
+                with progress.bar("denoise", len(transformer.conditions) * windows, unit="step") as bar:
                     for span, span_plans, span_stores in zip(spans, plans, stores):
                         for segment, segment_plans, (references, finals) in zip(span.segments, span_plans, span_stores):
                             for plan in segment_plans:
@@ -472,7 +527,7 @@ def restore_spans(
                 del transformer
                 torch.cuda.empty_cache()
         decoder = load_video_decoder(files.vae, files.tuned_decoder, device) if windows else None
-        with progress.bar("4/4 compose", progress.frames) as bar:
+        with progress.bar("compose", progress.frames) as bar:
             for span, span_plans, span_stores in zip(spans, plans, stores):
                 compose_span(
                     span,

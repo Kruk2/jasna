@@ -77,6 +77,7 @@ class TestProgressbarLifecycle:
         assert last_call[0][0] == pytest.approx(100.0)
         assert last_call[0][3] == 10
         assert last_call[0][4] == 10
+        assert last_call[0][5] == ""
 
     def test_buffer_respects_max_len(self):
         pb = Progressbar(total_frames=200, video_fps=1, disable=True)
