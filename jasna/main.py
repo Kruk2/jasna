@@ -862,8 +862,8 @@ def main() -> None:
     )
 
     if args.restoration_model_name == "ltx":
-        if is_streaming or segments_spec:
-            parser.error("--restoration-model-name ltx does not support --stream or --segments")
+        if is_streaming:
+            parser.error("--restoration-model-name ltx does not support --stream")
         if args.secondary_restoration != "none" or args.denoise != "none":
             parser.error("--restoration-model-name ltx does not support --secondary-restoration or --denoise")
     restoration_model_path = Path(

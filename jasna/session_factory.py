@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from jasna.session_config import SessionConfig
+from jasna.session_config import RestorationModelName, SessionConfig
 
 if TYPE_CHECKING:
     import torch
@@ -147,29 +147,64 @@ def build_restoration_session(
     import torch
 
     from jasna.accelerator import is_amd_device
+
+    device = torch.device(config.device)
+    if config.tvai_denoise and config.secondary_restoration != "tvai":
+        raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
+    if is_amd_device(device) and config.secondary_restoration != "none":
+        raise ValueError(
+            f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
+        )
+    if config.restoration_model_name == "ltx" and (
+        config.secondary_restoration != "none" or config.denoise_strength != "none"
+    ):
+        raise ValueError("LTX restoration does not support secondary restoration or denoise")
+    session = RestorationSession(device=device, restoration_pipeline=None)
+    provide_restoration_models(
+        config, session, frozenset({config.restoration_model_name}), log_callback=log_callback
+    )
+    return session
+
+
+def provide_restoration_models(
+    config: SessionConfig,
+    session: RestorationSession,
+    models: frozenset[RestorationModelName],
+    *,
+    log_callback: Callable[[str], None] | None,
+) -> None:
+    """Load each of ``models`` the session does not hold yet. ``--restoration-model-path``
+    belongs to the job's model; another model loads from its default path."""
+    if "basicvsrpp" in models and session.restoration_pipeline is None:
+        session.restoration_pipeline = _build_basicvsrpp_pipeline(config, session.device, log_callback=log_callback)
+    if "ltx" in models and session.ltx_files is None:
+        session.ltx_files = _ltx_model_files(config, session.device, log_callback=log_callback)
+
+
+def _restoration_model_path(config: SessionConfig, name: RestorationModelName) -> Path:
+    from jasna.engine_paths import default_restoration_model_path
+
+    if name == config.restoration_model_name:
+        return config.restoration_model_path
+    return default_restoration_model_path(name)
+
+
+def _build_basicvsrpp_pipeline(
+    config: SessionConfig, device: "torch.device", *, log_callback: Callable[[str], None] | None
+) -> "RestorationPipeline":
+    from jasna.accelerator import is_amd_device
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
     from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
 
-    device = torch.device(config.device)
-    amd = is_amd_device(device)
-    if config.tvai_denoise and config.secondary_restoration != "tvai":
-        raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
-    if amd and config.secondary_restoration != "none":
-        raise ValueError(
-            f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
-        )
-
-    if config.restoration_model_name == "ltx":
-        return _build_ltx_session(config, device, log_callback=log_callback)
-
+    model_path = _restoration_model_path(config, "basicvsrpp")
     compile_result = ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
             fp16=bool(config.fp16),
-            basicvsrpp=config.compile_basicvsrpp and not amd,
-            basicvsrpp_model_path=str(config.restoration_model_path),
+            basicvsrpp=config.compile_basicvsrpp and not is_amd_device(device),
+            basicvsrpp_model_path=str(model_path),
             detection=True,
             detection_model_name=config.detection_model_name,
             detection_model_path=str(config.detection_model_path),
@@ -178,27 +213,23 @@ def build_restoration_session(
         ),
         log_callback=log_callback,
     )
-
-    secondary_restorer = _build_secondary_restorer(config, device)
-    restoration_pipeline = RestorationPipeline(
+    return RestorationPipeline(
         restorer=BasicvsrppMosaicRestorer(
-            checkpoint_path=str(config.restoration_model_path),
+            checkpoint_path=str(model_path),
             device=device,
             max_clip_size=int(config.max_clip_size),
             use_tensorrt=compile_result.use_basicvsrpp_tensorrt,
             fp16=bool(config.fp16),
         ),
-        secondary_restorer=secondary_restorer,
+        secondary_restorer=_build_secondary_restorer(config, device),
         denoise_strength=DenoiseStrength(config.denoise_strength),
         denoise_step=DenoiseStep(config.denoise_step),
     )
 
-    return RestorationSession(device=device, restoration_pipeline=restoration_pipeline)
 
-
-def _build_ltx_session(
+def _ltx_model_files(
     config: SessionConfig, device: "torch.device", *, log_callback: Callable[[str], None] | None
-) -> RestorationSession:
+) -> "LtxModelFiles":
     import torch
 
     from jasna.accelerator import is_nvidia_device
@@ -207,11 +238,9 @@ def _build_ltx_session(
 
     if not is_nvidia_device(device):
         raise ValueError("LTX restoration needs an NVIDIA GPU")
-    if config.secondary_restoration != "none" or config.denoise_strength != "none":
-        raise ValueError("LTX restoration does not support secondary restoration or denoise")
     if config.ltx_fast and torch.cuda.get_device_capability(device)[0] < 10:
         raise ValueError("The fast LTX model needs an RTX 50-series (Blackwell) GPU")
-    files = LtxModelFiles.from_dir(config.restoration_model_path, fast=config.ltx_fast)
+    files = LtxModelFiles.from_dir(_restoration_model_path(config, "ltx"), fast=config.ltx_fast)
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
@@ -223,11 +252,7 @@ def _build_ltx_session(
         ),
         log_callback=log_callback,
     )
-    return RestorationSession(
-        device=device,
-        restoration_pipeline=None,
-        ltx_files=files,
-    )
+    return files
 
 
 def build_pipeline(
@@ -240,8 +265,15 @@ def build_pipeline(
     segments: "tuple[SegmentRange, ...] | None" = None,
     splice_plan: "SplicePlan | None" = None,
 ) -> "Pipeline":
+    """A per-video ``Pipeline``; the session first loads any model the segments ask for."""
     from jasna.pipeline import Pipeline
+    from jasna.segments import job_restoration, resolve_restorations
 
+    default = job_restoration(config.restoration_model_name, config.ltx_seed)
+    models = frozenset(
+        segment.restoration.model for segment in resolve_restorations(tuple(segments or ()), default)
+    ) or frozenset({config.restoration_model_name})
+    provide_restoration_models(config, session, models, log_callback=None)
     return Pipeline(
         config=config,
         session=session,

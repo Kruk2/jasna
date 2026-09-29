@@ -1,14 +1,37 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+
+from jasna.session_config import RestorationModelName
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True)
+class SegmentRestoration:
+    """The model that restores a segment; ``ltx_seed`` is set exactly for ``ltx``."""
+
+    model: RestorationModelName
+    ltx_seed: int | None
+
+    def __post_init__(self) -> None:
+        if (self.model == "ltx") != (self.ltx_seed is not None):
+            raise ValueError("an LTX segment needs a seed and only an LTX segment has one")
+
+
+def job_restoration(model: RestorationModelName, ltx_seed: int) -> SegmentRestoration:
+    return SegmentRestoration(model, ltx_seed if model == "ltx" else None)
+
+
+@dataclass(frozen=True)
 class SegmentRange:
-    """A user-visible half-open time range, in seconds."""
+    """A user-visible half-open time range, in seconds. ``restoration`` None means the
+    job's model; ``resolve_restorations`` fills it in before processing."""
 
     start: float
     end: float
+    restoration: SegmentRestoration | None = None
+
+    def __lt__(self, other: SegmentRange) -> bool:
+        return (self.start, self.end) < (other.start, other.end)
 
     def __post_init__(self) -> None:
         start = float(self.start)
@@ -75,14 +98,40 @@ def normalize_segments(
                     f"{format_timestamp(duration)}"
                 )
 
+    painted: list[SegmentRange] = []
+    for segment in segments:
+        painted = [piece for old in painted for piece in _outside(old, segment)] + [segment]
     merged: list[SegmentRange] = []
-    for segment in ordered:
-        if merged and segment.start <= merged[-1].end + 1e-9:
-            previous = merged[-1]
-            merged[-1] = SegmentRange(previous.start, max(previous.end, segment.end))
+    for segment in sorted(painted):
+        previous = merged[-1] if merged else None
+        if (
+            previous is not None
+            and segment.restoration == previous.restoration
+            and segment.start <= previous.end + 1e-9
+        ):
+            merged[-1] = replace(previous, end=max(previous.end, segment.end))
         else:
             merged.append(segment)
     return tuple(merged)
+
+
+def _outside(segment: SegmentRange, cut: SegmentRange) -> list[SegmentRange]:
+    """The parts of ``segment`` that ``cut`` does not cover."""
+    pieces = []
+    if cut.start - segment.start > 1e-9:
+        pieces.append(replace(segment, end=min(segment.end, cut.start)))
+    if segment.end - cut.end > 1e-9:
+        pieces.append(replace(segment, start=max(segment.start, cut.end)))
+    return pieces
+
+
+def resolve_restorations(
+    segments: tuple[SegmentRange, ...], default: SegmentRestoration
+) -> tuple[SegmentRange, ...]:
+    return tuple(
+        segment if segment.restoration is not None else replace(segment, restoration=default)
+        for segment in segments
+    )
 
 
 def parse_segments(spec: str, *, duration: float | None = None) -> tuple[SegmentRange, ...]:

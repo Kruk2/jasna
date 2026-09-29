@@ -5,7 +5,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jasna.segments import SegmentRange
+from jasna.engine_paths import default_restoration_model_path
+from jasna.segments import SegmentRange, SegmentRestoration
 from factories import session_config
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession, build_pipeline, build_restoration_session
@@ -161,3 +162,31 @@ def test_session_reuses_its_detector_until_detection_settings_change() -> None:
 
     session.close()
     changed.close.assert_called_once_with()
+
+
+def test_build_pipeline_loads_a_segment_model_the_session_lacks() -> None:
+    session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
+    segments = (SegmentRange(1, 2), SegmentRange(3, 4, SegmentRestoration("ltx", 9)))
+
+    with (
+        patch("jasna.accelerator.is_nvidia_device", return_value=True),
+        patch("jasna.engine_compiler.ensure_engines_compiled"),
+        patch("jasna.ltx.model_files.LtxModelFiles.from_dir") as from_dir,
+        patch("jasna.pipeline.Pipeline"),
+    ):
+        build_pipeline(session_config(), session, Path("in.mp4"), Path("out.mp4"), segments=segments)
+        build_pipeline(session_config(), session, Path("in.mp4"), Path("out.mp4"), segments=segments)
+
+    from_dir.assert_called_once_with(default_restoration_model_path("ltx"), fast=False)
+    assert session.ltx_files is from_dir.return_value
+
+
+def test_build_pipeline_keeps_a_session_that_holds_the_job_model() -> None:
+    pipeline = MagicMock()
+    session = RestorationSession(device=MagicMock(), restoration_pipeline=pipeline)
+
+    with patch("jasna.pipeline.Pipeline"):
+        build_pipeline(session_config(), session, Path("in.mp4"), Path("out.mp4"), segments=(SegmentRange(1, 2),))
+
+    assert session.restoration_pipeline is pipeline
+    assert session.ltx_files is None
