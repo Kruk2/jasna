@@ -31,6 +31,7 @@ def session_config(**overrides) -> SessionConfig:
         ltx_seed=0,
         ltx_fast=False,
         ltx_model="distilled",
+        ltx_trial=False,
         compile_basicvsrpp=True,
         max_clip_size=90,
         temporal_overlap=8,

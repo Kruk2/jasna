@@ -80,6 +80,23 @@ class TestMainValidation:
         assert (config.restoration_model_name, config.ltx_seed) == ("ltx", 3)
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
 
+    def test_ltx_trial_needs_no_model_files_or_download(self, tmp_path):
+        with (
+            patch("jasna.accelerator.is_nvidia_device", return_value=True),
+            patch("jasna.ltx.model_files.LtxModelFiles.from_dir", side_effect=AssertionError("reads model files")),
+            patch("jasna.ltx.model_files.missing_downloads", side_effect=AssertionError("offers a download")),
+        ):
+            pipeline_cls = _run_main_with_args(
+                tmp_path, ["--restoration-model-name", "ltx-undistilled", "--ltx-trial"], create_restoration=False
+            )
+
+        config = pipeline_cls.call_args.kwargs["config"]
+        assert (config.restoration_model_name, config.ltx_model, config.ltx_trial) == ("ltx", "undistilled", True)
+
+    def test_ltx_trial_rejects_basicvsrpp(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--ltx-trial"])
+
     def test_ltx_rejects_streaming(self, tmp_path):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--stream", "--restoration-model-name", "ltx"])
