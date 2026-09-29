@@ -69,8 +69,8 @@ class PlaceholderTensors:
 
 
 LTX_TRIAL_NOTICE = (
-    "LTX trial: placeholder weights, so the output is not restored. Timings match a real run "
-    "except model loading, which skips reading and decrypting the model files."
+    "LTX trial mode: output is not restored. Speed matches a real run, except model loading "
+    "(model files are not read or decrypted)."
 )
 
 # Chosen so a random INT8 / FP4 weight comes out near 1/sqrt(4096), like a trained one.
@@ -217,10 +217,10 @@ def download_files(
     """Download ``files`` into ``directory``, verifying each sha256 before it replaces
     anything. ``progress_callback(done_bytes, total_bytes)`` covers all files together."""
     if LTX_DOWNLOAD_URL is None:
-        raise RuntimeError("The LTX model download location is not published yet; get the model files manually.")
+        raise RuntimeError("LTX model downloads are not available yet. Get the model files manually.")
     unverifiable = [f.name for f in files if f.sha256 is None]
     if unverifiable:
-        raise RuntimeError(f"No published checksum for {', '.join(unverifiable)}; refusing to download.")
+        raise RuntimeError(f"No checksum for {', '.join(unverifiable)}, so it won't be downloaded.")
     directory.mkdir(parents=True, exist_ok=True)
     total = sum(f.size_bytes for f in files)
     done = 0
@@ -238,5 +238,5 @@ def download_files(
                     progress_callback(done, total)
         if digest.hexdigest() != file.sha256:
             partial.unlink()
-            raise RuntimeError(f"{file.name} failed its checksum; the download was discarded.")
+            raise RuntimeError(f"{file.name} is corrupted (checksum mismatch). The download was deleted.")
         partial.replace(target)

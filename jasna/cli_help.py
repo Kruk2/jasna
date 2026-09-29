@@ -8,26 +8,26 @@ them when turning a help string into a tooltip.
 
 CLI_HELP: dict[str, str] = {
     "restoration_model_name": (
-        "Restoration model for video input: basicvsrpp (fast), ltx (diffusion model, much "
-        "slower, best quality; no streaming, secondary restoration or denoise) or "
-        "ltx-undistilled (the same model without the 8-step speed-up, about 3x slower, looks "
-        "about the same). A missing ltx model is offered for download. (default: %(default)s)"
+        "Restoration model for video: basicvsrpp (fast), ltx (best quality, much slower) or "
+        "ltx-undistilled (slightly better than ltx, about 3x slower). LTX doesn't support "
+        "streaming, secondary restoration or denoise. A missing LTX model is offered for "
+        "download. (default: %(default)s)"
     ),
     "restoration_model_path": (
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
     ),
-    "ltx_seed": "ltx: noise seed. Another seed gives another take on the same restoration. (default: %(default)s)",
+    "ltx_seed": "ltx: noise seed. Different seeds give slightly different results. (default: %(default)s)",
     "ltx_fast": (
-        "ltx: about 1.4x faster with slightly less detail. Needs an RTX 50-series (Blackwell) GPU "
-        "and the fast model file. (default: %(default)s)"
+        "ltx: about 1.4x faster, slightly less detail. RTX 50-series (Blackwell) only; needs the "
+        "fast model file. (default: %(default)s)"
     ),
     "ltx_trial": (
-        "Speed test without a license: runs LTX with placeholder weights, so the picture will look "
-        "wrong. Use it to see if your GPU can run LTX and how fast. (default: %(default)s)"
+        "ltx: run with placeholder weights to test speed without a license or model files. "
+        "Output is not restored. (default: %(default)s)"
     ),
     "ltx_large_canvas": (
-        "ltx: restore large mosaics at 768 px instead of 512 px. Sharper, but about 3x slower for "
-        "those mosaics; needs 10 GB of free VRAM (ignored below that). (default: %(default)s)"
+        "ltx: restore large mosaics at 768 px instead of 512 px. More detail, about 3x slower on "
+        "those; needs 10 GB of free VRAM (ignored otherwise). (default: %(default)s)"
     ),
     "fp16": "Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
     "compile_basicvsrpp": "Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes. (default: %(default)s)",

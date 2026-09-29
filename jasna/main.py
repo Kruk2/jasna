@@ -799,7 +799,7 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     size = download_size_text(missing)
     if not sys.stdin.isatty():
         raise FileNotFoundError(f"LTX model files missing in {directory}: {names}. Run jasna in a terminal to download them ({size}).")
-    answer = input(f"The LTX {config.ltx_model} model is missing in {directory}:\n  {names}\nDownload {size} now? [y/N]: ")
+    answer = input(f"LTX {config.ltx_model} model not found in {directory}:\n  {names}\nDownload it ({size})? [y/N]: ")
     if answer.strip().lower() not in ("y", "yes"):
         raise FileNotFoundError(f"LTX model files missing in {directory}: {names}")
     from tqdm import tqdm

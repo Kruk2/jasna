@@ -54,7 +54,7 @@ def test_installed_checks_the_chosen_model_only(tmp_path):
 
 def test_download_refuses_without_a_published_location(tmp_path, monkeypatch):
     monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", None)
-    with pytest.raises(RuntimeError, match="not published"):
+    with pytest.raises(RuntimeError, match="not available yet"):
         model_files.download_files(tmp_path, model_files.missing_downloads(tmp_path, "distilled", fast=False))
 
 

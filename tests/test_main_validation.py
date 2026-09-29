@@ -92,7 +92,7 @@ class TestMainValidation:
 
         config = pipeline_cls.call_args.kwargs["config"]
         assert (config.restoration_model_name, config.ltx_model, config.ltx_trial) == ("ltx", "undistilled", True)
-        assert "LTX trial: placeholder weights" in capsys.readouterr().out
+        assert "LTX trial mode: output is not restored" in capsys.readouterr().out
 
     def test_ltx_trial_rejects_basicvsrpp(self, tmp_path):
         with pytest.raises(SystemExit):
