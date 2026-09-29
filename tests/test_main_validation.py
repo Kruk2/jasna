@@ -70,6 +70,7 @@ class TestMainValidation:
             patch("jasna.media.splice.build_splice_plan", return_value=MagicMock()),
             patch("jasna.accelerator.is_nvidia_device", return_value=True),
             patch("jasna.ltx.model_files.LtxModelFiles.from_dir", return_value=MagicMock()),
+            patch("jasna.ltx.model_files.missing_downloads", return_value=[]),
         ):
             pipeline_cls = _run_main_with_args(
                 tmp_path, ["--segments", "1-2", "--restoration-model-name", "ltx", "--ltx-seed", "3"]
