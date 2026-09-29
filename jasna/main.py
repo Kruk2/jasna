@@ -206,7 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     restoration.add_argument(
         "--ltx-large-canvas",
-        default=True,
+        default=False,
         action=argparse.BooleanOptionalAction,
         help=CLI_HELP["ltx_large_canvas"],
     )

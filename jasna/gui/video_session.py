@@ -70,7 +70,7 @@ def video_session_config(
         scene_detection=bool(settings.scene_detection),
         restoration_model_name="basicvsrpp",
         restoration_model_path=default_restoration_model_path("basicvsrpp"),
-        ltx_large_canvas=True,
+        ltx_large_canvas=False,
         ltx_seed=LTX_DEFAULT_SEED,
         ltx_fast=False,
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
