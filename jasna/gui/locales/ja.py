@@ -198,7 +198,7 @@ JA = {
         "segments_smart_render_range_too_short": "選択区間が1フレームより短いため、長くしてください。",
         "segments_smart_render_before_first_keyframe": "最初の区間が安全なカット位置より前から始まっています。開始位置を少し後ろへ移動してください。",
         "segments_smart_render_whole_video": "使用できる安全なカット位置が残らないため、個別処理すると動画全体の再エンコードが必要です。範囲を小さくするか、全区間を消して動画全体を処理してください。",
-        "segments_mixed_models_too_close": "「標準」の範囲と LTX の範囲が近すぎます。離すか、両方を同じモデルにしてください。",
+        "segments_mixed_models_too_close": "BasicVSR++ の範囲と LTX の範囲が近すぎます。離すか、両方を同じモデルにしてください。",
         "segments_discard_title": "区間の変更を破棄しますか？",
         "segments_discard_changes": "復元区間の変更を適用せずに閉じますか？",
         "segments_edit_tooltip": "この動画で復元する部分を選択",
@@ -214,7 +214,7 @@ JA = {
         # Sections
         "section_basic": "基本設定",
         "section_restoration_model": "修復モデル",
-        "model_basicvsrpp": "標準",
+        "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "高速。ほとんどの動画に向いています。",
         "model_ltx": "LTX",
         "model_ltx_description": "最も精細。かなり遅く、高性能な NVIDIA GPU が必要です。",

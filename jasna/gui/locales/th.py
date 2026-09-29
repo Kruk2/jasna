@@ -198,7 +198,7 @@ TH = {
         "segments_smart_render_range_too_short": "ช่วงที่เลือกสั้นกว่าหนึ่งเฟรมวิดีโอ โปรดทำให้ยาวขึ้น",
         "segments_smart_render_before_first_keyframe": "ช่วงแรกเริ่มก่อนจุดตัดที่ปลอดภัยของวิดีโอ โปรดเลื่อนจุดเริ่มไปข้างหน้าเล็กน้อย",
         "segments_smart_render_whole_video": "ช่วงเหล่านี้ไม่เหลือจุดตัดที่ปลอดภัยให้ใช้ การประมวลผลแยกจะต้องเข้ารหัสวิดีโอทั้งไฟล์ใหม่ โปรดเลือกพื้นที่เล็กลงหรือล้างทุกช่วงเพื่อประมวลผลวิดีโอทั้งไฟล์",
-        "segments_mixed_models_too_close": "ช่วง “มาตรฐาน” กับช่วง LTX อยู่ใกล้กันเกินไป ให้แยกออกจากกันหรือใช้โมเดลเดียวกันทั้งสองช่วง",
+        "segments_mixed_models_too_close": "ช่วง BasicVSR++ กับช่วง LTX อยู่ใกล้กันเกินไป ให้แยกออกจากกันหรือใช้โมเดลเดียวกันทั้งสองช่วง",
         "segments_discard_title": "ละทิ้งการเปลี่ยนแปลงช่วงหรือไม่",
         "segments_discard_changes": "ปิดโดยไม่ใช้การเปลี่ยนแปลงช่วงการกู้คืนหรือไม่",
         "segments_edit_tooltip": "เลือกส่วนของวิดีโอนี้ที่จะกู้คืน",
@@ -214,7 +214,7 @@ TH = {
         # Sections
         "section_basic": "การประมวลผลพื้นฐาน",
         "section_restoration_model": "โมเดลฟื้นฟู",
-        "model_basicvsrpp": "มาตรฐาน",
+        "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "เร็ว เหมาะกับวิดีโอส่วนใหญ่",
         "model_ltx": "LTX",
         "model_ltx_description": "รายละเอียดดีที่สุด ช้ากว่ามาก และต้องใช้ GPU NVIDIA ที่แรง",

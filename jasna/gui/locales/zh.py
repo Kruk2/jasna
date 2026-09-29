@@ -198,7 +198,7 @@ ZH = {
         "segments_smart_render_range_too_short": "所选区间短于一个视频帧，请将其延长。",
         "segments_smart_render_before_first_keyframe": "第一个区间开始于视频的安全切点之前，请将开始时间稍微后移。",
         "segments_smart_render_whole_video": "这些区间没有留下可用的安全切点，单独处理会导致整个视频重新编码。请选择更小的区域，或清除所有区间以处理完整视频。",
-        "segments_mixed_models_too_close": "“标准”片段和 LTX 片段离得太近。请把它们分开，或两者使用同一模型。",
+        "segments_mixed_models_too_close": "BasicVSR++ 片段和 LTX 片段离得太近。请把它们分开，或两者使用同一模型。",
         "segments_discard_title": "放弃区间更改？",
         "segments_discard_changes": "不应用修复区间更改并关闭吗？",
         "segments_edit_tooltip": "选择此视频中需要修复的部分",
@@ -214,7 +214,7 @@ ZH = {
         # Sections
         "section_basic": "基本处理",
         "section_restoration_model": "修复模型",
-        "model_basicvsrpp": "标准",
+        "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "速度快，适合大多数视频。",
         "model_ltx": "LTX",
         "model_ltx_description": "细节最好。速度慢很多，需要高性能 NVIDIA 显卡。",

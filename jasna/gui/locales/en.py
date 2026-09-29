@@ -198,7 +198,7 @@ EN = {
         "segments_smart_render_range_too_short": "A selected range is shorter than one video frame. Make it longer.",
         "segments_smart_render_before_first_keyframe": "The first range starts before the first frame where this video can be split safely. Move its start slightly later.",
         "segments_smart_render_whole_video": "These ranges leave no safe places to split the video, so processing them separately would re-encode the whole video. Select a smaller area, or clear all ranges to process the full video.",
-        "segments_mixed_models_too_close": "A Standard range and an LTX range are too close. Move them apart or use one model for both.",
+        "segments_mixed_models_too_close": "A BasicVSR++ range and an LTX range are too close. Move them apart or use one model for both.",
         "segments_discard_title": "Discard range changes?",
         "segments_discard_changes": "Close without applying your restoration-range changes?",
         "segments_edit_tooltip": "Choose which parts of this video should be restored",
@@ -214,7 +214,7 @@ EN = {
         # Sections
         "section_basic": "Basic Processing",
         "section_restoration_model": "Restoration Model",
-        "model_basicvsrpp": "Standard",
+        "model_basicvsrpp": "BasicVSR++",
         "model_basicvsrpp_description": "Fast. Good for most videos.",
         "model_ltx": "LTX",
         "model_ltx_description": "Best detail. Much slower and needs a strong NVIDIA GPU.",
