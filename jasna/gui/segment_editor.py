@@ -584,9 +584,9 @@ class SegmentEditor(ctk.CTkToplevel):
             text=t("segments_restore_with"),
             text_color=Colors.TEXT_PRIMARY,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
-        ).grid(row=0, column=0, sticky="w", padx=(8, 6), pady=(6, 3))
+        ).grid(row=0, column=0, sticky="w", padx=(8, 6), pady=6)
         models = ctk.CTkFrame(self._inspector, fg_color="transparent")
-        models.grid(row=0, column=1, columnspan=2, sticky="w", pady=(6, 3))
+        models.grid(row=0, column=1, sticky="w", pady=6)
         self._range_model = ctk.StringVar(value="basicvsrpp")
         self._model_radios = {}
         for model in ("basicvsrpp", "ltx"):
@@ -631,13 +631,14 @@ class SegmentEditor(ctk.CTkToplevel):
         self._use_for_all_btn = ctk.CTkButton(
             self._inspector,
             text=t("segments_use_for_all"),
-            height=26,
+            width=10,
+            height=24,
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             command=self._use_restoration_for_all,
         )
-        self._use_for_all_btn.grid(row=2, column=0, columnspan=3, sticky="ew", padx=8, pady=(3, 8))
+        self._use_for_all_btn.grid(row=0, column=2, sticky="e", padx=(4, 8), pady=6)
         Tooltip(self._use_for_all_btn, t("tip_segments_use_for_all"))
 
         self._seed_box = ctk.CTkFrame(self._inspector, fg_color="transparent")
@@ -731,10 +732,10 @@ class SegmentEditor(ctk.CTkToplevel):
         )
         self._ltx_radio_tooltip.set_text(t(blocked) if blocked else t("model_ltx_description"))
         if restoration.model == "ltx":
-            self._seed_box.grid(row=3, column=0, columnspan=3, sticky="ew", padx=8, pady=(0, 8))
+            self._seed_box.grid(row=2, column=0, columnspan=3, sticky="ew", padx=8, pady=(3, 8))
             self._seed_label.grid(row=1, column=0, sticky="w", padx=(8, 6), pady=3)
             self._seed_entry.grid(row=1, column=1, sticky="ew", pady=3)
-            self._new_seed_btn.grid(row=1, column=2, padx=(4, 8), pady=3)
+            self._new_seed_btn.grid(row=1, column=2, sticky="w", padx=(4, 8), pady=3)
             self._seed_entry.delete(0, "end")
             self._seed_entry.insert(0, str(restoration.ltx_seed))
         else:
