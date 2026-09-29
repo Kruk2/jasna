@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 FrameBatches = Iterator[tuple[torch.Tensor, list[int]]]
 FrameSource = Callable[[], FrameBatches]
+LARGE_CANVAS_MIN_FREE_BYTES = 10 << 30
 
 
 class Cancelled(Exception):
@@ -234,6 +235,15 @@ def compose(
     bar.close()
 
 
+def large_canvas_fits(requested: bool, free_bytes: int) -> bool:
+    """768 px windows need ~7.5 GiB of VAE-encoder activations alone; below 10 GiB free
+    every window runs at 512 px instead."""
+    if requested and free_bytes < LARGE_CANVAS_MIN_FREE_BYTES:
+        logger.warning("LTX: %.1f GiB free VRAM, restoring large mosaics at 512 px", free_bytes / 2**30)
+        return False
+    return requested
+
+
 def restore_video(
     frames: FrameSource,
     write: Callable[[torch.Tensor, int], None],
@@ -252,6 +262,7 @@ def restore_video(
     """Restore every mosaic of the video ``frames`` yields and ``write`` each output frame
     with its pts. ``detector`` is only used by the scan pass; ``large_canvas`` allows 768 px
     windows for large mosaics; window ``i`` draws its noise from ``seed + i``."""
+    large_canvas = large_canvas_fits(large_canvas, torch.cuda.mem_get_info(device)[0])
     plans = scan(frames, detector, frame_h=frame_h, frame_w=frame_w, large_canvas=large_canvas, progress=progress, cancel=cancel)
     with tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-") as temp:
         references = _LatentStore(Path(temp), "reference")

@@ -22,7 +22,7 @@ CLI_HELP: dict[str, str] = {
     ),
     "ltx_large_canvas": (
         "ltx: restore large mosaics at 768 px instead of 512 px. Sharper, about 3x slower for "
-        "those mosaics and needs more VRAM. (default: %(default)s)"
+        "those mosaics and needs more VRAM (off automatically below 10 GB free). (default: %(default)s)"
     ),
     "fp16": "Use FP16 where supported (restoration + TensorRT). Reduces VRAM usage and might improve performance.",
     "compile_basicvsrpp": "Compile BasicVSR++ for big performance boost (at cost of VRAM usage). Not recommended to use big clip sizes. (default: %(default)s)",
