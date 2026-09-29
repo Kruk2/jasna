@@ -17,8 +17,13 @@ import triton
 import triton.language as tl
 from triton.language.extra import libdevice
 
+EPS = tl.constexpr(1e-6)
+
+
 @triton.jit
-def _rotate_quantize_kernel(x_ptr, q_ptr, s_ptr, stride_x, K: tl.constexpr):
+def _rotate_quantize_kernel(
+    x_ptr, shift_ptr, scale_ptr, q_ptr, s_ptr, stride_x, half_rows, K: tl.constexpr, MODULATE: tl.constexpr
+):
     # One row per program, held in registers, so the activations are read once.
     # x @ H for the regular Hadamard H = (r4 x r4 x r4 x r4) / 16 per 256 columns: one r4
     # stage along an axis is y_j = s - 2 x_(3-j) with s the sum over that axis; the four
@@ -26,7 +31,14 @@ def _rotate_quantize_kernel(x_ptr, q_ptr, s_ptr, stride_x, K: tl.constexpr):
     # reversed.
     row = tl.program_id(0)
     j = tl.arange(0, K)
-    x = tl.load(x_ptr + row * stride_x + (j // 256) * 256 + 255 - j % 256).to(tl.float32)
+    cols = (j // 256) * 256 + 255 - j % 256
+    x = tl.load(x_ptr + row * stride_x + cols).to(tl.float32)
+    if MODULATE:
+        # rms_norm, then the AdaLN row of this row's half: x * (1 + scale) + shift
+        x = x * libdevice.rsqrt(tl.sum(x * x, axis=0) / K + EPS)
+        half = row // half_rows
+        x = x * (1 + tl.load(scale_ptr + half * K + cols).to(tl.float32)) + tl.load(shift_ptr + half * K + cols).to(tl.float32)
+        x = x.to(tl.bfloat16).to(tl.float32)
     x = tl.reshape(x, (K // 256, 4, 4, 4, 4))
     x = 0.5 * (tl.sum(x, axis=1, keep_dims=True) - 2 * x)
     x = 0.5 * (tl.sum(x, axis=2, keep_dims=True) - 2 * x)
@@ -40,21 +52,36 @@ def _rotate_quantize_kernel(x_ptr, q_ptr, s_ptr, stride_x, K: tl.constexpr):
     tl.store(q_ptr + row * K + j, tl.minimum(tl.maximum(codes, -127.0), 127.0).to(tl.int8))
 
 
-def rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """``(rows, k)`` bf16 -> (int8 codes ``(rows, k)``, fp32 row scales ``(rows,)``)."""
+def _rotate_quantize(x, shift, scale, modulate):
     m, k = x.shape
     if k % 256 or k & (k - 1):
         raise ValueError(f"rotate_quantize needs a power-of-two width of at least 256, got {k}")
     codes = torch.empty(m, k, dtype=torch.int8, device=x.device)
     scales = torch.empty(m, dtype=torch.float32, device=x.device)
-    _rotate_quantize_kernel[(m,)](x, codes, scales, x.stride(0), K=k, num_warps=8)
+    _rotate_quantize_kernel[(m,)](
+        x, shift, scale, codes, scales, x.stride(0), max(m // 2, 1), K=k, MODULATE=modulate, num_warps=8
+    )
     return codes, scales
+
+
+def rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(rows, k)`` bf16 -> (int8 codes ``(rows, k)``, fp32 row scales ``(rows,)``)."""
+    return _rotate_quantize(x, x, x, False)
+
+
+def modulate_rotate_quantize(
+    x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """``rotate_quantize(rms_norm(x) * (1 + scale[half]) + shift[half])`` where the first half
+    of the rows uses AdaLN row 0 of ``shift``/``scale`` (``(2, k)``) and the second half row 1;
+    the modulated row is rounded to bf16 as the torch path stores it."""
+    return _rotate_quantize(x, shift.contiguous(), scale.contiguous(), True)
 
 
 @triton.jit
 def _int8_mm_kernel(
-    a_ptr, b_ptr, as_ptr, bs_ptr, bias_ptr, c_ptr, M, N, K,
-    HAS_BIAS: tl.constexpr, GELU: tl.constexpr,
+    a_ptr, b_ptr, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, K, half_rows, row_offset,
+    HAS_BIAS: tl.constexpr, GELU: tl.constexpr, RESIDUAL: tl.constexpr,
     BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr, GROUP_M: tl.constexpr,
 ):
     pid = tl.program_id(0)
@@ -79,6 +106,7 @@ def _int8_mm_kernel(
 
     m_mask = offs_m < M
     n_mask = offs_n < N
+    mask = m_mask[:, None] & n_mask[None, :]
     a_scales = tl.load(as_ptr + offs_m, mask=m_mask, other=0.0)
     b_scales = tl.load(bs_ptr + offs_n, mask=n_mask, other=0.0)
     out = acc.to(tl.float32) * (a_scales[:, None] * b_scales[None, :])
@@ -88,7 +116,30 @@ def _int8_mm_kernel(
     if GELU:
         v = out.to(tl.float32)
         out = (0.5 * v * (1 + libdevice.tanh(0.7978845608028654 * (v + 0.044715 * v * v * v)))).to(tl.bfloat16)
-    tl.store(c_ptr + offs_m[:, None] * N + offs_n[None, :], out, mask=m_mask[:, None] & n_mask[None, :])
+    if RESIDUAL:
+        # x + gate[half] * out, the gate row picked by the row's half of the whole block input
+        half = (offs_m + row_offset) // half_rows
+        gate = tl.load(gate_ptr + half[:, None] * N + offs_n[None, :], mask=mask, other=0.0).to(tl.float32)
+        residual = tl.load(res_ptr + offs_m[:, None] * N + offs_n[None, :], mask=mask, other=0.0).to(tl.float32)
+        out = (residual + out.to(tl.float32) * gate).to(tl.bfloat16)
+    tl.store(c_ptr + offs_m[:, None] * N + offs_n[None, :], out, mask=mask)
+
+
+def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, half_rows, row_offset):
+    m, k = codes.shape
+    n = qdata.shape[0]
+    bm, bn, bk, stages, warps = (32, 32, 256, 3, 2) if n < 128 else (128, 256, 128, 3, 8)
+    if k % bk:
+        raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
+    grid = (triton.cdiv(m, bm) * triton.cdiv(n, bn),)
+    _int8_mm_kernel[grid](
+        codes, qdata, act_scales, scales, bias if bias is not None else scales,
+        residual if residual is not None else out, gate if gate is not None else scales, out,
+        m, n, k, half_rows, row_offset,
+        HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None,
+        BM=bm, BN=bn, BK=bk, GROUP_M=8, num_stages=stages, num_warps=warps,
+    )
+    return out
 
 
 def int8_scaled_mm(
@@ -101,17 +152,36 @@ def int8_scaled_mm(
 ) -> torch.Tensor:
     """``(codes @ qdata.T) * act_scales[:, None] * scales + bias`` as bf16, then GELU-tanh
     when ``gelu``."""
-    m, k = codes.shape
-    n = qdata.shape[0]
-    out = torch.empty(m, n, dtype=torch.bfloat16, device=codes.device)
-    bm, bn, bk, stages, warps = (32, 32, 256, 3, 2) if n < 128 else (128, 256, 128, 3, 8)
-    if k % bk:
-        raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
-    grid = (triton.cdiv(m, bm) * triton.cdiv(n, bn),)
-    _int8_mm_kernel[grid](
-        codes, qdata, act_scales, scales, bias if bias is not None else scales, out, m, n, k,
-        HAS_BIAS=bias is not None, GELU=gelu, BM=bm, BN=bn, BK=bk, GROUP_M=8, num_stages=stages, num_warps=warps,
-    )
+    out = torch.empty(codes.shape[0], qdata.shape[0], dtype=torch.bfloat16, device=codes.device)
+    return _mm(codes, act_scales, qdata, scales, bias, out, gelu=gelu, residual=None, gate=None, half_rows=1, row_offset=0)
+
+
+def int8_feed_forward(
+    codes: torch.Tensor,
+    act_scales: torch.Tensor,
+    up_qdata: torch.Tensor,
+    up_scales: torch.Tensor,
+    up_bias: torch.Tensor | None,
+    down_qdata: torch.Tensor,
+    down_scales: torch.Tensor,
+    down_bias: torch.Tensor | None,
+    residual: torch.Tensor,
+    gate: torch.Tensor,
+    chunk_rows: int,
+) -> torch.Tensor:
+    """``residual + gate[half] * down(gelu_tanh(up(x)))`` from the quantized ``x``, in row
+    chunks so the wide hidden activation stays small."""
+    residual, gate = residual.contiguous(), gate.contiguous()
+    out = torch.empty_like(residual)
+    rows = codes.shape[0]
+    for start in range(0, rows, chunk_rows):
+        stop = min(start + chunk_rows, rows)
+        hidden = int8_scaled_mm(codes[start:stop], act_scales[start:stop], up_qdata, up_scales, up_bias, True)
+        hidden_codes, hidden_scales = rotate_quantize(hidden)
+        _mm(
+            hidden_codes, hidden_scales, down_qdata, down_scales, down_bias, out[start:stop],
+            gelu=False, residual=residual[start:stop], gate=gate, half_rows=rows // 2, row_offset=start,
+        )
     return out
 
 

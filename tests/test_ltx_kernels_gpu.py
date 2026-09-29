@@ -64,6 +64,28 @@ def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeyp
         assert torch.allclose(gelu, expected, rtol=2**-7, atol=2**-7)
 
 
+def test_fused_norm_modulation_and_feed_forward(kernels):
+    generator = torch.Generator().manual_seed(0)
+    x = _activations(256, 1024, generator)
+    shift, scale, gate = (torch.randn(3, 2, 1024, generator=generator) * 0.3).to("cuda", torch.bfloat16)
+    halves = F.rms_norm(x.float(), (1024,), eps=T.EPS).view(2, 128, 1024)
+    modulated = (halves * (1 + scale.float()[:, None]) + shift.float()[:, None]).view(256, 1024).to(torch.bfloat16)
+    codes, scales = kernels.modulate_rotate_quantize(x, shift, scale)
+    expected_codes, expected_scales = kernels.rotate_quantize(modulated)
+    assert (codes != expected_codes).float().mean() < 1e-4
+    assert torch.allclose(scales, expected_scales, rtol=1e-2, atol=0)
+
+    def weights(out_features, in_features):
+        qdata = torch.randint(-127, 128, (out_features, in_features), generator=generator, dtype=torch.int8)
+        return qdata.cuda(), torch.full((out_features,), 4e-4, device="cuda"), None
+
+    up, down = weights(4096, 1024), weights(1024, 4096)
+    hidden = kernels.int8_scaled_mm(codes, scales, *up, True)
+    down_out = kernels.int8_scaled_mm(*kernels.rotate_quantize(hidden), *down, False).float().view(2, 128, 1024)
+    expected = (x.float() + (down_out * gate.float()[:, None]).view(256, 1024)).to(torch.bfloat16)
+    assert torch.equal(kernels.int8_feed_forward(codes, scales, *up, *down, x, gate, 96), expected)
+
+
 def test_quantize_fp4_is_bit_exact(kernels):
     generator = torch.Generator().manual_seed(0)
     for rows, cols in ((100, 512), (256, 16384)):
