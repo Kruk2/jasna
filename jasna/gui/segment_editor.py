@@ -857,7 +857,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._seed_chips.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         label = ctk.CTkLabel(
             self._seed_chips,
-            text=t("segments_seed_tried"),
+            text=t("segments_seed_tried_trial" if self._current_video_settings().ltx_trial else "segments_seed_tried"),
             font=(Fonts.FAMILY, Fonts.SIZE_TINY),
             text_color=Colors.STATUS_PENDING,
         )
@@ -962,7 +962,10 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         if isinstance(event, SeedProgress):
             self._seed_progress.set(event.fraction)
-            values = dict(seed=event.seed, stage=t(f"ltx_stage_{event.stage}"), percent=event.fraction * 100)
+            stage = t(f"ltx_stage_{event.stage}")
+            if self._current_video_settings().ltx_trial:
+                stage = t("ltx_trial_stage", stage=stage)
+            values = dict(seed=event.seed, stage=stage, percent=event.fraction * 100)
             text = (
                 t("segments_seed_progress", eta=format_duration(event.eta_seconds), **values)
                 if event.eta_seconds > 0

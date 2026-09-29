@@ -31,6 +31,7 @@ def video_session_key(settings: AppSettings) -> tuple:
         settings.restoration_model,
         settings.ltx_model,
         settings.ltx_fast,
+        settings.ltx_trial,
     )
     if settings.secondary_restoration == "tvai":
         key += (
@@ -79,7 +80,7 @@ def video_session_config(
         ltx_seed=int(settings.ltx_seed),
         ltx_fast=bool(settings.ltx_fast),
         ltx_model=settings.ltx_model,
-        ltx_trial=False,
+        ltx_trial=bool(settings.ltx_trial),
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),

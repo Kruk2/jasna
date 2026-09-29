@@ -613,6 +613,20 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             and self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
         ):
             return
+        if (
+            not settings.ltx_trial
+            and self._settings_panel.ltx_unavailable_reason() is None
+            and any_job_uses_ltx(jobs, settings)
+        ):
+            from jasna.gui.ltx_models import license_missing
+
+            if license_missing(self._ltx_models.directory, settings.ltx_model, settings.ltx_fast):
+                from tkinter import messagebox
+
+                if messagebox.askyesno(t("ltx_license_trial_title"), t("ltx_license_trial_confirm")):
+                    self._settings_panel.set_ltx_trial(True)
+                    self._on_start()
+                return
         errors = validate_gui_start(
             settings, jobs, ltx_available=self._settings_panel.ltx_unavailable_reason() is None
         )
@@ -651,6 +665,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         except Exception as e:
             self._log_panel.warning(f"Engine preflight warning failed: {e}")
 
+        trial = settings.ltx_trial and any_job_uses_ltx(jobs, settings)
+        if trial:
+            self._show_toast(t("toast_ltx_trial"), "warning")
+            self._log_panel.warning(t("toast_ltx_trial"))
+        self._control_bar.set_trial(trial)
         self._queue_panel.reset_jobs_for_run()
         
         self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)

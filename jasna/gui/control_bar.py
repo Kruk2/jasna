@@ -197,6 +197,7 @@ class ControlBar(ctk.CTkFrame):
         self._on_stop: callable = None
         self._on_toggle_logs: callable = None
         self._start_disabled_tooltip = None
+        self._trial = False
         
         
         self._build_controls()
@@ -372,6 +373,10 @@ class ControlBar(ctk.CTkFrame):
             if disabled_tooltip:
                 self._start_disabled_tooltip = Tooltip(self._start_btn, disabled_tooltip)
         
+    def set_trial(self, trial: bool) -> None:
+        """Mark the LTX stages of this run as a trial."""
+        self._trial = trial
+
     def set_running(self, running: bool):
         
         if running:
@@ -395,7 +400,8 @@ class ControlBar(ctk.CTkFrame):
         self._progress_bar.set(percent / 100.0)
         self._percent_label.configure(text=f"{int(percent)}%")
         if stage:
-            self._fps_label.configure(text=t(f"ltx_stage_{stage}"))
+            label = t(f"ltx_stage_{stage}")
+            self._fps_label.configure(text=t("ltx_trial_stage", stage=label) if self._trial else label)
         else:
             self._fps_label.configure(text=f"FPS: {fps:.1f}" if fps > 0 else "FPS: --")
         

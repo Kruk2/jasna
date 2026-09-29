@@ -70,6 +70,7 @@ def _fake_section_widgets() -> dict:
         "ltx_seed": _FakeWidget(" 123 "),
         "ltx_fast": _FakeWidget(1),
         "ltx_large_canvas": _FakeWidget(0),
+        "ltx_trial": _FakeWidget(1),
         "max_clip_size": _FakeWidget(90),
         "fp16_mode": _FakeWidget(1),
         "detection_model": _FakeWidget("rfdetr-v6"),
@@ -156,6 +157,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["ltx_seed"] == 123
     assert values["ltx_fast"] is True
     assert values["ltx_large_canvas"] is False
+    assert values["ltx_trial"] is True
 
 
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
@@ -466,12 +468,13 @@ def test_ltx_hides_standard_only_settings_and_restores_them(_panel_factory) -> N
     assert order.index(secondary._section) == order.index(secondary._previous_section) + 1
 
 
-def test_ltx_card_disabled_when_model_missing(_panel_factory) -> None:
+def test_ltx_without_model_files_runs_as_a_trial(_panel_factory) -> None:
     panel = _panel_factory(False)
 
-    assert panel._model_section._cards["ltx"].radio.cget("state") == "disabled"
+    assert panel._model_section._cards["ltx"].radio.cget("state") == "normal"
     panel._model_section.apply(AppSettings(restoration_model="ltx"))
-    assert panel.get_settings().restoration_model == "basicvsrpp"
+    settings = panel.get_settings()
+    assert (settings.restoration_model, settings.ltx_trial) == ("ltx", True)
 
 
 def test_gpu_support_disables_ltx_and_shows_fast_mode_on_blackwell(_panel_factory) -> None:
@@ -503,7 +506,8 @@ def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
 
 
 def test_disabling_settings_keeps_unavailable_ltx_disabled(_panel_factory) -> None:
-    panel = _panel_factory(False)
+    panel = _panel_factory(True)
+    panel._model_section.set_gpu_support(nvidia=False, blackwell=False)
 
     panel.set_enabled(False)
     panel.set_enabled(True)
