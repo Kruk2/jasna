@@ -106,7 +106,7 @@ def playback_window(metadata: VideoMetadata, start_seconds: float, max_clip_size
     return PreviewWindow(seek_ts=start_seconds, end_pts=end_pts, center_pts=start_pts)
 
 
-def _frame_image(
+def frame_image(
     frame,
     max_size: tuple[int, int],
     lut_applier=None,
@@ -171,7 +171,7 @@ class _CenterFrameCollector:
         return self._best_frame is not None
 
     def result_image(self, max_size: tuple[int, int]) -> Image.Image:
-        return _frame_image(self._best_frame, max_size, apply_lut=False)
+        return frame_image(self._best_frame, max_size, apply_lut=False)
 
 
 class _PlaybackFrameCollector:
@@ -197,7 +197,7 @@ class _PlaybackFrameCollector:
         self._frames.append(
             (
                 pts,
-                _frame_image(
+                frame_image(
                     frame,
                     self._max_size,
                     self._lut_applier,

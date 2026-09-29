@@ -109,6 +109,11 @@ class Progress:
         )
         return _StageBar(self, stage, tqdm_bar)
 
+    def skip(self, *stages: LtxStage) -> None:
+        """Count ``stages`` as done, for a run that reuses their results."""
+        for stage in stages:
+            self._finished(stage)
+
     def _advanced(self, stage: LtxStage, done: int, total: int) -> None:
         if self._report is None:
             return

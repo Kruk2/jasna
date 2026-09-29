@@ -858,3 +858,97 @@ def test_ltx_is_blocked_with_a_reason_when_it_cannot_run(monkeypatch) -> None:
         if editor is not None:
             editor._finish_close()
         root.destroy()
+
+
+class _FakeSeedWorker:
+    instances: list = []
+
+    def __init__(self, path, metadata, index, work_dir, *, on_stopped):
+        self.events = queue.Queue()
+        self.requests = []
+        self.released = 0
+        self.closed = False
+        self.work_dir = work_dir
+        _FakeSeedWorker.instances.append(self)
+
+    def start(self):
+        pass
+
+    def try_seed(self, segment, seed, settings):
+        self.requests.append((segment, seed, settings))
+        return len(self.requests)
+
+    def cancel(self):
+        pass
+
+    def release(self):
+        self.released += 1
+
+    def close(self):
+        self.closed = True
+
+
+def _seed_frames(tmp_path, seed, color):
+    frames = []
+    for seconds in (1.0, 1.5):
+        path = tmp_path / f"{seed}-{seconds}.jpg"
+        Image.new("RGB", (160, 90), color).save(path)
+        frames.append(segment_editor.SeedFrame(seconds, path))
+    return tuple(frames)
+
+
+def test_try_seed_shows_progress_then_lets_the_user_compare_and_pick_seeds(monkeypatch, tmp_path) -> None:
+    root = _tk_root()
+    editor = None
+    _FakeSeedWorker.instances = []
+    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    try:
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        editor = _build_editor_with_ui(root, monkeypatch, job=job)
+        editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+        editor._select_range(0)
+        editor._preview_source = Image.new("RGB", (160, 90), "red")
+        root.update()
+        assert editor._try_seed_btn.cget("state") == "normal"
+
+        editor._try_seed_btn.invoke()
+        worker = _FakeSeedWorker.instances[0]
+        assert worker.work_dir == tmp_path
+        assert worker.requests[0][:2] == (job.segments[0], 5)
+        assert editor._try_seed_btn.cget("state") == "disabled"
+        worker.events.put(segment_editor.SeedProgress(5, "denoise", 0.5, 70.0, 1))
+        editor._poll_workers()
+        assert editor._seed_status.cget("text") == t(
+            "segments_seed_progress", seed=5, stage=t("ltx_stage_denoise"), percent=50.0, eta="1m 10s"
+        )
+
+        worker.events.put(segment_editor.SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
+        editor._poll_workers()
+        root.update()
+        assert editor._seed_view_on and 1.0 <= editor._current < 2.0
+        assert editor._active_preview_source().getpixel((0, 0))[2] > 200
+        assert editor._seed_view_label.cget("text") == t("segments_seed_show", seed=5)
+
+        editor._new_range_seed()
+        new_seed = editor._state.selected_segment.restoration.ltx_seed
+        editor._try_seed_btn.invoke()
+        worker.events.put(segment_editor.SeedReady(new_seed, _seed_frames(tmp_path, new_seed, "green"), 2))
+        editor._poll_workers()
+        chips = [w.cget("text") for w in editor._seed_chip_widgets if isinstance(w, ctk.CTkButton)]
+        assert chips == ["5", f"{new_seed} ✓"]
+
+        editor._show_tried_seed(5)
+        assert editor._active_preview_source().getpixel((0, 0))[2] > 200
+        editor._use_tried_seed(5)
+        assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 5)
+
+        editor._toggle_seed_view()
+        assert editor._active_preview_source().getpixel((0, 0))[0] > 200
+
+        editor._claim_gpu_for_scan()
+        assert worker.released == 1
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+    assert _FakeSeedWorker.instances[0].closed
