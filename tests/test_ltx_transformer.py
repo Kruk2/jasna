@@ -131,3 +131,18 @@ def test_block_forward_runs_eager_without_triton(monkeypatch):
     real_find_spec = importlib.util.find_spec
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
     assert sampler.compiled_block_forward() is T.block_forward
+
+
+def test_sampler_settings_come_from_the_model_file():
+    from jasna.ltx.sampler import sampler_settings
+
+    sigmas, stg = sampler_settings({"sigmas": "[1.0, 0.4, 0.0]", "stg_scale": "0.0"})
+    assert sigmas.tolist() == pytest.approx([1.0, 0.4, 0.0]) and stg == 0.0
+    with pytest.raises(KeyError):
+        sampler_settings({"format": "jasna-ltx-restore"})
+
+
+def test_window_state_halves_without_stg():
+    from jasna.ltx import sampler
+
+    assert sampler._window_state_bytes(100, stg=True) == 2 * sampler._window_state_bytes(100, stg=False)
