@@ -20,11 +20,12 @@ from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.gui.segment_editor_state import PREVIEW_ZOOM_MAX, PreviewView, SegmentEditorState
 from jasna.media.splice import KeyframeIndex
+from jasna.segments import SegmentRange, SegmentRestoration
 
 
 def test_out_of_bounds_range_uses_specific_message() -> None:
     editor = object.__new__(SegmentEditor)
-    editor._state = SegmentEditorState(duration=10, fps=30)
+    editor._state = SegmentEditorState(duration=10, fps=30, segments=(), default_restoration=SegmentRestoration("basicvsrpp", None))
     editor._start_entry = MagicMock()
     editor._start_entry.get.return_value = "9"
     editor._end_entry = MagicMock()
@@ -59,6 +60,7 @@ def test_segment_editor_maps_before_taking_modal_grab(monkeypatch) -> None:
             lambda: AppSettings(),
             lambda: False,
             MagicMock(),
+            None,
             MagicMock(),
         )
 
@@ -106,6 +108,9 @@ def _build_editor_with_ui(
     *,
     metadata=None,
     path: Path = Path("video.mp4"),
+    settings: AppSettings = AppSettings(),
+    job: JobItem | None = None,
+    ltx_unavailable_reason: str | None = None,
 ) -> SegmentEditor:
     worker = MagicMock()
     worker.events = queue.Queue()
@@ -115,10 +120,11 @@ def _build_editor_with_ui(
     root.update()
     editor = SegmentEditor(
         root,
-        JobItem(path),
-        lambda: AppSettings(),
+        job or JobItem(path),
+        lambda: settings,
         lambda: False,
         MagicMock(),
+        ltx_unavailable_reason,
         MagicMock(),
     )
     worker.events.put(segment_editor.PreviewLoaded(metadata or _fake_metadata()))
@@ -340,7 +346,7 @@ def test_editor_height_grows_on_tall_screens(monkeypatch) -> None:
 
 def test_previous_frame_uses_exact_decoder_predecessor() -> None:
     editor = object.__new__(SegmentEditor)
-    editor._state = SegmentEditorState(duration=10.0, fps=30.0)
+    editor._state = SegmentEditorState(duration=10.0, fps=30.0, segments=(), default_restoration=SegmentRestoration("basicvsrpp", None))
     editor._current = 1.0
     editor._set_playing = MagicMock()
     editor._time_label = MagicMock()
@@ -775,3 +781,80 @@ def test_fit_to_label_compensates_widget_scaling(monkeypatch, scaling: float) ->
     )
     assert rendered[0] <= 900 and rendered[1] <= 540
     assert result._light_image.size == (900, 506)
+
+
+def _tk_root():
+    try:
+        return ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+
+def test_inspector_sets_the_model_and_seed_of_the_selected_range(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch, settings=AppSettings(ltx_seed=42))
+        editor._timeline_create(1.0, 2.0)
+        editor._timeline_create(4.0, 5.0)
+        root.update()
+        assert editor._inspector.winfo_manager() == "grid"
+        assert editor._range_model.get() == "basicvsrpp"
+        assert not editor._seed_entry.winfo_manager()
+
+        editor._model_radios["ltx"].invoke()
+        root.update()
+        assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 42)
+        assert editor._seed_entry.get() == "42"
+
+        editor._seed_entry.delete(0, "end")
+        editor._seed_entry.insert(0, "777")
+        editor._commit_seed_entry()
+        assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 777)
+
+        editor._use_for_all_btn.invoke()
+        assert {s.restoration for s in editor._state.segments} == {SegmentRestoration("ltx", 777)}
+        assert editor._timeline._segments == editor._state.segments
+
+        editor._undo()
+        assert editor._state.segments[0].restoration == SegmentRestoration("basicvsrpp", None)
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_new_ranges_follow_the_job_model_and_rows_name_it(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch, settings=AppSettings(restoration_model="ltx", ltx_seed=9))
+        editor._timeline_create(1.0, 2.0)
+        root.update()
+        assert editor._state.segments[0].restoration == SegmentRestoration("ltx", 9)
+        texts = [w.cget("text") for w in editor._segment_action_widgets if isinstance(w, ctk.CTkButton)]
+        assert any(f"{t('model_ltx')} 9" in text for text in texts)
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_ltx_is_blocked_with_a_reason_when_it_cannot_run(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        job = JobItem(Path("video.mp4"), segments=(SegmentRange(4.0, 5.0, SegmentRestoration("ltx", 3)),))
+        editor = _build_editor_with_ui(
+            root, monkeypatch, job=job, ltx_unavailable_reason="model_ltx_not_installed"
+        )
+        assert editor._notice.cget("text") == t("segments_ltx_ranges_unavailable")
+        editor._timeline_create(1.0, 2.0)
+        root.update()
+        assert editor._model_radios["ltx"].cget("state") == "disabled"
+        editor._select_range(1)
+        assert editor._model_radios["ltx"].cget("state") == "normal"
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()

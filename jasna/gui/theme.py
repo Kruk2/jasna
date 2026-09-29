@@ -36,6 +36,9 @@ class Colors:
     PRIMARY_HOVER = "#4338ca"# Indigo-700
     PRIMARY_DARK = "#3730a3" # Indigo-800
 
+    # LTX ranges in the segment editor
+    MODEL_LTX = "#0d9488"    # Teal-600
+
     # Video player call to action
     PLAYER = "#0284c7"       # Sky-600
     PLAYER_HOVER = "#0369a1" # Sky-700

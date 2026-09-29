@@ -356,6 +356,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._settings_panel.get_settings,
             lambda: self._processor is not None and self._processor.is_running(),
             self._set_preview_gpu_busy,
+            self._settings_panel.ltx_unavailable_reason,
         )
         self._queue_panel.set_initial_output(
             self._preset_manager.get_last_output_folder(),
@@ -594,7 +595,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         settings = self._settings_panel.get_settings()
 
         from jasna.gui.validation import validate_gui_start
-        errors = validate_gui_start(settings, jobs)
+        errors = validate_gui_start(
+            settings, jobs, ltx_available=self._settings_panel.ltx_unavailable_reason() is None
+        )
         if errors:
             from tkinter import messagebox
 

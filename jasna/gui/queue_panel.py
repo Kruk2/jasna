@@ -506,6 +506,7 @@ class QueuePanel(ctk.CTkFrame):
                 self._get_settings,
                 self._is_gpu_busy,
                 self._set_preview_gpu_busy,
+                self._ltx_unavailable_reason(),
                 lambda segments, j=job: self._segments_saved(j, segments),
                 self._segment_editor_closed,
             )
@@ -595,10 +596,12 @@ class QueuePanel(ctk.CTkFrame):
         get_settings: callable,
         is_gpu_busy: callable,
         set_preview_gpu_busy: callable,
+        ltx_unavailable_reason: callable,
     ):
         self._get_settings = get_settings
         self._is_gpu_busy = is_gpu_busy
         self._set_preview_gpu_busy = set_preview_gpu_busy
+        self._ltx_unavailable_reason = ltx_unavailable_reason
 
     def set_on_output_changed(self, callback: callable):
         self._on_output_changed = callback

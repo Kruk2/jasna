@@ -3,9 +3,18 @@ from pathlib import Path
 
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.locales import t
+from jasna.segments import job_restoration, resolve_restorations
 
 
-def validate_gui_start(settings: AppSettings, jobs: list[JobItem]) -> list[str]:
+def _uses_ltx(job: JobItem, settings: AppSettings) -> bool:
+    segments = job.snapshot_segments()
+    if not segments:
+        return settings.restoration_model == "ltx"
+    default = job_restoration(settings.restoration_model, settings.ltx_seed)
+    return any(segment.restoration.model == "ltx" for segment in resolve_restorations(segments, default))
+
+
+def validate_gui_start(settings: AppSettings, jobs: list[JobItem], *, ltx_available: bool) -> list[str]:
     errors: list[str] = []
 
     from jasna.post_export_action import validate_post_export_action
@@ -14,10 +23,12 @@ def validate_gui_start(settings: AppSettings, jobs: list[JobItem]) -> list[str]:
     except ValueError:
         errors.append(t("error_post_export_command_required"))
 
+    if not ltx_available:
+        needs_ltx = [job.filename for job in jobs if _uses_ltx(job, settings)]
+        if needs_ltx:
+            errors.append(t("error_ltx_ranges_unavailable", files=", ".join(needs_ltx)))
+
     if settings.restoration_model == "ltx":
-        segmented = [job.filename for job in jobs if job.snapshot_segments()]
-        if segmented:
-            errors.append(t("error_ltx_segments", files=", ".join(segmented)))
         return errors
 
     if settings.secondary_restoration != "tvai":

@@ -153,3 +153,7 @@ def test_video_session_key_tracks_model_and_ltx_variant() -> None:
     assert video_session_key(ltx) != video_session_key(AppSettings())
     assert video_session_key(replace(ltx, ltx_fast=True)) != video_session_key(ltx)
     assert video_session_key(replace(ltx, ltx_seed=1, ltx_large_canvas=True)) == video_session_key(ltx)
+
+
+def test_video_session_key_tracks_the_ltx_variant_for_ltx_ranges_of_standard_jobs() -> None:
+    assert video_session_key(replace(AppSettings(), ltx_fast=True)) != video_session_key(AppSettings())

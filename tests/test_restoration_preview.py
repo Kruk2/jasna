@@ -477,34 +477,34 @@ def test_app_prepares_entire_queue_before_starting_processor() -> None:
     assert calls == ["reset", "running", "start"]
 
 
-def test_restoration_worker_refuses_ltx_without_loading_models(monkeypatch) -> None:
-    build = MagicMock()
-    monkeypatch.setattr(restoration_preview, "build_video_session", build)
-    worker = RestorationPreviewWorker("unused.mp4", _metadata())
-    worker.start()
-    generation = worker.request(1.0, AppSettings(restoration_model="ltx"), projection="auto")
+def test_restoration_preview_refuses_ltx_ranges_and_previews_others_with_standard() -> None:
+    from jasna.gui.segment_editor_state import SegmentEditorState
+    from jasna.segments import SegmentRange, SegmentRestoration
 
-    event = worker.events.get(timeout=2)
-
-    assert event == restoration_preview.RestorationFailed(
-        restoration_preview.t("segments_restore_ltx_unavailable"), generation
-    )
-    build.assert_not_called()
-    worker.close()
-    worker.join(timeout=2)
-
-
-def test_segment_editor_explains_that_ltx_has_no_preview() -> None:
+    standard = SegmentRestoration("basicvsrpp", None)
     editor = SegmentEditor.__new__(SegmentEditor)
-    editor._state = SimpleNamespace()
-    editor._restore_active = False
-    editor._is_gpu_busy = lambda: False
-    editor._get_settings = lambda: AppSettings(restoration_model="ltx")
-    editor._restore_toggle = MagicMock()
+    editor._state = SegmentEditorState(
+        duration=10,
+        fps=10,
+        segments=(SegmentRange(1, 2, SegmentRestoration("ltx", 5)),),
+        default_restoration=standard,
+    )
+    editor._restore_active = True
+    editor._closed = threading.Event()
+    editor._restoration_worker = MagicMock()
+    editor._restored_source = None
+    editor._play = MagicMock()
+    editor._vr_projection = "auto"
     editor._show_preview_message = MagicMock()
+    editor._scan_panel = MagicMock()
+    editor._scan_panel.video_settings.return_value = AppSettings(restoration_model="ltx")
 
-    editor._toggle_restoration_preview()
-
-    editor._restore_toggle.deselect.assert_called_once_with()
+    editor._current = 1.5
+    editor._request_restoration_preview()
+    editor._restoration_worker.request.assert_not_called()
     editor._show_preview_message.assert_called_once()
-    assert editor._restore_active is False
+
+    editor._current = 5.0
+    editor._request_restoration_preview()
+    settings = editor._restoration_worker.request.call_args[0][1]
+    assert settings.restoration_model == "basicvsrpp"
