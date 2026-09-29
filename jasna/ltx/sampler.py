@@ -3,14 +3,15 @@
 A track's windows are denoised in lockstep: every step runs all windows through each
 block before the next block is fetched, so a streamed block crosses PCIe once per step
 per window group. After each step the windows' shared latent frames are replaced by a
-ramp-weighted mean (MultiDiffusion-style overlap fusion). Sampler: Euler over a fixed
-sigma schedule, CFG 1, STG on one block whose perturbed pass reuses the conditional
-pass's hidden state up to that block.
+ramp-weighted mean (MultiDiffusion-style overlap fusion). Sampler: Euler over the model
+file's sigma schedule, CFG 1, and the file's STG scale on one block, whose perturbed pass
+reuses the conditional pass's hidden state up to that block (skipped at scale 0).
 """
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import logging
 from collections.abc import Sequence
 from pathlib import Path
@@ -24,11 +25,6 @@ from jasna.ltx.plan import FUSION_RAMP, LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENT
 
 logger = logging.getLogger(__name__)
 
-LOWTAIL15_SIGMAS = (
-    1.0, 0.982, 0.959, 0.93, 0.892, 0.839, 0.762, 0.637, 0.4,
-    0.32, 0.184, 0.106, 0.061, 0.035, 0.02, 0.0,
-)  # fmt: skip
-STG_SCALE = 1.0
 STG_BLOCK = 28
 ACTIVATION_RESERVE_BYTES = 3 << 30
 _ADALN_PREFIXES = ("adaln_single.", "prompt_adaln_single.")
@@ -56,9 +52,14 @@ def fuse_overlaps(latents: Sequence[torch.Tensor], tokens_per_frame: int, right_
         b.copy_(fused)
 
 
-def _window_state_bytes(tokens: int) -> int:
-    """Hidden states one window keeps between blocks (conditional + perturbed)."""
-    return 2 * 2 * tokens * 4096 * 2
+def sampler_settings(metadata: dict[str, str]) -> tuple[torch.Tensor, float]:
+    """The model file's sigma schedule and STG scale (0 for a distilled student)."""
+    return torch.tensor(json.loads(metadata["sigmas"]), dtype=torch.float32), float(json.loads(metadata["stg_scale"]))
+
+
+def _window_state_bytes(tokens: int, *, stg: bool) -> int:
+    """Hidden states one window keeps between blocks (conditional, plus perturbed with STG)."""
+    return (2 if stg else 1) * 2 * tokens * 4096 * 2
 
 
 def _window_workspace_bytes(tokens: int) -> int:
@@ -69,10 +70,10 @@ def _window_workspace_bytes(tokens: int) -> int:
 class LtxTransformer:
     """The restoration transformer loaded from a jasna LTX model file."""
 
-    def __init__(self, path: Path, device: torch.device, *, sigmas: Sequence[float] = LOWTAIL15_SIGMAS) -> None:
+    def __init__(self, path: Path, device: torch.device) -> None:
         self.device = device
-        self.sigmas = torch.tensor(sigmas, dtype=torch.float32)
         with open_tensors(path) as handle:
+            self.sigmas, self.stg_scale = sampler_settings(handle.metadata())
             keys = list(handle.keys())
             top_keys = [k for k in keys if not k.startswith("blocks.") and k != "prompt_context"]
             top = {k: handle.get_tensor(k).to(device) for k in top_keys}
@@ -115,7 +116,7 @@ class LtxTransformer:
     def _group_size(self, windows: int, tokens: int) -> int:
         free, _ = torch.cuda.mem_get_info(self.device)
         free += torch.cuda.memory_reserved(self.device) - torch.cuda.memory_allocated(self.device)
-        fits = (free - _window_workspace_bytes(tokens)) // _window_state_bytes(tokens)
+        fits = (free - _window_workspace_bytes(tokens)) // _window_state_bytes(tokens, stg=bool(self.stg_scale))
         return max(1, min(windows, int(fits)))
 
     @torch.inference_mode()
@@ -160,7 +161,7 @@ class LtxTransformer:
         for index in range(T.NUM_BLOCKS):
             weights = self.blocks.acquire(index)
             for j in range(len(xs)):
-                if STG_SCALE and index >= STG_BLOCK:
+                if self.stg_scale and index >= STG_BLOCK:
                     source = xs[j] if index == STG_BLOCK else perturbed[j]
                     perturbed[j] = self._block_forward(
                         weights, source, cond, self.context, rope, skip_self_attention=index == STG_BLOCK
@@ -170,9 +171,9 @@ class LtxTransformer:
         out = []
         for lat, x, xp in zip(latents, xs, perturbed):
             denoised = (lat.float() - T.velocity(self.top, x, cond).float() * sigma).to(lat.dtype)
-            if STG_SCALE:
+            if self.stg_scale:
                 weak = (lat.float() - T.velocity(self.top, xp, cond).float() * sigma).to(lat.dtype)
-                denoised = (denoised.float() + STG_SCALE * (denoised.float() - weak.float())).to(lat.dtype)
+                denoised = (denoised.float() + self.stg_scale * (denoised.float() - weak.float())).to(lat.dtype)
             out.append(denoised)
         return out
 
