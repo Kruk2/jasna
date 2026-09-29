@@ -1,3 +1,5 @@
+import os
+
 import pytest
 import torch
 
@@ -160,7 +162,7 @@ def test_window_state_halves_without_stg():
     assert sampler._window_state_bytes(100, stg=True) == 2 * sampler._window_state_bytes(100, stg=False)
 
 
-def test_block_forward_compiles_without_timing_kernels(monkeypatch):
+def test_block_forward_compiles_with_autotuning_and_no_cuda_graphs(monkeypatch):
     import importlib.util
 
     from jasna.ltx import sampler
@@ -172,4 +174,16 @@ def test_block_forward_compiles_without_timing_kernels(monkeypatch):
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or fn)
 
     assert sampler.compiled_block_forward() is T.block_forward
-    assert calls == [{"dynamic": False, "options": {"deterministic": True}}]
+    assert calls == [{"dynamic": False, "mode": "max-autotune-no-cudagraphs"}]
+
+
+def test_compile_cache_lives_in_model_weights_unless_set(monkeypatch):
+    from jasna.engine_paths import configure_torch_compile_cache, model_weights_dir
+
+    monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR", raising=False)
+    configure_torch_compile_cache()
+    assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str((model_weights_dir() / "torch-compile-cache").resolve())
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/elsewhere")
+    configure_torch_compile_cache()
+    assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == "/elsewhere"

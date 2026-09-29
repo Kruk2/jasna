@@ -185,13 +185,14 @@ class LtxTransformer:
 def compiled_block_forward():
     """``transformer.block_forward`` compiled with static shapes when Triton is available
     (one graph per canvas and per STG variant, shared by all blocks), else eager. Kernels
-    are picked without timing them, so a seed gives the same pixels whatever else the GPU
-    is doing and wherever the block weights live."""
+    are autotuned on the first compile and the picks kept in the compile cache
+    (``engine_paths.configure_torch_compile_cache``), so later runs reuse them and a seed
+    keeps its pixels. No CUDA graphs: every block passes its own weight tensors."""
     if importlib.util.find_spec("triton") is None:
         return T.block_forward
     torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
     torch._dynamo.config.accumulated_cache_size_limit = max(torch._dynamo.config.accumulated_cache_size_limit, 1024)
-    return torch.compile(T.block_forward, dynamic=False, options={"deterministic": True})
+    return torch.compile(T.block_forward, dynamic=False, mode="max-autotune-no-cudagraphs")
 
 
 def _euler(sample: torch.Tensor, denoised: torch.Tensor, sigmas: torch.Tensor, step: int) -> torch.Tensor:

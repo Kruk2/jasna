@@ -914,6 +914,8 @@ def run_gui():
     """Entry point to run the GUI application."""
     from jasna._frozen import patch_frozen_torch
     patch_frozen_torch()
+    from jasna.engine_paths import configure_torch_compile_cache
+    configure_torch_compile_cache()
     from jasna.accelerator import configure_rocm_process_env
     configure_rocm_process_env()
 

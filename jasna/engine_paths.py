@@ -20,6 +20,13 @@ def model_weights_dir() -> Path:
     return Path("model_weights")
 
 
+def configure_torch_compile_cache() -> None:
+    """Keep torch.compile's kernels and autotuning picks under ``model_weights`` (unless
+    ``TORCHINDUCTOR_CACHE_DIR`` is set), so they survive reboots: later runs reuse the same
+    kernels and a seed keeps its pixels."""
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str((model_weights_dir() / "torch-compile-cache").resolve()))
+
+
 _DEFAULT_RESTORATION_MODELS = {
     "basicvsrpp": "lada_mosaic_restoration_model_generic_v1.2.pth",
     "ltx": "ltx-restore",
