@@ -199,6 +199,8 @@ def build_restoration_session(
 def _build_ltx_session(
     config: SessionConfig, device: "torch.device", *, log_callback: Callable[[str], None] | None
 ) -> RestorationSession:
+    import torch
+
     from jasna.accelerator import is_nvidia_device
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.ltx.model_files import LtxModelFiles
@@ -207,7 +209,9 @@ def _build_ltx_session(
         raise ValueError("LTX restoration needs an NVIDIA GPU")
     if config.secondary_restoration != "none" or config.denoise_strength != "none":
         raise ValueError("LTX restoration does not support secondary restoration or denoise")
-    files = LtxModelFiles.from_dir(config.restoration_model_path)
+    if config.ltx_fast and torch.cuda.get_device_capability(device)[0] < 10:
+        raise ValueError("The fast LTX model needs an RTX 50-series (Blackwell) GPU")
+    files = LtxModelFiles.from_dir(config.restoration_model_path, fast=config.ltx_fast)
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),

@@ -45,6 +45,7 @@ def _session_config_from_args(
         restoration_model_path=restoration_model_path,
         ltx_large_canvas=bool(args.ltx_large_canvas),
         ltx_seed=int(args.ltx_seed),
+        ltx_fast=bool(args.ltx_fast),
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
         temporal_overlap=int(args.temporal_overlap),
@@ -214,6 +215,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=LTX_DEFAULT_SEED,
         help=CLI_HELP["ltx_seed"],
+    )
+    restoration.add_argument(
+        "--ltx-fast",
+        default=False,
+        action=argparse.BooleanOptionalAction,
+        help=CLI_HELP["ltx_fast"],
     )
     restoration.add_argument(
         "--compile-basicvsrpp",
