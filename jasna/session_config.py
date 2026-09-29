@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 RestorationModelName = Literal["basicvsrpp", "ltx"]
+LtxModelName = Literal["distilled", "undistilled"]
+LTX_DEFAULT_MODEL: LtxModelName = "distilled"
 
 LTX_DEFAULT_SEED = 20260923
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
@@ -40,6 +42,7 @@ class SessionConfig:
     ltx_large_canvas: bool
     ltx_seed: int
     ltx_fast: bool
+    ltx_model: LtxModelName
     compile_basicvsrpp: bool
     max_clip_size: int
     temporal_overlap: int

@@ -2,6 +2,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import get_args
 
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
@@ -16,7 +17,7 @@ from jasna.os_utils import (
     check_windows_nvidia_sysmem_fallback_policy,
     gpu_check_error,
 )
-from jasna.session_config import LTX_DEFAULT_SEED, SessionConfig
+from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, SessionConfig
 
 
 
@@ -46,6 +47,7 @@ def _session_config_from_args(
         ltx_large_canvas=bool(args.ltx_large_canvas),
         ltx_seed=int(args.ltx_seed),
         ltx_fast=bool(args.ltx_fast),
+        ltx_model=str(args.ltx_model),
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
         temporal_overlap=int(args.temporal_overlap),
@@ -215,6 +217,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=LTX_DEFAULT_SEED,
         help=CLI_HELP["ltx_seed"],
+    )
+    restoration.add_argument(
+        "--ltx-model",
+        choices=list(get_args(LtxModelName)),
+        default=LTX_DEFAULT_MODEL,
+        help=CLI_HELP["ltx_model"],
     )
     restoration.add_argument(
         "--ltx-fast",
@@ -763,6 +771,33 @@ def _run_videos(
     return all_commands_ok
 
 
+def _ensure_ltx_model(config: SessionConfig, segments) -> None:
+    """Offer to download the selected LTX model when the job needs it and it is missing.
+    Without a terminal to ask in, fail with what to download instead of waiting."""
+    from jasna.ltx.model_files import download_files, download_size_text, missing_downloads
+
+    uses_ltx = config.restoration_model_name == "ltx" or any(
+        segment.restoration is not None and segment.restoration.model == "ltx" for segment in segments or ()
+    )
+    if not uses_ltx:
+        return
+    directory = config.restoration_model_path if config.restoration_model_name == "ltx" else default_restoration_model_path("ltx")
+    missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
+    if not missing:
+        return
+    names = ", ".join(file.name for file in missing)
+    size = download_size_text(missing)
+    if not sys.stdin.isatty():
+        raise FileNotFoundError(f"LTX model files missing in {directory}: {names}. Run jasna in a terminal to download them ({size}).")
+    answer = input(f"The LTX {config.ltx_model} model is missing in {directory}:\n  {names}\nDownload {size} now? [y/N]: ")
+    if answer.strip().lower() not in ("y", "yes"):
+        raise FileNotFoundError(f"LTX model files missing in {directory}: {names}")
+    from tqdm import tqdm
+
+    with tqdm(total=sum(file.size_bytes for file in missing), unit="B", unit_scale=True, desc="LTX download") as bar:
+        download_files(directory, missing, lambda done, total: bar.update(done - bar.n))
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -907,6 +942,8 @@ def main() -> None:
         restoration_model_path=restoration_model_path,
         lut_path=lut_arg or None,
     )
+
+    _ensure_ltx_model(config, segments)
 
     from jasna.session_factory import build_pipeline, build_restoration_session
 

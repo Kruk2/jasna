@@ -240,7 +240,7 @@ def _ltx_model_files(
         raise ValueError("LTX restoration needs an NVIDIA GPU")
     if config.ltx_fast and torch.cuda.get_device_capability(device)[0] < 10:
         raise ValueError("The fast LTX model needs an RTX 50-series (Blackwell) GPU")
-    files = LtxModelFiles.from_dir(_restoration_model_path(config, "ltx"), fast=config.ltx_fast)
+    files = LtxModelFiles.from_dir(_restoration_model_path(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
