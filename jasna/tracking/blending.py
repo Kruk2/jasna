@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import functools
+
+import cv2
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -70,6 +74,53 @@ def _box_blur(x: torch.Tensor, kernel_h: int, kernel_w: int) -> torch.Tensor:
     if is_nvidia_device(x.device):
         return _conv_box_blur(x, kernel_h, kernel_w)
     return _prefix_box_blur(x, kernel_h, kernel_w)
+
+
+def _ellipse_structuring_element(radius: int) -> np.ndarray:
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * radius + 1,) * 2)
+
+
+@functools.cache
+def _ellipse_kernel(radius: int, device: torch.device) -> torch.Tensor:
+    return torch.from_numpy(_ellipse_structuring_element(radius).astype(np.float32)).to(device)[None, None]
+
+
+@functools.cache
+def _ellipse_levels(radius: int) -> tuple[tuple[int, int], ...]:
+    """``(half width, vertical reach)`` per distinct row width of the ellipse: its rows are
+    centred runs that narrow away from the middle, so the dilation is the union of one
+    horizontal-then-vertical window pass per width."""
+    widths = [radius - int(np.flatnonzero(row)[0]) for row in _ellipse_structuring_element(radius)]
+    return tuple(
+        (width, max(abs(dy - radius) for dy, row_width in enumerate(widths) if row_width >= width))
+        for width in sorted(set(widths))
+    )
+
+
+def _conv_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
+    padded = F.pad(mask[None, None].float(), (radius,) * 4)
+    return F.conv2d(padded, _ellipse_kernel(radius, mask.device))[0, 0] > 0.5
+
+
+def _any_in_window(x: torch.Tensor, half: int, dim: int) -> torch.Tensor:
+    padding = (half, half) if dim == 1 else (0, 0, half, half)
+    return _moving_average(F.pad(x, padding), 2 * half + 1, dim) > 0
+
+
+def _prefix_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
+    x = mask.float()
+    out = torch.zeros_like(mask)
+    for half_width, reach in _ellipse_levels(radius):
+        out |= _any_in_window(_any_in_window(x, half_width, 1).float(), reach, 0)
+    return out
+
+
+def dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
+    """Bool ``[H, W]`` mask dilated on its own device; same pixels as ``cv2.dilate`` with a
+    ``MORPH_ELLIPSE`` kernel of ``2*radius+1``."""
+    if is_nvidia_device(mask.device):
+        return _conv_dilate_ellipse(mask, radius)
+    return _prefix_dilate_ellipse(mask, radius)
 
 
 def create_blend_mask(
