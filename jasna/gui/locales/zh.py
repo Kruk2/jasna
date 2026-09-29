@@ -463,7 +463,7 @@ ZH = {
 
         # App messages
         "error_cannot_start": "无法开始处理：",
-        "error_invalid_tvai": "无效的 TVAI 配置",
+        "error_start_title": "无法开始",
         "error_post_export_command_required": "需要填写导出后的自定义命令",
         "error_ltx_segments": "LTX 会处理整个视频。请清除片段或选择“标准”：{files}",
 

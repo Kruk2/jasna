@@ -463,7 +463,7 @@ EN = {
 
         # App messages
         "error_cannot_start": "Cannot start processing:",
-        "error_invalid_tvai": "Invalid TVAI configuration",
+        "error_start_title": "Can't start",
         "error_post_export_command_required": "Custom post-export command is required",
         "error_ltx_segments": "LTX processes whole videos. Clear the segments or pick Standard: {files}",
 

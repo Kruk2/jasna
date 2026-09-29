@@ -445,7 +445,7 @@ TH = {
 
         # App messages
         "error_cannot_start": "ไม่สามารถเริ่มประมวลผล:",
-        "error_invalid_tvai": "การกำหนดค่า TVAI ไม่ถูกต้อง",
+        "error_start_title": "เริ่มไม่ได้",
         "error_post_export_command_required": "ต้องระบุคำสั่งกำหนดเองหลังส่งออก",
         "error_ltx_segments": "LTX ประมวลผลทั้งวิดีโอ ล้างช่วงที่เลือกหรือเลือก “มาตรฐาน”: {files}",
 
