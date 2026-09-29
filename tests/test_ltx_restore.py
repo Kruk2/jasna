@@ -11,3 +11,9 @@ def test_decode_window_converts_a_float32_decode(monkeypatch):
     assert frames.dtype == torch.uint8 and frames.shape == (3, 3, 1, 1)
     assert frames[:, 0, 0, 0].tolist() == [0, 128, 255]
 
+
+def test_large_canvas_needs_ten_gib_free():
+    gib = 1 << 30
+    assert restore.large_canvas_fits(True, 10 * gib)
+    assert not restore.large_canvas_fits(True, 9 * gib)
+    assert not restore.large_canvas_fits(False, 30 * gib)
