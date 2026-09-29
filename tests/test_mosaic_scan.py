@@ -9,7 +9,9 @@ from jasna.gui.mosaic_scan import (
     segments_from_scores,
 )
 from jasna.gui.segment_editor_state import SegmentEditorState
-from jasna.segments import SegmentRange
+from jasna.segments import SegmentRange, SegmentRestoration
+
+STANDARD = SegmentRestoration("basicvsrpp", None)
 
 
 def test_stride_follows_fps():
@@ -122,7 +124,7 @@ def test_scan_collector_recycles_gpu_chunk_when_free_memory_reaches_reserve(
 
 
 def test_add_many_is_single_undo_step():
-    state = SegmentEditorState(duration=100.0, fps=25.0)
+    state = SegmentEditorState(duration=100.0, fps=25.0, segments=(), default_restoration=STANDARD)
     added = state.add_many((SegmentRange(1.0, 2.0), SegmentRange(5.0, 7.0)))
     assert added == 2
     assert len(state.segments) == 2
@@ -131,12 +133,12 @@ def test_add_many_is_single_undo_step():
 
 
 def test_add_many_skips_already_covered_ranges():
-    state = SegmentEditorState(duration=100.0, fps=25.0)
+    state = SegmentEditorState(duration=100.0, fps=25.0, segments=(), default_restoration=STANDARD)
     state.add(0.0, 10.0)
     assert state.add_many((SegmentRange(2.0, 3.0),)) == 0
     added = state.add_many((SegmentRange(2.0, 3.0), SegmentRange(20.0, 21.0)))
     assert added == 1
-    assert state.segments == (SegmentRange(0.0, 10.0), SegmentRange(20.0, 21.0))
+    assert state.segments == (SegmentRange(0.0, 10.0, STANDARD), SegmentRange(20.0, 21.0, STANDARD))
 
 
 def test_scan_decoder_count_parallel_only_for_4k_on_nvidia():
