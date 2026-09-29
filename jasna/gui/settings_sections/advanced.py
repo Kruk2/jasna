@@ -10,6 +10,7 @@ from jasna.gui.settings_sections.widgets import (
     ValueOptionMenu,
     create_slider_value_label,
     get_tooltip,
+    pack_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 
@@ -31,7 +32,6 @@ class AdvancedSection:
 
         # Temporal Overlap row
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
-        row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(row1, "temporal_overlap")
 
@@ -49,7 +49,6 @@ class AdvancedSection:
 
         # Max Detection Gap row
         gap_row = ctk.CTkFrame(inner, fg_color="transparent")
-        gap_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(gap_row, "max_detection_gap")
 
@@ -68,7 +67,6 @@ class AdvancedSection:
 
         # Min Detection Duration row
         mindur_row = ctk.CTkFrame(inner, fg_color="transparent")
-        mindur_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(mindur_row, "min_detection_duration")
 
@@ -87,7 +85,6 @@ class AdvancedSection:
 
         # Scene cut detection toggle
         scene_row = ctk.CTkFrame(inner, fg_color="transparent")
-        scene_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         scene_frame = ctk.CTkFrame(scene_row, fg_color=Colors.BG_CARD, corner_radius=6)
         scene_frame.pack(fill="x")
@@ -102,7 +99,6 @@ class AdvancedSection:
 
         # Crossfade toggle
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
-        row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         crossfade_frame = ctk.CTkFrame(row2, fg_color=Colors.BG_CARD, corner_radius=6)
         crossfade_frame.pack(fill="x")
@@ -116,7 +112,6 @@ class AdvancedSection:
         self._widgets["enable_crossfade"].select()
 
         row_vr = ctk.CTkFrame(inner, fg_color="transparent")
-        row_vr.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
         vr_label = ctk.CTkLabel(
             row_vr,
             text=t("vr_mode"),
@@ -155,7 +150,6 @@ class AdvancedSection:
 
         # Denoising Strength
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
-        row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(row3, "denoise_strength")
 
@@ -178,7 +172,6 @@ class AdvancedSection:
 
         # Denoise Step
         row4 = ctk.CTkFrame(inner, fg_color="transparent")
-        row4.pack(fill="x")
 
         add_setting_label(row4, "denoise_step")
 
@@ -196,6 +189,18 @@ class AdvancedSection:
         )
         self._widgets["denoise_step"].pack(side="right")
         self._widgets["denoise_step"].set_value("after_primary")
+
+        row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        self._rows = [
+            (row1, row_gap), (gap_row, row_gap), (mindur_row, row_gap), (scene_row, row_gap),
+            (row2, row_gap), (row_vr, row_gap), (row3, row_gap), (row4, dict(fill="x")),
+        ]
+        self._vr_row = row_vr
+        self.set_model("basicvsrpp")
+
+    def set_model(self, model: str) -> None:
+        hidden = tuple(row for row, _options in self._rows if row is not self._vr_row) if model == "ltx" else ()
+        pack_rows(self._rows, hidden)
 
     def _on_slider_change(self, key: str, value: int):
         self._widgets[f"{key}_val"].configure(text=str(value))

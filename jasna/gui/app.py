@@ -50,17 +50,22 @@ _MIN_WINDOW_SIZE = (900, 580)
 _SHUTDOWN_COUNTDOWN_SECONDS = 60
 
 
-def _warm_up_cuda() -> None:
+def _warm_up_cuda() -> tuple[bool, bool]:
     """Import torch and create the CUDA context. Run off the UI thread after the window
     paints, so the window shows first and the first job skips cold torch/CUDA init.
-    An unsupported GPU gets no kernel launch; the system check reports it instead."""
+    An unsupported GPU gets no kernel launch; the system check reports it instead.
+    Returns (NVIDIA GPU, Blackwell GPU) for the LTX model options."""
     from jasna.os_utils import check_supported_gpu
 
     gpu_ok, _ = check_supported_gpu()
-    if gpu_ok:
-        import torch
+    if not gpu_ok:
+        return False, False
+    import torch
+    from jasna.accelerator import is_nvidia_device
 
-        torch.zeros(1, device="cuda")
+    torch.zeros(1, device="cuda")
+    nvidia = is_nvidia_device()
+    return nvidia, nvidia and torch.cuda.get_device_capability(0)[0] >= 10
 
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
@@ -324,7 +329,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._queue_panel.configure(cursor="arrow")
         self._queue_panel.set_on_jobs_changed(self._on_jobs_changed)
 
-        self._settings_panel = SettingsPanel(self._workspace, self._preset_manager)
+        from jasna.engine_paths import default_restoration_model_path
+        from jasna.ltx.model_files import bundle_present as ltx_bundle_present
+
+        self._settings_panel = SettingsPanel(
+            self._workspace,
+            self._preset_manager,
+            ltx_installed=ltx_bundle_present(default_restoration_model_path("ltx")),
+        )
         self._settings_panel.configure(cursor="arrow")
         self._settings_panel.set_on_interactive_image_restore(self._open_interactive_image_restore)
 
@@ -393,9 +405,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _start_cuda_warmup(self):
         def _run():
             try:
-                _warm_up_cuda()
+                nvidia, blackwell = _warm_up_cuda()
             except Exception:
-                logger.debug("CUDA warm-up failed", exc_info=True)
+                logger.warning("CUDA warm-up failed", exc_info=True)
+                nvidia, blackwell = False, False
+            self._main_thread.post(
+                lambda: self._settings_panel.set_gpu_support(nvidia=nvidia, blackwell=blackwell)
+            )
 
         threading.Thread(target=_run, daemon=True, name="cuda-warmup").start()
 
@@ -578,7 +594,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         settings = self._settings_panel.get_settings()
 
         from jasna.gui.validation import validate_gui_start
-        errors = validate_gui_start(settings)
+        errors = validate_gui_start(settings, jobs)
         if errors:
             from tkinter import messagebox
 

@@ -9,6 +9,7 @@ from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     ValueOptionMenu,
     create_slider_value_label,
+    pack_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 
@@ -46,7 +47,6 @@ class BasicSection:
 
         # Max Clip Size slider
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
-        row1.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(row1, "max_clip_size")
 
@@ -64,7 +64,6 @@ class BasicSection:
 
         # Detection Model
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
-        row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(row2, "detection_model")
 
@@ -83,7 +82,6 @@ class BasicSection:
 
         # Detection Threshold
         row3 = ctk.CTkFrame(inner, fg_color="transparent")
-        row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
         add_setting_label(row3, "detection_threshold", "detection_score_threshold")
 
@@ -101,10 +99,8 @@ class BasicSection:
 
         # Toggles row - FP16 Mode and Compile BasicVSR++
         row4 = ctk.CTkFrame(inner, fg_color="transparent")
-        row4.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
         fp16_frame = ctk.CTkFrame(row4, fg_color=Colors.BG_CARD, corner_radius=6)
-        fp16_frame.pack(side="left", fill="x", expand=True, padx=(0, 4))
         add_setting_label(fp16_frame, "fp16_mode", in_card=True)
         self._widgets["fp16_mode"] = CompactSwitch(
             fp16_frame,
@@ -115,7 +111,6 @@ class BasicSection:
         self._widgets["fp16_mode"].select()
 
         compile_frame = ctk.CTkFrame(row4, fg_color=Colors.BG_CARD, corner_radius=6)
-        compile_frame.pack(side="right", fill="x", expand=True, padx=(4, 0))
         add_setting_label(compile_frame, "compile_basicvsrpp", in_card=True)
         self._widgets["compile_basicvsrpp"] = CompactSwitch(
             compile_frame,
@@ -127,7 +122,6 @@ class BasicSection:
 
         # File Conflict dropdown
         row5 = ctk.CTkFrame(inner, fg_color="transparent")
-        row5.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
         add_setting_label(row5, "file_conflict")
 
@@ -151,6 +145,21 @@ class BasicSection:
         )
         self._widgets["file_conflict"].pack(side="right")
         self._widgets["file_conflict"].set_value("auto_rename")
+
+        row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        toggle_gap = dict(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        self._rows = [(row1, row_gap), (row2, row_gap), (row3, row_gap), (row4, toggle_gap), (row5, toggle_gap)]
+        self._toggles = [
+            (fp16_frame, dict(side="left", fill="x", expand=True, padx=(0, 4))),
+            (compile_frame, dict(side="right", fill="x", expand=True, padx=(4, 0))),
+        ]
+        self._standard_only = (row1, compile_frame)
+        self.set_model("basicvsrpp")
+
+    def set_model(self, model: str) -> None:
+        hidden = self._standard_only if model == "ltx" else ()
+        pack_rows(self._rows, hidden)
+        pack_rows(self._toggles, hidden)
 
     def _on_max_clip_size_slider(self, value: float):
         max_clip_size = int(value)

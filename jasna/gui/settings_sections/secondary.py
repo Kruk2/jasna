@@ -14,8 +14,10 @@ class SecondarySection:
     def __init__(self, parent, widgets: dict):
         self._widgets = widgets
 
+        self._previous_section = parent.pack_slaves()[-1]
         section = CollapsibleSection(parent, t("section_secondary"), expanded=False)
         section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        self._section = section
         content = section.content
         content.configure(corner_radius=Sizing.BORDER_RADIUS)
 
@@ -255,6 +257,12 @@ class SecondarySection:
             self._tvai_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         elif secondary == "rtx-super-res":
             self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+
+    def set_model(self, model: str) -> None:
+        if model == "ltx":
+            self._section.pack_forget()
+        else:
+            self._section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL), after=self._previous_section)
 
     def apply(self, preset):
         self._widgets["secondary_var"].set(preset.secondary_restoration)

@@ -24,6 +24,7 @@ from jasna.gui.settings_sections.basic import BasicSection
 from jasna.gui.settings_sections.encoding import EncodingSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
+from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ _EDITABLE_WHILE_PROCESSING = frozenset({"post_export_action", "post_export_comma
 class SettingsPanel(ctk.CTkFrame):
     """Right panel composing the settings sections; widgets live in the sections."""
 
-    def __init__(self, master, preset_manager: PresetManager, **kwargs):
+    def __init__(self, master, preset_manager: PresetManager, *, ltx_installed: bool, **kwargs):
         super().__init__(
             master,
             fg_color=Colors.BG_PANEL,
@@ -52,7 +53,7 @@ class SettingsPanel(ctk.CTkFrame):
 
         self._build_preset_bar()
         self._build_scrollable()
-        self._build_sections()
+        self._build_sections(ltx_installed)
         self._apply_preset(self._current_preset)
 
     def _build_preset_bar(self):
@@ -211,8 +212,15 @@ class SettingsPanel(ctk.CTkFrame):
         )
         self._scroll.pack(fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=(0, Sizing.PADDING_MEDIUM))
 
-    def _build_sections(self):
-        self._sections = [
+    def _build_sections(self, ltx_installed: bool):
+        self._model_section = RestorationModelSection(
+            self._scroll,
+            self._widgets,
+            self._mark_modified,
+            self._on_restoration_model_changed,
+            ltx_installed=ltx_installed,
+        )
+        self._model_aware_sections = [
             BasicSection(
                 self._scroll,
                 self._widgets,
@@ -221,6 +229,10 @@ class SettingsPanel(ctk.CTkFrame):
             ),
             AdvancedSection(self._scroll, self._widgets, self._mark_modified),
             SecondarySection(self._scroll, self._widgets),
+        ]
+        self._sections = [
+            self._model_section,
+            *self._model_aware_sections,
             ImageRestorationSection(
                 self._scroll,
                 self._widgets,
@@ -231,6 +243,14 @@ class SettingsPanel(ctk.CTkFrame):
             EncodingSection(self._scroll, self._widgets, self._mark_modified),
             PostExportSection(self._scroll, self._widgets, self._mark_modified),
         ]
+
+    def _on_restoration_model_changed(self, model: str):
+        for section in self._model_aware_sections:
+            section.set_model(model)
+
+    def set_gpu_support(self, *, nvidia: bool, blackwell: bool):
+        self._model_section.set_gpu_support(nvidia=nvidia, blackwell=blackwell)
+        self._update_modified_indicator()
 
     def set_on_interactive_image_restore(self, callback: callable):
         self._on_interactive_image_restore = callback
@@ -354,6 +374,8 @@ class SettingsPanel(ctk.CTkFrame):
     def set_enabled(self, enabled: bool):
         """Enable or disable the settings; the queue-wide post-export action stays editable while processing."""
         state = "normal" if enabled else "disabled"
+
+        self._model_section.set_enabled(enabled)
 
         # Preset bar buttons
         self._preset_dropdown.configure(state=state)

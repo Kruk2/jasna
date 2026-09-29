@@ -15,6 +15,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from jasna.gui.locales import t
 from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
@@ -325,6 +326,8 @@ class RestorationPreviewWorker:
                 if isinstance(command, _Cancel):
                     continue
                 try:
+                    if command.settings.restoration_model == "ltx":
+                        raise ValueError(t("segments_restore_ltx_unavailable"))
                     key = video_session_key(command.settings)
                     if session is None or key != session_key:
                         pipeline = None

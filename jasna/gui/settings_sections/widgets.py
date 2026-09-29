@@ -76,3 +76,12 @@ class ValueOptionMenu(ctk.CTkOptionMenu):
         if label is None:
             label = next(iter(self._value_to_label.values()))
         self.set(label)
+
+
+def pack_rows(rows: list[tuple[tk.Misc, dict]], hidden: tuple[tk.Misc, ...]) -> None:
+    """Pack ``rows`` (widget, pack options) in order, leaving out ``hidden``."""
+    for row, _options in rows:
+        row.pack_forget()
+    for row, options in rows:
+        if row not in hidden:
+            row.pack(**options)

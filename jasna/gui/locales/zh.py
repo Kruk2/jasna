@@ -77,6 +77,7 @@ ZH = {
         "segments_preview_reset_view": "重置视图",
         "segments_preview_reset_view_hint": "重置缩放和平移并显示完整画面",
         "segments_restore_gpu_busy": "处理进行中，暂不可用",
+        "segments_restore_ltx_unavailable": "LTX 暂不支持预览",
         "segments_restore_loading_models": "正在加载修复模型…",
         "segments_restore_restoring": "正在修复…",
         "segments_restore_failed": "修复预览失败：{message}",
@@ -196,6 +197,16 @@ ZH = {
         
         # Sections
         "section_basic": "基本处理",
+        "section_restoration_model": "修复模型",
+        "model_basicvsrpp": "标准",
+        "model_basicvsrpp_description": "速度快，适合大多数视频。",
+        "model_ltx": "LTX",
+        "model_ltx_description": "细节最好。速度慢很多，需要高性能 NVIDIA 显卡。",
+        "model_ltx_needs_nvidia": "需要 NVIDIA 显卡。",
+        "model_ltx_not_installed": "模型未安装。",
+        "ltx_seed": "种子",
+        "ltx_fast": "快速模式",
+        "ltx_large_canvas": "大马赛克更清晰",
         "section_advanced": "高级处理",
         "section_secondary": "二次修复",
         "section_image_restoration": "图像修复（静态图片）",
@@ -397,6 +408,10 @@ ZH = {
         "tip_vr_mode": "控制并排 VR180 视频的处理方式。\n\n自动模式会在画面为严格 2:1 且高度超过 1080 像素、文件名包含可信的片商标记或具有兼容空间元数据时启用，并按片商为每个检测到的马赛克区域选择修复投影（raw／鱼眼／等距投影，未知片商时使用 raw）。SBS 采用相同路由分别处理双眼；SBS + 鱼眼则对所有区域强制使用鱼眼条件化。检测、跟踪、蒙版和混合始终保持在源坐标中，仅将修复后的差分重新投影回去。\n\n区间编辑器只显示左眼，但扫描和导出会处理双眼。\n默认值：自动",
         "tip_fp16_mode": "使用半精度计算来减少显存占用，通常还能提升速度。在现代显卡上几乎无画质损失。\n\n建议：RTX 20 系列及以上显卡开启。\n默认值：开启",
         "tip_compile_basicvsrpp": "将修复模型编译为 TensorRT 子引擎，大幅提升速度（约 2-3 倍）。\n首次编译需要 15-60 分钟。请关闭所有其他应用程序（包括浏览器），编译期间请勿使用电脑。\n引擎会被缓存，后续运行自动复用。\n\n引擎显存：约 1.9 GB（片段 60）、约 5.4 GB（片段 180）。\n处理时峰值显存：约 7.6 GB（片段 60）、约 14.7 GB（片段 180）。\n不编译时：约 6 GB（片段 60）、约 10.4 GB（片段 180）。\n\n如果显存不足，请关闭此选项或降低片段大小。\n\n建议：配合片段大小 60-90 开启。\n默认值：开启",
+        "tip_ltx_seed": "换一个种子，同一视频会得到另一种效果。\n保留喜欢的种子即可再次得到相同结果。",
+        "tip_ltx_new_seed": "换一个随机种子",
+        "tip_ltx_fast": "约快 1.4 倍，细节略少。\n仅限 RTX 50 系列。",
+        "tip_ltx_large_canvas": "大马赛克修复得更细致，但这些部分约慢 3 倍。\n需要至少 10 GB 可用显存。",
         "tip_denoise_strength": "降低修复区域的噪点和颗粒感。强度越高画面越平滑，但可能丢失细节。\n\n无：不降噪。低/中：推荐起步值。高：强力平滑。\n默认值：无",
         "tip_denoise_step": "降噪在处理流程中的应用时机：\n- 主修复后：在放大（二次修复）之前降噪，在 256x256 分辨率下处理。\n- 二次修复后：在放大之后、最终输出之前降噪，在完整分辨率下处理。\n\n默认值：主修复后",
         "tip_secondary_restoration": "可选的第二步处理，将修复区域从 256x256 放大到 1024 像素。可提升清晰度，特别是近景和 4K 视频。\n\nUNet 4x 是支持者专属模型，比 TVAI 快很多，质量高。激活 Jasna 后可用。\nRTX Super Res 是速度快但质量一般的替代方案。\nTopaz TVAI 需要单独购买和安装。",
@@ -450,6 +465,7 @@ ZH = {
         "error_cannot_start": "无法开始处理：",
         "error_invalid_tvai": "无效的 TVAI 配置",
         "error_post_export_command_required": "需要填写导出后的自定义命令",
+        "error_ltx_segments": "LTX 会处理整个视频。请清除片段或选择“标准”：{files}",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "选择 Topaz Video ffmpeg.exe",

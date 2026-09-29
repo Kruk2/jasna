@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
 
-from jasna.gui.models import AppSettings
+from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.locales import t
 
 
-def validate_gui_start(settings: AppSettings) -> list[str]:
+def validate_gui_start(settings: AppSettings, jobs: list[JobItem]) -> list[str]:
     errors: list[str] = []
 
     from jasna.post_export_action import validate_post_export_action
@@ -13,6 +13,12 @@ def validate_gui_start(settings: AppSettings) -> list[str]:
         validate_post_export_action(settings.post_export_action, settings.post_export_command)
     except ValueError:
         errors.append(t("error_post_export_command_required"))
+
+    if settings.restoration_model == "ltx":
+        segmented = [job.filename for job in jobs if job.snapshot_segments()]
+        if segmented:
+            errors.append(t("error_ltx_segments", files=", ".join(segmented)))
+        return errors
 
     if settings.secondary_restoration != "tvai":
         return errors

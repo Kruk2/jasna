@@ -76,6 +76,7 @@ KO = {
         "segments_preview_reset_view": "보기 초기화",
         "segments_preview_reset_view_hint": "이동과 확대/축소를 초기화하고 전체 프레임을 표시합니다",
         "segments_restore_gpu_busy": "처리가 진행 중일 때는 사용할 수 없습니다",
+        "segments_restore_ltx_unavailable": "LTX에서는 아직 미리보기를 사용할 수 없습니다",
         "segments_restore_loading_models": "복원 모델을 불러오는 중…",
         "segments_restore_restoring": "복원 중…",
         "segments_restore_failed": "복원 미리보기 실패: {message}",
@@ -195,6 +196,16 @@ KO = {
 
         # Sections
         "section_basic": "기본 처리",
+        "section_restoration_model": "복원 모델",
+        "model_basicvsrpp": "표준",
+        "model_basicvsrpp_description": "빠릅니다. 대부분의 영상에 적합합니다.",
+        "model_ltx": "LTX",
+        "model_ltx_description": "가장 세밀합니다. 훨씬 느리고 고성능 NVIDIA GPU가 필요합니다.",
+        "model_ltx_needs_nvidia": "NVIDIA GPU가 필요합니다.",
+        "model_ltx_not_installed": "모델이 설치되지 않았습니다.",
+        "ltx_seed": "시드",
+        "ltx_fast": "빠른 모드",
+        "ltx_large_canvas": "큰 모자이크 더 선명하게",
         "section_advanced": "고급 처리",
         "section_secondary": "2차 복원",
         "section_image_restoration": "이미지 복원 (정지 이미지)",
@@ -377,6 +388,10 @@ KO = {
         "tip_vr_mode": "좌우 분할 VR180 처리 방식을 설정합니다.\n\n자동은 높이가 1080픽셀을 넘는 정확한 2:1 프레임, 신뢰할 수 있는 스튜디오 파일명 토큰 또는 호환 공간 메타데이터가 있을 때 활성화되며, 감지된 각 모자이크 영역의 복원 투영(raw／어안／그노모닉)을 스튜디오별로 선택합니다(알 수 없는 스튜디오는 raw). SBS는 동일한 라우팅으로 양쪽 눈을 각각 처리하고, SBS + 어안은 모든 영역에 어안 조건화를 강제합니다. 감지·추적·마스크·합성은 항상 소스 좌표에 유지되며 복원된 차분만 원래대로 재투영됩니다.\n\n구간 편집기는 왼쪽 눈만 표시하지만 스캔과 내보내기는 양쪽 눈을 처리합니다.\n기본값: 자동",
         "tip_fp16_mode": "반정밀도 계산으로 VRAM 사용량을 줄이고 속도도 빨라지는 경우가 많습니다. 최신 GPU에서 화질 차이는 거의 없습니다.\n\n권장: RTX 20 시리즈 이상에서 켜기.\n기본값: 켜기",
         "tip_compile_basicvsrpp": "복원 모델을 TensorRT 서브엔진으로 컴파일하여 큰 속도 향상을 얻습니다 (약 2-3배).\n첫 컴파일에 15-60분이 소요됩니다. 다른 모든 앱(브라우저 포함)을 닫고, 컴파일 중 PC를 사용하지 마세요.\n엔진은 캐시되어 이후 실행 시 자동으로 재사용됩니다.\n\n엔진 VRAM: 약 1.9 GB (클립 60), 약 5.4 GB (클립 180).\n처리 시 피크 VRAM: 약 7.6 GB (클립 60), 약 14.7 GB (클립 180).\n컴파일 없이: 약 6 GB (클립 60), 약 10.4 GB (클립 180).\n\nVRAM 부족 시 이 설정을 끄거나 클립 크기를 줄이세요.\n\n권장: 클립 크기 60-90에서 켜기.\n기본값: 켜기",
+        "tip_ltx_seed": "시드를 바꾸면 같은 영상도 다른 결과가 나옵니다.\n마음에 드는 시드를 두면 같은 결과를 다시 얻을 수 있습니다.",
+        "tip_ltx_new_seed": "새 무작위 시드 사용",
+        "tip_ltx_fast": "약 1.4배 빠르지만 디테일이 조금 줄어듭니다.\nRTX 50 시리즈 전용.",
+        "tip_ltx_large_canvas": "큰 모자이크를 더 세밀하게 복원하지만 해당 부분은 약 3배 느려집니다.\n여유 VRAM이 10 GB 이상 필요합니다.",
         "tip_denoise_strength": "복원된 영역의 노이즈와 입자를 줄여줍니다. 높을수록 부드럽지만 세부 디테일이 줄어들 수 있습니다.\n\n없음: 노이즈 제거 안 함. 낮음/중간: 좋은 시작점. 높음: 강력한 평활화.\n기본값: 없음",
         "tip_denoise_step": "노이즈 제거를 적용하는 시점:\n- 1차 복원 후: 업스케일링(2차 복원) 전에 적용. 256x256 해상도에서 처리.\n- 2차 복원 후: 업스케일링 후, 최종 출력 직전에 적용. 전체 해상도에서 처리.\n\n기본값: 1차 복원 후",
         "tip_secondary_restoration": "복원된 영역을 256x256에서 1024 픽셀로 확대하는 선택적 추가 처리입니다. 클로즈업이나 4K 영상에서 선명도가 향상됩니다.\n\nUNet 4x는 서포터 전용 모델입니다. TVAI보다 훨씬 빠르고 고품질입니다. Jasna를 활성화하면 사용할 수 있습니다.\nRTX Super Res는 빠르지만 품질은 보통입니다.\nTopaz TVAI는 별도 구매 및 설치가 필요합니다.",
@@ -430,6 +445,7 @@ KO = {
         "error_cannot_start": "처리를 시작할 수 없습니다:",
         "error_invalid_tvai": "잘못된 TVAI 구성",
         "error_post_export_command_required": "내보내기 후 사용자 정의 명령이 필요합니다",
+        "error_ltx_segments": "LTX는 영상 전체를 처리합니다. 구간을 지우거나 '표준'을 선택하세요: {files}",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "Topaz Video ffmpeg.exe 선택",
