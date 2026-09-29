@@ -13,7 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import torch
@@ -120,9 +120,12 @@ class LtxTransformer:
         return max(1, min(windows, int(fits)))
 
     @torch.inference_mode()
-    def denoise_chain(self, references: Sequence[torch.Tensor], seeds: Sequence[int]) -> list[torch.Tensor]:
+    def denoise_chain(
+        self, references: Sequence[torch.Tensor], seeds: Sequence[int], advance: Callable[[int], None]
+    ) -> list[torch.Tensor]:
         """Final latents ``[1, 128, F, H, W]`` of one track's windows, given each window's
-        reference latent (the encoded mosaic crop) and noise seed."""
+        reference latent (the encoded mosaic crop) and noise seed. ``advance(n)`` reports n
+        window-steps done."""
         frames, height, width = references[0].shape[2:]
         tokens_per_frame = height * width
         tokens = frames * tokens_per_frame
@@ -144,6 +147,7 @@ class LtxTransformer:
                 )
                 for i, value in zip(members, denoised):
                     latents[i] = _euler(latents[i], value, sigmas, step)
+                advance(len(members))
             fuse_overlaps(latents, tokens_per_frame, FUSION_RAMP)
         return [unpatchify(latent, frames, height, width) for latent in latents]
 

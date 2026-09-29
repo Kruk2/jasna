@@ -89,7 +89,7 @@ def scan(
     regions: list[list[Region]] = []
     cuts: set[int] = set()
     scene = SceneCutDetector()
-    with progress.bar("scan", progress.frames) as bar:
+    with progress.bar("1/4 scan", progress.frames) as bar:
         for batch, _pts in frames():
             _check(cancel)
             cuts.update(len(regions) + offset for offset in scene.find_cuts(batch))
@@ -126,7 +126,7 @@ def encode_references(
     upcoming = next(pending, None)
     active: dict[int, tuple[Window, list[torch.Tensor]]] = {}
     frame_idx = 0
-    bar = progress.bar("encode", progress.frames)
+    bar = progress.bar("2/4 encode", progress.frames)
     for batch, _pts in frames():
         _check(cancel)
         bar.update(len(batch))
@@ -156,16 +156,16 @@ def denoise(
     progress: Progress,
     cancel: threading.Event,
 ) -> None:
-    bar = progress.bar("denoise", sum(len(plan.windows) for plan in plans), unit="window")
+    steps = len(transformer.conditions)
+    bar = progress.bar("3/4 denoise", steps * sum(len(plan.windows) for plan in plans), unit="step")
     for plan in plans:
         _check(cancel)
         latents = transformer.denoise_chain(
-            [references.get(w.index) for w in plan.windows], [seed + w.index for w in plan.windows]
+            [references.get(w.index) for w in plan.windows], [seed + w.index for w in plan.windows], bar.update
         )
         for window, latent in zip(plan.windows, latents):
             finals.put(window.index, latent)
             references.delete(window.index)
-        bar.update(len(plan.windows))
     bar.close()
 
 
@@ -205,7 +205,7 @@ def compose(
     covering: list[Window] = []
     decoded: dict[int, torch.Tensor] = {}
     frame_idx = 0
-    bar = progress.bar("compose", progress.frames)
+    bar = progress.bar("4/4 compose", progress.frames)
     for batch, pts in frames():
         _check(cancel)
         bar.update(len(batch))

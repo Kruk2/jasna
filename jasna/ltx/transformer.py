@@ -62,13 +62,21 @@ LINEAR_NAMES = tuple(
 ) + ("ff.net.0.proj", "ff.net.2")
 
 
-@functools.cache
-def _regular_hadamard(size: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+def _build_regular_hadamard(size: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
     r4 = torch.tensor([[1.0, 1, 1, -1], [1, 1, -1, 1], [1, -1, 1, 1], [-1, 1, 1, 1]])
     h = r4.clone()
     while h.shape[0] < size:
         h = torch.kron(h, r4)
     return (h / size**0.5).to(device=device, dtype=dtype)
+
+
+_cached_regular_hadamard = functools.cache(_build_regular_hadamard)
+
+
+def _regular_hadamard(size: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    if torch.compiler.is_compiling():
+        return _build_regular_hadamard(size, device, dtype)
+    return _cached_regular_hadamard(size, device, dtype)
 
 
 def rotate(x: torch.Tensor) -> torch.Tensor:
