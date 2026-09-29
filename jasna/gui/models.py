@@ -10,6 +10,7 @@ from pathlib import Path
 
 from jasna.gui.paths import get_settings_path
 from jasna.segments import SegmentRange
+from jasna.session_config import LTX_DEFAULT_SEED
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,12 @@ class JobItem:
 
 @dataclass
 class AppSettings:
+    # Restoration model
+    restoration_model: str = "basicvsrpp"  # basicvsrpp, ltx
+    ltx_seed: int = LTX_DEFAULT_SEED
+    ltx_fast: bool = False
+    ltx_large_canvas: bool = False
+
     # Basic processing
     batch_size: int = 4
     max_clip_size: int = 90

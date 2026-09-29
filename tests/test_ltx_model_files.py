@@ -36,3 +36,13 @@ def test_fast_bundle_uses_the_fast_transformer(tmp_path):
     for name in ("transformer-fast", "vae", "vae-decoder"):
         save_file({"weight": torch.zeros(1)}, str(tmp_path / f"{name}.safetensors"))
     assert LtxModelFiles.from_dir(tmp_path, fast=True).transformer == tmp_path / "transformer-fast.safetensors"
+
+
+def test_bundle_present_needs_every_quality_file(tmp_path):
+    from jasna.ltx.model_files import bundle_present
+
+    for name in ("transformer-fast", "vae", "vae-decoder"):
+        (tmp_path / f"{name}.safetensors").touch()
+    assert not bundle_present(tmp_path)
+    (tmp_path / "transformer.safetensors.enc").touch()
+    assert bundle_present(tmp_path)

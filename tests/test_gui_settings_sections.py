@@ -16,6 +16,7 @@ from jasna.gui.settings_sections.basic import BasicSection
 from jasna.gui.settings_sections.encoding import EncodingSection
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
+from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 
@@ -63,6 +64,10 @@ def test_value_option_menu_falls_back_to_first_option_for_unknown_value() -> Non
 
 def _fake_section_widgets() -> dict:
     return {
+        "restoration_model": _FakeWidget("ltx"),
+        "ltx_seed": _FakeWidget(" 123 "),
+        "ltx_fast": _FakeWidget(1),
+        "ltx_large_canvas": _FakeWidget(0),
         "max_clip_size": _FakeWidget(90),
         "fp16_mode": _FakeWidget(1),
         "detection_model": _FakeWidget("rfdetr-v6"),
@@ -110,6 +115,7 @@ def _collect_all(widgets: dict) -> dict:
     fake = SimpleNamespace(_widgets=widgets)
     values: dict = {}
     for section in (
+        RestorationModelSection,
         BasicSection,
         AdvancedSection,
         SecondarySection,
@@ -143,6 +149,10 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["retarget_high_fps"] is True
     assert values["fmp4"] is True
     assert values["sharpen_strength"] == 0.35
+    assert values["restoration_model"] == "ltx"
+    assert values["ltx_seed"] == 123
+    assert values["ltx_fast"] is True
+    assert values["ltx_large_canvas"] is False
 
 
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
@@ -182,9 +192,9 @@ def _basic_section_panel(monkeypatch, tmp_path):
 
     from jasna.gui.settings_panel import SettingsPanel
 
-    panel = SettingsPanel(root, PresetManager())
+    panel = SettingsPanel(root, PresetManager(), ltx_installed=True)
     try:
-        yield panel, panel._sections[0]
+        yield panel, next(section for section in panel._sections if isinstance(section, BasicSection))
     finally:
         root.destroy()
 
@@ -353,7 +363,7 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
     try:
         from jasna.gui.settings_panel import SettingsPanel
 
-        panel = SettingsPanel(root, PresetManager())
+        panel = SettingsPanel(root, PresetManager(), ltx_installed=True)
         assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
         assert panel._saved_preset_settings == panel.get_settings()
     finally:
@@ -394,3 +404,113 @@ def test_only_queue_wide_post_export_action_stays_editable_while_processing(_bas
     assert panel._widgets["post_export_command"].cget("state") == "normal"
     assert panel._widgets["post_export_video_command"].cget("state") == "disabled"
     assert panel._widgets["max_clip_size"].cget("state") == "disabled"
+
+
+def test_ltx_unavailable_reason() -> None:
+    from jasna.gui.settings_sections.restoration_model import ltx_unavailable_reason
+
+    assert ltx_unavailable_reason(installed=True, nvidia=None) is None
+    assert ltx_unavailable_reason(installed=True, nvidia=True) is None
+    assert ltx_unavailable_reason(installed=True, nvidia=False) == "model_ltx_needs_nvidia"
+    assert ltx_unavailable_reason(installed=False, nvidia=True) == "model_ltx_not_installed"
+
+
+def test_parse_seed_falls_back_to_default() -> None:
+    from jasna.gui.settings_sections.restoration_model import parse_seed
+    from jasna.session_config import LTX_DEFAULT_SEED
+
+    assert parse_seed(" 42 ") == 42
+    assert parse_seed("abc") == LTX_DEFAULT_SEED
+
+
+@pytest.fixture
+def _panel_factory(monkeypatch, tmp_path):
+    monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    from jasna.gui.settings_panel import SettingsPanel
+
+    try:
+        yield lambda installed: SettingsPanel(root, PresetManager(), ltx_installed=installed)
+    finally:
+        root.destroy()
+
+
+def _select_ltx(panel) -> None:
+    panel._model_section._cards["ltx"].radio.invoke()
+
+
+def test_ltx_hides_standard_only_settings_and_restores_them(_panel_factory) -> None:
+    panel = _panel_factory(True)
+    secondary = panel._model_aware_sections[2]
+    panel.update_idletasks()
+    clip_row = panel._widgets["max_clip_size"].master
+    overlap_row = panel._widgets["temporal_overlap"].master
+
+    _select_ltx(panel)
+
+    assert panel.get_settings().restoration_model == "ltx"
+    assert not clip_row.winfo_manager()
+    assert not panel._widgets["compile_basicvsrpp"].master.winfo_manager()
+    assert not overlap_row.winfo_manager()
+    assert panel._widgets["vr_mode"].master.winfo_manager()
+    assert not secondary._section.winfo_manager()
+    assert panel._model_section._ltx_options.winfo_manager()
+
+    panel._model_section._cards["basicvsrpp"].radio.invoke()
+
+    assert clip_row.winfo_manager() and overlap_row.winfo_manager()
+    assert secondary._section.winfo_manager()
+    assert not panel._model_section._ltx_options.winfo_manager()
+    order = panel._scroll.pack_slaves()
+    assert order.index(secondary._section) == order.index(secondary._previous_section) + 1
+
+
+def test_ltx_card_disabled_when_model_missing(_panel_factory) -> None:
+    panel = _panel_factory(False)
+
+    assert panel._model_section._cards["ltx"].radio.cget("state") == "disabled"
+    panel._model_section.apply(AppSettings(restoration_model="ltx"))
+    assert panel.get_settings().restoration_model == "basicvsrpp"
+
+
+def test_gpu_support_disables_ltx_and_shows_fast_mode_on_blackwell(_panel_factory) -> None:
+    panel = _panel_factory(True)
+    section = panel._model_section
+    section.apply(AppSettings(restoration_model="ltx", ltx_fast=True))
+
+    section.set_gpu_support(nvidia=True, blackwell=True)
+    assert section._fast_row.winfo_manager()
+    assert panel.get_settings().ltx_fast is True
+
+    section.set_gpu_support(nvidia=True, blackwell=False)
+    assert not section._fast_row.winfo_manager()
+    assert panel.get_settings().ltx_fast is False
+
+    section.set_gpu_support(nvidia=False, blackwell=False)
+    assert panel.get_settings().restoration_model == "basicvsrpp"
+    assert section._cards["ltx"].radio.cget("state") == "disabled"
+
+
+def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
+    panel = _panel_factory(True)
+    ltx = replace(AppSettings(), restoration_model="ltx", ltx_seed=99, ltx_large_canvas=True, encoder_cq=28)
+
+    for section in panel._sections:
+        section.apply(ltx)
+
+    assert panel.get_settings() == ltx
+
+
+def test_disabling_settings_keeps_unavailable_ltx_disabled(_panel_factory) -> None:
+    panel = _panel_factory(False)
+
+    panel.set_enabled(False)
+    panel.set_enabled(True)
+
+    assert panel._model_section._cards["ltx"].radio.cget("state") == "disabled"
+    assert panel._model_section._cards["basicvsrpp"].radio.cget("state") == "normal"

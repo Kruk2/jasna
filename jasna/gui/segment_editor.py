@@ -994,6 +994,10 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._is_gpu_busy():
             self._restore_toggle.deselect()
             return
+        if self._get_settings().restoration_model == "ltx":
+            self._restore_toggle.deselect()
+            self._show_preview_message(t("segments_restore_ltx_unavailable"), Colors.STATUS_WARNING)
+            return
         self._restore_active = True
         self._set_playing(False)
         self._restore_toggle.select()

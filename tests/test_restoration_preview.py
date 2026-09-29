@@ -475,3 +475,36 @@ def test_app_prepares_entire_queue_before_starting_processor() -> None:
         app._on_start()
 
     assert calls == ["reset", "running", "start"]
+
+
+def test_restoration_worker_refuses_ltx_without_loading_models(monkeypatch) -> None:
+    build = MagicMock()
+    monkeypatch.setattr(restoration_preview, "build_video_session", build)
+    worker = RestorationPreviewWorker("unused.mp4", _metadata())
+    worker.start()
+    generation = worker.request(1.0, AppSettings(restoration_model="ltx"), projection="auto")
+
+    event = worker.events.get(timeout=2)
+
+    assert event == restoration_preview.RestorationFailed(
+        restoration_preview.t("segments_restore_ltx_unavailable"), generation
+    )
+    build.assert_not_called()
+    worker.close()
+    worker.join(timeout=2)
+
+
+def test_segment_editor_explains_that_ltx_has_no_preview() -> None:
+    editor = SegmentEditor.__new__(SegmentEditor)
+    editor._state = SimpleNamespace()
+    editor._restore_active = False
+    editor._is_gpu_busy = lambda: False
+    editor._get_settings = lambda: AppSettings(restoration_model="ltx")
+    editor._restore_toggle = MagicMock()
+    editor._show_preview_message = MagicMock()
+
+    editor._toggle_restoration_preview()
+
+    editor._restore_toggle.deselect.assert_called_once_with()
+    editor._show_preview_message.assert_called_once()
+    assert editor._restore_active is False

@@ -686,6 +686,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
     def _playback_settings(self) -> AppSettings:
         return replace(
             self._base_settings,
+            restoration_model="basicvsrpp",
             detection_model=self._model.get(),
             detection_score_threshold=float(self._threshold.get()),
             secondary_restoration=self._secondary.get_value(),

@@ -173,3 +173,12 @@ def test_amd_preflight_has_no_engine_requirements(
     assert result.requirements == ()
     assert result.missing == ()
     assert result.should_warn_first_run_slow is False
+
+
+def test_ltx_preflight_skips_standard_model_engines(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
+
+    settings = AppSettings(restoration_model="ltx", secondary_restoration="unet-4x")
+
+    assert {r.key for r in run_engine_preflight(settings).requirements} == {"rfdetr"}

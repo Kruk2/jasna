@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
 from jasna.gui.models import AppSettings
-from jasna.session_config import LTX_DEFAULT_SEED, SessionConfig
+from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession
 
 if TYPE_CHECKING:
@@ -28,7 +28,10 @@ def video_session_key(settings: AppSettings) -> tuple:
         settings.denoise_strength,
         settings.denoise_step,
         settings.secondary_restoration,
+        settings.restoration_model,
     )
+    if settings.restoration_model == "ltx":
+        key += (settings.ltx_fast,)
     if settings.secondary_restoration == "tvai":
         key += (
             settings.tvai_ffmpeg_path,
@@ -58,6 +61,8 @@ def video_session_config(
     from jasna.mosaic.detection_registry import coerce_detection_model_name, require_detection_model_weights
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
+    standard_model = settings.restoration_model == "basicvsrpp"
+    secondary_restoration = settings.secondary_restoration if standard_model else "none"
     return SessionConfig(
         device="cuda:0",
         fp16=bool(settings.fp16_mode),
@@ -68,26 +73,24 @@ def video_session_config(
         max_detection_gap=int(settings.max_detection_gap),
         min_detection_duration=int(settings.min_detection_duration),
         scene_detection=bool(settings.scene_detection),
-        restoration_model_name="basicvsrpp",
-        restoration_model_path=default_restoration_model_path("basicvsrpp"),
-        ltx_large_canvas=False,
-        ltx_seed=LTX_DEFAULT_SEED,
-        ltx_fast=False,
+        restoration_model_name=settings.restoration_model,
+        restoration_model_path=default_restoration_model_path(settings.restoration_model),
+        ltx_large_canvas=bool(settings.ltx_large_canvas),
+        ltx_seed=int(settings.ltx_seed),
+        ltx_fast=bool(settings.ltx_fast),
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),
         enable_crossfade=bool(settings.enable_crossfade),
-        denoise_strength=settings.denoise_strength,
+        denoise_strength=settings.denoise_strength if standard_model else "none",
         denoise_step=settings.denoise_step,
-        secondary_restoration=settings.secondary_restoration,
+        secondary_restoration=secondary_restoration,
         tvai_ffmpeg_path=settings.tvai_ffmpeg_path,
         tvai_model=settings.tvai_model,
         tvai_scale=int(settings.tvai_scale),
         tvai_args=settings.tvai_args,
         tvai_workers=int(settings.tvai_workers),
-        tvai_denoise=bool(
-            settings.tvai_denoise and settings.secondary_restoration == "tvai"
-        ),
+        tvai_denoise=bool(settings.tvai_denoise and secondary_restoration == "tvai"),
         rtx_scale=int(settings.rtx_scale),
         rtx_quality=settings.rtx_quality.lower(),
         rtx_denoise=settings.rtx_denoise.lower(),

@@ -77,6 +77,7 @@ JA = {
         "segments_preview_reset_view": "表示をリセット",
         "segments_preview_reset_view_hint": "移動とズームをリセットしてフレーム全体を表示します",
         "segments_restore_gpu_busy": "処理の実行中は使用できません",
+        "segments_restore_ltx_unavailable": "LTX ではまだプレビューできません",
         "segments_restore_loading_models": "復元モデルを読み込み中…",
         "segments_restore_restoring": "復元中…",
         "segments_restore_failed": "復元プレビューに失敗しました：{message}",
@@ -196,6 +197,16 @@ JA = {
 
         # Sections
         "section_basic": "基本設定",
+        "section_restoration_model": "修復モデル",
+        "model_basicvsrpp": "標準",
+        "model_basicvsrpp_description": "高速。ほとんどの動画に向いています。",
+        "model_ltx": "LTX",
+        "model_ltx_description": "最も精細。かなり遅く、高性能な NVIDIA GPU が必要です。",
+        "model_ltx_needs_nvidia": "NVIDIA GPU が必要です。",
+        "model_ltx_not_installed": "モデルがインストールされていません。",
+        "ltx_seed": "シード",
+        "ltx_fast": "高速モード",
+        "ltx_large_canvas": "大きなモザイクをより鮮明に",
         "section_advanced": "詳細設定",
         "section_secondary": "二次修復",
         "section_image_restoration": "画像修復（静止画）",
@@ -397,6 +408,10 @@ JA = {
         "tip_vr_mode": "サイドバイサイド VR180 の処理方法を設定します。\n\n自動は、高さが 1080 ピクセルを超える正確な 2:1 フレーム、信頼できるスタジオ名トークン、または互換性のある空間メタデータがある場合に有効になり、検出した各モザイク領域の復元用投影（raw／魚眼／グノモニック）をスタジオごとに振り分けます（不明なスタジオは raw）。SBS は同じ振り分けで両目を個別に処理し、SBS + 魚眼はすべての領域を魚眼で条件付けします。検出・トラッキング・マスク・合成は常にソース座標のままで、復元された差分のみを元へ再投影します。\n\n区間エディターは左目のみ表示しますが、スキャンと書き出しは両目を処理します。\nデフォルト：自動",
         "tip_fp16_mode": "半精度計算で VRAM 使用量を削減し、速度も向上することが多いです。最新の GPU では画質の劣化はほぼありません。\n\n推奨：RTX 20 シリーズ以降で ON。\nデフォルト：ON",
         "tip_compile_basicvsrpp": "修復モデルを TensorRT サブエンジンにコンパイルし、大幅に高速化します（約 2-3 倍）。\n初回コンパイルには 15～60 分かかります。他のアプリ（ブラウザ含む）をすべて閉じ、コンパイル中は PC を使用しないでください。\nエンジンはキャッシュされ、次回以降自動的に再利用されます。\n\nエンジン VRAM：約 1.9 GB（クリップ 60）、約 5.4 GB（クリップ 180）。\n処理時ピーク VRAM：約 7.6 GB（クリップ 60）、約 14.7 GB（クリップ 180）。\nコンパイルなし：約 6 GB（クリップ 60）、約 10.4 GB（クリップ 180）。\n\nVRAM 不足の場合は、この設定を無効にするかクリップサイズを下げてください。\n\n推奨：クリップサイズ 60-90 で ON。\nデフォルト：ON",
+        "tip_ltx_seed": "シードを変えると、同じ動画でも別の仕上がりになります。\n気に入ったシードを残せば同じ結果を再現できます。",
+        "tip_ltx_new_seed": "新しいランダムなシードを試す",
+        "tip_ltx_fast": "約 1.4 倍速くなりますが、細部はやや減ります。\nRTX 50 シリーズのみ。",
+        "tip_ltx_large_canvas": "大きなモザイクをより細かく修復しますが、その部分は約 3 倍遅くなります。\n10 GB 以上の空き VRAM が必要です。",
         "tip_denoise_strength": "修復された部分のノイズや粒子を低減します。高いほど滑らかになりますが、細部が失われることがあります。\n\nなし：ノイズ除去なし。低/中：まずこちらをお試しください。高：強力な平滑化。\nデフォルト：なし",
         "tip_denoise_step": "ノイズ除去を適用するタイミング：\n- 一次修復後：アップスケール（二次修復）前に適用。256x256 の解像度で処理。\n- 二次修復後：アップスケール後、最終出力の直前に適用。フル解像度で処理。\n\nデフォルト：一次修復後",
         "tip_secondary_restoration": "修復された領域を 256x256 から 1024 ピクセルに拡大するオプションの追加処理です。アップ時や 4K 動画で鮮明さが向上します。\n\nUNet 4x は支援者限定モデルです。TVAI よりかなり高速で高品質です。Jasna を有効化すると使えます。\nRTX Super Res は高速ですが品質はまずまずです。\nTopaz TVAI は別途購入とインストールが必要です。",
@@ -450,6 +465,7 @@ JA = {
         "error_cannot_start": "処理を開始できません:",
         "error_invalid_tvai": "無効な TVAI 設定",
         "error_post_export_command_required": "エクスポート後のカスタムコマンドが必要です",
+        "error_ltx_segments": "LTX は動画全体を処理します。セグメントを消去するか「標準」を選んでください：{files}",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "Topaz Video の ffmpeg.exe を選択",

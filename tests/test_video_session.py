@@ -110,3 +110,46 @@ def test_video_session_close_closes_restorers() -> None:
 
     session.restoration_pipeline.restorer.close.assert_called_once_with()
     session.restoration_pipeline.secondary_restorer.close.assert_called_once_with()
+
+
+def _config(settings: AppSettings):
+    with (
+        patch("jasna.engine_paths.model_weights_dir", return_value=Path("weights")),
+        patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda name: name),
+        patch("jasna.mosaic.detection_registry.require_detection_model_weights", return_value=Path("det.engine")),
+    ):
+        return video_session_config(settings, codec="hevc", encoder_settings={})
+
+
+def test_video_session_config_maps_ltx_settings() -> None:
+    config = _config(
+        replace(AppSettings(), restoration_model="ltx", ltx_seed=7, ltx_fast=True, ltx_large_canvas=True)
+    )
+
+    assert config.restoration_model_name == "ltx"
+    assert config.restoration_model_path == Path("weights") / "ltx-restore"
+    assert (config.ltx_seed, config.ltx_fast, config.ltx_large_canvas) == (7, True, True)
+
+
+def test_video_session_config_ignores_standard_only_extras_for_ltx() -> None:
+    settings = replace(
+        AppSettings(),
+        restoration_model="ltx",
+        secondary_restoration="tvai",
+        tvai_denoise=True,
+        denoise_strength="high",
+    )
+
+    config = _config(settings)
+
+    assert (config.secondary_restoration, config.tvai_denoise, config.denoise_strength) == ("none", False, "none")
+    standard = _config(replace(settings, restoration_model="basicvsrpp"))
+    assert (standard.secondary_restoration, standard.tvai_denoise, standard.denoise_strength) == ("tvai", True, "high")
+
+
+def test_video_session_key_tracks_model_and_ltx_variant() -> None:
+    ltx = replace(AppSettings(), restoration_model="ltx")
+
+    assert video_session_key(ltx) != video_session_key(AppSettings())
+    assert video_session_key(replace(ltx, ltx_fast=True)) != video_session_key(ltx)
+    assert video_session_key(replace(ltx, ltx_seed=1, ltx_large_canvas=True)) == video_session_key(ltx)

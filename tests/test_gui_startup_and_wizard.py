@@ -38,22 +38,31 @@ def test_evaluate_sysmem_only_failure_is_warning_not_required():
     assert required_failure is False  # but sysmem is warning-only, not blocking
 
 
-def _warm_up_with_gpu_check(monkeypatch, gpu_check_result) -> dict:
-    from jasna import os_utils
+def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, nvidia=True, major=8) -> tuple[dict, tuple]:
+    from jasna import accelerator, os_utils
 
     calls = {}
-    fake_torch = types.SimpleNamespace(zeros=lambda *a, **k: calls.setdefault("device", k.get("device")))
+    fake_torch = types.SimpleNamespace(
+        zeros=lambda *a, **k: calls.setdefault("device", k.get("device")),
+        cuda=types.SimpleNamespace(get_device_capability=lambda _index: (major, 0)),
+    )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: gpu_check_result)
+    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda: nvidia)
     from jasna.gui.app import _warm_up_cuda
 
-    _warm_up_cuda()
-    return calls
+    return calls, _warm_up_cuda()
 
 
 def test_warm_up_cuda_inits_context_when_gpu_supported(monkeypatch):
-    calls = _warm_up_with_gpu_check(monkeypatch, (True, "RTX 4090"))
+    calls, support = _warm_up_with_gpu_check(monkeypatch, (True, "RTX 4090"))
     assert calls["device"] == "cuda"
+    assert support == (True, False)
+
+
+@pytest.mark.parametrize(("nvidia", "major", "support"), [(True, 12, (True, True)), (False, 12, (False, False))])
+def test_warm_up_cuda_reports_ltx_gpu_support(monkeypatch, nvidia, major, support):
+    assert _warm_up_with_gpu_check(monkeypatch, (True, "GPU"), nvidia=nvidia, major=major)[1] == support
 
 
 @pytest.mark.parametrize(
@@ -61,5 +70,6 @@ def test_warm_up_cuda_inits_context_when_gpu_supported(monkeypatch):
     [(False, "no_cuda"), (False, ("arch_unsupported", "gfx1103"))],
 )
 def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_check_result):
-    calls = _warm_up_with_gpu_check(monkeypatch, gpu_check_result)
+    calls, support = _warm_up_with_gpu_check(monkeypatch, gpu_check_result)
     assert calls == {}
+    assert support == (False, False)

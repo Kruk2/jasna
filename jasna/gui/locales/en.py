@@ -77,6 +77,7 @@ EN = {
         "segments_preview_reset_view": "Reset view",
         "segments_preview_reset_view_hint": "Reset zoom and pan to show the full frame",
         "segments_restore_gpu_busy": "Unavailable while processing is running",
+        "segments_restore_ltx_unavailable": "Preview is not available with LTX yet",
         "segments_restore_loading_models": "Loading restoration models…",
         "segments_restore_restoring": "Restoring…",
         "segments_restore_failed": "Restoration preview failed: {message}",
@@ -196,6 +197,16 @@ EN = {
         
         # Sections
         "section_basic": "Basic Processing",
+        "section_restoration_model": "Restoration Model",
+        "model_basicvsrpp": "Standard",
+        "model_basicvsrpp_description": "Fast. Good for most videos.",
+        "model_ltx": "LTX",
+        "model_ltx_description": "Best detail. Much slower and needs a strong NVIDIA GPU.",
+        "model_ltx_needs_nvidia": "Needs an NVIDIA GPU.",
+        "model_ltx_not_installed": "Model not installed.",
+        "ltx_seed": "Seed",
+        "ltx_fast": "Fast mode",
+        "ltx_large_canvas": "Sharper large mosaics",
         "section_advanced": "Advanced Processing",
         "section_secondary": "Secondary Restoration",
         "section_image_restoration": "Image Restoration (still images)",
@@ -397,6 +408,10 @@ EN = {
         "tip_vr_mode": "Controls side-by-side VR180 processing.\n\nAuto enables it for exact 2:1 frames taller than 1080 pixels, trusted studio filename tokens, or compatible spatial metadata, and routes each detected mosaic region's restoration projection — raw, fisheye, or gnomonic — by studio (raw when the studio is unknown). SBS forces per-eye processing with the same routing; SBS + fisheye forces fisheye conditioning for every region. Detection, tracking, masks, and blending always stay in source coordinates, so only the restored delta is reprojected back.\n\nThe segment editor displays the left eye while scans and exports process both eyes.\nDefault: Auto",
         "tip_fp16_mode": "Uses half-precision math to reduce VRAM usage and often run faster. No visible quality loss on modern GPUs.\n\nRecommended: ON for RTX 20-series and newer.\nDefault: ON",
         "tip_compile_basicvsrpp": "Compiles the restoration model into TensorRT sub-engines for a big speed boost (~2-3x faster).\nFirst compilation takes 15-60 minutes. Close all other applications (including browsers) and avoid using the PC during compilation.\nEngines are cached and reused on subsequent runs.\n\nEngine VRAM: ~1.9 GB (clip 60), ~5.4 GB (clip 180).\nPeak VRAM during processing: ~7.6 GB (clip 60), ~14.7 GB (clip 180).\nWithout compilation: ~6 GB (clip 60), ~10.4 GB (clip 180).\n\nIf you run out of VRAM, disable this or lower clip size.\n\nRecommended: ON with clip size 60-90.\nDefault: ON",
+        "tip_ltx_seed": "Another seed gives another take on the same video.\nKeep a seed you like to get the same result again.",
+        "tip_ltx_new_seed": "Try a new random seed",
+        "tip_ltx_fast": "About 1.4x faster with slightly less detail.\nRTX 50-series only.",
+        "tip_ltx_large_canvas": "Restores big mosaics in more detail, but about 3x slower for them.\nNeeds at least 10 GB of free video memory.",
         "tip_denoise_strength": "Reduces noise and grain in restored areas. Higher = smoother but may lose fine detail.\n\nNone: no denoising. Low/Medium: good starting point. High: heavy smoothing.\nDefault: None",
         "tip_denoise_step": "When to apply denoising in the pipeline:\n- After Primary: before upscaling (secondary restoration). Denoises at 256x256.\n- After Secondary: after upscaling, right before final output. Denoises at full resolution.\n\nDefault: After Primary",
         "tip_secondary_restoration": "Optional second pass that upscales restored areas from 256x256 to 1024 pixels. Improves sharpness, especially for close-ups and 4K video.\n\nUNet 4x is a supporter-only model: much faster than TVAI and high quality. Activate Jasna to use it.\nRTX Super Res is a fast alternative with ok quality.\nTopaz TVAI requires a separate purchase and install.",
@@ -450,6 +465,7 @@ EN = {
         "error_cannot_start": "Cannot start processing:",
         "error_invalid_tvai": "Invalid TVAI configuration",
         "error_post_export_command_required": "Custom post-export command is required",
+        "error_ltx_segments": "LTX processes whole videos. Clear the segments or pick Standard: {files}",
 
         # Settings panel
         "dialog_select_tvai_ffmpeg": "Select Topaz Video ffmpeg.exe",
