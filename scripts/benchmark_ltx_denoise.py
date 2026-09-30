@@ -164,7 +164,7 @@ def main() -> None:
         "windows": args.windows,
         "steps": steps,
         "stg": stg,
-        "sage": T._sage_attention is not None,
+        "int8_attention": T._int8_attention is not None,
         "inductor": " ".join(args.inductor),
         "compile_s": round(compile_s, 1),
         "s_per_window": round(per_window, 2),
