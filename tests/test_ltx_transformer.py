@@ -64,11 +64,12 @@ def test_block_matches_across_token_chunking(monkeypatch):
     )
     x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
     context = torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16)
-    whole = T.block_forward(weights, x, cond, context, rope, heads=heads)
+    prompt = T.prompt_key_value(weights, cond, context, heads=heads)
+    whole = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
     monkeypatch.setattr(T, "CHUNK_ROWS", 5)
-    chunked = T.block_forward(weights, x, cond, context, rope, heads=heads)
+    chunked = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
     assert torch.equal(whole, chunked)
-    skipped = T.block_forward(weights, x, cond, context, rope, heads=heads, skip_self_attention=True)
+    skipped = T.block_forward(weights, x, cond, prompt, rope, heads=heads, skip_self_attention=True)
     assert not torch.equal(whole, skipped)
 
 

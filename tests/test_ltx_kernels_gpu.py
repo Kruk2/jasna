@@ -153,10 +153,31 @@ def test_block_forward_with_kernels_matches_the_torch_path(kernels, monkeypatch,
     )
     x = torch.randn(1, 64, dim, generator=generator).to("cuda", torch.bfloat16)
     context = torch.randn(1, 8, dim, generator=generator).to("cuda", torch.bfloat16)
-    with_kernels = T.block_forward(weights, x, cond, context, rope, heads=heads)
+    with_kernels = T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
     monkeypatch.setattr(T, "_quant_kernels", None)
-    expected = T.block_forward(weights, x, cond, context, rope, heads=heads)
+    expected = T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
     assert (with_kernels.float() - expected.float()).norm() / expected.float().norm() < 1e-2
+
+
+def test_one_prompt_pair_serves_every_window_and_the_perturbed_pass(kernels):
+    generator = torch.Generator().manual_seed(0)
+    dim, heads = 512, 16
+    weights = _quantized_block(dim, heads, False, generator)
+    rope = T.build_rope(2, 4, 4, dim=dim, heads=heads, device=torch.device("cuda"))
+    cond = T.StepConditioning(
+        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
+        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16, device="cuda"),
+        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
+    )
+    context = torch.randn(1, 8, dim, generator=generator).to("cuda", torch.bfloat16)
+    windows = [torch.randn(1, 64, dim, generator=generator).to("cuda", torch.bfloat16) for _ in range(2)]
+    shared = T.prompt_key_value(weights, cond, context, heads=heads)
+    for x in windows:
+        for skip in (False, True):
+            own = T.prompt_key_value(weights, cond, context, heads=heads)
+            reused = T.block_forward(weights, x, cond, shared, rope, heads=heads, skip_self_attention=skip)
+            fresh = T.block_forward(weights, x, cond, own, rope, heads=heads, skip_self_attention=skip)
+            assert torch.equal(reused, fresh)
 
 
 def test_kernels_reject_widths_they_would_compute_wrong(kernels):

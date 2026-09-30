@@ -90,6 +90,7 @@ class LtxTransformer:
         logger.info("LTX self-attention: %s", "INT8 (comfy-kitchen)" if T.enable_int8_attention(device) else "SDPA")
         logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
         self._block_forward = compiled_block_forward()
+        self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
 
     def _resident_blocks(self, blocks: list[dict[str, torch.Tensor]]) -> int:
         sizes = [sum(t.numel() * t.element_size() for t in b.values()) for b in blocks]
@@ -165,13 +166,14 @@ class LtxTransformer:
         perturbed: list[torch.Tensor | None] = [None] * len(xs)
         for index in range(T.NUM_BLOCKS):
             weights = self.blocks.acquire(index)
+            prompt = self._prompt_key_value(weights, cond, self.context)
             for j in range(len(xs)):
                 if self.stg_scale and index >= STG_BLOCK:
                     source = xs[j] if index == STG_BLOCK else perturbed[j]
                     perturbed[j] = self._block_forward(
-                        weights, source, cond, self.context, rope, skip_self_attention=index == STG_BLOCK
+                        weights, source, cond, prompt, rope, skip_self_attention=index == STG_BLOCK
                     )
-                xs[j] = self._block_forward(weights, xs[j], cond, self.context, rope)
+                xs[j] = self._block_forward(weights, xs[j], cond, prompt, rope)
             self.blocks.release(index)
         out = []
         for lat, x, xp in zip(latents, xs, perturbed):

@@ -47,7 +47,8 @@ rope = T.build_rope(4, 8, 8, dim=dim, heads=heads, device=device)
 x = rand(1, 2 * 4 * 8 * 8, dim, scale=1.0)
 context = rand(1, 64, dim, scale=1.0)
 
-out = compiled_block_forward()(weights, x, cond, context, rope, heads=heads)
+prompt = T.prompt_key_value(weights, cond, context, heads=heads)
+out = compiled_block_forward()(weights, x, cond, prompt, rope, heads=heads)
 torch.save(out.cpu(), sys.argv[1])
 print(counters["inductor"]["fxgraph_cache_hit"])
 """
