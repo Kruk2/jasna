@@ -159,6 +159,24 @@ def test_block_forward_with_kernels_matches_the_torch_path(kernels, monkeypatch,
     assert (with_kernels.float() - expected.float()).norm() / expected.float().norm() < 1e-2
 
 
+@needs_blackwell
+def test_shared_nvfp4_quantization_matches_quantizing_per_linear(kernels, monkeypatch):
+    generator = torch.Generator().manual_seed(0)
+    dim, heads = 512, 16
+    weights = _quantized_block(dim, heads, True, generator)
+    rope = T.build_rope(2, 4, 4, dim=dim, heads=heads, device=torch.device("cuda"))
+    cond = T.StepConditioning(
+        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
+        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16, device="cuda"),
+        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to("cuda", torch.bfloat16),
+    )
+    x = torch.randn(1, 64, dim, generator=generator).to("cuda", torch.bfloat16)
+    context = torch.randn(1, 8, dim, generator=generator).to("cuda", torch.bfloat16)
+    shared = T.block_forward(weights, x, cond, context, rope, heads=heads)
+    monkeypatch.setattr(T, "_shared_fp4_input", lambda w, name, x: x)
+    assert torch.equal(shared, T.block_forward(weights, x, cond, context, rope, heads=heads))
+
+
 def test_kernels_reject_widths_they_would_compute_wrong(kernels):
     x = torch.zeros(8, 384, dtype=torch.bfloat16, device="cuda")
     with pytest.raises(ValueError):
