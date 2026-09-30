@@ -1,5 +1,6 @@
 import importlib
 import logging
+import os
 import sys
 from unittest.mock import patch
 
@@ -15,6 +16,12 @@ def test_frozen_config_scan_skips_source(caplog, monkeypatch):
 
     monkeypatch.setattr(_frozen, "_patched", False)
     monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
+    monkeypatch.setattr(_frozen, "use_prebuilt_triton_modules", lambda directory: None)
+    monkeypatch.setenv("TRITON_BACKENDS_IN_TREE", "1")
+    import torch._inductor.config as inductor_config
+    from torch._inductor import codecache
+    monkeypatch.setattr(inductor_config, "compile_threads", inductor_config.compile_threads)
+    monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
     with (
         patch.object(torch.jit, "interface"),
         patch.object(
@@ -78,3 +85,28 @@ def test_gui_run_gui_patches_frozen_torch():
             with pytest.raises(_Stop):
                 gui_app.run_gui()
     spy.assert_called()
+
+
+def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypatch, tmp_path):
+    import torch._inductor.config as inductor_config
+    import torch.jit
+    from jasna import _frozen
+
+    triton = pytest.importorskip("triton")
+    monkeypatch.setattr(_frozen, "_patched", False)
+    monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "jasna"))
+    monkeypatch.delenv("TRITON_BACKENDS_IN_TREE", raising=False)
+    monkeypatch.setattr(inductor_config, "compile_threads", inductor_config.compile_threads)
+    monkeypatch.setattr(triton.knobs.build, "impl", None)
+    from torch._inductor import codecache
+    monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
+    with patch.object(torch.jit, "interface"):
+        _frozen.patch_frozen_torch()
+
+    assert inductor_config.compile_threads == 1
+    assert codecache.torch_key() != b"source"
+    assert os.environ["TRITON_BACKENDS_IN_TREE"] == "1"
+    module = triton.runtime.build._build("cuda_utils", "src.c", str(tmp_path), [], [], [], [])
+    assert module.startswith(str(tmp_path / "triton_prebuilt" / "cuda_utils"))
