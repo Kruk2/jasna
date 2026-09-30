@@ -5,6 +5,7 @@ import torch
 from safetensors.torch import save_file
 
 from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder
+from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.loader import decoder_kwargs, decoder_state_dict, encoder_kwargs, encoder_state_dict
 from jasna.models.ltx_vae.tiling import DimensionSizeConfig, TileSizeConfig, scale_by_masks_1d
@@ -225,3 +226,48 @@ def test_tiny_decoder_multi_tile_decode_is_seeded_and_shaped():
     assert torch.isfinite(pixels).all()
     assert torch.equal(pixels, torch.cat(decode(1), dim=2))
     assert not torch.equal(pixels, torch.cat(decode(2), dim=2))
+
+
+def test_modulating_mlp_chunks_match_one_unchunked_pass(monkeypatch):
+    monkeypatch.setattr(T, "SWIGLU_TILE_TOKENS", 7)
+    torch.manual_seed(0)
+    mlp = T.SwiGLU(16, 32)
+    norm = torch.nn.RMSNorm(16)
+    x = torch.randn(1, 2, 3, 4, 16)
+    scale = torch.randn(1, 1, 1, 1, 16)
+    shift = torch.randn(1, 1, 1, 1, 16)
+
+    with torch.inference_mode():
+        y = torch.nn.functional.rms_norm(x, (16,), norm.weight, 1e-6) * (1 + scale) + shift
+        expected = x + mlp.w_down(torch.nn.functional.silu(mlp.w_gate(y)) * mlp.w_up(y))
+        actual = T.residual_modulating_mlp(x.clone(), mlp, norm, scale, shift)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_decoder_blocks_stay_eager_without_triton(monkeypatch):
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
+    monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
+    monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
+
+    assert T.compile_diffusion_blocks() is False
+    assert T._slab_attention is T._attn_on_w_slab
+
+
+def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
+    import importlib.util
+
+    if importlib.util.find_spec("triton") is None:
+        pytest.skip("needs Triton")
+    monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
+    monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
+    calls = []
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append((fn, kwargs)) or (lambda *a: fn(*a)))
+
+    assert T.compile_diffusion_blocks() is True
+    assert T.compile_diffusion_blocks() is True
+    assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu]
+    assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)

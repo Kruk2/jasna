@@ -1,14 +1,13 @@
 """Neighborhood-attention transformer blocks of the diffusion VAE decoder, ``chunked_eager`` path only.
 
 Ported from ``ltx_core/model/video_vae/transformer/`` (layers, qkv, rope_math, det_attn_rope,
-attention, swiglu, blocks, chunked/*): NATTEN neighborhood attention when installed, else eager
-tiled SDPA (same window semantics), torch SwiGLU,
+attention, swiglu, blocks, chunked/*): comfy-kitchen's fused neighborhood attention when installed,
+else eager tiled SDPA (same window semantics), torch SwiGLU,
 W-chunked diffusion residual with halos and deferred stage-4 context inject.
 """
 
 from __future__ import annotations
 
-import functools
 import importlib.util
 import math
 
@@ -18,10 +17,12 @@ import torch.nn.functional as F
 from torch import nn
 
 from jasna.models.ltx_vae.eager_na import na3d
+from jasna.tensor_utils import compile_static
 
 DET_ROPE_NUM_TILES = 4
 DIFFUSION_W_CHUNKS = 4
 SWIGLU_TILE_TOKENS = 16_384
+DECODER_COMPILE_MODE = "default"
 _NORM_EPS = 1e-6
 
 
@@ -135,27 +136,30 @@ class QKVProjections(nn.Module):
         return self.to_q(x), self.to_k(x), self.to_v(x)
 
 
-@functools.cache
-def _fused_na3d():
-    """NATTEN's fused ``na3d`` when installed, else None."""
-    if importlib.util.find_spec("natten") is None:
-        return None
-    import natten
+_fused_na3d = None
 
-    return natten.na3d
+
+def enable_fused_attention() -> bool:
+    """Run neighborhood attention on CUDA through comfy-kitchen's fused ``na3d`` when it is
+    installed. Returns whether it is in use."""
+    global _fused_na3d
+    if _fused_na3d is None and importlib.util.find_spec("comfy_kitchen") is not None:
+        import comfy_kitchen
+
+        _fused_na3d = comfy_kitchen.na3d
+    return _fused_na3d is not None
 
 
 def neighborhood_attention(
     attn: NeighborhoodAttention3D, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
 ) -> torch.Tensor:
-    """NATTEN's fused kernel on CUDA when installed, else the pure-torch ``na3d``
+    """comfy-kitchen's fused kernel on CUDA once enabled, else the pure-torch ``na3d``
     (same window semantics). Q is already scaled."""
     if q.dtype != v.dtype or k.dtype != v.dtype:
         q = q.to(dtype=v.dtype)
         k = k.to(dtype=v.dtype)
-    fused = _fused_na3d()
-    if fused is not None and q.is_cuda:
-        return fused(q, k, v, kernel_size=attn.kernel_size, scale=1.0)
+    if _fused_na3d is not None and q.is_cuda:
+        return _fused_na3d(q, k, v, list(attn.kernel_size), scale=1.0)
     return na3d(q, k, v, kernel_size=attn.kernel_size)
 
 
@@ -244,6 +248,20 @@ def swiglu_token_chunked(x: torch.Tensor, mlp: SwiGLU) -> torch.Tensor:
     return out_flat.view(*leading, dim)
 
 
+def modulated_swiglu(
+    xc: torch.Tensor,
+    norm_weight: torch.Tensor,
+    scale: torch.Tensor,
+    shift: torch.Tensor,
+    w_gate: torch.Tensor,
+    w_up: torch.Tensor,
+    w_down: torch.Tensor,
+) -> torch.Tensor:
+    """``swiglu(modulate(rms_norm(xc)))`` of one token chunk."""
+    y = F.rms_norm(xc, (xc.shape[-1],), norm_weight, _NORM_EPS) * (1.0 + scale) + shift
+    return F.linear(F.silu(F.linear(y, w_gate)) * F.linear(y, w_up), w_down)
+
+
 def residual_modulating_mlp(
     x: torch.Tensor, mlp: SwiGLU, norm: nn.RMSNorm, scale: torch.Tensor, shift: torch.Tensor
 ) -> torch.Tensor:
@@ -252,22 +270,12 @@ def residual_modulating_mlp(
         x = x.contiguous()
     dim = x.shape[-1]
     x_flat = x.reshape(-1, dim)
-    n_tok = x_flat.shape[0]
     s = scale.reshape(-1, dim)
     sh = shift.reshape(-1, dim)
-    max_chunk = min(n_tok, SWIGLU_TILE_TOKENS)
-    workspace = torch.empty((max_chunk, mlp.w_gate.weight.shape[0]), device=x.device, dtype=x.dtype)
-    y_buf = torch.empty((max_chunk, dim), device=x.device, dtype=x.dtype)
-    out_buf = torch.empty((max_chunk, dim), device=x.device, dtype=x.dtype)
-    for start in range(0, n_tok, SWIGLU_TILE_TOKENS):
-        end = min(n_tok, start + SWIGLU_TILE_TOKENS)
-        n = end - start
-        xc = x_flat[start:end]
-        y = y_buf[:n]
-        y.copy_(F.rms_norm(xc, (dim,), norm.weight, _NORM_EPS))
-        y.mul_(1.0 + s).add_(sh)
-        _swiglu_into(y, mlp, workspace[:n], out_buf[:n])
-        xc.add_(out_buf[:n])
+    chunk_mlp = _mlp_chunk if x.is_cuda else modulated_swiglu
+    for start in range(0, x_flat.shape[0], SWIGLU_TILE_TOKENS):
+        xc = x_flat[start : start + SWIGLU_TILE_TOKENS]
+        xc.add_(chunk_mlp(xc, norm.weight, s, sh, mlp.w_gate.weight, mlp.w_up.weight, mlp.w_down.weight))
     return x
 
 
@@ -332,6 +340,7 @@ def w_chunked_attention_residual(
     chunk_w = (w + w_chunks - 1) // w_chunks
     extent = chunk_w + 2 * halo
     left_halo: torch.Tensor | None = None
+    slab_attention = _slab_attention if x.is_cuda else _attn_on_w_slab
 
     for i in range(w_chunks):
         core_start = i * chunk_w
@@ -364,10 +373,25 @@ def w_chunked_attention_residual(
             left_halo = x[:, :, :, core_end - take : core_end, :].clone()
 
         w_pos = torch.arange(extent, device=x.device, dtype=torch.float32) + (core_start - halo)
-        out = _attn_on_w_slab(attn, norm, buf, w_pos, scale, shift)
+        out = slab_attention(attn, norm, buf, w_pos, scale, shift)
         x[:, :, :, core_start:core_end, :].add_(out[:, :, :, halo : halo + core_len, :])
 
     return x
+
+
+_slab_attention = _attn_on_w_slab
+_mlp_chunk = modulated_swiglu
+
+
+def compile_diffusion_blocks() -> bool:
+    """Compile the stage-5 attention slab and MLP chunk with static shapes (one graph per
+    shape, shared by all blocks) when Triton is available; CUDA tensors use them from then on.
+    Returns whether they are compiled."""
+    global _slab_attention, _mlp_chunk
+    if _slab_attention is _attn_on_w_slab:
+        _slab_attention = compile_static(_attn_on_w_slab, mode=DECODER_COMPILE_MODE)
+        _mlp_chunk = compile_static(modulated_swiglu, mode=DECODER_COMPILE_MODE)
+    return _slab_attention is not _attn_on_w_slab
 
 
 def _upsample_then_ctx(

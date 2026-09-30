@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import TypeVar
@@ -12,6 +13,7 @@ from torch import nn
 
 from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
+from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_attention
 from jasna.models.ltx_vae.video_encoder import VideoEncoder
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"
@@ -21,6 +23,8 @@ _QKV_LEAVES = ("weight", "bias")
 _UNUSED_DECODER_KEYS = frozenset({"type_emb"})
 
 _Model = TypeVar("_Model", bound=nn.Module)
+
+logger = logging.getLogger(__name__)
 
 
 def read_vae_config(vae_path: Path) -> dict:
@@ -147,6 +151,11 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
     if unknown:
         raise KeyError(f"{tuned_decoder_path}: {len(unknown)} tensors not in the decoder, e.g. {unknown[:3]}")
     decoder.load_state_dict({k: v.to(own[k].dtype) for k, v in tuned.items()}, strict=False)
+    logger.info(
+        "LTX VAE decoder: %s neighborhood attention, %s blocks",
+        "comfy-kitchen" if enable_fused_attention() else "torch",
+        "compiled" if compile_diffusion_blocks() else "eager",
+    )
     return decoder
 
 

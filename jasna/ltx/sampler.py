@@ -10,7 +10,6 @@ reuses the conditional pass's hidden state up to that block (skipped at scale 0)
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
 from collections.abc import Callable, Sequence
@@ -22,6 +21,7 @@ from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore
 from jasna.ltx.model_files import open_tensors
 from jasna.ltx.plan import FUSION_RAMP, LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENTS
+from jasna.tensor_utils import compile_static
 
 logger = logging.getLogger(__name__)
 
@@ -189,11 +189,7 @@ def compiled_block_forward():
     are autotuned on the first compile and the picks kept in the compile cache
     (``engine_paths.configure_torch_compile_cache``), so later runs reuse them and a seed
     keeps its pixels. No CUDA graphs: every block passes its own weight tensors."""
-    if importlib.util.find_spec("triton") is None:
-        return T.block_forward
-    torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
-    torch._dynamo.config.accumulated_cache_size_limit = max(torch._dynamo.config.accumulated_cache_size_limit, 1024)
-    return torch.compile(T.block_forward, dynamic=False, mode="max-autotune-no-cudagraphs")
+    return compile_static(T.block_forward, mode="max-autotune-no-cudagraphs")
 
 
 def _euler(sample: torch.Tensor, denoised: torch.Tensor, sigmas: torch.Tensor, step: int) -> torch.Tensor:
