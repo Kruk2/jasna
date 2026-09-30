@@ -118,6 +118,20 @@ def polygon_mask(polygons: Sequence[Polygon], shape: tuple[int, int], offset: tu
     return torch.from_numpy(mask).to(device) > 0
 
 
+def masked_median(difference: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Per-channel median of a whole-valued ``[C, h, w]`` difference in -255..255 over the bool
+    ``[h, w]`` mask, the mean of the two central values for an even count (as
+    ``torch.quantile(q=0.5)``), 0 for an empty mask; a histogram, so no host sync."""
+    channels = difference.shape[0]
+    channel_offset = torch.arange(channels, device=difference.device)[:, None, None] * 511.0
+    values = torch.where(mask, difference + 255.0 + channel_offset, -1.0)
+    counts = torch.histc(values, bins=channels * 511, min=-0.5, max=channels * 511 - 0.5)
+    cumulative = counts.view(channels, 511).long().cumsum(1)
+    count = cumulative[:, -1:]
+    central = torch.searchsorted(cumulative, torch.cat([(count - 1) // 2, count // 2], dim=1), right=True)
+    return torch.where(count[:, 0] > 0, central.sum(1) * 0.5 - 255.0, 0.0)
+
+
 @dataclass(frozen=True)
 class Candidate:
     """One window's restored canvas for a frame, with its crop, crossfade weight and the
@@ -141,26 +155,37 @@ def composite_frame(source: torch.Tensor, candidates: Sequence[Candidate], *, fe
     y3 = min(max(c.crop.crop_box[3] for c in live) + reach, height)
     shape = (y3 - y0, x3 - x0)
     device = source.device
-    rois = [polygon_mask(c.polygons, shape, (x0, y0), device) for c in live]
-    union = torch.stack(rois).any(dim=0)
-    outside = feather_alpha(union, feather) <= 0.0
+    tracks: list[Sequence[Polygon]] = []
+    for candidate in live:
+        if candidate.polygons not in tracks:
+            tracks.append(candidate.polygons)
+    rois = [polygon_mask(polygons, shape, (x0, y0), device) for polygons in tracks]
+    feathered = [feather_alpha(roi, feather) for roi in rois]
+    if len(rois) == 1:
+        union, union_feathered = rois[0], feathered[0]
+    else:
+        union = torch.stack(rois).any(dim=0)
+        union_feathered = feather_alpha(union, feather)
+    outside = union_feathered <= 0.0
     region = source[:, y0:y3, x0:x3].float()
     accumulator = torch.zeros_like(region)
     total = torch.zeros(shape, dtype=torch.float32, device=device)
-    for candidate, roi in zip(live, rois):
+    for candidate in live:
+        track = tracks.index(candidate.polygons)
+        roi = rois[track]
         x1, y1, x2, y2 = candidate.crop.crop_box
         x1, y1, x2, y2 = x1 - x0, y1 - y0, x2 - x0, y2 - y0
         ramp = crop_edge_ramp((x1, y1, x2, y2), shape, feather, device)
         covered = ramp > 0.0
+        restored_crop = canvas_to_source(candidate.canvas, candidate.crop)
         restored = region.clone()
-        restored[:, y1:y2, x1:x2] = canvas_to_source(candidate.canvas, candidate.crop)
+        restored[:, y1:y2, x1:x2] = restored_crop
         edge = torch.where(roi, covered.float(), ramp)
-        alpha = feather_alpha(roi, feather) * edge * candidate.weight
+        alpha = feathered[track] * edge * candidate.weight
         alpha = alpha * (roi | ~union).float()
-        ring = covered & outside
-        if ring.any():
-            offset = torch.quantile((region - restored)[:, ring], 0.5, dim=1) * COLOUR_MATCH_STRENGTH
-            restored = restored + offset[:, None, None]
+        ring = (covered & outside)[y1:y2, x1:x2]
+        offset = masked_median(region[:, y1:y2, x1:x2] - restored_crop, ring) * COLOUR_MATCH_STRENGTH
+        restored = restored + offset[:, None, None]
         accumulator += restored * alpha
         total += alpha
     over = total > 1.0
