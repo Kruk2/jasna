@@ -176,6 +176,15 @@ $P scripts/benchmark_ltx_denoise.py --inductor force_fuse_int_mm_with_mul=True -
 It reports seconds per window and per window-step (the median of `--repeats`),
 the compile time and the peak VRAM.
 
+The DiffVAE decode of one window (compose pass) has its own script too; variants
+swap parts of the shipped path and report the pixel difference to the first one:
+
+```bash
+$P scripts/benchmark_ltx_decode.py --canvas 768 --budget-gib 24   # whole-video tile budget
+$P scripts/benchmark_ltx_decode.py --variants shipped,natten,eager --model-dir model_weights/ltx-restore
+$P scripts/benchmark_ltx_decode.py --split                        # time per decoder stage
+```
+
 Write results to `benchmarks/<date>_<topic>.{csv,md}` and keep old CSVs intact —
 the README tables are a summary that drops releases where nothing moved, so the
 CSVs are the only full record. `scripts/benchmark_releases.py` compares frozen
