@@ -349,29 +349,33 @@ def enable_quant_kernels(device: torch.device) -> bool:
     return _quant_kernels is not None
 
 
-_sage_attention = None
+_int8_attention = None
 
 
-def enable_sage_attention() -> bool:
-    """Route video self-attention through SageAttention 2 (an opaque op, so it compiles as
-    one call) when it is installed. Returns whether it is in use."""
-    global _sage_attention
-    if _sage_attention is None and importlib.util.find_spec("sageattention") is not None:
-        from sageattention import sageattn
+def enable_int8_attention(device: torch.device) -> bool:
+    """Route video self-attention through comfy-kitchen's INT8 attention (an opaque op, so it
+    compiles as one call) when it is installed and supports ``device``. Returns whether it is
+    in use."""
+    global _int8_attention
+    if _int8_attention is None and importlib.util.find_spec("comfy_kitchen") is not None:
+        import comfy_kitchen
 
-        @torch.library.custom_op("jasna::sage_attention", mutates_args=())
-        def sage_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-            return sageattn(q, k, v, tensor_layout="HND", is_causal=False).contiguous()
+        if not comfy_kitchen.int8_attention_is_available(device):
+            return False
 
-        sage_attention.register_fake(lambda q, k, v: torch.empty_like(q, memory_format=torch.contiguous_format))
-        _sage_attention = sage_attention
-    return _sage_attention is not None
+        @torch.library.custom_op("jasna::int8_attention", mutates_args=())
+        def int8_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+            return comfy_kitchen.int8_attention(q, k, v).contiguous()
+
+        int8_attention.register_fake(lambda q, k, v: torch.empty_like(q, memory_format=torch.contiguous_format))
+        _int8_attention = int8_attention
+    return _int8_attention is not None
 
 
 def self_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Video self-attention ``[1, heads, tokens, d]``: SageAttention 2 once enabled."""
-    if _sage_attention is not None and q.is_cuda:
-        return _sage_attention(q, k, v)
+    """Video self-attention ``[1, heads, tokens, d]``: INT8 attention once enabled."""
+    if _int8_attention is not None and q.is_cuda:
+        return _int8_attention(q, k, v)
     with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
         return F.scaled_dot_product_attention(q, k, v)
 
