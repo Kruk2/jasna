@@ -56,7 +56,8 @@ def _views(buffer: torch.Tensor, layout: dict[str, _Entry]) -> dict[str, torch.T
 
 
 class BlockStore:
-    """Hands out each block's weights on ``device`` in a fixed cyclic block order."""
+    """Hands out each block's weights on ``device`` in a fixed cyclic block order. Empties each
+    dict of ``blocks`` once packed, so loading never holds the weights twice in RAM."""
 
     def __init__(self, blocks: list[dict[str, torch.Tensor]], device: torch.device, *, resident: int) -> None:
         self.device = device
@@ -78,6 +79,7 @@ class BlockStore:
                 _pack(tensors, layout, buffer)
                 self._host.append(buffer)
                 slot_bytes = max(slot_bytes, nbytes)
+            tensors.clear()
         streamed = self.count - self.resident
         self._slots = [torch.empty(slot_bytes, dtype=torch.uint8, device=device) for _ in range(min(2, streamed))]
         self._slot_block = [-1] * len(self._slots)
