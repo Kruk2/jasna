@@ -3,7 +3,9 @@ import pytest
 
 from jasna.ltx.camera import PLAN_CANVAS, ZOOM_PER_WINDOW, letterbox, track_camera, zoom_crop_sides
 from jasna.ltx.plan import (
+    BLEND_FRAMES,
     LARGE_CANVAS,
+    LEAD_IN_FRAMES,
     LEFT_SHARED_LATENTS,
     RIGHT_SHARED_LATENTS,
     WINDOW_HOP,
@@ -12,10 +14,14 @@ from jasna.ltx.plan import (
     Track,
     build_tracks,
     crossfade_weights,
+    filled_frames,
     group_regions,
+    handover_leads,
+    handover_presence,
     merge_continuations,
     plan_video,
-    track_polygons,
+    rejoin_across_cover,
+    restart_cameras,
     window_starts,
 )
 
@@ -52,18 +58,87 @@ def test_merge_continuations_folds_a_split_mosaic():
     parent = Track(0, {i: _group(100, 100, 200) for i in range(10)})
     child = Track(1, {i: _group(150, 150, 60) for i in range(5, 15)})
     elsewhere = Track(2, {i: _group(900, 900, 60) for i in range(5, 15)})
-    merged = merge_continuations([parent, child, elsewhere], cuts=set())
+    merged = merge_continuations([parent, child, elsewhere], cuts=set(), frame_w=1920, frame_h=1080)
     assert [t.track_id for t in merged] == [0, 2]
     assert merged[0].first == 0 and merged[0].last == 14
     assert len(merged[0].frames[6].polygons) == 2
-    assert len(merge_continuations([parent, child], cuts={5})) == 2
+    assert len(merge_continuations([parent, child], cuts={5}, frame_w=1920, frame_h=1080)) == 2
 
 
-def test_track_polygons_interpolate_gaps():
+def test_merge_continuations_keeps_the_gap_fill_of_both_tracks():
+    parent = Track(0, {i: _group(100, 100, 200) for i in range(10) if i != 7})
+    child = Track(1, {i: _group(150, 150, 60) for i in range(5, 15) if i != 8})
+    merged = merge_continuations([parent, child], cuts=set(), frame_w=1920, frame_h=1080)
+    assert len(merged) == 1
+    assert [len(merged[0].frames[i].polygons) for i in (6, 7, 8, 9)] == [2, 2, 2, 2]
+    assert merged[0].frames[7].box == (100, 100, 300, 300)
+
+
+def _split_video() -> list[list[Region]]:
+    """A 900 px mosaic that splits at frame 100 into a piece leaving by frame 129 and a
+    100 px piece staying until frame 499."""
+    frames = [[_square(100, 90, 900)] for _ in range(100)]
+    frames += [[_square(100, 500, 400), _square(700, 150, 100)] for _ in range(30)]
+    return frames + [[_square(700, 150, 100)] for _ in range(370)]
+
+
+def test_a_lasting_split_gets_its_own_camera_with_a_handover():
+    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, large_canvas=False)
+    assert [(p.start, p.stop) for p in plans] == [(0, 130), (100 - LEAD_IN_FRAMES, 500)]
+    piece = plans[1]
+    assert len(piece.presence) == len(piece.polygons) == piece.stop - piece.start
+    blend = piece.presence[LEAD_IN_FRAMES - BLEND_FRAMES : LEAD_IN_FRAMES]
+    assert set(piece.presence[: LEAD_IN_FRAMES - BLEND_FRAMES]) == {0.0}
+    assert 0.0 < blend[0] and all(a < b for a, b in zip(blend, blend[1:])) and blend[-1] < 1.0
+    assert set(piece.presence[LEAD_IN_FRAMES:]) == {1.0}
+    assert piece.polygons[0] == piece.polygons[LEAD_IN_FRAMES]
+    window = piece.windows[1]
+    assert window.crops[200 - window.start].side <= PLAN_CANVAS
+
+
+def test_handover_leads_stop_at_cuts_and_hand_back_to_a_covering_track():
+    parent = Track(0, {i: _group(100, 100, 800) for i in range(300)})
+    child = Track(1, {i: _group(150, 150, 100) for i in range(100, 200)})
+    assert handover_leads([parent, child], set(), 300) == [(0, 0), (LEAD_IN_FRAMES, BLEND_FRAMES)]
+    assert handover_leads([parent, child], {90}, 300)[1] == (10, BLEND_FRAMES)
+    assert handover_leads([parent, child], {200}, 300)[1] == (LEAD_IN_FRAMES, 0)
+    assert handover_leads([parent, child], {202}, 300)[1] == (LEAD_IN_FRAMES, 2)
+
+
+def test_handover_presence_ramps_in_and_out():
+    presence = handover_presence(5, LEAD_IN_FRAMES, BLEND_FRAMES)
+    ramp_in = presence[LEAD_IN_FRAMES - BLEND_FRAMES : LEAD_IN_FRAMES]
+    ramp_out = presence[LEAD_IN_FRAMES + 5 :]
+    assert len(presence) == LEAD_IN_FRAMES + 5 + BLEND_FRAMES
+    assert presence[LEAD_IN_FRAMES : LEAD_IN_FRAMES + 5] == (1.0,) * 5
+    assert ramp_in == pytest.approx(tuple(1.0 - v for v in ramp_out))
+    assert handover_presence(3, 0, 0) == (1.0, 1.0, 1.0)
+
+
+def test_rejoin_across_cover_bridges_a_brief_join_only_while_covered():
+    joined = Track(0, {i: _group(100, 100, 800) for i in range(300)})
+    before = Track(1, {i: _group(150, 150, 200) for i in range(100)})
+    after = Track(2, {i: _group(150, 150, 200) for i in range(104, 300)})
+    rejoined = rejoin_across_cover([joined, before, after], set())
+    assert [(t.first, t.last) for t in rejoined] == [(0, 299), (0, 299)]
+    assert len(rejoined[1].frames) == 300
+    short = Track(0, {i: _group(100, 100, 800) for i in range(102)})
+    assert len(rejoin_across_cover([short, before, after], set())) == 3
+    assert len(rejoin_across_cover([joined, before, after], {102})) == 3
+
+
+def test_restart_cameras_cut_at_a_lasting_size_change_only():
+    shrinking = Track(0, {i: _group(100, 100, 800 if i < 200 else 100) for i in range(600)})
+    assert [(t.first, t.last) for t in restart_cameras([shrinking], frame_w=1920, frame_h=1080)] == [(0, 199), (200, 599)]
+    spiking = Track(0, {i: _group(100, 100, 800 if 300 <= i < 303 else 100) for i in range(600)})
+    assert len(restart_cameras([spiking], frame_w=1920, frame_h=1080)) == 1
+
+
+def test_filled_frames_interpolate_gaps():
     track = Track(0, {0: _group(0, 0, 100), 4: _group(40, 0, 100)})
-    polygons = track_polygons(track)
-    assert len(polygons) == 5
-    xs = [p[0][0][0] for p in polygons]
+    frames = filled_frames(track)
+    assert list(frames) == [0, 1, 2, 3, 4]
+    xs = [group.polygons[0][0][0] for group in frames.values()]
     assert xs == pytest.approx([0, 10, 20, 30, 40])
 
 

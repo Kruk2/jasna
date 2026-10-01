@@ -519,7 +519,9 @@ class _SegmentComposer:
                     canvas=self._decoded[window.index][local],
                     crop=window.crops[local],
                     weight=float(self._weights[window.index][local]),
+                    track=track.track_id,
                     polygons=track.polygons[frame_idx - track.start],
+                    presence=track.presence[frame_idx - track.start],
                 )
             )
         self._frame_idx += 1
