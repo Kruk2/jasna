@@ -16,7 +16,8 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_self_attention_runs_int8_attention_close_to_exact():
-    assert T.enable_int8_attention(torch.device("cuda"))
+    T.require_kernels(torch.device("cuda"))
+    T.enable_int8_attention()
     generator = torch.Generator(device="cuda").manual_seed(0)
     q, k, v = (
         torch.randn(1, T.HEADS, 1024, 128, device="cuda", generator=generator, dtype=torch.bfloat16) for _ in range(3)

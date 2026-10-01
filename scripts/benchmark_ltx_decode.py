@@ -55,6 +55,14 @@ LATENT_SPATIAL_SCALE = 32
 OPTIONS = ("shipped", "kitchen", "natten", "eager", "autotune")
 
 
+def kitchen_na3d(q, k, v, kernel_size, query_w_start):
+    """comfy-kitchen's fused ``na3d`` with the decoder's core-column query interface."""
+    import comfy_kitchen
+
+    full = comfy_kitchen.na3d(T._full_width_queries(q, k, query_w_start), k, v, list(kernel_size), scale=1.0)
+    return full[:, :, :, query_w_start : query_w_start + q.shape[3]]
+
+
 def natten_na3d(q, k, v, kernel_size, query_w_start):
     import natten
 
@@ -79,7 +87,7 @@ def variant_patches(variant: str) -> contextlib.ExitStack:
         raise ValueError(f"unknown variant options {sorted(unknown)}; choose from {OPTIONS}")
     stack = contextlib.ExitStack()
     if "kitchen" in options:
-        stack.enter_context(patched(T, "_fused_na3d", T._kitchen_na3d))
+        stack.enter_context(patched(T, "_fused_na3d", kitchen_na3d))
     if "natten" in options:
         stack.enter_context(patched(T, "_fused_na3d", natten_na3d))
     if "eager" in options:

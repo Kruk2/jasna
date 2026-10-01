@@ -246,30 +246,14 @@ def test_modulating_mlp_chunks_match_one_unchunked_pass(monkeypatch):
     torch.testing.assert_close(actual, expected)
 
 
-def test_decoder_blocks_stay_eager_without_triton(monkeypatch):
-    import importlib.util
-
-    real_find_spec = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
-    monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
-    monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
-
-    assert T.compile_diffusion_blocks() is False
-    assert T._slab_attention is T._attn_on_w_slab
-
-
 def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
-    import importlib.util
-
-    if importlib.util.find_spec("triton") is None:
-        pytest.skip("needs Triton")
     monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
     monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
     calls = []
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append((fn, kwargs)) or (lambda *a: fn(*a)))
 
-    assert T.compile_diffusion_blocks() is True
-    assert T.compile_diffusion_blocks() is True
+    T.compile_diffusion_blocks()
+    T.compile_diffusion_blocks()
     assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu]
     assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)
 
@@ -293,3 +277,19 @@ def test_slab_attention_of_core_columns_matches_full_slab_attention():
         actual = T._attn_on_w_slab(attn, norm, x, w_pos, scale, shift, core_len)
 
     torch.testing.assert_close(actual, expected)
+
+
+def test_decode_tiling_is_logged_once_per_layout(caplog):
+    from jasna.models.ltx_vae import loader
+
+    loader._log_tiling.cache_clear()
+    tiling = TileSizeConfig(
+        frames=DimensionSizeConfig(tile_size=88, overlap=24),
+        height=DimensionSizeConfig(tile_size=512, overlap=64),
+        width=DimensionSizeConfig(tile_size=512, overlap=64),
+    )
+    with caplog.at_level("INFO", logger=loader.__name__):
+        for _ in range(3):
+            loader._log_tiling(121, 512, 512, tiling)
+
+    assert [r.getMessage() for r in caplog.records] == ["LTX decode: 121 frames x 512x512 px in tiles of 88 frames x 512x512 px"]

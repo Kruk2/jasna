@@ -138,14 +138,29 @@ def test_self_attention_falls_back_to_sdpa_off_gpu():
     assert torch.allclose(T.self_attention(q, k, v), expected)
 
 
-def test_block_forward_runs_eager_without_triton(monkeypatch):
+@pytest.mark.parametrize("package", ["triton", "comfy_kitchen"])
+def test_ltx_refuses_to_run_without_its_kernels(package, monkeypatch):
     import importlib.util
 
-    from jasna.ltx import sampler
-
     real_find_spec = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
-    assert sampler.compiled_block_forward() is T.block_forward
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == package else real_find_spec(name))
+    with pytest.raises(RuntimeError, match=package):
+        T.require_kernels(torch.device("cuda"))
+
+
+def test_ltx_refuses_a_device_without_int8_attention():
+    pytest.importorskip("comfy_kitchen")
+    with pytest.raises(RuntimeError, match="INT8 attention"):
+        T.require_kernels(torch.device("cpu"))
+
+
+def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch):
+    from jasna.tensor_utils import compile_static
+
+    monkeypatch.setattr(torch._dynamo.config, "fail_on_recompile_limit_hit", False)
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: fn)
+    compile_static(T.block_forward, mode="default")
+    assert torch._dynamo.config.fail_on_recompile_limit_hit is True
 
 
 def test_sampler_settings_come_from_the_model_file():
@@ -176,6 +191,18 @@ def test_block_forward_compiles_with_autotuning_and_no_cuda_graphs(monkeypatch):
 
     assert sampler.compiled_block_forward() is T.block_forward
     assert calls == [{"dynamic": False, "mode": "max-autotune-no-cudagraphs"}]
+
+
+def test_an_unwritable_compile_cache_is_a_warning(tmp_path, monkeypatch, caplog):
+    import os
+
+    from jasna.engine_paths import configure_torch_compile_cache
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(os, "access", lambda path, mode: path != tmp_path)
+    with caplog.at_level("WARNING", logger="jasna.engine_paths"):
+        configure_torch_compile_cache()
+    assert "is not writable" in caplog.text
 
 
 def test_compile_cache_lives_in_model_weights_unless_set(monkeypatch):

@@ -72,6 +72,7 @@ def test_trial_session_uses_placeholders_without_files_or_license():
     config = session_config(restoration_model_name="ltx", ltx_trial=True, ltx_model="undistilled")
     with (
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
+        patch("jasna.ltx.transformer.require_kernels"),
         patch("jasna.engine_compiler.ensure_engines_compiled"),
         patch("jasna.ltx.model_files.LtxModelFiles.from_dir", side_effect=AssertionError("reads model files")),
     ):

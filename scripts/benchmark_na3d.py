@@ -19,6 +19,7 @@ import torch
 import triton
 from triton.runtime.errors import OutOfResources
 
+from benchmark_ltx_decode import kitchen_na3d
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.na_triton import config_for, na3d_with_config, tile_config
 
@@ -73,8 +74,8 @@ def run_benchmark(names: list[str], sweep: bool) -> None:
             ms = time_ms(fn)
             print(f"  {label:<24} {ms:9.2f} ms {useful_tflop / ms * 1e3:6.1f} TFLOPS  diff {diff:.4f}")
 
-        reference = T._kitchen_na3d(q, k, v, list(kernel), w_start)
-        report("comfy-kitchen", lambda: T._kitchen_na3d(q, k, v, list(kernel), w_start))
+        reference = kitchen_na3d(q, k, v, list(kernel), w_start)
+        report("comfy-kitchen", lambda: kitchen_na3d(q, k, v, list(kernel), w_start))
         if natten is not None:
             full_q = T._full_width_queries(q, k, w_start)
             report(

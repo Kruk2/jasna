@@ -170,6 +170,7 @@ def test_build_pipeline_loads_a_segment_model_the_session_lacks() -> None:
 
     with (
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
+        patch("jasna.ltx.transformer.require_kernels"),
         patch("jasna.engine_compiler.ensure_engines_compiled"),
         patch("jasna.ltx.model_files.LtxModelFiles.from_dir") as from_dir,
         patch("jasna.pipeline.Pipeline"),

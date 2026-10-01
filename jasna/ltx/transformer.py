@@ -54,7 +54,6 @@ SDPA_PRIORITY = [
     SDPBackend.CUDNN_ATTENTION,
     SDPBackend.FLASH_ATTENTION,
     SDPBackend.EFFICIENT_ATTENTION,
-    SDPBackend.MATH,
 ]
 
 LINEAR_NAMES = tuple(
@@ -292,12 +291,7 @@ def enable_quant_kernels(device: torch.device) -> bool:
     as calls; an INT8 block also fuses its norms, AdaLN modulation and feed-forward residual
     into them. Returns whether they are in use."""
     global _quant_kernels
-    if (
-        _quant_kernels is None
-        and device.type == "cuda"
-        and torch.version.cuda is not None
-        and importlib.util.find_spec("triton") is not None
-    ):
+    if _quant_kernels is None and device.type == "cuda" and torch.version.cuda is not None:
         from jasna.ltx import kernels
 
         if torch.cuda.get_device_capability(device) not in kernels.INT8_MM_TILES:
@@ -381,19 +375,27 @@ def enable_quant_kernels(device: torch.device) -> bool:
     return _quant_kernels is not None
 
 
+def require_kernels(device: torch.device) -> None:
+    """Fail unless Triton and comfy-kitchen's INT8 attention can run on ``device``: without them
+    every LTX pass would run on far slower fallbacks."""
+    for package in ("triton", "comfy_kitchen"):
+        if importlib.util.find_spec(package) is None:
+            raise RuntimeError(f"LTX restoration needs {package}, which is missing from this install. Reinstall Jasna.")
+    import comfy_kitchen
+
+    if not comfy_kitchen.int8_attention_is_available(device):
+        raise RuntimeError("comfy-kitchen's INT8 attention cannot run on this GPU (its CUDA extension did not load).")
+
+
 _int8_attention = None
 
 
-def enable_int8_attention(device: torch.device) -> bool:
-    """Route video self-attention through comfy-kitchen's INT8 attention (an opaque op, so it
-    compiles as one call) when it is installed and supports ``device``. Returns whether it is
-    in use."""
+def enable_int8_attention() -> None:
+    """Route CUDA video self-attention through comfy-kitchen's INT8 attention (an opaque op, so
+    it compiles as one call); ``require_kernels`` checks that it can run."""
     global _int8_attention
-    if _int8_attention is None and importlib.util.find_spec("comfy_kitchen") is not None:
+    if _int8_attention is None:
         import comfy_kitchen
-
-        if not comfy_kitchen.int8_attention_is_available(device):
-            return False
 
         @torch.library.custom_op("jasna::int8_attention", mutates_args=())
         def int8_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
@@ -401,7 +403,6 @@ def enable_int8_attention(device: torch.device) -> bool:
 
         int8_attention.register_fake(lambda q, k, v: torch.empty_like(q, memory_format=torch.contiguous_format))
         _int8_attention = int8_attention
-    return _int8_attention is not None
 
 
 def self_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:

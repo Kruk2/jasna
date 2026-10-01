@@ -26,6 +26,7 @@ def test_model_check_precedes_engine_compilation(tmp_path, monkeypatch):
 
     compile_engines = Mock()
     monkeypatch.setattr(accelerator, "is_nvidia_device", lambda device: True)
+    monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: None)
     monkeypatch.setattr(engine_compiler, "ensure_engines_compiled", compile_engines)
     monkeypatch.setattr(LtxModelFiles, "from_dir", Mock(side_effect=ValueError("model unavailable")))
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
