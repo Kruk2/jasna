@@ -1,14 +1,12 @@
 """Neighborhood-attention transformer blocks of the diffusion VAE decoder, ``chunked_eager`` path only.
 
 Ported from ``ltx_core/model/video_vae/transformer/`` (layers, qkv, rope_math, det_attn_rope,
-attention, swiglu, blocks, chunked/*): jasna's Triton neighborhood attention on NVIDIA GPUs,
-else comfy-kitchen's fused kernel when installed, else eager tiled SDPA (same window semantics),
-torch SwiGLU, W-chunked diffusion residual with halos and deferred stage-4 context inject.
+attention, swiglu, blocks, chunked/*): jasna's Triton neighborhood attention on CUDA, eager tiled
+SDPA (same window semantics) on the CPU, torch SwiGLU, W-chunked diffusion residual with halos and deferred stage-4 context inject.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import math
 
 import numpy as np
@@ -139,14 +137,6 @@ class QKVProjections(nn.Module):
 _fused_na3d = None
 
 
-def _kitchen_na3d(q, k, v, kernel_size, query_w_start):
-    import comfy_kitchen
-
-    return comfy_kitchen.na3d(_full_width_queries(q, k, query_w_start), k, v, kernel_size, scale=1.0)[
-        :, :, :, query_w_start : query_w_start + q.shape[3]
-    ]
-
-
 def _full_width_queries(q: torch.Tensor, k: torch.Tensor, query_w_start: int) -> torch.Tensor:
     """``q`` zero-padded to the K/V width (each query's output depends only on itself)."""
     if q.shape[3] == k.shape[3]:
@@ -156,28 +146,20 @@ def _full_width_queries(q: torch.Tensor, k: torch.Tensor, query_w_start: int) ->
     return full
 
 
-def enable_fused_attention() -> str:
-    """Pick the CUDA neighborhood attention: jasna's Triton kernel on NVIDIA GPUs when Triton is
-    installed, else comfy-kitchen's fused ``na3d`` when installed. Returns the backend's name
-    ("torch" when neither is available)."""
+def enable_fused_attention() -> None:
+    """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``)."""
     global _fused_na3d
-    if _fused_na3d is None and torch.version.cuda is not None and importlib.util.find_spec("triton") is not None:
-        from jasna.models.ltx_vae import na_triton
+    from jasna.models.ltx_vae import na_triton
 
-        _fused_na3d = na_triton.na3d
-    if _fused_na3d is None and importlib.util.find_spec("comfy_kitchen") is not None:
-        _fused_na3d = _kitchen_na3d
-    if _fused_na3d is None:
-        return "torch"
-    return "comfy-kitchen" if _fused_na3d is _kitchen_na3d else "triton"
+    _fused_na3d = na_triton.na3d
 
 
 def neighborhood_attention(
     attn: NeighborhoodAttention3D, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, query_w_start: int
 ) -> torch.Tensor:
     """NA of the queries ``q`` of W columns ``[query_w_start, query_w_start + q.shape[3])`` over the
-    whole K/V grid: the enabled fused kernel on CUDA, else the pure-torch ``na3d`` (same window
-    semantics). Q is already scaled."""
+    whole K/V grid: the Triton kernel on CUDA once enabled, else the pure-torch ``na3d`` (same
+    window semantics). Q is already scaled."""
     if q.dtype != v.dtype or k.dtype != v.dtype:
         q = q.to(dtype=v.dtype)
         k = k.to(dtype=v.dtype)
@@ -412,15 +394,13 @@ _slab_attention = _attn_on_w_slab
 _mlp_chunk = modulated_swiglu
 
 
-def compile_diffusion_blocks() -> bool:
+def compile_diffusion_blocks() -> None:
     """Compile the stage-5 attention slab and MLP chunk with static shapes (one graph per
-    shape, shared by all blocks) when Triton is available; CUDA tensors use them from then on.
-    Returns whether they are compiled."""
+    shape, shared by all blocks); CUDA tensors use them from then on."""
     global _slab_attention, _mlp_chunk
     if _slab_attention is _attn_on_w_slab:
         _slab_attention = compile_static(_attn_on_w_slab, mode=DECODER_COMPILE_MODE)
         _mlp_chunk = compile_static(modulated_swiglu, mode=DECODER_COMPILE_MODE)
-    return _slab_attention is not _attn_on_w_slab
 
 
 def _upsample_then_ctx(

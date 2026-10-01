@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 from collections.abc import Callable
@@ -13,6 +14,7 @@ from torch import nn
 
 from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
+from jasna.models.ltx_vae.tiling import TileSizeConfig
 from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_attention
 from jasna.models.ltx_vae.video_encoder import VideoEncoder
 
@@ -151,11 +153,8 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
     if unknown:
         raise KeyError(f"{tuned_decoder_path}: {len(unknown)} tensors not in the decoder, e.g. {unknown[:3]}")
     decoder.load_state_dict({k: v.to(own[k].dtype) for k, v in tuned.items()}, strict=False)
-    logger.info(
-        "LTX VAE decoder: %s neighborhood attention, %s blocks",
-        enable_fused_attention(),
-        "compiled" if compile_diffusion_blocks() else "eager",
-    )
+    enable_fused_attention()
+    compile_diffusion_blocks()
     return decoder
 
 
@@ -173,10 +172,23 @@ def decode_latent(
     """
     _b, _c, frames, height, width = latent.shape
     scale = decoder.video_downscale_factors
+    pixel_frames, pixel_height, pixel_width = (frames - 1) * scale.time + 1, height * scale.height, width * scale.width
     tiling = decoder.recommended_tiling_config(
-        height=height * scale.height,
-        width=width * scale.width,
-        num_frames=(frames - 1) * scale.time + 1,
-        free_bytes=free_bytes,
+        height=pixel_height, width=pixel_width, num_frames=pixel_frames, free_bytes=free_bytes
     )
+    _log_tiling(pixel_frames, pixel_height, pixel_width, tiling)
     return torch.cat(list(decoder.tiled_decode(latent, tiling, generator)), dim=2)
+
+
+@functools.cache
+def _log_tiling(frames: int, height: int, width: int, tiling: TileSizeConfig) -> None:
+    """Once per layout: a window decoded in several tiles is noticeably slower."""
+    logger.info(
+        "LTX decode: %d frames x %dx%d px in tiles of %d frames x %dx%d px",
+        frames,
+        height,
+        width,
+        tiling.frames.tile_size,
+        tiling.height.tile_size,
+        tiling.width.tile_size,
+    )

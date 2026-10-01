@@ -1,8 +1,7 @@
-"""The DiffVAE decoder's CUDA paths (Triton and comfy-kitchen ``na3d``, compiled stage-5 slab and
-MLP) against the eager torch reference. Needs an NVIDIA GPU, comfy-kitchen and Triton."""
+"""The DiffVAE decoder's CUDA paths (Triton ``na3d``, compiled stage-5 slab and MLP) against the
+eager torch reference. Needs an NVIDIA GPU and Triton."""
 
 import importlib.util
-from importlib.util import find_spec
 
 import pytest
 import torch
@@ -13,9 +12,8 @@ from jasna.models.ltx_vae.eager_na import na3d
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available()
     or torch.version.cuda is None
-    or importlib.util.find_spec("comfy_kitchen") is None
     or importlib.util.find_spec("triton") is None,
-    reason="needs an NVIDIA GPU, comfy-kitchen and Triton",
+    reason="needs an NVIDIA GPU and Triton",
 )
 
 
@@ -26,14 +24,11 @@ def _qkv(shape: tuple[int, ...]) -> list[torch.Tensor]:
     ]
 
 
-@pytest.mark.parametrize("backend", ["triton", "comfy-kitchen"])
 @pytest.mark.parametrize("kernel_size", [(3, 5, 5), (11, 11, 11)])
 @pytest.mark.parametrize("query_w", [(0, 14), (5, 4)])
-def test_fused_na3d_matches_the_eager_windows(backend, kernel_size, query_w, monkeypatch):
+def test_triton_na3d_matches_the_eager_windows(kernel_size, query_w, monkeypatch):
     monkeypatch.setattr(T, "_fused_na3d", None)
-    if backend == "comfy-kitchen":
-        monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else find_spec(name))
-    assert T.enable_fused_attention() == backend
+    T.enable_fused_attention()
     attn = T.NeighborhoodAttention3D(128, kernel_size, head_dim=64)
     q, k, v = _qkv((1, 12, 13, 14, 2, 64))
     w_start, w_len = query_w
@@ -46,7 +41,7 @@ def test_fused_na3d_matches_the_eager_windows(backend, kernel_size, query_w, mon
 
 def test_triton_na3d_compiles_into_the_slab_without_graph_breaks(monkeypatch):
     monkeypatch.setattr(T, "_fused_na3d", None)
-    assert T.enable_fused_attention() == "triton"
+    T.enable_fused_attention()
     torch.manual_seed(0)
     attn = T.NeighborhoodAttention3D(128, (3, 5, 5), head_dim=64).cuda().bfloat16().eval()
     norm = torch.nn.RMSNorm(128).cuda().bfloat16()
@@ -78,8 +73,8 @@ def test_compiled_diffusion_block_matches_eager(monkeypatch):
             return block(x.clone(), stage4, modulation, upsample, drop_leading_frame=True)
 
     eager = run()
-    assert T.enable_fused_attention() == "triton"
-    assert T.compile_diffusion_blocks() is True
+    T.enable_fused_attention()
+    T.compile_diffusion_blocks()
     compiled = run()
 
     torch.testing.assert_close(compiled.float(), eager.float(), atol=5e-2, rtol=5e-2)

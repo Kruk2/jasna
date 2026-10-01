@@ -84,7 +84,13 @@ class BlockStore:
         self._copy_done = [torch.cuda.Event() for _ in self._slots]
         self._compute_done = [torch.cuda.Event() for _ in self._slots]
         self._copy_stream = torch.cuda.Stream(device) if self._slots else None
-        logger.info("LTX blocks: %d resident, %d streamed", self.resident, streamed)
+        if streamed:
+            logger.warning(
+                "LTX: %d of %d transformer blocks stream from RAM (not enough free VRAM); "
+                "closing other programs that use the GPU makes LTX faster",
+                streamed,
+                self.count,
+            )
 
     def _slot_of(self, index: int) -> int | None:
         return self._slot_block.index(index) if index in self._slot_block else None

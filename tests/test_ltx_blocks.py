@@ -29,3 +29,10 @@ def test_streamed_and_resident_blocks_hand_out_the_same_weights(resident):
                 assert torch.equal(weights[name].cpu(), tensor)
             store.release(index)
     store.close()
+
+
+@pytest.mark.parametrize("resident, warns", [(5, False), (3, True)])
+def test_streaming_blocks_from_ram_is_a_warning(resident, warns, caplog):
+    with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
+        BlockStore(_blocks(5), torch.device("cuda"), resident=resident).close()
+    assert any("2 of 5 transformer blocks stream from RAM" in r.getMessage() for r in caplog.records) is warns

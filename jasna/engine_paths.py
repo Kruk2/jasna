@@ -1,11 +1,14 @@
 """Lightweight engine-path helpers — no torch / tensorrt imports."""
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
 
 from jasna._frozen import is_frozen
+
+logger = logging.getLogger(__name__)
 
 
 def model_weights_dir() -> Path:
@@ -22,9 +25,13 @@ def model_weights_dir() -> Path:
 
 def configure_torch_compile_cache() -> None:
     """Keep torch.compile's kernels and autotuning picks under ``model_weights`` (unless
-    ``TORCHINDUCTOR_CACHE_DIR`` is set), so they survive reboots: later runs reuse the same
-    kernels and a seed keeps its pixels."""
+    ``TORCHINDUCTOR_CACHE_DIR`` is set), so they survive reboots and later runs reuse the same
+    kernels and autotuning picks."""
     os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str((model_weights_dir() / "torch-compile-cache").resolve()))
+    cache = Path(os.environ["TORCHINDUCTOR_CACHE_DIR"])
+    nearest = next(path for path in (cache, *cache.parents) if path.exists())
+    if not os.access(nearest, os.W_OK):
+        logger.warning("Compile cache %s is not writable: every LTX run will tune its kernels again", cache)
 
 
 _DEFAULT_RESTORATION_MODELS = {

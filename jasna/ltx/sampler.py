@@ -87,7 +87,8 @@ class LtxTransformer:
             ]
         self.blocks = BlockStore(blocks, device, resident=self._resident_blocks(blocks))
         self._ropes: dict[tuple[int, int, int], T.Rope] = {}
-        logger.info("LTX self-attention: %s", "INT8 (comfy-kitchen)" if T.enable_int8_attention(device) else "SDPA")
+        T.require_kernels(device)
+        T.enable_int8_attention()
         logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
         self._block_forward = compiled_block_forward()
         self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
