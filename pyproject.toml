@@ -15,6 +15,8 @@ dependencies = [
   "psutil",
   "diffusers",
   "huggingface-hub",
+  "safetensors",
+  "requests",
   "mmengine==0.10.7",
   "opencv-python<5",
   "Pillow",
@@ -42,7 +44,7 @@ nvidia = [
   "comfy-kitchen==0.2.36",
   # torch.compile and the LTX Triton kernels; Linux torch wheels bring triton 3.7.1 themselves.
   "triton-windows==3.7.1.post27; sys_platform == 'win32'",
-  # The VALI decode backend needs the corruption-tolerant fork (~/tools/vali,
+  # The VALI decode backend needs the corruption-tolerant fork (codeberg.org/Kruk2/vali,
   # DecodeSingleSurfaceAsyncDetailed); with the stock PyPI wheel the reader
   # falls back to PyAV at open time. Release builds use the fork wheel.
   "python_vali==4.8.8",
@@ -71,6 +73,9 @@ dev = [
 
 [tool.setuptools]
 include-package-data = false
+
+[tool.setuptools.package-data]
+"jasna.media" = ["*.fatbin"]
 
 [tool.setuptools.packages.find]
 include = ["jasna*"]
