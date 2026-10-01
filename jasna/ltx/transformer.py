@@ -287,14 +287,14 @@ _quant_kernels = None
 
 def enable_quant_kernels(device: torch.device) -> bool:
     """Route the INT8 and NVFP4 linears through the fused Triton kernels (``kernels.py``,
-    tiled per GPU architecture in ``kernels.INT8_MM_TILES``) as opaque ops, so they compile
+    on the GPU architectures ``kernels.supports``) as opaque ops, so they compile
     as calls; an INT8 block also fuses its norms, AdaLN modulation and feed-forward residual
     into them. Returns whether they are in use."""
     global _quant_kernels
     if _quant_kernels is None and device.type == "cuda" and torch.version.cuda is not None:
         from jasna.ltx import kernels
 
-        if torch.cuda.get_device_capability(device) not in kernels.INT8_MM_TILES:
+        if not kernels.supports(device):
             return False
 
         @torch.library.custom_op("jasna::int8_rotate_quantize", mutates_args=())
