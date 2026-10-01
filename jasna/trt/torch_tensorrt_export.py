@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import sys
 import warnings
 
 import torch
+
+from jasna._frozen import is_frozen
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +36,10 @@ def get_workspace_size_bytes() -> int:
 
 def load_torchtrt_export(*, checkpoint_path: str, device: torch.device) -> torch.nn.Module:
     _mute_torch_tensorrt()
+
+    if sys.platform == "linux" and is_frozen():
+        from jasna.protection.export_cache import load
+        return load(checkpoint_path, device).to(device)
 
     logger.debug("Loading TensorRT export from %s", checkpoint_path)
     fake_reg_logger = logging.getLogger("torch._library.fake_class_registry")
@@ -110,7 +117,10 @@ def compile_and_save_torchtrt_dynamo(
         prev_level = fake_reg_logger.level
         fake_reg_logger.setLevel(logging.ERROR)
         try:
-            if has_dynamic:
+            if sys.platform == "linux" and is_frozen():
+                from jasna.protection.export_cache import save
+                save(trt_gm, output_path)
+            elif has_dynamic:
                 _save_with_dynamic_shapes(trt_gm, output_path, inputs, device, dtype)
             else:
                 torch_tensorrt.save(trt_gm, output_path, inputs=inputs)
@@ -169,4 +179,3 @@ def _save_with_dynamic_shapes(
             "falling back to torch.save for %s", output_path,
         )
         torch.save(trt_gm, output_path)
-

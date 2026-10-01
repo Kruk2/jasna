@@ -1,5 +1,4 @@
 import logging
-import multiprocessing
 import os
 import sys
 from pathlib import Path, PureWindowsPath
@@ -7,6 +6,13 @@ from pathlib import Path, PureWindowsPath
 logger = logging.getLogger(__name__)
 
 from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
+from jasna._frozen import is_frozen
+
+if __name__ == "__main__" and sys.platform == "linux" and is_frozen():
+    from jasna.protection import initialize_runtime
+    initialize_runtime()
+
+import multiprocessing
 
 if sys.platform == "win32":
     os.environ.setdefault("OMP_WAIT_POLICY", "passive")
@@ -33,7 +39,6 @@ if multiprocessing.parent_process() is not None:
     sys.exit(0)
 os.environ["JASNA_MAIN_PID"] = str(os.getpid())
 
-from jasna._frozen import is_frozen
 from jasna.bootstrap import sanitize_sys_path_for_local_dev
 from jasna.os_utils import drop_console_window
 
@@ -65,7 +70,8 @@ def _wants_cli(argv: list[str]) -> bool:
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
+    if not (sys.platform == "linux" and is_frozen()):
+        multiprocessing.freeze_support()
 
 if multiprocessing.parent_process() is None:
     if _wants_cli(sys.argv):

@@ -7,6 +7,24 @@ import pytest
 from jasna import os_utils
 
 
+def test_frozen_linux_application_executable_ignores_the_python_placeholder(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "linux")
+    monkeypatch.setattr(os_utils.sys, "executable", "/moved/app/python")
+    monkeypatch.setattr(os_utils.os, "readlink", lambda path: "/moved/app/jasna.bin")
+
+    assert os_utils.get_application_executable() == "/moved/app/jasna.bin"
+
+
+@pytest.mark.parametrize("platform,frozen", [("linux", False), ("win32", True)])
+def test_other_application_executables_keep_sys_executable(monkeypatch, platform, frozen) -> None:
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: frozen)
+    monkeypatch.setattr(os_utils.sys, "platform", platform)
+    monkeypatch.setattr(os_utils.sys, "executable", "/application/python")
+
+    assert os_utils.get_application_executable() == "/application/python"
+
+
 class _FakeKernel32:
     def __init__(self) -> None:
         self.free = 0

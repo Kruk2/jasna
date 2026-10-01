@@ -15,6 +15,7 @@ from jasna.engine_paths import (
     BASICVSRPP_UPSAMPLE_BATCH as UPSAMPLE_BATCH,
     all_basicvsrpp_sub_engines_exist,
     basicvsrpp_sub_engine_dir,
+    basicvsrpp_sub_engine_exists,
     get_basicvsrpp_sub_engine_paths,
 )
 from jasna.trt.torch_tensorrt_export import (
@@ -281,7 +282,7 @@ def compile_basicvsrpp_sub_engines(
     for i, direction in enumerate(DIRECTIONS):
         path = engine_paths[f"loop_body_{direction}"]
         paths[f"loop_body_{direction}"] = path
-        if os.path.isfile(path):
+        if basicvsrpp_sub_engine_exists(path):
             logger.info("Sub-engine already exists: %s", path)
             continue
 
@@ -312,7 +313,7 @@ def compile_basicvsrpp_sub_engines(
     # ── preprocess engine (feat_extract + downsample + bidirectional SPyNet, dynamic batch) ──
     path = engine_paths["preprocess"]
     paths["preprocess"] = path
-    if os.path.isfile(path):
+    if basicvsrpp_sub_engine_exists(path):
         logger.info("Sub-engine already exists: %s", path)
     else:
         wrapper = _PreprocessWrapper(
@@ -339,7 +340,7 @@ def compile_basicvsrpp_sub_engines(
     # ── upsample engine (per-frame stage, run in UPSAMPLE_BATCH-sized batches) ──
     path = engine_paths["upsample"]
     paths["upsample"] = path
-    if os.path.isfile(path):
+    if basicvsrpp_sub_engine_exists(path):
         logger.info("Sub-engine already exists: %s", path)
     else:
         in_ch = 5 * mid

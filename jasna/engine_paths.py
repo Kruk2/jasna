@@ -148,4 +148,12 @@ def get_basicvsrpp_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict
 
 
 def all_basicvsrpp_sub_engines_exist(model_weights_path: str, fp16: bool) -> bool:
-    return all(os.path.isfile(p) for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16).values())
+    return all(basicvsrpp_sub_engine_exists(p)
+               for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16).values())
+
+
+def basicvsrpp_sub_engine_exists(path: str) -> bool:
+    if sys.platform == "linux" and is_frozen():
+        from jasna.protection.export_cache import available
+        return available(path)
+    return os.path.isfile(path)

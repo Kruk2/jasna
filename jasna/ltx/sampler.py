@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -67,34 +68,61 @@ def _window_workspace_bytes(tokens: int) -> int:
     return 2 * tokens * 4096 * 2 * 10 + T.CHUNK_ROWS * 16384 * 4 * 3
 
 
+def _read_tensors(reader, names: tuple[str, ...], specs, device: torch.device) -> dict[str, torch.Tensor]:
+    sources = {name: torch.empty(specs[name][1], dtype=specs[name][0], device="cpu") for name in names}
+    result = {}
+    try:
+        reader.read_tensors_into((names,), iter((sources,)))
+        for name, source in sources.items():
+            result[name] = source.to(device)
+        return result
+    except BaseException:
+        for tensor in result.values():
+            tensor.view(-1).view(torch.uint8).zero_()
+        raise
+    finally:
+        for name, source in sources.items():
+            if result.get(name) is not source:
+                source.view(-1).view(torch.uint8).zero_()
+
+
 class LtxTransformer:
     """The restoration transformer loaded from a jasna LTX model file."""
 
     def __init__(self, path: Path, device: torch.device) -> None:
         self.device = device
-        with open_tensors(path) as handle:
-            self.sigmas, self.stg_scale = sampler_settings(handle.metadata())
-            keys = list(handle.keys())
-            top_keys = [k for k in keys if not k.startswith("blocks.") and k != "prompt_context"]
-            top = {k: handle.get_tensor(k).to(device) for k in top_keys}
-            self.context = handle.get_tensor("prompt_context").to(device)
-            self.conditions = [T.step_conditioning(top, float(s), device) for s in self.sigmas[:-1]]
-            self.top = {k: v for k, v in top.items() if not k.startswith(_ADALN_PREFIXES)}
-            del top
-            blocks = [
-                {k.split(".", 2)[2]: handle.get_tensor(k) for k in keys if k.startswith(f"blocks.{i}.")}
-                for i in range(T.NUM_BLOCKS)
-            ]
-        self.blocks = BlockStore(blocks, device, resident=self._resident_blocks(blocks))
+        self.top: dict[str, torch.Tensor] = {}
+        self.conditions: list[T.StepConditioning] = []
+        self.context: torch.Tensor | None = None
+        self.blocks: BlockStore | None = None
         self._ropes: dict[tuple[int, int, int], T.Rope] = {}
-        T.require_kernels(device)
-        T.enable_int8_attention()
-        logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
-        self._block_forward = compiled_block_forward()
-        self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
+        try:
+            T.require_kernels(device)
+            with open_tensors(path) as handle:
+                self.sigmas, self.stg_scale = sampler_settings(handle.metadata())
+                specs = handle.tensor_specs()
+                self.top = _read_tensors(handle, tuple(name for name in specs if not name.startswith("blocks.")),
+                                         specs, device)
+                self.context = self.top.pop("prompt_context")
+                for sigma in self.sigmas[:-1]:
+                    self.conditions.append(T.step_conditioning(self.top, float(sigma), device))
+                for name in list(self.top):
+                    if name.startswith(_ADALN_PREFIXES):
+                        self.top.pop(name).view(-1).view(torch.uint8).zero_()
+                names = [{k.split(".", 2)[2]: k for k in specs if k.startswith(f"blocks.{index}.")}
+                         for index in range(T.NUM_BLOCKS)]
+                sizes = [sum(math.prod(specs[name][1]) * specs[name][0].itemsize for name in block.values())
+                         for block in names]
+                self.blocks = BlockStore.from_reader(handle, names, device, resident=self._resident_blocks(sizes))
+            T.enable_int8_attention()
+            logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
+            self._block_forward = compiled_block_forward()
+            self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
+        except BaseException:
+            self.close()
+            raise
 
-    def _resident_blocks(self, blocks: list[dict[str, torch.Tensor]]) -> int:
-        sizes = [sum(t.numel() * t.element_size() for t in b.values()) for b in blocks]
+    def _resident_blocks(self, sizes: list[int]) -> int:
         free, _ = torch.cuda.mem_get_info(self.device)
         budget = free - ACTIVATION_RESERVE_BYTES - 2 * max(sizes)
         resident, used = 0, 0
@@ -106,8 +134,24 @@ class LtxTransformer:
         return resident
 
     def close(self) -> None:
-        self.blocks.close()
+        if self.blocks is not None:
+            self.blocks.close()
+            self.blocks = None
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
+        tensors = list(self.top.values())
+        for condition in self.conditions:
+            tensors.extend((condition.block_rows, condition.output_rows, condition.prompt_rows))
+        if self.context is not None:
+            tensors.append(self.context)
+        for tensor in tensors:
+            tensor.view(-1).view(torch.uint8).zero_()
+        if self.device.type == "cuda":
+            torch.cuda.synchronize(self.device)
         self.top.clear()
+        self.conditions.clear()
+        self.context = None
+        self._ropes.clear()
 
     def _rope(self, frames: int, height: int, width: int) -> T.Rope:
         key = (frames, height, width)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TypeVar
 
@@ -84,7 +84,29 @@ def decoder_kwargs(config: dict) -> dict:
 
 def _read_tensors(path: Path, prefixes: tuple[str, ...]) -> dict[str, torch.Tensor]:
     with open_tensors(path) as handle:
-        return {key: handle.get_tensor(key) for key in handle.keys() if key.startswith(prefixes)}
+        tensors = {name: torch.empty(shape, dtype=dtype, device="cpu")
+                   for name, (dtype, shape) in handle.tensor_specs().items() if name.startswith(prefixes)}
+        try:
+            handle.read_tensors_into((tuple(tensors),), iter((tensors,)))
+            return tensors
+        except BaseException:
+            _clear_tensors(tensors.values(), None)
+            raise
+
+
+def _clear_tensors(tensors: Iterable[torch.Tensor], retained: nn.Module | None) -> None:
+    preserved = {(tensor.device, tensor.untyped_storage().data_ptr())
+                 for tensor in retained.state_dict().values()} if retained is not None else set()
+    devices = set()
+    with torch.no_grad():
+        for tensor in tensors:
+            if tensor.is_meta or (tensor.device, tensor.untyped_storage().data_ptr()) in preserved:
+                continue
+            tensor.zero_()
+            if tensor.device.type == "cuda":
+                devices.add(tensor.device)
+    for device in devices:
+        torch.cuda.synchronize(device)
 
 
 def encoder_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -104,58 +126,93 @@ def decoder_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.T
     and the unused ``type_emb``.
     """
     out: dict[str, torch.Tensor] = {}
-    for key, value in checkpoint.items():
-        if key.startswith("per_channel_statistics."):
+    copies = []
+    try:
+        for key, value in checkpoint.items():
+            if key.startswith("per_channel_statistics."):
+                out[key] = value
+                continue
+            if not key.startswith("decoder."):
+                continue
+            key = key.removeprefix("decoder.")
+            if key.startswith("coarse_") or key in _UNUSED_DECODER_KEYS:
+                continue
+            if key.endswith(_GATE_SUFFIXES):
+                raise ValueError(f"gated decoder checkpoints are not supported (found {key!r})")
+            key = key.replace("t_embedder.mlp.0.", "t_embedder.timestep_embedder.linear_1.")
+            key = key.replace("t_embedder.mlp.2.", "t_embedder.timestep_embedder.linear_2.")
+            leaf = key.rsplit(".", 1)[-1]
+            if key.endswith(".qkv." + leaf) and leaf in _QKV_LEAVES:
+                prefix = key[: -len(leaf)]
+                for name, part in zip(("to_q", "to_k", "to_v"), value.chunk(3), strict=True):
+                    copy = part.clone()
+                    copies.append(copy)
+                    out[f"{prefix}{name}.{leaf}"] = copy
+                continue
             out[key] = value
-            continue
-        if not key.startswith("decoder."):
-            continue
-        key = key.removeprefix("decoder.")
-        if key.startswith("coarse_") or key in _UNUSED_DECODER_KEYS:
-            continue
-        if key.endswith(_GATE_SUFFIXES):
-            raise ValueError(f"gated decoder checkpoints are not supported (found {key!r})")
-        key = key.replace("t_embedder.mlp.0.", "t_embedder.timestep_embedder.linear_1.")
-        key = key.replace("t_embedder.mlp.2.", "t_embedder.timestep_embedder.linear_2.")
-        leaf = key.rsplit(".", 1)[-1]
-        if key.endswith(".qkv." + leaf) and leaf in _QKV_LEAVES:
-            prefix = key[: -len(leaf)]
-            for name, part in zip(("to_q", "to_k", "to_v"), value.chunk(3), strict=True):
-                out[f"{prefix}{name}.{leaf}"] = part.clone()
-            continue
-        out[key] = value
-    return out
+        return out
+    except BaseException:
+        _clear_tensors(copies, None)
+        raise
 
 
 def _build_bf16(factory: Callable[[], _Model], state: dict[str, torch.Tensor], device: torch.device) -> _Model:
-    with torch.device("meta"):
-        model = factory()
-    model.load_state_dict({k: v.to(torch.bfloat16) for k, v in state.items()}, strict=True, assign=True)
-    return model.to(device).eval().requires_grad_(False)
+    model, result = None, None
+    converted = {}
+    try:
+        with torch.device("meta"):
+            model = factory()
+        for name, tensor in state.items():
+            converted[name] = tensor.to(torch.bfloat16)
+        model.load_state_dict(converted, strict=True, assign=True)
+        result = model.to(device).eval().requires_grad_(False)
+        return result
+    finally:
+        tensors = [*state.values(), *converted.values()]
+        if result is None and model is not None:
+            tensors.extend(model.state_dict().values())
+        _clear_tensors(tensors, result)
 
 
 def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
     """bf16 eval ``VideoEncoder``; call it on ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1]."""
     kwargs = encoder_kwargs(read_vae_config(vae_path))
-    state = encoder_state_dict(_read_tensors(vae_path, ("encoder.", "per_channel_statistics.")))
-    return _build_bf16(lambda: VideoEncoder(**kwargs), state, device)
+    checkpoint = _read_tensors(vae_path, ("encoder.", "per_channel_statistics."))
+    encoder = None
+    try:
+        encoder = _build_bf16(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device)
+        return encoder
+    finally:
+        _clear_tensors(checkpoint.values(), encoder)
 
 
 def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.device) -> DiffusionVideoDecoder:
     """bf16 eval ``DiffusionVideoDecoder`` with the fine-tuned decoder tensors overlaid."""
     kwargs = decoder_kwargs(read_vae_config(vae_path))
-    state = decoder_state_dict(_read_tensors(vae_path, ("decoder.", "per_channel_statistics.")))
-    decoder = _build_bf16(lambda: DiffusionVideoDecoder(**kwargs), state, device)
-
-    tuned = _read_tensors(tuned_decoder_path, ("",))
-    own = decoder.state_dict()
-    unknown = sorted(set(tuned) - set(own))
-    if unknown:
-        raise KeyError(f"{tuned_decoder_path}: {len(unknown)} tensors not in the decoder, e.g. {unknown[:3]}")
-    decoder.load_state_dict({k: v.to(own[k].dtype) for k, v in tuned.items()}, strict=False)
-    enable_fused_attention(device)
-    compile_diffusion_blocks()
-    return decoder
+    checkpoint = _read_tensors(vae_path, ("decoder.", "per_channel_statistics."))
+    decoder, complete = None, False
+    tuned, overlay = {}, {}
+    try:
+        state = decoder_state_dict(checkpoint)
+        decoder = _build_bf16(lambda: DiffusionVideoDecoder(**kwargs), state, device)
+        tuned = _read_tensors(tuned_decoder_path, ("",))
+        own = decoder.state_dict()
+        unknown = sorted(set(tuned) - set(own))
+        if unknown:
+            raise KeyError(f"{tuned_decoder_path}: {len(unknown)} tensors not in the decoder, e.g. {unknown[:3]}")
+        for name, tensor in tuned.items():
+            overlay[name] = tensor.to(own[name].dtype)
+        decoder.load_state_dict(overlay, strict=False)
+        enable_fused_attention(device)
+        compile_diffusion_blocks()
+        complete = True
+        return decoder
+    except BaseException:
+        if decoder is not None:
+            _clear_tensors(decoder.state_dict().values(), None)
+        raise
+    finally:
+        _clear_tensors([*checkpoint.values(), *tuned.values(), *overlay.values()], decoder if complete else None)
 
 
 @torch.inference_mode()

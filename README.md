@@ -176,6 +176,8 @@ How to get a key:
 
 Keys are sold **only** on these two pages. Anyone else selling Jasna, keys or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub.
 
+Jasna 0.11 needs a replacement supporter key from your official seller. Jasna 0.10 keys work only in Jasna 0.10.
+
 If activation fails, check the exact purchase email or handle and copy the full key again.
 An invalid key alone does not prove fraud; Jasna identifies keys from known unofficial sellers separately.
 

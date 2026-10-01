@@ -1,7 +1,14 @@
 import importlib
 import logging
+import inspect
+import linecache
 import os
+from contextlib import nullcontext
+from pathlib import Path
+import subprocess
 import sys
+import sysconfig
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -9,17 +16,36 @@ import pytest
 from test_main import _base_argv, _main_patches, _make_model_files
 
 
+def test_frozen_detection_import_does_not_load_late_runtime_helpers():
+    repository = Path(__file__).resolve().parents[1]
+    subprocess.run(
+        [sys.executable, "-I", "-B", "-c", """
+import sys
+sys.path.insert(0, sys.argv[1])
+before = set(sys.modules)
+from jasna._frozen import is_frozen
+assert not is_frozen()
+loaded = set(sys.modules) - before
+assert not loaded.intersection({'hashlib', 'sysconfig', 'linecache', 'pathlib', 'importlib.util'})
+assert not any(name == 'torch' or name.startswith('torch.') for name in loaded)
+assert not any(name == 'cryptography' or name.startswith('cryptography.') for name in loaded)
+""", str(repository)],
+        check=True, timeout=30,
+    )
+
+
 def test_frozen_config_scan_skips_source(caplog, monkeypatch):
+    import torch._inductor.config as inductor_config
+    from torch._inductor import codecache
     import torch.jit
     from torch.utils import _config_module
     from jasna import _frozen
 
     monkeypatch.setattr(_frozen, "_patched", False)
     monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
+    monkeypatch.setattr(_frozen, "register_ltx_sources", lambda: None)
     monkeypatch.setattr(_frozen, "use_prebuilt_triton_modules", lambda directory: None)
     monkeypatch.setenv("TRITON_BACKENDS_IN_TREE", "1")
-    import torch._inductor.config as inductor_config
-    from torch._inductor import codecache
     monkeypatch.setattr(inductor_config, "compile_threads", inductor_config.compile_threads)
     monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
     with (
@@ -66,7 +92,8 @@ def test_importing_pipeline_does_not_patch_frozen_torch():
 
 def test_cli_main_patches_frozen_torch(tmp_path):
     inp, out, rest, det = _make_model_files(tmp_path)
-    with patch("jasna._frozen.patch_frozen_torch") as spy:
+    with (patch("jasna._frozen.patch_frozen_torch") as spy,
+          patch("jasna.accelerator.device_context", return_value=nullcontext())):
         with _main_patches():
             with patch.object(sys, "argv", _base_argv(inp, out, rest, det)):
                 from jasna.main import main
@@ -87,6 +114,67 @@ def test_gui_run_gui_patches_frozen_torch():
     spy.assert_called()
 
 
+@pytest.mark.parametrize("module", (
+    "jasna.ltx.transformer", "jasna.ltx.kernels",
+    "jasna.models.ltx_vae.transformer", "jasna.models.ltx_vae.na_triton",
+))
+def test_frozen_ltx_sources_support_inspect_without_a_jasna_directory(monkeypatch, tmp_path, module):
+    from jasna import _frozen
+
+    (tmp_path / "jasna").write_bytes(b"executable")
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "jasna"))
+    monkeypatch.setattr(_frozen.os, "readlink", lambda path: str(tmp_path / "jasna"))
+    monkeypatch.setattr(linecache, "cache", {})
+    source = "def probe(value):\n    return value + 1\n"
+    for name in ("jasna.ltx.transformer", "jasna.ltx.kernels",
+                 "jasna.models.ltx_vae.transformer", "jasna.models.ltx_vae.na_triton"):
+        path = tmp_path / "python_source" / Path(*name.split(".")).with_suffix(".py")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        linecache.cache[str(path)] = (len(source), None, source.splitlines(keepends=True), str(path))
+        path.write_text("def probe(value):\n    return 'replaced'\n")
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: SimpleNamespace(
+        origin=str(tmp_path / (name.replace(".", "/") + ".py"))))
+    _frozen.register_ltx_sources()
+    filename = str(tmp_path / Path(*module.split(".")).with_suffix(".py"))
+    namespace = {}
+    exec(compile(source, filename, "exec"), namespace)
+    assert inspect.getsource(namespace["probe"]) == source
+
+
+def test_prebuilt_triton_helper_avoids_a_customer_c_compiler(monkeypatch, tmp_path):
+    from jasna import _frozen
+
+    triton = pytest.importorskip("triton")
+    monkeypatch.setattr(triton.knobs.build, "impl", None)
+    module = tmp_path / ("cuda_utils" + sysconfig.get_config_var("EXT_SUFFIX"))
+    module.write_bytes(b"prebuilt fixture")
+    _frozen.use_prebuilt_triton_modules(tmp_path)
+    assert triton.runtime.build._build("cuda_utils", "source.c", str(tmp_path), [], [], [], []) == str(module)
+    with pytest.raises(FileNotFoundError):
+        triton.runtime.build._build("missing", "source.c", str(tmp_path), [], [], [], [])
+
+
+def test_frozen_inductor_runs_in_process_and_keeps_runtime_cache_paths(monkeypatch):
+    import torch._inductor.config as inductor_config
+    from torch._inductor import codecache
+    from jasna import _frozen
+
+    monkeypatch.setattr(_frozen, "_patched", False)
+    monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
+    monkeypatch.setattr(_frozen, "register_ltx_sources", lambda: None)
+    monkeypatch.setattr(_frozen, "use_prebuilt_triton_modules", lambda directory: None)
+    monkeypatch.setattr(inductor_config, "compile_threads", 8)
+    monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/private/process/inductor")
+    monkeypatch.setenv("TRITON_CACHE_DIR", "/private/process/triton")
+    _frozen.patch_frozen_torch()
+    assert inductor_config.compile_threads == 1
+    assert codecache.torch_key() != b"source"
+    assert _frozen.os.environ["TRITON_BACKENDS_IN_TREE"] == "1"
+    assert _frozen.os.environ["TORCHINDUCTOR_CACHE_DIR"] == "/private/process/inductor"
+    assert _frozen.os.environ["TRITON_CACHE_DIR"] == "/private/process/triton"
+
+
 def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypatch, tmp_path):
     import torch._inductor.config as inductor_config
     import torch.jit
@@ -95,11 +183,17 @@ def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypat
     triton = pytest.importorskip("triton")
     monkeypatch.setattr(_frozen, "_patched", False)
     monkeypatch.setattr(_frozen, "is_frozen", lambda: True)
+    monkeypatch.setattr(_frozen, "register_ltx_sources", lambda: None)
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setattr(sys, "executable", str(tmp_path / "jasna"))
+    monkeypatch.setattr(_frozen.os, "readlink", lambda path: str(tmp_path / "jasna"))
     monkeypatch.delenv("TRITON_BACKENDS_IN_TREE", raising=False)
     monkeypatch.setattr(inductor_config, "compile_threads", inductor_config.compile_threads)
     monkeypatch.setattr(triton.knobs.build, "impl", None)
+    directory = tmp_path / "triton_prebuilt"
+    directory.mkdir()
+    expected = directory / ("cuda_utils" + sysconfig.get_config_var("EXT_SUFFIX"))
+    expected.write_bytes(b"prebuilt fixture")
     from torch._inductor import codecache
     monkeypatch.setattr(codecache, "torch_key", codecache.torch_key_cache(lambda: b"source"))
     with patch.object(torch.jit, "interface"):
@@ -109,4 +203,4 @@ def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypat
     assert codecache.torch_key() != b"source"
     assert os.environ["TRITON_BACKENDS_IN_TREE"] == "1"
     module = triton.runtime.build._build("cuda_utils", "src.c", str(tmp_path), [], [], [], [])
-    assert module.startswith(str(tmp_path / "triton_prebuilt" / "cuda_utils"))
+    assert module == str(expected)

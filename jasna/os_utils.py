@@ -13,6 +13,16 @@ logger = logging.getLogger(__name__)
 MIN_GPU_COMPUTE = (7, 5)
 MIN_DRIVER_VERSION = 580 if sys.platform == "linux" else 610
 
+
+def get_application_executable() -> str:
+    """Return the running application for subprocess launches."""
+    if sys.platform == "linux" and is_frozen():
+        # Without Nuitka's multiprocessing plugin, sys.executable names a
+        # CPython placeholder in the distribution rather than the compiled app.
+        return os.readlink("/proc/self/exe")
+    return sys.executable
+
+
 def check_supported_gpu(
     device: str = "cuda:0",
 ) -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:

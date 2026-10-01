@@ -1,10 +1,11 @@
 import json
+from pathlib import Path
 
 import pytest
 import torch
 from safetensors.torch import save_file
 
-from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder
+from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder, loader
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.eager_na import na3d
@@ -96,6 +97,27 @@ def test_decoder_state_dict_rejects_gated_checkpoints():
         decoder_state_dict({"decoder.diff_blocks.0.gate_msa": torch.zeros(1)})
 
 
+@pytest.mark.parametrize("failure", ("gated", "incomplete-qkv"))
+def test_decoder_state_dict_failure_clears_discarded_qkv_clones(monkeypatch, failure):
+    source = torch.arange(12.0).reshape(6, 2)
+    checkpoint = {"decoder.first.qkv.weight": source}
+    checkpoint["decoder.second.gate_msa" if failure == "gated" else "decoder.second.qkv.weight"] = torch.ones(1)
+    clones = []
+    original_clone = torch.Tensor.clone
+
+    def clone(tensor, *args, **kwargs):
+        result = original_clone(tensor, *args, **kwargs)
+        clones.append(result)
+        return result
+
+    monkeypatch.setattr(torch.Tensor, "clone", clone)
+    with pytest.raises(ValueError):
+        decoder_state_dict(checkpoint)
+    assert clones
+    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in clones)
+    assert torch.equal(source, torch.arange(12.0).reshape(6, 2))
+
+
 def test_ltx25_decoder_keys_match_module():
     decoder = _meta_ltx25_decoder()
     expected = set(decoder.state_dict())
@@ -148,6 +170,76 @@ def test_load_video_encoder_from_checkpoint(tmp_path):
     assert all(p.dtype == torch.bfloat16 and not p.requires_grad for p in encoder.parameters())
     assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16())
     assert torch.equal(encoder.per_channel_statistics.get_buffer("std-of-means"), torch.full((8,), 2.0).bfloat16())
+
+
+@pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
+def test_weight_state_cleanup_preserves_the_returned_cpu_model(dtype):
+    source = torch.ones(2, 2, dtype=dtype)
+    model = loader._build_bf16(lambda: torch.nn.Linear(2, 2, bias=False), {"weight": source}, torch.device("cpu"))
+    assert torch.equal(model.weight, torch.ones(2, 2, dtype=torch.bfloat16))
+    if dtype == torch.bfloat16:
+        assert source.untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
+        assert torch.count_nonzero(source).item() == 4
+    else:
+        assert torch.count_nonzero(source).item() == 0
+
+
+@pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
+def test_weight_state_failure_clears_sources_and_partially_assigned_parameters(dtype):
+    sources = {"weight": torch.ones(2, 2, dtype=dtype), "unexpected": torch.ones(1, dtype=dtype)}
+    constructed = []
+
+    def factory():
+        model = torch.nn.Linear(2, 2, bias=False)
+        constructed.append(model)
+        return model
+
+    with pytest.raises(RuntimeError, match="Unexpected key"):
+        loader._build_bf16(factory, sources, torch.device("cpu"))
+    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in sources.values())
+    assert torch.count_nonzero(constructed[0].weight).item() == 0
+
+
+@pytest.mark.parametrize("failure", ("stream", "unknown"))
+def test_decoder_load_failure_clears_the_already_built_base_and_owned_sources(monkeypatch, failure):
+    base = {"decoder.weight": torch.ones(2, 2, dtype=torch.bfloat16)}
+    tuned = {"unexpected": torch.ones(1, dtype=torch.bfloat16)}
+    constructed = []
+
+    def decoder(**kwargs):
+        model = torch.nn.Linear(2, 2, bias=False)
+        constructed.append(model)
+        return model
+
+    def tensors(path, prefixes):
+        if path.name == "base":
+            return base
+        if failure == "stream":
+            raise ValueError("synthetic tuned final-check failure")
+        return tuned
+
+    monkeypatch.setattr(loader, "DiffusionVideoDecoder", decoder)
+    monkeypatch.setattr(loader, "read_vae_config", lambda path: _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))
+    monkeypatch.setattr(loader, "_read_tensors", tensors)
+    exception, message = (ValueError, "final-check") if failure == "stream" else (KeyError, "not in the decoder")
+    with pytest.raises(exception, match=message):
+        loader.load_video_decoder(Path("base"), Path("tuned"), torch.device("cpu"))
+    assert torch.count_nonzero(constructed[0].weight).item() == 0
+    assert torch.count_nonzero(base["decoder.weight"]).item() == 0
+    if failure == "unknown":
+        assert torch.count_nonzero(tuned["unexpected"]).item() == 0
+
+
+def test_decoder_load_success_preserves_cpu_weights_and_clears_overlay_sources(monkeypatch):
+    base = {"decoder.weight": torch.ones(2, 2, dtype=torch.bfloat16)}
+    tuned = {"weight": torch.full((2, 2), 2, dtype=torch.bfloat16)}
+    monkeypatch.setattr(loader, "DiffusionVideoDecoder", lambda **kwargs: torch.nn.Linear(2, 2, bias=False))
+    monkeypatch.setattr(loader, "read_vae_config", lambda path: _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))
+    monkeypatch.setattr(loader, "_read_tensors", lambda path, prefixes: base if path.name == "base" else tuned)
+    model = loader.load_video_decoder(Path("base"), Path("tuned"), torch.device("cpu"))
+    assert torch.equal(model.weight, torch.full((2, 2), 2, dtype=torch.bfloat16))
+    assert base["decoder.weight"].untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
+    assert torch.count_nonzero(tuned["weight"]).item() == 0
 
 
 def test_ltx25_tiling_needs_minimum_budget():

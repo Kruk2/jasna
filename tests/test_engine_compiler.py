@@ -105,8 +105,7 @@ def test_ensure_subprocess_failure_raises(monkeypatch) -> None:
 def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
     monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
     monkeypatch.setattr("jasna.engine_compiler.is_frozen", lambda: True)
-    fake_sys = type("FakeSys", (), {"executable": "C:/app/jasna.exe"})()
-    monkeypatch.setattr("jasna.engine_compiler.sys", fake_sys)
+    monkeypatch.setattr("jasna.engine_compiler.get_application_executable", lambda: "C:/app/jasna.exe")
 
     popen_calls = []
     proc = _mock_proc([])
@@ -119,6 +118,25 @@ def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
     assert popen_calls[0][0] == "C:/app/jasna.exe"
     assert popen_calls[0][1] == "--compile-engines"
     assert "-m" not in popen_calls[0]
+
+
+def test_frozen_linux_engine_compiler_uses_the_running_binary(monkeypatch) -> None:
+    import torch  # noqa: F401  Initialize before mocking subprocess.
+    import jasna.engine_compiler as compiler
+    from jasna import os_utils
+
+    monkeypatch.setattr(compiler, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "linux")
+    monkeypatch.setattr(compiler.sys, "executable", "/relocated/app/python")
+    monkeypatch.setattr(os_utils.os, "readlink", lambda path: "/relocated/app/jasna.bin")
+    monkeypatch.setattr(compiler, "_missing_engines", lambda *_args, **_kwargs: compiler._MissingEngines(False, True, False))
+    commands = []
+    monkeypatch.setattr(compiler.subprocess, "Popen", lambda command, **kwargs: (commands.append(command), _mock_proc([]))[1])
+
+    ensure_engines_compiled(EngineCompilationRequest(device="cpu", fp16=False, detection=True))
+
+    assert commands[0][:2] == ["/relocated/app/jasna.bin", "--compile-engines"]
 
 
 def test_ensure_create_no_window_on_windows(monkeypatch) -> None:

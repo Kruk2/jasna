@@ -46,14 +46,14 @@ _SHARED_NAMES = ("vae.safetensors", "vae-decoder.safetensors")
 # The published files (``.enc`` in releases): size for the download prompt, and a sha256
 # that is filled in with the release that publishes the file.
 LTX_DOWNLOADS: dict[str, DownloadableFile] = {
-    name: DownloadableFile(name, size, None)
-    for name, size in (
-        ("ltx-restore-alpha1-distill8-int8.safetensors", 13_368_044_744),
-        ("ltx-restore-alpha1-distill8-nvfp4.safetensors", 7_733_292_672),
-        ("ltx-restore-alpha1-int8.safetensors", 13_368_044_792),
-        ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_292_712),
-        ("vae.safetensors", 1_472_223_346),
-        ("vae-decoder.safetensors", 38_718_560),
+    name: DownloadableFile(name, size, checksum)
+    for name, size, checksum in (
+        ("ltx-restore-alpha1-distill8-int8.safetensors", 13_368_048_773, "b006342a109c640a46ae91a5cd10e67186d968c63ef2f715c78bedf36936e057"),
+        ("ltx-restore-alpha1-distill8-nvfp4.safetensors", 7_733_295_021, "54f2f4f6f7d3f5d60e18aca7bf6137da206a2b66f282e1a9078743c3173e62e2"),
+        ("ltx-restore-alpha1-int8.safetensors", 13_368_048_821, "c72161b1afefe4d8cc0592fa57afef6c20466dcf912912f3628a451468780f83"),
+        ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_295_061, "8301d5ba17660b577ebe906d343963208f7e5453e589ef2f7470087a3ba2ccb5"),
+        ("vae.safetensors", 1_472_223_815, "b9252d5a799748d1932d4eed60a2d77461949a19f6feb57f2238dbffe08f5e25"),
+        ("vae-decoder.safetensors", 38_718_609, "c60c3572871203bd364d6bb2390225fa4c347f7ea5c64fe468256c900caeea2d"),
     )
 }
 
@@ -72,7 +72,55 @@ LTX_TRIAL_NOTICE = "LTX trial mode: output is not restored. Speed matches a real
 
 # Chosen so a random INT8 / FP4 weight comes out near 1/sqrt(4096), like a trained one.
 _PLACEHOLDER_SCALES = {".scales": 2e-4, ".weight_scale_2": 5e-3, ".weight_scale": 1.0}
-_TORCH_DTYPES = {"BF16": "bfloat16", "F32": "float32", "I8": "int8", "U8": "uint8", "F8_E4M3": "float8_e4m3fn"}
+_TORCH_DTYPES = {
+    "BOOL": "bool", "U8": "uint8", "I8": "int8", "I16": "int16", "I32": "int32", "I64": "int64",
+    "F16": "float16", "BF16": "bfloat16", "F32": "float32", "F64": "float64",
+    "F8_E4M3": "float8_e4m3fn", "F8_E5M2": "float8_e5m2",
+}
+
+
+def _fill_tensor_groups(reader, group_names, groups) -> None:
+    for names, destinations in zip(group_names, groups, strict=True):
+        if tuple(destinations) != tuple(names):
+            raise ValueError("tensor group does not match its declared names")
+        for name, destination in destinations.items():
+            reader.get_tensor_into(name, destination)
+
+
+class _PlaintextHandle:
+    def __init__(self, path: Path) -> None:
+        from safetensors import safe_open
+        self._source = safe_open(str(path), framework="pt", device="cpu")
+
+    def __enter__(self):
+        self._source.__enter__()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._source.__exit__(*exc)
+
+    def keys(self):
+        return self._source.keys()
+
+    def metadata(self):
+        return self._source.metadata()
+
+    def get_tensor(self, name: str):
+        return self._source.get_tensor(name)
+
+    def tensor_specs(self):
+        import torch
+        result = {}
+        for name in self.keys():
+            tensor = self._source.get_slice(name)
+            result[name] = (getattr(torch, _TORCH_DTYPES[tensor.get_dtype()]), tuple(tensor.get_shape()))
+        return result
+
+    def get_tensor_into(self, name: str, destination) -> None:
+        destination.copy_(self._source.get_tensor(name))
+
+    def read_tensors_into(self, group_names, groups) -> None:
+        _fill_tensor_groups(self, group_names, groups)
 
 
 class _PlaceholderHandle:
@@ -111,6 +159,19 @@ class _PlaceholderHandle:
     def keys(self) -> list[str]:
         return list(self._specs)
 
+    def tensor_specs(self):
+        import torch
+        return {name: (getattr(torch, _TORCH_DTYPES[dtype]), tuple(shape))
+                for name, (dtype, shape) in self._specs.items()}
+
+    def get_tensor_into(self, name: str, destination) -> None:
+        dtype, shape = self._specs[name]
+        scale = next((value for suffix, value in _PLACEHOLDER_SCALES.items() if name.endswith(suffix)), None)
+        if scale is not None:
+            destination.fill_(scale)
+        else:
+            destination.copy_(self._pool(dtype)[:math.prod(shape)].view(shape))
+
     def get_tensor(self, name: str):
         import torch
 
@@ -134,13 +195,15 @@ class _PlaceholderHandle:
                 self._pools[dtype] = (torch.randn(numel, generator=generator) * 0.02).to(torch_dtype)
         return self._pools[dtype]
 
+    def read_tensors_into(self, group_names, groups) -> None:
+        _fill_tensor_groups(self, group_names, groups)
+
 
 def open_tensors(path: Path | PlaceholderTensors):
     if isinstance(path, PlaceholderTensors):
         return _PlaceholderHandle(path)
     if not is_frozen() and path.suffix != ".enc" and path.is_file():
-        from safetensors import safe_open
-        return safe_open(str(path), framework="pt", device="cpu")
+        return _PlaintextHandle(path)
     from jasna.protection.protected_tensors import open_ltx_tensors
     return open_ltx_tensors(path)
 
