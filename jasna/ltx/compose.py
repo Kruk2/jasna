@@ -2,7 +2,8 @@
 
 Frames are ``[3, H, W]`` uint8 RGB tensors. A window paints only its own track's
 feathered mask and never a pixel inside another track's mask; outside every mask the
-source stays bit-exact.
+source stays bit-exact. A track in a handover (presence below 1) also paints over the
+other tracks' masks and takes that share of its feathered area from them.
 """
 
 from __future__ import annotations
@@ -134,17 +135,19 @@ def masked_median(difference: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
 @dataclass(frozen=True)
 class Candidate:
-    """One window's restored canvas for a frame, with its crop, crossfade weight and the
-    polygons of the track it restores."""
+    """One window's restored canvas for a frame, with its crop, crossfade weight, and the
+    id, polygons and handover presence of the track it restores."""
 
     canvas: torch.Tensor
     crop: CropFrame
     weight: float
+    track: int
     polygons: Sequence[Polygon]
+    presence: float
 
 
 def composite_frame(source: torch.Tensor, candidates: Sequence[Candidate], *, feather: int) -> torch.Tensor:
-    live = [c for c in candidates if c.weight > 0.0]
+    live = [c for c in candidates if c.weight > 0.0 and c.presence > 0.0]
     if not live:
         return source
     _, height, width = source.shape
@@ -155,24 +158,19 @@ def composite_frame(source: torch.Tensor, candidates: Sequence[Candidate], *, fe
     y3 = min(max(c.crop.crop_box[3] for c in live) + reach, height)
     shape = (y3 - y0, x3 - x0)
     device = source.device
-    tracks: list[Sequence[Polygon]] = []
-    for candidate in live:
-        if candidate.polygons not in tracks:
-            tracks.append(candidate.polygons)
-    rois = [polygon_mask(polygons, shape, (x0, y0), device) for polygons in tracks]
-    feathered = [feather_alpha(roi, feather) for roi in rois]
+    tracks = {c.track: c for c in live}
+    rois = {track: polygon_mask(c.polygons, shape, (x0, y0), device) for track, c in tracks.items()}
+    feathered = {track: feather_alpha(roi, feather) for track, roi in rois.items()}
     if len(rois) == 1:
-        union, union_feathered = rois[0], feathered[0]
+        (union,), (union_feathered,) = rois.values(), feathered.values()
     else:
-        union = torch.stack(rois).any(dim=0)
+        union = torch.stack(list(rois.values())).any(dim=0)
         union_feathered = feather_alpha(union, feather)
     outside = union_feathered <= 0.0
     region = source[:, y0:y3, x0:x3].float()
-    accumulator = torch.zeros_like(region)
-    total = torch.zeros(shape, dtype=torch.float32, device=device)
+    layers = []
     for candidate in live:
-        track = tracks.index(candidate.polygons)
-        roi = rois[track]
+        roi = rois[candidate.track]
         x1, y1, x2, y2 = candidate.crop.crop_box
         x1, y1, x2, y2 = x1 - x0, y1 - y0, x2 - x0, y2 - y0
         ramp = crop_edge_ramp((x1, y1, x2, y2), shape, feather, device)
@@ -181,11 +179,25 @@ def composite_frame(source: torch.Tensor, candidates: Sequence[Candidate], *, fe
         restored = region.clone()
         restored[:, y1:y2, x1:x2] = restored_crop
         edge = torch.where(roi, covered.float(), ramp)
-        alpha = feathered[track] * edge * candidate.weight
-        alpha = alpha * (roi | ~union).float()
+        alpha = feathered[candidate.track] * edge * candidate.weight
+        if candidate.presence == 1.0:
+            alpha = alpha * (roi | ~union).float()
         ring = (covered & outside)[y1:y2, x1:x2]
         offset = masked_median(region[:, y1:y2, x1:x2] - restored_crop, ring) * COLOUR_MATCH_STRENGTH
-        restored = restored + offset[:, None, None]
+        layers.append((candidate, restored + offset[:, None, None], alpha))
+    handing = {track: c.presence for track, c in tracks.items() if c.presence < 1.0}
+    shares = {
+        track: sum(alpha for c, _, alpha in layers if c.track == track).clamp(max=1.0) * presence
+        for track, presence in handing.items()
+    }
+    accumulator = torch.zeros_like(region)
+    total = torch.zeros(shape, dtype=torch.float32, device=device)
+    for candidate, restored, alpha in layers:
+        if candidate.track in handing:
+            alpha = alpha * candidate.presence
+        else:
+            for share in shares.values():
+                alpha = alpha * (1.0 - share)
         accumulator += restored * alpha
         total += alpha
     over = total > 1.0

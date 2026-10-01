@@ -51,7 +51,7 @@ def test_composite_touches_only_the_feathered_mask():
     crop = letterbox((200, 100, 456, 356), 256)
     restored = torch.full((3, 256, 256), 128, dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0], [300.0, 260.0]]
-    out = composite_frame(source, [Candidate(restored, crop, 1.0, [polygon])], feather=8)
+    out = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8)
     changed = (out != source).any(dim=0)
     ys, xs = torch.nonzero(changed, as_tuple=True)
     assert changed[230, 330]
@@ -74,7 +74,7 @@ def test_zero_weight_and_no_candidates_keep_the_source():
     restored = torch.zeros((3, 256, 256), dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0]]
     assert torch.equal(composite_frame(source, [], feather=8), source)
-    assert torch.equal(composite_frame(source, [Candidate(restored, crop, 0.0, [polygon])], feather=8), source)
+    assert torch.equal(composite_frame(source, [Candidate(restored, crop, 0.0, 0, [polygon], 1.0)], feather=8), source)
 
 
 def test_two_agreeing_windows_equal_one():
@@ -82,9 +82,9 @@ def test_two_agreeing_windows_equal_one():
     crop = letterbox((200, 100, 456, 356), 256)
     restored = torch.full((3, 256, 256), 90, dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0], [300.0, 260.0]]
-    one = composite_frame(source, [Candidate(restored, crop, 1.0, [polygon])], feather=8)
+    one = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8)
     two = composite_frame(
-        source, [Candidate(restored, crop, 0.3, [polygon]), Candidate(restored, crop, 0.7, [polygon])], feather=8
+        source, [Candidate(restored, crop, 0.3, 0, [polygon], 1.0), Candidate(restored, crop, 0.7, 0, [polygon], 1.0)], feather=8
     )
     assert (one.int() - two.int()).abs().max() <= 1
 
@@ -135,7 +135,7 @@ def test_composite_shifts_the_restored_colour_towards_the_ring():
     crop = letterbox((200, 100, 456, 356), 256)
     restored = torch.full((3, 256, 256), 140, dtype=torch.uint8)
     polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0], [300.0, 260.0]]
-    out = composite_frame(source, [Candidate(restored, crop, 1.0, [polygon])], feather=8)
+    out = composite_frame(source, [Candidate(restored, crop, 1.0, 0, [polygon], 1.0)], feather=8)
     assert out[:, 230, 330].tolist() == [110, 110, 110]
 
 
@@ -146,5 +146,27 @@ def test_two_tracks_each_paint_their_own_mask():
     right = [[400.0, 150.0], [460.0, 150.0], [460.0, 210.0], [400.0, 210.0]]
     dark = torch.full((3, 480, 480), 20, dtype=torch.uint8)
     bright = torch.full((3, 480, 480), 220, dtype=torch.uint8)
-    out = composite_frame(source, [Candidate(dark, crop, 1.0, [left]), Candidate(bright, crop, 1.0, [right])], feather=8)
+    out = composite_frame(source, [Candidate(dark, crop, 1.0, 0, [left], 1.0), Candidate(bright, crop, 1.0, 1, [right], 1.0)], feather=8)
     assert out[0, 180, 230] < 100 < out[0, 180, 430]
+
+
+def _handover(presence: float) -> torch.Tensor:
+    source = torch.full((3, 360, 640), 100, dtype=torch.uint8)
+    crop = letterbox((100, 50, 580, 330), 480)
+    parent = [[150.0, 100.0], [500.0, 100.0], [500.0, 280.0], [150.0, 280.0]]
+    child = [[200.0, 150.0], [300.0, 150.0], [300.0, 230.0], [200.0, 230.0]]
+    dark = torch.full((3, 480, 480), 20, dtype=torch.uint8)
+    bright = torch.full((3, 480, 480), 220, dtype=torch.uint8)
+    return composite_frame(
+        source, [Candidate(dark, crop, 1.0, 0, [parent], 1.0), Candidate(bright, crop, 1.0, 1, [child], presence)], feather=8
+    )
+
+
+def test_handover_shares_the_child_area_by_presence():
+    start, half, done = _handover(1e-6), _handover(0.5), _handover(1.0 - 1e-6)
+    inside, edge, parent_only = (190, 250), (150, 200 - 9), (190, 450)
+    assert start[0, 190, 250] < 100 < done[0, 190, 250]
+    for y, x in (inside, edge):
+        assert abs(int(half[0, y, x]) - (int(start[0, y, x]) + int(done[0, y, x])) / 2) <= 1
+    assert torch.equal(half[:, parent_only[0], parent_only[1]], start[:, parent_only[0], parent_only[1]])
+    assert done[0, edge[0], edge[1]] > start[0, edge[0], edge[1]]
