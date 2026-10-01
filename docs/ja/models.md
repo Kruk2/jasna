@@ -89,7 +89,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 - **VRAM**: 24 GB ならモデル全体が GPU に載ります。16 GB でも十分で、
   11～12 GB でも動きますが遅くなります。11 GB 未満は未検証です。
-- **システム RAM**: 32 GB を推奨します。モデルの読み込みに約 15 GB 使います。
+- **システム RAM**: 32 GB を推奨します（モデルの読み込みに約 19 GB 使います）。16 GB の場合は、約 10 GB で動く Fast モードを使ってください。
 
 ## セカンダリ復元
 

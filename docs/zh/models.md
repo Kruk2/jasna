@@ -82,7 +82,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 - **显存**：24 GB 可把整个模型放在显卡上，16 GB 也没问题，11–12 GB
   能用但更慢。低于 11 GB 未测试。
-- **内存**：建议 32 GB；加载模型时约占用 15 GB。
+- **内存**：建议 32 GB（加载模型时约占用 19 GB）。只有 16 GB 时，请使用约需 10 GB 的 Fast 模式。
 
 ## 二级修复
 

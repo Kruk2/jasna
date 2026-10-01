@@ -90,7 +90,8 @@ Undistilled takes about twice as long.
 
 - **VRAM**: 24 GB keeps the whole model on the GPU, 16 GB is fine, and
   11–12 GB works but is slower. Less than 11 GB is untested.
-- **System RAM**: 32 GB recommended; loading the model uses about 15 GB.
+- **System RAM**: 32 GB recommended (loading the model uses about 19 GB). With
+  16 GB, use Fast mode, which needs about 10 GB.
 
 ## Secondary restoration
 
