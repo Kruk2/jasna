@@ -297,6 +297,7 @@ class Pipeline:
 
     def _run_ltx(self, metadata) -> None:
         from jasna.ltx.restore import Cancelled, restore_video, video_frames
+        from jasna.ltx.speed import profile_path
 
         self._require_ltx_video()
         frame_rate = self._resolve_frame_rate(metadata)
@@ -322,6 +323,7 @@ class Pipeline:
                 seed=self.ltx_seed,
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
+                speed_profile=profile_path(),
                 progress=self._ltx_progress(
                     frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
                 ),
@@ -337,6 +339,7 @@ class Pipeline:
         GPU's size, never the VRAM free at that moment, so a segment renders the same in a
         job and in a seed preview."""
         from jasna.ltx.restore import LtxRender, segment_decode_budget, segment_large_canvas
+        from jasna.ltx.speed import profile_path
 
         self._require_ltx_video()
         return LtxRender(
@@ -350,6 +353,7 @@ class Pipeline:
             ),
             budget=segment_decode_budget,
             device=self.device,
+            speed_profile=profile_path(),
         )
 
     def ltx_span(
