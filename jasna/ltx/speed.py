@@ -1,6 +1,8 @@
 """LTX speed learned from finished runs, so a later run knows its time left once it is planned.
 
-A profile (one JSON file) maps a key (Jasna version, GPU, transformer file) to rates in
+A profile (one JSON file) maps a key (Jasna version, GPU, transformer file, decode
+budget: whole videos decode within the free VRAM, segments within a fixed budget, so their
+decode tiling differs) to rates in
 seconds: per pass a fixed part (model load, first-call compile), per frame-megapixel
 for the passes that decode the video, and per window of each canvas. Rates are warm: the
 first batch of a pass and the first window of each canvas are left out, and denoise
@@ -28,8 +30,8 @@ def profile_path() -> Path:
     return model_weights_dir() / "ltx-speed-profile.json"
 
 
-def profile_key(gpu: str, transformer: str) -> str:
-    return f"{__version__} | {gpu} | {transformer}"
+def profile_key(gpu: str, transformer: str, decode_budget: str) -> str:
+    return f"{__version__} | {gpu} | {transformer} | decode {decode_budget}"
 
 
 def load_rates(path: Path, key: str) -> dict[str, float]:
@@ -133,16 +135,17 @@ def _medians(samples: dict[int, list[float]], unit: str) -> list[str]:
 
 
 def run_summary(
-    timings: dict[str, PassTiming], work: Work, peak_vram_bytes: int, blocks: tuple[int, int] | None
+    profile_key: str, timings: dict[str, PassTiming], work: Work, peak_vram_bytes: int, blocks: tuple[int, int] | None
 ) -> list[str]:
-    """Log lines for a finished run: totals, then per pass its wall time and warm rates
-    (medians per canvas); ``blocks`` is ``(resident, total)`` transformer blocks when
-    denoise ran."""
+    """Log lines for a finished run: totals and the speed profile key its rates belong to,
+    then per pass its wall time and warm rates (medians per canvas); ``blocks`` is
+    ``(resident, total)`` transformer blocks when denoise ran."""
     windows = ", ".join(f"{count} at {canvas}" for canvas, count in sorted(work.windows.items())) or "0"
     window_steps = timings["denoise"].units if "denoise" in timings else 0
     lines = [
         f"[timing] LTX: {sum(t.seconds for t in timings.values()):.1f}s, {work.frames} frames, "
-        f"windows {windows}, {window_steps} window-steps, peak VRAM {peak_vram_bytes / 2**20:.1f} MiB"
+        f"windows {windows}, {window_steps} window-steps, peak VRAM {peak_vram_bytes / 2**20:.1f} MiB",
+        f"[timing] LTX profile: {profile_key}",
     ]
     for stage in SUMMARY_PASSES:
         timing = timings.get(stage)

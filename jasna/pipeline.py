@@ -356,6 +356,7 @@ class Pipeline:
                 self.ltx_large_canvas, torch.cuda.get_device_properties(self.device).total_memory
             ),
             budget=segment_decode_budget,
+            budget_name="segment",
             device=self.device,
             speed_profile=profile_path(),
         )

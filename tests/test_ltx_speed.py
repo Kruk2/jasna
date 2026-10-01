@@ -7,8 +7,11 @@ from jasna.ltx import speed
 from jasna.ltx.model_files import LtxModelFiles
 
 
-def test_profile_key_names_the_version_gpu_and_transformer():
-    assert speed.profile_key("RTX 5090", "m.safetensors") == f"{__version__} | RTX 5090 | m.safetensors"
+def test_profile_key_names_the_version_gpu_transformer_and_decode_budget():
+    assert (
+        speed.profile_key("RTX 5090", "m.safetensors", "segment")
+        == f"{__version__} | RTX 5090 | m.safetensors | decode segment"
+    )
 
 
 def test_a_trial_shares_the_key_of_the_model_it_stands_in_for(tmp_path):
@@ -109,8 +112,9 @@ def test_run_summary_gives_each_pass_its_wall_time_and_warm_medians_per_canvas()
         ),
     }
     work = speed.Work(frames=100, megapixels=2.0, windows={768: 2, 512: 4})
-    assert speed.run_summary(timings, work, 3 << 30, (40, 48)) == [
+    assert speed.run_summary("key", timings, work, 3 << 30, (40, 48)) == [
         "[timing] LTX: 100.0s, 100 frames, windows 4 at 512, 2 at 768, 40 window-steps, peak VRAM 3072.0 MiB",
+        "[timing] LTX profile: key",
         "[timing] LTX scan: 4.0s, 45.0 frames/s",
         "[timing] LTX encode: 20.0s, 9.0 frames/s, 2.00 s/window at 512, 4.00 s/window at 768",
         "[timing] LTX denoise: 60.0s, 2.00 s/window-step at 512, 4.00 s/window-step at 768, blocks 40/48 resident",
@@ -123,8 +127,9 @@ def test_run_summary_without_mosaics_has_only_scan_and_compose():
         "scan": speed.PassTiming(seconds=3.0, units=50, warm_seconds=1.0, warm_frames=40),
         "compose": speed.PassTiming(seconds=2.0, units=50),
     }
-    assert speed.run_summary(timings, speed.Work(frames=50, megapixels=2.0, windows={}), 0, None) == [
+    assert speed.run_summary("key", timings, speed.Work(frames=50, megapixels=2.0, windows={}), 0, None) == [
         "[timing] LTX: 5.0s, 50 frames, windows 0, 0 window-steps, peak VRAM 0.0 MiB",
+        "[timing] LTX profile: key",
         "[timing] LTX scan: 3.0s, 40.0 frames/s",
         "[timing] LTX compose: 2.0s",
     ]

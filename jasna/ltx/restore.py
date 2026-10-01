@@ -119,8 +119,8 @@ class Progress:
     def learned_rates(self) -> dict[str, float]:
         return speed.learned_rates(self.timings, self._work, self._rates)
 
-    def summary(self, peak_vram_bytes: int, blocks: tuple[int, int] | None) -> list[str]:
-        return speed.run_summary(self.timings, self._work, peak_vram_bytes, blocks)
+    def summary(self, profile_key: str, peak_vram_bytes: int, blocks: tuple[int, int] | None) -> list[str]:
+        return speed.run_summary(profile_key, self.timings, self._work, peak_vram_bytes, blocks)
 
     def bar(self, stage: LtxStage, total: int, unit: str = "frame") -> _StageBar:
         tqdm_bar = tqdm(
@@ -581,8 +581,9 @@ def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
 @dataclass(frozen=True)
 class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
-    size, detection batch size, the 768 px decision, the decode budget per canvas, the
-    GPU and the speed profile file (``speed.py``)."""
+    size, detection batch size, the 768 px decision, the decode budget per canvas and its
+    name (decode tiling follows the budget, so it keys the speed profile), the GPU and the
+    speed profile file (``speed.py``)."""
 
     detector: Callable
     files: LtxModelFiles
@@ -591,6 +592,7 @@ class LtxRender:
     batch_size: int
     large_canvas: bool
     budget: DecodeBudget
+    budget_name: str
     device: torch.device
     speed_profile: Path
 
@@ -722,7 +724,9 @@ def restore_spans(
 ) -> None:
     """Restore every segment of ``spans`` and write each span's frames to a writer of its own
     (closed once the span is written)."""
-    profile_key = speed.profile_key(torch.cuda.get_device_name(render.device), render.files.transformer_name)
+    profile_key = speed.profile_key(
+        torch.cuda.get_device_name(render.device), render.files.transformer_name, render.budget_name
+    )
     progress.expect(speed.load_rates(render.speed_profile, profile_key))
     torch.cuda.reset_peak_memory_stats(render.device)
     blocks = None
@@ -741,7 +745,7 @@ def restore_spans(
                 torch.cuda.empty_cache()
         decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device) if windows else None
         compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
-    for line in progress.summary(torch.cuda.max_memory_allocated(render.device), blocks):
+    for line in progress.summary(profile_key, torch.cuda.max_memory_allocated(render.device), blocks):
         logger.info(line)
     if windows:
         speed.save_rates(render.speed_profile, profile_key, progress.learned_rates())
@@ -776,6 +780,7 @@ def restore_video(
             batch_size=batch_size,
             large_canvas=large_canvas_fits(large_canvas, torch.cuda.mem_get_info(device)[0]),
             budget=free_vram_budget(device),
+            budget_name="free VRAM",
             device=device,
             speed_profile=speed_profile,
         ),
