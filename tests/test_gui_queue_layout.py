@@ -10,11 +10,13 @@ import customtkinter as ctk
 import pytest
 
 from jasna.gui.app import JasnaApp
+from jasna.gui import scaling
 from jasna.gui.models import JobItem, JobStatus
 from jasna.gui import queue_panel as queue_panel_module
 from jasna.gui.queue_panel import QueuePanel
 from jasna.segments import SegmentRange
 from jasna.gui.theme import Colors, Sizing
+from jasna.gui.locales import t
 
 
 def test_reset_jobs_for_run_prepares_every_status_and_preserves_job_options(
@@ -52,7 +54,7 @@ def test_reset_jobs_for_run_prepares_every_status_and_preserves_job_options(
         _find_job_index_by_id=lambda job_id: next(
             index for index, job in enumerate(jobs) if job.id == job_id
         ),
-        _get_output_path=lambda path: tmp_path / f"{path.stem}-restored.mp4",
+        _get_output_path=lambda job: tmp_path / f"{job.path.stem}-restored.mp4",
         _set_widget_action_options=lambda *_args: None,
     )
     panel.update_job_status = MethodType(QueuePanel.update_job_status, panel)
@@ -81,7 +83,7 @@ def test_queue_footer_stacks_count_above_action_buttons() -> None:
         root.geometry("320x800")
         panel = QueuePanel(root)
         panel.pack(fill="both", expand=True)
-        root.update_idletasks()
+        root.update()
 
         count_bottom = panel._queue_count.winfo_rooty() + panel._queue_count.winfo_height()
         actions_top = min(
@@ -90,8 +92,31 @@ def test_queue_footer_stacks_count_above_action_buttons() -> None:
         )
         assert count_bottom <= actions_top
 
-        empty_content_width = panel._empty_state.winfo_width() - 40
+        empty_content_width = panel._empty_state.winfo_width() - scaling.raw_tk_size(
+            panel._empty_label,
+            40,
+        )
         assert panel._empty_label.winfo_reqwidth() <= empty_content_width
+    finally:
+        root.destroy()
+
+
+def test_preserve_structure_control_is_above_output_path() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        root.geometry("420x900")
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        root.update()
+
+        assert (
+            panel._preserve_structure_checkbox.winfo_rooty()
+            < panel._output_entry.winfo_rooty()
+        )
     finally:
         root.destroy()
 
@@ -146,6 +171,36 @@ def test_segment_button_only_appears_for_pending_video_jobs() -> None:
         panel.update_job_status(job.id, JobStatus.PENDING)
         root.update()
         assert widget._segments_btn.winfo_ismapped()
+    finally:
+        root.destroy()
+
+
+def test_processing_row_shows_phase_and_labels_eta_as_stage_eta() -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        panel = QueuePanel(root)
+        panel.pack(fill="both", expand=True)
+        panel.add_job(Path("/tmp/video.mp4"))
+        job = panel._jobs[0]
+        widget = panel._job_widgets[0]
+
+        panel.update_job_status(
+            job.id,
+            JobStatus.PROCESSING,
+            progress=0.5,
+            fps=19.5,
+            eta_seconds=38.0,
+            phase="fine_scan",
+        )
+        root.update()
+
+        assert widget._status_label.cget("text") == t("job_phase_fine_scan")
+        assert widget._fps_label.cget("text") == "19.5fps"
+        assert widget._eta_label.cget("text") == t("stage_eta", eta="38s")
     finally:
         root.destroy()
 
@@ -308,7 +363,7 @@ def test_same_as_input_clears_output_and_refreshes_conflicts(tmp_path: Path) -> 
         assert panel.get_output_folder() == ""
         assert panel._jobs[0].has_conflict
         assert panel._same_as_input_btn.cget("state") == "normal"
-        changed.assert_called_once_with("", panel.get_output_pattern())
+        changed.assert_called_once_with("", panel.get_output_pattern(), False)
 
         changed.reset_mock()
         panel._output_entry.insert(0, str(tmp_path / "manual"))
@@ -316,7 +371,9 @@ def test_same_as_input_clears_output_and_refreshes_conflicts(tmp_path: Path) -> 
 
         assert panel.get_output_folder() == str(tmp_path / "manual")
         assert panel._same_as_input_btn.cget("fg_color") == Colors.BG_CARD
-        changed.assert_called_once_with(str(tmp_path / "manual"), panel.get_output_pattern())
+        changed.assert_called_once_with(
+            str(tmp_path / "manual"), panel.get_output_pattern(), False
+        )
 
         panel.set_running(True, processing_job_id=panel._jobs[0].id)
         assert panel._same_as_input_btn.cget("state") == "disabled"
@@ -380,6 +437,7 @@ def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
         _output_entry=control(),
         _same_as_input_btn=control(),
         _pattern_entry=control(),
+        _preserve_structure_checkbox=control(),
         _add_files_btn=control(),
         _add_folder_btn=control(),
         _jobs=jobs,
