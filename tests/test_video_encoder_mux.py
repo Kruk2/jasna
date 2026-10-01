@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 import torch
 
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media import get_video_meta_data
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.splice import probe_keyframes
@@ -80,11 +81,12 @@ def _make_source(
     *,
     rate: str = "12",
     duration: float = 2,
+    size: str = "256x256",
 ) -> Path:
     out = tmp_path / name
     cmd = [
         resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", f"testsrc2=size=256x256:rate={rate}:duration={duration}",
+        "-f", "lavfi", "-i", f"testsrc2=size={size}:rate={rate}:duration={duration}",
     ]
     if acodec:
         cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}", "-c:a", acodec]
@@ -93,6 +95,12 @@ def _make_source(
     cmd.append(str(out))
     subprocess.run(cmd, check=True)
     return out
+
+
+def _codec_fixture_size(codec: str) -> str:
+    if codec == "h264" and vendor_for_device(DEVICE) == AcceleratorVendor.AMD:
+        return "640x360"
+    return "256x256"
 
 
 def _make_count_only_stereo_pcm_source(tmp_path: Path) -> Path:
@@ -417,7 +425,7 @@ def test_count_only_stereo_pcm_copies_to_mp4_with_explicit_layout(tmp_path):
             [frame.to_ndarray() for frame in container.decode(audio)], axis=1
         )
 
-    _transcode(src, dst, codec="h264")
+    _transcode(src, dst, codec="hevc")
 
     with av.open(str(dst)) as container:
         audio = container.streams.audio[0]
@@ -637,7 +645,12 @@ _VFR_PTS_STEPS = [512, 512, 700, 300, 512, 1024, 256, 512, 512, 900, 400, 512]
 
 
 def _encode_synthetic_vfr(tmp_path: Path, codec: str, suffix: str) -> tuple[Path, list[int], Fraction]:
-    src = _make_source(tmp_path, "vfr_meta_src.mp4", acodec=None)
+    src = _make_source(
+        tmp_path,
+        "vfr_meta_src.mp4",
+        acodec=None,
+        size=_codec_fixture_size(codec),
+    )
     metadata = get_video_meta_data(str(src))
     h, w = metadata.video_height, metadata.video_width
     dst = tmp_path / f"vfr_{codec}{suffix}"
@@ -703,7 +716,12 @@ def test_codec_round_trip_pixels(tmp_path, codec, require_codec):
     require_codec(codec)
     dst, in_pts, _ = _encode_synthetic_vfr(tmp_path, codec, ".mp4")
     metadata = get_video_meta_data(str(dst))
-    src = _make_source(tmp_path, "rt_ref_src.mp4", acodec=None)
+    src = _make_source(
+        tmp_path,
+        "rt_ref_src.mp4",
+        acodec=None,
+        size=_codec_fixture_size(codec),
+    )
     ref_meta = get_video_meta_data(str(src))
     h, w = ref_meta.video_height, ref_meta.video_width
 
@@ -720,6 +738,7 @@ def test_shared_mux_path_for_new_codecs(tmp_path, codec, require_codec):
     src = _make_source(
         tmp_path, "src.mp4",
         extra=["-metadata", "title=jasna-test", "-metadata:s:a:0", "language=pol"],
+        size=_codec_fixture_size(codec),
     )
     dst = tmp_path / "out.mp4"
     _transcode(src, dst, codec=codec)
@@ -741,7 +760,12 @@ def test_shared_mux_path_for_new_codecs(tmp_path, codec, require_codec):
 @pytest.mark.parametrize("codec", ["h264", "av1"])
 def test_audio_transcode_for_new_codecs(tmp_path, codec, require_codec):
     require_codec(codec)
-    src = _make_source(tmp_path, "src.mkv", acodec="libvorbis")
+    src = _make_source(
+        tmp_path,
+        "src.mkv",
+        acodec="libvorbis",
+        size=_codec_fixture_size(codec),
+    )
     dst = tmp_path / "out.mp4"
     _transcode(src, dst, codec=codec)
 

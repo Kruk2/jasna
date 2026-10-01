@@ -343,6 +343,11 @@ def test_dragging_zoomed_preview_pans_the_source() -> None:
 
 def test_editor_height_grows_on_tall_screens(monkeypatch) -> None:
     monkeypatch.setattr(segment_editor.scaling, "window_scaling", lambda _window: 1.0)
+    monkeypatch.setattr(
+        segment_editor.scaling,
+        "screen_rect",
+        lambda _window: (0, 0, 2560, 1440),
+    )
     editor = object.__new__(SegmentEditor)
     editor.winfo_screenwidth = MagicMock(return_value=2560)
     editor.winfo_screenheight = MagicMock(return_value=1440)
@@ -469,7 +474,10 @@ def test_scan_card_stays_compact_and_visible_at_minimum_size(monkeypatch) -> Non
         editor.geometry("900x640")
         editor.update()
 
-        assert editor._scan_card.winfo_reqheight() < 100
+        assert editor._scan_card.winfo_reqheight() < segment_editor.scaling.raw_tk_size(
+            editor._scan_card,
+            100,
+        )
         assert (
             editor._scan_model.winfo_rootx() + editor._scan_model.winfo_width()
             < editor._scan_interval.winfo_rootx()

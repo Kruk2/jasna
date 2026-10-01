@@ -147,6 +147,11 @@ def test_slider_value_uses_native_label_without_ctk_canvas() -> None:
         assert label.cget("text") == "90"
         assert label.cget("background") == Colors.BG_PANEL
         assert int(label.cget("width")) == 4
-        assert label.cget("font") == f"{settings_widgets.Fonts.FAMILY} -{settings_widgets.Fonts.SIZE_NORMAL}"
+        family, size = root.tk.splitlist(label.cget("font"))
+        assert family == settings_widgets.Fonts.FAMILY
+        assert int(size) == settings_widgets.scaling.raw_tk_font_size(
+            root,
+            settings_widgets.Fonts.SIZE_NORMAL,
+        )
     finally:
         root.destroy()

@@ -9,6 +9,7 @@ from tkinter import TclError
 
 from jasna.gui import app as app_module
 from jasna.gui import components
+from jasna.gui import scaling
 from jasna.gui.app import JasnaApp
 from jasna.gui.components import JobListItem, StatusPill
 from jasna.gui.control_bar import ControlBar
@@ -201,7 +202,7 @@ def test_status_pill_sizes_to_localized_content(monkeypatch) -> None:
             root.update_idletasks()
             widths.append(pill.winfo_reqwidth())
 
-        assert max(widths) < 180
+        assert max(widths) < scaling.raw_tk_size(pill, 180)
         assert pill._label.cget("text") == translations["status_error"].upper()
     finally:
         root.destroy()

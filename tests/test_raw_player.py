@@ -427,6 +427,7 @@ def test_source_has_audio_uses_ffprobe_process(
 
     monkeypatch.setattr(raw_player, "resolve_executable", lambda name: "/tools/ffprobe")
     monkeypatch.setattr(raw_player.subprocess, "run", run)
+    monkeypatch.setattr(raw_player, "subprocess_no_window_kwargs", lambda: {})
 
     assert raw_player.source_has_audio("video.mp4") is expected
     assert calls == [

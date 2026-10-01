@@ -1,5 +1,6 @@
 """Load NVIDIA TensorRT DLLs first when the active environment provides them."""
 from importlib.util import find_spec
+import sys
 
 import pytest
 
@@ -16,6 +17,20 @@ collect_ignore = [] if _HAS_TENSORRT else [
     "test_trt_utils.py",
     "test_unet4x_secondary_restorer.py",
 ]
+
+
+@pytest.fixture(scope="session", autouse=True)
+def synchronize_windows_rocm_before_interpreter_teardown():
+    """Drain queued HIP work before CPython unloads the Windows runtime."""
+
+    yield
+    if sys.platform != "win32":
+        return
+
+    import torch
+
+    if getattr(torch.version, "hip", None) and torch.cuda.is_available():
+        torch.cuda.synchronize()
 
 
 @pytest.fixture
