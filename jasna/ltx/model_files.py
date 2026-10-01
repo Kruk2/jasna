@@ -164,6 +164,14 @@ class LtxModelFiles:
     vae: Path | PlaceholderTensors
     tuned_decoder: Path | PlaceholderTensors
 
+    @property
+    def transformer_name(self) -> str:
+        """The transformer's published file name (it names the model and precision); a
+        trial's placeholder gets the name of the file it stands in for."""
+        if isinstance(self.transformer, PlaceholderTensors):
+            return _TRANSFORMER_NAMES[(self.transformer.model, self.transformer.part == "nvfp4")]
+        return self.transformer.name.removesuffix(".enc")
+
     @classmethod
     def placeholder(cls, model: LtxModelName, *, fast: bool) -> LtxModelFiles:
         """Random weights shaped like ``model``'s files, for the trial: runs every pass at

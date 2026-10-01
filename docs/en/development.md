@@ -186,6 +186,12 @@ $P scripts/benchmark_na3d.py                                    # Triton NA kern
 $P scripts/benchmark_ltx_decode.py --split                        # time per decoder stage
 ```
 
+Every finished LTX run also stores its warm speed in `model_weights/ltx-speed-profile.json`
+(`jasna/ltx/speed.py`), keyed by Jasna version, GPU and transformer file: per pass a
+fixed part plus seconds per frame-megapixel and per window of each canvas. The next run
+with the same key shows its time left from the end of the scan. Delete the file to
+forget it; the profile is not a benchmark record.
+
 Write results to `benchmarks/<date>_<topic>.{csv,md}` and keep old CSVs intact —
 the README tables are a summary that drops releases where nothing moved, so the
 CSVs are the only full record. `scripts/benchmark_releases.py` compares frozen

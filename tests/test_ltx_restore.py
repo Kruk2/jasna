@@ -1,3 +1,5 @@
+import contextlib
+import json
 import threading
 from pathlib import Path
 
@@ -45,6 +47,12 @@ class _Bar:
 
     def update(self, n):
         self.n += n
+
+    def window(self, canvas):
+        return contextlib.nullcontext()
+
+    def track(self, canvas, steps):
+        return self.update
 
     def __enter__(self):
         return self
@@ -112,11 +120,12 @@ def fakes(monkeypatch):
     monkeypatch.setattr(restore.Progress, "bar", bar)
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (123 << 20, 1 << 40))
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "Test GPU")
     _Transformer.seeds = []
     return budgets, bars
 
 
-def _render():
+def _render(tmp_path):
     return restore.LtxRender(
         detector=_Detector(),
         files=FILES,
@@ -126,13 +135,14 @@ def _render():
         large_canvas=False,
         budget=restore.segment_decode_budget,
         device=torch.device("cpu"),
+        speed_profile=tmp_path / "speed.json",
     )
 
 
 def _run_spans(tmp_path, spans):
     restore.restore_spans(
         spans,
-        _render(),
+        _render(tmp_path),
         work_dir=tmp_path,
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
@@ -240,6 +250,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         seed=5,
         device=torch.device("cpu"),
         work_dir=tmp_path,
+        speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
     )
@@ -277,14 +288,39 @@ def test_segment_large_canvas_follows_the_gpu_size():
     assert not restore.segment_large_canvas(False, 32 * gib)
 
 
+class _Clock:
+    """``time.monotonic`` and CUDA events on one settable clock."""
+
+    def __init__(self, monkeypatch):
+        self.now = 0.0
+        clock = self
+        monkeypatch.setattr(restore.time, "monotonic", lambda: clock.now)
+
+        class Event:
+            def __init__(self, enable_timing):
+                self.at = None
+
+            def record(self):
+                self.at = clock.now
+
+            def synchronize(self):
+                pass
+
+            def elapsed_time(self, end):
+                return (end.at - self.at) * 1000.0
+
+        monkeypatch.setattr(torch.cuda, "Event", Event)
+
+
 def test_progress_reports_the_stage_and_the_share_of_the_whole_run(monkeypatch):
-    clock = iter([0.0, 100.0, 100.0, 100.0, 300.0, 300.0])
-    monkeypatch.setattr(restore.time, "monotonic", lambda: next(clock))
+    clock = _Clock(monkeypatch)
     reports = []
     progress = restore.Progress(10, disable=True, report=lambda *args: reports.append(args))
     with progress.bar("scan", 10) as bar:
+        clock.now = 100.0
         bar.update(10)
     with progress.bar("denoise", 4, unit="step") as bar:
+        clock.now = 300.0
         bar.update(2)
     assert [(stage, round(fraction, 3)) for stage, fraction, _eta in reports] == [
         ("scan", 0.0),
@@ -294,6 +330,88 @@ def test_progress_reports_the_stage_and_the_share_of_the_whole_run(monkeypatch):
     ]
     assert [eta for *_rest, eta in reports[:3]] == [0.0, 0.0, 0.0]
     assert reports[-1][2] == pytest.approx(300.0 * 0.58 / 0.42)
+
+
+_RATES = {
+    "encode/fixed": 5.0,
+    "encode/frame": 0.01,
+    "encode/window512": 0.5,
+    "denoise/fixed": 20.0,
+    "denoise/window512": 4.0,
+    "compose/fixed": 3.0,
+    "compose/frame": 0.02,
+    "compose/window512": 1.0,
+}
+
+
+def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(monkeypatch):
+    clock = _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress.expect(_RATES)
+    with progress.bar("scan", 100) as bar:
+        clock.now = 10.0
+        bar.update(100)
+    assert reports[-1] == ("scan", pytest.approx(0.02), 0.0)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}))
+    with progress.bar("encode", 100) as bar:
+        clock.now = 20.0
+        bar.update(50)
+
+    encode_left = (100 * 2.0 * 0.01 + 10 * 0.5) / 2
+    later = 20.0 + 10 * 4.0 + 3.0 + 100 * 2.0 * 0.02 + 10 * 1.0
+    stage, fraction, left = reports[-1]
+    assert stage == "encode"
+    assert left == pytest.approx(encode_left + later)
+    assert fraction == pytest.approx(20.0 / (20.0 + left))
+
+
+def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monkeypatch):
+    _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress.expect(_RATES)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 3, 768: 1}))
+    with progress.bar("encode", 100) as bar:
+        bar.update(50)
+    assert reports[-1] == ("encode", pytest.approx(0.04), 0.0)
+
+
+def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
+    clock = _Clock(monkeypatch)
+    progress = restore.Progress(10, disable=True, report=None)
+    clock.now = 2.0
+    with progress.bar("compose", 10) as bar:
+        clock.now = 3.0
+        bar.update(4)
+        with bar.window(512):
+            clock.now = 4.5
+        clock.now = 6.0
+        bar.update(6)
+    with progress.bar("denoise", 6, unit="step") as bar:
+        advance = bar.track(512, 3)
+        clock.now = 16.0
+        advance(2)
+        clock.now = 18.0
+        advance(2)
+        clock.now = 20.0
+        advance(2)
+        other = bar.track(512, 3)
+        other(2)
+
+    compose, denoise = progress.timings["compose"], progress.timings["denoise"]
+    assert (compose.seconds, compose.warm_seconds, compose.warm_frames) == (6.0, 3.0, 6)
+    assert compose.windows == [(512, 1.5)]
+    assert denoise.seconds == 14.0
+    assert denoise.windows == [(512, pytest.approx(4.0 / 4 * 3))]
+
+
+def test_restore_spans_saves_the_speed_profile(fakes, tmp_path):
+    video = _video(12, range(2, 10))
+    _run_spans(tmp_path, [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)])
+    key = restore.speed.profile_key("Test GPU", "t")
+    assert restore.speed.load_rates(tmp_path / "speed.json", key) == {}
+    assert key in json.loads((tmp_path / "speed.json").read_text())
 
 
 def test_progress_without_a_report_only_drives_the_console_bar():
@@ -307,7 +425,7 @@ def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
     span = restore.LtxSpan(_source(video), (restore.LtxSegment(50, 150, seed=1),), _Writer)
     progress = restore.Progress(30, disable=True, report=None)
     cancel = threading.Event()
-    (prepared,) = restore.prepare_spans([span], _render(), tmp_path, progress=progress, cancel=cancel)
+    (prepared,) = restore.prepare_spans([span], _render(tmp_path), tmp_path, progress=progress, cancel=cancel)
     transformer = _Transformer(None, None)
     _Transformer.seeds = []
 
