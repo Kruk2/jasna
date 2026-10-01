@@ -7,6 +7,7 @@ from safetensors.torch import save_file
 from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
+from jasna.models.ltx_vae.eager_na import na3d
 from jasna.models.ltx_vae.loader import decoder_kwargs, decoder_state_dict, encoder_kwargs, encoder_state_dict
 from jasna.models.ltx_vae.tiling import DimensionSizeConfig, TileSizeConfig, scale_by_masks_1d
 from jasna.models.ltx_vae.video_encoder import VideoEncoder
@@ -271,3 +272,24 @@ def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
     assert T.compile_diffusion_blocks() is True
     assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu]
     assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)
+
+
+def test_slab_attention_of_core_columns_matches_full_slab_attention():
+    torch.manual_seed(0)
+    attn = T.NeighborhoodAttention3D(32, (3, 5, 5), head_dim=16)
+    norm = torch.nn.RMSNorm(32)
+    x = torch.randn(1, 4, 6, 12, 32)
+    scale, shift = torch.randn(2, 1, 1, 1, 1, 32) * 0.1
+    w_pos = torch.arange(12, dtype=torch.float32) + 7
+    halo, core_len = 2, 7
+
+    with torch.inference_mode():
+        y = torch.nn.functional.rms_norm(x, (32,), norm.weight, 1e-6) * (1 + scale) + shift
+        q, k, v = attn.project_qkv(y)
+        q = T.apply_abs_rope_slab(attn.q_norm(q) * attn.scale, attn, w_pos)
+        k = T.apply_abs_rope_slab(attn.k_norm(k), attn, w_pos)
+        full = na3d(q, k, v, kernel_size=attn.kernel_size).reshape(1, 4, 6, 12, 32)
+        expected = attn.proj(full)[:, :, :, halo : halo + core_len]
+        actual = T._attn_on_w_slab(attn, norm, x, w_pos, scale, shift, core_len)
+
+    torch.testing.assert_close(actual, expected)

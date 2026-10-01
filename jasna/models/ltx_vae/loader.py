@@ -153,7 +153,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
     decoder.load_state_dict({k: v.to(own[k].dtype) for k, v in tuned.items()}, strict=False)
     logger.info(
         "LTX VAE decoder: %s neighborhood attention, %s blocks",
-        "comfy-kitchen" if enable_fused_attention() else "torch",
+        enable_fused_attention(),
         "compiled" if compile_diffusion_blocks() else "eager",
     )
     return decoder
