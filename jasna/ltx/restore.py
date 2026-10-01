@@ -119,6 +119,9 @@ class Progress:
     def learned_rates(self) -> dict[str, float]:
         return speed.learned_rates(self.timings, self._work, self._rates)
 
+    def summary(self, peak_vram_bytes: int, blocks: tuple[int, int] | None) -> list[str]:
+        return speed.run_summary(self.timings, self._work, peak_vram_bytes, blocks)
+
     def bar(self, stage: LtxStage, total: int, unit: str = "frame") -> _StageBar:
         tqdm_bar = tqdm(
             total=total,
@@ -159,8 +162,7 @@ class Progress:
         now = time.monotonic()
         timing.seconds = now - self._pass_end
         self._pass_end = now
-        if stage in speed.TIMED_PASSES:
-            self.timings[stage] = timing
+        self.timings[stage] = timing
 
 
 class _StageBar:
@@ -208,7 +210,7 @@ class _StageBar:
 
     def close(self) -> None:
         self._bar.close()
-        timing = speed.PassTiming()
+        timing = speed.PassTiming(units=self._done)
         if self._warm_from is not None:
             started, done = self._warm_from
             timing.warm_seconds = time.monotonic() - started
@@ -219,6 +221,8 @@ class _StageBar:
         for canvas, steps, marks in self._tracks:
             if len(marks) > 1:
                 marks[-1][1].synchronize()
+                for (_, previous), (n, mark) in zip(marks, marks[1:]):
+                    timing.steps.append((canvas, previous.elapsed_time(mark) / 1000 / n))
                 seconds = marks[0][1].elapsed_time(marks[-1][1]) / 1000
                 timing.windows.append((canvas, seconds / sum(n for n, _ in marks[1:]) * steps))
         self._progress._finished(self._stage, timing)
@@ -720,12 +724,15 @@ def restore_spans(
     (closed once the span is written)."""
     profile_key = speed.profile_key(torch.cuda.get_device_name(render.device), render.files.transformer_name)
     progress.expect(speed.load_rates(render.speed_profile, profile_key))
+    torch.cuda.reset_peak_memory_stats(render.device)
+    blocks = None
     with tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-") as temp:
         prepared = prepare_spans(spans, render, Path(temp), progress=progress, cancel=cancel)
         finals = final_stores(prepared, Path(temp))
         windows = sum(p.windows for p in prepared)
         if windows:
             transformer = LtxTransformer(render.files.transformer, render.device)
+            blocks = (transformer.blocks.resident, transformer.blocks.count)
             try:
                 denoise_spans(prepared, finals, transformer, keep_references=False, progress=progress, cancel=cancel)
             finally:
@@ -734,6 +741,8 @@ def restore_spans(
                 torch.cuda.empty_cache()
         decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device) if windows else None
         compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
+    for line in progress.summary(torch.cuda.max_memory_allocated(render.device), blocks):
+        logger.info(line)
     if windows:
         speed.save_rates(render.speed_profile, profile_key, progress.learned_rates())
 
