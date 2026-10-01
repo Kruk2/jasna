@@ -260,3 +260,26 @@ def test_cuda_stream_final_failure_clears_gpu_pinned_and_staging_storage(tmp_pat
                                    torch.device("cuda"), resident=1)
     assert retained
     assert all(torch.count_nonzero(tensor).item() == 0 for tensor in retained)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA required")
+def test_cuda_staging_failure_closes_the_store(tmp_path, monkeypatch):
+    path = tmp_path / "blocks.safetensors"
+    save_file({"blocks.0.weight": torch.ones(4)}, str(path))
+    stores = []
+    allocate, empty = BlockStore._allocate, torch.empty
+
+    def observe_allocation(store, layouts, device, resident):
+        allocate(store, layouts, device, resident)
+        stores.append(store)
+
+    def no_pinned_memory(*args, **kwargs):
+        if kwargs.get("pin_memory"):
+            raise RuntimeError("synthetic pinned allocation failure")
+        return empty(*args, **kwargs)
+
+    monkeypatch.setattr(BlockStore, "_allocate", observe_allocation)
+    monkeypatch.setattr(torch, "empty", no_pinned_memory)
+    with open_tensors(path) as reader, pytest.raises(RuntimeError, match="pinned allocation"):
+        BlockStore.from_reader(reader, [{"weight": "blocks.0.weight"}], torch.device("cuda"), resident=1)
+    assert stores and not stores[0]._resident_buffers

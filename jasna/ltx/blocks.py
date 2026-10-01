@@ -107,17 +107,27 @@ class BlockStore:
         layouts = [_layout({name: specs[source] for name, source in block.items()}) for block in names]
         store = cls.__new__(cls)
         store._allocate(layouts, device, resident)
+        try:
+            store._read(reader, names)
+        except BaseException:
+            store.close()
+            raise
+        return store
+
+    def _read(self, reader, names: list[dict[str, str]]) -> None:
         targets = {sources[name]: view for index, sources in enumerate(names)
-                   for name, view in _views(store._buffer(index), store._layouts[index]).items()}
+                   for name, view in _views(self._buffer(index), self._layouts[index]).items()}
         staged_sizes = [_aligned(target.nbytes) for target in targets.values() if target.device.type != "cpu"]
-        stage_bytes = max(_aligned(max(nbytes for _, nbytes in layouts[:store.resident]) // 2),
+        stage_bytes = max(_aligned(max(self._buffer(index).numel() for index in range(self.resident)) // 2),
                           *staged_sizes) if staged_sizes else 0
         groups = _file_order_groups([name for name in reader.offset_keys() if name in targets], targets, stage_bytes)
-        stages = [torch.empty(stage_bytes, dtype=torch.uint8, pin_memory=True) for _ in range(2)] if stage_bytes else []
-        copied = [torch.cuda.Event() for _ in stages]
+        stages, copied = [], []
 
         def destinations():
             try:
+                if stage_bytes:
+                    stages.extend(torch.empty(stage_bytes, dtype=torch.uint8, pin_memory=True) for _ in range(2))
+                    copied.extend(torch.cuda.Event() for _ in stages)
                 for number, (group, offsets) in enumerate(groups):
                     slot = number % 2
                     if offsets:
@@ -131,19 +141,15 @@ class BlockStore:
                         copied[slot].record()
             finally:
                 if stages:
-                    torch.cuda.synchronize(device)
+                    torch.cuda.synchronize(self.device)
                     for stage in stages:
                         stage.zero_()
 
         stream = destinations()
         try:
             reader.read_tensors_into(tuple(group for group, _ in groups), stream)
-        except BaseException:
-            store.close()
-            raise
         finally:
             stream.close()
-        return store
 
     def _buffer(self, index: int) -> torch.Tensor:
         return self._resident_buffers[index] if index < self.resident else self._host[index - self.resident]
