@@ -49,8 +49,6 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   显卡准备 LTX，会更慢。
 - 模型不随 Jasna 附带：约 15 GB（快速模式约 9 GB）。下载开放后，
   Jasna 会在下载前询问你。
-- LTX 需要包含 LTX 的密钥（页眉中的**激活 Jasna**）。没有密钥时，
-  请使用**试用模式**。
 
 ### LTX 选项
 
@@ -62,7 +60,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   需要 10 GB 空闲显存，不够时不生效。CLI：`--ltx-large-canvas`。
 - **种子**：换一个种子，结果会略有不同；同一个种子会得到同样的结果。
   CLI：`--ltx-seed 7`。
-- **试用模式**：无需密钥或模型文件，以真实速度运行 LTX，看看它在你的
+- **试用模式**：无需模型文件，以真实速度运行 LTX，看看它在你的
   电脑上有多快。视频不会被修复。CLI：`--ltx-trial`。
 
 ### 显卡与耗时

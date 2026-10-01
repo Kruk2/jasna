@@ -22,7 +22,7 @@ CLI_HELP: dict[str, str] = {
         "fast model file. (default: %(default)s)"
     ),
     "ltx_trial": (
-        "ltx: test the speed without a license or model files. Output is not restored. "
+        "ltx: test the speed without the model files. Output is not restored. "
         "(default: %(default)s)"
     ),
     "ltx_large_canvas": (

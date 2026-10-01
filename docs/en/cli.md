@@ -38,7 +38,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only. |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs 10 GB of free VRAM. |
 | `--ltx-seed` | model default | LTX: another seed gives a slightly different result. |
-| `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without a key or model files. The video is not restored. |
+| `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model files. The video is not restored. |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | on | TensorRT compilation: big speed boost, more VRAM. See [Tuning](tuning.md). |
 | `--max-clip-size` | `90` | Maximum tracked clip length in frames. Main VRAM lever. |
 | `--temporal-overlap` | `8` | Overlap+discard margin at clip splits; reduces boundary flicker. |

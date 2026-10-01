@@ -38,7 +38,7 @@ jasna --input input_folder --output output_folder
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要 10 GB 空闲显存。 |
 | `--ltx-seed` | 模型默认值 | LTX：换一个种子，结果会略有不同。 |
-| `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：无需密钥或模型文件即可测试速度。视频不会被修复。 |
+| `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：无需模型文件即可测试速度。视频不会被修复。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | 开启 | TensorRT 编译: 大幅提速，占用更多 VRAM。见[调优](tuning.md)。 |
 | `--max-clip-size` | `90` | 跟踪片段的最大帧数。VRAM 的主要调节手段。 |
 | `--temporal-overlap` | `8` | 片段拼接处的重叠和丢弃余量；减少边界闪烁。 |

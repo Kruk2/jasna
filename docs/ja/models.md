@@ -52,8 +52,6 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   Jasna が LTX をお使いの GPU 向けに準備するため、さらに時間がかかります。
 - モデルは同梱されていません。約 15 GB（高速モードは約 9 GB）です。
   ダウンロードが公開されると、Jasna はダウンロード前に確認します。
-- LTX には LTX を含むキーが必要です（ヘッダーの **Jasna を有効化**）。
-  キーがない場合は**お試しモード**を使ってください。
 
 ### LTX のオプション
 
@@ -67,7 +65,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   必要で、足りない場合は効果がありません。CLI: `--ltx-large-canvas`。
 - **シード**: シードを変えると結果が少し変わり、同じシードなら同じ結果に
   なります。CLI: `--ltx-seed 7`。
-- **お試しモード**: キーやモデルファイルなしで LTX を実際の速度で動かし、
+- **お試しモード**: モデルファイルなしで LTX を実際の速度で動かし、
   お使いの PC での速さを確認できます。動画は復元されません。CLI:
   `--ltx-trial`。
 

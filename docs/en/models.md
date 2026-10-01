@@ -53,8 +53,6 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   the video. The first run takes longer while Jasna prepares LTX for your GPU.
 - The model is not bundled: about 15 GB (about 9 GB for Fast mode). Jasna
   asks before downloading it once the download is available.
-- LTX needs a key that includes it (**Activate Jasna** in the header).
-  Without it, use **Trial mode**.
 
 ### LTX options
 
@@ -68,7 +66,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   effect. CLI: `--ltx-large-canvas`.
 - **Seed**: another seed gives a slightly different result; the same seed
   repeats it. CLI: `--ltx-seed 7`.
-- **Trial mode**: runs LTX at full speed without a key or model files, so
+- **Trial mode**: runs LTX at full speed without the model files, so
   you can see how fast it is on your PC. The video is not restored. CLI:
   `--ltx-trial`.
 

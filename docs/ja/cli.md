@@ -38,7 +38,7 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | `--ltx-fast` / `--no-ltx-fast` | オフ | LTX：約 1.4 倍高速、ディテールはわずかに減ります。RTX 50 シリーズのみ。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。その部分は約 3 倍遅くなります。空き VRAM が 10 GB 必要です。 |
 | `--ltx-seed` | モデルの既定値 | LTX：シードを変えると結果が少し変わります。 |
-| `--ltx-trial` / `--no-ltx-trial` | オフ | LTX：キーやモデルファイルなしで速度を試します。動画は復元されません。 |
+| `--ltx-trial` / `--no-ltx-trial` | オフ | LTX：モデルファイルなしで速度を試します。動画は復元されません。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | オン | TensorRT コンパイル: 大幅な高速化、VRAM 増。詳しくは[調整ガイド](tuning.md)。 |
 | `--max-clip-size` | `90` | 追跡するクリップの最大フレーム数。VRAM の主な調整項目です。 |
 | `--temporal-overlap` | `8` | クリップ分割位置でのオーバーラップ+破棄マージン。境界のフリッカーを軽減します。 |
