@@ -34,6 +34,7 @@ Jasna 是免费的。支持者会获得一个密钥，用于解锁为本项目�
 - NVIDIA 和 AMD GPU 均支持按帧选择范围，区间编辑器还提供修复预览以及缩放和平移检查。
 - 通过时间重叠和交叉淡化减少片段边界闪烁。
 - 检测硬切镜头并在切换点结束跟踪片段，确保修复不会混合切换前后的画面。
+- 在 NVIDIA RTX 显卡上还可使用 [LTX](docs/zh/models.md#修复模型)：慢很多，但效果更细腻的修复模型。
 - 在 NVIDIA GPU 上，可使用可选的[二级修复模型](docs/zh/models.md) — **unet-4x**、**RTX Super Resolution** 或 **Topaz Video AI** — 进一步提升质量，让修复区域更清晰，尤其是大面积马赛克、特写和 4K 视频。目前 AMD 不支持二级修复。
 - 内置原生 GUI 视频播放器，无需生成输出文件即可全屏播放和跳转修复画面。
 - 可将修复后的视频串流到内置浏览器播放器，或支持的 Stash 分支。
@@ -89,7 +90,7 @@ jasna --input input_folder --output output_folder
 ## 了解更多
 
 - **[使用 GUI](docs/zh/gui.md)** — 修复视频播放器、队列、预设、输出文件名模板与文件冲突，以及其他容易错过的功能。
-- **[选择模型](docs/zh/models.md)** — 该选哪个检测模型、用二级修复（unet-4x / RTX Super Resolution / Topaz）获得更清晰的结果，以及 SD 1.5 静态图像修复。
+- **[选择模型](docs/zh/models.md)** — 该选哪个检测模型、更慢但更细腻的 LTX 修复模型、用二级修复（unet-4x / RTX Super Resolution / Topaz）获得更清晰的结果，以及 SD 1.5 静态图像修复。
 - **[只修复视频的一部分](docs/zh/segments.md)** — 区间编辑器、内置马赛克扫描、提交更好的遮罩，以及 `--segments` CLI 参数。
 - **[VR180 视频](docs/zh/vr180.md)** — Jasna 如何处理并排 VR，以及按片商的自动设置。
 - **[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)** — 片段大小、时间重叠、模型编译，以及显存不足时该怎么办。

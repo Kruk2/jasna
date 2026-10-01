@@ -15,6 +15,10 @@ Open it with the scissors button on any queued video.
   empty to restore the whole video.
 - **Restore preview** shows the current frame or a short playback with your
   current restoration settings, before you commit to processing.
+- Each range can use its own model (**Restore with**). On an
+  [LTX](models.md#restoration-model) range, **Try seed**
+  renders it with that seed in a few minutes; compare seeds and keep the
+  best with **Use this seed**.
 - Use the visible **− / +** controls or the mouse wheel to zoom into details,
   then drag the preview to pan. **Reset view** appears only after the view has
   been changed.
@@ -66,6 +70,7 @@ What works with segment processing:
 - H.264, HEVC, or AV1 input with constant frame rate; MP4, MOV, or MKV output.
 - On AMD, some H.264 files are fully re-encoded; only the selected ranges are restored.
 - The output codec always matches the input codec.
+- With `--restoration-model-name ltx`, every range uses LTX and `--ltx-seed`.
 - Cannot be combined with `--retarget-high-fps`.
 - Cannot be combined with `--fmp4`; the output is assembled after processing finishes.
 
