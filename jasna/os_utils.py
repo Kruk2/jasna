@@ -280,9 +280,34 @@ def _read_drs_setting(setting_id: int) -> int | None:
     return struct.unpack("<I", data[value_offset : value_offset + 4])[0]
 
 
+def _loaded_pytorch_accelerator_vendor() -> str | None:
+    """Return the already-loaded Torch build vendor without importing Torch.
+
+    The GUI runs its GPU/CUDA checks before this warning-only check. Looking at
+    the cached module avoids creating a CUDA/HIP context merely to decide
+    whether an NVIDIA DRS policy is applicable.
+    """
+
+    torch = sys.modules.get("torch")
+    version = getattr(torch, "version", None)
+    if getattr(version, "hip", None):
+        return "amd"
+    if getattr(version, "cuda", None):
+        return "nvidia"
+    return None
+
+
 def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
+    """Check NVIDIA's DRS policy only for a confirmed Windows NVIDIA build."""
+
     if sys.platform != "win32":
         return True, "N/A"
+
+    vendor = _loaded_pytorch_accelerator_vendor()
+    if vendor == "amd":
+        return True, "N/A (AMD/ROCm): NVIDIA CUDA Sysmem Fallback Policy does not apply"
+    if vendor != "nvidia":
+        return False, "NVIDIA CUDA provider could not be identified; policy was not checked"
 
     try:
         value = _read_drs_setting(_CUDA_SYSMEM_FALLBACK_POLICY_ID)
