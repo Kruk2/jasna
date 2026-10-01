@@ -73,3 +73,7 @@ Jasna 会修复列出的区间并复制其余部分。区间附近最近的安�
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
+
+已完成的片段会连同处理签名和校验和一起记录，因此中断后只会复用设置匹配且
+完整的片段。取消或失败时工作目录会保留；最终输出经过校验、刷新并原子替换
+成功后，工作目录才会删除。
