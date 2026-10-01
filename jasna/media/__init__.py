@@ -15,6 +15,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# FFprobe reports HEVC ``level`` as level_idc, while hevc_amf expects dotted
+# text. Unknown values are deliberately omitted instead of guessed.
+_HEVC_LEVEL_IDC_TO_AMF_OPTION: dict[int, str] = {
+    30: "1.0",
+    60: "2.0",
+    63: "2.1",
+    90: "3.0",
+    93: "3.1",
+    120: "4.0",
+    123: "4.1",
+    150: "5.0",
+    153: "5.1",
+    156: "5.2",
+    180: "6.0",
+    183: "6.1",
+    186: "6.2",
+}
+
 # ffmpeg *_nvenc option names shared by every codec
 _COMMON_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
@@ -68,7 +86,6 @@ _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
         "g",
         "bf",
         "preanalysis",
-        "vbaq",
         "maxrate",
         "bufsize",
         "profile",
@@ -77,10 +94,10 @@ _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
 )
 
 AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC: dict[str, frozenset[str]] = {
-    "hevc": _COMMON_AMF_ENCODER_SETTINGS | {"tier", "bitdepth"},
+    "hevc": _COMMON_AMF_ENCODER_SETTINGS | {"tier", "bitdepth", "vbaq"},
     "h264": _COMMON_AMF_ENCODER_SETTINGS
-    | {"coder", "bf_ref", "pa_adaptive_mini_gop"},
-    "av1": _COMMON_AMF_ENCODER_SETTINGS | {"bitdepth"},
+    | {"coder", "vbaq", "bf_ref", "pa_adaptive_mini_gop"},
+    "av1": _COMMON_AMF_ENCODER_SETTINGS | {"bitdepth", "aq_mode"},
 }
 
 AMF_SUPPORTED_ENCODER_SETTINGS: frozenset[str] = frozenset().union(
@@ -205,6 +222,7 @@ class VideoMetadata:
     stereo_layout: str = ""
     spherical_projection: str = ""
     video_bitrate: int = 0
+    hevc_level: int | None = None
 
 
 def resolve_video_start_pts(
@@ -223,6 +241,27 @@ def _get_frame_count_by_counting(path: str) -> int:
     return frame_count
 
 
+def _stream_pixel_format(json_video_stream: dict) -> str:
+    """Return ffprobe's pixel format or a standardized AV1 codec-string inference.
+
+    The minimal unified AMF runtime exposes only the hardware AV1 decoder.  Its
+    stream probe reports the standardized ``av01`` MIME codec string but no
+    ``pix_fmt`` until decode.  Preserve a fixed-format decision by translating
+    only the explicit 8/10-bit 4:2:0 depths this reader supports.
+    """
+
+    pixel_format = str(json_video_stream.get("pix_fmt") or "").lower()
+    if pixel_format or str(json_video_stream.get("codec_name") or "").lower() != "av1":
+        return pixel_format
+    codec_parts = str(json_video_stream.get("mime_codec_string") or "").split(".")
+    if len(codec_parts) < 4 or codec_parts[0].lower() != "av01":
+        return ""
+    return {
+        "08": "yuv420p",
+        "10": "yuv420p10le",
+    }.get(codec_parts[3], "")
+
+
 def is_stream_10bit(json_video_stream: dict) -> bool:
     bprs = json_video_stream.get('bits_per_raw_sample')
     if isinstance(bprs, (int, float)):
@@ -233,7 +272,7 @@ def is_stream_10bit(json_video_stream: dict) -> bool:
                 return True
         except ValueError:
             pass
-    pix_fmt = (json_video_stream.get('pix_fmt') or '').lower()
+    pix_fmt = _stream_pixel_format(json_video_stream)
     ten_bit_markers = (
         'p10',
         'p010',
@@ -272,6 +311,40 @@ def parse_video_bitrate(json_video_stream: dict, json_video_format: dict) -> int
         if value > 0:
             return value
     return 0
+
+
+def parse_hevc_level_idc(json_video_stream: dict) -> int | None:
+    """Return FFprobe's integral HEVC level_idc, or None when unavailable."""
+
+    if str(json_video_stream.get("codec_name") or "").lower() != "hevc":
+        return None
+    value = json_video_stream.get("level")
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value) if value.is_integer() else None
+    if isinstance(value, str):
+        try:
+            return int(value.strip(), 10)
+        except ValueError:
+            return None
+    return None
+
+
+def hevc_level_to_amf_option(level_idc: object) -> str | None:
+    """Translate FFprobe HEVC level_idc to hevc_amf dotted option text."""
+
+    if isinstance(level_idc, bool):
+        return None
+    try:
+        value = int(level_idc)
+    except (TypeError, ValueError):
+        return None
+    if isinstance(level_idc, float) and not level_idc.is_integer():
+        return None
+    return _HEVC_LEVEL_IDC_TO_AMF_OPTION.get(value)
 
 
 def parse_spatial_metadata(json_video_stream: dict) -> tuple[str, str]:
@@ -357,6 +430,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
     num_frames = int(json_video_stream.get('nb_frames', 0))
     if num_frames == 0:
         num_frames = _get_frame_count_by_counting(path)
+    pixel_format = _stream_pixel_format(json_video_stream)
     is_10bit = is_stream_10bit(json_video_stream)
     stereo_layout, spherical_projection = parse_spatial_metadata(json_video_stream)
 
@@ -376,7 +450,7 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         num_frames=num_frames,
         is_10bit=is_10bit,
         sample_aspect_ratio=parse_sample_aspect_ratio(json_video_stream),
-        pixel_format=str(json_video_stream.get("pix_fmt") or ""),
+        pixel_format=pixel_format,
         profile=str(json_video_stream.get("profile") or ""),
         field_order=str(json_video_stream.get("field_order") or ""),
         color_primaries=str(json_video_stream.get("color_primaries") or ""),
@@ -384,5 +458,6 @@ def get_video_meta_data(path: str) -> VideoMetadata:
         stereo_layout=stereo_layout,
         spherical_projection=spherical_projection,
         video_bitrate=parse_video_bitrate(json_video_stream, json_video_format),
+        hevc_level=parse_hevc_level_idc(json_video_stream),
     )
     return metadata

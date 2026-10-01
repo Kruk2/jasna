@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media import (
     SUPPORTED_ENCODER_SETTINGS,
     SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
@@ -18,6 +19,16 @@ from jasna.media import (
     resolve_video_start_pts,
     VideoMetadata,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_nvidia_encoder_contracts_by_default(monkeypatch) -> None:
+    """Keep legacy NVENC assertions independent of the test host GPU vendor."""
+
+    monkeypatch.setattr(
+        "jasna.media.vendor_for_device",
+        lambda: AcceleratorVendor.NVIDIA,
+    )
 
 
 @pytest.mark.parametrize(
@@ -122,21 +133,23 @@ class TestParseEncoderSettings:
 class TestValidateEncoderSettings:
     def test_valid_settings(self):
         settings = {"cq": 22, "rc-lookahead": 32, "preset": "p5"}
-        assert validate_encoder_settings(settings) == settings
+        assert validate_encoder_settings(settings, vendor=AcceleratorVendor.NVIDIA) == settings
 
     def test_empty_settings(self):
-        assert validate_encoder_settings({}) == {}
+        assert validate_encoder_settings({}, vendor=AcceleratorVendor.NVIDIA) == {}
 
     def test_invalid_key_raises(self):
         with pytest.raises(ValueError, match="Unsupported encoder setting"):
-            validate_encoder_settings({"cq": 22, "bad_key": 1})
+            validate_encoder_settings(
+                {"cq": 22, "bad_key": 1}, vendor=AcceleratorVendor.NVIDIA
+            )
 
     def test_all_supported_keys_accepted(self):
         # spatial_aq/spatial-aq are aliases and may not be combined.
         settings = {k: 0 for k in SUPPORTED_ENCODER_SETTINGS if k != "spatial-aq"}
-        assert validate_encoder_settings(settings) == settings
+        assert validate_encoder_settings(settings, vendor=AcceleratorVendor.NVIDIA) == settings
         settings = {k: 0 for k in SUPPORTED_ENCODER_SETTINGS if k != "spatial_aq"}
-        assert validate_encoder_settings(settings) == settings
+        assert validate_encoder_settings(settings, vendor=AcceleratorVendor.NVIDIA) == settings
 
 
 class TestValidateEncoderSettingsPerCodec:
@@ -147,50 +160,89 @@ class TestValidateEncoderSettingsPerCodec:
     @pytest.mark.parametrize("codec", ["hevc", "h264", "av1"])
     def test_common_settings_accepted_for_all_codecs(self, codec):
         settings = {"preset": "p5", "cq": 25, "rc-lookahead": 32, "bf": 4, "maxrate": "10M"}
-        assert validate_encoder_settings(settings, codec=codec) == settings
+        assert (
+            validate_encoder_settings(
+                settings, codec=codec, vendor=AcceleratorVendor.NVIDIA
+            )
+            == settings
+        )
 
     @pytest.mark.parametrize("codec", ["hevc", "h264"])
     def test_profile_accepted_for_hevc_and_h264(self, codec):
-        assert validate_encoder_settings({"profile": "x"}, codec=codec) == {"profile": "x"}
+        assert validate_encoder_settings(
+            {"profile": "x"}, codec=codec, vendor=AcceleratorVendor.NVIDIA
+        ) == {"profile": "x"}
 
     def test_profile_rejected_for_av1(self):
         with pytest.raises(ValueError, match="for codec av1.*profile"):
-            validate_encoder_settings({"profile": "main"}, codec="av1")
+            validate_encoder_settings(
+                {"profile": "main"}, codec="av1", vendor=AcceleratorVendor.NVIDIA
+            )
 
     @pytest.mark.parametrize("codec", ["hevc", "h264"])
     def test_underscore_aq_alias_accepted_for_hevc_and_h264(self, codec):
-        assert validate_encoder_settings({"spatial_aq": 1}, codec=codec)
-        assert validate_encoder_settings({"spatial-aq": 1}, codec=codec)
+        assert validate_encoder_settings(
+            {"spatial_aq": 1}, codec=codec, vendor=AcceleratorVendor.NVIDIA
+        )
+        assert validate_encoder_settings(
+            {"spatial-aq": 1}, codec=codec, vendor=AcceleratorVendor.NVIDIA
+        )
 
     def test_av1_requires_hyphen_aq_spelling(self):
-        assert validate_encoder_settings({"spatial-aq": 1}, codec="av1")
+        assert validate_encoder_settings(
+            {"spatial-aq": 1}, codec="av1", vendor=AcceleratorVendor.NVIDIA
+        )
         with pytest.raises(ValueError, match="for codec av1.*spatial_aq"):
-            validate_encoder_settings({"spatial_aq": 1}, codec="av1")
+            validate_encoder_settings(
+                {"spatial_aq": 1}, codec="av1", vendor=AcceleratorVendor.NVIDIA
+            )
 
     def test_av1_tile_options_accepted(self):
         settings = {"tile-rows": 2, "tile-columns": 2}
-        assert validate_encoder_settings(settings, codec="av1") == settings
+        assert (
+            validate_encoder_settings(
+                settings, codec="av1", vendor=AcceleratorVendor.NVIDIA
+            )
+            == settings
+        )
         with pytest.raises(ValueError, match="for codec hevc"):
-            validate_encoder_settings(settings, codec="hevc")
+            validate_encoder_settings(
+                settings, codec="hevc", vendor=AcceleratorVendor.NVIDIA
+            )
 
     def test_h264_coder_accepted_only_for_h264(self):
-        assert validate_encoder_settings({"coder": "cabac"}, codec="h264")
+        assert validate_encoder_settings(
+            {"coder": "cabac"}, codec="h264", vendor=AcceleratorVendor.NVIDIA
+        )
         with pytest.raises(ValueError, match="for codec hevc"):
-            validate_encoder_settings({"coder": "cabac"}, codec="hevc")
+            validate_encoder_settings(
+                {"coder": "cabac"}, codec="hevc", vendor=AcceleratorVendor.NVIDIA
+            )
 
     def test_error_message_names_selected_codec(self):
         with pytest.raises(ValueError, match=r"for codec h264.*tier.*Supported for h264"):
-            validate_encoder_settings({"tier": "high"}, codec="h264")
+            validate_encoder_settings(
+                {"tier": "high"}, codec="h264", vendor=AcceleratorVendor.NVIDIA
+            )
 
     def test_conflicting_aq_aliases_rejected(self):
         with pytest.raises(ValueError, match="Conflicting encoder settings.*spatial"):
-            validate_encoder_settings({"spatial_aq": 1, "spatial-aq": 1}, codec="hevc")
+            validate_encoder_settings(
+                {"spatial_aq": 1, "spatial-aq": 1},
+                codec="hevc",
+                vendor=AcceleratorVendor.NVIDIA,
+            )
         with pytest.raises(ValueError, match="Conflicting encoder settings.*spatial"):
-            validate_encoder_settings({"spatial_aq": 1, "spatial-aq": 1})
+            validate_encoder_settings(
+                {"spatial_aq": 1, "spatial-aq": 1},
+                vendor=AcceleratorVendor.NVIDIA,
+            )
 
     def test_unknown_codec_rejected(self):
         with pytest.raises(ValueError, match="Unsupported codec: vp9"):
-            validate_encoder_settings({}, codec="vp9")
+            validate_encoder_settings(
+                {}, codec="vp9", vendor=AcceleratorVendor.NVIDIA
+            )
 
 
 class TestIsStream10bit:
@@ -217,6 +269,16 @@ class TestIsStream10bit:
 
     def test_pix_fmt_8bit(self):
         assert is_stream_10bit({"pix_fmt": "yuv420p"}) is False
+
+    def test_av1_mime_codec_string_10bit(self):
+        assert is_stream_10bit(
+            {"codec_name": "av1", "mime_codec_string": "av01.0.14M.10"}
+        ) is True
+
+    def test_av1_mime_codec_string_8bit(self):
+        assert is_stream_10bit(
+            {"codec_name": "av1", "mime_codec_string": "av01.0.14M.08"}
+        ) is False
 
     def test_no_relevant_fields(self):
         assert is_stream_10bit({}) is False
@@ -300,6 +362,42 @@ class TestGetVideoMetaData:
 
         meta = get_video_meta_data("test.mp4")
         assert meta.is_10bit is True
+
+    @pytest.mark.parametrize(
+        ("depth", "expected_format", "expected_10bit"),
+        [
+            ("08", "yuv420p", False),
+            ("10", "yuv420p10le", True),
+            ("12", "", False),
+        ],
+    )
+    @patch("jasna.media.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.subprocess.Popen")
+    def test_av1_codec_string_fills_missing_pixel_format(
+        self,
+        mock_popen,
+        mock_resolve,
+        depth,
+        expected_format,
+        expected_10bit,
+    ):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(
+                codec_name="av1",
+                pix_fmt="",
+                bits_per_raw_sample=None,
+                mime_codec_string=f"av01.0.14M.{depth}",
+            ),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mkv")
+
+        assert meta.pixel_format == expected_format
+        assert meta.is_10bit is expected_10bit
 
     @patch("jasna.media.resolve_executable", return_value="ffprobe")
     @patch("jasna.media.subprocess.Popen")

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import heapq
 import logging
+import os
 import queue
+import sys
 import threading
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from fractions import Fraction
 from pathlib import Path
 from types import MappingProxyType
@@ -30,6 +32,7 @@ from jasna.media import (
     AMF_SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
     SUPPORTED_ENCODER_SETTINGS_BY_CODEC,
     VideoMetadata,
+    hevc_level_to_amf_option,
     validate_encoder_settings,
 )
 from jasna.media.audio_utils import needs_audio_reencode
@@ -45,6 +48,72 @@ from jasna.media.rgb_to_yuv import RgbToYuvConverter
 av.logging.set_level(logging.ERROR)
 
 logger = logging.getLogger(__name__)
+
+AMF_HEVC_VBR_PEAK_ENV = "JASNA_AMF_HEVC_VBR_PEAK"
+AMF_HOST_ZERO_COPY_ENV = "JASNA_AMF_HOST_ZERO_COPY"
+AMF_HOST_ZERO_COPY_MAIN8_MIN_PIXELS = 5760 * 2880
+AMF_HOST_ZERO_COPY_MAIN10_MIN_PIXELS = 3840 * 2160
+
+
+def _amf_host_native_output_eligible(
+    *,
+    width: int,
+    height: int,
+    ten_bit: bool,
+    frame_format: str,
+) -> bool:
+    """Return whether this HEVC output shape has passed real-video A/B tests."""
+
+    expected_format = "p010le" if ten_bit else "nv12"
+    minimum_pixels = (
+        AMF_HOST_ZERO_COPY_MAIN10_MIN_PIXELS
+        if ten_bit
+        else AMF_HOST_ZERO_COPY_MAIN8_MIN_PIXELS
+    )
+    return (
+        width > 0
+        and height > 0
+        and width % 2 == 0
+        and height % 2 == 0
+        and width * height >= minimum_pixels
+        and str(frame_format).strip().lower() == expected_format
+    )
+
+
+def _amf_hevc_vbr_peak_override() -> bool | None:
+    """Return the AMF HEVC source-rate override, or ``None`` for auto."""
+
+    raw_value = os.environ.get(AMF_HEVC_VBR_PEAK_ENV)
+    if raw_value is None:
+        return None
+    value = raw_value.strip().casefold()
+    if value == "auto":
+        return None
+    if value in {"", "0", "false", "no", "off"}:
+        return False
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    raise ValueError(
+        f"Invalid {AMF_HEVC_VBR_PEAK_ENV} value {value!r}; expected auto, 0, or 1"
+    )
+
+
+def _amf_host_zero_copy_override() -> bool | None:
+    """Return the Linux AMD HEVC host-native override, or ``None`` for auto."""
+
+    raw_value = os.environ.get(AMF_HOST_ZERO_COPY_ENV)
+    if raw_value is None:
+        return None
+    value = raw_value.strip().casefold()
+    if value == "auto":
+        return None
+    if value in {"", "0", "false", "no", "off"}:
+        return False
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    raise ValueError(
+        f"Invalid {AMF_HOST_ZERO_COPY_ENV} value {value!r}; expected auto, 0, or 1"
+    )
 
 DEFAULT_ENCODER_OPTIONS: dict[str, str] = {
     "preset": "p5",
@@ -148,13 +217,17 @@ DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
     ),
     "g": "250",
     "preanalysis": "1",
-    "vbaq": "1",
+    "aq_mode": "caq",
     "profile": "main",
     "bitdepth": "10",
 }
 
 NVENC_SMART_FRAGMENT_OPTIONS = MappingProxyType({"forced-idr": "1"})
 AMF_SMART_FRAGMENT_OPTIONS = MappingProxyType({"forced_idr": "1"})
+
+# CQP 30 measured near the portable CQ 28 source-quality point for Linux AMF
+# HEVC fragments. Keep the shared CQ scale with a fragment-only offset.
+AMD_HEVC_CQP_OFFSET = 2
 
 
 @dataclass(frozen=True)
@@ -249,6 +322,8 @@ _COLOR_TRANSFERS = {
     "smpte2084": 16,
     "arib-std-b67": 18,
 }
+_COLOR_PRIMARIES_BY_CODE = {value: key for key, value in _COLOR_PRIMARIES.items()}
+_COLOR_TRANSFERS_BY_CODE = {value: key for key, value in _COLOR_TRANSFERS.items()}
 _COLOR_VARIANTS = {
     (AvColorspace.ITU709, AvColorRange.MPEG): "bt709_limited",
     (AvColorspace.ITU709, AvColorRange.JPEG): "bt709_full",
@@ -259,6 +334,73 @@ _COLOR_VARIANTS = {
 }
 
 _NVENC_PITCH_ALIGNMENT = 16
+
+
+def resolve_hevc_smart_render_vui(
+    metadata: VideoMetadata,
+) -> tuple[VideoMetadata, Fraction]:
+    """Return encoder-only metadata matching the source HEVC SPS VUI."""
+
+    replacements: dict[str, object] = {}
+    output_fps = metadata.video_fps_exact
+    try:
+        with av.open(metadata.video_file) as source:
+            stream = source.streams.video[0]
+            context_rate = stream.codec_context.framerate or stream.codec_context.rate
+            if context_rate is not None and context_rate > 0:
+                output_fps = Fraction(context_rate)
+            frame = next(source.decode(stream), None)
+            if frame is not None:
+                try:
+                    color_range = AvColorRange(int(frame.color_range))
+                    colorspace = AvColorspace(int(frame.colorspace))
+                except ValueError:
+                    color_range = None
+                    colorspace = None
+                if (colorspace, color_range) in _COLOR_VARIANTS:
+                    replacements["color_range"] = color_range
+                    replacements["color_space"] = colorspace
+                primaries = _COLOR_PRIMARIES_BY_CODE.get(int(frame.color_primaries))
+                transfer = _COLOR_TRANSFERS_BY_CODE.get(int(frame.color_trc))
+                if primaries is not None:
+                    replacements["color_primaries"] = primaries
+                if transfer is not None:
+                    replacements["color_transfer"] = transfer
+    except (av.FFmpegError, IndexError, TypeError, ValueError, OSError) as exc:
+        logger.warning(
+            "Could not read HEVC source VUI from %s: %s",
+            metadata.video_file,
+            exc,
+        )
+    replacements.update(
+        video_fps=float(output_fps),
+        average_fps=float(output_fps),
+        video_fps_exact=output_fps,
+    )
+    return replace(metadata, **replacements), output_fps
+
+
+def add_amd_hevc_smart_fragment_source_level(
+    encoder_settings: Mapping[str, object],
+    metadata: VideoMetadata,
+    *,
+    codec: str,
+    vendor: AcceleratorVendor,
+) -> dict[str, object]:
+    """Add source HEVC level to Linux AMF fragments when not explicit."""
+
+    effective = dict(encoder_settings)
+    if (
+        vendor is not AcceleratorVendor.AMD
+        or sys.platform != "linux"
+        or codec != "hevc"
+        or "level" in effective
+    ):
+        return effective
+    level = hevc_level_to_amf_option(metadata.hevc_level)
+    if level is not None:
+        effective["level"] = level
+    return effective
 
 # `cq` alone targets a fixed quality and ignores how the source was stored, so a
 # cheaply encoded source is re-encoded far above its own quality point and grows
@@ -274,6 +416,8 @@ NVENC_H264_SOURCE_BITRATE_CAP_FACTOR = 2.0
 # Any VBV buffer of roughly a second or more never becomes the binding
 # constraint; only sub-second buffers throttle, which is the #243 unit trap.
 SOURCE_BITRATE_CAP_BUFFER_RATIO = 2
+FFMPEG_ENCODER_RATE_MAX = 2_147_483_647
+WINDOWS_AMF_HEVC_VBR_PEAK_BUFFER_TARGET_RATIO = 2
 
 
 def source_bitrate_cap_options(
@@ -295,9 +439,42 @@ def source_bitrate_cap_options(
             metadata.codec_name.lower(), DEFAULT_SOURCE_BITRATE_CAP_FACTOR
         )
     maxrate = int(metadata.video_bitrate * factor)
+    bufsize = maxrate * SOURCE_BITRATE_CAP_BUFFER_RATIO
+    if maxrate > FFMPEG_ENCODER_RATE_MAX or bufsize > FFMPEG_ENCODER_RATE_MAX:
+        logger.warning(
+            "Source bitrate ceiling for %s exceeds the encoder option range; "
+            "encoding without a source-tied bitrate ceiling",
+            metadata.video_file,
+        )
+        return {}
     return {
         "maxrate": str(maxrate),
-        "bufsize": str(maxrate * SOURCE_BITRATE_CAP_BUFFER_RATIO),
+        "bufsize": str(bufsize),
+    }
+
+
+def _windows_amf_hevc_vbr_peak_options(metadata: VideoMetadata) -> dict[str, str]:
+    """Build the Windows AMF HEVC diagnostic rate contract, or fail closed."""
+
+    target = int(metadata.video_bitrate)
+    if target <= 0:
+        logger.warning(
+            "No source bitrate for %s; cannot derive the Windows AMF HEVC VBR Peak contract",
+            metadata.video_file,
+        )
+        return {}
+    maxrate = int(target * SOURCE_BITRATE_CAP_FACTORS["hevc"])
+    bufsize = target * WINDOWS_AMF_HEVC_VBR_PEAK_BUFFER_TARGET_RATIO
+    if maxrate > FFMPEG_ENCODER_RATE_MAX or bufsize > FFMPEG_ENCODER_RATE_MAX:
+        logger.warning(
+            "Windows AMF HEVC VBR Peak contract for %s exceeds the encoder option range; "
+            "refusing to derive a source-tied rate contract",
+            metadata.video_file,
+        )
+        return {}
+    return {
+        "maxrate": str(maxrate),
+        "bufsize": str(bufsize),
     }
 
 
@@ -402,6 +579,16 @@ def _normalized_audio_layout(layout: av.AudioLayout) -> av.AudioLayout:
     return layout
 
 
+@dataclass(order=True, frozen=True)
+class _BufferedEncodeItem:
+    """Keep each buffered tensor paired with its own PTS and LUT decision."""
+
+    pts: int
+    sequence: int
+    frame: torch.Tensor = field(compare=False)
+    apply_lut: bool = field(compare=False)
+
+
 class NvidiaVideoEncoder:
     def __init__(
         self,
@@ -418,14 +605,36 @@ class NvidiaVideoEncoder:
         pts_origin: int = 0,
         match_input_bit_depth: bool = False,
         smart_fragment: bool = False,
+        auto_source_rate: bool = False,
+        prefer_amf_host_native: bool = False,
         fmp4: bool = False,
+        resident_coordinator: object | None = None,
     ):
         self.device = torch.device(device)
         self.vendor = vendor_for_device(self.device)
+        self._resident_coordinator = resident_coordinator
+        self.resident_encode_telemetry: list[dict[str, object]] = []
         if self.vendor not in {AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD}:
             raise RuntimeError(
                 f"GPU video encoding is not supported on {self.vendor.value}"
             )
+        if smart_fragment:
+            encoder_settings = add_amd_hevc_smart_fragment_source_level(
+                encoder_settings,
+                metadata,
+                codec=codec,
+                vendor=self.vendor,
+            )
+        if self._resident_coordinator is not None:
+            if self.vendor is not AcceleratorVendor.AMD:
+                raise ValueError(
+                    "The Windows D3D11/HIP resident encoder requires AMD"
+                )
+            if sys.platform != "win32" or codec != "hevc" or smart_fragment:
+                raise ValueError(
+                    "The Windows D3D11/HIP resident encoder supports only "
+                    "Windows AMD full HEVC encoding"
+                )
         specs = (
             AMF_ENCODER_SPECS
             if self.vendor is AcceleratorVendor.AMD
@@ -470,6 +679,7 @@ class NvidiaVideoEncoder:
         self.mux_audio = bool(mux_audio)
         self.pts_origin = int(pts_origin)
         self.smart_fragment = bool(smart_fragment)
+        self.auto_source_rate = bool(auto_source_rate)
         self.fmp4 = bool(fmp4)
         self.output_fps = Fraction(
             metadata.video_fps_exact if output_fps is None else output_fps
@@ -490,6 +700,130 @@ class NvidiaVideoEncoder:
 
         self.encoder_options = dict(spec.default_options)
         overrides: dict[str, str] = {}
+        self._target_bit_rate: int | None = None
+        amd_av1_main10 = (
+            self.vendor is AcceleratorVendor.AMD
+            and codec == "av1"
+            and spec.ten_bit
+        )
+        amf_hevc_vbr_peak_override = _amf_hevc_vbr_peak_override()
+        linux_amd_hevc = (
+            self.vendor is AcceleratorVendor.AMD
+            and sys.platform == "linux"
+            and codec == "hevc"
+        )
+        linux_amd_h264_smart = (
+            self.vendor is AcceleratorVendor.AMD
+            and sys.platform == "linux"
+            and codec == "h264"
+            and smart_fragment
+        )
+        windows_amd_hevc = (
+            self.vendor is AcceleratorVendor.AMD
+            and sys.platform == "win32"
+            and codec == "hevc"
+        )
+        windows_amd_hevc_full_encode = windows_amd_hevc and not smart_fragment
+        amf_host_zero_copy_override = _amf_host_zero_copy_override()
+        linux_amd_hevc_validated_host_output = (
+            linux_amd_hevc
+            and _amf_host_native_output_eligible(
+                width=int(metadata.video_width),
+                height=int(metadata.video_height),
+                ten_bit=bool(spec.ten_bit),
+                frame_format=spec.frame_format,
+            )
+        )
+        # Main10/P010 uses the accepted automatic host-native route from the
+        # 3840x2160-equivalent pixel count.
+        # Main/NV12 showed only a small single-session gain, so it is selected
+        # automatically only as the required input contract for a requested
+        # and separately validated dual-GOP writer.  The explicit override
+        # remains the fail-closed research entry for other HEVC output sizes.
+        if (
+            amf_host_zero_copy_override is True
+            and self._resident_coordinator is None
+            and not linux_amd_hevc
+        ):
+            raise ValueError(
+                f"{AMF_HOST_ZERO_COPY_ENV}=1 is supported only for Linux AMD "
+                "HEVC encoding"
+            )
+        self._amf_host_zero_copy = (
+            amf_host_zero_copy_override is True
+            or (
+                amf_host_zero_copy_override is None
+                and linux_amd_hevc_validated_host_output
+                and (
+                    bool(spec.ten_bit)
+                    or bool(prefer_amf_host_native)
+                )
+            )
+        )
+        if self._resident_coordinator is not None:
+            if amf_host_zero_copy_override is True:
+                raise ValueError(
+                    f"{AMF_HOST_ZERO_COPY_ENV}=1 conflicts with the Windows "
+                    "D3D11/HIP resident encoder"
+                )
+            self._amf_host_zero_copy = False
+        if amf_hevc_vbr_peak_override is True:
+            if windows_amd_hevc and smart_fragment:
+                raise ValueError(
+                    f"{AMF_HEVC_VBR_PEAK_ENV}=1 is not supported for Windows AMD "
+                    "HEVC Smart Render: the pinned runtime cannot complete copy/render "
+                    "seam validation"
+                )
+            if not (linux_amd_hevc or windows_amd_hevc_full_encode):
+                raise ValueError(
+                    f"{AMF_HEVC_VBR_PEAK_ENV}=1 is supported only for Linux AMD HEVC "
+                    "or Windows AMD HEVC full encoding"
+                )
+        explicit_rate_policy = {
+            "rc",
+            "maxrate",
+            "bufsize",
+            "qp_i",
+            "qp_p",
+            "qvbr_quality_level",
+        } & set(encoder_settings)
+        auto_amf_hevc_vbr_peak = (
+            amf_hevc_vbr_peak_override is None
+            and linux_amd_hevc
+            and (smart_fragment or self.auto_source_rate)
+            and not explicit_rate_policy
+        )
+        auto_amf_hevc_rate_options: dict[str, str] | None = None
+        if auto_amf_hevc_vbr_peak:
+            auto_amf_hevc_rate_options = source_bitrate_cap_options(
+                metadata,
+                output_codec=codec,
+                vendor=self.vendor,
+            )
+            if set(auto_amf_hevc_rate_options) != {"maxrate", "bufsize"}:
+                logger.warning(
+                    "Linux AMD HEVC source-rate mode could not derive a "
+                    "vbr_peak contract; retaining the existing CQP policy"
+                )
+                auto_amf_hevc_rate_options = None
+        amf_hevc_vbr_peak = (
+            amf_hevc_vbr_peak_override is True
+            or auto_amf_hevc_rate_options is not None
+        )
+        if amd_av1_main10:
+            # Supported Linux and Windows AMF runtimes cannot reliably open
+            # P010 AV1 while PreAnalysis is enabled.
+            self.encoder_options["preanalysis"] = "0"
+        use_amd_hevc_smart_fragment_cqp = (
+            self.vendor is AcceleratorVendor.AMD
+            and sys.platform == "linux"
+            and codec == "hevc"
+            and smart_fragment
+            and not amf_hevc_vbr_peak
+            and "cq" in encoder_settings
+            and "rc" not in encoder_settings
+            and "qvbr_quality_level" not in encoder_settings
+        )
         if encoder_settings:
             overrides = {k: _option_value(v) for k, v in encoder_settings.items()}
             # FFmpeg accepts both spellings for HEVC/H.264, but their defaults
@@ -498,12 +832,26 @@ class NvidiaVideoEncoder:
             if "spatial-aq" in overrides and "spatial_aq" in self.encoder_options:
                 overrides["spatial_aq"] = overrides.pop("spatial-aq")
             if self.vendor is AcceleratorVendor.AMD:
-                _normalize_amf_cq(
-                    codec,
-                    overrides,
-                    self.encoder_options,
-                    ten_bit=spec.ten_bit,
-                )
+                if use_amd_hevc_smart_fragment_cqp:
+                    portable_cq = int(overrides.pop("cq"))
+                    cqp = max(0, min(51, portable_cq + AMD_HEVC_CQP_OFFSET))
+                    self.encoder_options.pop("qvbr_quality_level", None)
+                    self.encoder_options.pop("vbaq", None)
+                    self.encoder_options.update(
+                        {
+                            "rc": "cqp",
+                            "qp_i": str(cqp),
+                            "qp_p": str(cqp),
+                            "preanalysis": "0",
+                        }
+                    )
+                else:
+                    _normalize_amf_cq(
+                        codec,
+                        overrides,
+                        self.encoder_options,
+                        ten_bit=spec.ten_bit,
+                    )
             else:
                 _drop_unsupported_nvenc_overrides(codec, overrides, self.encoder_options)
         uses_amf_hevc_cqp = (
@@ -520,15 +868,209 @@ class NvidiaVideoEncoder:
                 )
             )
         self.encoder_options.update(overrides)
+        if linux_amd_h264_smart:
+            # This AMF runtime requires PreAnalysis for QVBR, but persistent
+            # H.264 PA sessions can stop returning packets on long Smart Render
+            # spans.  Peak VBR preserves a source-tied size contract without PA.
+            if metadata.video_bitrate <= 0:
+                raise ValueError(
+                    "Linux AMD H.264 Smart Render requires a positive source "
+                    "video bitrate for its stable vbr_peak contract"
+                )
+            rate_options = source_bitrate_cap_options(
+                metadata,
+                output_codec=codec,
+                vendor=self.vendor,
+            )
+            if set(rate_options) != {"maxrate", "bufsize"}:
+                raise ValueError(
+                    "Linux AMD H.264 Smart Render could not derive a safe "
+                    "source-rate peak/buffer contract"
+                )
+            self.encoder_options.update(rate_options)
+            self.encoder_options.update(
+                {
+                    "rc": "vbr_peak",
+                    "preanalysis": "0",
+                    "vbaq": "0",
+                }
+            )
+            self.encoder_options.pop("qvbr_quality_level", None)
+            self._target_bit_rate = int(metadata.video_bitrate)
+            logger.info(
+                "Linux AMD H.264 Smart Render vbr_peak: target=%d peak=%s "
+                "buffer=%s preanalysis=0",
+                self._target_bit_rate,
+                self.encoder_options["maxrate"],
+                self.encoder_options["bufsize"],
+            )
+        if self._resident_coordinator is not None:
+            resident_encoder_contract = {
+                "g": "60",
+                "bf": "0",
+                "preanalysis": "0",
+                # FFmpeg's AMF encoder defaults async_depth to 16 and only
+                # blocks in QueryOutput once that many hardware surfaces are
+                # queued.  The resident bridge intentionally owns exactly
+                # four output surfaces, so a larger depth can consume all four
+                # before FFmpeg drives output retrieval.  Match the codec's
+                # progress threshold to the audited resident pool bound.
+                "async_depth": "4",
+            }
+            incompatible = {
+                name: value
+                for name, value in overrides.items()
+                if name in resident_encoder_contract
+                and value != resident_encoder_contract[name]
+            }
+            if incompatible:
+                raise ValueError(
+                    "The Windows D3D11/HIP resident encoder requires "
+                    "g=60, bf=0, preanalysis=0, and async_depth=4; "
+                    "incompatible overrides: "
+                    f"{incompatible}"
+                )
+            self.encoder_options.update(resident_encoder_contract)
+            logger.info(
+                "Windows D3D11/HIP resident encoder contract: "
+                "g=60 bf=0 preanalysis=0 async_depth=4"
+            )
+        if amf_hevc_vbr_peak:
+            explicit_rate_options = sorted(
+                {"maxrate", "bufsize"} & overrides.keys()
+            )
+            if explicit_rate_options:
+                raise ValueError(
+                    f"{AMF_HEVC_VBR_PEAK_ENV}=1 derives target/peak/buffer from "
+                    "the source; remove custom " + ", ".join(explicit_rate_options)
+                )
+            explicit_rc = overrides.get("rc")
+            if explicit_rc not in {None, "vbr_peak", "2"}:
+                raise ValueError(
+                    f"{AMF_HEVC_VBR_PEAK_ENV}=1 conflicts with rc={explicit_rc!r}"
+                )
+            if metadata.video_bitrate <= 0:
+                raise ValueError(
+                    f"{AMF_HEVC_VBR_PEAK_ENV}=1 requires a positive source video bitrate"
+                )
+            if windows_amd_hevc_full_encode:
+                rate_options = _windows_amf_hevc_vbr_peak_options(metadata)
+            else:
+                rate_options = auto_amf_hevc_rate_options or source_bitrate_cap_options(
+                    metadata,
+                    output_codec=codec,
+                    vendor=self.vendor,
+                )
+            if set(rate_options) != {"maxrate", "bufsize"}:
+                raise ValueError(
+                    f"{AMF_HEVC_VBR_PEAK_ENV}=1 could not derive a safe peak/buffer"
+                )
+            self.encoder_options.update(rate_options)
+            self.encoder_options.update(
+                {
+                    "rc": "vbr_peak",
+                    "preanalysis": "0",
+                    "vbaq": "0",
+                }
+            )
+            self.encoder_options.pop("qp_i", None)
+            self.encoder_options.pop("qp_p", None)
+            self.encoder_options.pop("qvbr_quality_level", None)
+            self._target_bit_rate = int(metadata.video_bitrate)
+            logger.info(
+                "%s AMF HEVC vbr_peak: target=%d peak=%s buffer=%s preanalysis=0",
+                (
+                    "Forced"
+                    if amf_hevc_vbr_peak_override is True
+                    else (
+                        "Automatic Smart Render"
+                        if smart_fragment
+                        else "Automatic full encode"
+                    )
+                ),
+                self._target_bit_rate,
+                self.encoder_options["maxrate"],
+                self.encoder_options["bufsize"],
+            )
+        if amd_av1_main10:
+            # Without PreAnalysis, QVBR can ignore maxrate/bufsize on large
+            # inputs. Peak VBR plus codec_context.bit_rate keeps the accepted
+            # source-tied rate contract on both AMD platforms.
+            self.encoder_options["rc"] = "vbr_peak"
+            self.encoder_options["preanalysis"] = "0"
+            self.encoder_options.pop("qvbr_quality_level", None)
+            pixel_rate = (
+                int(metadata.video_width)
+                * int(metadata.video_height)
+                * float(metadata.video_fps)
+            )
+            self._target_bit_rate = int(
+                metadata.video_bitrate
+                or max(2_000_000, min(100_000_000, round(pixel_rate * 0.02)))
+            )
+        if (
+            smart_fragment
+            and self.vendor is AcceleratorVendor.AMD
+            and sys.platform == "linux"
+            and codec == "hevc"
+        ):
+            # Repeated HEVC fragment sessions can abort natively with
+            # PreAnalysis enabled; custom settings cannot re-enable it.
+            self.encoder_options["preanalysis"] = "0"
         if self.smart_fragment:
             self.encoder_options.update(spec.smart_fragment_options)
+        if self._amf_host_zero_copy:
+            # AMF retains every wrapped pointer until the associated output is
+            # queried. Four inputs bound the live 8K P010 host owners to about
+            # 384 MiB while preserving the measured encoder overlap.
+            self.encoder_options.update(
+                {
+                    "async_depth": "4",
+                    "host_zero_copy": "1",
+                }
+            )
+            logger.info(
+                "%s Linux AMD HEVC %s AMF host-native input: async_depth=4",
+                "Forced" if amf_host_zero_copy_override is True else "Automatic",
+                "Main10/P010" if self.spec.ten_bit else "Main/NV12",
+            )
 
-        self.BUFFER_MAX_SIZE = 8
-        self._lut_flags: deque[bool] = deque()
+        # AMF receives a blocking host copy, so it needs only a small producer
+        # window. Retaining the NVENC-sized window can pin up to twelve cloned
+        # full RGB frames across the reorder heap and worker queue; at 8K that
+        # is more than 1 GiB. Four entries preserve overlap and PTS ordering
+        # while halving that AMD-only working set.
+        self.BUFFER_MAX_SIZE = (
+            4 if self.vendor is AcceleratorVendor.AMD else 8
+        )
+        self.frame_buffer: list[_BufferedEncodeItem] = []
+        self._next_buffer_sequence = 0
         # Set on AMD in __enter__, where the frame size is known; NVIDIA leaves
         # them None and allocates per frame (NVENC outlives encode()).
         self._packed: torch.Tensor | None = None
         self._cas_luma: torch.Tensor | None = None
+
+    def _video_stream_kwargs(self) -> dict[str, object]:
+        stream_kwargs: dict[str, object] = {
+            "rate": self.output_fps,
+            "options": dict(self.encoder_options),
+        }
+        if (
+            self.vendor is AcceleratorVendor.AMD
+            and not self._amf_host_zero_copy
+            and self._resident_coordinator is None
+        ):
+            stream_kwargs["hwaccel"] = HWAccel(
+                "amf",
+                device=str(self.device.index or 0),
+                allow_software_fallback=False,
+                is_hw_owned=False,
+            )
+        # PyAV's encoding HWAccel uploads software frames into an AMF hardware
+        # frame pool before avcodec_send_frame(). The validated host-native
+        # route deliberately leaves only AVCodecContext.hw_device_ctx in place
+        # so the contiguous P010 frame reaches amfenc's guarded wrap branch.
+        return stream_kwargs
 
     def __enter__(self):
         try:
@@ -546,22 +1088,14 @@ class NvidiaVideoEncoder:
         )
         self.dst = av.open(str(self.output_path), "w", container_options=container_options)
 
-        stream_kwargs = {
-            "rate": self.output_fps,
-            "options": dict(self.encoder_options),
-        }
-        if self.vendor is AcceleratorVendor.AMD:
-            stream_kwargs["hwaccel"] = HWAccel(
-                "amf",
-                device=str(self.device.index or 0),
-                allow_software_fallback=False,
-                is_hw_owned=False,
-            )
+        stream_kwargs = self._video_stream_kwargs()
         out_v = self.dst.add_stream(self.encoder_name, **stream_kwargs)
         out_v.width = self.metadata.video_width
         out_v.height = self.metadata.video_height
         out_v.time_base = self.metadata.time_base
         ctx = out_v.codec_context
+        if self._target_bit_rate is not None:
+            ctx.bit_rate = self._target_bit_rate
         ctx.time_base = self.metadata.time_base
         ctx.framerate = self.output_fps
         ctx.pix_fmt = (
@@ -583,6 +1117,9 @@ class NvidiaVideoEncoder:
         ctx.color_primaries = primaries
         ctx.color_trc = transfer
         self.out_stream = out_v
+
+        if self._resident_coordinator is not None:
+            self._resident_coordinator.bind_encoder_context(ctx)
 
         self._copy_source_metadata(in_v, out_v)
         self._setup_source_streams(in_v)
@@ -626,14 +1163,17 @@ class NvidiaVideoEncoder:
             if self._cas is not None:
                 self._cas_luma = torch.empty_like(self._packed[:height])
             dtype = torch.uint16 if self.spec.ten_bit else torch.uint8
-            self._host_yuv = torch.empty(
-                (height + height // 2, width),
-                dtype=dtype,
-                pin_memory=True,
-            )
-        self.pts_heap: list[int] = []
-        self.frame_buffer: deque = deque()
-        self._lut_flags.clear()
+            if (
+                not self._amf_host_zero_copy
+                and self._resident_coordinator is None
+            ):
+                self._host_yuv = torch.empty(
+                    (height + height // 2, width),
+                    dtype=dtype,
+                    pin_memory=True,
+                )
+        self.frame_buffer = []
+        self._next_buffer_sequence = 0
         self.pts_set: set[int] = set()
         self._last_emitted_pts: int | None = None
         self._video_started = False
@@ -684,6 +1224,13 @@ class NvidiaVideoEncoder:
                 )
                 continue
             if in_stream.codec_context is None and in_stream.type != "attachment":
+                if in_stream.type == "audio":
+                    raise RuntimeError(
+                        "Source audio stream "
+                        f"{in_stream.index} has no codec context; the unified "
+                        "FFmpeg runtime must include its audio decoder instead "
+                        "of silently producing a video without sound"
+                    )
                 if in_stream.type != "data" or not source_formats & output_formats:
                     logger.warning(
                         "Skipping %s stream %s: it has no copyable codec",
@@ -778,6 +1325,7 @@ class NvidiaVideoEncoder:
             self._source_iter = self._src.demux(packet_streams)
 
     def __exit__(self, exc_type, exc_value, traceback):
+        worker_error = None
         try:
             if exc_type is None:
                 while self.frame_buffer:
@@ -791,10 +1339,38 @@ class NvidiaVideoEncoder:
                     self._mux_video(packet)
                 self._drain_source_streams()
         finally:
-            self.dst.close()
-            self._src.close()
-        if exc_type is None and self._worker_error is not None:
-            raise self._worker_error
+            worker_error = self._worker_error
+            try:
+                self.dst.close()
+            finally:
+                try:
+                    self._src.close()
+                finally:
+                    self._release_runtime_references()
+        if exc_type is None and worker_error is not None:
+            raise worker_error
+
+    def _release_runtime_references(self) -> None:
+        """Drop per-session Torch/PyAV owners before the next Smart span opens."""
+
+        self.frame_buffer.clear()
+        self.pts_set.clear()
+        self._packed = None
+        self._cas_luma = None
+        self._host_yuv = None
+        self._converter = None
+        self._lut_applier = None
+        self._cas = None
+        self._source_iter = None
+        self._source_backlog.clear()
+        self._source_pipes.clear()
+        self.out_stream = None
+        self.dst = None
+        self._src = None
+        self._cuda_ctx = None
+        self.stream = None
+        self._encode_thread = None
+        self._encode_queue = None
 
     def _encode_worker(self):
         set_device(self.device)
@@ -948,15 +1524,14 @@ class NvidiaVideoEncoder:
 
     def _process_buffer(self, flush_all=False):
         if len(self.frame_buffer) > (self.BUFFER_MAX_SIZE // 2) or (flush_all and self.frame_buffer):
-            frame_to_encode = self.frame_buffer.popleft()
-            pts_to_assign = heapq.heappop(self.pts_heap)
-            self.pts_set.remove(pts_to_assign)
-            pts_to_assign = self._clamp_pts_monotonic(pts_to_assign)
-            apply_lut = self._lut_flags.popleft() if self._lut_flags else True
-            if apply_lut:
-                item = self._build_encode_item(frame_to_encode, pts_to_assign)
-            else:
-                item = self._build_encode_item(frame_to_encode, pts_to_assign, False)
+            buffered = heapq.heappop(self.frame_buffer)
+            self.pts_set.remove(buffered.pts)
+            pts_to_assign = self._clamp_pts_monotonic(buffered.pts)
+            item = self._build_encode_item(
+                buffered.frame,
+                pts_to_assign,
+                buffered.apply_lut,
+            )
             self._encode_queue.put(item)
 
     def _encoder_open_error(self, exc: Exception) -> RuntimeError:
@@ -979,8 +1554,9 @@ class NvidiaVideoEncoder:
     def _packed_frame(self, height: int, width: int) -> torch.Tensor:
         # NVENC takes the device frame by pointer and still owns it after
         # encode() returns, so NVIDIA hands it a fresh one every time. AMF has
-        # no zero-copy path: the AMD branch synchronizes then blocking-copies
-        # this buffer into pinned host memory, so one buffer can serve every frame.
+        # no direct HIP-to-AMF path: the AMD branch synchronizes then performs
+        # a blocking D2H into pinned host memory. One device buffer can therefore
+        # serve every frame even when AMF retains distinct host-native owners.
         if self._packed is not None:
             return self._packed
         return torch.empty(
@@ -1028,8 +1604,38 @@ class NvidiaVideoEncoder:
                     stream=self.stream.cuda_stream,
                     cuda_context=self._cuda_ctx,
                 )
+            elif self._resident_coordinator is not None:
+                hw_frame, telemetry = self._resident_coordinator.acquire_encoder_frame(
+                    packed.data_ptr(),
+                    packed.numel() * packed.element_size(),
+                    int(pts),
+                    int(self.stream.cuda_stream),
+                )
+                frame_format = getattr(
+                    getattr(hw_frame, "format", None), "name", None
+                )
+                if (
+                    frame_format != "amf"
+                    or int(getattr(hw_frame, "width", -1))
+                    != int(self.metadata.video_width)
+                    or int(getattr(hw_frame, "height", -1))
+                    != int(self.metadata.video_height)
+                    or int(telemetry.get("slot_count", -1)) != 4
+                    or int(telemetry.get("width", -1))
+                    != int(self.metadata.video_width)
+                    or int(telemetry.get("height", -1))
+                    != int(self.metadata.video_height)
+                ):
+                    raise RuntimeError(
+                        "Windows D3D11/HIP resident bridge returned an invalid "
+                        f"encoder frame: format={frame_format}, telemetry={telemetry}"
+                    )
+                self.resident_encode_telemetry.append(telemetry)
 
-        if self.vendor is AcceleratorVendor.AMD:
+        if (
+            self.vendor is AcceleratorVendor.AMD
+            and self._resident_coordinator is None
+        ):
             # Issue #252: isolated E1/E2 were clean; residual glitches under full
             # pipeline load matched AMF reading host planes while a non-blocking
             # D2H was still in flight. Finish convert on the stream, then
@@ -1037,11 +1643,22 @@ class NvidiaVideoEncoder:
             # Phase 4 (gfx1201): stream.synchronize() + blocking copy cleared P1;
             # do not escalate to full device.synchronize() unless field reports return.
             self.stream.synchronize()
-            self._host_yuv.copy_(
+            host_yuv = self._host_yuv
+            if self._amf_host_zero_copy:
+                # AMF may retain a wrapped host surface after encode() returns.
+                # Give every submission an independent pinned owner; PyAV's
+                # DLPack AVBuffer refs keep it alive until FFmpeg queries output.
+                dtype = torch.uint16 if self.spec.ten_bit else torch.uint8
+                host_yuv = torch.empty(
+                    (height + height // 2, self.metadata.video_width),
+                    dtype=dtype,
+                    pin_memory=True,
+                )
+            host_yuv.copy_(
                 _amf_host_input(packed, ten_bit=self.spec.ten_bit),
                 non_blocking=False,
             )
-            planes = [self._host_yuv[:height], self._host_yuv[height:]]
+            planes = [host_yuv[:height], host_yuv[height:]]
             hw_frame = av.VideoFrame.from_dlpack(
                 planes,
                 format=self.spec.frame_format,
@@ -1063,8 +1680,23 @@ class NvidiaVideoEncoder:
         pts = int(pts) - self.pts_origin
         while pts in self.pts_set:
             pts += 1
-        heapq.heappush(self.pts_heap, pts)
-        self.frame_buffer.append(frame)
-        self._lut_flags.append(bool(apply_lut))
+        # AMD decode batches can expose storage that is reused after the next
+        # native batch. Own it before the asynchronous encoder window retains
+        # the tensor; NVIDIA keeps the established producer-owned fast path.
+        owned_frame = (
+            frame.clone()
+            if self.vendor is AcceleratorVendor.AMD and isinstance(frame, torch.Tensor)
+            else frame
+        )
+        heapq.heappush(
+            self.frame_buffer,
+            _BufferedEncodeItem(
+                pts=pts,
+                sequence=self._next_buffer_sequence,
+                frame=owned_frame,
+                apply_lut=bool(apply_lut),
+            ),
+        )
+        self._next_buffer_sequence += 1
         self.pts_set.add(pts)
         self._process_buffer()

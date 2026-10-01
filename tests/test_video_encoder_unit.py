@@ -1,6 +1,7 @@
 """Unit tests for NvidiaVideoEncoder internals (options, color guard, buffer, worker, audio pump)."""
 from __future__ import annotations
 
+import heapq
 import queue
 import threading
 from contextlib import nullcontext
@@ -58,6 +59,17 @@ def _make_encoder(tmp_path, encoder_settings=None, codec="hevc", **meta_override
         metadata=_fake_metadata(**meta_overrides),
         codec=codec,
         encoder_settings=encoder_settings or {},
+    )
+
+
+@pytest.fixture(autouse=True)
+def _use_nvidia_encoder_contracts_by_default(monkeypatch) -> None:
+    """This legacy suite asserts NVENC unless a test explicitly selects AMD."""
+
+    monkeypatch.setattr(
+        video_encoder_module,
+        "vendor_for_device",
+        lambda _device=None: AcceleratorVendor.NVIDIA,
     )
 
 
@@ -352,6 +364,29 @@ class TestSourceContainerPreservation:
         encoder._src.demux.assert_not_called()
         assert "Skipping subtitle stream 1" in caplog.text
         assert "Skipping attachment stream 2" in caplog.text
+
+    def test_codec_less_audio_fails_instead_of_silently_dropping_sound(
+        self, tmp_path
+    ):
+        encoder = _make_encoder(tmp_path)
+        primary_video = _source_stream(0, "video", "h264")
+        audio = _source_stream(1, "audio", None)
+        encoder._src = SimpleNamespace(
+            streams=[primary_video, audio],
+            format=SimpleNamespace(name="mov,mp4,m4a,3gp,3g2,mj2"),
+            demux=MagicMock(),
+        )
+        encoder.dst = SimpleNamespace(
+            format=SimpleNamespace(name="mp4"),
+            add_stream=MagicMock(),
+            add_stream_from_template=MagicMock(),
+        )
+
+        with pytest.raises(RuntimeError, match="without sound"):
+            encoder._setup_source_streams(primary_video)
+
+        encoder.dst.add_stream_from_template.assert_not_called()
+        encoder._src.demux.assert_not_called()
 
     def test_transcodes_text_subtitle_when_container_cannot_copy(self, tmp_path):
         encoder = _make_encoder(tmp_path)
@@ -654,6 +689,7 @@ class TestSharpening:
 
     def test_zero_strength_leaves_the_converted_frame_untouched(self, tmp_path, monkeypatch):
         enc = _make_encoder(tmp_path, codec="h264")  # nv12, so planes stay uint8
+        enc.device = torch.device("cpu")
         packed = torch.arange(24, dtype=torch.uint8, device=enc.device).reshape(6, 4)
         enc._converter = SimpleNamespace(
             sample_dtype=torch.uint8,
@@ -692,7 +728,9 @@ class TestSharpening:
             encoder_settings={},
             sharpen_strength=0.4,
         )
+        enc.device = torch.device("cpu")
         enc._converter = SimpleNamespace(
+            # This DLPack ordering test uses CPU tensors and a fake submitter.
             sample_dtype=torch.uint8,
             uses_kernel=False,
             convert_into=lambda frame, luma, chroma: None,
@@ -771,17 +809,48 @@ class TestColorHandling:
 
 def _buffered_encoder(tmp_path) -> NvidiaVideoEncoder:
     enc = _make_encoder(tmp_path)
-    enc.pts_heap = []
-    enc.frame_buffer = deque()
+    enc.frame_buffer = []
+    enc._next_buffer_sequence = 0
     enc.pts_set = set()
     enc._last_emitted_pts = None
     enc._worker_error = None
     enc._encode_queue = MagicMock()
-    enc._build_encode_item = MagicMock(side_effect=lambda frame, pts: (frame, pts, None))
+    enc._build_encode_item = MagicMock(
+        side_effect=lambda frame, pts, apply_lut=True: (
+            frame,
+            pts,
+            apply_lut,
+            None,
+        )
+    )
     return enc
 
 
+def _buffered_encoder_for_vendor(tmp_path, monkeypatch, vendor) -> NvidiaVideoEncoder:
+    monkeypatch.setattr(
+        video_encoder_module,
+        "vendor_for_device",
+        lambda _device: vendor,
+    )
+    return _buffered_encoder(tmp_path)
+
+
+def _queued_encode_items(enc):
+    return [call.args[0] for call in enc._encode_queue.put.call_args_list]
+
+
 class TestEncodeBuffer:
+    def test_amd_uses_smaller_full_frame_retention_window(
+        self, tmp_path, monkeypatch
+    ):
+        enc = _buffered_encoder_for_vendor(
+            tmp_path, monkeypatch, AcceleratorVendor.AMD
+        )
+        assert enc.BUFFER_MAX_SIZE == 4
+
+    def test_nvidia_keeps_existing_retention_window(self, tmp_path):
+        assert _buffered_encoder(tmp_path).BUFFER_MAX_SIZE == 8
+
     @pytest.mark.parametrize(
         ("dtype", "width", "expected_pitch"),
         [
@@ -827,6 +896,7 @@ class TestEncodeBuffer:
         self, tmp_path, monkeypatch
     ):
         enc = _make_encoder(tmp_path, codec="hevc", video_width=2, video_height=2)
+        enc.device = torch.device("cpu")
         # Force NVIDIA contracts even when the host GPU is AMD/ROCm.
         enc.vendor = video_encoder_module.AcceleratorVendor.NVIDIA
         enc.stream = MagicMock()
@@ -907,30 +977,147 @@ class TestEncodeBuffer:
         _, kwargs = from_dlpack.call_args
         assert kwargs == {"format": "nv12"}
 
+    def test_amd_host_native_input_uses_distinct_pinned_frame_owner(
+        self, tmp_path, monkeypatch
+    ):
+        enc = _make_encoder(tmp_path, codec="h264", video_width=2, video_height=2)
+        enc.vendor = video_encoder_module.AcceleratorVendor.AMD
+        enc._amf_host_zero_copy = True
+        enc.stream = MagicMock()
+        enc._host_yuv = None
+        enc._packed = torch.zeros((3, 2), dtype=torch.uint8)
+        enc._lut_applier = None
+        enc._converter = SimpleNamespace(
+            sample_dtype=torch.uint8,
+            uses_kernel=False,
+            convert_into=lambda frame, luma, chroma: None,
+        )
+        enc.out_stream = MagicMock()
+        enc.out_stream.encode.return_value = []
+        hw_frame = SimpleNamespace(pts=None, time_base=None)
+        from_dlpack = MagicMock(return_value=hw_frame)
+        host_yuv = MagicMock(name="per_frame_host_yuv")
+        empty = MagicMock(return_value=host_yuv)
+        monkeypatch.setattr(
+            video_encoder_module.av,
+            "VideoFrame",
+            SimpleNamespace(from_dlpack=from_dlpack),
+        )
+        monkeypatch.setattr(video_encoder_module.torch, "empty", empty)
+        monkeypatch.setattr(
+            video_encoder_module, "stream_context", lambda _stream: nullcontext()
+        )
+
+        input_frame = torch.zeros((3, 2, 2), dtype=torch.uint8)
+        enc._encode_frame(input_frame, 7)
+
+        enc.stream.synchronize.assert_called_once_with()
+        empty.assert_called_once_with((3, 2), dtype=torch.uint8, pin_memory=True)
+        host_yuv.copy_.assert_called_once()
+        _, copy_kwargs = host_yuv.copy_.call_args
+        assert copy_kwargs == {"non_blocking": False}
+        assert from_dlpack.call_args.kwargs == {"format": "nv12"}
+
     def test_pts_origin_is_removed_from_fragment_timestamps(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
         enc.pts_origin = 100
         enc.encode("frame", 110)
-        assert enc.pts_heap == [10]
+        assert [item.pts for item in enc.frame_buffer] == [10]
+
+    def test_runtime_reference_release_drops_per_span_gpu_owners(self, tmp_path):
+        enc = _buffered_encoder(tmp_path)
+        enc.frame_buffer.append("frame")
+        enc.pts_set.add(1)
+        enc._packed = object()
+        enc._cas_luma = object()
+        enc._host_yuv = object()
+        enc._source_iter = iter(())
+        enc._source_backlog = deque([object()])
+        enc._source_pipes = {1: object()}
+        enc.out_stream = object()
+        enc.dst = object()
+        enc._src = object()
+        enc._cuda_ctx = object()
+        enc.stream = object()
+        enc._encode_thread = object()
+
+        enc._release_runtime_references()
+
+        assert enc.frame_buffer == []
+        assert enc.pts_set == set()
+        for name in (
+            "_packed",
+            "_cas_luma",
+            "_host_yuv",
+            "_converter",
+            "_lut_applier",
+            "_cas",
+            "_source_iter",
+            "out_stream",
+            "dst",
+            "_src",
+            "_cuda_ctx",
+            "stream",
+            "_encode_thread",
+            "_encode_queue",
+        ):
+            assert getattr(enc, name) is None
+        assert enc._source_backlog == deque()
+        assert enc._source_pipes == {}
 
     def test_bridge_frame_records_lut_bypass(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
         enc.encode("frame", 10, apply_lut=False)
-        assert list(enc.frame_buffer) == ["frame"]
-        assert list(enc._lut_flags) == [False]
+        buffered = enc.frame_buffer[0]
+        assert buffered.frame == "frame"
+        assert buffered.apply_lut is False
 
-    def test_encode_pushes_to_buffer_and_heap(self, tmp_path):
+    def test_encode_pushes_atomic_item_to_ordered_buffer(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
         enc.encode("frame0", 10)
-        assert list(enc.frame_buffer) == ["frame0"]
-        assert enc.pts_heap == [10]
+        buffered = enc.frame_buffer[0]
+        assert buffered.pts == 10
+        assert buffered.sequence == 0
+        assert buffered.frame == "frame0"
+        assert buffered.apply_lut is True
         assert enc.pts_set == {10}
 
-    def test_encode_dedup_pts(self, tmp_path):
+    def test_duplicate_pts_are_adjusted_and_emit_in_enqueue_order(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
-        enc.encode("a", 5)
-        enc.encode("b", 5)
-        assert sorted(enc.pts_set) == [5, 6]
+        enc.encode("first", 5, apply_lut=False)
+        enc.encode("second", 5, apply_lut=True)
+        while enc.frame_buffer:
+            enc._process_buffer(flush_all=True)
+        assert _queued_encode_items(enc) == [
+            ("first", 5, False, None),
+            ("second", 6, True, None),
+        ]
+        assert enc.pts_set == set()
+
+    def test_equal_pts_items_use_sequence_as_heap_tiebreaker(self):
+        heap = []
+        heapq.heappush(
+            heap,
+            video_encoder_module._BufferedEncodeItem(
+                pts=5,
+                sequence=1,
+                frame="later",
+                apply_lut=True,
+            ),
+        )
+        heapq.heappush(
+            heap,
+            video_encoder_module._BufferedEncodeItem(
+                pts=5,
+                sequence=0,
+                frame="first",
+                apply_lut=False,
+            ),
+        )
+        assert [heapq.heappop(heap).frame, heapq.heappop(heap).frame] == [
+            "first",
+            "later",
+        ]
 
     def test_flush_starts_above_half_buffer(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
@@ -938,14 +1125,60 @@ class TestEncodeBuffer:
             enc.encode(f"f{i}", i)
         enc._encode_queue.put.assert_not_called()
         enc.encode("one-more", 99)
-        enc._encode_queue.put.assert_called_once_with(("f0", 0, None))
+        enc._encode_queue.put.assert_called_once_with(("f0", 0, True, None))
 
-    def test_smallest_pts_pairs_with_oldest_frame(self, tmp_path):
+    def test_out_of_order_pts_keep_frame_and_lut_together(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
-        for i, pts in enumerate([30, 10, 20, 40]):
-            enc.encode(f"f{i}", pts)
+        for frame, pts, apply_lut in [
+            ("pts30", 30, True),
+            ("pts10", 10, False),
+            ("pts20", 20, True),
+            ("pts40", 40, False),
+        ]:
+            enc.encode(frame, pts, apply_lut=apply_lut)
         enc._process_buffer(flush_all=True)
-        enc._encode_queue.put.assert_called_once_with(("f0", 10, None))
+        enc._encode_queue.put.assert_called_once_with(("pts10", 10, False, None))
+
+    def test_amd_tensor_frame_is_owned_until_delayed_encode(
+        self, tmp_path, monkeypatch
+    ):
+        enc = _buffered_encoder_for_vendor(
+            tmp_path,
+            monkeypatch,
+            video_encoder_module.AcceleratorVendor.AMD,
+        )
+        source = torch.tensor([[[1]], [[2]], [[3]]], dtype=torch.uint8)
+        enc.encode(source, 10, apply_lut=False)
+        buffered = enc.frame_buffer[0]
+        source.fill_(99)
+        assert buffered.frame is not source
+        assert torch.equal(
+            buffered.frame,
+            torch.tensor([[[1]], [[2]], [[3]]], dtype=torch.uint8),
+        )
+        enc._process_buffer(flush_all=True)
+        emitted_frame, emitted_pts, emitted_lut, _ = _queued_encode_items(enc)[0]
+        assert emitted_frame is buffered.frame
+        assert emitted_pts == 10
+        assert emitted_lut is False
+
+    def test_nvidia_tensor_frame_keeps_existing_no_copy_reference(
+        self, tmp_path, monkeypatch
+    ):
+        enc = _buffered_encoder_for_vendor(
+            tmp_path,
+            monkeypatch,
+            video_encoder_module.AcceleratorVendor.NVIDIA,
+        )
+        source = torch.tensor([[[1]], [[2]], [[3]]], dtype=torch.uint8)
+        enc.encode(source, 10, apply_lut=False)
+        buffered = enc.frame_buffer[0]
+        assert buffered.frame is source
+        source.fill_(99)
+        assert torch.equal(
+            buffered.frame,
+            torch.tensor([[[99]], [[99]], [[99]]], dtype=torch.uint8),
+        )
 
     def test_emitted_pts_stay_strictly_increasing_on_scrambled_source(self, tmp_path):
         enc = _buffered_encoder(tmp_path)
