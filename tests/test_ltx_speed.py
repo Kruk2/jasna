@@ -7,8 +7,11 @@ from jasna.ltx import speed
 from jasna.ltx.model_files import LtxModelFiles
 
 
-def test_profile_key_names_the_version_gpu_and_transformer():
-    assert speed.profile_key("RTX 5090", "m.safetensors") == f"{__version__} | RTX 5090 | m.safetensors"
+def test_profile_key_names_the_version_gpu_transformer_and_decode_budget():
+    assert (
+        speed.profile_key("RTX 5090", "m.safetensors", "segment")
+        == f"{__version__} | RTX 5090 | m.safetensors | decode segment"
+    )
 
 
 def test_a_trial_shares_the_key_of_the_model_it_stands_in_for(tmp_path):
@@ -87,3 +90,46 @@ def test_pass_estimates_need_every_rate_the_plan_uses():
         "compose": (3.0, pytest.approx(100 * 2.0 * 0.2 + 3 * 1.0)),
     }
     assert speed.pass_estimates(rates, speed.Work(frames=100, megapixels=2.0, windows={768: 1})) is None
+
+
+def test_learned_rates_ignore_the_scan():
+    timings = {"scan": speed.PassTiming(seconds=5.0, warm_seconds=4.0, warm_frames=90, windows=[(512, 1.0)] * 3)}
+    assert speed.learned_rates(timings, WORK, known={}) == {}
+
+
+def test_run_summary_gives_each_pass_its_wall_time_and_warm_medians_per_canvas():
+    timings = {
+        "scan": speed.PassTiming(seconds=4.0, units=100, warm_seconds=2.0, warm_frames=90),
+        "encode": speed.PassTiming(
+            seconds=20.0, units=100, warm_seconds=10.0, warm_frames=90,
+            windows=[(512, 9.0), (512, 1.0), (512, 3.0), (512, 2.0), (768, 8.0), (768, 4.0)],
+        ),
+        "denoise": speed.PassTiming(
+            seconds=60.0, units=40, windows=[(512, 30.0)], steps=[(512, 1.0), (512, 5.0), (512, 2.0), (768, 4.0)]
+        ),
+        "compose": speed.PassTiming(
+            seconds=16.0, units=100, warm_seconds=5.0, warm_frames=90, windows=[(512, 7.0), (512, 0.5), (768, 3.0)]
+        ),
+    }
+    work = speed.Work(frames=100, megapixels=2.0, windows={768: 2, 512: 4})
+    assert speed.run_summary("key", timings, work, 3 << 30, (40, 48)) == [
+        "[timing] LTX: 100.0s, 100 frames, windows 4 at 512, 2 at 768, 40 window-steps, peak VRAM 3072.0 MiB",
+        "[timing] LTX profile: key",
+        "[timing] LTX scan: 4.0s, 45.0 frames/s",
+        "[timing] LTX encode: 20.0s, 9.0 frames/s, 2.00 s/window at 512, 4.00 s/window at 768",
+        "[timing] LTX denoise: 60.0s, 2.00 s/window-step at 512, 4.00 s/window-step at 768, blocks 40/48 resident",
+        "[timing] LTX compose: 16.0s, 18.0 frames/s, decode 0.50 s/window at 512",
+    ]
+
+
+def test_run_summary_without_mosaics_has_only_scan_and_compose():
+    timings = {
+        "scan": speed.PassTiming(seconds=3.0, units=50, warm_seconds=1.0, warm_frames=40),
+        "compose": speed.PassTiming(seconds=2.0, units=50),
+    }
+    assert speed.run_summary("key", timings, speed.Work(frames=50, megapixels=2.0, windows={}), 0, None) == [
+        "[timing] LTX: 5.0s, 50 frames, windows 0, 0 window-steps, peak VRAM 0.0 MiB",
+        "[timing] LTX profile: key",
+        "[timing] LTX scan: 3.0s, 40.0 frames/s",
+        "[timing] LTX compose: 2.0s",
+    ]

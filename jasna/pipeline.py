@@ -195,12 +195,15 @@ class Pipeline:
         finally:
             frame_writer.close()
 
-        free, total = torch.cuda.mem_get_info(self.device)
-        log.info("VRAM usage at end — %.1f MiB", (total - free) / (1024 ** 2))
-        log.info("RAM usage at end — %.1f MiB", psutil.Process(os.getpid()).memory_info().rss / (1024 ** 2))
+        self._log_memory_at_end()
         if error is not None:
             error.__traceback__ = None
             raise error
+
+    def _log_memory_at_end(self) -> None:
+        free, total = torch.cuda.mem_get_info(self.device)
+        log.info("VRAM usage at end — %.1f MiB", (total - free) / (1024 ** 2))
+        log.info("RAM usage at end — %.1f MiB", psutil.Process(os.getpid()).memory_info().rss / (1024 ** 2))
 
     def validate_metadata(self, metadata) -> None:
         from av.video.reformatter import Colorspace as AvColorspace
@@ -333,6 +336,7 @@ class Pipeline:
             log.info("LTX restoration cancelled")
         finally:
             writer.close()
+        self._log_memory_at_end()
 
     def ltx_segment_render(self, metadata) -> "LtxRender":
         """How LTX restores segments: the 768 px decision and the decode tiles follow the
@@ -352,6 +356,7 @@ class Pipeline:
                 self.ltx_large_canvas, torch.cuda.get_device_properties(self.device).total_memory
             ),
             budget=segment_decode_budget,
+            budget_name="segment",
             device=self.device,
             speed_profile=profile_path(),
         )
@@ -408,6 +413,7 @@ class Pipeline:
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
+        self._log_memory_at_end()
 
     def _run_smart(self, metadata) -> None:
         codec = validate_smart_render(

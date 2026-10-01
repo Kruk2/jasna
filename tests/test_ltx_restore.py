@@ -2,6 +2,7 @@ import contextlib
 import json
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -66,6 +67,7 @@ class _Transformer:
 
     def __init__(self, path, device):
         self.conditions = [None] * 8
+        self.blocks = SimpleNamespace(resident=40, count=48)
 
     def denoise_chain(self, references, seeds, advance):
         _Transformer.seeds.append(list(seeds))
@@ -121,6 +123,8 @@ def fakes(monkeypatch):
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (123 << 20, 1 << 40))
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "Test GPU")
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: None)
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: 5 << 20)
     _Transformer.seeds = []
     return budgets, bars
 
@@ -134,6 +138,7 @@ def _render(tmp_path):
         batch_size=4,
         large_canvas=False,
         budget=restore.segment_decode_budget,
+        budget_name="segment",
         device=torch.device("cpu"),
         speed_profile=tmp_path / "speed.json",
     )
@@ -402,16 +407,52 @@ def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
     compose, denoise = progress.timings["compose"], progress.timings["denoise"]
     assert (compose.seconds, compose.warm_seconds, compose.warm_frames) == (6.0, 3.0, 6)
     assert compose.windows == [(512, 1.5)]
+    assert compose.units == 10
     assert denoise.seconds == 14.0
+    assert denoise.units == 8
     assert denoise.windows == [(512, pytest.approx(4.0 / 4 * 3))]
+    assert denoise.steps == [(512, 1.0), (512, 1.0)]
+
+
+def test_restore_spans_logs_the_run_summary(fakes, tmp_path, caplog):
+    video = _video(12, range(2, 10))
+    with caplog.at_level("INFO", logger=restore.logger.name):
+        _run_spans(tmp_path, [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)])
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("[timing] LTX")]
+    assert lines == [
+        "[timing] LTX: 0.0s, 0 frames, windows 1 at 512, 0 window-steps, peak VRAM 5.0 MiB",
+        f"[timing] LTX profile: {restore.speed.profile_key('Test GPU', 't', 'segment')}",
+    ]
 
 
 def test_restore_spans_saves_the_speed_profile(fakes, tmp_path):
     video = _video(12, range(2, 10))
     _run_spans(tmp_path, [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)])
-    key = restore.speed.profile_key("Test GPU", "t")
+    key = restore.speed.profile_key("Test GPU", "t", "segment")
     assert restore.speed.load_rates(tmp_path / "speed.json", key) == {}
     assert key in json.loads((tmp_path / "speed.json").read_text())
+
+
+def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes, tmp_path):
+    restore.restore_video(
+        _source(_video(12, range(2, 10))),
+        _Writer(),
+        detector=_Detector(),
+        files=FILES,
+        frame_h=64,
+        frame_w=64,
+        batch_size=4,
+        large_canvas=False,
+        seed=1,
+        device=torch.device("cpu"),
+        work_dir=tmp_path,
+        speed_profile=tmp_path / "speed.json",
+        progress=restore.Progress(0, disable=True, report=None),
+        cancel=threading.Event(),
+    )
+    assert list(json.loads((tmp_path / "speed.json").read_text())) == [
+        restore.speed.profile_key("Test GPU", "t", "free VRAM")
+    ]
 
 
 def test_progress_without_a_report_only_drives_the_console_bar():
