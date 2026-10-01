@@ -150,7 +150,7 @@ def enable_fused_attention(device: torch.device) -> None:
     """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``), or before
     SM 8.0, where Triton has no tensor-core dot, through the fp16 pure-torch ``na3d``."""
     global _fused_na3d
-    if torch.cuda.get_device_capability(device) < (8, 0):
+    if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
         _fused_na3d = _fp16_eager_na3d
         return
     from jasna.models.ltx_vae import na_triton
