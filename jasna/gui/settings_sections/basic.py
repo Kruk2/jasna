@@ -18,6 +18,13 @@ MIN_CLIP_SIZE = 10
 MAX_CLIP_SIZE = 720
 CLIP_SIZE_STEP = 10
 
+PRE_SCAN_FULL_THRESHOLD_MIN = 0.50
+PRE_SCAN_FULL_THRESHOLD_MAX = 1.00
+PRE_SCAN_FULL_THRESHOLD_STEP = 0.01
+PRE_SCAN_COARSE_INTERVALS = (0.5, 1.0, 2.0, 3.0, 4.0, 5.0)
+PRE_SCAN_FINE_INTERVALS = (0.25, 0.5, 1.0)
+PRE_SCAN_PAD_SECONDS = ("auto", "0.0", "0.5", "1.0", "2.0", "5.0")
+
 
 def build_max_clip_size_slider(slider_class, parent, on_change, **kwargs):
     return slider_class(
@@ -111,6 +118,202 @@ class BasicSection:
         self._widgets["detection_score_threshold"].pack(side="right", padx=(0, 8))
         self._widgets["detection_score_threshold"].set(0.35)
 
+        # Pre-scan policy and routing controls
+        pre_scan_policy_row = ctk.CTkFrame(inner, fg_color="transparent")
+        pre_scan_policy_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        pre_scan_policy_label = ctk.CTkLabel(
+            pre_scan_policy_row,
+            text=t("pre_scan_policy"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        pre_scan_policy_label.pack(side="left")
+        pre_scan_policy_tip = ctk.CTkLabel(
+            pre_scan_policy_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        pre_scan_policy_tip.pack(side="left", padx=4)
+        Tooltip(pre_scan_policy_tip, get_tooltip("pre_scan_policy"))
+
+        self._widgets["pre_scan_policy"] = ValueOptionMenu(
+            pre_scan_policy_row,
+            options={
+                "auto": t("pre_scan_policy_auto"),
+                "scan": t("pre_scan_policy_scan"),
+                "off": t("pre_scan_policy_off"),
+            },
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD,
+            button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=180,
+        )
+        self._widgets["pre_scan_policy"].pack(side="right")
+        self._widgets["pre_scan_policy"].set_value("auto")
+
+        pre_scan_threshold_row = ctk.CTkFrame(inner, fg_color="transparent")
+        pre_scan_threshold_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        pre_scan_threshold_label = ctk.CTkLabel(
+            pre_scan_threshold_row,
+            text=t("pre_scan_full_threshold"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        pre_scan_threshold_label.pack(side="left")
+        pre_scan_threshold_tip = ctk.CTkLabel(
+            pre_scan_threshold_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        pre_scan_threshold_tip.pack(side="left", padx=4)
+        Tooltip(pre_scan_threshold_tip, get_tooltip("pre_scan_full_threshold"))
+
+        self._widgets["pre_scan_full_threshold_val"] = create_slider_value_label(
+            pre_scan_threshold_row,
+            "85%",
+            5,
+            Colors.BG_PANEL,
+        )
+        self._widgets["pre_scan_full_threshold_val"].pack(side="right")
+        self._widgets["pre_scan_full_threshold"] = ctk.CTkSlider(
+            pre_scan_threshold_row,
+            from_=PRE_SCAN_FULL_THRESHOLD_MIN,
+            to=PRE_SCAN_FULL_THRESHOLD_MAX,
+            number_of_steps=round(
+                (PRE_SCAN_FULL_THRESHOLD_MAX - PRE_SCAN_FULL_THRESHOLD_MIN)
+                / PRE_SCAN_FULL_THRESHOLD_STEP
+            ),
+            fg_color=Colors.BG_CARD,
+            progress_color=Colors.PRIMARY,
+            button_color=Colors.PRIMARY,
+            width=160,
+            command=self._on_pre_scan_full_threshold_changed,
+        )
+        self._widgets["pre_scan_full_threshold"].pack(side="right", padx=(0, 8))
+        self._widgets["pre_scan_full_threshold"].set(0.85)
+
+        pre_scan_coarse_row = ctk.CTkFrame(inner, fg_color="transparent")
+        pre_scan_coarse_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        pre_scan_coarse_label = ctk.CTkLabel(
+            pre_scan_coarse_row,
+            text=t("pre_scan_coarse_interval"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        pre_scan_coarse_label.pack(side="left")
+        pre_scan_coarse_tip = ctk.CTkLabel(
+            pre_scan_coarse_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        pre_scan_coarse_tip.pack(side="left", padx=4)
+        Tooltip(pre_scan_coarse_tip, get_tooltip("pre_scan_coarse_interval"))
+        self._widgets["pre_scan_coarse_interval"] = ValueOptionMenu(
+            pre_scan_coarse_row,
+            options={
+                str(value): t(f"pre_scan_interval_{str(value).replace('.', '_')}")
+                for value in PRE_SCAN_COARSE_INTERVALS
+            },
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD,
+            button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=120,
+        )
+        self._widgets["pre_scan_coarse_interval"].pack(side="right")
+        self._widgets["pre_scan_coarse_interval"].set_value("4.0")
+
+        pre_scan_fine_row = ctk.CTkFrame(inner, fg_color="transparent")
+        pre_scan_fine_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        pre_scan_fine_label = ctk.CTkLabel(
+            pre_scan_fine_row,
+            text=t("pre_scan_fine_interval"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        pre_scan_fine_label.pack(side="left")
+        pre_scan_fine_tip = ctk.CTkLabel(
+            pre_scan_fine_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        pre_scan_fine_tip.pack(side="left", padx=4)
+        Tooltip(pre_scan_fine_tip, get_tooltip("pre_scan_fine_interval"))
+        self._widgets["pre_scan_fine_interval"] = ValueOptionMenu(
+            pre_scan_fine_row,
+            options={
+                str(value): t(f"pre_scan_interval_{str(value).replace('.', '_')}")
+                for value in PRE_SCAN_FINE_INTERVALS
+            },
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD,
+            button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=120,
+        )
+        self._widgets["pre_scan_fine_interval"].pack(side="right")
+        self._widgets["pre_scan_fine_interval"].set_value("0.5")
+
+        pre_scan_pad_row = ctk.CTkFrame(inner, fg_color="transparent")
+        pre_scan_pad_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        pre_scan_pad_label = ctk.CTkLabel(
+            pre_scan_pad_row,
+            text=t("pre_scan_pad_seconds"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        pre_scan_pad_label.pack(side="left")
+        pre_scan_pad_tip = ctk.CTkLabel(
+            pre_scan_pad_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        pre_scan_pad_tip.pack(side="left", padx=4)
+        Tooltip(pre_scan_pad_tip, get_tooltip("pre_scan_pad_seconds"))
+        self._widgets["pre_scan_pad_seconds"] = ValueOptionMenu(
+            pre_scan_pad_row,
+            options={
+                "auto": t("pre_scan_pad_auto"),
+                "0.0": t("pre_scan_pad_none"),
+                **{
+                    value: t(f"pre_scan_interval_{value.replace('.', '_')}")
+                    for value in PRE_SCAN_PAD_SECONDS[2:]
+                },
+            },
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD,
+            button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY,
+            text_color=Colors.TEXT_PRIMARY,
+            width=180,
+        )
+        self._widgets["pre_scan_pad_seconds"].pack(side="right")
+        self._widgets["pre_scan_pad_seconds"].set_value("auto")
+
         # Toggles row - FP16 Mode and Compile BasicVSR++
         row4 = ctk.CTkFrame(inner, fg_color="transparent")
         row4.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
@@ -190,6 +393,13 @@ class BasicSection:
         self._widgets["detection_threshold_val"].configure(text=f"{threshold:.2f}")
         self._on_modified()
 
+    def _on_pre_scan_full_threshold_changed(self, value: float):
+        threshold = round(float(value), 2)
+        self._widgets["pre_scan_full_threshold_val"].configure(
+            text=f"{threshold:.0%}"
+        )
+        self._on_modified()
+
     def _on_file_conflict_changed(self, value: str):
         if value == "overwrite":
             self._widgets["conflict_warning"].pack(side="right", padx=(0, 8))
@@ -226,6 +436,22 @@ class BasicSection:
         self._widgets["detection_score_threshold"].set(det_threshold)
         self._widgets["detection_threshold_val"].configure(text=f"{det_threshold:.2f}")
 
+        self._widgets["pre_scan_policy"].set_value(preset.pre_scan_policy)
+        pre_scan_threshold = float(preset.pre_scan_full_threshold)
+        self._widgets["pre_scan_full_threshold"].set(pre_scan_threshold)
+        self._widgets["pre_scan_full_threshold_val"].configure(
+            text=f"{pre_scan_threshold:.0%}"
+        )
+        self._widgets["pre_scan_coarse_interval"].set_value(
+            str(float(preset.pre_scan_coarse_interval))
+        )
+        self._widgets["pre_scan_fine_interval"].set_value(
+            str(float(preset.pre_scan_fine_interval))
+        )
+        self._widgets["pre_scan_pad_seconds"].set_value(
+            str(preset.pre_scan_pad_seconds)
+        )
+
         self._widgets["file_conflict"].set_value(preset.file_conflict)
         self._on_file_conflict_changed(self._widgets["file_conflict"].get_value())
 
@@ -235,6 +461,19 @@ class BasicSection:
             "fp16_mode": self._widgets["fp16_mode"].get() == 1,
             "detection_model": self._widgets["detection_model"].get(),
             "detection_score_threshold": float(self._widgets["detection_score_threshold"].get()),
+            "pre_scan_policy": self._widgets["pre_scan_policy"].get_value(),
+            "pre_scan_full_threshold": round(
+                float(self._widgets["pre_scan_full_threshold"].get()), 2
+            ),
+            "pre_scan_coarse_interval": float(
+                self._widgets["pre_scan_coarse_interval"].get_value()
+            ),
+            "pre_scan_fine_interval": float(
+                self._widgets["pre_scan_fine_interval"].get_value()
+            ),
+            "pre_scan_pad_seconds": self._widgets[
+                "pre_scan_pad_seconds"
+            ].get_value(),
             "compile_basicvsrpp": self._widgets["compile_basicvsrpp"].get() == 1,
             "file_conflict": self._widgets["file_conflict"].get_value(),
         }

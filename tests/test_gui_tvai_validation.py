@@ -2,9 +2,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import jasna.gui.validation as gui_validation
 from jasna.gui.locales import t
 from jasna.gui.models import AppSettings
 from jasna.gui.validation import validate_gui_start
+
+
+@pytest.fixture(autouse=True)
+def _skip_core_model_asset_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the legacy TVAI/config assertions independent of model assets."""
+
+    monkeypatch.setattr(
+        gui_validation,
+        "_required_model_asset_errors",
+        lambda _settings: [],
+    )
 
 
 def test_validate_gui_start_non_tvai_returns_empty() -> None:

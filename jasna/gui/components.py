@@ -223,7 +223,7 @@ class LicenseDialog(ctk.CTkToplevel):
         self._status = ctk.CTkLabel(action, text="", text_color=Colors.TEXT_PRIMARY)
         self._status.pack(side="left", padx=10)
 
-        from jasna.protection import license_store
+        from jasna.license_api import license_store
         stored = license_store.load_license()
         if stored:
             self._email.insert(0, stored[0])
@@ -241,7 +241,7 @@ class LicenseDialog(ctk.CTkToplevel):
         )
 
     def _activate(self):
-        from jasna.protection import ProtectionError, license_store
+        from jasna.license_api import ProtectionError, license_store
         email = self._email.get().strip()
         key = self._key.get().strip()
         try:
@@ -882,7 +882,13 @@ class JobListItem(ctk.CTkFrame):
             except Exception:
                 logger.debug("Failed to set progress value %r", value, exc_info=True)
 
-    def set_fps_eta(self, fps: float = 0.0, eta_seconds: float = 0.0):
+    def set_fps_eta(
+        self,
+        fps: float = 0.0,
+        eta_seconds: float = 0.0,
+        *,
+        stage_eta: bool = False,
+    ):
         """Update small FPS and ETA labels shown on the tile."""
         if fps and fps > 0:
             self._fps_label.configure(text=f"{fps:.1f}fps")
@@ -898,7 +904,9 @@ class JobListItem(ctk.CTkFrame):
                 eta_str = f"{mins}m {secs}s"
             else:
                 eta_str = f"{secs}s"
-            self._eta_label.configure(text=f"ETA: {eta_str}")
+            self._eta_label.configure(
+                text=t("stage_eta", eta=eta_str) if stage_eta else f"ETA: {eta_str}"
+            )
         else:
             self._eta_label.configure(text="")
 

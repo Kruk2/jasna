@@ -138,6 +138,50 @@ def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path)
     assert loaded.post_export_video_command == "remux {output}"
 
 
+def test_preset_manager_round_trips_pre_scan_settings(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    settings = AppSettings(
+        pre_scan_policy="scan",
+        pre_scan_full_threshold=0.72,
+        pre_scan_coarse_interval=2.0,
+        pre_scan_fine_interval=0.25,
+        pre_scan_pad_seconds="1.0",
+    )
+    assert PresetManager().create_preset("ScanMatrix", settings)
+
+    loaded = PresetManager().get_preset("ScanMatrix")
+    assert loaded is not None
+    assert loaded.pre_scan_policy == "scan"
+    assert loaded.pre_scan_full_threshold == 0.72
+    assert loaded.pre_scan_coarse_interval == 2.0
+    assert loaded.pre_scan_fine_interval == 0.25
+    assert loaded.pre_scan_pad_seconds == "1.0"
+
+
+def test_legacy_preset_without_scan_fields_uses_current_defaults(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    settings_path = get_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(
+        json.dumps({"user_presets": {"Legacy": {"batch_size": 3}}}),
+        encoding="utf-8",
+    )
+
+    loaded = PresetManager().get_preset("Legacy")
+    assert loaded is not None
+    assert loaded.batch_size == 3
+    assert loaded.pre_scan_policy == "auto"
+    assert loaded.pre_scan_full_threshold == 0.85
+    assert loaded.pre_scan_coarse_interval == 4.0
+    assert loaded.pre_scan_fine_interval == 0.5
+    assert loaded.pre_scan_pad_seconds == "auto"
+
+
 def test_preset_manager_resolve_falls_back_to_default(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
@@ -145,7 +189,7 @@ def test_preset_manager_resolve_falls_back_to_default(monkeypatch, tmp_path: Pat
     mgr = PresetManager()
     name, preset = mgr.resolve("DoesNotExist")
     assert name == "Default"
-    assert preset == AppSettings()
+    assert preset == PresetManager.FACTORY_PRESETS["Default"]
 
     assert mgr.create_preset("Mine", AppSettings(encoder_cq=30))
     name, preset = mgr.resolve("Mine")
@@ -165,3 +209,39 @@ def test_preset_manager_saves_and_loads_last_output_pattern(monkeypatch, tmp_pat
 
     mgr2 = PresetManager()
     assert mgr2.get_last_output_pattern() == "{original}_done.mkv"
+
+
+def test_preset_manager_saves_and_loads_preserved_folder_choice(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    manager = PresetManager()
+    assert manager.get_last_preserve_input_structure() is False
+    manager.set_last_preserve_input_structure(True)
+
+    loaded = PresetManager()
+    assert loaded.get_last_preserve_input_structure() is True
+    data = json.loads(get_settings_path().read_text(encoding="utf-8"))
+    assert data["last_preserve_input_structure"] is True
+
+
+def test_preset_manager_round_trips_manual_encoder_rate_mode(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+
+    manager = PresetManager()
+    assert manager.create_preset(
+        "ManualCQ",
+        AppSettings(encoder_rate_mode="manual_cq", encoder_cq=23),
+    )
+
+    loaded = PresetManager().get_preset("ManualCQ")
+    assert loaded is not None
+    assert loaded.encoder_rate_mode == "manual_cq"
+    assert loaded.encoder_cq == 23

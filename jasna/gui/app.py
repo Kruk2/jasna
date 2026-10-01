@@ -4,6 +4,7 @@ import customtkinter as ctk
 import logging
 import os
 from pathlib import Path
+import platform
 import sys
 import threading
 import time
@@ -28,7 +29,8 @@ from jasna.engine_paths import UNET4X_ONNX_ENC_PATH
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
-from jasna.gui.processor import Processor, ProgressUpdate
+from jasna.gui.run_log import AsyncRunLog, RunTelemetrySampler
+from jasna.gui.processor import Processor, ProgressUpdate, _is_linux_amd_runtime
 from jasna.gui.models import JobStatus, PresetManager
 from jasna.gui.locales import get_locale, t, LANGUAGE_NAMES
 from jasna.gui.font_backend import (
@@ -53,6 +55,10 @@ def _warm_up_cuda() -> None:
 
     if torch.cuda.is_available():
         torch.zeros(1, device="cuda")
+        if sys.platform == "win32" and getattr(getattr(torch, "version", None), "hip", None):
+            # Finish the warmup on its owner thread before native Windows HIP
+            # teardown; pending work can otherwise hang even os._exit().
+            torch.cuda.synchronize()
 
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
@@ -92,10 +98,18 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._processor: Processor | None = None
         self._job_start_times: dict[int, float] = {}
         self._processing_start_time: float = 0.0
+        # Processor callbacks arrive off the UI thread.  Keep one UI-owned
+        # generation so callbacks already queued for an older run cannot alter
+        # a later run's controls or jobs.
+        self._ui_run_epoch = 0
+        self._ui_run_state = "idle"
         self._preview_gpu_busy = False
         self._video_player_dialog = None
         self._closing_after_player = False
         self._preset_manager = PresetManager()
+        self._run_log: AsyncRunLog | None = None
+        self._run_telemetry_sampler: RunTelemetrySampler | None = None
+        self._closing_run_logs: list[AsyncRunLog] = []
 
         self._system_stats_stop = threading.Event()
         self._system_stats_thread: threading.Thread | None = None
@@ -341,6 +355,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._queue_panel.set_initial_output(
             self._settings_panel.get_last_output_folder(),
             self._settings_panel.get_last_output_pattern(),
+            self._settings_panel.get_last_preserve_input_structure(),
         )
         self._queue_panel.set_on_output_changed(self._on_output_changed)
         self._queue_panel.set_on_play(
@@ -373,6 +388,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             on_progress=self._on_processor_progress,
             on_log=self._on_processor_log,
             on_complete=self._on_processor_complete,
+            video_job_isolation="linux-amd",
         )
 
     def _log_startup_timing(self):
@@ -384,6 +400,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
 
     def _start_cuda_warmup(self):
+        # A HIP context in the long-lived GUI defeats per-video native-resource
+        # isolation. Linux AMD initializes the GPU only inside each worker.
+        if _is_linux_amd_runtime():
+            return
+
         def _run():
             try:
                 _warm_up_cuda()
@@ -418,21 +439,165 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._system_stats_thread.join(timeout=1.0)
             self._system_stats_thread = None
 
+    def _start_run_log(
+        self,
+        settings,
+        jobs,
+        output_folder: str,
+        output_pattern: str,
+    ) -> Path | None:
+        """Start best-effort diagnostics without file I/O on the GUI thread."""
+
+        if not bool(getattr(settings, "save_run_log", False)):
+            return None
+        try:
+            run_log = AsyncRunLog.start(
+                output_folder,
+                on_status=self._on_run_log_status,
+            )
+            self._run_log = run_log
+            if run_log.failed:
+                self._run_log = None
+                return None
+            run_log.enqueue(
+                "INFO",
+                "Run context: "
+                f"gui_pid={os.getpid()} platform={platform.platform()} "
+                f"python={sys.version.split()[0]}",
+            )
+            run_log.enqueue(
+                "INFO",
+                "Run context: "
+                f"output_folder={output_folder or '<same as input>'} "
+                f"output_pattern={output_pattern}",
+            )
+            run_log.enqueue(
+                "INFO",
+                "Run context: "
+                f"detection_model={settings.detection_model} codec={settings.codec} "
+                f"fp16_mode={bool(settings.fp16_mode)} vr_mode={settings.vr_mode} "
+                f"secondary_restoration={settings.secondary_restoration}",
+            )
+            for index, job in enumerate(jobs, start=1):
+                run_log.enqueue("INFO", f"Queued input {index}: {job.path}")
+            run_log.enqueue(
+                "INFO",
+                (
+                    "Kernel/driver crash capture is not started; inspect the Windows "
+                    "Event Viewer System log after a reset for driver/kernel events."
+                    if sys.platform == "win32" else
+                    "Kernel journal capture is not started; inspect journalctl and pstore "
+                    "after a reset for kernel-only events."
+                ),
+            )
+            sampler = RunTelemetrySampler(
+                run_log.enqueue,
+                is_active=lambda: run_log.accepts_events,
+                context_provider=self._run_telemetry_context,
+            )
+            self._run_telemetry_sampler = sampler
+            sampler.start()
+            return run_log.path
+        except Exception as exc:
+            self._close_run_log()
+            self._on_run_log_status("WARNING", f"Run log unavailable: {exc}")
+            return None
+
+    def _enqueue_run_log(self, level: str, message: str) -> None:
+        run_log = getattr(self, "_run_log", None)
+        if run_log is None:
+            return
+        try:
+            run_log.enqueue(level, message)
+        except Exception:
+            pass
+
+    def _add_run_log_event(self, level: str, message: str) -> None:
+        self._enqueue_run_log(level, message)
+        self._log_panel.add_log(level, message)
+
+    def _on_run_log_status(self, level: str, message: str) -> None:
+        if level.upper() != "WARNING":
+            return
+        try:
+            self.after(
+                0,
+                lambda: self._log_panel.add_log("WARNING", t("run_log_unavailable")),
+            )
+        except Exception:
+            pass
+
+    def _run_telemetry_context(self) -> dict[str, object]:
+        context: dict[str, object] = {"gui_pid": os.getpid()}
+        processor = getattr(self, "_processor", None)
+        if processor is not None:
+            try:
+                job = processor.active_job()
+                if job is not None:
+                    context["job"] = str(job.path)
+            except Exception:
+                pass
+            try:
+                worker_pid = processor.isolated_worker_pid()
+                if worker_pid is not None:
+                    context["worker_pid"] = worker_pid
+            except Exception:
+                pass
+        return context
+
+    def _close_run_log(self) -> None:
+        sampler = getattr(self, "_run_telemetry_sampler", None)
+        self._run_telemetry_sampler = None
+        if sampler is not None:
+            try:
+                sampler.stop(timeout=0.0)
+            except Exception:
+                pass
+        run_log = getattr(self, "_run_log", None)
+        self._run_log = None
+        if run_log is None:
+            return
+        try:
+            run_log.close(timeout=0.0)
+            closing_logs = [
+                log
+                for log in getattr(self, "_closing_run_logs", [])
+                if getattr(log, "is_running", False)
+            ]
+            if getattr(run_log, "is_running", False):
+                closing_logs.append(run_log)
+            self._closing_run_logs = closing_logs
+        except Exception:
+            pass
+
+    def _wait_for_run_log_shutdown(self, timeout: float = 1.0) -> None:
+        deadline = time.monotonic() + max(0.0, timeout)
+        closing_logs = getattr(self, "_closing_run_logs", [])
+        self._closing_run_logs = []
+        for run_log in closing_logs:
+            try:
+                run_log.close(timeout=max(0.0, deadline - time.monotonic()))
+            except Exception:
+                pass
+
     def _on_close(self):
         if self._video_player_dialog is not None:
             self._closing_after_player = True
             self._video_player_dialog.request_close()
             return
+        self._ui_run_epoch = getattr(self, "_ui_run_epoch", 0) + 1
+        self._ui_run_state = "closed"
         try:
             if self._processor:
                 self._processor.stop()
                 self._processor.join(timeout=5.0)
         finally:
+            self._close_run_log()
             self._stop_system_stats_poller()
             self.destroy()
         
     def _refresh_license_chip(self):
-        from jasna.protection import license_store
+        from jasna.license_api import license_store
         licensed = license_store.is_licensed()
         self._license_chip.configure(
             text=t("license_chip_active") if licensed else t("license_chip_inactive"),
@@ -472,9 +637,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._control_bar.update_progress(queue_total=len(jobs))
         self._update_start_button_state()
 
-    def _on_output_changed(self, folder: str, pattern: str):
+    def _on_output_changed(
+        self,
+        folder: str,
+        pattern: str,
+        preserve_input_structure: bool,
+    ):
         self._settings_panel.set_last_output_folder(folder)
         self._settings_panel.set_last_output_pattern(pattern)
+        self._settings_panel.set_last_preserve_input_structure(
+            preserve_input_structure
+        )
 
     def _open_interactive_image_restore(self):
         from tkinter import filedialog
@@ -567,6 +740,18 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._processor is not None and self._processor.is_running()
         ):
             return
+        restart_reason_fn = getattr(self._processor, "restart_required_reason", None)
+        restart_reason = restart_reason_fn() if callable(restart_reason_fn) else None
+        if isinstance(restart_reason, str) and restart_reason:
+            from tkinter import messagebox
+
+            message = t("error_smart_render_restart_required")
+            self._log_panel.error(message)
+            messagebox.showerror(
+                t("error_smart_render_restart_required_title"),
+                message,
+            )
+            return
         jobs = self._queue_panel.get_jobs()
         if not jobs:
             self._log_panel.warning(t("toast_no_files"))
@@ -574,7 +759,17 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             
         output_folder = self._queue_panel.get_output_folder()
         output_pattern = self._queue_panel.get_output_pattern()
+        preserve_input_structure = self._queue_panel.get_preserve_input_structure()
         settings = self._settings_panel.get_settings()
+
+        run_log_path = self._start_run_log(
+            settings,
+            jobs,
+            output_folder,
+            output_pattern,
+        )
+        if run_log_path is not None:
+            self._add_run_log_event("INFO", t("run_log_path", path=str(run_log_path)))
 
         from jasna.gui.validation import validate_gui_start
         errors = validate_gui_start(settings)
@@ -582,7 +777,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             from tkinter import messagebox
 
             msg = t("error_cannot_start") + "\n\n" + "\n".join(f"- {e}" for e in errors)
-            self._log_panel.error(msg)
+            self._add_run_log_event("ERROR", msg)
+            self._close_run_log()
             messagebox.showerror(t("error_invalid_tvai"), msg)
             return
 
@@ -610,9 +806,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 if missing_lines:
                     msg += "\n\n" + t("engine_first_run_missing") + "\n" + missing_lines
                 messagebox.showinfo(t("engine_first_run_title"), msg)
-                self._log_panel.warning(msg)
+                self._add_run_log_event("WARNING", msg)
         except Exception as e:
-            self._log_panel.warning(f"Engine preflight warning failed: {e}")
+            self._add_run_log_event("WARNING", f"Engine preflight warning failed: {e}")
 
         self._queue_panel.reset_jobs_for_run()
         
@@ -625,27 +821,45 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._queue_panel.set_output_enabled(False)
         self._queue_panel.set_running(True)
         
-        self._log_panel.info("Processing started by user")
-        self._log_panel.info(f"Output folder: {output_folder}")
-        self._log_panel.info(f"Output pattern: {output_pattern}")
-        self._log_panel.info(f"Files queued: {len(jobs)}")
+        self._add_run_log_event("INFO", "Processing started by user")
+        self._add_run_log_event("INFO", f"Output folder: {output_folder}")
+        self._add_run_log_event("INFO", f"Output pattern: {output_pattern}")
+        self._add_run_log_event(
+            "INFO",
+            f"Preserve input structure: {preserve_input_structure}",
+        )
+        self._add_run_log_event("INFO", f"Files queued: {len(jobs)}")
 
         self._processing_start_time = time.time()
         self._job_start_times.clear()
         jobs_ref = self._queue_panel.get_jobs_ref()
-        self._processor.start(
-            jobs_ref,
-            settings,
-            output_folder,
-            output_pattern,
-            disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
-        )
+        self._ui_run_epoch = getattr(self, "_ui_run_epoch", 0) + 1
+        run_epoch = self._ui_run_epoch
+        self._ui_run_state = "running"
+        try:
+            self._processor.start(
+                jobs_ref,
+                settings,
+                output_folder,
+                output_pattern,
+                disable_basicvsrpp_tensorrt=disable_basicvsrpp_tensorrt,
+                preserve_input_structure=preserve_input_structure,
+            )
+        except Exception:
+            if self._ui_run_epoch == run_epoch:
+                self._ui_run_state = "idle"
+            self._close_run_log()
+            raise
         self._update_video_player_button_state()
                 
     def _on_stop(self):
+        if getattr(self, "_ui_run_state", None) == "running":
+            # Keep this generation for its authoritative completion callback,
+            # but reject any queued PROCESSING updates immediately.
+            self._ui_run_state = "stopping"
         if self._processor:
             self._processor.stop()
-            self._log_panel.info("Processing stopped by user")
+            self._add_run_log_event("INFO", "Processing stopped by user")
             
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
@@ -665,35 +879,59 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._log_panel.pack_forget()
             
     def _on_processor_progress(self, update: ProgressUpdate):
-        # Schedule UI update on main thread
-        self.after(0, lambda: self._handle_progress(update))
+        """Queue a progress update only for the active UI run."""
+        run_epoch = getattr(self, "_ui_run_epoch", 0)
+        run_state = getattr(self, "_ui_run_state", None)
+        if run_state not in {"running", "stopping", "finishing", "completed"}:
+            return
+        if update.status is JobStatus.PROCESSING and run_state != "running":
+            return
+        try:
+            self.after(
+                0,
+                lambda update=update, run_epoch=run_epoch:
+                    self._handle_progress(update, run_epoch),
+            )
+        except (tk.TclError, RuntimeError):
+            logger.debug("Progress callback ignored because the UI is gone", exc_info=True)
         
-    def _handle_progress(self, update: ProgressUpdate):
+    def _handle_progress(self, update: ProgressUpdate, run_epoch: int):
+        if run_epoch != getattr(self, "_ui_run_epoch", None):
+            return
+        run_state = getattr(self, "_ui_run_state", None)
+        if run_state not in {"running", "stopping", "finishing", "completed"}:
+            return
         jobs = self._queue_panel.get_jobs()
         job_id = update.job_id
+        job = next((item for item in jobs if item.id == job_id), None)
+        # The processor owns the live JobItem state.  Do not let a delayed UI
+        # notification overwrite a terminal state or revive a removed job.
+        if job is None:
+            return
         
         if update.status == JobStatus.PROCESSING:
+            if run_state != "running" or job.status in {
+                JobStatus.COMPLETED,
+                JobStatus.SKIPPED,
+                JobStatus.ERROR,
+            }:
+                return
             self._job_start_times.setdefault(job_id, time.time())
             # Resolve current queue position for control bar display
-            filename = ""
-            queue_current = 0
-            for i, j in enumerate(jobs):
-                if j.id == job_id:
-                    filename = j.filename
-                    queue_current = i + 1
-                    break
             self._control_bar.update_progress(
-                filename=filename,
+                filename=job.filename,
                 percent=update.progress,
                 fps=update.fps,
                 eta_seconds=update.eta_seconds,
-                queue_current=queue_current,
+                queue_current=jobs.index(job) + 1,
                 queue_total=len(jobs),
             )
             try:
                 self._queue_panel.set_running(True, processing_job_id=job_id)
             except Exception:
                 logger.warning("Failed to mark queue panel running", exc_info=True)
+        elif job.status is not update.status:
+            return
         if update.status == JobStatus.PENDING:
             self._job_start_times.pop(job_id, None)
         job_elapsed: float | None = None
@@ -708,31 +946,111 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 update.fps,
                 update.eta_seconds,
                 elapsed_seconds=job_elapsed,
+                phase=update.phase,
             )
         except Exception:
             logger.warning("Failed to update job status in queue panel", exc_info=True)
             
     def _on_processor_log(self, level: str, message: str):
+        self._enqueue_run_log(level, message)
         self.after(0, lambda: self._log_panel.add_log(level, message))
         
     def _on_processor_complete(self):
-        self.after(0, self._handle_complete)
-        
-    def _handle_complete(self):
-        self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
-        elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
-        self._control_bar.set_completed(elapsed_seconds)
-        self._update_start_button_state()
-        self._log_panel.info("All jobs completed")
-        
-        # Re-enable settings and output controls
-        self._settings_panel.set_enabled(True)
-        self._queue_panel.set_output_enabled(True)
-        # Clear running mode
+        run_epoch = getattr(self, "_ui_run_epoch", 0)
+        if getattr(self, "_ui_run_state", None) not in {"running", "stopping"}:
+            return
+        # Once the worker has signalled completion, a queued PROCESSING update
+        # from this generation is no longer authoritative.
+        self._ui_run_state = "finishing"
         try:
-            self._queue_panel.set_running(False)
-        except Exception:
-            logger.warning("Failed to clear queue panel running state", exc_info=True)
+            self.after(
+                0,
+                lambda run_epoch=run_epoch: self._handle_complete(run_epoch),
+            )
+        except (tk.TclError, RuntimeError):
+            logger.debug("Completion callback ignored because the UI is gone", exc_info=True)
+        
+    def _handle_complete(self, run_epoch: int | None = None):
+        if run_epoch is not None:
+            if (
+                run_epoch != getattr(self, "_ui_run_epoch", None)
+                or getattr(self, "_ui_run_state", None) != "finishing"
+            ):
+                return
+            self._ui_run_state = "completed"
+        elif hasattr(self, "_ui_run_state"):
+            # Keep direct test/support invocations compatible while ensuring a
+            # real callback must first transition through ``finishing``.
+            if self._ui_run_state != "finishing":
+                return
+            self._ui_run_state = "completed"
+        try:
+            restart_reason_fn = getattr(self._processor, "restart_required_reason", None)
+            restart_reason = restart_reason_fn() if callable(restart_reason_fn) else None
+            if isinstance(restart_reason, str) and restart_reason:
+                from tkinter import messagebox
+
+                message = t("error_smart_render_restart_required")
+                self._status_pill.set_status("ERROR", Colors.STATUS_ERROR)
+                self._control_bar.reset()
+                self._control_bar.set_start_enabled(False, message)
+                self._add_run_log_event("ERROR", message)
+                self._settings_panel.set_enabled(True)
+                self._queue_panel.set_output_enabled(True)
+                try:
+                    self._queue_panel.set_running(False)
+                except Exception:
+                    logger.warning("Failed to clear queue panel running state", exc_info=True)
+                messagebox.showerror(
+                    t("error_smart_render_restart_required_title"),
+                    message,
+                )
+                return
+            self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
+            elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
+            was_stopped_fn = getattr(self._processor, "was_stopped", None)
+            was_stopped = bool(was_stopped_fn()) if callable(was_stopped_fn) else False
+            jobs = self._queue_panel.get_jobs()
+            completed_or_skipped = bool(jobs) and all(
+                job.status in {JobStatus.COMPLETED, JobStatus.SKIPPED}
+                for job in jobs
+            )
+            if completed_or_skipped and not was_stopped:
+                self._control_bar.set_completed(elapsed_seconds)
+                self._add_run_log_event("INFO", "All jobs completed")
+            else:
+                self._control_bar.reset()
+                if was_stopped:
+                    self._add_run_log_event("INFO", "Processing stopped by user")
+                elif any(job.status is JobStatus.ERROR for job in jobs):
+                    failed_jobs = sum(
+                        job.status is JobStatus.ERROR
+                        for job in jobs
+                    )
+                    self._add_run_log_event(
+                        "ERROR",
+                        f"Processing finished with {failed_jobs} failed job(s)",
+                    )
+                elif jobs:
+                    self._add_run_log_event(
+                        "WARNING",
+                        "Processing ended before all jobs completed",
+                    )
+                else:
+                    self._add_run_log_event(
+                        "WARNING",
+                        "Processing ended with no queued jobs",
+                    )
+            self._update_start_button_state()
+
+            self._settings_panel.set_enabled(True)
+            self._queue_panel.set_output_enabled(True)
+            try:
+                self._queue_panel.set_running(False)
+            except Exception:
+                logger.warning("Failed to clear queue panel running state", exc_info=True)
+        finally:
+            self._close_run_log()
         
     def _on_language_changed(self, lang_name: str):
         """Handle language selection change."""
@@ -825,13 +1143,16 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 class GUILogHandler(logging.Handler):
     """Custom logging handler that forwards logs to the GUI log panel."""
     
-    def __init__(self, log_panel: LogPanel):
+    def __init__(self, log_panel: LogPanel, on_log=None):
         super().__init__()
         self._log_panel = log_panel
+        self._on_log = on_log
         
     def emit(self, record):
         try:
             msg = self.format(record)
+            if self._on_log is not None:
+                self._on_log(record.levelname, msg)
             # Use after_idle to thread-safely update GUI
             self._log_panel.after_idle(self._log_panel.add_log, record.levelname, msg)
         except Exception:
@@ -866,10 +1187,10 @@ def run_gui():
         app = JasnaApp()
     except GuiFontBackendError as error:
         print(error, file=sys.stderr)
-        return
+        raise SystemExit(1) from error
     
     # Replace console handler with GUI handler for all jasna loggers
-    gui_handler = GUILogHandler(app._log_panel)
+    gui_handler = GUILogHandler(app._log_panel, on_log=app._enqueue_run_log)
     gui_handler.setFormatter(logging.Formatter('%(message)s'))
     
     # Set up root logger to capture all logs
@@ -890,6 +1211,8 @@ def run_gui():
     _apply_runtime_log_level(app._log_panel.get_filter_level())
     
     app.mainloop()
+
+    app._wait_for_run_log_shutdown(timeout=1.0)
 
     # Force-exit the process. CUDA/TensorRT may leave non-daemon threads
     # or background subprocesses that prevent a clean interpreter shutdown.

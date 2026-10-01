@@ -224,6 +224,33 @@ class AdvancedSection:
         self._widgets["denoise_step"].pack(side="right")
         self._widgets["denoise_step"].set_value("after_primary")
 
+        # Opt-in crash-investigation log. It is kept with advanced settings so
+        # normal media output behavior remains unchanged unless explicitly enabled.
+        run_log_row = ctk.CTkFrame(inner, fg_color="transparent")
+        run_log_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        self._widgets["save_run_log"] = ctk.CTkCheckBox(
+            run_log_row,
+            text=t("save_run_log"),
+            command=self._on_modified,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text_color=Colors.TEXT_PRIMARY,
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            border_color=Colors.BORDER_LIGHT,
+            checkbox_width=18,
+            checkbox_height=18,
+        )
+        self._widgets["save_run_log"].pack(side="left")
+        run_log_tip = ctk.CTkLabel(
+            run_log_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        run_log_tip.pack(side="left", padx=4)
+        Tooltip(run_log_tip, get_tooltip("save_run_log"))
+
     def _on_slider_change(self, key: str, value: int):
         self._widgets[f"{key}_val"].configure(text=str(value))
         self._on_modified()
@@ -249,6 +276,10 @@ class AdvancedSection:
         self._widgets["vr_mode"].set_value(preset.vr_mode)
         self._widgets["denoise_strength"].set_value(preset.denoise_strength)
         self._widgets["denoise_step"].set_value(preset.denoise_step)
+        if preset.save_run_log:
+            self._widgets["save_run_log"].select()
+        else:
+            self._widgets["save_run_log"].deselect()
 
     def collect(self) -> dict:
         return {
@@ -260,4 +291,5 @@ class AdvancedSection:
             "vr_mode": self._widgets["vr_mode"].get_value(),
             "denoise_strength": self._widgets["denoise_strength"].get_value(),
             "denoise_step": self._widgets["denoise_step"].get_value(),
+            "save_run_log": self._widgets["save_run_log"].get() == 1,
         }

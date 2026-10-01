@@ -15,6 +15,13 @@ from jasna.segments import SegmentRange
 
 logger = logging.getLogger(__name__)
 
+ENCODER_RATE_MODE_AUTO_SOURCE = "auto_source"
+ENCODER_RATE_MODE_MANUAL_CQ = "manual_cq"
+ENCODER_RATE_MODES = {
+    ENCODER_RATE_MODE_AUTO_SOURCE,
+    ENCODER_RATE_MODE_MANUAL_CQ,
+}
+
 
 class JobStatus(Enum):
     PENDING = "pending"
@@ -23,6 +30,19 @@ class JobStatus(Enum):
     ERROR = "error"
     PAUSED = "paused"
     SKIPPED = "skipped"
+
+
+class SegmentSelectionMode(Enum):
+    """Where a queued video's restoration ranges came from.
+
+    ``DEFAULT`` leaves routing to the global pre-scan policy. ``MANUAL`` keeps
+    non-empty ranges strict, while ``FULL`` records that the user deliberately
+    saved an empty range list in the segment editor.
+    """
+
+    DEFAULT = "default"
+    MANUAL = "manual"
+    FULL = "full"
 
 
 _job_id_counter = itertools.count(1)
@@ -34,12 +54,14 @@ class JobProcessingSnapshot:
     detection_model: str | None
     detection_score_threshold: float | None
     vr_projection: str | None
+    segment_selection_mode: SegmentSelectionMode = SegmentSelectionMode.DEFAULT
 
 
 @dataclass
 class JobItem:
     path: Path
     output_path: Path | None = None
+    input_root: Path | None = None
     id: int = field(default_factory=lambda: next(_job_id_counter))
     status: JobStatus = JobStatus.PENDING
     duration_seconds: float | None = None
@@ -47,6 +69,7 @@ class JobItem:
     error_message: str = ""
     has_conflict: bool = False  # True if output file already exists
     segments: tuple[SegmentRange, ...] = ()
+    segment_selection_mode: SegmentSelectionMode = SegmentSelectionMode.DEFAULT
     detection_model: str | None = None
     detection_score_threshold: float | None = None
     vr_projection: str | None = None
@@ -76,6 +99,21 @@ class JobItem:
             if self.status is not JobStatus.PENDING:
                 return False
             self.segments = tuple(segments)
+            self.segment_selection_mode = (
+                SegmentSelectionMode.MANUAL
+                if self.segments
+                else SegmentSelectionMode.FULL
+            )
+            return True
+
+    def try_reset_segments(self) -> bool:
+        """Return a pending job to global automatic range selection."""
+
+        with self._state_lock:
+            if self.status is not JobStatus.PENDING:
+                return False
+            self.segments = ()
+            self.segment_selection_mode = SegmentSelectionMode.DEFAULT
             return True
 
     def try_set_video_options(
@@ -90,6 +128,11 @@ class JobItem:
             if self.status is not JobStatus.PENDING:
                 return False
             self.segments = tuple(segments)
+            self.segment_selection_mode = (
+                SegmentSelectionMode.MANUAL
+                if self.segments
+                else SegmentSelectionMode.FULL
+            )
             self.detection_model = str(detection_model)
             self.detection_score_threshold = float(detection_score_threshold)
             self.vr_projection = str(vr_projection)
@@ -102,6 +145,7 @@ class JobItem:
             self.status = JobStatus.PROCESSING
             return JobProcessingSnapshot(
                 segments=self.segments,
+                segment_selection_mode=self.segment_selection_mode,
                 detection_model=self.detection_model,
                 detection_score_threshold=self.detection_score_threshold,
                 vr_projection=self.vr_projection,
@@ -152,6 +196,11 @@ class AppSettings:
     # Detection
     detection_model: str = "rfdetr-v6"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
     detection_score_threshold: float = 0.35
+    pre_scan_policy: str = "auto"  # auto, scan, off
+    pre_scan_full_threshold: float = 0.85
+    pre_scan_coarse_interval: float = 4.0
+    pre_scan_fine_interval: float = 0.5
+    pre_scan_pad_seconds: str = "auto"  # auto, 0.0, 0.5, 1.0, 2.0, 5.0
     max_detection_gap: int = 2
     min_detection_duration: int = 2
     scene_detection: bool = True
@@ -166,8 +215,10 @@ class AppSettings:
 
     # Encoding
     codec: str = "hevc"
+    encoder_rate_mode: str = ENCODER_RATE_MODE_AUTO_SOURCE
     encoder_cq: int | None = None
     encoder_custom_args: str = ""
+    amd_dual_gop_encode: bool = False
     sharpen_strength: float = 0.0
     lut_path: str = ""
     retarget_high_fps: bool = False
@@ -185,9 +236,14 @@ class AppSettings:
     file_conflict: str = "auto_rename"  # auto_rename, overwrite, skip
     working_directory: str = ""  # empty = same directory as the output video
 
+    # Diagnostics
+    save_run_log: bool = False
 
-# Factory default preset - frozen, matches CLI defaults
-DEFAULT_SETTINGS = AppSettings()
+
+# The GUI factory preset enables the validated Linux AMD HEVC experiment for
+# the next full-video comparison.  AppSettings itself deliberately keeps the
+# CLI/session default off so non-GUI callers must opt in explicitly.
+DEFAULT_SETTINGS = AppSettings(amd_dual_gop_encode=True)
 
 
 # Old presets carry PyNvVideoCodec-era encoder option names; the encoder now
@@ -210,10 +266,12 @@ _OLD_TUNING_INFO_VALUES = {
 
 
 def _migrate_encoder_custom_args(value: str) -> str:
+    from jasna.gui.hardware_policy import split_batch_size_custom_arg
     from jasna.media import parse_encoder_settings
 
     try:
-        settings = parse_encoder_settings(value)
+        batch_size, encoder_args = split_batch_size_custom_arg(value)
+        settings = parse_encoder_settings(encoder_args)
     except (ValueError, json.JSONDecodeError):
         return value
 
@@ -236,7 +294,11 @@ def _migrate_encoder_custom_args(value: str) -> str:
             migrated[_OLD_ENCODER_ARG_RENAMES[key]] = v
         else:
             migrated[key] = v
-    return ",".join(f"{k}={v}" for k, v in migrated.items())
+    parts = []
+    if batch_size is not None:
+        parts.append(f"--batch-size {batch_size}")
+    parts.extend(f"{k}={v}" for k, v in migrated.items())
+    return ",".join(parts)
 
 
 _LEGACY_CODEC_SPELLINGS = {
@@ -264,11 +326,13 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
     migrated = {k: v for k, v in preset_dict.items() if k in known_fields}
     custom_args = migrated.get("encoder_custom_args")
     if custom_args:
+        from jasna.gui.hardware_policy import split_batch_size_custom_arg
         from jasna.media import parse_encoder_settings
 
         migrated_args = _migrate_encoder_custom_args(custom_args)
         try:
-            parsed_args = parse_encoder_settings(migrated_args)
+            batch_size, encoder_args = split_batch_size_custom_arg(migrated_args)
+            parsed_args = parse_encoder_settings(encoder_args)
         except (ValueError, json.JSONDecodeError):
             migrated["encoder_custom_args"] = migrated_args
         else:
@@ -285,9 +349,11 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
                 if isinstance(cq, int) and not isinstance(cq, bool):
                     migrated["encoder_cq"] = cq
                     del parsed_args[cq_key]
-            migrated["encoder_custom_args"] = ",".join(
-                f"{key}={value}" for key, value in parsed_args.items()
-            )
+            parts = []
+            if batch_size is not None:
+                parts.append(f"--batch-size {batch_size}")
+            parts.extend(f"{key}={value}" for key, value in parsed_args.items())
+            migrated["encoder_custom_args"] = ",".join(parts)
     if "codec" in migrated:
         migrated["codec"] = _normalize_preset_codec(migrated["codec"])
     return migrated
@@ -303,6 +369,7 @@ class PresetManager:
         self._last_selected: str = "Default"
         self._last_output_folder: str = ""
         self._last_output_pattern: str = "{original}_restored.mp4"
+        self._last_preserve_input_structure: bool = False
         self._system_check_passed_version: str = ""
         self._load()
         
@@ -319,6 +386,9 @@ class PresetManager:
             self._last_selected = data.get("last_selected", "Default")
             self._last_output_folder = data.get("last_output_folder", "")
             self._last_output_pattern = data.get("last_output_pattern", "{original}_restored.mp4")
+            self._last_preserve_input_structure = bool(
+                data.get("last_preserve_input_structure", False)
+            )
             self._system_check_passed_version = data.get("system_check_passed_version", "")
             
             for name, preset_dict in data.get("user_presets", {}).items():
@@ -345,6 +415,7 @@ class PresetManager:
         data["user_presets"] = {name: asdict(preset) for name, preset in self._user_presets.items()}
         data["last_output_folder"] = self._last_output_folder
         data["last_output_pattern"] = self._last_output_pattern
+        data["last_preserve_input_structure"] = self._last_preserve_input_structure
         data["system_check_passed_version"] = self._system_check_passed_version
         
         try:
@@ -423,6 +494,13 @@ class PresetManager:
 
     def set_last_output_pattern(self, pattern: str):
         self._last_output_pattern = pattern or "{original}_restored.mp4"
+        self._save()
+
+    def get_last_preserve_input_structure(self) -> bool:
+        return self._last_preserve_input_structure
+
+    def set_last_preserve_input_structure(self, enabled: bool):
+        self._last_preserve_input_structure = bool(enabled)
         self._save()
 
     def get_system_check_passed_version(self) -> str:
