@@ -1,8 +1,7 @@
 # Legacy full-video benchmarks
 
-The original Linux results are retained here and enriched with the new
-v0.7.2 and v0.9.0 runs. All runs used an RTX 5090 and i9-13900K on Linux; the listed
-clip size was preserved for each input.
+Full-length files, Linux, RTX 5090, i9-13900K, the listed clip size per input. Lada 0.10.1 to Jasna 0.6.2 are the
+older README results; v0.7.2 and v0.9.0 were run on 2026-07-26 (details in `2026-07-26_release_matrix.md`).
 
 | File | Clip (s) | Lada 0.10.1 | Jasna 0.3.0 | Jasna 0.5.0 | Jasna 0.6.2 | Jasna 0.7.2 | **Jasna 0.9.0 (7d9cc8c)** |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
