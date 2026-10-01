@@ -1,8 +1,10 @@
 """Planar RGB to packed NV12/P010 conversion for the encoder.
 
-NVIDIA runs the fused kernel in ``rgb_to_yuv.cu``; ROCm and CPU use the Torch
-implementations in ``rgb_to_nv12.py`` / ``rgb_to_p010.py``, which are also the
-reference the kernel is tested against.
+NVIDIA runs the fused kernel in ``rgb_to_yuv.cu``. Linux AMD gfx1100
+automatically runs an ahead-of-time HIP build of that same source when the
+committed code objects are installed; other ROCm devices and CPU use the Torch implementations in
+``rgb_to_nv12.py`` / ``rgb_to_p010.py``, which are also the reference the
+kernels are tested against.
 
 The kernel takes separate luma and chroma destinations. That lets the caller
 place the two planes in different buffers, which is what lets CAS sharpen
@@ -17,6 +19,12 @@ import torch
 
 from jasna.accelerator import is_nvidia_device
 from jasna.media.cuda_kernel import check_cuda, cuda_driver, resolve_function
+from jasna.media.hip_kernel import (
+    color_code_object_name,
+    hip_color_kernels_enabled,
+    launch_kernel as launch_hip_kernel,
+    resolve_function as resolve_hip_function,
+)
 from jasna.media.rgb_to_nv12 import (
     NV12_VARIANTS,
     _chw_rgb_to_nv12_into,
@@ -115,6 +123,60 @@ class _RgbToYuvKernel:
         )
 
 
+class _HipRgbToYuvKernel:
+    def __init__(self, function_name: str):
+        self.function_name = function_name
+        self._function: ctypes.c_void_p | None = None
+        self._values = [
+            ctypes.c_uint64(),  # RGB pointer
+            ctypes.c_int64(),   # RGB channel stride, in samples
+            ctypes.c_int64(),   # RGB row stride, in samples
+            ctypes.c_uint64(),  # luma pointer
+            ctypes.c_int64(),   # luma row stride, in samples
+            ctypes.c_uint64(),  # chroma pointer
+            ctypes.c_int64(),   # chroma row stride, in samples
+            ctypes.c_int(),     # height
+            ctypes.c_int(),     # width
+        ]
+        self._params = (ctypes.c_void_p * len(self._values))(
+            *(ctypes.cast(ctypes.byref(value), ctypes.c_void_p) for value in self._values)
+        )
+
+    def _resolve(self) -> ctypes.c_void_p:
+        if self._function is None:
+            self._function = resolve_hip_function(
+                color_code_object_name("rgb_to_yuv"), self.function_name
+            )
+        return self._function
+
+    def launch(self, rgb: torch.Tensor, luma: torch.Tensor, chroma: torch.Tensor) -> None:
+        height, width = luma.shape
+        values = self._values
+        values[0].value = rgb.data_ptr()
+        values[1].value = rgb.stride(0)
+        values[2].value = rgb.stride(1)
+        values[3].value = luma.data_ptr()
+        values[4].value = luma.stride(0)
+        values[5].value = chroma.data_ptr()
+        values[6].value = chroma.stride(0)
+        values[7].value = height
+        values[8].value = width
+        quads_x = (width + 1) // 2
+        quads_y = (height + 1) // 2
+        launch_hip_kernel(
+            self._resolve(),
+            grid=(
+                (quads_x + _BLOCK_WIDTH - 1) // _BLOCK_WIDTH,
+                (quads_y + _BLOCK_HEIGHT - 1) // _BLOCK_HEIGHT,
+                1,
+            ),
+            block=(_BLOCK_WIDTH, _BLOCK_HEIGHT, 1),
+            stream=int(torch.cuda.current_stream(rgb.device).cuda_stream),
+            params=self._params,
+            operation=f"hipModuleLaunchKernel({self.function_name})",
+        )
+
+
 class RgbToYuvConverter:
     """Converts a ``(3, H, W)`` planar RGB frame into a packed NV12/P010 frame.
 
@@ -133,7 +195,11 @@ class RgbToYuvConverter:
         self._eager_rows, self._eager_full_range = (
             P010_VARIANTS[variant] if self.ten_bit else NV12_VARIANTS[variant]
         )
-        self._kernel = _RgbToYuvKernel(variant) if is_nvidia_device(device) else None
+        self._kernel = None
+        if is_nvidia_device(device):
+            self._kernel = _RgbToYuvKernel(variant)
+        elif hip_color_kernels_enabled(device):
+            self._kernel = _HipRgbToYuvKernel(variant)
         self._scratch: YuvScratch | None = None
 
     @property
