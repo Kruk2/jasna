@@ -220,12 +220,14 @@ class YoloMosaicDetectionModel:
         if self._resizer is not None and frames_uint8_bchw.dtype is torch.uint8:
             _, _, h, w = frames_uint8_bchw.shape
             gain, left, top, unpad_w, unpad_h = _letterbox_geometry(h, w, (self.imgsz, self.imgsz))
-            x = self._resizer.run(
-                frames_uint8_bchw,
-                out_hw=(self.imgsz, self.imgsz),
-                content=(left, top, unpad_w, unpad_h),
-            )
-            return x, ((float(gain), float(gain)), (int(left), int(top)))
+            if self._resizer.supports(frames_uint8_bchw, out_hw=(self.imgsz, self.imgsz),
+                                      content=(left, top, unpad_w, unpad_h)):
+                x = self._resizer.run(
+                    frames_uint8_bchw,
+                    out_hw=(self.imgsz, self.imgsz),
+                    content=(left, top, unpad_w, unpad_h),
+                )
+                return x, ((float(gain), float(gain)), (int(left), int(top)))
 
         x = frames_uint8_bchw.to(device=self.device, dtype=self.input_dtype, non_blocking=True)
         x = x / 255.0

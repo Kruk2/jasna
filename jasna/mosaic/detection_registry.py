@@ -188,12 +188,32 @@ def build_detection_model(
     device: torch.device,
     score_threshold: float,
     fp16: bool,
+    amd_migraphx_manifest_path: Path | None = None,
 ):
     det_name = coerce_detection_model_name(detection_model_name)
+    if amd_migraphx_manifest_path is not None and not is_amd_device(device):
+        raise RuntimeError(
+            "The RF-DETR MIGraphX manifest requires an AMD/ROCm device"
+        )
+    if amd_migraphx_manifest_path is not None and det_name != "rfdetr-v6":
+        raise RuntimeError(
+            "The RF-DETR MIGraphX manifest only supports rfdetr-v6"
+        )
     if is_rfdetr_model(det_name):
         from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
 
         config = rfdetr_model_config(det_name)
+        if amd_migraphx_manifest_path is None:
+            from jasna.mosaic.rfdetr_migraphx_runner import (
+                discover_product_rfdetr_migraphx_manifest,
+            )
+
+            amd_migraphx_manifest_path = discover_product_rfdetr_migraphx_manifest(
+                detection_model_name=det_name,
+                weights_path=detection_model_path,
+                device=device,
+                fp16=bool(fp16),
+            )
         return RfDetrMosaicDetectionModel(
             weights_path=detection_model_path,
             batch_size=config.engine_batch_size(batch_size),
@@ -203,6 +223,11 @@ def build_detection_model(
             score_threshold=float(score_threshold),
             fp16=bool(fp16),
             torch_variant=config.torch_variant,
+            amd_migraphx_manifest_path=amd_migraphx_manifest_path,
+        )
+    if amd_migraphx_manifest_path is not None:
+        raise RuntimeError(
+            "The RF-DETR MIGraphX manifest cannot be used with a YOLO detector"
         )
     from jasna.mosaic.yolo import YoloMosaicDetectionModel
 
