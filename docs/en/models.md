@@ -34,6 +34,65 @@ jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 You can also set a different detection model per video inside the
 [segment editor](segments.md).
 
+## Restoration model
+
+**BasicVSR++** is the default: fast, and it runs on every supported GPU.
+**LTX** is much slower but gives more detailed, more natural results. Use it
+for the videos or scenes you care about most. Pick it in the **Restoration
+Model** section, or:
+
+```bash
+jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
+```
+
+- NVIDIA RTX only. Not for VR180 side-by-side videos or streaming.
+  Secondary restoration and denoise are off with LTX.
+- The Video Player and **Restore preview** always use BasicVSR++. To preview
+  LTX, use **Try seed** in the [Segment Editor](segments.md).
+- The time depends on how long mosaics are on screen, not on the length of
+  the video. The first run takes longer while Jasna prepares LTX for your GPU.
+- The model is not bundled: about 15 GB (about 9 GB for Fast mode). Jasna
+  asks before downloading it once the download is available.
+- LTX needs a key that includes it (**Activate Jasna** in the header).
+  Without it, use **Trial mode**.
+
+### LTX options
+
+- **Model**: **Distilled** (default) or **Undistilled**, which is slightly
+  better and about 2x slower (another 13 GB download). CLI:
+  `--restoration-model-name ltx-undistilled`.
+- **Fast mode**: RTX 50-series only. About 1.4x faster with slightly less
+  detail, and a smaller download. CLI: `--ltx-fast`.
+- **Sharper large mosaics**: more detail on big mosaics (close-ups, 4K),
+  about 3x slower on those. Needs 10 GB of free VRAM, otherwise it has no
+  effect. CLI: `--ltx-large-canvas`.
+- **Seed**: another seed gives a slightly different result; the same seed
+  repeats it. CLI: `--ltx-seed 7`.
+- **Trial mode**: runs LTX at full speed without a key or model files, so
+  you can see how fast it is on your PC. The video is not restored. CLI:
+  `--ltx-trial`.
+
+### Which GPU and how long
+
+Rough time for **1 minute of 1080p video with mosaics on screen the whole
+time** (Distilled model). Scenes without mosaics are much quicker;
+Undistilled takes about twice as long.
+
+| GPU | LTX | Time | With Fast mode |
+| --- | --- | ---: | ---: |
+| RTX 5090 | Fastest | about 5 min | about 3 min |
+| RTX 4090 | Works well | about 7 min | — |
+| RTX 5080 | Works well | about 10 min | about 6 min |
+| RTX 3090 | Works, slower | about 15 min | — |
+| RTX 2080 Ti | Works, very slow | about 45 min | — |
+| GTX 16-series | Not tested | — | — |
+| AMD | Not supported | — | — |
+
+- **VRAM**: 24 GB keeps the whole model on the GPU, 16 GB is fine, and
+  11–12 GB works but is slower. Less than 11 GB is untested.
+- **System RAM**: 32 GB recommended (loading the model uses about 19 GB). With
+  16 GB, use Fast mode, which needs about 10 GB.
+
 ## Secondary restoration
 
 Jasna restores a 256x256 crop of each mosaic region. Large mosaic regions,

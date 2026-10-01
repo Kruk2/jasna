@@ -68,10 +68,7 @@ class PlaceholderTensors:
     model: LtxModelName
 
 
-LTX_TRIAL_NOTICE = (
-    "LTX trial mode: output is not restored. Speed matches a real run, except model loading "
-    "(model files are not read or decrypted)."
-)
+LTX_TRIAL_NOTICE = "LTX trial mode: output is not restored. Speed matches a real run, except model loading."
 
 # Chosen so a random INT8 / FP4 weight comes out near 1/sqrt(4096), like a trained one.
 _PLACEHOLDER_SCALES = {".scales": 2e-4, ".weight_scale_2": 5e-3, ".weight_scale": 1.0}
@@ -225,7 +222,7 @@ def download_files(
     """Download ``files`` into ``directory``, verifying each sha256 before it replaces
     anything. ``progress_callback(done_bytes, total_bytes)`` covers all files together."""
     if LTX_DOWNLOAD_URL is None:
-        raise RuntimeError("LTX model downloads are not available yet. Get the model files manually.")
+        raise RuntimeError("LTX model downloads are not available yet.")
     unverifiable = [f.name for f in files if f.sha256 is None]
     if unverifiable:
         raise RuntimeError(f"No checksum for {', '.join(unverifiable)}, so it won't be downloaded.")
