@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -71,6 +72,31 @@ def test_block_matches_across_token_chunking(monkeypatch):
     assert torch.equal(whole, chunked)
     skipped = T.block_forward(weights, x, cond, prompt, rope, heads=heads, skip_self_attention=True)
     assert not torch.equal(whole, skipped)
+
+
+def test_fp16_prompt_attention_keeps_the_block_in_bf16():
+    generator = torch.Generator().manual_seed(0)
+    dim, heads = 64, 4
+    weights = _block_weights(dim, heads, generator)
+    rope = T.build_rope(3, 2, 2, dim=dim, heads=heads, device=torch.device("cpu"))
+    cond = T.StepConditioning(
+        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to(torch.bfloat16),
+        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16),
+        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to(torch.bfloat16),
+    )
+    x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
+    prompt = T.prompt_key_value(weights, cond, torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16), heads=heads)
+    bf16 = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
+    fp16 = T.block_forward(weights, x, cond, tuple(t.half() for t in prompt), rope, heads=heads)
+    assert fp16.dtype == torch.bfloat16
+    torch.testing.assert_close(fp16, bf16, atol=2e-2, rtol=2e-2)
+
+
+@pytest.mark.parametrize("major, dtype", [(7, torch.float16), (8, torch.bfloat16)])
+def test_prompt_attention_runs_in_fp16_before_sm80(major, dtype, monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=major))
+    assert T.prompt_attention_dtype(torch.device("cuda")) == dtype
+    assert T.prompt_attention_dtype(torch.device("cpu")) == torch.bfloat16
 
 
 def test_latent_positions_are_causal_seconds():
