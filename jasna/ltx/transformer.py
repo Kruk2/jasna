@@ -200,12 +200,12 @@ def nvfp4_linear(
     the block-scaled FP4 tensor-core GEMM. Both operands pack high nibble first; the block scale
     covers whole pairs, so the order only permutes each dot product's terms."""
     out_features = weight.shape[0]
+    if _quant_kernels is not None and x.is_cuda:
+        a = quantize_fp4_activation(x)
+        out = _fp4_mm(a.packed, a.block_scales, a.tensor_scale, weight, block_scales, tensor_scale, bias, x.dtype)
+        return out.reshape(*x.shape[:-1], out_features)
     flat = x.reshape(-1, weight.shape[1] * 2)
     act_scale = fp4_tensor_scale(flat)
-    if _quant_kernels is not None and x.is_cuda:
-        packed, act_blocks = _quant_kernels.quantize_fp4(flat, act_scale, False)
-        out = _fp4_mm(packed, act_blocks, act_scale, weight, block_scales, tensor_scale, bias, x.dtype)
-        return out.reshape(*x.shape[:-1], out_features)
     out = torch.empty(flat.shape[0], out_features, dtype=x.dtype, device=x.device)
     for start in range(0, flat.shape[0], CHUNK_ROWS):
         chunk = flat[start : start + CHUNK_ROWS]
@@ -239,10 +239,42 @@ class QuantizedRows(NamedTuple):
     scales: torch.Tensor
 
 
-def linear(w: Weights, name: str, x: torch.Tensor | QuantizedRows) -> torch.Tensor:
+class Fp4Activation(NamedTuple):
+    """NVFP4 codes ``(rows, k/2)``, tiled block scales and dynamic tensor scale of a
+    ``[1, rows, k]`` bf16 block activation, quantized once for every NVFP4 linear that reads
+    it (Triton kernels only)."""
+
+    packed: torch.Tensor
+    block_scales: torch.Tensor
+    tensor_scale: torch.Tensor
+
+
+def quantize_fp4_activation(x: torch.Tensor) -> Fp4Activation:
+    flat = x.reshape(-1, x.shape[-1])
+    tensor_scale = fp4_tensor_scale(flat)
+    return Fp4Activation(*_quant_kernels.quantize_fp4(flat, tensor_scale, False), tensor_scale)
+
+
+def _shared_fp4_input(
+    w: Weights, name: str, x: torch.Tensor | QuantizedRows
+) -> torch.Tensor | QuantizedRows | Fp4Activation:
+    """``x`` quantized once for the linears that read it when ``name`` is NVFP4 on the Triton
+    kernels, else ``x``."""
+    weight = w.get(f"{name}.weight")
+    if isinstance(x, QuantizedRows) or _quant_kernels is None or not x.is_cuda:
+        return x
+    return quantize_fp4_activation(x) if weight is not None and weight.dtype == torch.uint8 else x
+
+
+def linear(w: Weights, name: str, x: torch.Tensor | QuantizedRows | Fp4Activation) -> torch.Tensor:
     bias = w.get(f"{name}.bias")
     if isinstance(x, QuantizedRows):
         return _quant_kernels.int8_scaled_mm(x.codes, x.scales, w[f"{name}.qdata"], w[f"{name}.scales"], bias)[None]
+    if isinstance(x, Fp4Activation):
+        return _fp4_mm(
+            x.packed, x.block_scales, x.tensor_scale, w[f"{name}.weight"], w[f"{name}.weight_scale"],
+            w[f"{name}.weight_scale_2"], bias, torch.bfloat16,
+        )[None]
     weight = w.get(f"{name}.weight")
     if weight is None:
         return int8_linear(x, w[f"{name}.qdata"], w[f"{name}.scales"], bias)
@@ -507,13 +539,16 @@ def _attention(
     *,
     skip: bool,
 ) -> torch.Tensor:
-    """Gated attention output before its ``to_out.0`` projection."""
-    v = linear(w, f"{prefix}.to_v", context)
+    """Gated attention output before its ``to_out.0`` projection; NVFP4 Q/K/V projections of
+    one input share its quantization."""
+    kv_in = _shared_fp4_input(w, f"{prefix}.to_v", context)
+    v = linear(w, f"{prefix}.to_v", kv_in)
     if skip:
         out = v
     else:
-        q = rms_norm(linear(w, f"{prefix}.to_q", x), w[f"{prefix}.q_norm.weight"])
-        k = rms_norm(linear(w, f"{prefix}.to_k", context), w[f"{prefix}.k_norm.weight"])
+        q_in = kv_in if x is context else x
+        q = rms_norm(linear(w, f"{prefix}.to_q", q_in), w[f"{prefix}.q_norm.weight"])
+        k = rms_norm(linear(w, f"{prefix}.to_k", kv_in), w[f"{prefix}.k_norm.weight"])
         if rope is not None:
             q, k = _apply_rope(q, rope, heads), _apply_rope(k, rope, heads)
         else:
