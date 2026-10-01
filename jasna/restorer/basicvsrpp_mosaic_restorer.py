@@ -21,6 +21,7 @@ class BasicvsrppMosaicRestorer:
         fp16: bool,
         config: str | dict | None = None,
     ):
+        self.checkpoint_path = str(checkpoint_path)
         self.device = torch.device(device)
         self.max_clip_size = int(max_clip_size)
         self.use_tensorrt = bool(use_tensorrt)
@@ -28,6 +29,7 @@ class BasicvsrppMosaicRestorer:
         self.input_dtype = self.dtype
 
         self._split_forward = None
+        self._migraphx_b1 = None
         self.model = None
 
         if self.use_tensorrt and is_nvidia_device(self.device):
@@ -48,12 +50,40 @@ class BasicvsrppMosaicRestorer:
         else:
             self.use_tensorrt = False
             self.model = load_model(config, checkpoint_path, self.device, fp16)
-            logger.info("BasicVSR++ loaded from checkpoint: %s (fp16=%s)", checkpoint_path, fp16)
+            from jasna.restorer.basicvsrpp_migraphx_b1 import (
+                basicvsrpp_migraphx_b1_enabled,
+                load_basicvsrpp_b1_migraphx,
+            )
+
+            if basicvsrpp_migraphx_b1_enabled(
+                self.device,
+                fp16=fp16,
+                checkpoint_path=checkpoint_path,
+            ):
+                self._migraphx_b1 = load_basicvsrpp_b1_migraphx(
+                    self.model,
+                    checkpoint_path=checkpoint_path,
+                    device=self.device,
+                )
+                logger.info(
+                    "BasicVSR++ using verified AMD MIGraphX B1 propagation "
+                    "artifacts: %s (fallback=False)",
+                    self._migraphx_b1.directory,
+                )
+            else:
+                logger.info(
+                    "BasicVSR++ loaded from checkpoint: %s (fp16=%s)",
+                    checkpoint_path,
+                    fp16,
+                )
 
     def close(self) -> None:
         if self._split_forward is not None:
             self._split_forward.close()
             self._split_forward = None
+        if self._migraphx_b1 is not None:
+            self._migraphx_b1.close()
+            self._migraphx_b1 = None
         self.model = None
 
     def raw_process(self, video: list[Tensor]) -> torch.Tensor:
@@ -68,6 +98,9 @@ class BasicvsrppMosaicRestorer:
 
             if self._split_forward is not None:
                 result = self._split_forward(stacked.unsqueeze(0))
+            elif self._migraphx_b1 is not None:
+                with self._migraphx_b1.dispatch():
+                    result = self.model(inputs=stacked.unsqueeze(0))
             else:
                 result = self.model(inputs=stacked.unsqueeze(0))
             return result.squeeze(0)
