@@ -111,7 +111,7 @@ def test_block_loading_streams_all_destinations_in_one_reader_operation(tmp_path
         store = BlockStore.from_reader(reader, [{"weight": name} for name in expected],
                                        torch.device("cpu"), resident=3)
     try:
-        assert operations == [tuple((name,) for name in expected)]
+        assert operations == [(tuple(expected),)]
         for index, value in enumerate(expected.values()):
             assert torch.equal(store.acquire(index)["weight"], value)
     finally:
@@ -216,7 +216,7 @@ def test_cuda_block_loading_and_close_clear_retained_storage(tmp_path, resident)
         store = BlockStore.from_reader(reader, [{"weight": name} for name in expected],
                                        torch.device("cuda"), resident=resident)
     if resident == 3:
-        assert len(set(staging)) == 1
+        assert staging == [staging[0], staging[1], staging[0]] and staging[0] != staging[1]
     retained = store._resident_buffers + store._host + store._slots
     try:
         for index, name in enumerate(expected):

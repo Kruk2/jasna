@@ -102,6 +102,9 @@ class _PlaintextHandle:
     def keys(self):
         return self._source.keys()
 
+    def offset_keys(self):
+        return self._source.offset_keys()
+
     def metadata(self):
         return self._source.metadata()
 
@@ -157,6 +160,9 @@ class _PlaceholderHandle:
         return self._metadata
 
     def keys(self) -> list[str]:
+        return list(self._specs)
+
+    def offset_keys(self) -> list[str]:
         return list(self._specs)
 
     def tensor_specs(self):

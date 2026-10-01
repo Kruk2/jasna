@@ -55,6 +55,34 @@ def _views(buffer: torch.Tensor, layout: dict[str, _Entry]) -> dict[str, torch.T
     }
 
 
+def _aligned(nbytes: int) -> int:
+    return -(-nbytes // _ALIGN) * _ALIGN
+
+
+def _file_order_groups(
+    order: list[str], targets: dict[str, torch.Tensor], stage_bytes: int
+) -> list[tuple[tuple[str, ...], dict[str, int]]]:
+    """Consecutive runs of ``order`` whose GPU tensors fit one stage, each with those
+    tensors' stage offsets. CPU tensors are read straight into their final storage."""
+    groups, group, offsets, used = [], [], {}, 0
+    for name in order:
+        size = _aligned(targets[name].nbytes) if targets[name].device.type != "cpu" else 0
+        if size and used + size > stage_bytes:
+            groups.append((tuple(group), offsets))
+            group, offsets, used = [], {}, 0
+        if size:
+            offsets[name] = used
+            used += size
+        group.append(name)
+    if group:
+        groups.append((tuple(group), offsets))
+    return groups
+
+
+def _staged(stage: torch.Tensor, offset: int, target: torch.Tensor) -> torch.Tensor:
+    return stage[offset : offset + target.nbytes].view(target.dtype).view(target.shape)
+
+
 class BlockStore:
     """Hands out each block's weights on ``device`` in a fixed cyclic block order. Empties each
     dict of ``blocks`` once packed, so loading never holds the weights twice in RAM."""
@@ -73,40 +101,48 @@ class BlockStore:
 
     @classmethod
     def from_reader(cls, reader, names: list[dict[str, str]], device: torch.device, *, resident: int) -> BlockStore:
+        """Read in file order, so every encrypted chunk is decrypted once. Tensors of GPU-resident
+        blocks pass through two pinned stages; one stage's copies run while the other is read."""
         specs = reader.tensor_specs()
         layouts = [_layout({name: specs[source] for name, source in block.items()}) for block in names]
         store = cls.__new__(cls)
         store._allocate(layouts, device, resident)
+        targets = {sources[name]: view for index, sources in enumerate(names)
+                   for name, view in _views(store._buffer(index), store._layouts[index]).items()}
+        staged_sizes = [_aligned(target.nbytes) for target in targets.values() if target.device.type != "cpu"]
+        stage_bytes = max(_aligned(max(nbytes for _, nbytes in layouts[:store.resident]) // 2),
+                          *staged_sizes) if staged_sizes else 0
+        groups = _file_order_groups([name for name in reader.offset_keys() if name in targets], targets, stage_bytes)
+        stages = [torch.empty(stage_bytes, dtype=torch.uint8, pin_memory=True) for _ in range(2)] if stage_bytes else []
+        copied = [torch.cuda.Event() for _ in stages]
 
         def destinations():
-            staging = None
             try:
-                if device.type != "cpu" and store.resident:
-                    staging = torch.empty(max(store._buffer(index).numel() for index in range(store.resident)),
-                                          dtype=torch.uint8, pin_memory=True)
-                for index, sources in enumerate(names):
-                    destination = store._buffer(index)
-                    if destination.device.type == "cpu":
-                        yield {sources[name]: tensor for name, tensor in _views(destination, store._layouts[index]).items()}
-                    else:
-                        buffer = staging[:destination.numel()]
-                        try:
-                            yield {sources[name]: tensor for name, tensor in _views(buffer, store._layouts[index]).items()}
-                            destination.copy_(buffer)
-                        finally:
-                            buffer.zero_()
+                for number, (group, offsets) in enumerate(groups):
+                    slot = number % 2
+                    if offsets:
+                        copied[slot].synchronize()
+                    views = {name: _staged(stages[slot], offsets[name], targets[name]) if name in offsets else targets[name]
+                             for name in group}
+                    yield views
+                    for name in offsets:
+                        targets[name].copy_(views[name], non_blocking=True)
+                    if offsets:
+                        copied[slot].record()
             finally:
-                if staging is not None:
-                    staging.zero_()
+                if stages:
+                    torch.cuda.synchronize(device)
+                    for stage in stages:
+                        stage.zero_()
 
-        groups = destinations()
+        stream = destinations()
         try:
-            reader.read_tensors_into(tuple(tuple(block.values()) for block in names), groups)
+            reader.read_tensors_into(tuple(group for group, _ in groups), stream)
         except BaseException:
             store.close()
             raise
         finally:
-            groups.close()
+            stream.close()
         return store
 
     def _buffer(self, index: int) -> torch.Tensor:
