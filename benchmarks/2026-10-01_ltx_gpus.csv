@@ -36,9 +36,9 @@ RTX 3090,24,2e67910,decode,,768,8 GiB segment,8.340,s/window,,
 RTX 3090,24,2e67910,decode,,768,21 GiB,5.614,s/window,,one tile
 RTX 2080 Ti,11,e1eb45f,denoise,distilled int8,512,,,ms/window-step,,crashes (no bf16 SDPA kernel below SM 8.0)
 RTX 2080 Ti,11,e1eb45f,decode,,512,6 GiB segment,316.8,s/window,,
-RTX 2080 Ti,11,perf/ltx-sm75,denoise,distilled int8,512,,3137,ms/window-step,25/48,GPU locked at 1350 MHz
-RTX 2080 Ti,11,perf/ltx-sm75,denoise,distilled int8,768,,8658,ms/window-step,25/48,GPU locked at 1350 MHz
-RTX 2080 Ti,11,perf/ltx-sm75,denoise,undistilled int8,512,,4412,ms/window-step,25/48,GPU locked at 1350 MHz
-RTX 2080 Ti,11,perf/ltx-sm75,decode,,512,6 GiB segment,22.6,s/window,,GPU locked at 1350 MHz
-RTX 2080 Ti,11,perf/ltx-sm75,decode,,512,8 GiB,17.7,s/window,,GPU locked at 1350 MHz
-RTX 2080 Ti,11,perf/ltx-sm75,decode,,768,8 GiB segment,59.5,s/window,,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,denoise,distilled int8,512,,3137,ms/window-step,25/48,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,denoise,distilled int8,768,,8658,ms/window-step,25/48,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,denoise,undistilled int8,512,,4412,ms/window-step,25/48,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,decode,,512,6 GiB segment,22.6,s/window,,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,decode,,512,8 GiB,17.7,s/window,,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,decode,,768,8 GiB segment,59.5,s/window,,GPU locked at 1350 MHz
