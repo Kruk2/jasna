@@ -6,6 +6,7 @@ import importlib.util
 import pytest
 import torch
 
+from jasna.models.ltx_vae import na_triton
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.eager_na import na3d
 
@@ -24,24 +25,32 @@ def _qkv(shape: tuple[int, ...]) -> list[torch.Tensor]:
     ]
 
 
+@pytest.mark.parametrize("kernel", [na_triton.na3d, T._fp16_eager_na3d], ids=["triton", "fp16 eager"])
 @pytest.mark.parametrize("kernel_size", [(3, 5, 5), (11, 11, 11)])
 @pytest.mark.parametrize("query_w", [(0, 14), (5, 4)])
-def test_triton_na3d_matches_the_eager_windows(kernel_size, query_w, monkeypatch):
-    monkeypatch.setattr(T, "_fused_na3d", None)
-    T.enable_fused_attention()
+def test_cuda_na3d_matches_the_eager_windows(kernel, kernel_size, query_w, monkeypatch):
+    monkeypatch.setattr(T, "_fused_na3d", kernel)
     attn = T.NeighborhoodAttention3D(128, kernel_size, head_dim=64)
     q, k, v = _qkv((1, 12, 13, 14, 2, 64))
     w_start, w_len = query_w
 
     fused = T.neighborhood_attention(attn, q[:, :, :, w_start : w_start + w_len].contiguous(), k, v, w_start)
-    reference = na3d(q.float(), k.float(), v.float(), kernel_size=kernel_size)[:, :, :, w_start : w_start + w_len]
+    reference = na3d(q.float(), k.float(), v.float(), kernel_size, 0)[:, :, :, w_start : w_start + w_len]
 
     torch.testing.assert_close(fused.float(), reference, atol=2e-2, rtol=2e-2)
 
 
-def test_triton_na3d_compiles_into_the_slab_without_graph_breaks(monkeypatch):
+@pytest.mark.parametrize("capability, kernel", [((7, 5), T._fp16_eager_na3d), ((8, 6), na_triton.na3d)])
+def test_gpus_without_triton_tensor_core_dots_use_the_fp16_eager_na3d(capability, kernel, monkeypatch):
     monkeypatch.setattr(T, "_fused_na3d", None)
-    T.enable_fused_attention()
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability)
+    T.enable_fused_attention(torch.device("cuda"))
+    assert T._fused_na3d is kernel
+
+
+@pytest.mark.parametrize("kernel, breaks", [(na_triton.na3d, 0), (T._fp16_eager_na3d, 1)], ids=["triton", "fp16 eager"])
+def test_na3d_compiles_into_the_slab_with_at_most_one_graph_break(kernel, breaks, monkeypatch):
+    monkeypatch.setattr(T, "_fused_na3d", kernel)
     torch.manual_seed(0)
     attn = T.NeighborhoodAttention3D(128, (3, 5, 5), head_dim=64).cuda().bfloat16().eval()
     norm = torch.nn.RMSNorm(128).cuda().bfloat16()
@@ -53,8 +62,8 @@ def test_triton_na3d_compiles_into_the_slab_without_graph_breaks(monkeypatch):
     with torch.inference_mode():
         explanation = torch._dynamo.explain(T._attn_on_w_slab)(attn, norm, x, w_pos, scale, shift, 12)
 
-    assert explanation.graph_count == 1
-    assert explanation.graph_break_count == 0
+    assert explanation.graph_count == breaks + 1
+    assert explanation.graph_break_count == breaks
 
 
 def test_compiled_diffusion_block_matches_eager(monkeypatch):
@@ -73,7 +82,7 @@ def test_compiled_diffusion_block_matches_eager(monkeypatch):
             return block(x.clone(), stage4, modulation, upsample, drop_leading_frame=True)
 
     eager = run()
-    T.enable_fused_attention()
+    T.enable_fused_attention(torch.device("cuda"))
     T.compile_diffusion_blocks()
     compiled = run()
 

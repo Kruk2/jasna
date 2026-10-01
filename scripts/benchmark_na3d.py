@@ -19,8 +19,7 @@ import torch
 import triton
 from triton.runtime.errors import OutOfResources
 
-from benchmark_ltx_decode import kitchen_na3d
-from jasna.models.ltx_vae import transformer as T
+from benchmark_ltx_decode import full_width_queries, kitchen_na3d
 from jasna.models.ltx_vae.na_triton import config_for, na3d_with_config, tile_config
 
 # name: (K/V shape (B, T, H, W, heads, head_dim), kernel, first query column, query columns)
@@ -77,7 +76,7 @@ def run_benchmark(names: list[str], sweep: bool) -> None:
         reference = kitchen_na3d(q, k, v, list(kernel), w_start)
         report("comfy-kitchen", lambda: kitchen_na3d(q, k, v, list(kernel), w_start))
         if natten is not None:
-            full_q = T._full_width_queries(q, k, w_start)
+            full_q = full_width_queries(q, k, w_start)
             report(
                 "natten",
                 lambda: natten.na3d(full_q, k, v, kernel_size=kernel, scale=1.0)[:, :, :, w_start : w_start + w_len],
