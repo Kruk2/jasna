@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pytest
 import torch
 
 from jasna.ltx.camera import letterbox
@@ -9,6 +10,7 @@ from jasna.ltx.compose import (
     composite_frame,
     crop_to_canvas,
     feather_alpha,
+    masked_median,
     polygon_mask,
 )
 
@@ -85,3 +87,64 @@ def test_two_agreeing_windows_equal_one():
         source, [Candidate(restored, crop, 0.3, [polygon]), Candidate(restored, crop, 0.7, [polygon])], feather=8
     )
     assert (one.int() - two.int()).abs().max() <= 1
+
+
+def _quantile_median(difference: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    if not mask.any():
+        return torch.zeros(difference.shape[0])
+    return torch.quantile(difference[:, mask], 0.5, dim=1)
+
+
+@pytest.mark.parametrize(
+    "pixels",
+    [
+        [],
+        [(5, 7)],
+        [(0, 0), (1, 1), (2, 2)],
+        [(0, 0), (1, 1), (2, 2), (3, 3)],
+        [(y, 4) for y in range(16)],
+    ],
+    ids=["empty", "single", "odd", "even", "column"],
+)
+def test_masked_median_equals_quantile(pixels):
+    generator = torch.Generator().manual_seed(len(pixels))
+    difference = torch.randint(-255, 256, (3, 16, 16), generator=generator).float()
+    mask = torch.zeros(16, 16, dtype=torch.bool)
+    for y, x in pixels:
+        mask[y, x] = True
+    assert torch.equal(masked_median(difference, mask), _quantile_median(difference, mask))
+
+
+def test_masked_median_equals_quantile_on_random_rings():
+    generator = torch.Generator().manual_seed(0)
+    for spread in (0, 1, 3, 40, 255):
+        for _ in range(20):
+            difference = torch.randint(-spread, spread + 1, (3, 40, 50), generator=generator).float()
+            difference[1] = -difference[1].abs()
+            mask = torch.rand(40, 50, generator=generator) < torch.rand(1, generator=generator).item()
+            assert torch.equal(masked_median(difference, mask), _quantile_median(difference, mask))
+
+
+def test_masked_median_takes_the_mean_of_the_two_central_values():
+    difference = torch.tensor([[-255.0, -4.0, 7.0, 255.0], [3.0, 3.0, 3.0, 3.0], [-1.0, 0.0, 1.0, 2.0]])[:, None, :]
+    assert masked_median(difference, torch.ones(1, 4, dtype=torch.bool)).tolist() == [1.5, 3.0, 0.5]
+
+
+def test_composite_shifts_the_restored_colour_towards_the_ring():
+    source = torch.full((3, 360, 640), 100, dtype=torch.uint8)
+    crop = letterbox((200, 100, 456, 356), 256)
+    restored = torch.full((3, 256, 256), 140, dtype=torch.uint8)
+    polygon = [[300.0, 200.0], [360.0, 200.0], [360.0, 260.0], [300.0, 260.0]]
+    out = composite_frame(source, [Candidate(restored, crop, 1.0, [polygon])], feather=8)
+    assert out[:, 230, 330].tolist() == [110, 110, 110]
+
+
+def test_two_tracks_each_paint_their_own_mask():
+    source = torch.full((3, 360, 640), 100, dtype=torch.uint8)
+    crop = letterbox((100, 50, 580, 330), 480)
+    left = [[200.0, 150.0], [260.0, 150.0], [260.0, 210.0], [200.0, 210.0]]
+    right = [[400.0, 150.0], [460.0, 150.0], [460.0, 210.0], [400.0, 210.0]]
+    dark = torch.full((3, 480, 480), 20, dtype=torch.uint8)
+    bright = torch.full((3, 480, 480), 220, dtype=torch.uint8)
+    out = composite_frame(source, [Candidate(dark, crop, 1.0, [left]), Candidate(bright, crop, 1.0, [right])], feather=8)
+    assert out[0, 180, 230] < 100 < out[0, 180, 430]
