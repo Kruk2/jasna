@@ -384,7 +384,7 @@ def require_kernels(device: torch.device) -> None:
     import comfy_kitchen
 
     if not comfy_kitchen.int8_attention_is_available(device):
-        raise RuntimeError("comfy-kitchen's INT8 attention cannot run on this GPU (its CUDA extension did not load).")
+        raise RuntimeError("LTX can't run on this GPU: comfy-kitchen's INT8 attention did not load.")
 
 
 _int8_attention = None

@@ -8,10 +8,10 @@ them when turning a help string into a tooltip.
 
 CLI_HELP: dict[str, str] = {
     "restoration_model_name": (
-        "Restoration model for video: basicvsrpp (fast), ltx (best quality, much slower) or "
-        "ltx-undistilled (slightly better than ltx, about 3x slower). LTX doesn't support "
-        "streaming, secondary restoration or denoise. A missing LTX model is offered for "
-        "download. (default: %(default)s)"
+        "Restoration model for video: basicvsrpp (fast), ltx (best quality, much slower; NVIDIA "
+        "RTX only) or ltx-undistilled (slightly better than ltx, about 2x slower). LTX doesn't "
+        "support VR side-by-side video, streaming, secondary restoration or denoise. A missing "
+        "LTX model is offered for download. (default: %(default)s)"
     ),
     "restoration_model_path": (
         "Restoration model file (basicvsrpp) or folder (ltx). Default: the model in model_weights/."
@@ -22,8 +22,8 @@ CLI_HELP: dict[str, str] = {
         "fast model file. (default: %(default)s)"
     ),
     "ltx_trial": (
-        "ltx: run with placeholder weights to test speed without a license or model files. "
-        "Output is not restored. (default: %(default)s)"
+        "ltx: test the speed without a license or model files. Output is not restored. "
+        "(default: %(default)s)"
     ),
     "ltx_large_canvas": (
         "ltx: restore large mosaics at 768 px instead of 512 px. More detail, about 3x slower on "
