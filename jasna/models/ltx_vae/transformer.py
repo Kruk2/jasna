@@ -1,9 +1,9 @@
 """Neighborhood-attention transformer blocks of the diffusion VAE decoder, ``chunked_eager`` path only.
 
 Ported from ``ltx_core/model/video_vae/transformer/`` (layers, qkv, rope_math, det_attn_rope,
-attention, swiglu, blocks, chunked/*): comfy-kitchen's fused neighborhood attention when installed,
-else eager tiled SDPA (same window semantics), torch SwiGLU,
-W-chunked diffusion residual with halos and deferred stage-4 context inject.
+attention, swiglu, blocks, chunked/*): jasna's Triton neighborhood attention on NVIDIA GPUs,
+else comfy-kitchen's fused kernel when installed, else eager tiled SDPA (same window semantics),
+torch SwiGLU, W-chunked diffusion residual with halos and deferred stage-4 context inject.
 """
 
 from __future__ import annotations
@@ -139,28 +139,52 @@ class QKVProjections(nn.Module):
 _fused_na3d = None
 
 
-def enable_fused_attention() -> bool:
-    """Run neighborhood attention on CUDA through comfy-kitchen's fused ``na3d`` when it is
-    installed. Returns whether it is in use."""
-    global _fused_na3d
-    if _fused_na3d is None and importlib.util.find_spec("comfy_kitchen") is not None:
-        import comfy_kitchen
+def _kitchen_na3d(q, k, v, kernel_size, query_w_start):
+    import comfy_kitchen
 
-        _fused_na3d = comfy_kitchen.na3d
-    return _fused_na3d is not None
+    return comfy_kitchen.na3d(_full_width_queries(q, k, query_w_start), k, v, kernel_size, scale=1.0)[
+        :, :, :, query_w_start : query_w_start + q.shape[3]
+    ]
+
+
+def _full_width_queries(q: torch.Tensor, k: torch.Tensor, query_w_start: int) -> torch.Tensor:
+    """``q`` zero-padded to the K/V width (each query's output depends only on itself)."""
+    if q.shape[3] == k.shape[3]:
+        return q
+    full = q.new_zeros(k.shape)
+    full[:, :, :, query_w_start : query_w_start + q.shape[3]] = q
+    return full
+
+
+def enable_fused_attention() -> str:
+    """Pick the CUDA neighborhood attention: jasna's Triton kernel on NVIDIA GPUs when Triton is
+    installed, else comfy-kitchen's fused ``na3d`` when installed. Returns the backend's name
+    ("torch" when neither is available)."""
+    global _fused_na3d
+    if _fused_na3d is None and torch.version.cuda is not None and importlib.util.find_spec("triton") is not None:
+        from jasna.models.ltx_vae import na_triton
+
+        _fused_na3d = na_triton.na3d
+    if _fused_na3d is None and importlib.util.find_spec("comfy_kitchen") is not None:
+        _fused_na3d = _kitchen_na3d
+    if _fused_na3d is None:
+        return "torch"
+    return "comfy-kitchen" if _fused_na3d is _kitchen_na3d else "triton"
 
 
 def neighborhood_attention(
-    attn: NeighborhoodAttention3D, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
+    attn: NeighborhoodAttention3D, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, query_w_start: int
 ) -> torch.Tensor:
-    """comfy-kitchen's fused kernel on CUDA once enabled, else the pure-torch ``na3d``
-    (same window semantics). Q is already scaled."""
+    """NA of the queries ``q`` of W columns ``[query_w_start, query_w_start + q.shape[3])`` over the
+    whole K/V grid: the enabled fused kernel on CUDA, else the pure-torch ``na3d`` (same window
+    semantics). Q is already scaled."""
     if q.dtype != v.dtype or k.dtype != v.dtype:
         q = q.to(dtype=v.dtype)
         k = k.to(dtype=v.dtype)
     if _fused_na3d is not None and q.is_cuda:
-        return _fused_na3d(q, k, v, list(attn.kernel_size), scale=1.0)
-    return na3d(q, k, v, kernel_size=attn.kernel_size)
+        return _fused_na3d(q, k, v, list(attn.kernel_size), query_w_start)
+    full = na3d(_full_width_queries(q, k, query_w_start), k, v, kernel_size=attn.kernel_size)
+    return full[:, :, :, query_w_start : query_w_start + q.shape[3]]
 
 
 class NeighborhoodAttention3D(nn.Module):
@@ -205,7 +229,7 @@ class NeighborhoodAttention3D(nn.Module):
         q = q * self.scale
         q = apply_tiled_abs_rope(q, self)
         k = apply_tiled_abs_rope(k, self)
-        out = neighborhood_attention(self, q.contiguous(), k.contiguous(), v.contiguous())
+        out = neighborhood_attention(self, q.contiguous(), k.contiguous(), v.contiguous(), 0)
         out = out.reshape(batch, t, h, w, self.dim)
         return self.proj(out)
 
@@ -301,25 +325,29 @@ def _attn_on_w_slab(
     w_pos: torch.Tensor,
     scale: torch.Tensor,
     shift: torch.Tensor,
+    core_len: int,
 ) -> torch.Tensor:
-    """One W slab: rms_norm + modulate + QKV / in-slab RoPE / NA / proj."""
+    """One W slab: rms_norm + modulate + QKV / in-slab RoPE / NA / proj, output for the ``core_len``
+    columns after the ``kernel_w // 2`` halo only."""
     batch, t, h, ext_w, _ = x_chunk.shape
+    halo = attn.kernel_size[2] // 2
     y = F.rms_norm(x_chunk, (attn.dim,), norm.weight, _NORM_EPS)
     y = y * (1.0 + scale) + shift
 
     head_shape = (batch, t, h, ext_w, attn.num_heads, attn.head_dim)
-    q = F.linear(y, attn.qkv.to_q.weight, attn.qkv.to_q.bias).view(head_shape)
+    core_shape = (batch, t, h, core_len, attn.num_heads, attn.head_dim)
+    q = F.linear(y[:, :, :, halo : halo + core_len], attn.qkv.to_q.weight, attn.qkv.to_q.bias).view(core_shape)
     q = F.rms_norm(q, (attn.head_dim,), attn.q_norm.weight, _NORM_EPS) * float(attn.scale)
-    q = apply_abs_rope_slab(q, attn, w_pos)
+    q = apply_abs_rope_slab(q, attn, w_pos[halo : halo + core_len])
     k = F.linear(y, attn.qkv.to_k.weight, attn.qkv.to_k.bias).view(head_shape)
     k = F.rms_norm(k, (attn.head_dim,), attn.k_norm.weight, _NORM_EPS)
     k = apply_abs_rope_slab(k, attn, w_pos)
     v = F.linear(y, attn.qkv.to_v.weight, attn.qkv.to_v.bias).view(head_shape)
     del y
 
-    out = neighborhood_attention(attn, q.contiguous(), k.contiguous(), v.contiguous())
+    out = neighborhood_attention(attn, q.contiguous(), k.contiguous(), v.contiguous(), halo)
     del q, k, v
-    return F.linear(out.reshape(batch, t, h, ext_w, attn.dim), attn.proj.weight, attn.proj.bias)
+    return F.linear(out.reshape(batch, t, h, core_len, attn.dim), attn.proj.weight, attn.proj.bias)
 
 
 def w_chunked_attention_residual(
@@ -346,6 +374,8 @@ def w_chunked_attention_residual(
         core_start = i * chunk_w
         core_end = min(w, (i + 1) * chunk_w)
         core_len = core_end - core_start
+        if core_len <= 0:
+            break
 
         buf = x.new_zeros(*x.shape[:3], extent, c)
         if i > 0:
@@ -373,8 +403,7 @@ def w_chunked_attention_residual(
             left_halo = x[:, :, :, core_end - take : core_end, :].clone()
 
         w_pos = torch.arange(extent, device=x.device, dtype=torch.float32) + (core_start - halo)
-        out = slab_attention(attn, norm, buf, w_pos, scale, shift)
-        x[:, :, :, core_start:core_end, :].add_(out[:, :, :, halo : halo + core_len, :])
+        x[:, :, :, core_start:core_end, :].add_(slab_attention(attn, norm, buf, w_pos, scale, shift, core_len))
 
     return x
 

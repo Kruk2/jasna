@@ -5,10 +5,11 @@ each ``--variants`` entry in turn, and reports seconds per window, peak VRAM and
 pixel difference against the first variant (same seed and tile layout, so any difference
 is kernel numerics). Needs an otherwise idle GPU.
 
-A variant is ``+``-joined options applied to the shipped path (comfy-kitchen ``na3d``,
+A variant is ``+``-joined options applied to the shipped path (jasna's Triton ``na3d``,
 stage-5 attention slab and MLP chunk compiled):
     shipped   the shipped path unchanged
-    natten    NATTEN's fused ``na3d`` in place of comfy-kitchen's
+    kitchen   comfy-kitchen's fused ``na3d`` in place of the Triton one
+    natten    NATTEN's fused ``na3d`` in place of the Triton one
     eager     the stage-5 slab and MLP chunk uncompiled
     autotune  them compiled with ``max-autotune-no-cudagraphs``
 
@@ -51,13 +52,14 @@ from jasna.tensor_utils import compile_static
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LATENT_CHANNELS = 128
 LATENT_SPATIAL_SCALE = 32
-OPTIONS = ("shipped", "natten", "eager", "autotune")
+OPTIONS = ("shipped", "kitchen", "natten", "eager", "autotune")
 
 
-def natten_na3d(q, k, v, kernel_size, scale):
+def natten_na3d(q, k, v, kernel_size, query_w_start):
     import natten
 
-    return natten.na3d(q, k, v, kernel_size=tuple(kernel_size), scale=scale)
+    full = natten.na3d(T._full_width_queries(q, k, query_w_start), k, v, kernel_size=tuple(kernel_size), scale=1.0)
+    return full[:, :, :, query_w_start : query_w_start + q.shape[3]]
 
 
 @contextlib.contextmanager
@@ -76,6 +78,8 @@ def variant_patches(variant: str) -> contextlib.ExitStack:
     if unknown:
         raise ValueError(f"unknown variant options {sorted(unknown)}; choose from {OPTIONS}")
     stack = contextlib.ExitStack()
+    if "kitchen" in options:
+        stack.enter_context(patched(T, "_fused_na3d", T._kitchen_na3d))
     if "natten" in options:
         stack.enter_context(patched(T, "_fused_na3d", natten_na3d))
     if "eager" in options:

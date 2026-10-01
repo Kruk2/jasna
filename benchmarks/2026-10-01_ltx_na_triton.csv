@@ -1,0 +1,43 @@
+date,commit,kind,case,variant,time,unit,peak_vram_gib,psnr_vs_kitchen_db,max_abs_vs_kitchen,note
+2026-10-01,85d690b,na3d kernel,s5-512-w42,comfy-kitchen,35.65,ms/call,,,0.0000,18.9 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-512-w42,natten,42.58,ms/call,,,0.0020,15.9 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-512-w42,triton 4x4x4 n32 w2 s3,7.23,ms/call,,,0.0020,93.5 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-512-w42,int8/fp8 4x4x4 n64 w2 s2,5.93,ms/call,,,0.0254,114.0 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-512-w138,comfy-kitchen,110.58,ms/call,,,0.0000,24.4 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-512-w138,natten,144.21,ms/call,,,0.0039,18.7 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-512-w138,triton 4x4x4 n32 w2 s3,28.76,ms/call,,,0.0020,93.9 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-512-w138,int8/fp8 4x4x4 n64 w2 s2,23.91,ms/call,,,0.0352,113.0 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w58,comfy-kitchen,72.21,ms/call,,,0.0000,21.0 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w58,natten,89.78,ms/call,,,0.0020,16.9 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w58,triton 4x4x4 n32 w2 s3,16.28,ms/call,,,0.0020,93.3 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w58,int8/fp8 4x4x4 n64 w2 s2,13.66,ms/call,,,0.0508,111.3 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w202,comfy-kitchen,248.37,ms/call,,,0.0000,24.5 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w202,natten,319.76,ms/call,,,0.0039,19.0 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w202,triton 4x4x4 n32 w2 s3,66.88,ms/call,,,0.0020,90.9 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s5-768-w202,int8/fp8 4x4x4 n64 w2 s2,56.80,ms/call,,,0.0430,107.0 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-512,comfy-kitchen,3.50,ms/call,,,0.0000,12.4 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-512,natten,5.66,ms/call,,,0.0078,7.7 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-512,triton 2x4x4 n32 w2 s2,1.14,ms/call,,,0.0078,38.2 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-512,int8/fp8 4x4x4 n64 w2 s2,1.12,ms/call,,,0.1172,38.6 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-768,comfy-kitchen,7.96,ms/call,,,0.0000,12.3 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-768,natten,12.82,ms/call,,,0.0078,7.6 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-768,triton 2x4x4 n32 w2 s2,2.69,ms/call,,,0.0078,36.3 useful TFLOPS
+2026-10-01,85d690b,na3d kernel,s4-768,int8/fp8 4x4x4 n64 w2 s2,2.62,ms/call,,,0.1250,37.3 useful TFLOPS
+2026-10-01,85d690b,decode window,512 px @ 24.0 GiB tile 128x512x512,kitchen,1.805,s/window (median of 5),5.15,inf,0.0,
+2026-10-01,85d690b,decode window,512 px @ 24.0 GiB tile 128x512x512,triton,0.862,s/window (median of 5),5.33,63.43,0.1122,
+2026-10-01,85d690b,decode window,512 px @ 24.0 GiB tile 128x512x512,fp8,0.846,s/window (median of 5),5.25,61.37,0.0703,
+2026-10-01,85d690b,decode window,768 px @ 24.0 GiB tile 128x768x768,kitchen,3.8,s/window (median of 5),10.22,inf,0.0,
+2026-10-01,85d690b,decode window,768 px @ 24.0 GiB tile 128x768x768,triton,1.915,s/window (median of 5),10.62,63.43,0.0469,
+2026-10-01,85d690b,decode window,768 px @ 24.0 GiB tile 128x768x768,fp8,1.876,s/window (median of 5),10.41,61.38,0.0742,
+2026-10-01,85d690b,decode window,512 px @ 6.0 GiB tile 88x512x512,kitchen,2.382,s/window (median of 5),4.09,inf,0.0,
+2026-10-01,85d690b,decode window,512 px @ 6.0 GiB tile 88x512x512,triton,1.121,s/window (median of 5),4.26,63.44,0.1055,
+2026-10-01,85d690b,decode window,512 px @ 6.0 GiB tile 88x512x512,fp8,1.122,s/window (median of 5),4.21,61.52,0.1235,
+2026-10-01,85d690b,decode window,768 px @ 8.0 GiB tile 128x480x480,kitchen,6.297,s/window (median of 5),5.76,inf,0.0,
+2026-10-01,85d690b,decode window,768 px @ 8.0 GiB tile 128x480x480,triton,2.831,s/window (median of 5),6.16,63.47,0.0449,
+2026-10-01,85d690b,decode window,768 px @ 8.0 GiB tile 128x480x480,fp8,2.771,s/window (median of 5),6.09,61.53,0.0508,
+2026-10-01,329c6c9,decode window,512 px @ 6.0 GiB tile 88x512x512,"triton, DIFFUSION_W_CHUNKS=2",1.068,s/window (median of 3),5.28,,,not shipped; W chunks patched by a wrapper
+2026-10-01,329c6c9,decode window,512 px @ 24.0 GiB tile 128x512x512,"triton, DIFFUSION_W_CHUNKS=2",0.826,s/window (median of 3),6.82,,,not shipped; W chunks patched by a wrapper
+2026-10-01,329c6c9,decode window,768 px @ 8.0 GiB tile 128x480x480,"triton, DIFFUSION_W_CHUNKS=2",2.669,s/window (median of 3),7.22,,,not shipped; W chunks patched by a wrapper
+2026-10-01,329c6c9,decode window,512 px @ 6.0 GiB tile 88x512x512,"triton, DIFFUSION_W_CHUNKS=1",1.008,s/window (median of 3),6.91,,,not shipped; W chunks patched by a wrapper
+2026-10-01,329c6c9,decode window,512 px @ 24.0 GiB tile 128x512x512,"triton, DIFFUSION_W_CHUNKS=1",0.781,s/window (median of 3),9.08,,,not shipped; W chunks patched by a wrapper
+2026-10-01,329c6c9,decode window,768 px @ 8.0 GiB tile 128x480x480,"triton, DIFFUSION_W_CHUNKS=1",2.505,s/window (median of 3),9.21,,,not shipped; W chunks patched by a wrapper

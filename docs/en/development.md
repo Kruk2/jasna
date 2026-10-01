@@ -181,7 +181,8 @@ swap parts of the shipped path and report the pixel difference to the first one:
 
 ```bash
 $P scripts/benchmark_ltx_decode.py --canvas 768 --budget-gib 24   # whole-video tile budget
-$P scripts/benchmark_ltx_decode.py --variants shipped,natten,eager --model-dir model_weights/ltx-restore
+$P scripts/benchmark_ltx_decode.py --variants shipped,kitchen,eager --model-dir model_weights/ltx-restore
+$P scripts/benchmark_na3d.py                                    # Triton NA kernel vs comfy-kitchen per shape
 $P scripts/benchmark_ltx_decode.py --split                        # time per decoder stage
 ```
 
