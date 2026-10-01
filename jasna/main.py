@@ -919,7 +919,7 @@ def main() -> None:
     restoration_model_path = Path(
         args.restoration_model_path or default_restoration_model_path(restoration_backend)
     )
-    if not args.ltx_trial and not restoration_model_path.exists():
+    if restoration_backend != "ltx" and not restoration_model_path.exists():
         raise FileNotFoundError(str(restoration_model_path))
 
     segments = None

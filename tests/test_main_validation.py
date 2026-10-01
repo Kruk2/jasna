@@ -94,6 +94,11 @@ class TestMainValidation:
         assert (config.restoration_model_name, config.ltx_model, config.ltx_trial) == ("ltx", "undistilled", True)
         assert "LTX trial mode: output is not restored" in capsys.readouterr().out
 
+    def test_ltx_offers_the_download_when_its_model_folder_is_missing(self, tmp_path):
+        with patch("jasna.ltx.model_files.missing_downloads", side_effect=RuntimeError("offers a download")):
+            with pytest.raises(RuntimeError, match="offers a download"):
+                _run_main_with_args(tmp_path, ["--restoration-model-name", "ltx"], create_restoration=False)
+
     def test_ltx_trial_rejects_basicvsrpp(self, tmp_path):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--ltx-trial"])
