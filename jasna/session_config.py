@@ -56,6 +56,8 @@ class SessionConfig:
     retarget_high_fps: bool
     disable_progress: bool
     working_dir: Path | None
+    auto_source_rate: bool = False
+    amd_dual_gop_encode: bool = False
     vr_projection: VrProjectionName = "auto"
     fmp4: bool = False
     sharpen_strength: float = 0.0

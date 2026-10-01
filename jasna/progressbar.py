@@ -106,6 +106,28 @@ class Progressbar:
                 eta_seconds = remaining * mean_duration
             self.callback(progress_pct, fps, eta_seconds, self.frames_processed, self.total_frames)
 
+    def mark_completed(self, n: int) -> None:
+        """Advance already-completed work without adding a fake speed sample."""
+        n = max(0, min(int(n), self.total_frames - self.frames_processed))
+        if n <= 0:
+            return
+        self.frames_processed += n
+        self.tqdm.update(n)
+        self._update_time_remaining_and_speed()
+        if self.callback:
+            progress_pct = (
+                self.frames_processed / self.total_frames * 100
+                if self.total_frames > 0
+                else 0.0
+            )
+            self.callback(
+                progress_pct,
+                0.0,
+                0.0,
+                self.frames_processed,
+                self.total_frames,
+            )
+
     def _get_mean_processing_duration(self) -> float:
         """Calculate mean frame processing duration from the buffer."""
         return sum(self.frame_processing_durations_buffer) / len(

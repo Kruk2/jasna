@@ -4,14 +4,15 @@ import logging
 import os
 import subprocess
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 
 import numpy as np
 
-from jasna.frame_queue import FrameQueue
+from jasna.frame_queue import FrameQueue, FrameQueueCancelled
 from jasna.os_utils import subprocess_no_window_kwargs
 import torch
 
@@ -74,6 +75,8 @@ _Segment = _ClipSegment | _FillerSegment
 
 
 class _TvaiWorker:
+    _QUEUE_POLL_TIMEOUT = 0.05
+
     def __init__(self, cmd: list[str], out_frame_bytes: int, out_size: int, max_write_frames: int) -> None:
         self._cmd = cmd
         self._out_frame_bytes = out_frame_bytes
@@ -86,14 +89,43 @@ class _TvaiWorker:
         self._frame_queue: Queue[np.ndarray | None] = Queue()
         self._write_queue = FrameQueue(max_write_frames)
         self._error: BaseException | None = None
+        self._error_lock = threading.Lock()
+        self._stop_event = threading.Event()
+        self._cancel_event: threading.Event | None = None
+        self._shutdown_incomplete = False
         self.frames_pushed = 0
 
     @property
     def alive(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    @property
+    def shutdown_incomplete(self) -> bool:
+        return self._shutdown_incomplete
+
+    def set_cancel_event(self, cancel_event: threading.Event | None) -> None:
+        self._cancel_event = cancel_event
+        self._write_queue.wake_all()
+
+    def _cancel_requested(self) -> bool:
+        if self._stop_event.is_set():
+            return True
+        if self._cancel_event is not None and self._cancel_event.is_set():
+            return True
+        with self._error_lock:
+            return self._error is not None
+
+    def _record_error(self, error: BaseException) -> None:
+        with self._error_lock:
+            if self._error is None:
+                self._error = error
+        self._write_queue.wake_all()
+
     def start(self) -> None:
-        self._error = None
+        with self._error_lock:
+            self._error = None
+        self._stop_event.clear()
+        self._shutdown_incomplete = False
         self._frame_queue = Queue()
         self._write_queue = FrameQueue(self._max_write_frames)
         self.frames_pushed = 0
@@ -125,7 +157,10 @@ class _TvaiWorker:
                 ).copy()
                 self._frame_queue.put(frame)
         except Exception as e:
-            self._error = e
+            if not self._cancel_requested():
+                self._record_error(e)
+            else:
+                logger.debug("TVAI reader stopped during cancellation", exc_info=True)
         finally:
             self._frame_queue.put(None)
 
@@ -145,33 +180,143 @@ class _TvaiWorker:
     def _writer_loop(self) -> None:
         assert self._proc is not None and self._proc.stdin is not None
         stdin = self._proc.stdin
-        try:
-            while True:
-                data = self._write_queue.get()
+        while True:
+            try:
+                data = self._write_queue.get(
+                    timeout=self._QUEUE_POLL_TIMEOUT,
+                    cancel_event=self._cancel_requested,
+                )
+            except Empty:
+                continue
+            except FrameQueueCancelled:
+                self._write_queue.discard_pending()
+                break
+            try:
                 if data is None:
-                    self._write_queue.task_done()
                     break
                 stdin.write(memoryview(data))
                 stdin.flush()
+            except BaseException as e:
+                if not self._cancel_requested():
+                    self._record_error(e)
+                else:
+                    logger.debug("TVAI writer stopped during cancellation", exc_info=True)
+                self._write_queue.discard_pending()
+                break
+            finally:
+                # Every successful get owns exactly one unfinished task, even
+                # when stdin.write() or flush() fails.
                 self._write_queue.task_done()
-        except Exception as e:
-            self._error = e
 
     def check_error(self) -> None:
-        if self._error is not None:
-            e = self._error
-            self._error = None
-            raise RuntimeError("TVAI worker thread crashed") from e
+        with self._error_lock:
+            error = self._error
+        if error is not None:
+            raise RuntimeError("TVAI worker thread crashed") from error
 
     def push_frames(self, frames_hwc: np.ndarray) -> None:
         self.check_error()
         data = np.ascontiguousarray(frames_hwc)
-        self.frames_pushed += data.shape[0]
-        self._write_queue.put(data, frame_count=data.shape[0])
+        while True:
+            if self._cancel_requested():
+                self.check_error()
+                raise FrameQueueCancelled("TVAI frame push cancelled")
+            try:
+                self._write_queue.put(
+                    data,
+                    frame_count=data.shape[0],
+                    timeout=self._QUEUE_POLL_TIMEOUT,
+                    cancel_event=self._cancel_requested,
+                )
+            except Full:
+                # Recheck both the worker error and cancellation state at a
+                # short, deterministic interval while capacity is exhausted.
+                continue
+            except FrameQueueCancelled:
+                self.check_error()
+                raise
+            else:
+                self.frames_pushed += data.shape[0]
+                return
 
-    def drain_writes(self) -> None:
+    def drain_writes(self, timeout: float | None = None) -> None:
         self.check_error()
-        self._write_queue.join()
+        try:
+            drained = self._write_queue.join(
+                timeout=timeout,
+                cancel_event=self._cancel_requested,
+            )
+        except FrameQueueCancelled:
+            self.check_error()
+            raise
+        if not drained:
+            self._shutdown_incomplete = True
+            raise TimeoutError("TVAI writer did not drain queued frames before timeout")
+        self.check_error()
+
+    @staticmethod
+    def _remaining_timeout(deadline: float) -> float:
+        return max(0.0, deadline - time.monotonic())
+
+    def _join_thread(self, attribute: str, deadline: float) -> bool:
+        thread = getattr(self, attribute)
+        if thread is None:
+            return True
+        thread.join(timeout=self._remaining_timeout(deadline))
+        if thread.is_alive():
+            self._shutdown_incomplete = True
+            logger.warning("TVAI %s did not exit before shutdown timeout", attribute[1:])
+            return False
+        setattr(self, attribute, None)
+        return True
+
+    def _kill_process(self, deadline: float) -> bool:
+        proc = self._proc
+        if proc is None:
+            return True
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=self._remaining_timeout(deadline))
+        except (OSError, subprocess.TimeoutExpired):
+            self._shutdown_incomplete = True
+            logger.warning("TVAI subprocess did not exit before shutdown timeout")
+            return False
+        self._proc = None
+        return True
+
+    def close_stdin_and_drain(self, timeout: float = 30.0) -> list[np.ndarray]:
+        if timeout < 0:
+            raise ValueError("timeout must be non-negative")
+        deadline = time.monotonic() + timeout
+        self.check_error()
+        self.drain_writes(timeout=self._remaining_timeout(deadline))
+        self._write_queue.put(None)
+        if not self._join_thread("_writer", deadline):
+            raise TimeoutError("TVAI writer did not exit after stdin close")
+        if self._proc is not None and self._proc.stdin is not None:
+            try:
+                self._proc.stdin.close()
+            except OSError:
+                pass
+        reader_stopped = self._join_thread("_reader", deadline)
+        stderr_stopped = self._join_thread("_stderr_reader", deadline)
+        if not reader_stopped or not stderr_stopped:
+            raise TimeoutError("TVAI reader did not exit after stdin close")
+        self.check_error()
+
+        frames: list[np.ndarray] = []
+        while True:
+            try:
+                f = self._frame_queue.get_nowait()
+                if f is None:
+                    break
+                frames.append(f)
+            except Empty:
+                break
+        return frames
 
     def drain_available(self) -> list[np.ndarray]:
         self.check_error()
@@ -186,56 +331,26 @@ class _TvaiWorker:
                 break
         return frames
 
-    def close_stdin_and_drain(self, timeout: float = 30.0) -> list[np.ndarray]:
-        self.check_error()
-        self.drain_writes()
-        self._write_queue.put(None)
-        if self._writer is not None:
-            self._writer.join(timeout=timeout)
-            self._writer = None
-        if self._proc is not None and self._proc.stdin is not None:
-            try:
-                self._proc.stdin.close()
-            except OSError:
-                pass
-        if self._reader is not None:
-            self._reader.join(timeout=timeout)
-        if self._stderr_reader is not None:
-            self._stderr_reader.join(timeout=timeout)
-            self._stderr_reader = None
-
-        frames: list[np.ndarray] = []
-        while True:
-            try:
-                f = self._frame_queue.get_nowait()
-                if f is None:
-                    break
-                frames.append(f)
-            except Empty:
-                break
-        return frames
-
-    def kill(self) -> None:
-        if self._proc is not None:
-            try:
-                self._proc.kill()
-            except OSError:
-                pass
-            self._proc.wait(timeout=5)
-            self._proc = None
-        if self._writer is not None:
-            self._write_queue.put(None)
-            self._writer.join(timeout=5)
-            self._writer = None
-        if self._reader is not None:
-            self._reader.join(timeout=5)
-            self._reader = None
-        if self._stderr_reader is not None:
-            self._stderr_reader.join(timeout=5)
-            self._stderr_reader = None
+    def kill(self, timeout: float = 5.0) -> bool:
+        """Bound cancellation shutdown and report whether every thread exited."""
+        if timeout < 0:
+            raise ValueError("timeout must be non-negative")
+        self._stop_event.set()
+        # Dropped work is valid only on cancellation.  It balances queued
+        # tasks so a later join cannot block forever.
+        self._write_queue.discard_pending()
+        self._write_queue.wake_all()
+        deadline = time.monotonic() + timeout
+        stopped = self._kill_process(deadline)
+        stopped = self._join_thread("_writer", deadline) and stopped
+        stopped = self._join_thread("_reader", deadline) and stopped
+        stopped = self._join_thread("_stderr_reader", deadline) and stopped
+        self._shutdown_incomplete = not stopped
+        return stopped
 
     def restart(self) -> None:
-        self.kill()
+        if not self.kill():
+            raise RuntimeError("TVAI worker did not exit before restart")
         self.start()
 
 
@@ -272,10 +387,22 @@ class TvaiSecondaryRestorer:
         self._completed: dict[int, list[np.ndarray]] = {}
         self._seq_lock = threading.Lock()
         self._worker_locks: list[threading.Lock] = []
+        self._cancel_event: threading.Event | None = None
+        self._shutdown_incomplete = False
 
     @property
     def preferred_queue_size(self) -> int:
         return 2
+
+    @property
+    def shutdown_incomplete(self) -> bool:
+        return self._shutdown_incomplete
+
+    def set_cancel_event(self, cancel_event: threading.Event | None) -> None:
+        """Share Pipeline cancellation with already-running TVAI workers."""
+        self._cancel_event = cancel_event
+        for worker in self._workers:
+            worker.set_cancel_event(cancel_event)
 
     def _validate_environment(self) -> None:
         data_dir = os.environ.get("TVAI_MODEL_DATA_DIR")
@@ -303,6 +430,7 @@ class TvaiSecondaryRestorer:
         max_write_frames = self._max_clip_size * 2
         for _ in range(self.num_workers):
             w = _TvaiWorker(cmd, self._out_frame_bytes, self._out_size, max_write_frames)
+            w.set_cancel_event(self._cancel_event)
             w.start()
             self._workers.append(w)
             self._worker_segments.append(deque())
@@ -406,8 +534,16 @@ class TvaiSecondaryRestorer:
             wi = self._least_pending_worker()
 
         with self._worker_locks[wi]:
-            self._worker_segments[wi].append(_ClipSegment(seq=seq, expected=n))
-            self._workers[wi].push_frames(frames_hwc)
+            segment = _ClipSegment(seq=seq, expected=n)
+            self._worker_segments[wi].append(segment)
+            try:
+                self._workers[wi].push_frames(frames_hwc)
+            except BaseException:
+                # A cancelled/failed push did not reach the worker queue, so
+                # it must not leave a phantom pending clip behind.
+                if self._worker_segments[wi] and self._worker_segments[wi][-1] is segment:
+                    self._worker_segments[wi].pop()
+                raise
         logger.debug("TVAI push seq=%d frames=%d -> worker %d", seq, n, wi)
         return seq
 
@@ -467,10 +603,22 @@ class TvaiSecondaryRestorer:
                 if not has_target:
                     continue
                 if segs and isinstance(segs[-1], _FillerSegment):
-                    segs[-1].remaining += self._pipeline_delay
+                    filler_segment = segs[-1]
+                    filler_segment.remaining += self._pipeline_delay
+                    appended = False
                 else:
-                    segs.append(_FillerSegment(remaining=self._pipeline_delay))
-                self._workers[wi].push_frames(filler)
+                    filler_segment = _FillerSegment(remaining=self._pipeline_delay)
+                    segs.append(filler_segment)
+                    appended = True
+                try:
+                    self._workers[wi].push_frames(filler)
+                except BaseException:
+                    if appended:
+                        if segs and segs[-1] is filler_segment:
+                            segs.pop()
+                    else:
+                        filler_segment.remaining -= self._pipeline_delay
+                    raise
                 flushed = True
                 logger.debug("TVAI flush_pending: pushed %d filler frames to worker %d (target_seqs=%s)", self._pipeline_delay, wi, target_seqs)
             finally:
@@ -486,8 +634,14 @@ class TvaiSecondaryRestorer:
         if deficit <= 0 or not self._has_pending_clips(wi):
             return
         filler = np.zeros((deficit, self._INPUT_SIZE, self._INPUT_SIZE, 3), dtype=np.uint8)
-        self._worker_segments[wi].append(_FillerSegment(remaining=deficit))
-        worker.push_frames(filler)
+        filler_segment = _FillerSegment(remaining=deficit)
+        self._worker_segments[wi].append(filler_segment)
+        try:
+            worker.push_frames(filler)
+        except BaseException:
+            if self._worker_segments[wi] and self._worker_segments[wi][-1] is filler_segment:
+                self._worker_segments[wi].pop()
+            raise
         logger.debug("TVAI flush_all: padded worker %d with %d filler frames (stream too short)", wi, deficit)
 
     def flush_all(self) -> None:
@@ -539,11 +693,28 @@ class TvaiSecondaryRestorer:
             batch = batch.to(device, non_blocking=True)
         return list(batch.unbind(0))
 
-    def close(self) -> None:
-        for w in self._workers:
-            w.kill()
+    def cancel(self, timeout: float = 5.0) -> bool:
+        """Stop workers after Pipeline cancellation without fabricating an error."""
+        if timeout < 0:
+            raise ValueError("timeout must be non-negative")
+        deadline = time.monotonic() + timeout
+        stopped = True
+        for worker in self._workers:
+            stopped = worker.kill(timeout=max(0.0, deadline - time.monotonic())) and stopped
+        self._shutdown_incomplete = not stopped
+        if not stopped:
+            logger.warning("TVAI cancellation left one or more worker threads alive")
+        return stopped
+
+    def close(self) -> bool:
+        stopped = self.cancel()
+        if not stopped:
+            # Keep ownership of live workers and their segment bookkeeping so
+            # a later bounded close()/cancel() can retry cleanup.
+            return False
         self._workers.clear()
         self._worker_segments.clear()
         self._worker_locks.clear()
         self._completed.clear()
         self._started = False
+        return stopped

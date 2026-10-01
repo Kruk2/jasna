@@ -93,12 +93,13 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | オフライン出力用の `hevc`、`h264`、`av1`。HLS ストリーミングは常に H.264 を使います。 |
-| `--cq` | GPU/コーデック別 | エンコーダーへそのまま渡す品質目標。低いほど高品質でファイルは大きくなります。NVIDIA のデフォルト: H.264 25、HEVC 28、AV1 35。AMD: H.264 24、HEVC 25、AV1 32。 |
+| `--cq` | GPU/コーデック別 | エンコーダーへそのまま渡す品質目標。低いほど高品質でファイルは大きくなります。NVIDIA のデフォルト: H.264 25、HEVC 28、AV1 35。AMD: H.264 24、HEVC 25、AV1 32。Linux AMD HEVC Smart Render はレート制御を明示しない場合、ソースのビットレートへ自動的に合わせます。 |
 | `--encoder-settings` | — | 高度な設定を JSON オブジェクトまたはカンマ区切りの `key=value` で指定。例: `{"rc-lookahead":32}` または `rc-lookahead=32,bf=4`。下記参照。 |
 | `--lut` | — | エンコード前に GPU で適用される `.cube` カラー LUT（1D または 3D）。GUI のエンコードセクションでも設定できます。 |
 | `--sharpen` | `0` | エンコード前に映像をシャープにします。`0`（無効）〜`1`（最強）。ffmpeg の `cas` フィルターと同じ結果になるため、再エンコードは不要です。詳しくは[高度な処理](advanced_processing.md)。 |
 | `--retarget-high-fps` | オフ | 1 フレームおきに処理して 60 → 30 FPS（および 59.94 → 29.97）に変換。他のレートは変更せず、音声のタイミングは維持されます。 |
 | `--fmp4` | オフ | 作成中の `.mp4` / `.mov` 出力をそのまま再生できます。中断してもファイルは再生可能なままです。`--stream` および `--segments` とは併用できません。詳しくは[高度な処理](advanced_processing.md)。 |
+| `--amd-dual-gop-encode` | オフ | Linux AMD の高解像度 HEVC 向けデュアルセッションエンコード。Main 8-bit/NV12 は 5760×2880 以上、Main10/P010 は 3840×2160 相当の画素数以上に対応します。2つの常駐 AMF セッションで閉じた GOP を交互に処理し、フル動画と Smart Render 区間処理に対応します。フル再エンコードは出力条件で判定し、Smart Render では互換性のある HEVC ソースも必要です。ソースレート自動制御が必須で、`--cq`、明示的なレート設定、`--retarget-high-fps`、`--fmp4` とは併用できません。CLI では明示的に有効化する必要があり、対象外の要求はエラーになります。 |
 | `--segments` | — | 選択した範囲だけを復元します。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4` とは併用できません。詳しくは[区間](segments.md)。 |
 | `--working-directory` | 出力ディレクトリ | 区間処理の一時ファイルの書き込み先。詳しくは[区間](segments.md)。 |
 
@@ -194,6 +195,22 @@ NVIDIA H.264 は復元されたディテールを保つためにより多くの�
 無効化できます。ソースがビットレートを一切報告しない場合、Jasna は警告を記録し、
 上限なしでエンコードします。
 
+この上限は `maxrate` を使用するレート制御モードにだけ適用されます。AMD HEVC の動画全体の
+エンコードは引き続き CQP がデフォルトです。Linux AMD HEVC Smart Render はレート制御を
+明示しない場合、ソースレート `vbr_peak` を自動使用します。target はソース映像ビットレート、
+peak は target の 1.25 倍、buffer は peak の 2 倍で、PreAnalysis は無効のままです。
+`JASNA_AMF_HEVC_VBR_PEAK=0` で以前の Smart Render CQP を再現できます。ソースのビットレート
+情報が利用できない場合は warning を記録して CQP を維持します。
+
+Linux AMD の 3840×2160 相当画素数以上の HEVC Main10/P010 出力では、AMF host-native
+入力を自動的に使用します。同期と blocking D2H は維持したまま、FFmpeg が完成済みの
+pinned host フレームを直接ラップし、AMF 所有 host surface への全フレーム再コピーを
+省きます。`JASNA_AMF_HOST_ZERO_COPY=0` で以前の PyAV AMF upload 経路に戻せます。
+`auto` または未設定の場合は Main10/P010 の `3840x2160` 相当画素数以上で自動的に有効です。
+Main 8-bit/NV12 は、5K の単一セッションで約 3.9% の差しかなかったため、対象となる
+デュアル GOP 要求に限り `5760x2880` 以上で使用します。上記の画素数未満、Windows、
+NVIDIA、H.264 出力、AV1 出力のデフォルトは変わりません。
+
 
 コーデック別の追加キー:
 
@@ -207,17 +224,17 @@ NVIDIA H.264 は復元されたディテールを保つためにより多くの�
 
 | キー | 説明 |
 | --- | ------------ |
-| `cq` | 数値を変更せず AMF の `qvbr_quality_level` として渡す品質目標。低いほど高品質。範囲は 0–51、デフォルトは 24（H.264）、25（HEVC）、32（AV1）。 |
+| `cq` | H.264/AV1 は AMF `qvbr_quality_level`、動画全体の HEVC は CQP に割り当てます（低いほど高品質で大容量）。範囲は 0–51、デフォルトは 24（H.264）、25（HEVC）、32（AV1）。Linux AMD H.264/HEVC Smart Render の自動経路は CQ の代わりにソースレート `vbr_peak` を使い、HEVC の CQP ロールバック経路では `CQ+2` を使います。 |
 | `qvbr_quality_level` | AMF ネイティブの別名。`--cq` を省略した場合は CLI の高度な設定で利用できますが、GUI のカスタム引数では利用できません。 |
 | `usage` | エンコーダーの用途プロファイル。デフォルト `high_quality`。 |
 | `quality` | 速度/品質プリセット: `speed`、`balanced`、`quality`（デフォルト）。 |
-| `rc` | レート制御モード。デフォルト `qvbr`。 |
+| `rc` | レート制御モード。H.264/AV1 は `qvbr`、動画全体の HEVC は `cqp` がデフォルトです。Linux AMD H.264/HEVC Smart Render はソースレート `vbr_peak` を使います。 |
 | `preset` | AMF プリセット。 |
 | `g` | キーフレーム間隔（フレーム数）。デフォルト 250。 |
 | `bf` | 連続 B フレームの最大数。 |
-| `preanalysis` | 事前分析パス。デフォルトで有効。 |
-| `vbaq` | 分散ベースの適応量子化。デフォルトで有効。 |
-| `maxrate` / `bufsize` | ビットレート上限と VBV バッファサイズ（bit/秒）。`maxrate` を指定しない限り、ソースのビットレートから自動設定されます。 |
+| `preanalysis` | 事前分析。H.264/AV1 はデフォルトで有効、HEVC CQP は無効です。 |
+| `vbaq` | 分散ベースの適応量子化。H.264 はデフォルトで有効、HEVC CQP は無効です。 |
+| `maxrate` / `bufsize` | ビットレート上限と VBV バッファサイズ（bit/秒）。ソースのビットレートから導出しますが、CQP は使用しません。 |
 | `profile` / `level` | コーデックのプロファイルとレベル。 |
 
 コーデック別の追加キー:

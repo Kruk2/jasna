@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import sys
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 from jasna.gui.models import AppSettings
@@ -59,6 +61,29 @@ def test_video_session_config_forwards_vr_projection() -> None:
     assert config.vr_projection == "gnomonic"
 
 
+def test_video_session_config_forwards_batch_size_one() -> None:
+    settings = replace(AppSettings(), batch_size=1)
+
+    with (
+        patch("jasna.engine_paths.model_weights_dir"),
+        patch(
+            "jasna.mosaic.detection_registry.coerce_detection_model_name",
+            side_effect=lambda name: name,
+        ),
+        patch(
+            "jasna.mosaic.detection_registry.require_detection_model_weights",
+            return_value=Path("det.engine"),
+        ),
+    ):
+        config = video_session_config(
+            settings,
+            codec="hevc",
+            encoder_settings={},
+        )
+
+    assert config.batch_size == 1
+
+
 def test_video_session_key_includes_active_secondary_knobs() -> None:
     tvai = replace(AppSettings(), secondary_restoration="tvai")
     assert video_session_key(replace(tvai, tvai_scale=2)) != video_session_key(tvai)
@@ -71,18 +96,52 @@ def test_video_session_key_includes_active_secondary_knobs() -> None:
 
 def _build(settings: AppSettings):
     compile_result = MagicMock(use_basicvsrpp_tensorrt=True)
-    with (
-        patch("jasna._suppress_noise.install"),
-        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=compile_result) as compiled,
-        patch("jasna.engine_paths.model_weights_dir"),
-        patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda n: n),
-        patch("jasna.mosaic.detection_registry.require_detection_model_weights") as det_path,
-        patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer") as restorer_cls,
-        patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as pipeline_cls,
-        patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,
-    ):
-        det_path.return_value = "det.engine"
-        session = build_video_session(settings, disable_basicvsrpp_tensorrt=False, log=lambda _msg: None)
+    restorer_module = ModuleType("jasna.restorer.basicvsrpp_mosaic_restorer")
+    restorer_cls = MagicMock(name="BasicvsrppMosaicRestorer")
+    restorer_module.BasicvsrppMosaicRestorer = restorer_cls
+    pipeline_module = ModuleType("jasna.restorer.restoration_pipeline")
+    pipeline_cls = MagicMock(name="RestorationPipeline")
+    pipeline_module.RestorationPipeline = pipeline_cls
+    unet_module = ModuleType("jasna.restorer.unet4x_secondary_restorer")
+    unet_cls = MagicMock(name="Unet4xSecondaryRestorer")
+    unet_module.Unet4xSecondaryRestorer = unet_cls
+    modules = {
+        "jasna.restorer.basicvsrpp_mosaic_restorer": restorer_module,
+        "jasna.restorer.restoration_pipeline": pipeline_module,
+        "jasna.restorer.unet4x_secondary_restorer": unet_module,
+    }
+    missing = object()
+    previous_modules = {name: sys.modules.get(name, missing) for name in modules}
+    sys.modules.update(modules)
+    try:
+        with (
+            patch("jasna._suppress_noise.install"),
+            patch("jasna.accelerator.is_amd_device", return_value=False),
+            patch(
+                "jasna.engine_compiler.ensure_engines_compiled",
+                return_value=compile_result,
+            ) as compiled,
+            patch("jasna.engine_paths.model_weights_dir"),
+            patch(
+                "jasna.mosaic.detection_registry.coerce_detection_model_name",
+                side_effect=lambda n: n,
+            ),
+            patch(
+                "jasna.mosaic.detection_registry.require_detection_model_weights"
+            ) as det_path,
+        ):
+            det_path.return_value = "det.engine"
+            session = build_video_session(
+                settings,
+                disable_basicvsrpp_tensorrt=False,
+                log=lambda _msg: None,
+            )
+    finally:
+        for name, previous in previous_modules.items():
+            if previous is missing:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
     return session, compiled, restorer_cls, pipeline_cls, unet_cls
 
 

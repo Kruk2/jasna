@@ -91,3 +91,13 @@ class TestProgressbarLifecycle:
         for _ in range(5):
             pb.update(1)
         assert "Speed:" in pb.tqdm.desc or "?" in pb.tqdm.desc
+
+
+def test_mark_completed_does_not_seed_speed_samples():
+    progress = Progressbar(total_frames=100, video_fps=30, disable=True)
+    try:
+        progress.mark_completed(25)
+        assert progress.frames_processed == 25
+        assert progress.frame_processing_durations_buffer == []
+    finally:
+        progress.close()

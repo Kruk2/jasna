@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
+import sys
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -57,17 +60,45 @@ def _build_session(
     amd: bool = False,
 ):
     compile_result = MagicMock(use_basicvsrpp_tensorrt=True)
+    basic_module = importlib.import_module(
+        "jasna.restorer.basicvsrpp_mosaic_restorer"
+    )
+    pipeline_module = importlib.import_module("jasna.restorer.restoration_pipeline")
+    tvai_cls = MagicMock(name="TvaiSecondaryRestorer")
+    unet_cls = MagicMock(name="Unet4xSecondaryRestorer")
+    rtx_cls = MagicMock(name="RtxSuperresSecondaryRestorer")
+
+    def stub_module(name: str, export: str, value) -> ModuleType:
+        module = ModuleType(name)
+        setattr(module, export, value)
+        return module
+
+    secondary_modules = {
+        "jasna.restorer.tvai_secondary_restorer": stub_module(
+            "jasna.restorer.tvai_secondary_restorer",
+            "TvaiSecondaryRestorer",
+            tvai_cls,
+        ),
+        "jasna.restorer.unet4x_secondary_restorer": stub_module(
+            "jasna.restorer.unet4x_secondary_restorer",
+            "Unet4xSecondaryRestorer",
+            unet_cls,
+        ),
+        "jasna.restorer.rtx_superres_secondary_restorer": stub_module(
+            "jasna.restorer.rtx_superres_secondary_restorer",
+            "RtxSuperresSecondaryRestorer",
+            rtx_cls,
+        ),
+    }
     with (
+        patch.dict(sys.modules, secondary_modules),
         patch("jasna.accelerator.is_amd_device", return_value=amd),
         patch(
             "jasna.engine_compiler.ensure_engines_compiled",
             return_value=compile_result,
         ) as compiled,
-        patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer") as restorer_cls,
-        patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as pipeline_cls,
-        patch("jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer") as tvai_cls,
-        patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,
-        patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer") as rtx_cls,
+        patch.object(basic_module, "BasicvsrppMosaicRestorer") as restorer_cls,
+        patch.object(pipeline_module, "RestorationPipeline") as pipeline_cls,
     ):
         session = build_restoration_session(
             config,
@@ -168,6 +199,8 @@ def test_build_pipeline_passes_through_config_and_session() -> None:
     config = _config(
         lut_path="lut.cube",
         retarget_high_fps=True,
+        auto_source_rate=True,
+        amd_dual_gop_encode=True,
         disable_progress=True,
         working_dir=Path("/scratch"),
         vr_projection="gnomonic",
@@ -179,6 +212,7 @@ def test_build_pipeline_passes_through_config_and_session() -> None:
         restoration_pipeline=MagicMock(),
         secondary_restorer=None,
     )
+    session.restoration_pipeline.restorer.use_tensorrt = True
     segments = (SegmentRange(1, 2),)
     splice_plan = MagicMock()
     progress_callback = MagicMock()
@@ -189,6 +223,7 @@ def test_build_pipeline_passes_through_config_and_session() -> None:
             session,
             Path("in.mp4"),
             Path("out.mp4"),
+            workspace_output=Path("canonical.mp4"),
             progress_callback=progress_callback,
             segments=segments,
             splice_plan=splice_plan,
@@ -219,9 +254,22 @@ def test_build_pipeline_passes_through_config_and_session() -> None:
     assert kwargs["progress_callback"] is progress_callback
     assert kwargs["lut_path"] == "lut.cube"
     assert kwargs["retarget_high_fps"] is True
+    assert kwargs["auto_source_rate"] is True
+    assert kwargs["amd_dual_gop_encode"] is True
     assert kwargs["segments"] == segments
     assert kwargs["splice_plan"] is splice_plan
     assert kwargs["working_dir"] == Path("/scratch")
+    assert kwargs["workspace_output"] == Path("canonical.mp4")
+    signature = kwargs["processing_signature"]
+    assert signature["device"] == "cuda:0"
+    assert signature["denoise_strength"] == "none"
+    assert signature["denoise_step"] == "after_primary"
+    assert signature["primary_tensorrt"] is True
+    assert signature["secondary_restoration"] == "none"
+    assert signature["secondary_restoration_settings"] == {}
+    assert signature["vr_projection"] == "gnomonic"
+    assert signature["auto_source_rate"] is True
+    assert signature["amd_dual_gop_encode"] is True
 
 
 def test_build_pipeline_defaults_optional_runtime_inputs() -> None:
@@ -240,3 +288,65 @@ def test_build_pipeline_defaults_optional_runtime_inputs() -> None:
     assert kwargs["progress_callback"] is None
     assert kwargs["segments"] is None
     assert kwargs["splice_plan"] is None
+
+
+@pytest.mark.parametrize(
+    ("config", "expected"),
+    [
+        (
+            _config(
+                secondary_restoration="tvai",
+                tvai_ffmpeg_path="custom-ffmpeg",
+                tvai_model="iris-x",
+                tvai_scale=2,
+                tvai_args="noise=3",
+                tvai_denoise=True,
+            ),
+            {
+                "ffmpeg_path": "custom-ffmpeg",
+                "model": "iris-x",
+                "scale": 2,
+                "args": "noise=3",
+                "denoise": True,
+                "workers": 2,
+            },
+        ),
+        (
+            _config(secondary_restoration="unet-4x", fp16=True),
+            {"fp16": True},
+        ),
+        (
+            _config(
+                secondary_restoration="rtx-super-res",
+                rtx_scale=2,
+                rtx_quality="ultra",
+                rtx_denoise="low",
+                rtx_deblur="high",
+            ),
+            {
+                "scale": 2,
+                "quality": "ultra",
+                "denoise": "low",
+                "deblur": "high",
+            },
+        ),
+    ],
+)
+def test_build_pipeline_signs_active_secondary_restoration_settings(
+    config: SessionConfig,
+    expected: dict[str, object],
+) -> None:
+    session = RestorationSession(
+        device=MagicMock(),
+        detection_model_name="rfdetr-v5",
+        detection_model_path=Path("det.onnx"),
+        restoration_pipeline=MagicMock(),
+        secondary_restorer=MagicMock(),
+    )
+
+    with patch("jasna.pipeline.Pipeline") as pipeline_cls:
+        build_pipeline(config, session, Path("in.mp4"), Path("out.mp4"))
+
+    signature = pipeline_cls.call_args.kwargs["processing_signature"]
+    assert signature["secondary_restoration"] == config.secondary_restoration
+    assert signature["secondary_restoration_settings"] == expected

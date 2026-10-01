@@ -93,12 +93,13 @@ jasna --input input_folder --output output_folder
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | 离线输出可选 `hevc`、`h264` 或 `av1`。HLS 流媒体始终使用 H.264。 |
-| `--cq` | 根据 GPU/编解码器 | 原样传给编码器的质量目标。越低质量越好、文件越大。NVIDIA 默认值：H.264 25、HEVC 28、AV1 35；AMD 默认值：H.264 24、HEVC 25、AV1 32。 |
+| `--cq` | 根据 GPU/编解码器 | 原样传给编码器的质量目标。越低质量越好、文件越大。NVIDIA 默认值：H.264 25、HEVC 28、AV1 35；AMD 默认值：H.264 24、HEVC 25、AV1 32。Linux AMD HEVC Smart Render 在未显式配置码率控制时会自动匹配源码率。 |
 | `--encoder-settings` | — | JSON 对象或逗号分隔的高级 `key=value` 设置，例如 `{"rc-lookahead":32}` 或 `rc-lookahead=32,bf=4`。见下文。 |
 | `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），编码前由 GPU 应用。也可在 GUI 的编码设置部分设置。 |
 | `--sharpen` | `0` | 编码前锐化画面，取值 `0`（关闭）到 `1`（最强）。与 ffmpeg 的 `cas` 滤镜一致，无需二次转码。见[高级处理](advanced_processing.md)。 |
 | `--retarget-high-fps` | 关闭 | 通过每两帧处理一帧实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频时序保持不变。 |
 | `--fmp4` | 关闭 | `.mp4`/`.mov` 输出在生成过程中即可播放，任务中断后仍可播放。不能与 `--stream` 或 `--segments` 同时使用。见[高级处理](advanced_processing.md)。 |
+| `--amd-dual-gop-encode` | 关闭 | Linux AMD 高分辨率 HEVC 双会话编码：Main 8-bit/NV12 至少 5760×2880，Main10/P010 至少达到 3840×2160 等效像素量。两个持久 AMF 会话交替编码封闭 GOP，支持完整视频和 Smart Render 区间。全片重编码按输出格式判断；Smart Render 还要求兼容的 HEVC 源码流。强制自动源码率；不能与 `--cq`、显式码率设置、`--retarget-high-fps` 或 `--fmp4` 同时使用。CLI 必须显式开启且不符合范围时直接报错。 |
 | `--segments` | — | 只修复选定区间，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps` 或 `--fmp4` 同时使用。见[区间](segments.md)。 |
 | `--working-directory` | 输出目录 | 区间临时文件的写入位置。见[区间](segments.md)。 |
 
@@ -186,6 +187,19 @@ NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码�
 自行指定 `maxrate` 即可替换；设为很大的值可实际停用。若源完全没有报告码率，Jasna 会
 记录警告并在无上限的情况下编码。
 
+该上限只适用于会执行 `maxrate` 的码率控制模式。AMD HEVC 完整视频编码仍默认使用 CQP。
+Linux AMD HEVC Smart Render 在没有显式码率控制设置时会自动使用源码率 `vbr_peak`：target 为
+源视频码率，peak 为 target 的 1.25 倍，buffer 为 peak 的 2 倍，PreAnalysis 保持关闭。
+设置 `JASNA_AMF_HEVC_VBR_PEAK=0` 可复现旧 Smart Render CQP；源码率元数据不可用时会记录
+warning 并保留 CQP。
+
+Linux AMD 达到 3840×2160 等效像素量的 HEVC Main10/P010 输出会自动使用 AMF host-native 输入：
+Jasna 保留同步和 blocking D2H，但让 FFmpeg 直接包装完整的 pinned host 帧，避免再复制一遍
+整帧到 AMF 自有 host surface。`JASNA_AMF_HOST_ZERO_COPY=0` 可回退旧 PyAV AMF upload 路线；
+`auto` 或不设置时，Main10/P010 从 `3840×2160` 等效像素量起自动启用；Main 8-bit/NV12
+只有在合格的双 GOP 请求中才从 `5760×2880` 起启用，因为 5K 单会话实测仅快约 3.9%。
+低于上述像素门槛的分辨率、Windows、NVIDIA、H.264 和 AV1 输出默认不变。
+
 
 各编解码器额外参数:
 
@@ -199,17 +213,17 @@ NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码�
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | 数值不变、作为 AMF `qvbr_quality_level` 传递的质量目标。越低越好。范围 0–51；默认 24（H.264）、25（HEVC）、32（AV1）。 |
+| `cq` | H.264/AV1 映射到 AMF `qvbr_quality_level`；完整视频 HEVC 映射到 CQP（越低质量越高、文件越大）。范围 0–51；默认 24（H.264）、25（HEVC）、32（AV1）。Linux AMD 的 H.264/HEVC Smart Render 自动路线改用源码率 `vbr_peak`，不使用 CQ；HEVC 回退 CQP 路线使用 `CQ+2`。 |
 | `qvbr_quality_level` | AMF 原生别名。省略 `--cq` 时可用于 CLI 高级设置；GUI 自定义参数中不接受。 |
 | `usage` | 编码器用途配置。默认 `high_quality`。 |
 | `quality` | 速度/质量预设: `speed`、`balanced`、`quality`（默认）。 |
-| `rc` | 码率控制模式。默认 `qvbr`。 |
+| `rc` | 码率控制模式。H.264/AV1 默认 `qvbr`，完整视频 HEVC 默认 `cqp`；Linux AMD H.264/HEVC Smart Render 使用源码率 `vbr_peak`。 |
 | `preset` | AMF 预设。 |
 | `g` | 关键帧间隔（帧数）。默认 250。 |
 | `bf` | 最大连续 B 帧数。 |
-| `preanalysis` | 预分析，默认开启。 |
-| `vbaq` | 基于方差的自适应量化，默认开启。 |
-| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。除非指定 `maxrate`，否则会根据源码率自动设置。 |
+| `preanalysis` | 预分析。H.264/AV1 默认开启；HEVC CQP 默认关闭。 |
+| `vbaq` | 基于方差的自适应量化。H.264 默认开启；HEVC CQP 默认关闭。 |
+| `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。会根据源码率自动设置，但 CQP 模式不使用该上限。 |
 | `profile` / `level` | 编解码器 profile 和 level。 |
 
 各编解码器额外参数:

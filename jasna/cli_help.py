@@ -35,7 +35,9 @@ CLI_HELP: dict[str, str] = {
     "cq": (
         "Literal encoder quality target passed unchanged. Lower values improve "
         "quality and increase file size. NVIDIA defaults: H.264 25, HEVC 28, "
-        "AV1 35; AMD defaults: H.264 24, HEVC 25, AV1 32."
+        "AV1 35; AMD defaults: H.264 24, HEVC 25, AV1 32. Linux AMD HEVC "
+        "Smart Render instead matches the source bitrate unless rate control "
+        "is explicitly configured."
     ),
     "encoder_settings": 'Advanced encoder settings, as a JSON object or comma-separated key=value pairs (e.g. {"rc-lookahead":32} or rc-lookahead=32,bf=4)',
     "post_export_action": "Action to run after all non-streaming exports finish.",
