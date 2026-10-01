@@ -1,243 +1,134 @@
 # Running from Source
 
-This page is for developers. If you just want to use Jasna, download a
-release package instead — it bundles everything, including its own
-Python/Tk runtime, `ffmpeg`, and `ffprobe`.
+This page is for developers. To just use Jasna, download a release package: it
+bundles its own Python/Tk runtime, `ffmpeg` and `ffprobe`.
 
-Python requirement from `pyproject.toml`: **Python 3.12 or newer** (the
-examples below use 3.13, which is what release builds ship).
+The public checkout has no protection module: free models work from source,
+supporter-only models such as **unet-4x** and **SD 1.5 image restoration** do
+not.
 
-On Linux, create the venv from a distribution-provided Python whose matching Tk package
-uses Xft/fontconfig. Avoid a downloaded standalone Python that reports a `no-xft` Tk build;
-it reduces all GUI text and CustomTkinter shapes to the legacy bitmap `fixed` font. For
-example, when `/usr/bin/python3.13` is supplied by your distribution:
+## Requirements
+
+- Python **3.12+** (releases ship 3.13 on NVIDIA, 3.12 on AMD).
+- `ffmpeg` and `ffprobe` **8** on `PATH`.
+- libVLC 3 for GUI player audio (Ubuntu: `libvlc5 vlc-plugin-base`).
+- Optional, NVIDIA: a `python_vali` wheel built from
+  <https://codeberg.org/Kruk2/vali> (needs CUDA 13, `cmake`, `ninja`; on
+  Windows also VS Build Tools 2022 with C++). Without that fork the decoder
+  falls back to PyAV for every video.
+
+## NVIDIA
+
+Create the venv from your distribution's Python, whose Tk uses Xft. A
+standalone Python with a `no-xft` Tk renders every GUI font as bitmap `fixed`.
 
 ```bash
 uv venv --python /usr/bin/python3.13 --no-managed-python --no-python-downloads .venv
 source .venv/bin/activate
-python -c "import tkinter; root = tkinter.Tk(); print(root.tk.call('info', 'patchlevel')); root.destroy()"
+uv pip install -e ".[nvidia,dev]" --extra-index-url https://download.pytorch.org/whl/cu130
 ```
 
-Ubuntu 22.04 does not provide Python 3.13 in its base repositories, so source development
-there needs a separately installed or source-built Python 3.13 linked to the system `tk-dev`
-and `libxft-dev`. This does not affect the prebuilt Linux release, which bundles its own
-compatible Python/Tk runtime.
+Ubuntu 22.04 has no Python 3.13 package; build one against `tk-dev` and
+`libxft-dev`.
 
-The public source checkout does not include the protection module. Running from source is fine for development and free models, but supporter-only models such as **unet-4x** and **SD 1.5 image restoration** will not be available from a plain source checkout.
+On Windows (NVIDIA), run the same `uv pip install` line in a Python 3.13 venv.
 
-Install runtime dependencies for the active vendor:
+## AMD (ROCm 10.0)
 
-```bash
-# NVIDIA (CUDA 13 wheels)
-uv pip install ".[nvidia]" --extra-index-url https://download.pytorch.org/whl/cu130
+Linux: work inside the `rocm/pytorch` ROCm 10.0 image (torch comes from the
+image), then `uv pip install -e ".[amd,dev]"`.
 
-# AMD Linux (inside the rocm/pytorch ROCm 10.0 image; torch/torchvision+rocm come
-# from the image)
-uv pip install ".[amd]"
-```
-
-**AMD Windows** (ROCm 10.0.0 — Python 3.12, Adrenalin ≥ 26.8.1). Install torch and
-torchvision from AMD's ROCm index FIRST, with the GPU kernel packs the release
-ships, so pip cannot silently replace them with the CPU `torch==2.12.0` from PyPI
-when a later dependency (rfdetr, …) pulls torch — that swap is the usual cause of
-a "non-ROCm torch/torchvision" env:
+Windows (Python 3.12, Adrenalin 26.8.1 or newer): install torch from AMD's
+index **first**, otherwise a later dependency pulls the CPU torch from PyPI:
 
 ```powershell
 $I = "https://stable.repo.amd.com/rocm/whl-next/"
 $D = "device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1150,device-gfx1151,device-gfx1200,device-gfx1201"
 pip install --index-url $I "torch[$D]==2.12.0+rocm10.0.0" "torchvision[$D]==0.27.0+rocm10.0.0"
-# then the remaining AMD deps (torch/torchvision above already satisfy the pins)
-uv pip install ".[amd]"
+uv pip install -e ".[amd,dev]"
 ```
 
-Adding a GPU target means adding its `device-gfx*` extra here and keeping it in
-the `Dockerfile.amd` keep-list, so both OSes ship the same targets.
-
-The `rocm_sdk_core` / `rocm_sdk_libraries` / `rocm_sdk_device_gfx*` wheels are the
-ROCm runtime itself, and torch's own GPU kernels sit in `torch/.kpack`.
-`import torch` reaches the runtime through `rocm_sdk`, which resolves the package
-name at call time, so Nuitka sees no import and bundles nothing — both AMD release
-builds copy the wheel trees into the dist verbatim and then assert that every
-library torch preloads resolves there. Without that, the frozen app dies at startup
-with `UnboundLocalError: cannot access local variable 'py_module'` (upstream
-`rocm_sdk.find_libraries` reports an absent payload package that way).
-
-Verify ROCm actually stuck on either OS (the Linux Docker build asserts the same):
+Check that ROCm stuck (an unsatisfiable torch pin makes uv silently install the
+CUDA build, which breaks RF-DETR):
 
 ```bash
-python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK', torch.__version__, torchvision.__version__)"
+python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK')"
 ```
 
-`jasna[amd]` pins `torch==2.12.0` and `torchvision==0.27.0` as plain versions, which
-the ROCm wheels (`2.12.0+rocm10.0.0`, `0.27.0+rocm10.0.0`) satisfy on both OSes. A
-pin no ROCm wheel satisfies makes pip/uv silently install the PyPI CUDA build,
-which breaks `torchvision.ops.nms` (and with it RF-DETR) at runtime. The
-ROCm-build assertion above is the fail-loud guard on top.
+A new GPU target needs its `device-gfx*` extra above and in the
+`Dockerfile.amd` keep-list.
 
-For Nvidia library builds, you also need:
+AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
+(software decode when AMF can't). Secondary restoration is NVIDIA-only.
+`--device cuda:N` picks the GPU, but FFmpeg 8's Linux AMF ignores the adapter,
+so isolate the GPU at the container or host level on multi-GPU machines.
 
-- VS Build Tools 2022 with C++ support.
-- CUDA 13.0 installed on the system.
-- `cmake` and `ninja`:
+## Run
 
 ```bash
-uv pip install cmake ninja
+python -m jasna                                    # GUI
+python -m jasna --input in.mp4 --output out.mp4    # CLI (see docs/en/cli.md)
 ```
 
-Developer setup also requires:
+`JASNA_DECODE_BACKEND=vali|pyav-hw|pyav-sw` forces a decoder; the default
+`auto` prefers VALI on NVIDIA.
 
-- `ffmpeg` and `ffprobe` on `PATH`; `ffmpeg` major version must be **8**.
-- libVLC 3 installed for GUI player audio. The Python binding is installed
-  from `pyproject.toml`; on Ubuntu install `libvlc5` and `vlc-plugin-base`.
-- Optional: a `python_vali` wheel built from <https://codeberg.org/Kruk2/vali>. Only that
-  fork has `DecodeSingleSurfaceAsyncDetailed` and its corrupt-packet tolerance, which the
-  VALI decode backend needs; with the stock PyPI wheel the reader falls back to PyAV for
-  every video.
-
-Set `JASNA_DECODE_BACKEND` to `vali`, `pyav-hw`, or `pyav-sw` to force a
-decoder backend. The default is `auto`, which prefers VALI on NVIDIA and falls
-back to PyAV.
-
-Then install Jasna in editable mode:
+## Tests
 
 ```bash
-uv pip install -e ".[nvidia,dev]"  # or .[amd,dev]
+python -m pytest
 ```
+
+GUI tests need a screen; on a headless or locked desktop run them under
+`xvfb-run -a`. GPU tests need the matching GPU.
 
 ## CUDA kernels
 
-`jasna/media/*.cu` are compiled ahead of time into `.fatbin` files that are
-committed alongside them, and loaded at run time through the CUDA driver API
-(`jasna/media/cuda_kernel.py`). No CUDA toolkit is needed to *run* Jasna — only
-to rebuild a kernel after editing its `.cu`:
+`jasna/media/*.cu` are prebuilt into the committed `.fatbin` files next to
+them, so running Jasna needs no CUDA toolkit. After editing a `.cu`, rebuild
+with CUDA 13 and `g++-15` (override with `CCBIN=`):
 
 ```bash
 scripts/build_fatbins.sh        # every kernel
 scripts/build_fatbins.sh cas    # just jasna/media/cas.cu
 ```
 
-That script runs, for each `.cu`:
-
-```bash
-GENCODE="-gencode arch=compute_75,code=[compute_75,sm_75]"
-for arch in 80 86 87 88 89 90 100 103 110 120 121; do
-    GENCODE="$GENCODE -gencode arch=compute_$arch,code=sm_$arch"
-done
-nvcc -ccbin g++-15 -std=c++17 -O3 -fatbin $GENCODE \
-    -o jasna/media/cas.fatbin jasna/media/cas.cu
-```
-
-`-ccbin g++-15` is needed because CUDA 13 rejects newer host compilers (override
-with `CCBIN=`). PTX is embedded for `compute_75` only, so future architectures
-still load via JIT. The script prints each fatbin's size and architecture list;
-`cuobjdump -lelf jasna/media/cas.fatbin` shows the detail. Add any new fatbin to
-the release packaging configuration so frozen
-builds bundle it.
-
-Every kernel needs a Torch equivalent: ROCm has no fatbin path and falls back to
-it, and the unit tests use it as the reference implementation.
+Add a new fatbin to the release packaging configuration. Every kernel needs a Torch
+equivalent: ROCm uses it, and the tests use it as the reference.
 
 ## Benchmarks
 
-Run by the maintainer only, on an otherwise idle GPU — anything else on the
-card makes the numbers incomparable. The suite is deliberately small: **one
-input per resolution plus the 8K VR clip**, all H.264 8-bit.
+Run by the maintainer only, on an otherwise idle GPU. Inputs live in the
+gitignored `assets/benchmark/`. Write results to
+`benchmarks/<date>_<topic>.{csv,md}` and never edit an old CSV.
+
+The release suite is one H.264 input per resolution plus the 8K VR clip,
+median of three runs, with `--max-clip-size 180 --temporal-overlap 15
+--secondary-restoration none`. Add `--codecs` (HEVC 10-bit and AV1) when the
+change touches decode, encode or pixel formats; H.264 hides decode differences.
 
 ```bash
-scripts/run_benchmarks.sh benchmarks/scratch            # ~8 min
-scripts/run_benchmarks.sh benchmarks/scratch --codecs   # + HEVC 10-bit and AV1
-scripts/run_benchmarks.sh benchmarks/scratch --scan     # + the GUI mosaic scan
-```
-
-It discards a warmup run, then reports the median of three per clip with RAM and
-per-process VRAM sampled throughout (`scripts/bench_memory.py`). Fixed settings:
-`--max-clip-size 180 --temporal-overlap 15 --secondary-restoration none`.
-
-Why only H.264 by default: across five release steps a HEVC-10-bit or AV1
-encoding of the same resolution never disagreed in sign with its H.264 sibling,
-because the model sees identical 256² crops whatever the container held. H.264
-also has the cheapest decode, so it hides the least of whatever changed
-downstream. The other encodings do carry the decode-path signal — H.264 is
-nearly flat across decode backends while AV1 and HEVC 10-bit spread ~19 % — so
-pass `--codecs` when the change is in decode, encode or pixel-format code.
-
-LTX denoise (about 80 % of an LTX run) has its own script. It uses the trial's
-random weights, which run at the same speed as the real model:
-
-```bash
+scripts/run_benchmarks.sh benchmarks/scratch [--codecs] [--scan]       # ~8 min
 P=~/.virtualenvs/jasna-linux/bin/python
-$P scripts/benchmark_ltx_denoise.py --model undistilled --csv benchmarks/scratch/ltx.csv  # ~8 min
-$P scripts/benchmark_ltx_denoise.py --fast --canvas 768 --csv benchmarks/scratch/ltx.csv
-$P scripts/benchmark_ltx_denoise.py --profile        # kernel-time split of one step
-$P scripts/benchmark_ltx_denoise.py --fresh-cache    # time autotuning on an empty cache
-$P scripts/benchmark_ltx_denoise.py --inductor force_fuse_int_mm_with_mul=True --label fuse
+$P scripts/benchmark_decode_backends.py --backends vali pyav-hw pyav-sw   # e2e per decoder
+$P scripts/benchmark_scan_backends.py --backends vali                     # GUI mosaic scan
+$P scripts/benchmark_releases.py --release v0.9.0=/path/to/jasna --source HEAD=. --workdir WORKDIR/releases --csv out.csv
+$P scripts/benchmark_lada_flatpak.py --workdir WORKDIR/lada --csv out.csv   # Lada baseline
+$P scripts/benchmark_ltx_denoise.py --model undistilled --csv out.csv    # LTX denoise, trial weights
+$P scripts/benchmark_ltx_decode.py --variants shipped,kitchen,eager      # LTX VAE decode
+$P scripts/benchmark_na3d.py                                             # Triton NA kernel
 ```
 
-It reports seconds per window and per window-step (the median of `--repeats`),
-the compile time and the peak VRAM.
+`scripts/bench_memory.py` is the RAM/VRAM sampler the others share.
 
-The DiffVAE decode of one window (compose pass) has its own script too; variants
-swap parts of the shipped path and report the pixel difference to the first one:
+## Release checklist
 
-```bash
-$P scripts/benchmark_ltx_decode.py --canvas 768 --budget-gib 24   # whole-video tile budget
-$P scripts/benchmark_ltx_decode.py --variants shipped,kitchen,eager --model-dir model_weights/ltx-restore
-$P scripts/benchmark_na3d.py                                    # Triton NA kernel vs comfy-kitchen per shape
-$P scripts/benchmark_ltx_decode.py --split                        # time per decoder stage
-```
-
-Every finished LTX run also stores its warm speed in `model_weights/ltx-speed-profile.json`
-(`jasna/ltx/speed.py`), keyed by Jasna version, GPU and transformer file: per pass a
-fixed part plus seconds per frame-megapixel and per window of each canvas. The next run
-with the same key shows its time left from the end of the scan. Delete the file to
-forget it; the profile is not a benchmark record.
-
-Write results to `benchmarks/<date>_<topic>.{csv,md}` and keep old CSVs intact —
-the README tables are a summary that drops releases where nothing moved, so the
-CSVs are the only full record. `scripts/benchmark_releases.py` compares frozen
-release archives instead of the working tree, and
-`scripts/benchmark_lada_flatpak.py` refreshes the Lada baseline column.
-
-## Release licensing checklist
-
-Before publishing any platform archive:
-
-1. Set the same version in `pyproject.toml`, `jasna/__init__.py`, the git tag,
-   and `RELEASE_SOURCES.md`.
-2. Confirm `RELEASE_SOURCES.md` matches the PyAV, VALI, FFmpeg, Python, and
-   protection revisions used by the build.
-3. Verify the unpacked package contains `LICENSE`, `LICENSING.md`, `NOTICE`,
-   `RELEASE_SOURCES.md`, `assets/THIRD_PARTY_*.md`, and `licenses/`.
-4. Recalculate every bundled model hash and compare it with
-   `assets/THIRD_PARTY_MODELS.md`.
-5. Upload every archive part **and** its generated `.sha256` file to the same
-   GitHub release.
-
-The release builder copies maintained license texts plus the license files
-from all installed Python distributions. The public VALI fork is the source
-for Jasna's modified `python_vali` wheel.
-
-## AMD release builds
-
-These scripts live in the private protection submodule and are for the
-maintainer's release environment — they are not available in the public
-checkout:
+1. Same version in `pyproject.toml`, `jasna/__init__.py`, the git tag and
+   `RELEASE_SOURCES.md`; that file must match the PyAV, VALI, FFmpeg, Python
+   and protection revisions used by the build.
+2. The unpacked package contains `LICENSE`, `LICENSING.md`, `NOTICE`,
+   `RELEASE_SOURCES.md`, `assets/THIRD_PARTY_*.md` and `licenses/`.
+3. Every bundled model hash matches `assets/THIRD_PARTY_MODELS.md`.
+4. Upload every archive part **and** its `.sha256` to the same GitHub release.
 
 Release archives use maintainer-only packaging tools.
-
-The AMD build uses PyTorch/ROCm for BasicVSR++, YOLO and RF-DETR, and AMF for
-H.264/HEVC/AV1 decode and encode. RF-DETR runs the trained checkpoint through the
-`rfdetr` torch model (`rfdetr==1.8.3` on `transformers==5.1.0`, bundled as
-`rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
-per-model engine precompile step. NVIDIA builds keep the ONNX → TensorRT path
-(`rfdetr-v6.onnx`). Decode falls back to FFmpeg software decoding when AMF cannot
-handle the source. Segment smart rendering works on AMF; H.264 sources with
-more than three consecutive B-frames are fully re-encoded there, with
-restoration still limited to the selected ranges. Secondary restoration remains
-NVIDIA-only.
-
-`--device cuda:N` selects the PyTorch GPU (ROCm reuses the CUDA device API).
-FFmpeg 8's Linux AMF device context currently ignores its adapter
-argument, so AMF decode/encode can use the default Vulkan adapter on a multi-GPU
-AMD host. Isolate the target GPU at the container/host level when deterministic
-AMF adapter selection matters.
