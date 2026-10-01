@@ -42,11 +42,11 @@ def unpatchify(tokens: torch.Tensor, frames: int, height: int, width: int) -> to
 def fuse_overlaps(latents: Sequence[torch.Tensor], tokens_per_frame: int, right_weights: Sequence[float]) -> None:
     """Write the weighted mean of each consecutive pair's shared latent frames into both,
     in place. All-zero weights copy the earlier window into the later one."""
+    weight = torch.tensor(right_weights, dtype=torch.float32).repeat_interleave(tokens_per_frame).view(1, -1, 1)
+    weight = weight.to(latents[0].device, non_blocking=True)
     for left, right in zip(latents, latents[1:]):
         a = left[:, LEFT_SHARED_LATENTS.start * tokens_per_frame : LEFT_SHARED_LATENTS.stop * tokens_per_frame]
         b = right[:, RIGHT_SHARED_LATENTS.start * tokens_per_frame : RIGHT_SHARED_LATENTS.stop * tokens_per_frame]
-        weight = torch.tensor(right_weights, dtype=torch.float32, device=a.device)
-        weight = weight.repeat_interleave(tokens_per_frame).view(1, -1, 1)
         fused = (a.float() * (1.0 - weight) + b.float() * weight).to(a.dtype)
         a.copy_(fused)
         b.copy_(fused)
@@ -90,6 +90,7 @@ class LtxTransformer:
         logger.info("LTX self-attention: %s", "INT8 (comfy-kitchen)" if T.enable_int8_attention(device) else "SDPA")
         logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
         self._block_forward = compiled_block_forward()
+        self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
 
     def _resident_blocks(self, blocks: list[dict[str, torch.Tensor]]) -> int:
         sizes = [sum(t.numel() * t.element_size() for t in b.values()) for b in blocks]
@@ -139,7 +140,7 @@ class LtxTransformer:
             latents.append(noise[:, :tokens].clone())
         fuse_overlaps(latents, tokens_per_frame, [0.0] * len(FUSION_RAMP))
         group = self._group_size(len(latents), 2 * tokens)
-        sigmas = self.sigmas.to(self.device)
+        sigmas = self.sigmas
         for step, cond in enumerate(self.conditions):
             for start in range(0, len(latents), group):
                 members = range(start, min(start + group, len(latents)))
@@ -165,13 +166,14 @@ class LtxTransformer:
         perturbed: list[torch.Tensor | None] = [None] * len(xs)
         for index in range(T.NUM_BLOCKS):
             weights = self.blocks.acquire(index)
+            prompt = self._prompt_key_value(weights, cond, self.context)
             for j in range(len(xs)):
                 if self.stg_scale and index >= STG_BLOCK:
                     source = xs[j] if index == STG_BLOCK else perturbed[j]
                     perturbed[j] = self._block_forward(
-                        weights, source, cond, self.context, rope, skip_self_attention=index == STG_BLOCK
+                        weights, source, cond, prompt, rope, skip_self_attention=index == STG_BLOCK
                     )
-                xs[j] = self._block_forward(weights, xs[j], cond, self.context, rope)
+                xs[j] = self._block_forward(weights, xs[j], cond, prompt, rope)
             self.blocks.release(index)
         out = []
         for lat, x, xp in zip(latents, xs, perturbed):
@@ -193,6 +195,7 @@ def compiled_block_forward():
 
 
 def _euler(sample: torch.Tensor, denoised: torch.Tensor, sigmas: torch.Tensor, step: int) -> torch.Tensor:
+    """One Euler step; ``sigmas`` stays on the CPU so its scalars reach the kernels without a device sync."""
     sigma = sigmas[step]
     velocity = ((sample.float() - denoised.float()) / sigma.item()).to(sample.dtype)
     return (sample.float() + velocity.float() * (sigmas[step + 1] - sigma)).to(sample.dtype)

@@ -92,5 +92,6 @@ def test_placeholder_block_runs_on_the_gpu(fast):
     cond = T.step_conditioning(top, 0.5, device)
     rope = T.build_rope(2, 4, 4, dim=4096, heads=T.HEADS, device=device)
     tokens = torch.randn(1, 64, 128, device=device, dtype=torch.bfloat16)
-    x = T.block_forward(block, T.embed_tokens(top, tokens, 16), cond, top["prompt_context"], rope)
+    prompt = T.prompt_key_value(block, cond, top["prompt_context"])
+    x = T.block_forward(block, T.embed_tokens(top, tokens, 16), cond, prompt, rope)
     assert torch.isfinite(T.velocity(top, x, cond).float()).all()

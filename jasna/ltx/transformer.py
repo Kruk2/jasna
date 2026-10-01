@@ -529,64 +529,75 @@ def _gate(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
     return (x.unflatten(1, (2, -1)) * gate[:, :, None]).flatten(1, 2)
 
 
-def _attention(
-    w: Weights,
-    prefix: str,
-    x: torch.Tensor | QuantizedRows,
-    context: torch.Tensor | QuantizedRows,
-    rope: Rope | None,
-    heads: int,
-    *,
-    skip: bool,
-) -> torch.Tensor:
-    """Gated attention output before its ``to_out.0`` projection; NVFP4 Q/K/V projections of
-    one input share its quantization."""
-    kv_in = _shared_fp4_input(w, f"{prefix}.to_v", context)
-    v = linear(w, f"{prefix}.to_v", kv_in)
+def _heads(x: torch.Tensor, heads: int) -> torch.Tensor:
+    """``[1, tokens, heads*d]`` -> ``[1, heads, tokens, d]``."""
+    return x.unflatten(-1, (heads, -1)).transpose(1, 2)
+
+
+def _gated(w: Weights, prefix: str, x: torch.Tensor | QuantizedRows, out: torch.Tensor, heads: int) -> torch.Tensor:
+    """Attention output ``[1, tokens, D]`` times the per-head gates read from ``x``."""
+    gates = 2.0 * torch.sigmoid(linear(w, f"{prefix}.to_gate_logits", x))
+    return (out.unflatten(-1, (heads, -1)) * gates.unsqueeze(-1)).flatten(2)
+
+
+def _self_attention(w: Weights, x: torch.Tensor | QuantizedRows, rope: Rope, heads: int, *, skip: bool) -> torch.Tensor:
+    """Gated video self-attention output before its ``to_out.0`` projection; NVFP4 Q/K/V
+    projections share one quantization of ``x``."""
+    qkv_in = _shared_fp4_input(w, "attn1.to_v", x)
+    v = linear(w, "attn1.to_v", qkv_in)
     if skip:
         out = v
     else:
-        q_in = kv_in if x is context else x
-        q = rms_norm(linear(w, f"{prefix}.to_q", q_in), w[f"{prefix}.q_norm.weight"])
-        k = rms_norm(linear(w, f"{prefix}.to_k", kv_in), w[f"{prefix}.k_norm.weight"])
-        if rope is not None:
-            q, k = _apply_rope(q, rope, heads), _apply_rope(k, rope, heads)
-        else:
-            q = q.unflatten(-1, (heads, -1)).transpose(1, 2)
-            k = k.unflatten(-1, (heads, -1)).transpose(1, 2)
-        v_heads = v.unflatten(-1, (heads, -1)).transpose(1, 2)
-        if rope is not None:
-            out = self_attention(q, k, v_heads)
-        else:
-            with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
-                out = F.scaled_dot_product_attention(q, k, v_heads)
+        q = rms_norm(linear(w, "attn1.to_q", qkv_in), w["attn1.q_norm.weight"])
+        k = rms_norm(linear(w, "attn1.to_k", qkv_in), w["attn1.k_norm.weight"])
+        out = self_attention(_apply_rope(q, rope, heads), _apply_rope(k, rope, heads), _heads(v, heads))
         out = out.transpose(1, 2).flatten(2)
-    gates = 2.0 * torch.sigmoid(linear(w, f"{prefix}.to_gate_logits", x))
-    return (out.unflatten(-1, (heads, -1)) * gates.unsqueeze(-1)).flatten(2)
+    return _gated(w, "attn1", x, out, heads)
+
+
+def prompt_key_value(
+    w: Weights, cond: StepConditioning, context: torch.Tensor, *, heads: int = HEADS
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """One block's cross-attention key and value heads ``[1, heads, prompt, d]`` at one step.
+    They depend on neither the video tokens nor STG, so every window of a step shares them."""
+    kv = w["prompt_scale_shift_table"][None, None] + cond.prompt_rows
+    prompt = context * (1 + kv[:, :, 1]) + kv[:, :, 0]
+    if _quant_kernels is not None and context.is_cuda and "ff.net.2.qdata" in w:
+        prompt = QuantizedRows(*_quant_kernels.int8_rotate_quantize(prompt[0]))
+    prompt = _shared_fp4_input(w, "attn2.to_v", prompt)
+    key = rms_norm(linear(w, "attn2.to_k", prompt), w["attn2.k_norm.weight"])
+    return _heads(key, heads), _heads(linear(w, "attn2.to_v", prompt), heads)
+
+
+def _cross_attention(
+    w: Weights, x: torch.Tensor | QuantizedRows, prompt: tuple[torch.Tensor, torch.Tensor], heads: int
+) -> torch.Tensor:
+    """Gated prompt cross-attention output before its ``to_out.0`` projection."""
+    q = rms_norm(linear(w, "attn2.to_q", x), w["attn2.q_norm.weight"])
+    with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
+        out = F.scaled_dot_product_attention(_heads(q, heads), *prompt)
+    return _gated(w, "attn2", x, out.transpose(1, 2).flatten(2), heads)
 
 
 def block_forward(
     w: Weights,
     x: torch.Tensor,
     cond: StepConditioning,
-    context: torch.Tensor,
+    prompt: tuple[torch.Tensor, torch.Tensor],
     rope: Rope,
     *,
     heads: int = HEADS,
     skip_self_attention: bool = False,
 ) -> torch.Tensor:
-    """One transformer block on ``x`` ``[1, 2n, D]`` (target half, then reference half)."""
+    """One transformer block on ``x`` ``[1, 2n, D]`` (target half, then reference half), given
+    the block's ``prompt_key_value`` for this step."""
     ada = w["scale_shift_table"][None, None] + cond.block_rows  # [1, 2, 9, D]
     fused = _quant_kernels is not None and x.is_cuda and "ff.net.2.qdata" in w
     attn_in = _modulated(x, ada[:, :, 0], ada[:, :, 1], fused)
-    attn_out = _attention(w, "attn1", attn_in, attn_in, rope, heads, skip=skip_self_attention)
+    attn_out = _self_attention(w, attn_in, rope, heads, skip=skip_self_attention)
     x = x + _gate(linear(w, "attn1.to_out.0", attn_out), ada[:, :, 2])
-    kv = w["prompt_scale_shift_table"][None, None] + cond.prompt_rows
     query = _modulated(x, ada[:, :, 6], ada[:, :, 7], fused)
-    prompt = context * (1 + kv[:, :, 1]) + kv[:, :, 0]
-    if fused:
-        prompt = QuantizedRows(*_quant_kernels.int8_rotate_quantize(prompt[0]))
-    attn_out = _attention(w, "attn2", query, prompt, None, heads, skip=False)
+    attn_out = _cross_attention(w, query, prompt, heads)
     x = x + _gate(linear(w, "attn2.to_out.0", attn_out), ada[:, :, 8])
     ff_in = _modulated(x, ada[:, :, 3], ada[:, :, 4], fused)
     if fused:
