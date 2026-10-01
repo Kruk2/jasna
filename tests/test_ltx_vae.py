@@ -272,7 +272,7 @@ def test_slab_attention_of_core_columns_matches_full_slab_attention():
         q, k, v = attn.project_qkv(y)
         q = T.apply_abs_rope_slab(attn.q_norm(q) * attn.scale, attn, w_pos)
         k = T.apply_abs_rope_slab(attn.k_norm(k), attn, w_pos)
-        full = na3d(q, k, v, kernel_size=attn.kernel_size).reshape(1, 4, 6, 12, 32)
+        full = na3d(q, k, v, attn.kernel_size, 0).reshape(1, 4, 6, 12, 32)
         expected = attn.proj(full)[:, :, :, halo : halo + core_len]
         actual = T._attn_on_w_slab(attn, norm, x, w_pos, scale, shift, core_len)
 

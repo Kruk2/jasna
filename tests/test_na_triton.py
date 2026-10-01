@@ -63,7 +63,7 @@ def test_matches_eager_na3d(shape, kernel, query_w, config):
     q = (q * shape[-1] ** -0.5).to(torch.bfloat16)
     w_start, w_len = query_w
 
-    expected = eager_na3d(q.float(), k.float(), v.float(), kernel)[:, :, :, w_start : w_start + w_len]
+    expected = eager_na3d(q.float(), k.float(), v.float(), kernel, 0)[:, :, :, w_start : w_start + w_len]
     out = na3d_with_config(q[:, :, :, w_start : w_start + w_len], k, v, kernel, w_start, config)
 
     assert out.dtype == torch.bfloat16

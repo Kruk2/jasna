@@ -15,6 +15,7 @@ Same arithmetic as the torch path in ``transformer.py``, which stays the referen
 import functools
 
 import torch
+import torch.nn.functional as F
 import triton
 import triton.language as tl
 from triton.language.extra import libdevice
@@ -186,6 +187,23 @@ def _int8_mm_stream_k_kernel(
             )
 
 
+@triton.jit
+def _int8_epilogue_kernel(
+    acc_ptr, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, half_rows, row_offset,
+    HAS_BIAS: tl.constexpr, GELU: tl.constexpr, RESIDUAL: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr,
+):
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+    offs_m = pid_m * BM + tl.arange(0, BM)
+    offs_n = pid_n * BN + tl.arange(0, BN)
+    mask = (offs_m < M)[:, None] & (offs_n < N)[None, :]
+    acc = tl.load(acc_ptr + offs_m[:, None] * N + offs_n[None, :], mask=mask, other=0)
+    _mm_epilogue(
+        acc, pid_m, pid_n, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, M, N, half_rows, row_offset,
+        HAS_BIAS, GELU, RESIDUAL, BM, BN,
+    )
+
+
 @functools.cache
 def _programs(device: torch.device) -> int:
     return torch.cuda.get_device_properties(device).multi_processor_count
@@ -199,11 +217,24 @@ INT8_MM_TILES = {
     (12, 0): ((128, 256, 128, 3, 8), (128, 128, 128, 3, 4)),  # RTX 5090
     (12, 1): ((128, 256, 128, 3, 8), (128, 128, 128, 3, 4)),
 }
+# GPUs on which Triton runs dots as scalar FMA (it has no tensor-core dot below SM 8.0): the
+# int8 GEMM runs on cuBLAS (``torch._int_mm``) and only its epilogue in Triton.
+CUBLAS_INT8_MM = {(7, 5)}  # RTX 20 series
+
+
+def supports(device: torch.device) -> bool:
+    capability = torch.cuda.get_device_capability(device)
+    return capability in INT8_MM_TILES or capability in CUBLAS_INT8_MM
 
 
 @functools.cache
 def _int8_mm_tiles(device: torch.device) -> tuple[tuple[int, int, int, int, int], ...]:
     return INT8_MM_TILES[torch.cuda.get_device_capability(device)]
+
+
+@functools.cache
+def _cublas_int8_mm(device: torch.device) -> bool:
+    return torch.cuda.get_device_capability(device) in CUBLAS_INT8_MM
 
 
 @functools.cache
@@ -214,16 +245,25 @@ def _has_tma(device: torch.device) -> bool:
 def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, half_rows, row_offset):
     m, k = codes.shape
     n = qdata.shape[0]
+    args = (
+        act_scales, scales, bias if bias is not None else scales,
+        residual if residual is not None else out, gate if gate is not None else scales, out,
+    )
+    if _cublas_int8_mm(codes.device):
+        block = 64
+        # torch._int_mm needs more than 16 rows; on SM 7.5 also a multiple of 16 output features
+        acc = torch._int_mm(F.pad(codes, (0, 0, 0, 17 - m)) if m <= 16 else codes, qdata.t())
+        _int8_epilogue_kernel[(triton.cdiv(m, block), triton.cdiv(n, block))](
+            acc, *args, m, n, half_rows, row_offset,
+            HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=block, BN=block, num_warps=4,
+        )
+        return out
     if n < 128:
         bm, bn, bk, stages, warps = 32, 32, 256, 3, 2
     else:
         bm, bn, bk, stages, warps = _int8_mm_tiles(codes.device)[k > 4096]
     if k % bk:
         raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
-    args = (
-        act_scales, scales, bias if bias is not None else scales,
-        residual if residual is not None else out, gate if gate is not None else scales, out,
-    )
     flags = dict(HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=bm, BN=bn, BK=bk, GROUP_M=8)
     tiles = triton.cdiv(m, bm) * triton.cdiv(n, bn)
     programs = _programs(codes.device)

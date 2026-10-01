@@ -55,18 +55,27 @@ LATENT_SPATIAL_SCALE = 32
 OPTIONS = ("shipped", "kitchen", "natten", "eager", "autotune")
 
 
+def full_width_queries(q: torch.Tensor, k: torch.Tensor, query_w_start: int) -> torch.Tensor:
+    """``q`` zero-padded to the K/V width (each query's output depends only on itself)."""
+    if q.shape[3] == k.shape[3]:
+        return q
+    full = q.new_zeros(k.shape)
+    full[:, :, :, query_w_start : query_w_start + q.shape[3]] = q
+    return full
+
+
 def kitchen_na3d(q, k, v, kernel_size, query_w_start):
     """comfy-kitchen's fused ``na3d`` with the decoder's core-column query interface."""
     import comfy_kitchen
 
-    full = comfy_kitchen.na3d(T._full_width_queries(q, k, query_w_start), k, v, list(kernel_size), scale=1.0)
+    full = comfy_kitchen.na3d(full_width_queries(q, k, query_w_start), k, v, list(kernel_size), scale=1.0)
     return full[:, :, :, query_w_start : query_w_start + q.shape[3]]
 
 
 def natten_na3d(q, k, v, kernel_size, query_w_start):
     import natten
 
-    full = natten.na3d(T._full_width_queries(q, k, query_w_start), k, v, kernel_size=tuple(kernel_size), scale=1.0)
+    full = natten.na3d(full_width_queries(q, k, query_w_start), k, v, kernel_size=tuple(kernel_size), scale=1.0)
     return full[:, :, :, query_w_start : query_w_start + q.shape[3]]
 
 

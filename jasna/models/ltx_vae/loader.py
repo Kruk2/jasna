@@ -153,7 +153,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
     if unknown:
         raise KeyError(f"{tuned_decoder_path}: {len(unknown)} tensors not in the decoder, e.g. {unknown[:3]}")
     decoder.load_state_dict({k: v.to(own[k].dtype) for k, v in tuned.items()}, strict=False)
-    enable_fused_attention()
+    enable_fused_attention(device)
     compile_diffusion_blocks()
     return decoder
 

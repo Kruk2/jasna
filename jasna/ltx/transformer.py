@@ -287,14 +287,14 @@ _quant_kernels = None
 
 def enable_quant_kernels(device: torch.device) -> bool:
     """Route the INT8 and NVFP4 linears through the fused Triton kernels (``kernels.py``,
-    tiled per GPU architecture in ``kernels.INT8_MM_TILES``) as opaque ops, so they compile
+    on the GPU architectures ``kernels.supports``) as opaque ops, so they compile
     as calls; an INT8 block also fuses its norms, AdaLN modulation and feed-forward residual
     into them. Returns whether they are in use."""
     global _quant_kernels
     if _quant_kernels is None and device.type == "cuda" and torch.version.cuda is not None:
         from jasna.ltx import kernels
 
-        if torch.cuda.get_device_capability(device) not in kernels.INT8_MM_TILES:
+        if not kernels.supports(device):
             return False
 
         @torch.library.custom_op("jasna::int8_rotate_quantize", mutates_args=())
@@ -556,6 +556,14 @@ def _self_attention(w: Weights, x: torch.Tensor | QuantizedRows, rope: Rope, hea
     return _gated(w, "attn1", x, out, heads)
 
 
+def prompt_attention_dtype(device: torch.device) -> torch.dtype:
+    """Dtype of the prompt key/value heads: bf16, or fp16 on CUDA GPUs before SM 8.0, where
+    no fused attention kernel takes bf16."""
+    if device.type == "cuda" and torch.cuda.get_device_properties(device).major < 8:
+        return torch.float16
+    return torch.bfloat16
+
+
 def prompt_key_value(
     w: Weights, cond: StepConditioning, context: torch.Tensor, *, heads: int = HEADS
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -567,16 +575,19 @@ def prompt_key_value(
         prompt = QuantizedRows(*_quant_kernels.int8_rotate_quantize(prompt[0]))
     prompt = _shared_fp4_input(w, "attn2.to_v", prompt)
     key = rms_norm(linear(w, "attn2.to_k", prompt), w["attn2.k_norm.weight"])
-    return _heads(key, heads), _heads(linear(w, "attn2.to_v", prompt), heads)
+    dtype = prompt_attention_dtype(context.device)
+    return _heads(key, heads).to(dtype), _heads(linear(w, "attn2.to_v", prompt), heads).to(dtype)
 
 
 def _cross_attention(
     w: Weights, x: torch.Tensor | QuantizedRows, prompt: tuple[torch.Tensor, torch.Tensor], heads: int
 ) -> torch.Tensor:
-    """Gated prompt cross-attention output before its ``to_out.0`` projection."""
+    """Gated prompt cross-attention output before its ``to_out.0`` projection, computed in the
+    prompt key/value dtype."""
     q = rms_norm(linear(w, "attn2.to_q", x), w["attn2.q_norm.weight"])
+    key, value = prompt
     with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
-        out = F.scaled_dot_product_attention(_heads(q, heads), *prompt)
+        out = F.scaled_dot_product_attention(_heads(q, heads).to(key.dtype), key, value).to(q.dtype)
     return _gated(w, "attn2", x, out.transpose(1, 2).flatten(2), heads)
 
 

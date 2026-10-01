@@ -15,8 +15,10 @@ import torch
 from torch.nn import functional
 
 # Element budget for one tile's [Nq, Nk] attention mask (bounds the mask
-# allocation and, on CPU, the math-backend score materialization).
+# allocation and, on CPU, the math-backend score materialization). CUDA uses a
+# smaller one: smaller tiles waste fewer masked scores (fastest on an RTX 2080 Ti).
 NA_SCORE_BUDGET = 2**25
+NA_CUDA_SCORE_BUDGET = 2**21
 # Element budget for the stacked K/V copies of one batched SDPA call on CUDA.
 NA_KV_STACK_BUDGET = 2**28
 
@@ -35,7 +37,7 @@ def _window_bounds(length: int, kernel: int) -> tuple[list[int], list[int]]:
     return starts, ends
 
 
-def _pick_tiles(dims: tuple[int, int, int], kernels: list[int]) -> list[int]:
+def _pick_tiles(dims: tuple[int, int, int], kernels: list[int], budget: int) -> list[int]:
     """Per-axis query-tile lengths keeping one tile's [Nq, Nk] under budget."""
     tiles = list(dims)
 
@@ -44,7 +46,7 @@ def _pick_tiles(dims: tuple[int, int, int], kernels: list[int]) -> list[int]:
         nk = math.prod(min(d, t + k - 1) for t, k, d in zip(ts, kernels, dims, strict=True))
         return nq * nk
 
-    while cost(tiles) > NA_SCORE_BUDGET and max(tiles) > 1:
+    while cost(tiles) > budget and max(tiles) > 1:
         i = max(range(3), key=lambda a: tiles[a] / kernels[a])
         if tiles[i] <= 1:
             break
@@ -76,15 +78,20 @@ def _group_mask(
     return mask.reshape(1, 1, nq, nk)
 
 
-def na3d(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: tuple[int, int, int]) -> torch.Tensor:
-    """3D neighborhood attention over ``(B, T, H, W, NH, HD)`` tensors; Q must already be scaled."""
-    batch, t, h, w, nh, hd = q.shape
+def na3d(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: tuple[int, int, int], query_w_start: int
+) -> torch.Tensor:
+    """3D neighborhood attention over ``(B, T, H, W, NH, HD)`` K/V; Q must already be scaled and
+    holds the queries of W columns ``[query_w_start, query_w_start + q.shape[3])``."""
+    batch, t, h, w, nh, hd = k.shape
+    query_w_stop = query_w_start + q.shape[3]
     dims = (t, h, w)
     kernels = [min(k_, d) for k_, d in zip(kernel_size, dims, strict=True)]
     device = q.device
 
     bounds = [_window_bounds(d, k_) for d, k_ in zip(dims, kernels, strict=True)]
-    tile_t, tile_h, tile_w = _pick_tiles(dims, kernels)
+    budget = NA_CUDA_SCORE_BUDGET if device.type == "cuda" else NA_SCORE_BUDGET
+    tile_t, tile_h, tile_w = _pick_tiles((t, h, q.shape[3]), kernels, budget)
 
     groups: dict[
         tuple[
@@ -108,8 +115,8 @@ def na3d(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: tuple[i
                 tuple(s - rh0 for s in bounds[1][0][h0:h1]),
                 tuple(e - rh0 for e in bounds[1][1][h0:h1]),
             )
-            for w0 in range(0, w, tile_w):
-                w1 = min(w0 + tile_w, w)
+            for w0 in range(query_w_start, query_w_stop, tile_w):
+                w1 = min(w0 + tile_w, query_w_stop)
                 rw0, rw1 = bounds[2][0][w0], bounds[2][1][w1 - 1]
                 rel_w = (
                     tuple(s - rw0 for s in bounds[2][0][w0:w1]),
@@ -117,12 +124,12 @@ def na3d(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: tuple[i
                 )
                 groups.setdefault((rel_t, rel_h, rel_w), []).append(
                     (
-                        (slice(t0, t1), slice(h0, h1), slice(w0, w1)),
+                        (slice(t0, t1), slice(h0, h1), slice(w0 - query_w_start, w1 - query_w_start)),
                         (slice(rt0, rt1), slice(rh0, rh1), slice(rw0, rw1)),
                     )
                 )
 
-    out = torch.empty((batch, t, h, w, nh, hd), device=device, dtype=v.dtype)
+    out = torch.empty(q.shape, device=device, dtype=v.dtype)
     for rel, tiles in groups.items():
         mask = _group_mask(rel, q.dtype, device)
         nq, nk = mask.shape[2], mask.shape[3]

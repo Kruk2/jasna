@@ -137,18 +137,22 @@ class QKVProjections(nn.Module):
 _fused_na3d = None
 
 
-def _full_width_queries(q: torch.Tensor, k: torch.Tensor, query_w_start: int) -> torch.Tensor:
-    """``q`` zero-padded to the K/V width (each query's output depends only on itself)."""
-    if q.shape[3] == k.shape[3]:
-        return q
-    full = q.new_zeros(k.shape)
-    full[:, :, :, query_w_start : query_w_start + q.shape[3]] = q
-    return full
+@torch.compiler.disable
+def _fp16_eager_na3d(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: list[int], query_w_start: int
+) -> torch.Tensor:
+    """The pure-torch ``na3d`` run in fp16, which has a fused SDPA kernel before SM 8.0 (bf16 has
+    none). Not traced, so the compiled slab breaks once around it instead of inside its tile loops."""
+    return na3d(q.half(), k.half(), v.half(), tuple(kernel_size), query_w_start).to(q.dtype)
 
 
-def enable_fused_attention() -> None:
-    """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``)."""
+def enable_fused_attention(device: torch.device) -> None:
+    """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``), or before
+    SM 8.0, where Triton has no tensor-core dot, through the fp16 pure-torch ``na3d``."""
     global _fused_na3d
+    if torch.cuda.get_device_capability(device) < (8, 0):
+        _fused_na3d = _fp16_eager_na3d
+        return
     from jasna.models.ltx_vae import na_triton
 
     _fused_na3d = na_triton.na3d
@@ -165,8 +169,7 @@ def neighborhood_attention(
         k = k.to(dtype=v.dtype)
     if _fused_na3d is not None and q.is_cuda:
         return _fused_na3d(q, k, v, list(attn.kernel_size), query_w_start)
-    full = na3d(_full_width_queries(q, k, query_w_start), k, v, kernel_size=attn.kernel_size)
-    return full[:, :, :, query_w_start : query_w_start + q.shape[3]]
+    return na3d(q, k, v, attn.kernel_size, query_w_start)
 
 
 class NeighborhoodAttention3D(nn.Module):
