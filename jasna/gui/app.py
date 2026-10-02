@@ -19,12 +19,12 @@ from jasna.gui.branding import (
     install_window_icon,
 )
 from jasna.gui import scaling
+from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
 from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog, ShutdownCountdownDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
-from jasna.engine_paths import UNET4X_ONNX_ENC_PATH
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
@@ -258,15 +258,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._unifans_btn = UnifansButton(right, width=110, height=28)
         self._unifans_btn.pack(side="left", padx=(0, 12))
 
-        # Supporter license chip — only shown when the gated (encrypted) model ships.
-        if UNET4X_ONNX_ENC_PATH.exists():
-            self._license_chip = ctk.CTkButton(
-                right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-                fg_color="transparent", hover_color=Colors.BG_CARD,
-                width=130, command=self._open_license_dialog,
-            )
-            self._license_chip.pack(side="left", padx=(0, 12))
-            self._refresh_license_chip()
+        self._license_chip = ctk.CTkButton(
+            right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color="transparent", hover_color=Colors.BG_CARD,
+            text=t("license_chip_inactive"), text_color=Colors.STATUS_WARNING,
+            width=130, command=self._open_license_dialog,
+        )
+        self._license_chip.pack(side="left", padx=(0, 12))
+        self._refresh_license_chip()
 
         self._system_check_btn = ctk.CTkButton(
             right,
@@ -461,8 +460,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self.destroy()
         
     def _refresh_license_chip(self):
-        from jasna.protection import license_store
-        licensed = license_store.is_licensed()
+        activation_worker.start_license_info(
+            lambda info, error: self._main_thread.post(lambda: self._license_chip_ready(info, error))
+        )
+
+    def _license_chip_ready(self, info, error):
+        if error is not None:
+            logger.warning("Could not read activation status: %s", error)
+        licensed = error is None and info[1]
         self._license_chip.configure(
             text=t("license_chip_active") if licensed else t("license_chip_inactive"),
             text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_WARNING,

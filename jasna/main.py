@@ -333,18 +333,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate N stochastic variants with seeds seed..seed+N-1 (default: %(default)s)",
     )
 
-    license_group = parser.add_argument_group("License")
+    license_group = parser.add_argument_group("Activation")
     license_group.add_argument(
-        "--license-email",
-        type=str,
-        default="",
-        help="Supporter email tied to your license key (enables unet-4x).",
+        "--machine-key",
+        action="store_true",
+        help=CLI_HELP["machine_key"],
     )
     license_group.add_argument(
-        "--license-key",
+        "--cloud-workspace",
+        action="store_true",
+        help=CLI_HELP["cloud_workspace"],
+    )
+    license_group.add_argument(
+        "--activation-key",
         type=str,
-        default="",
-        help="License key issued for your supporter email.",
+        default=None,
+        help=CLI_HELP["activation_key"],
     )
 
     rtx = parser.add_argument_group("RTX Super Res")
@@ -822,6 +826,26 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+    if args.cloud_workspace and not args.machine_key:
+        parser.error("--cloud-workspace needs --machine-key")
+    if args.machine_key:
+        if args.activation_key is not None:
+            parser.error("--machine-key cannot be combined with --activation-key")
+        from jasna.protection import ProtectionError, machine
+        try:
+            print(machine.machine_key(cloud_workspace=args.cloud_workspace))
+        except (ProtectionError, OSError) as exc:
+            parser.exit(1, f"Activation error: {exc}\n")
+        return
+    if args.activation_key is not None:
+        from jasna.protection import ProtectionError, license_store
+        try:
+            license_store.set_license(args.activation_key.strip())
+        except (ProtectionError, OSError) as exc:
+            parser.exit(1, f"Activation error: {exc}\n")
+        print("Jasna activated. The Activation key is saved on this machine.")
+        if args.input is None and not args.stream and not args.benchmark:
+            return
     codec_was_explicit = any(
         value == "--codec" or value.startswith("--codec=")
         for value in sys.argv[1:]
@@ -958,10 +982,6 @@ def main() -> None:
         codec=codec,
         vendor=vendor_for_device(str(args.device)),
     )
-
-    if args.license_email and args.license_key:
-        from jasna.protection import license_store
-        license_store.set_license(args.license_email, args.license_key)
 
     lut_arg = str(args.lut).strip()
     if lut_arg and not Path(lut_arg).exists():

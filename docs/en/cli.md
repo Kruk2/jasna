@@ -258,14 +258,29 @@ jasna --input folder_in --output folder_out --post-export-action command --post-
 jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
 
-## License
+## Activation
 
 | Option | Notes |
 | ------ | ----- |
-| `--license-email` | Supporter email tied to your key (unlocks unet-4x and SD 1.5). |
-| `--license-key` | License key issued for that email. |
+| `--machine-key` | Print the Machine key and exit. No GPU or GUI startup is needed. |
+| `--cloud-workspace` | Use with `--machine-key` to create or reuse a cloud workspace identity. Your seller must enable it for your License code. |
+| `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
 
-The GUI stores these after first entry; the CLI flags exist for scripted use.
+Copy the Machine key, enter it with your **License code** on your seller's activation page, then save the returned **Activation key**. Jasna stores only the Activation key and validates it offline; later runs reuse it.
+
+```bash
+jasna --machine-key
+jasna --activation-key "YOUR_ACTIVATION_KEY"
+```
+
+For RunPod or Vast, keep the config folder on a persistent volume before requesting a cloud key. On Linux, `XDG_CONFIG_HOME` selects the folder that contains `jasna/`:
+
+```bash
+XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
+XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
+```
+
+Use the same config folder for later runs. Host or GPU changes reuse the workspace slot; copying the config with its Activation key transfers the identity. One License code has 3 registrations; repeat requests for the same Machine key use no extra slot. Replacements need owner review. If the page is unavailable, ask your official seller for manual activation under the same limit.
 
 ## Benchmark
 

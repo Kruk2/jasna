@@ -263,10 +263,6 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
     fp16 = bool(args.fp16)
     batch_size = int(args.batch_size)
 
-    if args.license_email and args.license_key:
-        from jasna.protection import license_store
-        license_store.set_license(args.license_email, args.license_key)
-
     ensure_sd15_bundle(SD15_DIR)
 
     detection_model_name, detection_model_path, score_threshold = resolve_detection_model(

@@ -1,4 +1,4 @@
-> **The only places to get a genuine key for the paid models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2) and [Unifans](https://app.unifans.io/c/kruk2).**
+> **The only places to get a genuine License code for the paid models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2) and [Unifans](https://app.unifans.io/c/kruk2).**
 >
 > **付费模型的正版密钥只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2) 或 [Unifans](https://app.unifans.io/c/kruk2) 获取。**
 
@@ -8,7 +8,7 @@
 
 Jasna is a mosaic restoration tool with a simple GUI, a CLI, a GPU-only processing pipeline, NVIDIA TensorRT and experimental AMD ROCm support, optional secondary restoration models, still-image restoration, and streaming support.
 
-Jasna is free. Supporters get a key that unlocks the extra models trained for this project: the **unet-4x** secondary upscaler and the experimental **SD 1.5 image restoration** model. See [Supporting the project](#supporting-the-project).
+Jasna is free. Supporters get a License code to activate the extra models trained for this project: the **unet-4x** secondary upscaler and the experimental **SD 1.5 image restoration** model. See [Supporting the project](#supporting-the-project).
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
 
@@ -157,7 +157,7 @@ retain their own terms. See [licensing and source availability](LICENSING.md),
 
 ## Supporting the Project
 
-Support pays for training extra models, mainly GPU rental and compute time for larger datasets. Supporters get a key that unlocks:
+Support pays for training extra models, mainly GPU rental and compute time for larger datasets. Supporters can activate:
 
 - **unet-4x** secondary upscaler for sharper 256->1024 restoration.
 - **SD 1.5 image restoration**, the experimental still-image model.
@@ -167,19 +167,19 @@ Example results:
 - unet-4x / secondary restoration examples on SLS Discord
 - SD 1.5 image restoration examples on SLS Discord and more SD 1.5 examples
 
-How to get a key:
+How to activate:
 
-1. Contribute **$15 USD or more in total**, across any number of contributions and at any time.
-2. After your contribution is processed, your supporter key is sent automatically:
-   - **[Unifans](https://app.unifans.io/c/kruk2)**: sent by platform message. There might be a slight delay.
-   - **[Buy Me a Coffee](https://buymeacoffee.com/kruk2)**, including **crypto**: sent to the email or handle used for the contribution. The key is tied to that email or handle.
+1. Contribute **$15 USD or more in total**. Your official seller sends a **License code** through [Unifans](https://app.unifans.io/c/kruk2) or [Buy Me a Coffee](https://buymeacoffee.com/kruk2), including crypto payments.
+2. Open **Activate Jasna**, copy the **Machine key**, and enter it with your License code on the activation page supplied by your seller.
+3. Paste the returned **Activation key** into Jasna. Jasna saves this key and checks it offline; your License code stays on the activation page.
 
-Keys are sold **only** on these two pages. Anyone else selling Jasna, keys or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub.
+Each License code allows **3 machines or workspaces**. Reusing a Machine key uses no extra slot. Only the owner can approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.
 
-Jasna 0.11 needs a replacement supporter key from your official seller. Jasna 0.10 keys work only in Jasna 0.10.
+For **RunPod or Vast**, select **Cloud workspace** only after your seller enables it for your License code. Keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity.
 
-If activation fails, check the exact purchase email or handle and copy the full key again.
-An invalid key alone does not prove fraud; Jasna identifies keys from known unofficial sellers separately.
+Page unavailable, including in mainland China? Send your License code and Machine key to your official seller for **manual activation**, under the same 3-slot limit. Earlier activation formats need replacement; old keys still work with compatible older Jasna versions.
+
+License codes are sold **only** on the two official pages. Anyone else selling Jasna, codes or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub. If activation fails, check the Machine key and copy the full Activation key again. An invalid key alone does not prove fraud; known unofficial keys get a separate warning.
 
 ## Acknowledgments
 

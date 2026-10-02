@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from tkinter import TclError
+import time
 
 import customtkinter as ctk
 import pytest
@@ -44,16 +45,28 @@ def test_license_dialog_explains_rejected_keys(monkeypatch, error_name, message_
     from jasna.gui.components import LicenseDialog
     from jasna.protection import license_store
 
-    def reject(email, key):
+    def reject(key):
         raise getattr(protection, error_name)("english text")
 
     monkeypatch.setattr(license_store, "load_license", lambda: None)
+    monkeypatch.setattr(license_store, "is_licensed", lambda: False)
     monkeypatch.setattr(license_store, "set_license", reject)
     root = _root()
     try:
         dialog = LicenseDialog(root, on_activated=lambda: None)
         assert t("license_official_sellers") in _label_texts(dialog)
-        dialog._activate()
-        assert dialog._status.cget("text") == t(message_key)
+        deadline = time.monotonic() + 3
+        while dialog._activate_button.cget("state") != "normal" and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        dialog._activate_button.invoke()
+        expected = t(message_key)
+        if error_name == "LicenseError":
+            expected += "\nenglish text"
+        deadline = time.monotonic() + 3
+        while dialog._status.cget("text") != expected and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        assert dialog._status.cget("text") == expected
     finally:
         root.destroy()

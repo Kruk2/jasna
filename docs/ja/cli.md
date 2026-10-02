@@ -256,14 +256,29 @@ jasna --input folder_in --output folder_out --post-export-action command --post-
 jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
 
-## ライセンス
+## 有効化
 
 | オプション | 説明 |
 | ------ | ----- |
-| `--license-email` | キーに紐付いた支援者メールアドレス（unet-4x と SD 1.5 を解除）。 |
-| `--license-key` | そのメールアドレスに発行されたライセンスキー。 |
+| `--machine-key` | マシンキーを表示して終了します。GPU や GUI の起動は不要です。 |
+| `--cloud-workspace` | `--machine-key` と併用し、クラウドワークスペースの識別情報を作成または再利用します。販売者によるライセンスコードのクラウド利用許可が必要です。 |
+| `--activation-key KEY` | このマシンのアクティベーションキーを保存します。処理オプションがなければ有効化して終了します。 |
 
-GUI は初回入力後にこれらを保存します。CLI フラグはスクリプトでの利用向けです。
+マシンキーをコピーし、販売者の有効化ページで**ライセンスコード**と一緒に入力して、返された**アクティベーションキー**を保存します。Jasna はアクティベーションキーだけを保存し、オフラインで確認します。以後の起動では保存済みのキーを使います。
+
+```bash
+jasna --machine-key
+jasna --activation-key "YOUR_ACTIVATION_KEY"
+```
+
+RunPod や Vast では、クラウドキーを取得する前に設定フォルダーを永続ボリュームに保存してください。Linux では `XDG_CONFIG_HOME` が `jasna/` を置くフォルダーを指定します:
+
+```bash
+XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
+XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
+```
+
+以後も同じ設定フォルダーを使ってください。ホストや GPU が変わっても同じ枠を使えます。設定フォルダーをキーと一緒にコピーすると識別情報も移ります。ライセンスコードごとに登録は 3 件までで、同じマシンキーの再取得では枠は増えません。交換には所有者の確認が必要です。ページを開けない場合は公式販売者に手動での有効化を依頼してください。同じ上限が適用されます。
 
 ## ベンチマーク
 

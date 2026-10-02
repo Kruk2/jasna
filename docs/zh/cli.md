@@ -248,14 +248,29 @@ jasna --input folder_in --output folder_out --post-export-action command --post-
 jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
 
-## 许可证
+## 激活
 
 | 选项 | 说明 |
 | ------ | ----- |
-| `--license-email` | 与密钥绑定的支持者邮箱（解锁 unet-4x 和 SD 1.5）。 |
-| `--license-key` | 为该邮箱签发的许可证密钥。 |
+| `--machine-key` | 显示机器密钥后退出，无需启动 GPU 或 GUI。 |
+| `--cloud-workspace` | 与 `--machine-key` 一起使用，创建或复用云工作区身份。卖家须为许可证码开通云权限。 |
+| `--activation-key KEY` | 保存本机的激活密钥。未指定处理选项时，激活后退出。 |
 
-GUI 在首次输入后会保存它们；这些 CLI 参数用于脚本化使用。
+复制机器密钥，在卖家的激活页面输入机器密钥和**许可证码**，然后保存返回的**激活密钥**。Jasna 只保存激活密钥并离线验证，之后启动会复用保存的密钥。
+
+```bash
+jasna --machine-key
+jasna --activation-key "YOUR_ACTIVATION_KEY"
+```
+
+在 RunPod 或 Vast 上，请先将设置目录保存在持久卷上，再请求云机器密钥。Linux 的 `XDG_CONFIG_HOME` 指定用于存放 `jasna/` 的目录：
+
+```bash
+XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
+XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
+```
+
+之后运行也须使用同一设置目录。主机或 GPU 更换后仍复用同一名额；将设置目录和激活密钥一起复制，也会转移身份。每个许可证码限 3 个注册，相同机器密钥的重复请求不占新名额。更换须由所有者审核。页面不可用时，请向官方卖家申请手动激活，同样适用此限制。
 
 ## 基准测试
 

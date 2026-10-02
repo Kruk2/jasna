@@ -1,11 +1,16 @@
 """Reusable UI components for Jasna GUI."""
 
+import logging
 import tkinter
 import customtkinter as ctk
 import webbrowser
 from jasna.gui import scaling
+from jasna.gui import activation_worker
+from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import t
+
+logger = logging.getLogger(__name__)
 
 
 # Support page URLs — two ways to back the project
@@ -182,13 +187,14 @@ class UnifansButton(_SupportButton):
 
 
 class LicenseDialog(ctk.CTkToplevel):
-    """Modal popup to enter the supporter email + license key. Persisted by
-    license_store (in the user config dir); on success calls on_activated so the
-    header chip can refresh."""
+    """Copy a Machine key and save its offline Activation key."""
 
     def __init__(self, master, on_activated):
         super().__init__(master)
+        self._closed = False
         self._on_activated = on_activated
+        self._main_thread = MainThreadCalls(self, 50)
+        self._cloud_workspace = tkinter.BooleanVar(self, value=False)
 
         self.title(t("supporter_title"))
         self.resizable(False, False)
@@ -205,90 +211,186 @@ class LicenseDialog(ctk.CTkToplevel):
         ).pack(anchor="w", pady=(0, 6))
         ctk.CTkLabel(
             outer, text=t("supporter_blurb"), text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 2))
         ctk.CTkLabel(
             outer, text=t("supporter_perks"), text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
         ctk.CTkLabel(
-            outer, text=t("license_crypto_info"), text_color=Colors.STATUS_PENDING,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+            outer, text=t("license_activation_steps"), text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 4))
         ctk.CTkLabel(
             outer, text=t("license_official_sellers"), text_color=Colors.STATUS_PENDING,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
-        self._email = ctk.CTkEntry(
-            outer, width=340, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_email_placeholder"),
+        self._cloud_check = ctk.CTkCheckBox(
+            outer, text=t("license_cloud_workspace"), variable=self._cloud_workspace,
+            command=self._load_machine_key, state="disabled",
         )
-        self._email.pack(fill="x", pady=(0, 6))
-        attach_entry_context_menu(self._email)
+        self._cloud_check.pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(
+            outer, text=t("license_cloud_warning"), text_color=Colors.STATUS_WARNING,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+        ctk.CTkLabel(
+            outer, text=t("license_machine_key"), text_color=Colors.TEXT_PRIMARY,
+        ).pack(anchor="w")
+        machine_row = ctk.CTkFrame(outer, fg_color="transparent")
+        machine_row.pack(fill="x", pady=(0, 10))
+        self._machine = ctk.CTkEntry(
+            machine_row, width=370, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, state="readonly",
+        )
+        self._machine.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        attach_entry_context_menu(self._machine)
+        self._copy = ctk.CTkButton(
+            machine_row, text=t("ctx_copy"), width=80,
+            command=self._copy_machine_key, state="disabled",
+        )
+        self._copy.pack(side="right")
+        ctk.CTkLabel(
+            outer, text=t("license_activation_key"), text_color=Colors.TEXT_PRIMARY,
+        ).pack(anchor="w")
         self._key = ctk.CTkEntry(
-            outer, width=340, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_key_placeholder"),
+            outer, width=460, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_activation_key"),
         )
         self._key.pack(fill="x", pady=(0, 10))
         attach_entry_context_menu(self._key)
 
         action = ctk.CTkFrame(outer, fg_color="transparent")
         action.pack(fill="x")
-        ctk.CTkButton(
+        self._activate_button = ctk.CTkButton(
             action, text=t("license_activate"), width=110,
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
-            command=self._activate,
-        ).pack(side="left")
-        self._status = ctk.CTkLabel(action, text="", text_color=Colors.TEXT_PRIMARY)
-        self._status.pack(side="left", padx=10)
+            command=self._activate, state="disabled",
+        )
+        self._activate_button.pack(side="left")
+        self._status = ctk.CTkLabel(
+            outer, text="", text_color=Colors.TEXT_PRIMARY,
+            wraplength=460, justify="left",
+        )
+        self._status.pack(anchor="w", pady=(6, 0))
+        activation_worker.start_license_info(
+            lambda info, error: self._post_result(self._loaded, info, error)
+        )
 
-        from jasna.protection import license_store
-        stored = license_store.load_license()
-        if stored:
-            self._email.insert(0, stored[0])
-            self._key.insert(0, stored[1])
-            if license_store.is_licensed():
-                self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+        self._resize()
 
+    def _resize(self):
         self.update_idletasks()
-        minimum_width, _ = scaling.to_physical(self, 388, 0)
+        minimum_width, _ = scaling.to_physical(self, 508, 0)
         scaling.place_centered_on_parent(
             self,
-            master,
+            self.master,
             max(minimum_width, self.winfo_reqwidth()),
             self.winfo_reqheight(),
         )
 
+    def destroy(self):
+        if self._closed:
+            return
+        self._closed = True
+        self._main_thread.close()
+        super().destroy()
+
+    def _post_result(self, callback, *args):
+        if self._closed:
+            logger.debug("Ignoring worker result for closed activation dialog")
+            return
+        self._main_thread.post(lambda: callback(*args))
+
+    def _loaded(self, info, error):
+        self._activate_button.configure(state="normal")
+        self._cloud_check.configure(state="normal")
+        if error is not None:
+            self._show_error(str(error))
+            self._load_machine_key()
+            return
+        key, licensed, identity = info
+        if key:
+            self._key.insert(0, key)
+        if identity is not None and identity.startswith("JW1-"):
+            self._cloud_workspace.set(True)
+            self._set_machine_key(identity)
+            if not licensed:
+                self._show_error(t("license_invalid"))
+        else:
+            self._load_machine_key()
+        if licensed:
+            self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+
+    def _load_machine_key(self):
+        self._activate_button.configure(state="disabled")
+        self._copy.configure(state="disabled")
+        self._cloud_check.configure(state="disabled")
+        self._set_machine_key("")
+        activation_worker.start_machine_key(
+            self._cloud_workspace.get(),
+            lambda key, error: self._post_result(self._machine_ready, key, error),
+        )
+
+    def _machine_ready(self, key, error):
+        self._activate_button.configure(state="normal")
+        self._cloud_check.configure(state="normal")
+        if error is not None:
+            self._show_error(str(error))
+            return
+        self._set_machine_key(key)
+
+    def _set_machine_key(self, key):
+        self._machine.configure(state="normal")
+        self._machine.delete(0, "end")
+        self._machine.insert(0, key)
+        self._machine.configure(state="readonly")
+        self._copy.configure(state="normal" if key else "disabled")
+
+    def _copy_machine_key(self):
+        self.clipboard_clear()
+        self.clipboard_append(self._machine.get())
+
     def _activate(self):
+        self._activate_button.configure(state="disabled")
+        self._cloud_check.configure(state="disabled")
+        self._status.configure(text=t("license_working"), text_color=Colors.TEXT_PRIMARY)
+        activation_worker.start_activation(
+            self._key.get().strip(),
+            lambda identity, error: self._post_result(self._activation_done, identity, error),
+        )
+
+    def _activation_done(self, identity, error):
         from jasna.protection import (
             ForgedLicenseError, LicenseError, MalformedLicenseError,
-            ProtectionError, RetiredLicenseError, license_store,
+            RetiredLicenseError,
         )
-        email = self._email.get().strip()
-        key = self._key.get().strip()
-        try:
-            license_store.set_license(email, key)
-        except ForgedLicenseError:
+        self._activate_button.configure(state="normal")
+        self._cloud_check.configure(state="normal")
+        if isinstance(error, ForgedLicenseError):
             self._show_error(t("license_forged"))
             return
-        except RetiredLicenseError:
+        if isinstance(error, RetiredLicenseError):
             self._show_error(t("license_retired"))
             return
-        except MalformedLicenseError:
+        if isinstance(error, MalformedLicenseError):
             self._show_error(t("license_malformed"))
             return
-        except LicenseError:
-            self._show_error(t("license_invalid"))
+        if isinstance(error, LicenseError):
+            self._show_error(f"{t('license_invalid')}\n{error}")
             return
-        except ProtectionError as exc:
-            self._show_error(str(exc))
+        if error is not None:
+            self._show_error(str(error))
             return
+        self._cloud_workspace.set(identity.startswith("JW1-"))
+        self._set_machine_key(identity)
         self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
         self._on_activated()
 
     def _show_error(self, text: str) -> None:
-        self._status.configure(text=text, text_color=Colors.STATUS_ERROR, wraplength=220, justify="left")
+        self._status.configure(text=text, text_color=Colors.STATUS_ERROR)
+        self._resize()
 
 
 class StatusPill(ctk.CTkFrame):

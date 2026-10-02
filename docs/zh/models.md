@@ -96,8 +96,8 @@ Jasna 会修复每个马赛克区域的 256x256 裁切图。因此，大面积�
 - **unet-4x**: 支持者模型。当前测试中比 TVAI 更快，质量相近。它在
   视频修复数据集上训练，视觉效果接近 TVAI `iris-2`。可以查看
   SLS Discord 上的示例。
-  使用支持者密钥解锁 — 见[支持本项目](../../README.zh.md)。
-  Jasna 0.11 需要向官方卖家申请替换密钥；0.10 的密钥仅适用于 Jasna 0.10。
+  使用机器对应的激活密钥解锁 — 见[支持本项目](../../README.zh.md)。
+  旧版激活格式的密钥须向官方卖家申请替换。
 - **RTX Super Resolution**: 非常快、免费、没有额外依赖。质量尚可。
   部分视频可能会闪烁，请先用短片段测试。
 - **TVAI**: 质量优于 RTX Super Resolution，并与 unet-4x 接近，但非常
@@ -136,9 +136,9 @@ jasna --input photo.png --output restored.png
 - 该模型**未随程序打包**，大小约 **6.9 GB**。Jasna 会在从
   [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav)
   下载前先询问你。
-- 目前仅面向支持者提供，并使用与 unet-4x 相同的密钥 —
+- 面向支持者提供。同一个机器激活密钥可包含 SD 1.5、unet-4x 和已购买的 LTX 版本 —
   见[支持本项目](../../README.zh.md)。
-  Jasna 0.11 需要向官方卖家申请替换密钥；0.10 的密钥仅适用于 Jasna 0.10。
+  旧版激活格式的密钥须向官方卖家申请替换。
 - 推理期间大约需要 **7 GB VRAM**，较大的 4K 图像会再多一些。
 
 SD 1.5 路径是实验性的。结果因场景而异，但有些图像可能效果非常好。

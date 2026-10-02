@@ -7,6 +7,16 @@ them when turning a help string into a tooltip.
 """
 
 CLI_HELP: dict[str, str] = {
+    "machine_key": "Print this machine's Machine key for activation, then exit. No GPU is needed.",
+    "cloud_workspace": (
+        "With --machine-key, create or reuse a cloud workspace identity for RunPod or Vast. "
+        "Your seller must enable it for your License code. Keep the Jasna config directory on "
+        "a persistent volume; copying it with the Activation key transfers the identity."
+    ),
+    "activation_key": (
+        "Save the Activation key returned for this Machine key. Use your License code on the "
+        "activation page, not in Jasna. Without --input, --stream or --benchmark, activate and exit."
+    ),
     "restoration_model_name": (
         "Restoration model for video: basicvsrpp (fast), ltx (best quality, much slower; NVIDIA "
         "RTX only) or ltx-undistilled (slightly better than ltx, about 2x slower). LTX doesn't "
