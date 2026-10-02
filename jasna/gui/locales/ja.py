@@ -254,6 +254,7 @@ JA = {
         "ltx_step_starting": "ステップ {number}/{count}：{stage}…",
         "ltx_step_percent": "ステップ {number}/{count}：{stage} {percent}%",
         "ltx_step_eta": "ステップ {number}/{count}：{stage} {percent}%、残り {time}",
+        "ltx_step_short": "ステップ {number}/{count}：{percent}%",
         "section_advanced": "詳細設定",
         "section_secondary": "二次修復",
         "section_image_restoration": "画像修復（静止画）",

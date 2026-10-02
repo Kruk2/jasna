@@ -253,6 +253,7 @@ KO = {
         "ltx_step_starting": "{count}단계 중 {number}단계: {stage}…",
         "ltx_step_percent": "{count}단계 중 {number}단계: {stage} {percent}%",
         "ltx_step_eta": "{count}단계 중 {number}단계: {stage} {percent}%, {time} 남음",
+        "ltx_step_short": "{number}/{count}단계: {percent}%",
         "section_advanced": "고급 처리",
         "section_secondary": "2차 복원",
         "section_image_restoration": "이미지 복원 (정지 이미지)",

@@ -254,6 +254,7 @@ EN = {
         "ltx_step_starting": "Step {number} of {count}: {stage}…",
         "ltx_step_percent": "Step {number} of {count}: {stage} {percent}%",
         "ltx_step_eta": "Step {number} of {count}: {stage} {percent}%, {time} left",
+        "ltx_step_short": "Step {number}/{count}: {percent}%",
         "section_advanced": "Advanced Processing",
         "section_secondary": "Secondary Restoration",
         "section_image_restoration": "Image Restoration (still images)",

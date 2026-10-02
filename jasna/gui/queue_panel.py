@@ -17,6 +17,7 @@ from jasna.gui.icons import create_icon
 from jasna.gui.file_actions import open_containing_folder
 from jasna.gui.file_actions import open_file
 from jasna.gui.locales import t
+from jasna.progressbar import StageProgress
 
 from jasna.media.media_files import (
     IMAGE_EXTENSIONS,
@@ -621,7 +622,7 @@ class QueuePanel(ctk.CTkFrame):
                 return i
         return None
 
-    def update_job_status(self, job_id: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0, elapsed_seconds: float | None = None):
+    def update_job_status(self, job_id: int, status: JobStatus, progress: float = 0.0, fps: float = 0.0, eta_seconds: float = 0.0, elapsed_seconds: float | None = None, stage: StageProgress | None = None):
         idx = self._find_job_index_by_id(job_id)
         if idx is None:
             return
@@ -646,13 +647,13 @@ class QueuePanel(ctk.CTkFrame):
         
         if status == JobStatus.PROCESSING:
             widget.set_progress(progress)
-            widget.set_fps_eta(fps=fps, eta_seconds=eta_seconds)
+            widget.set_fps_eta(fps, eta_seconds, stage)
         elif status == JobStatus.COMPLETED and elapsed_seconds is not None:
             widget.hide_progress()
             widget.set_completed(elapsed_seconds)
         else:
             widget.hide_progress()
-            widget.set_fps_eta(0.0, 0.0)
+            widget.set_fps_eta(0.0, 0.0, None)
             
         # Hide conflict indicator once processing starts
         if status != JobStatus.PENDING:

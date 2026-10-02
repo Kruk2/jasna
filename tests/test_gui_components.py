@@ -159,7 +159,7 @@ def test_updating_disabled_start_button_hides_previous_tooltip() -> None:
 
 def test_completed_job_combines_status_and_elapsed_time(tk_root) -> None:
     item = _job_item(tk_root)
-    item.set_fps_eta(fps=30.0, eta_seconds=10.0)
+    item.set_fps_eta(30.0, 10.0, None)
 
     item.set_completed(2.6)
 
@@ -290,3 +290,12 @@ def test_control_bar_progress_rows_fit_its_height(tk_root) -> None:
     bottom = control_bar._eta_label.winfo_rooty() + control_bar._eta_label.winfo_height()
     assert bottom <= control_bar.winfo_rooty() + control_bar.winfo_height()
     assert control_bar._fps_label.winfo_ismapped() and control_bar._eta_label.winfo_ismapped()
+
+
+def test_job_item_shows_the_ltx_step_in_place_of_fps(tk_root) -> None:
+    item = _job_item(tk_root)
+    item.set_fps_eta(0.0, 0.0, StageProgress("scan", 1, 4, 0.456, 30.0))
+    assert item._fps_label.cget("text") == "Step 1/4: 45%"
+    assert item._eta_label.cget("text") == ""
+    item.set_fps_eta(30.0, 10.0, None)
+    assert item._fps_label.cget("text") == "30.0fps"

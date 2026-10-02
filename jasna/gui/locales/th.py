@@ -254,6 +254,7 @@ TH = {
         "ltx_step_starting": "ขั้นตอน {number}/{count}: {stage}…",
         "ltx_step_percent": "ขั้นตอน {number}/{count}: {stage} {percent}%",
         "ltx_step_eta": "ขั้นตอน {number}/{count}: {stage} {percent}% เหลืออีก {time}",
+        "ltx_step_short": "ขั้นตอน {number}/{count}: {percent}%",
         "section_advanced": "การประมวลผลขั้นสูง",
         "section_secondary": "การฟื้นฟูขั้นที่สอง",
         "section_image_restoration": "การซ่อมแซมภาพ (ภาพนิ่ง)",

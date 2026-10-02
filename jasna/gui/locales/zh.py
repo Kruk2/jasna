@@ -254,6 +254,7 @@ ZH = {
         "ltx_step_starting": "第 {number}/{count} 步：{stage}…",
         "ltx_step_percent": "第 {number}/{count} 步：{stage} {percent}%",
         "ltx_step_eta": "第 {number}/{count} 步：{stage} {percent}%，剩余 {time}",
+        "ltx_step_short": "第 {number}/{count} 步：{percent}%",
         "section_advanced": "高级处理",
         "section_secondary": "二次修复",
         "section_image_restoration": "图像修复（静态图片）",
