@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from factories import make_pipeline
+from jasna.progressbar import StageProgress
 from jasna.vr180 import SbsDetectionAdapter
 from jasna.vr_projection import FisheyeProjector, GnomonicProjector
 
@@ -51,7 +52,7 @@ class TestPipelineInit:
         p = _make_pipeline(progress_callback=cb, disable_progress=True)
         with p._ltx_progress(10, cb).bar("scan", 10) as bar:
             bar.update(10)
-        assert cb.call_args[0] == (pytest.approx(2.0), 0.0, 0.0, 0, 0, "scan")
+        assert cb.call_args[0] == (pytest.approx(2.0), 0.0, 0.0, 0, 0, StageProgress("scan", 1, 4, 1.0, 0.0))
 
     def test_retarget_high_fps_defaults_off_and_can_be_enabled(self):
         assert _make_pipeline().retarget_high_fps is False

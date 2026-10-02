@@ -327,14 +327,41 @@ def test_progress_reports_the_stage_and_the_share_of_the_whole_run(monkeypatch):
     with progress.bar("denoise", 4, unit="step") as bar:
         clock.now = 300.0
         bar.update(2)
-    assert [(stage, round(fraction, 3)) for stage, fraction, _eta in reports] == [
+    assert [(stage.name, round(fraction, 3)) for fraction, _eta, stage in reports] == [
         ("scan", 0.0),
         ("scan", 0.02),
         ("denoise", 0.02),
         ("denoise", 0.42),
     ]
-    assert [eta for *_rest, eta in reports[:3]] == [0.0, 0.0, 0.0]
-    assert reports[-1][2] == pytest.approx(300.0 * 0.58 / 0.42)
+    assert [eta for _fraction, eta, _stage in reports[:3]] == [0.0, 0.0, 0.0]
+    assert reports[-1][1] == pytest.approx(300.0 * 0.58 / 0.42)
+
+
+def test_progress_reports_each_pass_with_its_own_share_and_time_left(monkeypatch):
+    clock = _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    with progress.bar("scan", 100) as bar:
+        clock.now = 1.0
+        bar.update(10)
+        clock.now = 5.0
+        bar.update(20)
+    first, second = reports[-2][2], reports[-1][2]
+    assert (first.number, first.count, first.fraction, first.seconds_left) == (1, 4, 0.1, 0.0)
+    assert second.fraction == pytest.approx(0.3)
+    assert second.seconds_left == pytest.approx(4.0 / 20 * 70)
+
+
+def test_progress_begin_shows_the_next_pass_while_its_model_loads(monkeypatch):
+    _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(10, disable=True, report=lambda *args: reports.append(args))
+    with progress.bar("scan", 10) as bar:
+        bar.update(10)
+    progress.begin("encode")
+    fraction, _eta, stage = reports[-1]
+    assert (stage.name, stage.number, stage.fraction) == ("encode", 2, 0.0)
+    assert fraction == pytest.approx(0.02)
 
 
 _RATES = {
@@ -357,7 +384,7 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
     with progress.bar("scan", 100) as bar:
         clock.now = 10.0
         bar.update(100)
-    assert reports[-1] == ("scan", pytest.approx(0.02), 0.0)
+    assert reports[-1][:2] == (pytest.approx(0.02), 0.0)
     progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}))
     with progress.bar("encode", 100) as bar:
         clock.now = 20.0
@@ -365,8 +392,9 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
 
     encode_left = (100 * 2.0 * 0.01 + 10 * 0.5) / 2
     later = 20.0 + 10 * 4.0 + 3.0 + 100 * 2.0 * 0.02 + 10 * 1.0
-    stage, fraction, left = reports[-1]
-    assert stage == "encode"
+    fraction, left, stage = reports[-1]
+    assert stage.name == "encode"
+    assert stage.seconds_left == pytest.approx(encode_left)
     assert left == pytest.approx(encode_left + later)
     assert fraction == pytest.approx(20.0 / (20.0 + left))
 
@@ -379,7 +407,8 @@ def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monk
     progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 3, 768: 1}))
     with progress.bar("encode", 100) as bar:
         bar.update(50)
-    assert reports[-1] == ("encode", pytest.approx(0.04), 0.0)
+    assert reports[-1][:2] == (pytest.approx(0.04), 0.0)
+    assert reports[-1][2].name == "encode"
 
 
 def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
@@ -482,3 +511,28 @@ def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
 
     assert _Transformer.seeds == [[11], [22]]
     assert prepared.windows == 1
+
+
+def test_restore_spans_shows_each_pass_before_its_model_loads(fakes, monkeypatch, tmp_path):
+    reports = []
+    shown_at_load = []
+
+    def loading(model, made):
+        def load(*args):
+            shown_at_load.append((model, reports[-1][2].name))
+            return made(*args)
+
+        return load
+
+    monkeypatch.setattr(restore, "load_video_encoder", loading("encoder", restore.load_video_encoder))
+    monkeypatch.setattr(restore, "LtxTransformer", loading("transformer", restore.LtxTransformer))
+    monkeypatch.setattr(restore, "load_video_decoder", loading("decoder", restore.load_video_decoder))
+    video = _video(12, range(2, 10))
+    restore.restore_spans(
+        [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)],
+        _render(tmp_path),
+        work_dir=tmp_path,
+        progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
+        cancel=threading.Event(),
+    )
+    assert shown_at_load == [("encoder", "encode"), ("transformer", "denoise"), ("decoder", "compose")]

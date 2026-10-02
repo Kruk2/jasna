@@ -37,6 +37,7 @@ from jasna.ltx.plan import LARGE_CANVAS, Region, TrackPlan, Window, crossfade_we
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
 from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
+from jasna.progressbar import StageProgress
 from jasna.tracking.scene_detector import SceneCutDetector
 
 logger = logging.getLogger(__name__)
@@ -84,17 +85,18 @@ class LtxSpan:
 
 
 LtxStage = Literal["scan", "encode", "denoise", "compose"]
-ProgressReport = Callable[[LtxStage, float, float], None]
+ProgressReport = Callable[[float, float, StageProgress], None]
 _STAGE_NUMBER = {"scan": 1, "encode": 2, "denoise": 3, "compose": 4}
 _STAGE_SHARE = {"scan": 0.02, "encode": 0.08, "denoise": 0.8, "compose": 0.1}
 
 
 class Progress:
     """One console bar per pass; ``frames`` sizes the frame-based passes. ``report`` gets
-    ``(stage, fraction of the whole run, seconds left)``. When the speed profile's rates
-    (``expect``) cover what the scan planned, seconds left come from them from the end of
-    the scan on; else they are 0 until the denoise pass has timed a step. Every pass
-    records its timing for the profile."""
+    ``(fraction of the whole run, seconds left, the pass's own progress)``. When the speed
+    profile's rates (``expect``) cover what the scan planned, seconds left come from them
+    from the end of the scan on; else they are 0 until the denoise pass has timed a step.
+    A pass's own seconds left come from its pace so far, else from the profile. Every
+    pass records its timing for the profile."""
 
     def __init__(self, frames: int, *, disable: bool, report: ProgressReport | None) -> None:
         self.frames = frames
@@ -132,29 +134,39 @@ class Progress:
         )
         return _StageBar(self, stage, tqdm_bar)
 
+    def begin(self, stage: LtxStage) -> None:
+        """Report ``stage`` as started before its model loads, so loading shows as that pass."""
+        self._advanced(stage, 0, 1, None)
+
     def skip(self, *stages: LtxStage) -> None:
         """Count ``stages`` as done, for a run that reuses their results."""
         for stage in stages:
             self._done_share += _STAGE_SHARE[stage]
 
-    def _profile_time_left(self, stage: LtxStage, stage_fraction: float) -> float | None:
+    def _profile_stage_left(self, stage: LtxStage, stage_fraction: float) -> float | None:
         if self._estimates is None or stage not in self._estimates:
             return None
-        later = speed.TIMED_PASSES[speed.TIMED_PASSES.index(stage) + 1 :]
-        return self._estimates[stage][1] * (1.0 - stage_fraction) + sum(sum(self._estimates[s]) for s in later)
+        return self._estimates[stage][1] * (1.0 - stage_fraction)
 
-    def _advanced(self, stage: LtxStage, done: int, total: int) -> float | None:
-        """Report the run's progress; returns the seconds left the profile gives, if any."""
+    def _advanced(self, stage: LtxStage, done: int, total: int, paced_left: float | None) -> float | None:
+        """Report the run's progress; ``paced_left`` is the pass's seconds left at its pace
+        so far. Returns the run's seconds left the profile gives, if any."""
         stage_fraction = min(1.0, done / total) if total else 1.0
-        left = self._profile_time_left(stage, stage_fraction)
+        profile_stage_left = self._profile_stage_left(stage, stage_fraction)
+        left = None
+        if profile_stage_left is not None:
+            later = speed.TIMED_PASSES[speed.TIMED_PASSES.index(stage) + 1 :]
+            left = profile_stage_left + sum(sum(self._estimates[s]) for s in later)
         if self._report is not None:
+            stage_left = paced_left if paced_left is not None else profile_stage_left or 0.0
+            step = StageProgress(stage, _STAGE_NUMBER[stage], len(_STAGE_NUMBER), stage_fraction, stage_left)
             elapsed = time.monotonic() - self._started
             if left is not None:
-                self._report(stage, elapsed / (elapsed + left), left)
+                self._report(elapsed / (elapsed + left), left, step)
             else:
                 fraction = self._done_share + _STAGE_SHARE[stage] * stage_fraction
                 self._timed = self._timed or (stage == "denoise" and done > 0)
-                self._report(stage, fraction, elapsed * (1.0 - fraction) / fraction if self._timed else 0.0)
+                self._report(fraction, elapsed * (1.0 - fraction) / fraction if self._timed else 0.0, step)
         return left
 
     def _finished(self, stage: LtxStage, timing: speed.PassTiming) -> None:
@@ -174,14 +186,21 @@ class _StageBar:
         self._warm_from: tuple[float, int] | None = None
         self._windows: list[tuple[int, torch.cuda.Event, torch.cuda.Event]] = []
         self._tracks: list[tuple[int, int, list[tuple[int, torch.cuda.Event]]]] = []
-        progress._advanced(stage, 0, bar.total)
+        progress._advanced(stage, 0, bar.total, None)
 
     def update(self, n: int) -> None:
         self._bar.update(n)
         self._done += n
+        now = time.monotonic()
         if self._warm_from is None:
-            self._warm_from = (time.monotonic(), self._done)
-        left = self._progress._advanced(self._stage, self._done, self._bar.total)
+            self._warm_from = (now, self._done)
+        started, warm_done = self._warm_from
+        paced_left = (
+            (now - started) / (self._done - warm_done) * (self._bar.total - self._done)
+            if self._done > warm_done
+            else None
+        )
+        left = self._progress._advanced(self._stage, self._done, self._bar.total, paced_left)
         if left is not None:
             self._bar.set_postfix_str(f"run {tqdm.format_interval(left)} left", refresh=False)
 
@@ -645,6 +664,7 @@ def prepare_spans(
     )
     progress.plan(speed.Work(progress.frames, render.frame_h * render.frame_w / 1e6, dict(windows)))
     if sum(p.windows for p in prepared):
+        progress.begin("encode")
         encoder = load_video_encoder(render.files.vae, render.device)
         with progress.bar("encode", progress.frames) as bar:
             for p in prepared:
@@ -737,6 +757,7 @@ def restore_spans(
         finals = final_stores(prepared, Path(temp))
         windows = sum(p.windows for p in prepared)
         if windows:
+            progress.begin("denoise")
             transformer = LtxTransformer(render.files.transformer, render.device)
             blocks = (transformer.blocks.resident, transformer.blocks.count)
             try:
@@ -745,6 +766,7 @@ def restore_spans(
                 transformer.close()
                 del transformer
                 torch.cuda.empty_cache()
+        progress.begin("compose")
         decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device) if windows else None
         compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
     for line in progress.summary(profile_key, torch.cuda.max_memory_allocated(render.device), blocks):

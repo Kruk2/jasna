@@ -13,6 +13,7 @@ from jasna.gui.video_session import build_image_session, build_video_session, re
 from jasna.media.probe import UnsupportedColorspaceError
 from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
+from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession, build_pipeline
 
@@ -29,7 +30,25 @@ class ProgressUpdate:
     frames_processed: int = 0
     total_frames: int = 0
     message: str = ""
-    stage: str = ""
+    stage: StageProgress | None = None
+
+
+class ProgressGate:
+    """Lets one progress update through per ``interval`` seconds, and always the first
+    update of an LTX pass, so a pass that starts by loading a model never shows the last one."""
+
+    def __init__(self, interval: float) -> None:
+        self._interval = interval
+        self._last_time = float("-inf")
+        self._last_stage: str | None = None
+
+    def admits(self, now: float, stage: StageProgress | None) -> bool:
+        name = stage.name if stage is not None else None
+        if now - self._last_time < self._interval and name == self._last_stage:
+            return False
+        self._last_time = now
+        self._last_stage = name
+        return True
 
 
 class ProcessingStopped(Exception):
@@ -369,15 +388,13 @@ class Processor:
         self._prepare_job_detector(config, s)
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
-        last_update_time = [0.0]
+        gate = ProgressGate(0.1)
 
         def progress_callback(
-            progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int, stage: str
+            progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int, stage: StageProgress | None
         ):
-            current_time = time.time()
-            if current_time - last_update_time[0] < 0.1:
+            if not gate.admits(time.monotonic(), stage):
                 return
-            last_update_time[0] = current_time
 
             if self._stop_event.is_set():
                 raise ProcessingStopped("Processing stopped")

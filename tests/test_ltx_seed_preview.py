@@ -19,6 +19,7 @@ from jasna.gui.ltx_seed_preview import (
 )
 from jasna.gui.models import AppSettings
 from jasna.ltx.restore import Cancelled
+from jasna.progressbar import StageProgress
 from jasna.segments import SegmentRange
 
 METADATA = SimpleNamespace(video_width=8, video_height=4, start_pts=0, time_base=Fraction(1, 100))
@@ -57,7 +58,7 @@ class _Renderer:
         if self.block:
             cancel.wait(5)
             raise Cancelled()
-        report("denoise", 0.5, 12.0)
+        report(0.5, 12.0, StageProgress("denoise", 3, 4, 0.5, 6.0))
         writer = writer_for(self.tmp_path, (0, 1000))
         writer.frames.append(SeedFrame(0.5, self.tmp_path / "50.jpg"))
         return writer

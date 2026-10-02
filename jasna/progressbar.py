@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Callable
 
 from tqdm import tqdm
 
-ProgressCallback = Callable[[float, float, float, int, int, str], None]
-"""``(percent, fps, eta_seconds, frames_done, total_frames, stage)``; ``stage`` names the LTX
-pass running, or is empty for frame-by-frame restoration."""
+
+@dataclass(frozen=True)
+class StageProgress:
+    """The LTX pass running: pass ``number`` of ``count``, how far it is and its seconds
+    left (0 while not known)."""
+
+    name: str
+    number: int
+    count: int
+    fraction: float
+    seconds_left: float
+
+
+ProgressCallback = Callable[[float, float, float, int, int, StageProgress | None], None]
+"""``(percent, fps, eta_seconds, frames_done, total_frames, stage)``; ``stage`` is the LTX
+pass running, or None for frame-by-frame restoration."""
 
 LTX_WORK_PER_FRAME = 30.0
 """Rough cost of one LTX-restored frame in frames of the standard model."""
@@ -34,7 +48,9 @@ class JobProgress:
     def part(self, name: str) -> ProgressCallback:
         offset, share = self._shares[name]
 
-        def report(percent: float, fps: float, eta_seconds: float, done: int, total: int, stage: str) -> None:
+        def report(
+            percent: float, fps: float, eta_seconds: float, done: int, total: int, stage: StageProgress | None
+        ) -> None:
             fraction = min(1.0, offset + share * percent / 100.0)
             self._timed = self._timed or eta_seconds > 0
             elapsed = time.monotonic() - self._started
@@ -142,7 +158,7 @@ class Progressbar:
                 fps = 1.0 / mean_duration if mean_duration > 0 else 0.0
                 remaining = self.total_frames - self.frames_processed
                 eta_seconds = remaining * mean_duration
-            self.callback(progress_pct, fps, eta_seconds, self.frames_processed, self.total_frames, "")
+            self.callback(progress_pct, fps, eta_seconds, self.frames_processed, self.total_frames, None)
 
     def _get_mean_processing_duration(self) -> float:
         """Calculate mean frame processing duration from the buffer."""

@@ -166,6 +166,7 @@ class SeedRenderer:
         finals = final_stores([prepared], run_dir)
         decoder = None
         if prepared.windows:
+            progress.begin("denoise")
             if self._transformer is None or self._transformer_path != render.files.transformer:
                 self._drop_transformer()
                 self._transformer = LtxTransformer(render.files.transformer, render.device)
@@ -174,6 +175,7 @@ class SeedRenderer:
             decode_bytes = render.budget(LARGE_CANVAS if render.large_canvas else PLAN_CANVAS) + DECODE_HEADROOM_BYTES
             if torch.cuda.mem_get_info(render.device)[0] < decode_bytes:
                 self._drop_transformer()
+            progress.begin("compose")
             decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device)
         try:
             compose_spans([prepared], finals, decoder, render, progress=progress, cancel=cancel)
@@ -323,8 +325,8 @@ class LtxSeedPreviewWorker:
                         writer_for=lambda directory, effect: SeedFrameWriter(
                             directory, effect, self.metadata, _lut_applier(command.settings)
                         ),
-                        report=lambda stage, fraction, eta: self.events.put(
-                            SeedProgress(command.seed, stage, fraction, eta, generation)
+                        report=lambda fraction, eta, stage: self.events.put(
+                            SeedProgress(command.seed, stage.name, fraction, eta, generation)
                         ),
                         cancel=cancel,
                     )

@@ -291,7 +291,7 @@ class Pipeline:
 
         report = None
         if callback is not None:
-            report = lambda stage, fraction, eta: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
+            report = lambda fraction, eta, stage: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
         return Progress(frames, disable=self.disable_progress, report=report)
 
     def _require_ltx_video(self) -> None:

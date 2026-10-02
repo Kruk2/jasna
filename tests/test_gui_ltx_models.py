@@ -430,12 +430,14 @@ def test_start_with_a_trial_skips_the_license_offer(monkeypatch) -> None:
 
 
 def test_the_progress_stage_is_marked_as_a_trial(tk_root) -> None:
-    from jasna.gui.control_bar import ControlBar
+    from jasna.gui.control_bar import ControlBar, status_text
+    from jasna.progressbar import StageProgress
 
     bar = ControlBar(tk_root)
+    stage = StageProgress("denoise", 3, 4, 0.0, 0.0)
     bar.set_trial(True)
-    bar.update_progress(percent=10, stage="denoise")
-    assert bar._fps_label.cget("text") == t("ltx_trial_stage", stage=t("ltx_stage_denoise"))
+    bar.update_progress(percent=10, stage=stage)
+    assert bar._fps_label.cget("text") == t("ltx_trial_stage", stage=status_text(0.0, stage, trial=False))
     bar.set_trial(False)
-    bar.update_progress(percent=10, stage="denoise")
-    assert bar._fps_label.cget("text") == t("ltx_stage_denoise")
+    bar.update_progress(percent=10, stage=stage)
+    assert bar._fps_label.cget("text") == status_text(0.0, stage, trial=False)

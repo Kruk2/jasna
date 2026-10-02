@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jasna.progressbar import Progressbar
+from jasna.progressbar import Progressbar, StageProgress
 
 
 class TestFormatDuration:
@@ -77,7 +77,7 @@ class TestProgressbarLifecycle:
         assert last_call[0][0] == pytest.approx(100.0)
         assert last_call[0][3] == 10
         assert last_call[0][4] == 10
-        assert last_call[0][5] == ""
+        assert last_call[0][5] is None
 
     def test_buffer_respects_max_len(self):
         pb = Progressbar(total_frames=200, video_fps=1, disable=True)
@@ -105,16 +105,17 @@ class TestJobProgress:
         ltx, standard = job.part("ltx"), job.part("standard")
 
         clock[0] = 110.0
-        ltx(50.0, 0.0, 0.0, 0, 0, "scan")
-        assert calls[-1] == (37.5, 0.0, 0.0, 0, 0, "scan")
+        scan = StageProgress("scan", 1, 4, 0.5, 0.0)
+        ltx(50.0, 0.0, 0.0, 0, 0, scan)
+        assert calls[-1] == (37.5, 0.0, 0.0, 0, 0, scan)
 
         clock[0] = 130.0
-        ltx(100.0, 0.0, 5.0, 0, 0, "compose")
+        ltx(100.0, 0.0, 5.0, 0, 0, StageProgress("compose", 4, 4, 1.0, 0.0))
         assert calls[-1][0] == 75.0
         assert calls[-1][2] == pytest.approx(10.0)
 
         clock[0] = 134.0
-        standard(50.0, 30.0, 0.0, 60, 120, "")
+        standard(50.0, 30.0, 0.0, 60, 120, None)
         assert calls[-1][:2] == (87.5, 30.0)
         assert calls[-1][2] == pytest.approx(34.0 / 7.0)
-        assert calls[-1][3:] == (60, 120, "")
+        assert calls[-1][3:] == (60, 120, None)

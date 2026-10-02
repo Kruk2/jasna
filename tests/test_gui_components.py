@@ -12,9 +12,10 @@ from jasna.gui import components, job_list_item
 from jasna.gui.app import JasnaApp
 from jasna.gui.components import StatusPill
 from jasna.gui.job_list_item import JobListItem
-from jasna.gui.control_bar import ControlBar
+from jasna.gui.control_bar import ControlBar, status_text
 from jasna.gui.locales import t
 from jasna.gui.locales.th import TH
+from jasna.progressbar import StageProgress
 
 
 @pytest.fixture
@@ -261,9 +262,31 @@ def test_grab_modal_restores_minimized_dialog_on_focus(tk_root) -> None:
     assert dialog.winfo_ismapped()
 
 
-def test_control_bar_shows_the_ltx_stage_instead_of_fps(tk_root) -> None:
+def test_control_bar_shows_the_ltx_step_instead_of_fps(tk_root) -> None:
     control_bar = ControlBar(tk_root)
-    control_bar.update_progress(filename="a.mp4", percent=42.0, eta_seconds=90.0, stage="denoise")
-    assert control_bar._fps_label.cget("text") == t("ltx_stage_denoise")
+    stage = StageProgress("denoise", 3, 4, 0.0, 0.0)
+    control_bar.update_progress(filename="a.mp4", percent=42.0, eta_seconds=90.0, stage=stage)
+    assert control_bar._fps_label.cget("text") == status_text(0.0, stage, trial=False)
     control_bar.update_progress(filename="a.mp4", percent=50.0, fps=30.0)
     assert control_bar._fps_label.cget("text") == "FPS: 30.0"
+
+
+def test_status_text_names_the_ltx_step_its_share_and_time_left() -> None:
+    assert status_text(0.0, StageProgress("scan", 1, 4, 0.0, 0.0), trial=False) == "Step 1 of 4: Finding mosaics…"
+    assert status_text(0.0, StageProgress("scan", 1, 4, 0.456, 0.0), trial=False) == "Step 1 of 4: Finding mosaics 45%"
+    assert (
+        status_text(0.0, StageProgress("denoise", 3, 4, 0.5, 130.0), trial=True)
+        == "Step 3 of 4: Restoring 50%, 2m 10s left (trial)"
+    )
+    assert status_text(24.0, None, trial=False) == "FPS: 24.0"
+
+
+def test_control_bar_progress_rows_fit_its_height(tk_root) -> None:
+    tk_root.geometry("1400x200")
+    control_bar = ControlBar(tk_root)
+    control_bar.pack(fill="x")
+    control_bar.update_progress(filename="a.mp4", percent=5.0, eta_seconds=60.0, stage=StageProgress("scan", 1, 4, 0.5, 30.0))
+    tk_root.update()
+    bottom = control_bar._eta_label.winfo_rooty() + control_bar._eta_label.winfo_height()
+    assert bottom <= control_bar.winfo_rooty() + control_bar.winfo_height()
+    assert control_bar._fps_label.winfo_ismapped() and control_bar._eta_label.winfo_ismapped()
