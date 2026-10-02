@@ -13,12 +13,14 @@ Open it with the scissors button on any queued video.
 
 - Preview the video and select frame-accurate ranges. Leave the selection
   empty to restore the whole video.
-- **Restore preview** shows the current frame or a short playback with your
-  current restoration settings, before you commit to processing.
-- Each range can use its own model (**Restore with**). On an
-  [LTX](models.md#restoration-model) range, **Try seed**
-  renders it with that seed in a few minutes; compare seeds and keep the
-  best with **Use this seed**.
+- **Restore preview** shows the restored video before you commit to
+  processing. BasicVSR++ parts update right away. An
+  [LTX](models.md#restoration-model) range has to be rendered first: the
+  **Render LTX** button shows how long it takes (often several minutes), and
+  Jasna asks before long renders.
+- Each range can use its own model (**Restore with**). To compare LTX seeds,
+  pick another seed and render again; click a tried seed to see it and keep
+  the best with **Use this seed**.
 - Use the visible **− / +** controls or the mouse wheel to zoom into details,
   then drag the preview to pan. **Reset view** appears only after the view has
   been changed.
@@ -35,6 +37,13 @@ The editor can find mosaic scenes for you:
   and reaches about **2,000 FPS on an RTX 5090**.
 - After scanning, adjust the confidence slider to update the amber detected
   ranges, then add them to your purple restoration selection with one click.
+- With **Show masks in preview** on, each mosaic is tagged with its size
+  (longest side as % of the video height).
+- **LTX only for big mosaics** (shown after a scan when LTX can run): adds ranges
+  with a big mosaic as LTX and the rest as BasicVSR++, so the slow LTX only
+  runs where it helps most. A mosaic is big when its longest side is at least
+  the slider's share of the video height; 12% is a good start. Check the
+  ranges and change any you don't like.
 
 The detection model and confidence are remembered per queued video and used
 during final processing, so different videos can use different settings.
@@ -75,6 +84,19 @@ What works with segment processing:
 - Cannot be combined with `--fmp4`; the output is assembled after processing finishes.
 
 Incompatible input is rejected with a clear error before processing starts.
+
+## CLI: `--ltx-auto-split`
+
+The CLI version of **LTX only for big mosaics**. Jasna scans each video
+first, then restores big mosaics with LTX and smaller ones with BasicVSR++.
+It works on folders too:
+
+```bash
+jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto-split 12
+```
+
+A split video keeps its own codec. A video segment processing can't handle is
+restored whole with LTX. Cannot be combined with `--segments`.
 
 ## Working directory
 

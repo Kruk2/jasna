@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import random
+import time
+from dataclasses import replace
+
 import pytest
 
 from jasna.segments import (
@@ -88,3 +92,41 @@ def test_resolve_restorations_fills_in_only_the_job_default() -> None:
         SegmentRange(0, 1, LTX_A),
         SegmentRange(2, 3, LTX_B),
     )
+
+
+def _painted_reference(segments):
+    """Range-by-range painting: each later range removes what it covers from the earlier ones."""
+    painted = []
+    for segment in segments:
+        kept = []
+        for old in painted:
+            if segment.start > old.start:
+                kept.append(replace(old, end=min(old.end, segment.start)))
+            if old.end > segment.end:
+                kept.append(replace(old, start=max(old.start, segment.end)))
+        painted = kept + [segment]
+    merged = []
+    for segment in sorted(painted):
+        if merged and segment.restoration == merged[-1].restoration and segment.start <= merged[-1].end:
+            merged[-1] = replace(merged[-1], end=max(merged[-1].end, segment.end))
+        else:
+            merged.append(segment)
+    return tuple(merged)
+
+
+def test_normalize_paints_later_ranges_over_earlier_ones_like_range_by_range_painting() -> None:
+    rng = random.Random(3)
+    choices = (None, SegmentRestoration("basicvsrpp", None), SegmentRestoration("ltx", 1), SegmentRestoration("ltx", 2))
+    for _ in range(300):
+        segments = []
+        for _ in range(rng.randrange(1, 12)):
+            start = rng.randrange(0, 40) / 2
+            segments.append(SegmentRange(start, start + rng.randrange(1, 12) / 2, rng.choice(choices)))
+        assert normalize_segments(segments) == _painted_reference(segments)
+
+
+def test_normalize_handles_a_long_scan_quickly() -> None:
+    hits = [SegmentRange(max(0.0, second - 0.5), second + 1.5) for second in range(5000)]
+    started = time.perf_counter()
+    assert normalize_segments(hits) == (SegmentRange(0.0, 5000.5),)
+    assert time.perf_counter() - started < 1.0

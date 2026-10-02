@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
     from jasna.mosaic.yolo import YoloMosaicDetectionModel
     from jasna.pipeline import Pipeline
+    from jasna.progressbar import ProgressCallback
     from jasna.restorer.restoration_pipeline import RestorationPipeline
     from jasna.segments import SegmentRange
 
@@ -266,6 +267,95 @@ def _ltx_model_files(
         log_callback=log_callback,
     )
     return files
+
+
+@dataclass(frozen=True)
+class AutoSplit:
+    """A job's LTX auto split: the source codec it keeps, its ranges and their smart-render plan."""
+
+    codec: str
+    segments: "tuple[SegmentRange, ...]"
+    splice_plan: "SplicePlan"
+
+
+def ltx_auto_split(
+    config: SessionConfig,
+    session: RestorationSession,
+    input_video: Path,
+    output_video: Path,
+    *,
+    progress_callback: "ProgressCallback | None",
+) -> AutoSplit | None:
+    """For an LTX job with ``ltx_auto_split_percent`` and no ranges of its own: scan the
+    video, give big mosaics LTX and the rest BasicVSR++, copy the parts without mosaics.
+    None when the job does not split, including a video segment processing cannot handle
+    or with no mosaics found; those are logged and restored whole with LTX."""
+    from jasna.media.probe import get_video_meta_data
+    from jasna.media.splice import (
+        SmartRenderCompatibilityError,
+        build_splice_plan,
+        canonical_codec,
+        probe_keyframes,
+        validate_smart_render,
+    )
+    from jasna.mosaic_scan import ltx_auto_segments, scan_mosaic_sizes
+    from jasna.progressbar import StageProgress
+
+    if config.ltx_auto_split_percent is None or config.restoration_model_name != "ltx":
+        return None
+    metadata = get_video_meta_data(str(input_video))
+    codec = canonical_codec(metadata.codec_name)
+    try:
+        validate_smart_render(
+            metadata, output_path=output_video, codec=codec, retarget_high_fps=config.retarget_high_fps
+        )
+        index = probe_keyframes(input_video, metadata)
+    except SmartRenderCompatibilityError as exc:
+        logger.warning("%s: LTX auto split skipped (%s); restoring the whole video with LTX", input_video.name, exc)
+        return None
+
+    def on_progress(fraction: float) -> None:
+        if progress_callback is not None:
+            progress_callback(0.0, 0.0, 0.0, 0, 0, StageProgress("split", 1, 1, fraction, 0.0))
+
+    samples = scan_mosaic_sizes(
+        session.detection_model_for(config),
+        input_video,
+        metadata,
+        batch_size=config.batch_size,
+        device=session.device,
+        disable_progress=config.disable_progress,
+        on_progress=on_progress,
+    )
+    segments = ltx_auto_segments(
+        samples.times,
+        samples.scores,
+        samples.sizes,
+        threshold=config.detection_score_threshold,
+        ltx_min_size=config.ltx_auto_split_percent / 100,
+        stride=samples.stride,
+        duration=metadata.duration,
+        keyframes=tuple(index.seconds_for_pts(pts) for pts in index.pts),
+        ltx_seed=config.ltx_seed,
+    )
+    if not segments:
+        logger.warning("%s: LTX auto split found no mosaics; restoring the whole video with LTX", input_video.name)
+        return None
+    try:
+        splice_plan = build_splice_plan(segments, index, duration=metadata.duration)
+    except SmartRenderCompatibilityError as exc:
+        logger.warning("%s: LTX auto split skipped (%s); restoring the whole video with LTX", input_video.name, exc)
+        return None
+    mosaic_seconds = sum(segment.duration for segment in segments)
+    ltx_seconds = sum(segment.duration for segment in segments if segment.restoration.model == "ltx")
+    logger.info(
+        "%s: LTX auto split: %.0f s with mosaics, %.0f s (%.0f%%) of it with LTX",
+        input_video.name,
+        mosaic_seconds,
+        ltx_seconds,
+        ltx_seconds / mosaic_seconds * 100,
+    )
+    return AutoSplit(codec, segments, splice_plan)
 
 
 def build_pipeline(

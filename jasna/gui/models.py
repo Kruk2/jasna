@@ -10,7 +10,7 @@ from pathlib import Path
 
 from jasna.gui.paths import get_settings_path
 from jasna.segments import SegmentRange
-from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
+from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +111,8 @@ class AppSettings:
     ltx_fast: bool = False
     ltx_large_canvas: bool = False
     ltx_trial: bool = False
+    ltx_auto_split: bool = False
+    ltx_auto_split_percent: int = LTX_AUTO_DEFAULT_PERCENT
 
     # Basic processing
     batch_size: int = 4

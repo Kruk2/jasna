@@ -21,10 +21,9 @@ from pathlib import Path
 from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
 from jasna.media.probe import VideoMetadata
-from jasna.segments import SegmentRange, normalize_segments
+from jasna.mosaic_scan import SCAN_MASK_HW, mosaic_sizes, scan_sample_stride
 
 SCAN_SCORE_FLOOR = 0.05
-SCAN_MASK_HW = (90, 160)
 SCAN_VRAM_RESERVE_BYTES = 750 * 1024**2
 SCAN_SPILL_CHUNK_BYTES = 64 * 1024**2
 
@@ -36,13 +35,15 @@ class MosaicScanResult:
     Sample ``i`` was taken at ``times[i]`` seconds. ``scores`` holds the best
     detection score per sample (0.0 when nothing was detected), ``masks`` a
     uint8 [N, H, W] tensor of merged detection masks downscaled to
-    ``mask_size``. ``completed_until`` is the last scanned timestamp; earlier
-    than ``duration`` when the scan was stopped.
+    ``mask_size``, and ``sizes`` each sample's biggest mosaic (``mosaic_sizes``).
+    ``completed_until`` is the last scanned timestamp; earlier than ``duration``
+    when the scan was stopped.
     """
 
     times: tuple[float, ...]
     scores: tuple[float, ...]
     masks: object
+    sizes: tuple[float, ...]
     stride: float
     duration: float
     completed_until: float
@@ -59,12 +60,6 @@ class MosaicScanResult:
         if abs(self.times[index] - seconds) > float(tolerance):
             return None
         return self.times[index], self.scores[index], self.masks[index]
-
-
-def scan_sample_stride(fps: float, *, seconds: float = 1.0) -> int:
-    """Frame stride for one detection sample roughly every ``seconds``."""
-
-    return max(1, round(float(fps) * float(seconds)))
 
 
 SCAN_PARALLEL_DECODERS = 2
@@ -102,35 +97,6 @@ def segment_sample_indices(
     keeps everything from ``start``)."""
 
     return [i for i, t in enumerate(times) if t >= start and (is_last or t < end)]
-
-
-def segments_from_scores(
-    times: tuple[float, ...] | list[float],
-    scores: tuple[float, ...] | list[float],
-    *,
-    threshold: float,
-    stride: float,
-    duration: float,
-    pad: float | None = None,
-) -> tuple[SegmentRange, ...]:
-    """Merge above-threshold samples into padded, normalized time ranges."""
-
-    if len(times) != len(scores):
-        raise ValueError("times and scores must have the same length")
-    stride = float(stride)
-    if stride <= 0:
-        raise ValueError("stride must be greater than zero")
-    if pad is None:
-        pad = stride / 2
-    hits = []
-    for seconds, score in zip(times, scores):
-        if score < threshold:
-            continue
-        start = max(0.0, float(seconds) - pad)
-        end = min(float(duration), float(seconds) + stride + pad)
-        if end > start:
-            hits.append(SegmentRange(start, end))
-    return normalize_segments(hits, duration=duration)
 
 
 @dataclass(frozen=True)
@@ -636,6 +602,11 @@ class MosaicScanWorker:
             times=tuple(times),
             scores=tuple(scores),
             masks=masks,
+            sizes=mosaic_sizes(
+                masks.numpy(),
+                frame_width=int(metadata.video_width),
+                frame_height=int(metadata.video_height),
+            ),
             stride=sample_stride_seconds,
             duration=duration,
             completed_until=completed_until,

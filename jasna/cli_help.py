@@ -25,6 +25,12 @@ CLI_HELP: dict[str, str] = {
         "ltx: test the speed without the model files. Output is not restored. "
         "(default: %(default)s)"
     ),
+    "ltx_auto_split": (
+        "ltx: restore only mosaics at least PERCENT of the video height with LTX and smaller "
+        "ones with BasicVSR++ (12 is a good start). Finds the mosaics in each video first and "
+        "copies the rest unchanged, keeping the video's own codec. Works on folders; a video "
+        "that can't be split is restored whole with LTX."
+    ),
     "ltx_large_canvas": (
         "ltx: restore large mosaics at 768 px instead of 512 px. More detail, about 3x slower on "
         "those; needs 10 GB of free VRAM (ignored otherwise). (default: %(default)s)"

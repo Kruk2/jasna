@@ -91,7 +91,7 @@ jasna --input input_folder --output output_folder
 
 - **[使用 GUI](docs/zh/gui.md)** — 修复视频播放器、队列、预设、输出文件名模板与文件冲突，以及其他容易错过的功能。
 - **[选择模型](docs/zh/models.md)** — 该选哪个检测模型、更慢但更细腻的 LTX 修复模型、用二级修复（unet-4x / RTX Super Resolution / Topaz）获得更清晰的结果，以及 SD 1.5 静态图像修复。
-- **[只修复视频的一部分](docs/zh/segments.md)** — 区间编辑器、内置马赛克扫描、提交更好的遮罩，以及 `--segments` CLI 参数。
+- **[只修复视频的一部分](docs/zh/segments.md)** — 区间编辑器、内置马赛克扫描、提交更好的遮罩，`--segments` CLI 参数，以及只对大马赛克用 LTX（`--ltx-auto-split`）。
 - **[VR180 视频](docs/zh/vr180.md)** — Jasna 如何处理并排 VR，以及按片商的自动设置。
 - **[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)** — 片段大小、时间重叠、模型编译，以及显存不足时该怎么办。
 - **[高级处理](docs/zh/advanced_processing.md)** — 降噪、60→30 FPS 导出、色彩 LUT、锐化、原样传给编码器的 CQ 质量设置、自定义编码器设置，以及队列级或逐视频导出后操作。

@@ -80,6 +80,52 @@ class TestMainValidation:
         assert (config.restoration_model_name, config.ltx_seed) == ("ltx", 3)
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
 
+    def test_ltx_auto_split_reaches_pipeline_with_the_split_source_codec(self, tmp_path):
+        from jasna.segments import SegmentRestoration
+        from jasna.session_factory import AutoSplit
+
+        segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 3)),)
+        split = AutoSplit("h264", segments, MagicMock())
+        with (
+            patch("jasna.session_factory.ltx_auto_split", return_value=split) as auto_split,
+            patch("jasna.accelerator.is_nvidia_device", return_value=True),
+            patch("jasna.ltx.model_files.LtxModelFiles.from_dir", return_value=MagicMock()),
+            patch("jasna.ltx.model_files.missing_downloads", return_value=[]),
+        ):
+            pipeline_cls = _run_main_with_args(
+                tmp_path,
+                ["--restoration-model-name", "ltx", "--ltx-seed", "3", "--ltx-auto-split", "12", "--codec", "av1"],
+            )
+
+        assert auto_split.call_args.args[0].ltx_auto_split_percent == 12.0
+        kwargs = pipeline_cls.call_args.kwargs
+        assert kwargs["config"].codec == "h264"
+        assert kwargs["config"].encoder_settings == {"cq": 25}
+        assert kwargs["segments"] == segments
+        assert kwargs["splice_plan"] is split.splice_plan
+
+    def test_ltx_auto_split_without_a_split_runs_the_whole_video(self, tmp_path):
+        with (
+            patch("jasna.session_factory.ltx_auto_split", return_value=None),
+            patch("jasna.accelerator.is_nvidia_device", return_value=True),
+            patch("jasna.ltx.model_files.LtxModelFiles.from_dir", return_value=MagicMock()),
+            patch("jasna.ltx.model_files.missing_downloads", return_value=[]),
+        ):
+            pipeline_cls = _run_main_with_args(tmp_path, ["--restoration-model-name", "ltx", "--ltx-auto-split", "12"])
+
+        assert pipeline_cls.call_args.kwargs["segments"] is None
+        assert pipeline_cls.call_args.kwargs["config"].codec == "hevc"
+
+    def test_ltx_auto_split_needs_ltx(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--ltx-auto-split", "12"])
+
+    def test_ltx_auto_split_rejects_segments(self, tmp_path):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(
+                tmp_path, ["--restoration-model-name", "ltx", "--ltx-auto-split", "12", "--segments", "1-2"]
+            )
+
     def test_ltx_trial_needs_no_model_files_or_download(self, tmp_path, capsys):
         with (
             patch("jasna.accelerator.is_nvidia_device", return_value=True),

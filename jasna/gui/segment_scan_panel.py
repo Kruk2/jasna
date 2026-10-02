@@ -27,24 +27,16 @@ from jasna.gui.mosaic_scan import (
     ScanProgress,
     ScanStatus,
     ScanStorageSpilled,
-    segments_from_scores,
 )
 from jasna.gui.segment_editor_state import SegmentEditorState
 from jasna.gui.segment_timeline import SegmentTimeline
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.media.probe import VideoMetadata
+from jasna.mosaic_scan import ltx_auto_segments, mosaic_boxes, segments_from_scores
 from jasna.segments import SegmentRange, format_timestamp
 
 _MASK_CACHE_SIZE = 256
-
-
-def worker_status_text(message: str) -> str:
-    if message == "loading_models":
-        return t("segments_restore_loading_models")
-    if message == "restoring":
-        return t("segments_restore_restoring")
-    return message
 
 
 def clamp_scan_threshold(value: float) -> float:
@@ -63,6 +55,8 @@ class ScanPanel(ctk.CTkFrame):
         detection_model: str,
         threshold: float,
         left_eye_only: bool,
+        ltx_seed: int | None,
+        keyframes: Callable[[], tuple[float, ...] | None],
         base_settings: Callable[[], AppSettings],
         current_seconds: Callable[[], float],
         is_gpu_busy: Callable[[], bool],
@@ -79,6 +73,8 @@ class ScanPanel(ctk.CTkFrame):
         self._state = state
         self._timeline = timeline
         self._left_eye_only = left_eye_only
+        self._ltx_seed = ltx_seed
+        self._keyframes = keyframes
         self._base_settings = base_settings
         self._current_seconds = current_seconds
         self._is_gpu_busy = is_gpu_busy
@@ -95,9 +91,12 @@ class ScanPanel(ctk.CTkFrame):
         self._was_stopped = False
         self._result: MosaicScanResult | None = None
         self._proposals: tuple[SegmentRange, ...] = ()
+        self._ltx_auto = bool(base_settings().ltx_auto_split)
+        self._ltx_percent = int(base_settings().ltx_auto_split_percent)
         self._overlay = True
         self._threshold = clamp_scan_threshold(threshold)
         self._threshold_after: str | None = None
+        self._ltx_percent_after: str | None = None
         self._mask_generation = 0
         self._mask_requested_key: int | None = None
         self._mask_cache: OrderedDict[int, tuple[float, float, object]] = OrderedDict()
@@ -130,6 +129,8 @@ class ScanPanel(ctk.CTkFrame):
             self._model,
             self._interval,
             self._threshold_slider,
+            self._ltx_auto_toggle,
+            self._ltx_percent_slider,
             self._add_btn,
             self._overlay_toggle,
         )
@@ -331,6 +332,42 @@ class ScanPanel(ctk.CTkFrame):
 
         self._progress = ctk.CTkProgressBar(self._activity, height=7)
         self._progress.set(0.0)
+        self._build_ltx_auto()
+
+    def _build_ltx_auto(self) -> None:
+        row = self._ltx_auto_row = ctk.CTkFrame(self._activity, fg_color="transparent")
+        self._ltx_auto_toggle = CompactSwitch(row, self._toggle_ltx_auto, Colors.BG_PANEL)
+        self._ltx_auto_toggle.pack(side="left")
+        if self._ltx_auto:
+            self._ltx_auto_toggle.select()
+        label = ctk.CTkLabel(
+            row,
+            text=t("segments_scan_ltx_auto"),
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+            text_color=Colors.TEXT_PRIMARY,
+        )
+        label.pack(side="left", padx=(6, 12))
+        self._ltx_percent_slider = ctk.CTkSlider(
+            row,
+            from_=2,
+            to=50,
+            number_of_steps=48,
+            width=150,
+            command=self._on_ltx_percent,
+        )
+        self._ltx_percent_slider.set(self._ltx_percent)
+        self._ltx_percent_slider.pack(side="left")
+        self._ltx_percent_label = ctk.CTkLabel(
+            row,
+            text=f"{self._ltx_percent}%",
+            font=(Fonts.FAMILY_MONO, Fonts.SIZE_SMALL),
+            text_color=Colors.TEXT_PRIMARY,
+            width=42,
+            height=26,
+        )
+        self._ltx_percent_label.pack(side="left", padx=(6, 0))
+        for widget in (self._ltx_auto_toggle, label, self._ltx_percent_slider):
+            Tooltip(widget, t("segments_scan_ltx_auto_hint"))
 
     def poll(self) -> None:
         worker = self._worker
@@ -368,6 +405,7 @@ class ScanPanel(ctk.CTkFrame):
         self._add_btn.pack_forget()
         self._overlay_box.pack_forget()
         self._progress.pack_forget()
+        self._ltx_auto_row.pack_forget()
 
         if state == "idle":
             self._activity.pack_forget()
@@ -388,6 +426,8 @@ class ScanPanel(ctk.CTkFrame):
             if self._proposals:
                 self._add_btn.pack(side="right", padx=(10, 0))
             self._overlay_box.pack(side="right", padx=(12, 0))
+            if self._ltx_seed is not None:
+                self._ltx_auto_row.pack(fill="x", padx=10, pady=(0, 8))
 
     def _start(self) -> None:
         if self._active:
@@ -422,7 +462,7 @@ class ScanPanel(ctk.CTkFrame):
         self._mask_requested_key = None
         self._timeline.set_detections(())
         self._progress.set(0.0)
-        self._set_status(t("segments_restore_loading_models"), dot_color=Colors.STATUS_PROCESSING)
+        self._set_status(t("segments_scan_loading_model"), dot_color=Colors.STATUS_PROCESSING)
         self._set_locked(True)
 
     def _set_locked(self, locked: bool) -> None:
@@ -441,7 +481,8 @@ class ScanPanel(ctk.CTkFrame):
 
     def _handle_event(self, event) -> None:
         if isinstance(event, ScanStatus):
-            self._set_status(worker_status_text(event.message), dot_color=Colors.STATUS_PROCESSING)
+            text = t("segments_scan_loading_model") if event.message == "loading_models" else event.message
+            self._set_status(text, dot_color=Colors.STATUS_PROCESSING)
         elif isinstance(event, ScanProgress):
             self._progress.set(event.fraction)
             status = t(
@@ -494,13 +535,7 @@ class ScanPanel(ctk.CTkFrame):
             pad=0.0,
         )
         self._timeline.set_detections(runs)
-        proposals = segments_from_scores(
-            result.times,
-            result.scores,
-            threshold=self._threshold,
-            stride=result.stride,
-            duration=state.duration,
-        )
+        proposals = self._scan_proposals(result)
         self._proposals = tuple(
             proposal
             for proposal in proposals
@@ -515,23 +550,67 @@ class ScanPanel(ctk.CTkFrame):
             state="normal" if count and not self._active else "disabled",
         )
         total_seconds = sum(proposal.duration for proposal in proposals)
+        ltx_seconds = sum(
+            proposal.duration
+            for proposal in proposals
+            if proposal.restoration is not None and proposal.restoration.model == "ltx"
+        )
         if not proposals:
             self._set_status(t("segments_scan_none"), dot_color=Colors.STATUS_PENDING)
         elif not count:
             self._set_status(t("segments_scan_all_added"), dot_color=Colors.STATUS_COMPLETED)
         else:
             summary_key = "segments_scan_result_partial" if self._was_stopped else "segments_scan_result"
-            self._set_status(
-                t(
-                    summary_key,
-                    count=len(proposals),
-                    duration=format_timestamp(total_seconds, milliseconds=False),
-                ),
-                dot_color=Colors.STATUS_WARNING,
+            summary = t(
+                summary_key,
+                count=len(proposals),
+                duration=format_timestamp(total_seconds, milliseconds=False),
             )
+            if any(proposal.restoration is not None for proposal in proposals):
+                summary = f"{summary} · {t('segments_scan_ltx_share', duration=format_timestamp(ltx_seconds, milliseconds=False))}"
+            self._set_status(summary, dot_color=Colors.STATUS_WARNING)
         self._set_ui_state("results")
         if self._overlay:
             self._on_preview_changed()
+
+    def _scan_proposals(self, result: MosaicScanResult) -> tuple[SegmentRange, ...]:
+        keyframes = self._keyframes() if self._ltx_auto else None
+        if keyframes is None:
+            return segments_from_scores(
+                result.times,
+                result.scores,
+                threshold=self._threshold,
+                stride=result.stride,
+                duration=self._state.duration,
+            )
+        return ltx_auto_segments(
+            result.times,
+            result.scores,
+            result.sizes,
+            threshold=self._threshold,
+            ltx_min_size=self._ltx_percent / 100,
+            stride=result.stride,
+            duration=self._state.duration,
+            keyframes=keyframes,
+            ltx_seed=self._ltx_seed,
+        )
+
+    def _toggle_ltx_auto(self) -> None:
+        self._ltx_auto = bool(self._ltx_auto_toggle.get())
+        self.refresh_view()
+
+    def _on_ltx_percent(self, value: float) -> None:
+        self._ltx_percent = round(value)
+        self._ltx_percent_label.configure(text=f"{self._ltx_percent}%")
+        if not self._ltx_auto:
+            return
+        if self._ltx_percent_after is not None:
+            self.after_cancel(self._ltx_percent_after)
+        self._ltx_percent_after = self.after(60, self._apply_ltx_percent)
+
+    def _apply_ltx_percent(self) -> None:
+        self._ltx_percent_after = None
+        self.refresh_view()
 
     def _on_threshold(self, value: float) -> None:
         self._threshold = float(value)
@@ -580,7 +659,30 @@ class ScanPanel(ctk.CTkFrame):
         overlay = Image.new("RGB", image.size, "#ef4444")
         composed = image.copy()
         composed.paste(overlay, (0, 0), alpha)
+        self._draw_size_tags(composed, mask_np)
         return composed
+
+    def _draw_size_tags(self, image: Image.Image, mask) -> None:
+        """Tag each mosaic with its size; with the LTX split on, teal goes to LTX and indigo to BasicVSR++."""
+        from PIL import ImageDraw, ImageFont
+
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default(size=max(12, image.height // 28))
+        pad = max(2, image.height // 160)
+        for box in mosaic_boxes(mask, aspect=image.width / image.height):
+            percent = box.size * 100
+            if not self._ltx_auto:
+                fill = Colors.BG_PANEL
+            elif percent >= self._ltx_percent:
+                fill = Colors.MODEL_LTX
+            else:
+                fill = Colors.PRIMARY
+            text = f"{percent:.0f}%"
+            left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+            x = box.left * image.width
+            y = max(0.0, box.top * image.height - (bottom - top) - 2 * pad)
+            draw.rectangle((x, y, x + right - left + 2 * pad, y + bottom - top + 2 * pad), fill=fill)
+            draw.text((x + pad - left, y + pad - top), text, fill="white", font=font)
 
     def _request_mask(self, seconds: float) -> None:
         worker = self._worker

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from jasna.gui.mosaic_scan import (
-    MosaicScanResult,
-    _ScanTensorCollector,
-    scan_sample_stride,
-    segments_from_scores,
-)
+from fractions import Fraction
+
+import numpy as np
+
+from jasna.gui.mosaic_scan import MosaicScanResult, _ScanTensorCollector
+from jasna.media.splice import KeyframeIndex, build_splice_plan
+from jasna.mosaic_scan import ltx_auto_segments, mosaic_boxes, mosaic_sizes, scan_sample_stride, segments_from_scores
 from jasna.gui.segment_editor_state import SegmentEditorState
 from jasna.segments import SegmentRange, SegmentRestoration
 
@@ -66,6 +67,7 @@ def test_mask_lookup_only_returns_exact_sample():
         times=(0.0, 1.0, 2.0),
         scores=(0.1, 0.9, 0.2),
         masks=["m0", "m1", "m2"],
+        sizes=(0.0,) * 3,
         stride=1.0,
         duration=10.0,
         completed_until=2.0,
@@ -158,3 +160,76 @@ def test_segment_sample_indices_ownership():
     assert segment_sample_indices(times, 0.0, 10.0, is_last=False) == [0, 1]
     assert segment_sample_indices(times, 10.0, 20.0, is_last=True) == [2, 3]
     assert segment_sample_indices([5.0], 10.0, 20.0, is_last=True) == []
+
+
+def test_mosaic_size_is_the_longest_side_of_the_biggest_mosaic_in_frame_heights():
+    masks = np.zeros((3, 90, 160), dtype=np.uint8)
+    masks[1, 10:19, 10:15] = 1
+    masks[1, 50:56, 100:150] = 1
+    masks[2, 0:45, 0:2] = 1
+    sizes = mosaic_sizes(masks, frame_width=1920, frame_height=1080)
+    assert sizes[0] == 0.0
+    assert sizes[1] == pytest.approx(50 / 160 * 16 / 9)
+    assert sizes[2] == pytest.approx(0.5)
+
+
+LTX = SegmentRestoration("ltx", 7)
+
+
+def _auto(sizes, *, keyframes=(0.0, 2.0, 4.0, 6.0, 8.0), min_size=0.12):
+    times = tuple(float(t) for t in range(len(sizes)))
+    scores = tuple(0.9 if size else 0.0 for size in sizes)
+    return ltx_auto_segments(
+        times,
+        scores,
+        sizes,
+        threshold=0.5,
+        ltx_min_size=min_size,
+        stride=1.0,
+        duration=10.0,
+        keyframes=keyframes,
+        ltx_seed=7,
+    )
+
+
+def test_auto_split_gives_big_mosaics_ltx_across_their_keyframe_interval():
+    segments = _auto((0.0, 0.05, 0.05, 0.3, 0.05, 0.05, 0.05, 0.0, 0.0, 0.0))
+    assert segments == (
+        SegmentRange(0.5, 2.0, STANDARD),
+        SegmentRange(2.0, 6.0, LTX),
+        SegmentRange(6.0, 7.5, STANDARD),
+    )
+
+
+def test_auto_split_without_big_mosaics_keeps_one_standard_range():
+    assert _auto((0.0, 0.05, 0.05, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)) == (SegmentRange(0.5, 3.5, STANDARD),)
+
+
+def test_auto_split_ltx_stays_inside_detected_ranges():
+    segments = _auto((0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0), keyframes=(0.0, 8.0))
+    assert segments == (SegmentRange(2.5, 4.5, LTX),)
+
+
+def test_auto_split_ranges_smart_render_with_one_model_per_span():
+    keyframes = (0, 60, 120, 180, 240)
+    segments = _auto((0.0, 0.05, 0.3, 0.05, 0.05, 0.05, 0.3, 0.05, 0.0, 0.0))
+    plan = build_splice_plan(segments, KeyframeIndex(keyframes, Fraction(1, 30), 0, 300), duration=10.0)
+    models = [{segment.restoration.model for segment in owners} for owners in plan.render_span_segments()]
+    assert all(len(span_models) == 1 for span_models in models)
+    assert {"ltx", "basicvsrpp"} == set().union(*models)
+
+
+def test_add_many_keeps_a_scanned_range_model():
+    state = SegmentEditorState(duration=10.0, fps=30.0, segments=(), default_restoration=STANDARD)
+    state.add_many((SegmentRange(1.0, 2.0, LTX), SegmentRange(3.0, 4.0)))
+    assert [segment.restoration for segment in state.segments] == [LTX, STANDARD]
+
+
+def test_mosaic_boxes_give_each_mosaic_its_box_and_size():
+    mask = np.zeros((90, 160), dtype=np.uint8)
+    mask[9:18, 16:24] = 1
+    mask[45:90, 80:84] = 1
+    boxes = sorted(mosaic_boxes(mask, aspect=16 / 9), key=lambda box: box.left)
+    assert [(box.left, box.top) for box in boxes] == [(0.1, 0.1), (0.5, 0.5)]
+    assert boxes[0].size == pytest.approx(9 / 90)
+    assert boxes[1].size == pytest.approx(0.5)

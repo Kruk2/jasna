@@ -16,6 +16,7 @@ LtxModelName = Literal["distilled", "undistilled"]
 LTX_DEFAULT_MODEL: LtxModelName = "distilled"
 
 LTX_DEFAULT_SEED = 20260923
+LTX_AUTO_DEFAULT_PERCENT = 12
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res"]
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 DenoiseStepName = Literal["after_primary", "after_secondary"]
@@ -44,6 +45,7 @@ class SessionConfig:
     ltx_fast: bool
     ltx_model: LtxModelName
     ltx_trial: bool
+    ltx_auto_split_percent: float | None
     compile_basicvsrpp: bool
     max_clip_size: int
     temporal_overlap: int

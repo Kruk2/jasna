@@ -79,6 +79,10 @@ class SegmentEditorState:
     def selected_duration(self) -> float:
         return sum(segment.duration for segment in self.output_segments)
 
+    @property
+    def ltx_duration(self) -> float:
+        return sum(segment.duration for segment in self.output_segments if segment.restoration.model == "ltx")
+
     def snap(self, seconds: float) -> float:
         """Clamp a timestamp to the video and snap it to the nearest frame."""
 
@@ -145,10 +149,11 @@ class SegmentEditorState:
         return self.replace_selected(start, end)
 
     def add_many(self, ranges: tuple[SegmentRange, ...]) -> int:
-        """Add several ranges as one undoable step; returns how many were new."""
+        """Add several ranges as one undoable step; returns how many were new. A range
+        without its own restoration gets the default one."""
 
         fresh = [
-            replace(candidate, restoration=self.default_restoration)
+            replace(candidate, restoration=candidate.restoration or self.default_restoration)
             for candidate in ranges
             if not any(
                 existing.start <= candidate.start and existing.end >= candidate.end
@@ -190,12 +195,17 @@ class SegmentEditorState:
         self.selected_index = None if selected is None else self._index_containing(selected)
         return True
 
-    def restoration_at(self, seconds: float) -> SegmentRestoration:
-        """The restoration of the range holding ``seconds``, else the default."""
+    def segment_at(self, seconds: float) -> SegmentRange | None:
+        """The range holding ``seconds``, if any."""
         for segment in self.segments:
             if segment.start <= seconds < segment.end:
-                return segment.restoration
-        return self.default_restoration
+                return segment
+        return None
+
+    def restoration_at(self, seconds: float) -> SegmentRestoration:
+        """The restoration of the range holding ``seconds``, else the default."""
+        segment = self.segment_at(seconds)
+        return self.default_restoration if segment is None else segment.restoration
 
     def delete_selected(self) -> bool:
         if self.selected_index is None:

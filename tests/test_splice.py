@@ -83,6 +83,24 @@ def test_plan_rejects_two_models_in_one_render_span() -> None:
     assert exc.value.reason == "mixed_models"
 
 
+def test_plan_splits_models_that_meet_at_a_keyframe() -> None:
+    ltx, basic = SegmentRestoration("ltx", 1), SegmentRestoration("basicvsrpp", None)
+    plan = build_splice_plan(
+        [SegmentRange(1.0, 2.0, basic), SegmentRange(2.0, 3.0, ltx), SegmentRange(4.5, 5.0, ltx)],
+        _index(points=(0, 60, 120, 150)),
+        duration=6,
+    )
+    assert [(span.kind, span.start_pts, span.end_pts) for span in plan.spans] == [
+        ("render", 0, 60),
+        ("render", 60, 150),
+        ("copy", 150, 180),
+    ]
+    assert [[segment.restoration for segment in segments] for segments in plan.render_span_segments()] == [
+        [basic],
+        [ltx, ltx],
+    ]
+
+
 def test_plan_keeps_each_segment_behind_its_render_span_effect_range() -> None:
     first, third = SegmentRestoration("ltx", 1), SegmentRestoration("ltx", 3)
     plan = build_splice_plan(

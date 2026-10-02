@@ -15,7 +15,7 @@ from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
-from jasna.session_factory import RestorationSession, build_pipeline
+from jasna.session_factory import RestorationSession, build_pipeline, ltx_auto_split
 
 logger = logging.getLogger(__name__)
 
@@ -409,6 +409,14 @@ class Processor:
                 total_frames=total,
                 stage=stage,
             ))
+
+        if not segments:
+            split = ltx_auto_split(config, s, input_path, output_path, progress_callback=progress_callback)
+            if split is not None:
+                segments, splice_plan = split.segments, split.splice_plan
+                config = video_session_config(
+                    settings, codec=split.codec, encoder_settings=build_job_encoder_settings(settings, split.codec)
+                )
 
         pipeline = None
         try:

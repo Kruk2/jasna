@@ -9,10 +9,10 @@ from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import LtxModels, card_unavailable_reason, run_unavailable_reason, trial_only
-from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, get_tooltip
+from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, create_slider_value_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
-from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
+from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 
 _MODELS = ("basicvsrpp", "ltx")
 
@@ -167,6 +167,31 @@ class RestorationModelSection:
         Tooltip(self._widgets["ltx_large_canvas"], get_tooltip("ltx_large_canvas"))
         self._large_row = large_row
 
+        auto_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        auto_row.pack(fill="x")
+        add_setting_label(auto_row, "ltx_auto_split", in_card=True)
+        self._widgets["ltx_auto_split_val"] = create_slider_value_label(
+            auto_row, f"{LTX_AUTO_DEFAULT_PERCENT}%", 4, Colors.BG_CARD
+        )
+        self._widgets["ltx_auto_split_val"].pack(side="right", padx=(0, 12))
+        self._widgets["ltx_auto_split_percent"] = ctk.CTkSlider(
+            auto_row,
+            from_=2,
+            to=50,
+            number_of_steps=48,
+            fg_color=Colors.BG_PANEL,
+            progress_color=Colors.MODEL_LTX,
+            button_color=Colors.MODEL_LTX,
+            width=120,
+            command=self._on_auto_split_percent,
+        )
+        self._widgets["ltx_auto_split_percent"].pack(side="right", padx=(0, 8))
+        self._widgets["ltx_auto_split"] = CompactSwitch(auto_row, self._on_auto_split_toggled, Colors.BG_CARD)
+        self._widgets["ltx_auto_split"].pack(side="right", padx=(0, 10), pady=8)
+        for key in ("ltx_auto_split", "ltx_auto_split_percent"):
+            Tooltip(self._widgets[key], get_tooltip("ltx_auto_split"))
+        self._set_auto_split(False, LTX_AUTO_DEFAULT_PERCENT)
+
         trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         trial_row.pack(fill="x")
         add_setting_label(trial_row, "ltx_trial", in_card=True)
@@ -192,6 +217,24 @@ class RestorationModelSection:
             self._widgets["ltx_fast"].select()
         else:
             self._widgets["ltx_fast"].deselect()
+
+    def _set_auto_split(self, enabled: bool, percent: int) -> None:
+        if enabled:
+            self._widgets["ltx_auto_split"].select()
+        else:
+            self._widgets["ltx_auto_split"].deselect()
+        self._widgets["ltx_auto_split_percent"].set(percent)
+        self._widgets["ltx_auto_split_val"].configure(text=f"{percent}%")
+        self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
+
+    def _on_auto_split_toggled(self) -> None:
+        enabled = self._widgets["ltx_auto_split"].get() == 1
+        self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
+        self._on_modified()
+
+    def _on_auto_split_percent(self, value: float) -> None:
+        self._widgets["ltx_auto_split_val"].configure(text=f"{round(value)}%")
+        self._on_modified()
 
     def _trial(self) -> bool:
         return self._widgets["ltx_trial"].get() == 1
@@ -371,6 +414,7 @@ class RestorationModelSection:
             self._widgets["ltx_trial"].select()
         else:
             self._widgets["ltx_trial"].deselect()
+        self._set_auto_split(preset.ltx_auto_split, preset.ltx_auto_split_percent)
         self._set_ltx_model(preset.ltx_model)
         self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
         self._show_notice(None)
@@ -385,4 +429,6 @@ class RestorationModelSection:
             "ltx_fast": self._widgets["ltx_fast"].get() == 1,
             "ltx_large_canvas": self._widgets["ltx_large_canvas"].get() == 1,
             "ltx_trial": self._widgets["ltx_trial"].get() == 1,
+            "ltx_auto_split": self._widgets["ltx_auto_split"].get() == 1,
+            "ltx_auto_split_percent": round(self._widgets["ltx_auto_split_percent"].get()),
         }

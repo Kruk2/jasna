@@ -1,6 +1,7 @@
 import argparse
 import logging
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 from jasna import __version__
@@ -55,6 +56,7 @@ def _session_config_from_args(
         ltx_fast=bool(args.ltx_fast),
         ltx_model=CLI_RESTORATION_MODELS[args.restoration_model_name][1],
         ltx_trial=bool(args.ltx_trial),
+        ltx_auto_split_percent=args.ltx_auto_split,
         compile_basicvsrpp=bool(args.compile_basicvsrpp),
         max_clip_size=int(args.max_clip_size),
         temporal_overlap=int(args.temporal_overlap),
@@ -236,6 +238,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         action=argparse.BooleanOptionalAction,
         help=CLI_HELP["ltx_trial"],
+    )
+    restoration.add_argument(
+        "--ltx-auto-split",
+        type=float,
+        default=None,
+        metavar="PERCENT",
+        help=CLI_HELP["ltx_auto_split"],
     )
     restoration.add_argument(
         "--compile-basicvsrpp",
@@ -855,6 +864,14 @@ def main() -> None:
     input_is_image = input_video is not None and is_image(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
     segments_spec = str(args.segments).strip()
+    auto_split = args.ltx_auto_split is not None
+    if auto_split:
+        if segments_spec:
+            parser.error("--segments cannot be combined with --ltx-auto-split")
+        if not 0 < args.ltx_auto_split <= 100:
+            parser.error("--ltx-auto-split must be a percentage above 0 and at most 100")
+        if args.fmp4:
+            parser.error("--fmp4 cannot be combined with --ltx-auto-split")
     if segments_spec:
         if is_streaming:
             parser.error("--segments cannot be combined with --stream")
@@ -914,8 +931,11 @@ def main() -> None:
             parser.error("--restoration-model-name ltx does not support --stream")
         if args.secondary_restoration != "none" or args.denoise != "none":
             parser.error("--restoration-model-name ltx does not support --secondary-restoration or --denoise")
-    elif args.ltx_trial:
-        parser.error("--ltx-trial needs --restoration-model-name ltx or ltx-undistilled")
+    else:
+        if args.ltx_trial:
+            parser.error("--ltx-trial needs --restoration-model-name ltx or ltx-undistilled")
+        if auto_split:
+            parser.error("--ltx-auto-split needs --restoration-model-name ltx or ltx-undistilled")
     restoration_model_path = Path(
         args.restoration_model_path or default_restoration_model_path(restoration_backend)
     )
@@ -960,13 +980,25 @@ def main() -> None:
 
     _ensure_ltx_model(config, segments)
 
-    from jasna.session_factory import build_pipeline, build_restoration_session
+    from jasna.session_factory import build_pipeline, build_restoration_session, ltx_auto_split
 
     with device_context(config.device):
         session = build_restoration_session(config, log_callback=None)
 
         def make_pipeline(vid_input: Path, out_path: Path):
-            return build_pipeline(config, session, vid_input, out_path, segments=segments, splice_plan=splice_plan)
+            split = None if segments else ltx_auto_split(config, session, vid_input, out_path, progress_callback=None)
+            if split is None:
+                return build_pipeline(config, session, vid_input, out_path, segments=segments, splice_plan=splice_plan)
+            split_config = replace(
+                config,
+                codec=split.codec,
+                encoder_settings=_resolve_cli_encoder_settings(
+                    str(args.encoder_settings), cq=args.cq, codec=split.codec, vendor=vendor_for_device(str(args.device))
+                ),
+            )
+            return build_pipeline(
+                split_config, session, vid_input, out_path, segments=split.segments, splice_plan=split.splice_plan
+            )
 
         def output_path_for(vid: Path) -> Path:
             if input_is_dir:

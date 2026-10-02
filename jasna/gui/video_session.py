@@ -81,6 +81,7 @@ def video_session_config(
         ltx_fast=bool(settings.ltx_fast),
         ltx_model=settings.ltx_model,
         ltx_trial=bool(settings.ltx_trial),
+        ltx_auto_split_percent=float(settings.ltx_auto_split_percent) if settings.ltx_auto_split else None,
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),

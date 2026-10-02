@@ -43,8 +43,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 - 仅限 NVIDIA RTX。不支持 VR180 左右并排视频和流媒体。使用 LTX 时
   二级修复和降噪会关闭。
-- 视频播放器和**修复预览**始终使用 BasicVSR++。要预览 LTX，请在
-  [区间编辑器](segments.md)中使用**试试种子**。
+- 视频播放器始终使用 BasicVSR++。要预览 LTX，请在
+  [区间编辑器](segments.md)中对 LTX 区间打开**修复预览**。
 - 耗时取决于马赛克出现的时长，而不是视频长度。首次运行时 Jasna 要为你的
   显卡准备 LTX，会更慢。
 - 模型不随 Jasna 附带：约 15 GB（快速模式约 9 GB）。下载开放后，
@@ -62,6 +62,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   CLI：`--ltx-seed 7`。
 - **试用模式**：无需模型文件，以真实速度运行 LTX，看看它在你的
   电脑上有多快。视频不会被修复。CLI：`--ltx-trial`。
+- **仅大马赛克用 LTX**：大马赛克用 LTX，较小的用更快的 BasicVSR++。每个
+  视频会先扫描，没有马赛克的部分直接复制。设置了区间的视频按区间处理。
+  CLI：`--ltx-auto-split 12`。
 
 ### 显卡与耗时
 

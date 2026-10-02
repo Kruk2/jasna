@@ -39,6 +39,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs 10 GB of free VRAM. |
 | `--ltx-seed` | model default | LTX: another seed gives a slightly different result. |
 | `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model files. The video is not restored. |
+| `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders; a split video keeps its own codec, one that can't be split is restored whole with LTX. See [Segments](segments.md). |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | on | TensorRT compilation: big speed boost, more VRAM. See [Tuning](tuning.md). |
 | `--max-clip-size` | `90` | Maximum tracked clip length in frames. Main VRAM lever. |
 | `--temporal-overlap` | `8` | Overlap+discard margin at clip splits; reduces boundary flicker. |

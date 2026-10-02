@@ -47,8 +47,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 - NVIDIA RTX only. Not for VR180 side-by-side videos or streaming.
   Secondary restoration and denoise are off with LTX.
-- The Video Player and **Restore preview** always use BasicVSR++. To preview
-  LTX, use **Try seed** in the [Segment Editor](segments.md).
+- The Video Player always uses BasicVSR++. To preview LTX, turn on
+  **Restore preview** on an LTX range in the [Segment Editor](segments.md).
 - The time depends on how long mosaics are on screen, not on the length of
   the video. The first run takes longer while Jasna prepares LTX for your GPU.
 - The model is not bundled: about 15 GB (about 9 GB for Fast mode). Jasna
@@ -69,6 +69,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **Trial mode**: runs LTX at full speed without the model files, so
   you can see how fast it is on your PC. The video is not restored. CLI:
   `--ltx-trial`.
+- **LTX only for big mosaics**: big mosaics get LTX, smaller ones the faster
+  BasicVSR++. Each video is scanned first and parts without mosaics are
+  copied. Videos with ranges you set keep them. CLI: `--ltx-auto-split 12`.
 
 ### Which GPU and how long
 

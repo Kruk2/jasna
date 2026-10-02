@@ -133,3 +133,23 @@ def test_run_summary_without_mosaics_has_only_scan_and_compose():
         "[timing] LTX scan: 3.0s, 40.0 frames/s",
         "[timing] LTX compose: 2.0s",
     ]
+
+
+def test_segment_estimate_uses_the_learned_rates_of_this_gpu_and_model(tmp_path):
+    path = tmp_path / "profile.json"
+    rates = {f"{stage}/fixed": 10.0 for stage in speed.TIMED_PASSES}
+    rates.update({"encode/window512": 1.0, "denoise/window512": 4.0, "compose/window512": 2.0})
+    rates.update({"encode/frame": 0.01, "compose/frame": 0.02})
+    speed.save_rates(path, speed.profile_key("RTX 5090", "m.safetensors", "segment"), rates)
+
+    seconds = speed.segment_estimate_seconds(path, "RTX 5090", "m.safetensors", frames=300, fps=30.0, megapixels=2.0)
+
+    windows = 4
+    assert seconds == pytest.approx(30.0 + windows * (1.0 + 4.0 + 2.0) + 300 * 2.0 * (0.01 + 0.02))
+
+
+def test_segment_estimate_without_a_profile_assumes_five_times_the_range(tmp_path):
+    seconds = speed.segment_estimate_seconds(
+        tmp_path / "missing.json", "RTX 5090", "m.safetensors", frames=600, fps=30.0, megapixels=2.0
+    )
+    assert seconds == pytest.approx(30.0 + 5 * 20.0)

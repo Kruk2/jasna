@@ -191,3 +191,68 @@ def test_build_pipeline_keeps_a_session_that_holds_the_job_model() -> None:
 
     assert session.restoration_pipeline is pipeline
     assert session.ltx_files is None
+
+
+def _auto_split(config, *, samples, validate=None, plan_error=None):
+    from fractions import Fraction
+
+    from jasna.media.splice import KeyframeIndex
+    from jasna.session_factory import ltx_auto_split
+
+    session = MagicMock()
+    progress = MagicMock()
+    with (
+        patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="hevc", duration=6.0)),
+        patch("jasna.media.splice.validate_smart_render", side_effect=validate),
+        patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180)),
+        patch("jasna.mosaic_scan.scan_mosaic_sizes", return_value=samples) as scan,
+    ):
+        if plan_error is not None:
+            with patch("jasna.media.splice.build_splice_plan", side_effect=plan_error):
+                return ltx_auto_split(config, session, Path("in.mp4"), Path("out.mp4"), progress_callback=progress), scan
+        return ltx_auto_split(config, session, Path("in.mp4"), Path("out.mp4"), progress_callback=progress), scan
+
+
+def _samples(sizes):
+    from jasna.mosaic_scan import MosaicSamples
+
+    return MosaicSamples(times=(1.0, 3.0), scores=(0.9, 0.9), sizes=sizes, stride=1.0)
+
+
+def test_ltx_auto_split_sends_big_mosaics_to_ltx_and_keeps_the_source_codec() -> None:
+    config = session_config(restoration_model_name="ltx", ltx_seed=3, ltx_auto_split_percent=12.0)
+    split, scan = _auto_split(config, samples=_samples((0.05, 0.3)))
+    assert split.codec == "hevc"
+    assert split.segments == (
+        SegmentRange(0.5, 2.0, SegmentRestoration("basicvsrpp", None)),
+        SegmentRange(2.0, 4.5, SegmentRestoration("ltx", 3)),
+    )
+    assert len(split.splice_plan.render_spans) == 2
+    assert scan.call_args.kwargs["batch_size"] == config.batch_size
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [dict(restoration_model_name="ltx", ltx_auto_split_percent=None), dict(ltx_auto_split_percent=12.0)],
+)
+def test_ltx_auto_split_is_off_without_the_setting_or_for_basicvsrpp(overrides) -> None:
+    split, scan = _auto_split(session_config(**overrides), samples=_samples((0.3, 0.3)))
+    assert split is None
+    scan.assert_not_called()
+
+
+def test_ltx_auto_split_falls_back_to_the_whole_video(caplog) -> None:
+    from jasna.media.splice import SmartRenderCompatibilityError
+
+    config = session_config(restoration_model_name="ltx", ltx_auto_split_percent=12.0)
+    split, scan = _auto_split(config, samples=_samples((0.3, 0.3)), validate=SmartRenderCompatibilityError("VFR"))
+    assert split is None
+    scan.assert_not_called()
+    assert "VFR" in caplog.text
+
+    split, _ = _auto_split(config, samples=_samples((0.3, 0.3)), plan_error=SmartRenderCompatibilityError("one span"))
+    assert split is None
+
+    split, _ = _auto_split(config, samples=MagicMock(times=(1.0,), scores=(0.0,), sizes=(0.0,), stride=1.0))
+    assert split is None
+    assert "no mosaics" in caplog.text

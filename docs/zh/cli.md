@@ -39,6 +39,7 @@ jasna --input input_folder --output output_folder
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要 10 GB 空闲显存。 |
 | `--ltx-seed` | 模型默认值 | LTX：换一个种子，结果会略有不同。 |
 | `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：无需模型文件即可测试速度。视频不会被修复。 |
+| `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹；拆分后的视频保持原编码，无法拆分的视频整段用 LTX 修复。见[区间](segments.md)。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | 开启 | TensorRT 编译: 大幅提速，占用更多 VRAM。见[调优](tuning.md)。 |
 | `--max-clip-size` | `90` | 跟踪片段的最大帧数。VRAM 的主要调节手段。 |
 | `--temporal-overlap` | `8` | 片段拼接处的重叠和丢弃余量；减少边界闪烁。 |

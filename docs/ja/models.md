@@ -46,8 +46,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 - NVIDIA RTX のみ。VR180 サイドバイサイド動画とストリーミングには
   使えません。LTX ではセカンダリ復元とノイズ除去はオフになります。
-- 動画プレーヤーと**復元プレビュー**は常に BasicVSR++ を使います。LTX を
-  試すには[区間エディター](segments.md)の**シードを試す**を使います。
+- 動画プレーヤーは常に BasicVSR++ を使います。LTX を試すには
+  [区間エディター](segments.md)で LTX の区間の**復元プレビュー**をオンにします。
 - 時間は動画の長さではなく、モザイクが映っている長さで決まります。初回は
   Jasna が LTX をお使いの GPU 向けに準備するため、さらに時間がかかります。
 - モデルは同梱されていません。約 15 GB（高速モードは約 9 GB）です。
@@ -68,6 +68,10 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **お試しモード**: モデルファイルなしで LTX を実際の速度で動かし、
   お使いの PC での速さを確認できます。動画は復元されません。CLI:
   `--ltx-trial`。
+- **大きなモザイクだけ LTX**: 大きなモザイクは LTX、小さなものは高速な
+  BasicVSR++ で復元します。各動画を先にスキャンし、モザイクのない部分は
+  コピーします。区間を設定した動画はその区間を使います。CLI:
+  `--ltx-auto-split 12`。
 
 ### 対応 GPU と所要時間
 

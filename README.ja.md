@@ -91,7 +91,7 @@ jasna --input input_folder --output output_folder
 
 - **[GUI の使い方](docs/ja/gui.md)** — 復元動画プレーヤー、キュー、プリセット、出力テンプレートとファイル競合、その他の見落としがちな機能。
 - **[モデルの選び方](docs/ja/models.md)** — 検出モデルの選択、遅いがより精細な LTX 復元モデル、セカンダリ復元（unet-4x / RTX Super Resolution / Topaz）によるよりシャープな結果、SD 1.5 静止画復元。
-- **[動画の一部だけを復元する](docs/ja/segments.md)** — 区間エディター、内蔵モザイクスキャン、より良いマスクの提案、CLI の `--segments` フラグ。
+- **[動画の一部だけを復元する](docs/ja/segments.md)** — 区間エディター、内蔵モザイクスキャン、より良いマスクの提案、CLI の `--segments` フラグ、大きなモザイクだけ LTX（`--ltx-auto-split`）。
 - **[VR180 動画](docs/ja/vr180.md)** — Jasna がサイドバイサイド VR をどう扱うか、スタジオ別の自動設定。
 - **[VRAM と GPU 使用量の調整](docs/ja/tuning.md)** — クリップサイズ、テンポラルオーバーラップ、モデルコンパイル、VRAM 不足時の対処。
 - **[高度な処理](docs/ja/advanced_processing.md)** — ノイズ除去、60→30 FPS 書き出し、カラー LUT、シャープネス、エンコーダーへそのまま渡す CQ 品質設定、カスタムエンコーダー設定、キュー全体または動画ごとのエクスポート後のアクション。
