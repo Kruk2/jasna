@@ -187,7 +187,8 @@ def test_vae_stream_failure_clears_the_entire_owned_state(tmp_path, monkeypatch)
 
     monkeypatch.setattr(vae_loader, "open_tensors", fail_after_verification)
     with pytest.raises(ValueError, match="final VAE verification"):
-        vae_loader._read_tensors(path, ("encoder.",))
+        with vae_loader.open_tensors(path) as reader:
+            vae_loader._read_tensors(reader, ("encoder.",))
     assert len(retained) == 2
     assert all(torch.count_nonzero(tensor).item() == 0 for tensor in retained)
 

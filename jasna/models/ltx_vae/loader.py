@@ -29,11 +29,10 @@ _Model = TypeVar("_Model", bound=nn.Module)
 logger = logging.getLogger(__name__)
 
 
-def read_vae_config(vae_path: Path) -> dict:
-    with open_tensors(vae_path) as handle:
-        config = json.loads(handle.metadata()["config"])["vae"]
+def read_vae_config(reader) -> dict:
+    config = json.loads(reader.metadata()["config"])["vae"]
     if config.get("_class_name") != _VAE_CLASS_NAME:
-        raise ValueError(f"{vae_path}: VAE class {config.get('_class_name')!r} is not supported")
+        raise ValueError(f"VAE class {config.get('_class_name')!r} is not supported")
     return config
 
 
@@ -82,16 +81,15 @@ def decoder_kwargs(config: dict) -> dict:
     }
 
 
-def _read_tensors(path: Path, prefixes: tuple[str, ...]) -> dict[str, torch.Tensor]:
-    with open_tensors(path) as handle:
-        tensors = {name: torch.empty(shape, dtype=dtype, device="cpu")
-                   for name, (dtype, shape) in handle.tensor_specs().items() if name.startswith(prefixes)}
-        try:
-            handle.read_tensors_into((tuple(tensors),), iter((tensors,)))
-            return tensors
-        except BaseException:
-            _clear_tensors(tensors.values(), None)
-            raise
+def _read_tensors(reader, prefixes: tuple[str, ...]) -> dict[str, torch.Tensor]:
+    tensors = {name: torch.empty(shape, dtype=dtype, device="cpu")
+               for name, (dtype, shape) in reader.tensor_specs().items() if name.startswith(prefixes)}
+    try:
+        reader.read_tensors_into((tuple(tensors),), iter((tensors,)))
+        return tensors
+    except BaseException:
+        _clear_tensors(tensors.values(), None)
+        raise
 
 
 def _clear_tensors(tensors: Iterable[torch.Tensor], retained: nn.Module | None) -> None:
@@ -176,10 +174,11 @@ def _build_bf16(factory: Callable[[], _Model], state: dict[str, torch.Tensor], d
 
 def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
     """bf16 eval ``VideoEncoder``; call it on ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1]."""
-    kwargs = encoder_kwargs(read_vae_config(vae_path))
-    checkpoint = _read_tensors(vae_path, ("encoder.", "per_channel_statistics."))
-    encoder = None
+    checkpoint, encoder = {}, None
     try:
+        with open_tensors(vae_path) as reader:
+            kwargs = encoder_kwargs(read_vae_config(reader))
+            checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
         encoder = _build_bf16(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device)
         return encoder
     finally:
@@ -188,14 +187,16 @@ def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
 
 def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.device) -> DiffusionVideoDecoder:
     """bf16 eval ``DiffusionVideoDecoder`` with the fine-tuned decoder tensors overlaid."""
-    kwargs = decoder_kwargs(read_vae_config(vae_path))
-    checkpoint = _read_tensors(vae_path, ("decoder.", "per_channel_statistics."))
     decoder, complete = None, False
-    tuned, overlay = {}, {}
+    checkpoint, tuned, overlay = {}, {}, {}
     try:
+        with open_tensors(vae_path) as reader:
+            kwargs = decoder_kwargs(read_vae_config(reader))
+            checkpoint = _read_tensors(reader, ("decoder.", "per_channel_statistics."))
         state = decoder_state_dict(checkpoint)
         decoder = _build_bf16(lambda: DiffusionVideoDecoder(**kwargs), state, device)
-        tuned = _read_tensors(tuned_decoder_path, ("",))
+        with open_tensors(tuned_decoder_path) as reader:
+            tuned = _read_tensors(reader, ("",))
         own = decoder.state_dict()
         unknown = sorted(set(tuned) - set(own))
         if unknown:

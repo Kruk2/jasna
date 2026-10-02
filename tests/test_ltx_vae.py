@@ -1,5 +1,5 @@
 import json
-from pathlib import Path
+from contextlib import contextmanager
 
 import pytest
 import torch
@@ -156,7 +156,7 @@ def test_tiny_encoder_output_shape_and_frame_crop():
     assert latent.shape == (1, 8, 3, 2, 3)
 
 
-def test_load_video_encoder_from_checkpoint(tmp_path):
+def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
     torch.manual_seed(0)
     source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
     tensors = {f"encoder.{k}": v for k, v in source.state_dict().items() if not k.startswith("per_channel")}
@@ -165,11 +165,23 @@ def test_load_video_encoder_from_checkpoint(tmp_path):
     path = tmp_path / "vae.safetensors"
     save_file(tensors, str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
 
+    opened = []
+    open_tensors = loader.open_tensors
+
+    @contextmanager
+    def record_open(source):
+        opened.append(source)
+        with open_tensors(source) as reader:
+            yield reader
+
+    monkeypatch.setattr(loader, "open_tensors", record_open)
+
     encoder = load_video_encoder(path, torch.device("cpu"))
 
     assert all(p.dtype == torch.bfloat16 and not p.requires_grad for p in encoder.parameters())
     assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16())
     assert torch.equal(encoder.per_channel_statistics.get_buffer("std-of-means"), torch.full((8,), 2.0).bfloat16())
+    assert opened == [path]
 
 
 @pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
@@ -201,45 +213,60 @@ def test_weight_state_failure_clears_sources_and_partially_assigned_parameters(d
 
 
 @pytest.mark.parametrize("failure", ("stream", "unknown"))
-def test_decoder_load_failure_clears_the_already_built_base_and_owned_sources(monkeypatch, failure):
+def test_decoder_load_failure_clears_the_already_built_base_and_owned_sources(tmp_path, monkeypatch, failure):
     base = {"decoder.weight": torch.ones(2, 2, dtype=torch.bfloat16)}
     tuned = {"unexpected": torch.ones(1, dtype=torch.bfloat16)}
+    base_path, tuned_path = tmp_path / "base", tmp_path / "tuned"
+    save_file(base, str(base_path))
+    save_file(tuned, str(tuned_path))
     constructed = []
+    loaded = []
+    read_tensors = loader._read_tensors
 
     def decoder(**kwargs):
         model = torch.nn.Linear(2, 2, bias=False)
         constructed.append(model)
         return model
 
-    def tensors(path, prefixes):
-        if path.name == "base":
-            return base
-        if failure == "stream":
+    def tensors(reader, prefixes):
+        if loaded and failure == "stream":
             raise ValueError("synthetic tuned final-check failure")
-        return tuned
+        result = read_tensors(reader, prefixes)
+        loaded.append(result)
+        return result
 
     monkeypatch.setattr(loader, "DiffusionVideoDecoder", decoder)
     monkeypatch.setattr(loader, "read_vae_config", lambda path: _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))
     monkeypatch.setattr(loader, "_read_tensors", tensors)
     exception, message = (ValueError, "final-check") if failure == "stream" else (KeyError, "not in the decoder")
     with pytest.raises(exception, match=message):
-        loader.load_video_decoder(Path("base"), Path("tuned"), torch.device("cpu"))
+        loader.load_video_decoder(base_path, tuned_path, torch.device("cpu"))
     assert torch.count_nonzero(constructed[0].weight).item() == 0
-    assert torch.count_nonzero(base["decoder.weight"]).item() == 0
+    assert torch.count_nonzero(loaded[0]["decoder.weight"]).item() == 0
     if failure == "unknown":
-        assert torch.count_nonzero(tuned["unexpected"]).item() == 0
+        assert torch.count_nonzero(loaded[1]["unexpected"]).item() == 0
 
 
-def test_decoder_load_success_preserves_cpu_weights_and_clears_overlay_sources(monkeypatch):
+def test_decoder_load_success_preserves_cpu_weights_and_clears_overlay_sources(tmp_path, monkeypatch):
     base = {"decoder.weight": torch.ones(2, 2, dtype=torch.bfloat16)}
     tuned = {"weight": torch.full((2, 2), 2, dtype=torch.bfloat16)}
+    base_path, tuned_path = tmp_path / "base", tmp_path / "tuned"
+    save_file(base, str(base_path))
+    save_file(tuned, str(tuned_path))
+    loaded = []
+    read_tensors = loader._read_tensors
+
+    def tensors(reader, prefixes):
+        result = read_tensors(reader, prefixes)
+        loaded.append(result)
+        return result
     monkeypatch.setattr(loader, "DiffusionVideoDecoder", lambda **kwargs: torch.nn.Linear(2, 2, bias=False))
     monkeypatch.setattr(loader, "read_vae_config", lambda path: _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))
-    monkeypatch.setattr(loader, "_read_tensors", lambda path, prefixes: base if path.name == "base" else tuned)
-    model = loader.load_video_decoder(Path("base"), Path("tuned"), torch.device("cpu"))
+    monkeypatch.setattr(loader, "_read_tensors", tensors)
+    model = loader.load_video_decoder(base_path, tuned_path, torch.device("cpu"))
     assert torch.equal(model.weight, torch.full((2, 2), 2, dtype=torch.bfloat16))
-    assert base["decoder.weight"].untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
-    assert torch.count_nonzero(tuned["weight"]).item() == 0
+    assert loaded[0]["decoder.weight"].untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
+    assert torch.count_nonzero(loaded[1]["weight"]).item() == 0
 
 
 def test_ltx25_tiling_needs_minimum_budget():
@@ -297,6 +324,75 @@ def _tiny_decoder() -> DiffusionVideoDecoder:
         t_emb_dim=32,
         timestep_scale_multiplier=1000.0,
     ).eval()
+
+
+def test_load_video_decoder_opens_base_once(tmp_path, monkeypatch):
+    source = _tiny_decoder()
+    config = {
+        **LTX25_DECODER_CONFIG,
+        "in_channels": 8,
+        "head_dim": 16,
+        "stage_channels": [128, 64, 32, 32, 16],
+        "stage_depths": [1] * 5,
+        "stage_kernels": [[3, 3, 3]] * 5,
+        "stage5_kernel": [3, 3, 3],
+        "stage5_channels": 16,
+        "t_emb_dim": 32,
+    }
+    base, tuned = tmp_path / "base.safetensors", tmp_path / "tuned.safetensors"
+    save_file({f"decoder.{name}": tensor for name, tensor in source.state_dict().items()}, str(base),
+              metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, config)})})
+    name, tensor = next(iter(source.state_dict().items()))
+    overlay = torch.full_like(tensor, 2)
+    save_file({name: overlay}, str(tuned))
+    opened = []
+    open_tensors = loader.open_tensors
+
+    @contextmanager
+    def record_open(path):
+        opened.append(path)
+        with open_tensors(path) as reader:
+            yield reader
+
+    monkeypatch.setattr(loader, "open_tensors", record_open)
+    decoder = loader.load_video_decoder(base, tuned, torch.device("cpu"))
+    assert torch.equal(decoder.state_dict()[name], overlay.bfloat16())
+    assert opened == [base, tuned]
+
+
+@pytest.mark.parametrize("stage", ("encoder", "decoder"))
+def test_vae_reader_close_failure_clears_loaded_weights(tmp_path, monkeypatch, stage):
+    path = tmp_path / "vae.safetensors"
+    config = _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)
+    save_file({f"{stage}.weight": torch.ones(2)}, str(path), metadata={"config": json.dumps({"vae": config})})
+    retained = []
+    open_tensors = loader.open_tensors
+
+    @contextmanager
+    def fail_on_close(source):
+        with open_tensors(source) as reader:
+            load = reader.read_tensors_into
+
+            def record(group_names, groups):
+                def capture():
+                    for group in groups:
+                        retained.extend(group.values())
+                        yield group
+
+                load(group_names, capture())
+
+            reader.read_tensors_into = record
+            yield reader
+        raise ValueError("synthetic reader-close failure")
+
+    monkeypatch.setattr(loader, "open_tensors", fail_on_close)
+    with pytest.raises(ValueError, match="reader-close failure"):
+        if stage == "encoder":
+            loader.load_video_encoder(path, torch.device("cpu"))
+        else:
+            loader.load_video_decoder(path, tmp_path / "unused", torch.device("cpu"))
+    assert len(retained) == 1
+    assert torch.count_nonzero(retained[0]).item() == 0
 
 
 def test_tiny_decoder_multi_tile_decode_is_seeded_and_shaped():
