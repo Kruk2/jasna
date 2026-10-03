@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 # Support page URLs — two ways to back the project
 BMC_URL = "https://buymeacoffee.com/Kruk2"
+ACTIVATION_URL = "https://jasna-activation.kruk2.workers.dev"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
 
@@ -269,6 +270,11 @@ class LicenseDialog(ctk.CTkToplevel):
             command=self._activate, state="disabled",
         )
         self._activate_button.pack(side="left")
+        self._activation_page_button = ctk.CTkButton(
+            action, text=t("license_activation_page"), width=180,
+            command=lambda: webbrowser.open(ACTIVATION_URL),
+        )
+        self._activation_page_button.pack(side="left", padx=(12, 0))
         self._status = ctk.CTkLabel(
             outer, text="", text_color=Colors.TEXT_PRIMARY,
             wraplength=460, justify="left",

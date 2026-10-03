@@ -362,6 +362,7 @@ EN = {
         "supporter_perks": "UNet 4x, SD 1.5 and purchased LTX versions.",
         "license_machine_key": "Machine key",
         "license_activation_key": "Activation key",
+        "license_activation_page": "Open activation page",
         "license_activation_steps": "1. Copy the Machine key.\n2. Use it with your License code on the activation page from your seller.\n3. Paste the returned Activation key below.\nPage unavailable? Ask your official seller for manual activation.",
         "license_cloud_workspace": "Cloud workspace (RunPod / Vast)",
         "license_cloud_warning": "Your seller must enable cloud workspaces for your License code. Keep the Jasna config folder on a persistent volume. Copying it with the Activation key transfers this identity.",

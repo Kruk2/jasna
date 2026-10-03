@@ -170,7 +170,7 @@ Example results:
 How to activate:
 
 1. Contribute **$15 USD or more in total**. Your official seller sends a **License code** through [Unifans](https://app.unifans.io/c/kruk2) or [Buy Me a Coffee](https://buymeacoffee.com/kruk2), including crypto payments.
-2. Open **Activate Jasna**, copy the **Machine key**, and enter it with your License code on the activation page supplied by your seller.
+2. Open **Activate Jasna**, copy the **Machine key**, and enter it with your License code on the [activation page](https://jasna-activation.kruk2.workers.dev).
 3. Paste the returned **Activation key** into Jasna. Jasna saves this key and checks it offline; your License code stays on the activation page.
 
 Each License code allows **3 machines or workspaces**. Reusing a Machine key uses no extra slot. Only the owner can approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.

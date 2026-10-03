@@ -256,7 +256,7 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | `--cloud-workspace` | 与 `--machine-key` 一起使用，创建或复用云工作区身份。卖家须为许可证码开通云权限。 |
 | `--activation-key KEY` | 保存本机的激活密钥。未指定处理选项时，激活后退出。 |
 
-复制机器密钥，在卖家的激活页面输入机器密钥和**许可证码**，然后保存返回的**激活密钥**。Jasna 只保存激活密钥并离线验证，之后启动会复用保存的密钥。
+复制机器密钥，在[激活页面](https://jasna-activation.kruk2.workers.dev)输入机器密钥和**许可证码**，然后保存返回的**激活密钥**。Jasna 只保存激活密钥并离线验证，之后启动会复用保存的密钥。
 
 ```bash
 jasna --machine-key

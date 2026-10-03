@@ -362,6 +362,7 @@ JA = {
         "supporter_perks": "UNet 4x、SD 1.5、購入済みの LTX バージョン。",
         "license_machine_key": "マシンキー",
         "license_activation_key": "アクティベーションキー",
+        "license_activation_page": "有効化ページを開く",
         "license_activation_steps": "1. マシンキーをコピーします。\n2. 販売者の有効化ページでライセンスコードと入力します。\n3. 返されたアクティベーションキーを下に貼り付けます。\nページを開けない場合は公式販売者に手動での有効化を依頼してください。",
         "license_cloud_workspace": "クラウドワークスペース (RunPod / Vast)",
         "license_cloud_warning": "販売者によるライセンスコードのクラウド利用許可が必要です。Jasna の設定フォルダーを永続ボリュームに保存してください。アクティベーションキーと一緒にコピーすると、この識別情報も移ります。",

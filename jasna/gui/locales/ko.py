@@ -343,6 +343,7 @@ KO = {
         "supporter_perks": "UNet 4x, SD 1.5 및 구매한 LTX 버전.",
         "license_machine_key": "머신 키",
         "license_activation_key": "활성화 키",
+        "license_activation_page": "활성화 페이지 열기",
         "license_activation_steps": "1. 머신 키를 복사하세요.\n2. 판매자의 활성화 페이지에 라이선스 코드와 함께 입력하세요.\n3. 발급된 활성화 키를 아래에 붙여넣으세요.\n페이지를 열 수 없으면 공식 판매자에게 수동 활성화를 요청하세요.",
         "license_cloud_workspace": "클라우드 작업 공간 (RunPod / Vast)",
         "license_cloud_warning": "판매자가 라이선스 코드의 클라우드 사용을 허용해야 합니다. Jasna 설정 폴더를 영구 볼륨에 보관하세요. 활성화 키와 함께 복사하면 이 식별 정보도 이전됩니다.",

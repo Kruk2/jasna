@@ -266,7 +266,7 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | `--cloud-workspace` | Use with `--machine-key` to create or reuse a cloud workspace identity. Your seller must enable it for your License code. |
 | `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
 
-Copy the Machine key, enter it with your **License code** on your seller's activation page, then save the returned **Activation key**. Jasna stores only the Activation key and validates it offline; later runs reuse it.
+Copy the Machine key, enter it with your **License code** on the [activation page](https://jasna-activation.kruk2.workers.dev), then save the returned **Activation key**. Jasna stores only the Activation key and validates it offline; later runs reuse it.
 
 ```bash
 jasna --machine-key

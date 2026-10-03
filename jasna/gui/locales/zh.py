@@ -362,6 +362,7 @@ ZH = {
         "supporter_perks": "UNet 4x、SD 1.5 和已购买的 LTX 版本。",
         "license_machine_key": "机器密钥",
         "license_activation_key": "激活密钥",
+        "license_activation_page": "打开激活页面",
         "license_activation_steps": "1. 复制机器密钥。\n2. 在卖家提供的激活页面输入机器密钥和许可证码。\n3. 将返回的激活密钥粘贴到下方。\n无法打开页面？请联系官方卖家手动激活。",
         "license_cloud_workspace": "云工作区 (RunPod / Vast)",
         "license_cloud_warning": "卖家须为许可证码开通云工作区权限。请将 Jasna 设置目录保存在持久卷上。将该目录与激活密钥一起复制，也会转移此身份。",

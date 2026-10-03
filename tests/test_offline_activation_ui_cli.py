@@ -168,6 +168,17 @@ def test_dialog_saves_only_activation_key_and_calls_ui_on_main_thread(root, prot
     assert callback_threads == [threading.get_ident()]
 
 
+def test_dialog_opens_activation_page_without_sending_credentials(root, protection_api, monkeypatch):
+    from jasna.gui.components import LicenseDialog
+
+    opened = Mock()
+    monkeypatch.setattr("jasna.gui.components.webbrowser.open", opened)
+    dialog = LicenseDialog(root, on_activated=lambda: None)
+    dialog._key.insert(0, "private-activation")
+    dialog._activation_page_button.invoke()
+    opened.assert_called_once_with("https://jasna-activation.kruk2.workers.dev")
+
+
 def test_saved_cloud_activation_does_not_create_a_seed(root, monkeypatch, protection_api):
     from jasna.gui.components import LicenseDialog
     from jasna.protection import signing

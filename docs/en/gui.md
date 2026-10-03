@@ -102,7 +102,7 @@ after a driver update or when something misbehaves.
 ## Activate paid models
 
 1. Copy the **Machine key** from **Activate Jasna**.
-2. Enter it with the **License code** from your official seller on the seller's activation page.
+2. Enter it with the **License code** from your official seller on the [activation page](https://jasna-activation.kruk2.workers.dev), or press **Open activation page** in Jasna.
 3. Paste the returned **Activation key** into Jasna and press **Activate**. Jasna stores this key and checks it offline.
 
 Each License code supports **3 registered machines or workspaces**. Retrieving the same Machine key's activation uses no extra slot. Replacements need owner review; buyers cannot remove registrations. Releasing a slot does not disable keys already issued to older offline versions. A key covers only the model versions you purchased.
