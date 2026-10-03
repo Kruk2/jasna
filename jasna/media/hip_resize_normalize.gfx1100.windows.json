@@ -1,0 +1,17 @@
+{
+  "schema": "jasna.hip-resize.windows.v1",
+  "platform": "win32",
+  "architecture": "gfx1100",
+  "torch_hip": "7.16.26354",
+  "runtime_version": 71626354,
+  "runtime_dll_sha256": "37c40daa884de68bb7b5ee1b0575ab97b96866adf304fd76fdbccba772830f5f",
+  "parameter_abi": "jasna.resize-normalize.params.v1",
+  "source": {
+    "file": "resize_normalize.cu",
+    "sha256": "206391fa046d3a96b725eaa14e66b9bbfe8e95b903421fe4be74ac270fef63ab"
+  },
+  "artifact": {
+    "file": "resize_normalize.gfx1100.windows.co",
+    "sha256": "3c93e066930ad74bfa90f50ffdc059b230bc3ccfcc1ead3b1aa40034d29d0a10"
+  }
+}

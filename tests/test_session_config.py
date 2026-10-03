@@ -84,6 +84,15 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.fmp4 is False
     assert config.disable_progress is False
     assert config.working_dir is None
+    assert config.auto_source_rate is False
+    assert config.amd_dual_gop_encode is False
+
+
+def test_cli_dual_gop_flag_enables_source_rate_policy() -> None:
+    config = _cli_config(["--amd-dual-gop-encode"])
+
+    assert config.auto_source_rate is True
+    assert config.amd_dual_gop_encode is True
 
 
 def test_cli_non_default_args_are_mapped() -> None:
@@ -147,7 +156,7 @@ def test_gui_defaults_match_cli_defaults() -> None:
     cli = _cli_config()
     gui = _gui_config(AppSettings())
 
-    assert replace(cli, disable_progress=True) == gui
+    assert replace(cli, disable_progress=True, auto_source_rate=True) == gui
 
 
 def test_gui_config_maps_settings_fields() -> None:
@@ -172,6 +181,24 @@ def test_gui_config_maps_settings_fields() -> None:
     assert config.denoise_strength == "low"
     assert config.scene_detection is False
     assert config.disable_progress is True
+    assert config.auto_source_rate is True
+
+
+def test_gui_manual_cq_disables_source_rate_pipeline_policy() -> None:
+    from jasna.gui.models import ENCODER_RATE_MODE_MANUAL_CQ
+
+    config = _gui_config(
+        AppSettings(encoder_rate_mode=ENCODER_RATE_MODE_MANUAL_CQ)
+    )
+
+    assert config.auto_source_rate is False
+
+
+def test_gui_maps_dual_gop_setting() -> None:
+    config = _gui_config(AppSettings(amd_dual_gop_encode=True))
+
+    assert config.amd_dual_gop_encode is True
+
 
 
 def test_gui_image_session_requires_installed_sd15_bundle(monkeypatch) -> None:

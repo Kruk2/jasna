@@ -81,3 +81,8 @@ or use the CLI flag:
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
+
+Completed fragments are recorded with a processing signature and checksum, so
+an interrupted run can reuse only matching, intact work. The workspace is kept
+after cancellation or failure and removed after the final output has been
+validated, flushed, and atomically installed.

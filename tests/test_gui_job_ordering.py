@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+import torch
 
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobItem, JobStatus, AppSettings
@@ -16,6 +17,12 @@ pytestmark = pytest.mark.usefixtures("no_gpu_cleanup")
 
 def _make_jobs(*names: str) -> list[JobItem]:
     return [JobItem(path=Path(n)) for n in names]
+
+
+def _settings(**kwargs) -> AppSettings:
+    """Settings for fake video paths that cannot be probed by pre-scan."""
+
+    return AppSettings(pre_scan_policy="off", **kwargs)
 
 
 class TestNextPendingJob:
@@ -56,9 +63,57 @@ class TestNextPendingJob:
 
 
 class TestProcessorPullLoop:
+    def test_restart_required_failure_leaves_remaining_queue_pending(self):
+        processed_ids: list[int] = []
+        p = Processor()
+        jobs = _make_jobs("a.mp4", "b.mp4")
+        p._jobs = jobs
+        p._settings = _settings()
+
+        def fail_terminally(job):
+            processed_ids.append(job.id)
+            job.status = JobStatus.ERROR
+            p._restart_required_reason = "restart required"
+
+        with patch.object(p, "_process_job", side_effect=fail_terminally):
+            p._run()
+
+        assert processed_ids == [jobs[0].id]
+        assert jobs[0].status is JobStatus.ERROR
+        assert jobs[1].status is JobStatus.PENDING
+
+    def test_gpu_oom_failure_stops_remaining_queue(self, tmp_path):
+        processed_ids: list[int] = []
+        p = Processor()
+        jobs = _make_jobs("a.mp4", "b.mp4")
+
+        def fail_with_oom(job_id, _input, _output):
+            processed_ids.append(job_id)
+            raise torch.OutOfMemoryError("HIP out of memory")
+
+        with patch.object(p, "_run_pipeline", side_effect=fail_with_oom):
+            p.start(
+                jobs,
+                _settings(),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        assert processed_ids == [jobs[0].id]
+        assert jobs[0].status is JobStatus.ERROR
+        assert jobs[1].status is JobStatus.PENDING
+        assert "remaining queue was not started" in p.restart_required_reason()
+    @pytest.fixture(autouse=True)
+    def isolate_gpu_cleanup(self):
+        with patch("jasna.gui.processor._cleanup_torch"):
+            yield
+
     def test_processes_jobs_in_order_by_status(self):
         processed_ids: list[int] = []
         p = Processor()
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
         def fake_pipeline(job_id, inp, out, **_kwargs):
@@ -67,7 +122,7 @@ class TestProcessorPullLoop:
         with patch.object(p, "_run_pipeline", side_effect=fake_pipeline):
             p.start(
                 jobs,
-                AppSettings(),
+                _settings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
             )
@@ -79,6 +134,7 @@ class TestProcessorPullLoop:
     def test_skips_removed_pending_job(self):
         processed_ids: list[int] = []
         p = Processor()
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
         call_count = [0]
@@ -93,7 +149,7 @@ class TestProcessorPullLoop:
         with patch.object(p, "_run_pipeline", side_effect=fake_pipeline):
             p.start(
                 jobs,
-                AppSettings(),
+                _settings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
             )
@@ -106,12 +162,13 @@ class TestProcessorPullLoop:
     def test_progress_update_carries_job_id(self):
         updates: list[ProgressUpdate] = []
         p = Processor(on_progress=lambda u: updates.append(u))
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs("a.mp4")
 
         with patch.object(p, "_run_pipeline"):
             p.start(
                 jobs,
-                AppSettings(),
+                _settings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
             )
@@ -124,6 +181,7 @@ class TestProcessorPullLoop:
     def test_reorder_during_processing_respects_new_order(self):
         processed_filenames: list[str] = []
         p = Processor()
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
         call_count = [0]
@@ -142,7 +200,7 @@ class TestProcessorPullLoop:
         with patch.object(p, "_run_pipeline", side_effect=fake_pipeline):
             p.start(
                 jobs,
-                AppSettings(),
+                _settings(),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
             )
@@ -153,12 +211,13 @@ class TestProcessorPullLoop:
     def test_reports_finished_queue_on_complete(self):
         finished: list[bool] = []
         p = Processor(on_complete=finished.append)
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs("a.mp4")
 
         with patch.object(p, "_run_pipeline"):
             p.start(
                 jobs,
-                AppSettings(post_export_action="shutdown"),
+                _settings(post_export_action="command", post_export_command="echo done"),
                 output_folder="",
                 output_pattern="{original}_restored.mp4",
             )
@@ -179,6 +238,7 @@ class TestProcessorPullLoop:
     def test_runs_post_export_video_command_after_each_video(self, tmp_path):
         calls: list[tuple[str, Path, Path]] = []
         p = Processor()
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
 
         with (
@@ -192,7 +252,7 @@ class TestProcessorPullLoop:
         ):
             p.start(
                 jobs,
-                AppSettings(post_export_video_command="remux {output}"),
+                _settings(post_export_video_command="remux {output}"),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
             )
@@ -214,6 +274,7 @@ class TestProcessorPullLoop:
 
     def test_post_export_video_command_failure_marks_job_error_and_continues(self, tmp_path):
         p = Processor()
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
 
         def run_command(_command, _input_path, output_path, _cancel):
@@ -229,7 +290,7 @@ class TestProcessorPullLoop:
         ):
             p.start(
                 jobs,
-                AppSettings(post_export_video_command="remux {output}"),
+                _settings(post_export_video_command="remux {output}"),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
             )
@@ -249,7 +310,7 @@ class TestProcessorPullLoop:
         ):
             p.start(
                 jobs,
-                AppSettings(post_export_video_command="remux {output}"),
+                _settings(post_export_video_command="remux {output}"),
                 output_folder=str(tmp_path),
                 output_pattern="{original}_restored.mp4",
             )
@@ -261,6 +322,7 @@ class TestProcessorPullLoop:
         (tmp_path / "clip_restored.mp4").touch()
         command = MagicMock()
         p = Processor()
+        p._validate_completed_video_output = MagicMock()
         jobs = _make_jobs(str(tmp_path / "clip.mp4"))
 
         with (
@@ -269,7 +331,7 @@ class TestProcessorPullLoop:
         ):
             p.start(
                 jobs,
-                AppSettings(
+                _settings(
                     post_export_video_command="remux {output}",
                     file_conflict="auto_rename",
                 ),
@@ -279,6 +341,39 @@ class TestProcessorPullLoop:
             p.join(timeout=5.0)
 
         assert command.call_args.args[2] == tmp_path / "clip_restored (1).mp4"
+
+    def test_per_video_action_precedes_completed_queue_callback(self, tmp_path):
+        calls: list[str] = []
+        # Queue-wide actions belong to the app/main thread in upstream main.
+        p = Processor(on_complete=lambda finished: calls.append("queue") if finished else None)
+        p._validate_completed_video_output = MagicMock()
+        jobs = _make_jobs(str(tmp_path / "clip.mp4"))
+
+        with (
+            patch.object(p, "_run_pipeline"),
+            patch(
+                "jasna.post_export_action.run_post_export_video_command",
+                side_effect=lambda *_args: calls.append("video"),
+            ),
+            patch(
+                "jasna.post_export_action.run_post_export_action",
+                side_effect=lambda *_args: calls.append("queue"),
+            ),
+        ):
+            p.start(
+                jobs,
+                _settings(
+                    post_export_video_command="remux {output}",
+                    post_export_action="command",
+                    post_export_command="notify",
+                ),
+                output_folder=str(tmp_path),
+                output_pattern="{original}_restored.mp4",
+                disable_basicvsrpp_tensorrt=False,
+            )
+            p.join(timeout=5.0)
+
+        assert calls == ["video", "queue"]
 
 
 class TestJobItemId:
