@@ -323,8 +323,9 @@ def test_player_reuses_tk_image_for_same_sized_frames(monkeypatch) -> None:
     photos = []
 
     class Photo:
-        def __init__(self, image):
+        def __init__(self, image, *, master):
             self.image = image
+            self.master = master
             self.pasted = []
             photos.append(self)
 
@@ -352,6 +353,7 @@ def test_player_reuses_tk_image_for_same_sized_frames(monkeypatch) -> None:
     VideoPlayerDialog._show_frame(dialog, second)
 
     assert len(photos) == 1
+    assert photos[0].master is surface
     assert photos[0].pasted == [second.image]
     surface.configure.assert_called_once_with(image=photos[0], text="")
     assert dialog._last_frame_image is second.image
@@ -361,8 +363,9 @@ def test_player_resizes_buffered_windowed_frame_for_fullscreen(monkeypatch) -> N
     photos = []
 
     class Photo:
-        def __init__(self, image):
+        def __init__(self, image, *, master):
             self.image = image
+            self.master = master
             photos.append(self)
 
     monkeypatch.setattr(video_player_module.ImageTk, "PhotoImage", Photo)
@@ -386,6 +389,7 @@ def test_player_resizes_buffered_windowed_frame_for_fullscreen(monkeypatch) -> N
     VideoPlayerDialog._show_frame(dialog, frame)
 
     assert photos[0].image.size == (1280, 720)
+    assert photos[0].master is dialog._video_surface
 
 
 def test_player_fullscreen_toggle_hides_configuration_chrome(monkeypatch) -> None:
