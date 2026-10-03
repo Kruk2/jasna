@@ -849,8 +849,11 @@ def main() -> None:
         from jasna.protection import ProtectionError, activation, license_store, machine
         try:
             if args.license_code is not None:
+                from jasna.gui.locales import get_locale
+
                 activation.activate_license_code(
-                    args.license_code, machine.machine_key(cloud_workspace=args.cloud_workspace)
+                    args.license_code, machine.machine_key(cloud_workspace=args.cloud_workspace),
+                    prefer_hong_kong=get_locale().current_language == "zh",
                 )
             else:
                 license_store.set_license(args.activation_key.strip())

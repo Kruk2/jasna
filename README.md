@@ -175,6 +175,8 @@ How to activate:
 
 Jasna sends only your License code and Machine key to that service over HTTPS when you press **Activate online**. It checks and saves only the returned Activation key for this machine; your License code is not saved, and later starts and restoration check activation offline without periodic requests.
 
+If the service cannot be reached, Jasna tries the [Hong Kong activation page](https://47.238.135.110). With Chinese selected as Jasna's language, Hong Kong is tried first. Both addresses use the same License code and three device slots.
+
 Both methods share **3 machines or workspaces per License code**. Reusing a Machine key uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.
 
 For **RunPod or Vast**, select **Cloud workspace** in either choice only after your seller enables it for your License code. Keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity.

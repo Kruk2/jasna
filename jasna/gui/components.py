@@ -8,8 +8,8 @@ from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.locales import t
-from jasna.protection.activation import ACTIVATION_URL
+from jasna.gui.locales import get_locale, t
+from jasna.protection.activation import activation_urls
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +303,7 @@ class LicenseDialog(ctk.CTkToplevel):
         self._activate_button.pack(side="left")
         self._activation_page_button = ctk.CTkButton(
             action, text=t("license_activation_page"), width=180,
-            command=lambda: webbrowser.open(ACTIVATION_URL),
+            command=lambda: webbrowser.open(activation_urls(get_locale().current_language == "zh")[0]),
         )
         self._activation_page_button.pack(side="left", padx=(12, 0))
         self._status = ctk.CTkLabel(

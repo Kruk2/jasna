@@ -269,6 +269,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 
 For online activation, use `--license-code`. This sends only your License code and local Machine key to the [activation service](https://jasna-activation.kruk2.workers.dev) over HTTPS. Jasna checks and saves only the returned **Activation key** for this machine; it does not save your License code. Later starts and restoration check activation offline, with no periodic requests.
 
+If that address cannot be reached, Jasna tries the [Hong Kong service](https://47.238.135.110). Chinese language settings prefer Hong Kong first. Both addresses share your License code and three device slots.
+
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv

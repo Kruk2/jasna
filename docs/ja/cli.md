@@ -267,6 +267,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 
 オンラインでの有効化には `--license-code` を使います。ライセンスコードとこのマシンのマシンキーだけを HTTPS で[有効化サービス](https://jasna-activation.kruk2.workers.dev)に送信します。Jasna は返された**アクティベーションキー**がこのマシン用か確認し、そのキーだけを保存します。ライセンスコードは保存しません。以後の起動や復元ではオフラインで確認し、定期的な通信は行いません。
 
+接続できない場合は[香港のサービス](https://47.238.135.110)を試します。Jasna の言語が中国語の場合は香港を先に試します。どちらも同じライセンスコードと 3 台分の枠を使います。
+
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
