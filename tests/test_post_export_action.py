@@ -126,6 +126,14 @@ def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: 
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("jasna.post_export_action.subprocess.Popen", popen)
     monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
+    monkeypatch.setattr(
+        "jasna.post_export_action.expand_post_export_video_command",
+        lambda *_args: "expanded-command",
+    )
+    monkeypatch.setattr(
+        "jasna.post_export_action.subprocess_no_window_kwargs",
+        lambda: {},
+    )
     input_path = tmp_path / "in.mp4"
     output_path = tmp_path / "out.mp4"
 
@@ -137,7 +145,7 @@ def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: 
     )
 
     popen.assert_called_once_with(
-        f"tool {output_path}",
+        "expanded-command",
         shell=True,
         cwd=tmp_path,
         start_new_session=True,

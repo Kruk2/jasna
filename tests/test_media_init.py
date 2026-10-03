@@ -218,6 +218,16 @@ class TestIsStream10bit:
     def test_pix_fmt_8bit(self):
         assert is_stream_10bit({"pix_fmt": "yuv420p"}) is False
 
+    def test_av1_mime_codec_string_10bit(self):
+        assert is_stream_10bit(
+            {"codec_name": "av1", "mime_codec_string": "av01.0.14M.10"}
+        ) is True
+
+    def test_av1_mime_codec_string_8bit(self):
+        assert is_stream_10bit(
+            {"codec_name": "av1", "mime_codec_string": "av01.0.14M.08"}
+        ) is False
+
     def test_no_relevant_fields(self):
         assert is_stream_10bit({}) is False
 
@@ -300,6 +310,42 @@ class TestGetVideoMetaData:
 
         meta = get_video_meta_data("test.mp4")
         assert meta.is_10bit is True
+
+    @pytest.mark.parametrize(
+        ("depth", "expected_format", "expected_10bit"),
+        [
+            ("08", "yuv420p", False),
+            ("10", "yuv420p10le", True),
+            ("12", "", False),
+        ],
+    )
+    @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
+    @patch("jasna.media.probe.subprocess.Popen")
+    def test_av1_codec_string_fills_missing_pixel_format(
+        self,
+        mock_popen,
+        mock_resolve,
+        depth,
+        expected_format,
+        expected_10bit,
+    ):
+        proc = MagicMock()
+        proc.communicate.return_value = (
+            self._make_ffprobe_output(
+                codec_name="av1",
+                pix_fmt="",
+                bits_per_raw_sample=None,
+                mime_codec_string=f"av01.0.14M.{depth}",
+            ),
+            b"",
+        )
+        proc.returncode = 0
+        mock_popen.return_value = proc
+
+        meta = get_video_meta_data("test.mkv")
+
+        assert meta.pixel_format == expected_format
+        assert meta.is_10bit is expected_10bit
 
     @patch("jasna.media.probe.resolve_executable", return_value="ffprobe")
     @patch("jasna.media.probe.subprocess.Popen")

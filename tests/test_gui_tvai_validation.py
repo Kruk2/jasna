@@ -2,19 +2,33 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import jasna.gui.validation as gui_validation
 from jasna.gui.locales import t
-from jasna.gui.models import AppSettings
+from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.validation import validate_gui_start
+
+
+@pytest.fixture(autouse=True)
+def _skip_core_model_asset_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the legacy TVAI/config assertions independent of model assets."""
+
+    monkeypatch.setattr(
+        gui_validation,
+        "_required_model_asset_errors",
+        lambda _settings: [],
+    )
 
 
 def test_validate_gui_start_non_tvai_returns_empty() -> None:
     settings = AppSettings(secondary_restoration="none")
-    assert validate_gui_start(settings, [], ltx_available=True) == []
+    assert validate_gui_start(settings, [JobItem(path=Path("video.mp4"))], ltx_available=True) == []
 
 
 def test_validate_gui_start_custom_post_export_requires_command() -> None:
     settings = AppSettings(secondary_restoration="none", post_export_action="command", post_export_command="")
-    assert t("error_post_export_command_required") in validate_gui_start(settings, [], ltx_available=True)
+    assert t("error_post_export_command_required") in validate_gui_start(settings, [JobItem(path=Path("video.mp4"))], ltx_available=True)
 
 
 def test_validate_gui_start_tvai_missing_env_vars(tmp_path: Path, monkeypatch) -> None:
@@ -25,7 +39,7 @@ def test_validate_gui_start_tvai_missing_env_vars(tmp_path: Path, monkeypatch) -
     ffmpeg.write_bytes(b"")
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
 
-    errors = validate_gui_start(settings, [], ltx_available=True)
+    errors = validate_gui_start(settings, [JobItem(path=Path("video.mp4"))], ltx_available=True)
     assert t("error_tvai_data_dir_not_set") in errors
     assert t("error_tvai_model_dir_not_set") in errors
 
@@ -38,7 +52,7 @@ def test_validate_gui_start_tvai_env_dirs_must_exist(tmp_path: Path, monkeypatch
     ffmpeg.write_bytes(b"")
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
 
-    errors = validate_gui_start(settings, [], ltx_available=True)
+    errors = validate_gui_start(settings, [JobItem(path=Path("video.mp4"))], ltx_available=True)
     assert len(errors) == 2
     assert str(tmp_path / "missing_data") in errors[0]
     assert str(tmp_path / "missing_model") in errors[1]
@@ -53,7 +67,7 @@ def test_validate_gui_start_tvai_ffmpeg_path_must_exist(tmp_path: Path, monkeypa
     monkeypatch.setenv("TVAI_MODEL_DIR", str(model_dir))
 
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(tmp_path / "missing_ffmpeg.exe"))
-    errors = validate_gui_start(settings, [], ltx_available=True)
+    errors = validate_gui_start(settings, [JobItem(path=Path("video.mp4"))], ltx_available=True)
     assert len(errors) == 1
     assert str(tmp_path / "missing_ffmpeg.exe") in errors[0]
 
@@ -70,7 +84,7 @@ def test_validate_gui_start_tvai_ok(tmp_path: Path, monkeypatch) -> None:
     ffmpeg.write_bytes(b"")
 
     settings = AppSettings(secondary_restoration="tvai", tvai_ffmpeg_path=str(ffmpeg))
-    assert validate_gui_start(settings, [], ltx_available=True) == []
+    assert validate_gui_start(settings, [JobItem(path=Path("video.mp4"))], ltx_available=True) == []
 
 
 def test_validate_gui_start_blocks_ltx_ranges_only_when_ltx_cannot_run() -> None:

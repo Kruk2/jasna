@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import sys
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 from jasna.gui.models import AppSettings
@@ -59,6 +61,29 @@ def test_video_session_config_forwards_vr_projection() -> None:
     assert config.vr_projection == "gnomonic"
 
 
+def test_video_session_config_forwards_batch_size_one() -> None:
+    settings = replace(AppSettings(), batch_size=1)
+
+    with (
+        patch("jasna.engine_paths.model_weights_dir"),
+        patch(
+            "jasna.mosaic.detection_registry.coerce_detection_model_name",
+            side_effect=lambda name: name,
+        ),
+        patch(
+            "jasna.mosaic.detection_registry.require_detection_model_weights",
+            return_value=Path("det.engine"),
+        ),
+    ):
+        config = video_session_config(
+            settings,
+            codec="hevc",
+            encoder_settings={},
+        )
+
+    assert config.batch_size == 1
+
+
 def test_video_session_key_includes_active_secondary_knobs() -> None:
     tvai = replace(AppSettings(), secondary_restoration="tvai")
     assert video_session_key(replace(tvai, tvai_scale=2)) != video_session_key(tvai)
@@ -71,7 +96,12 @@ def test_video_session_key_includes_active_secondary_knobs() -> None:
 
 def _build(settings: AppSettings):
     compile_result = MagicMock(use_basicvsrpp_tensorrt=True)
+    unet_cls = MagicMock(name="Unet4xSecondaryRestorer")
+    unet_module = ModuleType("jasna.restorer.unet4x_secondary_restorer")
+    unet_module.Unet4xSecondaryRestorer = unet_cls
     with (
+        patch.dict(sys.modules, {unet_module.__name__: unet_module}),
+        patch("jasna.accelerator.is_amd_device", return_value=False),
         patch("jasna._suppress_noise.install"),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=compile_result) as compiled,
         patch("jasna.engine_paths.model_weights_dir"),
@@ -79,7 +109,6 @@ def _build(settings: AppSettings):
         patch("jasna.mosaic.detection_registry.require_detection_model_weights") as det_path,
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer") as restorer_cls,
         patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as pipeline_cls,
-        patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,
     ):
         det_path.return_value = "det.engine"
         session = build_video_session(settings, log=lambda _msg: None)
