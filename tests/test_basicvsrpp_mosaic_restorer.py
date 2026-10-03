@@ -121,3 +121,48 @@ def test_split_forward_path_used_when_available(monkeypatch) -> None:
     assert len(captured) == 1
     assert captured[0].shape == (1, 1, 3, 256, 256)
     assert model.captured_inputs is None
+
+
+def test_amd_migraphx_b1_dispatch_is_used_and_closed(monkeypatch) -> None:
+    from contextlib import contextmanager
+
+    import jasna.restorer.basicvsrpp_migraphx_b1 as b1
+    import jasna.restorer.basicvsrpp_mosaic_restorer as br
+
+    entered = []
+
+    class _FakeB1:
+        directory = "verified-artifacts"
+
+        @contextmanager
+        def dispatch(self):
+            entered.append("enter")
+            try:
+                yield
+            finally:
+                entered.append("exit")
+
+        def close(self):
+            entered.append("close")
+
+    model = _CaptureIdentityModel()
+    monkeypatch.setattr(
+        br,
+        "load_model",
+        lambda config, checkpoint_path, device, fp16: model,
+    )
+    monkeypatch.setattr(b1, "basicvsrpp_migraphx_b1_enabled", lambda *a, **k: True)
+    monkeypatch.setattr(b1, "load_basicvsrpp_b1_migraphx", lambda *a, **k: _FakeB1())
+    restorer = br.BasicvsrppMosaicRestorer(
+        checkpoint_path="unused.pth",
+        device=torch.device("cpu"),
+        max_clip_size=30,
+        use_tensorrt=False,
+        fp16=False,
+    )
+
+    frame = torch.zeros((3, 256, 256), dtype=torch.uint8)
+    restorer.raw_process([frame])
+    restorer.close()
+
+    assert entered == ["enter", "exit", "close"]

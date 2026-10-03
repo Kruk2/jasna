@@ -279,7 +279,7 @@ def test_start_downloads_a_missing_ltx_model_first(monkeypatch) -> None:
     app = SimpleNamespace(
         _preview_gpu_busy=False,
         _processor=None,
-        _queue_panel=SimpleNamespace(get_jobs=lambda: [job], get_output_folder=lambda: "", get_output_pattern=lambda: ""),
+        _queue_panel=SimpleNamespace(get_jobs=lambda: [job], get_output_folder=lambda: "", get_output_pattern=lambda: "", get_preserve_input_structure=lambda: False),
         _settings_panel=SimpleNamespace(
             get_settings=lambda: settings, ltx_unavailable_reason=lambda: "model_ltx_not_downloaded"
         ),
@@ -347,7 +347,7 @@ def _start_app(settings: AppSettings, *, license_missing: bool, yes: bool, monke
     app = SimpleNamespace(
         _preview_gpu_busy=False,
         _processor=None,
-        _queue_panel=SimpleNamespace(get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: ""),
+        _queue_panel=SimpleNamespace(get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: "", get_preserve_input_structure=lambda: False),
         _settings_panel=SimpleNamespace(
             get_settings=lambda: settings, ltx_unavailable_reason=lambda: None, set_ltx_trial=trials.append
         ),
@@ -376,8 +376,11 @@ def test_declining_the_trial_offer_does_not_start(monkeypatch) -> None:
     assert len(asked) == 1 and trials == [] and restarted == []
 
 
-def test_trial_session_config_and_key() -> None:
+def test_trial_session_config_and_key(monkeypatch) -> None:
     from jasna.gui.video_session import video_session_config, video_session_key
+    from jasna.mosaic import detection_registry
+
+    monkeypatch.setattr(detection_registry, "require_detection_model_weights", lambda *_args: Path("det.engine"))
 
     real = replace(AppSettings(), restoration_model="ltx")
     trial = replace(real, ltx_trial=True)
@@ -397,7 +400,7 @@ def test_a_trial_seed_preview_never_reuses_a_real_prepared_range() -> None:
 
 
 def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch) -> None:
-    from jasna.protection import LicenseError
+    from jasna.license_api import LicenseError
 
     directory = tmp_path / "ltx"
     _install(directory, "distilled", fast=False)
