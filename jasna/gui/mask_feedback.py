@@ -586,7 +586,7 @@ class MaskSuggestDialog(ctk.CTkToplevel):
             display = Image.alpha_composite(
                 display.convert("RGBA"), overlay
             ).convert("RGB")
-        self._photo = ImageTk.PhotoImage(display)
+        self._photo = ImageTk.PhotoImage(display, master=self._canvas)
         canvas.create_image(*draw_origin, image=self._photo, anchor="nw")
 
         def to_canvas(point: tuple[float, float]) -> tuple[float, float]:

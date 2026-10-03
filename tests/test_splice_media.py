@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fractions import Fraction
 import subprocess
 from pathlib import Path
 
@@ -10,13 +11,18 @@ import pytest
 from jasna.accelerator import AcceleratorVendor
 from jasna.media.probe import get_video_meta_data
 from jasna.media.splice import (
+    SmartRenderCompatibilityError,
     SpliceSpan,
     concatenate_fragments,
     create_copy_fragment,
+    mux_fragments_final_output,
     mux_final_output,
     normalize_fragment,
+    probe_hevc_parameter_sets,
     probe_keyframes,
     resolve_smart_encoder_settings,
+    validate_hevc_copy_seams,
+    validate_hevc_fragment_parameter_sets,
 )
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
@@ -70,6 +76,92 @@ def test_h264_probe_resolves_source_compatible_smart_settings(tmp_path: Path) ->
         "bf": 3,
         "b_ref_mode": "disabled",
     }
+
+
+def test_normalize_fragment_applies_decode_delay_to_unreordered_h264(
+    tmp_path: Path,
+) -> None:
+    raw = tmp_path / "rendered.nut"
+    normalized = tmp_path / "rendered.ts"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=30:duration=1",
+        "-an",
+        "-c:v", "libx264",
+        "-bf", "0",
+        "-g", "30",
+        "-f", "nut",
+        str(raw),
+    )
+    normalize_fragment(
+        raw,
+        normalized,
+        codec="h264",
+        decode_delay=Fraction(1, 30),
+    )
+    with av.open(str(normalized)) as container:
+        packets = [
+            packet
+            for packet in container.demux(container.streams.video[0])
+            if packet.pts is not None and packet.dts is not None
+        ]
+    assert packets
+    assert any(packet.pts > packet.dts for packet in packets)
+
+
+def _make_hevc_source(path: Path, *, size: str = "160x96") -> None:
+    _ffmpeg(
+        "-f", "lavfi", "-i", f"testsrc2=size={size}:rate=12:duration=2",
+        "-an",
+        "-c:v", "libx265",
+        "-pix_fmt", "yuv420p10le",
+        "-x265-params", "keyint=12:min-keyint=12:scenecut=0:open-gop=0:repeat-headers=1",
+        str(path),
+    )
+
+
+def test_hevc_parameter_set_probe_reads_hvcc_and_annex_b(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    annex_b = tmp_path / "source.ts"
+    _make_hevc_source(source)
+    normalize_fragment(source, annex_b, codec="hevc")
+    hvcc_signature = probe_hevc_parameter_sets(source)
+    annex_b_signature = probe_hevc_parameter_sets(annex_b)
+    assert {item.nal_type for item in hvcc_signature} == {32, 33, 34}
+    assert hvcc_signature == annex_b_signature
+
+
+def test_hevc_parameter_set_collision_with_ordered_headers_reaches_final_gate(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.mp4"
+    rendered = tmp_path / "rendered.mp4"
+    source_fragment = tmp_path / "source.ts"
+    rendered_fragment = tmp_path / "rendered.ts"
+    _make_hevc_source(source, size="160x96")
+    _make_hevc_source(rendered, size="176x96")
+    normalize_fragment(source, source_fragment, codec="hevc")
+    normalize_fragment(rendered, rendered_fragment, codec="hevc")
+    validate_hevc_fragment_parameter_sets(
+        [(source_fragment, "copy"), (rendered_fragment, "render")]
+    )
+
+
+def test_hevc_copy_seam_gate_accepts_copy_and_rejects_reencode(tmp_path: Path) -> None:
+    source = tmp_path / "source.mp4"
+    reencoded = tmp_path / "reencoded.mp4"
+    _make_hevc_source(source)
+    _ffmpeg(
+        "-i", str(source),
+        "-an",
+        "-vf", "hue=s=0",
+        "-c:v", "libx265",
+        "-pix_fmt", "yuv420p10le",
+        str(reencoded),
+    )
+    validate_hevc_copy_seams(source, source, ((0.0, 1.0),))
+    with pytest.raises(SmartRenderCompatibilityError) as rejected:
+        validate_hevc_copy_seams(reencoded, source, ((0.0, 1.0),))
+    assert rejected.value.reason == "hevc_copy_seam_mismatch"
 
 
 @pytest.mark.parametrize(
@@ -160,11 +252,13 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
     ("suffix", "expected_subtitle_codec", "expected_attachments"),
     [(".mkv", "srt", 1), (".mp4", "mov_text", 0)],
 )
+@pytest.mark.parametrize("fragment_route", [False, True])
 def test_final_mux_preserves_compatible_source_structure(
     tmp_path: Path,
     suffix: str,
     expected_subtitle_codec: str,
     expected_attachments: int,
+    fragment_route: bool,
 ) -> None:
     subtitle = tmp_path / "subtitle.srt"
     subtitle.write_text(
@@ -201,6 +295,7 @@ def test_final_mux_preserves_compatible_source_structure(
         "-map_metadata", "2",
         "-map_chapters", "2",
         "-metadata:s:v:0", "language=jpn",
+        "-disposition:v:0", "default+original",
         "-metadata:s:s:0", "language=pol",
         "-metadata:s:s:0", "title=Signs",
         "-disposition:s:0", "default+forced",
@@ -222,7 +317,16 @@ def test_final_mux_preserves_compatible_source_structure(
     )
     output = tmp_path / f"output{suffix}"
 
-    mux_final_output(assembled, source, output, codec="h264")
+    if fragment_route:
+        mux_fragments_final_output(
+            [(assembled, 2.0)],
+            source,
+            output,
+            manifest=tmp_path / "fragments.ffconcat",
+            codec="h264",
+        )
+    else:
+        mux_final_output(assembled, source, output, codec="h264")
 
     with av.open(str(output)) as container:
         assert container.metadata["title"] == "Source title"
@@ -231,6 +335,8 @@ def test_final_mux_preserves_compatible_source_structure(
             "Main",
         ]
         assert container.streams.video[0].metadata["language"] == "jpn"
+        assert container.streams.video[0].disposition.default
+        assert container.streams.video[0].disposition.original
         assert len(container.streams.audio) == 1
         assert len(container.streams.subtitles) == 1
         assert len(container.streams.attachments) == expected_attachments
@@ -252,7 +358,7 @@ def test_final_mux_preserves_compatible_source_structure(
         assert b"Opening subtitle" in subtitle_text
         if expected_attachments:
             output_attachment = container.streams.attachments[0]
-            assert output_attachment.name == "font.txt"
+            assert Path(output_attachment.name).name == "font.txt"
             assert output_attachment.mimetype == "text/plain"
             assert output_attachment.data == b"font payload"
 

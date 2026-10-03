@@ -25,6 +25,7 @@ from jasna.gui.restoration_preview import (
     preview_window,
 )
 from jasna.gui.segment_editor import SegmentEditor
+from jasna.gui.theme import Colors
 from jasna.media.probe import VideoMetadata
 
 
@@ -445,8 +446,52 @@ def test_app_start_guard_blocks_running_queue_reset() -> None:
     app._queue_panel.get_jobs.assert_not_called()
 
 
+def test_app_start_guard_requires_restart_after_native_smart_failure() -> None:
+    app = JasnaApp.__new__(JasnaApp)
+    app._preview_gpu_busy = False
+    app._processor = MagicMock()
+    app._processor.is_running.return_value = False
+    app._processor.restart_required_reason.return_value = "restart required"
+    app._queue_panel = MagicMock()
+    app._log_panel = MagicMock()
+
+    with patch("tkinter.messagebox.showerror") as showerror:
+        app._on_start()
+
+    app._queue_panel.get_jobs.assert_not_called()
+    app._log_panel.error.assert_called_once()
+    showerror.assert_called_once()
+
+
+def test_app_completion_keeps_start_disabled_when_restart_is_required() -> None:
+    app = JasnaApp.__new__(JasnaApp)
+    app._ui_run_epoch = 1
+    app._ui_run_state = "finishing"
+    app._processor = MagicMock()
+    app._processor.restart_required_reason.return_value = "restart required"
+    app._status_pill = MagicMock()
+    app._control_bar = MagicMock()
+    app._settings_panel = MagicMock()
+    app._queue_panel = MagicMock()
+    app._add_run_log_event = MagicMock()
+    app._close_run_log = MagicMock()
+
+    with patch("tkinter.messagebox.showerror") as showerror:
+        app._handle_complete(False)
+
+    app._status_pill.set_status.assert_called_once_with("ERROR", Colors.STATUS_ERROR)
+    app._control_bar.reset.assert_called_once()
+    assert app._control_bar.set_start_enabled.call_args.args[0] is False
+    app._control_bar.set_completed.assert_not_called()
+    app._queue_panel.set_running.assert_called_once_with(False)
+    showerror.assert_called_once()
+    app._close_run_log.assert_called_once()
+
+
 def test_app_prepares_entire_queue_before_starting_processor() -> None:
     app = JasnaApp.__new__(JasnaApp)
+    app._ui_run_epoch = 0
+    app._ui_run_state = "idle"
     app._preview_gpu_busy = False
     app._processor = MagicMock()
     app._processor.is_running.return_value = False
@@ -461,6 +506,7 @@ def test_app_prepares_entire_queue_before_starting_processor() -> None:
     app._control_bar = MagicMock()
     app._video_player_btn = MagicMock()
     app._log_panel = MagicMock()
+    app._run_log = None
     app._job_start_times = {}
     app._processing_start_time = 0.0
     calls = []

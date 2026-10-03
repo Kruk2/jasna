@@ -1,11 +1,19 @@
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.main import build_parser
+
+
+@pytest.fixture(autouse=True)
+def _cpu_cli_runtime(monkeypatch):
+    monkeypatch.setattr("jasna.accelerator.device_context", lambda _device: nullcontext())
+    monkeypatch.setattr("jasna.accelerator.vendor_for_device", lambda _device=None: AcceleratorVendor.NVIDIA)
 
 
 # ---------------------------------------------------------------------------
@@ -67,6 +75,33 @@ def _run_main(argv, pipeline_side_effect=None):
     return pipeline_cls
 
 
+_MISSING = object()
+
+
+@contextmanager
+def _fake_secondary_restorer_module(leaf, class_name, class_mock):
+    import jasna.restorer as restorer_package
+
+    name = f"jasna.restorer.{leaf}"
+    module = ModuleType(name)
+    setattr(module, class_name, class_mock)
+    old_module = sys.modules.get(name, _MISSING)
+    old_attribute = restorer_package.__dict__.get(leaf, _MISSING)
+    try:
+        sys.modules[name] = module
+        restorer_package.__dict__[leaf] = module
+        yield
+    finally:
+        if old_module is _MISSING:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = old_module
+        if old_attribute is _MISSING:
+            restorer_package.__dict__.pop(leaf, None)
+        else:
+            restorer_package.__dict__[leaf] = old_attribute
+
+
 # ---------------------------------------------------------------------------
 # build_parser
 # ---------------------------------------------------------------------------
@@ -88,6 +123,7 @@ class TestBuildParser:
         assert args.codec == "hevc"
         assert args.cq is None
         assert args.encoder_settings == ""
+        assert args.amd_dual_gop_encode is False
         assert args.retarget_high_fps is False
         assert args.sharpen == 0.0
         assert args.segments == ""
@@ -259,7 +295,17 @@ class TestSecondaryRestorers:
     def test_tvai_secondary(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_tvai = MagicMock()
-        with patch("jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer", mock_tvai):
+        with (
+            patch(
+                "jasna.accelerator.vendor_for_device",
+                return_value=AcceleratorVendor.NVIDIA,
+            ),
+            _fake_secondary_restorer_module(
+                "tvai_secondary_restorer",
+                "TvaiSecondaryRestorer",
+                mock_tvai,
+            ),
+        ):
             _run_main(_base_argv(inp, out, rest, det, [
                 "--secondary-restoration", "tvai",
                 "--tvai-ffmpeg-path", "fake_ffmpeg.exe",
@@ -280,14 +326,34 @@ class TestSecondaryRestorers:
     def test_unet4x_secondary(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_unet = MagicMock()
-        with patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer", mock_unet):
+        with (
+            patch(
+                "jasna.accelerator.vendor_for_device",
+                return_value=AcceleratorVendor.NVIDIA,
+            ),
+            _fake_secondary_restorer_module(
+                "unet4x_secondary_restorer",
+                "Unet4xSecondaryRestorer",
+                mock_unet,
+            ),
+        ):
             _run_main(_base_argv(inp, out, rest, det, ["--secondary-restoration", "unet-4x"]))
         mock_unet.assert_called_once()
 
     def test_rtx_super_res_secondary(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_rtx = MagicMock()
-        with patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer", mock_rtx):
+        with (
+            patch(
+                "jasna.accelerator.vendor_for_device",
+                return_value=AcceleratorVendor.NVIDIA,
+            ),
+            _fake_secondary_restorer_module(
+                "rtx_superres_secondary_restorer",
+                "RtxSuperresSecondaryRestorer",
+                mock_rtx,
+            ),
+        ):
             _run_main(_base_argv(inp, out, rest, det, [
                 "--secondary-restoration", "rtx-super-res",
                 "--rtx-scale", "2",
@@ -305,7 +371,17 @@ class TestSecondaryRestorers:
     def test_rtx_denoise_none_passes_none(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_rtx = MagicMock()
-        with patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer", mock_rtx):
+        with (
+            patch(
+                "jasna.accelerator.vendor_for_device",
+                return_value=AcceleratorVendor.NVIDIA,
+            ),
+            _fake_secondary_restorer_module(
+                "rtx_superres_secondary_restorer",
+                "RtxSuperresSecondaryRestorer",
+                mock_rtx,
+            ),
+        ):
             _run_main(_base_argv(inp, out, rest, det, [
                 "--secondary-restoration", "rtx-super-res",
                 "--rtx-denoise", "none",
@@ -461,18 +537,45 @@ class TestArgForwarding:
         pipe, _ = self._capture_run(tmp_path, ["--no-fp16"])
         assert pipe["fp16"] is False
 
-    def test_encoder_settings_forwarded(self, tmp_path):
-        pipe, _ = self._capture_run(tmp_path, ["--encoder-settings", "cq=22,rc-lookahead=32"])
-        assert pipe["encoder_settings"] == {"cq": 22, "rc-lookahead": 32}
+    @pytest.mark.parametrize(
+        ("vendor", "settings", "expected"),
+        [
+            (
+                AcceleratorVendor.NVIDIA,
+                "cq=22,rc-lookahead=32",
+                {"cq": 22, "rc-lookahead": 32},
+            ),
+            (
+                AcceleratorVendor.AMD,
+                "cq=22,preanalysis=1",
+                {"cq": 22, "preanalysis": 1},
+            ),
+        ],
+    )
+    def test_encoder_settings_forwarded(self, tmp_path, vendor, settings, expected):
+        with patch("jasna.accelerator.vendor_for_device", return_value=vendor):
+            pipe, _ = self._capture_run(
+                tmp_path,
+                ["--encoder-settings", settings],
+            )
+        assert pipe["encoder_settings"] == expected
 
-    def test_default_cq_follows_codec(self, tmp_path):
-        hevc, _ = self._capture_run(tmp_path, [])
-        h264, _ = self._capture_run(tmp_path, ["--codec", "h264"])
-        av1, _ = self._capture_run(tmp_path, ["--codec", "av1"])
+    @pytest.mark.parametrize(
+        ("vendor", "expected_cq"),
+        [
+            (AcceleratorVendor.NVIDIA, {"hevc": 28, "h264": 25, "av1": 35}),
+            (AcceleratorVendor.AMD, {"hevc": 25, "h264": 24, "av1": 32}),
+        ],
+    )
+    def test_default_cq_follows_codec(self, tmp_path, vendor, expected_cq):
+        with patch("jasna.accelerator.vendor_for_device", return_value=vendor):
+            hevc, _ = self._capture_run(tmp_path, [])
+            h264, _ = self._capture_run(tmp_path, ["--codec", "h264"])
+            av1, _ = self._capture_run(tmp_path, ["--codec", "av1"])
 
-        assert hevc["encoder_settings"] == {"cq": 28}
-        assert h264["encoder_settings"] == {"cq": 25}
-        assert av1["encoder_settings"] == {"cq": 35}
+        assert hevc["encoder_settings"] == {"cq": expected_cq["hevc"]}
+        assert h264["encoder_settings"] == {"cq": expected_cq["h264"]}
+        assert av1["encoder_settings"] == {"cq": expected_cq["av1"]}
 
     def test_direct_cq_forwarded_unchanged(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--codec", "h264", "--cq", "31"])
@@ -486,8 +589,18 @@ class TestArgForwarding:
                 ["--cq", "28", "--encoder-settings", "cq=22"],
             )
 
-    def test_direct_cq_validated_for_codec(self, tmp_path):
-        with pytest.raises(ValueError, match=r"h264.*1\.\.51"):
+    @pytest.mark.parametrize(
+        ("vendor", "expected_range"),
+        [
+            (AcceleratorVendor.NVIDIA, r"1\.\.51"),
+            (AcceleratorVendor.AMD, r"0\.\.51"),
+        ],
+    )
+    def test_direct_cq_validated_for_codec(self, tmp_path, vendor, expected_range):
+        with (
+            patch("jasna.accelerator.vendor_for_device", return_value=vendor),
+            pytest.raises(ValueError, match=rf"h264.*{expected_range}"),
+        ):
             self._capture_run(tmp_path, ["--codec", "h264", "--cq", "52"])
 
     def test_batch_size_forwarded(self, tmp_path):
@@ -971,7 +1084,17 @@ class TestCleanup:
         tvai_instance = MagicMock()
         mock_tvai.return_value = tvai_instance
 
-        with patch("jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer", mock_tvai):
+        with (
+            patch(
+                "jasna.accelerator.vendor_for_device",
+                return_value=AcceleratorVendor.NVIDIA,
+            ),
+            _fake_secondary_restorer_module(
+                "tvai_secondary_restorer",
+                "TvaiSecondaryRestorer",
+                mock_tvai,
+            ),
+        ):
             _run_main(_base_argv(inp, out, rest, det, ["--secondary-restoration", "tvai"]))
 
         tvai_instance.close.assert_called_once()
@@ -1058,6 +1181,15 @@ class TestEngineCompilation:
         mock_unet = MagicMock()
 
         with (
+            patch(
+                "jasna.accelerator.vendor_for_device",
+                return_value=AcceleratorVendor.NVIDIA,
+            ),
+            _fake_secondary_restorer_module(
+                "unet4x_secondary_restorer",
+                "Unet4xSecondaryRestorer",
+                mock_unet,
+            ),
             patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
             patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
             patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
@@ -1065,7 +1197,6 @@ class TestEngineCompilation:
             patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)) as mock_compile,
             patch("jasna.pipeline.Pipeline", return_value=MagicMock()),
             patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
-            patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer", mock_unet),
         ):
             with patch.object(sys, "argv", _base_argv(inp, out, rest, det, ["--secondary-restoration", "unet-4x"])):
                 from jasna.main import main

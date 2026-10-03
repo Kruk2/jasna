@@ -74,7 +74,7 @@ def run_unavailable_reason(
 def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
     """Whether the installed ``model`` needs a license this PC lacks. Verifies the stored
     license only; reads no model data."""
-    from jasna.protection import ProtectionError
+    from jasna.license_api import ProtectionError
 
     try:
         model_files.LtxModelFiles.from_dir(directory, model, fast=fast)
