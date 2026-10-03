@@ -158,6 +158,21 @@ class NativeLogsTests(unittest.TestCase):
         # Worker entry must treat this as fatal; no unsafe rollback callback.
         self.assertEqual(calls, [('native_level', 24)])
 
+    def test_worker_installs_before_processor_import_and_checks_before_after_run(self):
+        source = ROOT / 'jasna/gui/video_job_process.py'
+        tree = ast.parse(source.read_text(encoding='utf-8'))
+        imports = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+        self.assertFalse(any('av' == a.name or a.name.startswith('av.')
+            for n in imports for a in n.names))
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+        install = next(n for n in calls if ast.unparse(n.func) == 'install_worker_native_logs')
+        processor_import = next(n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+            and n.module == 'jasna.gui.processor')
+        checks = sorted(n.lineno for n in calls if ast.unparse(n.func) == 'native_log_policy.assert_active')
+        run = next(n for n in calls if ast.unparse(n.func) == 'processor._run')
+        self.assertLess(install.lineno, processor_import.lineno)
+        self.assertEqual(len(checks), 2)
+        self.assertLess(checks[0], run.lineno); self.assertLess(run.lineno, checks[1])
 
 
 if __name__ == '__main__': unittest.main(verbosity=2)
