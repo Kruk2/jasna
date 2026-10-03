@@ -28,6 +28,10 @@ from jasna.media.windows_d3d11_hip_resident import (
     WINDOWS_D3D11_HIP_RESIDENT_BACKEND,
 )
 from jasna.native_worker import run_amf_decoder_open_with_watchdog
+from jasna.gpu_context_errors import (
+    NativeGpuContextUnusableError,
+    is_windows_amf_host_transfer_failure,
+)
 
 log = logging.getLogger(__name__)
 
@@ -2446,6 +2450,16 @@ class VideoReader:
             log.warning("Recovered video corruption in %s: %s", self.file, e)
             return [], consecutive_errors
         except av.FFmpegError as e:
+            if (sys.platform == "win32" and self._decoder_ctx is not None
+                    and is_windows_amf_host_transfer_failure(
+                        e, platform=sys.platform,
+                        amd=getattr(self, "vendor", None) is AcceleratorVendor.AMD,
+                        decoder_name=str(getattr(self._decoder_ctx, "name", "")),
+                    )):
+                raise NativeGpuContextUnusableError(
+                    f"Windows AMF hardware-to-host frame transfer failed for {self.file}: {e}. "
+                    "The GPU context is quarantined; restart Jasna before continuing."
+                ) from e
             raise VideoDecodeError(f"Failed to decode {self.file}: {e}") from e
         if frames:
             consecutive_errors = 0

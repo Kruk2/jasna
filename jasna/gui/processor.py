@@ -39,6 +39,7 @@ from jasna.media import media_files
 from jasna.media.media_files import unique_path
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession, build_pipeline
+from jasna.gpu_context_errors import native_context_failure
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,8 @@ def build_job_encoder_settings(settings: AppSettings, codec: str) -> dict:
 def _gpu_failure_requires_restart(exc: BaseException) -> bool:
     """Return whether continuing the queue in this GPU process is unsafe."""
 
+    if native_context_failure(exc) is not None:
+        return True
     try:
         import torch
 
@@ -311,6 +314,7 @@ class Processor:
         # work may leave driver-owned allocations alive until process exit.
         # Never run another queued job (or a later Start) in that process.
         self._restart_required_reason: str | None = None
+        self._native_context_quarantined = False
         
     def start(
         self,
@@ -886,8 +890,15 @@ class Processor:
                 if job.status is JobStatus.PENDING:
                     break  # stopped mid-job; it stays queued for the next run
         finally:
-            self._close_image_session()
-            self._close_video_session()
+            for close_session in (self._close_image_session, self._close_video_session):
+                try:
+                    close_session()
+                except Exception:
+                    if not self._native_context_quarantined:
+                        raise
+                    # Preserve the original error and completion(False) even
+                    # if the invalid context also makes cleanup fail.
+                    logger.warning("Quarantined GPU session cleanup failed; restart required", exc_info=True)
 
         if self._stop_event.is_set():
             self._log("INFO", "Processing stopped by user")
@@ -1141,7 +1152,13 @@ class Processor:
             tb = traceback.format_exc()
             e.__traceback__ = None
             if _gpu_failure_requires_restart(e):
+                self._native_context_quarantined = native_context_failure(e) is not None
                 self._restart_required_reason = (
+                    "Native GPU frame transfer failed. The remaining queue was not "
+                    "started because the GPU context may be invalid. Close and restart "
+                    "Jasna to rebuild decoder, encoder and model resources. This error "
+                    "alone does not establish a GPU timeout or its trigger."
+                ) if native_context_failure(e) is not None else (
                     "GPU memory was exhausted. The remaining queue was not "
                     "started because native decoder/encoder resources may no "
                     "longer be safe to reuse in this process. Close and restart "
@@ -1155,11 +1172,12 @@ class Processor:
             ))
             self._log("ERROR", f"Failed to process {job.filename}: {e}\n{tb}")
 
-        try:
-            import torch
-            _cleanup_torch(torch)
-        except Exception:
-            logger.warning("Torch cleanup failed after job", exc_info=True)
+        if not self._native_context_quarantined:
+            try:
+                import torch
+                _cleanup_torch(torch)
+            except Exception:
+                logger.warning("Torch cleanup failed after job", exc_info=True)
 
     def _fail_isolated_video_job(self, job: JobItem, message: str) -> None:
         job.status = JobStatus.ERROR
@@ -2154,7 +2172,8 @@ class Processor:
         s = self._video_session
         self._video_session = None
         s.close()
-        release_session_memory(s.device)
+        if not self._native_context_quarantined:
+            release_session_memory(s.device)
         from jasna.native_worker import is_isolated_video_job
 
         self._log("DEBUG" if is_isolated_video_job() else "INFO", "Restoration models unloaded")
@@ -2222,5 +2241,6 @@ class Processor:
         import torch
         for _ in range(3):
             gc.collect()
-        _cleanup_torch(torch)
+        if not self._native_context_quarantined:
+            _cleanup_torch(torch)
         self._log("INFO", "SD 1.5 model unloaded")
