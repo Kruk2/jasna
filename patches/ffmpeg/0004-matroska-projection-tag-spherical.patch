@@ -1,0 +1,65 @@
+diff --git a/libavformat/matroskaenc.c b/libavformat/matroskaenc.c
+index c9386db6a0..1f1ee21e74 100644
+--- a/libavformat/matroskaenc.c
++++ b/libavformat/matroskaenc.c
+@@ -1508,18 +1508,27 @@ ignore:
+ }
+
+ static int mkv_handle_spherical(void *logctx, EbmlWriter *writer,
+-                                const AVCodecParameters *par, uint8_t private[],
++                                const AVCodecParameters *par,
++                                const AVDictionary *metadata, uint8_t private[],
+                                 double *yaw, double *pitch, double *roll)
+ {
+     const AVPacketSideData *sd = av_packet_side_data_get(par->coded_side_data,
+                                                          par->nb_coded_side_data,
+                                                          AV_PKT_DATA_SPHERICAL);
++    const AVDictionaryEntry *tag;
+     const AVSphericalMapping *spherical;
++    const AVSphericalMapping tag_spherical = {
++        .projection = AV_SPHERICAL_EQUIRECTANGULAR,
++    };
+
+-    if (!sd)
+-        return 0;
+-
+-    spherical = (const AVSphericalMapping *)sd->data;
++    if (sd) {
++        spherical = (const AVSphericalMapping *)sd->data;
++    } else {
++        tag = av_dict_get(metadata, "projection", NULL, 0);
++        if (!tag || av_strcasecmp(tag->value, "equirectangular"))
++            return 0;
++        spherical = &tag_spherical;
++    }
+     if (spherical->projection != AV_SPHERICAL_EQUIRECTANGULAR      &&
+         spherical->projection != AV_SPHERICAL_EQUIRECTANGULAR_TILE &&
+         spherical->projection != AV_SPHERICAL_CUBEMAP) {
+@@ -1569,6 +1578,7 @@ static int mkv_handle_spherical(void *logctx, EbmlWriter *writer,
+
+ static void mkv_write_video_projection(void *logctx, EbmlWriter *wr,
+                                        const AVCodecParameters *par,
++                                       const AVDictionary *metadata,
+                                        uint8_t private[])
+ {
+     double yaw = 0, pitch = 0, roll = 0;
+@@ -1576,7 +1586,8 @@ static void mkv_write_video_projection(void *logctx, EbmlWriter *wr,
+
+     ebml_writer_open_master(wr, MATROSKA_ID_VIDEOPROJECTION);
+
+-    ret = mkv_handle_spherical(logctx, wr, par, private, &yaw, &pitch, &roll);
++    ret = mkv_handle_spherical(logctx, wr, par, metadata, private,
++                               &yaw, &pitch, &roll);
+     if (!ret)
+         mkv_handle_rotation(logctx, par, &yaw, &roll);
+
+@@ -1925,7 +1936,8 @@ static int mkv_write_track_video(AVFormatContext *s, MatroskaMuxContext *mkv,
+                             color_space, sizeof(color_space));
+     }
+     mkv_write_video_color(&writer, st, par);
+-    mkv_write_video_projection(s, &writer, par, projection_private);
++    mkv_write_video_projection(s, &writer, par, st->metadata,
++                               projection_private);
+
+     return ebml_writer_write(&writer, pb);
+ }
