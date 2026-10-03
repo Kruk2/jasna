@@ -15,6 +15,7 @@ import torch
 from jasna.accelerator import AcceleratorVendor
 from jasna.media import dual_gop_encoder
 from jasna.media.video_encoder import AMF_ENCODER_SPECS, AMF_SMART_FRAGMENT_OPTIONS
+from jasna.pipeline import _OfflineFrameWriter, _dual_gop_smart_encoder_settings
 
 
 def _encoder(**overrides):
@@ -104,6 +105,17 @@ def test_persistent_session_uses_current_shared_encoder_contract(
     assert encoder._target_bit_rate == template._target_bit_rate
 
 
+def test_dual_gop_smart_render_restores_fixed_writer_contract() -> None:
+    source_matched = {"g": 300, "bf": 2, "level": "6.2"}
+
+    assert _dual_gop_smart_encoder_settings(
+        source_matched,
+        enabled=True,
+    ) == {"g": 250, "bf": 0, "level": "6.2"}
+    assert _dual_gop_smart_encoder_settings(
+        source_matched,
+        enabled=False,
+    ) is source_matched
 
 
 def test_dual_gop_accepts_bundled_ffprobe_empty_profile_fallback(
@@ -771,3 +783,42 @@ class _FakeDualWriter:
 
     def abort(self) -> None:
         self.aborted = True
+
+
+def test_offline_writer_routes_close_to_dual_writer(monkeypatch) -> None:
+    _FakeDualWriter.instances.clear()
+    monkeypatch.setattr(dual_gop_encoder, "use_dual_gop_writer", lambda *a, **k: True)
+    monkeypatch.setattr(dual_gop_encoder, "AmdDualGopFrameWriter", _FakeDualWriter)
+    heartbeat = [None]
+    encoder = SimpleNamespace()
+
+    writer = _OfflineFrameWriter(
+        encoder,
+        heartbeat,
+        amd_dual_gop_encode=True,
+    )
+    writer.write("frame", 17, apply_lut=False)
+    writer.close()
+
+    dual = _FakeDualWriter.instances[-1]
+    assert dual.writes == [("frame", 17, False)]
+    assert dual.closed is True
+    assert dual.aborted is False
+    assert heartbeat[0] > 0
+
+
+def test_offline_writer_routes_failure_to_dual_abort(monkeypatch) -> None:
+    _FakeDualWriter.instances.clear()
+    monkeypatch.setattr(dual_gop_encoder, "use_dual_gop_writer", lambda *a, **k: True)
+    monkeypatch.setattr(dual_gop_encoder, "AmdDualGopFrameWriter", _FakeDualWriter)
+    writer = _OfflineFrameWriter(
+        SimpleNamespace(),
+        [0.0],
+        amd_dual_gop_encode=True,
+    )
+
+    writer.close(abort=True)
+
+    dual = _FakeDualWriter.instances[-1]
+    assert dual.aborted is True
+    assert dual.closed is False

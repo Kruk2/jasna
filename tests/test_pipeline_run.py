@@ -1,6 +1,7 @@
 import threading
 from fractions import Fraction
 from pathlib import Path
+import threading
 from unittest.mock import MagicMock, patch, call
 
 from jasna.crop_buffer import RawCrop
@@ -20,6 +21,18 @@ from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResul
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange
 from jasna.tracking.clip_tracker import TrackedClip
+
+
+@pytest.fixture(autouse=True)
+def _cpu_pipeline_monitor(monkeypatch):
+    from jasna.vram_offloader import VramStats
+    monitor = MagicMock()
+    monitor.host_memory_pressure = False
+    monitor.stats = VramStats()
+    monkeypatch.setattr("jasna.pipeline_threads.VramOffloader", lambda **_kwargs: monitor)
+    monkeypatch.setattr(torch.cuda, "ipc_collect", lambda: None)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda *_args: None)
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda *_args: (8 * 1024**3, 24 * 1024**3))
 
 
 def _mock_async_restorer(**kwargs) -> MagicMock:
@@ -194,6 +207,37 @@ class TestPipelineRun:
             p.run()
 
         assert encoder_cls.call_args.kwargs["fmp4"] is True
+
+    def test_full_render_matches_input_bit_depth(self):
+        p = _make_pipeline()
+        p.amd_dual_gop_encode = True
+        reader_cls, _, _ = _make_two_readers([])
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+            patch("jasna.pipeline_threads.VideoReader", reader_cls),
+            patch(
+                "jasna.pipeline.VideoEncoder",
+                return_value=mock_encoder,
+            ) as encoder_cls,
+            patch(
+                "jasna.media.dual_gop_encoder.use_dual_gop_writer",
+                return_value=False,
+            ),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch(
+                "jasna.pipeline_threads.torch.inference_mode",
+                return_value=MagicMock(
+                    __enter__=MagicMock(),
+                    __exit__=MagicMock(return_value=False),
+                ),
+            ),
+        ):
+            p.run()
+        assert encoder_cls.call_args.kwargs["match_input_bit_depth"] is True
+        assert encoder_cls.call_args.kwargs["prefer_amf_host_native"] is True
 
     def test_fmp4_is_dropped_for_segment_processing(self):
         p = _make_pipeline()
@@ -527,6 +571,7 @@ class TestPipelineRun:
         ):
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()
+        assert p.cancel_requested
 
     def test_run_secondary_loop(self, monkeypatch):
         """Cover _run_secondary_loop: push_clip → flush → pop_completed → build_secondary_result."""
@@ -582,6 +627,86 @@ class TestPipelineRun:
         assert not encode_queue.empty()
         result = encode_queue.get()
         assert result is sr_result
+
+    def test_run_secondary_loop_user_cancel_releases_async_push_without_root_error(self):
+        p = _make_pipeline()
+        cancel_event = threading.Event()
+        push_started = threading.Event()
+        cancel_called = threading.Event()
+
+        class BlockingAsyncRestorer:
+            name = "blocking-test"
+            num_workers = 1
+
+            def __init__(self):
+                self.cancel_event = None
+                self.flush_all_called = False
+
+            @property
+            def has_pending(self):
+                return False
+
+            def set_cancel_event(self, event):
+                self.cancel_event = event
+
+            def push_clip(self, frames_256, *, keep_start, keep_end):
+                del frames_256, keep_start, keep_end
+                push_started.set()
+                assert self.cancel_event is not None
+                assert self.cancel_event.wait(timeout=0.5)
+                assert cancel_called.wait(timeout=0.5)
+                return 0
+
+            def pop_completed(self):
+                return []
+
+            def flush_pending(self, target_seqs=None):
+                del target_seqs
+                return False
+
+            def flush_all(self):
+                self.flush_all_called = True
+
+            def cancel(self):
+                cancel_called.set()
+                return True
+
+        restorer = BlockingAsyncRestorer()
+        p.restoration_pipeline.secondary_restorer = restorer
+        primary_result = MagicMock()
+        primary_result.primary_raw = torch.zeros((1, 3, 256, 256))
+        primary_result.keep_start = 0
+        primary_result.keep_end = 1
+        secondary_queue = FrameQueue(max_frames=8)
+        encode_queue = FrameQueue(max_frames=8)
+        secondary_queue.put(primary_result, frame_count=1)
+        outcome: list[BaseException] = []
+
+        def run_loop():
+            try:
+                run_async_secondary(
+                    restoration_pipeline=p.restoration_pipeline,
+                    secondary_queue=secondary_queue,
+                    encode_queue=encode_queue,
+                    clip_queue=FrameQueue(max_frames=1),
+                    primary_idle_event=threading.Event(),
+                    debug_memory=MagicMock(),
+                    cancel_event=cancel_event,
+                )
+            except BaseException as error:
+                outcome.append(error)
+
+        thread = threading.Thread(target=run_loop)
+        thread.start()
+        assert push_started.wait(timeout=0.5)
+        cancel_event.set()
+
+        thread.join(timeout=1.0)
+        assert not thread.is_alive()
+        assert outcome == []
+        assert restorer.cancel_event is cancel_event
+        assert cancel_called.is_set()
+        assert not restorer.flush_all_called
 
     def test_run_secondary_loop_no_flush_when_primary_busy(self, monkeypatch):
         """No flush_pending when secondary_queue is empty but primary is busy (not idle)."""
