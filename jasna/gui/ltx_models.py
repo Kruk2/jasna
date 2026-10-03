@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jasna.gui.download_worker import start_download
-from jasna.gui.locales import t
+from jasna.gui.locales import get_locale, t
 from jasna.gui.queues import MainThreadCalls
 from jasna.ltx import model_files
 from jasna.ltx.model_files import LTX_MODELS, DownloadableFile, download_size_text
@@ -116,8 +116,9 @@ class LtxModels:
             return False
         self.percent = 0
         self._on_change()
+        mirror_first = get_locale().current_language == "zh"
         start_download(
-            lambda progress: model_files.download_files(self._directory, list(files), progress),
+            lambda progress: model_files.download_files(self._directory, list(files), progress, mirror_first=mirror_first),
             lambda percent: self._main_thread.post(lambda: self._set_percent(percent)),
             lambda error: self._main_thread.post(lambda: self._finish(error, on_ready)),
         )

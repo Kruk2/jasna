@@ -6,9 +6,11 @@ and tuned decoder. Every file name is unique, so all variants can sit in one fol
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import logging
 import math
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -22,8 +24,11 @@ logger = logging.getLogger(__name__)
 
 LTX_MODELS: tuple[LtxModelName, ...] = get_args(LtxModelName)
 
-# Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}".
-LTX_DOWNLOAD_URL: str | None = None
+# Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}",
+# and from the same path on LTX_MIRROR_URL (reachable from mainland China) when that fails.
+LTX_DOWNLOAD_URL: str | None = "https://huggingface.co/Kruk2/ltx-restore/resolve/main"
+LTX_MIRROR_URL = "https://hf-mirror.com/Kruk2/ltx-restore/resolve/main"
+_NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
 
 DownloadProgressCallback = Callable[[int, int], None]
 
@@ -286,30 +291,46 @@ def download_size_text(files: list[DownloadableFile]) -> str:
 
 
 def download_files(
-    directory: Path, files: list[DownloadableFile], progress_callback: DownloadProgressCallback | None = None
+    directory: Path,
+    files: list[DownloadableFile],
+    progress_callback: DownloadProgressCallback | None,
+    *,
+    mirror_first: bool,
 ) -> None:
     """Download ``files`` into ``directory``, verifying each sha256 before it replaces
-    anything. ``progress_callback(done_bytes, total_bytes)`` covers all files together."""
+    anything. Each file falls back to the other source when the first is unreachable;
+    ``mirror_first`` tries the mirror first. ``progress_callback(done_bytes, total_bytes)``
+    covers all files together."""
     if LTX_DOWNLOAD_URL is None:
         raise RuntimeError("LTX model downloads are not available yet.")
     unverifiable = [f.name for f in files if f.sha256 is None]
     if unverifiable:
         raise RuntimeError(f"No checksum for {', '.join(unverifiable)}, so it won't be downloaded.")
+    sources = (LTX_MIRROR_URL, LTX_DOWNLOAD_URL) if mirror_first else (LTX_DOWNLOAD_URL, LTX_MIRROR_URL)
     directory.mkdir(parents=True, exist_ok=True)
     total = sum(f.size_bytes for f in files)
     done = 0
     for file in files:
         target = directory / file.name
         partial = target.with_name(target.name + ".part")
-        digest = hashlib.sha256()
-        logger.info("Downloading %s", file.name)
-        with urllib.request.urlopen(f"{LTX_DOWNLOAD_URL}/{file.name}") as response, partial.open("wb") as out:
-            while chunk := response.read(1 << 22):
-                out.write(chunk)
-                digest.update(chunk)
-                done += len(chunk)
-                if progress_callback is not None:
-                    progress_callback(done, total)
+        for source, fallback in zip(sources, (*sources[1:], None)):
+            digest = hashlib.sha256()
+            received = 0
+            logger.info("Downloading %s from %s", file.name, source)
+            try:
+                with urllib.request.urlopen(f"{source}/{file.name}", timeout=30) as response, partial.open("wb") as out:
+                    while chunk := response.read(1 << 22):
+                        out.write(chunk)
+                        digest.update(chunk)
+                        received += len(chunk)
+                        if progress_callback is not None:
+                            progress_callback(done + received, total)
+                break
+            except _NETWORK_ERRORS as error:
+                if fallback is None:
+                    raise
+                logger.warning("Downloading %s from %s failed (%s); trying %s", file.name, source, error, fallback)
+        done += received
         if digest.hexdigest() != file.sha256:
             partial.unlink()
             raise RuntimeError(f"{file.name} is corrupted (checksum mismatch). The download was deleted.")

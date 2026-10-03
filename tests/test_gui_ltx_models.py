@@ -37,6 +37,11 @@ def _install(directory: Path, model: str, *, fast: bool) -> None:
         (directory / name).touch()
 
 
+@pytest.fixture(autouse=True)
+def unpublished(monkeypatch):
+    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", None)
+
+
 @pytest.fixture
 def downloadable(monkeypatch):
     monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", "https://example.invalid/ltx")

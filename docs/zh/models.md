@@ -48,7 +48,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - 耗时取决于马赛克出现的时长，而不是视频长度。首次运行时 Jasna 要为你的
   显卡准备 LTX，会更慢。
 - 模型不随 Jasna 附带：约 15 GB（快速模式约 9 GB）。下载开放后，
-  Jasna 会在下载前询问你。
+  Jasna 会在下载前询问你。无法访问 Hugging Face 时（例如在中国），
+  会改从 hf-mirror.com 下载。
 
 ### LTX 选项
 

@@ -56,7 +56,9 @@ def test_installed_checks_the_chosen_model_only(tmp_path):
 def test_download_refuses_without_a_published_location(tmp_path, monkeypatch):
     monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", None)
     with pytest.raises(RuntimeError, match="not available yet"):
-        model_files.download_files(tmp_path, model_files.missing_downloads(tmp_path, "distilled", fast=False))
+        model_files.download_files(
+            tmp_path, model_files.missing_downloads(tmp_path, "distilled", fast=False), None, mirror_first=False
+        )
 
 
 def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):
@@ -69,12 +71,43 @@ def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):
     target = tmp_path / "models"
     progress = []
     ok = model_files.DownloadableFile("a.safetensors.enc", len(good), hashlib.sha256(good).hexdigest())
-    model_files.download_files(target, [ok], lambda done, total: progress.append((done, total)))
+    model_files.download_files(target, [ok], lambda done, total: progress.append((done, total)), mirror_first=False)
     assert (target / "a.safetensors.enc").read_bytes() == good and progress[-1] == (len(good), len(good))
     wrong = model_files.DownloadableFile("b.safetensors.enc", len(bad), hashlib.sha256(good).hexdigest())
     with pytest.raises(RuntimeError, match="checksum"):
-        model_files.download_files(target, [wrong])
+        model_files.download_files(target, [wrong], None, mirror_first=False)
     assert sorted(p.name for p in target.iterdir()) == ["a.safetensors.enc"]
+
+
+def _published(directory, content: bytes) -> str:
+    directory.mkdir()
+    (directory / "model.enc").write_bytes(content)
+    return directory.as_uri()
+
+
+def test_download_falls_back_to_the_other_source(tmp_path, monkeypatch):
+    content = b"model bytes"
+    file = model_files.DownloadableFile("model.enc", len(content), hashlib.sha256(content).hexdigest())
+    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", (tmp_path / "unreachable").as_uri())
+    monkeypatch.setattr(model_files, "LTX_MIRROR_URL", _published(tmp_path / "mirror", content))
+    model_files.download_files(tmp_path / "a", [file], None, mirror_first=False)
+    assert (tmp_path / "a" / "model.enc").read_bytes() == content
+
+    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", _published(tmp_path / "main", content))
+    monkeypatch.setattr(model_files, "LTX_MIRROR_URL", (tmp_path / "unreachable").as_uri())
+    model_files.download_files(tmp_path / "b", [file], None, mirror_first=True)
+    assert (tmp_path / "b" / "model.enc").read_bytes() == content
+
+
+def test_mirror_first_tries_the_mirror_before_the_main_source(tmp_path, monkeypatch):
+    mirrored = b"mirror bytes"
+    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", _published(tmp_path / "main", b"main bytes"))
+    monkeypatch.setattr(model_files, "LTX_MIRROR_URL", _published(tmp_path / "mirror", mirrored))
+    file = model_files.DownloadableFile("model.enc", len(mirrored), hashlib.sha256(mirrored).hexdigest())
+    model_files.download_files(tmp_path / "models", [file], None, mirror_first=True)
+    assert (tmp_path / "models" / "model.enc").read_bytes() == mirrored
+    with pytest.raises(RuntimeError, match="checksum"):
+        model_files.download_files(tmp_path / "models", [file], None, mirror_first=False)
 
 
 def test_cli_offers_the_missing_model_only_when_ltx_runs(tmp_path, monkeypatch):

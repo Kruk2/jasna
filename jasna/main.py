@@ -825,8 +825,10 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
         raise FileNotFoundError(f"LTX model files missing in {directory}: {names}")
     from tqdm import tqdm
 
+    from jasna.gui.locales import get_locale
+
     with tqdm(total=sum(file.size_bytes for file in missing), unit="B", unit_scale=True, desc="LTX download") as bar:
-        download_files(directory, missing, lambda done, total: bar.update(done - bar.n))
+        download_files(directory, missing, lambda done, total: bar.update(done - bar.n), mirror_first=get_locale().current_language == "zh")
 
 
 def main() -> None:

@@ -52,7 +52,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - The time depends on how long mosaics are on screen, not on the length of
   the video. The first run takes longer while Jasna prepares LTX for your GPU.
 - The model is not bundled: about 15 GB (about 9 GB for Fast mode). Jasna
-  asks before downloading it once the download is available.
+  asks before downloading it once the download is available. If Hugging
+  Face is blocked (for example in China), it downloads from hf-mirror.com.
 
 ### LTX options
 
