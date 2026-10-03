@@ -1,0 +1,31 @@
+{
+  "schema": "jasna.hip-color-kernels.windows.v1",
+  "platform": "win32",
+  "architecture": "gfx1100",
+  "hip_major": 7,
+  "compiler_hip_version": "HIP version: 7.2.53211-158bd99533",
+  "torch_hip_runtime": "7.2.53211-158bd99533",
+  "runtime_api_version": 70253211,
+  "runtime_dll": "amdhip64_7.dll",
+  "runtime_dll_sha256": "ae72615dfaa133f71210e3c46eb6414818413445cb91a58c17f9d125059adb40",
+  "code_object_abi": 4,
+  "parameter_abi": "jasna.hip-module-kernel-params.v1",
+  "compiler_arguments": [
+    "--genco",
+    "--no-gpu-bundle-output",
+    "-fuse-cuid=none",
+    "--offload-arch=gfx1100",
+    "--rocm-device-lib-path=<selected-sdk>/lib/llvm/amdgcn/bitcode",
+    "-O3",
+    "-std=c++17",
+    "-include hip/hip_runtime.h"
+  ],
+  "sources": {
+    "yuv_to_rgb.cu": "b88272d11a618f96135153732c48695da4667c9da4b63e239ac49e2bc26b6a4b",
+    "rgb_to_yuv.cu": "4ac44ae9c401f8d5f949d2c9e8a4438a032679cb9b710ca2532cfaf3c1ca7a6c"
+  },
+  "artifacts": {
+    "yuv_to_rgb.gfx1100.windows.co": "0fd3c74057c718b5da6dc78debd9272c7b613d9a46567ac89ab54707b1dd863e",
+    "rgb_to_yuv.gfx1100.windows.co": "a51c4bd6490c1498967a17561dbfbd778a96aad3a168f3dd03bfc2235feec7f4"
+  }
+}
