@@ -253,24 +253,42 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | 选项 | 说明 |
 | ------ | ----- |
 | `--machine-key` | 显示机器密钥后退出，无需启动 GPU 或 GUI。 |
-| `--cloud-workspace` | 与 `--machine-key` 一起使用，创建或复用云工作区身份。卖家须为许可证码开通云权限。 |
+| `--license-code CODE` | 在 GPU 初始化之前，使用官方卖家的许可证码在线激活。未指定处理选项时，激活后退出。 |
+| `--cloud-workspace` | 与 `--machine-key` 或 `--license-code` 一起使用，创建或复用云工作区身份。卖家须为许可证码开通云权限。 |
 | `--activation-key KEY` | 保存本机的激活密钥。未指定处理选项时，激活后退出。 |
 
-复制机器密钥，在[激活页面](https://jasna-activation.kruk2.workers.dev)输入机器密钥和**许可证码**，然后保存返回的**激活密钥**。Jasna 只保存激活密钥并离线验证，之后启动会复用保存的密钥。
+在线激活使用 `--license-code`，仅通过 HTTPS 向[激活服务](https://jasna-activation.kruk2.workers.dev)发送许可证码和本机的机器密钥。Jasna 确认返回的**激活密钥**适用于本机后，只保存此密钥，不保存许可证码。之后启动和修复时离线验证激活，不会定期联网检查。
+
+```bash
+jasna --license-code "YOUR_LICENSE_CODE"
+jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
+```
+
+手动激活时，复制机器密钥，在任意联网设备上打开同一页面，输入机器密钥和许可证码，或向官方卖家申请。保存返回的激活密钥：
 
 ```bash
 jasna --machine-key
 jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-在 RunPod 或 Vast 上，请先将设置目录保存在持久卷上，再请求云机器密钥。Linux 的 `XDG_CONFIG_HOME` 指定用于存放 `jasna/` 的目录：
+`--license-code` 不能与 `--machine-key` 或 `--activation-key` 同时使用。`--license-code` 和 `--activation-key` 均可与 `--input`、`--output` 一起使用，激活后直接处理。
+
+在 RunPod 或 Vast 上，请先向官方卖家申请云权限，并在激活前将设置目录保存在持久卷上。Linux 的 `XDG_CONFIG_HOME` 指定用于存放 `jasna/` 的目录。选择在线或手动激活：
 
 ```bash
+# 在线
+XDG_CONFIG_HOME=/workspace/config jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+
+# 手动
 XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
 XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-之后运行也须使用同一设置目录。主机或 GPU 更换后仍复用同一名额；将设置目录和激活密钥一起复制，也会转移身份。每个许可证码限 3 个注册，相同机器密钥的重复请求不占新名额。更换须由所有者审核。页面不可用时，请向官方卖家申请手动激活，同样适用此限制。
+之后运行也须使用同一设置目录。主机或 GPU 更换后仍复用同一名额；将设置目录和激活密钥一起复制，也会转移身份。
+
+两种方式共用每个许可证码的 **3 台机器或工作区**名额，相同机器密钥的重复请求不占新名额。只有所有者可以释放名额或批准更换。激活密钥只包含已购买的模型版本；旧版激活格式的密钥须向官方卖家申请替换。
+
+在线激活失败时，请从另一台联网设备手动激活，或将许可证码和机器密钥发送给官方卖家申请。服务无法保证在中国大陆等地区可用；同样适用 3 个名额的限制。
 
 ## 基准测试
 

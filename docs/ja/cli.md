@@ -261,24 +261,42 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | オプション | 説明 |
 | ------ | ----- |
 | `--machine-key` | マシンキーを表示して終了します。GPU や GUI の起動は不要です。 |
-| `--cloud-workspace` | `--machine-key` と併用し、クラウドワークスペースの識別情報を作成または再利用します。販売者によるライセンスコードのクラウド利用許可が必要です。 |
+| `--license-code CODE` | GPU の準備前に、公式販売者からのライセンスコードでオンラインで有効化します。処理オプションがなければ有効化して終了します。 |
+| `--cloud-workspace` | `--machine-key` または `--license-code` と併用し、クラウドワークスペースの識別情報を作成または再利用します。販売者によるライセンスコードのクラウド利用許可が必要です。 |
 | `--activation-key KEY` | このマシンのアクティベーションキーを保存します。処理オプションがなければ有効化して終了します。 |
 
-マシンキーをコピーし、[有効化ページ](https://jasna-activation.kruk2.workers.dev)で**ライセンスコード**と一緒に入力して、返された**アクティベーションキー**を保存します。Jasna はアクティベーションキーだけを保存し、オフラインで確認します。以後の起動では保存済みのキーを使います。
+オンラインでの有効化には `--license-code` を使います。ライセンスコードとこのマシンのマシンキーだけを HTTPS で[有効化サービス](https://jasna-activation.kruk2.workers.dev)に送信します。Jasna は返された**アクティベーションキー**がこのマシン用か確認し、そのキーだけを保存します。ライセンスコードは保存しません。以後の起動や復元ではオフラインで確認し、定期的な通信は行いません。
+
+```bash
+jasna --license-code "YOUR_LICENSE_CODE"
+jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
+```
+
+手動での有効化には、マシンキーをコピーし、接続済みの端末から同じページでライセンスコードと一緒に入力するか、公式販売者に依頼します。返されたアクティベーションキーを保存します:
 
 ```bash
 jasna --machine-key
 jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-RunPod や Vast では、クラウドキーを取得する前に設定フォルダーを永続ボリュームに保存してください。Linux では `XDG_CONFIG_HOME` が `jasna/` を置くフォルダーを指定します:
+`--license-code` は `--machine-key` や `--activation-key` と併用できません。`--license-code` と `--activation-key` はどちらも `--input` と `--output` と併用して、有効化後にそのまま処理できます。
+
+RunPod や Vast では、公式販売者にクラウド利用の許可を依頼し、有効化の前に設定フォルダーを永続ボリュームに保存してください。Linux では `XDG_CONFIG_HOME` が `jasna/` を置くフォルダーを指定します。オンラインか手動のどちらかを選びます:
 
 ```bash
+# オンライン
+XDG_CONFIG_HOME=/workspace/config jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+
+# 手動
 XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
 XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-以後も同じ設定フォルダーを使ってください。ホストや GPU が変わっても同じ枠を使えます。設定フォルダーをキーと一緒にコピーすると識別情報も移ります。ライセンスコードごとに登録は 3 件までで、同じマシンキーの再取得では枠は増えません。交換には所有者の確認が必要です。ページを開けない場合は公式販売者に手動での有効化を依頼してください。同じ上限が適用されます。
+以後も同じ設定フォルダーを使ってください。ホストや GPU が変わっても同じ枠を使えます。設定フォルダーをキーと一緒にコピーすると識別情報も移ります。
+
+どちらの方法でも、ライセンスコードごとの**3 台のマシンまたはワークスペース**の枠は共通です。同じマシンキーの再取得では枠は増えません。枠の解放や交換の承認は所有者だけが行えます。キーで使えるのは購入済みのモデルバージョンだけです。以前の有効化形式のキーは公式販売者に交換を依頼してください。
+
+オンラインでの有効化に失敗した場合は、別の接続済み端末から手動で有効化するか、ライセンスコードとマシンキーを添えて公式販売者に依頼してください。中国本土を含め、サービスへの接続は保証されません。同じ 3 枠の上限が適用されます。
 
 ## ベンチマーク
 

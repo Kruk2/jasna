@@ -344,7 +344,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=CLI_HELP["cloud_workspace"],
     )
-    license_group.add_argument(
+    activation_input = license_group.add_mutually_exclusive_group()
+    activation_input.add_argument(
+        "--license-code",
+        type=str,
+        help=CLI_HELP["license_code"],
+    )
+    activation_input.add_argument(
         "--activation-key",
         type=str,
         default=None,
@@ -826,21 +832,26 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
-    if args.cloud_workspace and not args.machine_key:
-        parser.error("--cloud-workspace needs --machine-key")
+    if args.cloud_workspace and not args.machine_key and args.license_code is None:
+        parser.error("--cloud-workspace needs --machine-key or --license-code")
     if args.machine_key:
-        if args.activation_key is not None:
-            parser.error("--machine-key cannot be combined with --activation-key")
+        if args.activation_key is not None or args.license_code is not None:
+            parser.error("--machine-key cannot be combined with --activation-key or --license-code")
         from jasna.protection import ProtectionError, machine
         try:
             print(machine.machine_key(cloud_workspace=args.cloud_workspace))
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
         return
-    if args.activation_key is not None:
-        from jasna.protection import ProtectionError, license_store
+    if args.activation_key is not None or args.license_code is not None:
+        from jasna.protection import ProtectionError, activation, license_store, machine
         try:
-            license_store.set_license(args.activation_key.strip())
+            if args.license_code is not None:
+                activation.activate_license_code(
+                    args.license_code, machine.machine_key(cloud_workspace=args.cloud_workspace)
+                )
+            else:
+                license_store.set_license(args.activation_key.strip())
         except (ProtectionError, OSError) as exc:
             parser.exit(1, f"Activation error: {exc}\n")
         print("Jasna activated. The Activation key is saved on this machine.")

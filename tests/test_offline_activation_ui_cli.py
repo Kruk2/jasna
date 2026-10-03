@@ -64,6 +64,8 @@ def test_cli_activation_only_and_processing_share_the_early_save(monkeypatch, pr
 @pytest.mark.parametrize("arguments", [
     ["--cloud-workspace"],
     ["--machine-key", "--activation-key", "key"],
+    ["--machine-key", "--license-code", "code"],
+    ["--license-code", "code", "--activation-key", "key"],
     ["--license-email", "buyer@example.com", "--license-key", "key"],
 ])
 def test_cli_rejects_conflicting_or_retired_options(monkeypatch, arguments):
@@ -211,10 +213,11 @@ def test_activation_worker_runs_io_and_errors_off_the_main_thread(protection_api
 def controlled_activation_workers(monkeypatch):
     from jasna.gui import activation_worker
 
-    pending = SimpleNamespace(info=[], machine=[], activation=[])
+    pending = SimpleNamespace(info=[], machine=[], activation=[], online=[])
     monkeypatch.setattr(activation_worker, "start_license_info", lambda done: pending.info.append(done))
     monkeypatch.setattr(activation_worker, "start_machine_key", lambda cloud, done: pending.machine.append((cloud, done)))
     monkeypatch.setattr(activation_worker, "start_activation", lambda key, done: pending.activation.append((key, done)))
+    monkeypatch.setattr(activation_worker, "start_online_activation", lambda code, machine, done: pending.online.append((code, machine, done)))
     return pending
 
 
@@ -287,3 +290,168 @@ def test_dialog_ignores_worker_result_after_close(root, controlled_activation_wo
     root.update()
     assert controlled_activation_workers.machine == []
     assert "closed activation dialog" in caplog.text
+
+
+@pytest.mark.parametrize("cloud", [False, True])
+def test_cli_online_activation_exits_before_gpu_setup(monkeypatch, protection_api, capsys, cloud):
+    from jasna import main
+    from jasna.protection import activation
+
+    machine, _ = protection_api
+    request = Mock(return_value="private-returned-key")
+    monkeypatch.setattr(activation, "activate_license_code", request)
+    monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
+    monkeypatch.setattr(main, "_configure_runtime", lambda args: pytest.fail("Runtime setup ran"))
+    code = "JL1-" + "A" * 43
+    monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", code] + (["--cloud-workspace"] if cloud else []))
+    main.main()
+    machine.machine_key.assert_called_once_with(cloud_workspace=cloud)
+    request.assert_called_once_with(code, "JM1-" + "1" * 64)
+    output = capsys.readouterr()
+    assert "Jasna activated" in output.out
+    assert code not in output.out + output.err
+    assert "private-returned-key" not in output.out + output.err
+
+
+def test_cli_online_activation_is_saved_before_processing(monkeypatch, protection_api):
+    from jasna import main
+    from jasna.protection import activation
+
+    request = Mock(return_value="activation")
+    monkeypatch.setattr(activation, "activate_license_code", request)
+    code = "JL1-" + "A" * 43
+    monkeypatch.setattr(sys, "argv", [
+        "jasna", "--license-code", code, "--input", "photo.png", "--output", "out.png",
+    ])
+
+    def stop_before_gpu(args):
+        request.assert_called_once_with(code, "JM1-" + "1" * 64)
+        raise RuntimeError("saved before processing")
+
+    monkeypatch.setattr(main, "_check_system", stop_before_gpu)
+    with pytest.raises(RuntimeError, match="saved before processing"):
+        main.main()
+
+
+def test_cli_online_failure_is_safe_and_stops_processing(monkeypatch, protection_api, capsys):
+    from jasna import main
+    from jasna.protection import activation
+
+    monkeypatch.setattr(activation, "activate_license_code", Mock(side_effect=activation.ActivationServiceError("slots_full")))
+    monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
+    code = "JL1-" + "A" * 43
+    monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", code])
+    with pytest.raises(SystemExit) as error:
+        main.main()
+    output = capsys.readouterr()
+    assert error.value.code == 1
+    assert "Three identities" in output.err
+    assert code not in output.out + output.err
+
+
+def test_dialog_defaults_to_online_and_can_use_manual(root, protection_api):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+
+    dialog = LicenseDialog(root, on_activated=lambda: None)
+    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    assert dialog._method.get() == t("license_online")
+    assert dialog._online_frame.winfo_manager() == "pack"
+    assert dialog._manual_frame.winfo_manager() == ""
+    dialog._method.set(t("license_manual"))
+    dialog._select_method(t("license_manual"))
+    assert dialog._manual_frame.winfo_manager() == "pack"
+    assert dialog._online_frame.winfo_manager() == ""
+    dialog._key.insert(0, "activation")
+    dialog._activate_button.invoke()
+    _, store = protection_api
+    _wait(root, lambda: store.set_license.called)
+    store.set_license.assert_called_once_with("activation")
+
+
+@pytest.mark.parametrize("error_code", [None, "slots_full", "cloud_not_enabled", "network_error"])
+def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(root, controlled_activation_workers, error_code):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+    from jasna.protection.activation import ActivationServiceError
+
+    pending = controlled_activation_workers
+    activated = Mock()
+    dialog = LicenseDialog(root, on_activated=activated)
+    pending.info.pop()((None, False, None), None)
+    _wait(root, lambda: len(pending.machine) == 1)
+    code = "JL1-" + "A" * 43
+    dialog._code.insert(0, code)
+    dialog._online_activate_button.invoke()
+    assert pending.online == []
+    _, done = pending.machine.pop()
+    identity = "JM1-" + "1" * 64
+    done(identity, None)
+    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    dialog._online_activate_button.invoke()
+    sent_code, sent_machine, done = pending.online.pop()
+    assert (sent_code, sent_machine) == (code, identity)
+    assert dialog._code.cget("state") == "disabled"
+    assert dialog._key.cget("state") == "disabled"
+    assert dialog._method.cget("state") == "disabled"
+    assert dialog._cloud_check.cget("state") == "disabled"
+    dialog._cloud_check.toggle()
+    assert dialog._cloud_workspace.get() is False
+    dialog._activate_button.invoke()
+    dialog._online_activate_button.invoke()
+    assert pending.activation == [] and pending.online == [] and pending.machine == []
+    if error_code is None:
+        done(("returned-activation", identity), None)
+    else:
+        done(None, ActivationServiceError(error_code))
+    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    if error_code is None:
+        assert dialog._code.get() == ""
+        assert dialog._key.get() == "returned-activation"
+        activated.assert_called_once()
+    else:
+        assert dialog._code.get() == code
+        assert dialog._status.cget("text") == t(f"license_service_{error_code}")
+        activated.assert_not_called()
+
+
+def test_dialog_ignores_online_result_after_close(root, controlled_activation_workers, caplog):
+    from jasna.gui.components import LicenseDialog
+
+    caplog.set_level("DEBUG", logger="jasna.gui.components")
+    pending = controlled_activation_workers
+    activated = Mock()
+    dialog = LicenseDialog(root, on_activated=activated)
+    pending.info.pop()((None, False, None), None)
+    _wait(root, lambda: len(pending.machine) == 1)
+    _, done = pending.machine.pop()
+    identity = "JM1-" + "1" * 64
+    done(identity, None)
+    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    dialog._code.insert(0, "JL1-" + "A" * 43)
+    dialog._online_activate_button.invoke()
+    _, _, done = pending.online.pop()
+    dialog.destroy()
+    done(("returned-activation", identity), None)
+    root.update()
+    activated.assert_not_called()
+    assert "closed activation dialog" in caplog.text
+
+
+def test_online_worker_runs_network_off_tk_thread(protection_api, monkeypatch):
+    from jasna.gui.activation_worker import start_online_activation
+    from jasna.protection import activation
+
+    network_threads, results = [], []
+
+    def request(code, machine_key):
+        network_threads.append(threading.get_ident())
+        return "returned-activation"
+
+    monkeypatch.setattr(activation, "activate_license_code", request)
+    thread = start_online_activation("code", "JM1-" + "1" * 64,
+        lambda value, error: results.append((value, error, threading.get_ident())))
+    thread.join(timeout=3)
+    assert network_threads == [thread.ident]
+    assert thread.ident != threading.get_ident()
+    assert results == [(("returned-activation", "JM1-" + "1" * 64), None, thread.ident)]

@@ -1,4 +1,4 @@
-"""Offline activation and config access, kept off the Tk thread."""
+"""Activation and config access, kept off the Tk thread."""
 
 import threading
 from collections.abc import Callable
@@ -57,5 +57,16 @@ def start_activation(key: str, on_done) -> threading.Thread:
         license_store.set_license(key)
         proof, _ = signing.decode_license(key)
         return signing.license_identity(proof)
+
+    return _start(activate, on_done)
+
+
+def start_online_activation(code: str, machine_key: str, on_done) -> threading.Thread:
+    def activate():
+        from jasna.protection import activation, signing
+
+        key = activation.activate_license_code(code, machine_key)
+        proof, _ = signing.decode_license(key)
+        return key, signing.license_identity(proof)
 
     return _start(activate, on_done)

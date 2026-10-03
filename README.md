@@ -170,14 +170,16 @@ Example results:
 How to activate:
 
 1. Contribute **$15 USD or more in total**. Your official seller sends a **License code** through [Unifans](https://app.unifans.io/c/kruk2) or [Buy Me a Coffee](https://buymeacoffee.com/kruk2), including crypto payments.
-2. Open **Activate Jasna**, copy the **Machine key**, and enter it with your License code on the [activation page](https://jasna-activation.kruk2.workers.dev).
-3. Paste the returned **Activation key** into Jasna. Jasna saves this key and checks it offline; your License code stays on the activation page.
+2. Open **Activate Jasna**. In **Online** (the default), enter your License code and press **Activate online**.
+3. For browser or offline activation, choose **Manual**. Copy the **Machine key**, use it with your License code on the [activation page](https://jasna-activation.kruk2.workers.dev) from any connected device, or ask your official seller. Paste the returned **Activation key** into Jasna and press **Activate**.
 
-Each License code allows **3 machines or workspaces**. Reusing a Machine key uses no extra slot. Only the owner can approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.
+Jasna sends only your License code and Machine key to that service over HTTPS when you press **Activate online**. It checks and saves only the returned Activation key for this machine; your License code is not saved, and later starts and restoration check activation offline without periodic requests.
 
-For **RunPod or Vast**, select **Cloud workspace** only after your seller enables it for your License code. Keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity.
+Both methods share **3 machines or workspaces per License code**. Reusing a Machine key uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.
 
-Page unavailable, including in mainland China? Send your License code and Machine key to your official seller for **manual activation**, under the same 3-slot limit. Earlier activation formats need replacement; old keys still work with compatible older Jasna versions.
+For **RunPod or Vast**, select **Cloud workspace** in either choice only after your seller enables it for your License code. Keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity.
+
+If online activation fails, use **Manual** from another connected device or send your License code and Machine key to your official seller. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies. Earlier activation formats need replacement; old keys still work with compatible older Jasna versions.
 
 License codes are sold **only** on the two official pages. Anyone else selling Jasna, codes or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub. If activation fails, check the Machine key and copy the full Activation key again. An invalid key alone does not prove fraud; known unofficial keys get a separate warning.
 

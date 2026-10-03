@@ -263,24 +263,42 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | Option | Notes |
 | ------ | ----- |
 | `--machine-key` | Print the Machine key and exit. No GPU or GUI startup is needed. |
-| `--cloud-workspace` | Use with `--machine-key` to create or reuse a cloud workspace identity. Your seller must enable it for your License code. |
+| `--license-code CODE` | Activate online with your official seller's License code before GPU setup. With no processing options, activate and exit. |
+| `--cloud-workspace` | Use with `--machine-key` or `--license-code` to create or reuse a cloud workspace identity. Your seller must enable it for your License code. |
 | `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
 
-Copy the Machine key, enter it with your **License code** on the [activation page](https://jasna-activation.kruk2.workers.dev), then save the returned **Activation key**. Jasna stores only the Activation key and validates it offline; later runs reuse it.
+For online activation, use `--license-code`. This sends only your License code and local Machine key to the [activation service](https://jasna-activation.kruk2.workers.dev) over HTTPS. Jasna checks and saves only the returned **Activation key** for this machine; it does not save your License code. Later starts and restoration check activation offline, with no periodic requests.
+
+```bash
+jasna --license-code "YOUR_LICENSE_CODE"
+jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
+```
+
+For manual activation, copy the Machine key and enter it with your License code on the same page from any connected device, or ask your official seller. Save the returned Activation key:
 
 ```bash
 jasna --machine-key
 jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-For RunPod or Vast, keep the config folder on a persistent volume before requesting a cloud key. On Linux, `XDG_CONFIG_HOME` selects the folder that contains `jasna/`:
+Do not combine `--license-code` with `--machine-key` or `--activation-key`. Both `--license-code` and `--activation-key` can be used with `--input` and `--output` to activate and process in one run.
+
+For RunPod or Vast, ask your official seller to enable cloud use first, then keep the config folder on a persistent volume before activating. On Linux, `XDG_CONFIG_HOME` selects the folder that contains `jasna/`. Choose online or manual activation:
 
 ```bash
+# Online
+XDG_CONFIG_HOME=/workspace/config jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+
+# Manual
 XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
 XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-Use the same config folder for later runs. Host or GPU changes reuse the workspace slot; copying the config with its Activation key transfers the identity. One License code has 3 registrations; repeat requests for the same Machine key use no extra slot. Replacements need owner review. If the page is unavailable, ask your official seller for manual activation under the same limit.
+Use the same config folder for later runs. Host or GPU changes reuse the workspace slot; copying the config with its Activation key transfers the identity.
+
+Both methods share **3 registered machines or workspaces per License code**; repeat requests for the same Machine key use no extra slot. Only the owner can release slots and approve replacements. Activation keys cover only purchased model versions; ask your official seller to replace keys in older activation formats.
+
+If online activation fails, use manual activation from another connected device or ask your official seller with your License code and Machine key. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies.
 
 ## Benchmark
 

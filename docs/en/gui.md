@@ -97,16 +97,21 @@ after a driver update or when something misbehaves.
   reporting a problem.
 - **System stats**: GPU, VRAM, RAM, and CPU usage are shown in the bottom
   bar while processing.
-- **Activation**: open **Activate Jasna** in the header to copy your Machine key or enter an Activation key. The chip shows whether activation is valid on this machine.
+- **Activation**: open **Activate Jasna** in the header to activate online or enter an Activation key manually. The chip shows whether activation is valid on this machine.
 
 ## Activate paid models
 
-1. Copy the **Machine key** from **Activate Jasna**.
-2. Enter it with the **License code** from your official seller on the [activation page](https://jasna-activation.kruk2.workers.dev), or press **Open activation page** in Jasna.
-3. Paste the returned **Activation key** into Jasna and press **Activate**. Jasna stores this key and checks it offline.
+Open **Activate Jasna** in the header. **Online** is selected by default; both **Online** and **Manual** show a **Machine key** you can copy but cannot edit.
 
-Each License code supports **3 registered machines or workspaces**. Retrieving the same Machine key's activation uses no extra slot. Replacements need owner review; buyers cannot remove registrations. Releasing a slot does not disable keys already issued to older offline versions. A key covers only the model versions you purchased.
+- **Online**: enter the **License code** from your official seller and press **Activate online**.
+- **Manual**: copy the Machine key and enter it with your License code on the [activation page](https://jasna-activation.kruk2.workers.dev) from any connected device, or ask your official seller. **Open activation page** opens it in your browser. Paste the returned **Activation key** into Jasna and press **Activate**.
 
-For **RunPod or Vast**, select **Cloud workspace** after your seller enables cloud use for your License code. Keep the Jasna config folder on a persistent volume; on Linux the default is `~/.config/jasna`, or `jasna/` under `XDG_CONFIG_HOME`. Host and GPU changes then reuse the same slot. Copying this folder with its Activation key transfers the workspace identity.
+Pressing **Activate online** sends only your License code and Machine key to that service over HTTPS. Jasna checks and saves only the returned Activation key for this machine; it does not save your License code. Later starts and restoration check activation offline, with no periodic requests.
 
-If the activation page is unavailable, including in mainland China, ask your official seller for **manual activation** with your License code and Machine key. The same 3-slot limit applies. If an Activation key is rejected, check the Machine key and copy the full key again; for a cloud workspace, restore the config folder from your volume. Earlier activation formats need a replacement from your official seller. License codes are sold only on Buy Me a Coffee and Unifans (kruk2).
+Both choices share **3 registered machines or workspaces per License code**. Retrieving the same Machine key's activation uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. Releasing a slot does not disable keys already issued to older offline versions. A key covers only the model versions you purchased.
+
+For **RunPod or Vast**, select **Cloud workspace** in either choice after your seller enables cloud use for your License code. Keep the Jasna config folder on a persistent volume; on Linux the default is `~/.config/jasna`, or `jasna/` under `XDG_CONFIG_HOME`. Host and GPU changes then reuse the same slot. Copying this folder with its Activation key transfers the workspace identity.
+
+If online activation fails, select **Manual** and use the page on another connected device, or ask your official seller with your License code and Machine key. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies.
+
+If an Activation key is rejected, check the Machine key and copy the full key again; for a cloud workspace, restore the config folder from your volume. Earlier activation formats need a replacement from your official seller. License codes are sold only on Buy Me a Coffee and Unifans (kruk2).
