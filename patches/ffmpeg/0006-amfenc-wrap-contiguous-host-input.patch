@@ -1,0 +1,296 @@
+From: Jasna AMF research <research@jasna.local>
+Subject: [PATCH] avcodec/amfenc: optionally wrap contiguous host input
+
+PyAV's AMF encoding HWAccel uploads every software frame into an AMF
+hardware-frame pool before avcodec_send_frame(). Callers that already own a
+complete pinned NV12/P010 frame can instead send that software frame directly,
+but amfenc currently allocates another AMF host surface and copies the entire
+image into it.
+
+Add a default-off HEVC option that wraps a strictly validated, contiguous host
+frame with CreateSurfaceFromHostNative(). Retain the AVFrame through amfenc's
+existing attached-frame mechanism until the corresponding output is queried,
+so external host memory cannot be recycled while AMF still owns it. Fail
+closed for unsupported formats, dimensions, strides, layouts, or reference
+ownership; never fall back silently to an extra copy.
+
+Add default-off aggregate timing counters used to compare the existing copy
+route with the host-native route on the same source and queue depth.
+---
+ libavcodec/amfenc.c      | 150 +++++++++++++++++++++++++++++++++++++++++++++--
+ libavcodec/amfenc.h      |  17 ++++++
+ libavcodec/amfenc_hevc.c |   2 +
+ 3 files changed, 165 insertions(+), 4 deletions(-)
+
+diff --git a/libavcodec/amfenc.c b/libavcodec/amfenc.c
+--- a/libavcodec/amfenc.c
++++ b/libavcodec/amfenc.c
+@@ -18,6 +18,8 @@
+
+ #include "config.h"
+
++#include <inttypes.h>
++
+ #include "libavutil/avassert.h"
+ #include "libavutil/imgutils.h"
+ #include "libavutil/hwcontext.h"
+@@ -163,6 +165,25 @@ int av_cold ff_amf_encode_close(AVCodecContext *avctx)
+     av_freep(&ctx->pts_property_name);
+     av_freep(&ctx->av_frame_property_name);
+
++    if (ctx->log_perf) {
++        /* The experiment normally runs through PyAV at warning log level. */
++        av_log(avctx, AV_LOG_WARNING,
++               "AMF perf: alloc_surface=%"PRId64" calls/%"PRId64" us, "
++               "copy_surface=%"PRId64" calls/%"PRId64" us, "
++               "wrap_surface=%"PRId64" calls/%"PRId64" us, "
++               "submit_input=%"PRId64" calls/%"PRId64" us, "
++               "query_output=%"PRId64" calls/%"PRId64" us/%"PRId64" frames, "
++               "input_full=%"PRId64", block_loops=%"PRId64", "
++               "hw_surfaces_peak=%"PRId64"\n",
++               ctx->perf_alloc_surface_calls, ctx->perf_alloc_surface_us,
++               ctx->perf_copy_surface_calls, ctx->perf_copy_surface_us,
++               ctx->perf_wrap_surface_calls, ctx->perf_wrap_surface_us,
++               ctx->perf_submit_input_calls, ctx->perf_submit_input_us,
++               ctx->perf_query_output_calls, ctx->perf_query_output_us,
++               ctx->perf_query_output_frames, ctx->perf_input_full_calls,
++               ctx->perf_block_loops, ctx->perf_hw_surfaces_peak);
++    }
++
+     return 0;
+ }
+
+@@ -373,6 +394,8 @@ static AMF_RESULT amf_store_attached_frame_ref(AMFEncoderContext *ctx, const AVF
+     if (frame_ref) {
+         memcpy(&data, &frame_ref, sizeof(frame_ref)); // store pointer in 8 bytes
+         AMF_ASSIGN_PROPERTY_INT64(res, surface, ctx->av_frame_property_name, data);
++        if (res != AMF_OK)
++            av_frame_free(&frame_ref);
+     }
+     return res;
+ }
+@@ -389,6 +412,71 @@ static AMF_RESULT amf_release_attached_frame_ref(AMFEncoderContext *ctx, AMFBuff
+     return res;
+ }
+
++static int amf_create_surface_from_host_frame(AVCodecContext *avctx,
++                                              const AVFrame *frame,
++                                              AMFSurface **surface)
++{
++    AMFEncoderContext  *ctx = avctx->priv_data;
++    AVHWDeviceContext  *hw_device_ctx = (AVHWDeviceContext*)ctx->device_ctx_ref->data;
++    AVAMFDeviceContext *amf_device_ctx = (AVAMFDeviceContext *)hw_device_ctx->hwctx;
++    const int bytes_per_sample = frame->format == AV_PIX_FMT_P010 ? 2 : 1;
++    const int min_linesize = avctx->width * bytes_per_sample;
++    uintptr_t expected_uv;
++    AMFPlane *y_plane;
++    AMFPlane *uv_plane;
++    AMF_RESULT res;
++
++    AMF_RETURN_IF_FALSE(ctx,
++                        frame->format == AV_PIX_FMT_NV12 ||
++                        frame->format == AV_PIX_FMT_P010,
++                        AVERROR(EINVAL),
++                        "host_zero_copy supports only NV12 and P010 host frames\n");
++    AMF_RETURN_IF_FALSE(ctx,
++                        frame->width == avctx->width &&
++                        frame->height == avctx->height,
++                        AVERROR(EINVAL),
++                        "host_zero_copy frame dimensions do not match the encoder\n");
++    AMF_RETURN_IF_FALSE(ctx,
++                        frame->buf[0] && frame->buf[1] &&
++                        frame->data[0] && frame->data[1],
++                        AVERROR(EINVAL),
++                        "host_zero_copy requires reference-counted Y and UV planes\n");
++    AMF_RETURN_IF_FALSE(ctx,
++                        frame->linesize[0] >= min_linesize &&
++                        frame->linesize[0] == frame->linesize[1],
++                        AVERROR(EINVAL),
++                        "host_zero_copy requires equal positive Y/UV strides\n");
++    expected_uv = (uintptr_t)frame->data[0] +
++                  (uintptr_t)frame->linesize[0] * avctx->height;
++    AMF_RETURN_IF_FALSE(ctx,
++                        (uintptr_t)frame->data[1] == expected_uv,
++                        AVERROR(EINVAL),
++                        "host_zero_copy requires UV immediately after the Y vertical pitch\n");
++
++    res = amf_device_ctx->context->pVtbl->CreateSurfaceFromHostNative(
++        amf_device_ctx->context, ctx->format, avctx->width, avctx->height,
++        frame->linesize[0], avctx->height, frame->data[0], surface, NULL);
++    AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR_EXTERNAL,
++                        "CreateSurfaceFromHostNative() failed with error %d\n", res);
++
++    y_plane = (*surface)->pVtbl->GetPlane(*surface, AMF_PLANE_Y);
++    uv_plane = (*surface)->pVtbl->GetPlane(*surface, AMF_PLANE_UV);
++    if (!y_plane || !uv_plane ||
++        y_plane->pVtbl->GetNative(y_plane) != frame->data[0] ||
++        uv_plane->pVtbl->GetNative(uv_plane) != frame->data[1] ||
++        y_plane->pVtbl->GetHPitch(y_plane) != frame->linesize[0] ||
++        uv_plane->pVtbl->GetHPitch(uv_plane) != frame->linesize[1] ||
++        y_plane->pVtbl->GetVPitch(y_plane) != avctx->height) {
++        av_log(avctx, AV_LOG_ERROR,
++               "CreateSurfaceFromHostNative() returned an unexpected plane layout\n");
++        (*surface)->pVtbl->Release(*surface);
++        *surface = NULL;
++        return AVERROR(EINVAL);
++    }
++
++    return 0;
++}
++
+ static int amf_submit_frame(AVCodecContext *avctx, AVFrame    *frame, AMFSurface **surface_resubmit)
+ {
+     AMFEncoderContext      *ctx = avctx->priv_data;
+@@ -398,6 +486,7 @@ static int amf_submit_frame(AVCodecContext *avctx, AVFrame    *frame, AMFSurface
+     AMF_RESULT              res;
+     int                     ret;
+     int                     hw_surface = 0;
++    int64_t                 perf_start;
+     int                     output_delay = FFMAX(ctx->max_b_frames, 0) + ((avctx->flags & AV_CODEC_FLAG_LOW_DELAY) ? 0 : 1);
+
+ // prepare surface from frame
+@@ -436,15 +525,45 @@ static int amf_submit_frame(AVCodecContext *avctx, AVFrame    *frame, AMFSurface
+         break;
+     default:
+         {
+-            res = amf_device_ctx->context->pVtbl->AllocSurface(amf_device_ctx->context, AMF_MEMORY_HOST, ctx->format, avctx->width, avctx->height, &surface);
+-            AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR(ENOMEM), "AllocSurface() failed  with error %d\n", res);
+-            amf_copy_surface(avctx, frame, surface);
++            if (ctx->host_zero_copy) {
++                perf_start = ctx->log_perf ? av_gettime_relative() : 0;
++                ret = amf_create_surface_from_host_frame(avctx, frame, &surface);
++                if (ctx->log_perf) {
++                    ctx->perf_wrap_surface_us += av_gettime_relative() - perf_start;
++                    ctx->perf_wrap_surface_calls++;
++                }
++                if (ret < 0)
++                    return ret;
++                hw_surface = 1;
++            } else {
++                perf_start = ctx->log_perf ? av_gettime_relative() : 0;
++                res = amf_device_ctx->context->pVtbl->AllocSurface(amf_device_ctx->context, AMF_MEMORY_HOST, ctx->format, avctx->width, avctx->height, &surface);
++                if (ctx->log_perf) {
++                    ctx->perf_alloc_surface_us += av_gettime_relative() - perf_start;
++                    ctx->perf_alloc_surface_calls++;
++                }
++                AMF_RETURN_IF_FALSE(ctx, res == AMF_OK, AVERROR(ENOMEM), "AllocSurface() failed  with error %d\n", res);
++                perf_start = ctx->log_perf ? av_gettime_relative() : 0;
++                amf_copy_surface(avctx, frame, surface);
++                if (ctx->log_perf) {
++                    ctx->perf_copy_surface_us += av_gettime_relative() - perf_start;
++                    ctx->perf_copy_surface_calls++;
++                }
++            }
+         }
+         break;
+     }
+     if (hw_surface) {
+-        amf_store_attached_frame_ref(ctx, frame, surface);
++        res = amf_store_attached_frame_ref(ctx, frame, surface);
++        if (res != AMF_OK) {
++            surface->pVtbl->Release(surface);
++            AMF_RETURN_IF_FALSE(ctx, 0, AVERROR(ENOMEM),
++                                "Failed to retain AMF input frame (error %d)\n",
++                                res);
++        }
+         ctx->hwsurfaces_in_queue++;
++        ctx->perf_hw_surfaces_peak = FFMAX(ctx->perf_hw_surfaces_peak,
++                                          ctx->hwsurfaces_in_queue);
+         // input HW surfaces can be vertically aligned by 16; tell AMF the real size
+         surface->pVtbl->SetCrop(surface, 0, 0, frame->width, frame->height);
+     }
+@@ -527,7 +646,14 @@ static int amf_submit_frame(AVCodecContext *avctx, AVFrame    *frame, AMFSurface
+         break;
+     }
+     // submit surface
++    perf_start = ctx->log_perf ? av_gettime_relative() : 0;
+     res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)surface);
++    if (ctx->log_perf) {
++        ctx->perf_submit_input_us += av_gettime_relative() - perf_start;
++        ctx->perf_submit_input_calls++;
++        if (res == AMF_INPUT_FULL)
++            ctx->perf_input_full_calls++;
++    }
+     if (res == AMF_INPUT_FULL) { // handle full queue
+         //store surface for later submission
+         *surface_resubmit = surface;
+@@ -563,9 +689,16 @@ static AMF_RESULT amf_query_output(AVCodecContext *avctx, AMFBuffer **buffer)
+ {
+     AMFEncoderContext     *ctx = avctx->priv_data;
+     AMFData    *data = NULL;
++    int64_t perf_start = ctx->log_perf ? av_gettime_relative() : 0;
+     AMF_RESULT ret = ctx->encoder->pVtbl->QueryOutput(ctx->encoder, &data);
++    if (ctx->log_perf) {
++        ctx->perf_query_output_us += av_gettime_relative() - perf_start;
++        ctx->perf_query_output_calls++;
++    }
+     *buffer = NULL;
+     if (data) {
++        if (ctx->log_perf)
++            ctx->perf_query_output_frames++;
+         AMFGuid guid = IID_AMFBuffer();
+         data->pVtbl->QueryInterface(data, &guid, (void**)buffer); // query for buffer interface
+         data->pVtbl->Release(data);
+@@ -659,6 +792,8 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
+             }
+         } else if (ctx->delayed_drain || (ctx->eof && res_query != AMF_EOF) || (ctx->hwsurfaces_in_queue >= ctx->hwsurfaces_in_queue_max) || surface) {
+             block_and_wait = 1;
++            if (ctx->log_perf)
++                ctx->perf_block_loops++;
+             // Only sleep if the driver doesn't support waiting in QueryOutput()
+             // or if we already have output data so we will skip calling it.
+             if (!ctx->query_timeout_supported || avpkt->data || avpkt->buf) {
+@@ -675,7 +810,14 @@ int ff_amf_receive_packet(AVCodecContext *avctx, AVPacket *avpkt)
+         if(surface) {
+             // resubmit surface
+             do {
++                int64_t perf_start = ctx->log_perf ? av_gettime_relative() : 0;
+                 res = ctx->encoder->pVtbl->SubmitInput(ctx->encoder, (AMFData*)surface);
++                if (ctx->log_perf) {
++                    ctx->perf_submit_input_us += av_gettime_relative() - perf_start;
++                    ctx->perf_submit_input_calls++;
++                    if (res == AMF_INPUT_FULL)
++                        ctx->perf_input_full_calls++;
++                }
+                 if (res != AMF_INPUT_FULL)
+                     break;
+
+diff --git a/libavcodec/amfenc.h b/libavcodec/amfenc.h
+--- a/libavcodec/amfenc.h
++++ b/libavcodec/amfenc.h
+@@ -76,6 +76,23 @@ typedef struct AMFEncoderContext {
+     int                 ref_b_frame_delta_qp;
+     int                 bit_depth;
+     int                 smart_access_video;
++    int                 host_zero_copy;
++    int                 log_perf;
++
++    int64_t             perf_alloc_surface_us;
++    int64_t             perf_copy_surface_us;
++    int64_t             perf_wrap_surface_us;
++    int64_t             perf_submit_input_us;
++    int64_t             perf_query_output_us;
++    int64_t             perf_alloc_surface_calls;
++    int64_t             perf_copy_surface_calls;
++    int64_t             perf_wrap_surface_calls;
++    int64_t             perf_submit_input_calls;
++    int64_t             perf_query_output_calls;
++    int64_t             perf_query_output_frames;
++    int64_t             perf_input_full_calls;
++    int64_t             perf_block_loops;
++    int64_t             perf_hw_surfaces_peak;
+
+     // Dynamic options, can be set after Init() call
+
+diff --git a/libavcodec/amfenc_hevc.c b/libavcodec/amfenc_hevc.c
+--- a/libavcodec/amfenc_hevc.c
++++ b/libavcodec/amfenc_hevc.c
+@@ -91,6 +91,8 @@ static const AVOption options[] = {
+     { "idr",            "", 0, AV_OPT_TYPE_CONST, { .i64 = AMF_VIDEO_ENCODER_HEVC_HEADER_INSERTION_MODE_IDR_ALIGNED }, 0, 0, VE, .unit = "hdrmode" },
+
+     { "async_depth",    "Set maximum encoding parallelism. Higher values increase output latency.",             OFFSET(hwsurfaces_in_queue_max), AV_OPT_TYPE_INT, {.i64 = 16 }, 1, MAX_LOOKAHEAD_DEPTH + 1, VE },
++    { "host_zero_copy", "Wrap compatible contiguous host frames instead of copying them into AMF-owned host surfaces (experimental)", OFFSET(host_zero_copy), AV_OPT_TYPE_BOOL, {.i64 = 0 }, 0, 1, VE },
++    { "log_perf",       "Log aggregate AMF surface allocation/copy/wrap, submit, and query timings", OFFSET(log_perf), AV_OPT_TYPE_BOOL, {.i64 = 0 }, 0, 1, VE },
+
+     { "high_motion_quality_boost_enable",   "Enable High motion quality boost mode",  OFFSET(hw_high_motion_quality_boost), AV_OPT_TYPE_BOOL,   {.i64 = -1 }, -1, 1, VE },
+     { "gops_per_idr",   "GOPs per IDR 0-no IDR will be inserted",   OFFSET(gops_per_idr),  AV_OPT_TYPE_INT,  { .i64 = 1  },  0, INT_MAX, VE },
