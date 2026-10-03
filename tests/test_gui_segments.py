@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from jasna.gui.models import AppSettings, JobItem, JobStatus
+from jasna.gui.models import (
+    AppSettings,
+    JobItem,
+    JobStatus,
+    SegmentSelectionMode,
+)
 from jasna.gui.processor import Processor
 from jasna.segments import SegmentRange
 from jasna.session_factory import RestorationSession
@@ -16,6 +21,15 @@ def test_pending_job_segments_can_be_replaced() -> None:
         segments, detection_model="rfdetr-v6", detection_score_threshold=0.35, vr_projection="auto"
     )
     assert job.snapshot_segments() == segments
+    assert job.segment_selection_mode is SegmentSelectionMode.MANUAL
+
+
+def test_saving_empty_segments_forces_full_until_reset() -> None:
+    job = JobItem(Path("video.mp4"))
+    assert job.try_set_segments(())
+    assert job.segment_selection_mode is SegmentSelectionMode.FULL
+    assert job.try_reset_segments()
+    assert job.segment_selection_mode is SegmentSelectionMode.DEFAULT
 
 
 def test_begin_processing_atomically_freezes_segments() -> None:
@@ -28,6 +42,7 @@ def test_begin_processing_atomically_freezes_segments() -> None:
     )
     snapshot = job.begin_processing()
     assert snapshot.segments == (SegmentRange(1, 2),)
+    assert snapshot.segment_selection_mode is SegmentSelectionMode.DEFAULT
     assert snapshot.detection_model == "lada-yolo-v4"
     assert snapshot.detection_score_threshold == 0.4
     assert snapshot.vr_projection == "gnomonic"
@@ -49,6 +64,7 @@ def test_processor_passes_frozen_segments_to_video_job(tmp_path) -> None:
 
     with (
         patch.object(processor, "_run_pipeline") as run_pipeline,
+        patch.object(processor, "_validate_completed_video_output"),
         patch("jasna.gui.processor._cleanup_torch"),
     ):
         processor._process_job(job)
@@ -70,11 +86,13 @@ def test_processor_uses_each_videos_detection_and_projection_overrides(tmp_path)
     processor._settings = AppSettings(
         detection_model="rfdetr-v5",
         detection_score_threshold=0.25,
+        pre_scan_policy="off",
     )
     processor._output_pattern = "{original}_restored.mp4"
 
     with (
         patch.object(processor, "_run_pipeline") as run_pipeline,
+        patch.object(processor, "_validate_completed_video_output"),
         patch("jasna.gui.processor._cleanup_torch"),
     ):
         processor._process_job(job)

@@ -25,6 +25,11 @@ if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
     _subprocess_compile(EngineCompilationRequest.from_json(sys.argv[2]))
     sys.exit(0)
 
+if len(sys.argv) >= 3 and sys.argv[1] == "--isolated-video-job":
+    from jasna.gui.video_job_process import run_video_job_file
+
+    sys.exit(run_video_job_file(sys.argv[2]))
+
 _JASNA_MAIN_PID = os.environ.get("JASNA_MAIN_PID")
 if _JASNA_MAIN_PID and str(os.getpid()) != _JASNA_MAIN_PID:
     if len(sys.argv) < 2 or sys.argv[1] != "--multiprocessing-fork":
