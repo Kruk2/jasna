@@ -10,12 +10,15 @@ import http.client
 import json
 import logging
 import math
+import ssl
 import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import get_args
+
+import certifi
 
 from jasna._frozen import is_frozen
 from jasna.session_config import LtxModelName
@@ -306,6 +309,7 @@ def download_files(
     unverifiable = [f.name for f in files if f.sha256 is None]
     if unverifiable:
         raise RuntimeError(f"No checksum for {', '.join(unverifiable)}, so it won't be downloaded.")
+    context = ssl.create_default_context(cafile=certifi.where())
     sources = (LTX_MIRROR_URL, LTX_DOWNLOAD_URL) if mirror_first else (LTX_DOWNLOAD_URL, LTX_MIRROR_URL)
     directory.mkdir(parents=True, exist_ok=True)
     total = sum(f.size_bytes for f in files)
@@ -318,7 +322,7 @@ def download_files(
             received = 0
             logger.info("Downloading %s from %s", file.name, source)
             try:
-                with urllib.request.urlopen(f"{source}/{file.name}", timeout=30) as response, partial.open("wb") as out:
+                with urllib.request.urlopen(f"{source}/{file.name}", timeout=30, context=context) as response, partial.open("wb") as out:
                     while chunk := response.read(1 << 22):
                         out.write(chunk)
                         digest.update(chunk)

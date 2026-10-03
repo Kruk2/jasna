@@ -1,6 +1,11 @@
 import hashlib
+import io
+import runpy
+import ssl
+import urllib.error
 from unittest.mock import Mock
 
+import certifi
 import pytest
 import torch
 from safetensors.torch import save_file
@@ -99,6 +104,42 @@ def test_download_falls_back_to_the_other_source(tmp_path, monkeypatch):
     assert (tmp_path / "b" / "model.enc").read_bytes() == content
 
 
+@pytest.mark.parametrize("mirror_first", [False, True])
+def test_download_uses_bundled_ca_for_primary_and_fallback_with_empty_system_trust(tmp_path, monkeypatch, mirror_first):
+    real_create_context = ssl.create_default_context
+    monkeypatch.setattr(ssl.SSLContext, "load_default_certs", lambda *args, **kwargs: None)
+    empty_default_context = real_create_context()
+    assert empty_default_context.cert_store_stats()["x509_ca"] == 0
+    create_context = Mock(wraps=real_create_context)
+    monkeypatch.setattr(ssl, "create_default_context", create_context)
+    requests = []
+    content = b"model bytes"
+    files = [model_files.DownloadableFile(name, len(content), hashlib.sha256(content).hexdigest())
+             for name in ("first.enc", "second.enc")]
+
+    def open_url(url, *, timeout, context=None):
+        requests.append((url, timeout, context or empty_default_context))
+        if len(requests) == 1:
+            raise urllib.error.URLError("primary unavailable")
+        return io.BytesIO(content)
+
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
+    target = tmp_path / "models"
+    model_files.download_files(target, files, None, mirror_first=mirror_first)
+    primary, fallback = ((model_files.LTX_MIRROR_URL, model_files.LTX_DOWNLOAD_URL) if mirror_first
+                         else (model_files.LTX_DOWNLOAD_URL, model_files.LTX_MIRROR_URL))
+    assert [url for url, _, _ in requests] == [f"{primary}/first.enc", f"{fallback}/first.enc", f"{primary}/second.enc"]
+    assert all(timeout == 30 for _, timeout, _ in requests)
+    for _, _, context in requests:
+        assert context.verify_mode == ssl.CERT_REQUIRED
+        assert context.check_hostname
+        assert context.cert_store_stats()["x509_ca"] > 0
+    assert all(context is requests[0][2] for _, _, context in requests)
+    create_context.assert_called_once_with(cafile=certifi.where())
+    assert all((target / file.name).read_bytes() == content for file in files)
+    assert not list(target.glob("*.part"))
+
+
 def test_mirror_first_tries_the_mirror_before_the_main_source(tmp_path, monkeypatch):
     mirrored = b"mirror bytes"
     monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", _published(tmp_path / "main", b"main bytes"))
@@ -129,3 +170,13 @@ def test_cli_offers_the_missing_model_only_when_ltx_runs(tmp_path, monkeypatch):
     with pytest.raises(FileNotFoundError, match="missing"):
         main._ensure_ltx_model(ltx, None)
     assert "GB" in asked[0] and "ltx-restore-alpha1-distill8-int8" in asked[0]
+
+
+def test_import_does_not_load_ca_or_start_downloads(monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail("module import performed download work")
+
+    monkeypatch.setattr(ssl, "create_default_context", forbidden)
+    monkeypatch.setattr(certifi, "where", forbidden)
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", forbidden)
+    runpy.run_path(model_files.__file__)
