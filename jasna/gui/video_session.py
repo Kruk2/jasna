@@ -9,7 +9,10 @@ segment-editor restoration preview, plus the still-image session.
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Mapping
 
-from jasna.gui.models import AppSettings
+from jasna.gui.models import (
+    AppSettings,
+    ENCODER_RATE_MODE_AUTO_SOURCE,
+)
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession
 
@@ -108,6 +111,10 @@ def video_session_config(
         fmp4=bool(settings.fmp4),
         disable_progress=True,
         working_dir=Path(settings.working_directory) if settings.working_directory else None,
+        auto_source_rate=(
+            settings.encoder_rate_mode == ENCODER_RATE_MODE_AUTO_SOURCE
+        ),
+        amd_dual_gop_encode=bool(settings.amd_dual_gop_encode),
     )
 
 

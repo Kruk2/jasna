@@ -15,6 +15,10 @@ from jasna.gui.components import (
     Tooltip,
 )
 from jasna.gui.icons import NativeIconButton
+from jasna.gui.hardware_policy import (
+    DEFAULT_DETECTION_BATCH_SIZE,
+    gui_batch_size_from_custom_args,
+)
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import LtxModels
 from jasna.gui.settings_sections.advanced import (
@@ -165,6 +169,24 @@ class SettingsPanel(ctk.CTkFrame):
         self._update_dropdown_values()
         self._preset_dropdown.configure(values=self._dropdown_values)
 
+    def get_last_output_folder(self) -> str:
+        return self._preset_manager.get_last_output_folder()
+
+    def set_last_output_folder(self, path: str):
+        self._preset_manager.set_last_output_folder(path)
+
+    def get_last_output_pattern(self) -> str:
+        return self._preset_manager.get_last_output_pattern()
+
+    def set_last_output_pattern(self, pattern: str):
+        self._preset_manager.set_last_output_pattern(pattern)
+
+    def get_last_preserve_input_structure(self) -> bool:
+        return self._preset_manager.get_last_preserve_input_structure()
+
+    def set_last_preserve_input_structure(self, enabled: bool):
+        self._preset_manager.set_last_preserve_input_structure(enabled)
+
     def _update_button_states(self):
         """Update button states based on current preset."""
         is_factory = self._preset_manager.is_factory_preset(self._current_preset)
@@ -301,6 +323,12 @@ class SettingsPanel(ctk.CTkFrame):
             self._saved_preset_settings.encoder_cq = int(
                 self._widgets["encoder_cq"].get()
             )
+        # The portable default enables dual GOP, but unsupported platforms and
+        # vendors display it disabled. Compare against that effective value so
+        # loading a factory preset does not immediately look user-modified.
+        self._saved_preset_settings.amd_dual_gop_encode = bool(
+            self._widgets["amd_dual_gop_encode"].get()
+        )
         self._sync_temporal_filter_limits(int(self._widgets["max_clip_size"].get()))
 
         self._applying_preset = False  # Re-enable modification tracking
@@ -379,8 +407,16 @@ class SettingsPanel(ctk.CTkFrame):
         values: dict = {}
         for section in self._sections:
             values.update(section.collect())
+        try:
+            batch_size = gui_batch_size_from_custom_args(
+                values.get("encoder_custom_args", "")
+            )
+        except ValueError:
+            # Settings collection stays side-effect free while an entry is
+            # incomplete; validate_gui_start reports the actionable error.
+            batch_size = DEFAULT_DETECTION_BATCH_SIZE
         return AppSettings(
-            batch_size=4,  # Fixed default value
+            batch_size=batch_size,
             **values,
         )
 
