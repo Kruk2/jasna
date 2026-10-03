@@ -5,6 +5,8 @@ import torch
 from jasna.media.probe import get_video_meta_data
 from jasna.media.video_decoder import VideoReader
 
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="hardware seek requires a GPU")
+
 SAMPLE_VIDEOS = [
     "assets/test_clip1_1080p.mp4",
     "assets/test_clip1_2160p.mp4",
@@ -29,11 +31,20 @@ def metadata(video_path):
     return get_video_meta_data(video_path)
 
 
+@pytest.fixture
+def decode_batch_size():
+    from jasna.accelerator import is_amd_device
+
+    # Exercise the promoted native backend on each vendor. The AMF D2D
+    # reader deliberately accepts bounded batches 1/2/4/8, not NVIDIA's 24.
+    return 4 if is_amd_device(torch.device("cuda:0")) else 24
+
+
 class TestSeekBehavior:
-    def test_sequential_read_speed(self, video_path, metadata):
+    def test_sequential_read_speed(self, video_path, metadata, decode_batch_size):
         """Baseline: read first 5 batches sequentially from start."""
         device = torch.device("cuda:0")
-        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=decode_batch_size, device=device, metadata=metadata) as reader:
             t0 = time.monotonic()
             frames_read = 0
             for batch, pts in reader.frames():
@@ -45,12 +56,12 @@ class TestSeekBehavior:
             print(f"\nSequential: {frames_read} frames in {elapsed:.2f}s = {fps:.0f} fps")
             assert fps > 30, f"Sequential read too slow: {fps:.0f} fps"
 
-    def test_seek_then_read_speed(self, video_path, metadata):
+    def test_seek_then_read_speed(self, video_path, metadata, decode_batch_size):
         """Seek to mid-video then read 5 batches."""
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 2
         seek_ts = seek_frame / metadata.video_fps
-        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=decode_batch_size, device=device, metadata=metadata) as reader:
             t0 = time.monotonic()
             frames_read = 0
             first_batch_time = None
@@ -66,13 +77,13 @@ class TestSeekBehavior:
                   f"{frames_read} frames in {elapsed:.2f}s = {fps:.0f} fps")
             assert fps > 30, f"Seek+read too slow: {fps:.0f} fps"
 
-    def test_seek_pts_are_sequential(self, video_path, metadata):
+    def test_seek_pts_are_sequential(self, video_path, metadata, decode_batch_size):
         """After a seek, PTS values should be sequential (not repeating)."""
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 3
         seek_ts = seek_frame / metadata.video_fps
         all_pts = []
-        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=decode_batch_size, device=device, metadata=metadata) as reader:
             for batch, pts in reader.frames(seek_ts=seek_ts):
                 all_pts.extend(pts)
                 if len(all_pts) >= 72:
@@ -83,13 +94,13 @@ class TestSeekBehavior:
                 f"PTS not increasing at index {i}: {all_pts[i-1]} -> {all_pts[i]}"
             )
 
-    def test_two_readers_seek_same_frame(self, video_path, metadata):
+    def test_two_readers_seek_same_frame(self, video_path, metadata, decode_batch_size):
         """Two readers seeking to the same frame should produce same PTS."""
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 2
         with (
-            VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as r1,
-            VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as r2,
+            VideoReader(video_path, batch_size=decode_batch_size, device=device, metadata=metadata) as r1,
+            VideoReader(video_path, batch_size=decode_batch_size, device=device, metadata=metadata) as r2,
         ):
             t0 = time.monotonic()
             frames1 = 0
@@ -111,13 +122,13 @@ class TestSeekBehavior:
             print(f"\nTwo readers seek to {seek_frame}: {frames1}+{frames2} frames in {elapsed:.2f}s = {combined_fps:.0f} fps combined")
             assert pts1 == pts2, f"PTS mismatch between readers"
 
-    def test_seek_does_not_repeat_on_subsequent_batches(self, video_path, metadata):
+    def test_seek_does_not_repeat_on_subsequent_batches(self, video_path, metadata, decode_batch_size):
         """Verify that batch 2+ after a seek continues forward, not re-seeking."""
         device = torch.device("cuda:0")
         seek_frame = metadata.num_frames // 2
         seek_ts = seek_frame / metadata.video_fps
         batch_times = []
-        with VideoReader(video_path, batch_size=24, device=device, metadata=metadata) as reader:
+        with VideoReader(video_path, batch_size=decode_batch_size, device=device, metadata=metadata) as reader:
             for batch, pts in reader.frames(seek_ts=seek_ts):
                 batch_times.append(time.monotonic())
                 if len(batch_times) >= 5:
