@@ -8,7 +8,6 @@ import torch
 
 from jasna.trt import (
     _engine_io_names,
-    _TRT_LOGGER,
     _trt_dtype_to_torch,
     get_onnx_tensorrt_engine_path,
     get_trt_logger,
@@ -19,7 +18,8 @@ from jasna.trt import (
 class TestGetTrtLogger:
     def test_returns_fallback_when_torch_tensorrt_not_imported(self):
         with patch.dict("sys.modules", {"torch_tensorrt": None}):
-            assert get_trt_logger() is _TRT_LOGGER
+            first = get_trt_logger()
+            assert get_trt_logger() is first
 
     def test_returns_torch_tensorrt_logger_when_available(self):
         sentinel = MagicMock()
