@@ -3,7 +3,10 @@ from __future__ import annotations
 import logging
 import subprocess
 import warnings
+import sys
+from collections.abc import Iterator
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock
 
 import pytest
@@ -15,6 +18,23 @@ from jasna.engine_compiler import (
     _unet4x_engine_exists,
     ensure_engines_compiled,
 )
+
+
+@pytest.fixture(autouse=True)
+def _nvidia_engine_tests(monkeypatch):
+    from jasna.accelerator import AcceleratorVendor
+
+    monkeypatch.setattr("jasna.accelerator.vendor_for_device", lambda _device=None: AcceleratorVendor.NVIDIA)
+
+
+@pytest.fixture
+def restore_logging_disable() -> Iterator[None]:
+    """Undo the child-process logging threshold after direct helper tests."""
+    previous = logging.root.manager.disable
+    try:
+        yield
+    finally:
+        logging.disable(previous)
 
 
 def _mock_proc(lines: list[str], returncode: int = 0) -> MagicMock:
@@ -169,7 +189,9 @@ def test_ensure_popen_stdin_is_devnull(monkeypatch) -> None:
     assert popen_kwargs.get("stdin") == subprocess.DEVNULL
 
 
-def test_subprocess_compile_patches_frozen_torch(monkeypatch) -> None:
+def test_subprocess_compile_patches_frozen_torch(
+    monkeypatch, restore_logging_disable: None
+) -> None:
     # In the compiled binary the compile subprocess imports torch_tensorrt -> torch._inductor
     # directly; without patch_frozen_torch the source-introspection raises. An empty request
     # compiles nothing, so this only exercises the early import-torch + patch path.
@@ -190,7 +212,7 @@ def test_detection_engine_exists_rfdetr(tmp_path: Path) -> None:
         "rfdetr-v5", str(onnx_path), 4, True, "cuda:0"
     ) is False
 
-    from jasna.trt import get_onnx_tensorrt_engine_path
+    from jasna.engine_paths import get_onnx_tensorrt_engine_path
     engine = get_onnx_tensorrt_engine_path(
         onnx_path,
         batch_size=4,
@@ -210,7 +232,7 @@ def test_detection_engine_exists_rfdetr_v6_uses_dynamic_path(
     onnx_path = tmp_path / "rfdetr-v6.onnx"
     onnx_path.write_text("x")
 
-    from jasna.trt import get_onnx_tensorrt_engine_path
+    from jasna.engine_paths import get_onnx_tensorrt_engine_path
 
     engine = get_onnx_tensorrt_engine_path(
         onnx_path,
@@ -253,14 +275,18 @@ def test_unet4x_engine_exists_plaintext(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
+    # The public source tree does not ship the private licensed-model module.
+    protection = ModuleType("jasna.protection")
+    protection.ProtectionError = type("ProtectionError", (RuntimeError,), {})
+    protected_model = ModuleType("jasna.protection.protected_model")
+    protected_model.decrypt_engine_bytes = lambda model_id, data: b"decrypted-engine"
+    protection.protected_model = protected_model
+    monkeypatch.setitem(sys.modules, "jasna.protection", protection)
+    monkeypatch.setitem(sys.modules, "jasna.protection.protected_model", protected_model)
     onnx_path = tmp_path / "unet-4x.onnx"  # absent → encrypted branch
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", onnx_path)
     enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"
     monkeypatch.setattr("jasna.engine_paths.get_unet4x_encrypted_engine_path", lambda fp16=True: enc_engine)
-    monkeypatch.setattr(
-        "jasna.protection.protected_model.decrypt_engine_bytes",
-        lambda model_id, data: b"decrypted-engine",
-    )
 
     assert _unet4x_engine_exists(fp16=True) is False
     enc_engine.write_text("x")

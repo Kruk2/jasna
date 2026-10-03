@@ -71,6 +71,8 @@ class SessionConfig:
     fmp4: bool
     sharpen_strength: float
     tvai_denoise: bool
+    auto_source_rate: bool = False
+    amd_dual_gop_encode: bool = False
 
     def __post_init__(self) -> None:
         if self.batch_size <= 0:

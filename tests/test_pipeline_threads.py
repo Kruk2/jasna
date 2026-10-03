@@ -19,12 +19,19 @@ from jasna.frame_queue import FrameQueue
 from jasna.media.probe import VideoMetadata
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryRestoreResult, _SENTINEL
 from jasna.pipeline_threads import (
+    AMF_READER_CALLER_HANDOFF_ENV,
     FrameWriter,
+    _PtsAlignedFrameReader,
+    _PtsRecoveryCancelled,
+    _amf_reader_caller_handoff_mode,
+    _handoff_reader_batch_to_caller,
     decode_detect_loop,
     primary_restore_loop,
+    record_worker_error,
     secondary_restore_loop,
     blend_encode_loop,
     _estimate_start_frame,
+    wait_for_worker_threads,
 )
 from jasna.tracking.clip_tracker import TrackedClip
 
@@ -83,16 +90,148 @@ def _mock_reader(batches, seek_ts_check=None):
     return r
 
 
+class _ScriptedPtsReader:
+    def __init__(
+        self,
+        batches,
+        *,
+        start_pts: int = 0,
+        decode_backend: str = "auto",
+        amf_interop_enabled: bool = False,
+        on_first_batch=None,
+    ) -> None:
+        self.batches = list(batches)
+        self.start_pts = start_pts
+        self._decode_backend = decode_backend
+        self._amf_interop_enabled = amf_interop_enabled
+        self.on_first_batch = on_first_batch
+        self.seek_calls: list[float | None] = []
+        self.enter_calls = 0
+        self.exit_calls = 0
+
+    def __enter__(self):
+        self.enter_calls += 1
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.exit_calls += 1
+
+    def frames(self, seek_ts=None):
+        self.seek_calls.append(seek_ts)
+        for index, batch in enumerate(self.batches):
+            if index == 0 and self.on_first_batch is not None:
+                self.on_first_batch()
+            yield batch
+
+
+def _pts_batch(*pts: int) -> tuple[torch.Tensor, list[int]]:
+    return torch.tensor([[value] for value in pts]), list(pts)
+
+
+def _mock_exact_reader(frames: torch.Tensor, pts: list[int]):
+    reader = MagicMock()
+    reader.__enter__ = MagicMock(return_value=reader)
+    reader.__exit__ = MagicMock(return_value=False)
+    by_pts = {int(frame_pts): frames[index] for index, frame_pts in enumerate(pts)}
+    reader.read_exact.side_effect = lambda frame_pts: by_pts[int(frame_pts)]
+    return reader
+
+
 class _RecordingWriter:
     def __init__(self):
         self.written: list[tuple[torch.Tensor, int]] = []
         self.after_write_calls: list[int] = []
 
-    def write(self, frame: torch.Tensor, pts: int) -> None:
+    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
         self.written.append((frame, pts))
 
     def after_write(self, frames_written: int) -> None:
         self.after_write_calls.append(frames_written)
+
+
+class TestAmfReaderCallerHandoff:
+    def test_amf_interop_reader_defaults_to_record_stream(self, monkeypatch):
+        monkeypatch.delenv(AMF_READER_CALLER_HANDOFF_ENV, raising=False)
+        reader = MagicMock()
+        reader._amf_interop_enabled = True
+        assert _amf_reader_caller_handoff_mode(reader) == "record-stream"
+
+    @pytest.mark.parametrize("amf_interop_enabled", (False, None))
+    def test_non_amf_reader_defaults_to_off(
+        self,
+        monkeypatch,
+        amf_interop_enabled,
+    ):
+        monkeypatch.delenv(AMF_READER_CALLER_HANDOFF_ENV, raising=False)
+        reader = MagicMock()
+        reader._amf_interop_enabled = amf_interop_enabled
+        assert _amf_reader_caller_handoff_mode(reader) == "off"
+
+    @pytest.mark.parametrize(
+        "mode",
+        ("off", "record-stream", "record-stream-clone-batch"),
+    )
+    def test_accepts_explicit_modes(self, monkeypatch, mode):
+        monkeypatch.setenv(AMF_READER_CALLER_HANDOFF_ENV, mode)
+        assert _amf_reader_caller_handoff_mode(MagicMock()) == mode
+
+    def test_explicit_off_overrides_amf_default(self, monkeypatch):
+        monkeypatch.setenv(AMF_READER_CALLER_HANDOFF_ENV, "off")
+        reader = MagicMock()
+        reader._amf_interop_enabled = True
+        assert _amf_reader_caller_handoff_mode(reader) == "off"
+
+    def test_rejects_unknown_mode(self, monkeypatch):
+        monkeypatch.setenv(AMF_READER_CALLER_HANDOFF_ENV, "unsafe")
+        with pytest.raises(ValueError, match=AMF_READER_CALLER_HANDOFF_ENV):
+            _amf_reader_caller_handoff_mode(MagicMock())
+
+    def test_off_does_not_touch_tensor_stream(self):
+        batch = torch.ones((2, 3, 4, 4), dtype=torch.uint8)
+        assert (
+            _handoff_reader_batch_to_caller(
+                batch,
+                role="test",
+                mode="off",
+            )
+            is batch
+        )
+
+    def test_record_stream_registers_actual_caller(self):
+        batch = MagicMock(spec=torch.Tensor)
+        batch.device = torch.device("cuda:0")
+        caller_stream = object()
+        with patch(
+            "jasna.pipeline_threads.current_stream",
+            return_value=caller_stream,
+        ):
+            result = _handoff_reader_batch_to_caller(
+                batch,
+                role="test",
+                mode="record-stream",
+            )
+        assert result is batch
+        batch.record_stream.assert_called_once_with(caller_stream)
+        batch.clone.assert_not_called()
+
+    def test_clone_mode_records_source_before_cloning(self):
+        order = []
+        cloned = MagicMock(spec=torch.Tensor)
+        batch = MagicMock(spec=torch.Tensor)
+        batch.device = torch.device("cuda:0")
+        batch.record_stream.side_effect = lambda _stream: order.append("record")
+        batch.clone.side_effect = lambda: (order.append("clone"), cloned)[1]
+        with patch(
+            "jasna.pipeline_threads.current_stream",
+            return_value=object(),
+        ):
+            result = _handoff_reader_batch_to_caller(
+                batch,
+                role="test",
+                mode="record-stream-clone-batch",
+            )
+        assert result is cloned
+        assert order == ["record", "clone"]
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +246,272 @@ class TestEstimateStartFrame:
     def test_zero(self):
         meta = _fake_metadata(fps=24.0)
         assert _estimate_start_frame(meta, 0.0) == 0
+
+
+# ---------------------------------------------------------------------------
+# Worker failure shutdown
+# ---------------------------------------------------------------------------
+
+class TestWorkerFailureShutdown:
+    def test_record_worker_error_keeps_first_failure_and_cancels_peers(self):
+        cancel_event = threading.Event()
+        error_holder: list[BaseException] = []
+        first_error = RuntimeError("first worker failure")
+        try:
+            raise first_error
+        except RuntimeError as error:
+            record_worker_error("primary", error, error_holder, cancel_event)
+        try:
+            raise RuntimeError("second worker failure")
+        except RuntimeError as error:
+            record_worker_error("secondary", error, error_holder, cancel_event)
+        assert error_holder == [first_error]
+        assert cancel_event.is_set()
+
+    def test_record_worker_error_ignores_user_initiated_cancellation(self):
+        cancel_event = threading.Event()
+        cancel_event.set()
+        error_holder: list[BaseException] = []
+        try:
+            raise RuntimeError("cancelled worker")
+        except RuntimeError as error:
+            record_worker_error("decode", error, error_holder, cancel_event)
+        assert not error_holder
+
+    def test_wait_for_worker_threads_drains_queue_and_joins_cancelled_workers(self):
+        class TrackingFrameQueue:
+            def __init__(self):
+                self._queue = FrameQueue(max_frames=1)
+                self.drain_calls = 0
+
+            def put(self, item, frame_count=0):
+                self._queue.put(item, frame_count=frame_count)
+
+            def get_nowait(self):
+                self.drain_calls += 1
+                return self._queue.get_nowait()
+
+        cancel_event = threading.Event()
+        pipeline_queue = TrackingFrameQueue()
+        pipeline_queue.put("occupied", frame_count=1)
+        producer_entered = threading.Event()
+        producer_released = threading.Event()
+        peer_entered = threading.Event()
+        peer_released = threading.Event()
+
+        def blocked_producer():
+            producer_entered.set()
+            pipeline_queue.put("released", frame_count=1)
+            producer_released.set()
+
+        def peer_worker():
+            peer_entered.set()
+            cancel_event.wait(timeout=2)
+            peer_released.set()
+
+        threads = [
+            threading.Thread(target=blocked_producer),
+            threading.Thread(target=peer_worker),
+        ]
+        for thread in threads:
+            thread.start()
+        assert producer_entered.wait(timeout=1)
+        assert peer_entered.wait(timeout=1)
+        cancel_event.set()
+        wait_for_worker_threads(
+            threads,
+            (pipeline_queue,),
+            cancel_event,
+            poll_interval=0.001,
+        )
+        assert pipeline_queue.drain_calls >= 1
+        assert producer_released.is_set()
+        assert peer_released.is_set()
+        assert all(not thread.is_alive() for thread in threads)
+
+    def test_wait_for_worker_threads_does_not_drain_healthy_workers(self):
+        class NoDrainQueue:
+            def __init__(self):
+                self.drain_calls = 0
+
+            def get_nowait(self):
+                self.drain_calls += 1
+                raise AssertionError("healthy queues must not be drained")
+
+        worker_started = threading.Event()
+        worker_finished = threading.Event()
+
+        def healthy_worker():
+            worker_started.set()
+            time.sleep(0.03)
+            worker_finished.set()
+
+        thread = threading.Thread(target=healthy_worker)
+        thread.start()
+        assert worker_started.wait(timeout=1)
+        pipeline_queue = NoDrainQueue()
+        wait_for_worker_threads(
+            [thread],
+            (pipeline_queue,),
+            threading.Event(),
+            poll_interval=0.001,
+        )
+        assert worker_finished.is_set()
+        assert pipeline_queue.drain_calls == 0
+        assert not thread.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# _PtsAlignedFrameReader — exact secondary-reader PTS recovery
+# ---------------------------------------------------------------------------
+
+class TestPtsAlignedFrameReader:
+    def _reader(
+        self,
+        *,
+        cancel_event=None,
+        seek_ts=None,
+        resident_coordinator=None,
+    ):
+        return _PtsAlignedFrameReader(
+            input_video="fake.mkv",
+            batch_size=4,
+            device=torch.device("cpu"),
+            metadata=_fake_metadata(),
+            frame_stride=1,
+            seek_ts=seek_ts,
+            cancel_event=cancel_event,
+            resident_coordinator=resident_coordinator,
+        )
+
+    def test_exact_pts_fast_path_uses_initial_reader(self):
+        source = _ScriptedPtsReader([_pts_batch(40)])
+        with patch("jasna.pipeline_threads.VideoReader", return_value=source) as factory:
+            with self._reader() as reader:
+                frame = reader.read_exact(40)
+        assert torch.equal(frame, torch.tensor([40]))
+        factory.assert_called_once()
+        assert factory.call_args.kwargs["decode_backend"] is None
+        assert source.seek_calls == [None]
+
+    def test_resident_secondary_reader_forces_explicit_backend_and_role(self):
+        source = _ScriptedPtsReader([_pts_batch(40)])
+        coordinator = object()
+        with patch(
+            "jasna.pipeline_threads.VideoReader",
+            return_value=source,
+        ) as factory:
+            with self._reader(resident_coordinator=coordinator) as reader:
+                frame = reader.read_exact(40)
+
+        assert torch.equal(frame, torch.tensor([40]))
+        factory.assert_called_once()
+        assert factory.call_args.kwargs["decode_backend"] == (
+            "amf-d3d11-hip-resident"
+        )
+        assert factory.call_args.kwargs["resident_coordinator"] is coordinator
+        assert factory.call_args.kwargs["resident_role"] == "blend-encode"
+
+    def test_discards_stale_frames_before_exact_pts(self):
+        source = _ScriptedPtsReader([_pts_batch(38, 39, 40)])
+        with patch("jasna.pipeline_threads.VideoReader", return_value=source):
+            with self._reader() as reader:
+                frame = reader.read_exact(40)
+        assert torch.equal(frame, torch.tensor([40]))
+
+    def test_forward_mismatch_reopens_same_product_route(self):
+        first = _ScriptedPtsReader([_pts_batch(41)])
+        recovered = _ScriptedPtsReader([_pts_batch(40)])
+        with patch(
+            "jasna.pipeline_threads.VideoReader",
+            side_effect=[first, recovered],
+        ) as factory:
+            with self._reader() as reader:
+                frame = reader.read_exact(40)
+        assert torch.equal(frame, torch.tensor([40]))
+        assert [call.kwargs["decode_backend"] for call in factory.call_args_list] == [
+            None,
+            "auto",
+        ]
+        assert recovered.seek_calls == [40 / 24]
+
+    def test_reopened_reader_recomputes_amf_handoff_mode(self, monkeypatch):
+        monkeypatch.delenv(AMF_READER_CALLER_HANDOFF_ENV, raising=False)
+        first = _ScriptedPtsReader(
+            [_pts_batch(41)],
+            amf_interop_enabled=False,
+        )
+        recovered = _ScriptedPtsReader(
+            [_pts_batch(40)],
+            amf_interop_enabled=True,
+        )
+        handoff_modes = []
+
+        def _handoff(batch, *, role, mode):
+            assert role == "blend-encode"
+            handoff_modes.append(mode)
+            return batch
+
+        with (
+            patch(
+                "jasna.pipeline_threads.VideoReader",
+                side_effect=[first, recovered],
+            ),
+            patch(
+                "jasna.pipeline_threads._handoff_reader_batch_to_caller",
+                side_effect=_handoff,
+            ),
+        ):
+            with self._reader() as reader:
+                frame = reader.read_exact(40)
+        assert torch.equal(frame, torch.tensor([40]))
+        assert handoff_modes == ["off", "record-stream"]
+
+    def test_retries_selected_route_twice_before_succeeding(self):
+        first = _ScriptedPtsReader([_pts_batch(41)])
+        retry_one = _ScriptedPtsReader([_pts_batch(41)])
+        retry_two = _ScriptedPtsReader([_pts_batch(40)])
+        with patch(
+            "jasna.pipeline_threads.VideoReader",
+            side_effect=[first, retry_one, retry_two],
+        ) as factory:
+            with self._reader() as reader:
+                frame = reader.read_exact(40)
+        assert torch.equal(frame, torch.tensor([40]))
+        assert [call.kwargs["decode_backend"] for call in factory.call_args_list] == [
+            None,
+            "auto",
+            "auto",
+        ]
+    def test_unrecoverable_mismatch_is_terminal_without_cpu_fallback(self):
+        first = _ScriptedPtsReader([_pts_batch(41)])
+        retry_one = _ScriptedPtsReader([_pts_batch(41)])
+        retry_two = _ScriptedPtsReader([])
+        with patch(
+            "jasna.pipeline_threads.VideoReader",
+            side_effect=[first, retry_one, retry_two],
+        ) as factory:
+            with self._reader() as reader:
+                with pytest.raises(RuntimeError, match="could not recover secondary-reader PTS mismatch"):
+                    reader.read_exact(40)
+        assert [call.kwargs["decode_backend"] for call in factory.call_args_list] == [
+            None,
+            "auto",
+            "auto",
+        ]
+        assert "pyav-sw" not in repr(factory.call_args_list)
+
+    def test_cancellation_aborts_recovery_without_reopening(self):
+        cancel_event = threading.Event()
+        first = _ScriptedPtsReader(
+            [_pts_batch(41)],
+            on_first_batch=cancel_event.set,
+        )
+        with patch("jasna.pipeline_threads.VideoReader", return_value=first) as factory:
+            with self._reader(cancel_event=cancel_event) as reader:
+                with pytest.raises(_PtsRecoveryCancelled, match="cancelled"):
+                    reader.read_exact(40)
+        factory.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -461,7 +866,7 @@ class TestBlendEncodeLoop:
                           encode_items=None, metadata_items=None,
                           seek_ts=None):
         frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
-        reader = _mock_reader([(frames_t, [0, 1])])
+        reader = _mock_exact_reader(frames_t, [0, 1])
 
         blend_buffer = BlendBuffer(device=torch.device("cpu"))
         encode_queue = FrameQueue(max_frames=999)
@@ -484,7 +889,7 @@ class TestBlendEncodeLoop:
             vram_offloader = MagicMock()
 
         with (
-            patch("jasna.pipeline_threads.VideoReader", return_value=reader),
+            patch("jasna.pipeline_threads._PtsAlignedFrameReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
             blend_encode_loop(**_blend_defaults() | dict(
@@ -520,15 +925,8 @@ class TestBlendEncodeLoop:
         vram_offloader.pause_stall_check.assert_called_once()
 
     def test_seek_ts_passed_to_reader(self):
-        received_seek = []
         frames_t = torch.randint(0, 256, (1, 3, 8, 8), dtype=torch.uint8)
-        reader = MagicMock()
-        reader.__enter__ = MagicMock(return_value=reader)
-        reader.__exit__ = MagicMock(return_value=False)
-        def _frames(seek_ts=None):
-            received_seek.append(seek_ts)
-            return iter([(frames_t, [0])])
-        reader.frames = _frames
+        reader = _mock_exact_reader(frames_t, [0])
 
         blend_buffer = BlendBuffer(device=torch.device("cpu"))
         blend_buffer.register_frame(0, set())
@@ -538,7 +936,10 @@ class TestBlendEncodeLoop:
         metadata_queue.put(_SENTINEL)
 
         with (
-            patch("jasna.pipeline_threads.VideoReader", return_value=reader),
+            patch(
+                "jasna.pipeline_threads._PtsAlignedFrameReader",
+                return_value=reader,
+            ) as factory,
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
             blend_encode_loop(**_blend_defaults() | dict(
@@ -554,14 +955,57 @@ class TestBlendEncodeLoop:
                 seek_ts=5.0,
             ))
 
-        assert received_seek == [5.0]
+        assert factory.call_args.kwargs["seek_ts"] == 5.0
+
+    def test_requests_original_frame_by_metadata_pts_not_position(self):
+        requested_pts: list[int] = []
+
+        class _ExactReader:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback) -> None:
+                return None
+
+            def read_exact(self, pts: int) -> torch.Tensor:
+                requested_pts.append(pts)
+                return torch.full((3, 8, 8), pts, dtype=torch.int64)
+
+        metadata_queue = Queue()
+        metadata_queue.put(FrameMeta(frame_idx=0, pts=100, apply_effect=False))
+        metadata_queue.put(FrameMeta(frame_idx=1, pts=300, apply_effect=False))
+        metadata_queue.put(_SENTINEL)
+        writer = _RecordingWriter()
+
+        with (
+            patch(
+                "jasna.pipeline_threads._PtsAlignedFrameReader",
+                return_value=_ExactReader(),
+            ),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+        ):
+            blend_encode_loop(
+                input_video="fake.mkv",
+                batch_size=2,
+                device=torch.device("cpu"),
+                metadata=_fake_metadata(),
+                blend_buffer=BlendBuffer(device=torch.device("cpu")),
+                encode_queue=FrameQueue(max_frames=8),
+                metadata_queue=metadata_queue,
+                error_holder=[],
+                frame_writer=writer,
+                cancel_event=threading.Event(),
+            )
+
+        assert requested_pts == [100, 300]
+        assert [pts for _frame, pts in writer.written] == [100, 300]
 
     def test_error_holder_propagates_in_wait_loop(self):
         blend_buffer = BlendBuffer(device=torch.device("cpu"))
         blend_buffer.register_frame(0, {99})
 
         frames_t = torch.randint(0, 256, (1, 3, 8, 8), dtype=torch.uint8)
-        reader = _mock_reader([(frames_t, [0])])
+        reader = _mock_exact_reader(frames_t, [0])
 
         encode_queue = FrameQueue(max_frames=999)
         metadata_queue = Queue(maxsize=999)
@@ -578,7 +1022,7 @@ class TestBlendEncodeLoop:
         t.start()
 
         with (
-            patch("jasna.pipeline_threads.VideoReader", return_value=reader),
+            patch("jasna.pipeline_threads._PtsAlignedFrameReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
             blend_encode_loop(**_blend_defaults() | dict(
@@ -601,7 +1045,7 @@ class TestBlendEncodeLoop:
         blend_buffer.register_frame(0, {99})
 
         frames_t = torch.randint(0, 256, (1, 3, 8, 8), dtype=torch.uint8)
-        reader = _mock_reader([(frames_t, [0])])
+        reader = _mock_exact_reader(frames_t, [0])
 
         encode_queue = FrameQueue(max_frames=999)
         encode_queue.put(_SENTINEL)
@@ -612,7 +1056,7 @@ class TestBlendEncodeLoop:
         writer = _RecordingWriter()
 
         with (
-            patch("jasna.pipeline_threads.VideoReader", return_value=reader),
+            patch("jasna.pipeline_threads._PtsAlignedFrameReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
             blend_encode_loop(**_blend_defaults() | dict(
@@ -634,7 +1078,7 @@ class TestBlendEncodeLoop:
         # loop simply hands the untouched source frame to blend_frame.
         original = torch.randint(0, 256, (1, 3, 8, 8), dtype=torch.uint8)
         blended_out = torch.full_like(original[0], 30)
-        reader = _mock_reader([(original, [0])])
+        reader = _mock_exact_reader(original, [0])
         blend_buffer = MagicMock()
         blend_buffer.is_frame_ready.return_value = True
         blend_buffer.blend_frame.return_value = blended_out
@@ -644,7 +1088,7 @@ class TestBlendEncodeLoop:
         writer = _RecordingWriter()
 
         with (
-            patch("jasna.pipeline_threads.VideoReader", return_value=reader),
+            patch("jasna.pipeline_threads._PtsAlignedFrameReader", return_value=reader),
             patch("jasna.pipeline_threads.torch.cuda.set_device"),
         ):
             blend_encode_loop(**_blend_defaults() | dict(
@@ -676,7 +1120,7 @@ class TestOfflineFrameWriter:
         mock_enc.__enter__ = MagicMock(return_value=mock_enc)
         mock_enc.__exit__ = MagicMock(return_value=False)
 
-        heartbeat = [0.0]
+        heartbeat = [None]
         writer = _OfflineFrameWriter(mock_enc, heartbeat)
 
         frame = torch.zeros(3, 8, 8)
@@ -794,8 +1238,9 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_server.frames_per_segment.return_value = 120
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
-        writer.after_write(100)
+        with patch("jasna.streaming_pipeline.time.monotonic", return_value=42.0):
+            writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
+            writer.after_write(100)
 
         mock_server.update_production.assert_called_once()
 

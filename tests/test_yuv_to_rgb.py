@@ -84,6 +84,42 @@ def test_dither_is_deterministic():
     assert torch.equal(conv.convert(y, uv), conv.convert(y, uv))
 
 
+def test_tiled_eager_path_matches_full_frame_for_nv12_and_p010(monkeypatch):
+    import jasna.media.yuv_to_rgb as module
+
+    h, w = 32, 40
+    generator = torch.Generator().manual_seed(17)
+    for is_10bit, dtype, high in (
+        (False, torch.uint8, 256),
+        (True, torch.int32, 1024 << 6),
+    ):
+        y = torch.randint(0, high, (h, w), dtype=dtype, generator=generator)
+        uv = torch.randint(
+            0,
+            high,
+            (h // 2, w // 2, 2),
+            dtype=dtype,
+            generator=generator,
+        )
+        if is_10bit:
+            # The reference CPU tests feed P010 code storage as float32.
+            y = y.to(torch.float32)
+            uv = uv.to(torch.float32)
+
+        monkeypatch.setattr(module, "_EAGER_SCRATCH_MAX_PIXELS", h * w)
+        full = module.YuvToRgbConverter(
+            h, w, AvColorspace.ITU709, False, is_10bit, CPU
+        )
+        expected = full.convert(y, uv)
+
+        monkeypatch.setattr(module, "_EAGER_SCRATCH_MAX_PIXELS", 8 * w)
+        tiled = module.YuvToRgbConverter(
+            h, w, AvColorspace.ITU709, False, is_10bit, CPU
+        )
+        assert tiled._scratch_height == 8
+        assert torch.equal(tiled.convert(y, uv), expected)
+
+
 def test_matches_swscale_reference_bt709_limited():
     import av
 
