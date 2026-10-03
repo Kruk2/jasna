@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from queue import Empty, Queue
-from typing import Protocol
+from typing import Any, Protocol
 
 import torch
 
-from jasna.accelerator import empty_cache, ipc_collect
+from jasna.accelerator import AcceleratorVendor, current_stream, empty_cache, ipc_collect, vendor_for_device
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
 from jasna.frame_queue import FrameQueue
@@ -24,9 +25,350 @@ from jasna.restorer import RestorationPipeline
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.tracking.clip_tracker import ClipTracker
 from jasna.tracking.scene_detector import SceneCutDetector
-from jasna.vram_offloader import VramOffloader
+from jasna.vram_offloader import (
+    VramOffloader, default_host_memory_limit_bytes,
+    restoration_vram_safetynet, restoration_vram_startup_budget,
+)
+from jasna.native_worker import (
+    HostMemoryPressureError, NativeWorkerRecycleRequested,
+    amf_encoder_stall_timeout_seconds, is_isolated_video_job,
+)
 
 log = logging.getLogger(__name__)
+
+AMF_READER_CALLER_HANDOFF_ENV = "JASNA_AMF_READER_CALLER_HANDOFF"
+_AMF_READER_CALLER_HANDOFF_MODES = frozenset(
+    {"off", "record-stream", "record-stream-clone-batch"}
+)
+
+
+def _amf_reader_caller_handoff_mode(reader: VideoReader) -> str:
+    """Return the storage handoff policy for one opened reader.
+
+    Explicit AMF interop readers produce batches on a private Torch stream, so
+    their caller must register the subsequent cross-stream use with the
+    caching allocator.  Other decoder routes retain their existing behavior.
+    The environment override remains available for rollback and diagnosis.
+    """
+
+    configured_mode = os.environ.get(AMF_READER_CALLER_HANDOFF_ENV)
+    if configured_mode is None:
+        return (
+            "record-stream"
+            if (
+                getattr(reader, "_amf_interop_enabled", False) is True
+                or getattr(reader, "_windows_resident_enabled", False) is True
+            )
+            else "off"
+        )
+    mode = configured_mode.strip().casefold()
+    if mode not in _AMF_READER_CALLER_HANDOFF_MODES:
+        raise ValueError(
+            f"Invalid {AMF_READER_CALLER_HANDOFF_ENV} value {mode!r}; expected "
+            "'off', 'record-stream', or 'record-stream-clone-batch'"
+        )
+    return mode
+
+
+def _handoff_reader_batch_to_caller(
+    batch: torch.Tensor,
+    *,
+    role: str,
+    mode: str,
+) -> torch.Tensor:
+    """Register one yielded decode batch with its actual caller stream.
+
+    AMF uploads and RGB conversion run on a reader-private stream.  A producer
+    synchronization makes the pixels readable, but it does not tell Torch's
+    caching allocator that the decode tensor is subsequently consumed on the
+    caller stream.  The experimental clone mode first records that source use,
+    then gives the caller storage allocated on its own stream.
+    """
+
+    if mode == "off":
+        return batch
+    if not isinstance(batch, torch.Tensor) or batch.device.type != "cuda":
+        raise RuntimeError(
+            f"{AMF_READER_CALLER_HANDOFF_ENV}={mode} requires a CUDA/HIP "
+            f"reader tensor for {role}; got {type(batch).__name__} on "
+            f"{getattr(getattr(batch, 'device', None), 'type', None)!r}"
+        )
+    caller_stream = current_stream(batch.device)
+    batch.record_stream(caller_stream)
+    if mode == "record-stream-clone-batch":
+        batch = batch.clone()
+    return batch
+
+
+def record_worker_error(
+    label: str,
+    error: BaseException,
+    error_holder: list[BaseException],
+    cancel_event: threading.Event | None,
+) -> None:
+    """Record the first worker failure and ask the other workers to stop."""
+    if cancel_event is not None and cancel_event.is_set():
+        return
+    log.exception("[%s] thread crashed", label)
+    error_holder.append(error)
+    if cancel_event is not None:
+        cancel_event.set()
+
+
+def _drain_pipeline_queues(queues: Iterable[Any]) -> None:
+    for pipeline_queue in queues:
+        while True:
+            try:
+                pipeline_queue.get_nowait()
+            except Empty:
+                break
+
+
+def wait_for_worker_threads(
+    threads: Sequence[threading.Thread],
+    queues: Iterable[Any],
+    cancel_event: threading.Event,
+    *,
+    poll_interval: float = 0.02,
+) -> None:
+    """Join workers while releasing blocked producers during cancellation."""
+    pipeline_queues = tuple(queues)
+    while True:
+        alive = [thread for thread in threads if thread.is_alive()]
+        if not alive:
+            return
+        if cancel_event.is_set():
+            _drain_pipeline_queues(pipeline_queues)
+        for thread in alive:
+            thread.join(timeout=poll_interval)
+
+PTS_RESYNC_HARDWARE_RETRIES = 2
+PTS_RESYNC_FORWARD_SCAN_LIMIT = 64
+
+
+class _PtsRecoveryCancelled(RuntimeError):
+    pass
+
+
+class _PtsAlignedFrameReader:
+    """Read exact source PTS and reopen the selected product route on divergence."""
+
+    def __init__(
+        self,
+        *,
+        input_video: str,
+        batch_size: int,
+        device: torch.device,
+        metadata,
+        frame_stride: int,
+        seek_ts: float | None,
+        cancel_event: threading.Event | None,
+        resident_coordinator: object | None = None,
+    ) -> None:
+        self.input_video = input_video
+        self.batch_size = int(batch_size)
+        self.device = device
+        self.metadata = metadata
+        self.frame_stride = int(frame_stride)
+        self.seek_ts = seek_ts
+        self.cancel_event = cancel_event
+        self.resident_coordinator = resident_coordinator
+        self._reader: VideoReader | None = None
+        self._frames = None
+        self._retry_backend: str | None = None
+        self._stream_start_pts = int(getattr(metadata, "start_pts", 0) or 0)
+
+    @staticmethod
+    def _flat_frames(
+        reader: VideoReader,
+        seek_ts: float | None,
+        handoff_mode: str,
+    ):
+        logged_handoff = False
+        for batch, pts in reader.frames(seek_ts=seek_ts):
+            batch = _handoff_reader_batch_to_caller(
+                batch,
+                role="blend-encode",
+                mode=handoff_mode,
+            )
+            if handoff_mode != "off" and not logged_handoff:
+                log.info(
+                    "AMF reader caller handoff: role=blend-encode mode=%s",
+                    handoff_mode,
+                )
+                logged_handoff = True
+            for index, frame_pts in enumerate(pts):
+                yield batch[index], int(frame_pts)
+
+    def __enter__(self):
+        self._open(self.seek_ts, decode_backend=None)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback) -> None:
+        self.close(exc_type=exc_type, exc_value=exc_value, traceback=traceback)
+
+    def close(
+        self,
+        *,
+        exc_type=None,
+        exc_value=None,
+        traceback=None,
+    ) -> None:
+        reader, self._reader = self._reader, None
+        frames, self._frames = self._frames, None
+        if frames is not None and hasattr(frames, "close"):
+            frames.close()
+        if reader is not None:
+            reader.__exit__(exc_type, exc_value, traceback)
+
+    def _open(self, seek_ts: float | None, *, decode_backend: str | None) -> None:
+        self.close()
+        reader = VideoReader(
+            self.input_video,
+            batch_size=self.batch_size,
+            device=self.device,
+            metadata=self.metadata,
+            frame_stride=self.frame_stride,
+            decode_backend=(
+                "amf-d3d11-hip-resident"
+                if self.resident_coordinator is not None
+                else decode_backend
+            ),
+            resident_coordinator=self.resident_coordinator,
+            resident_role=(
+                "blend-encode"
+                if self.resident_coordinator is not None
+                else None
+            ),
+        )
+        try:
+            entered = reader.__enter__()
+        except BaseException:
+            reader.__exit__(None, None, None)
+            raise
+        self._reader = reader
+        self._frames = self._flat_frames(
+            entered,
+            seek_ts,
+            _amf_reader_caller_handoff_mode(entered),
+        )
+        self._stream_start_pts = int(entered.start_pts)
+        self._retry_backend = str(entered._decode_backend)
+
+    def _next(self) -> tuple[torch.Tensor | None, int | None]:
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            raise _PtsRecoveryCancelled("PTS recovery cancelled")
+        if self._frames is None:
+            return None, None
+        try:
+            return next(self._frames)
+        except StopIteration:
+            return None, None
+
+    def _scan_for_pts(
+        self,
+        expected_pts: int,
+        *,
+        first_frame: torch.Tensor | None = None,
+        first_pts: int | None = None,
+    ) -> tuple[torch.Tensor | None, int | None, int]:
+        frame, actual_pts = first_frame, first_pts
+        discarded = 0
+        for _ in range(PTS_RESYNC_FORWARD_SCAN_LIMIT + 1):
+            if actual_pts is None:
+                frame, actual_pts = self._next()
+            if actual_pts is None or actual_pts >= expected_pts:
+                return frame, actual_pts, discarded
+            discarded += 1
+            frame, actual_pts = self._next()
+        return frame, actual_pts, discarded
+
+    def _target_seek_seconds(self, expected_pts: int) -> float:
+        return max(
+            0.0,
+            float(
+                (int(expected_pts) - self._stream_start_pts)
+                * self.metadata.time_base
+            ),
+        )
+
+    def read_exact(self, expected_pts: int) -> torch.Tensor:
+        frame, actual_pts = self._next()
+        if actual_pts == expected_pts and frame is not None:
+            return frame
+
+        first_actual = actual_pts
+        if actual_pts is not None and actual_pts < expected_pts:
+            frame, actual_pts, discarded = self._scan_for_pts(
+                expected_pts,
+                first_frame=frame,
+                first_pts=actual_pts,
+            )
+            if actual_pts == expected_pts and frame is not None:
+                log.warning(
+                    "[blend-encode] PTS resynchronized by discarding %d stale "
+                    "secondary-reader frame(s): expected=%d first_actual=%d",
+                    discarded,
+                    expected_pts,
+                    first_actual,
+                )
+                return frame
+
+        seek_ts = self._target_seek_seconds(expected_pts)
+        if self.resident_coordinator is not None:
+            self.close()
+            raise RuntimeError(
+                "The explicit Windows D3D11/HIP resident route does not reopen "
+                "a decoder after a PTS mismatch; refusing an unvalidated native "
+                f"session transition at expected PTS {expected_pts}"
+            )
+        observations: list[str] = []
+        retry_backend = self._retry_backend
+        attempts = [
+            (retry_backend, f"{retry_backend or 'decoder'} retry {attempt}")
+            for attempt in range(1, PTS_RESYNC_HARDWARE_RETRIES + 1)
+        ]
+        for backend, description in attempts:
+            if self.cancel_event is not None and self.cancel_event.is_set():
+                raise _PtsRecoveryCancelled("PTS recovery cancelled")
+            try:
+                self._open(seek_ts, decode_backend=backend)
+                frame, recovered_pts, discarded = self._scan_for_pts(expected_pts)
+            except _PtsRecoveryCancelled:
+                raise
+            except Exception as error:
+                observations.append(f"{description}: {type(error).__name__}: {error}")
+                log.warning(
+                    "[blend-encode] PTS recovery %s failed while reopening at "
+                    "PTS %d: %s",
+                    description,
+                    expected_pts,
+                    error,
+                )
+                continue
+
+            if recovered_pts == expected_pts and frame is not None:
+                log.warning(
+                    "[blend-encode] PTS mismatch recovered by %s at PTS %d "
+                    "(first_actual=%s, discarded=%d)",
+                    description,
+                    expected_pts,
+                    first_actual,
+                    discarded,
+                )
+                return frame
+            observations.append(
+                f"{description}: observed "
+                f"{recovered_pts if recovered_pts is not None else 'EOF'}"
+            )
+
+        self.close()
+        details = "; ".join(observations)
+        raise RuntimeError(
+            "[blend-encode] could not recover secondary-reader PTS mismatch: "
+            f"expected PTS {expected_pts}, initial actual PTS "
+            f"{first_actual if first_actual is not None else 'EOF'}; {details}"
+        )
 
 
 class FrameWriter(Protocol):
@@ -52,17 +394,19 @@ def decode_detect_loop(
     clip_queue: FrameQueue,
     metadata_queue: Queue,
     error_holder: list[BaseException],
-    cancel_event: threading.Event,
-    debug_memory: PipelineDebugMemoryLogger,
-    vr_mode: str,
-    vr_projector,
-    seek_ts: float | None,
-    end_pts: int | None,
-    effect_ranges: tuple[tuple[int, int], ...] | None,
-    frame_stride: int,
-    output_frame_count: int | None,
-    output_fps: float | None,
-    progress: Progressbar | None,
+    cancel_event: threading.Event | None = None,
+    seek_ts: float | None = None,
+    end_pts: int | None = None,
+    effect_ranges: tuple[tuple[int, int], ...] | None = None,
+    frame_stride: int = 1,
+    output_frame_count: int | None = None,
+    output_fps: float | None = None,
+    progress: Progressbar | None = None,
+    close_progress: bool = True,
+    debug_memory: PipelineDebugMemoryLogger | None = None,
+    vr_mode: str = "off",
+    vr_projector=None,
+    resident_coordinator: object | None = None,
 ) -> None:
     timer = LoopTimer("decode-detect")
     try:
@@ -76,16 +420,23 @@ def decode_detect_loop(
         discard_margin = temporal_overlap
         blend_frames = (temporal_overlap // 3) if enable_crossfade else 0
 
-        with (
-            VideoReader(
-                input_video,
-                batch_size=batch_size,
-                device=device,
-                metadata=metadata,
-                frame_stride=frame_stride,
-            ) as reader,
-            torch.inference_mode(),
-        ):
+        reader_context = VideoReader(
+            input_video,
+            batch_size=batch_size,
+            device=device,
+            metadata=metadata,
+            frame_stride=frame_stride,
+            decode_backend=(
+                "amf-d3d11-hip-resident"
+                if resident_coordinator is not None
+                else None
+            ),
+            resident_coordinator=resident_coordinator,
+            resident_role=(
+                "decode-detect" if resident_coordinator is not None else None
+            ),
+        )
+        with reader_context as reader, torch.inference_mode():
             if progress is not None:
                 progress.init()
             target_hw = (int(metadata.video_height), int(metadata.video_width))
@@ -128,9 +479,23 @@ def decode_detect_loop(
                 metadata.video_height,
             )
 
+            frame_batches = reader.frames(seek_ts=seek_ts)
+            handoff_mode = _amf_reader_caller_handoff_mode(reader)
+            logged_handoff = False
             try:
-                for frames, pts_list in timer.timed_iter(reader.frames(seek_ts=seek_ts), "decode"):
-                    if cancel_event.is_set():
+                for frames, pts_list in timer.timed_iter(frame_batches, "decode"):
+                    frames = _handoff_reader_batch_to_caller(
+                        frames,
+                        role="decode-detect",
+                        mode=handoff_mode,
+                    )
+                    if handoff_mode != "off" and not logged_handoff:
+                        log.info(
+                            "AMF reader caller handoff: role=decode-detect mode=%s",
+                            handoff_mode,
+                        )
+                        logged_handoff = True
+                    if cancel_event is not None and cancel_event.is_set():
                         break
                     if end_pts is not None:
                         keep_count = next(
@@ -211,10 +576,14 @@ def decode_detect_loop(
                 if progress is not None:
                     progress.error = True
                 raise
+            finally:
+                close_batches = getattr(frame_batches, "close", None)
+                if callable(close_batches):
+                    close_batches()
+                if progress is not None and close_progress:
+                    progress.close(ensure_completed_bar=True)
     except BaseException as e:
-        if not cancel_event.is_set():
-            log.exception("[decode] thread crashed")
-            error_holder.append(e)
+        record_worker_error("decode", e, error_holder, cancel_event)
     finally:
         log.info(timer.summary())
         log.debug("[decode] thread exiting")
@@ -266,9 +635,7 @@ def primary_restore_loop(
                 f"clip={clip_item.clip.track_id} frames={len(clip_item.raw_crops)}",
             )
     except BaseException as e:
-        if not cancel_event.is_set():
-            log.exception("[primary] thread crashed")
-            error_holder.append(e)
+        record_worker_error("primary", e, error_holder, cancel_event)
     finally:
         log.info(timer.summary())
         log.debug("[primary] thread exiting")
@@ -313,9 +680,7 @@ def secondary_restore_loop(
                 f"clip={pr.track_id} frames={sr.frame_count}",
             )
     except BaseException as e:
-        if not cancel_event.is_set():
-            log.exception("[secondary] thread crashed")
-            error_holder.append(e)
+        record_worker_error("secondary", e, error_holder, cancel_event)
     finally:
         log.info(timer.summary())
         log.debug("[secondary] thread exiting")
@@ -333,28 +698,26 @@ def blend_encode_loop(
     metadata_queue: Queue,
     error_holder: list[BaseException],
     frame_writer: FrameWriter,
-    cancel_event: threading.Event,
-    vram_offloader: VramOffloader,
-    seek_ts: float | None,
-    frame_stride: int,
+    cancel_event: threading.Event | None = None,
+    seek_ts: float | None = None,
+    frame_stride: int = 1,
+    vram_offloader=None,
+    resident_coordinator: object | None = None,
 ) -> None:
     timer = LoopTimer("blend-encode")
     try:
         torch.cuda.set_device(device)
 
-        def _flat_frames(rdr: VideoReader):
-            for batch, pts in rdr.frames(seek_ts=seek_ts):
-                for i in range(len(pts)):
-                    yield batch[i]
-
-        with VideoReader(
-            input_video,
+        with _PtsAlignedFrameReader(
+            input_video=input_video,
             batch_size=batch_size,
             device=device,
             metadata=metadata,
             frame_stride=frame_stride,
+            seek_ts=seek_ts,
+            cancel_event=cancel_event,
+            resident_coordinator=resident_coordinator,
         ) as reader2:
-            frame_gen = _flat_frames(reader2)
             secondary_done = False
             frames_encoded = 0
 
@@ -381,7 +744,7 @@ def blend_encode_loop(
                     break
                 meta: FrameMeta = meta_item
                 with timer.measure("decode"):
-                    original_frame = next(frame_gen)
+                    original_frame = reader2.read_exact(meta.pts)
 
                 with timer.measure("result-wait"):
                     while meta.apply_effect and not blend_buffer.is_frame_ready(meta.frame_idx):
@@ -420,9 +783,7 @@ def blend_encode_loop(
             vram_offloader.pause_stall_check()
 
     except BaseException as e:
-        if not cancel_event.is_set():
-            log.exception("[blend-encode] thread crashed")
-            error_holder.append(e)
+        record_worker_error("blend-encode", e, error_holder, cancel_event)
     finally:
         log.info(timer.summary())
 
@@ -432,6 +793,7 @@ def _estimate_start_frame(metadata, seek_ts: float) -> int:
 
 
 _ASYNC_POLL_TIMEOUT = 0.05
+_ASYNC_CANCEL_JOIN_TIMEOUT = 5.0
 _FLUSH_DELAY = 2.0
 _FLUSH_RETRY_TIMEOUT = 5.0
 
@@ -462,6 +824,9 @@ def run_async_secondary(
     loop flushes the clip that blocks the earliest unblended frame.
     """
     restorer: AsyncSecondaryRestorer = restoration_pipeline.secondary_restorer  # type: ignore[assignment]
+    set_cancel_event = getattr(restorer, "set_cancel_event", None)
+    if callable(set_cancel_event):
+        set_cancel_event(cancel_event)
     pending_prs: dict[int, PrimaryRestoreResult] = {}
     push_done = threading.Event()
     pusher_error: list[BaseException] = []
@@ -498,7 +863,8 @@ def run_async_secondary(
                 if push_elapsed > 0.05:
                     log.debug("[secondary] push_clip seq=%d took %.0fms", seq, push_elapsed * 1000)
         except BaseException as e:
-            pusher_error.append(e)
+            if not cancel_event.is_set():
+                pusher_error.append(e)
         finally:
             push_done.set()
 
@@ -530,59 +896,79 @@ def run_async_secondary(
     starvation_seconds = 0.0
     starvation_start: float | None = None
 
-    while not push_done.is_set():
+    try:
+        while not push_done.is_set():
+            if cancel_event.is_set():
+                break
+            if pusher_error:
+                raise pusher_error[0]
+
+            if _forward_completed() > 0:
+                if starvation_start is not None:
+                    starvation_seconds += time.monotonic() - starvation_start
+                    starvation_start = None
+                flushed_since_last_push = False
+                continue
+
+            now = time.monotonic()
+            if (
+                restorer.has_pending
+                and _no_clips_incoming()
+                and not flushed_since_last_push
+                and now - last_push_time > _FLUSH_DELAY
+            ):
+                if starvation_start is None:
+                    starvation_start = now
+                target_seqs = earliest_blocking_seqs(dict(pending_prs))
+                log.debug("[secondary] starvation flush target_seqs=%s", target_seqs)
+                if restorer.flush_pending(target_seqs=target_seqs):
+                    flushed_since_last_push = True
+                    last_flush_time = now
+                starvation_count += 1
+            elif (
+                flushed_since_last_push
+                and restorer.has_pending
+                and _no_clips_incoming()
+                and now - last_flush_time > _FLUSH_RETRY_TIMEOUT
+            ):
+                log.warning(
+                    "[secondary] flush retry: no clips forwarded for %.0fs after flush, pending=%d",
+                    now - last_flush_time, len(pending_prs),
+                )
+                flushed_since_last_push = False
+
+            time.sleep(_ASYNC_POLL_TIMEOUT)
+
+        if starvation_start is not None:
+            starvation_seconds += time.monotonic() - starvation_start
         if pusher_error:
             raise pusher_error[0]
-
-        if _forward_completed() > 0:
-            if starvation_start is not None:
-                starvation_seconds += time.monotonic() - starvation_start
-                starvation_start = None
-            flushed_since_last_push = False
-            continue
-
-        now = time.monotonic()
-        if (
-            restorer.has_pending
-            and _no_clips_incoming()
-            and not flushed_since_last_push
-            and now - last_push_time > _FLUSH_DELAY
-        ):
-            if starvation_start is None:
-                starvation_start = now
-            target_seqs = earliest_blocking_seqs(dict(pending_prs))
-            log.debug("[secondary] starvation flush target_seqs=%s", target_seqs)
-            if restorer.flush_pending(target_seqs=target_seqs):
-                flushed_since_last_push = True
-                last_flush_time = now
-            starvation_count += 1
-        elif (
-            flushed_since_last_push
-            and restorer.has_pending
-            and _no_clips_incoming()
-            and now - last_flush_time > _FLUSH_RETRY_TIMEOUT
-        ):
-            log.warning(
-                "[secondary] flush retry: no clips forwarded for %.0fs after flush, pending=%d",
-                now - last_flush_time, len(pending_prs),
-            )
-            flushed_since_last_push = False
-
-        time.sleep(_ASYNC_POLL_TIMEOUT)
-
-    if starvation_start is not None:
-        starvation_seconds += time.monotonic() - starvation_start
-    pusher_thread.join()
-    if pusher_error:
-        raise pusher_error[0]
-    if not cancel_event.is_set():
-        restorer.flush_all()
-        for _ in range(100):
-            if not pending_prs:
-                break
-            _forward_completed()
-            if pending_prs:
-                time.sleep(_ASYNC_POLL_TIMEOUT)
+        if not cancel_event.is_set():
+            restorer.flush_all()
+            for _ in range(100):
+                if cancel_event.is_set() or not pending_prs:
+                    break
+                _forward_completed()
+                if pending_prs:
+                    cancel_event.wait(_ASYNC_POLL_TIMEOUT)
+    except BaseException:
+        if not cancel_event.is_set():
+            cancel_event.set()
+            raise
+    finally:
+        if cancel_event.is_set():
+            cancel_restorer = getattr(restorer, "cancel", None)
+            if callable(cancel_restorer):
+                try:
+                    if cancel_restorer() is False:
+                        log.warning("[secondary] async restorer cancellation timed out")
+                except BaseException:
+                    log.exception("[secondary] async restorer cancellation failed")
+            pusher_thread.join(timeout=_ASYNC_CANCEL_JOIN_TIMEOUT)
+            if pusher_thread.is_alive():
+                log.warning("[secondary] async pusher remained alive after cancellation timeout")
+        else:
+            pusher_thread.join()
     return SecondaryLoopStats(
         starvation_flushes=starvation_count,
         starvation_seconds=starvation_seconds,
@@ -621,9 +1007,12 @@ def async_secondary_restore_loop(
             stats.starvation_flushes, stats.starvation_seconds,
         )
     except BaseException as e:
-        if not cancel_event.is_set():
-            log.exception("[secondary-async] thread crashed")
+        # The async helper cancels its pusher before re-raising a genuine
+        # failure; do not mistake that cleanup for a user cancellation.
+        log.exception("[secondary-async] thread crashed")
+        if not error_holder:
             error_holder.append(e)
+        cancel_event.set()
     finally:
         encode_queue.put(_SENTINEL)
 
@@ -642,8 +1031,10 @@ def run_restoration_pass(
     output_frame_count: int | None = None,
     output_fps: float | None = None,
     progress: Progressbar | None = None,
-    encode_heartbeat: list[float] | None = None,
+    encode_heartbeat: list[float | None] | None = None,
     poll: Callable[[], bool] | None = None,
+    resident_coordinator: object | None = None,
+    recycle_on_host_memory_pressure: bool = False,
 ) -> BaseException | None:
     """Run the decode/detect -> primary -> secondary -> blend threads over one span.
 
@@ -667,7 +1058,38 @@ def run_restoration_pass(
     blend_buffer = BlendBuffer(device=device, vr_projector=pipeline.vr_projector)
     crop_buffers: dict[int, CropBuffer] = {}
     primary_idle_event = threading.Event()
-    vram_offloader = VramOffloader(device=device, blend_buffer=blend_buffer, crop_buffers=crop_buffers)
+    vendor = vendor_for_device(device)
+    amd = vendor is AcceleratorVendor.AMD
+    memory_geometry = dict(
+        frame_width=int(metadata.video_width), frame_height=int(metadata.video_height),
+        batch_size=int(pipeline.batch_size), ten_bit=bool(metadata.is_10bit), amd=amd,
+    )
+    owned_vram_options = {}
+    if os.name == "nt" and amd and os.environ.get("JASNA_WINDOWS_WORKER_GPU_IDENTITY") == "1":
+        from jasna.windows_global_vram import create_windows_hip_vram_reader
+
+        def required_vram_failure(error):
+            if not error_holder:
+                error_holder.append(error)
+            cancel_event.set()
+            log.error("Required whole-card VRAM monitoring failed", exc_info=(
+                type(error), error, error.__traceback__,
+            ))
+
+        owned_vram_options = dict(
+            system_vram_reader_factory=lambda: create_windows_hip_vram_reader(device),
+            on_system_vram_error=required_vram_failure,
+        )
+    vram_offloader = VramOffloader(
+        device=device, blend_buffer=blend_buffer, crop_buffers=crop_buffers,
+        safetynet=restoration_vram_safetynet(**memory_geometry),
+        system_vram_startup_budget=(restoration_vram_startup_budget(**memory_geometry) if amd else None),
+        host_memory_limit_bytes=(default_host_memory_limit_bytes() if amd and is_isolated_video_job() else None),
+        cancel_event=cancel_event,
+        terminate_on_encode_stall=amd and is_isolated_video_job(),
+        encode_stall_timeout_seconds=amf_encoder_stall_timeout_seconds(),
+        **owned_vram_options,
+    )
     if encode_heartbeat is not None:
         vram_offloader.set_encode_heartbeat(encode_heartbeat)
     vram_offloader.set_pipeline_queues(clip_queue, secondary_queue, encode_queue, metadata_queue)
@@ -696,8 +1118,20 @@ def run_restoration_pass(
     else:
         secondary_target = lambda: secondary_restore_loop(**secondary_kwargs)  # noqa: E731
 
+    def worker_thread(*, target, name, daemon=True):
+        # Also cover failures before a loop enters its own try block (for
+        # example argument binding). Peers must never wait forever for a
+        # sentinel from a worker that failed to start its loop.
+        def guarded_target():
+            try:
+                target()
+            except BaseException as worker_error:
+                record_worker_error(name, worker_error, error_holder, cancel_event)
+
+        return threading.Thread(target=guarded_target, name=name, daemon=daemon)
+
     threads = [
-        threading.Thread(
+        worker_thread(
             target=lambda: decode_detect_loop(
                 input_video=str(pipeline.input_video),
                 batch_size=pipeline.batch_size,
@@ -726,10 +1160,12 @@ def run_restoration_pass(
                 output_frame_count=output_frame_count,
                 output_fps=output_fps,
                 progress=progress,
+                close_progress=False,
+                resident_coordinator=resident_coordinator,
             ),
             name="DecodeDetect", daemon=True,
         ),
-        threading.Thread(
+        worker_thread(
             target=lambda: primary_restore_loop(
                 device=device,
                 restoration_pipeline=restoration_pipeline,
@@ -742,8 +1178,8 @@ def run_restoration_pass(
             ),
             name="PrimaryRestore", daemon=True,
         ),
-        threading.Thread(target=secondary_target, name="SecondaryRestore", daemon=True),
-        threading.Thread(
+        worker_thread(target=secondary_target, name="SecondaryRestore", daemon=True),
+        worker_thread(
             target=lambda: blend_encode_loop(
                 input_video=str(pipeline.input_video),
                 batch_size=pipeline.batch_size,
@@ -758,32 +1194,69 @@ def run_restoration_pass(
                 vram_offloader=vram_offloader,
                 seek_ts=seek_ts,
                 frame_stride=frame_stride,
+                resident_coordinator=resident_coordinator,
             ),
             name="BlendEncode", daemon=True,
         ),
     ]
-    vram_offloader.start()
-    for thread in threads:
-        thread.start()
-
-    while any(thread.is_alive() for thread in threads):
-        if poll is not None and poll():
-            cancel_event.set()
-        if cancel_event.wait(0.05):
-            break
-
-    for thread in threads:
-        while thread.is_alive():
-            _drain(queues)
-            thread.join(timeout=0.02)
-    vram_offloader.stop()
+    started_threads: list[threading.Thread] = []
+    try:
+        vram_offloader.start()
+        for thread in threads:
+            thread.start()
+            started_threads.append(thread)
+        while any(thread.is_alive() for thread in started_threads):
+            if poll is not None and poll():
+                cancel_event.set()
+            if cancel_event.wait(0.05):
+                break
+    except BaseException as error:
+        if not error_holder:
+            error_holder.append(error)
+        cancel_event.set()
+    finally:
+        try:
+            wait_for_worker_threads(started_threads, queues, cancel_event)
+        finally:
+            try:
+                vram_offloader.stop()
+            except BaseException as error:
+                if not error_holder:
+                    error_holder.append(error)
+                else:
+                    log.exception("VRAM monitor cleanup failed after a pipeline failure")
 
     error = error_holder[0] if error_holder else None
-    del queues, clip_queue, secondary_queue, encode_queue, metadata_queue
-    del blend_buffer, crop_buffers, threads
-    gc.collect()
-    empty_cache(device)
-    ipc_collect(device)
+    pipeline._last_pass_vram_stats = vram_offloader.stats
+    if error is None and getattr(vram_offloader, "host_memory_pressure", False) is True:
+        message = "Host memory pressure stopped the isolated worker before the operating system OOM killer"
+        error = (
+            NativeWorkerRecycleRequested(message, reason="native_pressure")
+            if recycle_on_host_memory_pressure and is_isolated_video_job()
+            else HostMemoryPressureError(message)
+        )
+    try:
+        if resident_coordinator is not None:
+            resident_coordinator.decoder_backend.collect_telemetry()
+            resident_coordinator.decoder_backend.validate_telemetry()
+            resident_coordinator.validate_encoder_telemetry()
+    except BaseException as cleanup_error:
+        if error is None:
+            error = cleanup_error
+        else:
+            log.exception("Resident telemetry validation failed after a pipeline failure")
+    finally:
+        del queues, clip_queue, secondary_queue, encode_queue, metadata_queue
+        del blend_buffer, crop_buffers, threads, started_threads
+        gc.collect()
+        for cleanup in (empty_cache, ipc_collect):
+            try:
+                cleanup(device)
+            except BaseException as cleanup_error:
+                if error is None:
+                    error = cleanup_error
+                else:
+                    log.exception("GPU cache cleanup failed after a pipeline failure")
     return error
 
 
