@@ -236,7 +236,6 @@ JA = {
         "model_ltx_variant_not_installed": "このモデルはインストールされていません。インストール済みのモデルを使います。",
         "tip_ltx_model": "非蒸留：少し高品質、約 2 倍遅い。\n蒸留：速い。",
         "model_ltx_undistilled": "LTX（非蒸留）",
-        "model_ltx_download_needed": "未インストール（{size} のダウンロード）",
         "model_ltx_not_downloaded": "未ダウンロードです。設定で選ぶとダウンロードします。",
         "model_ltx_fast_not_installed": "高速モードはオフです：そのモデルファイルがありません。",
         "model_ltx_quality_not_installed": "高速モードはオンです：高速モデルのファイルしかありません。",

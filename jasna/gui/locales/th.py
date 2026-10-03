@@ -236,7 +236,6 @@ TH = {
         "model_ltx_variant_not_installed": "ไม่ได้ติดตั้งโมเดลนี้ จะใช้โมเดลที่ติดตั้งไว้แทน",
         "tip_ltx_model": "แบบไม่กลั่น: ดีขึ้นเล็กน้อย ช้ากว่าประมาณ 2 เท่า\nแบบกลั่น: เร็วกว่า",
         "model_ltx_undistilled": "LTX (ไม่กลั่น)",
-        "model_ltx_download_needed": "ยังไม่ได้ติดตั้ง (ดาวน์โหลด {size})",
         "model_ltx_not_downloaded": "ยังไม่ได้ดาวน์โหลด เลือกในการตั้งค่าเพื่อดาวน์โหลด",
         "model_ltx_fast_not_installed": "โหมดเร็วปิดอยู่: ไม่ได้ติดตั้งไฟล์โมเดลของโหมดนี้",
         "model_ltx_quality_not_installed": "โหมดเร็วเปิดอยู่: ติดตั้งไว้แค่ไฟล์โมเดลแบบเร็ว",

@@ -236,7 +236,6 @@ ZH = {
         "model_ltx_variant_not_installed": "此模型未安装，将使用已安装的模型。",
         "tip_ltx_model": "未蒸馏：效果稍好，约慢 2 倍。\n蒸馏：更快。",
         "model_ltx_undistilled": "LTX（未蒸馏）",
-        "model_ltx_download_needed": "未安装（需下载 {size}）",
         "model_ltx_not_downloaded": "未下载。在设置中选择即可下载。",
         "model_ltx_fast_not_installed": "快速模式已关闭：未安装其模型文件。",
         "model_ltx_quality_not_installed": "快速模式已开启：只安装了快速模型文件。",

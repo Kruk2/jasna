@@ -75,7 +75,6 @@ def test_availability_with_a_download_location(tmp_path, downloadable) -> None:
     assert state.downloadable
     assert not trial_only(state)
     assert run_unavailable_reason(state, "undistilled", False, nvidia=True, trial=False) == "model_ltx_not_downloaded"
-    assert state.download_size("distilled", False) == "14.9 GB"
 
 
 def _answer(monkeypatch, yes: bool) -> list[str]:
@@ -192,17 +191,15 @@ def test_picking_a_missing_model_asks_and_reverts_on_no(tk_root, tmp_path, monke
 
     assert len(asked) == 1
     assert panel.get_settings().ltx_model == "distilled"
-    assert not section._install_status.winfo_manager()
 
 
-def test_a_missing_model_shows_its_download_size(tk_root, tmp_path, downloadable) -> None:
+def test_a_missing_downloadable_model_stays_selectable(tk_root, tmp_path, downloadable) -> None:
     panel = _panel(tk_root, ltx_models(tk_root, tmp_path / "ltx", installed=False))
     section = panel._model_section
 
     section.apply(replace(AppSettings(), restoration_model="ltx", ltx_model="undistilled"))
 
     assert section._cards["ltx"].radio.cget("state") == "normal"
-    assert section._install_status.cget("text") == t("model_ltx_download_needed", size="14.9 GB")
     assert section.unavailable_reason() == "model_ltx_not_downloaded"
 
 
@@ -268,7 +265,6 @@ def test_every_model_option_has_a_tooltip(tk_root, tmp_path, monkeypatch) -> Non
     for key, card in section._cards.items():
         assert card.radio in tips[t(f"tip_model_{key}")]
     assert section._ltx_model in tips[t("tip_ltx_model")]
-    assert section._install_status in tips[t("tip_ltx_download")]
     assert section._new_seed_btn in tips[t("tip_ltx_new_seed")]
     assert section._download_bar in tips[t("tip_ltx_download")]
     for key in ("ltx_seed", "ltx_fast", "ltx_large_canvas", "ltx_trial"):
@@ -307,7 +303,6 @@ def test_the_trial_switch_round_trips_and_skips_the_download(tk_root, tmp_path, 
 
     assert panel.get_settings().ltx_trial is True
     assert section.unavailable_reason() is None
-    assert not section._install_status.winfo_manager()
     assert section._trial_status.cget("text") == t("ltx_trial_notice")
     _pick_ltx_model(section, "distilled")
     assert asked == [] and panel.get_settings().ltx_model == "distilled"

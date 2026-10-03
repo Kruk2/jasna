@@ -235,7 +235,6 @@ KO = {
         "model_ltx_variant_not_installed": "이 모델은 설치되지 않았습니다. 설치된 모델을 사용합니다.",
         "tip_ltx_model": "비증류: 조금 더 좋음, 약 2배 느림.\n증류: 더 빠름.",
         "model_ltx_undistilled": "LTX (비증류)",
-        "model_ltx_download_needed": "설치 안 됨 ({size} 다운로드)",
         "model_ltx_not_downloaded": "다운로드되지 않았습니다. 설정에서 선택하면 다운로드됩니다.",
         "model_ltx_fast_not_installed": "빠른 모드 꺼짐: 해당 모델 파일이 설치되지 않았습니다.",
         "model_ltx_quality_not_installed": "빠른 모드 켜짐: 빠른 모델 파일만 설치되어 있습니다.",

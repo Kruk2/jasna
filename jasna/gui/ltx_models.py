@@ -34,9 +34,6 @@ class LtxInstallState:
     def usable(self, model: LtxModelName, fast: bool) -> bool:
         return self.downloadable or self.installed(model, fast)
 
-    def download_size(self, model: LtxModelName, fast: bool) -> str:
-        return download_size_text(list(self.missing[(model, fast)]))
-
 
 def read_install_state(directory: Path) -> LtxInstallState:
     return LtxInstallState(

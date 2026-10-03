@@ -236,7 +236,6 @@ EN = {
         "model_ltx_variant_not_installed": "This model isn't installed. Using the installed one.",
         "tip_ltx_model": "Undistilled: slightly better, about 2x slower.\nDistilled: faster.",
         "model_ltx_undistilled": "LTX (undistilled)",
-        "model_ltx_download_needed": "Not installed ({size} download)",
         "model_ltx_not_downloaded": "Not downloaded. Select it in settings to download.",
         "model_ltx_fast_not_installed": "Fast mode is off: its model file isn't installed.",
         "model_ltx_quality_not_installed": "Fast mode is on: only the fast model file is installed.",
