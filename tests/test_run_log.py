@@ -148,3 +148,123 @@ def test_linux_telemetry_reads_proc_and_amd_sysfs(tmp_path: Path, monkeypatch) -
     rendered = format_run_telemetry(telemetry, {"gui_pid": 7, "job": "video.mp4"})
     assert "gui_pid=7" in rendered
     assert "gpu_busy=73%" in rendered
+
+
+def test_recursive_media_scan_ignores_diagnostic_log_directory(tmp_path: Path) -> None:
+    visible = tmp_path / "video.mp4"
+    visible.touch()
+    hidden_dir = tmp_path / ".jasna-logs"
+    hidden_dir.mkdir()
+    (hidden_dir / "misleading.mp4").touch()
+
+    assert folder_media_in_processing_order(tmp_path) == [visible]
+
+
+def test_app_run_log_disabled_does_not_start_writer(monkeypatch) -> None:
+    app = _bare_app()
+
+    def unexpected_start(*_args, **_kwargs):
+        raise AssertionError("run-log writer must stay disabled")
+
+    monkeypatch.setattr(app_module.AsyncRunLog, "start", unexpected_start)
+
+    assert app._start_run_log(_run_log_settings(enabled=False), [], "output", "{stem}") is None
+    assert app._run_log is None
+    assert app._run_telemetry_sampler is None
+
+
+def test_app_run_log_lifecycle_is_bounded_and_does_not_log_secret_fields(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FakeRunLog:
+        path = tmp_path / "run.log"
+        failed = False
+        accepts_events = True
+
+        def __init__(self):
+            self.events: list[tuple[str, str]] = []
+            self.close_calls: list[float] = []
+            self.is_running = True
+
+        def enqueue(self, level: str, message: str) -> bool:
+            self.events.append((level, message))
+            return True
+
+        def close(self, timeout: float = 1.0) -> None:
+            self.close_calls.append(timeout)
+            if len(self.close_calls) > 1:
+                self.is_running = False
+
+    class FakeSampler:
+        instance = None
+
+        def __init__(self, on_log, *, is_active, context_provider):
+            self.on_log = on_log
+            self.is_active = is_active
+            self.context_provider = context_provider
+            self.started = False
+            self.stop_calls: list[float] = []
+            FakeSampler.instance = self
+
+        def start(self) -> None:
+            self.started = True
+
+        def stop(self, timeout: float = 0.5) -> None:
+            self.stop_calls.append(timeout)
+
+    run_log = FakeRunLog()
+    monkeypatch.setattr(app_module.AsyncRunLog, "start", lambda *_args, **_kwargs: run_log)
+    monkeypatch.setattr(app_module, "RunTelemetrySampler", FakeSampler)
+    app = _bare_app()
+    app._on_run_log_status = lambda *_args: None
+
+    path = app._start_run_log(
+        _run_log_settings(enabled=True),
+        [SimpleNamespace(path=tmp_path / "input.mp4")],
+        str(tmp_path),
+        "{stem}-restored",
+    )
+
+    assert path == run_log.path
+    assert app._run_log is run_log
+    assert FakeSampler.instance is app._run_telemetry_sampler
+    assert FakeSampler.instance.started
+    assert "must-not-be-logged" not in "\n".join(message for _level, message in run_log.events)
+    messages = "\n".join(message for _level, message in run_log.events)
+    if app_module.sys.platform == "win32":
+        assert "Event Viewer System log" in messages
+        assert "journalctl" not in messages
+    else:
+        assert "journalctl and pstore" in messages
+
+    app._close_run_log()
+
+    assert app._run_log is None
+    assert app._run_telemetry_sampler is None
+    assert FakeSampler.instance.stop_calls == [0.0]
+    assert run_log.close_calls == [0.0]
+    assert app._closing_run_logs == [run_log]
+
+    app._wait_for_run_log_shutdown(timeout=0.25)
+
+    assert len(run_log.close_calls) == 2
+    assert 0.0 <= run_log.close_calls[-1] <= 0.25
+    assert not run_log.is_running
+    assert app._closing_run_logs == []
+
+
+def test_app_run_log_start_failure_is_fail_open(monkeypatch) -> None:
+    statuses: list[tuple[str, str]] = []
+    app = _bare_app()
+    app._on_run_log_status = lambda *item: statuses.append(item)
+    monkeypatch.setattr(
+        app_module.AsyncRunLog,
+        "start",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("disk unavailable")),
+    )
+
+    assert app._start_run_log(_run_log_settings(enabled=True), [], "output", "{stem}") is None
+    assert app._run_log is None
+    assert app._run_telemetry_sampler is None
+    assert statuses == [("WARNING", "Run log unavailable: disk unavailable")]

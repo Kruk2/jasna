@@ -946,3 +946,29 @@ def test_linux_amd_isolation_is_gui_opt_in_and_video_only(monkeypatch, tmp_path)
     assert not Processor()._should_isolate_video_job(
         JobItem(path=tmp_path / "clip.mp4")
     )
+
+
+def test_gui_enables_linux_amd_isolation() -> None:
+    from jasna.gui.app import JasnaApp
+
+    app = SimpleNamespace(
+        _on_processor_progress=MagicMock(),
+        _on_processor_log=MagicMock(),
+        _on_processor_complete=MagicMock(),
+    )
+
+    JasnaApp._setup_processor(app)
+
+    assert app._processor._video_job_isolation == "linux-amd"
+
+
+def test_linux_amd_gui_skips_cuda_warmup_thread(monkeypatch) -> None:
+    import jasna.gui.app as app_module
+
+    thread = MagicMock()
+    monkeypatch.setattr(app_module, "_is_linux_amd_runtime", lambda: True)
+    monkeypatch.setattr(app_module.threading, "Thread", thread)
+
+    app_module.JasnaApp._start_cuda_warmup(SimpleNamespace())
+
+    thread.assert_not_called()

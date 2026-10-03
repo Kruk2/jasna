@@ -70,8 +70,58 @@ def test_batch_flag_rejects_unsupported_or_ambiguous_forms(custom_args: str) -> 
         split_batch_size_custom_arg(custom_args)
 
 
+@pytest.mark.parametrize(
+    ("custom_args", "expected_batch"),
+    [
+        ("", 4),
+        ("--batch-size 1", 1),
+        ("--batch-size 4", 4),
+        ("--batch-size 8", 8),
+    ],
+)
+def test_settings_panel_uses_explicit_custom_flag(
+    custom_args: str,
+    expected_batch: int,
+) -> None:
+    panel = SimpleNamespace(
+        _sections=[
+            SimpleNamespace(
+                collect=lambda: {
+                    "detection_model": "rfdetr-v6",
+                    "encoder_custom_args": custom_args,
+                }
+            )
+        ]
+    )
+
+    settings = SettingsPanel.get_settings(panel)
+
+    assert isinstance(settings, AppSettings)
+    assert settings.batch_size == expected_batch
 
 
+@pytest.mark.parametrize("batch_size", [1, 8])
+def test_processor_does_not_forward_batch_flag_to_encoder(
+    monkeypatch,
+    batch_size: int,
+) -> None:
+    from jasna.accelerator import AcceleratorVendor
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        encoder_cq=28,
+        encoder_custom_args=f"--batch-size {batch_size},preanalysis=1",
+    )
+    monkeypatch.setattr(
+        "jasna.accelerator.vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    assert processor._build_encoder_settings("hevc") == {
+        "cq": 28,
+        "preanalysis": 1,
+    }
 
 
 @pytest.mark.parametrize("batch_size", [1, 8])
@@ -88,3 +138,16 @@ def test_preset_migration_preserves_explicit_batch_flag(batch_size: int) -> None
     assert migrated["encoder_custom_args"] == (
         f"--batch-size {batch_size},rc-lookahead=16"
     )
+
+
+def test_gui_validation_reports_invalid_batch_flag(monkeypatch) -> None:
+    from jasna.gui import validation
+
+    monkeypatch.setattr(validation, "t", lambda key, **_kwargs: key)
+    errors = validation.validate_gui_start(
+        AppSettings(encoder_custom_args="--batch-size 6"),
+        [],
+        ltx_available=True,
+    )
+
+    assert "error_batch_size_custom_args" in errors

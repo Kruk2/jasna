@@ -135,12 +135,21 @@ def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, monkeypatch)
     assert minimum[-1][0] >= 899 and minimum[-1][1] >= 579
 
 
-def test_activate_static_dpi_is_a_no_op_off_windows() -> None:
+def test_activate_static_dpi_is_a_no_op_off_windows_and_linux(monkeypatch) -> None:
+    monkeypatch.setattr(scaling.sys, "platform", "darwin")
+    original = (
+        ctk.ScalingTracker.deactivate_automatic_dpi_awareness,
+        ctk.ScalingTracker.widget_scaling,
+        ctk.ScalingTracker.window_scaling,
+    )
+
     scaling.activate_static_dpi((900, 580))
 
-    assert not ctk.ScalingTracker.deactivate_automatic_dpi_awareness
-    assert ctk.ScalingTracker.widget_scaling == 1
-    assert ctk.ScalingTracker.window_scaling == 1
+    assert (
+        ctk.ScalingTracker.deactivate_automatic_dpi_awareness,
+        ctk.ScalingTracker.widget_scaling,
+        ctk.ScalingTracker.window_scaling,
+    ) == original
 
 
 def test_activate_static_dpi_windows_path(monkeypatch) -> None:
@@ -165,6 +174,69 @@ def test_activate_static_dpi_windows_path(monkeypatch) -> None:
         ctk.set_window_scaling(1.0)
 
 
+def test_linux_desktop_scaling_uses_xft_dpi(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(*args, **kwargs):
+        calls.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stdout="Xft.dpi: 192\n")
+
+    monkeypatch.setattr(scaling.subprocess, "run", fake_run)
+    monkeypatch.delenv("GDK_SCALE", raising=False)
+    monkeypatch.delenv("GDK_DPI_SCALE", raising=False)
+
+    assert scaling._linux_desktop_scaling() == 2.0
+    assert calls == [
+        ((["xrdb", "-query"],), {
+            "capture_output": True,
+            "check": False,
+            "text": True,
+            "timeout": 2,
+        }),
+    ]
+
+
+def test_linux_desktop_scaling_falls_back_to_gdk_environment(monkeypatch) -> None:
+    def unavailable(*args, **kwargs):
+        raise OSError("xrdb unavailable")
+
+    monkeypatch.setattr(scaling.subprocess, "run", unavailable)
+    monkeypatch.setenv("GDK_SCALE", "2")
+    monkeypatch.setenv("GDK_DPI_SCALE", "1.25")
+
+    assert scaling._linux_desktop_scaling() == 2.5
+
+
+@pytest.mark.parametrize(
+    ("xft_dpi", "expected"),
+    [("24", 0.5), ("768", 4.0)],
+)
+def test_linux_desktop_scaling_clamps_xft_dpi(monkeypatch, xft_dpi, expected) -> None:
+    monkeypatch.setattr(
+        scaling.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout=f"Xft.dpi: {xft_dpi}\n"
+        ),
+    )
+    monkeypatch.delenv("GDK_SCALE", raising=False)
+    monkeypatch.delenv("GDK_DPI_SCALE", raising=False)
+
+    assert scaling._linux_desktop_scaling() == expected
+
+
+def test_activate_static_dpi_linux_applies_widget_and_window_scaling(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(scaling.sys, "platform", "linux")
+    monkeypatch.setattr(scaling, "_linux_desktop_scaling", lambda: 2.0)
+    monkeypatch.setattr(ctk, "set_widget_scaling", lambda value: calls.append(("widget", value)))
+    monkeypatch.setattr(ctk, "set_window_scaling", lambda value: calls.append(("window", value)))
+
+    scaling.activate_static_dpi((900, 580))
+
+    assert calls == [("widget", 2.0), ("window", 2.0)]
+
+
 def test_scaling_helpers_are_identity_without_scaling():
     root = _root()
     try:
@@ -182,10 +254,15 @@ def test_scaling_helpers_are_identity_without_scaling():
 def test_main_window_fits_screen_at_hidpi(hidpi, monkeypatch) -> None:
     root = _root()
     try:
+        screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
+        monkeypatch.setattr(
+            scaling,
+            "screen_rect",
+            lambda _window: (0, 0, screen_w, screen_h),
+        )
         requested = _record_geometry(root, monkeypatch)
         JasnaApp._size_and_center(root)
 
-        screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
         width, height = _physical_size(requested[-1], hidpi)
         assert width <= screen_w and height <= screen_h
 
