@@ -101,6 +101,7 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 - **[Streaming](docs/en/streaming.md)** — watch restored video on the fly in your browser or through Stash.
 - **[CLI reference](docs/en/cli.md)** — every command-line option, including `--cq`, encoder settings per codec, and post-export actions.
 - **[Running from source](docs/en/development.md)** — developer setup and build notes.
+- **[Linux and Windows feature reviews](docs/en/feature_reviews.md)** — English-first guides, Chinese counterparts, prerequisites, and validation limits for the 26-feature integration.
 
 ## Benchmarks
 
