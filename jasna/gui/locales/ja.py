@@ -567,7 +567,7 @@ JA = {
         # App messages
         "error_cannot_start": "処理を開始できません:",
         "error_start_title": "開始できません",
-        "error_ltx_ranges_unavailable": "この PC では LTX を使えませんが、次の動画に LTX の範囲があります：{files}",
+        "error_ltx_ranges_unavailable": "この PC では LTX を使えません。次の動画には LTX が必要です：{files}",
         "error_post_export_command_required": "エクスポート後のカスタムコマンドが必要です",
 
         # Settings panel

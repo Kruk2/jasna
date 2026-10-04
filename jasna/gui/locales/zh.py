@@ -567,7 +567,7 @@ ZH = {
         # App messages
         "error_cannot_start": "无法开始处理：",
         "error_start_title": "无法开始",
-        "error_ltx_ranges_unavailable": "这台电脑无法运行 LTX，但这些视频含有 LTX 片段：{files}",
+        "error_ltx_ranges_unavailable": "这台电脑无法运行 LTX。这些视频需要它：{files}",
         "error_post_export_command_required": "需要填写导出后的自定义命令",
 
         # Settings panel

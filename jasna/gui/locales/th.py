@@ -567,7 +567,7 @@ TH = {
         # App messages
         "error_cannot_start": "ไม่สามารถเริ่มประมวลผล:",
         "error_start_title": "เริ่มไม่ได้",
-        "error_ltx_ranges_unavailable": "PC เครื่องนี้ใช้ LTX ไม่ได้ แต่วิดีโอเหล่านี้มีช่วง LTX: {files}",
+        "error_ltx_ranges_unavailable": "PC เครื่องนี้ใช้ LTX ไม่ได้ วิดีโอเหล่านี้ต้องใช้ LTX: {files}",
         "error_post_export_command_required": "ต้องระบุคำสั่งกำหนดเองหลังส่งออก",
 
         # Settings panel

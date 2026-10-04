@@ -567,7 +567,7 @@ EN = {
         # App messages
         "error_cannot_start": "Cannot start processing:",
         "error_start_title": "Can't start",
-        "error_ltx_ranges_unavailable": "LTX can't run on this PC, but these videos have LTX ranges: {files}",
+        "error_ltx_ranges_unavailable": "LTX can't run on this PC. These videos need it: {files}",
         "error_post_export_command_required": "Custom post-export command is required",
 
         # Settings panel

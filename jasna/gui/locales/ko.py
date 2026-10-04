@@ -567,7 +567,7 @@ KO = {
         # App messages
         "error_cannot_start": "처리를 시작할 수 없습니다:",
         "error_start_title": "시작할 수 없음",
-        "error_ltx_ranges_unavailable": "이 PC에서는 LTX를 실행할 수 없지만 다음 영상에 LTX 구간이 있습니다: {files}",
+        "error_ltx_ranges_unavailable": "이 PC에서는 LTX를 실행할 수 없습니다. 다음 영상에는 LTX가 필요합니다: {files}",
         "error_post_export_command_required": "내보내기 후 사용자 정의 명령이 필요합니다",
 
         # Settings panel
