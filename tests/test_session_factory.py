@@ -241,6 +241,28 @@ def test_ltx_auto_split_is_off_without_the_setting_or_for_basicvsrpp(overrides) 
     scan.assert_not_called()
 
 
+def test_ltx_auto_split_rejects_vr_side_by_side_before_scanning() -> None:
+    from fractions import Fraction
+
+    from jasna.media.probe import UnsupportedVideoError
+    from jasna.session_factory import ltx_auto_split
+
+    config = session_config(restoration_model_name="ltx", ltx_auto_split_percent=12.0, vr_mode="sbs")
+    metadata = MagicMock(
+        codec_name="hevc", duration=6.0, video_width=3840, video_height=1920, sample_aspect_ratio=Fraction(1, 1)
+    )
+    with (
+        patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
+        patch("jasna.media.splice.validate_smart_render"),
+        patch("jasna.media.splice.probe_keyframes") as keyframes,
+        patch("jasna.mosaic_scan.scan_mosaic_sizes") as scan,
+        pytest.raises(UnsupportedVideoError, match="VR180 side-by-side"),
+    ):
+        ltx_auto_split(config, MagicMock(), Path("in.mp4"), Path("out.mp4"), progress_callback=None)
+    keyframes.assert_not_called()
+    scan.assert_not_called()
+
+
 def test_ltx_auto_split_falls_back_to_the_whole_video(caplog) -> None:
     from jasna.media.splice import SmartRenderCompatibilityError
 

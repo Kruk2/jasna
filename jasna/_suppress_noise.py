@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from importlib.util import find_spec
 import logging
+import sys
+from types import ModuleType
 import warnings
 
 import av
@@ -24,6 +26,23 @@ def _add_message_drop_filter(logger_name: str, *needles: str) -> None:
             return not any(n in message for n in needles)
 
     logging.getLogger(logger_name).addFilter(_Drop())
+
+
+def _tensorrt_proxy_getattr(self, name: str):
+    return getattr(self._target_module, name)
+
+
+class _QuietTensorRTProxyFinder:
+    """torch_tensorrt replaces ``sys.modules["tensorrt"]`` with a proxy whose ``__getattr__``
+    prints every missing attribute, and Inductor probes it while hashing compiled graphs.
+    At the first import after the proxy appears, swap in a ``__getattr__`` that only raises."""
+
+    def find_spec(self, fullname, path, target=None):
+        proxy_class = type(sys.modules.get("tensorrt"))
+        if issubclass(proxy_class, ModuleType) and proxy_class is not ModuleType:
+            proxy_class.__getattr__ = _tensorrt_proxy_getattr
+            sys.meta_path = [finder for finder in sys.meta_path if finder is not self]
+        return None
 
 
 def install() -> None:
@@ -108,3 +127,4 @@ def install() -> None:
         return _original_trt_log(self, severity, msg)
 
     trt.Logger.log = _trt_log_without_plugin_experimental
+    sys.meta_path.insert(0, _QuietTensorRTProxyFinder())

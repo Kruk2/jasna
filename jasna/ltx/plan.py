@@ -24,7 +24,7 @@ import numpy as np
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES, Box, CropFrame, lada_crop_boxes, letterbox, track_camera
 from jasna.tracking.clip_tracker import compute_iou_matrix
 
-Polygon = list[list[float]]
+Polygon = np.ndarray
 
 WINDOW_HOP = 88
 TEMPORAL_SCALE = 8
@@ -42,7 +42,8 @@ FEATHER_FRACTION = 0.028
 
 @dataclass(frozen=True)
 class Region:
-    """One detected mosaic: model box and the traced outline of its dilated mask."""
+    """One detected mosaic: model box and the traced outline of its dilated mask, ``(N, 2)``
+    int32 points (float64 once mapped onto a gap frame)."""
 
     box: Box
     polygon: Polygon
@@ -56,9 +57,9 @@ class RegionGroup:
     @functools.cached_property
     def extent(self) -> Box:
         """Bounds of the polygon points."""
-        points = np.asarray([point for polygon in self.polygons for point in polygon], dtype=np.float64)
-        if not len(points):
+        if not self.polygons:
             raise ValueError("a tracked frame carries no polygon")
+        points = np.concatenate(self.polygons)
         x1, y1 = points.min(axis=0)
         x2, y2 = points.max(axis=0)
         return float(x1), float(y1), float(x2), float(y2)
@@ -405,10 +406,8 @@ def handover_presence(frames: int, lead_in: int, lead_out: int) -> tuple[float, 
 def _affine_polygons(polygons: Sequence[Polygon], source: Box, target: Box) -> tuple[Polygon, ...]:
     scale_x = (target[2] - target[0]) / max(source[2] - source[0], 1e-6)
     scale_y = (target[3] - target[1]) / max(source[3] - source[1], 1e-6)
-    return tuple(
-        [[target[0] + (x - source[0]) * scale_x, target[1] + (y - source[1]) * scale_y] for x, y in polygon]
-        for polygon in polygons
-    )
+    scale = np.array((scale_x, scale_y))
+    return tuple(np.array(target[:2]) + (polygon - np.array(source[:2])) * scale for polygon in polygons)
 
 
 def filled_frames(track: Track) -> dict[int, RegionGroup]:

@@ -250,11 +250,11 @@ EN = {
         "model_ltx_needs_nvidia": "Needs an NVIDIA GPU",
         "model_ltx_not_installed": "The LTX model isn't on this PC.",
         "ltx_model": "Model",
-        "ltx_model_distilled": "Distilled (faster)",
-        "ltx_model_undistilled": "Undistilled (slightly better, slower)",
+        "ltx_model_distilled": "Standard (faster)",
+        "ltx_model_undistilled": "Best (slower)",
         "model_ltx_variant_not_installed": "That model isn't on this PC, so the one you have is selected.",
-        "tip_ltx_model": "Undistilled: slightly better, about 2x slower.\nDistilled: faster.",
-        "model_ltx_undistilled": "LTX (undistilled)",
+        "tip_ltx_model": "Best: slightly better, about 1.5x slower.\nStandard: faster.",
+        "model_ltx_undistilled": "LTX (best)",
         "model_ltx_not_downloaded": "LTX model not downloaded yet. Press ▶ in the main window to download it.",
         "model_ltx_fast_not_installed": "The Fast mode model isn't on this PC, so Fast mode was turned off.",
         "model_ltx_quality_not_installed": "Only the Fast mode model is on this PC, so Fast mode was turned on.",
@@ -510,7 +510,7 @@ EN = {
         "tip_ltx_trial": "Runs LTX without the model files to test speed.\nOutput is not restored.",
         "tip_model_basicvsrpp": "Default model. Fast and works well on most videos.",
         "tip_model_ltx": "Best quality, but much slower.\nNeeds an NVIDIA RTX GPU. RTX 40 or 50 recommended.",
-        "tip_model_ltx_undistilled": "Undistilled LTX model: slightly better, slower.",
+        "tip_model_ltx_undistilled": "Best LTX model: slightly better, slower.",
         "tip_segments_restore_with": "Model used for this range.",
         "tip_segments_seed_cancel": "Stop this seed preview.",
         "tip_segments_seed_use": "Use this seed for this range.",
@@ -566,7 +566,7 @@ EN = {
         # App messages
         "error_cannot_start": "Cannot start processing:",
         "error_start_title": "Can't start",
-        "error_ltx_ranges_unavailable": "LTX can't run on this PC, but these videos have LTX ranges: {files}",
+        "error_ltx_ranges_unavailable": "LTX can't run on this PC. These videos need it: {files}",
         "error_post_export_command_required": "Custom post-export command is required",
 
         # Settings panel

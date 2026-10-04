@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from jasna.media.probe import UnsupportedVideoError
 from jasna.mosaic.detections import Detections
 
 log = logging.getLogger(__name__)
@@ -183,6 +184,11 @@ def resolve_vr_mode(
     else:
         log.info(message)
     return result
+
+
+def require_ltx_input(resolution: VrModeResolution) -> None:
+    if resolution.is_sbs:
+        raise UnsupportedVideoError("LTX does not support VR180 side-by-side video; restore it with BasicVSR++")
 
 
 class SbsDetectionAdapter:

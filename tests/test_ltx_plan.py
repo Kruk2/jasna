@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import torch
 
 from jasna.ltx.camera import PLAN_CANVAS, ZOOM_PER_WINDOW, letterbox, track_camera, zoom_crop_sides
 from jasna.ltx.plan import (
@@ -24,11 +25,12 @@ from jasna.ltx.plan import (
     restart_cameras,
     window_starts,
 )
+from jasna.ltx.regions import trace_region
 
 
 def _square(x: float, y: float, side: float) -> Region:
     box = (x, y, x + side, y + side)
-    return Region(box=box, polygon=[[x, y], [x + side, y], [x + side, y + side], [x, y + side]])
+    return Region(box=box, polygon=np.array([[x, y], [x + side, y], [x + side, y + side], [x, y + side]], dtype=np.int32))
 
 
 def _group(x: float, y: float, side: float) -> RegionGroup:
@@ -91,7 +93,7 @@ def test_a_lasting_split_gets_its_own_camera_with_a_handover():
     assert set(piece.presence[: LEAD_IN_FRAMES - BLEND_FRAMES]) == {0.0}
     assert 0.0 < blend[0] and all(a < b for a, b in zip(blend, blend[1:])) and blend[-1] < 1.0
     assert set(piece.presence[LEAD_IN_FRAMES:]) == {1.0}
-    assert piece.polygons[0] == piece.polygons[LEAD_IN_FRAMES]
+    assert piece.polygons[0] is piece.polygons[LEAD_IN_FRAMES]
     window = piece.windows[1]
     assert window.crops[200 - window.start].side <= PLAN_CANVAS
 
@@ -190,3 +192,25 @@ def test_large_crops_use_the_large_canvas():
     capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=False)
     assert capped[0].windows[0].canvas == PLAN_CANVAS
     assert letterbox((0, 0, 900, 900), LARGE_CANVAS).resize_hw == (LARGE_CANVAS, LARGE_CANVAS)
+
+
+def test_traced_polygons_are_compact_int32_points():
+    mask = torch.zeros(16, 16)
+    mask[4:10, 5:12] = 1.0
+    region = trace_region(np.array([20.7, 16.2, 50.0, 41.9]), mask, 64, 64)
+    assert region.box == (20.0, 16.0, 50.0, 41.0)
+    assert isinstance(region.polygon, np.ndarray)
+    assert region.polygon.dtype == np.int32 and region.polygon.ndim == 2 and region.polygon.shape[1] == 2
+    assert RegionGroup(region.box, (region.polygon,)).extent == (0.0, 0.0, 63.0, 59.0)
+
+
+def test_gap_polygons_map_points_exactly_as_float64_arithmetic():
+    polygon = np.array([[3, 7], [250, 9], [101, 333]], dtype=np.int32)
+    source, target = (2.0, 5.0, 260.0, 340.0), (10.5, 3.25, 300.75, 377.0)
+    track = Track(0, {0: RegionGroup(source, (polygon,)), 2: RegionGroup((18.0, 1.5, 340.5, 413.0), (polygon,))})
+    (mapped,) = filled_frames(track)[1].polygons
+    box = tuple(a + (b - a) * 0.5 for a, b in zip(source, (18.0, 1.5, 340.5, 413.0)))
+    scale_x = (box[2] - box[0]) / (source[2] - source[0])
+    scale_y = (box[3] - box[1]) / (source[3] - source[1])
+    expected = [[box[0] + (x - source[0]) * scale_x, box[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
+    assert mapped.dtype == np.float64 and mapped.tolist() == expected

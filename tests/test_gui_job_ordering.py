@@ -76,6 +76,21 @@ class TestProcessorPullLoop:
         assert processed_ids == [jobs[0].id, jobs[1].id, jobs[2].id]
         assert all(j.status == JobStatus.COMPLETED for j in jobs)
 
+    def test_unsupported_video_is_skipped_with_its_reason_and_the_queue_continues(self):
+        from jasna.media.probe import UnsupportedVideoError
+
+        updates: list[ProgressUpdate] = []
+        p = Processor(on_progress=updates.append)
+        jobs = _make_jobs("a_vr.mp4", "b_clip.mp4")
+        reason = "LTX does not support VR180 side-by-side video; restore it with BasicVSR++"
+
+        with patch.object(p, "_run_pipeline", side_effect=[UnsupportedVideoError(reason), None]):
+            p.start(jobs, AppSettings(), output_folder="", output_pattern="{original}_restored.mp4")
+            p.join(timeout=5.0)
+
+        assert [j.status for j in jobs] == [JobStatus.SKIPPED, JobStatus.COMPLETED]
+        assert any(u.job_id == jobs[0].id and u.status is JobStatus.SKIPPED and u.message == reason for u in updates)
+
     def test_skips_removed_pending_job(self):
         processed_ids: list[int] = []
         p = Processor()

@@ -1,9 +1,11 @@
 import contextlib
 import json
 import threading
+import weakref
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -11,7 +13,7 @@ from jasna.ltx import restore
 from jasna.ltx.plan import Region
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
-MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=[[10.0, 10.0], [40.0, 10.0], [40.0, 40.0], [10.0, 40.0]])
+MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
 
 
 def _video(frames: int, mosaic: range, pts_step: int = 10) -> list[tuple[torch.Tensor, int]]:
@@ -536,3 +538,20 @@ def test_restore_spans_shows_each_pass_before_its_model_loads(fakes, monkeypatch
         cancel=threading.Event(),
     )
     assert shown_at_load == [("encoder", "encode"), ("transformer", "denoise"), ("decoder", "compose")]
+
+
+def test_restore_spans_frees_the_decoder_and_its_cached_memory_after_compose(fakes, monkeypatch, tmp_path):
+    class Decoder:
+        pass
+
+    decoders = []
+    released = []
+
+    def load_decoder(vae, tuned, device):
+        decoders.append(weakref.ref(decoder := Decoder()))
+        return decoder
+
+    monkeypatch.setattr(restore, "load_video_decoder", load_decoder)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: released.append(decoders[0]() is None if decoders else None))
+    _run_spans(tmp_path, [restore.LtxSpan(_source(_video(30, range(3, 28))), (restore.LtxSegment(50, 150, seed=1),), _Writer)])
+    assert decoders and released[-1] is True

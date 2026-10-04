@@ -38,13 +38,13 @@ def _install(directory: Path, model: str, *, fast: bool) -> None:
 
 
 @pytest.fixture(autouse=True)
-def unpublished(monkeypatch):
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", None)
+def public_source(monkeypatch):
+    monkeypatch.setattr(ltx_models_module, "protection_available", lambda: False)
 
 
 @pytest.fixture
 def downloadable(monkeypatch):
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", "https://example.invalid/ltx")
+    monkeypatch.setattr(ltx_models_module, "protection_available", lambda: True)
 
 
 def test_model_key_names_each_model_choice() -> None:
@@ -53,7 +53,7 @@ def test_model_key_names_each_model_choice() -> None:
     assert model_key("ltx", "undistilled") == "ltx_undistilled"
 
 
-def test_availability_without_a_download_location(tmp_path) -> None:
+def test_availability_without_downloads(tmp_path) -> None:
     _install(tmp_path, "distilled", fast=False)
     state = read_install_state(tmp_path)
 
@@ -69,7 +69,7 @@ def test_availability_without_a_download_location(tmp_path) -> None:
     assert run_unavailable_reason(state, "distilled", True, nvidia=False, trial=True) == "model_ltx_needs_nvidia"
 
 
-def test_availability_with_a_download_location(tmp_path, downloadable) -> None:
+def test_availability_with_downloads(tmp_path, downloadable) -> None:
     state = read_install_state(tmp_path)
 
     assert state.downloadable
@@ -131,7 +131,7 @@ def test_ensure_shows_the_download_error(tmp_path, monkeypatch, downloadable) ->
     assert not models.downloading
 
 
-def test_ensure_skips_installed_models_and_unpublished_downloads(tmp_path, monkeypatch) -> None:
+def test_ensure_skips_installed_models_and_unavailable_downloads(tmp_path, monkeypatch) -> None:
     _answer(monkeypatch, yes=True)
     _install(tmp_path, "distilled", fast=False)
     models = LtxModels(tmp_path, _NowCalls(), lambda: None)
@@ -425,7 +425,7 @@ def test_a_trial_seed_preview_never_reuses_a_real_prepared_range() -> None:
     assert prepared_key(segment, real) != prepared_key(segment, replace(real, ltx_trial=True))
 
 
-def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch) -> None:
+def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downloadable) -> None:
     from jasna.protection import LicenseError
 
     directory = tmp_path / "ltx"

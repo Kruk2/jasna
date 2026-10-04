@@ -24,7 +24,7 @@ CLI_HELP: dict[str, str] = {
     ),
     "restoration_model_name": (
         "Restoration model for video: basicvsrpp (fast), ltx (best quality, much slower; NVIDIA "
-        "RTX only) or ltx-undistilled (slightly better than ltx, about 2x slower). LTX doesn't "
+        "RTX only) or ltx-undistilled (slightly better than ltx, about 1.5x slower). LTX doesn't "
         "support VR side-by-side video, streaming, secondary restoration or denoise. A missing "
         "LTX model is offered for download. (default: %(default)s)"
     ),

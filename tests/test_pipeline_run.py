@@ -131,11 +131,22 @@ class TestPipelineColorspaceCheck:
         mock_meta.return_value = meta
         p = _make_pipeline()
 
-        from jasna.media.probe import UnsupportedColorspaceError
+        from jasna.media.probe import UnsupportedVideoError
         with pytest.raises(
-            UnsupportedColorspaceError,
+            UnsupportedVideoError,
             match="Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported",
         ):
+            p.run()
+
+    @patch("jasna.pipeline.get_video_meta_data")
+    def test_ltx_run_skips_vr_side_by_side_as_unsupported_video(self, mock_meta):
+        meta = _fake_metadata()
+        meta.video_width = 16
+        mock_meta.return_value = meta
+        p = make_pipeline(restoration_model_name="ltx", vr_mode="sbs", vr_projection="raw")
+
+        from jasna.media.probe import UnsupportedVideoError
+        with pytest.raises(UnsupportedVideoError, match="VR180 side-by-side"):
             p.run()
 
 

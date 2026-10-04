@@ -7,7 +7,7 @@ from pathlib import Path
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
 from jasna.engine_paths import default_restoration_model_path
-from jasna.media.probe import UnsupportedColorspaceError
+from jasna.media.probe import UnsupportedVideoError
 from jasna.os_utils import (
     MIN_DRIVER_VERSION,
     check_ascii_install_path,
@@ -751,7 +751,7 @@ def _run_streaming(args: argparse.Namespace, make_pipeline, input_video: Path | 
             video_path = hls_server.wait_for_video()
             try:
                 run_streaming(make_pipeline(video_path, video_path), hls_server)
-            except UnsupportedColorspaceError as e:
+            except UnsupportedVideoError as e:
                 print(f"Error: {e}")
             hls_server.unload_video()
     except KeyboardInterrupt:
@@ -781,7 +781,7 @@ def _run_videos(
             print(f"[{i}/{total}] Processing {vid.name} -> {out_path.name}")
         try:
             make_pipeline(vid, out_path).run()
-        except UnsupportedColorspaceError as e:
+        except UnsupportedVideoError as e:
             print(f"Error processing {vid.name}: {e}")
             if not in_folder:
                 sys.exit(1)
@@ -1067,7 +1067,7 @@ def main() -> None:
             _run_post_export_action()
             if not all_commands_ok:
                 sys.exit(1)
-        except UnsupportedColorspaceError as e:
+        except UnsupportedVideoError as e:
             print(f"Error: {e}")
             sys.exit(1)
         finally:

@@ -36,7 +36,7 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--restoration-model-name` | `basicvsrpp` | 動画復元モデル：`basicvsrpp`（高速）、`ltx`（より精細、かなり遅い）、`ltx-undistilled`（`ltx` より少し良く、約 2 倍遅い）。[モデルの選び方](models.md#復元モデル)を参照。 |
+| `--restoration-model-name` | `basicvsrpp` | 動画復元モデル：`basicvsrpp`（高速）、`ltx`（より精細、かなり遅い）、`ltx-undistilled`（高画質の LTX モデル：`ltx` より少し良く、約 1.5 倍遅い）。[モデルの選び方](models.md#復元モデル)を参照。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | 復元モデルの重み（LTX はフォルダー）。 |
 | `--ltx-fast` / `--no-ltx-fast` | オフ | LTX：約 1.4 倍高速、ディテールはわずかに減ります。RTX 50 シリーズのみ。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。その部分は約 3 倍遅くなります。空き VRAM が 10 GB 必要です。 |

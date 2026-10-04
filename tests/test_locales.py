@@ -9,7 +9,7 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.gui.locales import TRANSLATIONS
 from jasna.media.encoder_settings import encoder_cq_spec
 
-_FULL_LOCALES = ["zh", "ja"]
+_FULL_LOCALES = ["zh", "ja", "ko", "th"]
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 
 

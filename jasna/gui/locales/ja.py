@@ -250,11 +250,11 @@ JA = {
         "model_ltx_needs_nvidia": "NVIDIA GPU が必要",
         "model_ltx_not_installed": "この PC に LTX モデルがありません。",
         "ltx_model": "モデル",
-        "ltx_model_distilled": "蒸留（速い）",
-        "ltx_model_undistilled": "非蒸留（少し高品質・遅い）",
+        "ltx_model_distilled": "標準（速い）",
+        "ltx_model_undistilled": "高画質（遅い）",
         "model_ltx_variant_not_installed": "このモデルはこの PC にないため、あるモデルを選びました。",
-        "tip_ltx_model": "非蒸留：少し高品質、約 2 倍遅い。\n蒸留：速い。",
-        "model_ltx_undistilled": "LTX（非蒸留）",
+        "tip_ltx_model": "高画質：画質が少し良く、約 1.5 倍遅い。\n標準：速い。",
+        "model_ltx_undistilled": "LTX（高画質）",
         "model_ltx_not_downloaded": "LTX モデルはまだダウンロードされていません。メイン画面で ▶ を押すとダウンロードします。",
         "model_ltx_fast_not_installed": "高速モードのモデルがこの PC にないため、高速モードをオフにしました。",
         "model_ltx_quality_not_installed": "この PC には高速モードのモデルしかないため、高速モードをオンにしました。",
@@ -510,7 +510,7 @@ JA = {
         "tip_ltx_trial": "モデルファイルなしで LTX を動かし、速度を確認します。\n出力は復元されません。",
         "tip_model_basicvsrpp": "標準のモデル。速く、ほとんどの動画でうまく動きます。",
         "tip_model_ltx": "最高画質ですが、かなり遅くなります。\nNVIDIA RTX GPU が必要です。RTX 40／50 シリーズを推奨します。",
-        "tip_model_ltx_undistilled": "非蒸留の LTX モデル：少し高品質、遅い。",
+        "tip_model_ltx_undistilled": "高画質の LTX モデル：画質が少し良く、遅い。",
         "tip_segments_restore_with": "この範囲に使うモデル。",
         "tip_segments_seed_cancel": "このシードのプレビューを止めます。",
         "tip_segments_seed_use": "この範囲にこのシードを使います。",
@@ -566,7 +566,7 @@ JA = {
         # App messages
         "error_cannot_start": "処理を開始できません:",
         "error_start_title": "開始できません",
-        "error_ltx_ranges_unavailable": "この PC では LTX を使えませんが、次の動画に LTX の範囲があります：{files}",
+        "error_ltx_ranges_unavailable": "この PC では LTX を使えません。次の動画には LTX が必要です：{files}",
         "error_post_export_command_required": "エクスポート後のカスタムコマンドが必要です",
 
         # Settings panel

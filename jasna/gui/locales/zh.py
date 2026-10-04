@@ -250,11 +250,11 @@ ZH = {
         "model_ltx_needs_nvidia": "需要 NVIDIA 显卡",
         "model_ltx_not_installed": "此电脑上没有 LTX 模型。",
         "ltx_model": "模型",
-        "ltx_model_distilled": "蒸馏（更快）",
-        "ltx_model_undistilled": "未蒸馏（稍好，更慢）",
+        "ltx_model_distilled": "标准（更快）",
+        "ltx_model_undistilled": "最佳（更慢）",
         "model_ltx_variant_not_installed": "此电脑上没有该模型，已改用现有的模型。",
-        "tip_ltx_model": "未蒸馏：效果稍好，约慢 2 倍。\n蒸馏：更快。",
-        "model_ltx_undistilled": "LTX（未蒸馏）",
+        "tip_ltx_model": "最佳：效果稍好，约慢 1.5 倍。\n标准：更快。",
+        "model_ltx_undistilled": "LTX（最佳）",
         "model_ltx_not_downloaded": "LTX 模型尚未下载。在主窗口按 ▶ 即可下载。",
         "model_ltx_fast_not_installed": "此电脑上没有快速模式的模型，已关闭快速模式。",
         "model_ltx_quality_not_installed": "此电脑上只有快速模式的模型，已开启快速模式。",
@@ -510,7 +510,7 @@ ZH = {
         "tip_ltx_trial": "无需模型文件即可运行 LTX，用于测试速度。\n输出不会被修复。",
         "tip_model_basicvsrpp": "默认模型。速度快，适合大多数视频。",
         "tip_model_ltx": "画质最好，但慢得多。\n需要 NVIDIA RTX 显卡，推荐 RTX 40 或 50 系列。",
-        "tip_model_ltx_undistilled": "未蒸馏的 LTX 模型：效果稍好，更慢。",
+        "tip_model_ltx_undistilled": "最佳 LTX 模型：效果稍好，更慢。",
         "tip_segments_restore_with": "此片段使用的模型。",
         "tip_segments_seed_cancel": "停止此种子预览。",
         "tip_segments_seed_use": "此片段使用这个种子。",
@@ -566,7 +566,7 @@ ZH = {
         # App messages
         "error_cannot_start": "无法开始处理：",
         "error_start_title": "无法开始",
-        "error_ltx_ranges_unavailable": "这台电脑无法运行 LTX，但这些视频含有 LTX 片段：{files}",
+        "error_ltx_ranges_unavailable": "这台电脑无法运行 LTX。这些视频需要它：{files}",
         "error_post_export_command_required": "需要填写导出后的自定义命令",
 
         # Settings panel

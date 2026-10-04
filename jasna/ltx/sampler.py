@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 STG_BLOCK = 28
 ACTIVATION_RESERVE_BYTES = 3 << 30
+PINNED_CHUNK_BYTES = 64 << 20
 _ADALN_PREFIXES = ("adaln_single.", "prompt_adaln_single.")
 
 
@@ -170,44 +171,37 @@ class LtxTransformer:
     def denoise_chain(
         self, references: Sequence[torch.Tensor], seeds: Sequence[int], advance: Callable[[int], None]
     ) -> list[torch.Tensor]:
-        """Final latents ``[1, 128, F, H, W]`` of one track's windows, given each window's
+        """Final latents ``[1, 128, F, H, W]`` (on the CPU) of one track's windows, given each window's
         reference latent (the encoded mosaic crop) and noise seed. ``advance(n)`` reports n
         window-steps done."""
         frames, height, width = references[0].shape[2:]
         tokens_per_frame = height * width
-        tokens = frames * tokens_per_frame
         rope = self._rope(frames, height, width)
-        refs = [patchify(r.to(self.device, torch.bfloat16)) for r in references]
-        latents = []
-        for ref, seed in zip(refs, seeds):
-            generator = torch.Generator(device=self.device).manual_seed(int(seed))
-            noise = torch.randn(1, 2 * tokens, ref.shape[-1], device=self.device, dtype=torch.bfloat16, generator=generator)
-            latents.append(noise[:, :tokens].clone())
-        fuse_overlaps(latents, tokens_per_frame, [0.0] * len(FUSION_RAMP))
-        group = self._group_size(len(latents), 2 * tokens)
-        sigmas = self.sigmas
-        for step, cond in enumerate(self.conditions):
-            for start in range(0, len(latents), group):
-                members = range(start, min(start + group, len(latents)))
-                denoised = self._denoise(
-                    [latents[i] for i in members], [refs[i] for i in members], cond, rope, tokens_per_frame, sigmas[step]
-                )
-                for i, value in zip(members, denoised):
-                    latents[i] = _euler(latents[i], value, sigmas, step)
-                advance(len(members))
-            fuse_overlaps(latents, tokens_per_frame, FUSION_RAMP)
-        return [unpatchify(latent, frames, height, width) for latent in latents]
+
+        def denoise(inputs: list[torch.Tensor], step: int) -> list[torch.Tensor]:
+            return self._denoise(inputs, self.conditions[step], rope, tokens_per_frame, self.sigmas[step])
+
+        return denoise_windows(
+            references,
+            seeds,
+            self.sigmas,
+            steps=len(self.conditions),
+            group=self._group_size(len(references), 2 * frames * tokens_per_frame),
+            denoise=denoise,
+            advance=advance,
+            device=self.device,
+        )
 
     def _denoise(
         self,
-        latents: list[torch.Tensor],
-        refs: list[torch.Tensor],
+        inputs: list[torch.Tensor],
         cond: T.StepConditioning,
         rope: T.Rope,
         tokens_per_frame: int,
         sigma: torch.Tensor,
     ) -> list[torch.Tensor]:
-        xs = [T.embed_tokens(self.top, torch.cat([lat, ref], dim=1), tokens_per_frame) for lat, ref in zip(latents, refs)]
+        latents = [x[:, : x.shape[1] // 2] for x in inputs]
+        xs = [T.embed_tokens(self.top, x, tokens_per_frame) for x in inputs]
         perturbed: list[torch.Tensor | None] = [None] * len(xs)
         for index in range(T.NUM_BLOCKS):
             weights = self.blocks.acquire(index)
@@ -228,6 +222,81 @@ class LtxTransformer:
                 denoised = (denoised.float() + self.stg_scale * (denoised.float() - weak.float())).to(lat.dtype)
             out.append(denoised)
         return out
+
+
+def _pinned_windows(count: int, shape: tuple[int, ...]) -> list[torch.Tensor]:
+    """``count`` bf16 host tensors of ``shape`` in pinned memory, packed into chunks of
+    ``PINNED_CHUNK_BYTES`` (the pinned allocator rounds every allocation up to a power of two)."""
+    per_chunk = max(1, PINNED_CHUNK_BYTES // (math.prod(shape) * torch.bfloat16.itemsize))
+    windows: list[torch.Tensor] = []
+    for start in range(0, count, per_chunk):
+        chunk = torch.empty((min(per_chunk, count - start), *shape), dtype=torch.bfloat16, pin_memory=True)
+        windows.extend(chunk.unbind(0))
+    return windows
+
+
+class _FusedChain:
+    """Windows' latents pushed in order: each is fused on the GPU with the one before it,
+    which then goes back to its host window."""
+
+    def __init__(self, host: list[torch.Tensor], tokens: int, tokens_per_frame: int) -> None:
+        self._host = host
+        self._tokens = tokens
+        self._tokens_per_frame = tokens_per_frame
+        self._held: tuple[int, torch.Tensor] | None = None
+
+    def push(self, index: int, latent: torch.Tensor, right_weights: Sequence[float]) -> None:
+        if self._held is not None:
+            fuse_overlaps([self._held[1], latent], self._tokens_per_frame, right_weights)
+            self._store(*self._held)
+        self._held = (index, latent)
+
+    def flush(self) -> None:
+        self._store(*self._held)
+        self._held = None
+
+    def _store(self, index: int, latent: torch.Tensor) -> None:
+        self._host[index][:, : self._tokens].copy_(latent, non_blocking=True)
+
+
+def denoise_windows(
+    references: Sequence[torch.Tensor],
+    seeds: Sequence[int],
+    sigmas: torch.Tensor,
+    *,
+    steps: int,
+    group: int,
+    denoise: Callable[[list[torch.Tensor], int], list[torch.Tensor]],
+    advance: Callable[[int], None],
+    device: torch.device,
+) -> list[torch.Tensor]:
+    """Final latents of a chain of overlapping windows. Each window waits in pinned host
+    memory as ``[1, 2T, C]`` latent-then-reference tokens; only the ``group`` windows being
+    denoised are on the GPU, so a long take needs no more VRAM than a short one.
+    ``denoise(inputs, step)`` returns the denoised latents of a group's GPU inputs."""
+    frames, height, width = references[0].shape[2:]
+    tokens_per_frame = height * width
+    tokens = frames * tokens_per_frame
+    host = _pinned_windows(len(references), (1, 2 * tokens, references[0].shape[1]))
+    for window, reference in zip(host, references):
+        window[:, tokens:].copy_(patchify(reference))
+    chain = _FusedChain(host, tokens, tokens_per_frame)
+    for index, seed in enumerate(seeds):
+        generator = torch.Generator(device=device).manual_seed(int(seed))
+        noise = torch.randn(1, 2 * tokens, host[0].shape[-1], device=device, dtype=torch.bfloat16, generator=generator)
+        chain.push(index, noise[:, :tokens].clone(), [0.0] * len(FUSION_RAMP))
+    chain.flush()
+    for step in range(steps):
+        for start in range(0, len(host), group):
+            members = range(start, min(start + group, len(host)))
+            inputs = [host[i].to(device, non_blocking=True) for i in members]
+            denoised = denoise(inputs, step)
+            for i, x, value in zip(members, inputs, denoised):
+                chain.push(i, _euler(x[:, :tokens], value, sigmas, step), FUSION_RAMP)
+            advance(len(members))
+        chain.flush()
+    torch.cuda.current_stream(device).synchronize()
+    return [unpatchify(window[:, :tokens], frames, height, width) for window in host]
 
 
 def compiled_block_forward():

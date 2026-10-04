@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -122,3 +125,19 @@ def test_autotune_choice_that_exceeds_shared_memory_is_filtered() -> None:
 
     assert not logger.filter(suppressed)
     assert logger.filter(kept)
+
+
+def test_tensorrt_proxy_misses_attributes_without_printing() -> None:
+    pytest.importorskip("torch_tensorrt")
+    script = (
+        "import sys\n"
+        "from jasna._suppress_noise import install\n"
+        "install()\n"
+        "import torch_tensorrt\n"
+        "assert not hasattr(sys.modules['tensorrt'], 'torch')\n"
+        "assert sys.modules['tensorrt'].Logger is not None\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=Path(__file__).parents[1], capture_output=True, text=True, check=True
+    )
+    assert "AttributeError" not in result.stdout

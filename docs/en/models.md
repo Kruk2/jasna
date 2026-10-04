@@ -52,13 +52,13 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - The time depends on how long mosaics are on screen, not on the length of
   the video. The first run takes longer while Jasna prepares LTX for your GPU.
 - The model is not bundled: about 15 GB (about 9 GB for Fast mode). Jasna
-  asks before downloading it once the download is available. If Hugging
-  Face is blocked (for example in China), it downloads from hf-mirror.com.
+  asks before downloading it. If Hugging Face is blocked (for example in
+  China), it downloads from hf-mirror.com.
 
 ### LTX options
 
-- **Model**: **Distilled** (default) or **Undistilled**, which is slightly
-  better and about 2x slower (another 13 GB download). CLI:
+- **Model**: **Standard** (default) or **Best**, which is slightly better
+  and about 1.5x slower (another 13 GB download). CLI for Best:
   `--restoration-model-name ltx-undistilled`.
 - **Fast mode**: RTX 50-series only. About 1.4x faster with slightly less
   detail, and a smaller download. CLI: `--ltx-fast`.
@@ -77,8 +77,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 ### Which GPU and how long
 
 Rough time for **1 minute of 1080p video with mosaics on screen the whole
-time** (Distilled model). Scenes without mosaics are much quicker;
-Undistilled takes about twice as long.
+time** (Standard model). Scenes without mosaics are much quicker; Best
+takes about 1.5x as long.
 
 | GPU | LTX | Time | With Fast mode |
 | --- | --- | ---: | ---: |

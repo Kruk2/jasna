@@ -10,7 +10,7 @@ from typing import Callable
 
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_image_session, build_video_session, release_session_memory, video_session_config
-from jasna.media.probe import UnsupportedColorspaceError
+from jasna.media.probe import UnsupportedVideoError
 from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.progressbar import StageProgress
@@ -269,7 +269,7 @@ class Processor:
         except ProcessingStopped:
             self._mark_stopped(job)
 
-        except UnsupportedColorspaceError as e:
+        except UnsupportedVideoError as e:
             e.__traceback__ = None
             job.status = JobStatus.SKIPPED
             self._progress(ProgressUpdate(
