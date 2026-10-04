@@ -40,17 +40,18 @@ def start_license_info(on_done) -> threading.Thread:
                 identity = signing.license_identity(proof)
             except ValueError:
                 identity = None
-        return key, license_store.is_licensed(), identity
+        licensed = license_store.is_licensed() and not (identity is not None and identity.startswith("JW1-"))
+        return key, licensed, identity
 
     return _start(read, on_done)
 
 
-def start_machine_key(cloud_workspace: bool, on_done) -> threading.Thread:
+def start_machine_key(on_done) -> threading.Thread:
     def read():
         require_protection()
         from jasna.protection import machine
 
-        return machine.machine_key(cloud_workspace=cloud_workspace)
+        return machine.machine_key(cloud_workspace=False)
 
     return _start(read, on_done)
 
@@ -59,10 +60,14 @@ def start_activation(key: str, on_done) -> threading.Thread:
     def activate():
         require_protection()
         from jasna.protection import license_store, signing
+        from jasna.gui.locales import t
 
+        proof, _ = license_store._decode(key)
+        identity = signing.license_identity(proof)
+        if identity.startswith("JW1-"):
+            raise ValueError(t("license_cloud_cli_only"))
         license_store.set_license(key)
-        proof, _ = signing.decode_license(key)
-        return signing.license_identity(proof)
+        return identity
 
     return _start(activate, on_done)
 
@@ -75,7 +80,10 @@ def start_online_activation(code: str, machine_key: str, on_done) -> threading.T
     def activate():
         require_protection()
         from jasna.protection import activation, signing
+        from jasna.gui.locales import t
 
+        if machine_key.startswith("JW1-"):
+            raise ValueError(t("license_cloud_cli_only"))
         key = activation.activate_license_code(code, machine_key, prefer_hong_kong=prefer_hong_kong)
         proof, _ = signing.decode_license(key)
         return key, signing.license_identity(proof)

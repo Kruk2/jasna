@@ -23,6 +23,7 @@ def protection_api(monkeypatch):
     monkeypatch.setattr(license_store, "is_licensed", lambda: False)
     monkeypatch.setattr(license_store, "set_license", Mock())
     monkeypatch.setattr(signing, "decode_license", lambda key: (b"proof", {}))
+    monkeypatch.setattr(license_store, "_decode", lambda key: signing.decode_license(key))
     monkeypatch.setattr(signing, "license_identity", lambda proof: "JM1-" + "1" * 64, raising=False)
     return machine, license_store
 
@@ -140,7 +141,7 @@ def _wait(root, ready):
     assert ready()
 
 
-def test_dialog_copies_readonly_machine_key_and_cloud_is_explicit(root, protection_api):
+def test_dialog_copies_only_readonly_system_machine_key(root, protection_api):
     from jasna.gui.components import LicenseDialog
 
     machine, _ = protection_api
@@ -152,10 +153,8 @@ def test_dialog_copies_readonly_machine_key_and_cloud_is_explicit(root, protecti
     assert root.clipboard_get() == "JM1-" + "1" * 64
     machine.machine_key.assert_called_once_with(cloud_workspace=False)
 
-    machine.machine_key.return_value = "JW1-" + "2" * 64
-    dialog._cloud_check.toggle()
-    _wait(root, lambda: dialog._machine.get().startswith("JW1-"))
-    assert machine.machine_key.call_args.kwargs == {"cloud_workspace": True}
+    assert "_cloud_check" not in vars(dialog)
+    assert "_cloud_workspace" not in vars(dialog)
 
 
 def test_dialog_saves_only_activation_key_and_calls_ui_on_main_thread(root, protection_api):
@@ -190,8 +189,9 @@ def test_dialog_opens_activation_page_without_sending_credentials(root, protecti
     opened.assert_called_once_with(expected_url)
 
 
-def test_saved_cloud_activation_does_not_create_a_seed(root, monkeypatch, protection_api):
+def test_saved_cloud_activation_does_not_switch_gui_identity(root, monkeypatch, protection_api):
     from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
     from jasna.protection import signing
 
     machine, store = protection_api
@@ -199,10 +199,10 @@ def test_saved_cloud_activation_does_not_create_a_seed(root, monkeypatch, protec
     monkeypatch.setattr(signing, "decode_license", lambda key: (b"proof", {}))
     monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64, raising=False)
     dialog = LicenseDialog(root, on_activated=lambda: None)
-    _wait(root, lambda: dialog._machine.get().startswith("JW1-"))
-    assert dialog._cloud_workspace.get() is True
-    assert dialog._key.get() == "stored-cloud-activation"
-    machine.machine_key.assert_not_called()
+    _wait(root, lambda: dialog._machine.get().startswith("JM1-"))
+    assert dialog._status.cget("text") == t("license_cloud_cli_only")
+    assert dialog._key.get() == ""
+    machine.machine_key.assert_called_once_with(cloud_workspace=False)
 
 
 def test_activation_worker_runs_io_and_errors_off_the_main_thread(protection_api):
@@ -218,13 +218,61 @@ def test_activation_worker_runs_io_and_errors_off_the_main_thread(protection_api
     assert thread.ident != threading.get_ident()
 
 
+def test_gui_status_does_not_offer_a_saved_cloud_activation(protection_api, monkeypatch):
+    from jasna.gui.activation_worker import start_license_info
+    from jasna.protection import signing
+
+    machine, store = protection_api
+    identity = "JW1-" + "2" * 64
+    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
+    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    monkeypatch.setattr(signing, "license_identity", lambda proof: identity)
+    result = []
+    thread = start_license_info(lambda value, error: result.append((value, error)))
+    thread.join(timeout=3)
+    assert result == [(("stored-cloud-activation", False, identity), None)]
+    machine.machine_key.assert_not_called()
+    store.set_license.assert_not_called()
+
+
+def test_gui_activation_rejects_cloud_key_before_save(protection_api, monkeypatch):
+    from jasna.gui.activation_worker import start_activation
+    from jasna.gui.locales import t
+    from jasna.protection import signing
+
+    _, store = protection_api
+    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    result = []
+    thread = start_activation("cloud-activation", lambda value, error: result.append((value, error)))
+    thread.join(timeout=3)
+    assert len(result) == 1 and result[0][0] is None
+    assert str(result[0][1]) == t("license_cloud_cli_only")
+    store.set_license.assert_not_called()
+
+
+def test_gui_online_activation_rejects_cloud_identity_before_request(protection_api, monkeypatch):
+    from jasna.gui.activation_worker import start_online_activation
+    from jasna.gui.locales import t
+    from jasna.protection import activation
+
+    request = Mock()
+    monkeypatch.setattr(activation, "activate_license_code", request)
+    result = []
+    thread = start_online_activation("code", "JW1-" + "2" * 64,
+                                    lambda value, error: result.append((value, error)))
+    thread.join(timeout=3)
+    assert len(result) == 1 and result[0][0] is None
+    assert str(result[0][1]) == t("license_cloud_cli_only")
+    request.assert_not_called()
+
+
 @pytest.fixture
 def controlled_activation_workers(monkeypatch):
     from jasna.gui import activation_worker
 
     pending = SimpleNamespace(info=[], machine=[], activation=[], online=[])
     monkeypatch.setattr(activation_worker, "start_license_info", lambda done: pending.info.append(done))
-    monkeypatch.setattr(activation_worker, "start_machine_key", lambda cloud, done: pending.machine.append((cloud, done)))
+    monkeypatch.setattr(activation_worker, "start_machine_key", lambda done: pending.machine.append(done))
     monkeypatch.setattr(activation_worker, "start_activation", lambda key, done: pending.activation.append((key, done)))
     monkeypatch.setattr(activation_worker, "start_online_activation", lambda code, machine, done: pending.online.append((code, machine, done)))
     return pending
@@ -244,27 +292,22 @@ def test_dialog_serializes_machine_read_and_activation(root, controlled_activati
     dialog._activate_button.invoke()
     assert pending.activation == []
 
-    cloud, done = pending.machine.pop()
-    assert cloud is False
+    done = pending.machine.pop()
     done("JM1-" + "1" * 64, None)
     _wait(root, lambda: dialog._activate_button.cget("state") == "normal")
     dialog._activate_button.invoke()
-    assert dialog._cloud_check.cget("state") == "disabled"
-    dialog._cloud_check.toggle()
-    assert dialog._cloud_workspace.get() is False
+    assert dialog._method.cget("state") == "disabled"
     assert pending.machine == []
 
     key, done = pending.activation.pop()
     assert key == "activation"
-    done("JW1-" + "2" * 64 if error is None else None, error)
+    done("JM1-" + "1" * 64 if error is None else None, error)
     _wait(root, lambda: dialog._activate_button.cget("state") == "normal")
-    assert dialog._cloud_check.cget("state") == "normal"
+    assert dialog._method.cget("state") == "normal"
     if error is None:
-        assert dialog._cloud_workspace.get() is True
-        assert dialog._machine.get() == "JW1-" + "2" * 64
+        assert dialog._machine.get() == "JM1-" + "1" * 64
         activated.assert_called_once()
     else:
-        assert dialog._cloud_workspace.get() is False
         assert dialog._machine.get() == "JM1-" + "1" * 64
         assert "config volume unavailable" in dialog._status.cget("text")
         activated.assert_not_called()
@@ -277,15 +320,14 @@ def test_dialog_restores_controls_after_machine_read_failure(root, controlled_ac
     dialog = LicenseDialog(root, on_activated=lambda: None)
     pending.info.pop()((None, False, None), None)
     _wait(root, lambda: len(pending.machine) == 1)
-    _, done = pending.machine.pop()
+    done = pending.machine.pop()
     done(None, OSError("system identity unavailable"))
-    _wait(root, lambda: dialog._cloud_check.cget("state") == "normal")
+    _wait(root, lambda: dialog._method.cget("state") == "normal")
     assert dialog._activate_button.cget("state") == "normal"
     assert dialog._copy.cget("state") == "disabled"
     assert "system identity unavailable" in dialog._status.cget("text")
-    dialog._cloud_check.toggle()
-    assert pending.machine[0][0] is True
-    assert dialog._activate_button.cget("state") == "disabled"
+    assert pending.machine == []
+    assert dialog._online_activate_button.cget("state") == "disabled"
 
 
 def test_dialog_ignores_worker_result_after_close(root, controlled_activation_workers, caplog):
@@ -396,7 +438,7 @@ def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(roo
     dialog._code.insert(0, code)
     dialog._online_activate_button.invoke()
     assert pending.online == []
-    _, done = pending.machine.pop()
+    done = pending.machine.pop()
     identity = "JM1-" + "1" * 64
     done(identity, None)
     _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
@@ -406,9 +448,6 @@ def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(roo
     assert dialog._code.cget("state") == "disabled"
     assert dialog._key.cget("state") == "disabled"
     assert dialog._method.cget("state") == "disabled"
-    assert dialog._cloud_check.cget("state") == "disabled"
-    dialog._cloud_check.toggle()
-    assert dialog._cloud_workspace.get() is False
     dialog._activate_button.invoke()
     dialog._online_activate_button.invoke()
     assert pending.activation == [] and pending.online == [] and pending.machine == []
@@ -436,7 +475,7 @@ def test_dialog_ignores_online_result_after_close(root, controlled_activation_wo
     dialog = LicenseDialog(root, on_activated=activated)
     pending.info.pop()((None, False, None), None)
     _wait(root, lambda: len(pending.machine) == 1)
-    _, done = pending.machine.pop()
+    done = pending.machine.pop()
     identity = "JM1-" + "1" * 64
     done(identity, None)
     _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")

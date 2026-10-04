@@ -50,6 +50,8 @@ def test_license_dialog_explains_rejected_keys(monkeypatch, error_name, message_
 
     monkeypatch.setattr(license_store, "load_license", lambda: None)
     monkeypatch.setattr(license_store, "is_licensed", lambda: False)
+    monkeypatch.setattr(license_store, "_decode", lambda key: (b"JM1-" + b"1" * 64, {}))
+    monkeypatch.setattr(protection.signing, "license_identity", lambda proof: proof.decode())
     monkeypatch.setattr(license_store, "set_license", reject)
     root = _root()
     try:

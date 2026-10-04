@@ -265,7 +265,7 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | ------ | ----- |
 | `--machine-key` | マシンキーを表示して終了します。GPU や GUI の起動は不要です。 |
 | `--license-code CODE` | GPU の準備前に、公式販売者からのライセンスコードでオンラインで有効化します。処理オプションがなければ有効化して終了します。 |
-| `--cloud-workspace` | `--machine-key` または `--license-code` と併用し、クラウドワークスペースの識別情報を作成または再利用します。販売者によるライセンスコードのクラウド利用許可が必要です。 |
+| `--cloud-workspace` | `--machine-key` または `--license-code` と併用し、クラウドの識別情報を作成または再利用します。対応するコンテナー内で実行する Linux 公式版の CLI 専用で、販売者によるクラウド利用許可が必要です。 |
 | `--activation-key KEY` | このマシンのアクティベーションキーを保存します。処理オプションがなければ有効化して終了します。 |
 
 オンラインでの有効化には `--license-code` を使います。ライセンスコードとこのマシンのマシンキーだけを HTTPS で[有効化サービス](https://jasna-activation.kruk2.workers.dev)に送信します。Jasna は返された**アクティベーションキー**がこのマシン用か確認し、そのキーだけを保存します。ライセンスコードは保存しません。以後の起動や復元ではオフラインで確認し、定期的な通信は行いません。
@@ -286,7 +286,7 @@ jasna --activation-key "YOUR_ACTIVATION_KEY"
 
 `--license-code` は `--machine-key` や `--activation-key` と併用できません。`--license-code` と `--activation-key` はどちらも `--input` と `--output` と併用して、有効化後にそのまま処理できます。
 
-RunPod や Vast では、公式販売者にクラウド利用の許可を依頼し、有効化の前に設定フォルダーを永続ボリュームに保存してください。Linux では `XDG_CONFIG_HOME` が `jasna/` を置くフォルダーを指定します。オンラインか手動のどちらかを選びます:
+RunPod や Vast では、**対応するコンテナー内で Linux 公式版の CLI を実行**します。公式販売者にクラウド利用の許可を依頼し、有効化の前に設定フォルダーを永続ボリュームに保存してください。`XDG_CONFIG_HOME` が `jasna/` を置くフォルダーを指定します。オンラインか手動のどちらかを選びます:
 
 ```bash
 # オンライン

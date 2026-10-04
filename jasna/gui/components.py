@@ -196,7 +196,6 @@ class LicenseDialog(ctk.CTkToplevel):
         self._busy = True
         self._on_activated = on_activated
         self._main_thread = MainThreadCalls(self, 50)
-        self._cloud_workspace = tkinter.BooleanVar(self, value=False)
 
         self.title(t("supporter_title"))
         self.resizable(False, False)
@@ -224,15 +223,6 @@ class LicenseDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
-        self._cloud_check = ctk.CTkCheckBox(
-            outer, text=t("license_cloud_workspace"), variable=self._cloud_workspace,
-            command=self._load_machine_key, state="disabled",
-        )
-        self._cloud_check.pack(anchor="w", pady=(0, 4))
-        ctk.CTkLabel(
-            outer, text=t("license_cloud_warning"), text_color=Colors.STATUS_WARNING,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
-        ).pack(anchor="w", pady=(0, 10))
         ctk.CTkLabel(
             outer, text=t("license_machine_key"), text_color=Colors.TEXT_PRIMARY,
         ).pack(anchor="w")
@@ -337,7 +327,7 @@ class LicenseDialog(ctk.CTkToplevel):
     def _set_busy(self, busy, *, lock_inputs=False):
         self._busy = busy
         state = "disabled" if busy else "normal"
-        for widget in (self._activate_button, self._cloud_check, self._method):
+        for widget in (self._activate_button, self._method):
             widget.configure(state=state)
         for widget in (self._key, self._code):
             widget.configure(state="disabled" if busy and lock_inputs else "normal")
@@ -375,23 +365,19 @@ class LicenseDialog(ctk.CTkToplevel):
             self._load_machine_key()
             return
         key, licensed, identity = info
-        if key:
-            self._key.insert(0, key)
         if identity is not None and identity.startswith("JW1-"):
-            self._cloud_workspace.set(True)
-            self._set_machine_key(identity)
-            if not licensed:
-                self._show_error(t("license_invalid"))
+            self._show_error(t("license_cloud_cli_only"))
         else:
-            self._load_machine_key()
-        if licensed:
-            self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+            if key:
+                self._key.insert(0, key)
+            if licensed:
+                self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+        self._load_machine_key()
 
     def _load_machine_key(self):
         self._set_busy(True)
         self._set_machine_key("")
         activation_worker.start_machine_key(
-            self._cloud_workspace.get(),
             lambda key, error: self._post_result(self._machine_ready, key, error),
         )
 
@@ -469,7 +455,6 @@ class LicenseDialog(ctk.CTkToplevel):
         if error is not None:
             self._show_error(str(error))
             return
-        self._cloud_workspace.set(identity.startswith("JW1-"))
         self._set_machine_key(identity)
         self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
         self._on_activated()

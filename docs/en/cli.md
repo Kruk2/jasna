@@ -267,7 +267,7 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | ------ | ----- |
 | `--machine-key` | Print the Machine key and exit. No GPU or GUI startup is needed. |
 | `--license-code CODE` | Activate online with your official seller's License code before GPU setup. With no processing options, activate and exit. |
-| `--cloud-workspace` | Use with `--machine-key` or `--license-code` to create or reuse a cloud workspace identity. Your seller must enable it for your License code. |
+| `--cloud-workspace` | Create or reuse a cloud identity with `--machine-key` or `--license-code`. CLI only: the official Linux release must run inside a supported container, with cloud use enabled by your seller. |
 | `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
 
 For online activation, use `--license-code`. This sends only your License code and local Machine key to the [activation service](https://jasna-activation.kruk2.workers.dev) over HTTPS. Jasna checks and saves only the returned **Activation key** for this machine; it does not save your License code. Later starts and restoration check activation offline, with no periodic requests.
@@ -288,7 +288,7 @@ jasna --activation-key "YOUR_ACTIVATION_KEY"
 
 Do not combine `--license-code` with `--machine-key` or `--activation-key`. Both `--license-code` and `--activation-key` can be used with `--input` and `--output` to activate and process in one run.
 
-For RunPod or Vast, ask your official seller to enable cloud use first, then keep the config folder on a persistent volume before activating. On Linux, `XDG_CONFIG_HOME` selects the folder that contains `jasna/`. Choose online or manual activation:
+For RunPod or Vast, run the **official Linux release through the CLI inside a supported container**. Ask your official seller to enable cloud use first, then keep the config folder on a persistent volume before activating. `XDG_CONFIG_HOME` selects the folder that contains `jasna/`. Choose online or manual activation:
 
 ```bash
 # Online

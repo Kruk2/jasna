@@ -114,8 +114,8 @@ Pressing **Activate online** sends only your License code and Machine key to tha
 
 Both choices share **3 registered machines or workspaces per License code**. Retrieving the same Machine key's activation uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. Releasing a slot does not disable keys already issued to older offline versions. A key covers only the model versions you purchased.
 
-For **RunPod or Vast**, select **Cloud workspace** in either choice after your seller enables cloud use for your License code. Keep the Jasna config folder on a persistent volume; on Linux the default is `~/.config/jasna`, or `jasna/` under `XDG_CONFIG_HOME`. Host and GPU changes then reuse the same slot. Copying this folder with its Activation key transfers the workspace identity.
+Cloud activation for **RunPod or Vast** is available only through the [CLI](cli.md#activation), using the official Linux release inside a supported container.
 
 If online activation fails, select **Manual** and use the page on another connected device, or ask your official seller with your License code and Machine key. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies.
 
-If an Activation key is rejected, check the Machine key and copy the full key again; for a cloud workspace, restore the config folder from your volume. Earlier activation formats need a replacement from your official seller. License codes are sold only on Buy Me a Coffee and Unifans (kruk2).
+If an Activation key is rejected, check the Machine key and copy the full key again. Earlier activation formats need a replacement from your official seller. License codes are sold only on Buy Me a Coffee and Unifans (kruk2).
