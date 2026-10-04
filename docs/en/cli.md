@@ -2,6 +2,9 @@
 
 Jasna's CLI mirrors the GUI. `jasna --help` always shows the full, current list of options; this page adds context and examples.
 
+Official releases report startup checks on stderr before processing. `--no-progress`
+keeps only brief startup messages. The first launch after an install or update takes longer.
+
 ```bash
 # Single video
 jasna --input input.mp4 --output output.mkv
@@ -268,6 +271,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
 
 For online activation, use `--license-code`. This sends only your License code and local Machine key to the [activation service](https://jasna-activation.kruk2.workers.dev) over HTTPS. Jasna checks and saves only the returned **Activation key** for this machine; it does not save your License code. Later starts and restoration check activation offline, with no periodic requests.
+
+If that address cannot be reached, Jasna tries the [Hong Kong service](https://47.238.135.110). Chinese language settings prefer Hong Kong first. Both addresses share your License code and three device slots.
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"

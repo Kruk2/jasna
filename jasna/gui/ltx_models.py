@@ -9,6 +9,7 @@ from jasna.gui.locales import get_locale, t
 from jasna.gui.queues import MainThreadCalls
 from jasna.ltx import model_files
 from jasna.ltx.model_files import LTX_MODELS, DownloadableFile, download_size_text
+from jasna.license_api import protection_available
 from jasna.session_config import LtxModelName
 
 Variant = tuple[LtxModelName, bool]
@@ -34,9 +35,6 @@ class LtxInstallState:
     def usable(self, model: LtxModelName, fast: bool) -> bool:
         return self.downloadable or self.installed(model, fast)
 
-    def download_size(self, model: LtxModelName, fast: bool) -> str:
-        return download_size_text(list(self.missing[(model, fast)]))
-
 
 def read_install_state(directory: Path) -> LtxInstallState:
     return LtxInstallState(
@@ -45,7 +43,7 @@ def read_install_state(directory: Path) -> LtxInstallState:
             for model in LTX_MODELS
             for fast in (False, True)
         },
-        model_files.LTX_DOWNLOAD_URL is not None,
+        model_files.LTX_DOWNLOAD_URL is not None and protection_available(),
     )
 
 
@@ -74,6 +72,8 @@ def run_unavailable_reason(
 def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
     """Whether the installed ``model`` needs a license this PC lacks. Verifies the stored
     license only; reads no model data."""
+    if not protection_available():
+        return not all((directory / name).is_file() for name in model_files.bundle_names(model, fast=fast))
     from jasna.protection import ProtectionError
 
     try:

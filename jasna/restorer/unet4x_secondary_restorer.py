@@ -13,7 +13,7 @@ from jasna.engine_paths import (
     get_unet4x_encrypted_engine_path,
     get_unet4x_engine_path,
 )
-from jasna.protection import ProtectionError
+from jasna.license_api import require_protection
 from jasna.trt.trt_runner import TrtRunner
 
 logger = logging.getLogger(__name__)
@@ -43,7 +43,8 @@ def compile_unet4x_engine(
             UNET4X_ONNX_PATH, device, batch_size=None, fp16=bool(fp16), workspace_gb=20,
         )
 
-    from jasna.protection import protected_model
+    require_protection()
+    from jasna.protection import ProtectionError, protected_model
     from jasna.trt import compile_onnx_bytes_to_encrypted_engine
 
     engine_path = get_unet4x_encrypted_engine_path(fp16=bool(fp16))
@@ -91,13 +92,14 @@ class Unet4xSecondaryRestorer:
                 self.engine_path, input_shapes=UNET4X_INPUT_SHAPES, device=self.device,
             )
         else:
+            require_protection()
             self.engine_path = get_unet4x_encrypted_engine_path(fp16=self.fp16)
             if not self.engine_path.exists():
                 raise FileNotFoundError(
                     f"Unet4x engine not found: {self.engine_path}. "
                     "Run engine compilation first via ensure_engines_compiled()."
                 )
-            from jasna.protection import protected_model
+            from jasna.protection import ProtectionError, protected_model
             try:
                 engine_bytes = protected_model.decrypt_engine_bytes(UNET4X_MODEL_ID, self.engine_path.read_bytes())
             except ProtectionError:

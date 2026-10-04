@@ -101,8 +101,6 @@ class RestorationModelSection:
         self._download_label.pack(fill="x")
         self._download_bar = ctk.CTkProgressBar(self._download_row, progress_color=Colors.PRIMARY, fg_color=Colors.BG_CARD)
         self._download_bar.pack(fill="x", pady=(2, 0))
-        for widget in (self._download_label, self._download_bar):
-            Tooltip(widget, get_tooltip("ltx_download"))
 
         self._ltx_options = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
         model_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
@@ -123,11 +121,6 @@ class RestorationModelSection:
         self._ltx_model.pack(side="right", padx=12, pady=8)
         Tooltip(self._ltx_model, get_tooltip("ltx_model"))
         self._set_ltx_model(LTX_DEFAULT_MODEL)
-        self._model_row = model_row
-        self._install_status = ctk.CTkLabel(
-            self._ltx_options, text="", text_color=Colors.STATUS_WARNING, font=(Fonts.FAMILY, Fonts.SIZE_SMALL), anchor="e"
-        )
-        Tooltip(self._install_status, get_tooltip("ltx_download"))
 
         seed_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         seed_row.pack(fill="x")
@@ -354,12 +347,6 @@ class RestorationModelSection:
             self._trial_status.pack(fill="x", padx=12, pady=(0, 8), after=self._trial_row)
         else:
             self._trial_status.pack_forget()
-        model, fast = self._ltx_model.get_value(), self._fast()
-        if not self._trial() and not state.installed(model, fast) and state.downloadable:
-            self._install_status.configure(text=t("model_ltx_download_needed", size=state.download_size(model, fast)))
-            self._install_status.pack(fill="x", padx=12, pady=(0, 4), after=self._model_row)
-        else:
-            self._install_status.pack_forget()
 
     def _usable_model(self) -> str:
         """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed

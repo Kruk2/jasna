@@ -3,9 +3,11 @@
 This page is for developers. To just use Jasna, download a release package: it
 bundles its own Python/Tk runtime, `ffmpeg` and `ffprobe`.
 
-The public checkout has no protection module: free models work from source,
-supporter-only models such as **unet-4x** and **SD 1.5 image restoration** do
-not.
+The public checkout runs the GUI, CLI and free **BasicVSR++** without the private
+protection module. Activation and encrypted **unet-4x**, **SD 1.5** and **LTX**
+models require the official release. LTX trial mode uses random weights and
+does not restore videos. A missing private module disables activation; errors
+inside an installed module still report a failure.
 
 ## Requirements
 

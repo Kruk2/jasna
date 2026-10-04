@@ -3,6 +3,11 @@
 A tour of the app — including the small features that are easy to miss.
 Every setting has a tooltip: hover the ⓘ icon next to it.
 
+A loading window shows the installation check before the interface opens.
+The first launch after an install or update takes longer. Startup errors stay visible;
+use a local NTFS disk on Windows, or an ext4, Btrfs or XFS disk on Linux.
+Network disks are unsupported.
+
 ## The queue
 
 - Add videos or images with the **Add Files** button (the folder icon next

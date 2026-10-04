@@ -4,6 +4,8 @@ import threading
 from collections.abc import Callable
 from typing import TypeVar
 
+from jasna.license_api import protection_available, require_protection
+
 Result = TypeVar("Result")
 
 
@@ -26,6 +28,8 @@ def _start(
 
 def start_license_info(on_done) -> threading.Thread:
     def read():
+        if not protection_available():
+            return None, False, None
         from jasna.protection import license_store, signing
 
         key = license_store.load_license()
@@ -43,6 +47,7 @@ def start_license_info(on_done) -> threading.Thread:
 
 def start_machine_key(cloud_workspace: bool, on_done) -> threading.Thread:
     def read():
+        require_protection()
         from jasna.protection import machine
 
         return machine.machine_key(cloud_workspace=cloud_workspace)
@@ -52,6 +57,7 @@ def start_machine_key(cloud_workspace: bool, on_done) -> threading.Thread:
 
 def start_activation(key: str, on_done) -> threading.Thread:
     def activate():
+        require_protection()
         from jasna.protection import license_store, signing
 
         license_store.set_license(key)
@@ -62,10 +68,15 @@ def start_activation(key: str, on_done) -> threading.Thread:
 
 
 def start_online_activation(code: str, machine_key: str, on_done) -> threading.Thread:
+    from jasna.gui.locales import get_locale
+
+    prefer_hong_kong = get_locale().current_language == "zh"
+
     def activate():
+        require_protection()
         from jasna.protection import activation, signing
 
-        key = activation.activate_license_code(code, machine_key)
+        key = activation.activate_license_code(code, machine_key, prefer_hong_kong=prefer_hong_kong)
         proof, _ = signing.decode_license(key)
         return key, signing.license_identity(proof)
 

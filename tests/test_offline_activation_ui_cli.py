@@ -13,9 +13,11 @@ import pytest
 @pytest.fixture
 def protection_api(monkeypatch):
     from jasna import protection
+    from jasna.gui.locales import get_locale
     from jasna.protection import license_store, signing
 
     machine = SimpleNamespace(machine_key=Mock(return_value="JM1-" + "1" * 64))
+    monkeypatch.setattr(get_locale(), "_current_lang", "en")
     monkeypatch.setattr(protection, "machine", machine, raising=False)
     monkeypatch.setattr(license_store, "load_license", lambda: None)
     monkeypatch.setattr(license_store, "is_licensed", lambda: False)
@@ -170,15 +172,22 @@ def test_dialog_saves_only_activation_key_and_calls_ui_on_main_thread(root, prot
     assert callback_threads == [threading.get_ident()]
 
 
-def test_dialog_opens_activation_page_without_sending_credentials(root, protection_api, monkeypatch):
+@pytest.mark.parametrize("language,expected_url", [
+    ("en", "https://jasna-activation.kruk2.workers.dev"),
+    ("zh", "https://47.238.135.110"),
+    ("ja", "https://jasna-activation.kruk2.workers.dev"),
+])
+def test_dialog_opens_activation_page_without_sending_credentials(root, protection_api, monkeypatch, language, expected_url):
     from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import get_locale
 
+    monkeypatch.setattr(get_locale(), "_current_lang", language)
     opened = Mock()
     monkeypatch.setattr("jasna.gui.components.webbrowser.open", opened)
     dialog = LicenseDialog(root, on_activated=lambda: None)
     dialog._key.insert(0, "private-activation")
     dialog._activation_page_button.invoke()
-    opened.assert_called_once_with("https://jasna-activation.kruk2.workers.dev")
+    opened.assert_called_once_with(expected_url)
 
 
 def test_saved_cloud_activation_does_not_create_a_seed(root, monkeypatch, protection_api):
@@ -293,11 +302,14 @@ def test_dialog_ignores_worker_result_after_close(root, controlled_activation_wo
 
 
 @pytest.mark.parametrize("cloud", [False, True])
-def test_cli_online_activation_exits_before_gpu_setup(monkeypatch, protection_api, capsys, cloud):
+@pytest.mark.parametrize("language,prefer_hong_kong", [("en", False), ("zh", True)])
+def test_cli_online_activation_exits_before_gpu_setup(monkeypatch, protection_api, capsys, cloud, language, prefer_hong_kong):
     from jasna import main
+    from jasna.gui.locales import get_locale
     from jasna.protection import activation
 
     machine, _ = protection_api
+    monkeypatch.setattr(get_locale(), "_current_lang", language)
     request = Mock(return_value="private-returned-key")
     monkeypatch.setattr(activation, "activate_license_code", request)
     monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
@@ -306,7 +318,7 @@ def test_cli_online_activation_exits_before_gpu_setup(monkeypatch, protection_ap
     monkeypatch.setattr(sys, "argv", ["jasna", "--license-code", code] + (["--cloud-workspace"] if cloud else []))
     main.main()
     machine.machine_key.assert_called_once_with(cloud_workspace=cloud)
-    request.assert_called_once_with(code, "JM1-" + "1" * 64)
+    request.assert_called_once_with(code, "JM1-" + "1" * 64, prefer_hong_kong=prefer_hong_kong)
     output = capsys.readouterr()
     assert "Jasna activated" in output.out
     assert code not in output.out + output.err
@@ -325,7 +337,7 @@ def test_cli_online_activation_is_saved_before_processing(monkeypatch, protectio
     ])
 
     def stop_before_gpu(args):
-        request.assert_called_once_with(code, "JM1-" + "1" * 64)
+        request.assert_called_once_with(code, "JM1-" + "1" * 64, prefer_hong_kong=False)
         raise RuntimeError("saved before processing")
 
     monkeypatch.setattr(main, "_check_system", stop_before_gpu)
@@ -438,20 +450,23 @@ def test_dialog_ignores_online_result_after_close(root, controlled_activation_wo
     assert "closed activation dialog" in caplog.text
 
 
-def test_online_worker_runs_network_off_tk_thread(protection_api, monkeypatch):
+@pytest.mark.parametrize("language,prefer_hong_kong", [("en", False), ("zh", True), ("ja", False)])
+def test_online_worker_runs_network_off_tk_thread(protection_api, monkeypatch, language, prefer_hong_kong):
     from jasna.gui.activation_worker import start_online_activation
+    from jasna.gui.locales import get_locale
     from jasna.protection import activation
 
     network_threads, results = [], []
+    monkeypatch.setattr(get_locale(), "_current_lang", language)
 
-    def request(code, machine_key):
-        network_threads.append(threading.get_ident())
+    def request(code, machine_key, *, prefer_hong_kong):
+        network_threads.append((threading.get_ident(), prefer_hong_kong))
         return "returned-activation"
 
     monkeypatch.setattr(activation, "activate_license_code", request)
     thread = start_online_activation("code", "JM1-" + "1" * 64,
         lambda value, error: results.append((value, error, threading.get_ident())))
     thread.join(timeout=3)
-    assert network_threads == [thread.ident]
+    assert network_threads == [(thread.ident, prefer_hong_kong)]
     assert thread.ident != threading.get_ident()
     assert results == [(("returned-activation", "JM1-" + "1" * 64), None, thread.ident)]

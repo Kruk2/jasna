@@ -2,6 +2,9 @@
 
 Jasna の CLI は GUI と同じ機能を提供します。`jasna --help` で常に最新の全オプション一覧を表示できます。このページは補足とサンプルを提供します。
 
+公式リリースは処理前の起動確認を標準エラー出力に表示します。`--no-progress` では
+短い起動メッセージだけを表示します。インストールや更新後の初回起動には時間がかかります。
+
 ```bash
 # Single video
 jasna --input input.mp4 --output output.mkv
@@ -266,6 +269,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | `--activation-key KEY` | このマシンのアクティベーションキーを保存します。処理オプションがなければ有効化して終了します。 |
 
 オンラインでの有効化には `--license-code` を使います。ライセンスコードとこのマシンのマシンキーだけを HTTPS で[有効化サービス](https://jasna-activation.kruk2.workers.dev)に送信します。Jasna は返された**アクティベーションキー**がこのマシン用か確認し、そのキーだけを保存します。ライセンスコードは保存しません。以後の起動や復元ではオフラインで確認し、定期的な通信は行いません。
+
+接続できない場合は[香港のサービス](https://47.238.135.110)を試します。Jasna の言語が中国語の場合は香港を先に試します。どちらも同じライセンスコードと 3 台分の枠を使います。
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"

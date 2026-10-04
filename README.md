@@ -64,6 +64,10 @@ Jasna manages VRAM automatically: when it runs low, waiting frames are temporari
    - Linux AMD: run `run_jasna_amd.sh`.
 4. Add a video or image, choose settings, and start processing.
 
+On Windows, keep Jasna on a local NTFS disk; on Linux, use ext4, Btrfs or XFS.
+A loading window shows the
+installation check before the interface opens; the first launch takes longer.
+
 Every setting in the GUI has a tooltip — hover the ⓘ icon next to it. The
 [GUI guide](docs/en/gui.md) tours the rest: full-queue reruns, queue
 pages and reordering, media actions, player shortcuts, presets, output patterns, and more.
@@ -100,8 +104,11 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 - **[Tuning VRAM and GPU usage](docs/en/tuning.md)** — clip size, temporal overlap, model compilation, and what to do when VRAM runs out.
 - **[Advanced processing](docs/en/advanced_processing.md)** — denoising, 60→30 FPS export, color LUTs, sharpening, literal encoder CQ controls, custom encoder settings, and queue-wide or per-video post-export actions.
 - **[Streaming](docs/en/streaming.md)** — watch restored video on the fly in your browser or through Stash.
+- **[Cloud GPUs](docs/en/cloud.md)** — use Jasna on a rented GPU (RunPod, Vast, Docker).
 - **[CLI reference](docs/en/cli.md)** — every command-line option, including `--cq`, encoder settings per codec, and post-export actions.
 - **[Running from source](docs/en/development.md)** — developer setup and build notes.
+
+Free BasicVSR++ works from source without the private protection module. Activation and encrypted paid models require the official release.
 
 ## Benchmarks
 
@@ -175,9 +182,11 @@ How to activate:
 
 Jasna sends only your License code and Machine key to that service over HTTPS when you press **Activate online**. It checks and saves only the returned Activation key for this machine; your License code is not saved, and later starts and restoration check activation offline without periodic requests.
 
+If the service cannot be reached, Jasna tries the [Hong Kong activation page](https://47.238.135.110). With Chinese selected as Jasna's language, Hong Kong is tried first. Both addresses use the same License code and three device slots.
+
 Both methods share **3 machines or workspaces per License code**. Reusing a Machine key uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.
 
-For **RunPod or Vast**, select **Cloud workspace** in either choice only after your seller enables it for your License code. Keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity.
+For **RunPod or Vast**, select **Cloud workspace** in either choice only after your seller enables it for your License code. Keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity. Commands: [Cloud GPUs](docs/en/cloud.md).
 
 If online activation fails, use **Manual** from another connected device or send your License code and Machine key to your official seller. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies. Earlier activation formats need replacement; old keys still work with compatible older Jasna versions.
 

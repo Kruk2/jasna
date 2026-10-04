@@ -2,6 +2,9 @@
 
 Jasna 的 CLI 与 GUI 功能一致。`jasna --help` 始终显示完整的最新选项列表；本页补充说明和示例。
 
+官方发行版会在处理前向标准错误输出显示启动检查。`--no-progress` 只保留
+简短的启动消息。安装或更新后的首次启动需要更长时间。
+
 ```bash
 # Single video
 jasna --input input.mp4 --output output.mkv
@@ -258,6 +261,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | `--activation-key KEY` | 保存本机的激活密钥。未指定处理选项时，激活后退出。 |
 
 在线激活使用 `--license-code`，仅通过 HTTPS 向[激活服务](https://jasna-activation.kruk2.workers.dev)发送许可证码和本机的机器密钥。Jasna 确认返回的**激活密钥**适用于本机后，只保存此密钥，不保存许可证码。之后启动和修复时离线验证激活，不会定期联网检查。
+
+Jasna 语言设为中文时优先使用[香港服务](https://47.238.135.110)，其他语言优先使用原服务。无法连接时会尝试另一个地址。两个地址共用许可证码和 3 个设备名额。
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
