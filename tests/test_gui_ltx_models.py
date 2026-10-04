@@ -425,7 +425,7 @@ def test_a_trial_seed_preview_never_reuses_a_real_prepared_range() -> None:
     assert prepared_key(segment, real) != prepared_key(segment, replace(real, ltx_trial=True))
 
 
-def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch) -> None:
+def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downloadable) -> None:
     from jasna.protection import LicenseError
 
     directory = tmp_path / "ltx"
