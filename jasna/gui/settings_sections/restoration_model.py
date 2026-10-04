@@ -101,8 +101,6 @@ class RestorationModelSection:
         self._download_label.pack(fill="x")
         self._download_bar = ctk.CTkProgressBar(self._download_row, progress_color=Colors.PRIMARY, fg_color=Colors.BG_CARD)
         self._download_bar.pack(fill="x", pady=(2, 0))
-        for widget in (self._download_label, self._download_bar):
-            Tooltip(widget, get_tooltip("ltx_download"))
 
         self._ltx_options = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
         model_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
