@@ -9,7 +9,7 @@ from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
-from jasna.protection.activation import activation_urls
+from jasna.license_api import protection_available
 
 logger = logging.getLogger(__name__)
 
@@ -303,7 +303,7 @@ class LicenseDialog(ctk.CTkToplevel):
         self._activate_button.pack(side="left")
         self._activation_page_button = ctk.CTkButton(
             action, text=t("license_activation_page"), width=180,
-            command=lambda: webbrowser.open(activation_urls(get_locale().current_language == "zh")[0]),
+            command=self._open_activation_page,
         )
         self._activation_page_button.pack(side="left", padx=(12, 0))
         self._status = ctk.CTkLabel(
@@ -311,11 +311,21 @@ class LicenseDialog(ctk.CTkToplevel):
             wraplength=460, justify="left",
         )
         self._status.pack(anchor="w", pady=(6, 0))
-        activation_worker.start_license_info(
-            lambda info, error: self._post_result(self._loaded, info, error)
-        )
+        if protection_available():
+            activation_worker.start_license_info(
+                lambda info, error: self._post_result(self._loaded, info, error)
+            )
+        else:
+            self._set_busy(True, lock_inputs=True)
+            self._activation_page_button.configure(state="disabled")
+            self._show_error(t("license_source_unavailable"))
 
         self._resize()
+
+    def _open_activation_page(self):
+        from jasna.protection.activation import activation_urls
+
+        webbrowser.open(activation_urls(get_locale().current_language == "zh")[0])
 
     def _select_method(self, method):
         self._online_frame.pack_forget()

@@ -396,6 +396,7 @@ ZH = {
         "license_cloud_workspace": "云工作区 (RunPod / Vast)",
         "license_cloud_warning": "卖家须为许可证码开通云工作区权限。请将 Jasna 设置目录保存在持久卷上。将该目录与激活密钥一起复制，也会转移此身份。",
         "license_working": "正在检查激活密钥…",
+        "license_source_unavailable": "免费模型可从源代码运行。要激活付费模型，请下载 Jasna 官方发行版。",
         "license_activate": "激活",
         "license_active": "Jasna 已激活",
         "ctx_cut": "剪切",

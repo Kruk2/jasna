@@ -375,9 +375,12 @@ def test_declining_the_trial_offer_does_not_start(monkeypatch) -> None:
     assert len(asked) == 1 and trials == [] and restarted == []
 
 
-def test_trial_session_config_and_key() -> None:
+def test_trial_session_config_and_key(monkeypatch, tmp_path) -> None:
     from jasna.gui.video_session import video_session_config, video_session_key
 
+    detection_path = tmp_path / "rfdetr-v6.onnx"
+    detection_path.touch()
+    monkeypatch.setattr("jasna.mosaic.detection_registry.require_detection_model_weights", lambda _name: detection_path)
     real = replace(AppSettings(), restoration_model="ltx")
     trial = replace(real, ltx_trial=True)
 

@@ -218,6 +218,9 @@ def open_tensors(path: Path | PlaceholderTensors):
         return _PlaceholderHandle(path)
     if not is_frozen() and path.suffix != ".enc" and path.is_file():
         return _PlaintextHandle(path)
+    from jasna.license_api import require_protection
+
+    require_protection()
     from jasna.protection.protected_tensors import open_ltx_tensors
     return open_ltx_tensors(path)
 
@@ -261,6 +264,9 @@ class LtxModelFiles:
         """The bundle of ``model``; ``fast`` picks its NVFP4 transformer over the INT8 one."""
         paths = _bundle_paths(directory, model, fast=fast)
         if any(path.suffix == ".enc" for path in paths):
+            from jasna.license_api import require_protection
+
+            require_protection()
             from jasna.protection.protected_tensors import check_ltx_license
             check_ltx_license()
         missing = [str(path) for path in paths if not path.is_file()]

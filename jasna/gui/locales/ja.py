@@ -396,6 +396,7 @@ JA = {
         "license_cloud_workspace": "クラウドワークスペース (RunPod / Vast)",
         "license_cloud_warning": "販売者によるライセンスコードのクラウド利用許可が必要です。Jasna の設定フォルダーを永続ボリュームに保存してください。アクティベーションキーと一緒にコピーすると、この識別情報も移ります。",
         "license_working": "アクティベーションキーを確認中…",
+        "license_source_unavailable": "無料モデルはソースから実行できます。有料モデルの有効化には Jasna の公式リリースをダウンロードしてください。",
         "license_activate": "有効化",
         "license_active": "Jasna は有効化済み",
         "ctx_cut": "切り取り",

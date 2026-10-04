@@ -102,6 +102,8 @@ jasna --input input_folder --output output_folder
 - **[CLI 参考](docs/zh/cli.md)** — 所有命令行选项，包括 `--cq`、输出模板、各编解码器的编码器设置和导出后操作。
 - **[从源代码运行](docs/en/development.md)** — 开发者环境搭建和构建说明。
 
+免费 BasicVSR++ 可在没有私有保护模块的情况下从源代码运行。激活和加密的付费模型需要官方发行版。
+
 ## 基准测试
 
 在 Linux、RTX 5090（驱动 595.84）和 i9-13900K 上进行端到端修复。每个构建均使用

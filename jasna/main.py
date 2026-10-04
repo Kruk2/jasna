@@ -816,6 +816,9 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
     if not missing:
         return
+    from jasna.license_api import require_protection
+
+    require_protection()
     names = ", ".join(file.name for file in missing)
     size = download_size_text(missing)
     if not sys.stdin.isatty():
@@ -836,9 +839,16 @@ def main() -> None:
     args = parser.parse_args()
     if args.cloud_workspace and not args.machine_key and args.license_code is None:
         parser.error("--cloud-workspace needs --machine-key or --license-code")
+    if args.machine_key and (args.activation_key is not None or args.license_code is not None):
+        parser.error("--machine-key cannot be combined with --activation-key or --license-code")
+    if args.machine_key or args.activation_key is not None or args.license_code is not None:
+        from jasna.license_api import ProtectionUnavailableError, require_protection
+
+        try:
+            require_protection()
+        except ProtectionUnavailableError as exc:
+            parser.exit(1, f"Activation error: {exc}\n")
     if args.machine_key:
-        if args.activation_key is not None or args.license_code is not None:
-            parser.error("--machine-key cannot be combined with --activation-key or --license-code")
         from jasna.protection import ProtectionError, machine
         try:
             print(machine.machine_key(cloud_workspace=args.cloud_workspace))

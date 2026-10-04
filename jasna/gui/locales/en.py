@@ -396,6 +396,7 @@ EN = {
         "license_cloud_workspace": "Cloud workspace (RunPod / Vast)",
         "license_cloud_warning": "Your seller must enable cloud workspaces for your License code. Keep the Jasna config folder on a persistent volume. Copying it with the Activation key transfers this identity.",
         "license_working": "Checking Activation key…",
+        "license_source_unavailable": "Free models work from source. To activate paid models, download the official Jasna release.",
         "license_activate": "Activate",
         "license_active": "Jasna activated",
         "ctx_cut": "Cut",

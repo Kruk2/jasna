@@ -106,6 +106,8 @@ If you run out of VRAM during processing, reduce **max clip size** first, for ex
 - **[CLI reference](docs/en/cli.md)** — every command-line option, including `--cq`, encoder settings per codec, and post-export actions.
 - **[Running from source](docs/en/development.md)** — developer setup and build notes.
 
+Free BasicVSR++ works from source without the private protection module. Activation and encrypted paid models require the official release.
+
 ## Benchmarks
 
 End-to-end restoration measured on Linux with an RTX 5090 (driver 595.84) and

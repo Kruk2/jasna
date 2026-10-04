@@ -377,6 +377,7 @@ KO = {
         "license_cloud_workspace": "클라우드 작업 공간 (RunPod / Vast)",
         "license_cloud_warning": "판매자가 라이선스 코드의 클라우드 사용을 허용해야 합니다. Jasna 설정 폴더를 영구 볼륨에 보관하세요. 활성화 키와 함께 복사하면 이 식별 정보도 이전됩니다.",
         "license_working": "활성화 키 확인 중…",
+        "license_source_unavailable": "무료 모델은 소스에서 실행할 수 있습니다. 유료 모델을 활성화하려면 Jasna 공식 릴리스를 다운로드하세요.",
         "license_activate": "활성화",
         "license_active": "Jasna 활성화됨",
         "ctx_cut": "잘라내기",
