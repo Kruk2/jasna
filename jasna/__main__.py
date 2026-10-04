@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
 from jasna._frozen import is_frozen
 
-if __name__ == "__main__" and sys.platform == "linux" and is_frozen():
+if __name__ == "__main__" and sys.platform in ("linux", "win32") and is_frozen():
     from jasna.protection import initialize_runtime
     initialize_runtime()
 
@@ -70,7 +70,7 @@ def _wants_cli(argv: list[str]) -> bool:
 
 
 if __name__ == "__main__":
-    if not (sys.platform == "linux" and is_frozen()):
+    if not (sys.platform in ("linux", "win32") and is_frozen()):
         multiprocessing.freeze_support()
 
 if multiprocessing.parent_process() is None:
@@ -85,7 +85,8 @@ if multiprocessing.parent_process() is None:
 
         main()
     else:
-        drop_console_window()
+        if os.environ.get("JASNA_GUI_FONT_PROBE") != "1":
+            drop_console_window()
         _preload_native_libs()
         from jasna.gui import run_gui
 
