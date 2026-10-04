@@ -53,8 +53,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### LTX 选项
 
-- **模型**：**蒸馏**（默认）或**未蒸馏**。未蒸馏效果稍好，约慢 1.5 倍
-  （需另外下载 13 GB）。CLI：`--restoration-model-name ltx-undistilled`。
+- **模型**：**标准**（默认）或**最佳**。最佳效果稍好，约慢 1.5 倍
+  （需另外下载 13 GB）。最佳的 CLI：`--restoration-model-name ltx-undistilled`。
 - **快速模式**：仅限 RTX 50 系列。快约 1.4 倍，细节略少，下载也更小。
   CLI：`--ltx-fast`。
 - **大马赛克更清晰**：让大马赛克（特写、4K）细节更多，这部分约慢 3 倍。
@@ -69,8 +69,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### 显卡与耗时
 
-**1 分钟 1080p、马赛克一直在画面中的视频**的大致耗时（蒸馏模型）。
-没有马赛克的场景快得多；未蒸馏约需 1.5 倍时间。
+**1 分钟 1080p、马赛克一直在画面中的视频**的大致耗时（标准模型）。
+没有马赛克的场景快得多；最佳约需 1.5 倍时间。
 
 | 显卡 | LTX | 耗时 | 快速模式 |
 | --- | --- | ---: | ---: |
