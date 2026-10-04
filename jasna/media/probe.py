@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class UnsupportedColorspaceError(Exception):
+class UnsupportedVideoError(Exception):
     pass
 
 

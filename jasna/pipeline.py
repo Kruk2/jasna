@@ -14,7 +14,7 @@ import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media.container_utils import MOV_SUFFIXES
-from jasna.media.probe import UnsupportedColorspaceError, get_video_meta_data
+from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
 from jasna.media.video_encoder import VideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.splice import (
@@ -38,6 +38,7 @@ from jasna.segments import SegmentRange, job_restoration, resolve_restorations
 from jasna.session_config import SessionConfig
 from jasna.vr180 import (
     SbsDetectionAdapter,
+    require_ltx_input,
     resolve_vr_mode,
 )
 from jasna.vr_projection import build_vr_projector
@@ -213,7 +214,7 @@ class Pipeline:
             AvColorspace.ITU601,
             AvColorspace.BT2020,
         ):
-            raise UnsupportedColorspaceError(
+            raise UnsupportedVideoError(
                 f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. "
                 "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
             )
@@ -294,15 +295,11 @@ class Pipeline:
             report = lambda fraction, eta, stage: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
         return Progress(frames, disable=self.disable_progress, report=report)
 
-    def _require_ltx_video(self) -> None:
-        if self.vr_resolution.is_sbs:
-            raise ValueError("LTX restoration does not support VR180 side-by-side video")
-
     def _run_ltx(self, metadata) -> None:
         from jasna.ltx.restore import Cancelled, restore_video, video_frames
         from jasna.ltx.speed import profile_path
 
-        self._require_ltx_video()
+        require_ltx_input(self.vr_resolution)
         frame_rate = self._resolve_frame_rate(metadata)
         writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate), [time.monotonic()])
         try:
@@ -345,7 +342,7 @@ class Pipeline:
         from jasna.ltx.restore import LtxRender, segment_decode_budget, segment_large_canvas
         from jasna.ltx.speed import profile_path
 
-        self._require_ltx_video()
+        require_ltx_input(self.vr_resolution)
         return LtxRender(
             detector=self.job_detection_model,
             files=self.ltx_files,

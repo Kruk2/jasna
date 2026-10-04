@@ -300,10 +300,12 @@ def ltx_auto_split(
     )
     from jasna.mosaic_scan import ltx_auto_segments, scan_mosaic_sizes
     from jasna.progressbar import StageProgress
+    from jasna.vr180 import require_ltx_input, resolve_vr_mode
 
     if config.ltx_auto_split_percent is None or config.restoration_model_name != "ltx":
         return None
     metadata = get_video_meta_data(str(input_video))
+    require_ltx_input(resolve_vr_mode(config.vr_mode, metadata, input_video, projection=config.vr_projection))
     codec = canonical_codec(metadata.codec_name)
     try:
         validate_smart_render(
