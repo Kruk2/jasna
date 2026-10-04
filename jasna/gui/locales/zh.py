@@ -1,6 +1,23 @@
 """Chinese (Simplified) translations for the Jasna GUI."""
 
 ZH = {
+    "startup_title": "正在启动 Jasna",
+    "startup_check": "正在检查安装…",
+    "startup_files": "正在检查程序文件…",
+    "startup_interface": "正在启动界面…",
+    "startup_first": "安装或更新后的首次启动需要更长时间。",
+    "startup_checked": "已检查 %u / %u 个文件",
+    "startup_failure": "Jasna 无法启动",
+    "startup_filesystem": "此 Linux 版本无法从 NTFS 或网络磁盘运行。",
+    "startup_move": "请将 Jasna 文件夹移到 ext4、Btrfs 或 XFS 磁盘。",
+    "startup_environment": "当前启动环境阻止了 Jasna 启动。",
+    "startup_clean": "请从干净的终端或桌面会话启动 Jasna。",
+    "startup_integrity": "部分程序文件缺失或已被修改。",
+    "startup_extract": "请重新解压完整的发行包。",
+    "startup_stopped": "Jasna 在窗口打开前已停止。",
+    "startup_terminal": "请从终端运行 Jasna 查看错误。",
+    "startup_close": "关闭",
+    "startup_cancel": "取消",
         # App
         "app_title": "JASNA 图形界面",
         "status_idle": "空闲",

@@ -2,6 +2,9 @@
 
 Jasna 的 CLI 与 GUI 功能一致。`jasna --help` 始终显示完整的最新选项列表；本页补充说明和示例。
 
+Linux 发行版会在处理前向标准错误输出显示启动检查。`--no-progress` 只保留
+简短的启动消息。安装或更新后的首次启动需要更长时间。
+
 ```bash
 # Single video
 jasna --input input.mp4 --output output.mkv

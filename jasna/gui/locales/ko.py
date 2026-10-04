@@ -1,6 +1,23 @@
 """Korean translations for the Jasna GUI."""
 
 KO = {
+    "startup_title": "Jasna 시작 중",
+    "startup_check": "설치 확인 중…",
+    "startup_files": "프로그램 파일 확인 중…",
+    "startup_interface": "화면 시작 중…",
+    "startup_first": "설치나 업데이트 후 처음 시작할 때는 더 오래 걸립니다.",
+    "startup_checked": "파일 %u / %u개 확인됨",
+    "startup_failure": "Jasna를 시작할 수 없음",
+    "startup_filesystem": "이 Linux 버전은 NTFS나 네트워크 디스크에서 실행할 수 없습니다.",
+    "startup_move": "Jasna 폴더를 ext4, Btrfs 또는 XFS 디스크로 옮기세요.",
+    "startup_environment": "현재 실행 환경 때문에 Jasna를 시작할 수 없습니다.",
+    "startup_clean": "깨끗한 터미널이나 데스크톱 세션에서 실행하세요.",
+    "startup_integrity": "일부 프로그램 파일이 없거나 변경되었습니다.",
+    "startup_extract": "완전한 릴리스 파일을 다시 압축 해제하세요.",
+    "startup_stopped": "창이 열리기 전에 Jasna가 종료되었습니다.",
+    "startup_terminal": "터미널에서 Jasna를 실행해 오류를 확인하세요.",
+    "startup_close": "닫기",
+    "startup_cancel": "취소",
         # App
         "app_title": "JASNA GUI",
         "status_idle": "대기 중",

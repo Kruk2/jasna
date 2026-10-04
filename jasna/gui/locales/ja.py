@@ -1,6 +1,23 @@
 """Japanese translations for the Jasna GUI."""
 
 JA = {
+    "startup_title": "Jasna を起動中",
+    "startup_check": "インストールを確認中…",
+    "startup_files": "プログラムファイルを確認中…",
+    "startup_interface": "画面を起動中…",
+    "startup_first": "インストールや更新後の初回起動には時間がかかります。",
+    "startup_checked": "%u / %u ファイルを確認済み",
+    "startup_failure": "Jasna を起動できません",
+    "startup_filesystem": "この Linux 版は NTFS やネットワーク上では動作しません。",
+    "startup_move": "Jasna フォルダーを ext4、Btrfs、XFS のディスクに移動してください。",
+    "startup_environment": "現在の起動環境では Jasna を起動できません。",
+    "startup_clean": "クリーンなターミナルやデスクトップから起動してください。",
+    "startup_integrity": "プログラムファイルが不足しているか変更されています。",
+    "startup_extract": "完全なリリースをもう一度展開してください。",
+    "startup_stopped": "画面を開く前に Jasna が停止しました。",
+    "startup_terminal": "ターミナルから起動してエラーを確認してください。",
+    "startup_close": "閉じる",
+    "startup_cancel": "キャンセル",
         # App
         "app_title": "JASNA GUI",
         "status_idle": "待機中",

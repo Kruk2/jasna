@@ -1,6 +1,23 @@
 """Thai translations for the Jasna GUI."""
 
 TH = {
+    "startup_title": "กำลังเริ่ม Jasna",
+    "startup_check": "กำลังตรวจสอบการติดตั้ง…",
+    "startup_files": "กำลังตรวจสอบไฟล์โปรแกรม…",
+    "startup_interface": "กำลังเปิดหน้าต่าง…",
+    "startup_first": "การเปิดครั้งแรกหลังติดตั้งหรืออัปเดตจะใช้เวลานานขึ้น",
+    "startup_checked": "ตรวจสอบแล้ว %u จาก %u ไฟล์",
+    "startup_failure": "เริ่ม Jasna ไม่ได้",
+    "startup_filesystem": "รุ่น Linux นี้รันจาก NTFS หรือดิสก์เครือข่ายไม่ได้",
+    "startup_move": "ย้ายโฟลเดอร์ Jasna ไปยังดิสก์ ext4, Btrfs หรือ XFS",
+    "startup_environment": "สภาพแวดล้อมปัจจุบันทำให้เริ่ม Jasna ไม่ได้",
+    "startup_clean": "เปิด Jasna จากเทอร์มินัลหรือเดสก์ท็อปที่สะอาด",
+    "startup_integrity": "ไฟล์โปรแกรมบางไฟล์หายไปหรือถูกแก้ไข",
+    "startup_extract": "แตกไฟล์รุ่นที่สมบูรณ์อีกครั้ง",
+    "startup_stopped": "Jasna หยุดก่อนเปิดหน้าต่าง",
+    "startup_terminal": "รัน Jasna จากเทอร์มินัลเพื่อดูข้อผิดพลาด",
+    "startup_close": "ปิด",
+    "startup_cancel": "ยกเลิก",
         # App
         "app_title": "JASNA GUI",
         "status_idle": "พร้อม",

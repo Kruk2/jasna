@@ -2,6 +2,9 @@
 
 Jasna の CLI は GUI と同じ機能を提供します。`jasna --help` で常に最新の全オプション一覧を表示できます。このページは補足とサンプルを提供します。
 
+Linux 版は処理前の起動確認を標準エラー出力に表示します。`--no-progress` では
+短い起動メッセージだけを表示します。インストールや更新後の初回起動には時間がかかります。
+
 ```bash
 # Single video
 jasna --input input.mp4 --output output.mkv

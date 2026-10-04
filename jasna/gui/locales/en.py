@@ -1,6 +1,23 @@
 """English translations for the Jasna GUI."""
 
 EN = {
+    "startup_title": "Starting Jasna",
+    "startup_check": "Checking the installation…",
+    "startup_files": "Checking application files…",
+    "startup_interface": "Starting interface…",
+    "startup_first": "The first launch after an install or update takes longer.",
+    "startup_checked": "Checked %u of %u files",
+    "startup_failure": "Jasna couldn't start",
+    "startup_filesystem": "This Linux build can't run from NTFS or a network disk.",
+    "startup_move": "Move the Jasna folder to an ext4, Btrfs or XFS disk.",
+    "startup_environment": "The launch environment prevents Jasna from starting.",
+    "startup_clean": "Start Jasna from a clean terminal or desktop session.",
+    "startup_integrity": "Some application files are missing or have changed.",
+    "startup_extract": "Extract a fresh copy of the complete release.",
+    "startup_stopped": "Jasna stopped before its window opened.",
+    "startup_terminal": "Run Jasna from a terminal to see the error.",
+    "startup_close": "Close",
+    "startup_cancel": "Cancel",
         # App
         "app_title": "JASNA GUI",
         "status_idle": "IDLE",
