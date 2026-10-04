@@ -768,7 +768,11 @@ def restore_spans(
                 torch.cuda.empty_cache()
         progress.begin("compose")
         decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device) if windows else None
-        compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
+        try:
+            compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
+        finally:
+            del decoder
+            torch.cuda.empty_cache()
     for line in progress.summary(profile_key, torch.cuda.max_memory_allocated(render.device), blocks):
         logger.info(line)
     if windows:
