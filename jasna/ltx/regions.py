@@ -39,7 +39,7 @@ def trace_region(box: np.ndarray, mask: torch.Tensor, frame_h: int, frame_w: int
     x_min, y_min, x_max, y_max = (float(int(v)) for v in box.tolist())
     return Region(
         box=(x_min, y_min, x_max, y_max),
-        polygon=[[float(x + x0), float(y + y0)] for x, y in largest[:, 0, :]],
+        polygon=largest[:, 0, :] + np.array((x0, y0), dtype=np.int32),
     )
 
 

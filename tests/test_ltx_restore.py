@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -11,7 +12,7 @@ from jasna.ltx import restore
 from jasna.ltx.plan import Region
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
-MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=[[10.0, 10.0], [40.0, 10.0], [40.0, 40.0], [10.0, 40.0]])
+MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
 
 
 def _video(frames: int, mosaic: range, pts_step: int = 10) -> list[tuple[torch.Tensor, int]]:
