@@ -612,11 +612,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         from jasna.gui.validation import any_job_uses_ltx, validate_gui_start
 
-        if (
-            self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded"
-            and any_job_uses_ltx(jobs, settings)
-            and self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
+        if self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded" and any_job_uses_ltx(
+            jobs, settings
         ):
+            self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
             return
         if (
             not settings.ltx_trial

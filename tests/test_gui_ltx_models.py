@@ -292,6 +292,33 @@ def test_start_downloads_a_missing_ltx_model_first(monkeypatch) -> None:
     assert ensured == [("undistilled", False)]
 
 
+def test_declining_the_ltx_download_at_start_shows_no_error(tk_root, tmp_path, monkeypatch, downloadable) -> None:
+    from jasna.gui.app import JasnaApp
+
+    asked = _answer(monkeypatch, yes=False)
+    errors: list[str] = []
+    monkeypatch.setattr(messagebox, "showerror", lambda _title, message: errors.append(message))
+    settings = replace(AppSettings(), restoration_model="ltx")
+    app = SimpleNamespace(
+        _preview_gpu_busy=False,
+        _processor=None,
+        _queue_panel=SimpleNamespace(
+            get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: ""
+        ),
+        _settings_panel=SimpleNamespace(
+            get_settings=lambda: settings, ltx_unavailable_reason=lambda: "model_ltx_not_downloaded"
+        ),
+        _ltx_models=ltx_models(tk_root, tmp_path / "ltx", installed=False),
+        _log_panel=SimpleNamespace(error=errors.append),
+    )
+    app._on_start = lambda: None
+
+    JasnaApp._on_start(app)
+
+    assert len(asked) == 1
+    assert errors == []
+
+
 def test_the_trial_switch_round_trips_and_skips_the_download(tk_root, tmp_path, monkeypatch, downloadable) -> None:
     asked = _answer(monkeypatch, yes=True)
     panel = _panel(tk_root, ltx_models(tk_root, tmp_path / "ltx", installed=False))
