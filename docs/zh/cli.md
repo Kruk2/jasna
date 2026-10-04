@@ -36,7 +36,7 @@ jasna --input input_folder --output output_folder
 
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
-| `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx`（细节更多，慢很多）或 `ltx-undistilled`（比 `ltx` 稍好，约慢 2 倍）。见[选择模型](models.md#修复模型)。 |
+| `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx`（细节更多，慢很多）或 `ltx-undistilled`（比 `ltx` 稍好，约慢 1.5 倍）。见[选择模型](models.md#修复模型)。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | 修复模型权重（LTX 为文件夹）。 |
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要 10 GB 空闲显存。 |

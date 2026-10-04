@@ -58,7 +58,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 ### LTX options
 
 - **Model**: **Distilled** (default) or **Undistilled**, which is slightly
-  better and about 2x slower (another 13 GB download). CLI:
+  better and about 1.5x slower (another 13 GB download). CLI:
   `--restoration-model-name ltx-undistilled`.
 - **Fast mode**: RTX 50-series only. About 1.4x faster with slightly less
   detail, and a smaller download. CLI: `--ltx-fast`.
@@ -78,7 +78,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 Rough time for **1 minute of 1080p video with mosaics on screen the whole
 time** (Distilled model). Scenes without mosaics are much quicker;
-Undistilled takes about twice as long.
+Undistilled takes about 1.5x as long.
 
 | GPU | LTX | Time | With Fast mode |
 | --- | --- | ---: | ---: |

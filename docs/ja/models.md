@@ -58,7 +58,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 ### LTX のオプション
 
 - **モデル**: **蒸留**（既定）または**非蒸留**。非蒸留は少し高品質で、
-  約 2 倍遅くなります（さらに 13 GB のダウンロード）。CLI:
+  約 1.5 倍遅くなります（さらに 13 GB のダウンロード）。CLI:
   `--restoration-model-name ltx-undistilled`。
 - **高速モード**: RTX 50 シリーズのみ。約 1.4 倍速く、ディテールは
   わずかに減り、ダウンロードも小さくなります。CLI: `--ltx-fast`。
@@ -78,7 +78,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 ### 対応 GPU と所要時間
 
 **モザイクが常に映っている 1080p 動画 1 分**あたりのおおよその時間
-（蒸留モデル）です。モザイクのないシーンはずっと速く、非蒸留は約 2 倍
+（蒸留モデル）です。モザイクのないシーンはずっと速く、非蒸留は約 1.5 倍
 かかります。
 
 | GPU | LTX | 時間 | 高速モード |

@@ -253,7 +253,7 @@ ZH = {
         "ltx_model_distilled": "蒸馏（更快）",
         "ltx_model_undistilled": "未蒸馏（稍好，更慢）",
         "model_ltx_variant_not_installed": "此电脑上没有该模型，已改用现有的模型。",
-        "tip_ltx_model": "未蒸馏：效果稍好，约慢 2 倍。\n蒸馏：更快。",
+        "tip_ltx_model": "未蒸馏：效果稍好，约慢 1.5 倍。\n蒸馏：更快。",
         "model_ltx_undistilled": "LTX（未蒸馏）",
         "model_ltx_not_downloaded": "LTX 模型尚未下载。在主窗口按 ▶ 即可下载。",
         "model_ltx_fast_not_installed": "此电脑上没有快速模式的模型，已关闭快速模式。",

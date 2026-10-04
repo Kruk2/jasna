@@ -253,7 +253,7 @@ JA = {
         "ltx_model_distilled": "蒸留（速い）",
         "ltx_model_undistilled": "非蒸留（少し高品質・遅い）",
         "model_ltx_variant_not_installed": "このモデルはこの PC にないため、あるモデルを選びました。",
-        "tip_ltx_model": "非蒸留：少し高品質、約 2 倍遅い。\n蒸留：速い。",
+        "tip_ltx_model": "非蒸留：少し高品質、約 1.5 倍遅い。\n蒸留：速い。",
         "model_ltx_undistilled": "LTX（非蒸留）",
         "model_ltx_not_downloaded": "LTX モデルはまだダウンロードされていません。メイン画面で ▶ を押すとダウンロードします。",
         "model_ltx_fast_not_installed": "高速モードのモデルがこの PC にないため、高速モードをオフにしました。",

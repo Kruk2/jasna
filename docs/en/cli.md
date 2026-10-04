@@ -36,7 +36,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 
 | Option | Default | Notes |
 | ------ | ------- | ----- |
-| `--restoration-model-name` | `basicvsrpp` | Video restoration model: `basicvsrpp` (fast), `ltx` (more detail, much slower) or `ltx-undistilled` (slightly better than `ltx`, about 2x slower). See [Choosing models](models.md#restoration-model). |
+| `--restoration-model-name` | `basicvsrpp` | Video restoration model: `basicvsrpp` (fast), `ltx` (more detail, much slower) or `ltx-undistilled` (slightly better than `ltx`, about 1.5x slower). See [Choosing models](models.md#restoration-model). |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | Restoration weights (a folder for LTX). |
 | `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only. |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs 10 GB of free VRAM. |

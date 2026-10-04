@@ -252,7 +252,7 @@ KO = {
         "ltx_model_distilled": "증류 (더 빠름)",
         "ltx_model_undistilled": "비증류 (조금 더 좋음, 느림)",
         "model_ltx_variant_not_installed": "이 모델이 PC에 없어 있는 모델로 바꿨습니다.",
-        "tip_ltx_model": "비증류: 조금 더 좋음, 약 2배 느림.\n증류: 더 빠름.",
+        "tip_ltx_model": "비증류: 조금 더 좋음, 약 1.5배 느림.\n증류: 더 빠름.",
         "model_ltx_undistilled": "LTX (비증류)",
         "model_ltx_not_downloaded": "LTX 모델이 아직 다운로드되지 않았습니다. 메인 창에서 ▶를 누르면 다운로드됩니다.",
         "model_ltx_fast_not_installed": "빠른 모드 모델이 PC에 없어 빠른 모드를 껐습니다.",

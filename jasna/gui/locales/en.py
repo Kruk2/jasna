@@ -253,7 +253,7 @@ EN = {
         "ltx_model_distilled": "Distilled (faster)",
         "ltx_model_undistilled": "Undistilled (slightly better, slower)",
         "model_ltx_variant_not_installed": "That model isn't on this PC, so the one you have is selected.",
-        "tip_ltx_model": "Undistilled: slightly better, about 2x slower.\nDistilled: faster.",
+        "tip_ltx_model": "Undistilled: slightly better, about 1.5x slower.\nDistilled: faster.",
         "model_ltx_undistilled": "LTX (undistilled)",
         "model_ltx_not_downloaded": "LTX model not downloaded yet. Press ▶ in the main window to download it.",
         "model_ltx_fast_not_installed": "The Fast mode model isn't on this PC, so Fast mode was turned off.",
