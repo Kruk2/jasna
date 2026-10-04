@@ -127,3 +127,44 @@ def test_pipeline_stop_detection(cancel_requested, completed, expected):
     pipeline.completed = completed
 
     assert _pipeline_was_stopped(pipeline) is expected
+
+
+@pytest.mark.parametrize("queue_finished", [False, True])
+def test_only_a_finished_queue_is_reported_as_completed(queue_finished):
+    from tkinter import TclError
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import customtkinter as ctk
+
+    from jasna.gui.app import JasnaApp
+    from jasna.gui.control_bar import ControlBar
+
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        bar = ControlBar(root)
+        bar.set_running(True)
+        bar.update_progress("clip.mp4", 40.0)
+        logs: list[str] = []
+        post_export = MagicMock()
+        app = SimpleNamespace(
+            _status_pill=MagicMock(),
+            _processing_start_time=0.0,
+            _control_bar=bar,
+            _update_start_button_state=lambda: None,
+            _log_panel=SimpleNamespace(info=logs.append),
+            _settings_panel=MagicMock(),
+            _queue_panel=MagicMock(),
+            _run_post_export_action=post_export,
+        )
+
+        JasnaApp._handle_complete(app, queue_finished)
+
+        assert (bar._percent_label.cget("text") == "100%") is queue_finished
+        assert (logs == ["All jobs completed"]) is queue_finished
+        assert post_export.called is queue_finished
+    finally:
+        root.destroy()

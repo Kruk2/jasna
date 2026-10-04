@@ -780,10 +780,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def _handle_complete(self, queue_finished: bool):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
-        elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
-        self._control_bar.set_completed(elapsed_seconds)
+        if queue_finished:
+            elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
+            self._control_bar.set_completed(elapsed_seconds)
+            self._log_panel.info("All jobs completed")
+        else:
+            self._control_bar.reset()
         self._update_start_button_state()
-        self._log_panel.info("All jobs completed")
         
         # Re-enable settings and output controls
         self._settings_panel.set_enabled(True)
