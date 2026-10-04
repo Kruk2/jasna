@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 from dataclasses import replace
 import threading
+import time
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,12 +15,14 @@ import pytest
 import torch
 from PIL import Image
 
-from jasna.gui import segment_editor, segment_scan_panel
+from jasna.gui import ltx_seed_preview, segment_editor, segment_scan_panel
 from jasna.gui.locales import t
+from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.gui.segment_editor_state import PREVIEW_ZOOM_MAX, PreviewView, SegmentEditorState
+from jasna.ltx.restore import Cancelled
 from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange, SegmentRestoration
 
@@ -1060,6 +1063,71 @@ def test_restore_preview_asks_before_a_long_ltx_render(monkeypatch, tmp_path, an
     finally:
         if editor is not None:
             editor._finish_close()
+        root.destroy()
+
+
+class _BlockingSeedRenderer(ltx_seed_preview.SeedRenderer):
+    started = threading.Event()
+
+    def render(self, segment, seed, settings, *, writer_for, report, cancel):
+        self.started.set()
+        cancel.wait(5)
+        time.sleep(0.2)
+        raise Cancelled()
+
+
+class _BlockingSeedWorker(LtxSeedPreviewWorker):
+    def _make_renderer(self):
+        return _BlockingSeedRenderer(self.path, self.metadata, self.index, self.work_dir)
+
+
+@pytest.mark.parametrize("stop_render", [True, False])
+def test_closing_the_app_closes_the_segment_editor_and_its_seed_frames(monkeypatch, tmp_path, stop_render) -> None:
+    from jasna.gui.app import JasnaApp
+    from jasna.gui.queue_panel import QueuePanel
+
+    root = _tk_root()
+    preview = MagicMock()
+    preview.events = queue.Queue()
+    monkeypatch.setattr(segment_editor, "SegmentPreviewWorker", MagicMock(return_value=preview))
+    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _BlockingSeedWorker)
+    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 0.0)
+    asked: list[str] = []
+    monkeypatch.setattr(
+        segment_editor.messagebox, "askyesno", lambda _title, message, parent: asked.append(message) or stop_render
+    )
+    _BlockingSeedRenderer.started.clear()
+    destroyed: list[bool] = []
+    panel = QueuePanel(root)
+    try:
+        panel.set_segment_editor_context(AppSettings, lambda: False, MagicMock(), lambda: None)
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        panel._edit_segments(job)
+        editor = panel._segment_editor
+        preview.events.put(segment_editor.PreviewLoaded(_fake_metadata()))
+        editor._poll_workers()
+        editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+        editor._seek(1.5)
+        editor._toggle_restoration_preview()
+        assert _BlockingSeedRenderer.started.wait(5)
+        app = SimpleNamespace(
+            _ltx_models=SimpleNamespace(downloading=False),
+            _video_player_dialog=None,
+            _queue_panel=panel,
+            _processor=None,
+            _stop_system_stats_poller=lambda: None,
+            _main_thread=MagicMock(),
+            destroy=lambda: destroyed.append(True),
+        )
+
+        JasnaApp._on_close(app)
+
+        assert asked == [t("segments_seed_stop_confirm")]
+        assert bool(destroyed) is stop_render
+        assert (not list(tmp_path.glob(".jasna-seeds-*"))) is stop_render
+    finally:
+        if panel._segment_editor is not None:
+            panel._segment_editor._finish_close()
         root.destroy()
 
 

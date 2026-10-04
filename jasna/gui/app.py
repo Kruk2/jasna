@@ -450,6 +450,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._closing_after_player = True
             self._video_player_dialog.request_close()
             return
+        if not self._queue_panel.close_segment_editor():
+            return
         try:
             if self._processor:
                 self._processor.stop()
