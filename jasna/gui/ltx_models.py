@@ -43,7 +43,7 @@ def read_install_state(directory: Path) -> LtxInstallState:
             for model in LTX_MODELS
             for fast in (False, True)
         },
-        model_files.LTX_DOWNLOAD_URL is not None and protection_available(),
+        protection_available(),
     )
 
 

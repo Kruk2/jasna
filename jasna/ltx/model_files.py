@@ -29,7 +29,7 @@ LTX_MODELS: tuple[LtxModelName, ...] = get_args(LtxModelName)
 
 # Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}",
 # and from the same path on LTX_MIRROR_URL (reachable from mainland China) when that fails.
-LTX_DOWNLOAD_URL: str | None = "https://huggingface.co/Kruk2/ltx-restore/resolve/main"
+LTX_DOWNLOAD_URL = "https://huggingface.co/Kruk2/ltx-restore/resolve/main"
 LTX_MIRROR_URL = "https://hf-mirror.com/Kruk2/ltx-restore/resolve/main"
 _NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
 
@@ -40,7 +40,7 @@ DownloadProgressCallback = Callable[[int, int], None]
 class DownloadableFile:
     name: str
     size_bytes: int
-    sha256: str | None
+    sha256: str
 
 
 _TRANSFORMER_NAMES: dict[tuple[LtxModelName, bool], str] = {
@@ -51,8 +51,7 @@ _TRANSFORMER_NAMES: dict[tuple[LtxModelName, bool], str] = {
 }
 _SHARED_NAMES = ("vae.safetensors", "vae-decoder.safetensors")
 
-# The published files (``.enc`` in releases): size for the download prompt, and a sha256
-# that is filled in with the release that publishes the file.
+# The published files (``.enc`` in releases): size for the download prompt and sha256.
 LTX_DOWNLOADS: dict[str, DownloadableFile] = {
     name: DownloadableFile(name, size, checksum)
     for name, size, checksum in (
@@ -310,11 +309,6 @@ def download_files(
     anything. Each file falls back to the other source when the first is unreachable;
     ``mirror_first`` tries the mirror first. ``progress_callback(done_bytes, total_bytes)``
     covers all files together."""
-    if LTX_DOWNLOAD_URL is None:
-        raise RuntimeError("LTX model downloads are not available yet.")
-    unverifiable = [f.name for f in files if f.sha256 is None]
-    if unverifiable:
-        raise RuntimeError(f"No checksum for {', '.join(unverifiable)}, so it won't be downloaded.")
     context = ssl.create_default_context(cafile=certifi.where())
     sources = (LTX_MIRROR_URL, LTX_DOWNLOAD_URL) if mirror_first else (LTX_DOWNLOAD_URL, LTX_MIRROR_URL)
     directory.mkdir(parents=True, exist_ok=True)

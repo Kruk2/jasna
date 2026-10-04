@@ -19,7 +19,7 @@ from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
-from jasna.ltx import model_files
+from jasna.gui import ltx_models as ltx_models_module
 from factories import ltx_models
 
 
@@ -474,7 +474,7 @@ def test_ltx_hides_standard_only_settings_and_restores_them(_panel_factory) -> N
 
 
 def test_ltx_without_model_files_runs_as_a_trial(_panel_factory, monkeypatch) -> None:
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", None)
+    monkeypatch.setattr(ltx_models_module, "protection_available", lambda: False)
     panel = _panel_factory(False)
 
     assert panel._model_section._cards["ltx"].radio.cget("state") == "normal"

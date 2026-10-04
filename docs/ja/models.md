@@ -51,7 +51,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - 時間は動画の長さではなく、モザイクが映っている長さで決まります。初回は
   Jasna が LTX をお使いの GPU 向けに準備するため、さらに時間がかかります。
 - モデルは同梱されていません。約 15 GB（高速モードは約 9 GB）です。
-  ダウンロードが公開されると、Jasna はダウンロード前に確認します。
+  Jasna はダウンロード前に確認します。
   Hugging Face に接続できない場合（中国など）は hf-mirror.com から
   ダウンロードします。
 
