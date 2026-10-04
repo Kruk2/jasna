@@ -10,6 +10,8 @@ KO = {
     "startup_failure": "Jasna를 시작할 수 없음",
     "startup_filesystem": "이 Linux 버전은 NTFS나 네트워크 디스크에서 실행할 수 없습니다.",
     "startup_move": "Jasna 폴더를 ext4, Btrfs 또는 XFS 디스크로 옮기세요.",
+    "startup_windows_filesystem": "이 Windows 버전은 로컬 NTFS 디스크가 필요합니다.",
+    "startup_windows_move": "Jasna 폴더를 로컬 NTFS 디스크로 옮기세요.",
     "startup_environment": "현재 실행 환경 때문에 Jasna를 시작할 수 없습니다.",
     "startup_clean": "깨끗한 터미널이나 데스크톱 세션에서 실행하세요.",
     "startup_integrity": "일부 프로그램 파일이 없거나 변경되었습니다.",

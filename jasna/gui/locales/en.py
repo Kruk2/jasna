@@ -10,6 +10,8 @@ EN = {
     "startup_failure": "Jasna couldn't start",
     "startup_filesystem": "This Linux build can't run from NTFS or a network disk.",
     "startup_move": "Move the Jasna folder to an ext4, Btrfs or XFS disk.",
+    "startup_windows_filesystem": "This Windows build needs a local NTFS disk.",
+    "startup_windows_move": "Move the Jasna folder to a local NTFS disk.",
     "startup_environment": "The launch environment prevents Jasna from starting.",
     "startup_clean": "Start Jasna from a clean terminal or desktop session.",
     "startup_integrity": "Some application files are missing or have changed.",

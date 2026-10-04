@@ -10,6 +10,8 @@ TH = {
     "startup_failure": "เริ่ม Jasna ไม่ได้",
     "startup_filesystem": "รุ่น Linux นี้รันจาก NTFS หรือดิสก์เครือข่ายไม่ได้",
     "startup_move": "ย้ายโฟลเดอร์ Jasna ไปยังดิสก์ ext4, Btrfs หรือ XFS",
+    "startup_windows_filesystem": "รุ่น Windows นี้ต้องใช้ดิสก์ NTFS ภายในเครื่อง",
+    "startup_windows_move": "ย้ายโฟลเดอร์ Jasna ไปยังดิสก์ NTFS ภายในเครื่อง",
     "startup_environment": "สภาพแวดล้อมปัจจุบันทำให้เริ่ม Jasna ไม่ได้",
     "startup_clean": "เปิด Jasna จากเทอร์มินัลหรือเดสก์ท็อปที่สะอาด",
     "startup_integrity": "ไฟล์โปรแกรมบางไฟล์หายไปหรือถูกแก้ไข",

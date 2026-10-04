@@ -10,6 +10,8 @@ ZH = {
     "startup_failure": "Jasna 无法启动",
     "startup_filesystem": "此 Linux 版本无法从 NTFS 或网络磁盘运行。",
     "startup_move": "请将 Jasna 文件夹移到 ext4、Btrfs 或 XFS 磁盘。",
+    "startup_windows_filesystem": "此 Windows 版本需要本地 NTFS 磁盘。",
+    "startup_windows_move": "请将 Jasna 文件夹移到本地 NTFS 磁盘。",
     "startup_environment": "当前启动环境阻止了 Jasna 启动。",
     "startup_clean": "请从干净的终端或桌面会话启动 Jasna。",
     "startup_integrity": "部分程序文件缺失或已被修改。",

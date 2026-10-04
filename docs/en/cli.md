@@ -2,7 +2,7 @@
 
 Jasna's CLI mirrors the GUI. `jasna --help` always shows the full, current list of options; this page adds context and examples.
 
-Linux releases report startup checks on stderr before processing. `--no-progress`
+Official releases report startup checks on stderr before processing. `--no-progress`
 keeps only brief startup messages. The first launch after an install or update takes longer.
 
 ```bash

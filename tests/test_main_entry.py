@@ -15,6 +15,23 @@ def test_no_args_dispatches_to_gui() -> None:
                 run_gui.assert_called_once()
 
 
+@pytest.mark.parametrize("probe", [None, "0", "1"])
+def test_gui_font_probe_preserves_console_output(monkeypatch, probe) -> None:
+    sys.modules.pop("jasna.__main__", None)
+    monkeypatch.setattr(sys, "argv", ["jasna"])
+    if probe is None:
+        monkeypatch.delenv("JASNA_GUI_FONT_PROBE", raising=False)
+    else:
+        monkeypatch.setenv("JASNA_GUI_FONT_PROBE", probe)
+
+    with patch("jasna.os_utils.drop_console_window") as drop_console:
+        with patch("jasna.gui.run_gui") as run_gui:
+            import jasna.__main__  # noqa: F401
+
+    run_gui.assert_called_once()
+    assert drop_console.call_count == (0 if probe == "1" else 1)
+
+
 def test_linux_with_args_dispatches_to_main(monkeypatch) -> None:
     if "jasna.__main__" in sys.modules:
         del sys.modules["jasna.__main__"]

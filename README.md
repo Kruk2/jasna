@@ -64,7 +64,8 @@ Jasna manages VRAM automatically: when it runs low, waiting frames are temporari
    - Linux AMD: run `run_jasna_amd.sh`.
 4. Add a video or image, choose settings, and start processing.
 
-On Linux, keep Jasna on an ext4, Btrfs or XFS disk. A loading window shows the
+On Windows, keep Jasna on a local NTFS disk; on Linux, use ext4, Btrfs or XFS.
+A loading window shows the
 installation check before the interface opens; the first launch takes longer.
 
 Every setting in the GUI has a tooltip — hover the ⓘ icon next to it. The

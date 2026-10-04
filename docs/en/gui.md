@@ -3,9 +3,10 @@
 A tour of the app — including the small features that are easy to miss.
 Every setting has a tooltip: hover the ⓘ icon next to it.
 
-On Linux, a loading window shows the installation check before the interface opens.
+A loading window shows the installation check before the interface opens.
 The first launch after an install or update takes longer. Startup errors stay visible;
-NTFS and network disks are unsupported, so use an ext4, Btrfs or XFS disk.
+use a local NTFS disk on Windows, or an ext4, Btrfs or XFS disk on Linux.
+Network disks are unsupported.
 
 ## The queue
 

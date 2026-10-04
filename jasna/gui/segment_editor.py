@@ -161,7 +161,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self.title(t("segments_title"))
         self.configure(fg_color=Colors.BG_MAIN)
         self.transient(master.winfo_toplevel())
-        self.protocol("WM_DELETE_WINDOW", self._request_close)
+        self.protocol("WM_DELETE_WINDOW", self.request_close)
         self._size_and_center()
         self._build_loading()
         self._bind_shortcuts()
@@ -1226,7 +1226,7 @@ class SegmentEditor(ctk.CTkToplevel):
             text=t("btn_cancel"),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
-            command=self._request_close,
+            command=self.request_close,
         )
         self._cancel_btn.pack(side="right")
         self._apply_btn = ctk.CTkButton(
@@ -2228,7 +2228,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._on_saved(state.output_segments)
         self._finish_close()
 
-    def _request_close(self) -> None:
+    def request_close(self) -> None:
         if self._scanning():
             self._scan_panel.stop()
             return
@@ -2268,6 +2268,10 @@ class SegmentEditor(ctk.CTkToplevel):
             self._on_closed()
         self.destroy()
 
+    def join_seed_worker(self, timeout: float) -> None:
+        if self._seed_worker is not None:
+            self._seed_worker.join(timeout)
+
     def _bind_shortcuts(self) -> None:
         self.bind("<space>", lambda event: self._shortcut(event, self._toggle_play))
         self.bind("<KeyPress-i>", lambda event: self._shortcut(event, self._set_mark_in))
@@ -2278,7 +2282,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self.bind("<Right>", lambda event: self._shortcut_step(event, 1))
         self.bind("<Control-z>", lambda event: self._shortcut(event, self._undo, allow_entry=False))
         self.bind("<Control-y>", lambda event: self._shortcut(event, self._redo, allow_entry=False))
-        self.bind("<Escape>", lambda _event: self._request_close())
+        self.bind("<Escape>", lambda _event: self.request_close())
 
     def _shortcut(self, event, action: Callable[[], None], *, allow_entry: bool = False):
         if self._state is None or self._scanning():

@@ -10,6 +10,8 @@ JA = {
     "startup_failure": "Jasna を起動できません",
     "startup_filesystem": "この Linux 版は NTFS やネットワーク上では動作しません。",
     "startup_move": "Jasna フォルダーを ext4、Btrfs、XFS のディスクに移動してください。",
+    "startup_windows_filesystem": "この Windows 版にはローカルの NTFS ディスクが必要です。",
+    "startup_windows_move": "Jasna フォルダーをローカルの NTFS ディスクに移動してください。",
     "startup_environment": "現在の起動環境では Jasna を起動できません。",
     "startup_clean": "クリーンなターミナルやデスクトップから起動してください。",
     "startup_integrity": "プログラムファイルが不足しているか変更されています。",

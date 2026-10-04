@@ -519,6 +519,18 @@ class QueuePanel(ctk.CTkFrame):
     def _segment_editor_closed(self) -> None:
         self._segment_editor = None
 
+    def close_segment_editor(self) -> bool:
+        """Closes the open segment editor the way its own Close does and waits for its seed
+        preview to delete its frames; False when the user keeps the editor open."""
+        editor = self._segment_editor
+        if editor is None:
+            return True
+        editor.request_close()
+        if self._segment_editor is not None:
+            return False
+        editor.join_seed_worker(timeout=10.0)
+        return True
+
     def _segments_saved(self, job: JobItem, segments: tuple[SegmentRange, ...]) -> None:
         idx = self._find_job_index_by_id(job.id)
         if idx is None:
