@@ -1,5 +1,5 @@
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -11,6 +11,13 @@ from jasna.main import build_parser
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _mock_device_context():
+    """CLI orchestration tests use mocked models and must not initialize CUDA."""
+    with patch("jasna.accelerator.device_context", side_effect=lambda _device: nullcontext()):
+        yield
+
 
 def _make_model_files(tmp_path, *, create_input=True, create_detection=True, create_restoration=True):
     input_path = tmp_path / "in.mp4"

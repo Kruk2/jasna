@@ -22,6 +22,16 @@ from jasna.segments import SegmentRange
 from jasna.tracking.clip_tracker import TrackedClip
 
 
+@pytest.fixture(autouse=True)
+def _mock_gpu_monitoring():
+    """Exercise the real thread flow on CPU without GPU memory monitoring."""
+    with (
+        patch("jasna.pipeline_threads.VramOffloader", autospec=True),
+        patch.object(Pipeline, "_log_memory_at_end"),
+    ):
+        yield
+
+
 def _mock_async_restorer(**kwargs) -> MagicMock:
     m = MagicMock(spec=AsyncSecondaryRestorer, **kwargs)
     def _real_to_tensors(frames_np):
@@ -72,7 +82,7 @@ def _make_pipeline():
             codec="hevc",
             encoder_settings={},
             batch_size=2,
-            device=torch.device("cuda:0"),
+            device=torch.device("cpu"),
             max_clip_size=60,
             temporal_overlap=8,
             max_detection_gap=0,
@@ -1081,7 +1091,7 @@ class TestPipelineRun:
                 codec="hevc",
                 encoder_settings={},
                 batch_size=2,
-                device=torch.device("cuda:0"),
+                device=torch.device("cpu"),
                 max_clip_size=60,
                 temporal_overlap=8,
                 max_detection_gap=0,

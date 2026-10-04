@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 
 import pytest
@@ -128,12 +129,19 @@ def test_autotune_choice_that_exceeds_shared_memory_is_filtered() -> None:
 
 
 def test_tensorrt_proxy_misses_attributes_without_printing() -> None:
-    pytest.importorskip("torch_tensorrt")
+    if find_spec("torch_tensorrt") is None:
+        pytest.skip("Torch-TensorRT is not installed")
     script = (
         "import sys\n"
+        "from unittest.mock import patch\n"
+        "import torch\n"
         "from jasna._suppress_noise import install\n"
         "install()\n"
-        "import torch_tensorrt\n"
+        "with (\n"
+        "    patch('torch.cuda.get_device_capability', return_value=(0, 0)),\n"
+        "    patch('torch.cuda.current_device', return_value=0),\n"
+        "):\n"
+        "    import torch_tensorrt\n"
         "assert not hasattr(sys.modules['tensorrt'], 'torch')\n"
         "assert sys.modules['tensorrt'].Logger is not None\n"
     )
