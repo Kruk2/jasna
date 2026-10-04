@@ -225,14 +225,164 @@ def test_gui_status_does_not_offer_a_saved_cloud_activation(protection_api, monk
     machine, store = protection_api
     identity = "JW1-" + "2" * 64
     monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
-    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    approved = Mock(return_value=True)
+    monkeypatch.setattr(store, "is_licensed", approved)
     monkeypatch.setattr(signing, "license_identity", lambda proof: identity)
     result = []
     thread = start_license_info(lambda value, error: result.append((value, error)))
     thread.join(timeout=3)
     assert result == [(("stored-cloud-activation", False, identity), None)]
+    approved.assert_not_called()
     machine.machine_key.assert_not_called()
     store.set_license.assert_not_called()
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_saved_cloud_activation_blocks_encrypted_ltx_gui_paths(protection_api, monkeypatch, tmp_path, frozen):
+    from dataclasses import replace
+    from jasna.gui import ltx_models, video_session
+    from jasna.gui.locales import t
+    from jasna.gui.models import AppSettings
+    from jasna.ltx import model_files
+    from jasna.protection import protected_tensors, signing
+    from jasna.mosaic import detection_registry
+
+    _, store = protection_api
+    directory = tmp_path / "ltx-restore"
+    directory.mkdir()
+    for name in model_files.bundle_names("distilled", fast=False):
+        (directory / (name + ".enc")).touch()
+        if frozen:
+            (directory / name).touch()
+    monkeypatch.setattr(model_files, "is_frozen", lambda: frozen)
+    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
+    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    accepted = Mock()
+    monkeypatch.setattr(protected_tensors, "check_ltx_license", accepted)
+    model_files.LtxModelFiles.from_dir(directory, "distilled", fast=False)
+    accepted.assert_called_once()
+    assert ltx_models.license_missing(directory, "distilled", False)
+
+    built = Mock()
+    monkeypatch.setattr("jasna.engine_paths.model_weights_dir", lambda: tmp_path)
+    monkeypatch.setattr(detection_registry, "require_detection_model_weights", lambda name: tmp_path / "det.onnx")
+    monkeypatch.setattr("jasna.session_factory.build_restoration_session", built)
+    settings = replace(AppSettings(), restoration_model="ltx", ltx_trial=False)
+    with pytest.raises(ValueError, match=t("license_cloud_cli_only")):
+        video_session.build_video_session(settings, log=lambda message: None)
+    built.assert_not_called()
+    store.set_license.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["plaintext", "trial", "free"])
+def test_gui_cloud_restriction_keeps_plaintext_trial_and_free_paths(protection_api, monkeypatch, tmp_path, mode):
+    from dataclasses import replace
+    from jasna.gui import ltx_models, video_session
+    from jasna.gui.models import AppSettings
+    from jasna.ltx import model_files
+    from jasna.protection import signing
+    from jasna.mosaic import detection_registry
+
+    _, store = protection_api
+    directory = tmp_path / "ltx-restore"
+    directory.mkdir()
+    for name in model_files.bundle_names("distilled", fast=False):
+        (directory / (name + ".enc")).touch()
+        if mode == "plaintext":
+            (directory / name).touch()
+    monkeypatch.setattr(model_files, "is_frozen", lambda: False)
+    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
+    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    if mode == "plaintext":
+        assert not ltx_models.license_missing(directory, "distilled", False)
+    built = Mock()
+    monkeypatch.setattr("jasna.engine_paths.model_weights_dir", lambda: tmp_path)
+    monkeypatch.setattr(detection_registry, "require_detection_model_weights", lambda name: tmp_path / "det.onnx")
+    monkeypatch.setattr("jasna.session_factory.build_restoration_session", built)
+    settings = replace(AppSettings(), restoration_model="basicvsrpp" if mode == "free" else "ltx", ltx_trial=mode == "trial")
+    assert video_session.build_video_session(settings, log=lambda message: None) is built.return_value
+    built.assert_called_once()
+    store.set_license.assert_not_called()
+
+
+def test_gui_standard_machine_activation_keeps_exact_ltx_entitlements(protection_api, monkeypatch, tmp_path):
+    from jasna.gui import ltx_models
+    from jasna.ltx import model_files
+    from jasna.protection import ModelNotLicensedError, protected_tensors
+
+    _, store = protection_api
+    for name in model_files.bundle_names("distilled", fast=False):
+        (tmp_path / (name + ".enc")).touch()
+    monkeypatch.setattr(store, "load_license", lambda: "stored-standard-activation")
+    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    accepted = Mock()
+    monkeypatch.setattr(protected_tensors, "check_ltx_license", accepted)
+    assert not ltx_models.license_missing(tmp_path, "distilled", False)
+    accepted.assert_called_once()
+    accepted.side_effect = ModelNotLicensedError("LTX not included")
+    assert ltx_models.license_missing(tmp_path, "distilled", False)
+
+
+@pytest.mark.parametrize("plaintext", [False, True])
+def test_gui_saved_cloud_unet_grant_only_allows_plaintext_source(protection_api, monkeypatch, tmp_path, plaintext):
+    from dataclasses import replace
+    from jasna.gui import video_session
+    from jasna.gui.locales import t
+    from jasna.gui.models import AppSettings
+    from jasna.protection import signing
+
+    _, store = protection_api
+    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
+    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    monkeypatch.setattr("jasna.engine_paths.unet4x_plaintext_available", lambda: plaintext)
+    monkeypatch.setattr("jasna.mosaic.detection_registry.require_detection_model_weights", lambda name: tmp_path / "det.onnx")
+    built = Mock()
+    monkeypatch.setattr("jasna.session_factory.build_restoration_session", built)
+    settings = replace(AppSettings(), secondary_restoration="unet-4x")
+    if plaintext:
+        assert video_session.build_video_session(settings, log=lambda message: None) is built.return_value
+        built.assert_called_once()
+    else:
+        with pytest.raises(ValueError, match=t("license_cloud_cli_only")):
+            video_session.build_video_session(settings, log=lambda message: None)
+        built.assert_not_called()
+
+
+@pytest.mark.parametrize("plaintext,frozen", [(False, False), (True, False), (True, True)])
+def test_gui_saved_cloud_sd_grant_only_allows_plaintext_source(protection_api, monkeypatch, tmp_path, plaintext, frozen):
+    from jasna.gui import video_session
+    from jasna.gui.locales import t
+    from jasna.gui.models import AppSettings
+    from jasna.protection import signing
+    from jasna.restorer import sd15_inpaint_restorer
+    from jasna.engine_paths import SD15_CKPT_PATH
+
+    _, store = protection_api
+    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
+    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    monkeypatch.setattr("jasna.engine_paths.SD15_DIR", tmp_path)
+    if plaintext:
+        (tmp_path / SD15_CKPT_PATH.name).touch()
+    monkeypatch.setattr(sd15_inpaint_restorer, "is_frozen", lambda: frozen)
+    monkeypatch.setattr("jasna.restorer.sd15_download.bundle_present", lambda directory: True)
+    built = Mock()
+    detector = Mock()
+    monkeypatch.setattr(sd15_inpaint_restorer, "Sd15InpaintRestorer", built)
+    monkeypatch.setattr("jasna.session_factory.build_compiled_detection_model", detector)
+    monkeypatch.setattr("jasna.mosaic.detection_registry.resolve_detection_model", lambda *args: ("rfdetr-v6", "det.onnx", None))
+    if plaintext and not frozen:
+        result = video_session.build_image_session(AppSettings(), log=None)
+        assert result[:2] == (detector.return_value, built.return_value)
+        built.assert_called_once()
+    else:
+        with pytest.raises(ValueError, match=t("license_cloud_cli_only")):
+            video_session.build_image_session(AppSettings(), log=None)
+        built.assert_not_called()
+        detector.assert_not_called()
 
 
 def test_gui_activation_rejects_cloud_key_before_save(protection_api, monkeypatch):

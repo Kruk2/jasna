@@ -73,6 +73,7 @@ def _build(settings: AppSettings):
     compile_result = MagicMock(use_basicvsrpp_tensorrt=True)
     with (
         patch("jasna._suppress_noise.install"),
+        patch("jasna.gui.activation_worker.read_license_info", return_value=(None, False, None)),
         patch("jasna.engine_compiler.ensure_engines_compiled", return_value=compile_result) as compiled,
         patch("jasna.engine_paths.model_weights_dir"),
         patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda n: n),

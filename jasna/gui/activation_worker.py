@@ -26,24 +26,25 @@ def _start(
     return thread
 
 
+def read_license_info() -> tuple[str | None, bool, str | None]:
+    if not protection_available():
+        return None, False, None
+    from jasna.protection import license_store, signing
+
+    key = license_store.load_license()
+    identity = None
+    if key:
+        try:
+            proof, _ = signing.decode_license(key)
+            identity = signing.license_identity(proof)
+        except ValueError:
+            identity = None
+    licensed = not (identity is not None and identity.startswith("JW1-")) and license_store.is_licensed()
+    return key, licensed, identity
+
+
 def start_license_info(on_done) -> threading.Thread:
-    def read():
-        if not protection_available():
-            return None, False, None
-        from jasna.protection import license_store, signing
-
-        key = license_store.load_license()
-        identity = None
-        if key:
-            try:
-                proof, _ = signing.decode_license(key)
-                identity = signing.license_identity(proof)
-            except ValueError:
-                identity = None
-        licensed = license_store.is_licensed() and not (identity is not None and identity.startswith("JW1-"))
-        return key, licensed, identity
-
-    return _start(read, on_done)
+    return _start(read_license_info, on_done)
 
 
 def start_machine_key(on_done) -> threading.Thread:

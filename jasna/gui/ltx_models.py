@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jasna.gui.download_worker import start_download
+from jasna.gui.activation_worker import read_license_info
 from jasna.gui.locales import get_locale, t
 from jasna.gui.queues import MainThreadCalls
 from jasna.ltx import model_files
@@ -77,6 +78,9 @@ def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
     from jasna.protection import ProtectionError
 
     try:
+        if any(path.suffix == ".enc" for path in model_files._bundle_paths(directory, model, fast=fast)):
+            if not read_license_info()[1]:
+                return True
         model_files.LtxModelFiles.from_dir(directory, model, fast=fast)
     except ProtectionError:
         return True
