@@ -9,7 +9,8 @@ them when turning a help string into a tooltip.
 CLI_HELP: dict[str, str] = {
     "machine_key": "Print this machine's Machine key for activation, then exit. No GPU is needed.",
     "cloud_workspace": (
-        "With --machine-key or --license-code, create or reuse a cloud workspace identity for RunPod or Vast. "
+        "CLI only, in the official Linux release running inside a supported container: "
+        "with --machine-key or --license-code, create or reuse a cloud workspace identity for RunPod or Vast. "
         "Your seller must enable it for your License code. Keep the Jasna config directory on "
         "a persistent volume; copying it with the Activation key transfers the identity."
     ),
