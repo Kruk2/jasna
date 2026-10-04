@@ -5,6 +5,19 @@ from unittest.mock import patch
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def restore_jasna_modules():
+    saved = {name: module for name, module in sys.modules.items() if name.startswith("jasna")}
+    yield
+    for name in [name for name in sys.modules if name.startswith("jasna") and name not in saved]:
+        del sys.modules[name]
+    sys.modules.update(saved)
+    for name, module in saved.items():
+        parent, _, child = name.rpartition(".")
+        if parent in saved:
+            setattr(saved[parent], child, module)
+
+
 def test_no_args_dispatches_to_gui() -> None:
     if "jasna.__main__" in sys.modules:
         del sys.modules["jasna.__main__"]
