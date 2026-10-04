@@ -1,0 +1,77 @@
+# 云 GPU（RunPod、Vast、Docker）
+
+租来的 GPU 也能跑 Jasna。用 Linux NVIDIA 官方版，在受支持容器的命令行里运行。
+云激活仅限 CLI，Windows 和 GitHub 源码版不支持。
+
+## 需要准备
+
+- 请卖家为你的许可证码打开**云权限**。
+- 使用有独立 PID 命名空间的普通容器。不支持无 root、用户映射或 Docker 的 `--pid=host`。
+- NVIDIA 显卡，驱动 **580 或更新**。
+- 至少 **80 GB** 磁盘。
+- 在模板或实例设置里加上 `NVIDIA_DRIVER_CAPABILITIES=all`。
+  不加的话 Jasna 读不了也存不了视频。Vast 上把
+  `-e NVIDIA_DRIVER_CAPABILITIES=all` 加到 Docker 选项里。
+- 用 `root` 登录。RunPod 和 Vast 默认就是。
+
+## 安装
+
+把下面几行粘贴到租来机器的终端里。用的是更新的 Jasna 的话，把 `0.11.0`
+改成你的版本。
+
+```bash
+apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
+
+cd /root
+for part in 000 001 002; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
+
+cat jasna-linux-nvidia-0.11.0.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
+cd jasna-linux-nvidia-0.11.0
+```
+
+像上面这样解压到 `/root`。放在 `/workspace` 或网络盘里 Jasna 启动不了。
+
+## 激活
+
+```bash
+export XDG_CONFIG_HOME=/workspace/jasna-config
+./jasna --license-code 你的许可证码 --cloud-workspace
+```
+
+出现 `installation verified` 后，可能会像卡住一样最多一分钟。等着就行，
+别按 Ctrl+C。
+
+激活信息存在 `/workspace/jasna-config`。每次启动 Jasna 前都先运行 `export`
+那一行。换一台新机器时，把这个文件夹一起带过去（RunPod 卷，或下载到电脑）。
+丢了的话，需要空闲名额才能再激活。
+
+## 修复视频
+
+```bash
+export XDG_CONFIG_HOME=/workspace/jasna-config
+./jasna --input /root/video.mp4 --output /root/video-restored.mp4 --restoration-model-name ltx
+```
+
+第一次会问要不要下载 LTX 模型（15 GB），输入 `y`。
+
+上传视频和取回结果，可以用服务商的文件管理器，或在电脑上运行：
+
+```bash
+scp -P PORT video.mp4 root@HOST:/root/
+scp -P PORT root@HOST:/root/video-restored.mp4 .
+```
+
+## 常见问题
+
+| 看到 | 怎么办 |
+| ---- | ------ |
+| `unsigned or modified Jasna runtime` | 用 `root` 重新解压到 `/root`。 |
+| `libGL.so.1: cannot open shared object file` | 运行安装里的 `apt-get` 那一行。 |
+| `Cloud workspace activation requires a supported Linux container` | 使用没有用户映射或 `--pid=host` 的普通容器。 |
+| `enable cloud activation` | 请卖家打开云权限。 |
+| `No activation found` 或 `Cloud workspace identity is missing` | 先运行 `export` 那一行，再重新启动 Jasna。 |
+| `unsafe Jasna launch environment` | 用 `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` 启动。 |
+
+看到 `Bit depth 10 ... not supported` 没关系，只是这个视频读得慢一点。
+
+别把 `jasna-config` 文件夹给别人。谁拿到它都能用你的激活。
