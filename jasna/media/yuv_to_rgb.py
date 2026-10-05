@@ -6,6 +6,7 @@ from av.video.reformatter import Colorspace as AvColorspace
 
 from jasna.accelerator import is_nvidia_device
 from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.hip_kernel import Kernel as HipKernel, color_code_object_name, hip_color_kernels_enabled
 
 # YUV->RGB from standard luma coefficients (Kr, Kb):
 #   R = Y' + 2(1-Kr) * V'
@@ -42,6 +43,24 @@ def _rgb_from_yuv_coeffs(name: str) -> tuple[float, float, float, float]:
 
 _CUDA_CONVERSION_BATCH = 8
 _FATBIN = "yuv_to_rgb.fatbin"
+
+# The eager AMD path used to keep four full-resolution working tensors for
+# every reader. That is reasonable through 4K, but one 8K P010 converter then
+# owns roughly 1 GiB before its packed/RGB batch or any decoder surfaces are
+# counted. Keep at most a 4K-sized row tile and reuse it for the whole frame.
+# 8K therefore takes four tiles while 4K retains the established single-tile
+# path and its launch count.
+_EAGER_SCRATCH_MAX_PIXELS = 3840 * 2160
+
+
+def _eager_scratch_height(height: int, width: int) -> int:
+    """Return an even, Bayer-aligned reusable row-tile height."""
+
+    if height * width <= _EAGER_SCRATCH_MAX_PIXELS:
+        return height
+    rows = max(8, _EAGER_SCRATCH_MAX_PIXELS // width)
+    rows -= rows % 8
+    return min(height, max(8, rows))
 
 
 _YUV_TO_RGB_ARG_TYPES = (
@@ -84,6 +103,7 @@ def _launch_yuv_to_rgb(
     )
 
 
+
 class YuvToRgbConverter:
     """NV12/P010 planes -> planar RGB uint8 (3, H, W) on GPU.
 
@@ -115,10 +135,16 @@ class YuvToRgbConverter:
             raise ValueError(f"Unsupported YUV color space: {color_space}") from exc
 
         self._cuda_kernel = None
+        self._hip_kernel = None
         if is_nvidia_device(device):
             bits = 10 if is_10bit else 8
             value_range = "full" if full_range else "limited"
             self._cuda_kernel = Kernel(_FATBIN, f"yuv{bits}_{name}_{value_range}", _YUV_TO_RGB_ARG_TYPES)
+            return
+        if hip_color_kernels_enabled(device):
+            bits = 10 if is_10bit else 8
+            value_range = "full" if full_range else "limited"
+            self._hip_kernel = HipKernel(color_code_object_name("yuv_to_rgb"), f"yuv{bits}_{name}_{value_range}", _YUV_TO_RGB_ARG_TYPES)
             return
 
         a, b, c, d = _rgb_from_yuv_coeffs(name)
@@ -153,12 +179,20 @@ class YuvToRgbConverter:
         ]
         # See jasna/media/yuv_scratch.py for why the eager path allocates its
         # working set once instead of per frame.
-        self._rgb = torch.empty((3, height, width), dtype=torch.float32, device=device)
+        self._scratch_height = _eager_scratch_height(height, width)
+        scratch_height = self._scratch_height
+        self._rgb = torch.empty(
+            (3, scratch_height, width), dtype=torch.float32, device=device
+        )
         self._chroma = torch.empty(
-            (3, height // 2, width // 2), dtype=torch.float32, device=device
+            (3, scratch_height // 2, width // 2),
+            dtype=torch.float32,
+            device=device,
         )
         self._codes = (
-            torch.empty((3, height, width), dtype=torch.int32, device=device)
+            torch.empty(
+                (3, scratch_height, width), dtype=torch.int32, device=device
+            )
             if is_10bit
             else None
         )
@@ -166,7 +200,7 @@ class YuvToRgbConverter:
         if is_10bit:
             bayer = torch.tensor(_BAYER8, device=device, dtype=torch.float32)
             bayer = (bayer + 0.5) / 64.0
-            y_mod8 = torch.arange(height, device=device) & 7
+            y_mod8 = torch.arange(scratch_height, device=device) & 7
             x_mod8 = torch.arange(width, device=device) & 7
             t = bayer[y_mod8][:, x_mod8].unsqueeze(0)
             self._dither2 = torch.floor(t * 4.0).to(torch.int32)
@@ -175,6 +209,39 @@ class YuvToRgbConverter:
         out = torch.empty((3, self.height, self.width), device=y.device, dtype=torch.uint8)
         self.convert_into(y, uv, out)
         return out
+
+    @property
+    def uses_kernel(self) -> bool:
+        return self._cuda_kernel is not None or self._hip_kernel is not None
+
+    def convert_frame_into(
+        self, frame, out: torch.Tensor, stream: int | None = None
+    ) -> None:
+        """Convert a PyAV CUDA frame without constructing per-plane Torch tensors."""
+        if self._cuda_kernel is None:
+            raise RuntimeError("CUDA frame conversion requires a CUDA converter")
+        if len(frame.planes) != 2:
+            raise ValueError(f"Expected a two-plane NV12/P010 frame, got {len(frame.planes)}")
+        y_plane, uv_plane = frame.planes
+        bytes_per_sample = 2 if self.is_10bit else 1
+        if y_plane.line_size % bytes_per_sample or uv_plane.line_size % bytes_per_sample:
+            raise ValueError("YUV plane pitch is not aligned to its sample size")
+        if y_plane.line_size < self.width * bytes_per_sample:
+            raise ValueError("Luma plane pitch is smaller than the visible width")
+        if uv_plane.line_size < self.width * bytes_per_sample:
+            raise ValueError("Chroma plane pitch is smaller than the visible width")
+        if out.shape != (3, self.height, self.width) or out.dtype != torch.uint8:
+            raise ValueError(f"Unexpected RGB destination: {tuple(out.shape)} {out.dtype}")
+        if not out.is_cuda or out.stride(2) != 1:
+            raise ValueError("RGB destination must be a CUDA tensor with contiguous pixels")
+        _launch_yuv_to_rgb(
+            self._cuda_kernel, [y_plane.buffer_ptr],
+            y_plane.line_size // bytes_per_sample,
+            [uv_plane.buffer_ptr],
+            uv_plane.line_size // bytes_per_sample,
+            out,
+            stream,
+        )
 
     def convert_surface_into(
         self,
@@ -255,7 +322,8 @@ class YuvToRgbConverter:
         P010 planes store the 10-bit value in the top bits (value << 6).
         """
         if y.is_cuda:
-            if self._cuda_kernel is None:
+            kernel = self._cuda_kernel or self._hip_kernel
+            if kernel is None:
                 # AMD/ROCm path: the coefficient tensors already live on the
                 # device, so the eager math runs there directly.
                 self._convert_eager(y, uv, out)
@@ -274,7 +342,7 @@ class YuvToRgbConverter:
                 raise ValueError(f"Unexpected RGB destination: {tuple(out.shape)} {out.dtype}")
             if y.stride(1) != 1 or uv.stride(1) != 2 or uv.stride(2) != 1 or out.stride(2) != 1:
                 raise ValueError("YUV/RGB tensors have unsupported pixel strides")
-            _launch_yuv_to_rgb(self._cuda_kernel, [y.data_ptr()], y.stride(0), [uv.data_ptr()], uv.stride(0), out, None)
+            _launch_yuv_to_rgb(kernel, [y.data_ptr()], y.stride(0), [uv.data_ptr()], uv.stride(0), out, None)
             return
 
         if self._cuda_kernel is not None:
@@ -283,25 +351,38 @@ class YuvToRgbConverter:
 
     def _convert_eager(self, y: torch.Tensor, uv: torch.Tensor, out: torch.Tensor) -> None:
         H, W = self.height, self.width
-        u, v = uv[..., 0], uv[..., 1]
+        tile_rows = self._scratch_height
+        for top in range(0, H, tile_rows):
+            bottom = min(H, top + tile_rows)
+            rows = bottom - top
+            half_rows = rows // 2
+            uv_tile = uv[top // 2 : bottom // 2]
+            u, v = uv_tile[..., 0], uv_tile[..., 1]
 
-        chroma = self._chroma
-        for plane, (cu, cv) in enumerate(self._chroma_matrix):
-            torch.mul(u, cu, out=chroma[plane])
-            chroma[plane].add_(v, alpha=cv)
+            chroma = self._chroma[:, :half_rows]
+            for plane, (cu, cv) in enumerate(self._chroma_matrix):
+                torch.mul(u, cu, out=chroma[plane])
+                chroma[plane].add_(v, alpha=cv)
 
-        # Nearest 2x upsample: broadcasting a copy into the split view of the
-        # destination replaces interpolate() and its per-frame allocation.
-        rgb = self._rgb
-        rgb.view(3, H // 2, 2, W // 2, 2).copy_(chroma.unsqueeze(2).unsqueeze(4))
-        for plane, offset in enumerate(self._offset):
-            rgb[plane].add_(offset)
-        rgb.add_(y, alpha=self._luma_scale)
+            # Nearest 2x upsample: broadcasting a copy into the split view of
+            # the reusable tile replaces interpolate() and its allocation.
+            rgb = self._rgb[:, :rows]
+            rgb.view(3, half_rows, 2, W // 2, 2).copy_(
+                chroma.unsqueeze(2).unsqueeze(4)
+            )
+            for plane, offset in enumerate(self._offset):
+                rgb[plane].add_(offset)
+            rgb.add_(y[top:bottom], alpha=self._luma_scale)
 
-        if self.is_10bit:
-            codes = self._codes
-            codes.copy_(rgb.round_().clamp_(0, 1023))
-            codes.add_(self._dither2).bitwise_right_shift_(2).clamp_(0, 255)
-            out.copy_(codes)
-        else:
-            out.copy_(rgb.round_().clamp_(0, 255))
+            out_tile = out[:, top:bottom]
+            if self.is_10bit:
+                codes = self._codes[:, :rows]
+                codes.copy_(rgb.round_().clamp_(0, 1023))
+                # Tiled heights are multiples of the 8-row Bayer period, so
+                # every tile starts at the same phase as the full-frame path.
+                codes.add_(self._dither2[:, :rows]).bitwise_right_shift_(2).clamp_(
+                    0, 255
+                )
+                out_tile.copy_(codes)
+            else:
+                out_tile.copy_(rgb.round_().clamp_(0, 255))

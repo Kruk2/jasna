@@ -79,6 +79,8 @@ def _session_config_from_args(
         lut_path=lut_path,
         sharpen_strength=float(args.sharpen),
         retarget_high_fps=bool(args.retarget_high_fps),
+        auto_source_rate=bool(args.amd_dual_gop_encode),
+        amd_dual_gop_encode=bool(args.amd_dual_gop_encode),
         fmp4=bool(args.fmp4),
         disable_progress=bool(args.no_progress),
         working_dir=Path(args.working_directory) if args.working_directory else None,
@@ -97,6 +99,7 @@ def _resolve_cli_encoder_settings(
     cq: int | None,
     codec: str,
     vendor,
+    add_default_cq: bool = True,
 ) -> dict[str, object]:
     from jasna.accelerator import AcceleratorVendor
     from jasna.media.encoder_settings import parse_encoder_settings, validate_encoder_settings
@@ -140,7 +143,7 @@ def _resolve_cli_encoder_settings(
             codec=codec,
             vendor=resolved_vendor,
         )
-    else:
+    elif add_default_cq:
         settings["cq"] = encoder_cq_spec(codec, resolved_vendor).default
 
     return validate_encoder_settings(
@@ -536,6 +539,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     encoding.add_argument(
+        "--amd-dual-gop-encode",
+        action="store_true",
+        help=(
+            "Linux AMD HEVC full-video and Smart Render encoding: alternate "
+            "closed GOPs across two persistent AMF sessions with source-rate "
+            "control. Automatic eligibility requires Main10/P010 output at "
+            "least 3840x2160 pixels, or Main/NV12 output at least 5760x2880 "
+            "pixels. CLI default is off; the GUI preset enables eligible jobs."
+        ),
+    )
+    encoding.add_argument(
         "--segments",
         type=str,
         default="",
@@ -826,7 +840,26 @@ def main() -> None:
         parser.error("--retarget-high-fps is only supported for offline exports")
     if is_streaming and args.fmp4:
         parser.error("--fmp4 is only supported for offline exports")
-    from jasna.post_export_action import run_post_export_action_safely, validate_post_export_action
+    if args.amd_dual_gop_encode:
+        if is_streaming:
+            parser.error("--amd-dual-gop-encode is only supported for offline exports")
+        if args.retarget_high_fps:
+            parser.error(
+                "--amd-dual-gop-encode cannot be combined with --retarget-high-fps"
+            )
+        if args.fmp4:
+            parser.error("--amd-dual-gop-encode cannot be combined with --fmp4")
+        if args.cq is not None:
+            parser.error(
+                "--amd-dual-gop-encode uses automatic source-rate VBR Peak "
+                "and cannot be combined with --cq"
+            )
+    from jasna.post_export_action import (
+        PostExportVideoCommandError,
+        run_post_export_action_safely,
+        run_post_export_video_command,
+        validate_post_export_action,
+    )
     validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
 
     def _run_post_export_action() -> None:
@@ -853,6 +886,11 @@ def main() -> None:
     input_is_image = input_video is not None and is_image(input_video)
     input_is_dir = input_video is not None and input_video.is_dir()
     segments_spec = str(args.segments).strip()
+    if args.amd_dual_gop_encode:
+        if input_is_image or input_is_dir:
+            parser.error(
+                "--amd-dual-gop-encode requires one HEVC video input"
+            )
     if segments_spec:
         if is_streaming:
             parser.error("--segments cannot be combined with --stream")
@@ -928,17 +966,61 @@ def main() -> None:
             parser, args, input_video, output_video, codec_was_explicit=codec_was_explicit
         )
 
-    from jasna.accelerator import device_context, vendor_for_device
+    from jasna.accelerator import AcceleratorVendor, device_context, vendor_for_device
+
+    encoder_vendor = vendor_for_device(str(args.device))
+    if args.amd_dual_gop_encode:
+        if sys.platform != "linux":
+            parser.error("--amd-dual-gop-encode is supported only on Linux")
+        if encoder_vendor is not AcceleratorVendor.AMD:
+            parser.error("--amd-dual-gop-encode requires an AMD GPU")
+        if codec != "hevc":
+            parser.error("--amd-dual-gop-encode requires HEVC output")
 
     encoder_settings = _resolve_cli_encoder_settings(
         str(args.encoder_settings),
         cq=args.cq,
         codec=codec,
-        vendor=vendor_for_device(str(args.device)),
+        vendor=encoder_vendor,
+        add_default_cq=not bool(args.amd_dual_gop_encode),
     )
+    if args.amd_dual_gop_encode:
+        conflicting_rate_options = sorted(
+            {
+                "cq",
+                "qvbr_quality_level",
+                "rc",
+                "maxrate",
+                "bufsize",
+                "qp_i",
+                "qp_p",
+            }
+            & encoder_settings.keys()
+        )
+        if conflicting_rate_options:
+            parser.error(
+                "--amd-dual-gop-encode derives VBR Peak from the source; "
+                "remove custom " + ", ".join(conflicting_rate_options)
+            )
+        custom_gop = encoder_settings.get("g")
+        if custom_gop is not None and int(custom_gop) != 250:
+            parser.error("--amd-dual-gop-encode requires g=250")
+        custom_b_frames = encoder_settings.get("bf")
+        if custom_b_frames is not None and int(custom_b_frames) != 0:
+            parser.error("--amd-dual-gop-encode requires bf=0")
+        from jasna.media.probe import get_video_meta_data
+        from jasna.media.dual_gop_encoder import validate_amd_dual_gop_source
+
+        try:
+            validate_amd_dual_gop_source(
+                get_video_meta_data(str(input_video)),
+                smart_fragment=bool(segments_spec),
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
 
     if args.license_email and args.license_key:
-        from jasna.protection import license_store
+        from jasna.license_api import license_store
         license_store.set_license(args.license_email, args.license_key)
 
     lut_arg = str(args.lut).strip()

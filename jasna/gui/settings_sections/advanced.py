@@ -190,16 +190,44 @@ class AdvancedSection:
         self._widgets["denoise_step"].pack(side="right")
         self._widgets["denoise_step"].set_value("after_primary")
 
+        # Opt-in crash-investigation log. It is kept with advanced settings so
+        # normal media output behavior remains unchanged unless explicitly enabled.
+        run_log_row = ctk.CTkFrame(inner, fg_color="transparent")
+        run_log_row.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        self._widgets["save_run_log"] = ctk.CTkCheckBox(
+            run_log_row,
+            text=t("save_run_log"),
+            command=self._on_modified,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text_color=Colors.TEXT_PRIMARY,
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            border_color=Colors.BORDER_LIGHT,
+            checkbox_width=18,
+            checkbox_height=18,
+        )
+        self._widgets["save_run_log"].pack(side="left")
+        run_log_tip = ctk.CTkLabel(
+            run_log_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        run_log_tip.pack(side="left", padx=4)
+        Tooltip(run_log_tip, get_tooltip("save_run_log"))
+
+        self._run_log_row = run_log_row
         row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._rows = [
             (row1, row_gap), (gap_row, row_gap), (mindur_row, row_gap), (scene_row, row_gap),
-            (row2, row_gap), (row_vr, row_gap), (row3, row_gap), (row4, dict(fill="x")),
+            (row2, row_gap), (row_vr, row_gap), (row3, row_gap), (row4, row_gap), (run_log_row, dict(fill="x")),
         ]
         self._vr_row = row_vr
         self.set_model("basicvsrpp")
 
     def set_model(self, model: str) -> None:
-        hidden = tuple(row for row, _options in self._rows if row is not self._vr_row) if model == "ltx" else ()
+        hidden = tuple(row for row, _options in self._rows if row not in (self._vr_row, self._run_log_row)) if model == "ltx" else ()
         pack_rows(self._rows, hidden)
 
     def _on_slider_change(self, key: str, value: int):
@@ -227,6 +255,10 @@ class AdvancedSection:
         self._widgets["vr_mode"].set_value(preset.vr_mode)
         self._widgets["denoise_strength"].set_value(preset.denoise_strength)
         self._widgets["denoise_step"].set_value(preset.denoise_step)
+        if preset.save_run_log:
+            self._widgets["save_run_log"].select()
+        else:
+            self._widgets["save_run_log"].deselect()
 
     def collect(self) -> dict:
         return {
@@ -238,4 +270,5 @@ class AdvancedSection:
             "vr_mode": self._widgets["vr_mode"].get_value(),
             "denoise_strength": self._widgets["denoise_strength"].get_value(),
             "denoise_step": self._widgets["denoise_step"].get_value(),
+            "save_run_log": self._widgets["save_run_log"].get() == 1,
         }

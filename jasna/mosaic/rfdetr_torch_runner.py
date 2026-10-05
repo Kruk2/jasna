@@ -53,6 +53,15 @@ class RfDetrTorchRunner:
         resolution: int,
         variant: str,
     ) -> None:
+        from jasna.mosaic.windows_sdpa_policy import configure_windows_amd_sdpa
+
+        self.device = torch.device(device)
+        self.fp16 = bool(fp16)
+        # Some model constructors perform warmup forwards. Apply the policy
+        # before importing/constructing the wrapper, not after the first SDPA.
+        self.sdpa_policy = configure_windows_amd_sdpa(
+            self.device, fp16=self.fp16, torch_module=torch
+        )
         try:
             import rfdetr
         except ImportError as exc:
@@ -66,9 +75,6 @@ class RfDetrTorchRunner:
                 f"RF-DETR torch runner: unsupported variant {variant!r}; "
                 f"known: {', '.join(sorted(_VARIANT_CLASSES))}"
             )
-
-        self.device = torch.device(device)
-        self.fp16 = bool(fp16)
 
         checkpoint = torch.load(weights_path, map_location="cpu", weights_only=False)
         state = checkpoint["model"]

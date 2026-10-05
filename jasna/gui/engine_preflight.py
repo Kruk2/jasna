@@ -57,8 +57,9 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     det_weights = _detection_weights_path(settings)
     if is_rfdetr_model(det_name):
         if amd:
-            # AMD runs RF-DETR through the rfdetr torch model; no precompiled
-            # engine/cache artifact to check or build.
+            # AMD does not build a TensorRT engine here. Eligible Linux
+            # gfx1100/FP16/rfdetr-v6 jobs select the installed, strictly
+            # validated MIGraphX sidecar; other AMD cases retain PyTorch.
             det_engine = None
             det_exists = True
         else:
