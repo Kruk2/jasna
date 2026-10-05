@@ -240,8 +240,6 @@ def _ltx_model_files(
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.ltx.model_files import LtxModelFiles
 
-    if not is_nvidia_device(device):
-        raise ValueError("LTX restoration needs an NVIDIA GPU")
     if config.ltx_fast and torch.cuda.get_device_capability(device)[0] < 10:
         raise ValueError("The fast LTX model needs an RTX 50-series (Blackwell) GPU")
     if config.ltx_trial:
