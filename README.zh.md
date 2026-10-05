@@ -97,6 +97,7 @@ jasna --input input_folder --output output_folder
 - **[流媒体](docs/zh/streaming.md)** — 在浏览器中或通过 Stash 实时观看修复后的视频。
 - **[CLI 参考](docs/zh/cli.md)** — 所有命令行选项，包括 `--cq`、输出模板、各编解码器的编码器设置和导出后操作。
 - **[从源代码运行](docs/en/development.md)** — 开发者环境搭建和构建说明。
+- **[Linux 与 Windows 功能审查](docs/zh/feature_reviews.md)** — 26 项整合的中英文指南、前置依赖及验证限制；[英文为默认入口](docs/en/feature_reviews.md)。
 
 ## 基准测试
 

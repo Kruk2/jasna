@@ -15,6 +15,14 @@ from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResul
 from jasna.tracking.clip_tracker import TrackedClip
 
 
+@pytest.fixture(autouse=True)
+def _cpu_monitor(monkeypatch):
+    from jasna.vram_offloader import VramStats
+    monitor = MagicMock(host_memory_pressure=False, stats=VramStats())
+    monkeypatch.setattr("jasna.pipeline_threads.VramOffloader", lambda **kwargs: monitor)
+    monkeypatch.setattr(torch.cuda, "ipc_collect", lambda: None)
+
+
 def _fake_metadata() -> VideoMetadata:
     return VideoMetadata(
         video_file="fake_input.mkv",
@@ -327,4 +335,3 @@ class TestPipelineRunSync:
         ):
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()
-

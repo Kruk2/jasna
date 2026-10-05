@@ -40,9 +40,9 @@ def test_wizard_names_the_official_sellers(monkeypatch):
     ("MalformedLicenseError", "license_malformed"),
 ])
 def test_license_dialog_explains_rejected_keys(monkeypatch, error_name, message_key):
-    protection = pytest.importorskip("jasna.protection")
+    from jasna import license_api as protection
     from jasna.gui.components import LicenseDialog
-    from jasna.protection import license_store
+    from jasna.license_api import license_store
 
     def reject(email, key):
         raise getattr(protection, error_name)("english text")

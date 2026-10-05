@@ -1,12 +1,18 @@
 """Encoding settings section."""
 
+import sys
 import customtkinter as ctk
 from tkinter import filedialog
 
-from jasna.accelerator import vendor_for_device
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch, create_icon
 from jasna.gui.locales import t
+from jasna.gui.models import (
+    ENCODER_RATE_MODE_AUTO_SOURCE as RATE_MODE_AUTO_SOURCE,
+    ENCODER_RATE_MODE_MANUAL_CQ as RATE_MODE_MANUAL_CQ,
+    ENCODER_RATE_MODES as RATE_MODES,
+)
 from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     ValueOptionMenu,
@@ -24,6 +30,31 @@ CODEC_LABEL_TO_CANONICAL = {
     "AV1": "av1",
 }
 CODEC_CANONICAL_TO_LABEL = {v: k for k, v in CODEC_LABEL_TO_CANONICAL.items()}
+
+def supports_auto_source_rate_gui(
+    codec: str,
+    vendor: AcceleratorVendor | str,
+    *,
+    platform: str | None = None,
+) -> bool:
+    """Return whether the validated source-rate encoding control applies."""
+
+    return (
+        (sys.platform if platform is None else platform) == "linux"
+        and AcceleratorVendor(str(vendor)) is AcceleratorVendor.AMD
+        and codec == "hevc"
+    )
+
+
+def supports_amd_dual_gop_gui(
+    codec: str,
+    vendor: AcceleratorVendor | str,
+    *,
+    platform: str | None = None,
+) -> bool:
+    """Return whether the proven Linux AMD dual-session control applies."""
+
+    return supports_auto_source_rate_gui(codec, vendor, platform=platform)
 
 
 class EncodingSection:
@@ -61,20 +92,91 @@ class EncodingSection:
             for codec in CODEC_CANONICAL_TO_LABEL
         }
 
-        # Quality/CQ
+        # Linux AMD HEVC full/Smart Render rate-control policy. Other platforms
+        # and codecs keep the established CQ control until their source-rate
+        # route has been validated separately.
         row2 = ctk.CTkFrame(inner, fg_color="transparent")
         row2.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
 
-        add_setting_label(row2, "quality_cq", "encoder_cq")
+        rate_mode_label = ctk.CTkLabel(
+            row2,
+            text=t("smart_rate_mode"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        rate_mode_label.pack(side="left")
+        rate_mode_tip = ctk.CTkLabel(
+            row2,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        rate_mode_tip.pack(side="left", padx=4)
+        Tooltip(rate_mode_tip, get_tooltip("smart_rate_mode"))
+        self._widgets["encoder_rate_mode"] = ValueOptionMenu(
+            row2,
+            options={
+                RATE_MODE_AUTO_SOURCE: t("rate_mode_auto_source"),
+                RATE_MODE_MANUAL_CQ: t("rate_mode_manual_cq"),
+            },
+            command=self._on_rate_mode_changed,
+            fg_color=Colors.BG_CARD,
+            button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT,
+            dropdown_fg_color=Colors.BG_CARD,
+            text_color=Colors.TEXT_PRIMARY,
+            width=190,
+        )
+        self._widgets["encoder_rate_mode"].pack(side="right")
+        self._widgets["encoder_rate_mode"].set_value(RATE_MODE_AUTO_SOURCE)
+        self._rate_mode_row = row2
+
+        # Experimental Linux AMD 8K Main10 HEVC temporal multi-session mode.
+        dual_gop_row = ctk.CTkFrame(inner, fg_color="transparent")
+        dual_gop_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        dual_gop_label = ctk.CTkLabel(
+            dual_gop_row,
+            text=t("amd_dual_gop_encode"),
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+        )
+        dual_gop_label.pack(side="left")
+        dual_gop_tip = ctk.CTkLabel(
+            dual_gop_row,
+            text="ⓘ",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_TINY),
+            cursor="hand2",
+        )
+        dual_gop_tip.pack(side="left", padx=4)
+        Tooltip(dual_gop_tip, get_tooltip("amd_dual_gop_encode"))
+        self._widgets["amd_dual_gop_encode"] = CompactSwitch(
+            dual_gop_row,
+            self._on_dual_gop_changed,
+            Colors.BG_PANEL,
+        )
+        self._widgets["amd_dual_gop_encode"].pack(side="right")
+        self._dual_gop_row = dual_gop_row
+
+        # Quality/CQ
+        row3 = ctk.CTkFrame(inner, fg_color="transparent")
+        row3.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+
+        cq_label = ctk.CTkLabel(row3, text=t("quality_cq"), text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL))
+        cq_label.pack(side="left")
+        cq_tip = ctk.CTkLabel(row3, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        cq_tip.pack(side="left", padx=4)
+        Tooltip(cq_tip, get_tooltip("encoder_cq"))
 
         initial_cq = self._cq_values[self._active_codec]
         initial_spec = encoder_cq_spec(self._active_codec, self._cq_vendor)
         self._widgets["encoder_cq_val"] = create_slider_value_label(
-            row2, str(initial_cq), 3, Colors.BG_PANEL
+            row3, str(initial_cq), 3, Colors.BG_PANEL
         )
         self._widgets["encoder_cq_val"].pack(side="right")
         self._widgets["encoder_cq"] = ctk.CTkSlider(
-            row2,
+            row3,
             from_=initial_spec.minimum,
             to=initial_spec.maximum,
             number_of_steps=initial_spec.maximum - initial_spec.minimum,
@@ -84,10 +186,13 @@ class EncodingSection:
         )
         self._widgets["encoder_cq"].pack(side="right", padx=(0, 8))
         self._widgets["encoder_cq"].set(initial_cq)
+        self._cq_row = row3
 
         # Sharpening
         sharpen_row = ctk.CTkFrame(inner, fg_color="transparent")
         sharpen_row.pack(fill="x", pady=(0, Sizing.PADDING_SMALL))
+        self._sharpen_row = sharpen_row
+        self._sync_rate_control_visibility()
 
         add_setting_label(sharpen_row, "sharpen_strength")
 
@@ -125,7 +230,7 @@ class EncodingSection:
         Tooltip(retarget_tip, get_tooltip("retarget_high_fps"))
         self._widgets["retarget_high_fps"] = CompactSwitch(
             retarget_row,
-            self._on_modified,
+            lambda: self._on_incompatible_export_toggle("retarget_high_fps"),
             Colors.BG_PANEL,
         )
         self._widgets["retarget_high_fps"].pack(side="right")
@@ -151,7 +256,7 @@ class EncodingSection:
         Tooltip(fmp4_tip, get_tooltip("fmp4"))
         self._widgets["fmp4"] = CompactSwitch(
             fmp4_row,
-            self._on_modified,
+            lambda: self._on_incompatible_export_toggle("fmp4"),
             Colors.BG_PANEL,
         )
         self._widgets["fmp4"].pack(side="right")
@@ -227,7 +332,83 @@ class EncodingSection:
         cq = self._cq_values[new_codec]
         self._widgets["encoder_cq"].set(cq)
         self._widgets["encoder_cq_val"].configure(text=str(cq))
+        self._sync_rate_control_visibility()
         self._on_modified()
+
+    def _on_rate_mode_changed(self, _new_mode: str):
+        if (
+            _new_mode != RATE_MODE_AUTO_SOURCE
+            and self._widgets["amd_dual_gop_encode"].get() == 1
+        ):
+            self._widgets["amd_dual_gop_encode"].deselect()
+        self._sync_rate_control_visibility()
+        self._on_modified()
+
+    def _on_dual_gop_changed(self):
+        if self._widgets["amd_dual_gop_encode"].get() == 1:
+            self._widgets["encoder_rate_mode"].set_value(
+                RATE_MODE_AUTO_SOURCE
+            )
+            self._widgets["retarget_high_fps"].deselect()
+            self._widgets["fmp4"].deselect()
+        self._sync_rate_control_visibility()
+        self._on_modified()
+
+    def _on_incompatible_export_toggle(self, key: str):
+        if (
+            self._widgets[key].get() == 1
+            and self._widgets["amd_dual_gop_encode"].get() == 1
+        ):
+            self._widgets["amd_dual_gop_encode"].deselect()
+        self._on_modified()
+
+    def _sync_rate_control_visibility(self):
+        supports_auto = supports_auto_source_rate_gui(
+            self._active_codec,
+            self._cq_vendor,
+        )
+        if supports_auto:
+            if not self._rate_mode_row.winfo_manager():
+                self._rate_mode_row.pack(
+                    fill="x",
+                    pady=(0, Sizing.PADDING_SMALL),
+                    before=self._sharpen_row,
+                )
+        else:
+            self._rate_mode_row.pack_forget()
+
+        show_cq = (
+            not supports_auto
+            or self._widgets["encoder_rate_mode"].get_value()
+            == RATE_MODE_MANUAL_CQ
+        )
+        if show_cq:
+            if not self._cq_row.winfo_manager():
+                self._cq_row.pack(
+                    fill="x",
+                    pady=(0, Sizing.PADDING_SMALL),
+                    before=self._sharpen_row,
+                )
+        else:
+            self._cq_row.pack_forget()
+
+        dual_row = getattr(self, "_dual_gop_row", None)
+        dual_widget = self._widgets.get("amd_dual_gop_encode")
+        if dual_row is None or dual_widget is None:
+            return
+        if supports_amd_dual_gop_gui(
+            self._active_codec,
+            self._cq_vendor,
+        ):
+            if not dual_row.winfo_manager():
+                dual_row.pack(
+                    fill="x",
+                    pady=(0, Sizing.PADDING_SMALL),
+                    before=self._cq_row,
+                )
+        else:
+            dual_row.pack_forget()
+            dual_widget.deselect()
 
     def _on_cq_changed(self, value: float):
         cq = int(value)
@@ -274,6 +455,11 @@ class EncodingSection:
         )
         self._widgets["encoder_cq"].set(cq)
         self._widgets["encoder_cq_val"].configure(text=str(cq))
+        rate_mode = getattr(preset, "encoder_rate_mode", RATE_MODE_AUTO_SOURCE)
+        if rate_mode not in RATE_MODES:
+            rate_mode = RATE_MODE_AUTO_SOURCE
+        self._widgets["encoder_rate_mode"].set_value(rate_mode)
+        self._sync_rate_control_visibility()
         self._widgets["encoder_custom_args"].delete(0, "end")
         self._widgets["encoder_custom_args"].insert(0, preset.encoder_custom_args)
         self._widgets["sharpen_strength"].set(preset.sharpen_strength)
@@ -288,6 +474,11 @@ class EncodingSection:
             self._widgets["fmp4"].select()
         else:
             self._widgets["fmp4"].deselect()
+        if getattr(preset, "amd_dual_gop_encode", False):
+            self._widgets["amd_dual_gop_encode"].select()
+        else:
+            self._widgets["amd_dual_gop_encode"].deselect()
+        self._sync_rate_control_visibility()
 
         self._widgets["lut_path"].delete(0, "end")
         self._widgets["lut_path"].insert(0, preset.lut_path or "")
@@ -298,8 +489,12 @@ class EncodingSection:
     def collect(self) -> dict:
         return {
             "codec": self._widgets["codec"].get_value(),
+            "encoder_rate_mode": self._widgets["encoder_rate_mode"].get_value(),
             "encoder_cq": int(self._widgets["encoder_cq"].get()),
             "encoder_custom_args": self._widgets["encoder_custom_args"].get(),
+            "amd_dual_gop_encode": (
+                self._widgets["amd_dual_gop_encode"].get() == 1
+            ),
             "sharpen_strength": round(float(self._widgets["sharpen_strength"].get()), 2),
             "retarget_high_fps": self._widgets["retarget_high_fps"].get() == 1,
             "fmp4": self._widgets["fmp4"].get() == 1,

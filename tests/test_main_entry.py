@@ -5,6 +5,54 @@ from unittest.mock import patch
 import pytest
 
 
+_MISSING = object()
+
+
+@pytest.fixture(autouse=True)
+def _restore_jasna_module_state():
+    """Keep entrypoint import tests from replacing collected Jasna modules."""
+    original_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "jasna" or name.startswith("jasna.")
+    }
+    original_parent_attrs = {}
+    for name in original_modules:
+        if "." not in name:
+            continue
+        parent_name, attr = name.rsplit(".", 1)
+        parent = original_modules.get(parent_name)
+        if parent is not None:
+            original_parent_attrs[(parent_name, attr)] = parent.__dict__.get(
+                attr, _MISSING
+            )
+
+    yield
+
+    current_names = {
+        name
+        for name in sys.modules
+        if name == "jasna" or name.startswith("jasna.")
+    }
+    relation_names = current_names | set(original_modules)
+    for name in sorted(current_names, key=lambda value: value.count("."), reverse=True):
+        sys.modules.pop(name, None)
+    sys.modules.update(original_modules)
+
+    for name in relation_names:
+        if "." not in name:
+            continue
+        parent_name, attr = name.rsplit(".", 1)
+        parent = sys.modules.get(parent_name)
+        if parent is None:
+            continue
+        original = original_parent_attrs.get((parent_name, attr), _MISSING)
+        if original is _MISSING:
+            parent.__dict__.pop(attr, None)
+        else:
+            parent.__dict__[attr] = original
+
+
 def test_no_args_dispatches_to_gui() -> None:
     if "jasna.__main__" in sys.modules:
         del sys.modules["jasna.__main__"]
@@ -132,3 +180,27 @@ def test_jasna_main_pid_child_exits_without_dispatch(monkeypatch) -> None:
             assert e.value.code == 0
             run_gui.assert_not_called()
             main.assert_not_called()
+
+
+def test_isolated_video_job_dispatches_before_main_pid_guard(monkeypatch) -> None:
+    for name in list(sys.modules):
+        if name == "jasna.__main__" or name.startswith("jasna.gui"):
+            del sys.modules[name]
+
+    monkeypatch.setattr(os, "getpid", lambda: 99999)
+    monkeypatch.setenv("JASNA_MAIN_PID", "12345")
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["jasna", "--isolated-video-job", "/tmp/request.json"],
+    )
+
+    with patch(
+        "jasna.gui.video_job_process.run_video_job_file",
+        return_value=7,
+    ) as run_job:
+        with pytest.raises(SystemExit) as error:
+            import jasna.__main__  # noqa: F401
+
+    assert error.value.code == 7
+    run_job.assert_called_once_with("/tmp/request.json")

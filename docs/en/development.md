@@ -1,5 +1,9 @@
 # Running from Source
 
+For the Linux/Windows integration, start with the [English feature review index](feature_reviews.md)
+or its [Chinese counterpart](../zh/feature_reviews.md). Each feature has bilingual usage,
+dependency, and acceptance documentation; English is the default entry point.
+
 This page is for developers. If you just want to use Jasna, download a
 release package instead — it bundles everything, including its own
 Python/Tk runtime, `ffmpeg`, and `ffprobe`.
@@ -104,7 +108,7 @@ Then install Jasna in editable mode:
 uv pip install -e ".[nvidia,dev]"  # or .[amd,dev]
 ```
 
-## CUDA kernels
+## CUDA and Linux AMD HIP kernels
 
 `jasna/media/*.cu` are compiled ahead of time into `.fatbin` files that are
 committed alongside them, and loaded at run time through the CUDA driver API
@@ -134,8 +138,89 @@ still load via JIT. The script prints each fatbin's size and architecture list;
 `CUDA_KERNEL_FATBINS` in `jasna/protection/keytool/build_nuitka.py` so frozen
 builds bundle it.
 
-Every kernel needs a Torch equivalent: ROCm has no fatbin path and falls back to
-it, and the unit tests use it as the reference implementation.
+The two colour-conversion sources also have ahead-of-time AMD code objects for
+the validated `gfx1100` target. Linux artifacts are rebuilt with:
+
+```bash
+scripts/build_hip_code_objects.sh                 # both colour kernels, gfx1100
+scripts/build_hip_code_objects.sh gfx1100 yuv_to_rgb
+```
+
+The resulting `jasna/media/{yuv_to_rgb,rgb_to_yuv}.gfx1100.hsaco` files are
+loaded through the HIP module API. A ROCm compiler is required only to rebuild
+them. On Linux AMD `gfx1100`, Jasna automatically uses the pair when both files
+are installed; `JASNA_AMD_HIP_COLOR_KERNELS=0` disables the route, while `=1`
+requests it explicitly and fails closed on an unsupported or incomplete
+installation. Other AMD architectures retain the Torch conversion path.
+
+Windows artifacts must be rebuilt offline with the same HIP SDK used by the
+installed ROCm PyTorch wheel:
+
+```powershell
+.\scripts\build_hip_code_objects_windows.ps1 `
+  -Architecture gfx1100 `
+  -Hipcc C:\path\to\matching\HIP\bin\hipcc.exe `
+  -Python C:\path\to\rocm-python.exe
+```
+
+This writes two `.gfx1100.windows.co` files and
+`hip_color_kernels.gfx1100.windows.json`. The manifest pins the source and
+artifact hashes, architecture, parameter/code-object ABI, exact Torch HIP
+version, HIP runtime API, and the SHA-256 of the HIP DLL already loaded by
+PyTorch. Product startup never invokes `hipcc` or JIT compilation. Windows
+selection is deliberately explicit-only with `JASNA_AMD_HIP_COLOR_KERNELS=1`;
+unset/`auto` retains the Torch eager route and any mismatch fails closed.
+
+Every kernel still needs a Torch equivalent. It is the fallback for targets
+without an accepted AOT object and the reference implementation for parity
+tests. Frozen Linux AMD builds must copy both `.hsaco` files next to the
+executable. Frozen Windows builds must instead copy the two `.windows.co` files
+and their Windows manifest next to the executable. Rebuild-only `.cu` sources
+are not shipped in either frozen product. These locations match
+`jasna.media.hip_kernel.code_object_path()`.
+
+## Linux AMD BasicVSR++ B1 MIGraphX artifacts
+
+Linux AMD `gfx1100` FP16 builds can automatically replace only the repeated
+`i > 0` body of the four BasicVSR++ propagation directions with four static-B1
+Torch-MIGraphX GraphModules. Model loading, optical flow, first-frame
+propagation, reconstruction, and the rest of the pipeline stay on PyTorch.
+
+Install the accepted artifact set next to the restoration checkpoint:
+
+```text
+model_weights/
+├── lada_mosaic_restoration_model_generic_v1.2.pth
+└── basicvsrpp-b1-migraphx-gfx1100/
+    ├── B1_COLD_MANIFEST.json
+    ├── B1_COLD_MANIFEST.sha256
+    ├── b1_backward_1.torch
+    ├── b1_forward_1.torch
+    ├── b1_backward_2.torch
+    ├── b1_forward_2.torch
+    └── _torch_migraphx*.so
+```
+
+The loader validates the manifest and its digest, checkpoint and semantic-source
+digests, Torch/ROCm/MIGraphX/Torch-MIGraphX versions, GPU identity, every static
+tensor ABI, and the expected 28-node/three-partition graph topology. It rejects
+artifacts that need loader-side compilation and immediately clones reusable
+artifact outputs. When RF-DETR initialized Torch-MIGraphX first, the loader
+reuses its already-loaded native extension if its SHA-256 matches the manifest.
+Equal-content copies in the artifact directory and Torch extension cache may
+have different paths; different content still fails closed.
+`JASNA_BASICVSRPP_MIGRAPHX_B1=0` disables automatic selection;
+`=1` explicitly requires the route and fails closed. Use
+`JASNA_BASICVSRPP_MIGRAPHX_B1_DIR` only to point at an equivalent validated
+artifact directory.
+
+Compiled model artifacts and native Torch-MIGraphX extensions are release
+assets, not Git source artifacts. Frozen Linux AMD packaging must include the
+complete directory plus its Python/native runtime dependencies. The public
+checkout does not contain the private `jasna/protection/keytool/build_nuitka.py`
+asset list, so maintainers must update that private list before producing a
+release. See `docs/LINUX_AMD_HIP_MIGRAPHX_OPTIMIZATION_CN.md` for the accepted
+real-video measurements and reproduction boundaries.
 
 ## Benchmarks
 
@@ -198,19 +283,48 @@ jasna/protection/keytool/validate_amd_ssh.sh user@amd-host
 python jasna/protection/keytool/build_windows_amd.py
 ```
 
-The AMD build uses PyTorch/ROCm for BasicVSR++, YOLO and RF-DETR, and AMF for
-H.264/HEVC/AV1 decode and encode. RF-DETR runs the trained checkpoint through the
-`rfdetr` torch model (`rfdetr==1.8.3` on `transformers==5.1.0`, bundled as
-`rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
-per-model engine precompile step. NVIDIA builds keep the ONNX → TensorRT path
-(`rfdetr-v6.onnx`). Decode falls back to FFmpeg software decoding when AMF cannot
-handle the source. Segment smart rendering works on AMF; H.264 sources with
-more than three consecutive B-frames are fully re-encoded there, with
-restoration still limited to the selected ranges. Secondary restoration remains
-NVIDIA-only.
+AMD builds use PyTorch/ROCm for their general model path and AMF for supported
+H.264/HEVC/AV1 decode and encode. Windows AMD runs RF-DETR and BasicVSR++ in
+PyTorch. Linux AMD `gfx1100` can instead auto-select the installed, strictly
+versioned RF-DETR and BasicVSR++ B1 MIGraphX artifacts; when no accepted
+artifact is installed, the corresponding PyTorch path remains available.
+RF-DETR's source model is `rfdetr-v6.pt` (`rfdetr==1.8.3` on
+`transformers==5.1.0`). NVIDIA builds keep the ONNX → TensorRT path
+(`rfdetr-v6.onnx`). Decode falls back to FFmpeg software decoding when the
+platform's product capability gate allows it and AMF cannot handle the source.
+Secondary restoration remains NVIDIA-only; see the segment documentation for
+current Smart Render platform/codec gates.
 
 `--device cuda:N` selects the PyTorch GPU (ROCm reuses the CUDA device API).
 FFmpeg 8's Linux AMF device context currently ignores its adapter
 argument, so AMF decode/encode can use the default Vulkan adapter on a multi-GPU
 AMD host. Isolate the target GPU at the container/host level when deterministic
 AMF adapter selection matters.
+
+## Latest-main local review stack (2026-10-03)
+
+The local 26-feature review stack is based on upstream main
+`81dc8b053fb317c063390daab1dab8289c2094df`, not the historical 0.10 tag.
+The first 22 exact feature commits are retained; three Windows additions and a
+refreshed documentation feature follow them. Each review must declare its exact
+base and dependencies; later cumulative prefixes are not independent diffs
+against upstream main. No branches or pull requests have been published.
+
+Shared job/session/scan/render/output orchestration stays shared. Native media,
+model and runtime backends retain vendor/platform capability gates. The new
+Windows RF-DETR Math SDPA policy matches the verified Torch/HIP/DLL/gfx1100
+identity before model construction and does not change Linux, CPU or NVIDIA
+backends, precision selection, or explicit LTX attention contexts. A typed
+Windows AMF host-transfer failure quarantines the queue and requires a new
+process; this prevents reuse of an unsafe context, not a claim of fixing TDR.
+The explicit synthetic precision probe is not a quality certificate.
+
+The accepted Linux ROCm 10 collection was promoted to the desktop GUI with user
+authorization. This review reorganization does not switch that launcher or
+change deployed processing code. Windows SDK native asset rebuild, whole-card
+telemetry and real-hardware A/B were waived by the user for this round:
+`WAIVED_BY_USER_NOT_RUN`, never PASS. Existing binary identity gates and opt-in
+defaults remain strict. New Windows/NVIDIA native paths and paid-model AMD
+compatibility are not certified by CPU regression or historical evidence.
+See `MAIN_INTEGRATION_ROCM10_20261001_CN.md` and
+`WINDOWS_ROCM10_COMPATIBILITY_CN.md` for scope and evidence boundaries.
