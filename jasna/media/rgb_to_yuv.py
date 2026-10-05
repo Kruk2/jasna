@@ -1,7 +1,7 @@
 """Planar RGB to packed NV12/P010 conversion for the encoder.
 
-NVIDIA runs the fused kernel in ``rgb_to_yuv.cu``; ROCm and CPU use the Torch
-implementation below, which is also the reference the kernel is tested against.
+NVIDIA and supported AMD devices launch the same fused colour-kernel source
+through their CUDA/HIP backends. Other devices use the shared Torch reference.
 
 The kernel takes separate luma and chroma destinations. That lets the caller
 place the two planes in different buffers, which is what lets CAS sharpen
@@ -17,6 +17,7 @@ import torch
 
 from jasna.accelerator import is_nvidia_device
 from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.hip_kernel import Kernel as HipKernel, color_code_object_name, hip_color_kernels_enabled
 from jasna.media.yuv_scratch import (
     YuvScratch,
     apply_matrix,
@@ -119,6 +120,7 @@ def _launch_rgb_to_yuv(kernel: Kernel, rgb: torch.Tensor, luma: torch.Tensor, ch
     )
 
 
+
 class RgbToYuvConverter:
     """Converts a ``(3, H, W)`` uint8 planar RGB frame into a packed NV12/P010 frame.
 
@@ -144,7 +146,11 @@ class RgbToYuvConverter:
         self._code_range = _CODE_RANGES[pixel_format]
         self._full_range = value_range == "full"
         self._rows = _matrix_rows(standard, self._code_range, self._full_range)
-        self._kernel = Kernel(_FATBIN, variant, _RGB_TO_YUV_ARG_TYPES) if is_nvidia_device(device) else None
+        self._kernel = None
+        if is_nvidia_device(device):
+            self._kernel = Kernel(_FATBIN, variant, _RGB_TO_YUV_ARG_TYPES)
+        elif hip_color_kernels_enabled(device):
+            self._kernel = HipKernel(color_code_object_name("rgb_to_yuv"), variant, _RGB_TO_YUV_ARG_TYPES)
         self._scratch: YuvScratch | None = None
 
     @property

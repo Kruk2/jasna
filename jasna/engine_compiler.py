@@ -147,7 +147,7 @@ def ensure_engines_compiled(
     missing = _missing_engines(req, nvidia=nvidia)
     if missing.unet4x:
         from jasna.engine_paths import unet4x_plaintext_available
-        from jasna.protection import license_store
+        from jasna.license_api import license_store
         if not unet4x_plaintext_available() and not license_store.is_licensed():
             raise RuntimeError("unet-4x is a supporter feature. Enter your license to enable it.")
 
