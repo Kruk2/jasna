@@ -22,6 +22,7 @@ def apply_rocm_env_defaults(environ: MutableMapping[str, str]) -> None:
     environ.setdefault("MIOPEN_FIND_MODE", "FAST")
     environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:False")
     environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:False")
+    environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 
 def configure_rocm_process_env() -> None:
