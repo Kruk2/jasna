@@ -4,12 +4,13 @@ import threading
 import weakref
 from pathlib import Path
 from types import SimpleNamespace
+from dataclasses import replace
 
 import numpy as np
 import pytest
 import torch
 
-from jasna.ltx import restore
+from jasna.ltx import inference, restore
 from jasna.ltx.plan import Region
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
@@ -116,9 +117,9 @@ def fakes(monkeypatch):
     )
     monkeypatch.setattr(restore, "crop_to_canvas", lambda frame, crop: torch.zeros(1))
     monkeypatch.setattr(restore, "_vae_pixels", lambda canvases, device: torch.zeros(1))
-    monkeypatch.setattr(restore, "load_video_encoder", lambda path, device: lambda pixels: torch.zeros(1))
-    monkeypatch.setattr(restore, "load_video_decoder", lambda vae, tuned, device: object())
-    monkeypatch.setattr(restore, "LtxTransformer", _Transformer)
+    monkeypatch.setattr(inference, "load_video_encoder", lambda path, device: lambda pixels: torch.zeros(1))
+    monkeypatch.setattr(inference, "load_video_decoder", lambda vae, tuned, device: object())
+    monkeypatch.setattr(inference, "LtxTransformer", _Transformer)
     monkeypatch.setattr(restore, "decode_latent", decode)
     monkeypatch.setattr(restore, "composite_frame", composite)
     monkeypatch.setattr(restore.Progress, "bar", bar)
@@ -526,9 +527,9 @@ def test_restore_spans_shows_each_pass_before_its_model_loads(fakes, monkeypatch
 
         return load
 
-    monkeypatch.setattr(restore, "load_video_encoder", loading("encoder", restore.load_video_encoder))
-    monkeypatch.setattr(restore, "LtxTransformer", loading("transformer", restore.LtxTransformer))
-    monkeypatch.setattr(restore, "load_video_decoder", loading("decoder", restore.load_video_decoder))
+    monkeypatch.setattr(inference, "load_video_encoder", loading("encoder", inference.load_video_encoder))
+    monkeypatch.setattr(inference, "LtxTransformer", loading("transformer", inference.LtxTransformer))
+    monkeypatch.setattr(inference, "load_video_decoder", loading("decoder", inference.load_video_decoder))
     video = _video(12, range(2, 10))
     restore.restore_spans(
         [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)],
@@ -551,7 +552,48 @@ def test_restore_spans_frees_the_decoder_and_its_cached_memory_after_compose(fak
         decoders.append(weakref.ref(decoder := Decoder()))
         return decoder
 
-    monkeypatch.setattr(restore, "load_video_decoder", load_decoder)
+    monkeypatch.setattr(inference, "load_video_decoder", load_decoder)
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: released.append(decoders[0]() is None if decoders else None))
     _run_spans(tmp_path, [restore.LtxSpan(_source(_video(30, range(3, 28))), (restore.LtxSegment(50, 150, seed=1),), _Writer)])
     assert decoders and released[-1] is True
+
+
+def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp_path):
+    requests = []
+
+    def forbidden(*_args):
+        pytest.fail("licensed weights loaded in the parent")
+
+    def request(self, op, params, tensors, advance=None):
+        requests.append((op, params, tensors))
+        if op == "load_transformer":
+            return {"steps": 8, "resident": 40, "count": 48}, []
+        if op == "encode":
+            assert tensors[0].dtype == torch.uint8
+            assert tensors[0].shape == (1, 3, restore.WINDOW_FRAMES, 2, 2)
+            return {}, [torch.zeros(1)]
+        if op == "denoise_chain":
+            advance(8 * len(tensors))
+            return {}, [torch.zeros(1) for _ in tensors]
+        if op == "decode":
+            return {}, [torch.zeros(restore.WINDOW_FRAMES, 3, 2, 2, dtype=torch.uint8)]
+        return {}, []
+
+    monkeypatch.setattr(inference, "load_video_encoder", forbidden)
+    monkeypatch.setattr(inference, "load_video_decoder", forbidden)
+    monkeypatch.setattr(inference, "LtxTransformer", forbidden)
+    monkeypatch.setattr(inference.ModelRuntime, "request", request)
+    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, _crop: torch.zeros(3, 2, 2, dtype=torch.uint8))
+    files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
+    render = replace(_render(tmp_path), files=files)
+    writer = _Writer()
+    restore.restore_spans(
+        [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), lambda: writer)],
+        render, work_dir=tmp_path, progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
+    )
+    assert writer.closed
+    assert [op for op, _, _ in requests] == [
+        "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",
+        "unload_transformer", "load_decoder", "decode", "unload_decoder",
+    ]
+    assert requests[4][1] == {"seeds": [5]}

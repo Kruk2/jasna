@@ -32,6 +32,7 @@ dist_nuitka/
 dist_nuitka_amd/
 dist_nuitka_win/
 dist_nuitka_win_amd/
+/dist_nuitka*/
 nuitka-crash-report*.xml
 release/
 *.egg-info/
@@ -69,6 +70,7 @@ CLAUDE.md
 model_weights/
 dist_windows/
 dist_windows_amd/
+/dist_windows*/
 
 .repowise/
 .repowise-workspace/

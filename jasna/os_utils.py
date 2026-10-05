@@ -20,6 +20,22 @@ def get_application_executable() -> str:
         # Without Nuitka's multiprocessing plugin, sys.executable names a
         # CPython placeholder in the distribution rather than the compiled app.
         return os.readlink("/proc/self/exe")
+    if sys.platform == "win32" and is_frozen():
+        import ctypes
+        from ctypes import wintypes
+
+        module_path = ctypes.WinDLL("kernel32", use_last_error=True).GetModuleFileNameW
+        module_path.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+        module_path.restype = wintypes.DWORD
+        size = 260
+        while True:
+            buffer = ctypes.create_unicode_buffer(size)
+            length = module_path(None, buffer, size)
+            if not length:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if length < size:
+                return buffer.value
+            size *= 2
     return sys.executable
 
 

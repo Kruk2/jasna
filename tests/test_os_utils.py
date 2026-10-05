@@ -16,13 +16,61 @@ def test_frozen_linux_application_executable_ignores_the_python_placeholder(monk
     assert os_utils.get_application_executable() == "/moved/app/jasna.bin"
 
 
-@pytest.mark.parametrize("platform,frozen", [("linux", False), ("win32", True)])
+@pytest.mark.parametrize("platform,frozen", [("linux", False), ("win32", False), ("darwin", True)])
 def test_other_application_executables_keep_sys_executable(monkeypatch, platform, frozen) -> None:
     monkeypatch.setattr(os_utils, "is_frozen", lambda: frozen)
     monkeypatch.setattr(os_utils.sys, "platform", platform)
     monkeypatch.setattr(os_utils.sys, "executable", "/application/python")
 
     assert os_utils.get_application_executable() == "/application/python"
+
+
+@pytest.mark.parametrize("path", ["C:/relocated/app/jasna.exe", "C:/" + "folder/" * 100 + "jasna.exe"])
+def test_frozen_windows_application_executable_uses_complete_running_module_path(monkeypatch, path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    calls = []
+    def module_path(module, buffer, size):
+        calls.append((module, size))
+        buffer.value = path[:size - 1]
+        return len(path) if len(path) < size else size
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **kwargs: types.SimpleNamespace(GetModuleFileNameW=module_path), raising=False)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "win32")
+    monkeypatch.setattr(os_utils.sys, "executable", "C:/relocated/app/python.exe")
+
+    assert os_utils.get_application_executable() == path
+    assert all(module is None for module, size in calls)
+    assert calls[-1][1] > len(path)
+    assert module_path.argtypes == [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    assert module_path.restype is wintypes.DWORD
+
+
+def test_frozen_windows_application_executable_reports_module_lookup_failure(monkeypatch) -> None:
+    import ctypes
+
+    def module_path(module, buffer, size):
+        return 0
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **kwargs: types.SimpleNamespace(GetModuleFileNameW=module_path), raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(ctypes, "WinError", lambda error: OSError(error, "module path unavailable"), raising=False)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "win32")
+    monkeypatch.setattr(os_utils.sys, "executable", "C:/relocated/app/python.exe")
+
+    with pytest.raises(OSError, match="module path unavailable") as failure:
+        os_utils.get_application_executable()
+    assert failure.value.errno == 5
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows native module path API")
+def test_frozen_windows_application_executable_ignores_placeholder_using_native_api(monkeypatch) -> None:
+    expected = sys.executable
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "executable", "C:/relocated/app/python.exe")
+
+    assert os_utils.get_application_executable().casefold() == expected.casefold()
 
 
 class _FakeKernel32:

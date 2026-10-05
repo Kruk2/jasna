@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 import warnings
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -120,6 +121,30 @@ def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
     assert "-m" not in popen_calls[0]
 
 
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+def test_frozen_engine_compiler_removes_parent_tcl_paths_before_native_startup(monkeypatch, platform) -> None:
+    import torch
+    import jasna.engine_compiler as compiler
+
+    pytest.importorskip("jasna.protection.runtime")
+    monkeypatch.setattr(compiler, "is_frozen", lambda: True)
+    monkeypatch.setattr(compiler.sys, "platform", platform)
+    monkeypatch.setattr(compiler, "get_application_executable", lambda: "/app/jasna.bin")
+    monkeypatch.setattr(compiler, "subprocess_no_window_kwargs", lambda: {})
+    monkeypatch.setattr(compiler, "_missing_engines", lambda *_args, **_kwargs: compiler._MissingEngines(False, True, False))
+    for name in ("TCL_LIBRARY", "TK_LIBRARY", "TCLLIBPATH"):
+        monkeypatch.setenv(name, "/parent/runtime/tcl")
+    monkeypatch.setenv("JASNA_ENGINE_ENV_SENTINEL", "preserved")
+    calls = []
+    monkeypatch.setattr(compiler.subprocess, "Popen", lambda command, **kwargs: (calls.append(kwargs), _mock_proc([]))[1])
+
+    ensure_engines_compiled(EngineCompilationRequest(device="cpu", fp16=False, detection=True))
+
+    environment = calls[0]["env"]
+    assert all(name not in environment for name in ("TCL_LIBRARY", "TK_LIBRARY", "TCLLIBPATH"))
+    assert environment["JASNA_ENGINE_ENV_SENTINEL"] == "preserved"
+
+
 def test_frozen_linux_engine_compiler_uses_the_running_binary(monkeypatch) -> None:
     import torch  # noqa: F401  Initialize before mocking subprocess.
     import jasna.engine_compiler as compiler
@@ -137,6 +162,26 @@ def test_frozen_linux_engine_compiler_uses_the_running_binary(monkeypatch) -> No
     ensure_engines_compiled(EngineCompilationRequest(device="cpu", fp16=False, detection=True))
 
     assert commands[0][:2] == ["/relocated/app/jasna.bin", "--compile-engines"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows native module path API")
+def test_frozen_windows_engine_compiler_uses_running_binary_when_python_placeholder_is_missing(monkeypatch) -> None:
+    import torch  # noqa: F401  Initialize before mocking subprocess.
+    import jasna.engine_compiler as compiler
+    from jasna import os_utils
+
+    expected = sys.executable
+    monkeypatch.setattr(compiler, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(compiler.sys, "executable", "C:/relocated/app/python.exe")
+    monkeypatch.setattr(compiler, "_missing_engines", lambda *_args, **_kwargs: compiler._MissingEngines(False, True, False))
+    commands = []
+    monkeypatch.setattr(compiler.subprocess, "Popen", lambda command, **kwargs: (commands.append(command), _mock_proc([]))[1])
+
+    ensure_engines_compiled(EngineCompilationRequest(device="cpu", fp16=False, detection=True))
+
+    assert commands[0][0].casefold() == expected.casefold()
+    assert commands[0][1] == "--compile-engines"
 
 
 def test_ensure_create_no_window_on_windows(monkeypatch) -> None:

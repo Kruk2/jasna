@@ -33,10 +33,11 @@ from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
 from jasna.ltx.model_files import LtxModelFiles
+from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder
 from jasna.ltx.plan import LARGE_CANVAS, Region, TrackPlan, Window, crossfade_weights, feather_pixels, plan_video
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
-from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
+from jasna.models.ltx_vae import decode_latent
 from jasna.progressbar import StageProgress
 from jasna.tracking.scene_detector import SceneCutDetector
 
@@ -414,7 +415,11 @@ class _SegmentEncoder:
             canvases.append(crop_to_canvas(frame, window.crops[self._frame_idx - window.start]).cpu())
             if len(canvases) == window.real_frames:
                 with self._bar.window(window.canvas), torch.inference_mode():
-                    self._store.put(index, self._encoder(_vae_pixels(canvases, self._device)))
+                    pixels = (
+                        torch.stack(canvases + [canvases[-1]] * (WINDOW_FRAMES - len(canvases)), dim=1).unsqueeze(0)
+                        if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(canvases, self._device)
+                    )
+                    self._store.put(index, self._encoder(pixels))
                 del self._active[index]
         self._frame_idx += 1
 
@@ -472,6 +477,8 @@ def _decode_window(
     """Decoded window as uint8 ``[F, 3, S, S]`` on ``device``."""
     torch.cuda.empty_cache()
     free = budget(canvas)
+    if isinstance(decoder, WorkerDecoder):
+        return decoder.decode_window(latent, seed, free, device)
     generator = torch.Generator(device=device).manual_seed(seed)
     with torch.inference_mode():
         video = decode_latent(decoder, latent.to(device), free_bytes=free, generator=generator)
@@ -633,7 +640,8 @@ class PreparedSpan:
 
 
 def prepare_spans(
-    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
+    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event,
+    runtime: ModelRuntime | None = None,
 ) -> list[PreparedSpan]:
     """Scan and VAE-encode every span; reference latents go to ``directory``."""
     with progress.bar("scan", progress.frames) as bar:
@@ -665,22 +673,23 @@ def prepare_spans(
     progress.plan(speed.Work(progress.frames, render.frame_h * render.frame_w / 1e6, dict(windows)))
     if sum(p.windows for p in prepared):
         progress.begin("encode")
-        encoder = load_video_encoder(render.files.vae, render.device)
-        with progress.bar("encode", progress.frames) as bar:
-            for p in prepared:
-                encode_span(
-                    p.span.frames,
-                    p.span.segments,
-                    p.plans,
-                    encoder,
-                    p.references,
-                    batch_size=render.batch_size,
-                    device=render.device,
-                    bar=bar,
-                    cancel=cancel,
-                )
-        del encoder
-        torch.cuda.empty_cache()
+        owned_runtime = runtime is None
+        runtime = runtime or ModelRuntime(render.files, render.device, cancel)
+        try:
+            encoder = runtime.load_encoder()
+            try:
+                with progress.bar("encode", progress.frames) as bar:
+                    for p in prepared:
+                        encode_span(
+                            p.span.frames, p.span.segments, p.plans, encoder, p.references,
+                            batch_size=render.batch_size, device=render.device, bar=bar, cancel=cancel,
+                        )
+            finally:
+                del encoder
+                runtime.unload_encoder()
+        finally:
+            if owned_runtime:
+                runtime.close()
     return prepared
 
 
@@ -752,28 +761,30 @@ def restore_spans(
     progress.expect(speed.load_rates(render.speed_profile, profile_key))
     torch.cuda.reset_peak_memory_stats(render.device)
     blocks = None
-    with tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-") as temp:
-        prepared = prepare_spans(spans, render, Path(temp), progress=progress, cancel=cancel)
+    with ModelRuntime(render.files, render.device, cancel) as runtime, tempfile.TemporaryDirectory(
+        dir=work_dir, prefix=".ltx-"
+    ) as temp:
+        prepared = prepare_spans(spans, render, Path(temp), progress=progress, cancel=cancel, runtime=runtime)
         finals = final_stores(prepared, Path(temp))
         windows = sum(p.windows for p in prepared)
         if windows:
             progress.begin("denoise")
-            transformer = LtxTransformer(render.files.transformer, render.device)
+            transformer = runtime.load_transformer()
             blocks = (transformer.blocks.resident, transformer.blocks.count)
             try:
                 denoise_spans(prepared, finals, transformer, keep_references=False, progress=progress, cancel=cancel)
             finally:
-                transformer.close()
                 del transformer
-                torch.cuda.empty_cache()
+                runtime.unload_transformer()
         progress.begin("compose")
-        decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device) if windows else None
+        decoder = runtime.load_decoder() if windows else None
         try:
             compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
         finally:
             del decoder
-            torch.cuda.empty_cache()
-    for line in progress.summary(profile_key, torch.cuda.max_memory_allocated(render.device), blocks):
+            runtime.unload_decoder()
+        peak_vram_bytes = runtime.peak_vram_bytes()
+    for line in progress.summary(profile_key, peak_vram_bytes, blocks):
         logger.info(line)
     if windows:
         speed.save_rates(render.speed_profile, profile_key, progress.learned_rates())

@@ -26,6 +26,15 @@ from jasna.packaging.windows_dll_paths import configure_windows_dll_search_paths
 
 configure_windows_dll_search_paths()
 
+if sys.argv[1:2] == ["--ltx-worker"]:
+    expected_args = 6 if is_frozen() else 2
+    if len(sys.argv) != expected_args or any(not value.isascii() or not value.isdecimal() for value in sys.argv[2:]):
+        raise SystemExit("Invalid LTX worker launch.")
+    from jasna.protection.ltx_worker import worker_main
+
+    worker_main()
+    raise SystemExit(0)
+
 if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
     from jasna.engine_compiler import EngineCompilationRequest, _subprocess_compile
     _subprocess_compile(EngineCompilationRequest.from_json(sys.argv[2]))

@@ -187,7 +187,7 @@ def ensure_engines_compiled(
         "text": True,
         "bufsize": 1,
     }
-    if frozen and sys.platform == "linux":
+    if frozen:
         from jasna.protection.runtime import subprocess_environment
         kwargs["env"] = subprocess_environment()
     proc = subprocess.Popen(cmd, **kwargs, **subprocess_no_window_kwargs())

@@ -108,6 +108,7 @@ class SeedRenderer:
         self._prepared: dict[tuple, object] = {}
         self._transformer = None
         self._transformer_path: Path | None = None
+        self._runtime = None
         self._runs = 0
 
     def render(
@@ -133,8 +134,7 @@ class SeedRenderer:
             final_stores,
             prepare_spans,
         )
-        from jasna.ltx.sampler import LtxTransformer
-        from jasna.models.ltx_vae import load_video_decoder
+        from jasna.ltx.inference import ModelRuntime
         from jasna.session_factory import build_pipeline
 
         settings = replace(settings, restoration_model="ltx")
@@ -144,6 +144,10 @@ class SeedRenderer:
         pipeline = build_pipeline(config, self._session, self.path, self.path, segments=(seeded,))
         pipeline.configure_vr(self.metadata)
         render = pipeline.ltx_segment_render(self.metadata)
+        if self._runtime is None or self._runtime.files != render.files:
+            self._drop_runtime()
+            self._runtime = ModelRuntime(render.files, render.device, cancel)
+        self._runtime.cancel = cancel
         span = segment_render_span(seeded, self.index)
         self._runs += 1
         run_dir = self._temp / f"run-{self._runs}"
@@ -156,9 +160,11 @@ class SeedRenderer:
         key = prepared_key(segment, settings)
         prepared = self._prepared.get(key)
         if prepared is None:
-            directory = self._temp / f"prepared-{len(self._prepared)}"
+            directory = self._temp / f"prepared-{self._runs}"
             directory.mkdir()
-            (prepared,) = prepare_spans([ltx_span], render, directory, progress=progress, cancel=cancel)
+            (prepared,) = prepare_spans(
+                [ltx_span], render, directory, progress=progress, cancel=cancel, runtime=self._runtime
+            )
             self._prepared[key] = prepared
         else:
             progress.skip("scan", "encode")
@@ -169,18 +175,19 @@ class SeedRenderer:
             progress.begin("denoise")
             if self._transformer is None or self._transformer_path != render.files.transformer:
                 self._drop_transformer()
-                self._transformer = LtxTransformer(render.files.transformer, render.device)
+                self._transformer = self._runtime.load_transformer()
                 self._transformer_path = render.files.transformer
             denoise_spans([prepared], finals, self._transformer, keep_references=True, progress=progress, cancel=cancel)
             decode_bytes = render.budget(LARGE_CANVAS if render.large_canvas else PLAN_CANVAS) + DECODE_HEADROOM_BYTES
             if torch.cuda.mem_get_info(render.device)[0] < decode_bytes:
                 self._drop_transformer()
             progress.begin("compose")
-            decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device)
+            decoder = self._runtime.load_decoder()
         try:
             compose_spans([prepared], finals, decoder, render, progress=progress, cancel=cancel)
         finally:
             del decoder
+            self._runtime.unload_decoder()
             torch.cuda.empty_cache()
         return writer
 
@@ -194,13 +201,20 @@ class SeedRenderer:
 
     def _drop_transformer(self) -> None:
         if self._transformer is not None:
-            self._transformer.close()
             self._transformer = None
             self._transformer_path = None
+            self._runtime.unload_transformer()
             torch.cuda.empty_cache()
 
+    def _drop_runtime(self) -> None:
+        self._transformer = None
+        self._transformer_path = None
+        if self._runtime is not None:
+            self._runtime.close()
+            self._runtime = None
+
     def _drop_session(self) -> None:
-        self._drop_transformer()
+        self._drop_runtime()
         if self._session is not None:
             device = self._session.device
             self._session.close()
@@ -332,8 +346,11 @@ class LtxSeedPreviewWorker:
                     )
                     self.events.put(SeedReady(command.seed, tuple(writer.frames), generation))
                 except Cancelled:
-                    pass
+                    if renderer is not None:
+                        renderer.release()
                 except Exception as exc:
+                    if renderer is not None:
+                        renderer.release()
                     if not self._closed.is_set():
                         self.events.put(SeedFailed(str(exc), generation))
                 finally:

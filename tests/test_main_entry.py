@@ -162,3 +162,27 @@ def test_jasna_main_pid_child_exits_without_dispatch(monkeypatch) -> None:
             assert e.value.code == 0
             run_gui.assert_not_called()
             main.assert_not_called()
+
+
+def test_ltx_worker_dispatch_precedes_parent_pid_and_gui(monkeypatch) -> None:
+    sys.modules.pop("jasna.__main__", None)
+    monkeypatch.setenv("JASNA_MAIN_PID", "12345")
+    monkeypatch.setattr(sys, "argv", ["jasna", "--ltx-worker"])
+    with patch("jasna.protection.ltx_worker.worker_main") as worker:
+        with patch("jasna.gui.run_gui") as gui, patch("jasna.main.main") as cli:
+            with pytest.raises(SystemExit) as exit_info:
+                import jasna.__main__  # noqa: F401
+    assert exit_info.value.code == 0
+    worker.assert_called_once_with()
+    gui.assert_not_called()
+    cli.assert_not_called()
+
+
+def test_ltx_worker_rejects_extra_launch_arguments(monkeypatch) -> None:
+    sys.modules.pop("jasna.__main__", None)
+    monkeypatch.setattr(sys, "argv", ["jasna", "--ltx-worker", "untrusted"])
+    with patch("jasna.gui.run_gui") as gui, patch("jasna.main.main") as cli:
+        with pytest.raises(SystemExit, match="Invalid LTX worker launch"):
+            import jasna.__main__  # noqa: F401
+    gui.assert_not_called()
+    cli.assert_not_called()
