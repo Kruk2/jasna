@@ -237,12 +237,9 @@ def _ltx_model_files(
 ) -> "LtxModelFiles":
     import torch
 
-    from jasna.accelerator import is_nvidia_device
     from jasna.engine_compiler import EngineCompilationRequest, ensure_engines_compiled
     from jasna.ltx.model_files import LtxModelFiles
 
-    if not is_nvidia_device(device):
-        raise ValueError("LTX restoration needs an NVIDIA GPU")
     from jasna.ltx.transformer import require_kernels
 
     require_kernels(device)
