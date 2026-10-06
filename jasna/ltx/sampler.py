@@ -19,6 +19,7 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
+from jasna.ltx import native
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderHandle, open_tensors
@@ -94,6 +95,23 @@ def _opaque_blocks(reader) -> bool:
     return is_frozen() and not isinstance(reader, PlaceholderHandle)
 
 
+def _block_functions(
+    device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]
+) -> tuple[Callable, Callable, str]:
+    """(block forward, prompt key/value, backend name) for plain-tensor blocks: the native block
+    when it can run here, with eager prompt keys/values (once per block and step), else both
+    compiled."""
+    native_forward = native.load(device, block_specs)
+    if native_forward is not None:
+        return native_forward, T.prompt_key_value, "native"
+    T.enable_int8_attention()
+    return (
+        compiled_block_forward(),
+        compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs"),
+        "torch.compile",
+    )
+
+
 class LtxTransformer:
     """The restoration transformer loaded from a jasna LTX model file."""
 
@@ -103,6 +121,7 @@ class LtxTransformer:
         self.conditions: list[T.StepConditioning] = []
         self.context: torch.Tensor | None = None
         self.blocks: BlockStore | OpaqueBlockStore | None = None
+        self.block_backend = "native opaque store"
         self._ropes: dict[tuple[int, int, int], T.Rope] = {}
         try:
             T.require_kernels(device)
@@ -122,15 +141,16 @@ class LtxTransformer:
                 sizes = [sum(math.prod(specs[name][1]) * specs[name][0].itemsize for name in block.values())
                          for block in names]
                 resident = self._resident_blocks(sizes)
+                block_specs = {name: specs[source] for name, source in names[0].items()}
                 if _opaque_blocks(handle):
                     self.blocks = OpaqueBlockStore.from_reader(handle, names, device, resident=resident)
                 else:
                     self.blocks = BlockStore.from_reader(handle, names, device, resident=resident)
-            T.enable_int8_attention()
             logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
-            if isinstance(self.blocks, BlockStore):
-                self._block_forward = compiled_block_forward()
-                self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
+            if isinstance(self.blocks, OpaqueBlockStore):
+                T.enable_int8_attention()
+            else:
+                self._block_forward, self._prompt_key_value, self.block_backend = _block_functions(device, block_specs)
         except BaseException:
             self.close()
             raise

@@ -141,6 +141,7 @@ def main() -> None:
     print(
         f"{torch.cuda.get_device_name(device)} | {args.model} {'nvfp4' if args.fast else 'int8'} | canvas {args.canvas} "
         f"| {args.windows} windows x {steps} steps | STG {stg} | {transformer.blocks.resident}/{T.NUM_BLOCKS} blocks resident"
+        f" | {transformer.block_backend} blocks"
     )
 
     compile_s = run_chain(transformer, refs, 1)
@@ -164,7 +165,8 @@ def main() -> None:
         "windows": args.windows,
         "steps": steps,
         "stg": stg,
-        "int8_attention": T._int8_attention is not None,
+        "blocks": transformer.block_backend,
+        "resident": transformer.blocks.resident,
         "inductor": " ".join(args.inductor),
         "compile_s": round(compile_s, 1),
         "s_per_window": round(per_window, 2),
