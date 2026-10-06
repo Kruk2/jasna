@@ -811,7 +811,7 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         if self._photo is not None and self._photo_size == image.size:
             self._photo.paste(image)
             return
-        self._photo = ImageTk.PhotoImage(image)
+        self._photo = ImageTk.PhotoImage(image, master=self._video_surface)
         self._photo_size = image.size
         self._video_surface.configure(image=self._photo, text="")
 
@@ -1119,4 +1119,3 @@ class VideoPlayerDialog(ctk.CTkToplevel):
         self._main_thread.close()
         self.destroy()
         self._on_closed()
-

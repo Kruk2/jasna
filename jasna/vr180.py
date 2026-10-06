@@ -24,9 +24,15 @@ _AUTO_SBS_MIN_HEIGHT = 1080
 
 STUDIO_PROJECTION: dict[str, str] = {
     "ATVR": "raw",
+    "CCVR": "fisheye",
     "CJVR": "raw",
+    "DSVR": "fisheye",
     "IPVR": "raw",
+    "JPSVR": "fisheye",
     "KAVR": "raw",
+    "KBVR": "fisheye",
+    "KMVR": "fisheye",
+    "MAXVR": "fisheye",
     "NHVR": "fisheye",
     "PXVR": "fisheye",
     "TMAVR": "fisheye",

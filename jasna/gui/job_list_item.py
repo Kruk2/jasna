@@ -379,7 +379,7 @@ class JobListItem(ctk.CTkFrame):
             self._progress_visible = True
         self._progress.set(value)
 
-    def set_fps_eta(self, fps: float = 0.0, eta_seconds: float = 0.0):
+    def set_fps_eta(self, fps: float = 0.0, eta_seconds: float = 0.0, *, stage_eta: bool = False):
         """Update small FPS and ETA labels shown on the tile."""
         if fps and fps > 0:
             self._fps_label.configure(text=f"{fps:.1f}fps")
@@ -387,7 +387,8 @@ class JobListItem(ctk.CTkFrame):
             self._fps_label.configure(text="")
 
         if eta_seconds and eta_seconds > 0:
-            self._eta_label.configure(text=f"ETA: {format_duration(eta_seconds)}")
+            eta = format_duration(eta_seconds)
+            self._eta_label.configure(text=t("stage_eta", eta=eta) if stage_eta else f"ETA: {eta}")
         else:
             self._eta_label.configure(text="")
 

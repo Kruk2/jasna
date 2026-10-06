@@ -10,10 +10,16 @@ import pytest
 
 from jasna import os_utils
 from jasna.accelerator import AcceleratorVendor
-from jasna.gui.models import AppSettings, PresetManager
+from jasna.gui.models import DEFAULT_SETTINGS, AppSettings, PresetManager
 from jasna.gui.settings_sections.advanced import AdvancedSection
-from jasna.gui.settings_sections.basic import BasicSection
-from jasna.gui.settings_sections.encoding import EncodingSection
+from jasna.gui.settings_sections.basic import BasicSection, PRE_SCAN_COARSE_INTERVALS
+from jasna.gui.settings_sections.encoding import (
+    RATE_MODE_AUTO_SOURCE,
+    RATE_MODE_MANUAL_CQ,
+    EncodingSection,
+    supports_amd_dual_gop_gui,
+    supports_auto_source_rate_gui,
+)
 from jasna.gui.settings_sections.image_restoration import ImageRestorationSection
 from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
@@ -75,6 +81,37 @@ def _fake_section_widgets() -> dict:
         "fp16_mode": _FakeWidget(1),
         "detection_model": _FakeWidget("rfdetr-v6"),
         "detection_score_threshold": _FakeWidget(0.35),
+        "pre_scan_policy": _FakeValueMenu(
+            {"auto": "Automatic", "scan": "Always scan", "off": "No scan"},
+            "auto",
+        ),
+        "pre_scan_full_threshold": _FakeWidget(0.85),
+        "pre_scan_coarse_interval": _FakeValueMenu(
+            {
+                "0.5": "0.5 s",
+                "1.0": "1.0 s",
+                "2.0": "2.0 s",
+                "3.0": "3.0 s",
+                "4.0": "4.0 s",
+                "5.0": "5.0 s",
+            },
+            "4.0",
+        ),
+        "pre_scan_fine_interval": _FakeValueMenu(
+            {"0.25": "0.25 s", "0.5": "0.5 s", "1.0": "1.0 s"},
+            "0.5",
+        ),
+        "pre_scan_pad_seconds": _FakeValueMenu(
+            {
+                "auto": "Auto",
+                "0.0": "None",
+                "0.5": "0.5 s",
+                "1.0": "1.0 s",
+                "2.0": "2.0 s",
+                "5.0": "5.0 s",
+            },
+            "auto",
+        ),
         "compile_basicvsrpp": _FakeWidget(1),
         "file_conflict": _FakeValueMenu({"auto_rename": "A", "overwrite": "B", "skip": "C"}, "skip"),
         "temporal_overlap": _FakeWidget(8),
@@ -82,6 +119,7 @@ def _fake_section_widgets() -> dict:
         "min_detection_duration": _FakeWidget(2),
         "scene_detection": _FakeWidget(0),
         "enable_crossfade": _FakeWidget(0),
+        "save_run_log": _FakeWidget(0),
         "vr_mode": _FakeValueMenu({"auto": "自動", "off": "オフ"}, "off"),
         "denoise_strength": _FakeValueMenu({"none": "なし", "high": "高"}, "high"),
         "denoise_step": _FakeValueMenu({"after_primary": "一", "after_secondary": "二"}, "after_secondary"),
@@ -101,8 +139,13 @@ def _fake_section_widgets() -> dict:
         "image_restore_seed": _FakeWidget("not-a-number"),
         "image_restore_variants": _FakeWidget(2),
         "codec": _FakeValueMenu({"hevc": "HEVC (H.265)", "av1": "AV1"}, "av1"),
+        "encoder_rate_mode": _FakeValueMenu(
+            {"auto_source": "Automatic", "manual_cq": "Manual CQ"},
+            "manual_cq",
+        ),
         "encoder_cq": _FakeWidget(29),
         "encoder_custom_args": _FakeWidget("cq=22"),
+        "amd_dual_gop_encode": _FakeWidget(1),
         "sharpen_strength": _FakeWidget(0.35),
         "retarget_high_fps": _FakeWidget(1),
         "fmp4": _FakeWidget(1),
@@ -134,10 +177,16 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     values = _collect_all(_fake_section_widgets())
 
     assert values["file_conflict"] == "skip"
+    assert values["pre_scan_policy"] == "auto"
+    assert values["pre_scan_full_threshold"] == pytest.approx(0.85)
+    assert values["pre_scan_coarse_interval"] == pytest.approx(4.0)
+    assert values["pre_scan_fine_interval"] == pytest.approx(0.5)
+    assert values["pre_scan_pad_seconds"] == "auto"
     assert values["vr_mode"] == "off"
     assert values["denoise_strength"] == "high"
     assert values["denoise_step"] == "after_secondary"
     assert values["codec"] == "av1"
+    assert values["encoder_rate_mode"] == "manual_cq"
     assert values["post_export_action"] == "command"
     assert values["post_export_command"] == "echo done"
     assert values["post_export_video_command"] == "remux {output}"
@@ -151,6 +200,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["scene_detection"] is False
     assert values["retarget_high_fps"] is True
     assert values["fmp4"] is True
+    assert values["amd_dual_gop_encode"] is True
     assert values["sharpen_strength"] == 0.35
     assert values["restoration_model"] == "ltx"
     assert values["ltx_model"] == "undistilled"
@@ -158,6 +208,17 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["ltx_fast"] is True
     assert values["ltx_large_canvas"] is False
     assert values["ltx_trial"] is True
+
+
+def test_auto_coarse_scan_defaults_to_four_seconds() -> None:
+    assert AppSettings().pre_scan_coarse_interval == pytest.approx(4.0)
+    assert AppSettings().pre_scan_pad_seconds == "auto"
+    assert 4.0 in PRE_SCAN_COARSE_INTERVALS
+
+
+def test_gui_factory_preset_enables_amd_dual_gop() -> None:
+    assert DEFAULT_SETTINGS.amd_dual_gop_encode is True
+    assert AppSettings().amd_dual_gop_encode is False
 
 
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
@@ -234,6 +295,136 @@ def test_apply_keeps_installed_model_and_threshold(_basic_section_panel) -> None
 
 def test_default_encoder_cq_uses_portable_native_default_sentinel() -> None:
     assert AppSettings().encoder_cq is None
+    assert AppSettings().encoder_rate_mode == RATE_MODE_AUTO_SOURCE
+
+
+@pytest.mark.parametrize(
+    ("platform", "vendor", "codec", "expected"),
+    [
+        ("linux", AcceleratorVendor.AMD, "hevc", True),
+        ("win32", AcceleratorVendor.AMD, "hevc", False),
+        ("linux", AcceleratorVendor.NVIDIA, "hevc", False),
+        ("linux", AcceleratorVendor.AMD, "h264", False),
+    ],
+)
+def test_auto_source_rate_gui_is_limited_to_validated_route(
+    platform, vendor, codec, expected
+) -> None:
+    assert supports_auto_source_rate_gui(
+        codec,
+        vendor,
+        platform=platform,
+    ) is expected
+
+
+@pytest.mark.parametrize(
+    ("platform", "vendor", "codec", "expected"),
+    [
+        ("linux", AcceleratorVendor.AMD, "hevc", True),
+        ("win32", AcceleratorVendor.AMD, "hevc", False),
+        ("linux", AcceleratorVendor.NVIDIA, "hevc", False),
+        ("linux", AcceleratorVendor.AMD, "av1", False),
+    ],
+)
+def test_dual_gop_gui_is_limited_to_validated_route(
+    platform, vendor, codec, expected
+) -> None:
+    assert supports_amd_dual_gop_gui(
+        codec,
+        vendor,
+        platform=platform,
+    ) is expected
+
+
+def test_enabling_dual_gop_selects_auto_rate_and_disables_conflicts() -> None:
+    dual = MagicMock()
+    dual.get.return_value = 1
+    rate = MagicMock()
+    retarget = MagicMock()
+    fmp4 = MagicMock()
+    section = SimpleNamespace(
+        _widgets={
+            "amd_dual_gop_encode": dual,
+            "encoder_rate_mode": rate,
+            "retarget_high_fps": retarget,
+            "fmp4": fmp4,
+        },
+        _sync_rate_control_visibility=MagicMock(),
+        _on_modified=MagicMock(),
+    )
+
+    EncodingSection._on_dual_gop_changed(section)
+
+    rate.set_value.assert_called_once_with(RATE_MODE_AUTO_SOURCE)
+    retarget.deselect.assert_called_once_with()
+    fmp4.deselect.assert_called_once_with()
+    section._on_modified.assert_called_once_with()
+
+
+def test_auto_source_rate_hides_cq_on_linux_amd_hevc(monkeypatch) -> None:
+    from jasna.gui.settings_sections import encoding
+
+    monkeypatch.setattr(encoding.sys, "platform", "linux")
+    rate_row = MagicMock()
+    rate_row.winfo_manager.return_value = "pack"
+    cq_row = MagicMock()
+    cq_row.winfo_manager.return_value = "pack"
+    section = SimpleNamespace(
+        _active_codec="hevc",
+        _cq_vendor=AcceleratorVendor.AMD,
+        _rate_mode_row=rate_row,
+        _cq_row=cq_row,
+        _sharpen_row=MagicMock(),
+        _widgets={
+            "encoder_rate_mode": _FakeValueMenu(
+                {
+                    RATE_MODE_AUTO_SOURCE: "Automatic",
+                    RATE_MODE_MANUAL_CQ: "Manual CQ",
+                },
+                RATE_MODE_AUTO_SOURCE,
+            )
+        },
+    )
+
+    EncodingSection._sync_rate_control_visibility(section)
+
+    rate_row.pack_forget.assert_not_called()
+    cq_row.pack_forget.assert_called_once_with()
+
+
+def test_manual_source_rate_mode_shows_cq_on_linux_amd_hevc(monkeypatch) -> None:
+    from jasna.gui.settings_sections import encoding
+
+    monkeypatch.setattr(encoding.sys, "platform", "linux")
+    rate_row = MagicMock()
+    rate_row.winfo_manager.return_value = "pack"
+    cq_row = MagicMock()
+    cq_row.winfo_manager.return_value = ""
+    sharpen_row = MagicMock()
+    section = SimpleNamespace(
+        _active_codec="hevc",
+        _cq_vendor=AcceleratorVendor.AMD,
+        _rate_mode_row=rate_row,
+        _cq_row=cq_row,
+        _sharpen_row=sharpen_row,
+        _widgets={
+            "encoder_rate_mode": _FakeValueMenu(
+                {
+                    RATE_MODE_AUTO_SOURCE: "Automatic",
+                    RATE_MODE_MANUAL_CQ: "Manual CQ",
+                },
+                RATE_MODE_MANUAL_CQ,
+            )
+        },
+    )
+
+    EncodingSection._sync_rate_control_visibility(section)
+
+    cq_row.pack.assert_called_once_with(
+        fill="x",
+        pady=(0, 8),
+        before=sharpen_row,
+    )
 
 
 def test_nvidia_codec_change_recalls_literal_cq() -> None:
@@ -245,6 +436,7 @@ def test_nvidia_codec_change_recalls_literal_cq() -> None:
         _active_codec="hevc",
         _cq_vendor=AcceleratorVendor.NVIDIA,
         _cq_values={"hevc": 28, "h264": 25, "av1": 35},
+        _sync_rate_control_visibility=MagicMock(),
         _on_modified=MagicMock(),
     )
 
@@ -279,6 +471,7 @@ def test_nvidia_av1_codec_change_uses_native_range() -> None:
         _active_codec="hevc",
         _cq_vendor=AcceleratorVendor.NVIDIA,
         _cq_values={"hevc": 28, "h264": 25, "av1": 35},
+        _sync_rate_control_visibility=MagicMock(),
         _on_modified=MagicMock(),
     )
 
@@ -337,6 +530,150 @@ def test_processor_resolves_native_default_for_codec(monkeypatch) -> None:
     assert build_job_encoder_settings(settings, "h264") == {"cq": 25}
 
 
+def test_processor_manual_cq_disables_amd_hevc_auto_source_rate(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        codec="hevc",
+        encoder_rate_mode=RATE_MODE_MANUAL_CQ,
+        encoder_cq=23,
+    )
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    assert processor._build_encoder_settings("hevc") == {
+        "cq": 23,
+        "rc": "cqp",
+    }
+
+
+def test_processor_auto_source_rate_leaves_amd_hevc_rc_implicit(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        codec="hevc",
+        encoder_rate_mode=RATE_MODE_AUTO_SOURCE,
+        encoder_cq=23,
+    )
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    assert processor._build_encoder_settings("hevc") == {"cq": 23}
+
+
+def test_processor_dual_gop_uses_implicit_source_rate_contract(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        codec="hevc",
+        encoder_rate_mode=RATE_MODE_AUTO_SOURCE,
+        encoder_cq=23,
+        amd_dual_gop_encode=True,
+    )
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    assert processor._build_encoder_settings("hevc") == {}
+
+
+def test_processor_dual_gop_rejects_custom_rate_contract(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        codec="hevc",
+        encoder_rate_mode=RATE_MODE_AUTO_SOURCE,
+        amd_dual_gop_encode=True,
+        encoder_custom_args="rc=vbr_peak",
+    )
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    with pytest.raises(ValueError, match="derives VBR Peak"):
+        processor._build_encoder_settings("hevc")
+
+
+def test_processor_dual_gop_rejects_nonvalidated_gop(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        codec="hevc",
+        encoder_rate_mode=RATE_MODE_AUTO_SOURCE,
+        amd_dual_gop_encode=True,
+        encoder_custom_args="g=120",
+    )
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    with pytest.raises(ValueError, match="g=250"):
+        processor._build_encoder_settings("hevc")
+
+
+def test_processor_dual_gop_rejects_b_frames(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        codec="hevc",
+        encoder_rate_mode=RATE_MODE_AUTO_SOURCE,
+        amd_dual_gop_encode=True,
+        encoder_custom_args="bf=2",
+    )
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    with pytest.raises(ValueError, match="bf=0"):
+        processor._build_encoder_settings("hevc")
+
+
+def test_processor_manual_amd_hevc_rejects_conflicting_custom_rc(monkeypatch) -> None:
+    import jasna.accelerator as accelerator
+    from jasna.gui.processor import Processor
+
+    processor = Processor.__new__(Processor)
+    processor._settings = AppSettings(
+        codec="hevc",
+        encoder_rate_mode=RATE_MODE_MANUAL_CQ,
+        encoder_custom_args="rc=vbr_peak",
+    )
+    monkeypatch.setattr(
+        accelerator,
+        "vendor_for_device",
+        lambda: AcceleratorVendor.AMD,
+    )
+
+    with pytest.raises(ValueError, match="Manual CQ.*rc=cqp"):
+        processor._build_encoder_settings("hevc")
+
+
 def test_processor_rejects_cq_in_custom_args(monkeypatch) -> None:
     import jasna.accelerator as accelerator
     from jasna.gui.processor import build_job_encoder_settings
@@ -352,9 +689,21 @@ def test_processor_rejects_cq_in_custom_args(monkeypatch) -> None:
         build_job_encoder_settings(settings, "hevc")
 
 
-def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("vendor", "cq", "dual_gop"),
+    [(AcceleratorVendor.NVIDIA, 28, False), (AcceleratorVendor.AMD, 25, True)],
+)
+def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path, vendor, cq, dual_gop) -> None:
+    monkeypatch.setattr(
+        "jasna.accelerator.vendor_for_device",
+        lambda _device=None: vendor,
+    )
     monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setattr(
+        "jasna.gui.settings_sections.encoding.vendor_for_device",
+        lambda: vendor,
+    )
 
     from jasna.gui.locales import get_locale
 
@@ -369,7 +718,7 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
         from jasna.gui.settings_panel import SettingsPanel
 
         panel = SettingsPanel(root, PresetManager(), ltx_models=ltx_models(root, tmp_path / "ltx", installed=True))
-        assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
+        assert panel.get_settings() == replace(DEFAULT_SETTINGS, encoder_cq=cq, amd_dual_gop_encode=dual_gop)
         assert panel._saved_preset_settings == panel.get_settings()
     finally:
         root.destroy()
