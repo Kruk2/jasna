@@ -28,6 +28,10 @@ QUANTIZATIONS = ["int8", pytest.param("nvfp4", marks=needs_nvfp4)]
 DEVICE = torch.device("cuda")
 # canvas 512 and 768: 16 latent frames of 16x16 / 24x24 tokens, target and reference halves
 CANVAS_SIDES = {8192: 16, 18432: 24}
+# Relative error bounds against the eager block_forward on (block output, block update), set a
+# little above how far the compiled block_forward the sampler runs is from it on an RTX 5090
+# (INT8 3.8e-3 / 3.0e-2; NVFP4 1.8e-2 / 0.12: one rounding moves many FP4 codes).
+TOLERANCE = {"int8": (5e-3, 3.5e-2), "nvfp4": (2.5e-2, 0.15)}
 
 
 def _block(quantization: str) -> tuple[dict[str, torch.Tensor], dict]:
@@ -45,7 +49,7 @@ def block(request):
     weights, specs = _block(request.param)
     forward = native.load(DEVICE, specs)
     assert forward is not None, "the native block did not build; see the log"
-    return weights, forward
+    return weights, forward, TOLERANCE[request.param]
 
 
 def _inputs(weights: dict[str, torch.Tensor], rows: int, seed: int):
@@ -70,29 +74,28 @@ def _relative_error(actual: torch.Tensor, expected: torch.Tensor) -> float:
 @pytest.mark.parametrize("rows", list(CANVAS_SIDES))
 @pytest.mark.parametrize("skip", [False, True], ids=["full", "stg"])
 def test_native_block_matches_block_forward(block, rows, skip):
-    weights, forward = block
+    weights, forward, (output_tolerance, update_tolerance) = block
     x, cond, prompt, rope = _inputs(weights, rows, seed=rows)
     expected = T.block_forward(weights, x, cond, prompt, rope, skip_self_attention=skip)
     actual = forward(weights, x, cond, prompt, rope, skip_self_attention=skip)
     assert actual.shape == expected.shape and actual.dtype == expected.dtype
     assert torch.isfinite(actual.float()).all()
-    assert _relative_error(actual, expected) < 1e-2
-    assert _relative_error(actual - x, expected - x) < 2e-2
+    assert _relative_error(actual, expected) < output_tolerance
+    assert _relative_error(actual - x, expected - x) < update_tolerance
 
 
 def test_native_block_honors_feed_forward_biases(block):
-    weights, forward = block
+    weights, forward, (_, update_tolerance) = block
     generator = torch.Generator(device=DEVICE).manual_seed(1)
     biased = dict(weights)
     for name in ("ff.net.0.proj", "ff.net.2"):
         out_features = (weights.get(f"{name}.qdata") if f"{name}.qdata" in weights else weights[f"{name}.weight"]).shape[0]
-        biased[f"{name}.bias"] = (torch.randn(out_features, generator=generator, device=DEVICE) * 0.5).to(torch.bfloat16)
+        biased[f"{name}.bias"] = (torch.randn(out_features, generator=generator, device=DEVICE) * 2).to(torch.bfloat16)
     x, cond, prompt, rope = _inputs(weights, 8192, seed=2)
     expected = T.block_forward(biased, x, cond, prompt, rope)
-    unbiased = T.block_forward(weights, x, cond, prompt, rope)
-    actual = forward(biased, x, cond, prompt, rope)
-    assert _relative_error(expected - x, unbiased - x) > 0.1
-    assert _relative_error(actual - x, expected - x) < 2e-2
+    with_bias = _relative_error(forward(biased, x, cond, prompt, rope) - x, expected - x)
+    without_bias = _relative_error(forward(weights, x, cond, prompt, rope) - x, expected - x)
+    assert with_bias < update_tolerance and with_bias < without_bias / 3
 
 
 def test_native_int8_attention_matches_comfy_kitchen():
@@ -115,13 +118,13 @@ def test_native_int8_attention_matches_comfy_kitchen():
 
 
 def test_native_block_is_deterministic(block):
-    weights, forward = block
+    weights, forward, _ = block
     x, cond, prompt, rope = _inputs(weights, 8192, seed=4)
     assert torch.equal(forward(weights, x, cond, prompt, rope), forward(weights, x, cond, prompt, rope))
 
 
 def test_native_block_rejects_an_odd_row_count(block):
-    weights, forward = block
+    weights, forward, _ = block
     x, cond, prompt, rope = _inputs(weights, 8192, seed=5)
     with pytest.raises(RuntimeError):
         forward(weights, x[:, :-1], cond, prompt, rope)
