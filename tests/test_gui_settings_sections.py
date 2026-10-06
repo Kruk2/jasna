@@ -95,6 +95,12 @@ def _fake_section_widgets() -> dict:
         "rtx_quality": _FakeWidget("Ultra"),
         "rtx_denoise": _FakeWidget("None"),
         "rtx_deblur": _FakeWidget("Low"),
+        "amd_upscale_engine": _FakeWidget("amf-sr"),
+        "amd_upscale_scale": _FakeWidget("2x"),
+        "amd_upscale_algorithm": _FakeWidget("sr1-1"),
+        "amd_upscale_sharpness": _FakeWidget("0.5"),
+        "amd_upscale_ffmpeg_path": _FakeWidget(" C:\\tools\\ffmpeg.exe "),
+        "amd_upscale_timeout": _FakeWidget("90"),
         "image_restore_steps": _FakeWidget(30),
         "image_restore_strength": _FakeWidget(0.55),
         "image_restore_freeu": _FakeWidget(0),
@@ -145,6 +151,12 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["tvai_scale"] == 2
     assert values["tvai_denoise"] is True
     assert values["rtx_quality"] == "ultra"
+    assert values["amd_upscale_engine"] == "amf-sr"
+    assert values["amd_upscale_scale"] == 2
+    assert values["amd_upscale_algorithm"] == "sr1-1"
+    assert values["amd_upscale_sharpness"] == 0.5
+    assert values["amd_upscale_ffmpeg_path"] == " C:\\tools\\ffmpeg.exe "
+    assert values["amd_upscale_timeout_s"] == 90
     assert values["image_restore_seed"] == 0
     assert values["lut_path"] == "/luts/a.cube"
     assert values["enable_crossfade"] is False

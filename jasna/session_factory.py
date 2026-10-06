@@ -140,6 +140,29 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
             denoise=None if config.rtx_denoise == "none" else config.rtx_denoise,
             deblur=None if config.rtx_deblur == "none" else config.rtx_deblur,
         )
+    if config.secondary_restoration == "amd-upscale":
+        if config.amd_upscale_engine == "realesrgan":
+            from jasna.restorer.realesrgan_secondary_restorer import (
+                RealEsrganSecondaryRestorer,
+            )
+
+            return RealEsrganSecondaryRestorer(
+                device=device,
+                scale=int(config.amd_upscale_scale),
+                model_path=config.amd_upscale_model_path,
+                fp16=bool(config.fp16),
+            )
+        from jasna.restorer.amd_upscale_secondary_restorer import AmdUpscaleSecondaryRestorer
+
+        return AmdUpscaleSecondaryRestorer(
+            device=device,
+            scale=int(config.amd_upscale_scale),
+            engine=config.amd_upscale_engine,
+            algorithm=config.amd_upscale_algorithm,
+            sharpness=float(config.amd_upscale_sharpness),
+            ffmpeg_path=config.amd_upscale_ffmpeg_path,
+            timeout_s=float(config.amd_upscale_timeout_s),
+        )
     raise ValueError(f"Unsupported secondary restoration: {config.secondary_restoration}")
 
 
@@ -155,7 +178,11 @@ def build_restoration_session(
     device = torch.device(config.device)
     if config.tvai_denoise and config.secondary_restoration != "tvai":
         raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
-    if is_amd_device(device) and config.secondary_restoration != "none":
+    if config.secondary_restoration == "amd-upscale" and not is_amd_device(device):
+        raise ValueError(
+            "Secondary restoration 'amd-upscale' requires an AMD GPU (it uses the AMF video upscaler)"
+        )
+    if is_amd_device(device) and config.secondary_restoration not in ("none", "amd-upscale"):
         raise ValueError(
             f"Secondary restoration '{config.secondary_restoration}' is not available in the AMD build yet"
         )
