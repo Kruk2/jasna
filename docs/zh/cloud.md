@@ -2,11 +2,13 @@
 
 租来的 GPU 也能跑 Jasna。用 Linux NVIDIA 官方版，在受支持容器的命令行里运行。
 云激活仅限 CLI，Windows 和 GitHub 源码版不支持。
+较早的 0.11.0 构建可能会拒绝 RunPod 激活，请向卖家获取更新后的 Linux 版。
 
 ## 需要准备
 
 - 请卖家为你的许可证码打开**云权限**。
-- 使用有独立 PID 命名空间的普通容器。不支持无 root、用户映射或 Docker 的 `--pid=host`。
+- 使用有独立 PID 命名空间的容器。更新后的 Linux 版支持 RunPod 的用户映射，
+  但不支持 Docker 的 `--pid=host`。
 - NVIDIA 显卡，驱动 **580 或更新**。
 - 至少 **80 GB** 磁盘。
 - 在模板或实例设置里加上 `NVIDIA_DRIVER_CAPABILITIES=all`。
@@ -67,7 +69,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ---- | ------ |
 | `unsigned or modified Jasna runtime` | 用 `root` 重新解压到 `/root`。 |
 | `libGL.so.1: cannot open shared object file` | 运行安装里的 `apt-get` 那一行。 |
-| `Cloud workspace activation requires a supported Linux container` | 使用没有用户映射或 `--pid=host` 的普通容器。 |
+| `Cloud workspace activation requires a supported Linux container` | 使用更新后的 Linux 版，并在不带 `--pid=host` 的容器中运行。 |
 | `enable cloud activation` | 请卖家打开云权限。 |
 | `No activation found` 或 `Cloud workspace identity is missing` | 先运行 `export` 那一行，再重新启动 Jasna。 |
 | `unsafe Jasna launch environment` | 用 `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` 启动。 |

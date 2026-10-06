@@ -3,12 +3,14 @@
 You can run Jasna on a rented GPU. Use the Linux NVIDIA version from the
 command line inside a supported container. Cloud activation is CLI-only in the
 official Linux release; Windows and GitHub source checkouts do not support it.
+Older 0.11.0 builds may reject RunPod activation; use the updated Linux build
+from your seller.
 
 ## What you need
 
 - Your seller has to turn on **cloud** for your License code.
-- A standard container with its own PID namespace. Rootless/user-remapped
-  containers and Docker's `--pid=host` are not supported.
+- A container with its own PID namespace. Updated Linux builds support
+  RunPod's user remapping; Docker's `--pid=host` is not supported.
 - An NVIDIA GPU with driver **580 or newer**.
 - At least **80 GB** of disk.
 - `NVIDIA_DRIVER_CAPABILITIES=all` in your template or instance settings.
@@ -72,7 +74,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ------- | ------- |
 | `unsigned or modified Jasna runtime` | Unpack again in `/root` as `root`. |
 | `libGL.so.1: cannot open shared object file` | Run the `apt-get` line from Install. |
-| `Cloud workspace activation requires a supported Linux container` | Use a standard container without user remapping or `--pid=host`. |
+| `Cloud workspace activation requires a supported Linux container` | Use the updated Linux build and a container without `--pid=host`. |
 | `enable cloud activation` | Ask your seller to turn on cloud. |
 | `No activation found` or `Cloud workspace identity is missing` | Run the `export` line, then start Jasna again. |
 | `unsafe Jasna launch environment` | Start it with `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` |

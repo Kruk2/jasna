@@ -186,7 +186,7 @@ If the service cannot be reached, Jasna tries the [Hong Kong activation page](ht
 
 Both methods share **3 machines or workspaces per License code**. Reusing a Machine key uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.
 
-Cloud activation for **RunPod or Vast** uses the [CLI](docs/en/cli.md#activation) only, with the official Linux release inside a supported container. Ask your seller to enable it, and keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity. Commands: [Cloud GPUs](docs/en/cloud.md).
+Cloud activation for **RunPod or Vast** uses the [CLI](docs/en/cli.md#activation) only, with the official Linux release inside a supported container. Use the updated Linux build for RunPod's user-remapped containers. Ask your seller to enable cloud use, and keep the Jasna config folder on a persistent volume so host or GPU changes reuse the same slot. Copying that folder with its Activation key transfers the workspace identity. Commands: [Cloud GPUs](docs/en/cloud.md).
 
 If online activation fails, use **Manual** from another connected device or send your License code and Machine key to your official seller. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies. Earlier activation formats need replacement; old keys still work with compatible older Jasna versions.
 

@@ -3,12 +3,14 @@
 レンタルした GPU でも Jasna を使えます。Linux NVIDIA 版をコマンドラインで
 対応するコンテナー内で使います。クラウド有効化は Linux 公式版の CLI 専用で、
 Windows と GitHub のソース版には対応していません。
+以前の 0.11.0 ビルドでは RunPod の有効化が拒否されることがあります。
+販売者から更新された Linux 版を入手してください。
 
 ## 必要なもの
 
 - 販売者にライセンスコードの**クラウド利用**をオンにしてもらう。
-- 独自の PID 名前空間を持つ通常のコンテナー。ルートレス、ユーザーの再マッピング、
-  Docker の `--pid=host` には対応していません。
+- 独自の PID 名前空間を持つコンテナー。更新された Linux 版は RunPod の
+  ユーザー再マッピングに対応しています。Docker の `--pid=host` は非対応です。
 - ドライバー **580 以降**の NVIDIA GPU。
 - **80 GB** 以上のディスク。
 - テンプレートかインスタンスの設定に `NVIDIA_DRIVER_CAPABILITIES=all`。
@@ -72,7 +74,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ---- | -------- |
 | `unsigned or modified Jasna runtime` | `root` で `/root` に展開し直す。 |
 | `libGL.so.1: cannot open shared object file` | インストールの `apt-get` の行を実行する。 |
-| `Cloud workspace activation requires a supported Linux container` | ユーザーの再マッピングや `--pid=host` を使わない通常のコンテナーで実行する。 |
+| `Cloud workspace activation requires a supported Linux container` | 更新された Linux 版を使い、`--pid=host` のないコンテナーで実行する。 |
 | `enable cloud activation` | 販売者にクラウド利用をオンにしてもらう。 |
 | `No activation found` または `Cloud workspace identity is missing` | `export` の行を実行してから Jasna を起動し直す。 |
 | `unsafe Jasna launch environment` | `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` で起動する。 |
