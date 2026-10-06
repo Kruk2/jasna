@@ -68,8 +68,7 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
     assert steps == [8]
     assert len(transformer.conditions) == 8
     assert transformer.blocks == inference.BlockLayout(40, 48)
-    assert not hasattr(transformer, "top")
-    assert not hasattr(transformer, "context")
+    assert not [value for value in vars(transformer).values() if isinstance(value, torch.Tensor)]
     transformer.close()
     decoder = runtime.load_decoder()
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)

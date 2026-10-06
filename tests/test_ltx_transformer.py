@@ -1,4 +1,5 @@
 import os
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -157,9 +158,27 @@ def test_quantize_fp4_reconstructs_within_fp4_error():
     assert (rebuilt - blocks).norm() / blocks.norm() < 0.15
 
 
-def test_public_transformer_has_no_opaque_per_linear_dispatcher():
-    assert not hasattr(T, "enable_opaque_kernels")
-    assert not hasattr(T, "_opaque_kernels")
+def test_public_block_forward_runs_on_plain_tensors_without_the_protection_module(monkeypatch):
+    generator = torch.Generator().manual_seed(0)
+    dim, heads = 256, 2
+    weights = _block_weights(dim, heads, generator)
+    for name in T.LINEAR_NAMES:
+        weight = weights.pop(f"{name}.weight").float()
+        codes, scales = T.quantize_rows(T.rotate(weight))
+        weights[f"{name}.qdata"] = codes[: weight.shape[0]]
+        weights[f"{name}.scales"] = scales[: weight.shape[0]]
+    rope = T.build_rope(3, 2, 2, dim=dim, heads=heads, device=torch.device("cpu"))
+    cond = T.StepConditioning(
+        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to(torch.bfloat16),
+        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16),
+        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to(torch.bfloat16),
+    )
+    x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
+    context = torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16)
+    monkeypatch.setitem(sys.modules, "jasna.protection", None)
+    out = T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
+    assert out.shape == x.shape and torch.isfinite(out.float()).all()
+    assert not torch.equal(out, x)
 
 
 def test_self_attention_falls_back_to_sdpa_off_gpu():

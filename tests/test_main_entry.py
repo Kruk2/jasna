@@ -1,6 +1,7 @@
 import os
 import sys
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -168,10 +169,11 @@ def test_ltx_worker_dispatch_precedes_parent_pid_and_gui(monkeypatch) -> None:
     sys.modules.pop("jasna.__main__", None)
     monkeypatch.setenv("JASNA_MAIN_PID", "12345")
     monkeypatch.setattr(sys, "argv", ["jasna", "--ltx-worker"])
-    with patch("jasna.protection.ltx_worker.worker_main") as worker:
-        with patch("jasna.gui.run_gui") as gui, patch("jasna.main.main") as cli:
-            with pytest.raises(SystemExit) as exit_info:
-                import jasna.__main__  # noqa: F401
+    worker = MagicMock()
+    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(worker_main=worker))
+    with patch("jasna.gui.run_gui") as gui, patch("jasna.main.main") as cli:
+        with pytest.raises(SystemExit) as exit_info:
+            import jasna.__main__  # noqa: F401
     assert exit_info.value.code == 0
     worker.assert_called_once_with()
     gui.assert_not_called()
