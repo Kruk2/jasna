@@ -78,3 +78,6 @@ dist_windows_amd/
 .mcp.json
 AGENTS.md
 assets/benchmark/
+
+# release-built native LTX block (jasna.ltx.native.prebuild)
+jasna/ltx/native/prebuilt/

@@ -240,3 +240,4 @@ def prebuild(directory: Path) -> None:
     os.environ["TORCH_CUDA_ARCH_LIST"] = ";".join(f"{major}.{minor}" for major, minor in archs)
     module = _build_extension(directory / "build")
     shutil.copy2(module.__file__, directory / Path(module.__file__).name)
+    shutil.rmtree(directory / "build")
