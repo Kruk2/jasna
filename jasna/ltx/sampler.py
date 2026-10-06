@@ -96,7 +96,7 @@ class LtxTransformer:
         self.top: dict[str, torch.Tensor] = {}
         self.conditions: list[T.StepConditioning] = []
         self.context: torch.Tensor | None = None
-        self.blocks: BlockStore | None = None
+        self.blocks: BlockStore | OpaqueBlockStore | None = None
         self._ropes: dict[tuple[int, int, int], T.Rope] = {}
         try:
             T.require_kernels(device)
@@ -118,9 +118,8 @@ class LtxTransformer:
                 resident = self._resident_blocks(sizes)
                 if is_frozen():
                     self.blocks = OpaqueBlockStore.from_reader(
-                        handle, names, device, resident=resident, linear_names=T.LINEAR_NAMES,
+                        handle, names, device, resident=resident,
                     )
-                    T.enable_opaque_kernels()
                 else:
                     self.blocks = BlockStore.from_reader(handle, names, device, resident=resident)
             T.enable_int8_attention()
@@ -211,17 +210,29 @@ class LtxTransformer:
         latents = [x[:, : x.shape[1] // 2] for x in inputs]
         xs = [T.embed_tokens(self.top, x, tokens_per_frame) for x in inputs]
         perturbed: list[torch.Tensor | None] = [None] * len(xs)
-        for index in range(T.NUM_BLOCKS):
-            weights = self.blocks.acquire(index)
-            prompt = self._prompt_key_value(weights, cond, self.context)
-            for j in range(len(xs)):
-                if self.stg_scale and index >= STG_BLOCK:
-                    source = xs[j] if index == STG_BLOCK else perturbed[j]
-                    perturbed[j] = self._block_forward(
-                        weights, source, cond, prompt, rope, skip_self_attention=index == STG_BLOCK
-                    )
-                xs[j] = self._block_forward(weights, xs[j], cond, prompt, rope)
-            self.blocks.release(index)
+        if isinstance(self.blocks, OpaqueBlockStore):
+            self.blocks.begin_step(xs[0].shape[1], len(xs), bool(self.stg_scale))
+            for index in range(T.NUM_BLOCKS):
+                self.blocks.activate(index)
+                for j in range(len(xs)):
+                    if self.stg_scale and index >= STG_BLOCK:
+                        source = xs[j] if index == STG_BLOCK else perturbed[j]
+                        perturbed[j] = self.blocks.block_forward(
+                            source, cond, self.context, rope, stg_branch=True,
+                        )
+                    xs[j] = self.blocks.block_forward(xs[j], cond, self.context, rope)
+        else:
+            for index in range(T.NUM_BLOCKS):
+                weights = self.blocks.acquire(index)
+                prompt = self._prompt_key_value(weights, cond, self.context)
+                for j in range(len(xs)):
+                    if self.stg_scale and index >= STG_BLOCK:
+                        source = xs[j] if index == STG_BLOCK else perturbed[j]
+                        perturbed[j] = self._block_forward(
+                            weights, source, cond, prompt, rope, skip_self_attention=index == STG_BLOCK
+                        )
+                    xs[j] = self._block_forward(weights, xs[j], cond, prompt, rope)
+                self.blocks.release(index)
         out = []
         for lat, x, xp in zip(latents, xs, perturbed):
             denoised = (lat.float() - T.velocity(self.top, x, cond).float() * sigma).to(lat.dtype)

@@ -3,8 +3,8 @@
 Each block is packed into one flat byte buffer so it moves in a single copy. As many
 leading blocks as the VRAM budget allows stay resident; the rest live in pinned host
 memory and are copied on a side stream into one of two GPU slots, one block ahead of
-the block being computed. Frozen releases keep quantized Linear parameters in the
-native opaque store; Python receives only small operator tokens and non-Linear values.
+the block being computed. Frozen releases keep every transformer-block tensor and the
+complete block forward in the native opaque store; Python sees only block inputs/outputs.
 """
 
 from __future__ import annotations
@@ -252,15 +252,13 @@ class BlockStore:
 
 
 class OpaqueBlockStore:
-    """Keeps quantized Linear parameters in the native protection extension."""
+    """Keeps complete transformer blocks in the native protection extension."""
 
-    def __init__(self, native, public: BlockStore, tokens: list[dict[str, torch.Tensor]]) -> None:
+    def __init__(self, native, device: torch.device, count: int, resident: int) -> None:
         self._native = native
-        self._public = public
-        self._tokens = tokens
-        self.device = public.device
-        self.count = public.count
-        self.resident = public.resident
+        self.device = device
+        self.count = count
+        self.resident = min(resident, count)
 
     @classmethod
     def from_reader(
@@ -270,43 +268,38 @@ class OpaqueBlockStore:
         device: torch.device,
         *,
         resident: int,
-        linear_names: tuple[str, ...],
     ) -> OpaqueBlockStore:
         from jasna.protection.opaque_ltx import OpaqueStore
 
         specs = reader.tensor_specs()
-        prefixes = tuple(name + "." for name in linear_names)
-        opaque_names = [{name: source for name, source in block.items() if name.startswith(prefixes)} for block in names]
-        public_names = [{name: source for name, source in block.items() if name not in opaque}
-                        for block, opaque in zip(names, opaque_names, strict=True)]
         opaque_specs = [
             {name: (str(specs[source][0]).removeprefix("torch."), specs[source][1]) for name, source in block.items()}
-            for block in opaque_names
+            for block in names
         ]
         native = OpaqueStore(opaque_specs, str(device), resident)
         try:
-            groups = tuple(tuple(block.values()) for block in opaque_names)
+            groups = tuple(tuple(block.values()) for block in names)
             destinations = (
                 {source: native.destination(index, name) for name, source in block.items()}
-                for index, block in enumerate(opaque_names)
+                for index, block in enumerate(names)
             )
             reader.read_tensors_into(groups, destinations)
             native.finalize()
-            tokens = [native.tokens(index) for index in range(len(names))]
-            public = BlockStore.from_reader(reader, public_names, device, resident=resident)
-            return cls(native, public, tokens)
+            return cls(native, device, len(names), resident)
         except BaseException:
             native.close()
             raise
 
-    def acquire(self, index: int) -> dict[str, torch.Tensor]:
-        weights = self._public.acquire(index)
+    def activate(self, index: int) -> None:
         self._native.activate(index)
-        return {**weights, **self._tokens[index]}
 
-    def release(self, index: int) -> None:
-        self._public.release(index)
+    def begin_step(self, rows: int, windows: int, stg: bool) -> None:
+        self._native.begin_step(rows, windows, stg)
+
+    def block_forward(self, x, cond, context, rope, *, stg_branch: bool = False):
+        return self._native.block_forward(
+            x, cond.block_rows, cond.prompt_rows, context, rope.cos, rope.sin, stg_branch,
+        )
 
     def close(self) -> None:
-        self._public.close()
         self._native.close()

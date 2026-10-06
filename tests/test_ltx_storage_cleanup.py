@@ -118,7 +118,7 @@ def test_block_loading_streams_all_destinations_in_one_reader_operation(tmp_path
         store.close()
 
 
-def test_opaque_block_store_keeps_linear_destinations_out_of_python_tensors(monkeypatch):
+def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypatch):
     class Destination:
         pass
 
@@ -126,6 +126,7 @@ def test_opaque_block_store_keeps_linear_destinations_out_of_python_tensors(monk
         def __init__(self, specs, device, resident):
             self.specs = specs
             self.destinations = {}
+            self.steps = []
             self.closed = False
 
         def destination(self, block, name):
@@ -136,11 +137,15 @@ def test_opaque_block_store_keeps_linear_destinations_out_of_python_tensors(monk
         def finalize(self):
             pass
 
-        def tokens(self, block):
-            return {"proj.opaque_int8": torch.empty(4)}
-
         def activate(self, block):
-            pass
+            self.active = block
+
+        def begin_step(self, rows, windows, stg):
+            self.steps.append((rows, windows, stg))
+
+        def block_forward(self, x, block_rows, prompt_rows, context, rope_cos, rope_sin, stg_branch):
+            self.forward = (x, block_rows, prompt_rows, context, rope_cos, rope_sin, stg_branch)
+            return x
 
         def close(self):
             self.closed = True
@@ -173,12 +178,52 @@ def test_opaque_block_store_keeps_linear_destinations_out_of_python_tensors(monk
             "proj.scales": "blocks.0.proj.scales",
             "scale_shift_table": "blocks.0.scale_shift_table",
         }],
-        torch.device("cpu"), resident=1, linear_names=("proj",),
+        torch.device("cpu"), resident=1,
     )
-    weights = store.acquire(0)
-    assert set(weights) == {"proj.opaque_int8", "scale_shift_table"}
-    assert torch.equal(weights["scale_shift_table"], torch.ones(2, 4, dtype=torch.bfloat16))
+    assert set(store._native.destinations) == {
+        (0, "proj.qdata"), (0, "proj.scales"), (0, "scale_shift_table"),
+    }
+    store.begin_step(8192, 3, True)
+    store.activate(0)
+    assert store._native.steps == [(8192, 3, True)]
     store.close()
+
+
+def test_opaque_denoise_uses_only_native_complete_block_forward(monkeypatch):
+    class NativeBlocks(OpaqueBlockStore):
+        def __init__(self):
+            self.events = []
+
+        def begin_step(self, rows, windows, stg):
+            self.events.append(("step", rows, windows, stg))
+
+        def activate(self, index):
+            self.events.append(("activate", index))
+
+        def block_forward(self, x, cond, context, rope, *, stg_branch=False):
+            self.events.append(("forward", stg_branch))
+            return x
+
+    transformer = object.__new__(sampler.LtxTransformer)
+    transformer.blocks = NativeBlocks()
+    transformer.top = {}
+    transformer.context = object()
+    transformer.stg_scale = 1.0
+    transformer._block_forward = lambda *args, **kwargs: pytest.fail("Python block forward reached")
+    transformer._prompt_key_value = lambda *args, **kwargs: pytest.fail("Python prompt projection reached")
+    monkeypatch.setattr(sampler.T, "NUM_BLOCKS", 2)
+    monkeypatch.setattr(sampler, "STG_BLOCK", 1)
+    monkeypatch.setattr(sampler.T, "embed_tokens", lambda top, x, tokens_per_frame: x)
+    monkeypatch.setattr(
+        sampler.T, "velocity", lambda top, x, cond: torch.zeros_like(x[:, : x.shape[1] // 2]),
+    )
+    result = transformer._denoise([torch.zeros(1, 8, 4)], object(), object(), 1, torch.tensor(1.0))
+    assert len(result) == 1
+    assert transformer.blocks.events == [
+        ("step", 8, 1, True),
+        ("activate", 0), ("forward", False),
+        ("activate", 1), ("forward", True), ("forward", False),
+    ]
 
 
 def test_late_stream_failure_clears_every_committed_destination(tmp_path):

@@ -7,8 +7,9 @@ per-window token layout of ``n`` target tokens followed by ``n`` reference token
 the same positions. Target tokens carry timestep ``sigma`` and reference tokens 0, so
 every AdaLN modulation is one row per half instead of one per token.
 
-Blocks take a mapping so the executor can hand in resident tensors, streaming views, or
-opaque native operator tokens. A Linear is stored as ``<name>.weight`` (bf16), as ConvRot W8A8
+Blocks take a mapping so the development executor can hand in resident tensors or streaming
+views. Frozen releases execute complete blocks inside the native protection module. A Linear
+is stored as ``<name>.weight`` (bf16), as ConvRot W8A8
 (``<name>.qdata`` int8 rotated codes, ``<name>.scales`` fp32 per output channel), or as NVFP4
 W4A4 (``<name>.weight`` uint8 packed E2M1, high nibble first, ``<name>.weight_scale``
 float8_e4m3fn block scales in the cuBLAS 128x4 tiled layout, ``<name>.weight_scale_2`` fp32).
@@ -217,14 +218,6 @@ def nvfp4_linear(
 
 def gelu_linear(w: Weights, name: str, h: torch.Tensor) -> torch.Tensor:
     """``linear(w, name, gelu_tanh(h))``; the NVFP4 kernels quantize straight from ``h``."""
-    opaque = w.get(f"{name}.opaque_nvfp4")
-    if opaque is not None and _quant_kernels is not None and h.is_cuda:
-        flat = h.reshape(-1, h.shape[-1])
-        act_scale = fp4_tensor_scale(F.gelu(flat, approximate="tanh"))
-        packed, act_blocks = _quant_kernels.quantize_fp4(flat, act_scale, True)
-        return _opaque_kernels.nvfp4_scaled_mm(
-            packed, act_blocks, act_scale, opaque, _opaque_out_features(opaque)
-        ).reshape(*h.shape[:-1], _opaque_out_features(opaque))
     weight = w.get(f"{name}.weight")
     if _quant_kernels is not None and h.is_cuda and weight is not None and weight.dtype == torch.uint8:
         flat = h.reshape(-1, weight.shape[1] * 2)
@@ -270,36 +263,10 @@ def _shared_fp4_input(
     weight = w.get(f"{name}.weight")
     if isinstance(x, QuantizedRows) or _quant_kernels is None or not x.is_cuda:
         return x
-    if w.get(f"{name}.opaque_nvfp4") is not None:
-        return quantize_fp4_activation(x)
     return quantize_fp4_activation(x) if weight is not None and weight.dtype == torch.uint8 else x
 
 
 def linear(w: Weights, name: str, x: torch.Tensor | QuantizedRows | Fp4Activation) -> torch.Tensor:
-    opaque_int8 = w.get(f"{name}.opaque_int8")
-    opaque_nvfp4 = w.get(f"{name}.opaque_nvfp4")
-    opaque_bfloat16 = w.get(f"{name}.opaque_bfloat16")
-    opaque = opaque_int8 if opaque_int8 is not None else opaque_nvfp4 if opaque_nvfp4 is not None else opaque_bfloat16
-    if opaque is not None:
-        out_features = _opaque_out_features(opaque)
-        if isinstance(x, QuantizedRows):
-            return _opaque_kernels.int8_scaled_mm(x.codes, x.scales, opaque, out_features)[None]
-        if isinstance(x, Fp4Activation):
-            return _opaque_kernels.nvfp4_scaled_mm(
-                x.packed, x.block_scales, x.tensor_scale, opaque, out_features,
-            )[None]
-        if opaque_int8 is not None:
-            flat = x.reshape(-1, x.shape[-1])
-            codes, act_scales = _quant_kernels.int8_rotate_quantize(flat)
-            return _opaque_kernels.int8_scaled_mm(codes, act_scales, opaque, out_features).reshape(
-                *x.shape[:-1], out_features
-            )
-        if opaque_nvfp4 is not None:
-            activation = quantize_fp4_activation(x)
-            return _opaque_kernels.nvfp4_scaled_mm(
-                activation.packed, activation.block_scales, activation.tensor_scale, opaque, out_features,
-            ).reshape(*x.shape[:-1], out_features)
-        return _opaque_kernels.bfloat16_linear(x, opaque, out_features)
     bias = w.get(f"{name}.bias")
     if isinstance(x, QuantizedRows):
         return _quant_kernels.int8_scaled_mm(x.codes, x.scales, w[f"{name}.qdata"], w[f"{name}.scales"], bias)[None]
@@ -317,56 +284,6 @@ def linear(w: Weights, name: str, x: torch.Tensor | QuantizedRows | Fp4Activatio
 
 
 _quant_kernels = None
-_opaque_kernels = None
-
-
-def _opaque_out_features(token: torch.Tensor) -> int:
-    return int(token.shape[0])
-
-
-def enable_opaque_kernels() -> None:
-    global _opaque_kernels
-    if _opaque_kernels is not None:
-        return
-    from jasna.protection import opaque_ltx
-
-    @torch.library.custom_op("jasna::opaque_int8_scaled_mm", mutates_args=())
-    def opaque_int8_scaled_mm(
-        codes: torch.Tensor, scales: torch.Tensor, token: torch.Tensor, out_features: int,
-    ) -> torch.Tensor:
-        return opaque_ltx.int8_scaled_mm(codes, scales, token)
-
-    @opaque_int8_scaled_mm.register_fake
-    def _(codes, scales, token, out_features):
-        return codes.new_empty(codes.shape[0], out_features, dtype=torch.bfloat16)
-
-    @torch.library.custom_op("jasna::opaque_nvfp4_scaled_mm", mutates_args=())
-    def opaque_nvfp4_scaled_mm(
-        packed: torch.Tensor,
-        block_scales: torch.Tensor,
-        tensor_scale: torch.Tensor,
-        token: torch.Tensor,
-        out_features: int,
-    ) -> torch.Tensor:
-        return opaque_ltx.nvfp4_scaled_mm(packed, block_scales, tensor_scale, token)
-
-    @opaque_nvfp4_scaled_mm.register_fake
-    def _(packed, block_scales, tensor_scale, token, out_features):
-        return packed.new_empty(packed.shape[0], out_features, dtype=torch.bfloat16)
-
-    @torch.library.custom_op("jasna::opaque_bfloat16_linear", mutates_args=())
-    def opaque_bfloat16_linear(x: torch.Tensor, token: torch.Tensor, out_features: int) -> torch.Tensor:
-        return opaque_ltx.bfloat16_linear(x, token)
-
-    @opaque_bfloat16_linear.register_fake
-    def _(x, token, out_features):
-        return x.new_empty((*x.shape[:-1], out_features))
-
-    _opaque_kernels = SimpleNamespace(
-        int8_scaled_mm=opaque_int8_scaled_mm,
-        nvfp4_scaled_mm=opaque_nvfp4_scaled_mm,
-        bfloat16_linear=opaque_bfloat16_linear,
-    )
 
 
 def enable_quant_kernels(device: torch.device) -> bool:

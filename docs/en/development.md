@@ -123,6 +123,14 @@ $P scripts/benchmark_na3d.py                                             # Trito
 
 `scripts/bench_memory.py` is the RAM/VRAM sampler the others share.
 
+Source-mode LTX benchmarks intentionally exercise the public
+`torch.compile`/Triton path. NVIDIA frozen releases instead keep complete
+transformer blocks behind the private native `block_forward` boundary; they do
+not expose protected per-Linear operators. Changes to either path must compare
+identical weights, inputs, seeds and warmed caches. GPU qualification for the
+native path is currently limited to SM120; generated kernels for another SM do
+not by themselves establish release support.
+
 ## Release checklist
 
 1. Same version in `pyproject.toml`, `jasna/__init__.py`, the git tag and

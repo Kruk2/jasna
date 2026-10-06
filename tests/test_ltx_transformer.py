@@ -157,34 +157,9 @@ def test_quantize_fp4_reconstructs_within_fp4_error():
     assert (rebuilt - blocks).norm() / blocks.norm() < 0.15
 
 
-def test_opaque_int8_linear_passes_only_activation_and_token(monkeypatch):
-    token = torch.empty(7)
-    calls = []
-
-    def scaled_mm(codes, scales, supplied, out_features):
-        calls.append((codes, scales, supplied, out_features))
-        return torch.ones(codes.shape[0], out_features, dtype=torch.bfloat16)
-
-    monkeypatch.setattr(T, "_opaque_kernels", SimpleNamespace(int8_scaled_mm=scaled_mm))
-    rows = T.QuantizedRows(torch.ones(3, 4, dtype=torch.int8), torch.ones(3))
-    result = T.linear({"proj.opaque_int8": token}, "proj", rows)
-    assert result.shape == (1, 3, 7)
-    assert calls == [(rows.codes, rows.scales, token, 7)]
-
-
-def test_opaque_nvfp4_linear_passes_only_activation_and_token(monkeypatch):
-    token = torch.empty(9)
-    calls = []
-
-    def scaled_mm(packed, block_scales, tensor_scale, supplied, out_features):
-        calls.append((packed, block_scales, tensor_scale, supplied, out_features))
-        return torch.ones(packed.shape[0], out_features, dtype=torch.bfloat16)
-
-    monkeypatch.setattr(T, "_opaque_kernels", SimpleNamespace(nvfp4_scaled_mm=scaled_mm))
-    activation = T.Fp4Activation(torch.ones(3, 2, dtype=torch.uint8), torch.ones(128, 4), torch.ones(()))
-    result = T.linear({"proj.opaque_nvfp4": token}, "proj", activation)
-    assert result.shape == (1, 3, 9)
-    assert calls == [(activation.packed, activation.block_scales, activation.tensor_scale, token, 9)]
+def test_public_transformer_has_no_opaque_per_linear_dispatcher():
+    assert not hasattr(T, "enable_opaque_kernels")
+    assert not hasattr(T, "_opaque_kernels")
 
 
 def test_self_attention_falls_back_to_sdpa_off_gpu():
