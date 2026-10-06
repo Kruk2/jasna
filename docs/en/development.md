@@ -14,6 +14,9 @@ inside an installed module still report a failure.
 - Python **3.12+** (releases ship 3.13 on NVIDIA, 3.12 on AMD).
 - `ffmpeg` and `ffprobe` **8** on `PATH`.
 - libVLC 3 for GUI player audio (Ubuntu: `libvlc5 vlc-plugin-base`).
+- Optional, NVIDIA: the CUDA 13 toolkit (`nvcc`), a C++ compiler `nvcc` accepts and
+  `ninja` (in the `dev` extra) build the native LTX block on first use (see
+  [Benchmarks](#benchmarks)); without them LTX runs its `torch.compile` path.
 - Optional, NVIDIA: a `python_vali` wheel built from
   <https://codeberg.org/Kruk2/vali> (needs CUDA 13, `cmake`, `ninja`; on
   Windows also VS Build Tools 2022 with C++). Without that fork the decoder
@@ -123,13 +126,17 @@ $P scripts/benchmark_na3d.py                                             # Trito
 
 `scripts/bench_memory.py` is the RAM/VRAM sampler the others share.
 
-Source-mode LTX benchmarks intentionally exercise the public
-`torch.compile`/Triton path. NVIDIA frozen releases instead keep complete
-transformer blocks behind the private native `block_forward` boundary; they do
-not expose protected per-Linear operators. Changes to either path must compare
-identical weights, inputs, seeds and warmed caches. GPU qualification for the
-native path is currently limited to SM120; generated kernels for another SM do
-not by themselves establish release support.
+Source-mode LTX runs the public native block (`jasna/ltx/native/`: one C++/CUDA
+call per transformer block, built on first use into the compile cache, ~1-2 min)
+when the toolchain is there and the GPU is in the kernel tables, else the
+`torch.compile`/Triton path; `JASNA_LTX_NATIVE=0` forces `torch.compile` for an
+A/B in one tree. `jasna.ltx.native.prebuild(dir)` builds the extension and the
+cubins of every table architecture for a release (copy `dir` to
+`jasna/ltx/native/prebuilt/`). NVIDIA frozen releases keep licensed blocks behind
+the private native `block_forward` boundary; they do not expose protected
+per-Linear operators. Changes to any path must compare identical weights, inputs,
+seeds and warmed caches. The public native block is GPU-qualified on SM 12.0
+(RTX 5090) only; cubins for another SM do not by themselves establish support.
 
 ## Release checklist
 
