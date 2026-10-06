@@ -57,7 +57,14 @@ jasna --input input_folder --output output_folder
 
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
-| `--secondary-restoration` | `none` | `unet-4x`、`tvai` 或 `rtx-super-res`。见[模型](models.md)。 |
+| `--secondary-restoration` | `none` | `unet-4x`、`tvai`、`rtx-super-res`（NVIDIA）或 `amd-upscale`（AMD GPU）。见[模型](models.md)。 |
+| `--amd-upscale-engine` | `amf-sr` | `amf-sr`（AMD Video SR，Windows 下走 D3D11）或 `realesrgan`（Real-ESRGAN，ROCm/HIP）。 |
+| `--amd-upscale-scale` | `4` | AMD 超分放大倍数（`2`、`4`、`6`、`8`）。`6`/`8` 仍由 SR 引擎处理，相当于超采样，画质更干净但耗时按比例增加。 |
+| `--amd-upscale-algorithm` | `sr1-0` | `sr1-0`/`sr1-1`（AMD Video SR）或 `bicubic`/`bilinear`/`point`。 |
+| `--amd-upscale-sharpness` | `-1` | `sr_amf` 额外锐化，`-1` 用驱动默认值，范围 `-1`–`2`。 |
+| `--amd-upscale-model-path` | 自动 | `rocm` 引擎的 RRDBNet 权重路径；留空则自动在 `model_weights/` 中查找。 |
+| `--amd-upscale-ffmpeg-path` | 自动 | AMD 超分使用的 FFmpeg（需要 AMF 滤镜）；留空用内置副本或 PATH。 |
+| `--amd-upscale-timeout` | `120` | 单个片段等待 FFmpeg 的秒数，超时即报错。 |
 | `--rtx-scale` | `4` | RTX Super Res 放大倍数（`2` 或 `4`）。 |
 | `--rtx-quality` | `high` | `low`–`ultra`。 |
 | `--rtx-denoise` | `medium` | `none` 表示禁用。 |

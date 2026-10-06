@@ -67,8 +67,17 @@ class SecondarySection:
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed
         )
-        rtx_rb.pack(side="left")
+        rtx_rb.pack(side="left", padx=(0, 16))
         Tooltip(rtx_rb, get_tooltip("secondary_rtx"))
+
+        amd_rb = ctk.CTkRadioButton(
+            engines_frame, text=f"{t('secondary_amd_upscale')} ({t('secondary_amd_hint')})",
+            variable=self._widgets["secondary_var"], value="amd-upscale",
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
+            command=self._on_secondary_changed
+        )
+        amd_rb.pack(side="left")
+        Tooltip(amd_rb, get_tooltip("secondary_amd"))
 
         # TVAI options (hidden by default)
         self._tvai_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
@@ -238,6 +247,111 @@ class SecondarySection:
         self._widgets["rtx_deblur"].pack(side="right")
         self._widgets["rtx_deblur"].set("None")
 
+        # AMD upscale options (hidden by default)
+        self._amd_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
+
+        amd_inner = ctk.CTkFrame(self._amd_frame, fg_color="transparent")
+        amd_inner.pack(fill="x", padx=12, pady=12)
+
+        # AMD engine
+        amd_engine_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_engine_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_engine_row, text=t("amd_engine"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_engine_tip = ctk.CTkLabel(amd_engine_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_engine_tip.pack(side="left", padx=4)
+        Tooltip(amd_engine_tip, get_tooltip("amd_engine"))
+        self._widgets["amd_upscale_engine"] = ctk.CTkOptionMenu(
+            amd_engine_row, values=["amf-sr", "realesrgan"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=110
+        )
+        self._widgets["amd_upscale_engine"].pack(side="right")
+        self._widgets["amd_upscale_engine"].set("amf-sr")
+
+        # AMD scale
+        amd_scale_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_scale_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_scale_row, text=t("scale"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        self._widgets["amd_upscale_scale"] = ctk.CTkOptionMenu(
+            amd_scale_row, values=["2x", "4x", "6x", "8x"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_scale"].pack(side="right")
+        self._widgets["amd_upscale_scale"].set("4x")
+
+        # AMD algorithm
+        amd_algorithm_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_algorithm_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_algorithm_row, text=t("amd_algorithm"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_algorithm_tip = ctk.CTkLabel(amd_algorithm_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_algorithm_tip.pack(side="left", padx=4)
+        Tooltip(amd_algorithm_tip, get_tooltip("amd_algorithm"))
+        self._widgets["amd_upscale_algorithm"] = ctk.CTkOptionMenu(
+            amd_algorithm_row, values=["sr1-0", "sr1-1", "bicubic", "bilinear", "point"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=110
+        )
+        self._widgets["amd_upscale_algorithm"].pack(side="right")
+        self._widgets["amd_upscale_algorithm"].set("sr1-0")
+
+        # AMD sharpness
+        amd_sharpness_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_sharpness_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_sharpness_row, text=t("amd_sharpness"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_sharpness_tip = ctk.CTkLabel(amd_sharpness_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_sharpness_tip.pack(side="left", padx=4)
+        Tooltip(amd_sharpness_tip, get_tooltip("amd_sharpness"))
+        self._widgets["amd_upscale_sharpness"] = ctk.CTkEntry(
+            amd_sharpness_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_sharpness"].pack(side="right")
+        self._widgets["amd_upscale_sharpness"].insert(0, "-1")
+
+        # AMD timeout
+        amd_timeout_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_timeout_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_timeout_row, text=t("amd_timeout"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_timeout_tip = ctk.CTkLabel(amd_timeout_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_timeout_tip.pack(side="left", padx=4)
+        Tooltip(amd_timeout_tip, get_tooltip("amd_timeout"))
+        self._widgets["amd_upscale_timeout"] = ctk.CTkEntry(
+            amd_timeout_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_timeout"].pack(side="right")
+        self._widgets["amd_upscale_timeout"].insert(0, "120")
+
+        # AMD ffmpeg path
+        amd_path_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_path_row.pack(fill="x", pady=(0, 4))
+        add_setting_label(amd_path_row, "ffmpeg_path")
+        self._widgets["amd_upscale_ffmpeg_path"] = ctk.CTkEntry(
+            amd_path_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY
+        )
+        self._widgets["amd_upscale_ffmpeg_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        amd_browse_btn = ctk.CTkButton(
+            amd_path_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
+            fg_color=Colors.BG_PANEL, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
+            command=self._browse_amd_ffmpeg
+        )
+        amd_browse_btn.pack(side="right")
+
+    def _browse_amd_ffmpeg(self):
+        filepath = filedialog.askopenfilename(
+            title=t("dialog_select_tvai_ffmpeg"),
+            filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
+        )
+        if filepath:
+            self._widgets["amd_upscale_ffmpeg_path"].delete(0, "end")
+            self._widgets["amd_upscale_ffmpeg_path"].insert(0, filepath)
+
     def _browse_tvai_ffmpeg(self):
         filepath = filedialog.askopenfilename(
             title=t("dialog_select_tvai_ffmpeg"),
@@ -252,11 +366,14 @@ class SecondarySection:
         secondary = self._widgets["secondary_var"].get()
         self._tvai_frame.pack_forget()
         self._rtx_frame.pack_forget()
+        self._amd_frame.pack_forget()
 
         if secondary == "tvai":
             self._tvai_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         elif secondary == "rtx-super-res":
             self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        elif secondary == "amd-upscale":
+            self._amd_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
     def set_model(self, model: str) -> None:
         if model == "ltx":
@@ -280,6 +397,16 @@ class SecondarySection:
         self._widgets["rtx_denoise"].set(preset.rtx_denoise.capitalize())
         self._widgets["rtx_deblur"].set(preset.rtx_deblur.capitalize())
 
+        self._widgets["amd_upscale_engine"].set(preset.amd_upscale_engine)
+        self._widgets["amd_upscale_scale"].set(f"{preset.amd_upscale_scale}x")
+        self._widgets["amd_upscale_algorithm"].set(preset.amd_upscale_algorithm)
+        self._widgets["amd_upscale_sharpness"].delete(0, "end")
+        self._widgets["amd_upscale_sharpness"].insert(0, str(preset.amd_upscale_sharpness))
+        self._widgets["amd_upscale_timeout"].delete(0, "end")
+        self._widgets["amd_upscale_timeout"].insert(0, str(preset.amd_upscale_timeout_s))
+        self._widgets["amd_upscale_ffmpeg_path"].delete(0, "end")
+        self._widgets["amd_upscale_ffmpeg_path"].insert(0, preset.amd_upscale_ffmpeg_path)
+
         self._on_secondary_changed()
 
     def collect(self) -> dict:
@@ -294,4 +421,10 @@ class SecondarySection:
             "rtx_quality": self._widgets["rtx_quality"].get().lower(),
             "rtx_denoise": self._widgets["rtx_denoise"].get().lower(),
             "rtx_deblur": self._widgets["rtx_deblur"].get().lower(),
+            "amd_upscale_engine": self._widgets["amd_upscale_engine"].get(),
+            "amd_upscale_scale": int(self._widgets["amd_upscale_scale"].get().replace("x", "")),
+            "amd_upscale_algorithm": self._widgets["amd_upscale_algorithm"].get(),
+            "amd_upscale_sharpness": float(self._widgets["amd_upscale_sharpness"].get() or -1),
+            "amd_upscale_ffmpeg_path": self._widgets["amd_upscale_ffmpeg_path"].get(),
+            "amd_upscale_timeout_s": float(self._widgets["amd_upscale_timeout"].get() or 120),
         }

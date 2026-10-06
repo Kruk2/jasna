@@ -72,6 +72,13 @@ def _session_config_from_args(
         rtx_quality=str(args.rtx_quality).lower(),
         rtx_denoise=str(args.rtx_denoise).lower(),
         rtx_deblur=str(args.rtx_deblur).lower(),
+        amd_upscale_engine=str(args.amd_upscale_engine).lower(),
+        amd_upscale_scale=int(args.amd_upscale_scale),
+        amd_upscale_algorithm=str(args.amd_upscale_algorithm).lower(),
+        amd_upscale_sharpness=float(args.amd_upscale_sharpness),
+        amd_upscale_ffmpeg_path=str(args.amd_upscale_ffmpeg_path) or None,
+        amd_upscale_model_path=str(args.amd_upscale_model_path) or None,
+        amd_upscale_timeout_s=float(args.amd_upscale_timeout),
         vr_mode=str(args.vr_mode),
         vr_projection="auto",
         codec=codec,
@@ -281,7 +288,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--secondary-restoration",
         type=str,
         default="none",
-        choices=["none", "unet-4x", "tvai", "rtx-super-res"],
+        choices=["none", "unet-4x", "tvai", "rtx-super-res", "amd-upscale"],
         help=CLI_HELP["secondary_restoration"],
     )
 
@@ -366,6 +373,53 @@ def build_parser() -> argparse.ArgumentParser:
         default="none",
         choices=["none", "low", "medium", "high", "ultra"],
         help="RTX Super Res deblur level, none to disable (default: %(default)s)",
+    )
+
+    amd_upscale = parser.add_argument_group("AMD upscaling")
+    amd_upscale.add_argument(
+        "--amd-upscale-engine",
+        type=str,
+        default="amf-sr",
+        choices=["amf-sr", "realesrgan"],
+        help=CLI_HELP["amd_upscale_engine"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-scale",
+        type=int,
+        default=4,
+        choices=[2, 4, 6, 8],
+        help=CLI_HELP["amd_upscale_scale"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-algorithm",
+        type=str,
+        default="sr1-0",
+        choices=["sr1-0", "sr1-1", "bicubic", "bilinear", "point"],
+        help=CLI_HELP["amd_upscale_algorithm"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-sharpness",
+        type=float,
+        default=-1.0,
+        help=CLI_HELP["amd_upscale_sharpness"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-ffmpeg-path",
+        type=str,
+        default="",
+        help=CLI_HELP["amd_upscale_ffmpeg_path"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-model-path",
+        type=str,
+        default="",
+        help=CLI_HELP["amd_upscale_model_path"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-timeout",
+        type=float,
+        default=120.0,
+        help=CLI_HELP["amd_upscale_timeout"],
     )
 
     tvai = parser.add_argument_group("Topaz Video")

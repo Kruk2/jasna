@@ -36,7 +36,38 @@ CLI_HELP: dict[str, str] = {
     "enable_crossfade": "Cross-fade between clip boundaries to reduce flickering at seams. Uses frames that are already processed but otherwise discarded, so no extra GPU cost. (default: %(default)s)",
     "denoise": "Spatial denoising strength applied to restored crops. Reduces noise artifacts. (default: %(default)s)",
     "denoise_step": "When to apply denoising: after_primary (before secondary) or after_secondary (right before blend). (default: %(default)s)",
-    "secondary_restoration": "Secondary restoration after primary model (default: %(default)s)",
+    "secondary_restoration": (
+        "Secondary restoration after primary model: none, unet-4x (NVIDIA supporter model), "
+        "tvai (Topaz Video), rtx-super-res (NVIDIA Maxine), or amd-upscale (AMD GPU "
+        "super resolution: AMF Video SR or Real-ESRGAN on ROCm). (default: %(default)s)"
+    ),
+    "amd_upscale_engine": (
+        "AMD upscaling engine: amf-sr (AMD's own Video SR 1.0/1.1 via the AMF filter sr_amf; AMF "
+        "initialises over D3D11 on Windows) or realesrgan (Real-ESRGAN RRDBNet on the ROCm/HIP "
+        "device, in-process). (default: %(default)s)"
+    ),
+    "amd_upscale_model_path": (
+        "RRDBNet checkpoint for the rocm engine (Real-ESRGAN x4plus / x4plus_anime_6B / x2plus). "
+        "Empty auto-detects one in model_weights/. (default: %(default)s)"
+    ),
+    "amd_upscale_scale": (
+        "AMD upscale factor; the crop is restored at 256*scale and blended back. "
+        "6x/8x keep the SR engine engaged and act as supersampling, at a "
+        "proportional time cost (default: %(default)s)"
+    ),
+    "amd_upscale_algorithm": (
+        "sr_amf algorithm: sr1-0 / sr1-1 are AMD Video SR (machine learning), "
+        "bicubic / bilinear / point are the non-ML fallbacks. (default: %(default)s)"
+    ),
+    "amd_upscale_sharpness": "sr_amf sharpness, -1 keeps the driver default (range -1..2) (default: %(default)s)",
+    "amd_upscale_ffmpeg_path": (
+        "FFmpeg to use for AMD upscaling (needs the AMF filters). Empty uses the bundled "
+        "copy or 'ffmpeg' from PATH. (default: %(default)s)"
+    ),
+    "amd_upscale_timeout": (
+        "Seconds to wait for the AMD upscale FFmpeg process before giving up on a clip "
+        "(default: %(default)s)"
+    ),
     "vr_mode": (
         "VR180 SBS handling: auto uses conservative studio/metadata detection and "
         "routes each mosaic region's restoration projection (raw/fisheye/gnomonic) "
