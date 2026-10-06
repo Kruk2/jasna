@@ -238,6 +238,8 @@ def prebuild(directory: Path) -> None:
             if quantization == "int8" or capability in FP4_ARCHS:
                 build_kernels(capability, dims, fp4=quantization == "nvfp4", cache=directory / "kernels")
     os.environ["TORCH_CUDA_ARCH_LIST"] = ";".join(f"{major}.{minor}" for major, minor in archs)
+    if not _ninja_available():
+        raise RuntimeError("prebuilding the LTX native block needs ninja")
     module = _build_extension(directory / "build")
     shutil.copy2(module.__file__, directory / Path(module.__file__).name)
     shutil.rmtree(directory / "build")

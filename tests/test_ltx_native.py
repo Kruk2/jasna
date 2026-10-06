@@ -4,6 +4,7 @@ checks, the constants handed to the native side and the sampler's choice of bloc
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -116,6 +117,40 @@ def test_python_hands_every_constant_to_the_native_block(monkeypatch, tmp_path):
     assert config.fp4_recipe == [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value]
     assert config.kernels == [] and config.kernel_directory == str(tmp_path)
     assert forward.head_dim == 128
+
+
+def test_rtx_3090_native_block_launches_plain_triton_gemms(monkeypatch, tmp_path):
+    pytest.importorskip("comfy_kitchen")
+    _cuda_capability(monkeypatch, (8, 6))
+    monkeypatch.setattr(kernels, "programs", lambda device: 82)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("[]")
+    built = []
+    module = SimpleNamespace(Config=SimpleNamespace, Block=lambda config: built.append(config) or config)
+    native.NativeBlockForward(module, torch.device("cuda", 0), aot.BlockDims(4096, 16384, 32), manifest)
+    config = built[0]
+    assert not config.has_tma and not config.cublas_int8
+    assert (tuple(config.narrow_tile), tuple(config.wide_tile)) == kernels.INT8_MM_TILES[(8, 6)]
+    assert {v.family for v in aot.variants((8, 6), aot.BlockDims(4096, 16384, 32), fp4=False)} == {"rotate_quantize", "mm"}
+    assert "NVFP4 blocks need SM 12.0 / 12.1" in native.unavailable_reason(torch.device("cuda"), _block_specs("nvfp4"))
+
+
+def test_prebuild_finds_the_ninja_package_off_path(monkeypatch, tmp_path):
+    ninja = pytest.importorskip("ninja")
+    monkeypatch.setenv("PATH", "/nonexistent")
+    monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", "")
+    monkeypatch.setattr(native, "build_kernels", lambda *args, **kwargs: None)
+    extension = tmp_path / "build" / "jasna_ltx_native.so"
+
+    def build_extension(directory):
+        assert native.shutil.which("ninja") == str(Path(ninja.BIN_DIR) / "ninja")
+        extension.parent.mkdir(parents=True)
+        extension.write_bytes(b"")
+        return SimpleNamespace(__file__=str(extension))
+
+    monkeypatch.setattr(native, "_build_extension", build_extension)
+    native.prebuild(tmp_path)
+    assert (tmp_path / "jasna_ltx_native.so").is_file()
 
 
 def test_linear_slots_follow_the_transformer_names():
