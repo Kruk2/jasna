@@ -243,7 +243,7 @@ class LicenseDialog(ctk.CTkToplevel):
         self._status = ctk.CTkLabel(action, text="", text_color=Colors.TEXT_PRIMARY)
         self._status.pack(side="left", padx=10)
 
-        from jasna.protection import license_store
+        from jasna.license_api import license_store
         stored = license_store.load_license()
         if stored:
             self._email.insert(0, stored[0])
@@ -261,7 +261,7 @@ class LicenseDialog(ctk.CTkToplevel):
         )
 
     def _activate(self):
-        from jasna.protection import (
+        from jasna.license_api import (
             ForgedLicenseError, LicenseError, MalformedLicenseError,
             ProtectionError, RetiredLicenseError, license_store,
         )

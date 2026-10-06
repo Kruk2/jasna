@@ -118,3 +118,47 @@ class TestJobProgress:
         assert calls[-1][:2] == (87.5, 30.0)
         assert calls[-1][2] == pytest.approx(34.0 / 7.0)
         assert calls[-1][3:] == (60, 120, "")
+def test_mark_completed_does_not_seed_speed_samples():
+    progress = Progressbar(total_frames=100, video_fps=30, disable=True)
+    try:
+        progress.mark_completed(25)
+        assert progress.frames_processed == 25
+        assert progress.frame_processing_durations_buffer == []
+    finally:
+        progress.close()
+
+
+def test_mark_completed_uses_current_six_argument_callback():
+    calls = []
+
+    def callback(percent, fps, eta_seconds, frames_done, total_frames, stage):
+        calls.append((percent, fps, eta_seconds, frames_done, total_frames, stage))
+
+    progress = Progressbar(total_frames=100, video_fps=30, disable=True, callback=callback)
+    try:
+        progress.mark_completed(25)
+        progress.mark_completed(500)
+        progress.mark_completed(1)  # Already complete: no extra callback.
+        assert calls == [(25.0, 0.0, 0.0, 25, 100, ""),
+                         (100.0, 0.0, 0.0, 100, 100, "")]
+        assert progress.frame_processing_durations_buffer == []
+    finally:
+        progress.close()
+
+
+def test_mark_completed_composes_with_upstream_weighted_job_progress():
+    from jasna.progressbar import JobProgress
+
+    calls = []
+
+    def callback(percent, fps, eta_seconds, frames_done, total_frames, stage):
+        calls.append((percent, fps, eta_seconds, frames_done, total_frames, stage))
+
+    job = JobProgress(callback, {"ltx": 300.0, "standard": 100.0})
+    progress = Progressbar(total_frames=100, video_fps=30, disable=True,
+                           callback=job.part("standard"))
+    try:
+        progress.mark_completed(20)
+        assert calls == [(80.0, 0.0, 0.0, 20, 100, "")]
+    finally:
+        progress.close()

@@ -269,11 +269,14 @@ def build_pipeline(
     input_video: Path,
     output_video: Path,
     *,
+    workspace_output: Path | None = None,
     progress_callback: Callable | None = None,
     segments: "tuple[SegmentRange, ...] | None" = None,
     splice_plan: "SplicePlan | None" = None,
+    effect_ranges: "tuple[tuple[int, int], ...] | None" = None,
 ) -> "Pipeline":
     """A per-video ``Pipeline``; the session first loads any model the segments ask for."""
+    from jasna import __version__
     from jasna.pipeline import Pipeline
     from jasna.segments import job_restoration, resolve_restorations
 
@@ -282,6 +285,70 @@ def build_pipeline(
         segment.restoration.model for segment in resolve_restorations(tuple(segments or ()), default)
     ) or frozenset({config.restoration_model_name})
     provide_restoration_models(config, session, models, log_callback=None)
+    secondary_signature: dict[str, object] = {}
+    if config.secondary_restoration == "tvai":
+        secondary_signature = {
+            "ffmpeg_path": config.tvai_ffmpeg_path,
+            "model": config.tvai_model,
+            "scale": int(config.tvai_scale),
+            "args": config.tvai_args,
+            "denoise": bool(config.tvai_denoise),
+            "workers": int(config.tvai_workers),
+        }
+    elif config.secondary_restoration == "unet-4x":
+        secondary_signature = {
+            "fp16": bool(config.fp16),
+        }
+    elif config.secondary_restoration == "rtx-super-res":
+        secondary_signature = {
+            "scale": int(config.rtx_scale),
+            "quality": config.rtx_quality,
+            "denoise": config.rtx_denoise,
+            "deblur": config.rtx_deblur,
+        }
+
+    processing_signature = {
+        "jasna_version": __version__,
+        "device": config.device,
+        "fp16": bool(config.fp16),
+        "batch_size": int(config.batch_size),
+        "detection_model_name": config.detection_model_name,
+        "detection_score_threshold": float(config.detection_score_threshold),
+        "max_detection_gap": int(config.max_detection_gap),
+        "min_detection_duration": int(config.min_detection_duration),
+        "scene_detection": bool(config.scene_detection),
+        "restoration_model_name": config.restoration_model_name,
+        "ltx_model": config.ltx_model,
+        "ltx_seed": config.ltx_seed,
+        "ltx_large_canvas": config.ltx_large_canvas,
+        "ltx_fast": config.ltx_fast,
+        "ltx_trial": config.ltx_trial,
+        "segment_restorations": [
+            {
+                "start": segment.start, "end": segment.end,
+                "model": segment.restoration.model,
+                "ltx_seed": segment.restoration.ltx_seed,
+            }
+            for segment in resolve_restorations(tuple(segments or ()), default)
+        ],
+        "max_clip_size": int(config.max_clip_size),
+        "temporal_overlap": int(config.temporal_overlap),
+        "enable_crossfade": bool(config.enable_crossfade),
+        "denoise_strength": config.denoise_strength,
+        "denoise_step": config.denoise_step,
+        "primary_tensorrt": bool(
+            getattr(getattr(session.restoration_pipeline, "restorer", None), "use_tensorrt", False)
+        ),
+        "secondary_restoration": config.secondary_restoration,
+        "secondary_restoration_settings": secondary_signature,
+        "vr_mode": config.vr_mode,
+        "vr_projection": config.vr_projection,
+        "sharpen_strength": float(config.sharpen_strength),
+        "retarget_high_fps": bool(config.retarget_high_fps),
+        "auto_source_rate": bool(config.auto_source_rate),
+        "amd_dual_gop_encode": bool(config.amd_dual_gop_encode),
+    }
+
     return Pipeline(
         config=config,
         session=session,
@@ -290,4 +357,7 @@ def build_pipeline(
         progress_callback=progress_callback,
         segments=segments,
         splice_plan=splice_plan,
+        effect_ranges=effect_ranges,
+        workspace_output=workspace_output,
+        processing_signature=processing_signature,
     )
