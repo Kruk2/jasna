@@ -18,8 +18,9 @@ from pathlib import Path
 
 import torch
 
+from jasna._frozen import is_frozen
 from jasna.ltx import transformer as T
-from jasna.ltx.blocks import BlockStore
+from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import open_tensors
 from jasna.ltx.plan import FUSION_RAMP, LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENTS
 from jasna.tensor_utils import compile_static
@@ -114,7 +115,14 @@ class LtxTransformer:
                          for index in range(T.NUM_BLOCKS)]
                 sizes = [sum(math.prod(specs[name][1]) * specs[name][0].itemsize for name in block.values())
                          for block in names]
-                self.blocks = BlockStore.from_reader(handle, names, device, resident=self._resident_blocks(sizes))
+                resident = self._resident_blocks(sizes)
+                if is_frozen():
+                    self.blocks = OpaqueBlockStore.from_reader(
+                        handle, names, device, resident=resident, linear_names=T.LINEAR_NAMES,
+                    )
+                    T.enable_opaque_kernels()
+                else:
+                    self.blocks = BlockStore.from_reader(handle, names, device, resident=resident)
             T.enable_int8_attention()
             logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
             self._block_forward = compiled_block_forward()

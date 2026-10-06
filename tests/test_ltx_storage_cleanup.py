@@ -2,7 +2,7 @@ import torch
 import pytest
 from safetensors.torch import save_file
 
-from jasna.ltx.blocks import BlockStore
+from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import open_tensors
 from jasna.ltx import sampler, transformer as T
 from jasna.models.ltx_vae import loader as vae_loader
@@ -116,6 +116,69 @@ def test_block_loading_streams_all_destinations_in_one_reader_operation(tmp_path
             assert torch.equal(store.acquire(index)["weight"], value)
     finally:
         store.close()
+
+
+def test_opaque_block_store_keeps_linear_destinations_out_of_python_tensors(monkeypatch):
+    class Destination:
+        pass
+
+    class NativeStore:
+        def __init__(self, specs, device, resident):
+            self.specs = specs
+            self.destinations = {}
+            self.closed = False
+
+        def destination(self, block, name):
+            value = Destination()
+            self.destinations[block, name] = value
+            return value
+
+        def finalize(self):
+            pass
+
+        def tokens(self, block):
+            return {"proj.opaque_int8": torch.empty(4)}
+
+        def activate(self, block):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    class Reader:
+        def tensor_specs(self):
+            return {
+                "blocks.0.proj.qdata": (torch.int8, (4, 4)),
+                "blocks.0.proj.scales": (torch.float32, (4,)),
+                "blocks.0.scale_shift_table": (torch.bfloat16, (2, 4)),
+            }
+
+        def offset_keys(self):
+            return list(self.tensor_specs())
+
+        def read_tensors_into(self, group_names, groups):
+            for names, group in zip(group_names, groups, strict=True):
+                assert tuple(group) == tuple(names)
+                for destination in group.values():
+                    if isinstance(destination, torch.Tensor):
+                        destination.fill_(1)
+                    else:
+                        assert isinstance(destination, Destination)
+
+    monkeypatch.setattr("jasna.protection.opaque_ltx.OpaqueStore", NativeStore)
+    store = OpaqueBlockStore.from_reader(
+        Reader(),
+        [{
+            "proj.qdata": "blocks.0.proj.qdata",
+            "proj.scales": "blocks.0.proj.scales",
+            "scale_shift_table": "blocks.0.scale_shift_table",
+        }],
+        torch.device("cpu"), resident=1, linear_names=("proj",),
+    )
+    weights = store.acquire(0)
+    assert set(weights) == {"proj.opaque_int8", "scale_shift_table"}
+    assert torch.equal(weights["scale_shift_table"], torch.ones(2, 4, dtype=torch.bfloat16))
+    store.close()
 
 
 def test_late_stream_failure_clears_every_committed_destination(tmp_path):
