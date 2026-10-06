@@ -136,7 +136,9 @@ cubins of every table architecture for a release (copy `dir` to
 the private native `block_forward` boundary; they do not expose protected
 per-Linear operators. Changes to any path must compare identical weights, inputs,
 seeds and warmed caches. The public native block is GPU-qualified on SM 12.0
-(RTX 5090) and SM 8.9 (RTX 4090, INT8 only); cubins for another SM do not by themselves establish support.
+(RTX 5090), SM 8.9 (RTX 4090) and SM 8.6 (RTX 3090); on SM 8.x INT8 only, with plain
+Triton GEMMs since Ada and Ampere have no TMA for stream-K. Cubins for another SM
+do not by themselves establish support.
 
 ## Release checklist
 
