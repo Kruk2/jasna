@@ -3,8 +3,10 @@ checks, the constants handed to the native side and the sampler's choice of bloc
 
 from __future__ import annotations
 
+import os
 import sys
-from types import SimpleNamespace
+from importlib.machinery import ModuleSpec
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import torch
@@ -87,6 +89,19 @@ def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", None)
     assert "nvcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+
+
+def test_extension_build_finds_ninja_from_its_package_when_off_path(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    ninja = ModuleType("ninja")
+    ninja.__spec__ = ModuleSpec("ninja", None)
+    ninja.BIN_DIR = str(tmp_path / "ninja-bin")
+    monkeypatch.setitem(sys.modules, "ninja", ninja)
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
+    monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: os.environ["PATH"].split(os.pathsep))
+    assert ninja.BIN_DIR in native._build_extension(tmp_path / "build")
 
 
 def test_native_block_can_be_turned_off(monkeypatch):
