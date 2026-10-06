@@ -6,7 +6,6 @@ from __future__ import annotations
 import os
 import sys
 from importlib.machinery import ModuleSpec
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
