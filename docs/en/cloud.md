@@ -39,22 +39,26 @@ network drive.
 ## Activate
 
 ```bash
-export XDG_CONFIG_HOME=/workspace/jasna-config
+export XDG_CONFIG_HOME=/root/jasna-config
 ./jasna --license-code YOUR-LICENSE-CODE --cloud-workspace
 ```
 
 After `installation verified` it can look stuck for up to a minute. Just
 wait, don't press Ctrl+C.
 
-Your activation is saved in `/workspace/jasna-config`. Run the `export`
-line every time before you start Jasna. If you rent a new machine, bring
-that folder with you (RunPod volume, or download it to your PC). If you lose
-it, you need a free slot to activate again.
+RunPod's `/workspace` can ignore private file permissions. Keep activation in
+`/root/jasna-config` as above. On other providers, you can use a persistent
+folder that preserves private permissions.
+
+Run the `export` line every time before starting Jasna. Before deleting the
+Pod, download `jasna-config` privately to your PC. Restore it under `/root` on
+the next Pod, keeping the folder private. This reuses the same activation slot.
+If you lose it, you need a free slot to activate again.
 
 ## Restore a video
 
 ```bash
-export XDG_CONFIG_HOME=/workspace/jasna-config
+export XDG_CONFIG_HOME=/root/jasna-config
 ./jasna --input /root/video.mp4 --output /root/video-restored.mp4 --restoration-model-name ltx
 ```
 
@@ -74,7 +78,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ------- | ------- |
 | `unsigned or modified Jasna runtime` | Unpack again in `/root` as `root`. |
 | `libGL.so.1: cannot open shared object file` | Run the `apt-get` line from Install. |
-| `Cloud workspace activation requires a supported Linux container` | Use the updated Linux build and a container without `--pid=host`. |
+| `Cloud workspace activation requires a supported Linux container` | Use the updated Linux build, a container without `--pid=host`, and config under `/root` on RunPod. |
 | `enable cloud activation` | Ask your seller to turn on cloud. |
 | `No activation found` or `Cloud workspace identity is missing` | Run the `export` line, then start Jasna again. |
 | `unsafe Jasna launch environment` | Start it with `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` |

@@ -36,21 +36,24 @@ cd jasna-linux-nvidia-0.11.0
 ## 激活
 
 ```bash
-export XDG_CONFIG_HOME=/workspace/jasna-config
+export XDG_CONFIG_HOME=/root/jasna-config
 ./jasna --license-code 你的许可证码 --cloud-workspace
 ```
 
 出现 `installation verified` 后，可能会像卡住一样最多一分钟。等着就行，
 别按 Ctrl+C。
 
-激活信息存在 `/workspace/jasna-config`。每次启动 Jasna 前都先运行 `export`
-那一行。换一台新机器时，把这个文件夹一起带过去（RunPod 卷，或下载到电脑）。
-丢了的话，需要空闲名额才能再激活。
+RunPod 的 `/workspace` 可能不保留私有文件权限。请像上面一样将激活信息
+保存在 `/root/jasna-config`。其他服务商可以使用保留私有权限的持久文件夹。
+
+每次启动 Jasna 前都先运行 `export`。删除 Pod 前，将 `jasna-config` 私下下载
+到自己的电脑。下次将它恢复到 Pod 的 `/root` 并保持私有，就能继续使用同一
+激活名额。丢失这个文件夹后，需要空闲名额才能重新激活。
 
 ## 修复视频
 
 ```bash
-export XDG_CONFIG_HOME=/workspace/jasna-config
+export XDG_CONFIG_HOME=/root/jasna-config
 ./jasna --input /root/video.mp4 --output /root/video-restored.mp4 --restoration-model-name ltx
 ```
 
@@ -69,7 +72,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ---- | ------ |
 | `unsigned or modified Jasna runtime` | 用 `root` 重新解压到 `/root`。 |
 | `libGL.so.1: cannot open shared object file` | 运行安装里的 `apt-get` 那一行。 |
-| `Cloud workspace activation requires a supported Linux container` | 使用更新后的 Linux 版，并在不带 `--pid=host` 的容器中运行。 |
+| `Cloud workspace activation requires a supported Linux container` | 使用更新后的 Linux 版和不带 `--pid=host` 的容器。RunPod 上请将设置放在 `/root`。 |
 | `enable cloud activation` | 请卖家打开云权限。 |
 | `No activation found` 或 `Cloud workspace identity is missing` | 先运行 `export` 那一行，再重新启动 Jasna。 |
 | `unsafe Jasna launch environment` | 用 `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` 启动。 |

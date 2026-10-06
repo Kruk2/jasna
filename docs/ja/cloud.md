@@ -39,22 +39,25 @@ cd jasna-linux-nvidia-0.11.0
 ## 有効化
 
 ```bash
-export XDG_CONFIG_HOME=/workspace/jasna-config
+export XDG_CONFIG_HOME=/root/jasna-config
 ./jasna --license-code あなたのライセンスコード --cloud-workspace
 ```
 
 `installation verified` の後、1 分ほど止まって見えることがあります。
 Ctrl+C は押さずに待ってください。
 
-有効化は `/workspace/jasna-config` に保存されます。Jasna を起動する前に
-毎回 `export` の行を実行してください。別のマシンを借りるときは、この
-フォルダーも持っていきます (RunPod のボリュームか、PC にダウンロード)。
-なくすと、もう一度有効化するのに空き枠が必要です。
+RunPod の `/workspace` ではファイルを非公開にする権限が反映されない場合が
+あります。有効化は上のとおり `/root/jasna-config` に保存してください。
+ほかのサービスでは、非公開の権限を保つ永続フォルダーも使えます。
+
+Jasna を起動する前に毎回 `export` を実行してください。Pod を削除する前に、
+`jasna-config` を自分の PC に非公開で保存してください。次の Pod の `/root`
+に非公開のまま戻すと、同じ有効化の枠を使えます。なくすと、空き枠が必要です。
 
 ## 動画を復元する
 
 ```bash
-export XDG_CONFIG_HOME=/workspace/jasna-config
+export XDG_CONFIG_HOME=/root/jasna-config
 ./jasna --input /root/video.mp4 --output /root/video-restored.mp4 --restoration-model-name ltx
 ```
 
@@ -74,7 +77,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ---- | -------- |
 | `unsigned or modified Jasna runtime` | `root` で `/root` に展開し直す。 |
 | `libGL.so.1: cannot open shared object file` | インストールの `apt-get` の行を実行する。 |
-| `Cloud workspace activation requires a supported Linux container` | 更新された Linux 版を使い、`--pid=host` のないコンテナーで実行する。 |
+| `Cloud workspace activation requires a supported Linux container` | 更新された Linux 版と `--pid=host` のないコンテナーを使う。RunPod では設定を `/root` に置く。 |
 | `enable cloud activation` | 販売者にクラウド利用をオンにしてもらう。 |
 | `No activation found` または `Cloud workspace identity is missing` | `export` の行を実行してから Jasna を起動し直す。 |
 | `unsafe Jasna launch environment` | `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` で起動する。 |
