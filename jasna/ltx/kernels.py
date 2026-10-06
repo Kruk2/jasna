@@ -23,6 +23,26 @@ from triton.tools.tensor_descriptor import TensorDescriptor
 
 EPS = tl.constexpr(1e-6)
 
+# Launch parameters shared with the native block (``jasna/ltx/native``), which launches these
+# kernels ahead-of-time compiled: one definition here, read by both.
+ROTATE_QUANTIZE_WARPS = 8
+GROUP_M = 8
+# Outputs narrower than SMALL_MM_MAX_N (the per-head gate logits) take SMALL_MM_TILE; inputs
+# wider than WIDE_K (the FF down projection) take the second tile of INT8_MM_TILES.
+SMALL_MM_MAX_N = 128
+SMALL_MM_TILE = (32, 32, 256, 3, 2)
+WIDE_K = 4096
+# Stream-K only pays when the grid is a few waves long.
+STREAM_K_MAX_WAVES = 8
+CUBLAS_EPILOGUE_BLOCK = 64
+CUBLAS_EPILOGUE_WARPS = 4
+FP4_QUANTIZE_ROWS = 32
+FP4_QUANTIZE_COLS = 256
+FP4_QUANTIZE_WARPS = 4
+# cuBLAS block-scale layout: 128 x 4 tiles of float8 scales, zero padded.
+FP4_SCALE_TILE_ROWS = 128
+FP4_SCALE_TILE_COLS = 4
+
 
 @triton.jit
 def _rotate_quantize_kernel(
@@ -63,7 +83,8 @@ def _rotate_quantize(x, shift, scale, modulate):
     codes = torch.empty(m, k, dtype=torch.int8, device=x.device)
     scales = torch.empty(m, dtype=torch.float32, device=x.device)
     _rotate_quantize_kernel[(m,)](
-        x, shift, scale, codes, scales, x.stride(0), max(m // 2, 1), K=k, MODULATE=modulate, num_warps=8
+        x, shift, scale, codes, scales, x.stride(0), max(m // 2, 1), K=k, MODULATE=modulate,
+        num_warps=ROTATE_QUANTIZE_WARPS,
     )
     return codes, scales
 
@@ -153,9 +174,9 @@ def _tma_tile(a_desc, b_desc, pid_m, pid_n, k_start, k_stop, BM: tl.constexpr, B
 @triton.jit
 def _int8_mm_stream_k_kernel(
     a_desc, b_desc, as_ptr, bs_ptr, bias_ptr, res_ptr, gate_ptr, c_ptr, ws_ptr, count_ptr,
-    M, N, K, half_rows, row_offset, FULL_TILES, TAIL_SPLITS,
+    M, N, K, half_rows, row_offset, FULL_TILES, TAIL_SPLITS, PROGRAMS,
     HAS_BIAS: tl.constexpr, GELU: tl.constexpr, RESIDUAL: tl.constexpr,
-    BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr, GROUP_M: tl.constexpr, PROGRAMS: tl.constexpr,
+    BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr, GROUP_M: tl.constexpr,
 ):
     # Persistent: whole waves of tiles as usual, then the last, partial wave split along K
     # over the idle programs. Partial int32 sums are added atomically (exact, in any order)
@@ -205,8 +226,20 @@ def _int8_epilogue_kernel(
 
 
 @functools.cache
-def _programs(device: torch.device) -> int:
+def programs(device: torch.device) -> int:
+    """Persistent-kernel program count: one per SM."""
     return torch.cuda.get_device_properties(device).multi_processor_count
+
+
+def stream_k_splits(m: int, n: int, k: int, bm: int, bn: int, bk: int, sms: int) -> int:
+    """K splits per tile of the last, partial wave when stream-K pays for this GEMM (0: it doesn't).
+    ``tiles % sms`` tiles are left for that wave; each takes ``sms // tail`` idle SMs, at most
+    one per ``bk`` step."""
+    tiles = triton.cdiv(m, bm) * triton.cdiv(n, bn)
+    tail = tiles % sms
+    if n < SMALL_MM_MAX_N or tiles >= STREAM_K_MAX_WAVES * sms or not 0 < tail <= sms // 2:
+        return 0
+    return min(sms // tail, k // bk)
 
 
 # (BM, BN, BK, stages, warps) per GPU for LTX GEMMs of width up to 4096 and wider, from tile
@@ -222,14 +255,18 @@ INT8_MM_TILES = {
 CUBLAS_INT8_MM = {(7, 5)}  # RTX 20 series
 
 
+def has_tma(capability: tuple[int, int]) -> bool:
+    return capability[0] >= 9
+
+
+def gemm_tile(n: int, k: int, capability: tuple[int, int]) -> tuple[int, int, int, int, int]:
+    """(BM, BN, BK, stages, warps) of the Triton int8 GEMM for ``n`` outputs of width ``k``."""
+    return SMALL_MM_TILE if n < SMALL_MM_MAX_N else INT8_MM_TILES[capability][k > WIDE_K]
+
+
 def supports(device: torch.device) -> bool:
     capability = torch.cuda.get_device_capability(device)
     return capability in INT8_MM_TILES or capability in CUBLAS_INT8_MM
-
-
-@functools.cache
-def _int8_mm_tiles(device: torch.device) -> tuple[tuple[int, int, int, int, int], ...]:
-    return INT8_MM_TILES[torch.cuda.get_device_capability(device)]
 
 
 @functools.cache
@@ -238,8 +275,8 @@ def _cublas_int8_mm(device: torch.device) -> bool:
 
 
 @functools.cache
-def _has_tma(device: torch.device) -> bool:
-    return torch.cuda.get_device_capability(device)[0] >= 9
+def _capability(device: torch.device) -> tuple[int, int]:
+    return torch.cuda.get_device_capability(device)
 
 
 def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, half_rows, row_offset):
@@ -250,31 +287,31 @@ def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, ha
         residual if residual is not None else out, gate if gate is not None else scales, out,
     )
     if _cublas_int8_mm(codes.device):
-        block = 64
+        block = CUBLAS_EPILOGUE_BLOCK
         # torch._int_mm needs more than 16 rows; on SM 7.5 also a multiple of 16 output features
         acc = torch._int_mm(F.pad(codes, (0, 0, 0, 17 - m)) if m <= 16 else codes, qdata.t())
         _int8_epilogue_kernel[(triton.cdiv(m, block), triton.cdiv(n, block))](
             acc, *args, m, n, half_rows, row_offset,
-            HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=block, BN=block, num_warps=4,
+            HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=block, BN=block,
+            num_warps=CUBLAS_EPILOGUE_WARPS,
         )
         return out
-    if n < 128:
-        bm, bn, bk, stages, warps = 32, 32, 256, 3, 2
-    else:
-        bm, bn, bk, stages, warps = _int8_mm_tiles(codes.device)[k > 4096]
+    capability = _capability(codes.device)
+    bm, bn, bk, stages, warps = gemm_tile(n, k, capability)
     if k % bk:
         raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
-    flags = dict(HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=bm, BN=bn, BK=bk, GROUP_M=8)
+    flags = dict(HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=bm, BN=bn, BK=bk, GROUP_M=GROUP_M)
     tiles = triton.cdiv(m, bm) * triton.cdiv(n, bn)
-    programs = _programs(codes.device)
-    tail = tiles % programs
+    sms = programs(codes.device)
     # A short grid whose last wave is mostly idle loses most to that wave: split it along K.
-    if n >= 128 and _has_tma(codes.device) and tiles < 8 * programs and 0 < tail <= programs // 2:
+    splits = stream_k_splits(m, n, k, bm, bn, bk, sms) if has_tma(capability) else 0
+    if splits:
+        tail = tiles % sms
         workspace = torch.zeros(tail * bm * bn + tail, dtype=torch.int32, device=codes.device)
-        _int8_mm_stream_k_kernel[(programs,)](
+        _int8_mm_stream_k_kernel[(sms,)](
             TensorDescriptor.from_tensor(codes, [bm, bk]), TensorDescriptor.from_tensor(qdata, [bn, bk]), *args,
-            workspace, workspace[tail * bm * bn :], m, n, k, half_rows, row_offset, tiles - tail,
-            min(programs // tail, k // bk), PROGRAMS=programs, num_stages=stages, num_warps=warps, **flags,
+            workspace, workspace[tail * bm * bn :], m, n, k, half_rows, row_offset, tiles - tail, splits, sms,
+            num_stages=stages, num_warps=warps, **flags,
         )
     else:
         _int8_mm_kernel[(tiles,)](
@@ -363,17 +400,23 @@ def _quantize_fp4_kernel(
     tl.store(s_ptr + offsets, scale8.to(tl.uint8, bitcast=True), mask=row_mask[:, None])
 
 
+def fp4_scale_shape(rows: int, k: int) -> tuple[int, int]:
+    """Shape of the zero-padded tiled block scales of ``(rows, k)`` NVFP4 values."""
+    cols = k // 16
+    return -(-rows // FP4_SCALE_TILE_ROWS) * FP4_SCALE_TILE_ROWS, -(-cols // FP4_SCALE_TILE_COLS) * FP4_SCALE_TILE_COLS
+
+
 def quantize_fp4(x: torch.Tensor, tensor_scale: torch.Tensor, gelu: bool) -> tuple[torch.Tensor, torch.Tensor]:
     """``(rows, k)`` -> (packed uint8 ``(rows, k/2)``, float8 block scales in the zero-padded
     cuBLAS 128x4 tiled layout), like ``transformer.quantize_fp4``; with ``gelu``, of ``gelu_tanh(x)`` rounded
     to bf16."""
     m, k = x.shape
-    if k % 256:
-        raise ValueError(f"quantize_fp4 needs a width divisible by 256, got {k}")
+    if k % FP4_QUANTIZE_COLS:
+        raise ValueError(f"quantize_fp4 needs a width divisible by {FP4_QUANTIZE_COLS}, got {k}")
     packed = torch.empty(m, k // 2, dtype=torch.uint8, device=x.device)
-    scales = torch.zeros(-(-m // 128) * 128, -(-(k // 16) // 4) * 4, dtype=torch.uint8, device=x.device)
-    block_rows, block_k = 32, 256
-    _quantize_fp4_kernel[(triton.cdiv(m, block_rows), k // block_k)](
-        x, tensor_scale, packed, scales, m, k, x.stride(0), GELU=gelu, BM=block_rows, BK=block_k, num_warps=4
+    scales = torch.zeros(fp4_scale_shape(m, k), dtype=torch.uint8, device=x.device)
+    _quantize_fp4_kernel[(triton.cdiv(m, FP4_QUANTIZE_ROWS), k // FP4_QUANTIZE_COLS)](
+        x, tensor_scale, packed, scales, m, k, x.stride(0), GELU=gelu, BM=FP4_QUANTIZE_ROWS, BK=FP4_QUANTIZE_COLS,
+        num_warps=FP4_QUANTIZE_WARPS,
     )
     return packed, scales.view(torch.float8_e4m3fn)

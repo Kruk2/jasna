@@ -363,7 +363,7 @@ def enable_quant_kernels(device: torch.device) -> bool:
             rows, k = x.shape
             return (
                 x.new_empty(rows, k // 2, dtype=torch.uint8),
-                x.new_empty(-(-rows // 128) * 128, -(-(k // FP4_BLOCK) // 4) * 4, dtype=torch.float8_e4m3fn),
+                x.new_empty(kernels.fp4_scale_shape(rows, k), dtype=torch.float8_e4m3fn),
             )
 
         _quant_kernels = SimpleNamespace(
