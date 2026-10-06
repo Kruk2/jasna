@@ -76,6 +76,7 @@ include-package-data = false
 
 [tool.setuptools.package-data]
 "jasna.media" = ["*.fatbin"]
+"jasna.ltx.native" = ["*.cpp", "*.cu", "*.h"]
 
 [tool.setuptools.packages.find]
 include = ["jasna*"]
