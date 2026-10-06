@@ -1,11 +1,85 @@
+import sys
+from types import SimpleNamespace
+
 import torch
 import pytest
 from safetensors.torch import save_file
 
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
-from jasna.ltx.model_files import open_tensors
-from jasna.ltx import sampler, transformer as T
+from jasna.ltx.model_files import PlaceholderTensors, open_tensors
+from jasna.ltx import sampler, trial_shapes, transformer as T
 from jasna.models.ltx_vae import loader as vae_loader
+
+
+def _small_transformer_specs(block_spec):
+    """Top tensors of a working 8-wide transformer (adaln tables, patchify, prompt) and
+    ``block_spec`` for each of the ``NUM_BLOCKS`` blocks."""
+    top = {"patchify_proj.weight": (8, 8), "prompt_context": (1, 4, 8)}
+    for prefix, rows in (("adaln_single", 72), ("prompt_adaln_single", 16)):
+        for name, shape in (
+            ("emb.timestep_embedder.linear_1", (8, 256)),
+            ("emb.timestep_embedder.linear_2", (8, 8)),
+            ("linear", (rows, 8)),
+        ):
+            top[f"{prefix}.{name}.weight"] = shape
+            top[f"{prefix}.{name}.bias"] = (shape[0],)
+    blocks = {f"blocks.{index}.{name}": shape for index in range(T.NUM_BLOCKS) for name, shape in block_spec.items()}
+    return top | blocks
+
+
+def _small_transformer_file(path):
+    values = {name: torch.full(shape, 0.01, dtype=torch.bfloat16)
+              for name, shape in _small_transformer_specs({"weight": (2, 2)}).items()}
+    values["patchify_proj.weight"].fill_(1)
+    values["prompt_context"].fill_(1)
+    for name, tensor in values.items():
+        if name.endswith(".bias") or name.startswith("blocks."):
+            tensor.fill_(1)
+    save_file(values, str(path), metadata={"sigmas": "[1.0, 0.0]", "stg_scale": "0.0"})
+    return path
+
+
+def _without_compiling(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (20 << 30, 20 << 30))
+    monkeypatch.setattr(sampler, "compiled_block_forward", lambda: T.block_forward)
+    monkeypatch.setattr(T, "require_kernels", lambda device: None)
+    monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
+    monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: function)
+
+
+class _NativeStore:
+    """Stands in for the private native opaque store; records what the sampler asks of it."""
+
+    def __init__(self, specs, device, resident):
+        self.specs = specs
+        self.destinations = {}
+        self.events = []
+
+    def destination(self, block, name):
+        dtype, shape = self.specs[block][name]
+        value = torch.empty(shape, dtype=getattr(torch, dtype))
+        self.destinations[block, name] = value
+        return value
+
+    def finalize(self):
+        pass
+
+    def activate(self, block):
+        self.events.append(("activate", block))
+
+    def begin_step(self, rows, windows, stg):
+        self.events.append(("step", rows, windows, stg))
+
+    def block_forward(self, x, block_rows, prompt_rows, context, rope_cos, rope_sin, stg_branch):
+        self.events.append(("forward", stg_branch))
+        return x
+
+    def close(self):
+        self.events.append(("close",))
+
+
+def _install_native_store(monkeypatch):
+    monkeypatch.setitem(sys.modules, "jasna.protection.opaque_ltx", SimpleNamespace(OpaqueStore=_NativeStore))
 
 
 def test_close_clears_resident_storage_even_when_a_consumer_keeps_a_view():
@@ -44,28 +118,9 @@ def test_failed_block_fill_clears_every_owned_destination(tmp_path):
 
 
 def test_transformer_close_clears_top_context_conditioning_and_blocks(tmp_path, monkeypatch):
-    path = tmp_path / "small-transformer.safetensors"
-    values = {
-        "patchify_proj.weight": torch.ones(8, 8, dtype=torch.bfloat16),
-        "prompt_context": torch.ones(1, 4, 8, dtype=torch.bfloat16),
-    }
-    for prefix, rows in (("adaln_single", 72), ("prompt_adaln_single", 16)):
-        for name, shape in (
-            ("emb.timestep_embedder.linear_1", (8, 256)),
-            ("emb.timestep_embedder.linear_2", (8, 8)),
-            ("linear", (rows, 8)),
-        ):
-            values[f"{prefix}.{name}.weight"] = torch.full(shape, 0.01, dtype=torch.bfloat16)
-            values[f"{prefix}.{name}.bias"] = torch.ones(shape[0], dtype=torch.bfloat16)
-    for index in range(T.NUM_BLOCKS):
-        values[f"blocks.{index}.weight"] = torch.ones(2, 2, dtype=torch.bfloat16)
-    save_file(values, str(path), metadata={"sigmas": "[1.0, 0.0]", "stg_scale": "0.0"})
+    path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
     original = path.read_bytes()
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (20 << 30, 20 << 30))
-    monkeypatch.setattr(sampler, "compiled_block_forward", lambda: T.block_forward)
-    monkeypatch.setattr(T, "require_kernels", lambda device: None)
-    monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
-    monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: function)
+    _without_compiling(monkeypatch)
     transformer = sampler.LtxTransformer(path, torch.device("cpu"))
     condition = transformer.conditions[0]
     retained = [*transformer.top.values(), transformer.context,
@@ -76,6 +131,21 @@ def test_transformer_close_clears_top_context_conditioning_and_blocks(tmp_path, 
     assert all(torch.count_nonzero(tensor).item() == 0 for tensor in retained)
     assert path.read_bytes() == original
     transformer.close()
+
+
+def test_frozen_trial_keeps_its_placeholder_blocks_in_the_plain_tensor_store(monkeypatch):
+    spec = _small_transformer_specs({"weight": (2, 2)})
+    top = {name: ("BF16", shape) for name, shape in spec.items() if not name.startswith("blocks.")}
+    monkeypatch.setitem(trial_shapes.TRANSFORMER, "int8", {"top": top, "block": {"weight": ("BF16", (2, 2))}})
+    monkeypatch.setattr(sampler, "is_frozen", lambda: True)
+    _install_native_store(monkeypatch)
+    _without_compiling(monkeypatch)
+    transformer = sampler.LtxTransformer(PlaceholderTensors("int8", "distilled"), torch.device("cpu"))
+    try:
+        assert isinstance(transformer.blocks, BlockStore)
+        assert transformer.blocks.acquire(0)["weight"].shape == (2, 2)
+    finally:
+        transformer.close()
 
 
 def test_block_loading_fills_final_storage_without_returning_weight_tensors(tmp_path):
@@ -119,37 +189,6 @@ def test_block_loading_streams_all_destinations_in_one_reader_operation(tmp_path
 
 
 def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypatch):
-    class Destination:
-        pass
-
-    class NativeStore:
-        def __init__(self, specs, device, resident):
-            self.specs = specs
-            self.destinations = {}
-            self.steps = []
-            self.closed = False
-
-        def destination(self, block, name):
-            value = Destination()
-            self.destinations[block, name] = value
-            return value
-
-        def finalize(self):
-            pass
-
-        def activate(self, block):
-            self.active = block
-
-        def begin_step(self, rows, windows, stg):
-            self.steps.append((rows, windows, stg))
-
-        def block_forward(self, x, block_rows, prompt_rows, context, rope_cos, rope_sin, stg_branch):
-            self.forward = (x, block_rows, prompt_rows, context, rope_cos, rope_sin, stg_branch)
-            return x
-
-        def close(self):
-            self.closed = True
-
     class Reader:
         def tensor_specs(self):
             return {
@@ -165,12 +204,9 @@ def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypa
             for names, group in zip(group_names, groups, strict=True):
                 assert tuple(group) == tuple(names)
                 for destination in group.values():
-                    if isinstance(destination, torch.Tensor):
-                        destination.fill_(1)
-                    else:
-                        assert isinstance(destination, Destination)
+                    destination.fill_(1)
 
-    monkeypatch.setattr("jasna.protection.opaque_ltx.OpaqueStore", NativeStore)
+    _install_native_store(monkeypatch)
     store = OpaqueBlockStore.from_reader(
         Reader(),
         [{
@@ -180,50 +216,42 @@ def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypa
         }],
         torch.device("cpu"), resident=1,
     )
-    assert set(store._native.destinations) == {
-        (0, "proj.qdata"), (0, "proj.scales"), (0, "scale_shift_table"),
-    }
+    native = store._native
+    assert set(native.destinations) == {(0, "proj.qdata"), (0, "proj.scales"), (0, "scale_shift_table")}
+    assert all(torch.all(tensor == 1) for tensor in native.destinations.values())
     store.begin_step(8192, 3, True)
     store.activate(0)
-    assert store._native.steps == [(8192, 3, True)]
     store.close()
+    assert native.events == [("step", 8192, 3, True), ("activate", 0), ("close",)]
 
 
-def test_opaque_denoise_uses_only_native_complete_block_forward(monkeypatch):
-    class NativeBlocks(OpaqueBlockStore):
-        def __init__(self):
-            self.events = []
-
-        def begin_step(self, rows, windows, stg):
-            self.events.append(("step", rows, windows, stg))
-
-        def activate(self, index):
-            self.events.append(("activate", index))
-
-        def block_forward(self, x, cond, context, rope, *, stg_branch=False):
-            self.events.append(("forward", stg_branch))
-            return x
-
-    transformer = object.__new__(sampler.LtxTransformer)
-    transformer.blocks = NativeBlocks()
-    transformer.top = {}
-    transformer.context = object()
-    transformer.stg_scale = 1.0
-    transformer._block_forward = lambda *args, **kwargs: pytest.fail("Python block forward reached")
-    transformer._prompt_key_value = lambda *args, **kwargs: pytest.fail("Python prompt projection reached")
+def test_opaque_denoise_uses_only_native_complete_block_forward(tmp_path, monkeypatch):
+    path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
+    monkeypatch.setattr(sampler, "is_frozen", lambda: True)
     monkeypatch.setattr(sampler.T, "NUM_BLOCKS", 2)
     monkeypatch.setattr(sampler, "STG_BLOCK", 1)
+    _install_native_store(monkeypatch)
+    _without_compiling(monkeypatch)
+    monkeypatch.setattr(sampler, "compiled_block_forward", lambda: pytest.fail("Python block forward compiled"))
+    monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: pytest.fail("Python function compiled"))
     monkeypatch.setattr(sampler.T, "embed_tokens", lambda top, x, tokens_per_frame: x)
     monkeypatch.setattr(
         sampler.T, "velocity", lambda top, x, cond: torch.zeros_like(x[:, : x.shape[1] // 2]),
     )
-    result = transformer._denoise([torch.zeros(1, 8, 4)], object(), object(), 1, torch.tensor(1.0))
-    assert len(result) == 1
-    assert transformer.blocks.events == [
-        ("step", 8, 1, True),
-        ("activate", 0), ("forward", False),
-        ("activate", 1), ("forward", True), ("forward", False),
-    ]
+    transformer = sampler.LtxTransformer(path, torch.device("cpu"))
+    transformer.stg_scale = 1.0
+    native = transformer.blocks._native
+    rope = T.Rope(cos=torch.ones(1, 1, 4, 4), sin=torch.zeros(1, 1, 4, 4))
+    try:
+        result = transformer._denoise([torch.zeros(1, 8, 8)], transformer.conditions[0], rope, 1, torch.tensor(1.0))
+        assert len(result) == 1
+        assert native.events == [
+            ("step", 8, 1, True),
+            ("activate", 0), ("forward", False),
+            ("activate", 1), ("forward", True), ("forward", False),
+        ]
+    finally:
+        transformer.close()
 
 
 def test_late_stream_failure_clears_every_committed_destination(tmp_path):

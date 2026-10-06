@@ -21,7 +21,7 @@ import torch
 from jasna._frozen import is_frozen
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
-from jasna.ltx.model_files import open_tensors
+from jasna.ltx.model_files import PlaceholderHandle, open_tensors
 from jasna.ltx.plan import FUSION_RAMP, LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENTS
 from jasna.tensor_utils import compile_static
 
@@ -88,6 +88,12 @@ def _read_tensors(reader, names: tuple[str, ...], specs, device: torch.device) -
                 source.view(-1).view(torch.uint8).zero_()
 
 
+def _opaque_blocks(reader) -> bool:
+    """Whether the blocks go to the native opaque store: licensed files in frozen releases.
+    Trial placeholders are plain random tensors and always use ``BlockStore``."""
+    return is_frozen() and not isinstance(reader, PlaceholderHandle)
+
+
 class LtxTransformer:
     """The restoration transformer loaded from a jasna LTX model file."""
 
@@ -116,16 +122,15 @@ class LtxTransformer:
                 sizes = [sum(math.prod(specs[name][1]) * specs[name][0].itemsize for name in block.values())
                          for block in names]
                 resident = self._resident_blocks(sizes)
-                if is_frozen():
-                    self.blocks = OpaqueBlockStore.from_reader(
-                        handle, names, device, resident=resident,
-                    )
+                if _opaque_blocks(handle):
+                    self.blocks = OpaqueBlockStore.from_reader(handle, names, device, resident=resident)
                 else:
                     self.blocks = BlockStore.from_reader(handle, names, device, resident=resident)
             T.enable_int8_attention()
             logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
-            self._block_forward = compiled_block_forward()
-            self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
+            if isinstance(self.blocks, BlockStore):
+                self._block_forward = compiled_block_forward()
+                self._prompt_key_value = compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs")
         except BaseException:
             self.close()
             raise

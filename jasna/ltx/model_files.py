@@ -133,7 +133,7 @@ class _PlaintextHandle:
         _fill_tensor_groups(self, group_names, groups)
 
 
-class _PlaceholderHandle:
+class PlaceholderHandle:
     """``safe_open``-like reader of placeholder tensors. Every tensor of one dtype is a
     fresh copy of the same seeded random pool, so it costs what reading the file costs in
     RAM, not what generating 13 GB of random numbers would."""
@@ -157,7 +157,7 @@ class _PlaceholderHandle:
             self._specs, self._metadata = dict(S.VAE_DECODER), {}
         self._pools: dict = {}
 
-    def __enter__(self) -> _PlaceholderHandle:
+    def __enter__(self) -> PlaceholderHandle:
         return self
 
     def __exit__(self, *exc) -> None:
@@ -214,7 +214,7 @@ class _PlaceholderHandle:
 
 def open_tensors(path: Path | PlaceholderTensors):
     if isinstance(path, PlaceholderTensors):
-        return _PlaceholderHandle(path)
+        return PlaceholderHandle(path)
     if not is_frozen() and path.suffix != ".enc" and path.is_file():
         return _PlaintextHandle(path)
     from jasna.license_api import require_protection
