@@ -50,7 +50,11 @@ CLI_HELP: dict[str, str] = {
         "RRDBNet checkpoint for the rocm engine (Real-ESRGAN x4plus / x4plus_anime_6B / x2plus). "
         "Empty auto-detects one in model_weights/. (default: %(default)s)"
     ),
-    "amd_upscale_scale": "AMD upscale factor; the crop is restored at 256*scale and blended back (default: %(default)s)",
+    "amd_upscale_scale": (
+        "AMD upscale factor; the crop is restored at 256*scale and blended back. "
+        "6x/8x keep the SR engine engaged and act as supersampling, at a "
+        "proportional time cost (default: %(default)s)"
+    ),
     "amd_upscale_algorithm": (
         "sr_amf algorithm: sr1-0 / sr1-1 are AMD Video SR (machine learning), "
         "bicubic / bilinear / point are the non-ML fallbacks. (default: %(default)s)"

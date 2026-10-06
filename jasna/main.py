@@ -387,7 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--amd-upscale-scale",
         type=int,
         default=4,
-        choices=[2, 4],
+        choices=[2, 4, 6, 8],
         help=CLI_HELP["amd_upscale_scale"],
     )
     amd_upscale.add_argument(

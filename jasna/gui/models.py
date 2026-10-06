@@ -138,7 +138,7 @@ class AppSettings:
     rtx_denoise: str = "medium"  # none, low, medium, high, ultra
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
     amd_upscale_engine: str = "amf-sr"  # amf-sr (AMD Video SR, D3D11) or realesrgan (Real-ESRGAN, in-process)
-    amd_upscale_scale: int = 4  # 2, 4
+    amd_upscale_scale: int = 4  # 2, 4, 6, 8
     amd_upscale_algorithm: str = "sr1-0"  # sr1-0, sr1-1, bicubic, bilinear, point
     amd_upscale_sharpness: float = -1.0  # -1 (driver default) .. 2
     amd_upscale_ffmpeg_path: str = ""  # empty: bundled ffmpeg or PATH

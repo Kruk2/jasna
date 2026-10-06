@@ -274,7 +274,7 @@ class SecondarySection:
         amd_scale_row.pack(fill="x", pady=(0, 8))
         ctk.CTkLabel(amd_scale_row, text=t("scale"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
         self._widgets["amd_upscale_scale"] = ctk.CTkOptionMenu(
-            amd_scale_row, values=["2x", "4x"],
+            amd_scale_row, values=["2x", "4x", "6x", "8x"],
             fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
             text_color=Colors.TEXT_PRIMARY, width=80

@@ -27,14 +27,39 @@ sampled every 500 ms; the adapter was verified separately with
 
 | Engine | Scale | Output | Throughput |
 | ------ | ----: | -----: | ---------: |
-| `amf-sr` (`sr1-0`) | 4x | 1024x1024 | **59-60 fps** |
 | `amf-sr` (`sr1-0`) | 2x | 512x512 | **91-94 fps** |
+| `amf-sr` (`sr1-0`) | 4x | 1024x1024 | **59-60 fps** |
+| `amf-sr` (`sr1-0`) | 6x | 1536x1536 | **31 fps** |
+| `amf-sr` (`sr1-0`) | 8x | 2048x2048 | **17 fps** |
 | ~~`libplacebo` (`ewa_lanczos`)~~ (engine removed) | 4x | 1024x1024 | 31 fps |
 | `realesrgan` (Real-ESRGAN RRDBNet x4plus, fp16) | 4x | 1024x1024 | 16.5 fps |
 
 Real-ESRGAN engine batch sizes (same shapes): batch 1 → 15.7 fps, batch 2 → **16.5 fps**,
 batch 4 → 0.24 fps, batch 8 → 13.6 fps. Batch 4 makes MIOpen pick a pathological
 kernel, hence the hard-coded default of 2.
+
+### Does `sr_amf` really super-resolve at 6x/8x?
+
+The filter takes a free `w`/`h`, so "it runs" proves nothing — the engine could fall
+back to plain scaling. Verified by comparing `sr_amf` against `algorithm=bicubic` at
+the same output size (same source frame, `testsrc2` 256x256, one frame):
+
+| Scale | PSNR(sr vs bicubic) | Laplacian variance (sr) | (bicubic) | ratio |
+| ----: | ------------------: | ----------------------: | --------: | ----: |
+| 2x | 36.78 dB | 245.6 | 156.8 | 1.57 |
+| 4x | 38.01 dB | 57.0 | 19.6 | 2.91 |
+| 6x | 38.55 dB | 21.5 | 9.6 | 2.23 |
+| 8x | 38.81 dB | 12.8 | 4.1 | 3.11 |
+
+37-39 dB means the sr1-0 output is clearly a different image (not a bicubic
+fallback), and it carries 1.6-3.1x the high-frequency energy. 8x SR also differs from
+"4x SR + plain resize" (47.1 dB apart, sharpness 12.8 vs 6.9), so the engine is doing
+its own work at 8x rather than chaining a resize.
+
+Absolute sharpness drops with the factor simply because the same content is spread
+over more pixels; and since the blend step downsamples the restored crop back to the
+mosaic size, the higher factors act as supersampling (cleaner edges, less aliasing)
+rather than as "more output resolution".
 
 ## Notes for whoever repeats this
 

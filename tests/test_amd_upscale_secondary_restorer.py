@@ -98,7 +98,7 @@ class TestInit:
         assert r.num_workers == 1
         assert (r.input_size, r.output_size) == (256, 1024)
 
-    @pytest.mark.parametrize("scale,expected", [(2, 512), (4, 1024)])
+    @pytest.mark.parametrize("scale,expected", [(2, 512), (4, 1024), (6, 1536), (8, 2048)])
     def test_scale_maps_to_output_size(self, scale, expected):
         assert _restorer(scale=scale).output_size == expected
 
