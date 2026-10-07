@@ -89,6 +89,20 @@ def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
     assert "nvcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
 
 
+def test_building_the_extension_finds_the_ninja_package_off_path(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    monkeypatch.setenv("PATH", "/usr/bin")
+    monkeypatch.setattr(native.shutil, "which", lambda name: None)
+    monkeypatch.setattr(native.importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setitem(sys.modules, "ninja", SimpleNamespace(BIN_DIR="/venv/ninja-bin"))
+    monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
+    paths = []
+    monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: paths.append(native.os.environ["PATH"]))
+    native._build_extension(tmp_path)
+    assert "/venv/ninja-bin" in paths[0].split(native.os.pathsep)
+
+
 def test_native_block_can_be_turned_off(monkeypatch):
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     assert native.load(torch.device("cuda"), _block_specs("int8")) is None

@@ -107,6 +107,8 @@ def _cache() -> Path:
 def _build_extension(build_directory: Path):
     from torch.utils import cpp_extension
 
+    if not _ninja_available():
+        raise RuntimeError("building the LTX native block needs ninja")
     build_directory.mkdir(parents=True, exist_ok=True)
     return cpp_extension.load(
         name=EXTENSION_NAME,
