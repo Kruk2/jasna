@@ -249,10 +249,19 @@ class RfDetrMigraphxRunner:
         x = inputs["input"]
         feed = {self.input_names[0]: x.detach().to(torch.float16).cpu().numpy()}
         outs = self._session.run(None, feed)
-        return {
-            name: torch.from_numpy(np_out.astype(np.float32)).to(self.device)
-            for name, np_out in zip(self.output_names, outs)
-        }
+        # dets/labels are tiny -> straight to the GPU. Masks are ~200x too big to
+        # round-trip (B, Q, 120, 120): they are handed back as a zero-copy CPU
+        # view and the consumer thresholds them on the CPU before anything
+        # crosses the PCIe bus again (the postprocess only keeps a handful of
+        # the 200 candidate masks). Pinning the whole mask tensor to the GPU
+        # cost ~26 ms per call - more than the inference itself.
+        results: dict[str, torch.Tensor] = {}
+        for name, np_out in zip(self.output_names, outs):
+            if name == "masks":
+                results[name] = torch.from_numpy(np_out)
+            else:
+                results[name] = torch.from_numpy(np_out.astype(np.float32)).to(self.device)
+        return results
 
     def close(self) -> None:
         self._session = None

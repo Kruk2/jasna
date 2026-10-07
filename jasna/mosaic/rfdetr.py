@@ -266,19 +266,26 @@ class RfDetrMosaicDetectionModel:
         boxes = boxes * boxes.new_tensor((tw, th, tw, th))
 
         hm, wm = pred_masks.shape[-2], pred_masks.shape[-1]
-        masks = pred_masks.gather(1, topk_boxes[:, :, None, None].expand(b, k, hm, wm)) > 0.0
+        # The mask tensor may live on the CPU (the MIGraphX runner keeps it
+        # there on purpose - it is ~200x larger than everything else and only
+        # a handful of the Q candidates survive the threshold). Gather on the
+        # masks' own device and move just the survivors to the GPU.
+        mask_boxes = topk_boxes.to(pred_masks.device)
+        masks = pred_masks.gather(1, mask_boxes[:, :, None, None].expand(b, k, hm, wm)) > 0.0
 
         valid_mask = topk_values > score_threshold  # (B, K)
         boxes_cpu = boxes.to(device='cpu', dtype=torch.float32).numpy()  # (B, K, 4)
         valid_mask_cpu = valid_mask.cpu().numpy()  # (B, K)
-        
+
         boxes_list: list[np.ndarray] = []
         masks_list: list[torch.Tensor] = []
+        gpu_device = pred_boxes.device
+        valid_mask_masks_device = valid_mask.to(pred_masks.device)
         for i in range(b):
             valid_i = valid_mask_cpu[i]
             boxes_list.append(boxes_cpu[i][valid_i])  # (N_i, 4) CPU
-            masks_list.append(masks[i][valid_mask[i]])  # (N_i, Hm, Wm) GPU
-        
+            masks_list.append(masks[i][valid_mask_masks_device[i]].to(gpu_device, non_blocking=True))  # (N_i, Hm, Wm)
+
         return boxes_list, masks_list
 
     def scan_scores_masks(
@@ -293,10 +300,14 @@ class RfDetrMosaicDetectionModel:
         per_query = outs[self.logits_out].sigmoid().amax(dim=-1)  # (B, Q)
         scores = per_query.amax(dim=-1).float()  # (B,)
         pred_masks = outs[self.masks_out]  # (B, Q, Hm, Wm)
-        active = (pred_masks > 0.0) & (per_query > self.score_threshold)[:, :, None, None]
+        # The mask tensor can be a CPU view (MIGraphX runner); thresholding is a
+        # cheap elementwise op there, and only the tiny merged (B, mask_h,
+        # mask_w) result crosses back to the GPU.
+        threshold = per_query.to(pred_masks.device) > self.score_threshold
+        active = (pred_masks > 0.0) & threshold[:, :, None, None]
         merged = active.any(dim=1, keepdim=True).float()
         merged = F.interpolate(merged, size=mask_hw, mode="area") > 0.0
-        return scores, merged[:, 0]
+        return scores, merged[:, 0].to(scores.device)
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)
