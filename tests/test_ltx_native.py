@@ -150,7 +150,7 @@ def test_vendored_attention_compiles_for_the_msvc_runtime_on_windows(monkeypatch
     monkeypatch.delenv("CC", raising=False)
     command = native._attention_nvcc_command(PureWindowsPath("C:/cuda"))
     assert command[0] == "C:\\cuda\\bin\\nvcc"
-    assert {"-Xcompiler=/MD", "-Xcompiler=/Zc:preprocessor", "--use_fast_math"} <= set(command)
+    assert {"-Xcompiler=/MD", "-Xcompiler=/Zc:preprocessor", "-std=c++17", "--use_fast_math"} <= set(command)
 
 
 def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
