@@ -21,8 +21,6 @@ struct Config {
   int64_t fp4_block = 0, fp4_quantize_rows = 0, fp4_quantize_cols = 0, fp4_scale_tile_rows = 0,
           fp4_scale_tile_cols = 0;
   std::vector<int64_t> fp4_recipe, fp4_swizzle;
-  std::string kitchen_library;
-  int64_t kitchen_bf16 = 0;
   pybind11::list kernels;
   std::string kernel_directory;
 };

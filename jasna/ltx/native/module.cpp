@@ -21,7 +21,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def_readwrite("fp4_scale_tile_rows", &Config::fp4_scale_tile_rows)
       .def_readwrite("fp4_scale_tile_cols", &Config::fp4_scale_tile_cols)
       .def_readwrite("fp4_recipe", &Config::fp4_recipe).def_readwrite("fp4_swizzle", &Config::fp4_swizzle)
-      .def_readwrite("kitchen_library", &Config::kitchen_library).def_readwrite("kitchen_bf16", &Config::kitchen_bf16)
       .def_readwrite("kernels", &Config::kernels).def_readwrite("kernel_directory", &Config::kernel_directory);
   py::class_<Block>(m, "Block").def(py::init<const Config&>()).def("forward", &Block::forward)
       .def("self_attention", &Block::self_attention);

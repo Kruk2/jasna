@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import os
 import sys
+import tomllib
 from importlib.machinery import ModuleSpec
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -80,10 +82,75 @@ def test_native_block_refuses_gpus_without_its_kernels(monkeypatch, capability, 
     assert reason in native.unavailable_reason(torch.device("cuda"), _block_specs(quantization))
 
 
-def test_native_block_needs_the_mirrored_comfy_kitchen(monkeypatch):
+def test_native_block_runs_its_own_int8_attention_whatever_comfy_kitchen_is_installed(monkeypatch):
     _cuda_capability(monkeypatch, (12, 0))
-    monkeypatch.setattr(native.importlib.metadata, "version", lambda package: "9.9.9")
-    assert "comfy-kitchen 0.2.36" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: native.PREBUILT / "jasna_ltx_native.so")
+    monkeypatch.setitem(sys.modules, "comfy_kitchen", None)
+    assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
+
+
+def test_extension_sources_look_up_no_launchers_at_runtime():
+    sources = [path for path in native._HERE.rglob("*") if path.suffix in (".cpp", ".cu", ".cuh", ".h")]
+    assert {path.name for path in sources} >= {"block.cpp", "glue.cu", *native._ATTENTION_SOURCES}
+    for path in sources:
+        text = path.read_text()
+        for lookup in ("dlopen", "dlsym", "GetProcAddress", "GetModuleHandle", 'extern "C" void', "kitchen_library"):
+            assert lookup not in text, f"{path.name} uses {lookup}"
+    assert '"launch_' not in (native._HERE / "block.cpp").read_text()
+
+
+def test_package_data_ships_every_native_source():
+    pyproject = tomllib.loads((native._HERE.parents[2] / "pyproject.toml").read_text())
+    shipped = {path for pattern in pyproject["tool"]["setuptools"]["package-data"]["jasna.ltx.native"]
+               for path in native._HERE.glob(pattern)}
+    sources = {path for path in native._HERE.rglob("*")
+               if path.is_file() and path.suffix != ".py" and not {"__pycache__", "prebuilt"} & set(path.parts)}
+    assert sources and sources == shipped
+
+
+def test_attention_tile_follows_comfy_kitchen():
+    sage_attention = pytest.importorskip("comfy_kitchen.sage_attention")
+    for head_dim in (64, 128, 256):
+        for rows in (16, 1024, 1025, 8192):
+            assert native.attention_cta_k(head_dim, rows) == sage_attention._select_cta_k(head_dim, rows, has_mask=False)
+
+
+def test_vendored_attention_compiles_once_with_comfy_kitchens_flags(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    commands = []
+
+    def compile_object(command, check):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"object")
+
+    monkeypatch.setattr(native.subprocess, "run", compile_object)
+    monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: ["-gencode=arch=compute_120,code=sm_120"])
+    monkeypatch.setattr(native.os, "name", "posix")
+    monkeypatch.setenv("CC", "gcc-15")
+    objects = native._attention_objects(tmp_path, Path("/cuda"))
+    assert [path.name for path in objects] == ["quant_qk_int8.o", "quant_v_int8.o", "sage_attn_launcher.o"]
+    assert all(path.read_bytes() == b"object" for path in objects)
+    assert [command[-3] for command in commands] == [str(native._ATTENTION / source) for source in native._ATTENTION_SOURCES]
+    assert commands[0][:3] == ["/cuda/bin/nvcc", "-ccbin", "gcc-15"]
+    assert {"--use_fast_math", "-O3", "-Xcompiler=-fPIC", "-gencode=arch=compute_120,code=sm_120"} <= set(commands[0])
+    assert native._attention_objects(tmp_path, Path("/cuda")) == objects and len(commands) == 3
+
+    monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: ["-gencode=arch=compute_89,code=sm_89"])
+    assert native._attention_objects(tmp_path, Path("/cuda"))[0].parent != objects[0].parent
+
+
+def test_vendored_attention_compiles_for_the_msvc_runtime_on_windows(monkeypatch):
+    from pathlib import PureWindowsPath
+
+    from torch.utils import cpp_extension
+
+    monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: [])
+    monkeypatch.setattr(native.os, "name", "nt")
+    monkeypatch.delenv("CC", raising=False)
+    command = native._attention_nvcc_command(PureWindowsPath("C:/cuda"))
+    assert command[0] == "C:\\cuda\\bin\\nvcc"
+    assert {"-Xcompiler=/MD", "-Xcompiler=/Zc:preprocessor", "--use_fast_math"} <= set(command)
 
 
 def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
@@ -104,8 +171,23 @@ def test_extension_build_finds_ninja_from_its_package_when_off_path(monkeypatch,
     monkeypatch.setitem(sys.modules, "ninja", ninja)
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
+    monkeypatch.setattr(native, "_attention_objects", lambda build_directory, cuda_home: [])
     monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: os.environ["PATH"].split(os.pathsep))
     assert ninja.BIN_DIR in native._build_extension(tmp_path / "build")
+
+
+def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    objects = [tmp_path / "quant_qk_int8.o", tmp_path / "sage_attn_launcher.o"]
+    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    monkeypatch.setattr(native.os, "name", "posix")
+    monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
+    monkeypatch.setattr(native, "_attention_objects", lambda build_directory, cuda_home: objects)
+    monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: kwargs)
+    built = native._build_extension(tmp_path / "build")
+    assert built["extra_ldflags"][-2:] == [str(path) for path in objects]
+    assert built["sources"] == [str(native._HERE / source) for source in native._SOURCES]
 
 
 def test_build_flags_link_the_platform_cuda_driver_library(monkeypatch):
@@ -135,7 +217,6 @@ def test_native_block_can_be_turned_off(monkeypatch):
 
 
 def test_python_hands_every_constant_to_the_native_block(monkeypatch, tmp_path):
-    pytest.importorskip("comfy_kitchen")
     _cuda_capability(monkeypatch, (12, 0))
     monkeypatch.setattr(kernels, "programs", lambda device: 170)
     manifest = tmp_path / "manifest.json"
@@ -157,7 +238,6 @@ def test_python_hands_every_constant_to_the_native_block(monkeypatch, tmp_path):
 
 
 def test_rtx_3090_native_block_launches_plain_triton_gemms(monkeypatch, tmp_path):
-    pytest.importorskip("comfy_kitchen")
     _cuda_capability(monkeypatch, (8, 6))
     monkeypatch.setattr(kernels, "programs", lambda device: 82)
     manifest = tmp_path / "manifest.json"

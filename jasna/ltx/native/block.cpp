@@ -2,8 +2,8 @@
 //
 // GEMMs and quantization run the Triton kernels of ``jasna/ltx/kernels.py``, compiled ahead of
 // time to cubins (``aot.py``) and launched through the CUDA driver; NVFP4 GEMMs and the prompt
-// cross-attention are the same ATen ops the torch path calls; video self-attention launches
-// comfy-kitchen's INT8 attention kernels directly; the rest is ``glue.cu``. Every model constant
+// cross-attention are the same ATen ops the torch path calls; video self-attention is the INT8
+// attention vendored from comfy-kitchen (``sage_attention/``); the rest is ``glue.cu``. Every model constant
 // and launch policy value comes from Python (``Config``).
 
 #include <torch/extension.h>
@@ -12,21 +12,9 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <pybind11/stl.h>
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
 
 #include <cmath>
 #include <cstring>
-#include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
@@ -35,6 +23,7 @@
 
 #include "glue.h"
 #include "block.h"
+#include "sage_attention/launchers.h"
 
 namespace py = pybind11;
 
@@ -187,48 +176,13 @@ class Launch {
   size_t index_ = 0, filled_ = 0, descriptor_ = 0;
 };
 
-// comfy-kitchen's INT8 attention launchers (exported from its CUDA extension), called the way
-// comfy_kitchen.sage_attention._int8_attention_cuda calls them for unmasked attention.
-struct Kitchen {
-  using QuantQk = void (*)(const void*, void*, void*, const void*, void*, void*, int, int, int, int, int, int, int, int,
-                           int, int, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int, void*, cudaStream_t);
-  using QuantV = void (*)(const void*, void*, void*, int, int, int, int, int, int64_t, int64_t, int64_t, int,
-                          cudaStream_t);
-  using Attend = void (*)(const void*, const void*, const void*, void*, const void*, const void*, const void*,
-                          const void*, int64_t, int64_t, int64_t, int64_t, int, int, int, int, int, int, int, int,
-                          int64_t, int, int64_t, int64_t, int, int64_t, int64_t, int64_t, int, int64_t, int, int64_t,
-                          float, int, cudaStream_t, const float*);
-
-  explicit Kitchen(const std::string& library) {
-    // comfy-kitchen's extension is already imported by Python; take its handle without loading it.
-#if defined(_WIN32)
-    HMODULE handle = GetModuleHandleW(std::filesystem::path(library).c_str());
-    TORCH_CHECK(handle != nullptr, "comfy-kitchen's CUDA extension is not loaded: ", library);
-    quant_qk = reinterpret_cast<QuantQk>(GetProcAddress(handle, "launch_quant_qk_per_thread_int8"));
-    quant_v = reinterpret_cast<QuantV>(GetProcAddress(handle, "launch_quant_v_int8_kernel"));
-    attend = reinterpret_cast<Attend>(GetProcAddress(handle, "launch_sage_attn_kernel"));
-#else
-    void* handle = dlopen(library.c_str(), RTLD_NOW | RTLD_NOLOAD);
-    TORCH_CHECK(handle != nullptr, "comfy-kitchen's CUDA extension is not loaded: ", library);
-    quant_qk = reinterpret_cast<QuantQk>(dlsym(handle, "launch_quant_qk_per_thread_int8"));
-    quant_v = reinterpret_cast<QuantV>(dlsym(handle, "launch_quant_v_int8_kernel"));
-    attend = reinterpret_cast<Attend>(dlsym(handle, "launch_sage_attn_kernel"));
-#endif
-    TORCH_CHECK(quant_qk && quant_v && attend, "comfy-kitchen's CUDA extension lacks its INT8 attention launchers");
-  }
-
-  QuantQk quant_qk;
-  QuantV quant_v;
-  Attend attend;
-};
-
 }  // namespace
 
 class Block::Impl {
   struct Activation;
 
  public:
-  explicit Impl(const Config& config) : config_(config), kitchen_(config.kitchen_library) {
+  explicit Impl(const Config& config) : config_(config) {
     TORCH_CHECK(config_.narrow_tile.size() == 5 && config_.wide_tile.size() == 5 && config_.small_tile.size() == 5,
                 "GEMM tiles are (BM, BN, BK, stages, warps)");
     TORCH_CHECK(config_.epilogue_tile.size() == 2, "the cuBLAS-path epilogue tile is (BM, BN)");
@@ -288,8 +242,9 @@ class Block::Impl {
         .view({1, rows, dim});
   }
 
-  // comfy-kitchen INT8 attention of token-major (rows, heads * head_dim) q/k/v; exposed for the
-  // glue test against comfy_kitchen.int8_attention.
+  // comfy-kitchen's INT8 attention of token-major (rows, heads * head_dim) q/k/v, launched the way
+  // comfy_kitchen.sage_attention._int8_attention_cuda launches it unmasked; exposed for the
+  // bit-exactness test against comfy_kitchen.int8_attention.
   at::Tensor self_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t rows, int64_t heads,
                             int64_t head_dim, int64_t cta_k) {
     TORCH_CHECK(head_dim == 64 || head_dim == 128 || head_dim == 256, "INT8 attention needs a head size of 64/128/256");
@@ -308,19 +263,20 @@ class Block::Impl {
     const at::Tensor out = at::empty({1, H, L, D}, q.options());
     const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
     const int64_t token_stride = q.stride(0);
-    const int code = static_cast<int>(config_.kitchen_bf16);
-    kitchen_.quant_qk(q.data_ptr(), q_int8.data_ptr(), q_scale.data_ptr(), k.data_ptr(), k_int8.data_ptr(),
-                      k_scale.data_ptr(), 1, H, L, H, L, D, 128, D == 256 ? 16 : 32, static_cast<int>(cta_k),
-                      static_cast<int>(cta_k), q.numel(), D, token_stride, k.numel(), D, k.stride(0), code,
-                      anchors.data_ptr(), stream);
-    kitchen_.quant_v(v.data_ptr(), v_int8.data_ptr(), v_scale.data_ptr(), 1, H, L, D, static_cast<int>(padded),
-                     v.numel(), D, v.stride(0), code, stream);
+    const int code = sage_attention::kBFloat16;
+    sage_attention::launch_quant_qk_per_thread_int8(
+        q.data_ptr(), q_int8.data_ptr(), q_scale.data_ptr(), k.data_ptr(), k_int8.data_ptr(), k_scale.data_ptr(), 1, H,
+        L, H, L, D, 128, D == 256 ? 16 : 32, static_cast<int>(cta_k), static_cast<int>(cta_k), q.numel(), D,
+        token_stride, k.numel(), D, k.stride(0), code, anchors.data_ptr(), stream);
+    sage_attention::launch_quant_v_int8_kernel(v.data_ptr(), v_int8.data_ptr(), v_scale.data_ptr(), 1, H, L, D,
+                                               static_cast<int>(padded), v.numel(), D, v.stride(0), code, stream);
     const int64_t head_stride = static_cast<int64_t>(L) * D, v_head_stride = D * padded;
-    kitchen_.attend(q_int8.data_ptr(), k_int8.data_ptr(), v_int8.data_ptr(), out.data_ptr(), q_scale.data_ptr(),
-                    k_scale.data_ptr(), v_scale.data_ptr(), nullptr, 0, 0, 0, 0, -1, static_cast<int>(cta_k), 1, L, L,
-                    H, H, D, H * head_stride, D, head_stride, H * head_stride, D, head_stride, H * v_head_stride,
-                    v_head_stride, static_cast<int>(padded), H * head_stride, D, head_stride,
-                    static_cast<float>(1.0 / std::sqrt(static_cast<double>(D))), code, stream, nullptr);
+    sage_attention::launch_sage_attn_kernel(
+        q_int8.data_ptr(), k_int8.data_ptr(), v_int8.data_ptr(), out.data_ptr(), q_scale.data_ptr(), k_scale.data_ptr(),
+        v_scale.data_ptr(), nullptr, 0, 0, 0, 0, -1, static_cast<int>(cta_k), 1, L, L, H, H, D, H * head_stride, D,
+        head_stride, H * head_stride, D, head_stride, H * v_head_stride, v_head_stride, static_cast<int>(padded),
+        H * head_stride, D, head_stride, static_cast<float>(1.0 / std::sqrt(static_cast<double>(D))), code, stream,
+        nullptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return out.view({H, L, D}).transpose(0, 1);
   }
@@ -569,7 +525,6 @@ class Block::Impl {
   }
 
   Config config_;
-  Kitchen kitchen_;
   std::map<std::string, std::unique_ptr<Kernel>> kernels_;
 };
 

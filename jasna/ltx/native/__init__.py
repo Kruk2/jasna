@@ -2,9 +2,9 @@
 
 ``block.cpp`` runs a whole block on plain weight tensors: the Triton kernels of
 ``ltx/kernels.py`` compiled ahead of time for this GPU (``aot.py``), the same cuBLAS
-NVFP4 GEMMs and prompt SDPA as the torch path, comfy-kitchen's INT8 self-attention and
-the element-wise glue of ``glue.cu``. Python owns every model constant and launch policy
-value and hands them over in ``Config``.
+NVFP4 GEMMs and prompt SDPA as the torch path, the INT8 self-attention vendored from
+comfy-kitchen (``sage_attention/``) and the element-wise glue of ``glue.cu``. Python owns
+every model constant and launch policy value and hands them over in ``Config``.
 
 Source installs build it on first use into the compile cache (needs nvcc, a C++ compiler
 and ninja); a release ships it prebuilt (``prebuild``). Without the toolchain, on a GPU it
@@ -13,8 +13,7 @@ has no kernels for, or with ``JASNA_LTX_NATIVE=0`` the sampler keeps the torch.c
 
 from __future__ import annotations
 
-import functools
-import importlib.metadata
+import hashlib
 import importlib.util
 import json
 import logging
@@ -35,10 +34,13 @@ logger = logging.getLogger(__name__)
 
 _HERE = Path(__file__).resolve().parent
 _SOURCES = ("module.cpp", "block.cpp", "glue.cu")
+_ATTENTION = _HERE / "sage_attention"
+_ATTENTION_SOURCES = ("quant_qk_int8.cu", "quant_v_int8.cu", "sage_attn_launcher.cu")
+# comfy-kitchen 0.2.36's nvcc flags (its CMakeLists.txt): the vendored attention computes kitchen's
+# bits only with fast math, which glue.cu must not get, so it compiles apart from the extension
+_ATTENTION_NVCC_FLAGS = ("-O3", "--use_fast_math", "--expt-relaxed-constexpr")
 PREBUILT = _HERE / "prebuilt"
 EXTENSION_NAME = "jasna_ltx_native"
-# block.cpp launches comfy-kitchen's INT8 attention the way this release's Python wrapper does
-KITCHEN_VERSION = "0.2.36"
 
 
 def block_quantization(block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]) -> str | None:
@@ -83,8 +85,6 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
         return f"NVFP4 blocks need SM {' / '.join(f'{a}.{b}' for a, b in FP4_ARCHS)}"
     if dims.dim // dims.heads not in (64, 128, 256) or dims.dim % dims.heads:
         return f"INT8 attention has no kernel for {dims.dim // dims.heads}-wide heads"
-    if importlib.metadata.version("comfy-kitchen") != KITCHEN_VERSION:
-        return f"it launches the INT8 attention of comfy-kitchen {KITCHEN_VERSION} only"
     if _prebuilt_extension() is not None:
         return None
     from torch.utils.cpp_extension import CUDA_HOME
@@ -119,6 +119,36 @@ def _build_flags(cuda_home: Path) -> dict[str, list[str]]:
     }
 
 
+def _attention_nvcc_command(cuda_home: Path) -> list[str]:
+    """nvcc with every flag but the source and object, for the extension's host compiler and architectures."""
+    from torch.utils import cpp_extension
+
+    host = ("/MD", "/Zc:preprocessor") if os.name == "nt" else ("-fPIC", "-fvisibility=hidden")
+    ccbin = ["-ccbin", os.environ["CC"]] if "CC" in os.environ else []
+    return [str(cuda_home / "bin" / "nvcc"), *ccbin, *cpp_extension._get_cuda_arch_flags(), *_ATTENTION_NVCC_FLAGS,
+            *(f"-Xcompiler={flag}" for flag in host)]
+
+
+def _attention_objects(build_directory: Path, cuda_home: Path) -> list[Path]:
+    """The vendored INT8 attention compiled for the extension's link, in a directory named after its
+    sources and command so a change relinks the extension."""
+    command = _attention_nvcc_command(cuda_home)
+    digest = hashlib.sha256("\0".join(command).encode())
+    for path in sorted(_ATTENTION.iterdir()):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes())
+    directory = build_directory / f"sage_attention-{digest.hexdigest()[:16]}"
+    directory.mkdir(parents=True, exist_ok=True)
+    objects = []
+    for source in _ATTENTION_SOURCES:
+        target = directory / Path(source).with_suffix(".obj" if os.name == "nt" else ".o").name
+        if not target.is_file():
+            partial = target.with_name(f"partial-{target.name}")
+            subprocess.run([*command, "-c", str(_ATTENTION / source), "-o", str(partial)], check=True)
+            partial.replace(target)
+        objects.append(target)
+    return objects
+
+
 def _build_extension(build_directory: Path):
     from torch.utils import cpp_extension
 
@@ -129,11 +159,14 @@ def _build_extension(build_directory: Path):
     if shutil.which("gcc-15") and shutil.which("g++-15"):
         os.environ["CC"], os.environ["CXX"] = "gcc-15", "g++-15"
     try:
+        cuda_home = Path(cpp_extension.CUDA_HOME)
+        flags = _build_flags(cuda_home)
+        flags["extra_ldflags"] += [str(path) for path in _attention_objects(build_directory, cuda_home)]
         return cpp_extension.load(
             name=EXTENSION_NAME,
             sources=[str(_HERE / source) for source in _SOURCES],
             build_directory=str(build_directory),
-            **_build_flags(Path(cpp_extension.CUDA_HOME)),
+            **flags,
         )
     finally:
         for name, value in previous.items():
@@ -160,6 +193,11 @@ def _kernel_manifest(capability: tuple[int, int], dims: BlockDims, *, fp4: bool)
     return build_kernels(capability, dims, fp4=fp4, cache=_cache() / "kernels")
 
 
+def attention_cta_k(head_dim: int, rows: int) -> int:
+    """The INT8 attention key tile for ``rows`` tokens, as comfy-kitchen 0.2.36 picks it unmasked."""
+    return 128 if head_dim >= 128 and rows > 1024 else 64
+
+
 def _linear_tensors(w: T.Weights, name: str) -> tuple[torch.Tensor | None, ...]:
     """(weight, scale, scale_2, bias) of one linear in ``block.cpp``'s slot order."""
     if f"{name}.qdata" in w:
@@ -178,13 +216,6 @@ class NativeBlockForward:
         self.block = module.Block(config)
         self.head_dim = dims.dim // dims.heads
 
-    @functools.cache
-    def cta_k(self, rows: int) -> int:
-        """comfy-kitchen's INT8 attention key tile for ``rows`` tokens."""
-        from comfy_kitchen.sage_attention import _select_cta_k
-
-        return _select_cta_k(self.head_dim, rows, has_mask=False)
-
     def __call__(
         self, w: T.Weights, x: torch.Tensor, cond: T.StepConditioning,
         prompt: tuple[torch.Tensor, torch.Tensor], rope: T.Rope, *, skip_self_attention: bool = False,
@@ -193,16 +224,13 @@ class NativeBlockForward:
         with sdpa_kernel(T.SDPA_PRIORITY, set_priority=True):
             return self.block.forward(
                 linears, w["attn1.q_norm.weight"], w["attn1.k_norm.weight"], w["attn2.q_norm.weight"],
-                w["scale_shift_table"], x, cond.block_rows, *prompt, rope.cos, rope.sin, self.cta_k(x.shape[1]),
-                skip_self_attention,
+                w["scale_shift_table"], x, cond.block_rows, *prompt, rope.cos, rope.sin,
+                attention_cta_k(self.head_dim, x.shape[1]), skip_self_attention,
             )
 
 
 def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict[str, object]:
     """Typed native-block configuration shared by public and protected bindings."""
-    import comfy_kitchen.backends.cuda as kitchen_cuda
-    from comfy_kitchen.backends.eager.quantization import DTYPE_TO_CODE
-
     capability = torch.cuda.get_device_capability(device)
     tiles = kernels.INT8_MM_TILES.get(capability, (kernels.SMALL_MM_TILE,) * 2)
     return {
@@ -218,7 +246,6 @@ def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict
         "fp4_scale_tile_rows": kernels.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernels.FP4_SCALE_TILE_COLS,
         "fp4_recipe": [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value],
         "fp4_swizzle": [F.SwizzleType.SWIZZLE_32_4_4.value, F.SwizzleType.NO_SWIZZLE.value],
-        "kitchen_library": kitchen_cuda._C.__file__, "kitchen_bf16": DTYPE_TO_CODE[torch.bfloat16],
         "kernels": json.loads(manifest.read_text()), "kernel_directory": str(manifest.parent),
     }
 

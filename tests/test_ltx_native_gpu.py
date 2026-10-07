@@ -98,15 +98,25 @@ def test_native_block_honors_feed_forward_biases(block):
     assert with_bias < update_tolerance and with_bias < without_bias / 3
 
 
-def test_native_int8_attention_matches_comfy_kitchen():
+@pytest.fixture(scope="module")
+def int8_block():
+    _, specs = _block("int8")
+    forward = native.load(DEVICE, specs)
+    assert forward is not None, "the native block did not build; see the log"
+    return forward
+
+
+# rows cover both key tiles, lengths off the tile, kitchen's short-K paths (<= 256 / 512)
+# and its Blackwell 64-row query tile (4096-4608 rows at head dim 128)
+@pytest.mark.parametrize("head_dim", [64, 128, 256])
+@pytest.mark.parametrize("rows", [200, 500, 1000, 1100, 4200, 8192, 18432])
+def test_native_int8_attention_is_comfy_kitchens_bit_for_bit(int8_block, head_dim, rows):
     import comfy_kitchen
 
-    weights, specs = _block("int8")
-    forward = native.load(DEVICE, specs)
-    rows, heads, head_dim = 8192, T.HEADS, 128
-    generator = torch.Generator(device=DEVICE).manual_seed(3)
+    heads = 4096 // head_dim
+    generator = torch.Generator(device=DEVICE).manual_seed(rows * head_dim)
     q, k, v = (torch.randn(rows, heads * head_dim, generator=generator, device=DEVICE).to(torch.bfloat16) for _ in range(3))
-    attention = forward.block.self_attention(q, k, v, rows, heads, head_dim, forward.cta_k(rows))
+    attention = int8_block.block.self_attention(q, k, v, rows, heads, head_dim, native.attention_cta_k(head_dim, rows))
 
     def heads_first(t: torch.Tensor) -> torch.Tensor:
         return t.view(1, rows, heads, head_dim).transpose(1, 2)
