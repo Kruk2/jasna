@@ -36,8 +36,28 @@ def compile_rfdetr_engine(
     fp16: bool,
 ) -> Path:
     if is_amd_device(device):
-        # AMD runs the trained checkpoint through the rfdetr torch model
-        # (RfDetrTorchRunner); there is no ahead-of-time engine to build.
+        from jasna.mosaic.detection_registry import get_detection_engine, rfdetr_model_config
+
+        if get_detection_engine() != "migraphx":
+            # AMD runs the trained checkpoint through the rfdetr torch model
+            # (RfDetrTorchRunner) unless the MIGraphX engine is selected.
+            return weights_path
+        from jasna.mosaic.rfdetr_migraphx_runner import RfDetrMigraphxRunner
+
+        config = rfdetr_model_config(weights_path.stem)
+        if config.torch_variant is None:
+            raise RuntimeError(
+                f"The MIGraphX engine needs an rfdetr variant mapping for {weights_path.name}"
+            )
+        # building the runner exports the fp16 ONNX (if missing) and compiles the
+        # MIGraphX program into the cache, so the first video does not pay for it
+        RfDetrMigraphxRunner(
+            weights_path,
+            batch_size=int(batch_size),
+            resolution=int(resolution),
+            device=device,
+            variant=config.torch_variant,
+        )
         return weights_path
     if not is_nvidia_device(device):
         raise RuntimeError(
@@ -71,6 +91,7 @@ class RfDetrMosaicDetectionModel:
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         max_select: int = DEFAULT_MAX_SELECT,
         fp16: bool = True,
+        engine: str = "torch",
     ) -> None:
         self.weights_path = weights_path
         self.batch_size = int(batch_size)
@@ -79,29 +100,54 @@ class RfDetrMosaicDetectionModel:
         self.dynamic_batch = bool(dynamic_batch)
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
+        self.engine = str(engine)
         self._normalization_cache: dict[
             tuple[torch.device, torch.dtype], tuple[torch.Tensor, torch.Tensor]
         ] = {}
         if self.batch_size <= 0:
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
+        if self.engine not in ("torch", "migraphx"):
+            raise ValueError(f"Unknown RF-DETR engine {self.engine!r}")
+        if self.engine == "migraphx" and not is_amd_device(self.device):
+            raise RuntimeError(
+                "The MIGraphX engine is only available on AMD GPUs"
+            )
 
         if is_amd_device(self.device):
-            if torch_variant is None:
-                raise RuntimeError(
-                    f"RF-DETR on AMD requires a torch variant for {weights_path.name}"
-                )
-            from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner
+            if self.engine == "migraphx":
+                from jasna.mosaic.rfdetr_migraphx_runner import RfDetrMigraphxRunner
 
-            self.runner = RfDetrTorchRunner(
-                self.weights_path,
-                input_shapes=[
-                    (self.batch_size, 3, self.resolution, self.resolution)
-                ],
-                device=self.device,
-                fp16=bool(fp16),
-                resolution=self.resolution,
-                variant=torch_variant,
-            )
+                if torch_variant is None:
+                    raise RuntimeError(
+                        f"RF-DETR MIGraphX engine requires a torch variant for {weights_path.name}"
+                    )
+                self.runner = RfDetrMigraphxRunner(
+                    self.weights_path,
+                    batch_size=self.batch_size,
+                    resolution=self.resolution,
+                    device=self.device,
+                    variant=torch_variant,
+                )
+                # the export is a static-shape graph; pad short batches like the
+                # fixed-batch TensorRT engines do instead of recompiling per shape
+                self.dynamic_batch = False
+            else:
+                if torch_variant is None:
+                    raise RuntimeError(
+                        f"RF-DETR on AMD requires a torch variant for {weights_path.name}"
+                    )
+                from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner
+
+                self.runner = RfDetrTorchRunner(
+                    self.weights_path,
+                    input_shapes=[
+                        (self.batch_size, 3, self.resolution, self.resolution)
+                    ],
+                    device=self.device,
+                    fp16=bool(fp16),
+                    resolution=self.resolution,
+                    variant=torch_variant,
+                )
             self.engine_path = self.weights_path
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(

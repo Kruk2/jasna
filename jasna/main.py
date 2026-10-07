@@ -480,6 +480,21 @@ def build_parser() -> argparse.ArgumentParser:
         help='Optional path to detection weights. If not set, uses "model_weights/<detection-model>.onnx" (RF-DETR) or ".pt" (YOLO).',
     )
     detection.add_argument(
+        "--detection-engine",
+        type=str,
+        default=None,
+        choices=("torch", "migraphx"),
+        help=(
+            "RF-DETR execution engine. AMD default 'migraphx': ONNX Runtime's MIGraphX "
+            "(ROCm) provider on an fp16 ONNX export of the same checkpoint, ~1.5-1.9x "
+            "faster per frame than the torch path (first use exports the ONNX and "
+            "compiles the MIGraphX program, a few minutes, cached in "
+            "model_weights/migraphx-cache; needs the windowsml EP package). "
+            "'torch' restores the previous behaviour. NVIDIA ignores this "
+            "(ONNX -> TensorRT is always used). Default: vendor default"
+        ),
+    )
+    detection.add_argument(
         "--detection-score-threshold",
         type=float,
         default=None,
@@ -949,7 +964,12 @@ def main() -> None:
         coerce_detection_model_name,
         discover_available_detection_models,
         resolve_detection_model,
+        set_detection_engine,
     )
+
+    engine_arg = getattr(args, "detection_engine", None)
+    if engine_arg:
+        set_detection_engine(str(engine_arg))
 
     if not str(args.detection_model_path).strip():
         available = discover_available_detection_models()

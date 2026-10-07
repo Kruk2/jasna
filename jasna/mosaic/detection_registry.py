@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,6 +79,42 @@ RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-vr-v1": RfDetrModelConfig(768, 0.40, None, "large"),
 }
 _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(768, 0.25, None, None)
+
+# Which backend executes RF-DETR on AMD: the torch checkpoint path (default on
+# non-AMD) or ONNX Runtime's MIGraphX provider (the AMD default; see
+# jasna/mosaic/rfdetr_migraphx_runner.py and
+# benchmarks/2026-10-07_amd_migraphx_ep_windows.md). "migraphx" needs the
+# windowsml EP package (windowsml==1.8.2192[with-ort]); it exports an fp16 ONNX
+# from the same checkpoint on first use and compiles a MIGraphX program into
+# model_weights/migraphx-cache (~2.5 min once). NVIDIA always uses ONNX -> TensorRT.
+DETECTION_ENGINES: tuple[str, ...] = ("torch", "migraphx")
+_detection_engine: str | None = None
+
+
+def set_detection_engine(engine: str) -> None:
+    """Pin the RF-DETR engine for this process (CLI flag / GUI plumbing)."""
+    global _detection_engine
+    normalized = str(engine).strip().lower()
+    if normalized not in DETECTION_ENGINES:
+        raise ValueError(
+            f"Unknown detection engine '{engine}'. Valid: {', '.join(DETECTION_ENGINES)}"
+        )
+    _detection_engine = normalized
+
+
+def get_detection_engine() -> str:
+    """The pinned engine, else JASNA_DETECTION_ENGINE, else the vendor default.
+
+    AMD defaults to MIGraphX (measured ~1.5-1.9x faster per frame than the torch
+    path, benchmarks/2026-10-07_amd_migraphx_ep_windows.md); NVIDIA keeps torch
+    (its ONNX path goes to TensorRT instead).
+    """
+    if _detection_engine is not None:
+        return _detection_engine
+    from_env = os.environ.get("JASNA_DETECTION_ENGINE", "").strip().lower()
+    if from_env in DETECTION_ENGINES:
+        return from_env
+    return "migraphx" if is_amd_device() else "torch"
 
 YOLO_MODEL_FILES: dict[str, str] = {
     name: spec.filename
@@ -205,6 +242,8 @@ def build_detection_model(
         from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
 
         config = rfdetr_model_config(det_name)
+        # the engine only means something on AMD; NVIDIA always goes ONNX -> TensorRT
+        engine = get_detection_engine() if is_amd_device(device) else "torch"
         return RfDetrMosaicDetectionModel(
             weights_path=detection_model_path,
             batch_size=config.engine_batch_size(batch_size),
@@ -214,6 +253,7 @@ def build_detection_model(
             score_threshold=float(score_threshold),
             fp16=bool(fp16),
             torch_variant=config.torch_variant,
+            engine=engine,
         )
     from jasna.mosaic.yolo import YoloMosaicDetectionModel
 
