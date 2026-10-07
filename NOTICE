@@ -6,7 +6,8 @@ is licensed under the GNU Affero General Public License version 3.0. The full
 license is in LICENSE.
 
 Jasna incorporates or distributes work from Lada, OpenMMLab MMagic,
-Lightricks LTX-2.5, Roboflow RF-DETR, PyAV, VALI, FFmpeg, VideoLAN, Python, and other projects.
+Lightricks LTX-2.5, Roboflow RF-DETR, Comfy Org comfy-kitchen, SageAttention,
+PyAV, VALI, FFmpeg, VideoLAN, Python, and other projects.
 Their copyright, attribution, source, and license information is retained in:
 
 - LICENSING.md
@@ -14,6 +15,7 @@ Their copyright, attribution, source, and license information is retained in:
 - assets/THIRD_PARTY_LICENSES.md
 - assets/THIRD_PARTY_MODELS.md
 - assets/licenses/
+- jasna/ltx/native/sage_attention/NOTICE
 
 Official binary packages also contain license files collected from the exact
 installed Python distributions under licenses/python-packages/.
