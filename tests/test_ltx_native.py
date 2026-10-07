@@ -109,7 +109,7 @@ def test_extension_build_finds_ninja_from_its_package_when_off_path(monkeypatch,
 
 
 def test_build_flags_link_the_platform_cuda_driver_library(monkeypatch):
-    from pathlib import Path, PureWindowsPath
+    from pathlib import PurePosixPath, PureWindowsPath
 
     monkeypatch.setattr(native.os, "name", "nt")
     windows = native._build_flags(PureWindowsPath("C:/cuda"))
@@ -117,7 +117,7 @@ def test_build_flags_link_the_platform_cuda_driver_library(monkeypatch):
     assert windows["extra_ldflags"] == ["C:\\cuda\\lib\\x64\\cuda.lib"]
 
     monkeypatch.setattr(native.os, "name", "posix")
-    linux = native._build_flags(Path("/cuda"))
+    linux = native._build_flags(PurePosixPath("/cuda"))
     assert linux["extra_cflags"] == ["-O3", "-fvisibility=hidden"]
     assert linux["extra_ldflags"] == ["-L/cuda/lib64/stubs", "-lcuda"]
 
