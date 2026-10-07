@@ -133,7 +133,7 @@ def test_vendored_attention_compiles_once_with_comfy_kitchens_flags(monkeypatch,
     assert all(path.read_bytes() == b"object" for path in objects)
     assert [command[-3] for command in commands] == [str(native._ATTENTION / source) for source in native._ATTENTION_SOURCES]
     assert commands[0][:3] == ["/cuda/bin/nvcc", "-ccbin", "gcc-15"]
-    assert {"--use_fast_math", "-O3", "-Xcompiler=-fPIC", "-gencode=arch=compute_120,code=sm_120"} <= set(commands[0])
+    assert {"--use_fast_math", "-O3", "-DNDEBUG", "-Xcompiler=-fPIC", "-gencode=arch=compute_120,code=sm_120"} <= set(commands[0])
     assert native._attention_objects(tmp_path, Path("/cuda")) == objects and len(commands) == 3
 
     monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: ["-gencode=arch=compute_89,code=sm_89"])
