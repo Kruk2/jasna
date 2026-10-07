@@ -5,6 +5,27 @@
 import torch
 import torch.nn.functional as F
 
+# The identity grid only depends on (n, h, w, dtype, device, align_corners) -
+# it never depends on the input data. flow_warp runs ~1400 times per
+# BasicVSR++ forward at T=60 (every frame, both directions, second-order
+# terms and SPyNet levels), and rebuilding eye+affine_grid each time was
+# measured at ~25 % of the forward's device time (profiler, RX 7900 XT),
+# so the grid is cached per key instead. Cached tensors are created under
+# no_grad (plain tensors, safe in and out of inference_mode) and never
+# mutated: callers only do grid + offset, which allocates a new tensor.
+_GRID_CACHE: dict = {}
+
+
+def _identity_grid(n, c, h, w, dtype, device, align_corners):
+    key = (n, h, w, dtype, str(device), bool(align_corners))
+    grid = _GRID_CACHE.get(key)
+    if grid is None:
+        with torch.no_grad():
+            theta = torch.eye(2, 3, device=device, dtype=dtype).unsqueeze(0).expand(n, -1, -1)
+            grid = F.affine_grid(theta, (n, c, h, w), align_corners=align_corners)
+        _GRID_CACHE[key] = grid
+    return grid
+
 
 def flow_warp(x,
               flow,
@@ -31,8 +52,7 @@ def flow_warp(x,
     # Identity grid via affine_grid (has a native TRT converter, unlike
     # the arange+meshgrid approach which produces IR that TRT 2.10 can't
     # track through downstream cat operations).
-    theta = torch.eye(2, 3, device=x.device, dtype=x.dtype).unsqueeze(0).expand(n, -1, -1)
-    grid = F.affine_grid(theta, (n, c, h, w), align_corners=align_corners)
+    grid = _identity_grid(n, c, h, w, x.dtype, x.device, align_corners)
 
     # Convert pixel-space flow offsets to normalised [-1, 1] offsets
     flow_x = flow[..., 0] * (2.0 / max(w - 1, 1))

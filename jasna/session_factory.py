@@ -251,6 +251,7 @@ def _build_basicvsrpp_pipeline(
             max_clip_size=int(config.max_clip_size),
             use_tensorrt=compile_result.use_basicvsrpp_tensorrt,
             fp16=bool(config.fp16),
+            temporal_overlap=int(config.temporal_overlap),
         ),
         secondary_restorer=_build_secondary_restorer(config, device),
         denoise_strength=DenoiseStrength(config.denoise_strength),
