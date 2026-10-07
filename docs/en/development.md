@@ -140,9 +140,10 @@ and canaries remain protection-specific. Protected weights use explicit CUDA
 allocations outside the Torch caching allocator, with two event-synchronized
 streaming slots and wipe-before-reuse/free. Changes to any path must compare identical weights, inputs,
 seeds and warmed caches. The public native block is GPU-qualified on SM 12.0
-(RTX 5090), SM 8.9 (RTX 4090) and SM 8.6 (RTX 3090); on SM 8.x INT8 only, with plain
-Triton GEMMs since Ada and Ampere have no TMA for stream-K. Cubins for another SM
-do not by themselves establish support.
+(RTX 5090), SM 8.9 (RTX 4090), SM 8.6 (RTX 3090) and SM 7.5 (RTX 2080 Ti). Below SM 12.0
+it is INT8 only: plain Triton GEMMs on SM 8.x (no TMA for stream-K), cuBLAS INT8 GEMMs
+with the Triton epilogue on SM 7.5. Cubins for another SM do not by themselves
+establish support.
 
 ## Release checklist
 

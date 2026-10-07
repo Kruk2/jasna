@@ -52,7 +52,10 @@ def test_kernel_variants_follow_the_tile_tables():
         assert any(v.family == "mm_stream_k" for v in found) == kernels.has_tma(capability)
         assert not any(v.family == "mm_stream_k" and dict(v.constexprs)["BN"] == kernels.SMALL_MM_TILE[1] for v in found)
     for capability in kernels.CUBLAS_INT8_MM:
-        assert {v.family for v in aot.variants(capability, dims, fp4=False)} == {"rotate_quantize", "epilogue"}
+        found = aot.variants(capability, dims, fp4=False)
+        assert {v.family for v in found} == {"rotate_quantize", "epilogue"}
+        epilogue_tiles = {(dict(v.constexprs)["BM"], dict(v.constexprs)["BN"]) for v in found if v.family == "epilogue"}
+        assert epilogue_tiles == {kernels.CUBLAS_EPILOGUE_TILE}
     assert {v.family for v in aot.variants((12, 0), dims, fp4=True)} == {"quantize_fp4"}
 
 
@@ -70,6 +73,7 @@ def _cuda_capability(monkeypatch, capability):
 @pytest.mark.parametrize("capability, quantization, reason", [
     ((9, 0), "int8", "no tuned kernels for SM 9.0"),
     ((8, 9), "nvfp4", "NVFP4 blocks need SM 12.0 / 12.1"),
+    ((7, 5), "nvfp4", "NVFP4 blocks need SM 12.0 / 12.1"),
 ])
 def test_native_block_refuses_gpus_without_its_kernels(monkeypatch, capability, quantization, reason):
     _cuda_capability(monkeypatch, capability)

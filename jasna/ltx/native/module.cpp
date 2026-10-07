@@ -14,7 +14,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def_readwrite("wide_k", &Config::wide_k).def_readwrite("group_m", &Config::group_m)
       .def_readwrite("stream_k_max_waves", &Config::stream_k_max_waves).def_readwrite("programs", &Config::programs)
       .def_readwrite("has_tma", &Config::has_tma).def_readwrite("cublas_int8", &Config::cublas_int8)
-      .def_readwrite("epilogue_block", &Config::epilogue_block)
+      .def_readwrite("epilogue_tile", &Config::epilogue_tile)
       .def_readwrite("fp4_tensor_scale_divisor", &Config::fp4_tensor_scale_divisor)
       .def_readwrite("fp4_block", &Config::fp4_block).def_readwrite("fp4_quantize_rows", &Config::fp4_quantize_rows)
       .def_readwrite("fp4_quantize_cols", &Config::fp4_quantize_cols)

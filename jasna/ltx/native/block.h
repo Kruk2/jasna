@@ -16,7 +16,7 @@ struct Config {
   std::vector<int64_t> narrow_tile, wide_tile, small_tile;
   int64_t small_max_n = 0, wide_k = 0, group_m = 0, stream_k_max_waves = 0, programs = 0;
   bool has_tma = false, cublas_int8 = false;
-  int64_t epilogue_block = 0;
+  std::vector<int64_t> epilogue_tile;  // (BM, BN) of the cuBLAS-path epilogue
   double fp4_tensor_scale_divisor = 0;
   int64_t fp4_block = 0, fp4_quantize_rows = 0, fp4_quantize_cols = 0, fp4_scale_tile_rows = 0,
           fp4_scale_tile_cols = 0;

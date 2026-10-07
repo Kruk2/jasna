@@ -199,7 +199,7 @@ def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict
         "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(kernels.SMALL_MM_TILE),
         "small_max_n": kernels.SMALL_MM_MAX_N, "wide_k": kernels.WIDE_K, "group_m": kernels.GROUP_M,
         "stream_k_max_waves": kernels.STREAM_K_MAX_WAVES, "programs": kernels.programs(device),
-        "has_tma": kernels.has_tma(capability), "epilogue_block": kernels.CUBLAS_EPILOGUE_BLOCK,
+        "has_tma": kernels.has_tma(capability), "epilogue_tile": list(kernels.CUBLAS_EPILOGUE_TILE),
         "fp4_tensor_scale_divisor": T.FP4_MAX * T.FP8_E4M3_MAX, "fp4_block": T.FP4_BLOCK,
         "fp4_quantize_rows": kernels.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": kernels.FP4_QUANTIZE_COLS,
         "fp4_scale_tile_rows": kernels.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernels.FP4_SCALE_TILE_COLS,
