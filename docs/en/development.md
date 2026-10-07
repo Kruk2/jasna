@@ -132,7 +132,15 @@ when the toolchain is there and the GPU is in the kernel tables, else the
 `torch.compile`/Triton path; `JASNA_LTX_NATIVE=0` forces `torch.compile` for an
 A/B in one tree. `jasna.ltx.native.prebuild(dir)` builds the extension and the
 cubins of every table architecture for a release (copy `dir` to
-`jasna/ltx/native/prebuilt/`). NVIDIA frozen releases keep licensed blocks behind
+`jasna/ltx/native/prebuilt/`). Its INT8 self-attention is comfy-kitchen 0.2.36's
+SageAttention kernels vendored in `jasna/ltx/native/sage_attention/` (bf16,
+unmasked subset; provenance and edits in its `NOTICE`), compiled into the
+extension rather than looked up in comfy-kitchen's binary, so the native block
+needs no particular comfy-kitchen build on Linux or Windows. Those sources compile
+apart from the rest with comfy-kitchen's nvcc flags (`--use_fast_math` must not
+reach `glue.cu`) and must stay bit-identical with `comfy_kitchen.int8_attention`
+(`tests/test_ltx_native_gpu.py`); re-vendor them when the torch path's
+comfy-kitchen pin changes. NVIDIA frozen releases keep licensed blocks behind
 the private native `block_forward` boundary; they do not expose protected
 per-Linear operators. The private extension compiles the same `jasna_ltx::Block`
 from `block.cpp`; only Store/authentication, schedule enforcement, anomaly checks
