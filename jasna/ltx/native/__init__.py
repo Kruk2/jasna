@@ -34,7 +34,7 @@ from jasna.ltx.native.aot import FP4_ARCHS, BlockDims, build_kernels
 logger = logging.getLogger(__name__)
 
 _HERE = Path(__file__).resolve().parent
-_SOURCES = ("block.cpp", "glue.cu")
+_SOURCES = ("module.cpp", "block.cpp", "glue.cu")
 PREBUILT = _HERE / "prebuilt"
 EXTENSION_NAME = "jasna_ltx_native"
 # block.cpp launches comfy-kitchen's INT8 attention the way this release's Python wrapper does
@@ -110,14 +110,24 @@ def _build_extension(build_directory: Path):
     if not _ninja_available():
         raise RuntimeError("building the native LTX block needs ninja")
     build_directory.mkdir(parents=True, exist_ok=True)
-    return cpp_extension.load(
-        name=EXTENSION_NAME,
-        sources=[str(_HERE / source) for source in _SOURCES],
-        build_directory=str(build_directory),
-        extra_cflags=["-O3", "-fvisibility=hidden"],
-        extra_cuda_cflags=["-O3"],
-        extra_ldflags=[f"-L{Path(cpp_extension.CUDA_HOME) / 'lib64' / 'stubs'}", "-lcuda"],
-    )
+    previous = {name: os.environ.get(name) for name in ("CC", "CXX")}
+    if shutil.which("gcc-15") and shutil.which("g++-15"):
+        os.environ["CC"], os.environ["CXX"] = "gcc-15", "g++-15"
+    try:
+        return cpp_extension.load(
+            name=EXTENSION_NAME,
+            sources=[str(_HERE / source) for source in _SOURCES],
+            build_directory=str(build_directory),
+            extra_cflags=["-O3", "-fvisibility=hidden"],
+            extra_cuda_cflags=["-O3"],
+            extra_ldflags=[f"-L{Path(cpp_extension.CUDA_HOME) / 'lib64' / 'stubs'}", "-lcuda"],
+        )
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def _extension():
@@ -148,38 +158,10 @@ class NativeBlockForward:
     """``transformer.block_forward`` (same arguments, default heads) for one model's blocks."""
 
     def __init__(self, module, device: torch.device, dims: BlockDims, manifest: Path) -> None:
-        import comfy_kitchen.backends.cuda as kitchen_cuda
-        from comfy_kitchen.backends.eager.quantization import DTYPE_TO_CODE
-
-        capability = torch.cuda.get_device_capability(device)
+        values = config_values(device, dims, manifest)
         config = module.Config()
-        config.device = device.index if device.index is not None else torch.cuda.current_device()
-        config.heads = dims.heads
-        config.eps = T.EPS
-        config.chunk_rows = T.CHUNK_ROWS
-        config.cublas_int8 = capability in kernels.CUBLAS_INT8_MM
-        tiles = kernels.INT8_MM_TILES.get(capability, (kernels.SMALL_MM_TILE,) * 2)
-        config.narrow_tile, config.wide_tile = (list(tile) for tile in tiles)
-        config.small_tile = list(kernels.SMALL_MM_TILE)
-        config.small_max_n = kernels.SMALL_MM_MAX_N
-        config.wide_k = kernels.WIDE_K
-        config.group_m = kernels.GROUP_M
-        config.stream_k_max_waves = kernels.STREAM_K_MAX_WAVES
-        config.programs = kernels.programs(device)
-        config.has_tma = kernels.has_tma(capability)
-        config.epilogue_block = kernels.CUBLAS_EPILOGUE_BLOCK
-        config.fp4_tensor_scale_divisor = T.FP4_MAX * T.FP8_E4M3_MAX
-        config.fp4_block = T.FP4_BLOCK
-        config.fp4_quantize_rows = kernels.FP4_QUANTIZE_ROWS
-        config.fp4_quantize_cols = kernels.FP4_QUANTIZE_COLS
-        config.fp4_scale_tile_rows = kernels.FP4_SCALE_TILE_ROWS
-        config.fp4_scale_tile_cols = kernels.FP4_SCALE_TILE_COLS
-        config.fp4_recipe = [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value]
-        config.fp4_swizzle = [F.SwizzleType.SWIZZLE_32_4_4.value, F.SwizzleType.NO_SWIZZLE.value]
-        config.kitchen_library = kitchen_cuda._C.__file__
-        config.kitchen_bf16 = DTYPE_TO_CODE[torch.bfloat16]
-        config.kernels = json.loads(manifest.read_text())
-        config.kernel_directory = str(manifest.parent)
+        for name, value in values.items():
+            setattr(config, name, value)
         self.block = module.Block(config)
         self.head_dim = dims.dim // dims.heads
 
@@ -191,14 +173,8 @@ class NativeBlockForward:
         return _select_cta_k(self.head_dim, rows, has_mask=False)
 
     def __call__(
-        self,
-        w: T.Weights,
-        x: torch.Tensor,
-        cond: T.StepConditioning,
-        prompt: tuple[torch.Tensor, torch.Tensor],
-        rope: T.Rope,
-        *,
-        skip_self_attention: bool = False,
+        self, w: T.Weights, x: torch.Tensor, cond: T.StepConditioning,
+        prompt: tuple[torch.Tensor, torch.Tensor], rope: T.Rope, *, skip_self_attention: bool = False,
     ) -> torch.Tensor:
         linears = [tensor for name in T.LINEAR_NAMES for tensor in _linear_tensors(w, name)]
         with sdpa_kernel(T.SDPA_PRIORITY, set_priority=True):
@@ -208,6 +184,30 @@ class NativeBlockForward:
                 skip_self_attention,
             )
 
+
+def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict[str, object]:
+    """Typed native-block configuration shared by public and protected bindings."""
+    import comfy_kitchen.backends.cuda as kitchen_cuda
+    from comfy_kitchen.backends.eager.quantization import DTYPE_TO_CODE
+
+    capability = torch.cuda.get_device_capability(device)
+    tiles = kernels.INT8_MM_TILES.get(capability, (kernels.SMALL_MM_TILE,) * 2)
+    return {
+        "device": device.index if device.index is not None else torch.cuda.current_device(),
+        "heads": dims.heads, "eps": T.EPS, "chunk_rows": T.CHUNK_ROWS,
+        "cublas_int8": capability in kernels.CUBLAS_INT8_MM,
+        "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(kernels.SMALL_MM_TILE),
+        "small_max_n": kernels.SMALL_MM_MAX_N, "wide_k": kernels.WIDE_K, "group_m": kernels.GROUP_M,
+        "stream_k_max_waves": kernels.STREAM_K_MAX_WAVES, "programs": kernels.programs(device),
+        "has_tma": kernels.has_tma(capability), "epilogue_block": kernels.CUBLAS_EPILOGUE_BLOCK,
+        "fp4_tensor_scale_divisor": T.FP4_MAX * T.FP8_E4M3_MAX, "fp4_block": T.FP4_BLOCK,
+        "fp4_quantize_rows": kernels.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": kernels.FP4_QUANTIZE_COLS,
+        "fp4_scale_tile_rows": kernels.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernels.FP4_SCALE_TILE_COLS,
+        "fp4_recipe": [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value],
+        "fp4_swizzle": [F.SwizzleType.SWIZZLE_32_4_4.value, F.SwizzleType.NO_SWIZZLE.value],
+        "kitchen_library": kitchen_cuda._C.__file__, "kitchen_bf16": DTYPE_TO_CODE[torch.bfloat16],
+        "kernels": json.loads(manifest.read_text()), "kernel_directory": str(manifest.parent),
+    }
 
 def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]) -> NativeBlockForward | None:
     """The native block forward for blocks shaped like ``block_specs``, or None (logged) when it

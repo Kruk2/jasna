@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "glue.h"
+#include "block.h"
 
 namespace py = pybind11;
 
@@ -203,35 +204,11 @@ struct Kitchen {
 
 }  // namespace
 
-struct Config {
-  int64_t device = 0;
-  int64_t heads = 0;
-  double eps = 0;
-  int64_t chunk_rows = 0;
-  // INT8 GEMM launch policy of kernels._mm: tiles are (BM, BN, BK, stages, warps)
-  std::vector<int64_t> narrow_tile, wide_tile, small_tile;
-  int64_t small_max_n = 0, wide_k = 0, group_m = 0, stream_k_max_waves = 0, programs = 0;
-  bool has_tma = false, cublas_int8 = false;
-  int64_t epilogue_block = 0;
-  // NVFP4
-  double fp4_tensor_scale_divisor = 0;
-  int64_t fp4_block = 0, fp4_quantize_rows = 0, fp4_quantize_cols = 0, fp4_scale_tile_rows = 0,
-          fp4_scale_tile_cols = 0;
-  std::vector<int64_t> fp4_recipe, fp4_swizzle;  // (activation-or-weight blocks, tensor scale) of F.scaled_mm
-  // comfy-kitchen INT8 attention
-  std::string kitchen_library;
-  int64_t kitchen_bf16 = 0;
-  // ahead-of-time kernels: manifest entries and their directory
-  py::list kernels;
-  std::string kernel_directory;
-};
+class Block::Impl {
+  struct Activation;
 
-enum LinearIndex { SelfQ, SelfK, SelfV, SelfOut, SelfGate, CrossQ, CrossK, CrossV, CrossOut, CrossGate, FfUp, FfDown,
-                   LinearCount };
-
-class Block {
  public:
-  explicit Block(const Config& config) : config_(config), kitchen_(config.kitchen_library) {
+  explicit Impl(const Config& config) : config_(config), kitchen_(config.kitchen_library) {
     TORCH_CHECK(config_.narrow_tile.size() == 5 && config_.wide_tile.size() == 5 && config_.small_tile.size() == 5,
                 "GEMM tiles are (BM, BN, BK, stages, warps)");
     c10::cuda::CUDAGuard guard(static_cast<c10::DeviceIndex>(config_.device));
@@ -327,6 +304,22 @@ class Block {
     return out.view({H, L, D}).transpose(0, 1);
   }
 
+  std::pair<at::Tensor, at::Tensor> prompt_key_value(
+      const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& cross_k_norm,
+      const at::Tensor& prompt_scale_shift_table, const at::Tensor& prompt_rows, const at::Tensor& context) {
+    std::vector<Linear> w;
+    for (int i = 0; i < LinearCount; ++i) w.push_back(Linear::from(linear_tensors, i));
+    const at::Tensor kv = prompt_scale_shift_table.unsqueeze(0).unsqueeze(0) + prompt_rows;
+    const at::Tensor input = context * (1 + kv.select(2, 1)) + kv.select(2, 0);
+    const bool fp4 = w[CrossV].kind == Kind::Fp4;
+    const Activation prepared = plain_activation(input.view({-1, input.size(-1)}).contiguous(), fp4);
+    const int64_t dim = input.size(-1), heads = config_.heads, head_dim = dim / heads;
+    const at::Tensor key = at::empty({input.size(1), dim}, input.options());
+    norm_rope(linear(prepared, w[CrossK]), cross_k_norm, nullptr, nullptr, key, head_dim, config_.eps);
+    return {key.view({1, input.size(1), heads, head_dim}).transpose(1, 2),
+            linear(prepared, w[CrossV]).view({1, input.size(1), heads, head_dim}).transpose(1, 2)};
+  }
+
  private:
   enum class Kind { Int8, Fp4, Dense };
 
@@ -350,6 +343,15 @@ class Block {
     at::Tensor codes, scales;                        // INT8 ConvRot codes and row scales
     at::Tensor packed, block_scales, tensor_scale;   // NVFP4
   };
+
+  Activation plain_activation(const at::Tensor& x, bool fp4) const {
+    if (!fp4) {
+      auto [codes, scales] = rotate_quantize(x, nullptr, nullptr);
+      return {x, codes, scales, {}, {}, {}};
+    }
+    const at::Tensor amax = at::amax(at::abs(x)).to(at::kFloat).reshape({1});
+    return fp4_activation(x, tensor_scales(amax));
+  }
 
   static std::string key(const std::string& family, const std::map<std::string, int64_t>& constexprs) {
     std::string result = family;
@@ -549,42 +551,24 @@ class Block {
   std::map<std::string, std::unique_ptr<Kernel>> kernels_;
 };
 
-}  // namespace jasna_ltx
-
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  using jasna_ltx::Block;
-  using jasna_ltx::Config;
-  py::class_<Config>(m, "Config")
-      .def(py::init<>())
-      .def_readwrite("device", &Config::device)
-      .def_readwrite("heads", &Config::heads)
-      .def_readwrite("eps", &Config::eps)
-      .def_readwrite("chunk_rows", &Config::chunk_rows)
-      .def_readwrite("narrow_tile", &Config::narrow_tile)
-      .def_readwrite("wide_tile", &Config::wide_tile)
-      .def_readwrite("small_tile", &Config::small_tile)
-      .def_readwrite("small_max_n", &Config::small_max_n)
-      .def_readwrite("wide_k", &Config::wide_k)
-      .def_readwrite("group_m", &Config::group_m)
-      .def_readwrite("stream_k_max_waves", &Config::stream_k_max_waves)
-      .def_readwrite("programs", &Config::programs)
-      .def_readwrite("has_tma", &Config::has_tma)
-      .def_readwrite("cublas_int8", &Config::cublas_int8)
-      .def_readwrite("epilogue_block", &Config::epilogue_block)
-      .def_readwrite("fp4_tensor_scale_divisor", &Config::fp4_tensor_scale_divisor)
-      .def_readwrite("fp4_block", &Config::fp4_block)
-      .def_readwrite("fp4_quantize_rows", &Config::fp4_quantize_rows)
-      .def_readwrite("fp4_quantize_cols", &Config::fp4_quantize_cols)
-      .def_readwrite("fp4_scale_tile_rows", &Config::fp4_scale_tile_rows)
-      .def_readwrite("fp4_scale_tile_cols", &Config::fp4_scale_tile_cols)
-      .def_readwrite("fp4_recipe", &Config::fp4_recipe)
-      .def_readwrite("fp4_swizzle", &Config::fp4_swizzle)
-      .def_readwrite("kitchen_library", &Config::kitchen_library)
-      .def_readwrite("kitchen_bf16", &Config::kitchen_bf16)
-      .def_readwrite("kernels", &Config::kernels)
-      .def_readwrite("kernel_directory", &Config::kernel_directory);
-  py::class_<Block>(m, "Block")
-      .def(py::init<const Config&>())
-      .def("forward", &Block::forward)
-      .def("self_attention", &Block::self_attention);
+Block::Block(const Config& config) : impl_(std::make_unique<Impl>(config)) {}
+Block::~Block() = default;
+at::Tensor Block::forward(const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& q_norm,
+                          const at::Tensor& k_norm, const at::Tensor& cross_q_norm,
+                          const at::Tensor& scale_shift_table, const at::Tensor& x, const at::Tensor& block_rows,
+                          const at::Tensor& prompt_key, const at::Tensor& prompt_value, const at::Tensor& rope_cos,
+                          const at::Tensor& rope_sin, int64_t cta_k, bool skip_self_attention) {
+  return impl_->forward(linear_tensors, q_norm, k_norm, cross_q_norm, scale_shift_table, x, block_rows, prompt_key,
+                        prompt_value, rope_cos, rope_sin, cta_k, skip_self_attention);
 }
+at::Tensor Block::self_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t rows,
+                                 int64_t heads, int64_t head_dim, int64_t cta_k) {
+  return impl_->self_attention(q, k, v, rows, heads, head_dim, cta_k);
+}
+std::pair<at::Tensor, at::Tensor> Block::prompt_key_value(
+    const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& cross_k_norm,
+    const at::Tensor& prompt_scale_shift_table, const at::Tensor& prompt_rows, const at::Tensor& context) {
+  return impl_->prompt_key_value(linear_tensors, cross_k_norm, prompt_scale_shift_table, prompt_rows, context);
+}
+
+}  // namespace jasna_ltx

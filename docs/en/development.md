@@ -134,7 +134,11 @@ A/B in one tree. `jasna.ltx.native.prebuild(dir)` builds the extension and the
 cubins of every table architecture for a release (copy `dir` to
 `jasna/ltx/native/prebuilt/`). NVIDIA frozen releases keep licensed blocks behind
 the private native `block_forward` boundary; they do not expose protected
-per-Linear operators. Changes to any path must compare identical weights, inputs,
+per-Linear operators. The private extension compiles the same `jasna_ltx::Block`
+from `block.cpp`; only Store/authentication, schedule enforcement, anomaly checks
+and canaries remain protection-specific. Protected weights use explicit CUDA
+allocations outside the Torch caching allocator, with two event-synchronized
+streaming slots and wipe-before-reuse/free. Changes to any path must compare identical weights, inputs,
 seeds and warmed caches. The public native block is GPU-qualified on SM 12.0
 (RTX 5090), SM 8.9 (RTX 4090) and SM 8.6 (RTX 3090); on SM 8.x INT8 only, with plain
 Triton GEMMs since Ada and Ampere have no TMA for stream-K. Cubins for another SM
