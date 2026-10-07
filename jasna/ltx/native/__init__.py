@@ -104,6 +104,21 @@ def _cache() -> Path:
     return Path(cache_dir()) / "jasna-ltx-native"
 
 
+def _build_flags(cuda_home: Path) -> dict[str, list[str]]:
+    """Compiler and linker flags to build the extension against the CUDA driver API, per platform."""
+    if os.name == "nt":
+        return {
+            "extra_cflags": ["/O2"],
+            "extra_cuda_cflags": ["-O3"],
+            "extra_ldflags": [str(cuda_home / "lib" / "x64" / "cuda.lib")],
+        }
+    return {
+        "extra_cflags": ["-O3", "-fvisibility=hidden"],
+        "extra_cuda_cflags": ["-O3"],
+        "extra_ldflags": [f"-L{cuda_home / 'lib64' / 'stubs'}", "-lcuda"],
+    }
+
+
 def _build_extension(build_directory: Path):
     from torch.utils import cpp_extension
 
@@ -118,9 +133,7 @@ def _build_extension(build_directory: Path):
             name=EXTENSION_NAME,
             sources=[str(_HERE / source) for source in _SOURCES],
             build_directory=str(build_directory),
-            extra_cflags=["-O3", "-fvisibility=hidden"],
-            extra_cuda_cflags=["-O3"],
-            extra_ldflags=[f"-L{Path(cpp_extension.CUDA_HOME) / 'lib64' / 'stubs'}", "-lcuda"],
+            **_build_flags(Path(cpp_extension.CUDA_HOME)),
         )
     finally:
         for name, value in previous.items():

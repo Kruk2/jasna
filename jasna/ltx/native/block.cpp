@@ -11,11 +11,22 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
-#include <dlfcn.h>
 #include <pybind11/stl.h>
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
@@ -189,11 +200,20 @@ struct Kitchen {
                           float, int, cudaStream_t, const float*);
 
   explicit Kitchen(const std::string& library) {
+    // comfy-kitchen's extension is already imported by Python; take its handle without loading it.
+#if defined(_WIN32)
+    HMODULE handle = GetModuleHandleW(std::filesystem::path(library).c_str());
+    TORCH_CHECK(handle != nullptr, "comfy-kitchen's CUDA extension is not loaded: ", library);
+    quant_qk = reinterpret_cast<QuantQk>(GetProcAddress(handle, "launch_quant_qk_per_thread_int8"));
+    quant_v = reinterpret_cast<QuantV>(GetProcAddress(handle, "launch_quant_v_int8_kernel"));
+    attend = reinterpret_cast<Attend>(GetProcAddress(handle, "launch_sage_attn_kernel"));
+#else
     void* handle = dlopen(library.c_str(), RTLD_NOW | RTLD_NOLOAD);
     TORCH_CHECK(handle != nullptr, "comfy-kitchen's CUDA extension is not loaded: ", library);
     quant_qk = reinterpret_cast<QuantQk>(dlsym(handle, "launch_quant_qk_per_thread_int8"));
     quant_v = reinterpret_cast<QuantV>(dlsym(handle, "launch_quant_v_int8_kernel"));
     attend = reinterpret_cast<Attend>(dlsym(handle, "launch_sage_attn_kernel"));
+#endif
     TORCH_CHECK(quant_qk && quant_v && attend, "comfy-kitchen's CUDA extension lacks its INT8 attention launchers");
   }
 
