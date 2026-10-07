@@ -33,6 +33,16 @@ cd jasna-linux-nvidia-0.11.0
 
 像上面这样解压到 `/root`。放在 `/workspace` 或网络盘里 Jasna 启动不了。
 
+## 检查视频编码器
+
+有些租来的机器，显卡的视频编码器用不了。激活前先检查一下，只要一秒：
+
+```bash
+./tools/ffmpeg -loglevel error -f lavfi -i testsrc2=duration=1:size=1280x720 -c:v hevc_nvenc -f null - && echo OK
+```
+
+没看到 `OK`？删掉这台机器，换一台。在这台上 Jasna 存不了视频。
+
 ## 激活
 
 ```bash
@@ -59,6 +69,8 @@ export XDG_CONFIG_HOME=/root/jasna-config
 
 第一次会问要不要下载 LTX 模型（15 GB），输入 `y`。
 
+RTX 50 系显卡加上 `--ltx-fast`，修复大约快 1.4 倍（会多下载一个 8 GB 的模型）。
+
 上传视频和取回结果，可以用服务商的文件管理器，或在电脑上运行：
 
 ```bash
@@ -73,6 +85,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `unsigned or modified Jasna runtime` | 用 `root` 重新解压到 `/root`。 |
 | `libGL.so.1: cannot open shared object file` | 运行安装里的 `apt-get` 那一行。 |
 | `Cloud workspace activation requires a supported Linux container` | 使用更新后的 Linux 版和不带 `--pid=host` 的容器。RunPod 上请将设置放在 `/root`。 |
+| `Failed to open hevc encoder` | 这台机器的视频编码器坏了，换一台。 |
 | `enable cloud activation` | 请卖家打开云权限。 |
 | `No activation found` 或 `Cloud workspace identity is missing` | 先运行 `export` 那一行，再重新启动 Jasna。 |
 | `unsafe Jasna launch environment` | 用 `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` 启动。 |

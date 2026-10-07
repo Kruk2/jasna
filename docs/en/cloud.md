@@ -36,6 +36,18 @@ cd jasna-linux-nvidia-0.11.0
 Unpack in `/root` like above. Jasna won't start from `/workspace` or a
 network drive.
 
+## Check the video encoder
+
+Some rented machines have a GPU whose video encoder doesn't work. Check it
+before you activate; it takes a second:
+
+```bash
+./tools/ffmpeg -loglevel error -f lavfi -i testsrc2=duration=1:size=1280x720 -c:v hevc_nvenc -f null - && echo OK
+```
+
+No `OK`? Delete the machine and rent another one. Jasna can't save videos
+there.
+
 ## Activate
 
 ```bash
@@ -64,6 +76,9 @@ export XDG_CONFIG_HOME=/root/jasna-config
 
 The first time, Jasna asks to download the LTX model (15 GB). Type `y`.
 
+On an RTX 50-series GPU, add `--ltx-fast` to restore about 1.4× faster
+(it downloads one more 8 GB model).
+
 To send a video up and get the result back, use your provider's file
 manager, or run this on your PC:
 
@@ -79,6 +94,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `unsigned or modified Jasna runtime` | Unpack again in `/root` as `root`. |
 | `libGL.so.1: cannot open shared object file` | Run the `apt-get` line from Install. |
 | `Cloud workspace activation requires a supported Linux container` | Use the updated Linux build, a container without `--pid=host`, and config under `/root` on RunPod. |
+| `Failed to open hevc encoder` | This machine's video encoder is broken. Rent another one. |
 | `enable cloud activation` | Ask your seller to turn on cloud. |
 | `No activation found` or `Cloud workspace identity is missing` | Run the `export` line, then start Jasna again. |
 | `unsafe Jasna launch environment` | Start it with `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` |
