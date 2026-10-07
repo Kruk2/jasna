@@ -212,7 +212,7 @@ struct Config {
   std::vector<int64_t> narrow_tile, wide_tile, small_tile;
   int64_t small_max_n = 0, wide_k = 0, group_m = 0, stream_k_max_waves = 0, programs = 0;
   bool has_tma = false, cublas_int8 = false;
-  int64_t epilogue_block = 0;
+  std::vector<int64_t> epilogue_tile;  // (BM, BN) of the cuBLAS-path epilogue
   // NVFP4
   double fp4_tensor_scale_divisor = 0;
   int64_t fp4_block = 0, fp4_quantize_rows = 0, fp4_quantize_cols = 0, fp4_scale_tile_rows = 0,
@@ -234,6 +234,7 @@ class Block {
   explicit Block(const Config& config) : config_(config), kitchen_(config.kitchen_library) {
     TORCH_CHECK(config_.narrow_tile.size() == 5 && config_.wide_tile.size() == 5 && config_.small_tile.size() == 5,
                 "GEMM tiles are (BM, BN, BK, stages, warps)");
+    TORCH_CHECK(config_.epilogue_tile.size() == 2, "the cuBLAS-path epilogue tile is (BM, BN)");
     c10::cuda::CUDAGuard guard(static_cast<c10::DeviceIndex>(config_.device));
     C10_CUDA_CHECK(cudaFree(nullptr));  // makes the device's primary context current for the driver API
     for (const auto& item : config_.kernels) {
@@ -435,10 +436,11 @@ class Block {
       // torch._int_mm needs more than 16 rows
       const at::Tensor acc = at::_int_mm(m <= 16 ? at::constant_pad_nd(codes, {0, 0, 0, 17 - m}) : codes, w.weight.t());
       auto constexprs = flags;
-      constexprs["BM"] = constexprs["BN"] = config_.epilogue_block;
+      constexprs["BM"] = config_.epilogue_tile[0];
+      constexprs["BN"] = config_.epilogue_tile[1];
       Launch launch(kernel("epilogue", constexprs));
       epilogue_args(launch.ptr(acc)).i32(m).i32(n).i32(half_rows).i32(row_offset)(
-          cdiv(m, config_.epilogue_block), cdiv(n, config_.epilogue_block), 1);
+          cdiv(m, config_.epilogue_tile[0]), cdiv(n, config_.epilogue_tile[1]), 1);
       return out;
     }
     const auto& tile = n < config_.small_max_n ? config_.small_tile : k > config_.wide_k ? config_.wide_tile
@@ -570,7 +572,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def_readwrite("programs", &Config::programs)
       .def_readwrite("has_tma", &Config::has_tma)
       .def_readwrite("cublas_int8", &Config::cublas_int8)
-      .def_readwrite("epilogue_block", &Config::epilogue_block)
+      .def_readwrite("epilogue_tile", &Config::epilogue_tile)
       .def_readwrite("fp4_tensor_scale_divisor", &Config::fp4_tensor_scale_divisor)
       .def_readwrite("fp4_block", &Config::fp4_block)
       .def_readwrite("fp4_quantize_rows", &Config::fp4_quantize_rows)

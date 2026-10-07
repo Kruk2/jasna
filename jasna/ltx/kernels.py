@@ -34,8 +34,10 @@ SMALL_MM_TILE = (32, 32, 256, 3, 2)
 WIDE_K = 4096
 # Stream-K only pays when the grid is a few waves long.
 STREAM_K_MAX_WAVES = 8
-CUBLAS_EPILOGUE_BLOCK = 64
-CUBLAS_EPILOGUE_WARPS = 4
+# (BM, BN) of the cuBLAS-path epilogue: wide row strips, from a sweep over the LTX block shapes
+# on an RTX 2080 Ti (8-17 % faster than 64x64 on every large shape).
+CUBLAS_EPILOGUE_TILE = (8, 512)
+CUBLAS_EPILOGUE_WARPS = 8
 FP4_QUANTIZE_ROWS = 32
 FP4_QUANTIZE_COLS = 256
 FP4_QUANTIZE_WARPS = 4
@@ -287,12 +289,12 @@ def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, ha
         residual if residual is not None else out, gate if gate is not None else scales, out,
     )
     if _cublas_int8_mm(codes.device):
-        block = CUBLAS_EPILOGUE_BLOCK
+        bm, bn = CUBLAS_EPILOGUE_TILE
         # torch._int_mm needs more than 16 rows; on SM 7.5 also a multiple of 16 output features
         acc = torch._int_mm(F.pad(codes, (0, 0, 0, 17 - m)) if m <= 16 else codes, qdata.t())
-        _int8_epilogue_kernel[(triton.cdiv(m, block), triton.cdiv(n, block))](
+        _int8_epilogue_kernel[(triton.cdiv(m, bm), triton.cdiv(n, bn))](
             acc, *args, m, n, half_rows, row_offset,
-            HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=block, BN=block,
+            HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=bm, BN=bn,
             num_warps=CUBLAS_EPILOGUE_WARPS,
         )
         return out

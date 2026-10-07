@@ -102,12 +102,12 @@ def _mm_stream_k(tile, bias: bool, gelu: bool, residual: bool) -> Variant:
 
 
 def _epilogue(bias: bool, gelu: bool, residual: bool) -> Variant:
-    block = kernels.CUBLAS_EPILOGUE_BLOCK
+    bm, bn = kernels.CUBLAS_EPILOGUE_TILE
     return Variant(
         "epilogue", kernels._int8_epilogue_kernel,
         ("*i32", *_MM_TYPES, "i32", "i32", "i32", "i32"),
         ("acc_ptr", *_MM_POINTERS, "M", "N"),
-        (*_flags(bias, gelu, residual), ("BM", block), ("BN", block)), kernels.CUBLAS_EPILOGUE_WARPS, 3,
+        (*_flags(bias, gelu, residual), ("BM", bm), ("BN", bn)), kernels.CUBLAS_EPILOGUE_WARPS, 3,
     )
 
 

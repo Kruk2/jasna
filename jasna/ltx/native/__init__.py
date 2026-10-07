@@ -167,7 +167,7 @@ class NativeBlockForward:
         config.stream_k_max_waves = kernels.STREAM_K_MAX_WAVES
         config.programs = kernels.programs(device)
         config.has_tma = kernels.has_tma(capability)
-        config.epilogue_block = kernels.CUBLAS_EPILOGUE_BLOCK
+        config.epilogue_tile = list(kernels.CUBLAS_EPILOGUE_TILE)
         config.fp4_tensor_scale_divisor = T.FP4_MAX * T.FP8_E4M3_MAX
         config.fp4_block = T.FP4_BLOCK
         config.fp4_quantize_rows = kernels.FP4_QUANTIZE_ROWS
