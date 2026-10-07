@@ -77,6 +77,7 @@ def _fake_section_widgets() -> dict:
         "detection_score_threshold": _FakeWidget(0.35),
         "compile_basicvsrpp": _FakeWidget(1),
         "file_conflict": _FakeValueMenu({"auto_rename": "A", "overwrite": "B", "skip": "C"}, "skip"),
+        "batch_size": _FakeValueMenu({"4": "4", "8": "8"}, "8"),
         "temporal_overlap": _FakeWidget(8),
         "max_detection_gap": _FakeWidget(2),
         "min_detection_duration": _FakeWidget(2),
@@ -140,6 +141,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     values = _collect_all(_fake_section_widgets())
 
     assert values["file_conflict"] == "skip"
+    assert values["batch_size"] == 8
     assert values["vr_mode"] == "off"
     assert values["denoise_strength"] == "high"
     assert values["denoise_step"] == "after_secondary"
@@ -176,7 +178,6 @@ def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
     values = _collect_all(_fake_section_widgets())
 
     defaults_only = {
-        "batch_size",
         "tvai_args",
         "vr_projection",
         "output_folder",
@@ -185,8 +186,9 @@ def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
     expected = {f.name for f in fields(AppSettings)} - defaults_only
     assert set(values) == expected
 
-    settings = AppSettings(batch_size=4, **values)
+    settings = AppSettings(**values)
     assert settings.codec == "av1"
+    assert settings.batch_size == 8
 
 
 @pytest.fixture
@@ -214,6 +216,14 @@ def _basic_section_panel(monkeypatch, tmp_path):
         yield panel, next(section for section in panel._sections if isinstance(section, BasicSection))
     finally:
         root.destroy()
+
+
+def test_batch_size_choice_reaches_settings(_basic_section_panel) -> None:
+    panel, _basic = _basic_section_panel
+
+    assert panel.get_settings().batch_size == 4
+    panel._widgets["batch_size"].set_value("8")
+    assert panel.get_settings().batch_size == 8
 
 
 def test_switching_detection_model_applies_recommended_threshold(_basic_section_panel) -> None:

@@ -193,7 +193,12 @@ class RfDetrMosaicDetectionModel:
         )
         self.masks_out = next(k for k in self.runner.output_names if self.runner.outputs[k].ndim == 4)
         self.logits_out = next(k for k in self.runner.output_names if k not in {self.boxes_out, self.masks_out})
-        logger.info("RF-DETR detection model loaded: %s (batch_size=%d)", self.engine_path, self.batch_size)
+        logger.info(
+            "RF-DETR detection model loaded: %s (batch_size=%d, resolution=%d)",
+            self.engine_path,
+            self.batch_size,
+            self.resolution,
+        )
 
     def close(self) -> None:
         if self.runner is not None:
@@ -225,6 +230,19 @@ class RfDetrMosaicDetectionModel:
     def _infer(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         if self.dynamic_batch:
             return self.runner.infer({self._input_name: x})
+
+        total = int(x.shape[0])
+        # One engine call covers everything: hand the runner's outputs straight
+        # back. The generic path below clones every output before concatenating
+        # it, which copies the (Q, Hm, Wm) mask tensor twice per batch for no
+        # reason when there is only one chunk - masks are ~200x the size of the
+        # other outputs.
+        if total <= self.batch_size:
+            chunk = x if total == self.batch_size else pad_batch_with_last(x, batch_size=self.batch_size)
+            outputs = self.runner.infer({self._input_name: chunk})
+            if total == self.batch_size:
+                return outputs
+            return {name: tensor[:total] for name, tensor in outputs.items()}
 
         output_parts: dict[str, list[torch.Tensor]] = {
             name: [] for name in self.runner.output_names
@@ -271,7 +289,6 @@ class RfDetrMosaicDetectionModel:
         # a handful of the Q candidates survive the threshold). Gather on the
         # masks' own device and move just the survivors to the GPU.
         mask_boxes = topk_boxes.to(pred_masks.device)
-        masks = pred_masks.gather(1, mask_boxes[:, :, None, None].expand(b, k, hm, wm)) > 0.0
 
         valid_mask = topk_values > score_threshold  # (B, K)
         boxes_cpu = boxes.to(device='cpu', dtype=torch.float32).numpy()  # (B, K, 4)
@@ -312,12 +329,23 @@ class RfDetrMosaicDetectionModel:
         pred_masks = outs[self.masks_out]  # (B, Q, Hm, Wm)
         # The mask tensor can be a CPU view (MIGraphX runner); thresholding is a
         # cheap elementwise op there, and only the tiny merged (B, mask_h,
-        # mask_w) result crosses back to the GPU.
-        threshold = per_query.to(pred_masks.device) > self.score_threshold
-        active = (pred_masks > 0.0) & threshold[:, :, None, None]
-        merged = active.any(dim=1, keepdim=True).float()
-        merged = F.interpolate(merged, size=mask_hw, mode="area") > 0.0
-        return scores, merged[:, 0].to(scores.device)
+        # mask_w) result crosses back to the GPU. Most frames of most videos
+        # have no query above the threshold at all, so the (Q, Hm, Wm) work is
+        # restricted to the frames that actually hit - and skipped entirely
+        # when none of them do.
+        threshold = per_query.to(pred_masks.device) > self.score_threshold  # (B, Q)
+        merged = torch.zeros(
+            (per_query.shape[0], mask_hw[0], mask_hw[1]),
+            dtype=torch.bool, device=scores.device,
+        )
+        hit_frames = threshold.any(dim=1).nonzero(as_tuple=True)[0]
+        if hit_frames.numel() == 0:
+            return scores, merged
+        active = (pred_masks[hit_frames] > 0.0) & threshold[hit_frames][:, :, None, None]
+        reduced = active.any(dim=1, keepdim=True).float()
+        reduced = F.interpolate(reduced, size=mask_hw, mode="area") > 0.0
+        merged[hit_frames] = reduced[:, 0].to(scores.device)
+        return scores, merged
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)

@@ -46,10 +46,34 @@ DETECTION_MODEL_SPECS: dict[str, DetectionModelSpec] = {
         "yolo",
         "lada_mosaic_detection_model_v2.pt",
     ),
+    # Optional Lada checkpoints (same upstream repo as lada-yolo-v4): the
+    # "accurate" variants trade speed for quality, the 3.1 pair sits in between.
+    # All of them are plain YOLO .pt files, so the vendor-neutral YOLO backend
+    # runs them without a torch variant mapping.
+    "lada-yolo-v3": DetectionModelSpec(
+        "lada-yolo-v3",
+        "yolo",
+        "lada_mosaic_detection_model_v3.pt",
+    ),
+    "lada-yolo-v3.1-fast": DetectionModelSpec(
+        "lada-yolo-v3.1-fast",
+        "yolo",
+        "lada_mosaic_detection_model_v3.1_fast.pt",
+    ),
+    "lada-yolo-v3.1-accurate": DetectionModelSpec(
+        "lada-yolo-v3.1-accurate",
+        "yolo",
+        "lada_mosaic_detection_model_v3.1_accurate.pt",
+    ),
     "lada-yolo-v4": DetectionModelSpec(
         "lada-yolo-v4",
         "yolo",
         "lada_mosaic_detection_model_v4_fast.pt",
+    ),
+    "lada-yolo-v4-accurate": DetectionModelSpec(
+        "lada-yolo-v4-accurate",
+        "yolo",
+        "lada_mosaic_detection_model_v4_accurate.pt",
     ),
     "zelefans-vr-yolo-v2": DetectionModelSpec(
         "zelefans-vr-yolo-v2",
@@ -72,27 +96,31 @@ RFDETR_MODEL_NAMES: frozenset[str] = frozenset(
 
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 
+# resolution is the detector input size; it is the single biggest cost knob for
+# RF-DETR (attention scales with it) and the only place it is defined. Measured on
+# an RX 7900 XT with the AOTriton flash images installed, RF-DETR v6, batch 8, fp16:
+#     576 -> 18.8 ms/frame    480 -> 14.2 ms/frame    384 -> 10.7 ms/frame
+# v6 ships at 480: it is 25% cheaper than the native 576 and keeps the recall the
+# larger sizes are chosen for. Raise it back if a clip needs the extra detail.
 RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-v5": RfDetrModelConfig(768, 0.25, 4, None),
-    "rfdetr-v6": RfDetrModelConfig(576, 0.35, None, "medium"),
+    "rfdetr-v6": RfDetrModelConfig(480, 0.35, None, "medium"),
     "rfdetr-v6-large": RfDetrModelConfig(768, 0.40, None, "large"),
     "rfdetr-vr-v1": RfDetrModelConfig(768, 0.40, None, "large"),
 }
 _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(768, 0.25, None, None)
 
-# Which backend executes RF-DETR on AMD: the torch checkpoint path (default on
-# non-AMD) or ONNX Runtime's MIGraphX provider (the AMD default; see
-# jasna/mosaic/rfdetr_migraphx_runner.py and
-# benchmarks/2026-10-07_amd_migraphx_ep_windows.md). "migraphx" needs the
-# windowsml EP package (windowsml==1.8.2192[with-ort]); it exports an fp16 ONNX
-# from the same checkpoint on first use and compiles a MIGraphX program into
-# model_weights/migraphx-cache (~2.5 min once). NVIDIA always uses ONNX -> TensorRT.
+# Which backend executes RF-DETR on AMD: the torch checkpoint path (default) or
+# ONNX Runtime's MIGraphX provider (see jasna/mosaic/rfdetr_migraphx_runner.py).
+# "migraphx" is AMD-only and needs the Windows ML EP package plus the windowsml
+# ORT build; it exports an fp16 ONNX from the same checkpoint on first use and
+# compiles a MIGraphX program into model_weights/migraphx-cache (~2.5 min once).
 DETECTION_ENGINES: tuple[str, ...] = ("torch", "migraphx")
 _detection_engine: str | None = None
 
 
 def set_detection_engine(engine: str) -> None:
-    """Pin the RF-DETR engine for this process (CLI flag / GUI plumbing)."""
+    """Pin the RF-DETR AMD engine for this process (CLI flag / GUI plumbing)."""
     global _detection_engine
     normalized = str(engine).strip().lower()
     if normalized not in DETECTION_ENGINES:

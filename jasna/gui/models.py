@@ -148,7 +148,7 @@ class AppSettings:
     detection_model: str = "rfdetr-v6"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
     detection_score_threshold: float = 0.35
     max_detection_gap: int = 2
-    min_detection_duration: int = 2
+    min_detection_duration: int = 4
     scene_detection: bool = True
     compile_basicvsrpp: bool = True
     

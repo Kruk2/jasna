@@ -21,6 +21,7 @@ from jasna.media.splice import (
     KeyframeIndex,
     SplicePlan,
     SpliceSpan,
+    build_copy_only_plan,
     build_splice_plan,
     concatenate_fragments,
     create_copy_fragment,
@@ -114,7 +115,9 @@ class Pipeline:
         self.sharpen_strength = config.sharpen_strength
         self.retarget_high_fps = config.retarget_high_fps
         self.fmp4 = config.fmp4
-        self.segments = tuple(segments) if segments else None
+        # None means "no segmentation was requested"; an empty tuple means the
+        # segmentation ran and found nothing to render, which is a different thing.
+        self.segments = None if segments is None else tuple(segments)
         self.splice_plan = splice_plan
         self.vr_resolution = None
         self.vr_projector = None
@@ -414,7 +417,11 @@ class Pipeline:
         )
         if self.splice_plan is None:
             index = probe_keyframes(self.input_video, metadata)
-            plan = build_splice_plan(self.segments or (), index, duration=metadata.duration)
+            if self.segments:
+                plan = build_splice_plan(self.segments, index, duration=metadata.duration)
+            else:
+                # Nothing to render: remux the input untouched.
+                plan = build_copy_only_plan(index)
         else:
             plan = self.splice_plan
             if plan.segments != tuple(self.segments or ()):
@@ -432,8 +439,11 @@ class Pipeline:
         # match sources using more; re-render segments would not stitch
         # cleanly against the stream-copied ones. Fall back to a full
         # re-encode instead of failing the job (NVIDIA NVENC has no such cap).
+        # With nothing to render there is nothing to stitch, so a copy-only plan
+        # is unaffected by the source's B-frame layout.
         if (
-            vendor_for_device(self.device) is AcceleratorVendor.AMD
+            plan.render_spans
+            and vendor_for_device(self.device) is AcceleratorVendor.AMD
             and codec == "h264"
             and index.max_b_frames > 3
         ):
@@ -570,7 +580,9 @@ class Pipeline:
         metadata = get_video_meta_data(str(self.input_video))
         self.validate_metadata(metadata)
         self.configure_vr(metadata)
-        if self.segments:
+        # An empty tuple is not "no segmentation": it means the segmentation ran and
+        # found nothing to render, so the video is copied without a detection pass.
+        if self.segments is not None:
             if self.fmp4:
                 log.warning(
                     "Fragmented MP4 is not available with segment processing; "

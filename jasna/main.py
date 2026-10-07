@@ -509,7 +509,7 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--min-detection-duration",
         type=int,
-        default=2,
+        default=4,
         help=CLI_HELP["min_detection_duration"],
     )
     detection.add_argument(
@@ -611,6 +611,40 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Restore only selected ranges and smart-render the rest, for example "
             "10-25,01:10-01:30. Output codec must match the H.264, HEVC, or AV1 input."
+        ),
+    )
+    encoding.add_argument(
+        "--auto-segments",
+        action="store_true",
+        help=(
+            "Scan the video first (one detection sample per --auto-segments-stride "
+            "seconds), restore only the regions that contain mosaics and stream-copy "
+            "the rest. Without this every frame is detected and re-encoded. Has no "
+            "effect together with --segments, --stream or an LTX restoration model."
+        ),
+    )
+    encoding.add_argument(
+        "--auto-segments-stride",
+        type=float,
+        default=1.0,
+        help="Seconds between the samples taken by --auto-segments (default: 1.0).",
+    )
+    encoding.add_argument(
+        "--auto-segments-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Score above which a scanned sample counts as a mosaic (default: the "
+            "detection model's recommended score threshold)."
+        ),
+    )
+    encoding.add_argument(
+        "--auto-segments-max-coverage",
+        type=float,
+        default=0.98,
+        help=(
+            "Run a normal full pass instead when the detected regions cover more than "
+            "this fraction of the video (default: 0.98)."
         ),
     )
 
@@ -734,6 +768,73 @@ def _plan_folder(
     return images, videos, output_dir
 
 
+def _smart_render_plan(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    input_video: Path,
+    output_video: Path,
+    *,
+    codec_was_explicit: bool,
+    segments,
+    fail_hard: bool = True,
+):
+    """Validate smart rendering for `segments` and return (codec, segments, splice_plan).
+
+    An empty `segments` tuple is accepted and means "nothing to render": the whole
+    video is stream-copied, which is what an automatic scan that found no mosaics
+    should produce.
+
+    `fail_hard` is False for the automatic path: segments that the scanner proposed
+    are a suggestion, so a video smart rendering cannot handle (variable frame rate,
+    a mismatching codec, no usable cut points) must fall back to a normal pass
+    instead of aborting the job. Returns None when it falls back.
+    """
+    from jasna.media.probe import get_video_meta_data
+    from jasna.media.splice import (
+        SmartRenderCompatibilityError,
+        build_copy_only_plan,
+        build_splice_plan,
+        canonical_codec,
+        probe_keyframes,
+        validate_smart_render,
+    )
+
+    def give_up(message: str):
+        if fail_hard:
+            parser.error(message)
+        print(f"Auto-segments: {message} Falling back to a normal pass.")
+        return None
+
+    metadata = get_video_meta_data(str(input_video))
+    input_codec = canonical_codec(metadata.codec_name)
+    if codec_was_explicit and str(args.codec).lower() != input_codec:
+        return give_up(
+            f"smart rendering needs the output codec to match the input "
+            f"({input_codec}); pass --codec {input_codec}."
+        )
+    keyframes = probe_keyframes(input_video, metadata)
+    if not segments:
+        # Nothing to render: a plain remux does not depend on frame-rate constancy,
+        # keyframe layout or the output codec, so the smart-render checks that guard
+        # stitching do not apply here.
+        return input_codec, segments, build_copy_only_plan(keyframes)
+    try:
+        validate_smart_render(
+            metadata,
+            output_path=output_video,
+            codec=input_codec,
+            retarget_high_fps=bool(args.retarget_high_fps),
+        )
+        splice_plan = build_splice_plan(
+            segments,
+            keyframes,
+            duration=metadata.duration,
+        )
+    except SmartRenderCompatibilityError as exc:
+        return give_up(str(exc))
+    return input_codec, segments, splice_plan
+
+
 def _resolve_segments(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
@@ -744,13 +845,6 @@ def _resolve_segments(
 ):
     """Parse --segments and return (codec, segments, splice_plan); smart rendering keeps the input codec."""
     from jasna.media.probe import get_video_meta_data
-    from jasna.media.splice import (
-        SmartRenderCompatibilityError,
-        build_splice_plan,
-        canonical_codec,
-        probe_keyframes,
-        validate_smart_render,
-    )
     from jasna.segments import parse_segments
 
     metadata = get_video_meta_data(str(input_video))
@@ -758,24 +852,94 @@ def _resolve_segments(
         segments = parse_segments(str(args.segments).strip(), duration=metadata.duration)
     except ValueError as exc:
         parser.error(f"invalid --segments: {exc}")
-    input_codec = canonical_codec(metadata.codec_name)
-    if codec_was_explicit and str(args.codec).lower() != input_codec:
-        parser.error(f"with --segments output codec must match input; pass --codec {input_codec}")
+    return _smart_render_plan(
+        parser,
+        args,
+        input_video,
+        output_video,
+        codec_was_explicit=codec_was_explicit,
+        segments=segments,
+    )
+
+
+def _auto_segments(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    input_video: Path,
+    output_video: Path,
+    *,
+    codec_was_explicit: bool,
+    detection_model_name: str,
+    detection_model_path: Path,
+    detection_score_threshold: float,
+):
+    """Scan for mosaics before the main pass; None means "use a normal full pass".
+
+    The scan samples the video (one detection sample per --auto-segments-stride
+    seconds) instead of detecting every frame, so a video whose mosaics cover only
+    part of its length renders those parts and stream-copies the rest; a video with
+    no mosaics at all becomes a plain remux.
+    """
+    import torch
+
+    from jasna.accelerator import device_context
+    from jasna.media.probe import get_video_meta_data
+    from jasna.mosaic.auto_segments import plan_auto_segments, scan_video_scores
+    from jasna.mosaic.scan import SCAN_SCORE_FLOOR
+    from jasna.session_factory import build_compiled_detection_model
+
+    metadata = get_video_meta_data(str(input_video))
+    device = torch.device(str(args.device))
+    threshold = (
+        float(args.auto_segments_threshold)
+        if args.auto_segments_threshold is not None
+        else float(detection_score_threshold)
+    )
+    detector = build_compiled_detection_model(
+        detection_model_name,
+        detection_model_path,
+        device=device,
+        batch_size=int(args.batch_size),
+        fp16=bool(args.fp16),
+        score_threshold=SCAN_SCORE_FLOOR,
+        log_callback=None,
+    )
     try:
-        validate_smart_render(
-            metadata,
-            output_path=output_video,
-            codec=input_codec,
-            retarget_high_fps=bool(args.retarget_high_fps),
+        with device_context(device):
+            scan = scan_video_scores(
+                input_video,
+                metadata,
+                detector,
+                device=device,
+                batch_size=int(args.batch_size),
+                stride_seconds=float(args.auto_segments_stride),
+            )
+    finally:
+        detector.close()
+
+    plan = plan_auto_segments(
+        scan,
+        threshold=threshold,
+        coverage_limit=float(args.auto_segments_max_coverage),
+    )
+    print(plan.describe())
+    if not plan.worth_segmenting:
+        print(
+            "Auto-segments: %.1f%% of the video would be rendered, which is at or "
+            "above the %.0f%% limit where a normal full pass is cheaper than "
+            "scanning plus smart rendering."
+            % (plan.coverage * 100.0, plan.coverage_limit * 100.0)
         )
-        splice_plan = build_splice_plan(
-            segments,
-            probe_keyframes(input_video, metadata),
-            duration=metadata.duration,
-        )
-    except SmartRenderCompatibilityError as exc:
-        parser.error(str(exc))
-    return input_codec, segments, splice_plan
+        return None
+    return _smart_render_plan(
+        parser,
+        args,
+        input_video,
+        output_video,
+        codec_was_explicit=codec_was_explicit,
+        segments=plan.segments,
+        fail_hard=False,
+    )
 
 
 def _run_streaming(args: argparse.Namespace, make_pipeline, input_video: Path | None) -> None:
@@ -1001,6 +1165,19 @@ def main() -> None:
         codec, segments, splice_plan = _resolve_segments(
             parser, args, input_video, output_video, codec_was_explicit=codec_was_explicit
         )
+    elif args.auto_segments and not is_streaming and restoration_backend != "ltx":
+        auto = _auto_segments(
+            parser,
+            args,
+            input_video,
+            output_video,
+            codec_was_explicit=codec_was_explicit,
+            detection_model_name=detection_model_name,
+            detection_model_path=detection_model_path,
+            detection_score_threshold=detection_score_threshold,
+        )
+        if auto is not None:
+            codec, segments, splice_plan = auto
 
     from jasna.accelerator import device_context, vendor_for_device
 

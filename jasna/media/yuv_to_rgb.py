@@ -1,4 +1,8 @@
 import ctypes
+import logging
+import os
+import time
+from pathlib import Path
 
 import torch
 
@@ -6,6 +10,36 @@ from av.video.reformatter import Colorspace as AvColorspace
 
 from jasna.accelerator import is_nvidia_device
 from jasna.media.cuda_kernel import Kernel, grid_size
+
+logger = logging.getLogger(__name__)
+
+# NVIDIA converts YUV->RGB with one fatbin kernel. Without it (AMD/ROCm, CPU) the
+# eager path is a chain of small elementwise kernels, which at 4K costs ~2 ms per
+# frame. Compiling just that function measured 2.1x faster at 4K and 4.0x at 1080p on
+# an RX 7900 XT, with bit-identical output, for ~50 s of one-time compilation per
+# frame size. Set JASNA_COMPILE_YUV_TO_RGB=0 to opt out; any failure falls back.
+_COMPILE_ENV = "JASNA_COMPILE_YUV_TO_RGB"
+
+
+def _compiled_conversion_enabled() -> bool:
+    return os.environ.get(_COMPILE_ENV, "").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }
+
+
+def _inductor_cache_dir() -> Path:
+    """A cache directory that survives %TEMP% cleanups.
+
+    Inductor defaults to a directory under the system temp dir, which Windows storage
+    sense (or a disk cleanup) can delete - that would silently turn the one-time ~50 s
+    compilation into a per-run cost.
+    """
+    from jasna.os_utils import get_user_config_dir
+
+    return get_user_config_dir("jasna") / "inductor_cache"
 
 # YUV->RGB from standard luma coefficients (Kr, Kb):
 #   R = Y' + 2(1-Kr) * V'
@@ -170,6 +204,57 @@ class YuvToRgbConverter:
             x_mod8 = torch.arange(width, device=device) & 7
             t = bayer[y_mod8][:, x_mod8].unsqueeze(0)
             self._dither2 = torch.floor(t * 4.0).to(torch.int32)
+
+        self.compiled_conversion = False
+        self._enable_compiled_conversion()
+
+    def _enable_compiled_conversion(self) -> None:
+        """Run the eager conversion through torch.compile, warming it up here.
+
+        Only the non-NVIDIA path benefits: CUDA already converts in a single fatbin
+        kernel. Warming up at construction keeps the compilation cost in startup
+        (where model loading already dominates) instead of stalling the first frame
+        of a run; the compiled result is then reused for every later frame.
+        """
+        if self._cuda_kernel is not None or not self._rgb.is_cuda:
+            return
+        if not _compiled_conversion_enabled():
+            return
+
+        eager = self._convert_eager
+        sample_dtype = torch.uint16 if self.is_10bit else torch.uint8
+        device = self._rgb.device
+        try:
+            if not os.environ.get("TORCHINDUCTOR_CACHE_DIR"):
+                cache_dir = _inductor_cache_dir()
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                os.environ["TORCHINDUCTOR_CACHE_DIR"] = str(cache_dir)
+            started = time.perf_counter()
+            self._convert_eager = torch.compile(eager, dynamic=False)
+            self._convert_eager(
+                torch.zeros((self.height, self.width), dtype=sample_dtype, device=device),
+                torch.zeros(
+                    (self.height // 2, self.width // 2, 2), dtype=sample_dtype, device=device
+                ),
+                torch.empty((3, self.height, self.width), dtype=torch.uint8, device=device),
+            )
+            self.compiled_conversion = True
+            logger.info(
+                "YUV->RGB conversion compiled (%dx%d) in %.1fs; disable with %s=0",
+                self.width,
+                self.height,
+                time.perf_counter() - started,
+                _COMPILE_ENV,
+            )
+        except Exception as exc:  # pragma: no cover - depends on the inductor build
+            self._convert_eager = eager
+            self.compiled_conversion = False
+            logger.warning(
+                "torch.compile unavailable for the YUV->RGB conversion (%s: %s); "
+                "using the eager path",
+                type(exc).__name__,
+                exc,
+            )
 
     def convert(self, y: torch.Tensor, uv: torch.Tensor) -> torch.Tensor:
         out = torch.empty((3, self.height, self.width), device=y.device, dtype=torch.uint8)

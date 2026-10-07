@@ -47,7 +47,7 @@ def test_rfdetr_model_config_per_version() -> None:
         fast.score_threshold,
         fast.dynamic_batch,
         fast.fixed_batch_size,
-    ) == (576, 0.35, True, None)
+    ) == (480, 0.35, True, None)
     large = rfdetr_model_config("rfdetr-v6-large")
     assert (
         large.resolution,
@@ -316,7 +316,7 @@ def test_build_detection_model_rfdetr_resolution_per_version() -> None:
             "rfdetr-v6", Path("rfdetr-v6.onnx"),
             batch_size=4, device=torch.device("cpu"), score_threshold=0.35, fp16=True,
         )
-        assert mock_rf.call_args.kwargs["resolution"] == 576
+        assert mock_rf.call_args.kwargs["resolution"] == 480
         assert mock_rf.call_args.kwargs["batch_size"] == 4
         assert mock_rf.call_args.kwargs["dynamic_batch"] is True
     with patch("jasna.mosaic.rfdetr.RfDetrMosaicDetectionModel") as mock_rf:

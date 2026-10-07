@@ -141,14 +141,27 @@ def test_add_many_skips_already_covered_ranges():
     assert state.segments == (SegmentRange(0.0, 10.0, STANDARD), SegmentRange(20.0, 21.0, STANDARD))
 
 
-def test_scan_decoder_count_parallel_only_for_4k_on_nvidia():
+def test_scan_decoder_count_parallel_only_for_4k():
     from jasna.gui.mosaic_scan import scan_decoder_count
 
-    assert scan_decoder_count(3840, 2160, 120.0, amd=False) == 2
-    assert scan_decoder_count(8192, 4096, 15.0, amd=False) == 2
-    assert scan_decoder_count(1920, 1080, 120.0, amd=False) == 1
-    assert scan_decoder_count(3840, 2160, 5.0, amd=False) == 1
-    assert scan_decoder_count(3840, 2160, 120.0, amd=True) == 1
+    # A scan decodes every frame, so only 4K-and-up long videos are decode-bound.
+    # The vendor is no longer consulted: AMD runs two decoders exactly like NVIDIA.
+    assert scan_decoder_count(3840, 2160, 120.0) == 2
+    assert scan_decoder_count(8192, 4096, 15.0) == 2
+    assert scan_decoder_count(1920, 1080, 120.0) == 1
+    assert scan_decoder_count(3840, 2160, 5.0) == 1
+    assert scan_decoder_count(3840, 2160, 120.0, override=1) == 1
+
+
+def test_scan_decoder_env_override(monkeypatch):
+    from jasna.mosaic.scan import SCAN_DECODERS_ENV, scan_decoder_count
+
+    monkeypatch.setenv(SCAN_DECODERS_ENV, "1")
+    assert scan_decoder_count(3840, 2160, 120.0) == 1
+    monkeypatch.setenv(SCAN_DECODERS_ENV, "3")
+    assert scan_decoder_count(3840, 2160, 120.0) == 3
+    monkeypatch.setenv(SCAN_DECODERS_ENV, "not-a-number")
+    assert scan_decoder_count(3840, 2160, 120.0) == 2
 
 
 def test_segment_sample_indices_ownership():
