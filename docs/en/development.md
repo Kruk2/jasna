@@ -140,7 +140,9 @@ needs no particular comfy-kitchen build on Linux or Windows. Those sources compi
 apart from the rest with comfy-kitchen's nvcc flags (`--use_fast_math` must not
 reach `glue.cu`) and must stay bit-identical with `comfy_kitchen.int8_attention`
 (`tests/test_ltx_native_gpu.py`); re-vendor them when the torch path's
-comfy-kitchen pin changes. NVIDIA frozen releases keep licensed blocks behind
+comfy-kitchen pin changes. The protected extension statically links the same three
+objects, and release packaging keeps their `NOTICE` in its `licenses/` directory.
+NVIDIA frozen releases keep licensed blocks behind
 the private native `block_forward` boundary; they do not expose protected
 per-Linear operators. The private extension compiles the same `jasna_ltx::Block`
 from `block.cpp`; only Store/authentication, schedule enforcement, anomaly checks

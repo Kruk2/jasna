@@ -23,5 +23,5 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def_readwrite("fp4_recipe", &Config::fp4_recipe).def_readwrite("fp4_swizzle", &Config::fp4_swizzle)
       .def_readwrite("kernels", &Config::kernels).def_readwrite("kernel_directory", &Config::kernel_directory);
   py::class_<Block>(m, "Block").def(py::init<const Config&>()).def("forward", &Block::forward)
-      .def("self_attention", &Block::self_attention);
+      .def("self_attention", &Block::self_attention).def("prompt_key_value", &Block::prompt_key_value);
 }
