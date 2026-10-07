@@ -561,9 +561,14 @@ class VideoEncoder:
         # secondary CUDA context and cross-context scheduling overhead.
         # NVENC consumes device memory, so conversion runs on its own stream and
         # overlaps the rest of the pipeline. AMF consumes host memory and the
-        # conversion is eager Torch math, so on AMD everything stays on the
-        # current stream: a private stream there let ROCm recycle in-flight
-        # conversion buffers into the restorer's allocations (issue #252).
+        # conversion is eager Torch math, so it also runs on its own stream: the
+        # eager path writes only into persistent scratch + _packed buffers (no
+        # per-call temporaries, issue #252), and the blocking host copy drains
+        # the private stream before those buffers are reused. Keeping the old
+        # current_stream here serialised every encoded frame behind a
+        # full-device barrier (stream.synchronize() on the default stream, which
+        # also carries decode/detect/restore), which became the bottleneck on
+        # clean segments where restoration is skipped and encode is the limiter.
         height = self.metadata.video_height
         width = self.metadata.video_width
         self._cuda_ctx = None
@@ -579,7 +584,7 @@ class VideoEncoder:
                 cuda_stream=self.stream.cuda_stream,
             )
         else:
-            self.stream = current_stream(self.device)
+            self.stream = new_stream(self.device)
             self._packed = torch.empty(
                 (height + height // 2, width),
                 dtype=self._converter.sample_dtype,
