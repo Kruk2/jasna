@@ -227,19 +227,29 @@ def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[i
         return None
 
 
+def release_architectures() -> list[tuple[int, int]]:
+    """Every SM a release build compiles the native block for: those with tuned INT8 kernels."""
+    return sorted({*kernels.INT8_MM_TILES, *kernels.CUBLAS_INT8_MM})
+
+
+def cuda_arch_list() -> str:
+    """``TORCH_CUDA_ARCH_LIST`` for a release build of code that links the native block."""
+    return ";".join(f"{major}.{minor}" for major, minor in release_architectures())
+
+
 def prebuild(directory: Path) -> None:
     """Release build: kernels for every architecture of the kernel tables and the extension for
     all of them, laid out as ``PREBUILT`` expects (copy ``directory`` there)."""
     from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors
 
-    archs = sorted({*kernels.INT8_MM_TILES, *kernels.CUBLAS_INT8_MM})
+    archs = release_architectures()
     for quantization in ("int8", "nvfp4"):
         specs = PlaceholderHandle(PlaceholderTensors(quantization, "distilled")).tensor_specs()
         dims = BlockDims.from_specs({name.split(".", 2)[2]: spec for name, spec in specs.items() if name.startswith("blocks.0.")})
         for capability in archs:
             if quantization == "int8" or capability in FP4_ARCHS:
                 build_kernels(capability, dims, fp4=quantization == "nvfp4", cache=directory / "kernels")
-    os.environ["TORCH_CUDA_ARCH_LIST"] = ";".join(f"{major}.{minor}" for major, minor in archs)
+    os.environ["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list()
     module = _build_extension(directory / "build")
     shutil.copy2(module.__file__, directory / Path(module.__file__).name)
     shutil.rmtree(directory / "build")

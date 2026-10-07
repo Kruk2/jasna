@@ -108,6 +108,11 @@ def test_extension_build_finds_ninja_from_its_package_when_off_path(monkeypatch,
     assert ninja.BIN_DIR in native._build_extension(tmp_path / "build")
 
 
+def test_release_arch_list_covers_every_sm_with_tuned_int8_kernels():
+    archs = {tuple(int(part) for part in arch.split(".")) for arch in native.cuda_arch_list().split(";")}
+    assert archs == {*kernels.INT8_MM_TILES, *kernels.CUBLAS_INT8_MM}
+
+
 def test_native_block_can_be_turned_off(monkeypatch):
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     assert native.load(torch.device("cuda"), _block_specs("int8")) is None
