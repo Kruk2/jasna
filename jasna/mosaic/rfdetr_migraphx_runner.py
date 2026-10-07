@@ -237,6 +237,7 @@ class RfDetrMigraphxRunner:
             self.onnx_path.name, used, time.perf_counter() - t0,
         )
 
+        self._pinned: torch.Tensor | None = None
         self.input_names = ["input"]
         self.input_dtypes: dict[str, torch.dtype] = {"input": torch.float16}
         self.output_names = list(_ONNX_OUTPUT_NAMES)
@@ -245,9 +246,33 @@ class RfDetrMigraphxRunner:
             shape = tuple(dim if isinstance(dim, int) else -1 for dim in out.shape)
             self.outputs[out.name] = TorchTensorInfo(shape, _ORT_DTYPE.get(out.type, torch.float32))
 
+        # Warm up once: the first real batch would otherwise pay for lazy GPU
+        # kernel initialisation inside the pipeline's first frames.
+        dummy = torch.zeros(
+            (self.batch_size, 3, self.resolution, self.resolution),
+            dtype=torch.float16, device=self.device,
+        )
+        self.infer({self.input_names[0]: dummy})
+
+    def _pinned_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Persistent pinned staging buffer for the fp16 input.
+
+        Copying straight to host memory allocates a fresh pageable buffer on
+        every call; a pinned buffer keeps the D2H fast and lets ORT read the
+        data without another copy (numpy() is a zero-copy view).
+        """
+        shape = tuple(x.shape)
+        buf = self._pinned
+        if buf is None or tuple(buf.shape) != shape:
+            self._pinned = torch.empty(shape, dtype=torch.float16, pin_memory=True)
+            buf = self._pinned
+        buf.copy_(x.detach().to(torch.float16), non_blocking=True)
+        torch.cuda.synchronize()
+        return buf
+
     def infer(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         x = inputs["input"]
-        feed = {self.input_names[0]: x.detach().to(torch.float16).cpu().numpy()}
+        feed = {self.input_names[0]: self._pinned_input(x).numpy()}
         outs = self._session.run(None, feed)
         # dets/labels are tiny -> straight to the GPU. Masks are ~200x too big to
         # round-trip (B, Q, 120, 120): they are handed back as a zero-copy CPU

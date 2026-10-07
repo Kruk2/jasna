@@ -281,10 +281,20 @@ class RfDetrMosaicDetectionModel:
         masks_list: list[torch.Tensor] = []
         gpu_device = pred_boxes.device
         valid_mask_masks_device = valid_mask.to(pred_masks.device)
+        empty = pred_masks.new_empty(0, hm, wm, dtype=torch.bool)
         for i in range(b):
             valid_i = valid_mask_cpu[i]
             boxes_list.append(boxes_cpu[i][valid_i])  # (N_i, 4) CPU
-            masks_list.append(masks[i][valid_mask_masks_device[i]].to(gpu_device, non_blocking=True))  # (N_i, Hm, Wm)
+            # Only touch the mask planes of the queries that actually passed the
+            # threshold: on clean footage that is none of them, so the (Q, Hm,
+            # Wm) gather is skipped entirely instead of being built and thrown
+            # away.
+            idx = valid_mask_masks_device[i].nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                masks_list.append(empty.to(gpu_device))
+                continue
+            selected = pred_masks[i].index_select(0, mask_boxes[i][idx]) > 0.0
+            masks_list.append(selected.to(gpu_device, non_blocking=True))  # (N_i, Hm, Wm)
 
         return boxes_list, masks_list
 
