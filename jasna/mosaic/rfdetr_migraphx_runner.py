@@ -15,7 +15,12 @@ ROCm 10.1 / EP package MicrosoftCorporationII.WinML.AMD.GPU.EP.1.8):
 * ``onnxruntime_providers_migraphx.dll`` copied next to ORT's own onnxruntime.dll - ORT's
   provider bridge resolves providers from its own capi folder only,
 * the EP package's sibling runtimes (migraphx*.dll, amdhip64_7.dll, ...) preloaded by
-  full path, because bare-name loads do not find them once ORT narrows the search path,
+  full path, because bare-name loads do not find them once ORT narrows the search path.
+  They may come from a self-contained copy instead of the Windows ML catalogue, which
+  keeps an installation off ``C:\\Program Files\\WindowsApps``: see
+  ``migraphx_ep_dir_candidates`` - ``$JASNA_MIGRAPHX_EP_DIR``, ``model_weights/migraphx-ep``
+  or ``ep/amd`` (verified: session created and inference run with every runtime loaded
+  from such a directory),
 * no ``HIP_VISIBLE_DEVICES``: the plugin routes on the HIP device it sees, and setting it
   to the discrete card makes it see the integrated GPU instead and fall back to DirectML,
 * ``migraphx_model_cache_dir`` for the compiled-program cache; the first session compiles
@@ -48,6 +53,62 @@ _ONNX_OUTPUT_NAMES = ("dets", "labels", "masks")
 _LOAD_WITH_ALTERED_SEARCH_PATH = 0x00000008
 _ORT_DTYPE = {"tensor(float)": torch.float32, "tensor(float16)": torch.float16}
 
+_MIGRAPHX_PROVIDER_DLL = "onnxruntime_providers_migraphx.dll"
+
+#: Environment override pointing at a self-contained copy of the EP runtimes.
+MIGRAPHX_EP_DIR_ENV = "JASNA_MIGRAPHX_EP_DIR"
+
+#: DLLs the classic MIGraphX provider must not preload. They are the Windows ML plugin
+#: rail (an EP front-end and the DirectML backend) that the provider's own import table
+#: never references; preloading them drags their initialisation into the process, which
+#: is where the first-run crashes in amdgpu-ep.dll / directml-backend.dll came from.
+_SKIP_PRELOAD = frozenset({"amdgpu-ep.dll", "directml-backend.dll"})
+
+#: HIP targets the bundled MIGraphX runtime ships device kernels for. One package covers
+#: both generations: migraphx_device.dll carries gfx1100-gfx1103 and gfx1150-gfx1152
+#: (RDNA 3 / 3.5, RX 7000-8000) *and* gfx1200/gfx1201 (RDNA 4, RX 9000), and JIT compiles
+#: for whatever the local card reports through the bundled comgr/hipRTC.
+MIGRAPHX_SUPPORTED_ARCHS = frozenset({
+    "gfx1100", "gfx1101", "gfx1102", "gfx1103",
+    "gfx1150", "gfx1151", "gfx1152",
+    "gfx1200", "gfx1201",
+})
+
+
+def migraphx_ep_dir_candidates() -> list[Path]:
+    """Directories that may hold a self-contained copy of the EP runtimes, best first.
+
+    ``$JASNA_MIGRAPHX_EP_DIR`` wins, then ``model_weights/migraphx-ep`` and ``ep/amd``.
+    The last two resolve exactly like ``model_weights`` (working directory, or the folder
+    of the executable in a frozen build), so a portable tree can ship the runtimes next to
+    the models and never touch ``C:\\Program Files\\WindowsApps``.
+    """
+    candidates: list[Path] = []
+    override = os.environ.get(MIGRAPHX_EP_DIR_ENV, "").strip()
+    if override:
+        candidates.append(Path(override).expanduser())
+    candidates.append(model_weights_dir() / "migraphx-ep")
+    candidates.append(Path("ep") / "amd")
+    return candidates
+
+
+def find_local_ep_dir() -> Path | None:
+    """The first candidate directory that actually carries the provider, else ``None``."""
+    for candidate in migraphx_ep_dir_candidates():
+        if (candidate / _MIGRAPHX_PROVIDER_DLL).is_file():
+            return candidate
+    return None
+
+
+def hip_arch(device_index: int = 0) -> str | None:
+    """The local GPU's HIP target (``gfx1100``, ...) or ``None`` when it cannot be read."""
+    try:
+        props = torch.cuda.get_device_properties(int(device_index))
+    except Exception:  # pragma: no cover - no GPU / no usable ROCm runtime
+        return None
+    arch = str(getattr(props, "gcnArchName", "") or "").split(":")[0].strip()
+    return arch or None
+
 
 def migraphx_cache_dir() -> Path:
     return model_weights_dir() / "migraphx-cache"
@@ -68,7 +129,21 @@ def _clean_hip_env() -> None:
 
 
 def _ep_package() -> tuple[Path, Path]:
-    """The EP package folder and its classic MIGraphX provider library."""
+    """The folder holding the classic MIGraphX provider, and the provider library itself.
+
+    A self-contained copy of the runtimes (see :func:`find_local_ep_dir`) is preferred, so
+    a portable installation never has to find or register the Windows ML package under
+    ``C:\\Program Files\\WindowsApps``. Otherwise the Windows ML catalogue supplies the
+    package Windows installed for this machine.
+    """
+    local = find_local_ep_dir()
+    if local is not None:
+        # Resolve first: the candidates are built like model_weights (relative in a source
+        # checkout) and os.add_dll_directory only takes absolute paths.
+        local = local.resolve()
+        logger.info("MIGraphX EP runtimes: %s (bundled copy)", local)
+        return local, (local / _MIGRAPHX_PROVIDER_DLL)
+
     try:
         from windowsml import EpCatalog
     except ImportError as exc:  # pragma: no cover - environment problem
@@ -96,10 +171,23 @@ def _ep_package() -> tuple[Path, Path]:
 
 
 def _prepare_ort_for_migraphx() -> None:
-    """Copy the provider next to ORT's own DLLs and preload the package runtimes."""
+    """Copy the provider next to ORT's own DLLs and preload the runtime dependencies."""
     import onnxruntime as ort
 
     ep_dir, provider_lib = _ep_package()
+
+    arch = hip_arch()
+    if arch is None:
+        logger.debug("MIGraphX: could not read the local GPU's HIP target")
+    elif arch in MIGRAPHX_SUPPORTED_ARCHS:
+        logger.info("MIGraphX: GPU target %s is supported by the bundled runtime", arch)
+    else:
+        logger.warning(
+            "MIGraphX: GPU target %s is not in the runtime's supported set (%s); "
+            "the detector falls back to the torch path if the EP cannot engage",
+            arch, ", ".join(sorted(MIGRAPHX_SUPPORTED_ARCHS)),
+        )
+
     os.add_dll_directory(str(ep_dir))
 
     capi = Path(ort.__file__).parent / "capi"
@@ -113,11 +201,14 @@ def _prepare_ort_for_migraphx() -> None:
     k32.LoadLibraryExW.argtypes = [wintypes.LPCWSTR, wintypes.HANDLE, wintypes.DWORD]
     loaded = 0
     for dll in sorted(glob.glob(str(ep_dir / "*.dll"))):
-        if Path(dll).name == provider_lib.name:
+        name = Path(dll).name
+        # ORT loads the provider itself, from its own capi folder. The Windows ML plugin
+        # rail beside it is never imported by the classic provider, so skip it.
+        if name == provider_lib.name or name.lower() in _SKIP_PRELOAD:
             continue
         if k32.LoadLibraryExW(dll, None, _LOAD_WITH_ALTERED_SEARCH_PATH):
             loaded += 1
-    logger.debug("MIGraphX: preloaded %d EP package DLLs", loaded)
+    logger.debug("MIGraphX: preloaded %d EP runtime DLLs from %s", loaded, ep_dir)
 
 
 def export_rfdetr_onnx_fp16(
@@ -229,8 +320,8 @@ class RfDetrMigraphxRunner:
         used = self._session.get_providers()
         if "MIGraphXExecutionProvider" not in used:
             raise RuntimeError(
-                f"MIGraphX engine did not engage (session providers: {used}); "
-                "the model would run on the CPU"
+                f"MIGraphX engine did not engage (session providers: {used}; "
+                f"GPU target: {hip_arch() or 'unreadable'}); the model would run on the CPU"
             )
         logger.info(
             "RF-DETR MIGraphX session ready: %s (providers=%s, setup %.1f s)",

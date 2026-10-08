@@ -112,6 +112,13 @@ session = ort.InferenceSession(model, providers=[
   through ORT's own `register_execution_provider_library` is not enough: the provider
   bridge resolves `onnxruntime_providers_<name>.dll` next to ORT's `onnxruntime.dll`, so
   the file has to be copied there and its siblings preloaded.
+* Preloading the *whole* folder is not necessary. The classic provider's import table is
+  only `migraphx_c.dll`, `onnxruntime_providers_shared.dll`, `WS2_32.dll`, `amdhip64_7.dll`
+  and `KERNEL32.dll` (`dumpbin /dependents`); jasna therefore preloads everything in the
+  folder **except** `amdgpu-ep.dll` and `directml-backend.dll`. Those two belong to the
+  plugin rail and the DirectML fallback described further down, the provider never imports
+  them, and letting their initialisation run inside the process is what produced the
+  first-run aborts. See "Running the runtimes from a bundled directory" below.
 * **Do not set `HIP_VISIBLE_DEVICES`.** The plugin routes on the HIP device it sees:
   unset / `0` / `0,1` / `ROCR_VISIBLE_DEVICES=0` → `arch=gfx1100` → **MIGraphX**;
   `HIP_VISIBLE_DEVICES=1` → `arch=gfx1036` → **DirectML**. Routing can be traced with
@@ -120,6 +127,59 @@ session = ort.InferenceSession(model, providers=[
 * Only `device_id` is accepted by the classic provider; `cache_dir`, `force_recompile`,
   `exhaustive_tune`, `static_pad_*`, `pinned`, `profile` belong to the plugin wrapper
   (`amdgpu-ep.dll`), where `Unknown provider option` silently falls back to CPU.
+
+## Running the runtimes from a bundled directory (no WindowsApps, no Store)
+
+The EP package is a system component: Windows installs it on demand under
+`C:\Program Files\WindowsApps\MicrosoftCorporationII.WinML.AMD.GPU.EP.1.8_*`, which is the
+one piece a portable build cannot ship and a machine without the Store (or offline) cannot
+obtain. jasna resolves the runtime folder in this order and takes the first hit:
+
+1. `$JASNA_MIGRAPHX_EP_DIR`
+2. `model_weights/migraphx-ep` (resolved like `model_weights` itself)
+3. `ep/amd`
+4. otherwise the Windows ML catalogue, i.e. the behaviour described above — unchanged
+
+A candidate counts when it contains `onnxruntime_providers_migraphx.dll`.
+
+**Verified**: a byte-identical copy of the package's `ExecutionProvider\` (17 files,
+431 MB) placed in a local folder makes the session come up with *every* runtime loaded
+from that folder and nothing from `WindowsApps`. `GetModuleFileNameW` on the preloaded
+handles reports e.g. `D:\...\ep_local\migraphx_gpu.dll`, `...\amdhip64_7.dll`, and a batch-8
+480x480 inference then runs with outputs `dets (8,200,4)`, `labels (8,200,3)`,
+`masks (8,200,120,120)` in 0.083-0.095 s (0.079 s warm, compiled program from the `.mxr`
+cache). The provider itself is still copied next to ORT's own DLLs, as before.
+
+### One package covers RDNA 3 and RDNA 4 - there is nothing per-generation to pick
+
+Distinct `gfx` markers per binary of EP 1.8.64.0:
+
+| binary | gfx1100 | gfx1101 | gfx1102 | gfx1103 | gfx1150-1152 | gfx1200 | gfx1201 |
+| ------ | ------: | ------: | ------: | ------: | -----------: | ------: | ------: |
+| `migraphx_device.dll` (19 MB) | 11 | 11 | 11 | 11 | 11 each | **11** | **12** |
+| `migraphx_gpu.dll` (99 MB) | 9 | 4 | 1 | 12 | 9-12 | **3** | **12** |
+| `amdgpu-ep.dll` | 45 | - | - | - | 32 | **33** | **74** |
+| `amdhip64_7.dll` | 3 | 3 | 3 | 4 | 4 | **3** | **3** |
+| `amd_comgr0702.dll`, `amd_comgr_3.dll`, `hiprtc0702.dll` | every target listed (JIT toolchain) |
+
+`gfx110x`/`gfx115x` are RDNA 3 / 3.5 (RX 7000-8000), `gfx1200`/`gfx1201` are RDNA 4
+(RX 9000), and MIGraphX JIT-compiles for whichever target the local card reports through
+the bundled comgr/hipRTC. So the ESP catalogue offers a single AMD GPU EP
+(`MIGraphXExecutionProvider`) on this machine and one runtime covers both generations.
+`migraphx_device.dll` carries no `gfx103x`, which is why RDNA 2 (RX 6000) stays outside
+this engine - `jasna/mosaic/rfdetr_migraphx_runner.MIGRAPHX_SUPPORTED_ARCHS` lists the
+targets it will claim support for, and a card outside it falls back to the torch path
+with a warning instead of failing obscurely.
+
+### Portable package
+
+`scripts/portable/first_run_setup.ps1` (driven by `scripts/portable/首次运行-一键配置.bat`,
+Windows PowerShell 5.1, UTF-8 with BOM) performs the first-run setup of a portable tree:
+writes `venv\pyvenv.cfg` and the `app` path, detects the GPU arch and checks/installs the
+ROCm device packages, fills `app\model_weights\migraphx-ep` from the bundled copy or from
+the installed Windows ML package, and finally creates a real MIGraphX session as a
+self-test. All steps are idempotent and skippable (`-CheckOnly`, `-SkipRocm`,
+`-SkipSelfTest`).
 
 ## What does not work
 
