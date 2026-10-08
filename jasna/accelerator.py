@@ -129,6 +129,28 @@ _VISIBLE_DEVICES_ENV = ("HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES")
 _KEEP_VISIBLE_DEVICES_ENV = "JASNA_KEEP_HIP_VISIBLE_DEVICES"
 
 
+def _device_pin_file() -> str | None:
+    """A stale ``sitecustomize.py`` that pins device visibility, if one is installed.
+
+    ``sitecustomize`` is imported by ``site`` before the application runs, so a helper
+    that writes ``HIP_VISIBLE_DEVICES`` from a cached index re-applies the pin inside
+    every interpreter: clearing the variable at the entry point changes nothing, and the
+    symptom looks like a driver problem.
+    """
+    import site
+
+    directories = [*site.getsitepackages(), site.getusersitepackages()]
+    for directory in directories:
+        candidate = Path(directory) / "sitecustomize.py"
+        try:
+            text = candidate.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        if "HIP_VISIBLE_DEVICES" in text:
+            return str(candidate)
+    return None
+
+
 def allow_all_devices(environ: MutableMapping[str, str] | None = None) -> None:
     """Drop a device-visibility variable so every GPU is enumerated again.
 
@@ -148,6 +170,13 @@ def allow_all_devices(environ: MutableMapping[str, str] | None = None) -> None:
                 "jasna can pick the discrete Radeon (set %s=1 to keep the restriction)",
                 name, value, _KEEP_VISIBLE_DEVICES_ENV,
             )
+            pin = _device_pin_file()
+            if pin:
+                logger.warning(
+                    "%s is pinned again at every interpreter start by %s; rename it to "
+                    "sitecustomize.py.disabled (or delete it) to keep the pin gone",
+                    name, pin,
+                )
 
 
 def configure_rocm_process_env() -> None:
