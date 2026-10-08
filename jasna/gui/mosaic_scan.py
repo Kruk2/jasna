@@ -35,6 +35,7 @@ from jasna.mosaic.scan import (
     segments_from_scores,
 )
 from jasna.segments import SegmentRange, normalize_segments
+from jasna.accelerator import preferred_device
 
 __all__ = [
     "SCAN_MASK_HW",
@@ -368,7 +369,7 @@ class MosaicScanWorker:
         from jasna.session_factory import build_compiled_detection_model
 
         settings = self.settings
-        device = torch.device("cuda:0")
+        device = preferred_device()
         detection_model_name, detection_model_path, _ = resolve_detection_model(
             str(settings.detection_model), "", None
         )
@@ -403,7 +404,7 @@ class MosaicScanWorker:
         from jasna.media.video_decoder import VideoReader
 
         metadata = self.metadata
-        device = torch.device("cuda:0")
+        device = preferred_device()
         duration = float(metadata.duration)
         time_base = float(metadata.time_base)
         frame_stride = scan_sample_stride(metadata.video_fps, seconds=self.stride_seconds)
@@ -592,7 +593,7 @@ class MosaicScanWorker:
         from jasna.media.video_decoder import VideoReader
 
         metadata = self.metadata
-        device = torch.device("cuda:0")
+        device = preferred_device()
         batch_size = int(self.settings.batch_size)
         reader = VideoReader(
             str(self.path),

@@ -167,6 +167,27 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
     raise ValueError(f"Unsupported secondary restoration: {config.secondary_restoration}")
 
 
+def _resolve_device(requested: str) -> "torch.device":
+    """The device to run on, preferring a discrete Radeon over an iGPU at index 0.
+
+    Some driver builds enumerate a Ryzen iGPU first, and everything that used ``cuda:0``
+    then targeted it: the whole pipeline would run on the slowest device in the machine,
+    and the MIGraphX engine aborts there because ``gfx103x`` has no device code
+    (``RUNTIME_EXCEPTION ... Failed to call function``). Only the default (``cuda`` /
+    ``cuda:0``) is remapped, so an explicit ``--device cuda:1`` keeps its meaning, and a
+    machine with no discrete Radeon (Strix Halo, NVIDIA, CPU) is unaffected.
+    """
+    import torch
+
+    from jasna.accelerator import preferred_gpu_index
+
+    device = torch.device(requested)
+    if device.type != "cuda" or device.index not in (None, 0):
+        return device
+    index = preferred_gpu_index()
+    return torch.device(f"cuda:{index}") if index else device
+
+
 def build_restoration_session(
     config: SessionConfig,
     *,
@@ -176,7 +197,12 @@ def build_restoration_session(
 
     from jasna.accelerator import is_amd_device
 
-    device = torch.device(config.device)
+    device = _resolve_device(config.device)
+    if log_callback is not None and device != torch.device(config.device):
+        log_callback(
+            f"device 0 is not a discrete Radeon; running on {device} instead "
+            f"(the requested '{config.device}' was the default, pass --device to override)"
+        )
     if config.tvai_denoise and config.secondary_restoration != "tvai":
         raise ValueError("TVAI Denoise requires secondary restoration 'tvai'")
     if config.secondary_restoration == "amd-upscale" and not is_amd_device(device):

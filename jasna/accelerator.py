@@ -166,6 +166,56 @@ def is_amd_device(device: torch.device | str | None = None) -> bool:
     return vendor_for_device(device) is AcceleratorVendor.AMD
 
 
+#: RDNA 3 / 4 *discrete* cards. Integrated Radeons (gfx103x, gfx1103, gfx115x) share
+#: system memory and carry no MIGraphX device code at all, so a desktop whose driver
+#: order puts the iGPU first would otherwise run the whole pipeline - and the detection
+#: engine - on the wrong device.
+DISCRETE_RADEON_ARCHS = frozenset({
+    "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201",
+})
+
+
+def hip_device_archs() -> list[str]:
+    """``gcnArchName`` of every CUDA/HIP device, in the runtime's device order."""
+    try:
+        count = int(torch.cuda.device_count())
+    except Exception:  # pragma: no cover - no GPU / no usable runtime
+        return []
+    archs: list[str] = []
+    for index in range(count):
+        try:
+            props = torch.cuda.get_device_properties(index)
+            arch = str(getattr(props, "gcnArchName", "") or "").split(":")[0].strip()
+        except Exception:  # pragma: no cover - depends on the runtime
+            arch = ""
+        archs.append(arch)
+    return archs
+
+
+def preferred_gpu_index() -> int:
+    """Device index jasna should run on: the first *discrete* Radeon, otherwise 0.
+
+    Some driver builds enumerate a Ryzen iGPU as device 0 and the discrete card as
+    device 1. Everything that hard-coded ``cuda:0`` then targeted the iGPU: the MIGraphX
+    execution provider aborts on ``gfx103x`` (``RUNTIME_EXCEPTION ... Failed to call
+    function``, there is no device code for it) and the rest of the pipeline runs on the
+    slowest device in the machine. Selecting the discrete Radeon keeps the caller on the
+    card the user actually bought. Machines without one - a Strix Halo APU, an NVIDIA
+    card, plain CPU - keep device 0, so this is a no-op for them.
+    """
+    if not torch.version.hip:
+        return 0
+    for index, arch in enumerate(hip_device_archs()):
+        if arch in DISCRETE_RADEON_ARCHS:
+            return index
+    return 0
+
+
+def preferred_device() -> torch.device:
+    """The device jasna should use: :func:`preferred_gpu_index` resolved to a device."""
+    return torch.device(f"cuda:{preferred_gpu_index()}")
+
+
 def device_module(device: torch.device | str):
     return torch.get_device_module(torch.device(device))
 

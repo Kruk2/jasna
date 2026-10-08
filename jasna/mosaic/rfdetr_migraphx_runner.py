@@ -44,6 +44,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from jasna.accelerator import DISCRETE_RADEON_ARCHS
 from jasna.engine_paths import model_weights_dir
 from jasna.mosaic.rfdetr_torch_runner import TorchTensorInfo, _VARIANT_CLASSES
 
@@ -100,14 +101,51 @@ def find_local_ep_dir() -> Path | None:
     return None
 
 
-def hip_arch(device_index: int = 0) -> str | None:
-    """The local GPU's HIP target (``gfx1100``, ...) or ``None`` when it cannot be read."""
+def hip_device_archs() -> list[str]:
+    """``gcnArchName`` of every HIP device, in the runtime's device order.
+
+    Empty strings stand for devices whose arch cannot be read.
+    """
     try:
-        props = torch.cuda.get_device_properties(int(device_index))
+        count = int(torch.cuda.device_count())
     except Exception:  # pragma: no cover - no GPU / no usable ROCm runtime
+        return []
+    archs: list[str] = []
+    for index in range(count):
+        try:
+            props = torch.cuda.get_device_properties(index)
+            arch = str(getattr(props, "gcnArchName", "") or "").split(":")[0].strip()
+        except Exception:  # pragma: no cover - depends on the runtime
+            arch = ""
+        archs.append(arch)
+    return archs
+
+
+def migraphx_device_index() -> int:
+    """Index of the HIP device the MIGraphX engine should use.
+
+    A desktop Ryzen with a discrete Radeon exposes its iGPU (``gfx103x``) as device 0,
+    while the card the bundled kernels actually cover sits at device 1 - the EP then
+    reports ``RUNTIME_EXCEPTION ... Failed to call function`` because the iGPU has no
+    MIGraphX device code. Walking the device list for a supported target keeps the
+    engine on the discrete card; ``0`` stays the answer when nothing matches, so
+    single-GPU machines and the usual discrete-first ordering are unaffected.
+    """
+    for index, arch in enumerate(hip_device_archs()):
+        if arch in DISCRETE_RADEON_ARCHS:
+            return index
+    return 0
+
+
+def hip_arch(device_index: int | None = None) -> str | None:
+    """The HIP target (``gfx1100``, ...) of the device MIGraphX will use, or ``None``."""
+    archs = hip_device_archs()
+    if not archs:
         return None
-    arch = str(getattr(props, "gcnArchName", "") or "").split(":")[0].strip()
-    return arch or None
+    index = migraphx_device_index() if device_index is None else int(device_index)
+    if not 0 <= index < len(archs):
+        return None
+    return archs[index] or None
 
 
 def migraphx_cache_dir() -> Path:
@@ -176,11 +214,22 @@ def _prepare_ort_for_migraphx() -> None:
 
     ep_dir, provider_lib = _ep_package()
 
+    archs = hip_device_archs()
+    device_index = migraphx_device_index()
     arch = hip_arch()
     if arch is None:
         logger.debug("MIGraphX: could not read the local GPU's HIP target")
     elif arch in MIGRAPHX_SUPPORTED_ARCHS:
-        logger.info("MIGraphX: GPU target %s is supported by the bundled runtime", arch)
+        logger.info(
+            "MIGraphX: using HIP device %d (%s), covered by the bundled runtime",
+            device_index, arch,
+        )
+        if device_index != 0:
+            logger.info(
+                "MIGraphX: HIP device 0 is %s, which the MIGraphX kernels do not cover - "
+                "run the pipeline on the same card with --device cuda:%d",
+                archs[0] if archs and archs[0] else "an unsupported target", device_index,
+            )
     else:
         logger.warning(
             "MIGraphX: GPU target %s is not in the runtime's supported set (%s); "
@@ -313,7 +362,8 @@ class RfDetrMigraphxRunner:
             sess_options=ort.SessionOptions(),
             providers=[
                 ("MIGraphXExecutionProvider",
-                 {"device_id": "0", "migraphx_model_cache_dir": str(cache_dir)}),
+                 {"device_id": str(migraphx_device_index()),
+                  "migraphx_model_cache_dir": str(cache_dir)}),
                 "CPUExecutionProvider",
             ],
         )

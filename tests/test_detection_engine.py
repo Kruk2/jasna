@@ -189,3 +189,33 @@ def test_hip_arch_is_read_or_none():
 
     arch = hip_arch()
     assert arch is None or arch.startswith("gfx")
+
+
+def test_migraphx_skips_an_igpu_on_device_zero(monkeypatch):
+    # A Ryzen desktop exposes the iGPU (gfx103x) first; the discrete card the kernels
+    # cover sits at index 1. The engine must not pick the iGPU.
+    from jasna.mosaic import rfdetr_migraphx_runner as mod
+
+    monkeypatch.setattr(mod, "hip_device_archs", lambda: ["gfx1036", "gfx1201"])
+
+    assert mod.migraphx_device_index() == 1
+    assert mod.hip_arch() == "gfx1201"
+
+
+def test_migraphx_device_index_unchanged_when_discrete_is_first(monkeypatch):
+    from jasna.mosaic import rfdetr_migraphx_runner as mod
+
+    monkeypatch.setattr(mod, "hip_device_archs", lambda: ["gfx1100", "gfx1036"])
+    assert mod.migraphx_device_index() == 0
+    assert mod.hip_arch() == "gfx1100"
+
+
+def test_migraphx_device_index_defaults_to_zero(monkeypatch):
+    from jasna.mosaic import rfdetr_migraphx_runner as mod
+
+    monkeypatch.setattr(mod, "hip_device_archs", lambda: ["gfx1036"])
+    assert mod.migraphx_device_index() == 0
+
+    monkeypatch.setattr(mod, "hip_device_archs", lambda: [])
+    assert mod.migraphx_device_index() == 0
+    assert mod.hip_arch() is None
