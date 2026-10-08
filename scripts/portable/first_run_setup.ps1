@@ -100,8 +100,40 @@ if (-not $CheckOnly) {
     $pth = Join-Path $venv 'Lib\site-packages\zz_jasna_path.pth'
     Set-Content -Path $pth -Value $app -Encoding ascii
     Ok 'venv 配置已写入（pyvenv.cfg + app 路径）'
+
+    # A stale helper that an earlier build shipped inside this venv: sitecustomize.py
+    # rewrites HIP_VISIBLE_DEVICES at every interpreter start from _dgpu_index.txt, an
+    # index probed on whichever machine assembled the package. `site` imports
+    # sitecustomize before the application runs, so on a machine whose device 0 is the
+    # Ryzen iGPU it hides the discrete Radeon: the pipeline runs on the iGPU and the
+    # detection engine dies with "Failed to call function". Clearing the variable at the
+    # entry point does not help either, because the helper puts it straight back.
+    # Renamed instead of deleted, so it can be restored by hand.
+    $sitePkgs = Join-Path $venv 'Lib\site-packages'
+    $pinFile = Join-Path $sitePkgs 'sitecustomize.py'
+    $pinCache = Join-Path $sitePkgs '_dgpu_index.txt'
+    if (Test-Path $pinFile) {
+        $pinText = Get-Content -Raw -Encoding UTF8 $pinFile -ErrorAction SilentlyContinue
+        if ($pinText -match 'HIP_VISIBLE_DEVICES') {
+            $pinBackup = $pinFile + '.disabled'
+            if (Test-Path $pinBackup) { Remove-Item $pinBackup -Force -ErrorAction SilentlyContinue }
+            Move-Item $pinFile $pinBackup -Force -ErrorAction SilentlyContinue
+            Ok '已禁用残留的 GPU 钉选文件（改名为 sitecustomize.py.disabled，可随时还原）'
+        }
+    }
+    if (Test-Path $pinCache) {
+        Remove-Item $pinCache -Force -ErrorAction SilentlyContinue
+        Ok '已删除过期的钉选缓存 _dgpu_index.txt（里面存的是别的机器上的设备号）'
+    }
 } else {
     Info 'CheckOnly：跳过 venv 配置写入'
+    $pinProbe = Join-Path $venv 'Lib\site-packages\sitecustomize.py'
+    if (Test-Path $pinProbe) {
+        $pinText = Get-Content -Raw -Encoding UTF8 $pinProbe -ErrorAction SilentlyContinue
+        if ($pinText -match 'HIP_VISIBLE_DEVICES') {
+            Warn ('venv 里有残留的 GPU 钉选文件，它会隐藏显卡；正常配置会自动禁用它：' + $pinProbe)
+        }
+    }
 }
 $env:PYTHONPATH = $app
 
@@ -269,28 +301,6 @@ if ($SkipSelfTest) {
 } elseif ($CheckOnly) {
     Info 'CheckOnly：跳过（自检会向 venv 写入 provider 并加载模型）'
 } else {
-    # A stale sitecustomize.py that pins HIP_VISIBLE_DEVICES re-applies it inside every
-    # interpreter, so clearing the variable is not enough - the file itself has to go.
-    # Seen in the field: a shipped venv carried a cached index (0) from a machine whose
-    # device 0 was the iGPU, which then hid the discrete card everywhere else and made
-    # the detection engine fail with "Failed to call function".
-    $sitePkgs = Join-Path $venv 'Lib\site-packages'
-    $pinFile = Join-Path $sitePkgs 'sitecustomize.py'
-    $pinCache = Join-Path $sitePkgs '_dgpu_index.txt'
-    if (Test-Path $pinFile) {
-        $pinText = Get-Content -Raw -Encoding UTF8 $pinFile -ErrorAction SilentlyContinue
-        if ($pinText -match 'HIP_VISIBLE_DEVICES') {
-            $pinBackup = $pinFile + '.disabled'
-            if (Test-Path $pinBackup) { Remove-Item $pinBackup -Force -ErrorAction SilentlyContinue }
-            Move-Item $pinFile $pinBackup -Force -ErrorAction SilentlyContinue
-            Ok ('已禁用残留的 GPU 钉选文件（改名为 sitecustomize.py.disabled，可随时还原）：' + $pinFile)
-        }
-    }
-    if (Test-Path $pinCache) {
-        Remove-Item $pinCache -Force -ErrorAction SilentlyContinue
-        Ok '已删除过期的钉选缓存 _dgpu_index.txt（里面存的是别的机器上的设备号）'
-    }
-
     # The app clears these itself before it enumerates GPUs (jasna.accelerator.
     # allow_all_devices): they hide devices from the HIP runtime while HSA-level tools
     # still list them, which is how a machine ends up running on its iGPU. Do the same
