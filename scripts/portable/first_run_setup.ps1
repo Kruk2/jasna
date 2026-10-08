@@ -176,9 +176,14 @@ if ($SkipRocm) {
         if (Test-Path $setup) {
             Info ('需要补装，正在执行 setup-rocm101-gpu.ps1 -Gfx ' + $gfx + ' ...')
             $wheelDir = Join-Path $pkg 'wheels'
-            $setupArgs = @('-Gfx', $gfx)
-            if (Test-Path $wheelDir) { $setupArgs += @('-WheelDir', $wheelDir); Info '（优先使用包内 wheels\ 离线安装）' }
-            & $setup @setupArgs
+            # splat a HASHTABLE so the values bind by name; an array splat would pass
+            # them positionally ('-Gfx' lands in -Venv, the script's first parameter)
+            $setupParams = @{ Gfx = $gfx }
+            if (Test-Path $wheelDir) {
+                $setupParams['WheelDir'] = $wheelDir
+                Info '（优先使用包内 wheels\ 离线安装）'
+            }
+            & $setup @setupParams
             if ($LASTEXITCODE -eq 0) { Ok 'ROCm 组件安装流程结束' } else { Warn 'setup-rocm101-gpu.ps1 返回非 0，请看上面的输出' }
         } else {
             Warn '找不到 setup-rocm101-gpu.ps1，无法自动补装'
