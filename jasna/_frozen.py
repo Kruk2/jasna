@@ -9,8 +9,8 @@ The NVIDIA build preserves the bytecode and introspection data Dynamo needs.
 torch.compile in the binary: Inductor compiles in-process (its worker pool would re-launch
 the jasna binary) and keys its caches on the torch version (its source-tree hash cannot
 walk the bundled torch). Triton finds its GPU backends by scanning its package (no pip
-metadata is shipped), and on Linux loads the C helper modules the build ships in
-``triton_prebuilt/`` instead of compiling them with gcc, which users may not have.
+metadata is shipped), and loads the C helper modules the build ships in
+``triton_prebuilt/`` instead of compiling them with a C compiler users may not have.
 """
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ import os
 import sys
 
 _patched = False
+
+LTX_TRACED_MODULES = ("jasna.ltx.transformer", "jasna.ltx.kernels",
+                      "jasna.models.ltx_vae.na_triton", "jasna.models.ltx_vae.transformer")
 
 
 def is_frozen() -> bool:
@@ -61,20 +64,20 @@ def patch_frozen_torch() -> None:
         from torch._inductor import codecache
         inductor_config.compile_threads = 1
         codecache.torch_key.set(hashlib.sha256(f"frozen torch {torch.__version__}".encode()).digest())
-        if sys.platform == "linux" and importlib.util.find_spec("triton") is not None:
-            register_ltx_sources()
-            use_prebuilt_triton_modules(Path(os.readlink("/proc/self/exe")).parent / "triton_prebuilt")
+        if importlib.util.find_spec("triton") is not None:
+            from jasna.os_utils import get_application_executable
+            root = Path(get_application_executable()).parent
+            register_ltx_sources(root)
+            use_prebuilt_triton_modules(root / "triton_prebuilt")
 
 
-def register_ltx_sources() -> None:
+def register_ltx_sources(root) -> None:
     """Expose source to inspect without a directory named like the executable."""
     import importlib.util
     import linecache
     from pathlib import Path
 
-    root = Path(os.readlink("/proc/self/exe")).parent
-    for module in ("jasna.ltx.transformer", "jasna.ltx.kernels",
-                   "jasna.models.ltx_vae.transformer", "jasna.models.ltx_vae.na_triton"):
+    for module in LTX_TRACED_MODULES:
         relative = Path(*module.split(".")).with_suffix(".py")
         source_path = str(root / "python_source" / relative)
         lines = linecache.getlines(source_path)
