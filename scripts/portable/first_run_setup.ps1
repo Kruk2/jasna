@@ -181,10 +181,21 @@ if ($SkipRocm) {
             $setupParams = @{ Gfx = $gfx }
             if (Test-Path $wheelDir) {
                 $setupParams['WheelDir'] = $wheelDir
-                Info '（优先使用包内 wheels\ 离线安装）'
+                # If this card's exact device wheel is bundled, have pip resolve from the
+                # package instead of AMD's index: the package is meant to work without
+                # network. Cards without a bundled wheel stay online, as before.
+                $bundled = @(Get-ChildItem $wheelDir -Filter ('amd_torch_device_' + $gfx + '-*.whl') -ErrorAction SilentlyContinue)
+                if ($bundled.Count -gt 0) {
+                    $env:PIP_NO_INDEX = '1'
+                    $env:PIP_FIND_LINKS = $wheelDir
+                    Info ('使用包内 wheels\ 离线安装：' + $bundled[0].Name)
+                } else {
+                    Info '包内没有这张卡的内核包，改为联网从 AMD 索引下载'
+                }
             }
             & $setup @setupParams
             if ($LASTEXITCODE -eq 0) { Ok 'ROCm 组件安装流程结束' } else { Warn 'setup-rocm101-gpu.ps1 返回非 0，请看上面的输出' }
+            Remove-Item Env:PIP_NO_INDEX, Env:PIP_FIND_LINKS -ErrorAction SilentlyContinue
         } else {
             Warn '找不到 setup-rocm101-gpu.ps1，无法自动补装'
         }
@@ -264,14 +275,22 @@ info = {}
 try:
     import torch
     info["torch"] = torch.__version__
-    info["gpu"] = torch.cuda.get_device_name(0)
-    info["arch"] = str(getattr(torch.cuda.get_device_properties(0), "gcnArchName", "")).split(":")[0]
+    info["device_count"] = int(torch.cuda.device_count())
+    info["gpu0"] = torch.cuda.get_device_name(0)
 except Exception as exc:
     info["torch_error"] = repr(exc)[:200]
 try:
     from jasna.mosaic import rfdetr_migraphx_runner as m
     info["ep_dir"] = str(m.find_local_ep_dir())
-    info["arch_supported"] = bool(m.hip_arch() and m.hip_arch() in m.MIGRAPHX_SUPPORTED_ARCHS)
+    info["devices"] = m.hip_device_archs()
+    idx = m.migraphx_device_index()
+    info["device_index"] = idx
+    info["arch"] = m.hip_arch()
+    try:
+        info["device_name"] = torch.cuda.get_device_name(idx)
+    except Exception:
+        info["device_name"] = ""
+    info["arch_supported"] = bool(info["arch"] and info["arch"] in m.MIGRAPHX_SUPPORTED_ARCHS)
     m._prepare_ort_for_migraphx()
     onnx = sorted(glob.glob(os.path.join("model_weights", "*.migraphx.*.onnx")))
     if onnx:
@@ -279,7 +298,8 @@ try:
         sess = ort.InferenceSession(
             onnx[0], sess_options=ort.SessionOptions(),
             providers=[("MIGraphXExecutionProvider",
-                        {"device_id": "0", "migraphx_model_cache_dir": str(m.migraphx_cache_dir())}),
+                        {"device_id": str(idx),
+                         "migraphx_model_cache_dir": str(m.migraphx_cache_dir())}),
                        "CPUExecutionProvider"],
         )
         info["providers"] = sess.get_providers()
@@ -296,8 +316,20 @@ print("JASNA_SELFTEST " + json.dumps(info, ensure_ascii=False))
     if (-not $st) {
         Warn '自检没有返回结果（可能是 python 输出被截断），可手动运行 Start-Jasna.bat 观察启动日志'
     } else {
-        if ($st.torch) { Ok ('PyTorch ' + $st.torch + '  /  ' + $st.gpu + '  /  ' + $st.arch) }
-        elseif ($st.torch_error) { Warn ('PyTorch 加载失败：' + $st.torch_error) }
+        if ($st.torch) {
+            Ok ('PyTorch ' + $st.torch + '（检测到 ' + $st.device_count + ' 个 HIP 设备）')
+            if ($st.device_name) {
+                Ok ('检测引擎使用：' + $st.device_name + '  /  ' + $st.arch + '（HIP 设备 ' + $st.device_index + '）')
+            }
+            if ($st.device_index -ne 0) {
+                $firstDev = if ($st.devices -and $st.devices.Count -gt 0) { $st.devices[0] } else { '?' }
+                Warn ('设备 0 是核显（' + $firstDev + '），MIGraphX 内核不支持它，已自动改用设备 ' +
+                      $st.device_index + '；启动主程序时请加 --device cuda:' + $st.device_index +
+                      '，否则整条流水线会跑在核显上')
+            }
+        } elseif ($st.torch_error) {
+            Warn ('PyTorch 加载失败：' + $st.torch_error)
+        }
         if ($st.ep_dir) { Ok ('检测引擎运行库位置：' + $st.ep_dir) }
         if ($st.providers) {
             if ($st.providers -contains 'MIGraphXExecutionProvider') {
