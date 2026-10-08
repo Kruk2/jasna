@@ -319,13 +319,24 @@ print("JASNA_SELFTEST " + json.dumps(info, ensure_ascii=False))
         if ($st.torch) {
             Ok ('PyTorch ' + $st.torch + '（检测到 ' + $st.device_count + ' 个 HIP 设备）')
             if ($st.device_name) {
-                Ok ('检测引擎使用：' + $st.device_name + '  /  ' + $st.arch + '（HIP 设备 ' + $st.device_index + '）')
+                if ($st.arch_supported) {
+                    Ok ('检测引擎使用：' + $st.device_name + '  /  ' + $st.arch + '（HIP 设备 ' + $st.device_index + '）')
+                } else {
+                    Warn ('检测引擎使用：' + $st.device_name + '  /  ' + $st.arch + '（HIP 设备 ' + $st.device_index + '）' +
+                          '——这个架构不在 MIGraphX 的支持范围内，引擎在这台机器上建不起来；' +
+                          '可以先加 --detection-engine torch 让检测走 PyTorch 路径')
+                }
             }
             if ($st.device_index -ne 0) {
                 $firstDev = if ($st.devices -and $st.devices.Count -gt 0) { $st.devices[0] } else { '?' }
                 Warn ('设备 0 是核显（' + $firstDev + '），MIGraphX 内核不支持它，已自动改用设备 ' +
                       $st.device_index + '；启动主程序时请加 --device cuda:' + $st.device_index +
                       '，否则整条流水线会跑在核显上')
+            } elseif (-not $st.arch_supported -and $st.device_count -le 1) {
+                Warn ('ROCm 只看到 ' + $st.device_count + ' 个 HIP 设备（' + (@($st.devices) -join ', ') + '），' +
+                      '独显没有被认出来：查系统环境变量 HIP_VISIBLE_DEVICES / ROCR_VISIBLE_DEVICES / ' +
+                      'HSA_OVERRIDE_GFX_VERSION，以及设备管理器里独显的驱动状态；' +
+                      '现在整条流水线都跑在这个设备上')
             }
         } elseif ($st.torch_error) {
             Warn ('PyTorch 加载失败：' + $st.torch_error)
@@ -354,7 +365,8 @@ if ($script:issues.Count -eq 0) {
     Write-Host ('  通过 ' + $script:okCount + ' 项，另有 ' + $script:issues.Count + ' 项需要留意：') -ForegroundColor Yellow
     foreach ($i in $script:issues) { Write-Host ('   - ' + $i) -ForegroundColor Yellow }
     Write-Host ''
-    Write-Host '  多数“留意”不影响出片（例如慢路径、非 MIGraphX 架构）。' -ForegroundColor Yellow
+    Write-Host '  多数“留意”不影响出片（例如慢路径）；但“检测引擎自检失败”和' -ForegroundColor Yellow
+    Write-Host '  “独显没有被认出来”要先解决，否则检测引擎用不了、整条流水线还在核显上。' -ForegroundColor Yellow
     Write-Host '  拿不准就把上面的输出整段发给 AI 编程助手，它能带你排掉。' -ForegroundColor Yellow
 }
 
