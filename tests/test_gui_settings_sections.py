@@ -97,6 +97,7 @@ def _fake_section_widgets() -> dict:
         "rtx_denoise": _FakeWidget("None"),
         "rtx_deblur": _FakeWidget("Low"),
         "amd_upscale_engine": _FakeWidget("amf-sr"),
+        "amd_upscale_model": _FakeWidget("auto"),
         "amd_upscale_scale": _FakeWidget("2x"),
         "amd_upscale_algorithm": _FakeWidget("sr1-1"),
         "amd_upscale_sharpness": _FakeWidget("0.5"),

@@ -138,6 +138,7 @@ class AppSettings:
     rtx_denoise: str = "medium"  # none, low, medium, high, ultra
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
     amd_upscale_engine: str = "amf-sr"  # amf-sr (AMD Video SR, D3D11) or realesrgan (Real-ESRGAN, in-process)
+    amd_upscale_model: str = "auto"  # auto, x4plus (23-block) or anime-6b (6-block, ~2.8x faster) for the realesrgan engine
     amd_upscale_scale: int = 4  # 2, 4, 6, 8
     amd_upscale_algorithm: str = "sr1-0"  # sr1-0, sr1-1, bicubic, bilinear, point
     amd_upscale_sharpness: float = -1.0  # -1 (driver default) .. 2

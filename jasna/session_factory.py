@@ -150,6 +150,7 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
                 device=device,
                 scale=int(config.amd_upscale_scale),
                 model_path=config.amd_upscale_model_path,
+                model=str(config.amd_upscale_model),
                 fp16=bool(config.fp16),
             )
         from jasna.restorer.amd_upscale_secondary_restorer import AmdUpscaleSecondaryRestorer

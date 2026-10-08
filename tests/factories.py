@@ -49,6 +49,7 @@ def session_config(**overrides) -> SessionConfig:
         rtx_denoise="medium",
         rtx_deblur="none",
         amd_upscale_engine="amf-sr",
+        amd_upscale_model="auto",
         amd_upscale_scale=4,
         amd_upscale_algorithm="sr1-0",
         amd_upscale_sharpness=-1.0,

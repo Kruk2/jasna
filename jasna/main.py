@@ -73,6 +73,7 @@ def _session_config_from_args(
         rtx_denoise=str(args.rtx_denoise).lower(),
         rtx_deblur=str(args.rtx_deblur).lower(),
         amd_upscale_engine=str(args.amd_upscale_engine).lower(),
+        amd_upscale_model=str(args.amd_upscale_model).lower(),
         amd_upscale_scale=int(args.amd_upscale_scale),
         amd_upscale_algorithm=str(args.amd_upscale_algorithm).lower(),
         amd_upscale_sharpness=float(args.amd_upscale_sharpness),
@@ -382,6 +383,13 @@ def build_parser() -> argparse.ArgumentParser:
         default="amf-sr",
         choices=["amf-sr", "realesrgan"],
         help=CLI_HELP["amd_upscale_engine"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-model",
+        type=str,
+        default="auto",
+        choices=["auto", "x4plus", "anime-6b"],
+        help=CLI_HELP["amd_upscale_model"],
     )
     amd_upscale.add_argument(
         "--amd-upscale-scale",

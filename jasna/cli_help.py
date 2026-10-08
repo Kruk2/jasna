@@ -46,6 +46,11 @@ CLI_HELP: dict[str, str] = {
         "initialises over D3D11 on Windows) or realesrgan (Real-ESRGAN RRDBNet on the ROCm/HIP "
         "device, in-process). (default: %(default)s)"
     ),
+    "amd_upscale_model": (
+        "Real-ESRGAN checkpoint preset for the rocm engine: auto (first match in model_weights/), "
+        "x4plus (23-block, best quality) or anime-6b (6-block, ~2.8x faster, slightly softer). "
+        "Ignored when --amd-upscale-model-path is given. (default: %(default)s)"
+    ),
     "amd_upscale_model_path": (
         "RRDBNet checkpoint for the rocm engine (Real-ESRGAN x4plus / x4plus_anime_6B / x2plus). "
         "Empty auto-detects one in model_weights/. (default: %(default)s)"

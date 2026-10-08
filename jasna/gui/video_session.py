@@ -109,6 +109,7 @@ def video_session_config(
         rtx_denoise=settings.rtx_denoise.lower(),
         rtx_deblur=settings.rtx_deblur.lower(),
         amd_upscale_engine=str(settings.amd_upscale_engine).lower(),
+        amd_upscale_model=str(settings.amd_upscale_model).lower(),
         amd_upscale_scale=int(settings.amd_upscale_scale),
         amd_upscale_algorithm=str(settings.amd_upscale_algorithm).lower(),
         amd_upscale_sharpness=float(settings.amd_upscale_sharpness),

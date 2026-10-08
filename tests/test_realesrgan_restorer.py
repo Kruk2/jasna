@@ -12,6 +12,7 @@ import torch
 
 from jasna.restorer import realesrgan_secondary_restorer as mod
 from jasna.restorer.realesrgan_secondary_restorer import (
+    REALESRGAN_MODEL_FILES,
     REALESRGAN_WEIGHT_CANDIDATES,
     RealEsrganSecondaryRestorer,
     find_default_weights,
@@ -115,6 +116,29 @@ class TestWeightResolution:
         monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
         with pytest.raises(FileNotFoundError, match="No AMD super-res model found"):
             resolve_weights_path(None)
+
+    def test_preset_anime_6b_selects_the_six_block_checkpoint(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
+        wanted = tmp_path / REALESRGAN_MODEL_FILES["anime-6b"][0]
+        wanted.write_bytes(b"")
+        assert resolve_weights_path(None, "anime-6b") == wanted.resolve()
+
+    def test_preset_x4plus_ignores_the_anime_checkpoint(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
+        (tmp_path / REALESRGAN_MODEL_FILES["anime-6b"][0]).write_bytes(b"")
+        wanted = tmp_path / REALESRGAN_MODEL_FILES["x4plus"][0]
+        wanted.write_bytes(b"")
+        assert resolve_weights_path(None, "x4plus") == wanted.resolve()
+
+    def test_missing_preset_checkpoint_names_the_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
+        with pytest.raises(FileNotFoundError, match="realesrgan_x4plus_anime_6B.pth"):
+            resolve_weights_path(None, "anime-6b")
+
+    def test_invalid_preset_is_rejected(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
+        with pytest.raises(ValueError, match="Invalid AMD super-res model preset"):
+            resolve_weights_path(None, "bogus")
 
 
 class TestInit:

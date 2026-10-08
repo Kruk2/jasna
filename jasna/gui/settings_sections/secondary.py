@@ -269,6 +269,19 @@ class SecondarySection:
         self._widgets["amd_upscale_engine"].pack(side="right")
         self._widgets["amd_upscale_engine"].set("amf-sr")
 
+        # AMD model (Real-ESRGAN checkpoint preset; only used by the realesrgan engine)
+        amd_model_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_model_row.pack(fill="x", pady=(0, 8))
+        add_setting_label(amd_model_row, "model", "amd_model")
+        self._widgets["amd_upscale_model"] = ctk.CTkOptionMenu(
+            amd_model_row, values=["auto", "x4plus", "anime-6b"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=110
+        )
+        self._widgets["amd_upscale_model"].pack(side="right")
+        self._widgets["amd_upscale_model"].set("auto")
+
         # AMD scale
         amd_scale_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
         amd_scale_row.pack(fill="x", pady=(0, 8))
@@ -398,6 +411,7 @@ class SecondarySection:
         self._widgets["rtx_deblur"].set(preset.rtx_deblur.capitalize())
 
         self._widgets["amd_upscale_engine"].set(preset.amd_upscale_engine)
+        self._widgets["amd_upscale_model"].set(preset.amd_upscale_model)
         self._widgets["amd_upscale_scale"].set(f"{preset.amd_upscale_scale}x")
         self._widgets["amd_upscale_algorithm"].set(preset.amd_upscale_algorithm)
         self._widgets["amd_upscale_sharpness"].delete(0, "end")
@@ -422,6 +436,7 @@ class SecondarySection:
             "rtx_denoise": self._widgets["rtx_denoise"].get().lower(),
             "rtx_deblur": self._widgets["rtx_deblur"].get().lower(),
             "amd_upscale_engine": self._widgets["amd_upscale_engine"].get(),
+            "amd_upscale_model": self._widgets["amd_upscale_model"].get(),
             "amd_upscale_scale": int(self._widgets["amd_upscale_scale"].get().replace("x", "")),
             "amd_upscale_algorithm": self._widgets["amd_upscale_algorithm"].get(),
             "amd_upscale_sharpness": float(self._widgets["amd_upscale_sharpness"].get() or -1),

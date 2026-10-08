@@ -491,6 +491,7 @@ ZH = {
         "tip_secondary_amd": 'AMD 显卡超分——RTX Super Res 的 AMD 对应方案，免费且无需额外安装。\\n\\namf-sr 使用 AMD 自家的 Video SR（即 AMD Software 视频超分所用的同一类模型）；realesrgan 在 ROCm 设备上进程内运行 Real-ESRGAN。质量与 RTX Super Res 相当。',
         "tip_amd_engine": '选择 AMD 放大引擎。\\n\\namf-sr：通过 AMF 滤镜 sr_amf 调用 AMD Video SR 1.0/1.1（Windows 下走 D3D11）。\\nrealesrgan：在 ROCm/HIP 设备上进程内运行 Real-ESRGAN。\\n\\n默认：amf-sr',
         "tip_amd_algorithm": '引擎为 amf-sr 时的 sr_amf 算法。\\n\\nsr1-0 / sr1-1：AMD Video SR（机器学习），细节最好。\\nbicubic / bilinear / point：非机器学习回退，最快且最可预测。\\n\\n默认：sr1-0',
+        "tip_amd_model": '引擎为 realesrgan 时使用的 Real-ESRGAN 权重。\\n\\nauto：自动选用 model_weights/ 中第一个匹配的权重。\\nx4plus：23 块网络，质量最好。\\nanime-6b：6 块网络，约快 2.8 倍（RX 7900 XT 上 256→1024、fp16 实测 36.9 fps 对 13.3 fps），画面略柔和；需要 model_weights/ 中有 realesrgan_x4plus_anime_6B.pth。\\n\\n默认：auto',
         "tip_amd_sharpness": 'AMF 在放大之后额外施加的锐化。\\n-1 使用驱动默认值，0 表示关闭，最大 2。\\n\\n默认：-1',
         "tip_amd_timeout": '等待 AMD FFmpeg 进程的秒数，超时则放弃该片段并报错。\\n\\n默认：120',
         "tip_detection_model": "用于寻找需要修复区域的默认 AI 模型。\nrfdetr-v6：最新、快速 — 推荐使用（默认，内置）。\nrfdetr-v6-large：质量更高、速度更慢 — 可选的单独下载。\nrfdetr-vr-v1：VR180 模型（内置）— 推荐用于 VR。\nLada YOLO 模型可能更适合 2D 动画。\nzelefans-vr-yolo-v2：备用 VR180 模型 — 可选的单独下载。\n\n区间编辑器可以为每个视频单独覆盖并记住此设置。\n\n默认值：rfdetr-v6",

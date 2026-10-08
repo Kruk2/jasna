@@ -18,6 +18,7 @@ LTX_DEFAULT_MODEL: LtxModelName = "distilled"
 LTX_DEFAULT_SEED = 20260923
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res", "amd-upscale"]
 AmdUpscaleEngineName = Literal["amf-sr", "realesrgan"]
+AmdUpscaleModelName = Literal["auto", "x4plus", "anime-6b"]
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 DenoiseStepName = Literal["after_primary", "after_secondary"]
 VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye"]
@@ -62,6 +63,7 @@ class SessionConfig:
     rtx_denoise: RtxLevelName
     rtx_deblur: RtxLevelName
     amd_upscale_engine: AmdUpscaleEngineName
+    amd_upscale_model: AmdUpscaleModelName
     amd_upscale_scale: int
     amd_upscale_algorithm: str
     amd_upscale_sharpness: float
