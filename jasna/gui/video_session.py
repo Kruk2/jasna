@@ -24,6 +24,7 @@ def video_session_key(settings: AppSettings) -> tuple:
         settings.batch_size,
         settings.fp16_mode,
         settings.max_clip_size,
+        settings.temporal_overlap,  # defines the clip lengths the restorer pre-captures
         settings.compile_basicvsrpp,
         settings.denoise_strength,
         settings.denoise_step,

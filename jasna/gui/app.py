@@ -455,6 +455,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             if self._processor:
                 self._processor.stop()
                 self._processor.join(timeout=5.0)
+                # The processing session stays warm between batch runs; release it
+                # (and its VRAM) when the window closes.
+                self._processor.release_sessions()
         finally:
             self._stop_system_stats_poller()
             self._main_thread.close()
