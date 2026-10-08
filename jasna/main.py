@@ -1052,6 +1052,13 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    # Before anything enumerates GPUs: a leftover HIP_VISIBLE_DEVICES/ROCR_VISIBLE_DEVICES
+    # would hide the discrete card (see allow_all_devices), and the runtime only reads it
+    # while it initialises.
+    from jasna.accelerator import allow_all_devices
+    allow_all_devices()
+
     codec_was_explicit = any(
         value == "--codec" or value.startswith("--codec=")
         for value in sys.argv[1:]

@@ -269,6 +269,17 @@ if ($SkipSelfTest) {
 } elseif ($CheckOnly) {
     Info 'CheckOnly：跳过（自检会向 venv 写入 provider 并加载模型）'
 } else {
+    # The app clears these itself before it enumerates GPUs (jasna.accelerator.
+    # allow_all_devices): they hide devices from the HIP runtime while HSA-level tools
+    # still list them, which is how a machine ends up running on its iGPU. Do the same
+    # here so the self-test reports what the app will actually do.
+    foreach ($hidden in @('HIP_VISIBLE_DEVICES', 'ROCR_VISIBLE_DEVICES')) {
+        $value = [Environment]::GetEnvironmentVariable($hidden)
+        if ($value) {
+            Warn ($hidden + '=' + $value + ' 会把显卡从 ROCm 里藏起来；本次自检已清掉它')
+            Remove-Item ('Env:' + $hidden) -ErrorAction SilentlyContinue
+        }
+    }
     $selftest = @'
 import glob, json, os
 info = {}

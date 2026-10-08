@@ -118,8 +118,41 @@ def _math_sdp_forced() -> bool:
     return os.environ.get(_FORCE_MATH_ENV, "").strip().lower() in _TRUTHY
 
 
+#: Device-visibility restrictions apply in the HIP runtime's own enumeration, while
+#: HSA-level tools (``hipInfo``, ``rocm-smi``) still list every agent. A machine whose
+#: iGPU is device 0 and whose card is device 1 therefore looks like a one-GPU machine to
+#: PyTorch: the pipeline runs on the iGPU and the MIGraphX engine dies with
+#: ``RUNTIME_EXCEPTION ... Failed to call function`` (gfx103x has no device code).
+#: jasna needs the whole list to find the discrete Radeon, unless the user pins a device
+#: on purpose.
+_VISIBLE_DEVICES_ENV = ("HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES")
+_KEEP_VISIBLE_DEVICES_ENV = "JASNA_KEEP_HIP_VISIBLE_DEVICES"
+
+
+def allow_all_devices(environ: MutableMapping[str, str] | None = None) -> None:
+    """Drop a device-visibility variable so every GPU is enumerated again.
+
+    Must happen before the first ``torch.cuda`` call: the HIP runtime reads
+    ``HIP_VISIBLE_DEVICES`` when it initialises, so clearing it later changes nothing.
+    Set ``JASNA_KEEP_HIP_VISIBLE_DEVICES=1`` (e.g. a workstation that pins one card per
+    job) to keep the restriction and select with ``--device`` instead.
+    """
+    env = os.environ if environ is None else environ
+    if str(env.get(_KEEP_VISIBLE_DEVICES_ENV, "")).strip().lower() in _TRUTHY:
+        return
+    for name in _VISIBLE_DEVICES_ENV:
+        value = env.pop(name, None)
+        if value is not None:
+            logger.info(
+                "%s=%s restricted this machine's visible GPUs; listing all of them so "
+                "jasna can pick the discrete Radeon (set %s=1 to keep the restriction)",
+                name, value, _KEEP_VISIBLE_DEVICES_ENV,
+            )
+
+
 def configure_rocm_process_env() -> None:
     """Apply the ROCm defaults to this process; call at entry points before GPU work."""
+    allow_all_devices()
     if torch.version.hip:
         apply_rocm_env_defaults(os.environ)
         if _math_sdp_forced():
@@ -174,6 +207,9 @@ DISCRETE_RADEON_ARCHS = frozenset({
     "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201",
 })
 
+#: ``preferred_gpu_index`` reports the device list once per process (see below).
+_device_choice_logged = False
+
 
 def hip_device_archs() -> list[str]:
     """``gcnArchName`` of every CUDA/HIP device, in the runtime's device order."""
@@ -203,12 +239,21 @@ def preferred_gpu_index() -> int:
     card the user actually bought. Machines without one - a Strix Halo APU, an NVIDIA
     card, plain CPU - keep device 0, so this is a no-op for them.
     """
+    global _device_choice_logged
     if not torch.version.hip:
         return 0
-    for index, arch in enumerate(hip_device_archs()):
+    archs = hip_device_archs()
+    choice = 0
+    for index, arch in enumerate(archs):
         if arch in DISCRETE_RADEON_ARCHS:
-            return index
-    return 0
+            choice = index
+            break
+    if not _device_choice_logged:
+        # Once per process: this is the line to look at when a machine behaves as if it
+        # had one GPU, or as if the engine ran on the wrong one.
+        _device_choice_logged = True
+        logger.info("ROCm devices %s -> running on device %d", archs or "none", choice)
+    return choice
 
 
 def preferred_device() -> torch.device:
