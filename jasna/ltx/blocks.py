@@ -235,6 +235,10 @@ class BlockStore:
         if slot is not None:
             self._compute_done[slot].record(torch.cuda.current_stream(self.device))
 
+    def native_vram_bytes(self) -> int:
+        """PyTorch's allocator holds these blocks."""
+        return 0
+
     def close(self) -> None:
         buffers = self._resident_buffers + self._host + self._slots
         if not buffers:
@@ -300,6 +304,10 @@ class OpaqueBlockStore:
         return self._native.block_forward(
             x, cond.block_rows, cond.prompt_rows, context, rope.cos, rope.sin, stg_branch,
         )
+
+    def native_vram_bytes(self) -> int:
+        """VRAM holding the blocks outside PyTorch's allocator."""
+        return self._native.device_bytes()
 
     def close(self) -> None:
         self._native.close()

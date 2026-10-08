@@ -186,6 +186,7 @@ class WorkerBackend:
         self.encoder = None
         self.transformer = None
         self.decoder = None
+        self.peak_vram_bytes = 0
 
     def _unload_module(self, name: str) -> None:
         from jasna.models.ltx_vae.loader import _clear_tensors
@@ -199,6 +200,22 @@ class WorkerBackend:
 
     @torch.inference_mode()
     def dispatch(self, op: str, params: dict, tensors: list[torch.Tensor], advance: Callable[[int], None]):
+        if op == "stats":
+            return {"peak_vram_bytes": self.peak_vram_bytes}, []
+        if torch.cuda.is_initialized():
+            torch.cuda.reset_peak_memory_stats(self.device)
+        result = self._run(op, params, tensors, advance)
+        if torch.cuda.is_initialized():
+            self._record_peak_vram()
+        return result
+
+    def _record_peak_vram(self) -> None:
+        """The operation's PyTorch peak plus the transformer blocks the native store holds
+        outside PyTorch's allocator."""
+        native = self.transformer.native_vram_bytes() if self.transformer is not None else 0
+        self.peak_vram_bytes = max(self.peak_vram_bytes, torch.cuda.max_memory_allocated(self.device) + native)
+
+    def _run(self, op: str, params: dict, tensors: list[torch.Tensor], advance: Callable[[int], None]):
         if op == "load_encoder":
             if self.encoder is None:
                 self.encoder = load_video_encoder(self.files.vae, self.device)
@@ -237,8 +254,6 @@ class WorkerBackend:
             video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
             frames = video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous()
             return {}, [frames.to("cpu")]
-        elif op == "stats":
-            return {"peak_vram_bytes": torch.cuda.max_memory_allocated(self.device)}, []
         else:
             raise ValueError("unsupported LTX inference operation")
         return {}, []

@@ -89,7 +89,17 @@ def test_runtime_construction_and_unused_close_do_not_start_worker(monkeypatch):
     assert runtime._client is None
 
 
-def test_backend_rejects_inference_before_load_and_arbitrary_dispatch():
+@pytest.fixture
+def allocator(monkeypatch):
+    """PyTorch's peak allocation stats for a backend on the CPU (the worker runs on CUDA)."""
+    stats = {"peak": 0}
+    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: stats.update(peak=0))
+    monkeypatch.setattr(torch.cuda, "max_memory_allocated", lambda device: stats["peak"])
+    return stats
+
+
+def test_backend_rejects_inference_before_load_and_arbitrary_dispatch(allocator):
     backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
     for op in ("encode", "denoise_chain", "decode"):
         with pytest.raises(RuntimeError, match="is not loaded"):
@@ -99,7 +109,7 @@ def test_backend_rejects_inference_before_load_and_arbitrary_dispatch():
     backend.close()
 
 
-def test_backend_module_unload_wipes_parameters(monkeypatch):
+def test_backend_module_unload_wipes_parameters(monkeypatch, allocator):
     backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
     backend.encoder = torch.nn.Linear(2, 2)
     parameters = list(backend.encoder.parameters())
@@ -141,3 +151,28 @@ def test_runtime_reuses_transport_updates_cancel_and_translates_cancellation(mon
     with pytest.raises(restore.Cancelled):
         runtime.request("load_transformer", {}, [])
     assert clients[0].closed and runtime._client is None
+
+
+def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+
+    class Transformer:
+        def native_vram_bytes(self):
+            return 13 << 30
+
+        def denoise_chain(self, references, seeds, advance):
+            allocator["peak"] = 5 << 30
+            return references
+
+        def close(self):
+            pass
+
+    backend.encoder = lambda pixels: allocator.update(peak=9 << 30) or torch.zeros(1, 128, 16, 16, 16)
+    backend.dispatch("encode", {}, [torch.zeros(1, 3, 121, 512, 512, dtype=torch.uint8)], lambda _n: None)
+    backend.transformer = Transformer()
+    backend.dispatch("denoise_chain", {"seeds": [1]}, [torch.zeros(1)], lambda _n: None)
+    backend.dispatch("unload_transformer", {}, [], lambda _n: None)
+
+    stats, _ = backend.dispatch("stats", {}, [], lambda _n: None)
+    assert stats["peak_vram_bytes"] == (5 << 30) + (13 << 30)

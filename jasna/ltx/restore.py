@@ -33,7 +33,7 @@ from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
 from jasna.ltx.model_files import LtxModelFiles
-from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder
+from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder, WorkerTransformer
 from jasna.ltx.plan import LARGE_CANVAS, Region, TrackPlan, Window, crossfade_weights, feather_pixels, plan_video
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
@@ -91,6 +91,38 @@ _STAGE_NUMBER = {"scan": 1, "encode": 2, "denoise": 3, "compose": 4}
 _STAGE_SHARE = {"scan": 0.02, "encode": 0.08, "denoise": 0.8, "compose": 0.1}
 
 
+class _WallClockMark:
+    """``torch.cuda.Event``'s timing interface on the wall clock."""
+
+    def __init__(self) -> None:
+        self._at = 0.0
+
+    def record(self) -> None:
+        self._at = time.monotonic()
+
+    def synchronize(self) -> None:
+        pass
+
+    def elapsed_time(self, end: _WallClockMark) -> float:
+        return (end._at - self._at) * 1000.0
+
+
+def _cuda_mark() -> torch.cuda.Event:
+    return torch.cuda.Event(enable_timing=True)
+
+
+TimingMark = torch.cuda.Event | _WallClockMark
+
+
+def timing_marks(model) -> Callable[[], TimingMark]:
+    """How to time ``model``'s windows: the LTX worker's GPU work never reaches this process's
+    stream (and Windows batches the event records), but its requests return only once that
+    work is done, so the wall clock times it; local models are timed by CUDA events."""
+    if isinstance(model, (WorkerEncoder, WorkerTransformer, WorkerDecoder)):
+        return _WallClockMark
+    return _cuda_mark
+
+
 class Progress:
     """One console bar per pass; ``frames`` sizes the frame-based passes. ``report`` gets
     ``(fraction of the whole run, seconds left, the pass's own progress)``. When the speed
@@ -125,7 +157,10 @@ class Progress:
     def summary(self, profile_key: str, peak_vram_bytes: int, blocks: tuple[int, int] | None) -> list[str]:
         return speed.run_summary(profile_key, self.timings, self._work, peak_vram_bytes, blocks)
 
-    def bar(self, stage: LtxStage, total: int, unit: str = "frame") -> _StageBar:
+    def bar(
+        self, stage: LtxStage, total: int, unit: str = "frame", marks: Callable[[], TimingMark] = _cuda_mark
+    ) -> _StageBar:
+        """``marks`` times the pass's windows and steps (``timing_marks``)."""
         tqdm_bar = tqdm(
             total=total,
             desc=f"LTX {_STAGE_NUMBER[stage]}/4 {stage}",
@@ -133,7 +168,7 @@ class Progress:
             dynamic_ncols=True,
             disable=self._disable,
         )
-        return _StageBar(self, stage, tqdm_bar)
+        return _StageBar(self, stage, tqdm_bar, marks)
 
     def begin(self, stage: LtxStage) -> None:
         """Report ``stage`` as started before its model loads, so loading shows as that pass."""
@@ -179,14 +214,15 @@ class Progress:
 
 
 class _StageBar:
-    def __init__(self, progress: Progress, stage: LtxStage, bar: tqdm) -> None:
+    def __init__(self, progress: Progress, stage: LtxStage, bar: tqdm, marks: Callable[[], TimingMark]) -> None:
         self._progress = progress
         self._stage = stage
         self._bar = bar
+        self._marks = marks
         self._done = 0
         self._warm_from: tuple[float, int] | None = None
-        self._windows: list[tuple[int, torch.cuda.Event, torch.cuda.Event]] = []
-        self._tracks: list[tuple[int, int, list[tuple[int, torch.cuda.Event]]]] = []
+        self._windows: list[tuple[int, TimingMark, TimingMark]] = []
+        self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
         progress._advanced(stage, 0, bar.total, None)
 
     def update(self, n: int) -> None:
@@ -207,8 +243,8 @@ class _StageBar:
 
     @contextmanager
     def window(self, canvas: int) -> Iterator[None]:
-        """Time the GPU work of one window with stream events, read when the pass closes."""
-        start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
+        """Time the GPU work of one window with marks, read when the pass closes."""
+        start, end = self._marks(), self._marks()
         start.record()
         yield
         end.record()
@@ -222,7 +258,7 @@ class _StageBar:
 
         def advance(n: int) -> None:
             self.update(n)
-            mark = torch.cuda.Event(enable_timing=True)
+            mark = self._marks()
             mark.record()
             marks.append((n, mark))
 
@@ -678,7 +714,7 @@ def prepare_spans(
         try:
             encoder = runtime.load_encoder()
             try:
-                with progress.bar("encode", progress.frames) as bar:
+                with progress.bar("encode", progress.frames, marks=timing_marks(encoder)) as bar:
                     for p in prepared:
                         encode_span(
                             p.span.frames, p.span.segments, p.plans, encoder, p.references,
@@ -712,7 +748,9 @@ def denoise_spans(
     """Denoise every track with its segment's seed into ``finals``; ``keep_references``
     keeps the reference latents for another seed."""
     windows = sum(p.windows for p in prepared)
-    with progress.bar("denoise", len(transformer.conditions) * windows, unit="step") as bar:
+    with progress.bar(
+        "denoise", len(transformer.conditions) * windows, unit="step", marks=timing_marks(transformer)
+    ) as bar:
         for p, span_finals in zip(prepared, finals):
             for segment, segment_plans, references, store in zip(p.span.segments, p.plans, p.references, span_finals):
                 for plan in segment_plans:
@@ -734,7 +772,7 @@ def compose_spans(
     progress: Progress,
     cancel: threading.Event,
 ) -> None:
-    with progress.bar("compose", progress.frames) as bar:
+    with progress.bar("compose", progress.frames, marks=timing_marks(decoder)) as bar:
         for p, span_finals in zip(prepared, finals):
             compose_span(
                 p.span,

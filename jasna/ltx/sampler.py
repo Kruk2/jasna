@@ -166,6 +166,9 @@ class LtxTransformer:
             resident += 1
         return resident
 
+    def native_vram_bytes(self) -> int:
+        return self.blocks.native_vram_bytes() if self.blocks is not None else 0
+
     def close(self) -> None:
         if self.blocks is not None:
             self.blocks.close()

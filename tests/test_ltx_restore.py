@@ -108,7 +108,7 @@ def fakes(monkeypatch):
         out[2, 0, 0] = len(candidates)
         return out
 
-    def bar(self, name, total, unit="frame"):
+    def bar(self, name, total, unit="frame", marks=None):
         bars.append(_Bar(total))
         return bars[-1]
 
@@ -444,6 +444,48 @@ def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
     assert denoise.units == 8
     assert denoise.windows == [(512, pytest.approx(4.0 / 4 * 3))]
     assert denoise.steps == [(512, 1.0), (512, 1.0)]
+
+
+def test_worker_passes_are_timed_on_the_wall_clock(monkeypatch):
+    clock = _Clock(monkeypatch)
+
+    class BatchedEvent:
+        """Windows batches this process's event records when only the worker used the GPU."""
+
+        def __init__(self, enable_timing):
+            pass
+
+        def record(self):
+            pass
+
+        def synchronize(self):
+            pass
+
+        def elapsed_time(self, end):
+            return 0.0
+
+    monkeypatch.setattr(torch.cuda, "Event", BatchedEvent)
+
+    class Worker:
+        def request(self, op, params, tensors, advance=None):
+            for _ in range(3):
+                clock.now += 0.5
+                advance(len(tensors))
+            return {}, tensors
+
+    transformer = inference.WorkerTransformer(Worker(), {"steps": 3, "resident": 48, "count": 48})
+    encoder = inference.WorkerEncoder(Worker())
+    progress = restore.Progress(10, disable=True, report=None)
+    with progress.bar("encode", 10, marks=restore.timing_marks(encoder)) as bar:
+        bar.update(10)
+        for _ in range(2):
+            with bar.window(512):
+                clock.now += 2.0
+    with progress.bar("denoise", 6, unit="step", marks=restore.timing_marks(transformer)) as bar:
+        transformer.denoise_chain([torch.zeros(1), torch.zeros(1)], [1, 2], bar.track(512, 3))
+
+    assert progress.timings["encode"].windows == [(512, 2.0), (512, 2.0)]
+    assert progress.timings["denoise"].steps == [(512, 0.25), (512, 0.25)]
 
 
 def test_restore_spans_logs_the_run_summary(fakes, tmp_path, caplog):
