@@ -191,12 +191,24 @@ if ($SkipRocm) {
 } else {
     $sp    = Join-Path $venv 'Lib\site-packages'
     $kpack = Join-Path $sp ('torch\.kpack\torch_' + $gfx + '.kpack')
-    $images = Get-ChildItem (Join-Path $sp 'torch\lib\aotriton.images') -Recurse -File -ErrorAction SilentlyContinue
+    # the attention images ship per architecture family: gfx1100 -> amd-gfx110x,
+    # gfx1201 -> amd-gfx120x. A package assembled for one family carries no images for
+    # another, which is why an RX 9000 on a gfx110x package silently drops to SDPA MATH.
+    $imgFamily = 'amd-' + $gfx.Substring(0, 6) + 'x'
+    $imgRoot   = Join-Path $sp 'torch\lib\aotriton.images'
+    $images    = @(Get-ChildItem (Join-Path $imgRoot $imgFamily) -Recurse -File -ErrorAction SilentlyContinue)
     $imgMb = 0
     if ($images) { $imgMb = [math]::Round((($images | Measure-Object Length -Sum).Sum) / 1MB, 1) }
 
     if (Test-Path $kpack) { Ok ('内核包已安装：torch_' + $gfx + '.kpack') } else { Warn ('缺少内核包 torch_' + $gfx + '.kpack（不装会报 hipErrorInvalidKernelFile）') }
-    if ($images) { Ok ('注意力镜像：' + $images.Count + ' 个文件 / ' + $imgMb + ' MB（缺了会掉进慢 2 倍的 MATH 路径）') } else { Warn '缺少注意力镜像（能跑，但注意力会走慢路径）' }
+    if ($images) {
+        Ok ('注意力镜像（' + $imgFamily + '）：' + $images.Count + ' 个文件 / ' + $imgMb + ' MB（缺了会掉进慢 2 倍的 MATH 路径）')
+    } else {
+        $families = @(Get-ChildItem $imgRoot -Directory -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name)
+        Warn ('缺少本卡架构（' + $imgFamily + '）的注意力镜像；当前只有: ' +
+              $(if ($families) { $families -join ', ' } else { '无' }) +
+              '（能跑，但注意力会走慢 2 倍的路径）')
+    }
 
     if ((Test-Path $kpack) -and $images) {
         Info '都已就绪，无需安装'
@@ -223,11 +235,24 @@ if ($SkipRocm) {
                     Info ('使用包内 wheels\ 离线安装：' + $bundled[0].Name)
                 } else {
                     Info '包内没有这张卡的内核包，改为联网从 AMD 索引下载'
+                    Info ('装完之后可以执行 scripts\portable\fetch_device_wheels.ps1 -Gfx ' + $gfx +
+                          ' 把该架构的设备轮子收进 wheels\，下次在没有网络的机器上也能直接装')
                 }
             }
             & $setup @setupParams
             if ($LASTEXITCODE -eq 0) { Ok 'ROCm 组件安装流程结束' } else { Warn 'setup-rocm101-gpu.ps1 返回非 0，请看上面的输出' }
             Remove-Item Env:PIP_NO_INDEX, Env:PIP_FIND_LINKS -ErrorAction SilentlyContinue
+
+            # post-check: whether the card's kernels and attention images landed is what
+            # decides between a working install and hipErrorInvalidKernelFile / MATH SDPA
+            $imagesAfter = @(Get-ChildItem (Join-Path $imgRoot $imgFamily) -Recurse -File -ErrorAction SilentlyContinue)
+            if ((Test-Path $kpack) -and $imagesAfter.Count -gt 0) {
+                Ok ('补装后复检：内核包 torch_' + $gfx + '.kpack 与注意力镜像都已就位')
+            } else {
+                Warn ('补装后仍然缺少' + $(if (Test-Path $kpack) { '' } else { ' 内核包' }) +
+                      $(if ($imagesAfter.Count -gt 0) { '' } else { ' 注意力镜像' }) +
+                      '，请把这段输出发回来')
+            }
         } else {
             Warn '找不到 setup-rocm101-gpu.ps1，无法自动补装'
         }
