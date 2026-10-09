@@ -546,6 +546,8 @@ TH = {
         "tip_preset_create": "สร้างพรีเซ็ตใหม่",
 
         # Engine compilation / first run warnings
+        "windhawk_warning_title": "Windhawk กำลังทำงาน",
+        "windhawk_warning_body": "Windhawk ถูกโหลดเข้า Jasna ทำให้โมเดล LTX ล้มเหลวด้วย \"Access is denied\" ให้ปิด Windhawk หรือเพิ่ม jasna.exe ในรายการโปรเซสที่ยกเว้น แล้วเปิด Jasna ใหม่",
         "engine_first_run_title": "การรันครั้งแรกอาจช้า",
         "engine_first_run_body": "ต้องเตรียมไฟล์โมเดลเฉพาะ GPU ซึ่งเป็นเรื่องปกติในการรันครั้งแรก การคอมไพล์ NVIDIA TensorRT อาจใช้เวลา 15-60 นาที\n\nปิดแอปอื่นทั้งหมด (เบราว์เซอร์ เกม ฯลฯ) และอย่าใช้ PC ระหว่างการเตรียม แอปอาจดูเหมือนไม่ตอบสนอง — อย่าปิดมัน\n\nไฟล์โมเดลจะถูกแคชและนำกลับมาใช้ในครั้งต่อไปโดยอัตโนมัติ",
         "engine_first_run_missing": "engine ที่หายไป:",

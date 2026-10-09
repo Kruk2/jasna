@@ -338,6 +338,17 @@ def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
     return False, "Driver Default (recommended: Prefer No Sysmem Fallback)"
 
 
+def windows_module_loaded(name: str) -> bool:
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    get_module_handle = ctypes.WinDLL("kernel32", use_last_error=True).GetModuleHandleW
+    get_module_handle.argtypes = [ctypes.c_wchar_p]
+    get_module_handle.restype = ctypes.c_void_p
+    return bool(get_module_handle(name))
+
+
 def check_gpu_driver_version() -> tuple[bool, str]:
     import torch
 

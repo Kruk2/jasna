@@ -94,6 +94,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **VRAM**: 24 GB ならモデル全体が GPU に載ります。16 GB でも十分で、
   11～12 GB でも動きますが遅くなります。11 GB 未満は未検証です。
 - **システム RAM**: 32 GB を推奨します（モデルの読み込みに約 19 GB 使います）。16 GB の場合は、約 10 GB で動く Fast モードを使ってください。
+- **Windhawk**: Windhawk が Jasna 内で動いていると、LTX は「アクセスが拒否されました」で失敗します。
+  Windhawk を終了するか、`jasna.exe` を除外プロセスに追加してください。起動時に Jasna が警告します（Windows のみ）。
 
 ## セカンダリ復元
 

@@ -12,7 +12,7 @@ import tkinter as tk
 from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
-from jasna import startup_timing
+from jasna import os_utils, startup_timing
 from jasna.gui.branding import (
     HEADER_LOGO_SIZE,
     create_header_logo,
@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_WINDOW_SIZE = (1320, 960)
 _MIN_WINDOW_SIZE = (900, 580)
 _SHUTDOWN_COUNTDOWN_SECONDS = 60
+_WINDHAWK_MODULE = "windhawk.dll"
 
 
 def _warm_up_cuda() -> tuple[bool, bool]:
@@ -124,6 +125,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.after_idle(self._log_startup_timing)
         self.after_idle(self._start_cuda_warmup)
+        self.after_idle(self._warn_if_windhawk_loaded)
 
         if not skip_wizard:
             if self._preset_manager.get_system_check_passed_version() != __version__:
@@ -400,6 +402,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._t_init_start,
             self._t_ui_built - self._t_init_start,
         )
+
+    def _warn_if_windhawk_loaded(self):
+        if not os_utils.windows_module_loaded(_WINDHAWK_MODULE):
+            return
+        from tkinter import messagebox
+
+        message = t("windhawk_warning_body")
+        self._log_panel.warning(message)
+        messagebox.showwarning(t("windhawk_warning_title"), message, parent=self)
 
     def _start_cuda_warmup(self):
         def _run():

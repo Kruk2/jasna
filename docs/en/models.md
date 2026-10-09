@@ -94,6 +94,9 @@ takes about 1.5x as long.
   11–12 GB works but is slower. Less than 11 GB is untested.
 - **System RAM**: 32 GB recommended (loading the model uses about 19 GB). With
   16 GB, use Fast mode, which needs about 10 GB.
+- **Windhawk**: LTX fails with "Access is denied" while Windhawk runs
+  inside Jasna. Exit Windhawk or add `jasna.exe` to its excluded processes.
+  Jasna warns about this when it starts (Windows only).
 
 ## Secondary restoration
 

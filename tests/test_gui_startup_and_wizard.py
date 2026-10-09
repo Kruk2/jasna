@@ -73,3 +73,24 @@ def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_che
     calls, support = _warm_up_with_gpu_check(monkeypatch, gpu_check_result)
     assert calls == {}
     assert support == (False, False)
+
+
+@pytest.mark.parametrize("loaded", [True, False])
+def test_startup_warns_only_when_windhawk_is_loaded(monkeypatch, loaded):
+    from tkinter import messagebox
+
+    from jasna import os_utils
+    from jasna.gui import app as app_module
+    from jasna.gui.locales import t
+
+    monkeypatch.setattr(os_utils, "windows_module_loaded", lambda name: loaded and name == "windhawk.dll")
+    shown = []
+    monkeypatch.setattr(messagebox, "showwarning", lambda title, message, parent: shown.append((title, message)))
+    logged = []
+    fake_app = types.SimpleNamespace(_log_panel=types.SimpleNamespace(warning=logged.append))
+
+    app_module.JasnaApp._warn_if_windhawk_loaded(fake_app)
+
+    expected = [(t("windhawk_warning_title"), t("windhawk_warning_body"))] if loaded else []
+    assert shown == expected
+    assert logged == [message for _title, message in expected]

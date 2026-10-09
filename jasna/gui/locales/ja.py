@@ -546,6 +546,8 @@ JA = {
         "tip_preset_create": "新しいプリセットを作成",
 
         # Engine compilation / first run warnings
+        "windhawk_warning_title": "Windhawk が実行中です",
+        "windhawk_warning_body": "Windhawk が Jasna に読み込まれているため、LTX モデルは「アクセスが拒否されました」で失敗します。Windhawk を終了するか、jasna.exe を除外プロセスに追加してから Jasna を再起動してください。",
         "engine_first_run_title": "初回起動は時間がかかる場合があります",
         "engine_first_run_body": "GPU 固有のモデルファイルを準備する必要があります。初回起動時にはこれは正常です。NVIDIA TensorRT のコンパイルには 15～60 分かかる場合があります。\n\n他のアプリ（ブラウザ、ゲームなど）をすべて閉じ、準備中は PC を使用しないでください。アプリが応答しないように見える場合がありますが、閉じないでください。\n\nモデル成果物はキャッシュされ、次回以降自動的に再利用されます。",
         "engine_first_run_missing": "不足しているエンジン:",

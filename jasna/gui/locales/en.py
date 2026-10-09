@@ -546,6 +546,8 @@ EN = {
         "tip_preset_create": "Create new preset",
 
         # Engine compilation / first run warnings
+        "windhawk_warning_title": "Windhawk is running",
+        "windhawk_warning_body": "Windhawk is loaded into Jasna, so the LTX model will fail with \"Access is denied\". Exit Windhawk, or add jasna.exe to its excluded processes, then restart Jasna.",
         "engine_first_run_title": "First run may be slow",
         "engine_first_run_body": "GPU-specific model files need to be prepared. This is normal on the first run. NVIDIA TensorRT compilation can take 15-60 minutes.\n\nClose all other applications (browsers, games, etc.) and do not use the PC during preparation. The application may appear unresponsive — do not close it.\n\nModel artifacts are cached and reused on all future runs.",
         "engine_first_run_missing": "Missing engines:",

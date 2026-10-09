@@ -705,3 +705,15 @@ def test_check_ascii_install_path_uses_executable_when_frozen(monkeypatch, tmp_p
     monkeypatch.setattr(os_utils.sys, "executable", str(exe_path), raising=False)
     ok, info = os_utils.check_ascii_install_path()
     assert ok is True
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows module lookup")
+def test_windows_module_loaded_reports_modules_of_this_process() -> None:
+    assert os_utils.windows_module_loaded("kernel32.dll") is True
+    assert os_utils.windows_module_loaded("jasna-not-a-loaded-module.dll") is False
+
+
+def test_windows_module_loaded_is_false_off_windows(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "linux")
+
+    assert os_utils.windows_module_loaded("kernel32.dll") is False
