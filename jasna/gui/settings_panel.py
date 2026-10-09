@@ -3,6 +3,7 @@
 import logging
 
 import customtkinter as ctk
+import tkinter as tk
 from dataclasses import asdict
 
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -221,16 +222,15 @@ class SettingsPanel(ctk.CTkFrame):
             self._on_restoration_model_changed,
             ltx_models=ltx_models,
         )
-        self._model_aware_sections = [
-            BasicSection(
-                self._scroll,
-                self._widgets,
-                self._mark_modified,
-                self._sync_temporal_filter_limits,
-            ),
-            AdvancedSection(self._scroll, self._widgets, self._mark_modified),
-            SecondarySection(self._scroll, self._widgets),
-        ]
+        basic_section = BasicSection(
+            self._scroll,
+            self._widgets,
+            self._mark_modified,
+            self._sync_temporal_filter_limits,
+        )
+        advanced_section = AdvancedSection(self._scroll, self._widgets, self._mark_modified)
+        self._secondary_section = SecondarySection(self._scroll, self._widgets)
+        self._model_aware_sections = [basic_section, advanced_section, self._secondary_section]
         self._sections = [
             self._model_section,
             *self._model_aware_sections,
@@ -397,10 +397,11 @@ class SettingsPanel(ctk.CTkFrame):
 
         # All interactive widgets
         for key, widget in self._widgets.items():
-            if key.endswith("_val") or key in _EDITABLE_WHILE_PROCESSING:
+            if key.endswith("_val") or key in _EDITABLE_WHILE_PROCESSING or isinstance(widget, tk.Variable):
                 continue
             try:
                 widget.configure(state=state)
             except Exception:
                 logger.debug("Widget %r does not support state=%s", key, state, exc_info=True)
         self._model_section.set_enabled(enabled)
+        self._secondary_section.set_enabled(enabled)

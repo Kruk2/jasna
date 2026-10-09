@@ -42,17 +42,16 @@ class SecondarySection:
         none_rb.pack(side="left", padx=(0, 16))
 
         from jasna.engine_paths import UNET4X_ONNX_ENC_PATH, UNET4X_ONNX_PATH
-        unet4x_available = UNET4X_ONNX_PATH.exists() or UNET4X_ONNX_ENC_PATH.exists()
+        self._unet4x_available = UNET4X_ONNX_PATH.exists() or UNET4X_ONNX_ENC_PATH.exists()
         unet4x_rb = ctk.CTkRadioButton(
             engines_frame, text=f"{t('secondary_unet_4x')} ({t('secondary_unet_4x_hint')})",
             variable=self._widgets["secondary_var"], value="unet-4x",
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed,
-            state="normal" if unet4x_available else "disabled",
+            state="normal" if self._unet4x_available else "disabled",
         )
         unet4x_rb.pack(side="left", padx=(0, 16))
         Tooltip(unet4x_rb, get_tooltip("secondary_unet_4x"))
-        self._unet4x_rb = unet4x_rb
 
         tvai_rb = ctk.CTkRadioButton(
             engines_frame, text=f"{t('secondary_tvai')} ({t('secondary_tvai_hint')})", variable=self._widgets["secondary_var"], value="tvai",
@@ -68,6 +67,7 @@ class SecondarySection:
             command=self._on_secondary_changed
         )
         rtx_rb.pack(side="left")
+        self._engine_radios = {"none": none_rb, "unet-4x": unet4x_rb, "tvai": tvai_rb, "rtx-super-res": rtx_rb}
         Tooltip(rtx_rb, get_tooltip("secondary_rtx"))
 
         # TVAI options (hidden by default)
@@ -142,7 +142,7 @@ class SecondarySection:
         tvai_denoise_tip.pack(side="left", padx=4)
         Tooltip(tvai_denoise_tip, get_tooltip("tvai_denoise"))
         self._widgets["tvai_denoise"] = ctk.BooleanVar(value=False)
-        ctk.CTkSwitch(
+        self._tvai_denoise_switch = ctk.CTkSwitch(
             tvai_denoise_row,
             text="",
             variable=self._widgets["tvai_denoise"],
@@ -150,7 +150,8 @@ class SecondarySection:
             progress_color=Colors.PRIMARY,
             button_color=Colors.TEXT_PRIMARY,
             width=42,
-        ).pack(side="right")
+        )
+        self._tvai_denoise_switch.pack(side="right")
 
         # TVAI workers
         tvai_workers_row = ctk.CTkFrame(tvai_inner, fg_color="transparent")
@@ -263,6 +264,13 @@ class SecondarySection:
             self._section.pack_forget()
         else:
             self._section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL), after=self._previous_section)
+
+    def set_enabled(self, enabled: bool) -> None:
+        state = "normal" if enabled else "disabled"
+        for value, radio in self._engine_radios.items():
+            unavailable = value == "unet-4x" and not self._unet4x_available
+            radio.configure(state="disabled" if unavailable else state)
+        self._tvai_denoise_switch.configure(state=state)
 
     def apply(self, preset):
         self._widgets["secondary_var"].set(preset.secondary_restoration)

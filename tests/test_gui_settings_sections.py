@@ -511,6 +511,33 @@ def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
     assert panel.get_settings() == ltx
 
 
+def test_processing_locks_secondary_controls_and_keeps_missing_unet4x_disabled(
+    _panel_factory, monkeypatch, tmp_path, caplog
+) -> None:
+    from jasna import engine_paths
+
+    monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", tmp_path / "missing.onnx")
+    monkeypatch.setattr(engine_paths, "UNET4X_ONNX_ENC_PATH", tmp_path / "missing.onnx.enc")
+    panel = _panel_factory(True)
+    secondary = next(section for section in panel._sections if isinstance(section, SecondarySection))
+    controls = [*secondary._engine_radios.values(), secondary._tvai_denoise_switch]
+
+    with caplog.at_level("DEBUG", logger="jasna.gui.settings_panel"):
+        panel.set_enabled(False)
+        locked = [control.cget("state") for control in controls]
+        panel.set_enabled(True)
+
+    assert locked == ["disabled"] * len(controls)
+    assert {value: radio.cget("state") for value, radio in secondary._engine_radios.items()} == {
+        "none": "normal",
+        "unet-4x": "disabled",
+        "tvai": "normal",
+        "rtx-super-res": "normal",
+    }
+    assert secondary._tvai_denoise_switch.cget("state") == "normal"
+    assert "does not support" not in caplog.text
+
+
 def test_disabling_settings_keeps_unavailable_ltx_disabled(_panel_factory) -> None:
     panel = _panel_factory(True)
     panel._model_section.set_gpu_support(nvidia=False, blackwell=False)
