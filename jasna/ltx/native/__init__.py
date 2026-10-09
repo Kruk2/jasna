@@ -7,8 +7,9 @@ comfy-kitchen (``sage_attention/``) and the element-wise glue of ``glue.cu``. Py
 every model constant and launch policy value and hands them over in ``Config``.
 
 Source installs build it on first use into the compile cache (needs nvcc, a C++ compiler
-and ninja); a release ships it prebuilt (``prebuild``). Without the toolchain, on a GPU it
-has no kernels for, or with ``JASNA_LTX_NATIVE=0`` the sampler keeps the torch.compile path.
+and ninja); a frozen release never builds it and loads it only when ``prebuild`` output is
+shipped in ``PREBUILT``. Without the toolchain, on a GPU it has no kernels for, or with
+``JASNA_LTX_NATIVE=0`` the sampler keeps the torch.compile path.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel
 
+from jasna._frozen import is_frozen
 from jasna.ltx import kernels
 from jasna.ltx import transformer as T
 from jasna.ltx.native.aot import FP4_ARCHS, BlockDims, build_kernels
@@ -89,6 +91,8 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
         return f"INT8 attention has no kernel for {dims.dim // dims.heads}-wide heads"
     if _prebuilt_extension() is not None:
         return None
+    if is_frozen():
+        return "a release ships no native block to load and cannot build one"
     from torch.utils.cpp_extension import CUDA_HOME
 
     if CUDA_HOME is None or not (Path(CUDA_HOME) / "bin" / "nvcc").is_file():

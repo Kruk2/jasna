@@ -162,6 +162,21 @@ def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
     assert "nvcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
 
 
+def test_release_without_a_prebuilt_block_keeps_the_compiled_path_without_cpp_extension(monkeypatch):
+    _cuda_capability(monkeypatch, (12, 0))
+    monkeypatch.setattr(native, "is_frozen", lambda: True)
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
+    monkeypatch.setitem(sys.modules, "torch.utils.cpp_extension", None)
+    assert "release" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+
+
+def test_release_with_a_prebuilt_block_runs_it(monkeypatch):
+    _cuda_capability(monkeypatch, (12, 0))
+    monkeypatch.setattr(native, "is_frozen", lambda: True)
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: native.PREBUILT / "jasna_ltx_native.so")
+    assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
+
+
 def test_extension_build_finds_ninja_from_its_package_when_off_path(monkeypatch, tmp_path):
     from torch.utils import cpp_extension
 
