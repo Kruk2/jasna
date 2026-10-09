@@ -10,6 +10,7 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
+from jasna.accelerator import device_free_bytes
 from jasna.ltx.model_files import LtxModelFiles, PlaceholderTensors
 from jasna.ltx.sampler import LtxTransformer
 from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
@@ -119,10 +120,10 @@ class ModelRuntime:
     def load_transformer(self):
         if self._transformer is None:
             if self.protected:
-                info, _ = self.request("load_transformer", {}, [])
+                info, _ = self.request("load_transformer", {"free_bytes": device_free_bytes(self.device)}, [])
                 self._transformer = WorkerTransformer(self, info)
             else:
-                self._transformer = LtxTransformer(self.files.transformer, self.device)
+                self._transformer = LtxTransformer(self.files.transformer, self.device, device_free_bytes)
         return self._transformer
 
     def unload_transformer(self) -> None:
@@ -177,6 +178,14 @@ class ModelRuntime:
         self.close()
 
 
+def free_vram_beside_parent(device: torch.device, parent_free_bytes: int) -> Callable[[torch.device], int]:
+    """Device-wide free VRAM inside the worker, from the parent's device-wide figure taken just
+    before loading: on Windows the worker's CUDA view misses every other process's memory (the
+    parent's included), so that gap is subtracted from it from then on."""
+    hidden = max(0, torch.cuda.mem_get_info(device)[0] - parent_free_bytes)
+    return lambda current: max(0, torch.cuda.mem_get_info(current)[0] - hidden)
+
+
 class WorkerBackend:
     """Only the authenticated child owns models; dispatch exposes whole inference operations."""
 
@@ -228,7 +237,9 @@ class WorkerBackend:
             return {}, [self.encoder(pixels).to("cpu").contiguous()]
         elif op == "load_transformer":
             if self.transformer is None:
-                self.transformer = LtxTransformer(self.files.transformer, self.device)
+                self.transformer = LtxTransformer(
+                    self.files.transformer, self.device, free_vram_beside_parent(self.device, params["free_bytes"])
+                )
             return {"steps": len(self.transformer.conditions), "resident": self.transformer.blocks.resident,
                     "count": self.transformer.blocks.count}, []
         elif op == "unload_transformer":

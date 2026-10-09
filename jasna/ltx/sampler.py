@@ -113,10 +113,12 @@ def _block_functions(
 
 
 class LtxTransformer:
-    """The restoration transformer loaded from a jasna LTX model file."""
+    """The restoration transformer loaded from a jasna LTX model file; ``free_vram(device)``
+    gives the VRAM free on the whole GPU, which sizes the resident blocks and window groups."""
 
-    def __init__(self, path: Path, device: torch.device) -> None:
+    def __init__(self, path: Path, device: torch.device, free_vram: Callable[[torch.device], int]) -> None:
         self.device = device
+        self._free_vram = free_vram
         self.top: dict[str, torch.Tensor] = {}
         self.conditions: list[T.StepConditioning] = []
         self.context: torch.Tensor | None = None
@@ -156,8 +158,7 @@ class LtxTransformer:
             raise
 
     def _resident_blocks(self, sizes: list[int]) -> int:
-        free, _ = torch.cuda.mem_get_info(self.device)
-        budget = free - ACTIVATION_RESERVE_BYTES - 2 * max(sizes)
+        budget = self._free_vram(self.device) - ACTIVATION_RESERVE_BYTES - 2 * max(sizes)
         resident, used = 0, 0
         for size in sizes:
             if used + size > budget:
@@ -197,7 +198,7 @@ class LtxTransformer:
         return self._ropes[key]
 
     def _group_size(self, windows: int, tokens: int) -> int:
-        free, _ = torch.cuda.mem_get_info(self.device)
+        free = self._free_vram(self.device)
         free += torch.cuda.memory_reserved(self.device) - torch.cuda.memory_allocated(self.device)
         fits = (free - _window_workspace_bytes(tokens)) // _window_state_bytes(tokens, stg=bool(self.stg_scale))
         return max(1, min(windows, int(fits)))

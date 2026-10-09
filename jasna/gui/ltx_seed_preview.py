@@ -20,6 +20,7 @@ from pathlib import Path
 
 import torch
 
+from jasna.accelerator import device_free_bytes
 from jasna.gui.models import AppSettings
 from jasna.gui.queues import replace_pending
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
@@ -179,7 +180,7 @@ class SeedRenderer:
                 self._transformer_path = render.files.transformer
             denoise_spans([prepared], finals, self._transformer, keep_references=True, progress=progress, cancel=cancel)
             decode_bytes = render.budget(LARGE_CANVAS if render.large_canvas else PLAN_CANVAS) + DECODE_HEADROOM_BYTES
-            if torch.cuda.mem_get_info(render.device)[0] < decode_bytes:
+            if device_free_bytes(render.device) < decode_bytes:
                 self._drop_transformer()
             progress.begin("compose")
             decoder = self._runtime.load_decoder()

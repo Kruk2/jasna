@@ -38,6 +38,7 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
     monkeypatch.setattr(inference, "load_video_encoder", forbidden)
     monkeypatch.setattr(inference, "load_video_decoder", forbidden)
     monkeypatch.setattr(inference, "LtxTransformer", forbidden)
+    monkeypatch.setattr(inference, "device_free_bytes", lambda device: 9 << 30)
     runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
     requests = []
     pixels = torch.zeros(1, 3, 121, 2, 2, dtype=torch.uint8)
@@ -78,6 +79,7 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
         "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",
         "unload_transformer", "load_decoder", "decode", "unload_decoder",
     ]
+    assert requests[3][1] == {"free_bytes": 9 << 30}
     assert requests[4][1] == {"seeds": [43]}
     assert requests[7][1] == {"seed": 43, "free_bytes": 123}
 
@@ -176,3 +178,35 @@ def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
 
     stats, _ = backend.dispatch("stats", {}, [], lambda _n: None)
     assert stats["peak_vram_bytes"] == (5 << 30) + (13 << 30)
+
+
+def test_worker_sizes_the_transformer_from_the_parents_device_wide_free_vram(monkeypatch, allocator):
+    """On Windows the worker's CUDA view misses the parent's and other programs' VRAM."""
+    gib = 1 << 30
+    worker_view = {"free": 30 * gib}
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (worker_view["free"], 32 * gib))
+    readers = []
+
+    class Transformer:
+        conditions = [None] * 8
+        blocks = SimpleNamespace(resident=40, count=48)
+
+        def __init__(self, path, device, free_vram):
+            readers.append(free_vram)
+
+        def native_vram_bytes(self):
+            return 0
+
+    monkeypatch.setattr(inference, "LtxTransformer", Transformer)
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend.dispatch("load_transformer", {"free_bytes": 14 * gib}, [], lambda _n: None)
+    worker_view["free"] = 25 * gib
+    assert readers[0](torch.device("cpu")) == 9 * gib
+
+
+def test_local_transformer_reads_device_wide_free_vram(monkeypatch):
+    received = []
+    monkeypatch.setattr(inference, "LtxTransformer", lambda path, device, free_vram: received.append(free_vram))
+    runtime = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
+    runtime.load_transformer()
+    assert received == [inference.device_free_bytes]

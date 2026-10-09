@@ -29,6 +29,7 @@ from typing import Literal, Protocol
 import torch
 from tqdm import tqdm
 
+from jasna.accelerator import device_free_bytes
 from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
@@ -498,7 +499,7 @@ def denoise_track(
 
 
 def free_vram_budget(device: torch.device) -> DecodeBudget:
-    return lambda _canvas: torch.cuda.mem_get_info(device)[0]
+    return lambda _canvas: device_free_bytes(device)
 
 
 def segment_decode_budget(canvas: int) -> int:
@@ -855,7 +856,7 @@ def restore_video(
             frame_h=frame_h,
             frame_w=frame_w,
             batch_size=batch_size,
-            large_canvas=large_canvas_fits(large_canvas, torch.cuda.mem_get_info(device)[0]),
+            large_canvas=large_canvas_fits(large_canvas, device_free_bytes(device)),
             budget=free_vram_budget(device),
             budget_name="free VRAM",
             device=device,

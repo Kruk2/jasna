@@ -39,8 +39,11 @@ def _small_transformer_file(path):
     return path
 
 
+def _twenty_gib_free(device):
+    return 20 << 30
+
+
 def _without_compiling(monkeypatch):
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (20 << 30, 20 << 30))
     monkeypatch.setattr(sampler, "compiled_block_forward", lambda: T.block_forward)
     monkeypatch.setattr(T, "require_kernels", lambda device: None)
     monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
@@ -121,7 +124,7 @@ def test_transformer_close_clears_top_context_conditioning_and_blocks(tmp_path, 
     path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
     original = path.read_bytes()
     _without_compiling(monkeypatch)
-    transformer = sampler.LtxTransformer(path, torch.device("cpu"))
+    transformer = sampler.LtxTransformer(path, torch.device("cpu"), _twenty_gib_free)
     condition = transformer.conditions[0]
     retained = [*transformer.top.values(), transformer.context,
                 condition.block_rows, condition.output_rows, condition.prompt_rows,
@@ -140,7 +143,7 @@ def test_frozen_trial_keeps_its_placeholder_blocks_in_the_plain_tensor_store(mon
     monkeypatch.setattr(sampler, "is_frozen", lambda: True)
     _install_native_store(monkeypatch)
     _without_compiling(monkeypatch)
-    transformer = sampler.LtxTransformer(PlaceholderTensors("int8", "distilled"), torch.device("cpu"))
+    transformer = sampler.LtxTransformer(PlaceholderTensors("int8", "distilled"), torch.device("cpu"), _twenty_gib_free)
     try:
         assert isinstance(transformer.blocks, BlockStore)
         assert transformer.blocks.acquire(0)["weight"].shape == (2, 2)
@@ -238,7 +241,7 @@ def test_opaque_denoise_uses_only_native_complete_block_forward(tmp_path, monkey
     monkeypatch.setattr(
         sampler.T, "velocity", lambda top, x, cond: torch.zeros_like(x[:, : x.shape[1] // 2]),
     )
-    transformer = sampler.LtxTransformer(path, torch.device("cpu"))
+    transformer = sampler.LtxTransformer(path, torch.device("cpu"), _twenty_gib_free)
     transformer.stg_scale = 1.0
     native = transformer.blocks._native
     rope = T.Rope(cos=torch.ones(1, 1, 4, 4), sin=torch.zeros(1, 1, 4, 4))

@@ -68,7 +68,7 @@ class _Bar:
 class _Transformer:
     seeds: list[list[int]] = []
 
-    def __init__(self, path, device):
+    def __init__(self, path, device, free_vram):
         self.conditions = [None] * 8
         self.blocks = SimpleNamespace(resident=40, count=48)
 
@@ -123,7 +123,8 @@ def fakes(monkeypatch):
     monkeypatch.setattr(restore, "decode_latent", decode)
     monkeypatch.setattr(restore, "composite_frame", composite)
     monkeypatch.setattr(restore.Progress, "bar", bar)
-    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (123 << 20, 1 << 40))
+    monkeypatch.setattr(restore, "device_free_bytes", lambda device: 123 << 20)
+    monkeypatch.setattr(inference, "device_free_bytes", lambda device: 123 << 20)
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
     monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: "Test GPU")
     monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device: None)
@@ -541,7 +542,7 @@ def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
     progress = restore.Progress(30, disable=True, report=None)
     cancel = threading.Event()
     (prepared,) = restore.prepare_spans([span], _render(tmp_path), tmp_path, progress=progress, cancel=cancel)
-    transformer = _Transformer(None, None)
+    transformer = _Transformer(None, None, None)
     _Transformer.seeds = []
 
     for seed in (11, 22):

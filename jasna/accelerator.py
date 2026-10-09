@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from collections.abc import MutableMapping
 from contextlib import nullcontext
+import ctypes
 from enum import StrEnum
+import functools
 import os
+import sys
 from typing import Any
 
 import torch
@@ -130,6 +133,41 @@ def reset_peak_memory_stats(device: torch.device | str) -> None:
 def mem_get_info(device: torch.device | str) -> tuple[int, int]:
     module = device_module(torch.device(device))
     return module.mem_get_info(torch.device(device))
+
+
+class _NvmlMemory(ctypes.Structure):
+    _fields_ = [("total", ctypes.c_ulonglong), ("free", ctypes.c_ulonglong), ("used", ctypes.c_ulonglong)]
+
+
+@functools.cache
+def _nvml_device(uuid: str):
+    nvml = ctypes.WinDLL("nvml.dll")
+    _nvml_check(nvml, nvml.nvmlInit_v2())
+    handle = ctypes.c_void_p()
+    _nvml_check(nvml, nvml.nvmlDeviceGetHandleByUUID(f"GPU-{uuid}".encode(), ctypes.byref(handle)))
+    return nvml, handle
+
+
+def _nvml_check(nvml, status: int) -> None:
+    if status:
+        nvml.nvmlErrorString.restype = ctypes.c_char_p
+        raise RuntimeError(f"NVML: {nvml.nvmlErrorString(status).decode()}")
+
+
+def _nvml_free_bytes(device: torch.device) -> int:
+    nvml, handle = _nvml_device(str(torch.cuda.get_device_properties(device).uuid))
+    memory = _NvmlMemory()
+    _nvml_check(nvml, nvml.nvmlDeviceGetMemoryInfo(handle, ctypes.byref(memory)))
+    return memory.free
+
+
+def device_free_bytes(device: torch.device) -> int:
+    """VRAM free on the whole GPU. On Windows, CUDA counts only this process's memory (WDDM
+    hides every other process's), so NVML's device-wide figure caps it there."""
+    free = torch.cuda.mem_get_info(device)[0]
+    if sys.platform == "win32":
+        return min(free, _nvml_free_bytes(device))
+    return free
 
 
 def device_name(device: torch.device | str) -> str:
