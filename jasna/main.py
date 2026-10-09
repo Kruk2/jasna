@@ -834,6 +834,23 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
         download_files(directory, missing, lambda done, total: bar.update(done - bar.n), mirror_first=get_locale().current_language == "zh")
 
 
+LTX_ONLY_ARG_DESTS = ("ltx_fast", "ltx_large_canvas", "ltx_seed", "ltx_trial", "ltx_auto_split")
+BASICVSRPP_ONLY_ARG_DESTS = ("compile_basicvsrpp",)
+
+
+def _reject_options_of_other_restoration_backend(
+    parser: argparse.ArgumentParser, args: argparse.Namespace, restoration_backend: str
+) -> None:
+    if restoration_backend == "ltx":
+        foreign_dests, needed_models = BASICVSRPP_ONLY_ARG_DESTS, "basicvsrpp"
+    else:
+        foreign_dests, needed_models = LTX_ONLY_ARG_DESTS, "ltx or ltx-undistilled"
+    for dest in foreign_dests:
+        if getattr(args, dest) != parser.get_default(dest):
+            option = "--" + dest.replace("_", "-")
+            parser.error(f"{option} needs --restoration-model-name {needed_models}")
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -981,11 +998,7 @@ def main() -> None:
             parser.error("--restoration-model-name ltx does not support --stream")
         if args.secondary_restoration != "none" or args.denoise != "none":
             parser.error("--restoration-model-name ltx does not support --secondary-restoration or --denoise")
-    else:
-        if args.ltx_trial:
-            parser.error("--ltx-trial needs --restoration-model-name ltx or ltx-undistilled")
-        if auto_split:
-            parser.error("--ltx-auto-split needs --restoration-model-name ltx or ltx-undistilled")
+    _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
     restoration_model_path = Path(
         args.restoration_model_path or default_restoration_model_path(restoration_backend)
     )

@@ -149,6 +149,26 @@ class TestMainValidation:
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--ltx-trial"])
 
+    @pytest.mark.parametrize(
+        "ltx_args",
+        [["--ltx-fast"], ["--ltx-large-canvas"], ["--ltx-seed", "7"], ["--ltx-trial"], ["--ltx-auto-split", "12"]],
+    )
+    def test_basicvsrpp_rejects_ltx_options(self, tmp_path, capsys, ltx_args):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ltx_args)
+        assert "needs --restoration-model-name ltx or ltx-undistilled" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("model", ["ltx", "ltx-undistilled"])
+    def test_ltx_rejects_disabling_basicvsrpp_compile(self, tmp_path, capsys, model):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--restoration-model-name", model, "--no-compile-basicvsrpp"])
+        assert "--compile-basicvsrpp needs --restoration-model-name basicvsrpp" in capsys.readouterr().err
+
+    def test_basicvsrpp_accepts_disabling_its_compile(self, tmp_path):
+        pipeline_cls = _run_main_with_args(tmp_path, ["--no-compile-basicvsrpp"])
+
+        assert pipeline_cls.call_args.kwargs["config"].compile_basicvsrpp is False
+
     def test_ltx_rejects_streaming(self, tmp_path):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--stream", "--restoration-model-name", "ltx"])
