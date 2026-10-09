@@ -38,6 +38,8 @@ def patch_frozen_torch() -> None:
     if _patched:
         return
     _patched = True
+    if is_frozen():
+        ignore_triton_cuda_toolkit_lookup_warning()
 
     import torch.jit
     _interface = torch.jit.interface
@@ -69,6 +71,13 @@ def patch_frozen_torch() -> None:
             root = Path(get_application_executable()).parent
             register_ltx_sources(root)
             use_prebuilt_triton_modules(root / "triton_prebuilt")
+
+
+def ignore_triton_cuda_toolkit_lookup_warning() -> None:
+    """Triton on Windows warns when no CUDA Toolkit is installed, but the build bundles ptxas and the helper."""
+    import warnings
+    warnings.filterwarnings("ignore", message="Failed to find CUDA", category=UserWarning,
+                            module="triton.windows_utils")
 
 
 def register_ltx_sources(root) -> None:

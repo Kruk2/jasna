@@ -172,6 +172,34 @@ def test_frozen_inductor_runs_in_process_and_keeps_runtime_cache_paths(monkeypat
     assert _frozen.os.environ["TRITON_CACHE_DIR"] == "/private/process/triton"
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Triton looks for the CUDA Toolkit only on Windows")
+def test_frozen_startup_without_cuda_toolkit_shows_no_triton_warning(tmp_path):
+    pytest.importorskip("triton")
+    repository = Path(__file__).resolve().parents[1]
+    environment = {name: value for name, value in os.environ.items() if name not in ("CUDA_PATH", "CUDA_HOME")}
+    environment["ProgramFiles(x86)"] = environment["ProgramW6432"] = str(tmp_path)
+    result = subprocess.run(
+        [sys.executable, "-c", """
+import sys, sysconfig, warnings
+platlib_paths = sysconfig.get_paths
+sysconfig.get_paths = lambda *args, **kwargs: {**platlib_paths(*args, **kwargs), "platlib": sys.argv[2]}
+sys.path.insert(0, sys.argv[1])
+from jasna import _frozen
+_frozen.is_frozen = lambda: True
+_frozen.register_ltx_sources = lambda root: None
+_frozen.use_prebuilt_triton_modules = lambda directory: None
+with warnings.catch_warnings(record=True) as caught:
+    warnings.simplefilter("always")
+    _frozen.patch_frozen_torch()
+    from triton.windows_utils import find_cuda
+    assert find_cuda() == (None, [], [])
+print([str(warning.message) for warning in caught if "CUDA" in str(warning.message)])
+""", str(repository), str(tmp_path)],
+        env=environment, capture_output=True, text=True, check=True, timeout=300,
+    )
+    assert result.stdout.strip() == "[]", result.stdout + result.stderr
+
+
 @pytest.mark.parametrize("platform", ("linux", "win32"))
 def test_frozen_build_compiles_in_process_with_prebuilt_triton_modules(monkeypatch, tmp_path, platform):
     import torch._inductor.config as inductor_config
