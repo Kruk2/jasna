@@ -1,4 +1,6 @@
+import gc
 import json
+import weakref
 from contextlib import contextmanager
 
 import pytest
@@ -415,6 +417,29 @@ def test_tiny_decoder_multi_tile_decode_is_seeded_and_shaped():
     assert torch.isfinite(pixels).all()
     assert torch.equal(pixels, torch.cat(decode(1), dim=2))
     assert not torch.equal(pixels, torch.cat(decode(2), dim=2))
+
+
+def test_decode_latent_frees_activations_left_in_reference_cycles(monkeypatch):
+    """torch.compile keeps a call that compiled a new tile shape in reference cycles; the next
+    window's budget must not count those activations as used."""
+    decoder = _tiny_decoder()
+    tiled_decode = decoder.tiled_decode
+    left_behind = []
+
+    def tiled_decode_leaving_a_cycle(latent, tiling, generator):
+        cycle = {"activation": torch.ones(64)}
+        cycle["self"] = cycle
+        left_behind.append(weakref.ref(cycle["activation"]))
+        return tiled_decode(latent, tiling, generator)
+
+    monkeypatch.setattr(decoder, "tiled_decode", tiled_decode_leaving_a_cycle)
+    gc.collect()
+    gc.disable()
+    try:
+        loader.decode_latent(decoder, torch.randn(1, 8, 3, 3, 4), 4 << 30, torch.Generator().manual_seed(1))
+        assert left_behind[0]() is None
+    finally:
+        gc.enable()
 
 
 def test_modulating_mlp_chunks_match_one_unchunked_pass(monkeypatch):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+import gc
 import json
 import logging
 from collections.abc import Callable, Iterable
@@ -235,7 +236,17 @@ def decode_latent(
         height=pixel_height, width=pixel_width, num_frames=pixel_frames, free_bytes=free_bytes
     )
     _log_tiling(pixel_frames, pixel_height, pixel_width, tiling)
-    return torch.cat(list(decoder.tiled_decode(latent, tiling, generator)), dim=2)
+    video = torch.cat(list(decoder.tiled_decode(latent, tiling, generator)), dim=2)
+    _free_compile_garbage()
+    return video
+
+
+def _free_compile_garbage() -> None:
+    """A call that compiled a new tile shape stays referenced from torch.compile's frames in
+    reference cycles, activations included (GiBs at 768 px); collect them so the next window's
+    decode budget sees that memory free."""
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 @functools.cache
