@@ -58,7 +58,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **快速模式**：仅限 RTX 50 系列。快约 1.4 倍，细节略少，下载也更小。
   CLI：`--ltx-fast`。
 - **大马赛克更清晰**：让大马赛克（特写、4K）细节更多，这部分约慢 3 倍。
-  需要 10 GB 空闲显存，不够时不生效。CLI：`--ltx-large-canvas`。
+  需要 12 GB 空闲显存，不够时不生效。CLI：`--ltx-large-canvas`。
 - **种子**：换一个种子，结果会略有不同；同一个种子会得到同样的结果。
   CLI：`--ltx-seed 7`。
 - **试用模式**：无需模型文件，以真实速度运行 LTX，看看它在你的

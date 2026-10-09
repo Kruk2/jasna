@@ -39,7 +39,7 @@ jasna --input input_folder --output output_folder
 | `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx`（细节更多，慢很多）或 `ltx-undistilled`（最佳 LTX 模型：比 `ltx` 稍好，约慢 1.5 倍）。见[选择模型](models.md#修复模型)。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | 修复模型权重（LTX 为文件夹）。 |
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列。 |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要 10 GB 空闲显存。 |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要 12 GB 空闲显存。 |
 | `--ltx-seed` | 模型默认值 | LTX：换一个种子，结果会略有不同。 |
 | `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：无需模型文件即可测试速度。视频不会被修复。 |
 | `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹；拆分后的视频保持原编码，无法拆分的视频整段用 LTX 修复。见[区间](segments.md)。 |

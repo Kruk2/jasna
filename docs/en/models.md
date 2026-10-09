@@ -63,7 +63,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **Fast mode**: RTX 50-series only. About 1.4x faster with slightly less
   detail, and a smaller download. CLI: `--ltx-fast`.
 - **Sharper large mosaics**: more detail on big mosaics (close-ups, 4K),
-  about 3x slower on those. Needs 10 GB of free VRAM, otherwise it has no
+  about 3x slower on those. Needs 12 GB of free VRAM, otherwise it has no
   effect. CLI: `--ltx-large-canvas`.
 - **Seed**: another seed gives a slightly different result; the same seed
   repeats it. CLI: `--ltx-seed 7`.

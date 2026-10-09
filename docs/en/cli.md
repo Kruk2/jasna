@@ -39,7 +39,7 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | `--restoration-model-name` | `basicvsrpp` | Video restoration model: `basicvsrpp` (fast), `ltx` (more detail, much slower) or `ltx-undistilled` (the Best LTX model: slightly better than `ltx`, about 1.5x slower). See [Choosing models](models.md#restoration-model). |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | Restoration weights (a folder for LTX). |
 | `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only. |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs 10 GB of free VRAM. |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs 12 GB of free VRAM. |
 | `--ltx-seed` | model default | LTX: another seed gives a slightly different result. |
 | `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model files. The video is not restored. |
 | `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders; a split video keeps its own codec, one that can't be split is restored whole with LTX. See [Segments](segments.md). |
