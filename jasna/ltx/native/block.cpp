@@ -4,7 +4,7 @@
 // time to cubins (``aot.py``) and launched through the CUDA driver; NVFP4 GEMMs and the prompt
 // cross-attention are the same ATen ops the torch path calls; video self-attention is the INT8
 // attention vendored from comfy-kitchen (``sage_attention/``); the rest is ``glue.cu``. Every model constant
-// and launch policy value comes from Python (``Config``).
+// and launch policy value comes from the shared typed configuration.
 
 #include <torch/extension.h>
 
@@ -14,12 +14,14 @@
 #include <pybind11/stl.h>
 
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "glue.h"
 #include "block.h"
@@ -40,27 +42,42 @@ void check_cu(CUresult result, const char* what) {
 
 int64_t cdiv(int64_t a, int64_t b) { return (a + b - 1) / b; }
 
-struct TensorDescriptorLayout {
-  int swizzle, elem_size, elem_type;
-  std::vector<int64_t> block;  // box shape, outermost first
+class ModuleOwner {
+ public:
+  ModuleOwner() = default;
+  ModuleOwner(const ModuleOwner&) = delete;
+  ModuleOwner& operator=(const ModuleOwner&) = delete;
+  ~ModuleOwner() {
+    if (module_ && cuModuleUnload(std::exchange(module_, nullptr)) != CUDA_SUCCESS)
+      std::fputs("LTX native block: unloading a kernel module failed\n", stderr);
+  }
+  CUmodule* address() { return &module_; }
+  CUmodule get() const { return module_; }
+  CUmodule release() { return std::exchange(module_, nullptr); }
+
+ private:
+  CUmodule module_ = nullptr;
 };
 
 // One ahead-of-time compiled Triton kernel and the argument list its launcher expects.
 class Kernel {
  public:
-  explicit Kernel(const py::dict& entry, const std::string& directory) {
-    function_name_ = entry["function"].cast<std::string>();
-    shared_ = entry["shared"].cast<int>();
-    threads_ = entry["warps"].cast<int>() * 32;
-    args_ = entry["args"].cast<std::vector<std::string>>();
-    divisible_ = entry["divisible"].cast<std::vector<bool>>();
-    for (const auto& item : entry["tensordesc"].cast<py::list>()) {
-      const auto t = item.cast<py::tuple>();
-      descriptors_.push_back({t[0].cast<int>(), t[1].cast<int>(), t[2].cast<int>(), t[3].cast<std::vector<int64_t>>()});
-    }
-    const std::string path = directory + "/" + entry["cubin"].cast<std::string>();
-    check_cu(cuModuleLoad(&module_, path.c_str()), "loading a kernel cubin");
-    check_cu(cuModuleGetFunction(&function_, module_, function_name_.c_str()), "finding a kernel");
+  explicit Kernel(KernelSpec spec, KernelSource source) : source_(std::move(source)) {
+    validate_kernel_spec(spec);
+    TORCH_CHECK(source_.kind() == KernelSource::Kind::Image ? !source_.image().empty() : !source_.path().empty(),
+                "LTX native block: empty kernel source");
+    function_name_ = std::move(spec.function);
+    shared_ = spec.shared;
+    threads_ = spec.warps * 32;
+    args_ = std::move(spec.args);
+    divisible_ = std::move(spec.divisible);
+    descriptors_ = std::move(spec.tensordesc);
+    ModuleOwner loaded;
+    if (source_.kind() == KernelSource::Kind::Image)
+      check_cu(cuModuleLoadData(loaded.address(), source_.image().data()), "loading a kernel image");
+    else
+      check_cu(cuModuleLoad(loaded.address(), source_.path().c_str()), "loading a kernel cubin");
+    check_cu(cuModuleGetFunction(&function_, loaded.get(), function_name_.c_str()), "finding a kernel");
     if (shared_ > 49152) {  // as Triton's own loader: opt in to more than 48 KiB of dynamic shared memory
       CUdevice device;
       check_cu(cuCtxGetDevice(&device), "querying the device");
@@ -72,16 +89,19 @@ class Kernel {
       check_cu(cuFuncSetAttribute(function_, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, optin - static_shared),
                "shared");
     }
+    module_ = loaded.release();
   }
   Kernel(const Kernel&) = delete;
   Kernel& operator=(const Kernel&) = delete;
   ~Kernel() {
-    if (module_ != nullptr) cuModuleUnload(module_);
+    if (module_ && cuModuleUnload(std::exchange(module_, nullptr)) != CUDA_SUCCESS)
+      std::fputs("LTX native block: unloading a kernel module failed\n", stderr);
   }
 
   friend class Launch;
 
  private:
+  KernelSource source_;
   CUmodule module_ = nullptr;
   CUfunction function_ = nullptr;
   std::string function_name_;
@@ -182,18 +202,61 @@ class Block::Impl {
   struct Activation;
 
  public:
-  explicit Impl(const Config& config) : config_(config) {
+  explicit Impl(const Config& config) : Impl(config, path_kernels(config)) {}
+
+  Impl(const Config& config, std::vector<KernelImage> kernels) : Impl(config, image_kernels(std::move(kernels))) {}
+
+ private:
+  struct KernelInput {
+    KernelSpec spec;
+    KernelSource source;
+  };
+
+  static std::vector<KernelInput> path_kernels(const Config& config) {
+    std::vector<KernelInput> result;
+    for (const auto& item : config.kernels) {
+      const auto entry = item.cast<py::dict>();
+      KernelSpec spec;
+      spec.family = entry["family"].cast<std::string>();
+      spec.constexprs = entry["constexprs"].cast<std::map<std::string, int64_t>>();
+      spec.function = entry["function"].cast<std::string>();
+      spec.shared = entry["shared"].cast<int>();
+      spec.warps = entry["warps"].cast<int>();
+      spec.args = entry["args"].cast<std::vector<std::string>>();
+      spec.divisible = entry["divisible"].cast<std::vector<bool>>();
+      for (const auto& descriptor : entry["tensordesc"].cast<py::list>()) {
+        const auto t = descriptor.cast<py::tuple>();
+        spec.tensordesc.push_back({t[0].cast<int>(), t[1].cast<int>(), t[2].cast<int>(),
+                                 t[3].cast<std::vector<int64_t>>()});
+      }
+      validate_kernel_spec(spec);
+      result.push_back({std::move(spec), KernelSource::from_path(config.kernel_directory + "/" + entry["cubin"].cast<std::string>())});
+    }
+    return result;
+  }
+
+  static std::vector<KernelInput> image_kernels(std::vector<KernelImage> kernels) {
+    validate_kernel_images(kernels);
+    std::vector<KernelInput> result;
+    result.reserve(kernels.size());
+    for (auto& image : kernels)
+      result.push_back({std::move(image.spec), KernelSource::from_image(std::move(image.cubin))});
+    return result;
+  }
+
+  Impl(const Config& config, std::vector<KernelInput> kernels) : config_(config) {
     TORCH_CHECK(config_.narrow_tile.size() == 5 && config_.wide_tile.size() == 5 && config_.small_tile.size() == 5,
                 "GEMM tiles are (BM, BN, BK, stages, warps)");
     TORCH_CHECK(config_.epilogue_tile.size() == 2, "the cuBLAS-path epilogue tile is (BM, BN)");
     c10::cuda::CUDAGuard guard(static_cast<c10::DeviceIndex>(config_.device));
     C10_CUDA_CHECK(cudaFree(nullptr));  // makes the device's primary context current for the driver API
-    for (const auto& item : config_.kernels) {
-      const auto entry = item.cast<py::dict>();
-      kernels_.emplace(key(entry["family"].cast<std::string>(), entry["constexprs"].cast<std::map<std::string, int64_t>>()),
-                       std::make_unique<Kernel>(entry, config_.kernel_directory));
+    for (auto& input : kernels) {
+      const auto identity = kernel_key(input.spec.family, input.spec.constexprs);
+      kernels_.emplace(identity, std::make_unique<Kernel>(std::move(input.spec), std::move(input.source)));
     }
   }
+
+ public:
 
   at::Tensor forward(const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& q_norm,
                      const at::Tensor& k_norm, const at::Tensor& cross_q_norm, const at::Tensor& scale_shift_table,
@@ -331,9 +394,7 @@ class Block::Impl {
   }
 
   static std::string key(const std::string& family, const std::map<std::string, int64_t>& constexprs) {
-    std::string result = family;
-    for (const auto& [name, value] : constexprs) result += "|" + name + "=" + std::to_string(value);
-    return result;
+    return kernel_key(family, constexprs);
   }
 
   const Kernel& kernel(const std::string& family, const std::map<std::string, int64_t>& constexprs) const {
@@ -529,6 +590,8 @@ class Block::Impl {
 };
 
 Block::Block(const Config& config) : impl_(std::make_unique<Impl>(config)) {}
+Block::Block(const Config& config, std::vector<KernelImage> kernels)
+    : impl_(std::make_unique<Impl>(config, std::move(kernels))) {}
 Block::~Block() = default;
 at::Tensor Block::forward(const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& q_norm,
                           const at::Tensor& k_norm, const at::Tensor& cross_q_norm,

@@ -235,25 +235,34 @@ class NativeBlockForward:
             )
 
 
-def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict[str, object]:
-    """Typed native-block configuration shared by public and protected bindings."""
-    capability = torch.cuda.get_device_capability(device)
+def block_parameters(capability: tuple[int, int], heads: int) -> dict[str, object]:
+    """Public launch policy from architecture only; no device or kernel queries."""
     tiles = kernels.INT8_MM_TILES.get(capability, (kernels.SMALL_MM_TILE,) * 2)
     return {
-        "device": device.index if device.index is not None else torch.cuda.current_device(),
-        "heads": dims.heads, "eps": T.EPS, "chunk_rows": T.CHUNK_ROWS,
+        "heads": heads, "eps": T.EPS, "chunk_rows": T.CHUNK_ROWS,
         "cublas_int8": capability in kernels.CUBLAS_INT8_MM,
         "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(kernels.SMALL_MM_TILE),
         "small_max_n": kernels.SMALL_MM_MAX_N, "wide_k": kernels.WIDE_K, "group_m": kernels.GROUP_M,
-        "stream_k_max_waves": kernels.STREAM_K_MAX_WAVES, "programs": kernels.programs(device),
+        "stream_k_max_waves": kernels.STREAM_K_MAX_WAVES,
         "has_tma": kernels.has_tma(capability), "epilogue_tile": list(kernels.CUBLAS_EPILOGUE_TILE),
         "fp4_tensor_scale_divisor": T.FP4_MAX * T.FP8_E4M3_MAX, "fp4_block": T.FP4_BLOCK,
         "fp4_quantize_rows": kernels.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": kernels.FP4_QUANTIZE_COLS,
         "fp4_scale_tile_rows": kernels.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernels.FP4_SCALE_TILE_COLS,
         "fp4_recipe": [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value],
         "fp4_swizzle": [F.SwizzleType.SWIZZLE_32_4_4.value, F.SwizzleType.NO_SWIZZLE.value],
+    }
+
+
+def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict[str, object]:
+    """Typed native-block configuration shared by public and protected bindings."""
+    capability = torch.cuda.get_device_capability(device)
+    return {
+        "device": device.index if device.index is not None else torch.cuda.current_device(),
+        **block_parameters(capability, dims.heads),
+        "programs": kernels.programs(device),
         "kernels": json.loads(manifest.read_text()), "kernel_directory": str(manifest.parent),
     }
+
 
 def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]) -> NativeBlockForward | None:
     """The native block forward for blocks shaped like ``block_specs``, or None (logged) when it
@@ -283,18 +292,31 @@ def cuda_arch_list() -> str:
     return ";".join(f"{major}.{minor}" for major, minor in release_architectures())
 
 
-def prebuild(directory: Path) -> None:
-    """Release build: kernels for every architecture of the kernel tables and the extension for
-    all of them, laid out as ``PREBUILT`` expects (copy ``directory`` there)."""
+def prebuild_profiles() -> list[tuple[tuple[int, int], BlockDims, bool]]:
+    """The public architecture and model-shape profiles compiled into a release."""
     from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors
 
     archs = release_architectures()
+    profiles = []
     for quantization in ("int8", "nvfp4"):
         specs = PlaceholderHandle(PlaceholderTensors(quantization, "distilled")).tensor_specs()
         dims = BlockDims.from_specs({name.split(".", 2)[2]: spec for name, spec in specs.items() if name.startswith("blocks.0.")})
         for capability in archs:
             if quantization == "int8" or capability in FP4_ARCHS:
-                build_kernels(capability, dims, fp4=quantization == "nvfp4", cache=directory / "kernels")
+                profiles.append((capability, dims, quantization == "nvfp4"))
+    return profiles
+
+
+def prebuild_kernels(directory: Path) -> None:
+    """Build release kernel profiles without building the native extension or querying a GPU."""
+    for capability, dims, fp4 in prebuild_profiles():
+        build_kernels(capability, dims, fp4=fp4, cache=directory / "kernels")
+
+
+def prebuild(directory: Path) -> None:
+    """Release build: kernels for every architecture of the kernel tables and the extension for
+    all of them, laid out as ``PREBUILT`` expects (copy ``directory`` there)."""
+    prebuild_kernels(directory)
     os.environ["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list()
     module = _build_extension(directory / "build")
     shutil.copy2(module.__file__, directory / Path(module.__file__).name)

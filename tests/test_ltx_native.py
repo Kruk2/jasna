@@ -252,6 +252,76 @@ def test_python_hands_every_constant_to_the_native_block(monkeypatch, tmp_path):
     assert forward.head_dim == 128
 
 
+def _expected_block_parameters(capability, heads):
+    tiles = kernels.INT8_MM_TILES.get(capability, (kernels.SMALL_MM_TILE,) * 2)
+    return {
+        "heads": heads, "eps": T.EPS, "chunk_rows": T.CHUNK_ROWS,
+        "cublas_int8": capability in kernels.CUBLAS_INT8_MM,
+        "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(kernels.SMALL_MM_TILE),
+        "small_max_n": kernels.SMALL_MM_MAX_N, "wide_k": kernels.WIDE_K, "group_m": kernels.GROUP_M,
+        "stream_k_max_waves": kernels.STREAM_K_MAX_WAVES,
+        "has_tma": kernels.has_tma(capability), "epilogue_tile": list(kernels.CUBLAS_EPILOGUE_TILE),
+        "fp4_tensor_scale_divisor": T.FP4_MAX * T.FP8_E4M3_MAX, "fp4_block": T.FP4_BLOCK,
+        "fp4_quantize_rows": kernels.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": kernels.FP4_QUANTIZE_COLS,
+        "fp4_scale_tile_rows": kernels.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernels.FP4_SCALE_TILE_COLS,
+        "fp4_recipe": [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value],
+        "fp4_swizzle": [F.SwizzleType.SWIZZLE_32_4_4.value, F.SwizzleType.NO_SWIZZLE.value],
+    }
+
+
+@pytest.mark.parametrize("capability", [*native.release_architectures(), (9, 0), (0, 0), (99, 9)])
+def test_block_parameters_are_pure_capability_policy(monkeypatch, capability):
+    expected = _expected_block_parameters(capability, 32)
+
+    class ForbiddenCuda:
+        def __getattr__(self, name):
+            pytest.fail(f"Pure block parameters accessed torch.cuda.{name}")
+
+    monkeypatch.setattr(torch, "cuda", ForbiddenCuda())
+    monkeypatch.setattr(kernels, "programs", lambda *args: pytest.fail("GPU program count queried"))
+    monkeypatch.setattr(native, "_kernel_manifest", lambda *args, **kwargs: pytest.fail("Kernel manifest queried"))
+    monkeypatch.setattr(native, "build_kernels", lambda *args, **kwargs: pytest.fail("Kernels built"))
+    values = native.block_parameters(capability, 32)
+    assert values == expected
+    assert not {"device", "programs", "kernels", "kernel_directory"} & values.keys()
+    values["narrow_tile"][0] = -1
+    assert native.block_parameters(capability, 32) == expected
+    assert native.block_parameters(capability, 16)["heads"] == 16
+
+
+@pytest.mark.parametrize("capability", [*native.release_architectures(), (9, 0)])
+@pytest.mark.parametrize("explicit_device", [False, True])
+def test_config_values_preserves_complete_runtime_dictionary(monkeypatch, tmp_path, capability, explicit_device):
+    _cuda_capability(monkeypatch, capability)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 7)
+    monkeypatch.setattr(kernels, "programs", lambda device: 123)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text('[{"key":"owned-kernel","file":"owned.cubin"}]')
+    device = torch.device("cuda", 2) if explicit_device else torch.device("cuda")
+    expected = {"device": 2 if explicit_device else 7, **_expected_block_parameters(capability, 32),
+                "programs": 123, "kernels": [{"key": "owned-kernel", "file": "owned.cubin"}],
+                "kernel_directory": str(tmp_path)}
+    assert native.config_values(device, aot.BlockDims(4096, 16384, 32), manifest) == expected
+
+
+def test_config_values_consumes_shared_public_block_parameters(monkeypatch, tmp_path):
+    _cuda_capability(monkeypatch, (12, 0))
+    monkeypatch.setattr(kernels, "programs", lambda device: 170)
+    calls = []
+
+    def parameters(capability, heads):
+        calls.append((capability, heads))
+        return {"heads": heads, "owned_policy_marker": "shared"}
+
+    monkeypatch.setattr(native, "block_parameters", parameters)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("[]")
+    result = native.config_values(torch.device("cuda", 0), aot.BlockDims(4096, 16384, 32), manifest)
+    assert calls == [((12, 0), 32)]
+    assert result == {"device": 0, "heads": 32, "owned_policy_marker": "shared", "programs": 170,
+                      "kernels": [], "kernel_directory": str(tmp_path)}
+
+
 def test_rtx_3090_native_block_launches_plain_triton_gemms(monkeypatch, tmp_path):
     _cuda_capability(monkeypatch, (8, 6))
     monkeypatch.setattr(kernels, "programs", lambda device: 82)

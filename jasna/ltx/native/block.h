@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+#include "block_kernels.h"
+
 namespace jasna_ltx {
 
 struct Config {
@@ -31,6 +33,7 @@ enum LinearIndex { SelfQ, SelfK, SelfV, SelfOut, SelfGate, CrossQ, CrossK, Cross
 class Block {
  public:
   explicit Block(const Config& config);
+  Block(const Config& config, std::vector<KernelImage> kernels);
   ~Block();
   Block(const Block&) = delete;
   Block& operator=(const Block&) = delete;

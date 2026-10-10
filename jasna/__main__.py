@@ -8,16 +8,16 @@ logger = logging.getLogger(__name__)
 from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
 from jasna._frozen import is_frozen
 
+if __name__ == "__main__":
+    if sys.platform == "win32":
+        os.environ.setdefault("OMP_WAIT_POLICY", "passive")
+    os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+
 if __name__ == "__main__" and sys.platform in ("linux", "win32") and is_frozen():
     from jasna.protection import initialize_runtime
     initialize_runtime()
 
 import multiprocessing
-
-if sys.platform == "win32":
-    os.environ.setdefault("OMP_WAIT_POLICY", "passive")
-
-os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 # Wire CUDA/TensorRT/native-lib DLL search before any torch/native import. The Nuitka
 # build has no PyInstaller runtime hook, so this is the only place it runs; without it

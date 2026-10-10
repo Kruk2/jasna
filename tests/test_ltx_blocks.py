@@ -1,9 +1,12 @@
+import sys
+from types import ModuleType
+
 import pytest
 import torch
 
-from jasna.ltx.blocks import BlockStore
+from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
 
 def _blocks(count: int) -> list[dict[str, torch.Tensor]]:
@@ -18,6 +21,7 @@ def _blocks(count: int) -> list[dict[str, torch.Tensor]]:
     ]
 
 
+@needs_cuda
 @pytest.mark.parametrize("resident", [0, 2, 5])
 def test_streamed_and_resident_blocks_hand_out_the_same_weights(resident):
     blocks = _blocks(5)
@@ -31,6 +35,7 @@ def test_streamed_and_resident_blocks_hand_out_the_same_weights(resident):
     store.close()
 
 
+@needs_cuda
 @pytest.mark.parametrize("resident, warns", [(5, False), (3, True)])
 def test_streaming_blocks_from_ram_is_a_warning(resident, warns, caplog):
     with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
@@ -38,6 +43,7 @@ def test_streaming_blocks_from_ram_is_a_warning(resident, warns, caplog):
     assert any("2 of 5 transformer blocks stream from RAM" in r.getMessage() for r in caplog.records) is warns
 
 
+@needs_cuda
 def test_packed_blocks_are_released_from_the_input():
     blocks = _blocks(3)
     BlockStore(blocks, torch.device("cuda"), resident=1).close()
@@ -57,6 +63,7 @@ def test_file_order_groups_fill_a_stage_and_read_cpu_tensors_in_place():
     assert _file_order_groups(["b"], targets, 0) == [(("b",), {})]
 
 
+@needs_cuda
 def test_blocks_are_read_in_file_order(tmp_path):
     from safetensors.torch import save_file
 
@@ -85,3 +92,59 @@ def test_blocks_are_read_in_file_order(tmp_path):
                        for part, tensor in store.acquire(index).items())
     finally:
         store.close()
+
+
+@pytest.mark.parametrize("failure_stage", ["read", "finalize"])
+@pytest.mark.parametrize("cleanup_fails", [False, True])
+@pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
+def test_opaque_load_preserves_primary_error_on_cleanup(
+    failure_stage, cleanup_fails, error_type, monkeypatch,
+):
+    monkeypatch.setattr(sys, "platform", "linux")
+    primary = error_type("original load failure")
+    cleanup = OSError("cleanup failure") if cleanup_fails else None
+    operations = []
+    destination = object()
+
+    class NativeStore:
+        def __init__(self, specs, device, resident):
+            assert specs == [{"weight": ("float32", (2,))}]
+            assert device == "cpu"
+            assert resident == 1
+
+        def destination(self, index, name):
+            assert (index, name) == (0, "weight")
+            return destination
+
+        def finalize(self):
+            operations.append("finalize")
+            if failure_stage == "finalize":
+                raise primary
+
+        def close(self):
+            operations.append("close")
+            if cleanup is not None:
+                raise cleanup
+
+    class Reader:
+        def tensor_specs(self):
+            return {"blocks.0.weight": (torch.float32, (2,))}
+
+        def read_tensors_into(self, groups, destinations):
+            assert groups == (("blocks.0.weight",),)
+            assert list(destinations) == [{"blocks.0.weight": destination}]
+            operations.append("read")
+            if failure_stage == "read":
+                raise primary
+
+    native_module = ModuleType("jasna.protection.opaque_ltx")
+    native_module.OpaqueStore = NativeStore
+    monkeypatch.setitem(sys.modules, native_module.__name__, native_module)
+    with pytest.raises(error_type) as caught:
+        OpaqueBlockStore.from_reader(
+            Reader(), [{"weight": "blocks.0.weight"}], torch.device("cpu"), resident=1,
+        )
+    assert caught.value is primary
+    assert caught.value.__cause__ is cleanup
+    expected = ["read", "close"] if failure_stage == "read" else ["read", "finalize", "close"]
+    assert operations == expected

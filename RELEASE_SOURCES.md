@@ -1,7 +1,11 @@
 # v0.11.0 release source correspondence
 
-This file records the custom and patched inputs used by official v0.11.0
-packages. The release tag is the source revision for Jasna itself. Release
+This file records the custom and patched inputs used by v0.11.0 packages.
+The Windows native-LTX continuation includes changes beyond the v0.11.0 tag.
+The clean15 beta's completed freeze and native build receipts identify its exact
+inputs; the current checkout also includes later source fixes and is not a new
+frozen release. Do not infer binary correspondence from the version number alone.
+Release
 packages also include `LICENSE`, `LICENSING.md`, `NOTICE`, the third-party
 notices, and full license texts.
 
@@ -9,8 +13,8 @@ notices, and full license texts.
 
 | Component | Revision or source |
 | --- | --- |
-| Jasna | Git tag `v0.11.0`; the tag and package version must match |
-| Protection component | The private gitlink revision recorded by the `v0.11.0` tag; source is not published |
+| Jasna | `v0.11.0` base plus native-LTX continuation; exact packaged inputs are recorded in build receipts |
+| Protection component | Private gitlink plus receipt-bound native sources; source is not published |
 | PyAV | Unmodified PyPI `av` 18.1.0, tag [`v18.1.0`](https://github.com/PyAV-Org/PyAV/commit/7e3d950a8b72062502c1a60d672f8ca565313af5) |
 | VALI | [`0e5c01ee57222a8ef4f9c7591284c4324bb3fba5`](https://codeberg.org/Kruk2/vali/commit/0e5c01ee57222a8ef4f9c7591284c4324bb3fba5) in the public Kruk2 fork |
 | RF-DETR | [`1.8.3` / `3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86`](https://github.com/roboflow/rf-detr/commit/3bd6bffbcb13cac3a5b1c37da5a0fd5453b50c86) |

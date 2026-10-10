@@ -102,9 +102,76 @@ def test_tensorrt_plugin_experimental_warning_is_muted(monkeypatch) -> None:
 
 def test_install_succeeds_without_tensorrt(monkeypatch) -> None:
     monkeypatch.setattr(suppress_noise, "_installed", False)
-    monkeypatch.setattr(suppress_noise, "find_spec", lambda _name: None)
+    monkeypatch.delitem(sys.modules, "tensorrt", raising=False)
+
+    class RejectTensorRTFinder:
+        def find_spec(self, fullname, path, target=None):
+            if fullname == "tensorrt" or fullname.startswith("tensorrt."):
+                raise AssertionError("install eagerly probed TensorRT")
+            return None
+
+    monkeypatch.setattr(sys, "meta_path", [RejectTensorRTFinder(), *sys.meta_path])
 
     install()
+    assert "tensorrt" not in sys.modules
+
+
+def test_duplicate_install_does_not_add_filters_or_finders(monkeypatch) -> None:
+    monkeypatch.setattr(suppress_noise, "_installed", False)
+    monkeypatch.delitem(sys.modules, "tensorrt", raising=False)
+    monkeypatch.setattr(sys, "meta_path", list(sys.meta_path))
+
+    install()
+    finders = tuple(sys.meta_path)
+    filters = tuple(logging.getLogger("torch._inductor.select_algorithm").filters)
+    install()
+
+    assert tuple(sys.meta_path) == finders
+    assert tuple(logging.getLogger("torch._inductor.select_algorithm").filters) == filters
+    assert "tensorrt" not in sys.modules
+
+
+@pytest.mark.parametrize("proxy_before_plugin", [False, True])
+def test_real_tensorrt_plugin_logger_is_filtered_lazily(proxy_before_plugin) -> None:
+    if find_spec("tensorrt") is None:
+        pytest.skip("TensorRT is not installed")
+    script = (
+        "import sys\n"
+        "from importlib.util import find_spec\n"
+        "from types import ModuleType\n"
+        "from jasna._suppress_noise import install\n"
+        "assert 'tensorrt' not in sys.modules\n"
+        "install()\n"
+        "assert 'tensorrt' not in sys.modules\n"
+        "import tensorrt as trt\n"
+        "assert 'tensorrt.plugin' not in sys.modules\n"
+        "logged = []\n"
+        "def spy(self, severity, msg):\n"
+        "    logged.append(msg)\n"
+        "trt.Logger.log = spy\n"
+        "class Proxy(ModuleType):\n"
+        "    def __init__(self):\n"
+        "        super().__init__('tensorrt')\n"
+        "        self._target_module = trt\n"
+        "        self.__path__ = trt.__path__\n"
+        "        self.__spec__ = trt.__spec__\n"
+        "    def __getattr__(self, name):\n"
+        "        print('NOISY_PROXY_ATTRIBUTE', name)\n"
+        "        return getattr(self._target_module, name)\n"
+        f"if {proxy_before_plugin!r}:\n"
+        "    sys.modules['tensorrt'] = Proxy()\n"
+        "    assert find_spec('__jasna_missing_import_for_proxy_filter__') is None\n"
+        "    assert not hasattr(sys.modules['tensorrt'], 'missing_test_attribute')\n"
+        "import tensorrt.plugin\n"
+        "logger = trt.Logger()\n"
+        "logger.log(trt.Logger.WARNING, 'Functionality provided through tensorrt.plugin module is experimental.')\n"
+        "logger.log(trt.Logger.WARNING, 'an-unrelated-trt-warning')\n"
+        "assert logged == ['an-unrelated-trt-warning'], logged\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=Path(__file__).parents[1], capture_output=True, text=True, check=True
+    )
+    assert "NOISY_PROXY_ATTRIBUTE" not in result.stdout
 
 
 def test_autotune_choice_that_exceeds_shared_memory_is_filtered() -> None:
