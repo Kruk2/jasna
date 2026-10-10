@@ -66,7 +66,7 @@ def test_processor_error_logs_full_traceback():
 
     p = Processor(on_log=on_log)
     job = JobItem(path=Path("test.mp4"))
-    settings = AppSettings()
+    settings = AppSettings(pre_scan_policy="off")
 
     with patch.object(p, "_run_pipeline", side_effect=ValueError("test error")):
         p.start(
