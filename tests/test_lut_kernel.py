@@ -4,9 +4,13 @@ import numpy as np
 import pytest
 import torch
 
+from jasna.accelerator import is_nvidia_device
 from jasna.media.lut import GpuLutApplier, parse_cube_text
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+requires_nvidia_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available() or not is_nvidia_device(),
+    reason="needs NVIDIA CUDA",
+)
 
 
 def _cube_3d(size: int, transform, domain: tuple[float, float] | None = None) -> str:
@@ -101,6 +105,7 @@ def _codes(values: torch.Tensor) -> torch.Tensor:
     return (values * 255.0).round().clamp(0, 255).to(torch.int32)
 
 
+@requires_nvidia_cuda
 @pytest.mark.parametrize("name", sorted(CUBES))
 def test_kernel_is_at_least_as_accurate_as_the_torch_path(name):
     generator = torch.Generator(device="cuda").manual_seed(0)
@@ -121,6 +126,7 @@ def test_kernel_is_at_least_as_accurate_as_the_torch_path(name):
     assert kernel_error.sum().item() <= torch_error.sum().item() + exact.numel() // 1000
 
 
+@requires_nvidia_cuda
 @pytest.mark.parametrize("name", sorted(n for n in CUBES if n.startswith("1d")))
 def test_one_dimensional_lut_matches_the_torch_path_exactly(name):
     generator = torch.Generator(device="cuda").manual_seed(0)
@@ -132,6 +138,7 @@ def test_one_dimensional_lut_matches_the_torch_path_exactly(name):
     assert torch.equal(applier.apply(frame), _reference(applier, frame))
 
 
+@requires_nvidia_cuda
 @pytest.mark.parametrize("name", sorted(CUBES))
 def test_kernel_matches_the_reference_on_extreme_codes(name):
     frame = torch.zeros((3, 4, 6), device=_device(), dtype=torch.uint8)
@@ -144,6 +151,7 @@ def test_kernel_matches_the_reference_on_extreme_codes(name):
     assert torch.equal(applier.apply(frame), _reference(applier, frame))
 
 
+@requires_nvidia_cuda
 def test_identity_lut_is_lossless_through_the_kernel():
     generator = torch.Generator(device="cuda").manual_seed(1)
     frame = torch.randint(
@@ -154,6 +162,7 @@ def test_identity_lut_is_lossless_through_the_kernel():
     assert torch.equal(applier.apply(frame), frame)
 
 
+@requires_nvidia_cuda
 def test_kernel_output_is_a_fresh_contiguous_tensor():
     frame = torch.randint(0, 256, (3, 16, 16), device=_device(), dtype=torch.uint8)
     applier = GpuLutApplier(parse_cube_text(CUBES["3d-swap-rb"]), _device())
@@ -165,6 +174,7 @@ def test_kernel_output_is_a_fresh_contiguous_tensor():
     assert out.dtype is torch.uint8
 
 
+@requires_nvidia_cuda
 def test_float_input_still_uses_the_torch_path():
     frame = torch.rand((3, 8, 8), device=_device(), dtype=torch.float32)
     applier = GpuLutApplier(parse_cube_text(CUBES["3d-identity"]), _device())

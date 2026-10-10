@@ -3,21 +3,45 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
-import tensorrt as trt
 import torch
 
-_TRT_LOGGER = trt.Logger(trt.Logger.ERROR)
+_TRT_MODULE: ModuleType | None = None
+_TRT_LOGGER: Any | None = None
 
 
-def get_trt_logger() -> trt.ILogger:
+def _get_tensorrt() -> ModuleType:
+    global _TRT_MODULE
+    if _TRT_MODULE is None:
+        import tensorrt
+
+        _TRT_MODULE = tensorrt
+    return _TRT_MODULE
+
+
+def __getattr__(name: str) -> Any:
+    # Preserve public patch/access paths such as ``jasna.trt.trt.Builder``
+    # without importing the optional TensorRT dependency at module import time.
+    if name == "trt":
+        return _get_tensorrt()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def get_trt_logger() -> Any:
+    global _TRT_LOGGER
     torchtrt = sys.modules.get("torch_tensorrt")
     if torchtrt is not None:
         return torchtrt.logging.TRT_LOGGER
+    if _TRT_LOGGER is None:
+        trt = _get_tensorrt()
+        _TRT_LOGGER = trt.Logger(trt.Logger.ERROR)
     return _TRT_LOGGER
 
 
 def _engine_io_names(engine: trt.ICudaEngine) -> tuple[list[str], list[str]]:
+    trt = _get_tensorrt()
     input_names: list[str] = []
     output_names: list[str] = []
 
@@ -40,6 +64,7 @@ def _engine_io_names(engine: trt.ICudaEngine) -> tuple[list[str], list[str]]:
 
 
 def _trt_dtype_to_torch(trt_dtype: trt.DataType) -> torch.dtype:
+    trt = _get_tensorrt()
     if trt_dtype == trt.DataType.FLOAT:
         return torch.float32
     if trt_dtype == trt.DataType.HALF:
@@ -66,6 +91,7 @@ def _build_serialized_engine(
     workspace_gb: int,
     dynamic_batch: bool = False,
 ) -> bytes:
+    trt = _get_tensorrt()
     logger = get_trt_logger()
     builder = trt.Builder(logger)
     explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
