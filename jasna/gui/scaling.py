@@ -1,14 +1,10 @@
 """Physical-pixel to CustomTkinter-logical-pixel conversion for window and widget sizing.
 
-On Windows, Jasna owns DPI handling: ``run_gui()`` calls :func:`activate_static_dpi` before
-any CTk window exists. That disables CustomTkinter's automatic per-monitor rescaling (its
-poll loop alpha-blinks the window and re-issues ``geometry()`` mid-drag, which flickered and
-hung at high display scaling), makes the process system-DPI aware, and sets one static CTk
-scaling factor: the system DPI factor, shrunk just enough that the design-minimum window
-plus :data:`SCREEN_MARGIN` fits the primary screen. Windows bitmap-stretches the window on
-monitors with a different DPI. ``winfo_*`` stays physical while ``geometry()``/``minsize()``
-multiply their width/height arguments by the factor and pass the ``+x+y`` offset through
-untouched.
+``run_gui()`` calls :func:`activate_static_dpi` before any CTk window exists. On Windows,
+Jasna disables CustomTkinter's problematic per-monitor rescaling and uses one static system
+DPI factor. On Linux, where CustomTkinter does not apply desktop scaling itself, Jasna reads
+the Xft desktop DPI (falling back to the GDK scale environment) and applies it to both CTk
+windows and widgets.
 
 Three rules follow, and every helper here exists to keep them straight:
 
@@ -16,11 +12,14 @@ Three rules follow, and every helper here exists to keep them straight:
 - Width/height handed to ``geometry()``/``minsize()`` are logical.
 - CTk widget options are logical; raw ``tkinter`` pixel options are physical.
 
-Off Windows the factor is exactly 1 and every function here is the identity.
+At factor 1 every conversion helper here is the identity.
 """
 
 import logging
 import math
+import os
+import re
+import subprocess
 import sys
 
 import customtkinter as ctk
@@ -28,10 +27,19 @@ import customtkinter as ctk
 logger = logging.getLogger(__name__)
 
 SCREEN_MARGIN = (40, 80)
+_BASE_DPI = 96.0
+_MIN_SCALE = 0.5
+_MAX_SCALE = 4.0
 
 
 def activate_static_dpi(design_min: tuple[int, int]) -> None:
     """Fix process DPI awareness and one static CTk scaling factor, before any window exists."""
+    if sys.platform.startswith("linux"):
+        factor = _linux_desktop_scaling()
+        ctk.set_widget_scaling(factor)
+        ctk.set_window_scaling(factor)
+        logger.info("Linux desktop UI scale factor %.2f", factor)
+        return
     if sys.platform != "win32":
         return
     ctk.deactivate_automatic_dpi_awareness()
@@ -45,6 +53,42 @@ def activate_static_dpi(design_min: tuple[int, int]) -> None:
         "Display %dx%d at %d%% scaling, UI scale factor %.2f",
         screen[0], screen[1], round(dpi * 100), factor,
     )
+
+
+def _linux_desktop_scaling() -> float:
+    try:
+        result = subprocess.run(
+            ["xrdb", "-query"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        result = None
+
+    if result is not None and result.returncode == 0:
+        match = re.search(r"(?mi)^Xft\.dpi:\s*([0-9]+(?:\.[0-9]+)?)\s*$", result.stdout)
+        if match is not None:
+            return _clamp_scaling(float(match.group(1)) / _BASE_DPI)
+
+    gdk_scale = _positive_env_float("GDK_SCALE")
+    gdk_dpi_scale = _positive_env_float("GDK_DPI_SCALE")
+    if gdk_scale is not None or gdk_dpi_scale is not None:
+        return _clamp_scaling((gdk_scale or 1.0) * (gdk_dpi_scale or 1.0))
+    return 1.0
+
+
+def _positive_env_float(name: str) -> float | None:
+    try:
+        value = float(os.environ[name])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _clamp_scaling(value: float) -> float:
+    return max(_MIN_SCALE, min(value, _MAX_SCALE))
 
 
 def _static_scaling(

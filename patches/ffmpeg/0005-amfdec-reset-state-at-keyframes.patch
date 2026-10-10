@@ -1,0 +1,137 @@
+From: Jasna AMF research <research@jasna.local>
+Subject: [PATCH] avcodec/amfdec: optionally reset decoder state at keyframes
+
+Linux AMF on RADV can retain invalid HEVC Main10 decoder state across GOPs.
+The failure appears in the native P010 surface before any Jasna conversion:
+four reordered pictures immediately before a later IDR differ from software
+decode, while opening a fresh AMF decoder at the preceding IDR produces exact
+matches.
+
+Add a fail-closed, opt-in decoder option that drains all output before a later
+keyframe, terminates and reinitializes the AMF component, and then submits the
+retained keyframe packet. The option defaults off, so upstream behavior is
+unchanged for every caller that does not request the workaround.
+
+Correct the SurfaceCopy property type at the same time. Independent output
+surfaces are required when keyframe reset is enabled because callers may still
+own an earlier output frame when the codec reaches the boundary. Route HEVC
+through mp4toannexb as well so every retained keyframe carries the in-band
+parameter sets needed after component reinitialization.
+---
+ libavcodec/amfdec.c | 45 ++++++++++++++++++++++++++++++++++++++++++---
+ libavcodec/amfdec.h |  3 +++
+ 2 files changed, 45 insertions(+), 3 deletions(-)
+
+diff --git a/libavcodec/amfdec.h b/libavcodec/amfdec.h
+--- a/libavcodec/amfdec.h
++++ b/libavcodec/amfdec.h
+@@ -56,6 +56,9 @@ typedef struct AMFDecoderContext {
+     int                 resolution_changed;
+     int                 copy_output;
+     int                 dimensions_initialized;
++    int                 reset_on_keyframe;
++    int                 seen_keyframe;
++    int                 keyframe_reset;
+     AVPacket*           in_pkt;
+     enum AMF_SURFACE_FORMAT output_format;
+
+diff --git a/libavcodec/amfdec.c b/libavcodec/amfdec.c
+--- a/libavcodec/amfdec.c
++++ b/libavcodec/amfdec.c
+@@ -86,6 +86,8 @@ static int amf_init_decoder(AVCodecContext *avctx)
+
+     ctx->drain = 0;
+     ctx->resolution_changed = 0;
++    ctx->seen_keyframe = 0;
++    ctx->keyframe_reset = 0;
+
+     switch (avctx->codec->id) {
+         case AV_CODEC_ID_H264:
+@@ -158,7 +160,7 @@ static int amf_init_decoder(AVCodecContext *avctx)
+         AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SKIP_TRANSFER_SMART_ACCESS_VIDEO, ctx->skip_transfer_sav);
+
+     if (ctx->copy_output != -1)
+-        AMF_ASSIGN_PROPERTY_INT64(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_COPY, ctx->copy_output);
++        AMF_ASSIGN_PROPERTY_BOOL(res, ctx->decoder, AMF_VIDEO_DECODER_SURFACE_COPY, ctx->copy_output);
+
+     if (avctx->extradata_size) {
+         const uint8_t *extradata;
+@@ -603,8 +604,20 @@ static int amf_decode_frame(AVCodecContext *avctx, struct AVFrame *frame)
+                 ctx->drain = 1;
+             }
+         }
++        if (!ctx->drain && ctx->reset_on_keyframe &&
++            ctx->seen_keyframe && (avpkt->flags & AV_PKT_FLAG_KEY)) {
++            res = ctx->decoder->pVtbl->Drain(ctx->decoder);
++            if (res != AMF_OK) {
++                av_log(avctx, AV_LOG_ERROR,
++                       "Drain() before keyframe reset returned %d\n", res);
++                return AVERROR(EINVAL);
++            }
++            ctx->drain = 1;
++            ctx->keyframe_reset = 1;
++        }
+     }
+
++submit_packet:
+     if(!ctx->drain){
+         // submit frame
+         res = amf_buffer_from_packet(avctx, avpkt, &buf);
+@@ -622,3 +635,7 @@ static int amf_decode_frame(AVCodecContext *avctx, struct AVFrame *frame)
++        if ((res == AMF_OK || res == AMF_NEED_MORE_INPUT || res == AMF_REPEAT) &&
++            (avpkt->flags & AV_PKT_FLAG_KEY))
++            ctx->seen_keyframe = 1;
++
+         if(res == AMF_DECODER_NO_FREE_SURFACES) {
+             // input is not consumed, need to QueryOutput and submit again
+             av_log(avctx, AV_LOG_VERBOSE, "SubmitInput() returned NO_FREE_SURFACES and came out of loop - should never happen\n");
+@@ -649,5 +666,21 @@ static int amf_decode_frame(AVCodecContext *avctx, struct AVFrame *frame)
+     else if (res == AMF_EOF) {
+         // drain is complete
+         ctx->drain = 0;
+-        if(ctx->resolution_changed){
++        if (ctx->keyframe_reset) {
++            res = ctx->decoder->pVtbl->Terminate(ctx->decoder);
++            if (res != AMF_OK) {
++                av_log(avctx, AV_LOG_ERROR,
++                       "Terminate() after keyframe drain returned %d\n", res);
++                return AVERROR(EINVAL);
++            }
++            res = ctx->decoder->pVtbl->Init(ctx->decoder, AMF_SURFACE_UNKNOWN,
++                                            avctx->width, avctx->height);
++            if (res != AMF_OK) {
++                av_log(avctx, AV_LOG_ERROR,
++                       "Init() after keyframe drain returned %d\n", res);
++                return AVERROR(EINVAL);
++            }
++            ctx->keyframe_reset = 0;
++            goto submit_packet;
++        } else if(ctx->resolution_changed){
+             // re-initialze decoder
+@@ -683,6 +714,10 @@ static void amf_decode_flush(AVCodecContext *avctx)
+ {
+     AMFDecoderContext *ctx = avctx->priv_data;
+     ctx->decoder->pVtbl->Flush(ctx->decoder);
++    ctx->drain = 0;
++    ctx->seen_keyframe = 0;
++    ctx->keyframe_reset = 0;
++    av_packet_unref(ctx->in_pkt);
+ }
+
+ #define OFFSET(x) offsetof(AMFDecoderContext, x)
+@@ -709,6 +744,7 @@ static const AVOption options[] = {
+     { "smart_access_video", "Smart Access Video",                                           OFFSET(smart_access_video), AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 1, VD, NULL },
+     { "skip_transfer_sav",  "Skip transfer on another GPU when SAV enabled",                OFFSET(skip_transfer_sav),  AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 1, VD, NULL },
+     { "copy_output",        "Copy Output",                                                  OFFSET(copy_output),        AV_OPT_TYPE_INT, { .i64 = -1 }, -1, 1, VD, NULL },
++    { "reset_on_keyframe",  "Drain and reset decoder state before each keyframe",           OFFSET(reset_on_keyframe),  AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, VD, NULL },
+
+     { NULL }
+ };
+@@ -741,6 +777,6 @@ const FFCodec ff_##x##_amf_decoder = { \
+ }; \
+
+ DEFINE_AMF_DECODER(h264, H264, "h264_mp4toannexb")
+-DEFINE_AMF_DECODER(hevc, HEVC, NULL)
++DEFINE_AMF_DECODER(hevc, HEVC, "hevc_mp4toannexb")
+ DEFINE_AMF_DECODER(vp9, VP9, NULL)
+ DEFINE_AMF_DECODER(av1, AV1, NULL)

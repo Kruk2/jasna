@@ -1,4 +1,6 @@
 from pathlib import Path
+import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -298,8 +300,16 @@ class TestRfDetrCall:
 
 
 class TestCompileRfdetrEngine:
-    def test_delegates_to_compile_onnx(self):
-        with patch("jasna.trt.compile_onnx_to_tensorrt_engine", return_value=Path("out.engine")) as mock_compile:
+    def test_delegates_to_compile_onnx(self, monkeypatch):
+        import jasna.mosaic.rfdetr as module
+
+        mock_compile = MagicMock(return_value=Path("out.engine"))
+        monkeypatch.setattr(module, "is_amd_device", lambda _device: False)
+        monkeypatch.setattr(module, "is_nvidia_device", lambda _device: True)
+        with patch.dict(
+            sys.modules,
+            {"jasna.trt": SimpleNamespace(compile_onnx_to_tensorrt_engine=mock_compile)},
+        ):
             result = compile_rfdetr_engine(
                 Path("model.onnx"),
                 torch.device("cuda:0"),

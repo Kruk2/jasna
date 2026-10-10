@@ -1,0 +1,74 @@
+From: Jasna AMF research <research@jasna.local>
+Subject: [PATCH] avcodec/amfdec: restart decoder with unknown dimensions
+
+AMF_RESOLUTION_CHANGED requires the client to drain, terminate, and initialize
+the decoder.  amfdec instead calls ReInit() with AMF's still-current old size,
+which pins the retained input packet to that size and can also leave
+libavcodec with simultaneous send/receive EAGAIN.
+
+Follow the AMF state-machine contract and initialize with unknown dimensions so
+the retained packet's new sequence header selects the new size and bit depth.
+Refresh AVCodecContext dimensions immediately after that packet is accepted;
+the frames-context fix then replaces the stale pool when the new surface is
+returned.
+
+---
+ libavcodec/amfdec.c | 32 +++++++++++++++-----------------
+ 1 file changed, 15 insertions(+), 17 deletions(-)
+
+diff --git a/libavcodec/amfdec.c b/libavcodec/amfdec.c
+index d84cccd..ee24cfc 100644
+--- a/libavcodec/amfdec.c
++++ b/libavcodec/amfdec.c
+@@ -634,6 +634,8 @@ static int amf_decode_frame(AVCodecContext *avctx, struct AVFrame *frame)
+             av_log(avctx, AV_LOG_ERROR, "SubmitInput() returned error %d\n", res);
+             return AVERROR(EINVAL);
+         }
++        if (!ctx->drain && !ctx->dimensions_initialized)
++            amf_init_dimensions(avctx);
+     }
+
+     res = amf_receive_frame(avctx, frame);
+@@ -649,29 +651,26 @@ static int amf_decode_frame(AVCodecContext *avctx, struct AVFrame *frame)
+         ctx->drain = 0;
+         if(ctx->resolution_changed){
+             // re-initialze decoder
+-            AMFVariantStruct    size_var = {0};
+-            AMFVariantStruct    format_var = {0};
+-            res = ctx->decoder->pVtbl->GetProperty(ctx->decoder, AMF_VIDEO_DECODER_CURRENT_SIZE, &size_var);
++            res = ctx->decoder->pVtbl->Terminate(ctx->decoder);
+             if (res != AMF_OK) {
++                av_log(avctx, AV_LOG_ERROR, "Terminate() returned %d during resolution change\n", res);
+                 return AVERROR(EINVAL);
+             }
+
+-            avctx->width = size_var.sizeValue.width;
+-            avctx->height = size_var.sizeValue.height;
+-            avctx->coded_width  = size_var.sizeValue.width;
+-            avctx->coded_height = size_var.sizeValue.height;
+-            res = ctx->decoder->pVtbl->ReInit(ctx->decoder, avctx->width, avctx->height);
+-            if (res != AMF_OK) {
+-                av_log(avctx, AV_LOG_ERROR, "ReInit() returned %d\n", res);
+-                return AVERROR(EINVAL);
+-            }
+-            res = ctx->decoder->pVtbl->GetProperty(ctx->decoder, AMF_VIDEO_DECODER_OUTPUT_FORMAT, &format_var);
++            /* The retained packet carries the new sequence header.  Passing
++             * the old dimensions to Init() pins the replacement sequence to
++             * the old size, so let AMF discover both dimensions from it. */
++            avctx->width = 0;
++            avctx->height = 0;
++            avctx->coded_width = 0;
++            avctx->coded_height = 0;
++            ctx->dimensions_initialized = 0;
++            res = ctx->decoder->pVtbl->Init(ctx->decoder, AMF_SURFACE_UNKNOWN,
++                                            0, 0);
+             if (res != AMF_OK) {
++                av_log(avctx, AV_LOG_ERROR, "Init() returned %d during resolution change\n", res);
+                 return AVERROR(EINVAL);
+             }
+-            int ret = amf_init_frames_context(avctx, av_amf_to_av_format(format_var.int64Value), avctx->coded_width, avctx->coded_height);
+-            if (ret < 0)
+-                return ret;
+         }else
+             return AVERROR_EOF;
+     } else {
