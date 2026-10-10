@@ -10,7 +10,6 @@ complete block forward in the native opaque store; Python sees only block inputs
 from __future__ import annotations
 
 import logging
-import sys
 from dataclasses import dataclass
 
 import torch
@@ -274,41 +273,18 @@ class OpaqueBlockStore:
         *,
         resident: int,
     ) -> OpaqueBlockStore:
-        from jasna.protection.opaque_ltx import OpaqueStore
+        from jasna.ltx.native.aot import BlockDims
+        from jasna.protection.opaque_ltx import OpaqueInferenceStore
 
         specs = reader.tensor_specs()
-        if sys.platform == "win32":
-            from jasna.ltx.native.aot import BlockDims
-            from jasna.protection.opaque_ltx import OpaqueInferenceStore
-
-            dims = BlockDims.from_specs({name: specs[source] for name, source in names[0].items()})
-            if device.type != "cuda":
-                raise ValueError("native opaque blocks require a CUDA device")
-            index = device.index if device.index is not None else torch.cuda.current_device()
-            owner = reader.private_load(index, resident)
-            native = OpaqueInferenceStore(owner, head_dim=dims.dim // dims.heads,
-                                          count=len(names), resident=resident)
-            return cls(native, device, len(names), resident)
-        opaque_specs = [
-            {name: (str(specs[source][0]).removeprefix("torch."), specs[source][1]) for name, source in block.items()}
-            for block in names
-        ]
-        native = OpaqueStore(opaque_specs, str(device), resident)
-        try:
-            groups = tuple(tuple(block.values()) for block in names)
-            destinations = (
-                {source: native.destination(index, name) for name, source in block.items()}
-                for index, block in enumerate(names)
-            )
-            reader.read_tensors_into(groups, destinations)
-            native.finalize()
-            return cls(native, device, len(names), resident)
-        except BaseException as primary:
-            try:
-                native.close()
-            except BaseException as cleanup:
-                raise primary from cleanup
-            raise
+        dims = BlockDims.from_specs({name: specs[source] for name, source in names[0].items()})
+        if device.type != "cuda":
+            raise ValueError("native opaque blocks require a CUDA device")
+        index = device.index if device.index is not None else torch.cuda.current_device()
+        owner = reader.private_load(index, resident)
+        native = OpaqueInferenceStore(owner, head_dim=dims.dim // dims.heads,
+                                      count=len(names), resident=resident)
+        return cls(native, device, len(names), resident)
 
     def activate(self, index: int) -> None:
         self._native.activate(index)

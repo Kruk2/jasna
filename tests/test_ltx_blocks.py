@@ -1,6 +1,3 @@
-import sys
-from types import ModuleType
-
 import pytest
 import torch
 
@@ -94,57 +91,38 @@ def test_blocks_are_read_in_file_order(tmp_path):
         store.close()
 
 
-@pytest.mark.parametrize("failure_stage", ["read", "finalize"])
-@pytest.mark.parametrize("cleanup_fails", [False, True])
 @pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
-def test_opaque_load_preserves_primary_error_on_cleanup(
-    failure_stage, cleanup_fails, error_type, monkeypatch,
-):
-    monkeypatch.setattr(sys, "platform", "linux")
-    primary = error_type("original load failure")
-    cleanup = OSError("cleanup failure") if cleanup_fails else None
+def test_opaque_load_preserves_native_transaction_failure(error_type, monkeypatch):
+    from jasna.ltx.native.aot import BlockDims
+
+    primary = error_type("original native transaction failure")
     operations = []
-    destination = object()
-
-    class NativeStore:
-        def __init__(self, specs, device, resident):
-            assert specs == [{"weight": ("float32", (2,))}]
-            assert device == "cpu"
-            assert resident == 1
-
-        def destination(self, index, name):
-            assert (index, name) == (0, "weight")
-            return destination
-
-        def finalize(self):
-            operations.append("finalize")
-            if failure_stage == "finalize":
-                raise primary
-
-        def close(self):
-            operations.append("close")
-            if cleanup is not None:
-                raise cleanup
 
     class Reader:
         def tensor_specs(self):
             return {"blocks.0.weight": (torch.float32, (2,))}
 
-        def read_tensors_into(self, groups, destinations):
-            assert groups == (("blocks.0.weight",),)
-            assert list(destinations) == [{"blocks.0.weight": destination}]
-            operations.append("read")
-            if failure_stage == "read":
-                raise primary
+        def private_load(self, device, resident):
+            operations.append((device, resident))
+            raise primary
 
-    native_module = ModuleType("jasna.protection.opaque_ltx")
-    native_module.OpaqueStore = NativeStore
-    monkeypatch.setitem(sys.modules, native_module.__name__, native_module)
+    monkeypatch.setattr(BlockDims, "from_specs", lambda specs: type("Dims", (), {"dim": 8, "heads": 2}))
     with pytest.raises(error_type) as caught:
         OpaqueBlockStore.from_reader(
-            Reader(), [{"weight": "blocks.0.weight"}], torch.device("cpu"), resident=1,
+            Reader(), [{"weight": "blocks.0.weight"}], torch.device("cuda:1"), resident=1,
         )
     assert caught.value is primary
-    assert caught.value.__cause__ is cleanup
-    expected = ["read", "close"] if failure_stage == "read" else ["read", "finalize", "close"]
-    assert operations == expected
+    assert operations == [(1, 1)]
+
+
+def test_opaque_load_rejects_cpu_before_decryption(monkeypatch):
+    from jasna.ltx.native.aot import BlockDims
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(BlockDims, "from_specs", lambda specs: SimpleNamespace(dim=8, heads=2))
+    reader = SimpleNamespace(tensor_specs=lambda: {"blocks.0.weight": (torch.float32, (2,))},
+                             private_load=lambda *args: pytest.fail("native decryption attempted"))
+    with pytest.raises(ValueError, match="CUDA device"):
+        OpaqueBlockStore.from_reader(
+            reader, [{"weight": "blocks.0.weight"}], torch.device("cpu"), resident=1,
+        )

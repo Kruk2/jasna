@@ -1,6 +1,3 @@
-import sys
-from types import SimpleNamespace
-
 import torch
 import pytest
 from safetensors.torch import save_file
@@ -55,17 +52,7 @@ class _NativeStore:
 
     def __init__(self, specs, device, resident):
         self.specs = specs
-        self.destinations = {}
         self.events = []
-
-    def destination(self, block, name):
-        dtype, shape = self.specs[block][name]
-        value = torch.empty(shape, dtype=getattr(torch, dtype))
-        self.destinations[block, name] = value
-        return value
-
-    def finalize(self):
-        pass
 
     def activate(self, block):
         self.events.append(("activate", block))
@@ -82,7 +69,14 @@ class _NativeStore:
 
 
 def _install_native_store(monkeypatch):
-    monkeypatch.setitem(sys.modules, "jasna.protection.opaque_ltx", SimpleNamespace(OpaqueStore=_NativeStore))
+    # This CPU sampler fixture substitutes the completed inference owner.
+    # Actual CUDA admission and private-load cleanup have separate native tests.
+    def from_reader(cls, reader, names, device, *, resident):
+        specs = reader.tensor_specs()
+        native = _NativeStore([{name: specs[source] for name, source in block.items()} for block in names],
+                              device, resident)
+        return cls(native, device, len(names), resident)
+    monkeypatch.setattr(OpaqueBlockStore, "from_reader", classmethod(from_reader))
 
 
 def test_close_clears_resident_storage_even_when_a_consumer_keeps_a_view():
@@ -200,14 +194,8 @@ def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypa
                 "blocks.0.scale_shift_table": (torch.bfloat16, (2, 4)),
             }
 
-        def offset_keys(self):
-            return list(self.tensor_specs())
-
         def read_tensors_into(self, group_names, groups):
-            for names, group in zip(group_names, groups, strict=True):
-                assert tuple(group) == tuple(names)
-                for destination in group.values():
-                    destination.fill_(1)
+            pytest.fail("private block storage requested Python tensor destinations")
 
     _install_native_store(monkeypatch)
     store = OpaqueBlockStore.from_reader(
@@ -220,8 +208,7 @@ def test_opaque_block_store_keeps_complete_blocks_out_of_python_tensors(monkeypa
         torch.device("cpu"), resident=1,
     )
     native = store._native
-    assert set(native.destinations) == {(0, "proj.qdata"), (0, "proj.scales"), (0, "scale_shift_table")}
-    assert all(torch.all(tensor == 1) for tensor in native.destinations.values())
+    assert set(native.specs[0]) == {"proj.qdata", "proj.scales", "scale_shift_table"}
     store.begin_step(8192, 3, True)
     store.activate(0)
     store.close()
