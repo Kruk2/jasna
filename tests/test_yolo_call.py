@@ -4,8 +4,17 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import torch
 import pytest
+import jasna.mosaic.yolo as yolo_module
 
 from jasna.mosaic.yolo import YoloMosaicDetectionModel, _batched_nms_keep
+
+
+@pytest.fixture(autouse=True)
+def _mock_optional_gpu_preprocess(monkeypatch):
+    # These tests mock TensorRT inference and exercise CPU prediction tensors.
+    # Do not allocate CUDA preprocessing constants just to construct the model.
+    resizer = MagicMock(available=False)
+    monkeypatch.setattr(yolo_module, "ResizeNormalizer", MagicMock(return_value=resizer))
 
 
 def _mock_engine_path():
@@ -27,6 +36,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
     mock_runner.outputs = outs
 
     with (
+        patch("jasna.mosaic.yolo.is_nvidia_device", return_value=True),
         patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=_mock_engine_path()),
         patch("jasna.mosaic.yolo.TrtRunner", return_value=mock_runner),
     ):
@@ -36,6 +46,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
             device=torch.device("cuda:0"),
             imgsz=imgsz,
         )
+    model.device = torch.device("cpu")
     return model, mock_runner
 
 
@@ -54,6 +65,7 @@ class TestYoloInit:
         engine = _mock_engine_path()
 
         with (
+            patch("jasna.mosaic.yolo.is_nvidia_device", return_value=True),
             patch("jasna.mosaic.yolo.get_yolo_tensorrt_engine_path", return_value=engine),
             patch("jasna.mosaic.yolo.TrtRunner", mock_runner_cls),
         ):
@@ -160,7 +172,7 @@ class TestYoloCall:
         proto = torch.zeros(1, 32, 160, 160)
         mock_runner.infer.return_value = {"pred": pred, "proto": proto}
 
-        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8, device="cuda:0")
+        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8, device="cpu")
         det = model(frames, target_hw=(480, 640))
 
         assert len(det.boxes_xyxy) == 1
@@ -182,7 +194,7 @@ class TestYoloCall:
         proto = torch.ones(1, 32, 160, 160)
         mock_runner.infer.return_value = {"pred": pred, "proto": proto}
 
-        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8, device="cuda:0")
+        frames = torch.randint(0, 256, (1, 3, 480, 640), dtype=torch.uint8, device="cpu")
         det = model(frames, target_hw=(480, 640))
 
         assert len(det.boxes_xyxy) == 1

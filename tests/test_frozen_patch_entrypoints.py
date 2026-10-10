@@ -1,6 +1,7 @@
 import importlib
 import logging
 import sys
+from contextlib import nullcontext
 from unittest.mock import patch
 
 import pytest
@@ -45,19 +46,29 @@ def test_source_build_keeps_config_scan(monkeypatch):
 
 
 def test_importing_pipeline_does_not_patch_frozen_torch():
-    orig = sys.modules.pop("jasna.pipeline", None)
+    import jasna
+
+    missing = object()
+    orig_module = sys.modules.pop("jasna.pipeline", None)
+    orig_attr = jasna.__dict__.pop("pipeline", missing)
     try:
         with patch("jasna._frozen.patch_frozen_torch") as spy:
             importlib.import_module("jasna.pipeline")
         spy.assert_not_called()
     finally:
-        if orig is not None:
-            sys.modules["jasna.pipeline"] = orig
-        else:
-            sys.modules.pop("jasna.pipeline", None)
+        sys.modules.pop("jasna.pipeline", None)
+        jasna.__dict__.pop("pipeline", None)
+        if orig_module is not None:
+            sys.modules["jasna.pipeline"] = orig_module
+        if orig_attr is not missing:
+            jasna.pipeline = orig_attr
 
 
-def test_cli_main_patches_frozen_torch(tmp_path):
+def test_cli_main_patches_frozen_torch(tmp_path, monkeypatch):
+    from jasna.accelerator import AcceleratorVendor
+
+    monkeypatch.setattr("jasna.accelerator.device_context", lambda _device: nullcontext())
+    monkeypatch.setattr("jasna.accelerator.vendor_for_device", lambda _device=None: AcceleratorVendor.NVIDIA)
     inp, out, rest, det = _make_model_files(tmp_path)
     with patch("jasna._frozen.patch_frozen_torch") as spy:
         with _main_patches():

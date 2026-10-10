@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import io
+import sys
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -29,26 +31,32 @@ class TestModelId:
 class TestCheckpointPathSelection:
     def test_plaintext_loaded_directly_when_present(self, tmp_path: Path):
         _write_bundle(tmp_path, with_plaintext=True, with_enc=True)
+        protected = ModuleType("jasna.protection.protected_model")
+        protected.decrypt_model_to_buffer = MagicMock()
         with (
             patch.object(sd15, "is_frozen", return_value=False),
             patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_buffer") as mock_decrypt,
+            patch.dict(sys.modules, {protected.__name__: protected}),
         ):
             assert use_plaintext_sd15(tmp_path) is True
             _read_checkpoint(tmp_path)
-            mock_decrypt.assert_not_called()
+            protected.decrypt_model_to_buffer.assert_not_called()
             assert str(tmp_path / SD15_CKPT_PATH.name) == mock_load.call_args.args[0]
 
     def test_encrypted_path_when_no_plaintext(self, tmp_path: Path):
         _write_bundle(tmp_path, with_plaintext=False, with_enc=True)
+        protected = ModuleType("jasna.protection.protected_model")
+        protected.decrypt_model_to_buffer = MagicMock(return_value=io.BytesIO(b"x"))
         with (
             patch.object(sd15, "is_frozen", return_value=False),
             patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_buffer", return_value=io.BytesIO(b"x")) as mock_decrypt,
+            patch.dict(sys.modules, {protected.__name__: protected}),
         ):
             assert use_plaintext_sd15(tmp_path) is False
             _read_checkpoint(tmp_path)
-            mock_decrypt.assert_called_once()
+            protected.decrypt_model_to_buffer.assert_called_once_with(
+                Sd15InpaintRestorer.MODEL_ID, tmp_path / SD15_CKPT_ENC_PATH.name
+            )
             # decrypted bytes are loaded from an in-memory buffer, never written to disk.
             assert mock_load.call_count == 1
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -71,12 +72,21 @@ class RfDetrMosaicDetectionModel:
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         max_select: int = DEFAULT_MAX_SELECT,
         fp16: bool = True,
+        amd_migraphx_manifest_path: Path | None = None,
     ) -> None:
         self.weights_path = weights_path
         self.batch_size = int(batch_size)
         self.device = device
         self.resolution = int(resolution)
         self.dynamic_batch = bool(dynamic_batch)
+        amd_device = is_amd_device(self.device)
+        if amd_migraphx_manifest_path is not None and (
+            not amd_device or sys.platform != "linux"
+        ):
+            raise RuntimeError(
+                "The experimental RF-DETR MIGraphX manifest requires a Linux "
+                "AMD/ROCm device"
+            )
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
         self._normalization_cache: dict[
@@ -85,24 +95,42 @@ class RfDetrMosaicDetectionModel:
         if self.batch_size <= 0:
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
 
-        if is_amd_device(self.device):
+        if amd_device:
             if torch_variant is None:
                 raise RuntimeError(
                     f"RF-DETR on AMD requires a torch variant for {weights_path.name}"
                 )
-            from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner
+            if amd_migraphx_manifest_path is not None:
+                from jasna.mosaic.rfdetr_migraphx_runner import RfDetrMigraphxRunner
 
-            self.runner = RfDetrTorchRunner(
-                self.weights_path,
-                input_shapes=[
-                    (self.batch_size, 3, self.resolution, self.resolution)
-                ],
-                device=self.device,
-                fp16=bool(fp16),
-                resolution=self.resolution,
-                variant=torch_variant,
-            )
-            self.engine_path = self.weights_path
+                self.runner = RfDetrMigraphxRunner(
+                    Path(amd_migraphx_manifest_path),
+                    weights_path=self.weights_path,
+                    device=self.device,
+                    fp16=bool(fp16),
+                    resolution=self.resolution,
+                    variant=torch_variant,
+                )
+                # The accepted MXR is static. Keep the external Pipeline batch
+                # unchanged; _infer below preserves order while dispatching the
+                # runner's own static batch and cloning its pointer-backed outputs.
+                self.batch_size = int(self.runner.batch_size)
+                self.dynamic_batch = False
+                self.engine_path = self.runner.artifact_path
+            else:
+                from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner
+
+                self.runner = RfDetrTorchRunner(
+                    self.weights_path,
+                    input_shapes=[
+                        (self.batch_size, 3, self.resolution, self.resolution)
+                    ],
+                    device=self.device,
+                    fp16=bool(fp16),
+                    resolution=self.resolution,
+                    variant=torch_variant,
+                )
+                self.engine_path = self.weights_path
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(
                 self.weights_path, batch_size=self.batch_size, fp16=bool(fp16),
@@ -165,7 +193,10 @@ class RfDetrMosaicDetectionModel:
         return cached
 
     def _preprocess(self, frames_uint8_bchw: torch.Tensor) -> torch.Tensor:
-        if self._resizer is not None and frames_uint8_bchw.dtype is torch.uint8:
+        if (self._resizer is not None and frames_uint8_bchw.dtype is torch.uint8
+                and self._resizer.supports(frames_uint8_bchw,
+                    out_hw=(self.resolution, self.resolution),
+                    content=(0, 0, self.resolution, self.resolution))):
             return self._resizer.run(
                 frames_uint8_bchw,
                 out_hw=(self.resolution, self.resolution),
@@ -189,6 +220,9 @@ class RfDetrMosaicDetectionModel:
             outputs = self.runner.infer({self._input_name: padded})
             for name in output_parts:
                 output_parts[name].append(
+                    # Direct MIGraphX outputs are pointer-backed and can be
+                    # overwritten by the next static dispatch. Clone every
+                    # effective slice before that dispatch is issued.
                     outputs[name][:effective_batch_size].clone()
                 )
         return {
