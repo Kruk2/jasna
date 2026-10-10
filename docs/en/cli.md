@@ -93,12 +93,13 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 | Option | Default | Notes |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | `hevc`, `h264`, or `av1` for offline output. HLS streaming always uses H.264. |
-| `--cq` | GPU/codec-specific | Literal encoder quality target. Lower is better quality and a larger file. NVIDIA defaults: H.264 25, HEVC 28, AV1 35. AMD defaults: H.264 24, HEVC 25, AV1 32. |
+| `--cq` | GPU/codec-specific | Literal encoder quality target. Lower is better quality and a larger file. NVIDIA defaults: H.264 25, HEVC 28, AV1 35. AMD defaults: H.264 24, HEVC 25, AV1 32. Linux AMD HEVC Smart Render automatically matches the source bitrate unless rate control is explicitly configured. |
 | `--encoder-settings` | — | Advanced settings as a JSON object or comma-separated `key=value` pairs, e.g. `{"rc-lookahead":32}` or `rc-lookahead=32,bf=4`. See below. |
 | `--lut` | — | `.cube` color LUT (1D or 3D) applied on GPU before encoding. Also available in the GUI's Encoding section. |
 | `--sharpen` | `0` | Sharpen the picture before encoding, from `0` (off) to `1` (strongest). Matches ffmpeg's `cas` filter, so no second pass is needed. See [Advanced processing](advanced_processing.md). |
 | `--retarget-high-fps` | off | 60 → 30 FPS (and 59.94 → 29.97) by processing every second frame. Other rates unchanged; audio timing preserved. |
 | `--fmp4` | off | Play `.mp4`/`.mov` output while it is still being made; it also survives an interrupted job. Not available with `--stream` or `--segments`. See [Advanced processing](advanced_processing.md). |
+| `--amd-dual-gop-encode` | off | Linux AMD dual-session encoding for high-resolution HEVC: Main 8-bit/NV12 at 5760×2880 or larger, and Main10/P010 from the 3840×2160-equivalent pixel count. Two persistent AMF sessions alternate closed GOPs for full-video and Smart Render segment processing. Full re-encoding is selected from the output contract; Smart Render also requires a compatible HEVC source bitstream. Forces automatic source-rate control and is incompatible with `--cq`, explicit rate settings, `--retarget-high-fps`, and `--fmp4`. The CLI requires an explicit opt-in and rejects ineligible requests. |
 | `--segments` | — | Restore only selected ranges, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, or `--fmp4`. See [Segments](segments.md). |
 | `--working-directory` | output dir | Where segment temp files are written. See [Segments](segments.md). |
 
@@ -196,6 +197,25 @@ Pass your own `maxrate` to replace this, or set it very high to effectively disa
 it. If the source reports no bitrate at all, Jasna logs a warning and encodes
 without a ceiling.
 AMD HEVC and AV1 10-bit output use constant QP and have no automatic size ceiling.
+
+This ceiling applies only to rate-control modes that consume `maxrate`. Full-video
+AMD HEVC encoding still defaults to CQP. Linux AMD HEVC Smart Render now uses
+source-rate `vbr_peak` automatically when no explicit rate-control setting is
+present: target is the source video bitrate, peak is 1.25x target, the buffer is
+2x peak, and PreAnalysis stays off. Set `JASNA_AMF_HEVC_VBR_PEAK=0` to reproduce
+the previous Smart Render CQP policy. Sources without usable bitrate metadata
+log a warning and retain CQP.
+
+Linux AMD HEVC Main10/P010 output at the 3840×2160-equivalent pixel count or
+larger automatically uses the AMF host-native input path. Jasna keeps synchronization and the blocking D2H,
+but FFmpeg wraps the completed pinned host frame instead of copying the full
+image again into an AMF-owned host surface. Set
+`JASNA_AMF_HOST_ZERO_COPY=0` to restore the previous PyAV AMF upload path.
+`auto` or an unset value enables it automatically for Main10/P010 from the
+`3840x2160`-equivalent pixel count. Main 8-bit/NV12 uses it from `5760x2880`
+only for an eligible dual-GOP request because its measured 5K single-session gain was just
+about 3.9%. Sub-threshold resolutions, Windows, NVIDIA, H.264 output, and AV1
+output defaults are unchanged.
 
 
 Per-codec extras:
