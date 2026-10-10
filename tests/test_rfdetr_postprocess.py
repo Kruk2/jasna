@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import pytest
 
+from conftest import requires_nvidia
 from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel, compile_rfdetr_engine
 
 
@@ -297,6 +298,7 @@ class TestRfDetrCall:
         assert fed.shape[0] == 1
 
 
+@requires_nvidia
 class TestCompileRfdetrEngine:
     def test_delegates_to_compile_onnx(self):
         with patch("jasna.trt.compile_onnx_to_tensorrt_engine", return_value=Path("out.engine")) as mock_compile:

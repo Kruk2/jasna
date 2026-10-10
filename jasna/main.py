@@ -16,7 +16,15 @@ from jasna.os_utils import (
     check_windows_nvidia_sysmem_fallback_policy,
     gpu_check_error,
 )
-from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, RestorationModelName, SessionConfig
+from jasna.session_config import (
+    AMD_UPSCALE_ENGINE_ORDER,
+    AMD_UPSCALE_ENGINE_MODELS,
+    LTX_DEFAULT_MODEL,
+    LTX_DEFAULT_SEED,
+    LtxModelName,
+    RestorationModelName,
+    SessionConfig,
+)
 
 # CLI restoration model name -> (restoration backend, LTX model variant).
 CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
@@ -380,15 +388,15 @@ def build_parser() -> argparse.ArgumentParser:
     amd_upscale.add_argument(
         "--amd-upscale-engine",
         type=str,
-        default="amf-sr",
-        choices=["amf-sr", "realesrgan"],
+        default="real-esr",
+        choices=list(AMD_UPSCALE_ENGINE_ORDER),
         help=CLI_HELP["amd_upscale_engine"],
     )
     amd_upscale.add_argument(
         "--amd-upscale-model",
         type=str,
-        default="auto",
-        choices=["auto", "x4plus", "anime-6b"],
+        default="x4v3",
+        choices=sorted({m for models in AMD_UPSCALE_ENGINE_MODELS.values() for m in models}),
         help=CLI_HELP["amd_upscale_model"],
     )
     amd_upscale.add_argument(
@@ -517,7 +525,7 @@ def build_parser() -> argparse.ArgumentParser:
     detection.add_argument(
         "--min-detection-duration",
         type=int,
-        default=4,
+        default=2,
         help=CLI_HELP["min_detection_duration"],
     )
     detection.add_argument(
@@ -1258,6 +1266,9 @@ def main() -> None:
             sys.exit(1)
         finally:
             session.close()
+            from jasna.session_factory import release_shared_models
+
+            release_shared_models()
 
 
 if __name__ == "__main__":

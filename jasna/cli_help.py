@@ -42,18 +42,29 @@ CLI_HELP: dict[str, str] = {
         "super resolution: AMF Video SR or Real-ESRGAN on ROCm). (default: %(default)s)"
     ),
     "amd_upscale_engine": (
-        "AMD upscaling engine: amf-sr (AMD's own Video SR 1.0/1.1 via the AMF filter sr_amf; AMF "
-        "initialises over D3D11 on Windows) or realesrgan (Real-ESRGAN RRDBNet on the ROCm/HIP "
-        "device, in-process). (default: %(default)s)"
+        "AMD upscaling engine, the upper-level class: real-esr (SRVGGNetCompact checkpoints, "
+        "in-process on the ROCm/HIP device; the default), realesrgan (RRDBNet checkpoints, "
+        "also in-process) or amf-sr (AMD's own Video SR 1.0/1.1 via the AMF filter sr_amf; "
+        "AMF initialises over D3D11 on Windows). --amd-upscale-model lists only the weights "
+        "that belong to the chosen engine. (default: %(default)s)"
     ),
     "amd_upscale_model": (
-        "Real-ESRGAN checkpoint preset for the rocm engine: auto (first match in model_weights/), "
-        "x4plus (23-block, best quality) or anime-6b (6-block, ~2.8x faster, slightly softer). "
-        "Ignored when --amd-upscale-model-path is given. (default: %(default)s)"
+        "Super-resolution checkpoint for the rocm engine, i.e. the concrete weight of the "
+        "engine above. real-esr: x4v3 (32-conv SRVGGNetCompact, fastest and the default), "
+        "wdn-x4v3 (denoising variant), lsdir-c3 (16-conv 4xLSDIRCompactC3, LSDIR live-action), "
+        "lsdir-v2 (16-conv 4xLSDIRCompactv2, highest-PSNR of the compact nets), "
+        "hfa2k-2x (16-conv 2xHFA2kCompact, 2x-native) "
+        "or auto (first match in model_weights/). realesrgan: x4plus (23-block RRDBNet, best "
+        "quality), anime-6b (6-block RRDBNet, slightly softer), bsrnet (KAIR/BSRGAN 23-block) "
+        "or auto. Ignored by amf-sr and when --amd-upscale-model-path is given. "
+        "(default: %(default)s)"
     ),
     "amd_upscale_model_path": (
-        "RRDBNet checkpoint for the rocm engine (Real-ESRGAN x4plus / x4plus_anime_6B / x2plus). "
-        "Empty auto-detects one in model_weights/. (default: %(default)s)"
+        "Checkpoint for the rocm engine: an RRDBNet (Real-ESRGAN x4plus / x4plus_anime_6B / "
+        "x2plus, BSRNet) or an SRVGGNetCompact (realesr-general-x4v3 / -wdn-x4v3, "
+        "4xLSDIRCompactC3 / 4xLSDIRCompactv2, 2xHFA2kCompact). The architecture is derived "
+        "from the checkpoint. Empty "
+        "auto-detects one in model_weights/. (default: %(default)s)"
     ),
     "amd_upscale_scale": (
         "AMD upscale factor; the crop is restored at 256*scale and blended back. "

@@ -252,7 +252,9 @@ def test_final_mux_preserves_compatible_source_structure(
         assert b"Opening subtitle" in subtitle_text
         if expected_attachments:
             output_attachment = container.streams.attachments[0]
-            assert output_attachment.name == "font.txt"
+            # ffmpeg stores the path it was handed by `-attach`; only the file
+            # name is meaningful, so compare basenames.
+            assert Path(output_attachment.name).name == "font.txt"
             assert output_attachment.mimetype == "text/plain"
             assert output_attachment.data == b"font payload"
 

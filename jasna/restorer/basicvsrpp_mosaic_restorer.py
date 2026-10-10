@@ -8,6 +8,7 @@ from torch import Tensor
 
 from jasna.accelerator import is_nvidia_device
 from jasna.models.basicvsrpp.inference import load_model
+from jasna.os_utils import env_flag
 
 # On AMD (no TensorRT sub-engines) the BasicVSR++ forward runs ~150k small CUDA
 # ops per call, which makes it launch/dispatch bound: HIP-graph replay of the
@@ -23,6 +24,12 @@ from jasna.models.basicvsrpp.inference import load_model
 # Any other length (final partial clip, scene-cut clip) runs eager.
 # JASNA_BV_HIP_GRAPH=0 disables the feature entirely.
 _HIP_GRAPH_ENV = "JASNA_BV_HIP_GRAPH"
+# Extra clip lengths to capture, comma separated (e.g. "52,40"). Any clip whose
+# length was not captured runs eager, ~1.8x slower per frame on the same card, so
+# a run whose clips end early (scene cuts, mosaics that disappear) pays that on
+# every such clip. Capture cost is one eager forward plus the graph's reserved
+# activations per length, so add only the lengths the clip histogram shows.
+_HIP_GRAPH_LENGTHS_ENV = "JASNA_BV_HIP_GRAPH_LENGTHS"
 
 
 class BasicvsrppMosaicRestorer:
@@ -44,7 +51,7 @@ class BasicvsrppMosaicRestorer:
         self.model = None
         self._graphs: dict[int, tuple[Tensor, Tensor, "torch.cuda.CUDAGraph"]] = {}
         self._graphs_enabled = (
-            os.environ.get(_HIP_GRAPH_ENV, "1") != "0"
+            env_flag(_HIP_GRAPH_ENV, default=True)
             and self.device.type == "cuda"
         )
 
@@ -81,6 +88,13 @@ class BasicvsrppMosaicRestorer:
             lengths.append(t1)
         if 1 < t2 < t1:
             lengths.append(t2)
+        for token in os.environ.get(_HIP_GRAPH_LENGTHS_ENV, "").split(","):
+            token = token.strip()
+            if not token.isdigit():
+                continue
+            extra = int(token)
+            if extra > 1 and extra not in lengths:
+                lengths.append(extra)
         for t in lengths:
             reserved_before = torch.cuda.memory_reserved(self.device)
             try:

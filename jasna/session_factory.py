@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from jasna.session_config import RestorationModelName, SessionConfig
+from jasna.session_config import RestorationModelName, SessionConfig, amd_upscale_engine_for
 
 if TYPE_CHECKING:
     import torch
@@ -33,48 +33,70 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Models that stay resident in VRAM across sessions: the secondary restorer
+# (Real-ESRGAN / TVAI / RTX / UNet4x) and the mosaic detector. Each entry is
+# keyed by everything that defines the instance, so an unrelated settings
+# change (batch size, denoise, clip length, LTX model...) reuses the resident
+# copy instead of paying the disk load and the MIOpen warm-up again. They are
+# released when their own settings change, or by release_shared_models() on
+# app exit.
+_SHARED_MODELS: dict[tuple, object] = {}
+
+
+def release_shared_models() -> None:
+    """Close the models shared across sessions (app exit / explicit request)."""
+    for key, model in list(_SHARED_MODELS.items()):
+        closer = getattr(model, "close", None)
+        if callable(closer):
+            try:
+                closer()
+            except Exception:  # pragma: no cover - best effort
+                logger.debug("releasing shared model %s failed", key, exc_info=True)
+        _SHARED_MODELS.pop(key, None)
+    logger.info("Shared models released")
+
 
 @dataclass
 class RestorationSession:
     device: "torch.device"
     restoration_pipeline: "RestorationPipeline | None"
     ltx_files: "LtxModelFiles | None" = None
-    _detection_key: tuple | None = None
-    _detection_model: "DetectionModel | None" = None
 
     def detection_model_for(self, config: SessionConfig) -> "DetectionModel":
-        """The detector for ``config``, reused across videos until its settings change."""
+        """The detector for ``config``, shared across sessions until its settings change."""
         from jasna.mosaic.detection_registry import build_detection_model
 
         key = (
+            "detection",
             config.detection_model_name,
-            config.detection_model_path,
+            str(config.detection_model_path),
             config.detection_score_threshold,
             config.batch_size,
             config.fp16,
+            str(self.device),
         )
-        if key != self._detection_key:
-            if self._detection_model is not None:
-                self._detection_model.close()
-            self._detection_model = build_detection_model(
-                config.detection_model_name,
-                config.detection_model_path,
-                batch_size=config.batch_size,
-                device=self.device,
-                score_threshold=config.detection_score_threshold,
-                fp16=config.fp16,
-            )
-            self._detection_key = key
-        return self._detection_model
+        model = _SHARED_MODELS.get(key)
+        if model is not None:
+            logger.debug("Detection model reused from VRAM (shared across sessions)")
+            return model
+        model = build_detection_model(
+            config.detection_model_name,
+            config.detection_model_path,
+            batch_size=config.batch_size,
+            device=self.device,
+            score_threshold=config.detection_score_threshold,
+            fp16=config.fp16,
+        )
+        _SHARED_MODELS[key] = model
+        logger.info("Detection model loaded (shared across sessions, resident in VRAM)")
+        return model
 
     def close(self) -> None:
-        if self._detection_model is not None:
-            self._detection_model.close()
-            self._detection_model = None
+        # The detector and the secondary restorer are shared across sessions (see
+        # _SHARED_MODELS): they are released by release_shared_models(), not here,
+        # so an unrelated settings change does not reload them from disk.
         if self.restoration_pipeline is not None:
             self.restoration_pipeline.restorer.close()
-            if self.restoration_pipeline.secondary_restorer is not None:
-                self.restoration_pipeline.secondary_restorer.close()
 
 
 def build_compiled_detection_model(
@@ -112,7 +134,64 @@ def build_compiled_detection_model(
     )
 
 
+def _secondary_cache_key(config: SessionConfig, device: "torch.device") -> tuple:
+    """Everything that defines the secondary restorer instance."""
+    return (
+        "secondary",
+        config.secondary_restoration,
+        config.amd_upscale_engine,
+        config.amd_upscale_model,
+        str(config.amd_upscale_model_path),
+        config.amd_upscale_scale,
+        config.amd_upscale_algorithm,
+        config.amd_upscale_sharpness,
+        str(config.amd_upscale_ffmpeg_path),
+        config.amd_upscale_timeout_s,
+        config.tvai_ffmpeg_path,
+        config.tvai_model,
+        config.tvai_scale,
+        config.tvai_workers,
+        config.tvai_args,
+        config.tvai_denoise,
+        config.rtx_scale,
+        config.rtx_quality,
+        config.rtx_denoise,
+        config.rtx_deblur,
+        config.fp16,
+        str(device),
+    )
+
+
 def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
+    """Build the secondary restorer, or reuse the one already resident in VRAM.
+
+    Keyed by the restorer's own settings only: an unrelated settings change
+    (batch size, denoise, clip length, LTX model...) keeps it resident instead
+    of paying the disk load and the MIOpen warm-up again. Released when its own
+    settings change, or by release_shared_models() on app exit.
+    """
+    if config.secondary_restoration == "none":
+        return None
+    key = _secondary_cache_key(config, device)
+    cached = _SHARED_MODELS.get(key)
+    if cached is not None:
+        logger.info("Secondary restorer reused from VRAM (shared, not reloaded)")
+        return cached
+    restorer = _build_secondary_restorer_uncached(config, device)
+    for old_key in [k for k in _SHARED_MODELS if k[0] == "secondary" and k != key]:
+        old = _SHARED_MODELS.pop(old_key)
+        closer = getattr(old, "close", None)
+        if callable(closer):
+            try:
+                closer()
+            except Exception:  # pragma: no cover - best effort
+                logger.debug("releasing the previous secondary restorer failed", exc_info=True)
+    _SHARED_MODELS[key] = restorer
+    logger.info("Secondary restorer loaded (shared across sessions, resident in VRAM)")
+    return restorer
+
+
+def _build_secondary_restorer_uncached(config: SessionConfig, device: "torch.device"):
     if config.secondary_restoration == "none":
         return None
     if config.secondary_restoration == "tvai":
@@ -141,28 +220,34 @@ def _build_secondary_restorer(config: SessionConfig, device: "torch.device"):
             deblur=None if config.rtx_deblur == "none" else config.rtx_deblur,
         )
     if config.secondary_restoration == "amd-upscale":
-        if config.amd_upscale_engine == "realesrgan":
-            from jasna.restorer.realesrgan_secondary_restorer import (
-                RealEsrganSecondaryRestorer,
-            )
+        # Row 1 of the AMD panel picks the class: amf-sr is AMD's D3D11 Video SR
+        # filter, while real-esr and realesrgan both run a network in-process on the
+        # ROCm device (SRVGGNetCompact vs RRDBNet). The weight in row 2 selects which
+        # checkpoint; ``amd_upscale_engine_for`` keeps the two in sync for old presets.
+        engine = amd_upscale_engine_for(config.amd_upscale_engine, config.amd_upscale_model)
+        if engine == "amf-sr":
+            from jasna.restorer.amd_upscale_secondary_restorer import AmdUpscaleSecondaryRestorer
 
-            return RealEsrganSecondaryRestorer(
+            return AmdUpscaleSecondaryRestorer(
                 device=device,
                 scale=int(config.amd_upscale_scale),
-                model_path=config.amd_upscale_model_path,
-                model=str(config.amd_upscale_model),
-                fp16=bool(config.fp16),
+                engine=engine,
+                algorithm=config.amd_upscale_algorithm,
+                sharpness=float(config.amd_upscale_sharpness),
+                ffmpeg_path=config.amd_upscale_ffmpeg_path,
+                timeout_s=float(config.amd_upscale_timeout_s),
             )
-        from jasna.restorer.amd_upscale_secondary_restorer import AmdUpscaleSecondaryRestorer
 
-        return AmdUpscaleSecondaryRestorer(
+        from jasna.restorer.realesrgan_secondary_restorer import (
+            RealEsrganSecondaryRestorer,
+        )
+
+        return RealEsrganSecondaryRestorer(
             device=device,
             scale=int(config.amd_upscale_scale),
-            engine=config.amd_upscale_engine,
-            algorithm=config.amd_upscale_algorithm,
-            sharpness=float(config.amd_upscale_sharpness),
-            ffmpeg_path=config.amd_upscale_ffmpeg_path,
-            timeout_s=float(config.amd_upscale_timeout_s),
+            model_path=config.amd_upscale_model_path,
+            model=str(config.amd_upscale_model),
+            fp16=bool(config.fp16),
         )
     raise ValueError(f"Unsupported secondary restoration: {config.secondary_restoration}")
 

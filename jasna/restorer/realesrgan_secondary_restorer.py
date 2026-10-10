@@ -1,29 +1,44 @@
-"""Real-ESRGAN super resolution: an RRDBNet running in-process on the AMD GPU.
+"""Real-ESRGAN super resolution: a plain PyTorch network running in-process on the AMD GPU.
 
 This is the AMD counterpart of the RTX Super Res restorer and follows the same
 strategy: no subprocess, no FFmpeg filter graph and no Vulkan/D3D — the crops are
 upscaled by a PyTorch network on the ROCm device, so ``prefers_cpu_input`` stays
 ``False`` and the tensors never leave VRAM.
 
-Model: any Real-ESRGAN RRDBNet checkpoint (``RealESRGAN_x4plus.pth`` and friends).
-The architecture is derived from the checkpoint itself (see ``rrdbnet.py``), so a
-4x, a 2x/pixel-unshuffle or a 6-block anime checkpoint all work.  When the network
-is more powerful than the requested factor (4x net, ``scale=2``) the result is
-area-downsampled to the requested size, which is what the 256 -> 256*scale
-contract expects.
+Two network families are understood, and the family is derived from the checkpoint
+itself (see ``rrdbnet.py`` / ``srvggnet.py``):
+
+* ``SRVGGNetCompact`` — ``realesr-general-x4v3`` / ``-wdn-x4v3`` (32 convs, PReLU),
+  ``realesr-animevideov3`` (16 convs), ``4xLSDIRCompactC3`` / ``4xLSDIRCompactv2``
+  (16 convs, live-action LSDIR weights) and ``2xHFA2kCompact`` (16 convs, 2x-native).
+  No convolution runs at the high-resolution size, which makes them
+  several times cheaper than an RRDBNet.  ``realesr-general-x4v3`` is the default: on
+  an RX 7900 XT at 256x256 -> 1024x1024 (fp16, batch 2) it measures ~238 fps against
+  ~52 fps for the 6-block anime net, uses 38 MB of VRAM instead of 604 MB, and scores
+  higher PSNR/SSIM on live-action footage.  ``4xLSDIRCompactC3`` is the smaller
+  LSDIR-trained member of the same family (~0.6 M params).
+* ``RRDBNet`` — ``RealESRGAN_x4plus`` (23 blocks), ``RealESRGAN_x4plus_anime_6B``
+  (6 blocks), pixel-unshuffle 2x variants, and KAIR checkpoints such as ``BSRNet``
+  (23 blocks, BSRGAN, the highest-fidelity option measured on live-action crops).
+
+A 4x network asked for ``scale=2`` is area-downsampled, which is what the
+256 -> 256*scale contract expects.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+from torch import nn
 
 from jasna.engine_paths import model_weights_dir
-from jasna.restorer.rrdbnet import RrdbNetSpec, load_rrdbnet
+from jasna.restorer.rrdbnet import load_rrdbnet, read_checkpoint_spec as read_rrdbnet_spec
+from jasna.restorer.srvggnet import load_srvggnet, read_srvggnet_spec
 
 logger = logging.getLogger(__name__)
 
@@ -31,44 +46,185 @@ REALESRGAN_INPUT_SIZE = 256
 REALESRGAN_SCALE_CHOICES = (2, 4)
 # Measured on an RX 7900 XT (ROCm 7.1, fp16, 256x256 -> 1024x1024):
 #   batch 1 -> 15.7 fps, batch 2 -> 16.5 fps, batch 4 -> 0.24 fps (!), batch 8 -> 13.6 fps.
-# Batch 4 makes MIOpen pick a pathological kernel for this shape, so keep the
-# default at 2 and never batch this network in fours.
+# Batch 4 makes MIOpen pick a pathological kernel for the 23-block RRDBNet at this
+# shape, so keep the default at 2 and never batch that network in fours.  The
+# SRVGGNetCompact default is faster at batch 4 (measured ~254 fps vs ~222 fps for
+# realesr-general-x4v3), but the constant is shared, so it stays at 2 until an
+# end-to-end A/B justifies a per-architecture split.
 REALESRGAN_DEFAULT_BATCH = 2
 
-# Checked in this order when ``--amd-upscale-model-path`` is not given.
+ARCH_RRDBNET = "rrdbnet"
+ARCH_SRVGGNET = "srvggnet-compact"
+
+# Checked in this order when ``--amd-upscale-model-path`` is not given. The
+# realesr-general checkpoints come first: measured on an RX 7900 XT
+# (256x256 -> 1024x1024, fp16) realesr-general-x4v3 runs at ~238 fps against ~52 fps
+# for the 6-block anime net and ~17 fps for the 23-block x4plus, at equal or better
+# PSNR/SSIM on live-action footage, with 38 MB of VRAM instead of 604 MB.
 REALESRGAN_WEIGHT_CANDIDATES = (
+    "realesr-general-x4v3.pth",
+    "RealESRGAN_x4v3.pth",
+    "realesr-general-wdn-x4v3.pth",
+    "RealESRGAN_x4v3_wdn.pth",
+    "realesrgan_x4plus_anime_6B.pth",
+    "RealESRGAN_x4plus_anime_6B.pth",
     "realesrgan_x4plus.pth",
     "RealESRGAN_x4plus.pth",
     "realesrgan-x4plus.pth",
-    "realesrgan_x4plus_anime_6B.pth",
-    "RealESRGAN_x4plus_anime_6B.pth",
     "realesrgan_x2plus.pth",
     "RealESRGAN_x2plus.pth",
+    "4xLSDIRCompactC3.pth",
+    "4xLSDIRCompactv2.pth",
+    "2xHFA2kCompact.pth",
+    "BSRNet.pth",
 )
 
-# Named presets for ``--amd-upscale-model`` / the GUI's model picker. The 6-block
-# network is the same architecture at a third of the depth: measured on an
-# RX 7900 XT (256x256 -> 1024x1024, fp16, batch 2) 13.3 fps -> 36.9 fps (2.8x)
-# with a comparable SSIM and a slightly softer look than x4plus.
-REALESRGAN_MODEL_CHOICES = ("auto", "x4plus", "anime-6b")
+# Named presets for ``--amd-upscale-model`` / the GUI's model picker.  Two families
+# share this ROCm engine, and the panel's engine row splits them the same way
+# (see ``jasna.session_config.AMD_UPSCALE_ENGINE_MODELS``):
+#   real-esr   - SRVGGNetCompact: x4v3 / wdn-x4v3 / lsdir-c3 / lsdir-v2 / hfa2k-2x
+#                (~4.5x cheaper)
+#   realesrgan - RRDBNet: x4plus / anime-6b / bsrnet (quality ceiling)
+# The default is x4v3: fastest, highest SSIM, and the most even across mosaic crops
+# (per-crop colour drift and detail ratio both stay below the 6-block anime net),
+# which is what a restore-and-blend pipeline cares about most.
+REALESRGAN_MODEL_CHOICES = (
+    "auto",
+    "x4v3",
+    "wdn-x4v3",
+    "lsdir-c3",
+    "lsdir-v2",
+    "hfa2k-2x",
+    "x4plus",
+    "anime-6b",
+    "bsrnet",
+)
 REALESRGAN_MODEL_FILES: dict[str, tuple[str, ...]] = {
+    "x4v3": ("realesr-general-x4v3.pth", "RealESRGAN_x4v3.pth"),
+    "wdn-x4v3": ("realesr-general-wdn-x4v3.pth", "RealESRGAN_x4v3_wdn.pth"),
+    "lsdir-c3": ("4xLSDIRCompactC3.pth", "4xLSDIRCompactC3_fp16.pth"),
+    "lsdir-v2": ("4xLSDIRCompactv2.pth", "4xLSDIRCompactv2_fp16.pth"),
+    "hfa2k-2x": ("2xHFA2kCompact.pth", "2xHFA2kCompact_fp16.pth"),
     "x4plus": ("realesrgan_x4plus.pth", "RealESRGAN_x4plus.pth", "realesrgan-x4plus.pth"),
     "anime-6b": (
         "realesrgan_x4plus_anime_6B.pth",
         "RealESRGAN_x4plus_anime_6B.pth",
         "realesrgan-x4plus-anime-6b.pth",
     ),
+    "bsrnet": ("BSRNet.pth", "bsrnet.pth", "BSRGAN.pth"),
 }
 REALESRGAN_MODEL_URLS = {
+    "x4v3": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
+    "wdn-x4v3": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth",
+    "lsdir-c3": "https://github.com/Phhofm/models/releases/tag/4xLSDIRCompactC3",
+    "lsdir-v2": "https://github.com/Phhofm/models/releases/tag/4xLSDIRCompact2",
+    "hfa2k-2x": "https://github.com/Phhofm/models/releases/tag/2xHFA2kCompact",
     "x4plus": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
     "anime-6b": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
+    "bsrnet": "https://github.com/cszn/KAIR/releases/download/v1.0/BSRNet.pth",
 }
 
 REALESRGAN_WEIGHT_HELP = (
-    "Put a Real-ESRGAN RRDBNet checkpoint in model_weights/ (for example "
-    "realesrgan_x4plus.pth, https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth) "
+    "Put a Real-ESRGAN checkpoint in model_weights/ (for example "
+    "realesr-general-x4v3.pth, https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth) "
     "or pass an existing file with --amd-upscale-model-path."
 )
+
+_WEIGHT_WRAPPERS = ("params_ema", "params", "state_dict")
+
+
+@dataclass(frozen=True)
+class UpscaleNetSpec:
+    """Architecture-agnostic view of a loaded super-resolution checkpoint."""
+
+    arch: str
+    num_feat: int
+    native_scale: int
+    num_block: int = 0
+    num_conv: int = 0
+    act_type: str = ""
+
+    def describe(self) -> str:
+        if self.arch == ARCH_RRDBNET:
+            return f"RRDBNet {self.num_block} blocks, {self.num_feat} feat"
+        if self.arch == ARCH_SRVGGNET:
+            return f"SRVGGNetCompact {self.num_conv} convs, {self.num_feat} feat, {self.act_type}"
+        return f"{self.arch} {self.num_feat} feat"
+
+
+def _load_state_dict(path: str | Path) -> dict:
+    state = torch.load(str(path), map_location="cpu", weights_only=True)
+    if isinstance(state, dict):
+        for wrapper in _WEIGHT_WRAPPERS:
+            if wrapper in state and isinstance(state[wrapper], dict):
+                return state[wrapper]
+    if not isinstance(state, dict):
+        raise ValueError(
+            f"unsupported checkpoint: expected a state dict, got {type(state).__name__}"
+        )
+    return state
+
+
+def detect_upscale_arch(state: dict) -> str:
+    """Which network family a checkpoint belongs to, decided on its key names only."""
+    keys = set(state)
+    if any(key.startswith("conv_first") or ".rdb1." in key for key in keys):
+        return ARCH_RRDBNET
+    first = state.get("body.0.weight")
+    if first is not None and getattr(first, "ndim", 0) == 4:
+        return ARCH_SRVGGNET
+    raise ValueError(
+        "unsupported checkpoint: neither an RRDBNet (conv_first / body.*.rdb1) nor an "
+        "SRVGGNetCompact (body.0.weight) state dict"
+    )
+
+
+def read_upscale_spec(path: str | Path) -> UpscaleNetSpec:
+    """The architecture of a checkpoint without building the network."""
+    arch = detect_upscale_arch(_load_state_dict(path))
+    if arch == ARCH_RRDBNET:
+        spec = read_rrdbnet_spec(path)
+        return UpscaleNetSpec(
+            arch=arch,
+            num_feat=spec.num_feat,
+            native_scale=spec.native_scale,
+            num_block=spec.num_block,
+        )
+    spec = read_srvggnet_spec(path)
+    return UpscaleNetSpec(
+        arch=arch,
+        num_feat=spec.num_feat,
+        native_scale=spec.native_scale,
+        num_conv=spec.num_conv,
+        act_type=spec.act_type,
+    )
+
+
+def load_upscale_model(
+    path: str | Path, *, device: torch.device, fp16: bool
+) -> tuple[nn.Module, UpscaleNetSpec]:
+    """Build either network family from its checkpoint and move it to ``device``.
+
+    RRDBNet and SRVGGNetCompact share the same 256 -> 256*scale contract, so the
+    restorer treats them interchangeably.
+    """
+    arch = detect_upscale_arch(_load_state_dict(path))
+    if arch == ARCH_RRDBNET:
+        model, spec = load_rrdbnet(path, device=device, fp16=fp16)
+        return model, UpscaleNetSpec(
+            arch=arch,
+            num_feat=spec.num_feat,
+            native_scale=spec.native_scale,
+            num_block=spec.num_block,
+        )
+    model, spec = load_srvggnet(path, device=device, fp16=fp16)
+    return model, UpscaleNetSpec(
+        arch=arch,
+        num_feat=spec.num_feat,
+        native_scale=spec.native_scale,
+        num_conv=spec.num_conv,
+        act_type=spec.act_type,
+    )
 
 
 def find_default_weights() -> Path | None:
@@ -84,7 +240,10 @@ def resolve_weights_path(model_path: str | Path | None, model: str = "auto") -> 
     """Absolute, existence-checked checkpoint path (Windows-safe: no shell quoting).
 
     ``model_path`` wins when given. ``model`` otherwise picks one of the named
-    presets (``x4plus``, ``anime-6b``); ``auto`` keeps the candidate search.
+    presets (``x4v3``, ``wdn-x4v3``, ``lsdir-c3``, ``x4plus``, ``anime-6b``,
+    ``bsrnet``); ``auto`` keeps the candidate search, which also prefers
+    ``realesr-general-x4v3``.  The preset decides the checkpoint, not the engine
+    class, so an explicit ``--amd-upscale-model-path`` always wins.
     """
     if model_path:
         candidate = Path(model_path).expanduser()
@@ -125,7 +284,7 @@ def resolve_weights_path(model_path: str | Path | None, model: str = "auto") -> 
 
 
 class RealEsrganSecondaryRestorer:
-    """Real-ESRGAN upscaling of restored crops, on the ROCm device."""
+    """Real-ESRGAN family upscaling of restored crops, on the ROCm device."""
 
     name = "amd-upscale"
     num_workers = 1
@@ -161,20 +320,19 @@ class RealEsrganSecondaryRestorer:
         self.batch_size = int(batch_size)
         self.model_path = resolve_weights_path(model_path, model)
 
-        model, spec = load_rrdbnet(self.model_path, device=self.device, fp16=self.fp16)
-        self.model = model
-        self.spec: RrdbNetSpec = spec
+        self.model, self.spec = load_upscale_model(
+            self.model_path, device=self.device, fp16=self.fp16
+        )
 
         self._clips = 0
         self._frames = 0
         self._seconds = 0.0
         logger.info(
-            "RealEsrganSecondaryRestorer: %s (RRDBNet %d blocks, %d feat, native %dx) "
-            "on %s fp16=%s (%dx%d -> %dx%d, batch %d)",
+            "RealEsrganSecondaryRestorer: %s (%s, native %dx) on %s fp16=%s "
+            "(%dx%d -> %dx%d, batch %d)",
             self.model_path.name,
-            spec.num_block,
-            spec.num_feat,
-            spec.native_scale,
+            self.spec.describe(),
+            self.spec.native_scale,
             self.device,
             self.fp16,
             self.input_size,

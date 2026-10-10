@@ -57,7 +57,7 @@ def test_cli_defaults_map_to_expected_config() -> None:
     assert config.detection_model_path == _DETECTION_PATH
     assert config.detection_score_threshold == 0.35
     assert config.max_detection_gap == 2
-    assert config.min_detection_duration == 4
+    assert config.min_detection_duration == 2
     assert config.scene_detection is True
     assert config.restoration_model_path == _RESTORATION_PATH
     assert config.compile_basicvsrpp is True

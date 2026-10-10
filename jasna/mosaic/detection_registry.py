@@ -135,14 +135,24 @@ def get_detection_engine() -> str:
 
     AMD defaults to MIGraphX (measured ~1.5-1.9x faster per frame than the torch
     path, benchmarks/2026-10-07_amd_migraphx_ep_windows.md); NVIDIA keeps torch
-    (its ONNX path goes to TensorRT instead).
+    (its ONNX path goes to TensorRT instead). RDNA2 (gfx1030, RX 6000) also keeps
+    torch: MIGraphX has no device code for it and the EP dies at init with
+    "RUNTIME_EXCEPTION ... Failed to call function" - the GUI has no engine
+    picker, so an unsupported card must never be defaulted into MIGraphX.
     """
     if _detection_engine is not None:
         return _detection_engine
     from_env = os.environ.get("JASNA_DETECTION_ENGINE", "").strip().lower()
     if from_env in DETECTION_ENGINES:
         return from_env
-    return "migraphx" if is_amd_device() else "torch"
+    if not is_amd_device():
+        return "torch"
+    from jasna.mosaic.rfdetr_migraphx_runner import MIGRAPHX_SUPPORTED_ARCHS, hip_arch
+
+    arch = hip_arch()
+    if arch and arch not in MIGRAPHX_SUPPORTED_ARCHS:
+        return "torch"
+    return "migraphx"
 
 YOLO_MODEL_FILES: dict[str, str] = {
     name: spec.filename

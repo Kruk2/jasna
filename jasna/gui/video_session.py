@@ -53,6 +53,7 @@ def video_session_key(settings: AppSettings) -> tuple:
     elif settings.secondary_restoration == "amd-upscale":
         key += (
             settings.amd_upscale_engine,
+            settings.amd_upscale_model,
             settings.amd_upscale_scale,
             settings.amd_upscale_algorithm,
             settings.amd_upscale_sharpness,

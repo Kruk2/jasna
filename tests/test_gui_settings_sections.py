@@ -36,6 +36,10 @@ class _FakeValueMenu:
 
     get_value = ValueOptionMenu.get_value
     set_value = ValueOptionMenu.set_value
+    set_options = ValueOptionMenu.set_options
+
+    def configure(self, **kwargs) -> None:  # state= toggles and values= rewrites
+        pass
 
 
 class _FakeWidget:
@@ -96,8 +100,21 @@ def _fake_section_widgets() -> dict:
         "rtx_quality": _FakeWidget("Ultra"),
         "rtx_denoise": _FakeWidget("None"),
         "rtx_deblur": _FakeWidget("Low"),
-        "amd_upscale_engine": _FakeWidget("amf-sr"),
-        "amd_upscale_model": _FakeWidget("auto"),
+        "amd_upscale_engine": _FakeValueMenu(
+            {"amf-sr": "AMF-SR", "real-esr": "Real-ESR", "realesrgan": "Real-ESRGAN"}, "amf-sr"
+        ),
+        "amd_upscale_model": _FakeValueMenu(
+            {
+                "auto": "auto",
+                "x4v3": "realesr-general-x4v3",
+                "wdn-x4v3": "realesr-general-wdn-x4v3",
+                "lsdir-c3": "4xLSDIRCompactC3",
+                "x4plus": "RealESRGAN_x4plus",
+                "anime-6b": "RealESRGAN_x4plus_anime_6B",
+                "bsrnet": "BSRNet (BSRGAN)",
+            },
+            "auto",
+        ),
         "amd_upscale_scale": _FakeWidget("2x"),
         "amd_upscale_algorithm": _FakeWidget("sr1-1"),
         "amd_upscale_sharpness": _FakeWidget("0.5"),
@@ -155,6 +172,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["tvai_denoise"] is True
     assert values["rtx_quality"] == "ultra"
     assert values["amd_upscale_engine"] == "amf-sr"
+    assert values["amd_upscale_model"] == "auto"
     assert values["amd_upscale_scale"] == 2
     assert values["amd_upscale_algorithm"] == "sr1-1"
     assert values["amd_upscale_sharpness"] == 0.5
@@ -392,7 +410,13 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
         from jasna.gui.settings_panel import SettingsPanel
 
         panel = SettingsPanel(root, PresetManager(), ltx_models=ltx_models(root, tmp_path / "ltx", installed=True))
-        assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
+        # `encoder_cq` is the portable `None` sentinel in AppSettings; the panel
+        # resolves it to the active GPU's encoder default (AMD HEVC is 25, NVIDIA 28).
+        from jasna.accelerator import vendor_for_device
+        from jasna.media.encoder_settings import encoder_cq_spec
+
+        expected_cq = encoder_cq_spec("hevc", vendor_for_device()).default
+        assert panel.get_settings() == replace(AppSettings(), encoder_cq=expected_cq)
         assert panel._saved_preset_settings == panel.get_settings()
     finally:
         root.destroy()

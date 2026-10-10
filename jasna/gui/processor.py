@@ -461,6 +461,10 @@ class Processor:
         """Free both cached sessions (window close, or an explicit user request)."""
         self._close_image_session()
         self._close_video_session()
+        from jasna.session_factory import release_shared_models
+
+        release_shared_models()
+        self._log("INFO", "Shared models released")
 
     def _ensure_image_session(self):
         """Load the rf-detr detector + SD 1.5 restorer once; reused across image jobs."""

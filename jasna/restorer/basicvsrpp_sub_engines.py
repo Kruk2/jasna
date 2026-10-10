@@ -17,6 +17,7 @@ from jasna.engine_paths import (
     basicvsrpp_sub_engine_dir,
     get_basicvsrpp_sub_engine_paths,
 )
+from jasna.os_utils import env_flag
 from jasna.trt.torch_tensorrt_export import (
     compile_and_save_torchtrt_dynamo,
     get_workspace_size_bytes,
@@ -33,7 +34,7 @@ _CUDAGRAPHS_ENV = "JASNA_TRT_CUDAGRAPHS"
 
 
 def _loop_body_cudagraphs_enabled() -> bool:
-    return os.environ.get(_CUDAGRAPHS_ENV, "1") != "0"
+    return env_flag(_CUDAGRAPHS_ENV, default=True)
 
 
 def _set_trt_cudagraphs_mode(enabled: bool) -> None:

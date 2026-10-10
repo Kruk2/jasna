@@ -6,8 +6,43 @@ from tkinter import filedialog
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label, get_tooltip
+from jasna.gui.settings_sections.widgets import (
+    ValueOptionMenu,
+    add_setting_label,
+    create_slider_value_label,
+    get_tooltip,
+)
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.session_config import (
+    AMD_UPSCALE_ENGINE_MODELS,
+    AMD_UPSCALE_ENGINE_ORDER,
+    AMD_UPSCALE_MODEL_DEFAULT,
+    amd_upscale_engine_for,
+)
+
+# Row 1 shows the engine class; row 2 lists only that engine's checkpoints. The
+# engine names are brand names, so they are not translated.
+_AMD_ENGINE_LABELS = {"amf-sr": "AMF-SR", "real-esr": "Real-ESR", "realesrgan": "Real-ESRGAN"}
+# Labels are the real checkpoint file names, so the picker reads as a weight list.
+_AMD_MODEL_LABELS = {
+    "auto": "auto",
+    "x4v3": "realesr-general-x4v3",
+    "wdn-x4v3": "realesr-general-wdn-x4v3",
+    "lsdir-c3": "4xLSDIRCompactC3",
+    "lsdir-v2": "4xLSDIRCompactv2",
+    "hfa2k-2x": "2xHFA2kCompact (2x)",
+    "x4plus": "RealESRGAN_x4plus",
+    "anime-6b": "RealESRGAN_x4plus_anime_6B",
+    "bsrnet": "BSRNet (BSRGAN)",
+}
+
+
+def _amd_model_options(engine: str) -> dict[str, str]:
+    """Value->label map for the model row, restricted to ``engine``'s weights."""
+    models = AMD_UPSCALE_ENGINE_MODELS.get(engine, AMD_UPSCALE_ENGINE_MODELS["real-esr"])
+    if not models:
+        return {"auto": "—"}
+    return {model: _AMD_MODEL_LABELS.get(model, model) for model in models}
 
 
 class SecondarySection:
@@ -260,27 +295,35 @@ class SecondarySection:
         amd_engine_tip = ctk.CTkLabel(amd_engine_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         amd_engine_tip.pack(side="left", padx=4)
         Tooltip(amd_engine_tip, get_tooltip("amd_engine"))
-        self._widgets["amd_upscale_engine"] = ctk.CTkOptionMenu(
-            amd_engine_row, values=["amf-sr", "realesrgan"],
+        # AMD engine (row 1 = the class). Switching it re-populates row 2 with only
+        # that engine's weights, so Real-ESR (SRVGGNetCompact) and Real-ESRGAN
+        # (RRDBNet) never share one list.
+        self._widgets["amd_upscale_engine"] = ValueOptionMenu(
+            amd_engine_row,
+            options={engine: _AMD_ENGINE_LABELS[engine] for engine in AMD_UPSCALE_ENGINE_ORDER},
+            command=self._on_amd_engine_changed,
             fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
-            text_color=Colors.TEXT_PRIMARY, width=110
+            text_color=Colors.TEXT_PRIMARY, width=140
         )
         self._widgets["amd_upscale_engine"].pack(side="right")
-        self._widgets["amd_upscale_engine"].set("amf-sr")
+        self._widgets["amd_upscale_engine"].set_value("real-esr")
 
-        # AMD model (Real-ESRGAN checkpoint preset; only used by the realesrgan engine)
+        # AMD model (row 2 = the concrete checkpoint of the row-1 engine).
+        # Row 1 is the class; a Real-ESR engine lists only SRVGGNetCompact weights,
+        # a Real-ESRGAN engine only RRDBNet weights. amf-sr has no model of its own.
         amd_model_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
         amd_model_row.pack(fill="x", pady=(0, 8))
         add_setting_label(amd_model_row, "model", "amd_model")
-        self._widgets["amd_upscale_model"] = ctk.CTkOptionMenu(
-            amd_model_row, values=["auto", "x4plus", "anime-6b"],
+        self._widgets["amd_upscale_model"] = ValueOptionMenu(
+            amd_model_row,
+            options=_amd_model_options("real-esr"),
             fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
             button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
-            text_color=Colors.TEXT_PRIMARY, width=110
+            text_color=Colors.TEXT_PRIMARY, width=200
         )
         self._widgets["amd_upscale_model"].pack(side="right")
-        self._widgets["amd_upscale_model"].set("auto")
+        self._widgets["amd_upscale_model"].set_value("x4v3")
 
         # AMD scale
         amd_scale_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
@@ -388,6 +431,18 @@ class SecondarySection:
         elif secondary == "amd-upscale":
             self._amd_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
 
+    def _on_amd_engine_changed(self, engine: str) -> None:
+        """Engine picked by hand: reset row 2 to that engine's default weight."""
+        self._set_amd_models(engine, AMD_UPSCALE_MODEL_DEFAULT.get(engine))
+
+    def _set_amd_models(self, engine: str, value: str | None) -> None:
+        """Re-populate row 2 with ``engine``'s weights and select ``value``."""
+        menu = self._widgets["amd_upscale_model"]
+        menu.set_options(_amd_model_options(engine))
+        menu.configure(state="disabled" if engine == "amf-sr" else "normal")
+        if value:
+            menu.set_value(value)
+
     def set_model(self, model: str) -> None:
         if model == "ltx":
             self._section.pack_forget()
@@ -410,8 +465,9 @@ class SecondarySection:
         self._widgets["rtx_denoise"].set(preset.rtx_denoise.capitalize())
         self._widgets["rtx_deblur"].set(preset.rtx_deblur.capitalize())
 
-        self._widgets["amd_upscale_engine"].set(preset.amd_upscale_engine)
-        self._widgets["amd_upscale_model"].set(preset.amd_upscale_model)
+        amd_engine = amd_upscale_engine_for(preset.amd_upscale_engine, preset.amd_upscale_model)
+        self._widgets["amd_upscale_engine"].set_value(amd_engine)
+        self._set_amd_models(amd_engine, preset.amd_upscale_model)
         self._widgets["amd_upscale_scale"].set(f"{preset.amd_upscale_scale}x")
         self._widgets["amd_upscale_algorithm"].set(preset.amd_upscale_algorithm)
         self._widgets["amd_upscale_sharpness"].delete(0, "end")
@@ -435,8 +491,8 @@ class SecondarySection:
             "rtx_quality": self._widgets["rtx_quality"].get().lower(),
             "rtx_denoise": self._widgets["rtx_denoise"].get().lower(),
             "rtx_deblur": self._widgets["rtx_deblur"].get().lower(),
-            "amd_upscale_engine": self._widgets["amd_upscale_engine"].get(),
-            "amd_upscale_model": self._widgets["amd_upscale_model"].get(),
+            "amd_upscale_engine": self._widgets["amd_upscale_engine"].get_value(),
+            "amd_upscale_model": self._widgets["amd_upscale_model"].get_value(),
             "amd_upscale_scale": int(self._widgets["amd_upscale_scale"].get().replace("x", "")),
             "amd_upscale_algorithm": self._widgets["amd_upscale_algorithm"].get(),
             "amd_upscale_sharpness": float(self._widgets["amd_upscale_sharpness"].get() or -1),

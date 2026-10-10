@@ -7,20 +7,62 @@ which is what the public Real-ESRGAN checkpoints were trained with:
 * ``RealESRGAN_x4plus``      23 blocks, 64 features, 4x
 * ``RealESRGAN_x4plus_anime_6B``  6 blocks, 64 features, 4x
 * ``RealESRGAN_x2plus``      pixel-unshuffle 2 + 4x network = 2x
+* ``BSRNet`` (KAIR / BSRGAN)  23 blocks, 64 features, 4x, older BasicSR key names
 
 The loader reads the shape of ``conv_first.weight`` to derive ``num_feat`` and the
-pixel-unshuffle factor, and counts ``body.*`` keys for ``num_block``, so any of the
-above checkpoints (or a fine-tune of one) loads without configuration.
+pixel-unshuffle factor and counts ``body.*`` keys for ``num_block``, so any of the
+above checkpoints (or a fine-tune of one) loads without configuration.  KAIR's
+``BSRNet`` predates the ``basicvsr`` rename and stores the same layers under
+``RRDB_trunk``/``trunk_conv``/``upconv1``/``upconv2``/``HRconv`` with ``RDB1``-style
+names, so its keys are remapped to this module's naming before use.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+_KAIR_KEY_PREFIXES = (
+    ("trunk_conv.", "conv_body."),
+    ("upconv1.", "conv_up1."),
+    ("upconv2.", "conv_up2."),
+    ("HRconv.", "conv_hr."),
+)
+
+
+def _remap_kair_keys(state: dict) -> dict:
+    """Rename KAIR-style checkpoint keys to this module's ``basicvsr`` names."""
+    out: dict = {}
+    for key, value in state.items():
+        renamed = key.replace("RRDB_trunk.", "body.")
+        renamed = re.sub(r"\.RDB(\d)\.", r".rdb\1.", renamed)
+        for old, new in _KAIR_KEY_PREFIXES:
+            if renamed.startswith(old):
+                renamed = new + renamed[len(old) :]
+                break
+        out[renamed] = value
+    return out
+
+
+def _normalize_state(state: object) -> dict:
+    """Unwrap the common checkpoint envelopes and remap legacy KAIR key names."""
+    if isinstance(state, dict):
+        for wrapper in ("params_ema", "params", "state_dict"):
+            if wrapper in state and isinstance(state[wrapper], dict):
+                state = state[wrapper]
+                break
+    if not isinstance(state, dict):
+        raise ValueError(
+            f"unsupported checkpoint: expected a state dict, got {type(state).__name__}"
+        )
+    if any(key.startswith("RRDB_trunk.") for key in state):
+        return _remap_kair_keys(state)
+    return state
 
 
 @dataclass(frozen=True)
@@ -108,12 +150,7 @@ class RRDBNet(nn.Module):
 
 def read_checkpoint_spec(path: str | Path) -> RrdbNetSpec:
     """Derive the architecture from a Real-ESRGAN checkpoint without loading weights."""
-    state = torch.load(str(path), map_location="cpu", weights_only=True)
-    if isinstance(state, dict):
-        for wrapper in ("params_ema", "params", "state_dict"):
-            if wrapper in state and isinstance(state[wrapper], dict):
-                state = state[wrapper]
-                break
+    state = _normalize_state(torch.load(str(path), map_location="cpu", weights_only=True))
     conv_first = state["conv_first.weight"]
     num_feat = int(conv_first.shape[0])
     in_ch = int(conv_first.shape[1])
@@ -148,12 +185,7 @@ def build_rrdbnet(spec: RrdbNetSpec) -> RRDBNet:
 
 def load_rrdbnet(path: str | Path, *, device: torch.device, fp16: bool) -> tuple[RRDBNet, RrdbNetSpec]:
     """Build the network from its checkpoint and move it to ``device``."""
-    state = torch.load(str(path), map_location="cpu", weights_only=True)
-    if isinstance(state, dict):
-        for wrapper in ("params_ema", "params", "state_dict"):
-            if wrapper in state and isinstance(state[wrapper], dict):
-                state = state[wrapper]
-                break
+    state = _normalize_state(torch.load(str(path), map_location="cpu", weights_only=True))
     spec = read_checkpoint_spec(path)
     model = build_rrdbnet(spec)
     missing, unexpected = model.load_state_dict(state, strict=False)

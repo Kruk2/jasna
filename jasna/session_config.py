@@ -17,8 +17,11 @@ LTX_DEFAULT_MODEL: LtxModelName = "distilled"
 
 LTX_DEFAULT_SEED = 20260923
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res", "amd-upscale"]
-AmdUpscaleEngineName = Literal["amf-sr", "realesrgan"]
-AmdUpscaleModelName = Literal["auto", "x4plus", "anime-6b"]
+AmdUpscaleEngineName = Literal["amf-sr", "real-esr", "realesrgan"]
+AmdUpscaleModelName = Literal[
+    "auto", "x4v3", "wdn-x4v3", "lsdir-c3", "lsdir-v2", "hfa2k-2x",
+    "x4plus", "anime-6b", "bsrnet",
+]
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 DenoiseStepName = Literal["after_primary", "after_secondary"]
 VrModeName = Literal["auto", "off", "sbs", "sbs-fisheye"]
@@ -26,6 +29,50 @@ VrProjectionName = Literal["auto", "raw", "fisheye", "gnomonic"]
 RtxQualityName = Literal["low", "medium", "high", "ultra"]
 RtxLevelName = Literal["none", "low", "medium", "high", "ultra"]
 CodecName = Literal["hevc", "h264", "av1"]
+
+# Row 1 of the AMD upscale panel ("engine") is the class, row 2 ("model") picks the
+# concrete checkpoint inside that class. The classes are disjoint on purpose, so a
+# checkpoint never sits under a class it does not belong to:
+#   real-esr   - the SRVGGNetCompact family (VGG stack, no convolution at output size,
+#                16-32 convs): realesr-general-x4v3 / -wdn-x4v3, 4xLSDIRCompactC3,
+#                4xLSDIRCompactv2 and 2xHFA2kCompact.
+#   realesrgan - the RRDBNet family (23-block / 6-block, quality ceiling):
+#                RealESRGAN_x4plus / x4plus_anime_6B and BSRNet.
+#   amf-sr     - AMD's driver-level Video SR (AMF filter sr_amf): no checkpoint at all.
+AMD_UPSCALE_ENGINE_ORDER: tuple[str, ...] = ("amf-sr", "real-esr", "realesrgan")
+AMD_UPSCALE_ENGINE_MODELS: dict[str, tuple[str, ...]] = {
+    "amf-sr": (),
+    "real-esr": ("auto", "x4v3", "wdn-x4v3", "lsdir-c3", "lsdir-v2", "hfa2k-2x"),
+    "realesrgan": ("auto", "x4plus", "anime-6b", "bsrnet"),
+}
+# "auto" fits every class (it takes the first checkpoint found), so the reverse map
+# only covers the explicit presets, which is what repairs stale preset files.
+AMD_UPSCALE_MODEL_ENGINE: dict[str, str] = {
+    model: engine
+    for engine, models in AMD_UPSCALE_ENGINE_MODELS.items()
+    for model in models
+    if model != "auto"
+}
+AMD_UPSCALE_MODEL_DEFAULT: dict[str, str] = {
+    "amf-sr": "auto",
+    "real-esr": "x4v3",
+    "realesrgan": "x4plus",
+}
+
+
+def amd_upscale_engine_for(value: str, model: str) -> str:
+    """The engine a checkpoint belongs to, so a stale engine value stays consistent.
+
+    Presets written before the model row was split into classes record ``realesrgan``
+    for every checkpoint, SRVGGNetCompact ones included. The checkpoint decides here,
+    so such a preset shows up under the right class again instead of under a class
+    whose name does not cover it.
+    """
+    engine = str(value or "").strip().lower()
+    owner = AMD_UPSCALE_MODEL_ENGINE.get(str(model or "").strip().lower())
+    if owner is not None:
+        return owner
+    return engine if engine in AMD_UPSCALE_ENGINE_ORDER else "real-esr"
 
 
 @dataclass(frozen=True)

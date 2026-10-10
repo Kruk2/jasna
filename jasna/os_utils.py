@@ -13,6 +13,31 @@ logger = logging.getLogger(__name__)
 MIN_GPU_COMPUTE = (7, 5)
 MIN_DRIVER_VERSION = 580 if sys.platform == "linux" else 610
 
+_TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSY_ENV_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def env_flag(name: str, default: bool = False) -> bool:
+    """Read a boolean environment variable, tolerating stray surrounding whitespace.
+
+    On Windows ``set NAME=1 && prog`` binds ``"1 "`` into the value (cmd.exe folds the
+    space before ``&&``), so a literal ``os.environ.get(NAME) == "1"`` reads False and
+    the flag silently does nothing; the mirror case defeats an ``!= "0"`` opt-out.
+    Values are stripped and lower-cased and a small set of spellings is recognised
+    (``1/true/yes/on``, ``0/false/no/off``) before an empty or unrecognised value falls
+    back to ``default``.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in _TRUTHY_ENV_VALUES:
+        return True
+    if value in _FALSY_ENV_VALUES:
+        return False
+    return default
+
+
 def check_supported_gpu(
     device: str = "cuda:0",
 ) -> tuple[bool, str] | tuple[bool, tuple[str, int, int]]:

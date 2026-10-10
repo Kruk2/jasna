@@ -2,16 +2,17 @@
 
 Engines:
 
-``amf-sr`` (default)
+``amf-sr``
     AMD's own video super resolution, executed by the AMF filter ``sr_amf``.
     AMF is AMD's media framework; on Windows it is initialised over **D3D11**
     (``AMF initialisation succeeded via D3D11``), not Vulkan.  ``algorithm=sr1-0``
     / ``sr1-1`` are the "Video SR 1.0 / 1.1" models behind AMD Software's video
     upscaling; ``bicubic``/``bilinear``/``point`` are the non-ML fallbacks.
 
-The Real-ESRGAN engine (``--amd-upscale-engine realesrgan``) lives in
-``jasna.restorer.realesrgan_secondary_restorer`` and runs the network on the
-ROCm device; both backends share the same ``SecondaryRestorer`` contract.
+The two network engines (``--amd-upscale-engine real-esr`` for SRVGGNetCompact and
+``realesrgan`` for RRDBNet) live in ``jasna.restorer.realesrgan_secondary_restorer``
+and run their network on the ROCm device; all three backends share the same
+``SecondaryRestorer`` contract.
 
 Execution model
 ---------------

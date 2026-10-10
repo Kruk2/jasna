@@ -16,6 +16,11 @@ from jasna.segments import SegmentRange, SegmentRestoration
 
 def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = tmp_path / "input.mp4"
@@ -99,6 +104,11 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
 
 def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = tmp_path / "input.mp4"
@@ -147,6 +157,11 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
 
 def test_amf_h264_full_reencode_preserves_selected_ranges(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = tmp_path / "input.mp4"
@@ -205,6 +220,11 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
     vendor, max_b_frames
 ) -> None:
     pipeline = object.__new__(Pipeline)
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = Path("input.mp4")
@@ -237,6 +257,11 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
 
 def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
     pipeline = object.__new__(Pipeline)
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = Path("input.mp4")
@@ -259,6 +284,11 @@ def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
 
 def _mixed_pipeline(tmp_path, default_model: str, segments: tuple[SegmentRange, ...], spans) -> Pipeline:
     pipeline = object.__new__(Pipeline)
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = default_model
     pipeline.ltx_seed = 5
     pipeline.input_video = tmp_path / "input.mp4"
@@ -370,6 +400,11 @@ def test_a_render_span_resolving_to_two_models_is_rejected(tmp_path) -> None:
 )
 def test_run_routes_by_the_job_model_and_segments(model, segments, expected) -> None:
     pipeline = object.__new__(Pipeline)
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = model
     pipeline.segments = segments
     pipeline.input_video = Path("input.mp4")

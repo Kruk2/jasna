@@ -179,9 +179,146 @@ def allow_all_devices(environ: MutableMapping[str, str] | None = None) -> None:
                 )
 
 
+_VRAM_LIMIT_GB_ENV = "JASNA_VRAM_LIMIT_GB"
+_VRAM_FRACTION_ENV = "JASNA_VRAM_FRACTION"
+#: Small fixed headroom subtracted from the *discrete* card's VRAM when no
+#: explicit budget is set: 500 MB covers the compositor's basic buffers without
+#: giving away gigabytes of the card to the desktop.
+_VRAM_DEFAULT_HEADROOM_BYTES = 500 * 1024 * 1024
+#: Fraction of the budget above which the allocator's reserve counts as hoarded
+#: cold blocks and a clip boundary triggers a defragmenting release
+#: (JASNA_VRAM_DEFRAG_THRESHOLD overrides).
+_VRAM_DEFRAG_THRESHOLD_DEFAULT = 0.75
+_VRAM_DEFRAG_THRESHOLD_ENV = "JASNA_VRAM_DEFRAG_THRESHOLD"
+#: Minimum seconds between two defragmenting releases. empty_cache forces the
+#: next clips to re-allocate their workspaces, so back-to-back cleanups churn
+#: (reported as "slower towards the end") without reclaiming anything new.
+_VRAM_DEFRAG_COOLDOWN_S = 60.0
+_last_defrag_monotonic = 0.0
+#: The fraction apply_vram_budget last installed (None = no budget applied).
+_vram_budget_fraction: float | None = None
+
+
+def apply_vram_budget() -> None:
+    """Cap the CUDA caching allocator so long jobs stop ballooning.
+
+    The allocator caches every freed block and never returns VRAM on its own,
+    so a long 4K job creeps toward the whole card; once Windows starts demoting
+    pages to shared memory (PCIe slow path) the frame rate collapses.
+    ``set_per_process_memory_fraction`` makes the allocator reclaim its own
+    cached blocks at the cap instead of growing past it.
+
+    The budget is derived from the discrete card that ``preferred_gpu_index``
+    picks (the iGPU is skipped): that card's VRAM minus 500 MB. Tune with
+    ``JASNA_VRAM_LIMIT_GB`` (absolute GB) or ``JASNA_VRAM_FRACTION`` (0-1].
+    """
+    global _vram_budget_fraction
+    if not torch.cuda.is_available():
+        return
+    try:
+        index = preferred_gpu_index()
+        total = torch.cuda.get_device_properties(index).total_memory
+        if not total:
+            return
+        limit = os.environ.get(_VRAM_LIMIT_GB_ENV, "").strip()
+        frac_env = os.environ.get(_VRAM_FRACTION_ENV, "").strip()
+        if limit:
+            fraction = float(limit) * (1024 ** 3) / total
+        elif frac_env:
+            fraction = float(frac_env)
+        else:
+            fraction = (total - _VRAM_DEFAULT_HEADROOM_BYTES) / total
+        if not 0.05 <= fraction <= 0.99:
+            logger.warning(
+                "VRAM budget %s resolves to fraction %.2f, outside 0.05-0.99; ignored",
+                limit or frac_env or "default", fraction,
+            )
+            return
+        try:
+            name = torch.cuda.get_device_name(index)
+        except Exception:  # noqa: BLE001
+            name = "GPU"
+        torch.cuda.set_per_process_memory_fraction(fraction, index)
+        _vram_budget_fraction = fraction
+        logger.info(
+            "VRAM budget: device %d (%s) capped at %.1f GB of %.1f GB (%.0f%%); "
+            "tune with %s / %s",
+            index, name,
+            total * fraction / (1024 ** 3), total / (1024 ** 3), fraction * 100,
+            _VRAM_LIMIT_GB_ENV, _VRAM_FRACTION_ENV,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("VRAM budget not applied: %s", exc)
+
+
+def release_vram_cache() -> None:
+    """Return every cached-but-unused block to the driver (defragmentation).
+
+    Live allocations - the resident detector and secondary restorer, the
+    current clip's tensors - are untouched. Only the allocator's cold cache is
+    released, which is what otherwise grows until Windows starts demoting the
+    hot pages to shared memory and the frame rate collapses.
+    """
+    import gc
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+        torch.cuda.empty_cache()
+
+
+def maybe_release_vram_cache() -> bool:
+    """Defragment when the reserve creeps toward the budget; cheap no-op otherwise.
+
+    Called at clip boundaries. The check itself only reads allocator stats; the
+    actual release runs once the reserve crosses the defrag threshold. The freed
+    blocks are the allocator's cold cache - the part that does not need to sit
+    in VRAM - which the driver may then hold in system memory; the
+    speed-critical resident models stay untouched and, with the reserve back
+    under the budget, un-demoted.
+    """
+    global _last_defrag_monotonic
+    if not torch.cuda.is_available():
+        return False
+    try:
+        threshold = float(
+            os.environ.get(_VRAM_DEFRAG_THRESHOLD_ENV, "").strip()
+            or _VRAM_DEFRAG_THRESHOLD_DEFAULT
+        )
+        if not 0.1 <= threshold <= 1.0:
+            threshold = _VRAM_DEFRAG_THRESHOLD_DEFAULT
+        index = preferred_gpu_index()
+        total = torch.cuda.get_device_properties(index).total_memory
+        allowed = int(total * _vram_budget_fraction) if _vram_budget_fraction \
+            else int(total - _VRAM_DEFAULT_HEADROOM_BYTES)
+        reserved = torch.cuda.memory_reserved(index)
+        if allowed and reserved > allowed * threshold:
+            import time as _time
+
+            now = _time.monotonic()
+            if now - _last_defrag_monotonic < _VRAM_DEFRAG_COOLDOWN_S:
+                return False
+            _last_defrag_monotonic = now
+            logger.info(
+                "VRAM defrag: %.2f GB reserved exceeds %.0f%% of the %.2f GB budget; "
+                "returning the cold cache to the driver",
+                reserved / (1024 ** 3), threshold * 100, allowed / (1024 ** 3),
+            )
+            release_vram_cache()
+            logger.info(
+                "VRAM defrag: reserve %.2f GB -> %.2f GB",
+                reserved / (1024 ** 3), torch.cuda.memory_reserved(index) / (1024 ** 3),
+            )
+            return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("VRAM defrag check failed: %s", exc)
+    return False
+
+
 def configure_rocm_process_env() -> None:
     """Apply the ROCm defaults to this process; call at entry points before GPU work."""
     allow_all_devices()
+    apply_vram_budget()
     if torch.version.hip:
         apply_rocm_env_defaults(os.environ)
         if _math_sdp_forced():
