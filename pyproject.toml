@@ -49,8 +49,9 @@ amd = [
   # OSes; an unsatisfiable pin makes uv silently swap in the PyPI CUDA build.
   "torch==2.12.0",
   "torchvision==0.27.0",
-  # AMD runs RF-DETR through the rfdetr torch model (ROCm), not ONNX/MIGraphX,
-  # which sidesteps the Windows-only MIGraphX wheels (see issue #240).
+  # Windows AMD runs RF-DETR through the rfdetr Torch model. Linux AMD can
+  # auto-select separately installed, version-locked MIGraphX artifacts; its
+  # MIGraphX/Torch-MIGraphX runtime is supplied by the Linux release build.
   "rfdetr==1.8.3",
   # Newer transformers imports FSDP while resolving AutoBackbone, but the
   # Windows ROCm torch wheel intentionally has no distributed_c10d extension.
@@ -58,6 +59,8 @@ amd = [
   "numpy==1.26.4",
 ]
 dev = [
+  "cython>=3.1,<4",
+  "delvewheel; sys_platform == 'win32'",
   "nuitka>=2.4",
   "pytest",
   "pytest-cov",

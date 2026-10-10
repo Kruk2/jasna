@@ -18,6 +18,7 @@ from jasna.restorer.tvai_secondary_restorer import (
     _TvaiWorker,
     _parse_tvai_args_kv,
 )
+from jasna.frame_queue import FrameQueueCancelled
 
 
 class TestParseTvaiArgsKv:
@@ -220,6 +221,219 @@ def _setup_mock_workers(r, num_workers=None):
     r._worker_locks = [threading.Lock() for _ in range(n)]
     r._started = True
     return r._workers
+
+
+class _FakeProcess:
+    def __init__(self, stdin):
+        self.stdin = stdin
+        self._killed = False
+
+    def poll(self):
+        return 0 if self._killed else None
+
+    def kill(self):
+        self._killed = True
+        on_kill = getattr(self.stdin, "on_kill", None)
+        if on_kill is not None:
+            on_kill()
+
+    def wait(self, timeout=None):
+        del timeout
+        self._killed = True
+        return 0
+
+
+class _RecordingStdin:
+    def __init__(self):
+        self.writes: list[bytes] = []
+        self.flush_count = 0
+        self.closed = False
+
+    def write(self, data):
+        payload = bytes(data)
+        self.writes.append(payload)
+        return len(payload)
+
+    def flush(self):
+        self.flush_count += 1
+
+    def close(self):
+        self.closed = True
+
+
+class _KillReleasedStdin(_RecordingStdin):
+    def __init__(self):
+        super().__init__()
+        self.write_started = threading.Event()
+        self._released = threading.Event()
+
+    def write(self, data):
+        self.write_started.set()
+        if not self._released.wait(timeout=2.0):
+            raise TimeoutError("fake stdin was never released")
+        raise BrokenPipeError("fake process was killed")
+
+    def on_kill(self):
+        self._released.set()
+
+
+class _FailingStdin(_RecordingStdin):
+    def __init__(self):
+        super().__init__()
+        self.write_started = threading.Event()
+        self.allow_failure = threading.Event()
+
+    def write(self, data):
+        del data
+        self.write_started.set()
+        if not self.allow_failure.wait(timeout=2.0):
+            raise TimeoutError("fake write failure was never released")
+        raise OSError("fake write failure")
+
+
+class _StubbornStdin(_RecordingStdin):
+    def __init__(self):
+        super().__init__()
+        self.write_started = threading.Event()
+        self.release = threading.Event()
+
+    def write(self, data):
+        self.write_started.set()
+        if not self.release.wait(timeout=2.0):
+            raise TimeoutError("fake stubborn stdin was never released")
+        return super().write(data)
+
+
+def _start_test_worker(stdin, *, max_write_frames=4):
+    worker = _TvaiWorker(
+        cmd=["fake-ffmpeg"],
+        out_frame_bytes=3,
+        out_size=1,
+        max_write_frames=max_write_frames,
+    )
+    worker._proc = _FakeProcess(stdin)
+    worker._writer = threading.Thread(target=worker._writer_loop, daemon=True)
+    worker._writer.start()
+    return worker
+
+
+def _test_frame(value: int) -> np.ndarray:
+    return np.full((1, 1, 3), value, dtype=np.uint8)
+
+
+class TestTvaiWorkerBoundedCancellation:
+    def test_idle_writer_cancellation_exits_without_error(self):
+        worker = _start_test_worker(_RecordingStdin())
+
+        assert worker.kill(timeout=0.5)
+        assert worker._writer is None
+        assert not worker.shutdown_incomplete
+        assert worker._write_queue.join(timeout=0.1) is True
+        worker.check_error()
+
+    def test_kill_releases_blocked_write_and_discards_queued_frames(self):
+        stdin = _KillReleasedStdin()
+        worker = _start_test_worker(stdin, max_write_frames=4)
+        first = _test_frame(1)
+        second = _test_frame(2)
+
+        worker.push_frames(first)
+        assert stdin.write_started.wait(timeout=0.5)
+        worker.push_frames(second)
+        assert worker._write_queue.qsize() == 1
+
+        assert worker.kill(timeout=0.5)
+        assert worker._writer is None
+        assert worker._write_queue.join(timeout=0.1) is True
+        assert worker._write_queue.empty()
+        worker.check_error()
+
+    def test_unstoppable_writer_shutdown_is_bounded_and_observable(self):
+        stdin = _StubbornStdin()
+        worker = _start_test_worker(stdin)
+        worker.push_frames(_test_frame(7))
+        assert stdin.write_started.wait(timeout=0.5)
+
+        assert not worker.kill(timeout=0.05)
+        assert worker.shutdown_incomplete
+        assert worker._writer is not None
+        assert worker._writer.is_alive()
+
+        stdin.release.set()
+        assert worker.kill(timeout=0.5)
+        assert not worker.shutdown_incomplete
+        assert worker._writer is None
+
+    def test_write_failure_balances_queue_task_and_is_surfaced(self):
+        stdin = _FailingStdin()
+        worker = _start_test_worker(stdin)
+        worker.push_frames(_test_frame(3))
+
+        assert stdin.write_started.wait(timeout=0.5)
+        worker.push_frames(_test_frame(4))
+        assert worker._write_queue.qsize() == 1
+        stdin.allow_failure.set()
+        assert worker._write_queue.join(timeout=0.5) is True
+        with pytest.raises(RuntimeError, match="TVAI worker thread crashed"):
+            worker.drain_writes(timeout=0.1)
+
+        assert worker.kill(timeout=0.5)
+
+    def test_full_queue_push_observes_user_cancel_without_worker_error(self):
+        worker = _TvaiWorker(
+            cmd=["fake-ffmpeg"],
+            out_frame_bytes=3,
+            out_size=1,
+            max_write_frames=1,
+        )
+        worker._write_queue.put(_test_frame(1), frame_count=1)
+        cancel_event = threading.Event()
+        worker.set_cancel_event(cancel_event)
+        started = threading.Event()
+        done = threading.Event()
+        outcome: list[BaseException] = []
+
+        def blocked_push():
+            started.set()
+            try:
+                worker.push_frames(_test_frame(2))
+            except BaseException as error:
+                outcome.append(error)
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=blocked_push)
+        thread.start()
+        assert started.wait(timeout=0.5)
+        assert not done.wait(timeout=0.1)
+        cancel_event.set()
+
+        assert done.wait(timeout=0.5)
+        thread.join(timeout=0.5)
+        assert not thread.is_alive()
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], FrameQueueCancelled)
+        worker.check_error()
+        assert worker.kill(timeout=0.5)
+        assert worker._write_queue.join(timeout=0.1) is True
+
+    def test_healthy_close_drains_all_frames_without_loss(self):
+        stdin = _RecordingStdin()
+        worker = _start_test_worker(stdin)
+        first = _test_frame(4)
+        second = _test_frame(5)
+
+        worker.push_frames(first)
+        worker.push_frames(second)
+        assert worker.close_stdin_and_drain(timeout=0.5) == []
+
+        assert stdin.writes == [first.tobytes(), second.tobytes()]
+        assert stdin.flush_count == 2
+        assert stdin.closed
+        assert worker._writer is None
+        assert worker._write_queue.join(timeout=0.1) is True
+        worker.check_error()
+        assert worker.kill(timeout=0.5)
 
 
 class TestPushClip:
@@ -621,6 +835,35 @@ class TestClose:
             w.kill.assert_called_once()
         assert r._workers == []
         assert not r._started
+
+    def test_incomplete_close_retains_workers_until_retry_succeeds(self):
+        r = _make_restorer()
+        workers = _setup_mock_workers(r)
+        worker = workers[0]
+        worker_segments = r._worker_segments
+        worker_locks = r._worker_locks
+        r._worker_segments[0].append(_ClipSegment(seq=7, expected=1))
+        r._completed[7] = [_make_frame()]
+        worker.kill.side_effect = [False, True]
+
+        assert r.close() is False
+        assert r.shutdown_incomplete
+        assert r._workers is workers
+        assert r._worker_segments is worker_segments
+        assert r._worker_locks is worker_locks
+        assert r._started
+        assert len(r._worker_segments[0]) == 1
+        assert 7 in r._completed
+        assert worker.kill.call_count == 1
+
+        assert r.close() is True
+        assert not r.shutdown_incomplete
+        assert r._workers == []
+        assert r._worker_segments == []
+        assert r._worker_locks == []
+        assert r._completed == {}
+        assert not r._started
+        assert worker.kill.call_count == 2
 
     def test_noop_when_not_started(self):
         r = _make_restorer()
