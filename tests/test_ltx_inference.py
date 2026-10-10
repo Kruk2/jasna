@@ -210,3 +210,20 @@ def test_local_transformer_reads_device_wide_free_vram(monkeypatch):
     runtime = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
     runtime.load_transformer()
     assert received == [inference.device_free_bytes]
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def test_worker_decode_returns_its_vram_before_the_parent_reads_the_next_budget(monkeypatch):
+    """The parent sizes the next window's decode from device-wide free VRAM, which counts the
+    worker's allocator cache."""
+    device = torch.device("cuda")
+    monkeypatch.setattr(
+        inference, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.rand(1, 3, 33, 512, 512, device=device)
+    )
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cuda"})
+    backend.decoder = object()
+    torch.cuda.empty_cache()
+    reserved = torch.cuda.memory_reserved(device)
+    _, (frames,) = backend.dispatch("decode", {"seed": 1, "free_bytes": 4 << 30}, [torch.zeros(1, 128, 5, 16, 16)], lambda _n: None)
+    assert frames.device.type == "cpu" and frames.shape == (33, 3, 512, 512)
+    assert torch.cuda.memory_reserved(device) == reserved

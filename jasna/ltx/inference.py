@@ -260,14 +260,20 @@ class WorkerBackend:
             if self.decoder is None:
                 raise RuntimeError("LTX decoder is not loaded")
             torch.cuda.empty_cache()
-            generator = torch.Generator(device=self.device).manual_seed(params["seed"])
-            video = decode_latent(self.decoder, tensors[0].to(self.device), params["free_bytes"], generator)
-            video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
-            frames = video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous()
-            return {}, [frames.to("cpu")]
+            frames = self._decode_to_cpu(tensors[0], params["seed"], params["free_bytes"])
+            torch.cuda.empty_cache()
+            return {}, [frames]
         else:
             raise ValueError("unsupported LTX inference operation")
         return {}, []
+
+    def _decode_to_cpu(self, latent: torch.Tensor, seed: int, free_bytes: int) -> torch.Tensor:
+        """Decoded window as uint8 ``[F, 3, S, S]`` on the CPU; its GPU copies are freed on return,
+        so the caller can hand that cache back before the parent reads the next window's budget."""
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+        video = decode_latent(self.decoder, latent.to(self.device), free_bytes, generator)
+        video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
+        return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous().to("cpu")
 
     def close(self) -> None:
         self._unload_module("encoder")
