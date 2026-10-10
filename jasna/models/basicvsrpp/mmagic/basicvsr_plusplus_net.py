@@ -18,6 +18,24 @@ from .model_utils import default_init_weights
 from .model_utils import make_layer
 from .registry import MODELS
 
+# SPyNet flow rescale factors only depend on the (cached) input geometry, but
+# torch.tensor([...], device=cuda) performs a pageable H2D copy on every call -
+# illegal during HIP/CUDA graph capture and pure per-call overhead otherwise.
+_SCALE_CACHE: dict = {}
+
+
+def _flow_scale_cache(w, h, w_up, h_up, dtype, device):
+    key = (w, h, w_up, h_up, dtype, str(device))
+    scale = _SCALE_CACHE.get(key)
+    if scale is None:
+        with torch.no_grad():
+            scale = torch.tensor(
+                [float(w) / float(w_up), float(h) / float(h_up)],
+                device=device, dtype=dtype,
+            ).view(1, 2, 1, 1)
+        _SCALE_CACHE[key] = scale
+    return scale
+
 
 @MODELS.register_module()
 class BasicVSRPlusPlusNet(BaseModule):
@@ -496,10 +514,7 @@ class SPyNet(BaseModule):
             align_corners=False)
 
         # adjust the flow values
-        scale = torch.tensor(
-            [float(w) / float(w_up), float(h) / float(h_up)],
-            device=flow.device, dtype=flow.dtype,
-        ).view(1, 2, 1, 1)
+        scale = _flow_scale_cache(w, h, w_up, h_up, flow.dtype, flow.device)
         return flow * scale
 
 

@@ -77,6 +77,18 @@ class ValueOptionMenu(ctk.CTkOptionMenu):
             label = next(iter(self._value_to_label.values()))
         self.set(label)
 
+    def set_options(self, options: dict[str, str], value: str | None = None) -> None:
+        """Replace the whole value->label mapping (used for engine-dependent lists).
+
+        ``value`` selects an entry in the new mapping; unknown values fall back to
+        the first option, so a stale value from another engine never sticks.
+        """
+        self._value_to_label = dict(options)
+        self._label_to_value = {label: v for v, label in options.items()}
+        self.configure(values=list(self._value_to_label.values()))
+        if value is not None:
+            self.set_value(value)
+
 
 def pack_rows(rows: list[tuple[tk.Misc, dict]], hidden: tuple[tk.Misc, ...]) -> None:
     """Pack ``rows`` (widget, pack options) in order, leaving out ``hidden``."""

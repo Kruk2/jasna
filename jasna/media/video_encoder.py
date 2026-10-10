@@ -29,6 +29,7 @@ from jasna.accelerator import (
 )
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.cas import GpuCasSharpener
+from jasna.os_utils import env_flag
 from jasna.media.container_utils import (
     MOV_SUFFIXES,
     is_mov_chapter_stream,
@@ -169,6 +170,15 @@ class EncoderSpec:
     @property
     def ten_bit(self) -> bool:
         return self.frame_format == "p010le"
+
+
+class _YuvPayload:
+    """Marker for a queued already-decoded host YUV frame (AMD no-roundtrip path)."""
+
+    __slots__ = ("host_yuv",)
+
+    def __init__(self, host_yuv: torch.Tensor) -> None:
+        self.host_yuv = host_yuv
 
 
 ENCODER_SPECS: dict[str, EncoderSpec] = {
@@ -490,6 +500,13 @@ class VideoEncoder:
         self._converter = RgbToYuvConverter(f"{pixel_format}_{color_variant}", device=self.device)
 
         self._lut_flags: deque[bool] = deque()
+        # R1 zero-copy bridge gate (read in __init__: __enter__ picks pix_fmt
+        # from it before the bridge itself is constructed there).
+        self._bridge_requested = (
+            self.vendor is AcceleratorVendor.AMD
+            and env_flag("JASNA_AMD_D3D11_BRIDGE", default=False)
+        )
+        self._bridge = None
         # Only AMD reuses one packed frame (set in __enter__); NVENC still holds
         # its input frame after encode() returns, so NVIDIA allocates per frame.
         self._packed: torch.Tensor | None = None
@@ -516,7 +533,7 @@ class VideoEncoder:
             "rate": self.output_fps,
             "options": dict(self.encoder_options),
         }
-        if self.vendor is AcceleratorVendor.AMD:
+        if self.vendor is AcceleratorVendor.AMD and not self._bridge_requested:
             stream_kwargs["hwaccel"] = HWAccel(
                 "amf",
                 device=str(self.device.index or 0),
@@ -524,6 +541,13 @@ class VideoEncoder:
                 is_hw_owned=False,
             )
             pix_fmt = self.spec.frame_format
+        elif self.vendor is AcceleratorVendor.AMD:
+            # d3d11 bridge: frames carry our own ffmpeg-D3D11VA frames context
+            # which PyAV adopts at open.  A separate HWAccel device would make
+            # AMF see a foreign D3D11 device and reject the surface
+            # (CreateSurfaceFromDX11Native error 10); the codec ctx pix_fmt
+            # must match AVHWFramesContext.format, i.e. d3d11.
+            pix_fmt = "d3d11"
         else:
             pix_fmt = "cuda"
         out_v = self.dst.add_stream(self.encoder_name, **stream_kwargs)
@@ -561,9 +585,14 @@ class VideoEncoder:
         # secondary CUDA context and cross-context scheduling overhead.
         # NVENC consumes device memory, so conversion runs on its own stream and
         # overlaps the rest of the pipeline. AMF consumes host memory and the
-        # conversion is eager Torch math, so on AMD everything stays on the
-        # current stream: a private stream there let ROCm recycle in-flight
-        # conversion buffers into the restorer's allocations (issue #252).
+        # conversion is eager Torch math, so it also runs on its own stream: the
+        # eager path writes only into persistent scratch + _packed buffers (no
+        # per-call temporaries, issue #252), and the blocking host copy drains
+        # the private stream before those buffers are reused. Keeping the old
+        # current_stream here serialised every encoded frame behind a
+        # full-device barrier (stream.synchronize() on the default stream, which
+        # also carries decode/detect/restore), which became the bottleneck on
+        # clean segments where restoration is skipped and encode is the limiter.
         height = self.metadata.video_height
         width = self.metadata.video_width
         self._cuda_ctx = None
@@ -579,7 +608,7 @@ class VideoEncoder:
                 cuda_stream=self.stream.cuda_stream,
             )
         else:
-            self.stream = current_stream(self.device)
+            self.stream = new_stream(self.device)
             self._packed = torch.empty(
                 (height + height // 2, width),
                 dtype=self._converter.sample_dtype,
@@ -592,6 +621,24 @@ class VideoEncoder:
                 dtype=torch.uint16 if self.spec.ten_bit else torch.uint8,
                 pin_memory=True,
             )
+            # R1 zero-copy bridge (opt-in): hand AMF a D3D11 texture written by
+            # HIP directly, skipping the device->host copy + CPU from_dlpack.
+            # Falls back to the host path when anything in the ctypes chain is
+            # unavailable on this machine.
+            self._bridge = None
+            if self._bridge_requested:
+                from jasna.media.d3d11_bridge import BridgeUnavailable, D3D11Bridge
+
+                try:
+                    self._bridge = D3D11Bridge(
+                        self.device.index or 0, width, height, self.spec.frame_format
+                    )
+                    logger.info(
+                        "[encoder] AMD d3d11 zero-copy bridge enabled (%s %dx%d)",
+                        self.spec.frame_format, width, height,
+                    )
+                except BridgeUnavailable as exc:
+                    logger.warning("[encoder] d3d11 bridge unavailable, using host path: %s", exc)
         self.pts_heap: list[int] = []
         self.frame_buffer: deque = deque()
         self._lut_flags.clear()
@@ -621,6 +668,12 @@ class VideoEncoder:
         self._source_iter = None
         self._last_source_dts: dict[int, tuple[int, Fraction]] = {}
         self._warned_source_dts: set[int] = set()
+        # Sample-accurate running PTS per transcoded audio stream: codecs like
+        # wmapro put 20+ frames into one container packet but stamp only the
+        # first, and the container's millisecond time base jitters between
+        # packets. Without this the muxer sees a backwards DTS and dies with
+        # errno 22 (see _produce_source_packets).
+        self._next_source_audio_pts: dict[int, int] = {}
         if self.smart_fragment:
             return
 
@@ -764,6 +817,12 @@ class VideoEncoder:
                     self._mux_video(packet)
                 self._drain_source_streams()
         finally:
+            if getattr(self, "_bridge", None) is not None:
+                try:
+                    self._bridge.close()
+                except Exception:
+                    logger.exception("[encoder] d3d11 bridge close failed")
+                self._bridge = None
             self.dst.close()
             self._src.close()
         if exc_type is None and self._worker_error is not None:
@@ -778,10 +837,13 @@ class VideoEncoder:
                 if item is self._stop_sentinel:
                     return
                 if self._worker_error is None:
-                    frame, pts, apply_lut, ready_event = item
-                    self.stream.wait_event(ready_event)
-                    frame.record_stream(self.stream)
-                    self._encode_frame(frame, pts, apply_lut=apply_lut)
+                    frame, pts, apply_lut, ready_event, host_yuv = item
+                    if host_yuv is not None:
+                        self._encode_frame_yuv(host_yuv, pts)
+                    else:
+                        self.stream.wait_event(ready_event)
+                        frame.record_stream(self.stream)
+                        self._encode_frame(frame, pts, apply_lut=apply_lut)
             except Exception as exc:
                 self._worker_error = exc
                 logger.exception("[encoder-worker] crashed")
@@ -790,14 +852,18 @@ class VideoEncoder:
 
     def _build_encode_item(
         self,
-        frame: torch.Tensor,
+        frame: torch.Tensor | _YuvPayload,
         pts: int,
         apply_lut: bool,
-    ) -> tuple[torch.Tensor, int, bool, object]:
+    ) -> tuple[object, int, bool, object, object]:
+        if isinstance(frame, _YuvPayload):
+            # Already-decoded host YUV: nothing on the device to order against,
+            # so there is no producer event to wait on.
+            return None, pts, apply_lut, None, frame.host_yuv
         producer_stream = current_stream(self.device)
         ready_event = new_event(self.device)
         producer_stream.record_event(ready_event)
-        return frame, pts, apply_lut, ready_event
+        return frame, pts, apply_lut, ready_event, None
 
     def _validate_encoder_options(self):
         leftover = dict(self.out_stream.codec_context.options)
@@ -856,12 +922,26 @@ class VideoEncoder:
             return [packet]
         out_packets = []
         sample_time_base = Fraction(1, out_stream.codec_context.sample_rate)
+        # Codecs like wmapro pack 20+ frames into one container packet but stamp
+        # only the first (in the container's coarse millisecond time base); the
+        # rest decode with pts=None. Feeding those to the AAC encoder produced
+        # dts=None packets that the muxer spaced on its own, so the container's
+        # millisecond jitter between packets read as a backwards DTS and the MP4
+        # muxer aborted with errno 22. Assign a sample-accurate running PTS and
+        # never let it move backwards instead.
+        expected_pts = self._next_source_audio_pts.get(out_stream.index)
         for aframe in in_packet.decode():
             if aframe.pts is not None:
                 aframe.pts = round(aframe.pts * aframe.time_base / sample_time_base)
             aframe.time_base = sample_time_base
+            if expected_pts is not None and (aframe.pts is None or aframe.pts < expected_pts):
+                aframe.pts = expected_pts
             for rframe in processor.resample(aframe):
                 out_packets.extend(out_stream.encode(rframe))
+                if rframe.pts is not None:
+                    expected_pts = rframe.pts + (rframe.samples or 0)
+        if expected_pts is not None:
+            self._next_source_audio_pts[out_stream.index] = expected_pts
         return out_packets
 
     @staticmethod
@@ -1023,14 +1103,56 @@ class VideoEncoder:
                 )
 
         if self.vendor is AcceleratorVendor.AMD:
-            # AMF reads host planes, and reading them while a non-blocking copy
-            # was still in flight corrupted frames (issue #252): finish the
-            # conversion, then blocking-copy into pinned memory.
-            self.stream.synchronize()
-            self._host_yuv.copy_(
-                packed.view(torch.uint16) if self.spec.ten_bit else packed,
-                non_blocking=False,
+            if self._bridge is not None:
+                # the bridge's HIP copy must observe the finished conversion,
+                # so drain the torch stream first (same ordering guarantee the
+                # host path gets from stream.synchronize()).
+                self.stream.synchronize()
+                self._bridge.upload_and_wrap(packed.view(torch.uint16) if self.spec.ten_bit else packed)
+                hw_frame = self._bridge.wrap_frame()
+            else:
+                # AMF reads host planes, and reading them while a non-blocking
+                # copy was still in flight corrupted frames (issue #252):
+                # finish the conversion, then blocking-copy into pinned memory.
+                self.stream.synchronize()
+                self._host_yuv.copy_(
+                    packed.view(torch.uint16) if self.spec.ten_bit else packed,
+                    non_blocking=False,
+                )
+                planes = [self._host_yuv[:height], self._host_yuv[height:]]
+                hw_frame = av.VideoFrame.from_dlpack(
+                    planes,
+                    format=self.spec.frame_format,
+                )
+        hw_frame.pts = pts
+        hw_frame.time_base = self.metadata.time_base
+        try:
+            packets = self.out_stream.encode(hw_frame)
+        except av.FFmpegError as exc:
+            if not self._video_started:
+                raise self._encoder_open_error(exc) from exc
+            raise
+        for packet in packets:
+            self._mux_video(packet)
+
+    def _encode_frame_yuv(self, host_yuv: torch.Tensor, pts: int) -> None:
+        # The AMD no-roundtrip path: host_yuv is the decoder's normalized host YUV
+        # (nv12/p010), so there is no device conversion, no upload, and no device
+        # sync — the frame goes straight to AMF from pinned memory.
+        height = self.metadata.video_height
+        src = host_yuv
+        if src.dtype != self._host_yuv.dtype or tuple(src.shape) != tuple(self._host_yuv.shape):
+            raise RuntimeError(
+                f"encode_yuv received host YUV {tuple(src.shape)}/{src.dtype} but the "
+                f"{self.spec.frame_format} encoder needs "
+                f"{tuple(self._host_yuv.shape)}/{self._host_yuv.dtype}; the reader must "
+                f"reformat with yuv_format={self.spec.frame_format!r}"
             )
+        self._host_yuv.copy_(src)
+        if self._bridge is not None:
+            self._bridge.upload_and_wrap(src)
+            hw_frame = self._bridge.wrap_frame()
+        else:
             planes = [self._host_yuv[:height], self._host_yuv[height:]]
             hw_frame = av.VideoFrame.from_dlpack(
                 planes,
@@ -1046,6 +1168,27 @@ class VideoEncoder:
             raise
         for packet in packets:
             self._mux_video(packet)
+
+    def encode_yuv(self, host_yuv: torch.Tensor, pts: int, *, apply_lut: bool = False):
+        """Queue an already-decoded host YUV frame (nv12/p010) for encoding.
+
+        Only valid on the AMD/AMF path and only when no CAS sharpening is active,
+        because sharpening runs on the device RGB frame that this path skips.
+        """
+        if self.vendor is not AcceleratorVendor.AMD:
+            raise RuntimeError("encode_yuv is only implemented for the AMD/AMF path")
+        if self._cas is not None:
+            raise RuntimeError("encode_yuv cannot run with CAS sharpening enabled")
+        if self._worker_error is not None:
+            raise self._worker_error
+        pts = int(pts) - self.pts_origin
+        while pts in self.pts_set:
+            pts += 1
+        heapq.heappush(self.pts_heap, pts)
+        self.frame_buffer.append(_YuvPayload(host_yuv))
+        self._lut_flags.append(bool(apply_lut))
+        self.pts_set.add(pts)
+        self._process_buffer()
 
     def encode(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
         if self._worker_error is not None:

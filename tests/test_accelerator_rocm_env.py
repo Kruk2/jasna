@@ -9,6 +9,10 @@ ROCM_DEFAULTS = {
     "MIOPEN_FIND_MODE": "FAST",
     "PYTORCH_ALLOC_CONF": "expandable_segments:False",
     "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:False",
+    # Opt-in for the AOTriton flash-attention kernels: `configure_rocm_process_env`
+    # keeps FLASH SDPA enabled when this GPU's kernel images are installed (2x on
+    # attention-bound models) and only falls back to MATH when they are missing.
+    "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": "1",
 }
 
 

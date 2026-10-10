@@ -21,6 +21,7 @@ from jasna.media.splice import (
     KeyframeIndex,
     SplicePlan,
     SpliceSpan,
+    build_copy_only_plan,
     build_splice_plan,
     concatenate_fragments,
     create_copy_fragment,
@@ -66,6 +67,21 @@ class _OfflineFrameWriter:
         self._encoder_ctx.encode(frame, pts, apply_lut=apply_lut)
         self._encode_heartbeat[0] = time.monotonic()
 
+    def write_yuv(self, host_yuv: torch.Tensor, pts: int) -> None:
+        # Clean frame via the AMD no-roundtrip path: the decoded host YUV goes
+        # straight to AMF, skipping the device YUV->RGB->YUV round trip.
+        if not self._entered:
+            self._encoder_ctx.__enter__()
+            self._entered = True
+        self._encoder_ctx.encode_yuv(host_yuv, pts)
+        self._encode_heartbeat[0] = time.monotonic()
+
+    @property
+    def yuv_format(self) -> str | None:
+        # The encoder's expected host pixel format (p010le / nv12); the lazy reader
+        # reformats to this so the passthrough never mismatches the encoder buffer.
+        return getattr(getattr(self._encoder_ctx, "spec", None), "frame_format", None)
+
     def after_write(self, frames_written: int) -> None:
         pass
 
@@ -86,6 +102,8 @@ class Pipeline:
         progress_callback: ProgressCallback | None,
         segments: tuple[SegmentRange, ...] | None,
         splice_plan: SplicePlan | None,
+        resume_enabled: bool = True,
+        resume_dir: Path | None = None,
     ) -> None:
         self.input_video = input_video
         self.output_video = output_video
@@ -114,7 +132,15 @@ class Pipeline:
         self.sharpen_strength = config.sharpen_strength
         self.retarget_high_fps = config.retarget_high_fps
         self.fmp4 = config.fmp4
-        self.segments = tuple(segments) if segments else None
+        self.config = config
+        # Checkpoint/resume (断点续传): a stopped smart-render job keeps its
+        # finished fragments next to the output; the next run skips them and
+        # renders only the missing spans, then concatenates as usual.
+        self.resume_enabled = resume_enabled
+        self.resume_dir_override = resume_dir
+        # None means "no segmentation was requested"; an empty tuple means the
+        # segmentation ran and found nothing to render, which is a different thing.
+        self.segments = None if segments is None else tuple(segments)
         self.splice_plan = splice_plan
         self.vr_resolution = None
         self.vr_projector = None
@@ -414,7 +440,11 @@ class Pipeline:
         )
         if self.splice_plan is None:
             index = probe_keyframes(self.input_video, metadata)
-            plan = build_splice_plan(self.segments or (), index, duration=metadata.duration)
+            if self.segments:
+                plan = build_splice_plan(self.segments, index, duration=metadata.duration)
+            else:
+                # Nothing to render: remux the input untouched.
+                plan = build_copy_only_plan(index)
         else:
             plan = self.splice_plan
             if plan.segments != tuple(self.segments or ()):
@@ -432,8 +462,11 @@ class Pipeline:
         # match sources using more; re-render segments would not stitch
         # cleanly against the stream-copied ones. Fall back to a full
         # re-encode instead of failing the job (NVIDIA NVENC has no such cap).
+        # With nothing to render there is nothing to stitch, so a copy-only plan
+        # is unaffected by the source's B-frame layout.
         if (
-            vendor_for_device(self.device) is AcceleratorVendor.AMD
+            plan.render_spans
+            and vendor_for_device(self.device) is AcceleratorVendor.AMD
             and codec == "h264"
             and index.max_b_frames > 3
         ):
@@ -459,15 +492,82 @@ class Pipeline:
             self.encoder_settings,
             vendor=vendor_for_device(self.device),
         )
+        # --- checkpoint/resume (断点续传) --------------------------------------
+        # Fragments are deterministic per span: the same input, segments and
+        # settings always produce the same plan, so a stopped job can keep its
+        # finished fragments and the next run skips them, rendering only what
+        # is missing before concatenating everything as usual.
+        resume_dir = None
+        resume_state = None
+        completed: set[int] = set()
+        if self.resume_enabled:
+            from jasna.resume import (
+                clear_resume,
+                completed_fragments,
+                load_state,
+                resume_dir_for,
+                signature as resume_signature_of,
+            )
+
+            resume_dir = self.resume_dir_override or resume_dir_for(self.output_video)
+            try:
+                import dataclasses as _dataclasses
+
+                config_payload = _dataclasses.asdict(self.config)
+            except Exception:
+                config_payload = repr(self.config)
+            input_stat = self.input_video.stat()
+            resume_signature = resume_signature_of({
+                "input": str(self.input_video.resolve()),
+                "input_size": input_stat.st_size,
+                "codec": codec,
+                "config": config_payload,
+                "segments": [
+                    [segment.start, segment.end, repr(segment.restoration)]
+                    for segment in (self.segments or ())
+                ],
+                "spans": [
+                    [span.kind, span.start_pts, span.end_pts,
+                     [list(effect) for effect in span.effect_ranges]]
+                    for span in plan.spans
+                ],
+                "model": self.restoration_model_name,
+                "ltx_seed": self.ltx_seed,
+            })
+            resume_state = load_state(resume_dir)
+            if resume_state is not None and resume_state.get("signature") != resume_signature:
+                log.info(
+                    "Resume checkpoint in %s does not match this job (input, segments "
+                    "or settings changed); starting fresh",
+                    resume_dir,
+                )
+                clear_resume(resume_dir)
+                resume_state = None
+            completed = completed_fragments(resume_state, resume_dir)
+            if completed:
+                log.info(
+                    "Resume: %d of %d fragments already rendered in %s; "
+                    "only the missing ones will be processed",
+                    len(completed), len(plan.spans), resume_dir,
+                )
+            elif resume_state is None and resume_dir.exists() and any(resume_dir.iterdir()):
+                log.info("Discarding an unusable resume checkpoint in %s", resume_dir)
+                clear_resume(resume_dir)
         standard_frames = sum(
-            _span_frames(span, index, metadata) for span in plan.render_spans if span not in ltx_spans
+            _span_frames(span, index, metadata)
+            for span_index, span in enumerate(plan.spans)
+            if span.is_render and span not in ltx_spans and span_index not in completed
         )
         ltx_callback = standard_callback = self.progress_callback
         if self.progress_callback is not None and ltx_spans and standard_frames:
             job_progress = JobProgress(
                 self.progress_callback,
                 {
-                    "ltx": LTX_WORK_PER_FRAME * sum(_span_frames(span, index, metadata) for span in ltx_spans),
+                    "ltx": LTX_WORK_PER_FRAME * sum(
+                        _span_frames(span, index, metadata)
+                        for span_index, span in enumerate(plan.spans)
+                        if span in ltx_spans and span_index not in completed
+                    ),
                     "standard": float(standard_frames),
                 },
             )
@@ -482,95 +582,145 @@ class Pipeline:
         work_root = self.working_dir or self.output_video.parent
         work_root.mkdir(parents=True, exist_ok=True)
 
+        temp_ctx = None
         try:
-            with TemporaryDirectory(
-                dir=work_root,
-                prefix=f".{self.output_video.stem}.segments-",
-            ) as temp_dir_name:
-                temp_dir = Path(temp_dir_name)
-                fragments: list[tuple[Path, float]] = []
-                fragment_suffix = ".ts" if codec in {"h264", "hevc"} else ".mkv"
+            if resume_dir is not None:
+                # The checkpoint dir doubles as the fragment work dir: it is
+                # kept after a stop (that is the point) and removed after the
+                # job succeeds.
+                temp_dir = resume_dir
+                temp_dir.mkdir(parents=True, exist_ok=True)
+            else:
+                temp_ctx = TemporaryDirectory(
+                    dir=work_root,
+                    prefix=f".{self.output_video.stem}.segments-",
+                )
+                temp_dir = Path(temp_ctx.name)
+            fragments: list[tuple[Path, float]] = []
+            fragment_suffix = ".ts" if codec in {"h264", "hevc"} else ".mkv"
 
-                def raw_path(span_index: int) -> Path:
-                    return temp_dir / f"{span_index:04d}-raw.nut"
+            def raw_path(span_index: int) -> Path:
+                return temp_dir / f"{span_index:04d}-raw.nut"
 
-                def fragment_encoder(span_index: int, span: SpliceSpan) -> VideoEncoder:
-                    return VideoEncoder(
-                        str(raw_path(span_index)),
-                        device=self.device,
-                        metadata=metadata,
-                        codec=codec,
-                        encoder_settings=smart_encoder_settings,
-                        lut_path=self.lut_path,
-                        sharpen_strength=self.sharpen_strength,
-                        output_fps=metadata.video_fps_exact,
-                        pts_origin=span.start_pts,
-                        smart_fragment=True,
-                    )
+            def fragment_encoder(span_index: int, span: SpliceSpan) -> VideoEncoder:
+                return VideoEncoder(
+                    str(raw_path(span_index)),
+                    device=self.device,
+                    metadata=metadata,
+                    codec=codec,
+                    encoder_settings=smart_encoder_settings,
+                    lut_path=self.lut_path,
+                    sharpen_strength=self.sharpen_strength,
+                    output_fps=metadata.video_fps_exact,
+                    pts_origin=span.start_pts,
+                    smart_fragment=True,
+                )
 
-                def fragment_writer(span_index: int, span: SpliceSpan) -> Callable[[], _OfflineFrameWriter]:
-                    return lambda: _OfflineFrameWriter(fragment_encoder(span_index, span), [time.monotonic()])
+            def fragment_writer(span_index: int, span: SpliceSpan) -> Callable[[], _OfflineFrameWriter]:
+                return lambda: _OfflineFrameWriter(fragment_encoder(span_index, span), [time.monotonic()])
 
-                if ltx_spans:
-                    self._run_ltx_spans(
-                        metadata,
-                        index,
-                        [
-                            (
-                                span,
-                                segments_of[span],
-                                fragment_writer(span_index, span),
-                            )
-                            for span_index, span in enumerate(plan.spans)
-                            if span in ltx_spans
-                        ],
-                        work_root,
-                        ltx_callback,
-                    )
-                for span_index, span in enumerate(plan.spans):
-                    if self._cancel_event.is_set():
-                        return
-                    raw = raw_path(span_index)
-                    normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
-                    duration = float((span.end_pts - span.start_pts) * index.time_base)
-                    if not span.is_render:
-                        create_copy_fragment(self.input_video, span, index, raw, codec=codec)
-                    elif span not in ltx_spans:
-                        self._run_pass(
-                            metadata=metadata,
-                            encoder_ctx=fragment_encoder(span_index, span),
-                            progress=progress,
-                            seek_ts=index.seconds_for_pts(span.start_pts),
-                            end_pts=span.end_pts,
-                            effect_ranges=span.effect_ranges,
-                            output_frame_count=max(1, round(duration * metadata.video_fps)),
+            if ltx_spans:
+                self._run_ltx_spans(
+                    metadata,
+                    index,
+                    [
+                        (
+                            span,
+                            segments_of[span],
+                            fragment_writer(span_index, span),
                         )
-                    normalize_fragment(raw, normalized, codec=codec)
-                    fragments.append((normalized, duration))
-
+                        for span_index, span in enumerate(plan.spans)
+                        if span in ltx_spans and span_index not in completed
+                    ],
+                    work_root,
+                    ltx_callback,
+                )
+            for span_index, span in enumerate(plan.spans):
                 if self._cancel_event.is_set():
-                    return
-                assembled = temp_dir / f"assembled{fragment_suffix}"
-                concatenate_fragments(
-                    fragments,
-                    manifest=temp_dir / "fragments.ffconcat",
-                    destination=assembled,
-                    codec=codec,
-                )
-                mux_final_output(
-                    assembled,
-                    self.input_video,
-                    self.output_video,
-                    codec=codec,
-                )
+                    break
+                normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
+                duration = float((span.end_pts - span.start_pts) * index.time_base)
+                if span_index in completed and normalized.is_file() and normalized.stat().st_size > 0:
+                    log.info(
+                        "Resume: span %d/%d is already rendered, reusing its fragment",
+                        span_index + 1, len(plan.spans),
+                    )
+                    fragments.append((normalized, duration))
+                    continue
+                raw = raw_path(span_index)
+                if not span.is_render:
+                    create_copy_fragment(self.input_video, span, index, raw, codec=codec)
+                elif span not in ltx_spans:
+                    self._run_pass(
+                        metadata=metadata,
+                        encoder_ctx=fragment_encoder(span_index, span),
+                        progress=progress,
+                        seek_ts=index.seconds_for_pts(span.start_pts),
+                        end_pts=span.end_pts,
+                        effect_ranges=span.effect_ranges,
+                        output_frame_count=max(1, round(duration * metadata.video_fps)),
+                    )
+                normalize_fragment(raw, normalized, codec=codec)
+                if resume_dir is not None:
+                    try:
+                        raw.unlink(missing_ok=True)
+                    except OSError:
+                        pass
+                fragments.append((normalized, duration))
+                if resume_dir is not None:
+                    # Saved after every fragment so even a hard crash keeps the
+                    # finished spans resumable.
+                    self._save_resume_state(resume_dir, resume_signature, fragments)
+
+            if self._cancel_event.is_set():
+                if resume_dir is not None:
+                    log.info(
+                        "Stopped by the user; progress is saved in %s and the next "
+                        "run of this job will resume from there",
+                        resume_dir,
+                    )
+                return
+            assembled = temp_dir / f"assembled{fragment_suffix}"
+            concatenate_fragments(
+                fragments,
+                manifest=temp_dir / "fragments.ffconcat",
+                destination=assembled,
+                codec=codec,
+            )
+            mux_final_output(
+                assembled,
+                self.input_video,
+                self.output_video,
+                codec=codec,
+            )
+            if resume_dir is not None:
+                clear_resume(resume_dir)
+                log.info("Job finished; the resume checkpoint was removed")
         finally:
+            if temp_ctx is not None:
+                temp_ctx.cleanup()
             progress.close(ensure_completed_bar=True)
+
+    def _save_resume_state(self, resume_dir: Path, resume_signature: str, fragments: list[tuple[Path, float]]) -> None:
+        from jasna.resume import save_state
+
+        save_state(resume_dir, {
+            "version": 1,
+            "signature": resume_signature,
+            "output": str(self.output_video),
+            "fragments": [
+                {"index": index, "file": Path(path).name, "duration": duration}
+                for index, (path, duration) in enumerate(fragments)
+            ],
+        })
 
     def run(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))
         self.validate_metadata(metadata)
         self.configure_vr(metadata)
-        if self.segments:
+        # An empty tuple is not "no segmentation": it means the segmentation ran and
+        # found nothing to render, so the video is copied without a detection pass.
+        if self.segments is not None:
             if self.fmp4:
                 log.warning(
                     "Fragmented MP4 is not available with segment processing; "

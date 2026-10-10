@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from conftest import requires_nvidia
 from jasna.gui.models import AppSettings
 from jasna.gui.video_session import (
     build_video_session,
@@ -71,16 +73,34 @@ def test_video_session_key_includes_active_secondary_knobs() -> None:
 
 def _build(settings: AppSettings):
     compile_result = MagicMock(use_basicvsrpp_tensorrt=True)
-    with (
-        patch("jasna._suppress_noise.install"),
-        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=compile_result) as compiled,
-        patch("jasna.engine_paths.model_weights_dir"),
-        patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda n: n),
-        patch("jasna.mosaic.detection_registry.require_detection_model_weights") as det_path,
-        patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer") as restorer_cls,
-        patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as pipeline_cls,
-        patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,
-    ):
+    unet_cls = None
+    with ExitStack() as stack:
+        stack.enter_context(patch("jasna._suppress_noise.install"))
+        compiled = stack.enter_context(
+            patch("jasna.engine_compiler.ensure_engines_compiled", return_value=compile_result)
+        )
+        stack.enter_context(patch("jasna.engine_paths.model_weights_dir"))
+        stack.enter_context(
+            patch("jasna.mosaic.detection_registry.coerce_detection_model_name", side_effect=lambda n: n)
+        )
+        det_path = stack.enter_context(
+            patch("jasna.mosaic.detection_registry.require_detection_model_weights")
+        )
+        restorer_cls = stack.enter_context(
+            patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer")
+        )
+        pipeline_cls = stack.enter_context(
+            patch("jasna.restorer.restoration_pipeline.RestorationPipeline")
+        )
+        # `unet4x_secondary_restorer` imports TensorRT, which the AMD build does not
+        # ship; only the unet-4x test needs the patch, and that one is NVIDIA-only.
+        # Mock resolves the target when the context manager is entered.
+        try:
+            unet_cls = stack.enter_context(
+                patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer")
+            )
+        except (AttributeError, ImportError, ModuleNotFoundError):
+            unet_cls = None
         det_path.return_value = "det.engine"
         session = build_video_session(settings, log=lambda _msg: None)
     return session, compiled, restorer_cls, pipeline_cls, unet_cls
@@ -95,6 +115,7 @@ def test_build_video_session_without_secondary() -> None:
     assert compiled.call_args.args[0].unet4x is False
 
 
+@requires_nvidia
 def test_build_video_session_selects_unet_secondary() -> None:
     settings = replace(AppSettings(), secondary_restoration="unet-4x")
     session, compiled, _restorer_cls, pipeline_cls, unet_cls = _build(settings)
@@ -103,6 +124,7 @@ def test_build_video_session_selects_unet_secondary() -> None:
     assert compiled.call_args.args[0].unet4x is True
 
 
+@requires_nvidia
 def test_video_session_close_closes_restorers() -> None:
     session, *_ = _build(replace(AppSettings(), secondary_restoration="unet-4x"))
 

@@ -5,6 +5,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from conftest import requires_nvidia
+
+# The benchmark harness lives behind `jasna.benchmark`, which imports TensorRT
+# (NVIDIA-only): the AMD build does not carry it.
+pytestmark = requires_nvidia
+
 
 def test_benchmark_mode_runs_benchmark_cli() -> None:
     with (

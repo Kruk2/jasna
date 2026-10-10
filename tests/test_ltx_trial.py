@@ -83,6 +83,10 @@ def test_trial_session_uses_placeholders_without_files_or_license():
 @pytest.mark.parametrize("fast", [False, True])
 def test_placeholder_block_runs_on_the_gpu(fast):
     device = torch.device("cuda")
+    if fast and not torch.version.cuda:
+        # The fast block is an NVFP4/FP8 one built on torch._scaled_mm, which is
+        # CUDA-only ("only supported on CUDA devices" on ROCm).
+        pytest.skip("the fast (NVFP4) block uses torch._scaled_mm, CUDA-only")
     if fast and torch.cuda.get_device_capability(device)[0] < 10:
         pytest.skip("NVFP4 needs Blackwell")
     with open_tensors(LtxModelFiles.placeholder("distilled", fast=fast).transformer) as handle:

@@ -443,6 +443,20 @@ def build_splice_plan(
     return SplicePlan(index=index, spans=tuple(spans), segments=normalized)
 
 
+def build_copy_only_plan(index: KeyframeIndex) -> SplicePlan:
+    """A plan that stream-copies the whole video.
+
+    Produced when an automatic scan finds no mosaics at all: there is nothing to
+    render, so the output is the input remuxed — the cheapest possible result.
+    """
+
+    return SplicePlan(
+        index=index,
+        spans=(SpliceSpan("copy", index.start_pts, index.end_pts),),
+        segments=(),
+    )
+
+
 def _run_ffmpeg(args: list[str], *, purpose: str) -> None:
     command = [resolve_executable("ffmpeg"), "-hide_banner", "-y", "-loglevel", "error", *args]
     completed = subprocess.run(

@@ -93,7 +93,10 @@ def test_centered_position_clamps_into_the_given_monitor_rect():
     assert scaling.centered_position((400, 300), (2400, -100, 200, 100), bounds) == (2560, 0)
 
 
-def test_screen_rect_falls_back_to_the_full_screen_off_windows():
+def test_screen_rect_falls_back_to_the_full_screen_off_windows(monkeypatch):
+    # On Windows `screen_rect` asks the OS for the monitor work area through the
+    # window's HWND; this test covers the other platforms' fallback.
+    monkeypatch.setattr(scaling.sys, "platform", "linux")
     window = SimpleNamespace(winfo_screenwidth=lambda: 1920, winfo_screenheight=lambda: 1080)
 
     assert scaling.screen_rect(window) == (0, 0, 1920, 1080)
@@ -117,6 +120,7 @@ def test_static_scaling_is_identity_when_design_minimum_fits() -> None:
 def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, monkeypatch) -> None:
     factor = scaling._static_scaling(dpi, (2560, 1440), (900, 580), scaling.SCREEN_MARGIN)
     monkeypatch.setattr(scaling, "window_scaling", lambda _window: factor)
+    monkeypatch.setattr(scaling, "screen_rect", lambda _window: (0, 0, 2560, 1440))
     requested: list[str] = []
     minimum: list[tuple[int, int]] = []
     window = SimpleNamespace(
@@ -135,12 +139,21 @@ def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, monkeypatch)
     assert minimum[-1][0] >= 899 and minimum[-1][1] >= 579
 
 
-def test_activate_static_dpi_is_a_no_op_off_windows() -> None:
+def test_activate_static_dpi_is_a_no_op_off_windows(monkeypatch) -> None:
+    monkeypatch.setattr(scaling.sys, "platform", "linux")
+    # Compare against a snapshot rather than against CTk's documented defaults:
+    # deactivate_automatic_dpi_awareness is a class attribute another test may
+    # have flipped while simulating Windows. "No-op" means "changes nothing".
+    tracked = (
+        "deactivate_automatic_dpi_awareness",
+        "widget_scaling",
+        "window_scaling",
+    )
+    before = tuple(getattr(ctk.ScalingTracker, name) for name in tracked)
+
     scaling.activate_static_dpi((900, 580))
 
-    assert not ctk.ScalingTracker.deactivate_automatic_dpi_awareness
-    assert ctk.ScalingTracker.widget_scaling == 1
-    assert ctk.ScalingTracker.window_scaling == 1
+    assert tuple(getattr(ctk.ScalingTracker, name) for name in tracked) == before
 
 
 def test_activate_static_dpi_windows_path(monkeypatch) -> None:
@@ -201,6 +214,7 @@ def test_main_window_fits_screen_at_hidpi(hidpi, monkeypatch) -> None:
 @pytest.mark.parametrize("factor", [1.0, 1.5])
 def test_main_window_fits_a_small_screen(screen, factor, monkeypatch) -> None:
     monkeypatch.setattr(scaling, "window_scaling", lambda _window: factor)
+    monkeypatch.setattr(scaling, "screen_rect", lambda _window: (0, 0, screen[0], screen[1]))
     requested: list[str] = []
     minimum: list[tuple[int, int]] = []
     window = SimpleNamespace(
@@ -228,6 +242,7 @@ def test_segment_editor_fits_screen_at_hidpi(factor, monkeypatch) -> None:
     from jasna.gui.segment_editor import SegmentEditor
 
     monkeypatch.setattr(segment_editor.scaling, "window_scaling", lambda _window: factor)
+    monkeypatch.setattr(segment_editor.scaling, "screen_rect", lambda _window: (0, 0, 2560, 1440))
     editor = SimpleNamespace(
         winfo_screenwidth=lambda: 2560,
         winfo_screenheight=lambda: 1440,
@@ -322,7 +337,10 @@ def test_slider_value_label_font_scales_at_hidpi(hidpi) -> None:
         label = create_slider_value_label(root, "90", 4, Colors.BG_PANEL)
 
         expected_size = round(Fonts.SIZE_NORMAL * hidpi)
-        assert label.cget("font") == f"{Fonts.FAMILY} -{expected_size}"
+        # Tk braces a family name that contains a space, so accept both spellings.
+        assert label.cget("font").replace("{", "").replace("}", "") == (
+            f"{Fonts.FAMILY} -{expected_size}"
+        )
     finally:
         root.destroy()
 

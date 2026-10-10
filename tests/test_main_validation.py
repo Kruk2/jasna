@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.media.encoder_settings import encoder_cq_spec
 from jasna.segments import SegmentRange
 
 
@@ -57,7 +59,10 @@ class TestMainValidation:
             pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2"])
 
         assert pipeline_cls.call_args.kwargs["config"].codec == "h264"
-        assert pipeline_cls.call_args.kwargs["config"].encoder_settings == {"cq": 25}
+        # The H.264 default CQ is vendor-specific (AMD 24, NVIDIA 25).
+        assert pipeline_cls.call_args.kwargs["config"].encoder_settings == {
+            "cq": encoder_cq_spec("h264", vendor_for_device()).default
+        }
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
         assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
 
@@ -123,6 +128,14 @@ class TestMainValidation:
         _run_main_with_args(tmp_path, ["--codec", "AV1"])
 
     def test_codec_specific_encoder_settings_validated(self, tmp_path):
+        if vendor_for_device() is AcceleratorVendor.AMD:
+            # AMF honours `profile` for AV1; the NVENC-only lookahead key is what
+            # the AMD allow-list rejects.
+            with pytest.raises(ValueError, match="for codec av1.*rc-lookahead"):
+                _run_main_with_args(
+                    tmp_path, ["--codec", "av1", "--encoder-settings", "rc-lookahead=32"]
+                )
+            return
         with pytest.raises(ValueError, match="for codec av1.*profile"):
             _run_main_with_args(tmp_path, ["--codec", "av1", "--encoder-settings", "profile=main"])
 

@@ -6,7 +6,20 @@ from jasna.media.resize_normalize import ResizeNormalizer
 from jasna.mosaic.rfdetr import _IMAGENET_MEAN, _IMAGENET_STD
 from jasna.mosaic.yolo import _YOLO_LETTERBOX_PAD_VALUE, _letterbox_geometry
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def _kernel_available() -> bool:
+    """The fused resize+normalise kernel is an NVIDIA fatbin.
+
+    `ResizeNormalizer.run` requires it and raises on the AMD/CPU path, which uses
+    the eager torch pipeline instead.
+    """
+    try:
+        normalizer = ResizeNormalizer(
+            device=_device(), dtype=torch.float16,
+            mean=_IMAGENET_MEAN, std=_IMAGENET_STD, fill=IDENTITY,
+        )
+        return normalizer.available
+    except Exception:  # noqa: BLE001
+        return False
 
 IDENTITY = (0.0, 0.0, 0.0)
 UNIT = (1.0, 1.0, 1.0)
@@ -46,6 +59,11 @@ def _yolo_reference(frames: torch.Tensor, imgsz: int, dtype: torch.dtype):
 
 
 SHAPES = [(4, 1080, 1920), (2, 2160, 3840), (1, 512, 512), (3, 300, 401)]
+
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available() or not _kernel_available(),
+    reason="needs the fused resize+normalise kernel (not built on this platform)",
+)
 
 
 @pytest.mark.parametrize("shape", SHAPES)

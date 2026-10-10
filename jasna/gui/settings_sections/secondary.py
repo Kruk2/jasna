@@ -6,8 +6,43 @@ from tkinter import filedialog
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import create_icon
 from jasna.gui.locales import t
-from jasna.gui.settings_sections.widgets import add_setting_label, create_slider_value_label, get_tooltip
+from jasna.gui.settings_sections.widgets import (
+    ValueOptionMenu,
+    add_setting_label,
+    create_slider_value_label,
+    get_tooltip,
+)
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.session_config import (
+    AMD_UPSCALE_ENGINE_MODELS,
+    AMD_UPSCALE_ENGINE_ORDER,
+    AMD_UPSCALE_MODEL_DEFAULT,
+    amd_upscale_engine_for,
+)
+
+# Row 1 shows the engine class; row 2 lists only that engine's checkpoints. The
+# engine names are brand names, so they are not translated.
+_AMD_ENGINE_LABELS = {"amf-sr": "AMF-SR", "real-esr": "Real-ESR", "realesrgan": "Real-ESRGAN"}
+# Labels are the real checkpoint file names, so the picker reads as a weight list.
+_AMD_MODEL_LABELS = {
+    "auto": "auto",
+    "x4v3": "realesr-general-x4v3",
+    "wdn-x4v3": "realesr-general-wdn-x4v3",
+    "lsdir-c3": "4xLSDIRCompactC3",
+    "lsdir-v2": "4xLSDIRCompactv2",
+    "hfa2k-2x": "2xHFA2kCompact (2x)",
+    "x4plus": "RealESRGAN_x4plus",
+    "anime-6b": "RealESRGAN_x4plus_anime_6B",
+    "bsrnet": "BSRNet (BSRGAN)",
+}
+
+
+def _amd_model_options(engine: str) -> dict[str, str]:
+    """Value->label map for the model row, restricted to ``engine``'s weights."""
+    models = AMD_UPSCALE_ENGINE_MODELS.get(engine, AMD_UPSCALE_ENGINE_MODELS["real-esr"])
+    if not models:
+        return {"auto": "—"}
+    return {model: _AMD_MODEL_LABELS.get(model, model) for model in models}
 
 
 class SecondarySection:
@@ -67,8 +102,17 @@ class SecondarySection:
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
             command=self._on_secondary_changed
         )
-        rtx_rb.pack(side="left")
+        rtx_rb.pack(side="left", padx=(0, 16))
         Tooltip(rtx_rb, get_tooltip("secondary_rtx"))
+
+        amd_rb = ctk.CTkRadioButton(
+            engines_frame, text=f"{t('secondary_amd_upscale')} ({t('secondary_amd_hint')})",
+            variable=self._widgets["secondary_var"], value="amd-upscale",
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
+            command=self._on_secondary_changed
+        )
+        amd_rb.pack(side="left")
+        Tooltip(amd_rb, get_tooltip("secondary_amd"))
 
         # TVAI options (hidden by default)
         self._tvai_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
@@ -238,6 +282,132 @@ class SecondarySection:
         self._widgets["rtx_deblur"].pack(side="right")
         self._widgets["rtx_deblur"].set("None")
 
+        # AMD upscale options (hidden by default)
+        self._amd_frame = ctk.CTkFrame(inner, fg_color=Colors.BG_CARD, corner_radius=6)
+
+        amd_inner = ctk.CTkFrame(self._amd_frame, fg_color="transparent")
+        amd_inner.pack(fill="x", padx=12, pady=12)
+
+        # AMD engine
+        amd_engine_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_engine_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_engine_row, text=t("amd_engine"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_engine_tip = ctk.CTkLabel(amd_engine_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_engine_tip.pack(side="left", padx=4)
+        Tooltip(amd_engine_tip, get_tooltip("amd_engine"))
+        # AMD engine (row 1 = the class). Switching it re-populates row 2 with only
+        # that engine's weights, so Real-ESR (SRVGGNetCompact) and Real-ESRGAN
+        # (RRDBNet) never share one list.
+        self._widgets["amd_upscale_engine"] = ValueOptionMenu(
+            amd_engine_row,
+            options={engine: _AMD_ENGINE_LABELS[engine] for engine in AMD_UPSCALE_ENGINE_ORDER},
+            command=self._on_amd_engine_changed,
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=140
+        )
+        self._widgets["amd_upscale_engine"].pack(side="right")
+        self._widgets["amd_upscale_engine"].set_value("real-esr")
+
+        # AMD model (row 2 = the concrete checkpoint of the row-1 engine).
+        # Row 1 is the class; a Real-ESR engine lists only SRVGGNetCompact weights,
+        # a Real-ESRGAN engine only RRDBNet weights. amf-sr has no model of its own.
+        amd_model_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_model_row.pack(fill="x", pady=(0, 8))
+        add_setting_label(amd_model_row, "model", "amd_model")
+        self._widgets["amd_upscale_model"] = ValueOptionMenu(
+            amd_model_row,
+            options=_amd_model_options("real-esr"),
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=200
+        )
+        self._widgets["amd_upscale_model"].pack(side="right")
+        self._widgets["amd_upscale_model"].set_value("x4v3")
+
+        # AMD scale
+        amd_scale_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_scale_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_scale_row, text=t("scale"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        self._widgets["amd_upscale_scale"] = ctk.CTkOptionMenu(
+            amd_scale_row, values=["2x", "4x", "6x", "8x"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_scale"].pack(side="right")
+        self._widgets["amd_upscale_scale"].set("4x")
+
+        # AMD algorithm
+        amd_algorithm_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_algorithm_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_algorithm_row, text=t("amd_algorithm"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_algorithm_tip = ctk.CTkLabel(amd_algorithm_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_algorithm_tip.pack(side="left", padx=4)
+        Tooltip(amd_algorithm_tip, get_tooltip("amd_algorithm"))
+        self._widgets["amd_upscale_algorithm"] = ctk.CTkOptionMenu(
+            amd_algorithm_row, values=["sr1-0", "sr1-1", "bicubic", "bilinear", "point"],
+            fg_color=Colors.BG_PANEL, button_color=Colors.BG_PANEL,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_PANEL,
+            text_color=Colors.TEXT_PRIMARY, width=110
+        )
+        self._widgets["amd_upscale_algorithm"].pack(side="right")
+        self._widgets["amd_upscale_algorithm"].set("sr1-0")
+
+        # AMD sharpness
+        amd_sharpness_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_sharpness_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_sharpness_row, text=t("amd_sharpness"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_sharpness_tip = ctk.CTkLabel(amd_sharpness_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_sharpness_tip.pack(side="left", padx=4)
+        Tooltip(amd_sharpness_tip, get_tooltip("amd_sharpness"))
+        self._widgets["amd_upscale_sharpness"] = ctk.CTkEntry(
+            amd_sharpness_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_sharpness"].pack(side="right")
+        self._widgets["amd_upscale_sharpness"].insert(0, "-1")
+
+        # AMD timeout
+        amd_timeout_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_timeout_row.pack(fill="x", pady=(0, 8))
+        ctk.CTkLabel(amd_timeout_row, text=t("amd_timeout"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
+        amd_timeout_tip = ctk.CTkLabel(amd_timeout_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
+        amd_timeout_tip.pack(side="left", padx=4)
+        Tooltip(amd_timeout_tip, get_tooltip("amd_timeout"))
+        self._widgets["amd_upscale_timeout"] = ctk.CTkEntry(
+            amd_timeout_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, width=80
+        )
+        self._widgets["amd_upscale_timeout"].pack(side="right")
+        self._widgets["amd_upscale_timeout"].insert(0, "120")
+
+        # AMD ffmpeg path
+        amd_path_row = ctk.CTkFrame(amd_inner, fg_color="transparent")
+        amd_path_row.pack(fill="x", pady=(0, 4))
+        add_setting_label(amd_path_row, "ffmpeg_path")
+        self._widgets["amd_upscale_ffmpeg_path"] = ctk.CTkEntry(
+            amd_path_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY
+        )
+        self._widgets["amd_upscale_ffmpeg_path"].pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        amd_browse_btn = ctk.CTkButton(
+            amd_path_row, text="", image=create_icon("folder", 16, Colors.TEXT_PRIMARY), width=32, height=28,
+            fg_color=Colors.BG_PANEL, hover_color=Colors.BORDER_LIGHT, text_color=Colors.TEXT_PRIMARY,
+            command=self._browse_amd_ffmpeg
+        )
+        amd_browse_btn.pack(side="right")
+
+    def _browse_amd_ffmpeg(self):
+        filepath = filedialog.askopenfilename(
+            title=t("dialog_select_tvai_ffmpeg"),
+            filetypes=[("Executable", "*.exe"), ("All files", "*.*")],
+        )
+        if filepath:
+            self._widgets["amd_upscale_ffmpeg_path"].delete(0, "end")
+            self._widgets["amd_upscale_ffmpeg_path"].insert(0, filepath)
+
     def _browse_tvai_ffmpeg(self):
         filepath = filedialog.askopenfilename(
             title=t("dialog_select_tvai_ffmpeg"),
@@ -252,11 +422,26 @@ class SecondarySection:
         secondary = self._widgets["secondary_var"].get()
         self._tvai_frame.pack_forget()
         self._rtx_frame.pack_forget()
+        self._amd_frame.pack_forget()
 
         if secondary == "tvai":
             self._tvai_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
         elif secondary == "rtx-super-res":
             self._rtx_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+        elif secondary == "amd-upscale":
+            self._amd_frame.pack(fill="x", pady=(Sizing.PADDING_SMALL, 0))
+
+    def _on_amd_engine_changed(self, engine: str) -> None:
+        """Engine picked by hand: reset row 2 to that engine's default weight."""
+        self._set_amd_models(engine, AMD_UPSCALE_MODEL_DEFAULT.get(engine))
+
+    def _set_amd_models(self, engine: str, value: str | None) -> None:
+        """Re-populate row 2 with ``engine``'s weights and select ``value``."""
+        menu = self._widgets["amd_upscale_model"]
+        menu.set_options(_amd_model_options(engine))
+        menu.configure(state="disabled" if engine == "amf-sr" else "normal")
+        if value:
+            menu.set_value(value)
 
     def set_model(self, model: str) -> None:
         if model == "ltx":
@@ -280,6 +465,18 @@ class SecondarySection:
         self._widgets["rtx_denoise"].set(preset.rtx_denoise.capitalize())
         self._widgets["rtx_deblur"].set(preset.rtx_deblur.capitalize())
 
+        amd_engine = amd_upscale_engine_for(preset.amd_upscale_engine, preset.amd_upscale_model)
+        self._widgets["amd_upscale_engine"].set_value(amd_engine)
+        self._set_amd_models(amd_engine, preset.amd_upscale_model)
+        self._widgets["amd_upscale_scale"].set(f"{preset.amd_upscale_scale}x")
+        self._widgets["amd_upscale_algorithm"].set(preset.amd_upscale_algorithm)
+        self._widgets["amd_upscale_sharpness"].delete(0, "end")
+        self._widgets["amd_upscale_sharpness"].insert(0, str(preset.amd_upscale_sharpness))
+        self._widgets["amd_upscale_timeout"].delete(0, "end")
+        self._widgets["amd_upscale_timeout"].insert(0, str(preset.amd_upscale_timeout_s))
+        self._widgets["amd_upscale_ffmpeg_path"].delete(0, "end")
+        self._widgets["amd_upscale_ffmpeg_path"].insert(0, preset.amd_upscale_ffmpeg_path)
+
         self._on_secondary_changed()
 
     def collect(self) -> dict:
@@ -294,4 +491,11 @@ class SecondarySection:
             "rtx_quality": self._widgets["rtx_quality"].get().lower(),
             "rtx_denoise": self._widgets["rtx_denoise"].get().lower(),
             "rtx_deblur": self._widgets["rtx_deblur"].get().lower(),
+            "amd_upscale_engine": self._widgets["amd_upscale_engine"].get_value(),
+            "amd_upscale_model": self._widgets["amd_upscale_model"].get_value(),
+            "amd_upscale_scale": int(self._widgets["amd_upscale_scale"].get().replace("x", "")),
+            "amd_upscale_algorithm": self._widgets["amd_upscale_algorithm"].get(),
+            "amd_upscale_sharpness": float(self._widgets["amd_upscale_sharpness"].get() or -1),
+            "amd_upscale_ffmpeg_path": self._widgets["amd_upscale_ffmpeg_path"].get(),
+            "amd_upscale_timeout_s": float(self._widgets["amd_upscale_timeout"].get() or 120),
         }

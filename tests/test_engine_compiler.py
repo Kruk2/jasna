@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from conftest import requires_nvidia
 from jasna.engine_compiler import (
     EngineCompilationRequest,
     _detection_engine_exists,
@@ -15,6 +16,12 @@ from jasna.engine_compiler import (
     _unet4x_engine_exists,
     ensure_engines_compiled,
 )
+
+# Engine compilation builds the TensorRT sub-engines (BasicVSR++, unet-4x,
+# detection) that only the NVIDIA build links. On the AMD build nothing is
+# compiled - the restorer runs the PyTorch model and the detector runs MIGraphX -
+# so this whole flow is NVIDIA-only, like the files conftest already ignores.
+pytestmark = requires_nvidia
 
 
 def _mock_proc(lines: list[str], returncode: int = 0) -> MagicMock:

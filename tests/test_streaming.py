@@ -417,12 +417,18 @@ class TestStreamingEncoder:
         assert not enc._started
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
-    def test_ffmpeg_cmd_contains_nvenc(self, mock_popen, tmp_path):
+    def test_ffmpeg_cmd_contains_the_backend_encoder(self, mock_popen, tmp_path):
+        """The HLS segment encoder follows the active GPU backend (AMF on AMD)."""
+        from jasna.accelerator import AcceleratorVendor, vendor_for_device
+
         mock_popen.return_value = _mock_ffmpeg_process()
         enc = self._make_encoder(tmp_path)
         enc.start(start_number=0)
         cmd = mock_popen.call_args[0][0]
-        assert 'h264_nvenc' in cmd
+        expected = (
+            'h264_amf' if vendor_for_device() is AcceleratorVendor.AMD else 'h264_nvenc'
+        )
+        assert expected in cmd
         enc.stop()
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
@@ -1105,12 +1111,14 @@ class TestHttpSegments:
         thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00008.ts?epoch=0")))
         try:
             thread.start()
-            assert server.seek_requested.wait(timeout=2)
+            # Generous windows: these assert ordering, not latency, and a busy
+            # machine can take well over two seconds to schedule the HTTP thread.
+            assert server.seek_requested.wait(timeout=10)
             assert server.seek_target_segment == 8
             server.reset_demand(8)
             (server.segments_dir / "seg_00008.ts").write_bytes(b"complete")
             (server.segments_dir / "_hls_internal.m3u8").write_text("#EXTINF:4.000,\nseg_00008.ts\n")
-            thread.join(timeout=2)
+            thread.join(timeout=10)
             assert result[0][0:2] == (200, "complete")
         finally:
             server.stop()
@@ -1125,12 +1133,12 @@ class TestHttpSegments:
         thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00011.ts?epoch=0")[0]))
         try:
             thread.start()
-            deadline = time.monotonic() + 2
+            deadline = time.monotonic() + 10   # ordering check, not a latency check
             while server._highest_requested_segment < 11 and time.monotonic() < deadline:
                 time.sleep(0.01)
             assert server._highest_requested_segment == 11
             server.reset_demand(100)
-            thread.join(timeout=2)
+            thread.join(timeout=10)
             assert result == [404]
         finally:
             server.stop()

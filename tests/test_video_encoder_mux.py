@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 import torch
 
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media.probe import get_video_meta_data
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.splice import probe_keyframes
@@ -42,7 +43,9 @@ def _av1_probe(tmp_path_factory) -> str | None:
     tmp = tmp_path_factory.mktemp("av1probe")
     src = _make_source(tmp, "probe_src.mp4", acodec=None)
     metadata = get_video_meta_data(str(src))
-    frame = torch.zeros((3, 256, 256), dtype=torch.uint8, device=DEVICE)
+    frame = torch.zeros(
+        (3, metadata.video_height, metadata.video_width), dtype=torch.uint8, device=DEVICE
+    )
     try:
         with VideoEncoder(
             str(tmp / "probe.mp4"), device=DEVICE, metadata=metadata, codec="av1", encoder_settings={}
@@ -80,11 +83,15 @@ def _make_source(
     *,
     rate: str = "12",
     duration: float = 2,
+    size: str = "320x240",
 ) -> Path:
     out = tmp_path / name
     cmd = [
         resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", f"testsrc2=size=256x256:rate={rate}:duration={duration}",
+        # 320x240 is the smallest frame AMF's H.264 encoder accepts: 256x256 is
+        # refused outright ("Internal bug") whatever the rate control is, which
+        # would mask every h264 case behind an encoder-open failure.
+        "-f", "lavfi", "-i", f"testsrc2=size={size}:rate={rate}:duration={duration}",
     ]
     if acodec:
         cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}", "-c:a", acodec]
@@ -115,7 +122,7 @@ def _make_count_only_stereo_pcm_source(tmp_path: Path) -> Path:
             "-f",
             "lavfi",
             "-i",
-            f"testsrc2=size=256x256:rate=12:duration={duration}",
+            f"testsrc2=size=320x240:rate=12:duration={duration}",
             "-guess_layout_max",
             "0",
             "-i",
@@ -249,7 +256,15 @@ def test_unaligned_pitch_encodes_in_isolated_process(
 
     with av.open(str(dst)) as container:
         video = container.streams.video[0]
-        assert video.width == width
+        # AMF's AV1 encoder pads the width up to a multiple of 64 (852/854/860
+        # -> 896); HEVC/H.264 keep the unaligned width. The point of the test is
+        # that an unaligned pitch encodes at all, in its own process.
+        expected_width = (
+            -(-width // 64) * 64
+            if vendor_for_device() is AcceleratorVendor.AMD and codec == "av1"
+            else width
+        )
+        assert video.width == expected_width
         assert video.height == 480
         frames = list(container.decode(video))
         assert len(frames) == 12
@@ -299,6 +314,10 @@ def test_smart_fragment_keeps_periodic_random_access_points(tmp_path):
     keyframes = probe_keyframes(dst, output_metadata)
 
     assert len(keyframes.pts) >= 3
+    if vendor_for_device() is AcceleratorVendor.AMD:
+        # AMF's HEVC encoder emits no B-frames, so pts == dts for every packet;
+        # random access points (asserted above) are the property under test.
+        return
     with av.open(str(dst)) as container:
         stream = container.streams.video[0]
         assert any(
@@ -540,7 +559,8 @@ def test_container_structure_preserved(
         assert len(container.streams.attachments) == expected_attachments
         if expected_attachments:
             output_attachment = container.streams.attachments[0]
-            assert output_attachment.name == "rich-font.txt"
+            # ffmpeg stores the path it was given; only the file name matters.
+            assert Path(output_attachment.name).name == "rich-font.txt"
             assert output_attachment.mimetype == "text/plain"
             assert output_attachment.data == b"font payload"
 
@@ -689,7 +709,11 @@ def _encode_synthetic_vfr(tmp_path: Path, codec: str, suffix: str) -> tuple[Path
         pts_list.append(pts)
         pts += step
     with VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as enc:
-        assert enc._cuda_ctx.cuda_stream == enc.stream.cuda_stream
+        if vendor_for_device() is AcceleratorVendor.NVIDIA:
+            assert enc._cuda_ctx.cuda_stream == enc.stream.cuda_stream
+        else:
+            # AMF consumes host planes, so no CUDA context is created at all.
+            assert enc._cuda_ctx is None
         for i, p in enumerate(pts_list):
             enc.encode(_gradient_frame(i, h, w), p)
     return dst, pts_list, metadata.time_base
@@ -724,10 +748,11 @@ def test_codec_smoke_matrix(tmp_path, codec, suffix, require_codec):
         for a, b in zip(out_seconds, in_seconds):
             assert a == pytest.approx(b, abs=tolerance)
 
-    # bf=4/b_ref_mode=middle defaults must yield B-frames: reordering shows up
-    # as pts != dts on at least one packet. AV1 hides reordering behind
-    # show_existing_frame, so its packets stay in presentation order.
-    if codec != "av1":
+    # NVENC's bf=4/b_ref_mode=middle defaults must yield B-frames: reordering
+    # shows up as pts != dts on at least one packet. AV1 hides reordering behind
+    # show_existing_frame, so its packets stay in presentation order, and AMF's
+    # encoders emit no B-frames at all (pts == dts everywhere).
+    if codec != "av1" and vendor_for_device() is AcceleratorVendor.NVIDIA:
         with av.open(str(dst)) as c:
             v = c.streams.video[0]
             assert any(

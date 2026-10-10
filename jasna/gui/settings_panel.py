@@ -379,10 +379,7 @@ class SettingsPanel(ctk.CTkFrame):
         values: dict = {}
         for section in self._sections:
             values.update(section.collect())
-        return AppSettings(
-            batch_size=4,  # Fixed default value
-            **values,
-        )
+        return AppSettings(**values)
 
     def set_enabled(self, enabled: bool):
         """Enable or disable the settings; the queue-wide post-export action stays editable while processing."""

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jasna.gui.models import AppSettings
+from jasna.accelerator import preferred_device
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def run_engine_preflight(settings: AppSettings) -> EnginePreflightResult:
     )
 
     reqs: list[EngineRequirement] = []
-    device = torch.device("cuda:0")
+    device = preferred_device()
     amd = is_amd_device(device)
 
     det_name = coerce_detection_model_name(str(settings.detection_model))

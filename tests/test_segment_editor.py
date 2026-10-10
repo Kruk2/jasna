@@ -333,6 +333,7 @@ def test_dragging_zoomed_preview_pans_the_source() -> None:
 
 def test_editor_height_grows_on_tall_screens(monkeypatch) -> None:
     monkeypatch.setattr(segment_editor.scaling, "window_scaling", lambda _window: 1.0)
+    monkeypatch.setattr(segment_editor.scaling, "screen_rect", lambda _window: (0, 0, 2560, 1440))
     editor = object.__new__(SegmentEditor)
     editor.winfo_screenwidth = MagicMock(return_value=2560)
     editor.winfo_screenheight = MagicMock(return_value=1440)

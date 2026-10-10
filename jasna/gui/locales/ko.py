@@ -288,6 +288,7 @@ KO = {
         "conflict_tooltip": "출력 파일이 이미 존재합니다",
 
         # Advanced Processing
+        "batch_size": "배치 크기",
         "temporal_overlap": "시간 오버랩",
         "max_detection_gap": "최대 감지 공백",
         "min_detection_duration": "최소 감지 지속 프레임",
@@ -352,6 +353,12 @@ KO = {
         "rtx_quality": "품질",
         "rtx_denoise": "노이즈 제거",
         "rtx_deblur": "블러 제거",
+        "secondary_amd_upscale": 'AMD 업스케일',
+        "secondary_amd_hint": '무료, 빠름',
+        "amd_engine": '엔진',
+        "amd_algorithm": '알고리즘',
+        "amd_sharpness": '선명도',
+        "amd_timeout": '시간 초과(초)',
         "ffmpeg_path": "FFmpeg 경로",
         "model": "모델",
         "scale": "스케일",
@@ -424,6 +431,7 @@ KO = {
 
         # Tooltips
         "tip_max_clip_size": "한 번에 처리할 프레임 수입니다. 클수록 품질이 좋아질 수 있지만 VRAM을 더 많이 사용합니다.\n\n권장: 60 이상. 모델 컴파일을 끄더라도 최소 60을 유지하세요.\n참고: 60 (안전), 90 (균형), 180 (최고 품질, Compile BasicVSR++ 활성화 시 12GB+ VRAM 필요, 비활성화 시 더 적음).\n4K 영상은 VRAM을 더 많이 사용합니다. 클립 크기를 낮춰도 비슷한 품질로 훨씬 빠르게 처리할 수 있습니다.\n기본값: 90",
+        "tip_batch_size": "GPU 1회당 처리 프레임 수(검출/파이프라인 배치).\n4: 기본값, 8 GB 카드에서도 안전.\n8: 대용량 GPU에서 처리량 약 5~8% 향상, VRAM 약 300 MiB 추가 사용(RX 7900 XT 실측: 59 → 63 fps).\n배치가 고정된 검출 모델(구형 rfdetr-v5)은 항상 4.\n\n기본값: 4",
         "tip_temporal_overlap": "처리 클립 간 겹치는 프레임 수로, 경계의 깜빡임을 줄여줍니다.\n높을수록 부드럽지만 약간 느려집니다. 20을 넘으면 효과 차이가 거의 없습니다.\n\n클립 크기별 권장값:\n- 클립 60 → 오버랩 6-8\n- 클립 90 → 오버랩 8-12\n- 클립 180 → 오버랩 15-20\n기본값: 8",
         "tip_enable_crossfade": "클립 경계를 부드럽게 연결하여 깜빡임을 줄여줍니다. 이미 처리된 프레임을 재활용하므로 추가 GPU 부담이 전혀 없습니다.\n\n권장: 항상 켜기.\n기본값: 켜기",
         "tip_max_detection_gap": "짧은 감지 끊김을 이어줍니다. 추적 중인 모자이크가 최대 N 프레임 동안 사라졌다가 같은 위치에 다시 나타나면, 공백을 채우고 클립을 계속 이어갑니다.\n실제로 빠르게 나타났다 사라지는 장면이 잘못 채워지지 않도록 작은 값을 유지하세요.\n0이면 비활성화.\n기본값: 2",
@@ -460,6 +468,11 @@ KO = {
         "tip_rtx_quality": "업스케일 품질. 높을수록 결과가 좋지만 느려집니다.\n\n기본값: High",
         "tip_rtx_denoise": "RTX 하드웨어로 노이즈를 제거합니다. None으로 건너뛰기.\n\n기본값: Medium",
         "tip_rtx_deblur": "RTX 하드웨어로 흐린 부분을 선명하게 합니다. None으로 건너뛰기.\n\n기본값: None",
+        "tip_secondary_amd": 'AMD GPU 초해상도 — RTX Super Res의 AMD 대응 기능입니다. 무료이며 추가 설치가 필요 없습니다.\n\namf-sr은 AMD 자체 Video SR(AMD Software 동영상 업스케일링과 같은 모델 계열)을 사용하고, Real-ESR과 Real-ESRGAN은 각자의 네트워크를 ROCm 장치에서 실행합니다. 품질은 RTX Super Res와 비슷합니다.',
+        "tip_amd_engine": '1행: 사용할 AMD 업스케일러 계열.\n\nAMF-SR: AMF 필터 sr_amf를 통한 AMD Video SR 1.0/1.1 (Windows는 D3D11).\nReal-ESR: ROCm/HIP 장치에서 프로세스 내로 실행하는 SRVGGNetCompact 네트워크.\nReal-ESRGAN: ROCm/HIP 장치에서 프로세스 내로 실행하는 RRDBNet 네트워크.\n\n2행에는 여기서 고른 계열의 가중치만 표시됩니다.\n\n기본값: Real-ESR',
+        "tip_amd_algorithm": '엔진이 amf-sr일 때의 sr_amf 알고리즘.\n\nsr1-0 / sr1-1: AMD Video SR(머신러닝), 디테일 최고.\nbicubic / bilinear / point: 비 ML 대체, 가장 빠르고 예측 가능.\n\n기본값: sr1-0',
+        "tip_amd_sharpness": '업스케일 후 AMF가 적용하는 추가 샤프닝.\n-1은 드라이버 기본값, 0은 끔, 최대 2.\n\n기본값: -1',
+        "tip_amd_timeout": 'AMD FFmpeg 프로세스를 기다리는 시간(초). 초과하면 해당 클립을 오류로 중단합니다.\n\n기본값: 120',
         "tip_detection_model": "복원이 필요한 영역을 찾는 기본 AI 모델.\nrfdetr-v6: 최신, 빠름 — 권장 (기본값, 포함됨).\nrfdetr-v6-large: 더 높은 품질, 느림 — 선택적 별도 다운로드.\nrfdetr-vr-v1: VR180 모델(포함됨) — VR에 권장.\nLada YOLO 모델은 2D 애니메이션에 더 적합할 수 있습니다.\nzelefans-vr-yolo-v2: 대체 VR180 모델 — 선택적 별도 다운로드.\n\n구간 편집기에서 비디오마다 따로 재정의하고 기억할 수 있습니다.\n\n기본값: rfdetr-v6",
         "tip_detection_score_threshold": "AI가 복원 대상으로 표시하기 위해 필요한 기본 확신도.\n낮은 값 = 더 많은 영역 감지 (오탐 가능성 있음).\n높은 값 = 더 적은 영역 감지 (놓칠 가능성 있음).\n\n구간 편집기에서 비디오마다 따로 재정의하고 기억할 수 있습니다.\n\n기본값: 각 모델의 권장값 (rfdetr-v6: 0.35, rfdetr-v6-large: 0.40)",
         "tip_codec": "출력 동영상 형식.\nH.264 (AVC): 어디서나 재생 가능, 파일이 큼.\nHEVC (H.265): 작은 파일 크기로 우수한 화질.\nAV1: 최고 압축률, 최신 플레이어 필요. 인코딩에는 최신 세대 NVIDIA GPU가 필요합니다.",

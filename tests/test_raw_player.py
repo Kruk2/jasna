@@ -448,8 +448,13 @@ def test_source_has_audio_uses_ffprobe_process(
     monkeypatch.setattr(raw_player, "resolve_executable", lambda name: "/tools/ffprobe")
     monkeypatch.setattr(raw_player.subprocess, "run", run)
 
+    def _comparable(kwargs: dict) -> dict:
+        # `subprocess_no_window_kwargs` hands back a fresh STARTUPINFO each call
+        # and STARTUPINFO has no __eq__, so it is compared field-wise instead.
+        return {k: v for k, v in kwargs.items() if k != "startupinfo"}
+
     assert raw_player.source_has_audio("video.mp4") is expected
-    assert calls == [
+    assert [(cmd, _comparable(kw)) for cmd, kw in calls] == [
         (
             [
                 "/tools/ffprobe",
@@ -463,11 +468,13 @@ def test_source_has_audio_uses_ffprobe_process(
                 "csv=p=0",
                 "video.mp4",
             ],
-            {
+            _comparable({
                 "stdout": raw_player.subprocess.PIPE,
                 "stderr": raw_player.subprocess.PIPE,
                 "text": True,
-            },
+                # Console-suppression flags (CREATE_NO_WINDOW on Windows).
+                **raw_player.subprocess_no_window_kwargs(),
+            }),
         )
     ]
 

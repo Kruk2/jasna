@@ -3,7 +3,22 @@ import torch
 
 from jasna.media.rgb_to_yuv import RgbToYuvConverter
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+def _kernel_available() -> bool:
+    """The RGB→YUV conversion kernel is an NVIDIA fatbin (`is_nvidia_device` gate).
+
+    Windows ROCm keeps the eager torch path (the HIP colour kernels of the AMD
+    work are opt-in on Linux), so `uses_kernel` is False here.
+    """
+    try:
+        return RgbToYuvConverter("nv12_bt709_limited", device=torch.device("cuda:0")).uses_kernel
+    except Exception:  # noqa: BLE001
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available() or not _kernel_available(),
+    reason="needs the GPU RGB->YUV kernel (not built on this platform)",
+)
 
 VARIANTS = [
     f"{pixel_format}_{standard}_{value_range}"

@@ -110,6 +110,7 @@ class Processor:
         # same type; the other session is unloaded when the type switches.
         self._img_session: tuple | None = None      # (detector, restorer, device)
         self._video_session: RestorationSession | None = None
+        self._video_session_key: tuple | None = None
         self._current_pipeline = None
         
     def start(
@@ -172,7 +173,10 @@ class Processor:
                     break  # stopped mid-job; it stays queued for the next run
         finally:
             self._close_image_session()
-            self._close_video_session()
+            # The video session deliberately stays warm between batch runs: on AMD
+            # it costs ~20 s to rebuild (MIOpen warm-up + HIP graph capture +
+            # detector session) and users typically process several videos in a
+            # row. It is rebuilt when the settings change and released on exit.
 
         queue_finished = not self._stop_event.is_set()
         if queue_finished:
@@ -324,13 +328,24 @@ class Processor:
 
     def _ensure_video_session(self, settings: AppSettings):
         """Compile engines + build the BasicVSR++ (and optional secondary) restorer
-        once; reused across consecutive video jobs."""
-        if self._video_session is not None:
+        once; reused across consecutive video jobs and across batch runs.
+
+        Building the session costs ~20 s on AMD (MIOpen kernel warm-up, HIP graph
+        capture, detector session), so it survives the end of a batch run - it is
+        only rebuilt when the settings that define it change, and released on exit.
+        """
+        from jasna.gui.video_session import video_session_key
+
+        key = video_session_key(settings)
+        if self._video_session is not None and self._video_session_key == key:
             return
+        if self._video_session is not None:
+            self._close_video_session()
         self._video_session = build_video_session(
             settings,
             log=lambda msg: self._log("INFO", msg),
         )
+        self._video_session_key = key
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
 
     def _run_video_job(
@@ -437,9 +452,19 @@ class Processor:
             return
         s = self._video_session
         self._video_session = None
+        self._video_session_key = None
         s.close()
         release_session_memory(s.device)
         self._log("INFO", "Restoration models unloaded")
+
+    def release_sessions(self):
+        """Free both cached sessions (window close, or an explicit user request)."""
+        self._close_image_session()
+        self._close_video_session()
+        from jasna.session_factory import release_shared_models
+
+        release_shared_models()
+        self._log("INFO", "Shared models released")
 
     def _ensure_image_session(self):
         """Load the rf-detr detector + SD 1.5 restorer once; reused across image jobs."""

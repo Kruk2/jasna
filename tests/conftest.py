@@ -2,14 +2,30 @@
 from importlib.util import find_spec
 
 import pytest
+import torch
 
 _HAS_TENSORRT = find_spec("tensorrt") is not None
+
+#: The AMD/ROCm build ships without the NVIDIA-only pieces (TensorRT sub-engines,
+#: nvidia-smi driver checks, the CUDA fused preprocess kernel, the unet-4x /
+#: RTX Super Resolution / TVAI secondary restorers) and takes different branches
+#: in vendor-aware code (RF-DETR weights are `.pt` instead of `.onnx`, the driver
+#: string is a ROCm version). Tests for those paths are NVIDIA-only by nature.
+IS_AMD_BUILD = getattr(torch.version, "hip", None) is not None
+
+requires_nvidia = pytest.mark.skipif(
+    IS_AMD_BUILD,
+    reason="NVIDIA-only path: this build has no TensorRT / nvidia-smi / CUDA kernels",
+)
 
 if _HAS_TENSORRT and find_spec("tensorrt_libs") is not None:
     import tensorrt_libs
 
 collect_ignore = [] if _HAS_TENSORRT else [
     "test_basicvsrpp_sub_engines.py",
+    # Imports jasna.restorer.basicvsrpp_sub_engines at module scope, so without
+    # this the import error aborts collection of the WHOLE suite on the AMD build.
+    "test_basicvsrpp_engine_compilation.py",
     "test_rtx_superres_restorer.py",
     "test_torch_tensorrt_export.py",
     "test_trt_runner.py",

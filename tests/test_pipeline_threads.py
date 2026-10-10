@@ -75,7 +75,9 @@ def _mock_reader(batches, seek_ts_check=None):
     r = MagicMock()
     r.__enter__ = MagicMock(return_value=r)
     r.__exit__ = MagicMock(return_value=False)
-    def _frames(seek_ts=None):
+    def _frames(seek_ts=None, **kwargs):
+        # The reader also takes lazy_yuv / yuv_format (AMD single-decode path);
+        # these doubles only care about seek_ts.
         if seek_ts_check is not None:
             seek_ts_check(seek_ts)
         return iter(batches)
@@ -273,7 +275,7 @@ class TestDecodeDetectLoop:
         frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
 
         call_count = 0
-        def _batches(seek_ts=None):
+        def _batches(seek_ts=None, **kwargs):
             nonlocal call_count
             for _ in range(5):
                 call_count += 1
@@ -296,6 +298,10 @@ class TestDecodeDetectLoop:
             patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
             patch("jasna.pipeline_threads.process_frame_batch", return_value=BatchProcessResult(next_frame_idx=2, clips_emitted=0)),
         ):
+            # Another thread already recorded a failure, so the loop stops as soon
+            # as it notices it. The loop runs in a thread, so it must not re-raise
+            # (that only reaches threading.excepthook) - the error stays in the
+            # holder for the parent to propagate.
             decode_detect_loop(**_decode_defaults() | dict(
                 input_video="fake.mkv",
                 batch_size=2,
@@ -315,8 +321,9 @@ class TestDecodeDetectLoop:
                 error_holder=error_holder,
             ))
 
-        assert len(error_holder) == 2
-        assert call_count == 1
+        assert call_count == 1        # stopped after the batch in flight
+        assert len(error_holder) == 1 # recorded once, not duplicated
+        assert error_holder[0].args == ("boom",)
 
 
 # ---------------------------------------------------------------------------
@@ -525,7 +532,7 @@ class TestBlendEncodeLoop:
         reader = MagicMock()
         reader.__enter__ = MagicMock(return_value=reader)
         reader.__exit__ = MagicMock(return_value=False)
-        def _frames(seek_ts=None):
+        def _frames(seek_ts=None, **kwargs):
             received_seek.append(seek_ts)
             return iter([(frames_t, [0])])
         reader.frames = _frames

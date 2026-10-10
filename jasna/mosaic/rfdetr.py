@@ -36,8 +36,28 @@ def compile_rfdetr_engine(
     fp16: bool,
 ) -> Path:
     if is_amd_device(device):
-        # AMD runs the trained checkpoint through the rfdetr torch model
-        # (RfDetrTorchRunner); there is no ahead-of-time engine to build.
+        from jasna.mosaic.detection_registry import get_detection_engine, rfdetr_model_config
+
+        if get_detection_engine() != "migraphx":
+            # AMD runs the trained checkpoint through the rfdetr torch model
+            # (RfDetrTorchRunner) unless the MIGraphX engine is selected.
+            return weights_path
+        from jasna.mosaic.rfdetr_migraphx_runner import RfDetrMigraphxRunner
+
+        config = rfdetr_model_config(weights_path.stem)
+        if config.torch_variant is None:
+            raise RuntimeError(
+                f"The MIGraphX engine needs an rfdetr variant mapping for {weights_path.name}"
+            )
+        # building the runner exports the fp16 ONNX (if missing) and compiles the
+        # MIGraphX program into the cache, so the first video does not pay for it
+        RfDetrMigraphxRunner(
+            weights_path,
+            batch_size=int(batch_size),
+            resolution=int(resolution),
+            device=device,
+            variant=config.torch_variant,
+        )
         return weights_path
     if not is_nvidia_device(device):
         raise RuntimeError(
@@ -71,6 +91,7 @@ class RfDetrMosaicDetectionModel:
         score_threshold: float = DEFAULT_SCORE_THRESHOLD,
         max_select: int = DEFAULT_MAX_SELECT,
         fp16: bool = True,
+        engine: str = "torch",
     ) -> None:
         self.weights_path = weights_path
         self.batch_size = int(batch_size)
@@ -79,29 +100,54 @@ class RfDetrMosaicDetectionModel:
         self.dynamic_batch = bool(dynamic_batch)
         self.score_threshold = float(score_threshold)
         self.max_select = int(max_select)
+        self.engine = str(engine)
         self._normalization_cache: dict[
             tuple[torch.device, torch.dtype], tuple[torch.Tensor, torch.Tensor]
         ] = {}
         if self.batch_size <= 0:
             raise ValueError(f"batch_size must be > 0, got {batch_size}")
+        if self.engine not in ("torch", "migraphx"):
+            raise ValueError(f"Unknown RF-DETR engine {self.engine!r}")
+        if self.engine == "migraphx" and not is_amd_device(self.device):
+            raise RuntimeError(
+                "The MIGraphX engine is only available on AMD GPUs"
+            )
 
         if is_amd_device(self.device):
-            if torch_variant is None:
-                raise RuntimeError(
-                    f"RF-DETR on AMD requires a torch variant for {weights_path.name}"
-                )
-            from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner
+            if self.engine == "migraphx":
+                from jasna.mosaic.rfdetr_migraphx_runner import RfDetrMigraphxRunner
 
-            self.runner = RfDetrTorchRunner(
-                self.weights_path,
-                input_shapes=[
-                    (self.batch_size, 3, self.resolution, self.resolution)
-                ],
-                device=self.device,
-                fp16=bool(fp16),
-                resolution=self.resolution,
-                variant=torch_variant,
-            )
+                if torch_variant is None:
+                    raise RuntimeError(
+                        f"RF-DETR MIGraphX engine requires a torch variant for {weights_path.name}"
+                    )
+                self.runner = RfDetrMigraphxRunner(
+                    self.weights_path,
+                    batch_size=self.batch_size,
+                    resolution=self.resolution,
+                    device=self.device,
+                    variant=torch_variant,
+                )
+                # the export is a static-shape graph; pad short batches like the
+                # fixed-batch TensorRT engines do instead of recompiling per shape
+                self.dynamic_batch = False
+            else:
+                if torch_variant is None:
+                    raise RuntimeError(
+                        f"RF-DETR on AMD requires a torch variant for {weights_path.name}"
+                    )
+                from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner
+
+                self.runner = RfDetrTorchRunner(
+                    self.weights_path,
+                    input_shapes=[
+                        (self.batch_size, 3, self.resolution, self.resolution)
+                    ],
+                    device=self.device,
+                    fp16=bool(fp16),
+                    resolution=self.resolution,
+                    variant=torch_variant,
+                )
             self.engine_path = self.weights_path
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(
@@ -147,7 +193,12 @@ class RfDetrMosaicDetectionModel:
         )
         self.masks_out = next(k for k in self.runner.output_names if self.runner.outputs[k].ndim == 4)
         self.logits_out = next(k for k in self.runner.output_names if k not in {self.boxes_out, self.masks_out})
-        logger.info("RF-DETR detection model loaded: %s (batch_size=%d)", self.engine_path, self.batch_size)
+        logger.info(
+            "RF-DETR detection model loaded: %s (batch_size=%d, resolution=%d)",
+            self.engine_path,
+            self.batch_size,
+            self.resolution,
+        )
 
     def close(self) -> None:
         if self.runner is not None:
@@ -179,6 +230,19 @@ class RfDetrMosaicDetectionModel:
     def _infer(self, x: torch.Tensor) -> dict[str, torch.Tensor]:
         if self.dynamic_batch:
             return self.runner.infer({self._input_name: x})
+
+        total = int(x.shape[0])
+        # One engine call covers everything: hand the runner's outputs straight
+        # back. The generic path below clones every output before concatenating
+        # it, which copies the (Q, Hm, Wm) mask tensor twice per batch for no
+        # reason when there is only one chunk - masks are ~200x the size of the
+        # other outputs.
+        if total <= self.batch_size:
+            chunk = x if total == self.batch_size else pad_batch_with_last(x, batch_size=self.batch_size)
+            outputs = self.runner.infer({self._input_name: chunk})
+            if total == self.batch_size:
+                return outputs
+            return {name: tensor[:total] for name, tensor in outputs.items()}
 
         output_parts: dict[str, list[torch.Tensor]] = {
             name: [] for name in self.runner.output_names
@@ -220,19 +284,35 @@ class RfDetrMosaicDetectionModel:
         boxes = boxes * boxes.new_tensor((tw, th, tw, th))
 
         hm, wm = pred_masks.shape[-2], pred_masks.shape[-1]
-        masks = pred_masks.gather(1, topk_boxes[:, :, None, None].expand(b, k, hm, wm)) > 0.0
+        # The mask tensor may live on the CPU (the MIGraphX runner keeps it
+        # there on purpose - it is ~200x larger than everything else and only
+        # a handful of the Q candidates survive the threshold). Gather on the
+        # masks' own device and move just the survivors to the GPU.
+        mask_boxes = topk_boxes.to(pred_masks.device)
 
         valid_mask = topk_values > score_threshold  # (B, K)
         boxes_cpu = boxes.to(device='cpu', dtype=torch.float32).numpy()  # (B, K, 4)
         valid_mask_cpu = valid_mask.cpu().numpy()  # (B, K)
-        
+
         boxes_list: list[np.ndarray] = []
         masks_list: list[torch.Tensor] = []
+        gpu_device = pred_boxes.device
+        valid_mask_masks_device = valid_mask.to(pred_masks.device)
+        empty = pred_masks.new_empty(0, hm, wm, dtype=torch.bool)
         for i in range(b):
             valid_i = valid_mask_cpu[i]
             boxes_list.append(boxes_cpu[i][valid_i])  # (N_i, 4) CPU
-            masks_list.append(masks[i][valid_mask[i]])  # (N_i, Hm, Wm) GPU
-        
+            # Only touch the mask planes of the queries that actually passed the
+            # threshold: on clean footage that is none of them, so the (Q, Hm,
+            # Wm) gather is skipped entirely instead of being built and thrown
+            # away.
+            idx = valid_mask_masks_device[i].nonzero(as_tuple=True)[0]
+            if idx.numel() == 0:
+                masks_list.append(empty.to(gpu_device))
+                continue
+            selected = pred_masks[i].index_select(0, mask_boxes[i][idx]) > 0.0
+            masks_list.append(selected.to(gpu_device, non_blocking=True))  # (N_i, Hm, Wm)
+
         return boxes_list, masks_list
 
     def scan_scores_masks(
@@ -247,10 +327,25 @@ class RfDetrMosaicDetectionModel:
         per_query = outs[self.logits_out].sigmoid().amax(dim=-1)  # (B, Q)
         scores = per_query.amax(dim=-1).float()  # (B,)
         pred_masks = outs[self.masks_out]  # (B, Q, Hm, Wm)
-        active = (pred_masks > 0.0) & (per_query > self.score_threshold)[:, :, None, None]
-        merged = active.any(dim=1, keepdim=True).float()
-        merged = F.interpolate(merged, size=mask_hw, mode="area") > 0.0
-        return scores, merged[:, 0]
+        # The mask tensor can be a CPU view (MIGraphX runner); thresholding is a
+        # cheap elementwise op there, and only the tiny merged (B, mask_h,
+        # mask_w) result crosses back to the GPU. Most frames of most videos
+        # have no query above the threshold at all, so the (Q, Hm, Wm) work is
+        # restricted to the frames that actually hit - and skipped entirely
+        # when none of them do.
+        threshold = per_query.to(pred_masks.device) > self.score_threshold  # (B, Q)
+        merged = torch.zeros(
+            (per_query.shape[0], mask_hw[0], mask_hw[1]),
+            dtype=torch.bool, device=scores.device,
+        )
+        hit_frames = threshold.any(dim=1).nonzero(as_tuple=True)[0]
+        if hit_frames.numel() == 0:
+            return scores, merged
+        active = (pred_masks[hit_frames] > 0.0) & threshold[hit_frames][:, :, None, None]
+        reduced = active.any(dim=1, keepdim=True).float()
+        reduced = F.interpolate(reduced, size=mask_hw, mode="area") > 0.0
+        merged[hit_frames] = reduced[:, 0].to(scores.device)
+        return scores, merged
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)

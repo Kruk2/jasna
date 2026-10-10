@@ -135,7 +135,14 @@ def process_frame_batch(
     min_detection_duration: int = 0,
     scene_detector: SceneCutDetector | None = None,
     vr_projector=None,
+    forward_slots: list | None = None,
 ) -> BatchProcessResult:
+    """``forward_slots`` (AMD single-decode path): when given, each emitted
+    metadata item is ``(FrameMeta, slot)`` so the blend/encode thread gets the
+    already-decoded original frame instead of re-decoding the input. ``slot`` is
+    a ``LazyYuvFrame`` holding pinned host YUV, materialized to device RGB only
+    when the frame actually needs restoration.
+    """
     effective_bs = len(pts_list)
     if effective_bs == 0:
         return BatchProcessResult(next_frame_idx=int(start_frame_idx), clips_emitted=0)
@@ -159,7 +166,12 @@ def process_frame_batch(
         ended_clips = scene_cut_clips + ended_clips
 
         blend_buffer.register_frame(current_frame_idx, active_track_ids)
-        metadata_queue.put(FrameMeta(frame_idx=current_frame_idx, pts=pts))
+        if forward_slots is None:
+            metadata_queue.put(FrameMeta(frame_idx=current_frame_idx, pts=pts))
+        else:
+            metadata_queue.put(
+                (FrameMeta(frame_idx=current_frame_idx, pts=pts), forward_slots[i])
+            )
 
         for track_id in active_track_ids:
             clip = tracker.active_clips.get(track_id)

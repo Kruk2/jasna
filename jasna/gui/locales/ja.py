@@ -307,6 +307,7 @@ JA = {
         "conflict_tooltip": "出力ファイルが既に存在します",
 
         # Advanced Processing
+        "batch_size": "バッチサイズ",
         "temporal_overlap": "時間オーバーラップ",
         "max_detection_gap": "最大検出ギャップ",
         "min_detection_duration": "最短検出フレーム数",
@@ -372,6 +373,12 @@ JA = {
         "rtx_quality": "品質",
         "rtx_denoise": "ノイズ除去",
         "rtx_deblur": "ブレ除去",
+        "secondary_amd_upscale": 'AMD アップスケール',
+        "secondary_amd_hint": '無料・高速',
+        "amd_engine": 'エンジン',
+        "amd_algorithm": 'アルゴリズム',
+        "amd_sharpness": 'シャープネス',
+        "amd_timeout": 'タイムアウト (秒)',
         "ffmpeg_path": "FFmpeg パス",
         "model": "モデル",
         "scale": "スケール",
@@ -444,6 +451,7 @@ JA = {
 
         # Tooltips
         "tip_max_clip_size": "一度に処理するフレーム数です。大きいほど品質が向上する可能性がありますが、VRAM を多く使います。\n\n推奨：60 以上。モデルコンパイルを無効にしてでも 60 は維持しましょう。\n目安：60（安全）、90（バランス良）、180（最高品質、Compile BasicVSR++ 有効時 12GB 以上の VRAM が必要、無効なら少なめ）。\n4K 動画は VRAM を多く使います。クリップサイズを下げても同等の品質で大幅に高速化できます。\nデフォルト：90",
+        "tip_batch_size": "GPU 1 回あたりの処理フレーム数（検出・パイプラインのバッチ）。\n4：既定値。8 GB のカードでも安全。\n8：大容量 GPU でスループット約 5~8% 向上、VRAM を約 300 MiB 多く使用（RX 7900 XT 実測：59 → 63 fps）。\nバッチ固定の検出モデル（旧 rfdetr-v5）は常に 4。\n\n既定：4",
         "tip_temporal_overlap": "処理クリップ間の重なりフレーム数で、つなぎ目のちらつきを軽減します。\n大きいほど滑らかですがやや遅くなります。20 を超えても効果はほとんど変わりません。\n\nクリップサイズ別の推奨値：\n- クリップ 60 → オーバーラップ 6-8\n- クリップ 90 → オーバーラップ 8-12\n- クリップ 180 → オーバーラップ 15-20\nデフォルト：8",
         "tip_enable_crossfade": "クリップの境目を滑らかにつなぎ、ちらつきを軽減します。処理済みフレームを再利用するため、追加の GPU 負荷はゼロです。\n\n推奨：常に ON。\nデフォルト：ON",
         "tip_max_detection_gap": "短い検出の途切れを補完します。追跡中のモザイクが最大 N フレーム消えても同じ位置に再出現すれば、ギャップを埋めてクリップを継続します。\n本当に素早く現れて消える場面を誤って埋めないよう、小さい値に保ってください。\n0 で無効。\nデフォルト：2",
@@ -480,6 +488,12 @@ JA = {
         "tip_rtx_quality": "アップスケールの品質。高いほど綺麗ですが、速度が低下します。\n\nデフォルト：High",
         "tip_rtx_denoise": "RTX ハードウェアでノイズを除去します。None でスキップ。\n\nデフォルト：Medium",
         "tip_rtx_deblur": "RTX ハードウェアでぼやけた部分をシャープにします。None でスキップ。\n\nデフォルト：None",
+        "tip_secondary_amd": 'AMD GPU 超解像 — RTX Super Res の AMD 版。無料で追加インストール不要。\n\namf-sr は AMD 自身の Video SR（AMD Software の動画アップスケーリングと同じモデル系統）、Real-ESR と Real-ESRGAN はそれぞれのネットワークを ROCm デバイス上で実行します。品質は RTX Super Res と同等です。',
+        "tip_amd_engine": '1 行目：使用する AMD アップスケーラーの系統。\n\nAMF-SR：AMF フィルター sr_amf 経由の AMD Video SR 1.0/1.1（Windows では D3D11）。\nReal-ESR：ROCm/HIP デバイス上でインプロセス実行する SRVGGNetCompact ネットワーク。\nReal-ESRGAN：ROCm/HIP デバイス上でインプロセス実行する RRDBNet ネットワーク。\n\n2 行目にはここで選んだ系統の重みだけが並びます。\n\nデフォルト：Real-ESR',
+        "tip_amd_model": '2 行目：1 行目で選んだ系統の具体的な重み（ドロップダウンには実際の重みファイル名を表示）。\n\nReal-ESR（SRVGGNetCompact）：\nauto：model_weights/ で最初に見つかったものを使用。\nrealesr-general-x4v3：32 層。既定で最速・最省メモリ（256² クロップ、fp16 実測で約 238 fps・約 38 MB の VRAM）。SSIM はアニメモデルより高め。\nrealesr-general-wdn-x4v3：同じアーキテクチャのノイズ除去版。\n4xLSDIRCompactC3：LSDIR の実写写真で学習した 16 層のコンパクト網。軽量でクロップ間のばらつきが小さい。\n4xLSDIRCompactv2：同系の 16 層 LSDIR コンパクト網で PSNR がより高い（実写クロップ実測 29.48 dB / 0.898 SSIM）。RRDBNet より数倍速い。\n2xHFA2kCompact：16 層・ネイティブ 2 倍の網で最速（256² fp16 実測 約 352 fps）。倍率行の 2x と組み合わせてください。\n\nReal-ESRGAN（RRDBNet）：\nRealESRGAN_x4plus：23 ブロック網。高品質だが最も遅い。\nRealESRGAN_x4plus_anime_6B：6 ブロック網。アニメ寄りでやや柔らかい。\nBSRNet（BSRGAN）：KAIR の 23 ブロック網。実写クロップの実測で最も高忠実。\n\nAMF-SR に個別のモデルはありません。\nデフォルト：realesr-general-x4v3',
+        "tip_amd_algorithm": 'エンジンが AMF-SR のときの sr_amf アルゴリズム。\n\nsr1-0 / sr1-1：AMD Video SR（機械学習）。ディテールが最良。\nbicubic / bilinear / point：非 ML のフォールバック。最速で予測しやすい。\n\nデフォルト：sr1-0',
+        "tip_amd_sharpness": 'アップスケール後に AMF が適用する追加シャープ。\n-1 でドライバーの既定値、0 で無効、最大 2。\n\nデフォルト：-1',
+        "tip_amd_timeout": 'AMD FFmpeg プロセスを待つ秒数。超えるとそのクリップをエラーとして打ち切ります。\n\nデフォルト：120',
         "tip_detection_model": "修復が必要な領域を検出する既定の AI モデル。\nrfdetr-v6：最新かつ高速 — おすすめ（既定・同梱）。\nrfdetr-v6-large：高品質だが低速 — 別途ダウンロード（任意）。\nrfdetr-vr-v1：VR180 用モデル（同梱）— VR におすすめ。\nLada YOLO モデルは 2D アニメーションに適している場合があります。\nzelefans-vr-yolo-v2：VR180 の代替モデル — 別途ダウンロード（任意）。\n\n区間エディターでは動画ごとに上書きして記憶できます。\n\nデフォルト：rfdetr-v6",
         "tip_detection_score_threshold": "AI が修復対象としてマークするための既定の確信度。\n低い値 = より多くの領域を検出（誤検出の可能性あり）。\n高い値 = より少ない領域を検出（見逃す可能性あり）。\n\n区間エディターでは動画ごとに上書きして記憶できます。\n\nデフォルト：各モデルの推奨値（rfdetr-v6：0.35、rfdetr-v6-large：0.40）",
         "tip_codec": "出力動画のフォーマット。\nH.264 (AVC)：どこでも再生可能、ファイルは大きめ。\nHEVC (H.265)：小さなファイルサイズで優れた画質。\nAV1：最高の圧縮率、新しいプレーヤーが必要。エンコードには新しい世代の NVIDIA GPU が必要です。",

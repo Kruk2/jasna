@@ -9,7 +9,6 @@ re-thresholded after the scan without rescanning.
 
 from __future__ import annotations
 
-import bisect
 import math
 import queue
 import threading
@@ -21,116 +20,39 @@ from pathlib import Path
 from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
 from jasna.media.probe import VideoMetadata
+
+# The scan primitives live in jasna.mosaic.scan so the command line can reuse them
+# without importing the GUI; they are re-exported here for existing callers.
+from jasna.mosaic.scan import (
+    SCAN_MASK_HW,
+    SCAN_SCORE_FLOOR,
+    SCAN_SPILL_CHUNK_BYTES,
+    SCAN_VRAM_RESERVE_BYTES,
+    MosaicScanResult,
+    scan_decoder_count,
+    scan_sample_stride,
+    segment_sample_indices,
+    segments_from_scores,
+)
 from jasna.segments import SegmentRange, normalize_segments
+from jasna.accelerator import preferred_device
 
-SCAN_SCORE_FLOOR = 0.05
-SCAN_MASK_HW = (90, 160)
-SCAN_VRAM_RESERVE_BYTES = 750 * 1024**2
-SCAN_SPILL_CHUNK_BYTES = 64 * 1024**2
-
-
-@dataclass(frozen=True)
-class MosaicScanResult:
-    """Per-sample detection scores and low-res masks, on CPU after the scan.
-
-    Sample ``i`` was taken at ``times[i]`` seconds. ``scores`` holds the best
-    detection score per sample (0.0 when nothing was detected), ``masks`` a
-    uint8 [N, H, W] tensor of merged detection masks downscaled to
-    ``mask_size``. ``completed_until`` is the last scanned timestamp; earlier
-    than ``duration`` when the scan was stopped.
-    """
-
-    times: tuple[float, ...]
-    scores: tuple[float, ...]
-    masks: object
-    stride: float
-    duration: float
-    completed_until: float
-
-    def sample_at(self, seconds: float, *, tolerance: float):
-        if not self.times:
-            return None
-        position = bisect.bisect_left(self.times, float(seconds))
-        candidates = {
-            max(0, position - 1),
-            min(len(self.times) - 1, position),
-        }
-        index = min(candidates, key=lambda candidate: abs(self.times[candidate] - seconds))
-        if abs(self.times[index] - seconds) > float(tolerance):
-            return None
-        return self.times[index], self.scores[index], self.masks[index]
-
-
-def scan_sample_stride(fps: float, *, seconds: float = 1.0) -> int:
-    """Frame stride for one detection sample roughly every ``seconds``."""
-
-    return max(1, round(float(fps) * float(seconds)))
-
-
-SCAN_PARALLEL_DECODERS = 2
-SCAN_PARALLEL_MIN_PIXELS = 3840 * 2160
-SCAN_PARALLEL_MIN_DURATION = 10.0
-
-
-def scan_decoder_count(
-    video_width: int,
-    video_height: int,
-    duration: float,
-    *,
-    amd: bool,
-) -> int:
-    """Parallel decoders for a scan.
-
-    Scans of 4K+ material are NVDEC-bound while the GPU has more than one
-    NVDEC unit (NVDEC decodes every frame regardless of stride), so split the
-    video across decoders. Smaller resolutions are detection- or
-    loop-overhead-bound and AMD decode sessions are not known to be safe to
-    duplicate, so those stay on one decoder.
-    """
-
-    if amd or duration < SCAN_PARALLEL_MIN_DURATION:
-        return 1
-    if video_width * video_height < SCAN_PARALLEL_MIN_PIXELS:
-        return 1
-    return SCAN_PARALLEL_DECODERS
-
-
-def segment_sample_indices(
-    times: list[float], start: float, end: float, *, is_last: bool
-) -> list[int]:
-    """Indices of samples a segment owns: ``start <= t < end`` (last segment
-    keeps everything from ``start``)."""
-
-    return [i for i, t in enumerate(times) if t >= start and (is_last or t < end)]
-
-
-def segments_from_scores(
-    times: tuple[float, ...] | list[float],
-    scores: tuple[float, ...] | list[float],
-    *,
-    threshold: float,
-    stride: float,
-    duration: float,
-    pad: float | None = None,
-) -> tuple[SegmentRange, ...]:
-    """Merge above-threshold samples into padded, normalized time ranges."""
-
-    if len(times) != len(scores):
-        raise ValueError("times and scores must have the same length")
-    stride = float(stride)
-    if stride <= 0:
-        raise ValueError("stride must be greater than zero")
-    if pad is None:
-        pad = stride / 2
-    hits = []
-    for seconds, score in zip(times, scores):
-        if score < threshold:
-            continue
-        start = max(0.0, float(seconds) - pad)
-        end = min(float(duration), float(seconds) + stride + pad)
-        if end > start:
-            hits.append(SegmentRange(start, end))
-    return normalize_segments(hits, duration=duration)
+__all__ = [
+    "SCAN_MASK_HW",
+    "SCAN_SCORE_FLOOR",
+    "SCAN_SPILL_CHUNK_BYTES",
+    "SCAN_VRAM_RESERVE_BYTES",
+    "MosaicScanResult",
+    "MosaicScanWorker",
+    "ScanCompleted",
+    "ScanFailed",
+    "ScanStatus",
+    "ScanStorageSpilled",
+    "scan_decoder_count",
+    "scan_sample_stride",
+    "segment_sample_indices",
+    "segments_from_scores",
+]
 
 
 @dataclass(frozen=True)
@@ -447,7 +369,7 @@ class MosaicScanWorker:
         from jasna.session_factory import build_compiled_detection_model
 
         settings = self.settings
-        device = torch.device("cuda:0")
+        device = preferred_device()
         detection_model_name, detection_model_path, _ = resolve_detection_model(
             str(settings.detection_model), "", None
         )
@@ -479,11 +401,10 @@ class MosaicScanWorker:
     def _scan(self, detector) -> None:
         import torch
 
-        from jasna.accelerator import is_amd_device
         from jasna.media.video_decoder import VideoReader
 
         metadata = self.metadata
-        device = torch.device("cuda:0")
+        device = preferred_device()
         duration = float(metadata.duration)
         time_base = float(metadata.time_base)
         frame_stride = scan_sample_stride(metadata.video_fps, seconds=self.stride_seconds)
@@ -500,10 +421,11 @@ class MosaicScanWorker:
             int(metadata.video_width),
             int(metadata.video_height),
             duration,
-            amd=is_amd_device(device),
         )
+        # Two decoders may claim a sample on either side of their shared boundary,
+        # so each collector keeps a little headroom beyond its nominal share.
         segment_capacity = (
-            capacity if decoders == 1 else math.ceil(capacity / decoders) + batch_size
+            capacity if decoders == 1 else math.ceil(capacity / decoders) + batch_size + 2
         )
         bounds = [duration * index / decoders for index in range(decoders + 1)]
         batches: queue.Queue = queue.Queue(maxsize=decoders + 1)
@@ -511,6 +433,14 @@ class MosaicScanWorker:
         def decode_segment(index: int) -> None:
             start_s, end_s = bounds[index], bounds[index + 1]
             is_last = index == decoders - 1
+            # Each decoder samples on the stride grid of its own decode start, and
+            # that start is the keyframe the seek landed on, so the two grids do not
+            # line up. A hard split at end_s would therefore drop the sample that
+            # straddles the boundary and leave a stride-long blind window there;
+            # each decoder instead owns samples up to half a stride past its end,
+            # and whatever is claimed twice is harmless (the plan merges ranges).
+            own_start = 0.0 if index == 0 else max(0.0, start_s - sample_stride_seconds / 2)
+            own_end = min(duration, end_s + sample_stride_seconds / 2)
             try:
                 reader = VideoReader(
                     str(self.path),
@@ -530,7 +460,7 @@ class MosaicScanWorker:
                             max(0.0, (pts - start_pts) * time_base) for pts in pts_list
                         ]
                         keep = segment_sample_indices(
-                            sample_times, start_s, end_s, is_last=is_last
+                            sample_times, own_start, own_end, is_last=is_last
                         )
                         if keep:
                             if len(keep) < len(sample_times):
@@ -538,7 +468,7 @@ class MosaicScanWorker:
                             batches.put(
                                 (index, batch, [sample_times[i] for i in keep])
                             )
-                        if not is_last and sample_times[-1] >= end_s:
+                        if not is_last and sample_times[-1] >= own_end:
                             break
             except BaseException as exc:
                 batches.put((index, exc, None))
@@ -663,7 +593,7 @@ class MosaicScanWorker:
         from jasna.media.video_decoder import VideoReader
 
         metadata = self.metadata
-        device = torch.device("cuda:0")
+        device = preferred_device()
         batch_size = int(self.settings.batch_size)
         reader = VideoReader(
             str(self.path),

@@ -16,6 +16,13 @@ from jasna.gui.theme import Colors, Fonts, Sizing
 
 TEMPORAL_FILTER_SLIDER_MAX = 10
 
+# GPU batch per pass. 4 is the historical default and stays safe on 8 GB cards;
+# 8 measured ~6% higher pipeline throughput on an RX 7900 XT (59 -> 63 fps) for
+# roughly 300 MiB more VRAM, so it is exposed as an explicit choice instead of a
+# guessed default. Detection models with a fixed batch (legacy rfdetr-v5) keep 4.
+BATCH_SIZE_CHOICES = ("4", "8")
+DEFAULT_BATCH_SIZE = "4"
+
 
 class AdvancedSection:
     def __init__(self, parent, widgets: dict, on_modified):
@@ -29,6 +36,23 @@ class AdvancedSection:
 
         inner = ctk.CTkFrame(content, fg_color="transparent")
         inner.pack(fill="x", padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
+
+        # Batch size row
+        batch_row = ctk.CTkFrame(inner, fg_color="transparent")
+
+        add_setting_label(batch_row, "batch_size")
+
+        self._widgets["batch_size"] = ValueOptionMenu(
+            batch_row,
+            options={choice: choice for choice in BATCH_SIZE_CHOICES},
+            command=lambda _value: self._on_modified(),
+            fg_color=Colors.BG_CARD, button_color=Colors.BG_CARD,
+            button_hover_color=Colors.BORDER_LIGHT, dropdown_fg_color=Colors.BG_CARD,
+            dropdown_hover_color=Colors.PRIMARY, text_color=Colors.TEXT_PRIMARY,
+            width=80,
+        )
+        self._widgets["batch_size"].pack(side="right")
+        self._widgets["batch_size"].set_value(DEFAULT_BATCH_SIZE)
 
         # Temporal Overlap row
         row1 = ctk.CTkFrame(inner, fg_color="transparent")
@@ -192,8 +216,9 @@ class AdvancedSection:
 
         row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._rows = [
-            (row1, row_gap), (gap_row, row_gap), (mindur_row, row_gap), (scene_row, row_gap),
-            (row2, row_gap), (row_vr, row_gap), (row3, row_gap), (row4, dict(fill="x")),
+            (batch_row, row_gap), (row1, row_gap), (gap_row, row_gap), (mindur_row, row_gap),
+            (scene_row, row_gap), (row2, row_gap), (row_vr, row_gap), (row3, row_gap),
+            (row4, dict(fill="x")),
         ]
         self._vr_row = row_vr
         self.set_model("basicvsrpp")
@@ -207,6 +232,7 @@ class AdvancedSection:
         self._on_modified()
 
     def apply(self, preset):
+        self._widgets["batch_size"].set_value(str(preset.batch_size))
         self._widgets["temporal_overlap"].set(preset.temporal_overlap)
         self._widgets["temporal_overlap_val"].configure(text=str(preset.temporal_overlap))
         self._widgets["max_detection_gap"].set(preset.max_detection_gap)
@@ -230,6 +256,7 @@ class AdvancedSection:
 
     def collect(self) -> dict:
         return {
+            "batch_size": int(self._widgets["batch_size"].get_value()),
             "temporal_overlap": int(self._widgets["temporal_overlap"].get()),
             "max_detection_gap": int(self._widgets["max_detection_gap"].get()),
             "min_detection_duration": int(self._widgets["min_detection_duration"].get()),

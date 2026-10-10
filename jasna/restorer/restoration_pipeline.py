@@ -12,6 +12,7 @@ from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
 from jasna.restorer.secondary_restorer import SecondaryRestorer
+from jasna.accelerator import maybe_release_vram_cache
 from jasna.tracking.clip_tracker import TrackedClip
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,11 @@ class RestorationPipeline:
         keep_end: int,
         crossfade_weights: dict[int, float] | None,
     ) -> PrimaryRestoreResult:
+        # Make room before this clip's big allocations: when the allocator's
+        # reserve creeps toward the VRAM budget, return its cold cache to the
+        # driver so hot pages (resident models, working set) are never demoted
+        # to shared memory by Windows (see jasna.accelerator).
+        maybe_release_vram_cache()
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_from_raw_crops(raw_crops)
         primary_raw = self.restorer.raw_process(resized_crops)
         if self._denoise_step is DenoiseStep.AFTER_PRIMARY:

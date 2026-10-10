@@ -135,6 +135,9 @@ def test_slider_value_uses_native_label_without_ctk_canvas() -> None:
         assert label.cget("text") == "90"
         assert label.cget("background") == Colors.BG_PANEL
         assert int(label.cget("width")) == 4
-        assert label.cget("font") == f"{settings_widgets.Fonts.FAMILY} -{settings_widgets.Fonts.SIZE_NORMAL}"
+        # Tk braces a family name containing a space, so accept both spellings.
+        assert label.cget("font").replace("{", "").replace("}", "") == (
+            f"{settings_widgets.Fonts.FAMILY} -{settings_widgets.Fonts.SIZE_NORMAL}"
+        )
     finally:
         root.destroy()

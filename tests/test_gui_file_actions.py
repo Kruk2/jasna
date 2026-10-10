@@ -7,45 +7,47 @@ from jasna.gui import file_actions
 
 
 @pytest.mark.parametrize(
-    ("system", "command"),
+    ("system", "build_command"),
     [
-        ("Windows", ["explorer", "/media"]),
-        ("Linux", ["xdg-open", "/media"]),
-        ("Darwin", ["open", "/media"]),
+        ("Windows", lambda path: ["explorer", str(path.parent)]),
+        ("Linux", lambda path: ["xdg-open", str(path.parent)]),
+        ("Darwin", lambda path: ["open", str(path.parent)]),
     ],
 )
 def test_open_containing_folder_uses_platform_launcher(
-    monkeypatch, system: str, command: list[str]
+    monkeypatch, system: str, build_command
 ) -> None:
     launch = MagicMock()
     monkeypatch.setattr(file_actions.platform, "system", lambda: system)
     monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
+    path = Path("/media/video.mp4")
 
-    file_actions.open_containing_folder(Path("/media/video.mp4"), parent=MagicMock())
+    file_actions.open_containing_folder(path, parent=MagicMock())
 
-    launch.assert_called_once_with(command)
+    # The path spelling is platform-dependent (Windows renders it with
+    # backslashes), so the expectation is built from the same Path object.
+    launch.assert_called_once_with(build_command(path))
 
 
 @pytest.mark.parametrize(
-    ("system", "command"),
+    ("system", "build_command"),
     [
-        ("Windows", ["explorer", "/select,", "/media/video.mp4"]),
-        ("Linux", ["xdg-open", "/media"]),
-        ("Darwin", ["open", "-R", "/media/video.mp4"]),
+        ("Windows", lambda path: ["explorer", "/select,", str(path)]),
+        ("Linux", lambda path: ["xdg-open", str(path.parent)]),
+        ("Darwin", lambda path: ["open", "-R", str(path)]),
     ],
 )
 def test_open_containing_folder_selects_file_when_supported(
-    monkeypatch, system: str, command: list[str]
+    monkeypatch, system: str, build_command
 ) -> None:
     launch = MagicMock()
     monkeypatch.setattr(file_actions.platform, "system", lambda: system)
     monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
+    path = Path("/media/video.mp4")
 
-    file_actions.open_containing_folder(
-        Path("/media/video.mp4"), parent=MagicMock(), select_file=True
-    )
+    file_actions.open_containing_folder(path, parent=MagicMock(), select_file=True)
 
-    launch.assert_called_once_with(command)
+    launch.assert_called_once_with(build_command(path))
 
 
 def test_open_containing_folder_shows_localized_error_on_failure(monkeypatch) -> None:
@@ -66,27 +68,29 @@ def test_open_containing_folder_shows_localized_error_on_failure(monkeypatch) ->
 
 
 @pytest.mark.parametrize(
-    ("system", "command"),
+    ("system", "launcher"),
     [
-        ("Linux", ["xdg-open", "/media/video.mp4"]),
-        ("Darwin", ["open", "/media/video.mp4"]),
+        ("Linux", "xdg-open"),
+        ("Darwin", "open"),
     ],
 )
-def test_open_file_uses_platform_launcher(monkeypatch, system: str, command: list[str]) -> None:
+def test_open_file_uses_platform_launcher(monkeypatch, system: str, launcher: str) -> None:
     launch = MagicMock()
     monkeypatch.setattr(file_actions.platform, "system", lambda: system)
     monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
+    path = Path("/media/video.mp4")
 
-    file_actions.open_file(Path("/media/video.mp4"), parent=MagicMock())
+    file_actions.open_file(path, parent=MagicMock())
 
-    launch.assert_called_once_with(command)
+    launch.assert_called_once_with([launcher, str(path)])
 
 
 def test_open_file_uses_windows_default_application(monkeypatch) -> None:
     startfile = MagicMock()
     monkeypatch.setattr(file_actions.platform, "system", lambda: "Windows")
     monkeypatch.setattr(file_actions.os, "startfile", startfile, raising=False)
+    path = Path("/media/video.mp4")
 
-    file_actions.open_file(Path("/media/video.mp4"), parent=MagicMock())
+    file_actions.open_file(path, parent=MagicMock())
 
-    startfile.assert_called_once_with("/media/video.mp4")
+    startfile.assert_called_once_with(str(path))
