@@ -24,7 +24,8 @@ dependencies = [
   "customtkinter==6.0.0",
   "tkinterdnd2",
   "python-vlc==3.0.21203",
-  "ultralytics",
+  # Older versions cannot reconstruct YOLO checkpoints under the release's weights-only policy.
+  "ultralytics>=8.4.96",
   # Not imported directly; ultralytics needs it to export YOLO models for TensorRT.
   "onnx",
   "cryptography>=42",
@@ -42,6 +43,7 @@ nvidia = [
   "nvidia-vfx",
   # LTX self-attention kernel (INT8, prebuilt abi3 wheels for Linux and Windows).
   "comfy-kitchen==0.2.36",
+  "scipy",
   # torch.compile and the LTX Triton kernels; Linux torch wheels bring triton 3.7.1 themselves.
   "triton-windows==3.7.1.post27; sys_platform == 'win32'",
   # The VALI decode backend needs the corruption-tolerant fork (codeberg.org/Kruk2/vali,

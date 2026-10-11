@@ -15,6 +15,12 @@ def _touch(path: Path) -> None:
 
 
 def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_path: Path) -> None:
+    from ultralytics.utils.torch_utils import select_device
+
+    def reject_gpu_enumeration():
+        raise ImportError("unverified runtime library", path="libnvidia-ml.so.1")
+
+    monkeypatch.setattr(torch.cuda, "device_count", reject_gpu_enumeration)
     monkeypatch.chdir(tmp_path)
     (tmp_path / "model_weights").mkdir(parents=True, exist_ok=True)
 
@@ -28,6 +34,8 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
             pass
 
         def export(self, **_kwargs):
+            export_device = _kwargs.get("device")
+            assert select_device("cpu" if export_device is None else export_device) == torch.device("cpu")
             calls["export"] += 1
             onnx = pt.with_suffix(".onnx")
             _touch(onnx)
@@ -45,6 +53,7 @@ def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_p
     import jasna.trt as jt
 
     def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
+        assert device == torch.device("cuda:0")
         engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
         _touch(engine)
         return engine

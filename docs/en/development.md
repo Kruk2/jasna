@@ -38,6 +38,14 @@ Ubuntu 22.04 has no Python 3.13 package; build one against `tk-dev` and
 
 On Windows (NVIDIA), run the same `uv pip install` line in a Python 3.13 venv.
 
+Release builders must install the project's required `ultralytics>=8.4.96` before
+freezing. Older versions fail to load YOLO checkpoints under the release's
+restricted loading policy, even when the same checkpoint works in development.
+YOLO ONNX export uses an explicit CPU device object to avoid CUDA/NVML discovery;
+the subsequent TensorRT build uses the requested GPU.
+The NVIDIA extras also install SciPy directly for the LTX worker; the release
+bundler copies its Python modules, native extensions and bundled BLAS libraries.
+
 ## AMD (ROCm 10.0)
 
 Linux: work inside the `rocm/pytorch` ROCm 10.0 image (torch comes from the
