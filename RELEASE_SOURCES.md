@@ -1,12 +1,13 @@
 # v0.11.0 release source correspondence
 
 This file records the custom and patched inputs used by v0.11.0 packages.
-The Windows native-LTX continuation includes changes beyond the v0.11.0 tag.
-The clean15 beta's completed freeze and native build receipts identify its exact
-inputs; the current checkout also includes later source fixes and is not a new
-frozen release. Do not infer binary correspondence from the version number alone.
-Release
-packages also include `LICENSE`, `LICENSING.md`, `NOTICE`, the third-party
+The Linux and Windows native-LTX continuations include changes beyond the
+v0.11.0 tag. Native build receipts identify the exact native sources and
+toolchains. Windows freeze receipts identify the frozen application inputs;
+Linux builds require a fresh application freeze. Qualification reports bind
+the packaged executable and native libraries to their source revisions.
+Do not infer binary correspondence from the version number alone.
+Release packages also include `LICENSE`, `LICENSING.md`, `NOTICE`, the third-party
 notices, and full license texts.
 
 ## Source revisions
