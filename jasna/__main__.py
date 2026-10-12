@@ -15,7 +15,13 @@ if __name__ == "__main__":
 
 if __name__ == "__main__" and sys.platform in ("linux", "win32") and is_frozen():
     from jasna.protection import initialize_runtime
-    initialize_runtime()
+    try:
+        initialize_runtime()
+    except Exception as error:
+        if sys.argv[1:2] == ["--ltx-worker"]:
+            from jasna.protection.ltx_worker import report_startup_failure
+            report_startup_failure(error)
+        raise
 
 import multiprocessing
 
