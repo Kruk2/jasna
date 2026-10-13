@@ -1,9 +1,9 @@
 # CLI 参考
 
-Jasna 的 CLI 与 GUI 功能一致。`jasna --help` 始终显示完整的最新选项列表；本页补充说明和示例。
+命令行和 GUI 功能相同。`jasna --help` 总是显示所有选项。本页解释这些选项并给出示例。
 
-官方发行版会在处理前向标准错误输出显示启动检查。`--no-progress` 只保留
-简短的启动消息。安装或更新后的首次启动需要更长时间。
+处理前，官方发行版会把启动检查输出到 stderr。`--no-progress` 只保留简短的启动消息。
+安装或更新后的首次启动需要更长时间。
 
 ```bash
 # Single video
@@ -17,6 +17,20 @@ jasna --input input_folder --output output_folder
 ```
 
 在 Windows 上，CLI 与应用是同一个文件: `jasna.exe --input ...`。
+
+## Windows 临时文件
+
+Jasna 的临时运行文件夹可以使用已有且可写的 NTFS 内存盘，包括 ImDisk。
+启动 Jasna 前设置 `TMP` 和 `TEMP`：
+
+```powershell
+$env:TMP = 'Z:\Temp'
+$env:TEMP = 'Z:\Temp'
+.\jasna.exe --version
+```
+
+临时运行文件夹优先使用 `TMP`，其次使用 `TEMP`。只设置 `TMPDIR` 不会改变其位置。
+`--working-directory` 单独控制片段临时文件的位置。
 
 ## 通用
 
@@ -38,17 +52,17 @@ jasna --input input_folder --output output_folder
 | ------ | ------- | ----- |
 | `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx`（细节更多，慢很多）或 `ltx-undistilled`（最佳 LTX 模型：比 `ltx` 稍好，约慢 1.5 倍）。见[选择模型](models.md#修复模型)。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | 修复模型权重（LTX 为文件夹）。 |
-| `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列。 |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要 12 GB 空闲显存。 |
-| `--ltx-seed` | 模型默认值 | LTX：换一个种子，结果会略有不同。 |
-| `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：无需模型文件即可测试速度。视频不会被修复。 |
-| `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹；拆分后的视频保持原编码，无法拆分的视频整段用 LTX 修复。见[区间](segments.md)。 |
+| `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列；其他 GPU 会报错停止。 |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要约 12 GB 空闲显存；不够时，这些马赛克按普通方式修复。 |
+| `--ltx-seed` | `20260923` | LTX：换一个种子，结果会略有不同；同一个种子会重复同样的结果。 |
+| `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：不需要模型和许可证即可测试速度。视频不会被修复。 |
+| `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹。不能与 `--segments` 或 `--fmp4` 一起使用。见[区间](segments.md#cli---ltx-auto-split)。 |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | 开启 | TensorRT 编译: 大幅提速，占用更多 VRAM。见[调优](tuning.md)。 |
 | `--max-clip-size` | `90` | 跟踪片段的最大帧数。VRAM 的主要调节手段。 |
 | `--temporal-overlap` | `8` | 片段拼接处的重叠和丢弃余量；减少边界闪烁。 |
 | `--enable-crossfade` / `--no-enable-crossfade` | 开启 | 使用已处理的帧交叉淡化片段边界；没有额外 GPU 开销。 |
 | `--denoise` | `none` | 对修复裁切图的空间降噪: `low`、`medium`、`high`。 |
-| `--denoise-step` | `after_primary` | 在二级修复之前（`after_primary`）或混合前（`after_secondary`）应用降噪。 |
+| `--denoise-step` | `after_primary` | 在二次修复之前（`after_primary`）或混合前（`after_secondary`）应用降噪。 |
 
 ## 检测
 
@@ -61,7 +75,7 @@ jasna --input input_folder --output output_folder
 | `--min-detection-duration` | `2` | 丢弃持续少于 N 帧的检测（视为误检，相应帧保持原样）。`0` 表示禁用。 |
 | `--scene-detection` | 开 | 检测硬切镜头并在切换点结束所有跟踪中的马赛克片段，使片段不会跨越两个镜头。使用 `--no-scene-detection` 关闭。 |
 
-## 二级修复
+## 二次修复
 
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
@@ -112,45 +126,43 @@ jasna --input input_folder --output output_folder
 
 ### 选择编解码器
 
-- **`hevc`**（默认）: 质量和文件大小的最佳平衡，以 10-bit 编码。所有
-  现代设备和播放器都能播放。除非有特殊原因，建议使用它。
-- **`h264`**: 兼容性最强（老电视、浏览器、剪辑软件），仅支持 8-bit，
-  相同质量下文件更大。也是流媒体使用的编解码器。
-- **`av1`**: 压缩率最高 — 相同质量下文件最小，10-bit。需要支持 AV1
-  编码的 GPU（NVIDIA RTX 40 系列或更新）和较新的播放器。
+- **`hevc`**（默认）：相对文件大小质量好，10-bit。所有现代设备都能播放。
+  不确定时就用它。
+- **`h264`**：几乎到处都能播放（老电视、浏览器、视频剪辑软件）。仅 8-bit，
+  相同质量下文件更大。流媒体总是使用它。
+- **`av1`**：相同质量下文件最小，10-bit。需要能编码 AV1 的 GPU（NVIDIA RTX 40
+  系列或更新）和较新的播放器。
 
-使用 `--segments` 时，编解码器锁定为输入视频的编解码器，`--codec` 不
-生效。
+使用 `--segments` 时，输出总是使用输入的编解码器，`--codec` 不会生效。
 
 ### 编码器设置
 
-`--cq` 是主要的质量控制。GUI 显示或命令行输入的数值会原样传给当前编码器（AMD AV1 会乘以 5）；
-切换编解码器不会转换数值。数值越低，质量越好，文件越大。
+`--cq` 是主要的质量设置。数值越低，质量越好，文件越大。Jasna 会把数值原样传给
+编码器（只有 AMD AV1 会乘以 5）。更换编解码器时，数值不会被换算。
 
 | GPU | H.264 默认值 | HEVC 默认值 | AV1 默认值 | 允许范围 |
 | --- | ---: | ---: | ---: | --- |
 | NVIDIA | 25 | 28 | 35 | H.264/HEVC 为 1–51；AV1 为 1–63 |
 | AMD | 24 | 25 | 32 | H.264/HEVC 为 0–51；AV1 为 1–51 |
 
-NVIDIA 将 CQ 0 保留为自动值，因此 Jasna 要求显式质量目标从 1 开始。在编辑当前
-任务期间，GUI 会分别记住每个编解码器的原始数值。
+在 NVIDIA 上，CQ 0 表示“自动”，所以 Jasna 需要 1 或更大的值。GUI 会为每个
+编解码器分别保存 CQ 值。
 
-`--encoder-settings` 用于微调其他硬件编码器设置。参数会根据当前编码器进行
-校验 — 不支持的参数会失败，并给出清晰的错误提示，列出该编码器接受的参数:
+`--encoder-settings` 用于修改其他编码器选项。Jasna 会检查每个参数。编码器不认识的
+参数会让任务报错停止，错误信息会列出它接受的参数：
 
 ```bash
-# 要提高质量（并增大文件），请降低 CQ。
+# 更高质量（文件更大）：降低 CQ。
 jasna --input in.mp4 --output out.mkv --cq 22
 
-# CQ 与高级设置
+# CQ 加高级参数
 jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=32,bf=4"
 ```
 
-为保持兼容，省略 `--cq` 时仍可在 `--encoder-settings` 中使用 `cq=22`。若通过
-两个入口同时指定 CQ，Jasna 会报错，而不会静默选择其中一个。GUI 中的 CQ 控件是
-唯一入口，因此**自定义参数**不接受 CQ 别名。
+不使用 `--cq` 时，`--encoder-settings` 中的 `cq=22` 仍然有效。两处同时设置 CQ 会
+报错。在 GUI 中，CQ 只能通过 CQ 控件设置，不能写在**自定义参数**中。
 
-#### NVIDIA (NVENC) 参数 — 所有编解码器
+#### NVIDIA (NVENC) 参数，所有编解码器
 
 | 参数 | 作用 |
 | --- | ------------ |
@@ -165,11 +177,11 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 | `b_ref_mode` | 把 B 帧用作参考帧: `disabled`、`each`、`middle`（默认）。 |
 | `b_adapt` | 自适应 B 帧放置。 |
 | `nonref_p` | 非参考 P 帧，默认开启。 |
-| `spatial_aq` / `spatial-aq` | 空间自适应量化 — 把码率花在肉眼更敏感的区域。默认开启。AV1 只接受带连字符的写法。 |
+| `spatial_aq` / `spatial-aq` | 空间自适应量化：把更多码率花在肉眼更敏感的区域。默认开启。AV1 只接受带连字符的写法。 |
 | `temporal-aq` | 时间自适应量化。默认开启。 |
 | `aq-strength` | AQ 强度，1–15。默认 8。 |
 | `rc-lookahead` | 码率控制的前瞻分析帧数。默认 32。 |
-| `lookahead_level` | 前瞻质量，0–3。仅 HEVC/AV1 — 在 H.264 上会被忽略并警告（编码器无法使用它）。 |
+| `lookahead_level` | 前瞻质量，0–3。仅 HEVC/AV1。在 H.264 上会被忽略并警告。 |
 | `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。Jasna 会根据源码率自动设置（见下文）；自行指定 `maxrate` 则以你的值为准。 |
 | `multipass` | 两遍编码: `disabled`、`qres`、`fullres`。 |
 | `weighted_pred` | 加权预测。NVENC 仅在 `bf=0` 时支持；否则（以及 AV1 上始终）会被忽略并警告。 |
@@ -177,9 +189,9 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 
 #### 输出体积自动上限
 
-`cq` 只针对固定质量，不考虑源文件的存储方式，因此低码率保存的源会被重新编码到远高于
-其自身质量的水平，体积膨胀数倍。为此，Jasna 会根据源视频码率推导 `maxrate`，并将
-`bufsize` 设为其两倍：
+`cq` 追求固定的质量，不管源视频是怎么编码的。这样，低码率的源输出后会变大好几倍。
+为避免这种情况，Jasna 会根据源视频的码率设置 `maxrate`，并把 `bufsize` 设为它的
+两倍：
 
 | 情况 | 上限 |
 | ---- | ---- |
@@ -187,13 +199,11 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 | 其他输出，HEVC 源 | 源视频码率的 1.25 倍 |
 | 其他组合 | 源视频码率的 1.0 倍 |
 
-NVIDIA H.264 获得更多余量，因为保留修复后的细节需要更多码率。该上限只对低码率保存的源
-生效；码率充足的源不受影响。达到上限时，CQ 仍是目标质量，但相近的数值可能得到相同的
-码率和文件大小。
+NVIDIA H.264 的余量更大，因为它需要更多码率来保留修复后的细节。这个上限只对低码率的
+源有影响。高码率的源本来就低于上限。达到上限时，相近的 CQ 值可能得到相同的文件大小。
 
-自行指定 `maxrate` 即可替换；设为很大的值可实际停用。若源完全没有报告码率，Jasna 会
-记录警告并在无上限的情况下编码。
-AMD 的 10-bit HEVC/AV1 输出使用固定 QP，因此没有自动体积上限。
+自己设置 `maxrate` 可替换这个上限，设一个很大的值则相当于关闭。如果源没有码率信息，
+Jasna 会记录警告，并且不设上限。AMD HEVC 和 AV1（10-bit）使用固定 QP，没有上限。
 
 
 各编解码器额外参数:
@@ -204,7 +214,7 @@ AMD 的 10-bit HEVC/AV1 输出使用固定 QP，因此没有自动体积上限�
 | `h264` | `profile`（`baseline`、`main`、`high` — 默认 `high`）、`coder`（`cabac`/`cavlc`） |
 | `av1` | `tier`、`tile-rows`、`tile-columns`（并行解码大分辨率画面） |
 
-#### AMD (AMF) 参数 — 所有编解码器
+#### AMD (AMF) 参数，所有编解码器
 
 | 参数 | 作用 |
 | --- | ------------ |
@@ -260,40 +270,33 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | `--cloud-workspace` | 与 `--machine-key` 或 `--license-code` 一起使用，创建或复用云身份。仅限受支持的容器内的 Linux 官方版 CLI，且须由卖家开通云权限。 |
 | `--activation-key KEY` | 保存本机的激活密钥。未指定处理选项时，激活后退出。 |
 
-在线激活使用 `--license-code`，仅通过 HTTPS 向[激活服务](https://jasna-activation.kruk2.workers.dev)发送许可证码和本机的机器密钥。Jasna 确认返回的**激活密钥**适用于本机后，只保存此密钥，不保存许可证码。之后启动和修复时离线验证激活，不会定期联网检查。
-
-Jasna 语言设为中文时优先使用[香港服务](https://47.238.135.110)，其他语言优先使用原服务。无法连接时会尝试另一个地址。两个地址共用许可证码和 3 个设备名额。
+在线激活：
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-手动激活时，复制机器密钥，在任意联网设备上打开同一页面，输入机器密钥和许可证码，或向官方卖家申请。保存返回的激活密钥：
+手动激活：显示机器密钥，在任意设备上打开[激活页面](https://jasna-activation.kruk2.workers.dev)，
+输入机器密钥和许可证码，然后保存返回的激活密钥：
 
 ```bash
 jasna --machine-key
 jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-`--license-code` 不能与 `--machine-key` 或 `--activation-key` 同时使用。`--license-code` 和 `--activation-key` 均可与 `--input`、`--output` 一起使用，激活后直接处理。
+`--license-code` 不能与 `--machine-key` 或 `--activation-key` 一起使用。
 
-在 RunPod 或 Vast 上，须**在受支持的容器内运行 Linux 官方版 CLI**。请先向官方卖家申请云权限，并在激活前将设置目录保存在持久卷上。`XDG_CONFIG_HOME` 指定用于存放 `jasna/` 的目录。选择在线或手动激活：
+- 租用的 GPU（RunPod、Vast）：加上 `--cloud-workspace`，并把 `XDG_CONFIG_HOME`
+  设为一个你会备份的私有文件夹。它保存你的激活，所以每次运行都要用同一个文件夹：
 
-```bash
-# 在线
-XDG_CONFIG_HOME=/workspace/config jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+  ```bash
+  export XDG_CONFIG_HOME=/root/jasna-config
+  ./jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+  ```
 
-# 手动
-XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
-XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
-```
-
-之后运行也须使用同一设置目录。主机或 GPU 更换后仍复用同一名额；将设置目录和激活密钥一起复制，也会转移身份。
-
-两种方式共用每个许可证码的 **3 台机器或工作区**名额，相同机器密钥的重复请求不占新名额。只有所有者可以释放名额或批准更换。激活密钥只包含已购买的模型版本；旧版激活格式的密钥须向官方卖家申请替换。
-
-在线激活失败时，请从另一台联网设备手动激活，或将许可证码和机器密钥发送给官方卖家申请。服务无法保证在中国大陆等地区可用；同样适用 3 个名额的限制。
+  不要使用 RunPod 的 `/workspace`，它会忽略私有文件权限。完整步骤：[云 GPU](cloud.md)。
+- 设备名额、隐私，以及激活失败时怎么办：[激活付费模型](gui.md#激活付费模型)。
 
 ## 基准测试
 

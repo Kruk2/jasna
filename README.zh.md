@@ -1,12 +1,15 @@
-> **付费模型的正版许可证码只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2) 或 [Unifans](https://app.unifans.io/c/kruk2) 获取。**
+> **付费模型的正版许可证码只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](#在闲鱼购买) 获取。**
 
 [English](README.md) | [日本語](README.ja.md) | [**中文**](README.zh.md)
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna
 
-Jasna 是一个 马赛克修复工具，提供简洁 GUI、CLI、纯 GPU 处理流水线、NVIDIA TensorRT 与实验性 AMD ROCm 支持、可选二级修复模型、静态图像修复以及流媒体支持。
+Jasna 修复 视频和图像中的马赛克。它有简单的 GUI 和命令行，完全在 GPU 上运行
+（NVIDIA，或实验性的 AMD）。
 
-Jasna 是免费的。支持者会获得许可证码，用于激活为本项目训练的额外模型: **unet-4x** 二级放大模型，以及实验性的 **SD 1.5 图像修复**模型。详情见[支持本项目](#支持本项目)。
+Jasna 是免费的。支持者会获得许可证码，用于激活为本项目训练的额外模型：
+**unet-4x** 放大模型和实验性的 **SD 1.5** 图像模型（15 美元）；或者这两个再加上
+**LTX** 修复模型（25 美元）。见[支持本项目](#支持本项目)。
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
 
@@ -27,97 +30,103 @@ Jasna 是免费的。支持者会获得许可证码，用于激活为本项目�
 
 ## Jasna 能做什么
 
-- 修复视频文件中的马赛克。
-- 使用实验性 SD 1.5 图像模型修复静态图像中的马赛克。
-- 默认使用快速的 `rfdetr-v6` 模型检测马赛克；也提供更大的 RF-DETR 变体，以及 Lada 和 ZeLeFans YOLO 模型。
-- 可逐眼处理并排 VR180 视频，并按片商自动选择最合适的马赛克修复方式；还可在区间编辑器中预览每种方式。
-- NVIDIA 和 AMD GPU 均支持按帧选择范围，区间编辑器还提供修复预览以及缩放和平移检查。
-- 通过时间重叠和交叉淡化减少片段边界闪烁。
-- 检测硬切镜头并在切换点结束跟踪片段，确保修复不会混合切换前后的画面。
-- 在 NVIDIA RTX 显卡上还可使用 [LTX](docs/zh/models.md#修复模型)：慢很多，但效果更细腻的修复模型。
-- 在 NVIDIA GPU 上，可使用可选的[二级修复模型](docs/zh/models.md) — **unet-4x**、**RTX Super Resolution** 或 **Topaz Video AI** — 进一步提升质量，让修复区域更清晰，尤其是大面积马赛克、特写和 4K 视频。目前 AMD 不支持二级修复。
-- 内置原生 GUI 视频播放器，无需生成输出文件即可全屏播放和跳转修复画面。
-- 可将修复后的视频串流到内置浏览器播放器，或支持的 Stash 分支。
+- 修复视频中的马赛克，以及用 SD 1.5 模型修复图像中的马赛克。
+- 用快速的 `rfdetr-v6` 模型查找马赛克。也有其他检测模型（更大的 RF-DETR、
+  Lada YOLO、ZeLeFans）。
+- 两个修复模型：快速的 **BasicVSR++**（默认，免费），以及慢但细节更多的
+  [LTX](docs/zh/models.md#修复模型)（付费，仅限 NVIDIA）。
+- 可选的[二次修复](docs/zh/models.md#二次修复)让修复区域更清晰，主要用于大马赛克
+  和 4K（仅限 NVIDIA）：**unet-4x**、**RTX Super Resolution** 或 **Topaz Video AI**。
+- 按每只眼处理 VR180 左右并排视频，并按片商选择设置。
+- **区间编辑器**：只修复视频的一部分、扫描马赛克、预览结果，并为每个区间选择模型。
+- 片段边界平滑过渡（时间重叠和交叉淡入淡出），不会跨镜头切换混合画面。
+- **视频播放器**：实时观看修复后的视频，不用生成文件。
+- 串流到浏览器，或串流到为 Jasna 制作的 [Stash](docs/zh/streaming.md#stash) 版本。
 
 ## 社区
 
-加入 SLS Discord 查看示例、获取支持，并讨论设置。请不要表现得太奇怪。
+加入 SLS Discord 查看示例、获取帮助和讨论设置。
+请不要表现得太奇怪。
 
 ## 要求
 
-- NVIDIA **GTX 16 系列 / RTX 20 系列或更新**的 GPU。GTX 10 系列及更旧的显卡（GTX 1050/1060/1070/1080）无法使用。不确定自己的显卡？请查看 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus) — 需要计算能力 7.5 或更高。
-- Nvidia 驱动: Windows 需 **610 或更新**，Linux 需 **580 或更新**。
-- AMD 支持是实验性的，需要 ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI 核显）。Windows 上请把 AMD Adrenalin 驱动更新到 26.8.1 或更高版本。
-- 请把 Jasna 安装到路径只包含英文字母和数字的文件夹中。
-
-Jasna 会自动管理 VRAM: 显存不足时，等待中的帧会临时移动到系统内存。无需任何配置。
+- NVIDIA **GTX 16 系列 / RTX 20 系列或更新**。GTX 10 系列及更旧的显卡
+  （GTX 1050/1060/1070/1080）无法使用。不确定？你的 GPU 在 NVIDIA 的
+  [GPU 表格](https://developer.nvidia.com/cuda/gpus)中需要计算能力 7.5 或更高。
+- NVIDIA 驱动：Windows 需 **610 或更新**，Linux 需 **580 或更新**。
+- AMD（实验性）：ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、
+  Ryzen AI）。Windows 上需要 AMD Adrenalin 驱动 26.8.1 或更新。
+- 把 Jasna 安装到路径只包含英文字母和数字的文件夹中，并放在本地磁盘上：
+  Windows 用 NTFS，Linux 用 ext4、Btrfs 或 XFS。
+- LTX 的要求更高。见 [LTX 需要什么](docs/zh/models.md#ltx-需要什么)。
 
 ## 快速开始
 
-1. 下载与你的操作系统和 GPU 厂商匹配的发行包。
-2. 解压到路径只包含英文字符的文件夹。
-3. 启动应用:
-   - Windows: 双击 `jasna.exe`。
-   - Linux NVIDIA: 运行 `jasna` 文件。
-   - Linux AMD: 运行 `run_jasna_amd.sh`。
-4. 添加视频或图像，选择设置，然后开始处理。
+1. 下载适合你的系统和 GPU 的发行包。
+2. 解压到路径只包含英文字母的文件夹。
+3. 启动应用：
+   - Windows：双击 `jasna.exe`。
+   - Linux NVIDIA：运行 `jasna` 文件。
+   - Linux AMD：运行 `run_jasna_amd.sh`。
+4. 添加视频或图像，选择设置，点击开始。
 
-Windows 请使用本地 NTFS 磁盘，Linux 请使用 ext4、Btrfs 或 XFS 磁盘。界面打开前会显示安装检查的启动窗口，
-首次启动需要更长时间。
+首次启动需要更长时间。主窗口打开前，会先显示一个启动窗口，里面是安装检查。
 
-GUI 中的每个设置都有提示 — 把鼠标悬停在旁边的 ⓘ 图标上即可查看。[GUI 指南](docs/zh/gui.md)会带你了解其余功能: 重新运行整个队列、队列翻页和排序、媒体操作和播放器快捷方式、预设、输出文件名模板等等。
+在 Windows 上，Jasna 的临时文件也可以放在 ImDisk 等 NTFS 内存盘上。见
+[Windows 临时文件](docs/zh/cli.md#windows-临时文件)。
 
-更喜欢命令行？
+每个设置都有提示：把鼠标移到 ⓘ 图标上即可查看。[GUI 指南](docs/zh/gui.md)
+介绍了其余功能：队列、预设、输出文件名、视频播放器等。
+
+命令行：
 
 ```bash
-# Single video
+# One video
 jasna --input input.mp4 --output output.mkv
 
-# Still image
+# One image
 jasna --input photo.png --output restored.png
 
-# Whole folder
+# A whole folder
 jasna --input input_folder --output output_folder
 ```
 
-运行 `jasna --help` 查看全部选项，或阅读 [CLI 参考](docs/zh/cli.md)。
+`jasna --help` 会列出所有选项。更多内容见 [CLI 参考](docs/zh/cli.md)。
 
 ## 首次运行
 
-首次运行会比较慢，因为 Jasna 需要针对你的显卡准备 GPU 专用文件。NVIDIA 通常需要 **15-60 分钟**；AMD 的准备时间要短得多。这只会发生一次 — 结果会缓存在 `model_weights` 中，之后每次运行都会复用。你也可以把它们从旧版本 Jasna 复制到新版本中。
+第一个任务会很慢，因为 Jasna 要为你的 GPU 准备文件。NVIDIA 上大约需要
+**15–60 分钟**，AMD 上要短得多。这只会发生一次。这些文件保存在 `model_weights` 中，
+之后会重复使用。你可以把它们从旧版本 Jasna 复制到新版本中。
 
-请关闭其他应用程序（包括浏览器），并在此期间避免使用电脑。
+在此期间请关闭其他应用（包括浏览器），也不要使用电脑。
 
-如果处理时显存不足，请先降低**最大片段大小**，例如从 `180` 降到 `60`。见[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)。
+任务中显存不足？先降低**最大片段大小**，例如从 `90` 降到 `60`。见
+[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)。
 
 ## 了解更多
 
-- **[使用 GUI](docs/zh/gui.md)** — 修复视频播放器、队列、预设、输出文件名模板与文件冲突，以及其他容易错过的功能。
-- **[选择模型](docs/zh/models.md)** — 该选哪个检测模型、更慢但更细腻的 LTX 修复模型、用二级修复（unet-4x / RTX Super Resolution / Topaz）获得更清晰的结果，以及 SD 1.5 静态图像修复。
-- **[只修复视频的一部分](docs/zh/segments.md)** — 区间编辑器、内置马赛克扫描、提交更好的遮罩，`--segments` CLI 参数，以及只对大马赛克用 LTX（`--ltx-auto-split`）。
-- **[VR180 视频](docs/zh/vr180.md)** — Jasna 如何处理并排 VR，以及按片商的自动设置。
-- **[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)** — 片段大小、时间重叠、模型编译，以及显存不足时该怎么办。
-- **[高级处理](docs/zh/advanced_processing.md)** — 降噪、60→30 FPS 导出、色彩 LUT、锐化、原样传给编码器的 CQ 质量设置、自定义编码器设置，以及队列级或逐视频导出后操作。
-- **[流媒体](docs/zh/streaming.md)** — 在浏览器中或通过 Stash 实时观看修复后的视频。
-- **[云 GPU](docs/zh/cloud.md)** — 在租来的 GPU（RunPod、Vast、Docker）上用 Jasna。
-- **[CLI 参考](docs/zh/cli.md)** — 所有命令行选项，包括 `--cq`、输出模板、各编解码器的编码器设置和导出后操作。
-- **[从源代码运行](docs/en/development.md)** — 开发者环境搭建和构建说明。
+- **[使用 GUI](docs/zh/gui.md)**：队列、预设、输出文件名、视频播放器、激活。
+- **[选择模型](docs/zh/models.md)**：检测模型、BasicVSR++ 还是 LTX、二次修复、
+  用于图像的 SD 1.5。
+- **[只修复视频的一部分](docs/zh/segments.md)**：区间编辑器、马赛克扫描、
+  仅大马赛克用 LTX、`--segments`。
+- **[VR180 视频](docs/zh/vr180.md)**：如何处理左右并排 VR。
+- **[调整 VRAM 和 GPU 占用](docs/zh/tuning.md)**：片段大小、时间重叠、显存不足时
+  怎么办。
+- **[高级处理](docs/zh/advanced_processing.md)**：降噪、60→30 FPS、色彩 LUT、
+  锐化、编码器质量、队列完成后的操作。
+- **[流媒体](docs/zh/streaming.md)**：在浏览器或 Stash 中观看。
+- **[云 GPU](docs/zh/cloud.md)**：在租用的 GPU（RunPod、Vast）上运行 Jasna。
+- **[CLI 参考](docs/zh/cli.md)**：所有命令行选项。
+- **[从源代码运行](docs/en/development.md)**：面向开发者。
 
-免费 BasicVSR++ 可在没有私有保护模块的情况下从源代码运行。激活和加密的付费模型需要官方发行版。
+从源代码运行时可以使用免费的 BasicVSR++。激活和付费模型需要官方发行版。
 
 ## 基准测试
 
-在 Linux、RTX 5090（驱动 595.84）和 i9-13900K 上进行端到端修复。每个构建均使用
-默认模型以及 `--max-clip-size 180 --temporal-overlap 15
---secondary-restoration none`。Lada Flatpak 0.11.0 使用高精度 `v2`
-检测器、CUDA FP16、`--max-clip-length 180` 和 NVIDIA HEVC HQ
-预设。冻结版和 Lada 的计时为舍弃预热运行后的一次实测；v0.9.0 和 v0.9.1 的
-计时为预热后交替目标顺序运行三次的中位数。括号内的倍数以 Lada 为基准；由于
-Lada 未运行 8K，该行改用 v0.9.0 作为基准。每个 SONE 片段有 6,056 帧（3:22），
-8K VR 片段有 900 帧（15 秒）。
-
-表中只列出速度或显存确实发生变化的版本，以及每种分辨率一个输入。全部版本和
-编码见[完整基准测试报告](benchmarks/2026-07-26_release_matrix.md)。
+修复整个视频所需的时间，BasicVSR++ 加默认模型，RTX 5090（Linux），与 Lada 对比。
+越低越好。测试片段长 3:22，8K VR 片段长 15 秒。
 
 | 输入 | Lada 0.11.0 v2 | v0.4.1 | v0.5.0 | v0.9.0 (4a171c9) | **v0.9.1 (18add8a)** |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -126,9 +135,7 @@ Lada 未运行 8K，该行改用 v0.9.0 作为基准。每个 SONE 片段有 6,0
 | 2160p H.264 8-bit | 04:56 (基准) | 03:23 (快 1.5 倍) | 01:22 (快 3.6 倍) | 01:15 (快 3.9 倍) | **01:03 (快 4.7 倍)** |
 | 8K VR HEVC 8-bit 60 fps | — | — | — | 00:34 (8K 基准) | — |
 
-GPU 显存为基准测试目标的中位数/峰值（GiB）；`—` 表示未运行。括号内的倍数以
-中位数与 v0.4.1 比较；v0.4.1 未运行的 8K 行改用 v0.9.0 作为基准。Lada 不参与
-该比较：它的显存占用低于任何 Jasna 版本。
+GPU 显存占用（典型/峰值，单位 GB）。`—` 表示未测量。
 
 | 输入 | Lada | v0.4.1 | v0.5.0 | v0.9.0 | **v0.9.1** |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -137,13 +144,9 @@ GPU 显存为基准测试目标的中位数/峰值（GiB）；`—` 表示未运
 | 2160p H.264 8-bit | 2.6/4.1 | 26.0/30.5 (基准) | 12.9/15.0 (少 2.0 倍) | 11.4/15.4 (少 2.3 倍) | **7.2/10.9 (少 3.6 倍)** |
 | 8K VR HEVC 8-bit 60 fps | — | — | — | 17.1/18.3 (8K 基准) | — |
 
-v0.9.1 显存下降的原因是修复子引擎改为按固定批大小构建，而不是按片段大小构建，
-详见[引擎批大小报告](benchmarks/2026-07-28_engine_batch_vram.md)。
-RAM 的中位数/峰值、测试方法、原始数据及性能提交对比，请参阅
-[完整基准测试报告](benchmarks/2026-07-26_release_matrix.md)。
-
-较早的完整长视频结果见
-[旧版基准测试报告](benchmarks/2026-07-26_legacy_videos.md)（英文）。
+测试方法、内存占用以及所有版本和编码：
+[完整基准测试报告](benchmarks/2026-07-26_release_matrix.md)。较早的完整长视频：
+[旧版报告](benchmarks/2026-07-26_legacy_videos.md)。
 
 ## 许可证
 
@@ -154,44 +157,72 @@ Jasna 的公开应用程序源代码采用 AGPL-3.0。模型和捆绑依赖项�
 
 ## 支持本项目
 
-支持用于训练额外模型，主要是租用 GPU，以及在更大数据集上训练所需的计算时间。支持者可激活以下模型:
+你的支持用于训练新模型，主要是租用 GPU 来训练更大的数据集。付费模型：
 
-- **unet-4x** 二级放大模型，用于更清晰的 256->1024 修复。
-- **SD 1.5 图像修复**，实验性静态图像模型。
+| 支持 | 模型 |
+| --- | --- |
+| 累计 **15 美元**或以上 | **unet-4x**：二次放大模型，结果更清晰（256 → 1024）。<br>**SD 1.5**：用于静态图像的实验性模型。 |
+| **25 美元** | **unet-4x** 和 **SD 1.5**，再加上<br>**LTX**：比 BasicVSR++ 慢很多，但细节更多。仅限 NVIDIA。包含这个 LTX 模型以后的更新。 |
 
-结果示例:
+**[TBD] 之前**累计支持 **15 美元或以上**的支持者可免费获得 LTX。
 
-- unet-4x / 二级修复示例（SLS Discord）
-- SD 1.5 图像修复示例（SLS Discord） 和 更多 SD 1.5 示例
+**购买 LTX 之前：**
 
-激活步骤:
+- 看看 SLS Discord 频道
+  中的示例。
+- 在你的电脑上用**试用模式（速度测试）**运行 LTX。它是免费的，可以看出你的 GPU 能否
+  运行 LTX、需要多长时间。视频不会被修复。见
+  [LTX 需要什么](docs/zh/models.md#ltx-需要什么)。
 
-1. 累计贡献 **15 美元或以上**，不限次数、不限时间。官方卖家会发送**许可证码**：[Unifans](https://app.unifans.io/c/kruk2) 通过平台消息发送，[Buy Me a Coffee](https://buymeacoffee.com/kruk2)（包括加密货币）发送到贡献时使用的邮箱或账号。
-2. 打开**激活 Jasna**，在默认的**在线**选项中输入许可证码，点击**在线激活**。
-3. 使用浏览器或离线激活时，选择**手动**。复制**机器密钥**，在任意联网设备上打开[香港激活页面](https://47.238.135.110)，输入机器密钥和许可证码，或向官方卖家申请。将返回的**激活密钥**粘贴到 Jasna 并点击**激活**。
+更多示例：
 
-点击**在线激活**时，Jasna 仅通过 HTTPS 向该服务发送许可证码和机器密钥。它确认返回的激活密钥适用于本机后，只保存此密钥，不保存许可证码；之后启动和修复时离线验证激活，不会定期联网检查。
+- unet-4x / 二次修复（SLS Discord）
+- SD 1.5 图像修复（SLS Discord） 和 更多 SD 1.5 示例
 
-Jasna 语言设为中文时会优先使用[香港激活页面](https://47.238.135.110)，其他语言优先使用原服务。无法连接时会自动尝试另一个地址。两个地址共用同一许可证码和 3 个设备名额。
+### 在哪里购买
 
-两种方式共用每个许可证码的 **3 台机器或工作区**名额。为相同机器密钥重新获取密钥不会占用新名额。只有所有者可以释放名额或批准更换，买家不能自行删除注册。激活密钥只包含已购买的模型版本；已购买的 LTX 也可包含在内。
+许可证码**只**在这里出售：
 
-**RunPod 或 Vast** 云激活仅限在受支持的容器内通过 Linux 官方版 [CLI](docs/zh/cli.md#激活) 使用。RunPod 的用户映射容器请使用更新后的 Linux 版。请先向卖家申请云权限，并私下备份 Jasna 设置目录。RunPod 请使用指南中的 `/root` 设置，主机或 GPU 更换后仍可使用同一名额。将该目录与激活密钥一起复制，也会转移工作区身份。 命令：[云 GPU](docs/zh/cloud.md)。
+- [Buy Me a Coffee](https://buymeacoffee.com/kruk2)（也可以用加密货币）
+- [Unifans](https://app.unifans.io/c/kruk2)
+- 中国用户：[闲鱼 (Xianyu)](#在闲鱼购买)，见下文
 
-在线激活失败时，请从另一台联网设备使用**手动**方式，或将许可证码和机器密钥发送给官方卖家申请。服务无法保证在中国大陆等地区可用；同样适用 3 个名额的限制。旧版激活格式的密钥需要替换；旧密钥仍可用于原先接受它们的旧版 Jasna。
+#### 在闲鱼购买
 
-许可证码**仅**在以上两个官方页面出售。其他出售 Jasna、许可证码或修改版文件的人都是骗子：他们的密钥无法用于官方版本，文件可能会在电脑上运行隐藏代码。请只从 GitHub 下载 Jasna。若激活失败，请核对机器密钥并重新复制完整激活密钥。密钥无效本身并不能证明欺诈；已知的非官方密钥会单独提示。
+国内用户可以直接在闲鱼购买，得到的许可证码和其他渠道一样。闲鱼使用单独的人民币本地价格，以商品页面为准。
+
+1. 用闲鱼 App 扫描下面的二维码，或打开[这个链接](XIANYU_LINK_TBD)。
+   商品名称是 **jasna正版激活码**。
+2. 下单后，卖家会发给你**许可证码**。
+3. 按照下面的[如何激活](#如何激活)在 Jasna 中激活。
+
+<img width="200" alt="闲鱼 jasna正版激活码" src="assets/xianyu-qr.png" />
+
+只有这个闲鱼商品是官方的。闲鱼上其他卖 Jasna 的人都不是官方卖家。
+
+其他出售 Jasna、许可证码或修改版文件的人都是骗子：他们的密钥无法使用，他们的文件
+可能在你的电脑上运行隐藏代码。请只从 GitHub 下载 Jasna。
+
+### 如何激活
+
+1. 在上面的任一页面购买。你会收到一个**许可证码**。
+2. 在 Jasna 中打开**激活 Jasna**，输入许可证码，点击**在线激活**。
+3. 这台电脑没有网络，或激活失败？选择**手动**，见
+   [激活付费模型](docs/zh/gui.md#激活付费模型)。
+
+一个许可证码可用于 **3 台电脑或云工作区**。之后会离线检查激活。租用的 GPU：见
+[云 GPU](docs/zh/cloud.md)。
 
 ## 致谢
 
-- **Lada（Codeberg）** — Jasna 受 Lada 启发，
-  部分代码也基于 Lada。Jasna 使用的 `mosaic_restoration_1.2` 修复模型由 Lada 作者
+- **Lada（Codeberg）**：Jasna 受 Lada 启发，
+  部分地方也基于 Lada。Jasna 使用的 `mosaic_restoration_1.2` 模型由 Lada 作者
   ladaapp 训练。
-- **ZeLeFans** — 感谢提供 VR 检测模型，以及对马赛克形状和 VR 投影的深入分析。
+- **ZeLeFans**：感谢提供 VR 检测模型，以及对马赛克形状和 VR 投影的详细分析。
 
 ## TODO
 
-当前 TODO:
+当前 TODO：
 
 - SeedVR 支持？
 - 持续改善性能和 VRAM 使用。

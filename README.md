@@ -1,14 +1,18 @@
-> **The only places to get a genuine License code for the paid models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2) and [Unifans](https://app.unifans.io/c/kruk2).**
+> **The only places to get a genuine License code for the paid models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2), [Unifans](https://app.unifans.io/c/kruk2), and for China the seller in the [Chinese README](README.zh.md#在闲鱼购买).**
 >
-> **付费模型的正版密钥只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2) 或 [Unifans](https://app.unifans.io/c/kruk2) 获取。**
+> **付费模型的正版密钥只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](README.zh.md#在闲鱼购买) 获取。**
 
 [**English**](README.md) | [日本語](README.ja.md) | [中文](README.zh.md)
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna 
 
-Jasna is a mosaic restoration tool with a simple GUI, a CLI, a GPU-only processing pipeline, NVIDIA TensorRT and experimental AMD ROCm support, optional secondary restoration models, still-image restoration, and streaming support.
+Jasna restores mosaics in videos and images. It has a simple GUI and a
+command line, and runs fully on the GPU (NVIDIA, or AMD as experimental).
 
-Jasna is free. Supporters get a License code to activate the extra models trained for this project: the **unet-4x** secondary upscaler and the experimental **SD 1.5 image restoration** model. See [Supporting the project](#supporting-the-project).
+Jasna is free. Supporters get a License code for extra models trained for this
+project: the **unet-4x** upscaler and the experimental **SD 1.5** image model
+for $15 USD, or both plus the **LTX** restoration model for $25 USD. See
+[Supporting the project](#supporting-the-project).
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
 
@@ -29,103 +33,114 @@ Jasna is free. Supporters get a License code to activate the extra models traine
 
 ## What Jasna Does
 
-- Restores mosaics in video files.
-- Restores mosaics in still images with the experimental SD 1.5 image model.
-- Detects mosaics with the fast `rfdetr-v6` model by default; the larger RF-DETR variant and Lada and ZeLeFans YOLO models are also available.
-- Processes side-by-side VR180 videos per eye and automatically picks the best mosaic restoration handling for each studio; the Segment Editor can preview the options.
-- Supports frame-accurate ranges on NVIDIA and AMD GPUs, restoration previews, and zoom/pan inspection in the Segment Editor.
-- Reduces clip-boundary flicker with temporal overlap and crossfade.
-- Detects hard scene cuts and ends tracked clips at the boundary, so restoration never blends content across a cut.
-- Offers [LTX](docs/en/models.md#restoration-model), a much slower restoration model with more detailed results, on NVIDIA RTX GPUs.
-- Can further improve quality on NVIDIA GPUs with optional [secondary restoration models](docs/en/models.md#secondary-restoration) — **unet-4x**, **RTX Super Resolution**, or **Topaz Video AI** — which sharpen restored regions, especially large mosaics, close-ups, and 4K video. Secondary restoration is currently unavailable on AMD.
-- Includes a native GUI video player with full-screen playback and seeking through restored frames without creating an output file.
-- Can stream restored video to the built-in browser player or a supported Stash fork.
+- Restores mosaics in videos, and in images with the SD 1.5 model.
+- Finds mosaics with the fast `rfdetr-v6` model. Other detection models are
+  available too (bigger RF-DETR, Lada YOLO, ZeLeFans).
+- Two restoration models: fast **BasicVSR++** (default, free) and slow but
+  more detailed [LTX](docs/en/models.md#restoration-model) (paid, NVIDIA
+  only).
+- Optional [secondary restoration](docs/en/models.md#secondary-restoration)
+  makes restored areas sharper, mostly on big mosaics and 4K (NVIDIA only):
+  **unet-4x**, **RTX Super Resolution** or **Topaz Video AI**.
+- Handles VR180 side-by-side videos per eye, with settings picked per studio.
+- **Segment Editor**: restore only some parts of a video, scan for mosaics,
+  preview the result, and choose a model per range.
+- Smooth clip borders (overlap and crossfade) and no mixing across scene cuts.
+- **Video Player**: watch a video restored live, without making a file.
+- Streaming to your browser or to a [Stash](docs/en/streaming.md#stash)
+  version made for Jasna.
 
 ## Community
 
-Join the SLS Discord for examples, support, and settings discussion. Please don't be too weird.
+Join the SLS Discord for examples, help and
+settings. Please don't be too weird.
 
 ## Requirements
 
-- An NVIDIA **GTX 16-series / RTX 20-series or newer** GPU. GTX 10-series and older cards (GTX 1050/1060/1070/1080) won't work. Not sure about yours? Check NVIDIA's [GPU table](https://developer.nvidia.com/cuda/gpus) — compute capability 7.5+ is required.
-- Nvidia driver **610 or newer** on Windows, **580 or newer** on Linux.
-- AMD support is experimental and needs a ROCm-supported GPU (Radeon RX 7000/9000, Radeon 780M/760M/740M, Ryzen AI iGPUs). On Windows, update the AMD Adrenalin driver to 26.8.1 or newer.
-- Install Jasna into a folder whose path contains only English letters and numbers.
-
-Jasna manages VRAM automatically: when it runs low, waiting frames are temporarily moved to system RAM. No configuration needed.
+- NVIDIA **GTX 16-series / RTX 20-series or newer**. GTX 10-series and older
+  (GTX 1050/1060/1070/1080) don't work. Not sure? Your GPU needs compute
+  capability 7.5 or higher in NVIDIA's
+  [GPU table](https://developer.nvidia.com/cuda/gpus).
+- NVIDIA driver **610 or newer** on Windows, **580 or newer** on Linux.
+- AMD (experimental): a GPU supported by ROCm (Radeon RX 7000/9000, Radeon
+  780M/760M/740M, Ryzen AI). On Windows, AMD Adrenalin driver 26.8.1 or newer.
+- Install Jasna in a folder whose path has only English letters and numbers,
+  on a local disk: NTFS on Windows, ext4, Btrfs or XFS on Linux.
+- LTX needs more. See [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 ## Quick Start
 
-1. Download the release package for your OS and GPU vendor.
-2. Unzip it into a folder with only English characters in the path.
+1. Download the release for your system and GPU.
+2. Unpack it into a folder with only English letters in the path.
 3. Start the app:
-   - Windows: double click `jasna.exe`.
+   - Windows: double-click `jasna.exe`.
    - Linux NVIDIA: run the `jasna` file.
    - Linux AMD: run `run_jasna_amd.sh`.
-4. Add a video or image, choose settings, and start processing.
+4. Add a video or image, choose settings and click Start.
 
-On Windows, keep Jasna on a local NTFS disk; on Linux, use ext4, Btrfs or XFS.
-A loading window shows the
-installation check before the interface opens; the first launch takes longer.
+The first start takes longer. A loading window shows the installation check
+before the main window opens.
 
-Every setting in the GUI has a tooltip — hover the ⓘ icon next to it. The
-[GUI guide](docs/en/gui.md) tours the rest: full-queue reruns, queue
-pages and reordering, media actions, player shortcuts, presets, output patterns, and more.
+On Windows, Jasna's temporary files can also be on an NTFS RAM disk such as
+ImDisk. See [Windows temporary files](docs/en/cli.md#windows-temporary-files).
 
-Prefer the command line?
+Every setting has a tooltip: move the mouse over the ⓘ icon. The
+[GUI guide](docs/en/gui.md) explains the rest: the queue, presets, output
+names, the Video Player and more.
+
+Command line:
 
 ```bash
-# Single video
+# One video
 jasna --input input.mp4 --output output.mkv
 
-# Still image
+# One image
 jasna --input photo.png --output restored.png
 
-# Whole folder
+# A whole folder
 jasna --input input_folder --output output_folder
 ```
 
-Run `jasna --help` for all options, or read the [CLI reference](docs/en/cli.md).
+`jasna --help` lists all options. More in the [CLI reference](docs/en/cli.md).
 
 ## First Run
 
-The first run is slow because Jasna prepares GPU-specific files for your exact card. On NVIDIA this usually takes **15-60 minutes**; on AMD the preparation is much shorter. It only happens once — the results are cached in `model_weights` and reused on every later run. You can copy them from an older Jasna version to a newer one.
+The first job is slow, because Jasna prepares files for your exact GPU. On
+NVIDIA this takes about **15–60 minutes**, on AMD much less. It happens only
+once. The files are saved in `model_weights` and used again later. You can
+copy them from an older Jasna version to a newer one.
 
-Close other applications, including browsers, and avoid using the PC while this runs.
+Close other apps, also the browser, and don't use the PC during this time.
 
-If you run out of VRAM during processing, reduce **max clip size** first, for example from `180` to `60`. See [Tuning VRAM and GPU usage](docs/en/tuning.md).
+Out of VRAM during a job? Lower **max clip size** first, for example from `90`
+to `60`. See [Tuning VRAM and GPU usage](docs/en/tuning.md).
 
 ## Learn More
 
-- **[Using the GUI](docs/en/gui.md)** — the restored video player, queue, presets, output patterns, file conflicts, and other easy-to-miss features.
-- **[Choosing models](docs/en/models.md)** — which detection model to pick, the slower but more detailed LTX restoration model, sharper results with secondary restoration (unet-4x / RTX Super Resolution / Topaz), and SD 1.5 still-image restoration.
-- **[Restoring only parts of a video](docs/en/segments.md)** — the Segment Editor, built-in mosaic scanning, suggesting better masks, the `--segments` CLI flag, and LTX only for big mosaics (`--ltx-auto-split`).
-- **[VR180 videos](docs/en/vr180.md)** — how Jasna handles side-by-side VR and picks the right settings per studio.
-- **[Tuning VRAM and GPU usage](docs/en/tuning.md)** — clip size, temporal overlap, model compilation, and what to do when VRAM runs out.
-- **[Advanced processing](docs/en/advanced_processing.md)** — denoising, 60→30 FPS export, color LUTs, sharpening, literal encoder CQ controls, custom encoder settings, and queue-wide or per-video post-export actions.
-- **[Streaming](docs/en/streaming.md)** — watch restored video on the fly in your browser or through Stash.
-- **[Cloud GPUs](docs/en/cloud.md)** — use Jasna on a rented GPU (RunPod, Vast, Docker).
-- **[CLI reference](docs/en/cli.md)** — every command-line option, including `--cq`, encoder settings per codec, and post-export actions.
-- **[Running from source](docs/en/development.md)** — developer setup and build notes.
+- **[Using the GUI](docs/en/gui.md)**: queue, presets, output names, Video
+  Player, activation.
+- **[Choosing models](docs/en/models.md)**: detection models, BasicVSR++ or
+  LTX, secondary restoration, SD 1.5 for images.
+- **[Restoring only parts of a video](docs/en/segments.md)**: Segment Editor,
+  mosaic scan, LTX only for big mosaics, `--segments`.
+- **[VR180 videos](docs/en/vr180.md)**: how side-by-side VR is handled.
+- **[Tuning VRAM and GPU usage](docs/en/tuning.md)**: clip size, overlap, what
+  to do when VRAM runs out.
+- **[Advanced processing](docs/en/advanced_processing.md)**: denoise,
+  60→30 FPS, color LUT, sharpening, encoder quality, actions after the queue.
+- **[Streaming](docs/en/streaming.md)**: watch in the browser or in Stash.
+- **[Cloud GPUs](docs/en/cloud.md)**: Jasna on a rented GPU (RunPod, Vast).
+- **[CLI reference](docs/en/cli.md)**: all command line options.
+- **[Running from source](docs/en/development.md)**: for developers.
 
-Free BasicVSR++ works from source without the private protection module. Activation and encrypted paid models require the official release.
+From source you can use the free BasicVSR++. Activation and paid models need
+the official release.
 
 ## Benchmarks
 
-End-to-end restoration measured on Linux with an RTX 5090 (driver 595.84) and
-i9-13900K.
-Jasna used its default models with `--max-clip-size 180 --temporal-overlap 15
---secondary-restoration none`. Lada Flatpak 0.11.0 used the accurate `v2`
-detector, CUDA FP16, `--max-clip-length 180`, and its NVIDIA HEVC HQ preset.
-Frozen-release and Lada times are one measured run after a discarded warmup;
-v0.9.0 and v0.9.1 times are medians of three interleaved runs after warmup.
-Parenthetical ratios use Lada as the baseline; because Lada was not run on 8K,
-that row uses v0.9.0 as its baseline. The SONE clips contain 6,056 frames
-(3:22) each and the 8K VR clip 900 frames (15 s).
-
-Only the releases where speed or GPU memory actually moved are listed, and one
-input per resolution. Every version and every codec is in the
-[full benchmark report](benchmarks/2026-07-26_release_matrix.md).
+Time to restore a whole video, BasicVSR++ with default models, on an RTX 5090
+(Linux), compared with Lada. Lower is better. The test clips are 3:22 long,
+the 8K VR clip is 15 s.
 
 | Input | Lada 0.11.0 v2 | v0.4.1 | v0.5.0 | v0.9.0 (4a171c9) | **v0.9.1 (18add8a)** |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -134,10 +149,7 @@ input per resolution. Every version and every codec is in the
 | 2160p H.264 8-bit | 04:56 (baseline) | 03:23 (1.5x faster) | 01:22 (3.6x faster) | 01:15 (3.9x faster) | **01:03 (4.7x faster)** |
 | 8K VR HEVC 8-bit 60 fps | — | — | — | 00:34 (8K baseline) | — |
 
-GPU memory is median/peak GiB for the measured benchmark target; `—` means
-not run. Parenthetical ratios compare the median against v0.4.1, or against
-v0.9.0 on the 8K row that v0.4.1 never ran. Lada is left out of the comparison:
-it uses less GPU memory than any Jasna build.
+GPU memory used (typical / peak, in GB). `—` means not measured.
 
 | Input | Lada | v0.4.1 | v0.5.0 | v0.9.0 | **v0.9.1** |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -146,14 +158,9 @@ it uses less GPU memory than any Jasna build.
 | 2160p H.264 8-bit | 2.6/4.1 | 26.0/30.5 (baseline) | 12.9/15.0 (2.0x less) | 11.4/15.4 (2.3x less) | **7.2/10.9 (3.6x less)** |
 | 8K VR HEVC 8-bit 60 fps | — | — | — | 17.1/18.3 (8K baseline) | — |
 
-The v0.9.1 drop in GPU memory comes from building the restoration sub-engines
-at fixed batch sizes instead of at the clip size — see the
-[engine batch report](benchmarks/2026-07-28_engine_batch_vram.md). For
-median/peak RAM, methodology, raw data, and performance-commit comparisons see
-the [full benchmark report](benchmarks/2026-07-26_release_matrix.md).
-
-Older full-length video results are in the
-[legacy benchmark report](benchmarks/2026-07-26_legacy_videos.md).
+How it was measured, RAM use and every version and codec:
+[full benchmark report](benchmarks/2026-07-26_release_matrix.md). Older
+full-length videos: [legacy report](benchmarks/2026-07-26_legacy_videos.md).
 
 ## Licensing
 
@@ -164,40 +171,58 @@ retain their own terms. See [licensing and source availability](LICENSING.md),
 
 ## Supporting the Project
 
-Support pays for training extra models, mainly GPU rental and compute time for larger datasets. Supporters can activate:
+Your support pays for training new models, mostly GPU rental for bigger
+datasets. Paid models:
 
-- **unet-4x** secondary upscaler for sharper 256->1024 restoration.
-- **SD 1.5 image restoration**, the experimental still-image model.
+| Support | Models |
+| --- | --- |
+| **$15 USD** or more in total | **unet-4x**: secondary upscaler, sharper results (256 → 1024).<br>**SD 1.5**: experimental model for still images. |
+| **$25 USD** | **unet-4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA only. Includes future updates of this LTX model. |
 
-Example results:
+Supporters who gave **$15 USD or more before [TBD]** get LTX for free.
 
-- unet-4x / secondary restoration examples on SLS Discord
-- SD 1.5 image restoration examples on SLS Discord and more SD 1.5 examples
+**Before you buy LTX:**
 
-How to activate:
+- Look at the samples in the
+  SLS Discord channel.
+- Run LTX in **Trial mode** on your PC. It is free and shows if your GPU can
+  run LTX and how long it takes. The video is not restored. See
+  [What LTX needs](docs/en/models.md#what-ltx-needs).
 
-1. Contribute **$15 USD or more in total**. Your official seller sends a **License code** through [Unifans](https://app.unifans.io/c/kruk2) or [Buy Me a Coffee](https://buymeacoffee.com/kruk2), including crypto payments.
-2. Open **Activate Jasna**. In **Online** (the default), enter your License code and press **Activate online**.
-3. For browser or offline activation, choose **Manual**. Copy the **Machine key**, use it with your License code on the [activation page](https://jasna-activation.kruk2.workers.dev) from any connected device, or ask your official seller. Paste the returned **Activation key** into Jasna and press **Activate**.
+More examples:
 
-Jasna sends only your License code and Machine key to that service over HTTPS when you press **Activate online**. It checks and saves only the returned Activation key for this machine; your License code is not saved, and later starts and restoration check activation offline without periodic requests.
+- unet-4x / secondary restoration on SLS Discord
+- SD 1.5 image restoration on SLS Discord and more SD 1.5 examples
 
-If the service cannot be reached, Jasna tries the [Hong Kong activation page](https://47.238.135.110). With Chinese selected as Jasna's language, Hong Kong is tried first. Both addresses use the same License code and three device slots.
+### Where to buy
 
-Both methods share **3 machines or workspaces per License code**. Reusing a Machine key uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. An Activation key includes only purchased model versions, including LTX when purchased.
+License codes are sold **only** here:
 
-Cloud activation for **RunPod or Vast** uses the [CLI](docs/en/cli.md#activation) only, with the official Linux release inside a supported container. Use the updated Linux build for RunPod's user-remapped containers. Ask your seller to enable cloud use, and keep a private backup of the Jasna config folder so host or GPU changes reuse the same slot. On RunPod, follow the guide's `/root` config setup. Copying that folder with its Activation key transfers the workspace identity. Commands: [Cloud GPUs](docs/en/cloud.md).
+- [Buy Me a Coffee](https://buymeacoffee.com/kruk2) (crypto works too)
+- [Unifans](https://app.unifans.io/c/kruk2)
+- For China: see the [Chinese README](README.zh.md#在闲鱼购买)
 
-If online activation fails, use **Manual** from another connected device or send your License code and Machine key to your official seller. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies. Earlier activation formats need replacement; old keys still work with compatible older Jasna versions.
+Anyone else selling Jasna, codes or modified files is a scam: their keys don't
+work, and their files can run hidden code on your PC. Download Jasna only from
+GitHub.
 
-License codes are sold **only** on the two official pages. Anyone else selling Jasna, codes or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub. If activation fails, check the Machine key and copy the full Activation key again. An invalid key alone does not prove fraud; known unofficial keys get a separate warning.
+### How to activate
+
+1. Buy on one of the pages above. You get a **License code**.
+2. In Jasna, open **Activate Jasna**, enter the License code and press
+   **Activate online**.
+3. No internet on that PC, or it fails? Choose **Manual**, see
+   [Activate paid models](docs/en/gui.md#activate-paid-models).
+
+One License code works on **3 PCs or cloud workspaces**. Activation is checked
+offline after that. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
 
 ## Acknowledgments
 
-- **Lada (Codeberg)** — Jasna is inspired
-  by, and in some places based on, Lada. The `mosaic_restoration_1.2`
-  restoration model used by Jasna was trained by ladaapp, the Lada author.
-- **ZeLeFans** — for the VR detection model and the in-depth analysis of mosaic
+- **Lada (Codeberg)**: Jasna is inspired
+  by Lada and in some places based on it. The `mosaic_restoration_1.2` model
+  used by Jasna was trained by ladaapp, the author of Lada.
+- **ZeLeFans**: for the VR detection model and the detailed analysis of mosaic
   shapes and VR projection.
 
 ## TODO

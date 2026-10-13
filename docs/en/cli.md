@@ -1,9 +1,11 @@
 # CLI Reference
 
-Jasna's CLI mirrors the GUI. `jasna --help` always shows the full, current list of options; this page adds context and examples.
+The command line has the same features as the GUI. `jasna --help` always shows
+all options. This page explains them and gives examples.
 
-Official releases report startup checks on stderr before processing. `--no-progress`
-keeps only brief startup messages. The first launch after an install or update takes longer.
+Before processing, official releases print the startup checks to stderr.
+`--no-progress` keeps only short startup messages. The first start after an
+install or update takes longer.
 
 ```bash
 # Single video
@@ -17,6 +19,20 @@ jasna --input input_folder --output output_folder
 ```
 
 On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
+
+## Windows temporary files
+
+Jasna's temporary runtime folders can use an existing writable NTFS RAM disk,
+including ImDisk. Set `TMP` and `TEMP` before starting Jasna:
+
+```powershell
+$env:TMP = 'Z:\Temp'
+$env:TEMP = 'Z:\Temp'
+.\jasna.exe --version
+```
+
+Runtime folders follow `TMP`, then `TEMP`. Setting only `TMPDIR` does not move
+them. `--working-directory` controls segment files separately.
 
 ## General
 
@@ -38,11 +54,11 @@ On Windows the CLI is the same file as the app: `jasna.exe --input ...`.
 | ------ | ------- | ----- |
 | `--restoration-model-name` | `basicvsrpp` | Video restoration model: `basicvsrpp` (fast), `ltx` (more detail, much slower) or `ltx-undistilled` (the Best LTX model: slightly better than `ltx`, about 1.5x slower). See [Choosing models](models.md#restoration-model). |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | Restoration weights (a folder for LTX). |
-| `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only. |
-| `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs 12 GB of free VRAM. |
-| `--ltx-seed` | model default | LTX: another seed gives a slightly different result. |
-| `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model files. The video is not restored. |
-| `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders; a split video keeps its own codec, one that can't be split is restored whole with LTX. See [Segments](segments.md). |
+| `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only; other GPUs stop with an error. |
+| `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs about 12 GB of free VRAM; with less, those mosaics are restored normally. |
+| `--ltx-seed` | `20260923` | LTX: another seed gives a slightly different result; the same seed repeats it. |
+| `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model or a license. The video is not restored. |
+| `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments` or `--fmp4`. See [Segments](segments.md#cli---ltx-auto-split). |
 | `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | on | TensorRT compilation: big speed boost, more VRAM. See [Tuning](tuning.md). |
 | `--max-clip-size` | `90` | Maximum tracked clip length in frames. Main VRAM lever. |
 | `--temporal-overlap` | `8` | Overlap+discard margin at clip splits; reduces boundary flicker. |
@@ -112,37 +128,33 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 
 ### Choosing a codec
 
-- **`hevc`** (default): best balance of quality and file size, encodes in
-  10-bit. Plays on all modern devices and players. Use this unless you have
-  a reason not to.
-- **`h264`**: maximum compatibility (older TVs, browsers, editing software),
-  8-bit only, larger files at the same quality. Also the codec used for
-  streaming.
-- **`av1`**: best compression — smallest files at the same quality, 10-bit.
-  Needs a GPU generation that provides AV1 encoding (NVIDIA RTX 40-series or
-  newer) and a reasonably modern player.
+- **`hevc`** (default): good quality for the file size, 10-bit. Plays on all
+  modern devices. Use this if you are not sure.
+- **`h264`**: plays almost everywhere (old TVs, browsers, video editors).
+  8-bit only, bigger files at the same quality. Streaming always uses it.
+- **`av1`**: smallest files at the same quality, 10-bit. Needs a GPU that can
+  encode AV1 (NVIDIA RTX 40-series or newer) and a newer player.
 
-With `--segments`, the codec is locked to the input video's codec and
-`--codec` does not apply.
+With `--segments`, the output always has the codec of the input, and
+`--codec` is not used.
 
 ### Encoder settings
 
-`--cq` is the main quality control. The number shown in the GUI or supplied on
-the command line is sent to the active encoder unchanged (AMD AV1 multiplies it by 5); switching codecs does
-not translate it. Lower values improve quality and increase file size.
+`--cq` is the main quality setting. Lower means better quality and a bigger
+file. Jasna sends the number to the encoder as it is (only AMD AV1 multiplies
+it by 5). When you change the codec, the number is not converted.
 
 | GPU | H.264 default | HEVC default | AV1 default | Accepted range |
 | --- | ---: | ---: | ---: | --- |
 | NVIDIA | 25 | 28 | 35 | 1–51 for H.264/HEVC; 1–63 for AV1 |
 | AMD | 24 | 25 | 32 | H.264/HEVC: 0–51; AV1: 1–51 |
 
-NVIDIA reserves CQ 0 as an automatic value, so Jasna requires an explicit
-quality target starting at 1. The GUI remembers a separate literal value for
-each codec while you edit the current job.
+On NVIDIA, CQ 0 means "automatic", so Jasna needs a value of 1 or more. The
+GUI keeps a separate CQ value for each codec.
 
-`--encoder-settings` fine-tunes other hardware encoder options. Keys are
-validated against the active encoder — an unsupported key fails with a clear
-error listing what the encoder accepts:
+`--encoder-settings` changes other encoder options. Jasna checks every key.
+A key the encoder doesn't know stops the job with an error that lists the
+keys it accepts:
 
 ```bash
 # Higher quality (bigger file): lower CQ.
@@ -152,12 +164,11 @@ jasna --input in.mp4 --output out.mkv --cq 22
 jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=32,bf=4"
 ```
 
-For compatibility, `cq=22` inside `--encoder-settings` is still accepted when
-`--cq` is omitted. Supplying CQ through both interfaces is rejected instead of
-silently choosing one. In the GUI, the CQ control is authoritative, so CQ
-aliases are not accepted in **Encoder custom args**.
+`cq=22` inside `--encoder-settings` still works when you don't use `--cq`.
+Setting CQ in both places is an error. In the GUI, CQ can be set only with the
+CQ control, not in **Encoder custom args**.
 
-#### NVIDIA (NVENC) keys — all codecs
+#### NVIDIA (NVENC) keys, all codecs
 
 | Key | What it does |
 | --- | ------------ |
@@ -172,11 +183,11 @@ aliases are not accepted in **Encoder custom args**.
 | `b_ref_mode` | Use B-frames as references: `disabled`, `each`, `middle` (default). |
 | `b_adapt` | Adaptive B-frame placement. |
 | `nonref_p` | Non-reference P-frames, enabled by default. |
-| `spatial_aq` / `spatial-aq` | Spatial adaptive quantization — spends bits where the eye notices. On by default. AV1 accepts only the hyphenated spelling. |
+| `spatial_aq` / `spatial-aq` | Spatial adaptive quantization: spends more bits where the eye notices. On by default. AV1 accepts only the hyphenated spelling. |
 | `temporal-aq` | Temporal adaptive quantization. On by default. |
 | `aq-strength` | AQ aggressiveness, 1–15. Default 8. |
 | `rc-lookahead` | Frames analyzed ahead for rate control. Default 32. |
-| `lookahead_level` | Lookahead quality, 0–3. HEVC/AV1 only — on H.264 it is ignored with a warning (the encoder can't use it). |
+| `lookahead_level` | Lookahead quality, 0–3. HEVC/AV1 only. On H.264 it is ignored with a warning. |
 | `maxrate` / `bufsize` | Bitrate cap and VBV buffer size, in bits per second. Jasna sets these automatically from the source bitrate (see below); setting `maxrate` yourself replaces that. |
 | `multipass` | Two-pass encoding: `disabled`, `qres`, `fullres`. |
 | `weighted_pred` | Weighted prediction. NVENC supports it only together with `bf=0`; otherwise (and always on AV1) it is ignored with a warning. |
@@ -184,10 +195,10 @@ aliases are not accepted in **Encoder custom args**.
 
 #### Automatic output size ceiling
 
-`cq` targets a fixed quality regardless of how the source was stored, so a cheaply
-encoded source gets re-encoded well above its own quality point and grows several
-times larger. To bound that, Jasna derives `maxrate` from the source video bitrate
-and sets `bufsize` to twice it:
+`cq` aims for a fixed quality, no matter how the source was encoded. A source
+with low bitrate would then come out several times bigger. To stop that, Jasna
+sets `maxrate` from the bitrate of the source video, and `bufsize` to twice
+that:
 
 | Case | Ceiling |
 | ---- | ------- |
@@ -195,15 +206,14 @@ and sets `bufsize` to twice it:
 | Other output from an HEVC source | 1.25 x source video bitrate |
 | Other combinations | 1.0 x source video bitrate |
 
-NVIDIA H.264 gets more room because it needs more bits to retain restored detail.
-The ceiling only binds on sources that were cheaply encoded; a generously encoded
-source is unaffected and comes out below it anyway. When it binds, CQ remains a
-quality target, but nearby values can produce the same bitrate and file size.
+NVIDIA H.264 gets more room, because it needs more bits to keep the restored
+detail. The limit matters only for sources with low bitrate. A source with high
+bitrate stays below it anyway. When the limit is hit, close CQ values can give
+the same file size.
 
-Pass your own `maxrate` to replace this, or set it very high to effectively disable
-it. If the source reports no bitrate at all, Jasna logs a warning and encodes
-without a ceiling.
-AMD HEVC and AV1 10-bit output use constant QP and have no automatic size ceiling.
+Set your own `maxrate` to replace the limit, or a very high one to turn it off.
+If the source has no bitrate information, Jasna logs a warning and uses no
+limit. AMD HEVC and AV1 (10-bit) use constant QP and have no limit.
 
 
 Per-codec extras:
@@ -214,7 +224,7 @@ Per-codec extras:
 | `h264` | `profile` (`baseline`, `main`, `high` — default `high`), `coder` (`cabac`/`cavlc`) |
 | `av1` | `tier`, `tile-rows`, `tile-columns` (parallelize decode of large frames) |
 
-#### AMD (AMF) keys — all codecs
+#### AMD (AMF) keys, all codecs
 
 | Key | What it does |
 | --- | ------------ |
@@ -270,40 +280,37 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | `--cloud-workspace` | Create or reuse a cloud identity with `--machine-key` or `--license-code`. CLI only: the official Linux release must run inside a supported container, with cloud use enabled by your seller. |
 | `--activation-key KEY` | Save the Activation key for this machine. With no processing options, activate and exit. |
 
-For online activation, use `--license-code`. This sends only your License code and local Machine key to the [activation service](https://jasna-activation.kruk2.workers.dev) over HTTPS. Jasna checks and saves only the returned **Activation key** for this machine; it does not save your License code. Later starts and restoration check activation offline, with no periodic requests.
-
-If that address cannot be reached, Jasna tries the [Hong Kong service](https://47.238.135.110). Chinese language settings prefer Hong Kong first. Both addresses share your License code and three device slots.
+Online activation:
 
 ```bash
 jasna --license-code "YOUR_LICENSE_CODE"
 jasna --license-code "YOUR_LICENSE_CODE" --input input.mp4 --output output.mkv
 ```
 
-For manual activation, copy the Machine key and enter it with your License code on the same page from any connected device, or ask your official seller. Save the returned Activation key:
+Manual activation: print the Machine key, enter it with your License code on
+the [activation page](https://jasna-activation.kruk2.workers.dev) from any
+device, then save the Activation key it returns:
 
 ```bash
 jasna --machine-key
 jasna --activation-key "YOUR_ACTIVATION_KEY"
 ```
 
-Do not combine `--license-code` with `--machine-key` or `--activation-key`. Both `--license-code` and `--activation-key` can be used with `--input` and `--output` to activate and process in one run.
+Don't combine `--license-code` with `--machine-key` or `--activation-key`.
 
-For RunPod or Vast, run the **official Linux release through the CLI inside a supported container**. Ask your official seller to enable cloud use first, then keep the config folder on a persistent volume before activating. `XDG_CONFIG_HOME` selects the folder that contains `jasna/`. Choose online or manual activation:
+- Rented GPUs (RunPod, Vast): add `--cloud-workspace`, and set
+  `XDG_CONFIG_HOME` to a private folder that you back up. It holds your
+  activation, so use the same folder every run:
 
-```bash
-# Online
-XDG_CONFIG_HOME=/workspace/config jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+  ```bash
+  export XDG_CONFIG_HOME=/root/jasna-config
+  ./jasna --license-code "YOUR_LICENSE_CODE" --cloud-workspace
+  ```
 
-# Manual
-XDG_CONFIG_HOME=/workspace/config jasna --machine-key --cloud-workspace
-XDG_CONFIG_HOME=/workspace/config jasna --activation-key "YOUR_ACTIVATION_KEY"
-```
-
-Use the same config folder for later runs. Host or GPU changes reuse the workspace slot; copying the config with its Activation key transfers the identity.
-
-Both methods share **3 registered machines or workspaces per License code**; repeat requests for the same Machine key use no extra slot. Only the owner can release slots and approve replacements. Activation keys cover only purchased model versions; ask your official seller to replace keys in older activation formats.
-
-If online activation fails, use manual activation from another connected device or ask your official seller with your License code and Machine key. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies.
+  Don't use RunPod's `/workspace`, which ignores private file permissions.
+  Full steps: [Cloud GPUs](cloud.md).
+- Device slots, privacy and what to do when activation fails:
+  [Activate paid models](gui.md#activate-paid-models).
 
 ## Benchmark
 

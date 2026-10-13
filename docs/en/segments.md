@@ -1,109 +1,115 @@
 # Restoring Only Parts of a Video
 
-You don't have to restore a whole video. Pick just the scenes that need it —
-the rest of the video is copied through untouched, which is much faster and
-keeps the original quality everywhere else. The output is still the
-full-length video.
+You don't have to restore the whole video. Choose only the scenes with mosaics.
+Jasna copies the rest without changes, so it is much faster and the other
+parts keep their original quality. The output is still the full video.
 
 ## Segment Editor (GUI)
 
 <img width="822" alt="Segment editor" src="https://github.com/user-attachments/assets/c67939a9-37de-46ae-b722-20c6a0933df7" />
 
-Open it with the scissors button on any queued video.
+Open it with the scissors button on a video in the queue.
 
-- Preview the video and select frame-accurate ranges. Leave the selection
-  empty to restore the whole video.
-- **Restore preview** shows the restored video before you commit to
-  processing. BasicVSR++ parts update right away. An
-  [LTX](models.md#restoration-model) range has to be rendered first: the
-  **Render LTX** button shows how long it takes (often several minutes), and
-  Jasna asks before long renders.
-- Each range can use its own model (**Restore with**). To compare LTX seeds,
-  pick another seed and render again; click a tried seed to see it and keep
-  the best with **Use this seed**.
-- Use the visible **− / +** controls or the mouse wheel to zoom into details,
-  then drag the preview to pan. **Reset view** appears only after the view has
-  been changed.
-- When ranges are selected, the export keeps the source video codec — the
-  main **Encoding** codec setting does not apply, because unselected parts
-  are copied as-is. The editor tells you upfront if a video can't be used
-  with segment processing.
+- Select the ranges to restore, accurate to the frame. With no ranges, the
+  whole video is restored.
+- **Restore with** sets the model for each range: BasicVSR++ or
+  [LTX](models.md#restoration-model).
+- **Restore preview** shows the restored picture before you start the job.
+  - BasicVSR++ ranges show it at once.
+  - LTX ranges must be rendered first. Click **Render LTX seed N**; the button
+    shows how long it takes (often a few minutes). Jasna asks before long
+    renders.
+  - To compare LTX seeds: choose another seed and render again. Tried seeds
+    are listed under **Tried**. Click one to see it, then **Use this seed** to
+    keep it.
+- Zoom with **− / +** or the mouse wheel, and drag the picture to move it.
+  **Reset view** goes back.
+- With ranges selected, the output keeps the codec of the source video. The
+  **Codec** setting in **Encoding** is not used, because the parts between
+  ranges are copied. If a video can't be processed in parts, the editor tells
+  you at once.
+- A BasicVSR++ range and an LTX range need some space between them. If they
+  are too close, the editor tells you.
 
 ### Mosaic scanning
 
-The editor can find mosaic scenes for you:
+The editor can find the mosaic scenes for you.
 
-- Scan every frame or at 0.25–2 second intervals. Scanning runs on the GPU
-  and reaches about **2,000 FPS on an RTX 5090**.
-- After scanning, adjust the confidence slider to update the amber detected
-  ranges, then add them to your purple restoration selection with one click.
-- With **Show masks in preview** on, each mosaic is tagged with its size
+1. Choose a detection model and how often to check: every frame (most
+   accurate) or every 0.25–2 seconds (faster). On an RTX 5090 a scan runs at
+   about **2,000 FPS**.
+2. Click **Scan video**. Found ranges show in amber on the timeline.
+3. Move the confidence slider to change what counts as found.
+4. **Add all ranges** turns the amber ranges into purple ranges, which are
+   restored.
+
+- **Show masks in preview** draws the found mosaics in red, with their size
   (longest side as % of the video height).
-- **LTX only for big mosaics** (shown after a scan when LTX can run): adds ranges
-  with a big mosaic as LTX and the rest as BasicVSR++, so the slow LTX only
-  runs where it helps most. A mosaic is big when its longest side is at least
-  the slider's share of the video height; 12% is a good start. Check the
-  ranges and change any you don't like.
+- **LTX only for big mosaics** appears after a scan if LTX can run on your
+  PC. It makes LTX ranges where a mosaic is big and BasicVSR++ ranges for the
+  rest, so the slow LTX runs only where it helps most. "Big" means the longest
+  side is at least the slider value, as % of the video height. 12% is a good
+  start. Check the ranges and change the ones you don't like.
 
-The detection model and confidence are remembered per queued video and used
-during final processing, so different videos can use different settings.
+The detection model and confidence are saved for this video and used for the
+final job. Other videos keep their own settings.
 
-### Suggesting better masks
+### Suggest a better mask
 
-When a detection looks wrong, you can help improve future models. Pause on
-the frame, click **Suggest better mask**, and outline each mosaic area — the
-editor guides you through drawing. If the mosaic fades out with soft or
-blurry edges, include that soft region too.
+If a detection is wrong, you can help train better models. Pause on the
+frame, click **Suggest better mask** and draw around each mosaic. The editor
+shows you how. If the mosaic has soft or blurry edges, include them too.
 
-Submitting uploads the frame and your mask **anonymously**. The data is
-encrypted on your machine before upload, and the only attached details are
-the app version, the detection model name, and the frame resolution — never
-file names, timestamps, or anything identifying you.
+Jasna uploads the frame and your mask **anonymously**. The data is encrypted
+on your PC before upload. Only the app version, detection model name and
+frame size are sent with it. No file names, no times, nothing about you.
 
 ## CLI: `--segments`
 
-The CLI counterpart of the editor. Times accept seconds or `HH:MM:SS.s`:
+The same as the editor, from the command line. Times are in seconds or
+`HH:MM:SS.s`:
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25,01:10-01:30.5"
 ```
 
-Jasna restores the listed ranges and usually copies everything else. A short
-transition around the nearest safe video cut points is re-encoded but not
-restored — this is required to splice the video back together seamlessly.
+Jasna restores the listed ranges and copies the rest. A few seconds around
+each range are encoded again (but not restored), because the video can only
+be cut at some frames.
 
-What works with segment processing:
+Limits:
 
-- NVIDIA and AMD GPUs.
-- One video at a time (no folders, images, or streaming).
-- H.264, HEVC, or AV1 input with constant frame rate; MP4, MOV, or MKV output.
-- On AMD, some H.264 files are fully re-encoded; only the selected ranges are restored.
-- The output codec always matches the input codec.
-- With `--restoration-model-name ltx`, every range uses LTX and `--ltx-seed`.
-- Cannot be combined with `--retarget-high-fps`.
-- Cannot be combined with `--fmp4`; the output is assembled after processing finishes.
+- Works on NVIDIA and AMD.
+- One video at a time. No folders, images or streaming.
+- Input: H.264, HEVC or AV1 with a constant frame rate. Output: MP4, MOV or
+  MKV.
+- The output codec is always the input codec.
+- On AMD, some H.264 files are encoded again in full. Only the ranges are
+  restored.
+- With `--restoration-model-name ltx`, every range uses LTX.
+- Cannot be used with `--retarget-high-fps` or `--fmp4`.
 
-Incompatible input is rejected with a clear error before processing starts.
+If the input can't be used, Jasna stops with an error before it starts.
 
 ## CLI: `--ltx-auto-split`
 
-The CLI version of **LTX only for big mosaics**. Jasna scans each video
-first, then restores big mosaics with LTX and smaller ones with BasicVSR++.
-It works on folders too:
+The same as **LTX only for big mosaics**, for the command line. Jasna scans
+each video first. Then it restores big mosaics with LTX and the rest with
+BasicVSR++. It works on folders too:
 
 ```bash
 jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto-split 12
 ```
 
-A split video keeps its own codec. A video segment processing can't handle is
-restored whole with LTX. Cannot be combined with `--segments`.
+The number is the mosaic size, as % of the video height. The output keeps
+the codec of the source video. If a video can't be processed in parts, it is
+restored whole with LTX. Cannot be used with `--segments` or `--fmp4`.
 
 ## Working directory
 
-While assembling segment output, Jasna keeps temporary files in a hidden
-folder next to the output video. If you want them on another (faster or
-bigger) drive, set the **Working directory** in the GUI's Encoding section,
-or use the CLI flag:
+While Jasna puts the video together, it keeps temporary files in a hidden
+folder next to the output. To use another disk (faster or bigger), set
+**Working directory** in the **Encoding** section, or:
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch

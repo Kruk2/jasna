@@ -2,136 +2,161 @@
 
 ## Detection model
 
-The detection model finds mosaics in each frame.
+The detection model finds the mosaics in each frame.
 
-- **Use the latest RF-DETR model** (`rfdetr-v6`) — it's the default, fast, and
-  the best all-rounder. Bundled with Jasna.
-- **`rfdetr-v6-large`** is a higher-quality, slower variant, and can be the
-  better pick for 4K videos. It is an optional
-  separate download — pick the file for your graphics card, drop it into
-  `model_weights/`, and Jasna detects it automatically:
+- **`rfdetr-v6`** (default, included): fast and good for most videos. Use
+  this one if you are not sure.
+- **`rfdetr-v6-large`**: better detection, but slower. Can be better for 4K.
+  It is a separate download. Take the file for your GPU and put it in
+  `model_weights/`. Jasna finds it automatically.
   - NVIDIA:
     [rfdetr-v6-large.onnx](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.onnx)
   - AMD:
     [rfdetr-v6-large.pt](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.pt)
-- **Lada YOLO** models can work better for 2D animations.
-- **rfdetr-vr-v1** (bundled) is the RF-DETR VR180 detection model — best for VR180 videos.
-- **zelefans-vr-yolo-v2** (optional download) is an alternative VR180 detector.
-- **On AMD**, RF-DETR runs on your graphics card and uses the `.pt` model
-  files (NVIDIA uses `.onnx`). It is slower than on NVIDIA, so pick
-  `lada-yolo-v4` when speed matters more than detection quality.
+- **`rfdetr-vr-v1`** (included): best for VR180 videos.
+- **`zelefans-vr-yolo-v2`** (separate download): another VR180 model.
+- **Lada YOLO** models: can be better for 2D animation.
+- The old `rfdetr-v5` still works.
 
-Each model applies its own recommended detection threshold by default
-(`rfdetr-v6`: 0.35, `rfdetr-v6-large`: 0.40); override with
-`--detection-score-threshold`.
+On AMD, RF-DETR is slower than on NVIDIA. If speed is more important than
+detection quality, use `lada-yolo-v4`.
 
-The legacy `rfdetr-v5` model remains supported.
+Each model has its own default confidence (`rfdetr-v6`: 0.35,
+`rfdetr-v6-large`: 0.40). Change it with `--detection-score-threshold`.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 ```
 
-You can also set a different detection model per video inside the
-[segment editor](segments.md).
+In the [Segment Editor](segments.md) you can choose another detection model
+for each video.
 
 ## Restoration model
 
-**BasicVSR++** is the default: fast, and it runs on every supported GPU.
-**LTX** is much slower but gives more detailed, more natural results. Use it
-for the videos or scenes you care about most. Pick it in the **Restoration
-Model** section, or:
+| | **BasicVSR++** (default) | **LTX** |
+| --- | --- | --- |
+| Speed | Fast | Much slower (minutes per minute of video) |
+| Quality | Good | More detail, more natural |
+| GPU | Every supported GPU | NVIDIA only |
+| Cost | Free | Paid ([buy separately](../../README.md#supporting-the-project)) |
+
+Use LTX for the videos or scenes you care about most. Before you buy it, look
+at the samples on the
+SLS Discord channel
+and run **Trial mode** to see if your PC can run it and how long it takes. Pick it in the
+**Restoration Model** section, or:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 ```
 
-- NVIDIA RTX only. Not for VR180 side-by-side videos or streaming.
-  Secondary restoration and denoise are off with LTX.
-- The Video Player always uses BasicVSR++. To preview LTX, turn on
-  **Restore preview** on an LTX range in the [Segment Editor](segments.md).
-- The time depends on how long mosaics are on screen, not on the length of
-  the video. The first run takes longer while Jasna prepares LTX for your GPU.
-- The model is not bundled: about 15 GB (about 9 GB for Fast mode). Jasna
-  asks before downloading it. If Hugging Face is blocked (for example in
-  China), it downloads from hf-mirror.com.
+### What LTX needs
+
+- **License**: an Activation key that includes LTX ($25 USD, also gives unet-4x and SD 1.5, see
+  [Supporting the project](../../README.md#supporting-the-project)). Without
+  one, the app offers **Trial mode** instead (see below); the CLI stops with
+  an error.
+- **GPU**: NVIDIA RTX 20-series or newer. GTX 16-series is untested. AMD is
+  not supported.
+- **VRAM**: 16 GB or more is best. Smaller cards work but are slower: parts of
+  the model are kept in system RAM. 11 GB is the smallest card tested so far.
+- **System RAM**: 32 GB recommended (loading the model uses about 19 GB).
+- **Disk**: the model is not bundled. Jasna asks before downloading it the
+  first time you start an LTX job:
+
+  | Model | Download |
+  | --- | ---: |
+  | Standard | about 15 GB |
+  | Fast mode | about 9 GB |
+  | Best, on top of Standard | about 13 GB more |
+
+  If Hugging Face can't be reached (for example in China), Jasna uses
+  hf-mirror.com automatically.
+
+LTX does not work with VR180 side-by-side videos or streaming. Secondary
+restoration and denoising are turned off with LTX.
 
 ### LTX options
 
-- **Model**: **Standard** (default) or **Best**, which is slightly better
-  and about 1.5x slower (another 13 GB download). CLI for Best:
-  `--restoration-model-name ltx-undistilled`.
-- **Fast mode**: RTX 50-series only. About 1.4x faster with slightly less
-  detail, and a smaller download. CLI: `--ltx-fast`.
+- **Model**: **Standard** (default) or **Best**. Best is slightly better and about 1.5x
+  slower. CLI: `--restoration-model-name ltx-undistilled`.
+- **Fast mode** (RTX 50-series only): about 1.4x faster, slightly less detail,
+  smaller download. CLI: `--ltx-fast`.
 - **Sharper large mosaics**: more detail on big mosaics (close-ups, 4K),
-  about 3x slower on those. Needs 12 GB of free VRAM, otherwise it has no
-  effect. CLI: `--ltx-large-canvas`.
-- **Seed**: another seed gives a slightly different result; the same seed
-  repeats it. CLI: `--ltx-seed 7`.
-- **Trial mode**: runs LTX at full speed without the model files, so
-  you can see how fast it is on your PC. The video is not restored. CLI:
-  `--ltx-trial`.
-- **LTX only for big mosaics**: big mosaics get LTX, smaller ones the faster
-  BasicVSR++. Each video is scanned first and parts without mosaics are
-  copied. Videos with ranges you set keep them. CLI: `--ltx-auto-split 12`.
+  about 3x slower on those. Needs about 12 GB of free VRAM (16 GB cards for
+  Segment Editor ranges); otherwise Jasna restores them normally. CLI:
+  `--ltx-large-canvas`.
+- **Seed**: a different seed gives a slightly different result; the same seed
+  gives the same result. CLI: `--ltx-seed 7`.
+- **Trial mode**: runs LTX at full speed without the model or a license, so
+  you can see how fast it is on your PC. The video is **not** restored.
+  CLI: `--ltx-trial`.
+- **LTX only for big mosaics**: big mosaics get LTX, the rest the faster
+  BasicVSR++. Saves a lot of time on long videos. See
+  [Restoring only parts of a video](segments.md#cli---ltx-auto-split).
 
-### Which GPU and how long
+To preview LTX, open the [Segment Editor](segments.md), select a range,
+choose LTX and turn on **Restore preview**. The Video Player always uses
+BasicVSR++.
+
+### How long it takes
 
 Rough time for **1 minute of 1080p video with mosaics on screen the whole
-time** (Standard model). Scenes without mosaics are much quicker; Best
-takes about 1.5x as long.
+time** (Standard model). Scenes without mosaics are much quicker. Best takes
+about 1.5x as long.
 
-| GPU | LTX | Time | With Fast mode |
-| --- | --- | ---: | ---: |
-| RTX 5090 | Fastest | about 5 min | about 3 min |
-| RTX 4090 | Works well | about 7 min | — |
-| RTX 5080 | Works well | about 10 min | about 6 min |
-| RTX 3090 | Works, slower | about 15 min | — |
-| RTX 2080 Ti | Works, very slow | about 45 min | — |
-| GTX 16-series | Not tested | — | — |
-| AMD | Not supported | — | — |
+| GPU | Time | With Fast mode |
+| --- | ---: | ---: |
+| RTX 5090 | about 5 min | about 3 min |
+| RTX 4090 | about 7 min | not available |
+| RTX 5080 | about 10 min | about 7 min |
+| RTX 3090 | about 15 min | not available |
+| RTX 2080 Ti | about 45 min | not available |
 
-- **VRAM**: 24 GB keeps the whole model on the GPU, 16 GB is fine, and
-  11–12 GB works but is slower. Less than 11 GB is untested.
-- **System RAM**: 32 GB recommended (loading the model uses about 19 GB). With
-  16 GB, use Fast mode, which needs about 10 GB.
-- **Windhawk**: LTX fails with "Access is denied" while Windhawk runs
-  inside Jasna. Exit Windhawk or add `jasna.exe` to its excluded processes.
-  Jasna warns about this when it starts (Windows only).
+- The first LTX run takes longer while Jasna prepares it for your GPU.
+- Progress shows four steps: finding mosaics, preparing, restoring, saving.
+  The first LTX video on your GPU, and the first after each update, starts
+  with a short speed test. After that, the time left is accurate from the end
+  of step 1.
+- LTX slows down when other apps use the GPU. Close games and browsers.
+- **Windows**: LTX fails with "Access is denied" while Windhawk runs inside
+  Jasna. Exit Windhawk or add `jasna.exe` to its excluded processes. Jasna
+  warns about this when it starts.
 
 ## Secondary restoration
 
-Jasna restores a 256x256 crop of each mosaic region. Large mosaic regions,
-close-ups, and 4K videos can therefore look blurry after the primary
-restoration. A secondary model upscales the restored crop to 512x512 or
-1024x1024 before blending it back, making it noticeably sharper.
+Jasna restores each mosaic as a 256x256 picture. On big mosaics, close-ups and
+4K video this can look blurry. A secondary model makes this picture bigger
+(512x512 or 1024x1024) before it goes back into the frame, so the result is
+sharper.
 
-Secondary restoration is currently available only on NVIDIA GPUs. AMD builds
-support primary restoration only.
+NVIDIA only. On AMD there is no secondary restoration.
 
-- **unet-4x**: supporter model. Faster than TVAI with similar quality in
-  current testing. Trained on an in-domain dataset and visually close to
-  TVAI `iris-2`. See
-  examples on SLS Discord.
-  Unlock it with a machine Activation key — see
-  [Supporting the project](../../README.md#supporting-the-project).
-  Keys from earlier activation formats need a replacement from your official seller.
-- **RTX Super Resolution**: very fast, free, and needs nothing extra.
-  Quality is okay. Some videos may flicker, so test on a short clip first.
-- **TVAI**: better than RTX Super Resolution and comparable to unet-4x, but
-  very slow. Requires [Topaz Video](https://www.topazlabs.com/topaz-video),
-  which is paid and Windows-only. Recommended model: `iris-2`.
+- **unet-4x** (paid): trained for restoration, quality close to TVAI `iris-2`, and
+  faster than TVAI. See the
+  examples on SLS Discord
+  and [Supporting the project](../../README.md#supporting-the-project).
+- **RTX Super Resolution** (free): very fast, nothing to install. Quality is
+  OK. Some videos flicker, so test a short clip first.
+- **TVAI**: similar to unet-4x, but very slow. Needs
+  [Topaz Video](https://www.topazlabs.com/topaz-video), which is paid and
+  Windows only. Use the `iris-2` model.
+
+Not used with LTX.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --secondary-restoration unet-4x
 ```
 
-For TVAI, set the `TVAI_MODEL_DATA_DIR` and `TVAI_MODEL_DIR` environment
-variables to your Topaz Video model folders, as shown below
-(`--tvai-args` can further customize the Topaz model parameters):
+For TVAI, set the environment variables `TVAI_MODEL_DATA_DIR` and
+`TVAI_MODEL_DIR` to your Topaz Video model folders, like below. `--tvai-args`
+changes other Topaz settings.
 
 <img width="505" height="37" alt="Topaz Video environment variables" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
 
 ### Speed and VRAM comparison
+
+Time and VRAM for two 1080p videos:
 
 | Secondary type           | CAWD 1080p        | K109 1080p      |
 | ------------------------ | -----------------:| -----------------:|
@@ -142,33 +167,32 @@ variables to your Topaz Video model folders, as shown below
 
 ## Still-image restoration (SD 1.5)
 
-For still images, Jasna uses a fine-tuned Stable Diffusion 1.5 inpaint model
-instead of the video pipeline. Just add an image to the GUI queue (or pass it
-on the CLI) — image jobs route to SD 1.5 automatically:
+For images, Jasna uses a different model: a trained Stable Diffusion 1.5
+model. Add an image to the queue (or give it to the CLI) and Jasna uses this
+model automatically:
 
 ```bash
 jasna --input photo.png --output restored.png
 ```
 
-- The model is **not bundled** and is about **6.9 GB**. Jasna asks before
-  downloading it from
-  [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav).
-- It is available to supporters. One machine Activation key can include SD 1.5,
-  unet-4x and purchased LTX versions — see
+- Paid. One Activation key can include SD 1.5, unet-4x and LTX. See
   [Supporting the project](../../README.md#supporting-the-project).
-  Keys from earlier activation formats need a replacement from your official seller.
-- Expect about **7 GB VRAM** during inference, a bit more for large 4K
-  images.
+- Not included in the download. It is about **6.9 GB**. Jasna asks before it
+  downloads it from
+  [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav).
+- Needs about **7 GB of VRAM**, a bit more for big 4K images.
 
-The SD 1.5 path is experimental. Results vary by scene, but some images can
-work very well. Generate several variants and keep the best one:
+This model is experimental. Results change a lot from image to image, but some
+are very good. Make a few versions and keep the best one:
 
 ```bash
 jasna --input photo.png --output restored.png --sd15-variants 4
 ```
 
-Every knob (`--sd15-steps`, `--sd15-strength`, `--sd15-seed`, ...) is listed
-in the [CLI reference](cli.md#sd-15-image-restoration).
+To try seeds one by one in the GUI, use
+[Process images interactively](gui.md#images-one-by-one). All options
+(`--sd15-steps`, `--sd15-strength`, `--sd15-seed`, ...) are in the
+[CLI reference](cli.md#sd-15-image-restoration).
 
 Examples:
 SD 1.5 examples on SLS Discord

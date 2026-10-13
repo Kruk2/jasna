@@ -52,10 +52,10 @@ cd jasna-linux-nvidia-0.11.0
 
 ```bash
 export XDG_CONFIG_HOME=/root/jasna-config
-./jasna --license-code あなたのライセンスコード --cloud-workspace
+./jasna --license-code YOUR-LICENSE-CODE --cloud-workspace
 ```
 
-`installation verified` の後、1 分ほど止まって見えることがあります。
+`installation verified` の後、最大 1 分ほど止まって見えることがあります。
 Ctrl+C は押さずに待ってください。
 
 RunPod の `/workspace` ではファイルを非公開にする権限が反映されない場合が
@@ -64,7 +64,7 @@ RunPod の `/workspace` ではファイルを非公開にする権限が反映�
 
 Jasna を起動する前に毎回 `export` を実行してください。Pod を削除する前に、
 `jasna-config` を自分の PC に非公開で保存してください。次の Pod の `/root`
-に非公開のまま戻すと、同じ有効化の枠を使えます。なくすと、空き枠が必要です。
+に非公開のまま戻すと、同じ有効化の枠を使えます。なくすと、もう一度有効化するには空き枠が必要です。
 
 ## 動画を復元する
 

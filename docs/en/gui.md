@@ -1,122 +1,138 @@
 # Using the GUI
 
-A tour of the app — including the small features that are easy to miss.
-Every setting has a tooltip: hover the ⓘ icon next to it.
+Every setting has a tooltip. Move the mouse over the ⓘ icon next to it.
 
-A loading window shows the installation check before the interface opens.
-The first launch after an install or update takes longer. Startup errors stay visible;
-use a local NTFS disk on Windows, or an ext4, Btrfs or XFS disk on Linux.
-Network disks are unsupported.
+The first start after an install or update takes longer. A loading window shows
+the installation check before the main window opens. If the check fails, the
+error stays on screen.
+
+Install Jasna on a local disk: NTFS on Windows, ext4, Btrfs or XFS on Linux.
+Network disks are not supported.
 
 ## The queue
 
-- Add videos or images with the **Add Files** button (the folder icon next
-  to it adds a whole folder), or just **drag & drop** them onto the queue.
-- For more than 20 items, use the arrows below the queue to view another page.
-  All pages process in order; dragging changes order within the shown page.
-- **Reorder jobs by dragging** a queue item by its handle — processing runs
-  top to bottom.
-- Each video has **scissors** for the [Segment Editor](segments.md) and a
-  **play** button that opens it in the restored player, ready but paused. Use
-  the **three-dot** menu (or right-click a row) to open its input folder.
-  Completed videos reveal their output file when the file manager supports it.
-  The menu can also copy the relevant path, open a completed output, or
-  requeue a finished, failed, or skipped item at the end of the queue.
-  Image rows have the folder menu too; the cross removes any item from the queue.
-- While processing, each item shows live progress, FPS, and time remaining.
-- Every time you press **Start**, Jasna processes every item still in the
-  queue from top to bottom, including finished or failed items. Change your
-  settings and press Start again without adding the files again.
-- **Stop** ends the run. The interrupted item goes back to **Pending**, and
-  the next Start begins the whole queue again. A half-written output file is
-  left on disk; the **File conflict** setting below decides what happens to it.
-- **Clear Done** removes finished jobs; **Clear** empties the queue.
+- Add videos or images with **Add Files**, or with the folder icon next to it
+  for a whole folder. You can also drag and drop files onto the queue.
+- Drag an item by its handle to change the order. Jasna processes the queue
+  from top to bottom.
+- With more than 20 items, use the arrows below the queue to change the page.
+  All pages are processed in order. Dragging works only inside one page.
+- Buttons on each video:
+  - **Scissors** opens the [Segment Editor](segments.md).
+  - **Play** opens the video in the Video Player, paused.
+  - **Three dots** (or right-click) opens the input folder, copies a path,
+    opens the finished output, or puts a finished, failed or skipped item back
+    at the end of the queue.
+  - **Cross** removes the item.
+- During processing, each item shows progress, FPS and time left.
+- **Start** always processes everything in the queue, also items that are
+  already finished or failed. So you can change settings and press Start
+  again without adding the files again.
+- **Stop** ends the run. The current item goes back to **Pending**. The half
+  written output file stays on disk; **File conflict** decides what happens
+  with it next time.
+- **Clear Done** removes finished items. **Clear** removes everything.
 
 ## Output settings
 
-- **Same as input** writes each result next to its original file. Click its
-  button beside Output location to return to this mode after choosing a folder.
-- Type a folder path directly, or use the folder button. Either choice turns
-  off **Same as input**.
-- The **filename pattern** controls output names — `{original}` stands for
-  the input name. If a pattern would overwrite something, the affected queue
-  items are highlighted immediately.
-- **File conflict** decides what happens when the output file already
-  exists: **Auto rename** (default, safe), **Overwrite**, or **Skip**.
+- **Same as input** saves each result next to its original file.
+- Type a folder path or use the folder button to save somewhere else. This
+  turns off **Same as input**. Click **Same as input** to turn it back on.
+- **Filename pattern** sets the output name. `{original}` is the input file
+  name. If a name would overwrite another file, the queue items are marked at
+  once.
+- **File conflict** decides what to do when the output file already exists:
+  **Auto rename** (default), **Overwrite** or **Skip**.
 
 ## Presets
 
-The bar at the top of the settings panel stores complete setting
-combinations. Create a preset for each kind of content you process (for
-example "1080p fast" and "4K best quality") and switch with one click. Jasna
-remembers your last-used preset across restarts.
+The bar at the top of the settings saves all settings under one name. Make one
+preset for each type of video, for example "1080p fast" and "4K best quality",
+and switch with one click. Jasna remembers the last preset after a restart.
 
 ## Per-video settings
 
-Detection model and confidence chosen in the [Segment Editor](segments.md)
-are remembered **per queued video**, so different videos in one queue can use
-different detection settings.
+The detection model and confidence you set in the [Segment Editor](segments.md)
+are saved for that one video. Other videos in the queue keep their own.
 
-## Restored video player
+## Video Player
 
-Select **Video Player** in the header to watch a video as Jasna restores it.
-Choose the detection model, confidence, and optional RTX Super Resolution or
-unet-4x pass, select **Choose video**, then press the normal play button.
-Use Space to play or pause and the Left/Right arrow keys to seek by 30 seconds.
-Seek, volume, and full-screen controls remain available during playback.
-Full screen expands the video to the largest size that preserves its source
-aspect ratio. Move the pointer to the bottom edge to reveal the playback panel;
-moving outside that panel hides it again.
+Click **Video Player** in the header to watch a video while Jasna restores it.
+No output file is created.
 
-In the header player, **Choose video** opens the file picker. Selecting it
-during playback stops the current restoration first. Changing the detection
-model, confidence, or secondary restoration also reloads the restoration
-pipeline at the current playback position. While playing, the status displays
-how many seconds of restored video are buffered ahead of the playhead. A buffer
-that repeatedly falls to zero means restoration cannot sustain real-time
-playback with the current settings.
+1. Choose the detection model, confidence and, if you want, RTX Super
+   Resolution or unet-4x.
+2. Click **Choose video**.
+3. Press play.
 
-The player does not create an output file. If restoration is slower than the
-video, audio pauses while more restored frames are prepared. It is available
-only while the queue and restoration preview are idle.
+- **Space**: play or pause. **Left/Right**: jump 30 seconds.
+- In full screen, move the mouse to the bottom edge to show the controls.
+- If you change the model, confidence or secondary restoration, playback
+  restarts from the same position.
+- The status shows how many seconds are restored ahead. If it drops to zero
+  again and again, your GPU is too slow for real time with these settings.
+  Audio waits until more frames are ready.
+- The player always uses BasicVSR++, not LTX.
+- It works only when the queue and the restore preview are not running.
 
-## Interactive image restoration
+## Images, one by one
 
-For still images, **Process images interactively** (in the SD 1.5 section)
-opens a side-by-side view: step through your images, try different seeds,
-compare the original, mask, and restored result, and save only the variants
-you like. Much faster than re-running whole jobs when experimenting.
+For still images, **Process images interactively** (in the **Image Restoration** section)
+opens a side-by-side view. Go through your images, try other seeds, compare
+original, mask and result, and save only the results you like. This is much
+faster than running the whole job again for each try.
 
 ## System check
 
-On the first launch of each version, Jasna runs a system check (GPU, driver,
-memory, install path). You can re-run it any time from the header — useful
-after a driver update or when something misbehaves.
+On the first start of each version, Jasna checks the GPU, driver, memory and
+install path. You can run it again from the header, for example after a driver
+update.
 
-## Other bits worth knowing
+## Other settings
 
-- **Language**: the first start follows your system language. Switch it any
-  time from the header dropdown (restart for the full effect).
-- **Logs**: the Logs button in the bottom bar shows live logs with level
-  filters and an export button (the newest 5000 entries) — attach an export when
-  reporting a problem.
-- **System stats**: GPU, VRAM, RAM, and CPU usage are shown in the bottom
-  bar while processing.
-- **Activation**: open **Activate Jasna** in the header to activate online or enter an Activation key manually. The chip shows whether activation is valid on this machine.
+- **Language**: the first start uses your system language. Change it in the
+  header. Restart Jasna to change all texts.
+- **Logs**: the Logs button in the bottom bar shows live logs. **Export** saves
+  the last 5000 lines. Please attach it when you report a problem.
+- **System stats**: the bottom bar shows GPU, VRAM, RAM and CPU use during
+  processing.
 
 ## Activate paid models
 
-Open **Activate Jasna** in the header. **Online** is selected by default; both **Online** and **Manual** show a **Machine key** you can copy but cannot edit.
+Paid models (unet-4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
+the header.
 
-- **Online**: enter the **License code** from your official seller and press **Activate online**.
-- **Manual**: copy the Machine key and enter it with your License code on the [activation page](https://jasna-activation.kruk2.workers.dev) from any connected device, or ask your official seller. **Open activation page** opens it in your browser. Paste the returned **Activation key** into Jasna and press **Activate**.
+- **Online** (default): enter the **License code** from your seller and click
+  **Activate online**.
+- **Manual**, for a PC without internet or when online fails:
+  1. Copy the **Machine key**.
+  2. On any device with internet, open the
+     [activation page](https://jasna-activation.kruk2.workers.dev) (or click
+     **Open activation page**) and enter the Machine key and your License code.
+     You can also send both to your seller.
+  3. Paste the **Activation key** you get back into Jasna and click
+     **Activate**.
 
-Pressing **Activate online** sends only your License code and Machine key to that service over HTTPS. Jasna checks and saves only the returned Activation key for this machine; it does not save your License code. Later starts and restoration check activation offline, with no periodic requests.
+Good to know:
 
-Both choices share **3 registered machines or workspaces per License code**. Retrieving the same Machine key's activation uses no extra slot. Only the owner can release slots and approve replacements; buyers cannot remove registrations. Releasing a slot does not disable keys already issued to older offline versions. A key covers only the model versions you purchased.
+- One License code works on **3 PCs or cloud workspaces**. Activating the same
+  PC again does not use a new slot. Only the owner can free a slot; you can't
+  remove a PC yourself.
+- An Activation key covers only the models you bought.
+- **Activate online** sends only your License code and Machine key, over HTTPS.
+  Jasna saves only the Activation key, not your License code. After that,
+  Jasna checks activation offline and does not contact the server again.
+- If the main server can't be reached, Jasna tries a
+  [server in Hong Kong](https://47.238.135.110). With Chinese language it
+  tries Hong Kong first. Both use the same 3 slots. Access is not guaranteed,
+  for example in mainland China.
+- Key rejected? Check the Machine key and copy the whole Activation key again.
+  Keys made for older Jasna versions need a new key from your seller.
+- Rented GPUs (RunPod, Vast) can be activated only from the command line. See
+  [Cloud GPUs](cloud.md).
 
-Cloud activation for **RunPod or Vast** is available only through the [CLI](cli.md#activation), using the official Linux release inside a supported container.
-
-If online activation fails, select **Manual** and use the page on another connected device, or ask your official seller with your License code and Machine key. Access to the service is not guaranteed, including in mainland China; the same 3-slot limit applies.
-
-If an Activation key is rejected, check the Machine key and copy the full key again. Earlier activation formats need a replacement from your official seller. License codes are sold only on Buy Me a Coffee and Unifans (kruk2).
+License codes are sold only on
+[Buy Me a Coffee](https://buymeacoffee.com/kruk2),
+[Unifans](https://app.unifans.io/c/kruk2) and, for China, the seller in the
+[Chinese README](../../README.zh.md#在闲鱼购买). Prices: see
+[Supporting the project](../../README.md#supporting-the-project).

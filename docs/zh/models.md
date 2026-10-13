@@ -4,156 +4,173 @@
 
 检测模型负责在每一帧中找到马赛克。
 
-- **使用最新的 RF-DETR 模型**（`rfdetr-v6`）— 它是默认值、速度快，也是综合
-  表现最好的选择。已随 Jasna 内置。
-- **`rfdetr-v6-large`** 是质量更高、速度更慢的变体，4K 视频可能更适合用它。
-  它是可选的单独下载，
-  请按显卡选择对应文件，放入 `model_weights/`，Jasna 会自动检测：
+- **`rfdetr-v6`**（默认，已内置）：速度快，适合大多数视频。不确定时就用它。
+- **`rfdetr-v6-large`**：检测更好，但更慢。4K 视频可能更适合。
+  它需要单独下载。请按显卡选择文件，放入 `model_weights/`。Jasna 会自动找到它。
   - NVIDIA：
     [rfdetr-v6-large.onnx](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.onnx)
   - AMD：
     [rfdetr-v6-large.pt](https://github.com/Kruk2/jasna/releases/download/0.1/rfdetr-v6-large.pt)
-- **Lada YOLO** 模型在 2D 动画上可能效果更好。
-- **rfdetr-vr-v1**（已内置）是用于 VR180 的 RF-DETR 检测模型，最适合 VR180 视频。
-- **zelefans-vr-yolo-v2**（可选下载）是 VR180 的备用检测模型。
-- **在 AMD 上**，RF-DETR 在显卡上运行，使用 `.pt` 模型文件（NVIDIA 使用
-  `.onnx`）。它比在 NVIDIA 上慢，若速度比检测质量更重要，请选择
-  `lada-yolo-v4`。
+- **`rfdetr-vr-v1`**（已内置）：最适合 VR180 视频。
+- **`zelefans-vr-yolo-v2`**（单独下载）：另一个 VR180 模型。
+- **Lada YOLO** 模型：在 2D 动画上可能更好。
+- 旧的 `rfdetr-v5` 仍然可用。
 
-每个模型默认应用其推荐的检测阈值（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）；
-可用 `--detection-score-threshold` 覆盖。
+在 AMD 上，RF-DETR 比在 NVIDIA 上慢。如果速度比检测质量更重要，请用
+`lada-yolo-v4`。
 
-旧版 `rfdetr-v5` 模型仍受支持。
+每个模型都有自己的默认置信度（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）。
+用 `--detection-score-threshold` 修改。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 ```
 
-你也可以在[区间编辑器](segments.md)中为每个视频单独设置不同的检测模型。
+在[区间编辑器](segments.md)中，可以为每个视频选择不同的检测模型。
 
 ## 修复模型
 
-**BasicVSR++** 是默认模型：速度快，所有支持的显卡都能运行。
-**LTX** 慢很多，但效果更细腻、更自然。适合你最在意的视频或场景。在
-**修复模型**区域选择它，或使用：
+| | **BasicVSR++**（默认） | **LTX** |
+| --- | --- | --- |
+| 速度 | 快 | 慢很多（每分钟视频需要几分钟） |
+| 质量 | 好 | 细节更多，更自然 |
+| GPU | 所有支持的 GPU | 仅 NVIDIA |
+| 费用 | 免费 | 付费（[单独购买](../../README.zh.md#支持本项目)） |
+
+把 LTX 用在你最在意的视频或场景上。购买前，先看看
+SLS Discord 频道
+上的示例，并运行**试用模式（速度测试）**，看看你的电脑能不能运行它、需要多长时间。
+在**修复模型**部分选择它，或使用：
 
 ```bash
 jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 ```
 
-- 仅限 NVIDIA RTX。不支持 VR180 左右并排视频和流媒体。使用 LTX 时
-  二级修复和降噪会关闭。
-- 视频播放器始终使用 BasicVSR++。要预览 LTX，请在
-  [区间编辑器](segments.md)中对 LTX 区间打开**修复预览**。
-- 耗时取决于马赛克出现的时长，而不是视频长度。首次运行时 Jasna 要为你的
-  显卡准备 LTX，会更慢。
-- 模型不随 Jasna 附带：约 15 GB（快速模式约 9 GB）。
-  Jasna 会在下载前询问你。无法访问 Hugging Face 时（例如在中国），
-  会改从 hf-mirror.com 下载。
+### LTX 需要什么
+
+- **许可证**：包含 LTX 的激活密钥（25 美元，同时包含 unet-4x 和 SD 1.5，见
+  [支持本项目](../../README.zh.md#支持本项目)）。没有的话，应用会改为提供
+  **试用模式（速度测试）**（见下文）；CLI 会报错停止。
+- **GPU**：NVIDIA RTX 20 系列或更新。GTX 16 系列未测试。不支持 AMD。
+- **显存**：最好 16 GB 或以上。显存更小的显卡也能用，但更慢：模型的一部分会
+  放在系统内存中。目前测试过的最小显卡是 11 GB。
+- **系统内存**：建议 32 GB（加载模型约占用 19 GB）。
+- **磁盘**：模型不随 Jasna 附带。第一次开始 LTX 任务时，Jasna 会先询问再下载：
+
+  | 模型 | 下载大小 |
+  | --- | ---: |
+  | 标准 | 约 15 GB |
+  | 快速模式 | 约 9 GB |
+  | 最佳，在标准之外 | 再加约 13 GB |
+
+  如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
+
+LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。
 
 ### LTX 选项
 
-- **模型**：**标准**（默认）或**最佳**。最佳效果稍好，约慢 1.5 倍
-  （需另外下载 13 GB）。最佳的 CLI：`--restoration-model-name ltx-undistilled`。
-- **快速模式**：仅限 RTX 50 系列。快约 1.4 倍，细节略少，下载也更小。
+- **模型**：**标准**（默认）或**最佳**。最佳效果稍好，约慢 1.5 倍。
+  CLI：`--restoration-model-name ltx-undistilled`。
+- **快速模式**（仅限 RTX 50 系列）：快约 1.4 倍，细节略少，下载更小。
   CLI：`--ltx-fast`。
-- **大马赛克更清晰**：让大马赛克（特写、4K）细节更多，这部分约慢 3 倍。
-  需要 12 GB 空闲显存，不够时不生效。CLI：`--ltx-large-canvas`。
-- **种子**：换一个种子，结果会略有不同；同一个种子会得到同样的结果。
+- **大马赛克更清晰**：大马赛克（特写、4K）细节更多，这部分约慢 3 倍。
+  需要约 12 GB 空闲显存（区间编辑器中的区间需要 16 GB 显卡）；否则 Jasna 会
+  按普通方式修复它们。CLI：`--ltx-large-canvas`。
+- **种子**：换一个种子，结果会略有不同；同一个种子得到同样的结果。
   CLI：`--ltx-seed 7`。
-- **试用模式**：无需模型文件，以真实速度运行 LTX，看看它在你的
-  电脑上有多快。视频不会被修复。CLI：`--ltx-trial`。
-- **仅大马赛克用 LTX**：大马赛克用 LTX，较小的用更快的 BasicVSR++。每个
-  视频会先扫描，没有马赛克的部分直接复制。设置了区间的视频按区间处理。
-  CLI：`--ltx-auto-split 12`。
+- **试用模式（速度测试）**：不需要模型和许可证，以全速运行 LTX，让你看看它在
+  你的电脑上有多快。视频**不会**被修复。CLI：`--ltx-trial`。
+- **仅大马赛克用 LTX**：大马赛克用 LTX，其余用更快的 BasicVSR++。长视频能省很多
+  时间。见[只修复视频的一部分](segments.md#cli---ltx-auto-split)。
 
-### 显卡与耗时
+要预览 LTX，请打开[区间编辑器](segments.md)，选择一个区间，选 LTX，再打开
+**修复预览**。视频播放器总是使用 BasicVSR++。
 
-**1 分钟 1080p、马赛克一直在画面中的视频**的大致耗时（标准模型）。
-没有马赛克的场景快得多；最佳约需 1.5 倍时间。
+### 需要多长时间
 
-| 显卡 | LTX | 耗时 | 快速模式 |
-| --- | --- | ---: | ---: |
-| RTX 5090 | 最快 | 约 5 分钟 | 约 3 分钟 |
-| RTX 4090 | 流畅 | 约 7 分钟 | — |
-| RTX 5080 | 流畅 | 约 10 分钟 | 约 6 分钟 |
-| RTX 3090 | 能用，较慢 | 约 15 分钟 | — |
-| RTX 2080 Ti | 能用，很慢 | 约 45 分钟 | — |
-| GTX 16 系列 | 未测试 | — | — |
-| AMD | 不支持 | — | — |
+**1 分钟 1080p、马赛克一直在画面中的视频**的大致耗时（标准模型）。没有马赛克的
+场景快得多。最佳约需 1.5 倍时间。
 
-- **显存**：24 GB 可把整个模型放在显卡上，16 GB 也没问题，11–12 GB
-  能用但更慢。低于 11 GB 未测试。
-- **内存**：建议 32 GB（加载模型时约占用 19 GB）。只有 16 GB 时，请使用约需 10 GB 的 Fast 模式。
-- **Windhawk**：Windhawk 在 Jasna 中运行时，LTX 会因“拒绝访问”而失败。
-  请退出 Windhawk，或把 `jasna.exe` 加入其排除进程列表。Jasna 启动时会提示（仅 Windows）。
+| GPU | 耗时 | 快速模式 |
+| --- | ---: | ---: |
+| RTX 5090 | 约 5 分钟 | 约 3 分钟 |
+| RTX 4090 | 约 7 分钟 | 不可用 |
+| RTX 5080 | 约 10 分钟 | 约 7 分钟 |
+| RTX 3090 | 约 15 分钟 | 不可用 |
+| RTX 2080 Ti | 约 45 分钟 | 不可用 |
 
-## 二级修复
+- 第一次运行 LTX 时，Jasna 要为你的 GPU 做准备，所以更慢。
+- 进度显示四个步骤：查找马赛克、准备、修复、保存。在你的 GPU 上第一次（以及每次更新后第一次）
+  处理 LTX 视频时，会先做一次简短的速度测试。之后从第 1 步结束起，剩余时间就是准确的。
+- 其他应用占用 GPU 时，LTX 会变慢。请关闭游戏和浏览器。
+- **Windows**：Windhawk 在 Jasna 中运行时，LTX 会因“拒绝访问”而失败。请退出
+  Windhawk，或把 `jasna.exe` 加入它的排除进程列表。Jasna 启动时会提示这一点。
 
-Jasna 会修复每个马赛克区域的 256x256 裁切图。因此，大面积马赛克、
-特写和 4K 视频在主修复后可能看起来模糊。二级模型会先把修复后的裁切图
-放大到 512x512 或 1024x1024，再混合回原视频，让画面明显更清晰。
+## 二次修复
 
-目前，二级修复仅适用于 NVIDIA GPU；AMD 版本只支持主修复。
+Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特写和 4K 视频上，这可能
+看起来模糊。二次模型会先把这张图放大（512x512 或 1024x1024），再放回画面，
+所以结果更清晰。
 
-- **unet-4x**: 支持者模型。当前测试中比 TVAI 更快，质量相近。它在
-  视频修复数据集上训练，视觉效果接近 TVAI `iris-2`。可以查看
-  SLS Discord 上的示例。
-  使用机器对应的激活密钥解锁 — 见[支持本项目](../../README.zh.md)。
-  旧版激活格式的密钥须向官方卖家申请替换。
-- **RTX Super Resolution**: 非常快、免费、没有额外依赖。质量尚可。
-  部分视频可能会闪烁，请先用短片段测试。
-- **TVAI**: 质量优于 RTX Super Resolution，并与 unet-4x 接近，但非常
-  慢。需要 [Topaz Video](https://www.topazlabs.com/topaz-video)，这是
-  付费软件且仅支持 Windows。推荐模型: `iris-2`。
+仅限 NVIDIA。AMD 上没有二次修复。
+
+- **unet-4x**（付费）：针对修复任务训练，质量接近 TVAI `iris-2`，比 TVAI 快。见
+  SLS Discord 上的示例
+  和[支持本项目](../../README.zh.md#支持本项目)。
+- **RTX Super Resolution**（免费）：非常快，无需安装任何东西。质量尚可。部分视频
+  会闪烁，请先用短片段测试。
+- **TVAI**：和 unet-4x 相近，但非常慢。需要
+  [Topaz Video](https://www.topazlabs.com/topaz-video)，它是付费软件，且仅支持
+  Windows。请使用 `iris-2` 模型。
+
+使用 LTX 时不会用到。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --secondary-restoration unet-4x
 ```
 
-对于 TVAI，请按下图所示，把 `TVAI_MODEL_DATA_DIR` 和 `TVAI_MODEL_DIR`
-环境变量设置为你的 Topaz Video 模型文件夹（`--tvai-args` 可以进一步
-自定义 Topaz 模型参数）:
+使用 TVAI 时，请把环境变量 `TVAI_MODEL_DATA_DIR` 和 `TVAI_MODEL_DIR` 设置为你的
+Topaz Video 模型文件夹，如下图。`--tvai-args` 可修改 Topaz 的其他设置。
 
 <img width="505" height="37" alt="Topaz Video environment variables" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
 
 ### 速度与 VRAM 对比
 
-| 二级类型 | CAWD 1080p | K109 1080p |
+两个 1080p 视频的耗时和 VRAM：
+
+| 二次修复类型 | CAWD 1080p | K109 1080p |
 | ------------------------ | -----------------:| -----------------:|
-| 无二级修复 | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
+| 无二次修复 | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
 | unet-4x                  | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
 | RTX Super-Res            | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
 | TVAI (2 workers, Iris-2) | 52秒 / 12.1 GB VRAM | 24秒 / 12.4 GB VRAM |
 
 ## 静态图像修复（SD 1.5）
 
-对于静态图像，Jasna 使用微调过的 Stable Diffusion 1.5 inpaint 模型，
-而不是视频流水线。只需把图像加入 GUI 队列（或通过 CLI 传入）— 图像
-任务会自动路由到 SD 1.5:
+对于图像，Jasna 使用另一个模型：训练过的 Stable Diffusion 1.5 模型。把图像加入
+队列（或交给 CLI），Jasna 会自动使用这个模型：
 
 ```bash
 jasna --input photo.png --output restored.png
 ```
 
-- 该模型**未随程序打包**，大小约 **6.9 GB**。Jasna 会在从
-  [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav)
-  下载前先询问你。
-- 面向支持者提供。同一个机器激活密钥可包含 SD 1.5、unet-4x 和已购买的 LTX 版本 —
-  见[支持本项目](../../README.zh.md)。
-  旧版激活格式的密钥须向官方卖家申请替换。
-- 推理期间大约需要 **7 GB VRAM**，较大的 4K 图像会再多一些。
+- 付费。一个激活密钥可以同时包含 SD 1.5、unet-4x 和 LTX。见
+  [支持本项目](../../README.zh.md#支持本项目)。
+- 不包含在下载包中。大小约 **6.9 GB**。Jasna 会先询问，再从
+  [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 下载。
+- 需要约 **7 GB VRAM**，较大的 4K 图像需要更多一点。
 
-SD 1.5 路径是实验性的。结果因场景而异，但有些图像可能效果非常好。
-可以生成多个变体，保留最好的那个:
+这个模型是实验性的。不同图像的效果差别很大，但有些非常好。多生成几个版本，
+保留最好的：
 
 ```bash
 jasna --input photo.png --output restored.png --sd15-variants 4
 ```
 
-所有可调参数（`--sd15-steps`、`--sd15-strength`、`--sd15-seed` 等）
-都列在 [CLI 参考](cli.md)中。
+要在 GUI 中逐个尝试种子，请使用[交互式处理图片](gui.md#逐张处理图像)。所有选项
+（`--sd15-steps`、`--sd15-strength`、`--sd15-seed` 等）都在
+[CLI 参考](cli.md#sd-15-图像修复)中。
 
-示例:
+示例：
 SLS Discord 上的 SD 1.5 示例
-和更多示例。
+和更多。

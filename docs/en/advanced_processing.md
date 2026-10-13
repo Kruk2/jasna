@@ -1,137 +1,136 @@
 # Advanced Processing
 
-Optional features for special cases. Everything here works in both the GUI
-(look for the matching setting, each has a tooltip) and the CLI.
+Extra features for special cases. Everything here works in the GUI (each
+setting has a tooltip) and in the CLI.
 
 ## Denoising
 
-Restored regions can carry noise artifacts. The Denoising setting
-(`--denoise low|medium|high`) applies gentle spatial denoising to the
-restored regions only — the rest of the frame is untouched. Start with `low`
-and raise it only if artifacts remain.
+Restored areas can have some noise. **Denoise Strength**
+(`--denoise low|medium|high`) cleans only the restored areas. The rest of the
+frame is not changed. Start with `low`, and go higher only if the noise is
+still visible.
 
-By default it runs before secondary restoration;
-`--denoise-step after_secondary` moves it right before blending.
+By default it runs before secondary restoration.
+`--denoise-step after_secondary` moves it to the end, just before the
+restored area goes back into the frame.
 
-## Detection stability filtering
+Not used with LTX.
 
-Detection is not perfect frame-to-frame: a mosaic can vanish for a frame or
-two (cutting one clip into several, with a visible seam and an unrestored
-frame), and a single-frame false detection triggers a needless restore.
+## Detection stability
 
-- **Max Detection Gap** (`--max-detection-gap`, default `2`) fills dropouts
-  up to N frames when the mosaic reappears at the same spot, keeping the
-  clip continuous.
-- **Min Detection Duration** (`--min-detection-duration`, default `2`) drops
-  detections shorter than N frames as false positives; those frames stay
-  unrestored.
+Detection is not perfect from frame to frame. A mosaic can disappear for one
+or two frames. Then the clip is cut in pieces, with a visible seam and one
+frame not restored. A false detection on a single frame starts a restore that
+is not needed.
 
-Keep both small so genuine fast appear/disappear moments are unaffected.
-`0` disables either.
+- **Max Detection Gap** (`--max-detection-gap`, default `2`): fills gaps up to
+  N frames when the mosaic comes back at the same place.
+- **Min Detection Duration** (`--min-detection-duration`, default `2`): drops
+  detections shorter than N frames. Those frames stay as they are.
+
+Keep both small, so real short mosaics are not affected. `0` turns either one
+off.
 
 ## Scene cut detection
 
-Without it, a mosaic tracked across a hard scene cut can end up in one clip
-spanning two different shots, and the restorer blends content across the
-cut. **Scene Cut Detection** (`--scene-detection`, default on) detects hard
-cuts and ends every tracked clip at the boundary, so each clip stays within
-a single shot. It runs on the GPU with negligible cost.
+Without it, a mosaic can be tracked across a hard cut, and the restorer mixes
+two different shots. **Scene Cut Detection** (`--scene-detection`, on by
+default) finds hard cuts and ends every clip there. It runs on the GPU and
+costs almost nothing.
 
-Disable with `--no-scene-detection` (or the switch in the GUI's Advanced
-section) only if you see clips being split where there is no real cut.
+Turn it off (`--no-scene-detection`, or the switch in **Advanced Processing**) only if
+clips are split where there is no real cut.
 
-## 60 FPS to 30 FPS export
+## 60 FPS to 30 FPS
 
-For 60 (or 59.94) FPS input, **Reduce 60 FPS to 30 FPS**
-(`--retarget-high-fps`) processes every second frame and writes 30 (or
-29.97) FPS output — half the processing work. Audio timing and playback
-speed are preserved. Other frame rates are unchanged:
+For 60 (or 59.94) FPS video, **Reduce 60 FPS to 30 FPS**
+(`--retarget-high-fps`) processes every second frame and saves 30 (or 29.97)
+FPS. That is half the work. Audio and speed stay correct. Other frame rates
+are not changed.
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --retarget-high-fps
 ```
 
-Cannot be combined with [segment processing](segments.md).
+Cannot be used with [segment processing](segments.md).
 
-## Playable while processing (fragmented MP4)
+## Playable while processing (fMP4)
 
-A normal MP4 can only be opened once the job is finished. **Playable while
-processing** (`--fmp4`) lets you play the output while it is still being made —
-handy for checking quality without waiting — and the file stays playable if a
-job is interrupted:
+A normal MP4 opens only after the job is done. With **Playable while
+processing** (`--fmp4`) you can play the output while it is still being made,
+for example to check quality early. If the job stops in the middle, the file
+still plays.
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --fmp4
 ```
 
-The video grows in steps of a few seconds, and players may show the wrong length
-until the job ends. Only `.mp4` and `.mov` output is affected. Not available with
-streaming or [segment processing](segments.md).
+The video grows a few seconds at a time, and players can show the wrong
+length until the job ends. Works only for `.mp4` and `.mov` output. Not
+available with streaming or [segment processing](segments.md).
 
 ## Color LUT
 
-Apply a `.cube` color LUT (1D or 3D) to the output — for color grading or
-matching a house look. Set it in the GUI's Encoding section or with
-`--lut path/to/look.cube`. The LUT is applied on the GPU just before
-encoding, so it costs almost nothing.
+Apply a `.cube` color LUT (1D or 3D) to the output, for color grading. Set
+**Color LUT** in the **Encoding** section, or use `--lut path/to/look.cube`.
+It runs on the GPU just before encoding, so it is almost free.
 
 ## Sharpening
 
-Restored video can look a little soft. **Sharpening** in the GUI's Encoding
-section (`--sharpen`) makes edges and fine detail crisper as the video is
-written, so you don't need a second pass through another tool.
+Restored video can look a bit soft. **Sharpening** in the **Encoding** section
+(`--sharpen`) makes edges and small details sharper while the video is saved.
+No second tool is needed.
 
 ```bash
 jasna --input in.mp4 --output out.mkv --sharpen 0.5
 ```
 
-`0` turns it off, `0.2`–`0.5` is a gentle boost, and `1` is the strongest and
-can look harsh. A sharper picture needs a bigger file, so if the result looks
-worse rather than better, lower the CQ value as well. The effect is not shown
-in the preview.
+`0` is off, `0.2`–`0.5` is a small boost, `1` is the strongest and can look
+too hard. A sharper picture needs more bits. If the result looks worse, also
+lower CQ. The preview does not show sharpening.
 
 ## Encoder quality and custom settings
 
-Use the GUI's **CQ** control or `--cq` for encoder quality. The displayed or
-entered number is passed to the encoder unchanged (AMD AV1 multiplies it by 5); lower means better quality
-and a bigger file. When Jasna limits output size, nearby CQ values can give
-the same result when that limit is reached:
+**CQ** (`--cq`) sets the quality. Lower means better quality and a bigger
+file. Jasna sends the number to the encoder as it is (only AMD AV1 multiplies
+it by 5). Jasna also limits the output size, and when that limit is hit,
+close CQ values can give the same file.
 
 ```bash
 jasna --input in.mp4 --output out.mkv --cq 22
 ```
 
-The **Encoder custom args** field (`--encoder-settings`) is for other advanced
-options such as bitrate caps and keyframe intervals. CQ aliases are rejected in
-the GUI custom-args field so the CQ control always matches what the encoder
-receives. Every accepted key, supported range, and default is documented in the
+**Encoder custom args** (`--encoder-settings`) is for other encoder options,
+for example bitrate limits or keyframe interval. CQ can't be set there in the
+GUI; use the CQ control. All keys, ranges and defaults are in the
 [CLI reference](cli.md#encoding).
 
-## Post-export actions
+## After the queue is done
 
-Run something when the whole queue finishes: **Shutdown PC** or a **custom
-command** (for example, a notification script). Set it in the GUI's
-Post-export section or via CLI:
+Run something when the whole queue is finished: **Shutdown PC** or a
+**Custom Command** (for example a script that sends you a message). Set it in
+the **Post-export Action** section or in the CLI:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 ```
 
-In the GUI you can change or turn off this action while jobs are running. Before
-**Shutdown PC**, the GUI counts down 60 seconds; press **Cancel** to keep the PC on.
+You can change or turn off this action while jobs are running. Before
+**Shutdown PC**, the GUI counts down 60 seconds. Press **Cancel** to keep the
+PC on.
 
-To run a command after every successful video instead, fill **Command after
-each video** or use `--post-export-video-command`. Jasna waits for it to finish;
-if it fails, that video is marked as failed. The path placeholders are already
-quoted:
+To run a command after each finished video, use **Command after each video**
+or `--post-export-video-command`. Jasna waits until it ends. If the command
+fails, that video is marked as failed. The command runs in the output folder.
+
+Placeholders: `{input}`, `{output}`, `{output_dir}`, `{output_stem}`,
+`{output_suffix}`. They are already quoted.
 
 ```bash
 jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
 
-Available placeholders are `{input}`, `{output}`, `{output_dir}`,
-`{output_stem}`, and `{output_suffix}`. The example keeps the original output;
-use a script with a temporary file if you want to replace it safely. `ffmpeg`
-must be on `PATH`, or replace it with its full path. The command's working
-folder is the output folder.
+This example keeps the original output and writes a second file. To replace
+the file, use a script with a temporary file. `ffmpeg` must be on `PATH`, or
+write its full path.
