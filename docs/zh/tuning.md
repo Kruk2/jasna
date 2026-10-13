@@ -52,8 +52,15 @@ jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overla
 
 ## 模型编译
 
-在 NVIDIA 上，Jasna 会为你的 GPU 编译修复模型（TensorRT）。这样快得多。你可以
-关闭它，但几乎没有理由这么做。AMD 从不编译。
+在 NVIDIA 上，Jasna 会为你的 GPU 编译检测模型和修复模型（TensorRT）。这样处理
+速度快得多。AMD 从不编译。
+
+- 编译在第一个任务时进行，大约需要 **15–60 分钟**。在此期间请关闭其他应用，也不要
+  使用电脑。
+- 结果保存在 `model_weights` 中，之后的每个任务都会重复使用。
+- 你可以把 `model_weights` 从旧版本 Jasna 复制到新版本中，这样就不用再等。
+
+你可以关闭修复模型的编译，但几乎没有理由这么做。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp

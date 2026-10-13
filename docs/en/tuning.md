@@ -60,9 +60,17 @@ makes processing about 3x slower.
 
 ## Model compilation
 
-On NVIDIA, Jasna compiles the restoration model for your GPU (TensorRT). This
-is much faster. You can turn it off, but there is almost no reason to. AMD
-never compiles.
+On NVIDIA, Jasna compiles the detection and restoration models for your exact
+GPU (TensorRT). This makes processing much faster. AMD never compiles.
+
+- It happens on the first job and takes about **15–60 minutes**. Close other
+  apps and don't use the PC during this time.
+- The result is saved in `model_weights` and used again on every later job.
+- You can copy `model_weights` from an older Jasna version to a newer one, so
+  you don't wait again.
+
+You can turn compilation off for the restoration model, but there is almost
+no reason to.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp

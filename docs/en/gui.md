@@ -6,8 +6,9 @@ The first start after an install or update takes longer. A loading window shows
 the installation check before the main window opens. If the check fails, the
 error stays on screen.
 
-Install Jasna on a local disk: NTFS on Windows, ext4, Btrfs or XFS on Linux.
-Network disks are not supported.
+Install Jasna on a local disk (NTFS on Windows; ext4, Btrfs or XFS on Linux),
+in a folder with only English letters and numbers in its path. Network disks
+are not supported.
 
 ## The queue
 
@@ -25,10 +26,10 @@ Network disks are not supported.
     at the end of the queue.
   - **Cross** removes the item.
 - During processing, each item shows progress, FPS and time left.
-- **Start** always processes everything in the queue, also items that are
-  already finished or failed. So you can change settings and press Start
+- **▶** (start) always processes everything in the queue, also items that are
+  already finished or failed. So you can change settings and press ▶
   again without adding the files again.
-- **Stop** ends the run. The current item goes back to **Pending**. The half
+- **■** (stop) ends the run. The current item goes back to **Pending**. The half
   written output file stays on disk; **File conflict** decides what happens
   with it next time.
 - **Clear Done** removes finished items. **Clear** removes everything.
