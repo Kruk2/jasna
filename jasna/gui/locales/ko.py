@@ -277,6 +277,7 @@ KO = {
         "ltx_trial_stage": "{stage} (체험)",
         "segments_seed_tried_trial": "시험한 시드(체험):",
         "ltx_stage_split": "모자이크 크기 분류 중",
+        "ltx_stage_speed_test": "GPU 속도 측정 중 (처음 한 번만)",
         "ltx_stage_scan": "모자이크 찾는 중",
         "ltx_stage_encode": "준비 중",
         "ltx_stage_denoise": "복원 중",

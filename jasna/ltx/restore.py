@@ -21,11 +21,12 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
-from dataclasses import dataclass
+from contextlib import closing, contextmanager
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
@@ -35,10 +36,20 @@ from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
 from jasna.ltx.model_files import LtxModelFiles
 from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder, WorkerTransformer
-from jasna.ltx.plan import LARGE_CANVAS, Region, TrackPlan, Window, crossfade_weights, feather_pixels, plan_video
+from jasna.ltx.plan import (
+    LARGE_CANVAS,
+    WINDOW_HOP,
+    Region,
+    TrackPlan,
+    Window,
+    crossfade_weights,
+    feather_pixels,
+    plan_video,
+)
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
 from jasna.models.ltx_vae import decode_latent
+from jasna.mosaic.detections import Detections
 from jasna.progressbar import StageProgress
 from jasna.tracking.scene_detector import SceneCutDetector
 
@@ -51,6 +62,8 @@ LARGE_CANVAS_MIN_FREE_BYTES = 10 << 30
 LARGE_CANVAS_MIN_TOTAL_BYTES = 15 << 30
 SEGMENT_DECODE_BUDGET_BYTES = {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
+SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
+"""Two windows per track: the speed profile leaves out each canvas's cold first window."""
 
 
 class Cancelled(Exception):
@@ -147,7 +160,19 @@ class Progress:
         self.timings: dict[str, speed.PassTiming] = {}
 
     def expect(self, rates: dict[str, float]) -> None:
+        """The profile's ``rates`` for the run, whose passes start now."""
         self._rates = rates
+        self._pass_end = time.monotonic()
+
+    def speed_test(self) -> Progress:
+        """The progress of the speed test run before this run, reported as its own step."""
+        report = self._report
+        speed_test_report = None
+        if report is not None:
+            speed_test_report = lambda fraction, _left, _step: report(
+                0.0, 0.0, StageProgress("speed_test", 1, 1, fraction, 0.0)
+            )
+        return Progress(SPEED_TEST_FRAMES, disable=self._disable, report=speed_test_report)
 
     def plan(self, work: speed.Work) -> None:
         self._work = work
@@ -814,14 +839,74 @@ def compose_spans(
             )
 
 
+class _SpeedTestMosaics:
+    """A detector that finds the same two mosaics on every frame: a small one and one big
+    enough for the 768 px canvas (when the run allows it)."""
+
+    def __call__(self, batch: torch.Tensor, target_hw: tuple[int, int]) -> Detections:
+        frame_h, frame_w = target_hw
+        side = min(frame_h, frame_w)
+        small, big = side // 12, side * 9 // 10
+        boxes = np.array([[0, 0, small, small], [frame_w - big, frame_h - big, frame_w, frame_h]], dtype=np.float32)
+        masks = torch.zeros((len(boxes), frame_h // 4, frame_w // 4), dtype=torch.bool, device=batch.device)
+        for mask, (x0, y0, x1, y1) in zip(masks, (boxes // 4).astype(int)):
+            mask[y0:y1, x0:x1] = True
+        return Detections([boxes] * len(batch), [masks] * len(batch))
+
+
+class _DiscardedFrames:
+    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def _first_frames(frames: FrameSource, count: int) -> FrameSource:
+    def first() -> FrameBatches:
+        left = count
+        with closing(frames()) as batches:
+            for batch, pts in batches:
+                yield batch[:left], pts[:left]
+                left -= len(pts)
+                if left <= 0:
+                    return
+
+    return first
+
+
+def _profile_key(render: LtxRender) -> str:
+    return speed.profile_key(torch.cuda.get_device_name(render.device), render.files.transformer_name, render.budget_name)
+
+
 def restore_spans(
     spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, progress: Progress, cancel: threading.Event
 ) -> None:
     """Restore every segment of ``spans`` and write each span's frames to a writer of its own
-    (closed once the span is written)."""
-    profile_key = speed.profile_key(
-        torch.cuda.get_device_name(render.device), render.files.transformer_name, render.budget_name
-    )
+    (closed once the span is written). Without a speed profile for this GPU and model, a
+    speed test runs first: the first frames of the first span with two made-up mosaics,
+    restored and thrown away, so the run's time left is known once its scan has planned it."""
+    if not speed.load_rates(render.speed_profile, _profile_key(render)):
+        logger.info("LTX speed test: no speed profile for this GPU and model yet")
+        speed_test = LtxSpan(
+            _first_frames(spans[0].frames, SPEED_TEST_FRAMES),
+            (LtxSegment(*WHOLE_VIDEO_PTS, 0),),
+            _DiscardedFrames,
+        )
+        _restore_spans(
+            [speed_test],
+            replace(render, detector=_SpeedTestMosaics()),
+            work_dir=work_dir,
+            progress=progress.speed_test(),
+            cancel=cancel,
+        )
+    _restore_spans(spans, render, work_dir=work_dir, progress=progress, cancel=cancel)
+
+
+def _restore_spans(
+    spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, progress: Progress, cancel: threading.Event
+) -> None:
+    profile_key = _profile_key(render)
     progress.expect(speed.load_rates(render.speed_profile, profile_key))
     torch.cuda.reset_peak_memory_stats(render.device)
     blocks = None

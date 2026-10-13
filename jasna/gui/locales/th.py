@@ -277,6 +277,7 @@ TH = {
         "ltx_trial_stage": "{stage} (ทดลอง)",
         "segments_seed_tried_trial": "ที่ลองแล้ว (ทดลอง):",
         "ltx_stage_split": "กำลังแยกโมเสกตามขนาด",
+        "ltx_stage_speed_test": "กำลังวัดความเร็ว GPU (ครั้งแรกเท่านั้น)",
         "ltx_stage_scan": "กำลังค้นหาโมเสก",
         "ltx_stage_encode": "กำลังเตรียม",
         "ltx_stage_denoise": "กำลังฟื้นฟู",

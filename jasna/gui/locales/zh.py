@@ -277,6 +277,7 @@ ZH = {
         "ltx_trial_stage": "{stage}（试运行）",
         "segments_seed_tried_trial": "已试（试运行）：",
         "ltx_stage_split": "正在按大小区分马赛克",
+        "ltx_stage_speed_test": "正在测量 GPU 速度（仅首次）",
         "ltx_stage_scan": "正在查找马赛克",
         "ltx_stage_encode": "正在准备",
         "ltx_stage_denoise": "正在修复",

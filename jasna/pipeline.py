@@ -32,7 +32,7 @@ from jasna.media.splice import (
     validate_smart_render,
 )
 from jasna.pipeline_threads import run_restoration_pass
-from jasna.progressbar import LTX_WORK_PER_FRAME, JobProgress, ProgressCallback, Progressbar
+from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange, job_restoration, resolve_restorations
 from jasna.session_config import SessionConfig
@@ -387,6 +387,19 @@ class Pipeline:
             open_writer,
         )
 
+    def _ltx_estimate_seconds(self, metadata, frames: int) -> float:
+        """About how long LTX takes on ``frames``, before its scan has planned them."""
+        from jasna.ltx.speed import profile_path, segment_estimate_seconds
+
+        return segment_estimate_seconds(
+            profile_path(),
+            torch.cuda.get_device_name(self.device),
+            self.ltx_files.transformer_name,
+            frames=frames,
+            fps=metadata.video_fps,
+            megapixels=metadata.video_height * metadata.video_width / 1e6,
+        )
+
     def _run_ltx_spans(
         self,
         metadata,
@@ -471,14 +484,12 @@ class Pipeline:
         )
         ltx_callback = standard_callback = self.progress_callback
         if self.progress_callback is not None and ltx_spans and standard_frames:
+            ltx_frames = sum(_span_frames(span, index, metadata) for span in ltx_spans)
             job_progress = JobProgress(
                 self.progress_callback,
-                {
-                    "ltx": LTX_WORK_PER_FRAME * sum(_span_frames(span, index, metadata) for span in ltx_spans),
-                    "standard": float(standard_frames),
-                },
+                {"standard": 0.0, "ltx": self._ltx_estimate_seconds(metadata, ltx_frames)},
             )
-            ltx_callback, standard_callback = job_progress.part("ltx"), job_progress.part("standard")
+            standard_callback, ltx_callback = job_progress.part("standard"), job_progress.part("ltx")
         progress = Progressbar(
             total_frames=max(1, standard_frames),
             video_fps=metadata.video_fps,
@@ -518,6 +529,24 @@ class Pipeline:
                 def fragment_writer(span_index: int, span: SpliceSpan) -> Callable[[], _OfflineFrameWriter]:
                     return lambda: _OfflineFrameWriter(fragment_encoder(span_index, span), [time.monotonic()])
 
+                def duration(span: SpliceSpan) -> float:
+                    return float((span.end_pts - span.start_pts) * index.time_base)
+
+                for span_index, span in enumerate(plan.spans):
+                    if self._cancel_event.is_set():
+                        return
+                    if not span.is_render:
+                        create_copy_fragment(self.input_video, span, index, raw_path(span_index), codec=codec)
+                    elif span not in ltx_spans:
+                        self._run_pass(
+                            metadata=metadata,
+                            encoder_ctx=fragment_encoder(span_index, span),
+                            progress=progress,
+                            seek_ts=index.seconds_for_pts(span.start_pts),
+                            end_pts=span.end_pts,
+                            effect_ranges=span.effect_ranges,
+                            output_frame_count=max(1, round(duration(span) * metadata.video_fps)),
+                        )
                 if ltx_spans:
                     self._run_ltx_spans(
                         metadata,
@@ -534,29 +563,13 @@ class Pipeline:
                         work_root,
                         ltx_callback,
                     )
-                for span_index, span in enumerate(plan.spans):
-                    if self._cancel_event.is_set():
-                        return
-                    raw = raw_path(span_index)
-                    normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
-                    duration = float((span.end_pts - span.start_pts) * index.time_base)
-                    if not span.is_render:
-                        create_copy_fragment(self.input_video, span, index, raw, codec=codec)
-                    elif span not in ltx_spans:
-                        self._run_pass(
-                            metadata=metadata,
-                            encoder_ctx=fragment_encoder(span_index, span),
-                            progress=progress,
-                            seek_ts=index.seconds_for_pts(span.start_pts),
-                            end_pts=span.end_pts,
-                            effect_ranges=span.effect_ranges,
-                            output_frame_count=max(1, round(duration * metadata.video_fps)),
-                        )
-                    normalize_fragment(raw, normalized, codec=codec)
-                    fragments.append((normalized, duration))
-
                 if self._cancel_event.is_set():
                     return
+                for span_index, span in enumerate(plan.spans):
+                    normalized = temp_dir / f"{span_index:04d}{fragment_suffix}"
+                    normalize_fragment(raw_path(span_index), normalized, codec=codec)
+                    fragments.append((normalized, duration(span)))
+
                 assembled = temp_dir / f"assembled{fragment_suffix}"
                 concatenate_fragments(
                     fragments,

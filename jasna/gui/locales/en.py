@@ -277,6 +277,7 @@ EN = {
         "ltx_trial_stage": "{stage} (trial)",
         "segments_seed_tried_trial": "Tried (trial):",
         "ltx_stage_split": "Sorting mosaics by size",
+        "ltx_stage_speed_test": "Measuring GPU speed (first run only)",
         "ltx_stage_scan": "Finding mosaics",
         "ltx_stage_encode": "Preparing",
         "ltx_stage_denoise": "Restoring",

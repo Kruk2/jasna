@@ -23,39 +23,28 @@ ProgressCallback = Callable[[float, float, float, int, int, StageProgress | None
 """``(percent, fps, eta_seconds, frames_done, total_frames, stage)``; ``stage`` is the LTX
 pass running, or None for frame-by-frame restoration."""
 
-LTX_WORK_PER_FRAME = 30.0
-"""Rough cost of one LTX-restored frame in frames of the standard model."""
-
-
 class JobProgress:
-    """One bar for a job made of parts that report on their own (e.g. LTX ranges, then
-    standard ranges). Each part fills its share of the bar by its estimated ``work``, in
-    the order given; time left comes from the whole job's elapsed time and fraction, so
-    it does not jump when the next part starts."""
+    """One bar for a job made of parts run one after another (e.g. BasicVSR++ ranges, then
+    LTX ranges). ``estimates`` holds each part's seconds before it runs, in run order. Time
+    left is the running part's own estimate (else its share of ``estimates``) plus the
+    estimates of the parts after it; the bar shows the elapsed share of the whole."""
 
-    def __init__(self, callback: ProgressCallback, work: dict[str, float]) -> None:
+    def __init__(self, callback: ProgressCallback, estimates: dict[str, float]) -> None:
         self._callback = callback
-        total = sum(work.values())
-        self._shares: dict[str, tuple[float, float]] = {}
-        offset = 0.0
-        for part, amount in work.items():
-            share = amount / total if total > 0 else 0.0
-            self._shares[part] = (offset, share)
-            offset += share
+        self._estimates = estimates
         self._started = time.monotonic()
-        self._timed = False
 
     def part(self, name: str) -> ProgressCallback:
-        offset, share = self._shares[name]
+        parts = list(self._estimates)
+        later = sum(self._estimates[part] for part in parts[parts.index(name) + 1 :])
 
         def report(
             percent: float, fps: float, eta_seconds: float, done: int, total: int, stage: StageProgress | None
         ) -> None:
-            fraction = min(1.0, offset + share * percent / 100.0)
-            self._timed = self._timed or eta_seconds > 0
+            own = eta_seconds if eta_seconds > 0 else self._estimates[name] * (1.0 - percent / 100.0)
+            left = own + later
             elapsed = time.monotonic() - self._started
-            eta = elapsed * (1.0 - fraction) / fraction if self._timed and fraction > 0 else 0.0
-            self._callback(fraction * 100.0, fps, eta, done, total, stage)
+            self._callback(100.0 * elapsed / (elapsed + left) if elapsed + left > 0 else 0.0, fps, left, done, total, stage)
 
         return report
 

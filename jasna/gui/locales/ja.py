@@ -277,6 +277,7 @@ JA = {
         "ltx_trial_stage": "{stage}（お試し）",
         "segments_seed_tried_trial": "試したシード（お試し）：",
         "ltx_stage_split": "モザイクを大きさで仕分け中",
+        "ltx_stage_speed_test": "GPU の速度を測定中（初回のみ）",
         "ltx_stage_scan": "モザイクを検出中",
         "ltx_stage_encode": "準備中",
         "ltx_stage_denoise": "修復中",

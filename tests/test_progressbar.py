@@ -95,27 +95,25 @@ class TestProgressbarLifecycle:
 
 
 class TestJobProgress:
-    def test_parts_fill_their_work_share_of_one_bar(self, monkeypatch):
+    def test_time_left_is_the_running_part_plus_the_estimates_of_the_parts_after_it(self, monkeypatch):
         from jasna import progressbar
 
         clock = [100.0]
         monkeypatch.setattr(progressbar.time, "monotonic", lambda: clock[0])
         calls = []
-        job = progressbar.JobProgress(lambda *args: calls.append(args), {"ltx": 300.0, "standard": 100.0})
-        ltx, standard = job.part("ltx"), job.part("standard")
+        job = progressbar.JobProgress(lambda *args: calls.append(args), {"standard": 0.0, "ltx": 900.0})
+        standard, ltx = job.part("standard"), job.part("ltx")
 
         clock[0] = 110.0
-        scan = StageProgress("scan", 1, 4, 0.5, 0.0)
-        ltx(50.0, 0.0, 0.0, 0, 0, scan)
-        assert calls[-1] == (37.5, 0.0, 0.0, 0, 0, scan)
+        standard(50.0, 30.0, 10.0, 60, 120, None)
+        assert calls[-1] == (pytest.approx(100.0 * 10.0 / 920.0), 30.0, 910.0, 60, 120, None)
 
         clock[0] = 130.0
-        ltx(100.0, 0.0, 5.0, 0, 0, StageProgress("compose", 4, 4, 1.0, 0.0))
-        assert calls[-1][0] == 75.0
-        assert calls[-1][2] == pytest.approx(10.0)
+        scan = StageProgress("scan", 1, 4, 0.5, 0.0)
+        ltx(10.0, 0.0, 0.0, 0, 0, scan)
+        assert calls[-1] == (pytest.approx(100.0 * 30.0 / 840.0), 0.0, 810.0, 0, 0, scan)
 
-        clock[0] = 134.0
-        standard(50.0, 30.0, 0.0, 60, 120, None)
-        assert calls[-1][:2] == (87.5, 30.0)
-        assert calls[-1][2] == pytest.approx(34.0 / 7.0)
-        assert calls[-1][3:] == (60, 120, None)
+        clock[0] = 200.0
+        compose = StageProgress("compose", 4, 4, 0.5, 50.0)
+        ltx(90.0, 0.0, 50.0, 0, 0, compose)
+        assert calls[-1] == (pytest.approx(100.0 * 100.0 / 150.0), 0.0, 50.0, 0, 0, compose)

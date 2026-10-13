@@ -95,7 +95,12 @@ class _Writer:
 
 
 @pytest.fixture
-def fakes(monkeypatch):
+def fakes(monkeypatch, tmp_path):
+    """Fake models; every budget's speed profile has a rate, so no run starts with a speed test."""
+    for budget in ("segment", "free VRAM"):
+        restore.speed.save_rates(
+            tmp_path / "speed.json", restore.speed.profile_key("Test GPU", "t", budget), {"denoise/window512": 4.0}
+        )
     budgets = []
     bars = []
 
@@ -115,6 +120,7 @@ def fakes(monkeypatch):
     monkeypatch.setattr(
         restore, "regions_per_frame", lambda frames, h, w: [[MOSAIC] if int(f[0, 0, 0]) else [] for f in frames]
     )
+    monkeypatch.setattr(restore, "_SpeedTestMosaics", _Detector)
     monkeypatch.setattr(restore, "crop_to_canvas", lambda frame, crop: torch.zeros(1))
     monkeypatch.setattr(restore, "_vae_pixels", lambda canvases, device: torch.zeros(1))
     monkeypatch.setattr(inference, "load_video_encoder", lambda path, device: lambda pixels: torch.zeros(1))
@@ -523,6 +529,7 @@ def test_restore_spans_logs_the_run_summary(fakes, tmp_path, caplog):
 
 
 def test_restore_spans_saves_the_speed_profile(fakes, tmp_path):
+    (tmp_path / "speed.json").unlink()
     video = _video(12, range(2, 10))
     _run_spans(tmp_path, [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)])
     key = restore.speed.profile_key("Test GPU", "t", "segment")
@@ -531,6 +538,7 @@ def test_restore_spans_saves_the_speed_profile(fakes, tmp_path):
 
 
 def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes, tmp_path):
+    (tmp_path / "speed.json").unlink()
     restore.restore_video(
         _source(_video(12, range(2, 10))),
         _Writer(),
@@ -662,3 +670,41 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
         "unload_transformer", "load_decoder", "decode", "unload_decoder",
     ]
     assert requests[4][1] == {"seeds": [5]}
+
+
+def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
+    (tmp_path / "speed.json").unlink()
+    reports = []
+    writer = _Writer()
+    video = _video(12, range(2, 10))
+    restore.restore_spans(
+        [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), lambda: writer)],
+        _render(tmp_path),
+        work_dir=tmp_path,
+        progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
+        cancel=threading.Event(),
+    )
+    assert _Transformer.seeds == [[0], [7]]
+    assert len(writer.frames) == 12
+    assert reports[0][:2] == (0.0, 0.0)
+    assert (reports[0][2].name, reports[0][2].number, reports[0][2].count) == ("speed_test", 1, 1)
+    assert [report[2].name for report in reports if report[2].name != "speed_test"] == ["encode", "denoise", "compose"]
+    assert reports.index(next(r for r in reports if r[2].name == "encode")) > max(
+        i for i, r in enumerate(reports) if r[2].name == "speed_test"
+    )
+
+
+def test_a_run_with_a_speed_profile_skips_the_speed_test(fakes, tmp_path):
+    _run_spans(
+        tmp_path,
+        [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)],
+    )
+    assert _Transformer.seeds == [[7]]
+
+
+@pytest.mark.parametrize(("frame_h", "frame_w"), [(720, 1280), (1080, 1920), (2160, 3840)])
+def test_the_speed_test_mosaics_plan_two_windows_on_each_canvas(frame_h, frame_w):
+    detections = restore._SpeedTestMosaics()(torch.zeros(1, 3, 8, 8), target_hw=(frame_h, frame_w))
+    regions = restore.regions_per_frame(detections, frame_h, frame_w) * restore.SPEED_TEST_FRAMES
+    plans = restore.plan_video(regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True)
+    assert sorted(w.canvas for plan in plans for w in plan.windows) == [512, 512, 768, 768]
