@@ -62,7 +62,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   the model are kept in system RAM. 11 GB is the smallest card tested so far.
 - **System RAM**: 32 GB recommended (loading the model uses about 19 GB).
 - **Disk**: the model is not bundled. Jasna asks before downloading it the
-  first time you start an LTX job:
+  first time you start an LTX job, and downloads only the model you picked:
 
   | Model | Download |
   | --- | ---: |

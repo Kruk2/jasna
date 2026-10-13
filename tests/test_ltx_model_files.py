@@ -172,3 +172,22 @@ def test_import_does_not_load_ca_or_start_downloads(monkeypatch):
     monkeypatch.setattr(certifi, "where", forbidden)
     monkeypatch.setattr(model_files.urllib.request, "urlopen", forbidden)
     runpy.run_path(model_files.__file__)
+
+
+def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch):
+    import sys
+
+    from factories import session_config
+    from jasna import main
+
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    fast = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_fast=True)
+
+    with pytest.raises(FileNotFoundError, match="missing"):
+        main._ensure_ltx_model(fast, None)
+
+    assert "ltx-restore-alpha1-distill8-nvfp4" in asked[0] and "int8" not in asked[0]
+    assert "9.2 GB" in asked[0]

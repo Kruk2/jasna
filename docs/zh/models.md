@@ -55,7 +55,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **显存**：最好 16 GB 或以上。显存更小的显卡也能用，但更慢：模型的一部分会
   放在系统内存中。目前测试过的最小显卡是 11 GB。
 - **系统内存**：建议 32 GB（加载模型约占用 19 GB）。
-- **磁盘**：模型不随 Jasna 附带。第一次开始 LTX 任务时，Jasna 会先询问再下载：
+- **磁盘**：模型不随 Jasna 附带。第一次开始 LTX 任务时，Jasna 会先询问再下载，只下载你选的模型：
 
   | 模型 | 下载大小 |
   | --- | ---: |

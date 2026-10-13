@@ -109,7 +109,7 @@ class RestorationModelSection:
         self._ltx_model = self._widgets["ltx_model"] = ValueOptionMenu(
             model_row,
             options={model: t(f"ltx_model_{model}") for model in LTX_MODELS},
-            command=self._on_ltx_model_selected,
+            command=lambda _model: self._on_ltx_choice_changed(),
             fg_color=Colors.BG_PANEL,
             button_color=Colors.BG_PANEL,
             button_hover_color=Colors.BORDER_LIGHT,
@@ -120,7 +120,7 @@ class RestorationModelSection:
         )
         self._ltx_model.pack(side="right", padx=12, pady=8)
         Tooltip(self._ltx_model, get_tooltip("ltx_model"))
-        self._set_ltx_model(LTX_DEFAULT_MODEL)
+        self._ltx_model.set_value(LTX_DEFAULT_MODEL)
 
         seed_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         seed_row.pack(fill="x")
@@ -148,7 +148,7 @@ class RestorationModelSection:
 
         self._fast_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(self._fast_row, "ltx_fast", in_card=True)
-        self._widgets["ltx_fast"] = CompactSwitch(self._fast_row, self._on_fast_toggled, Colors.BG_CARD)
+        self._widgets["ltx_fast"] = CompactSwitch(self._fast_row, self._on_ltx_choice_changed, Colors.BG_CARD)
         self._widgets["ltx_fast"].pack(side="right", padx=12, pady=8)
         Tooltip(self._widgets["ltx_fast"], get_tooltip("ltx_fast"))
 
@@ -188,7 +188,7 @@ class RestorationModelSection:
         trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         trial_row.pack(fill="x")
         add_setting_label(trial_row, "ltx_trial", in_card=True)
-        self._widgets["ltx_trial"] = CompactSwitch(trial_row, self._on_trial_toggled, Colors.BG_CARD)
+        self._widgets["ltx_trial"] = CompactSwitch(trial_row, self._on_ltx_choice_changed, Colors.BG_CARD)
         self._widgets["ltx_trial"].pack(side="right", padx=12, pady=8)
         Tooltip(self._widgets["ltx_trial"], get_tooltip("ltx_trial"))
         self._trial_status = ctk.CTkLabel(
@@ -239,64 +239,11 @@ class RestorationModelSection:
             self._widgets["ltx_trial"].deselect()
         self._refresh_widgets()
 
-    def _set_ltx_model(self, model: str) -> None:
-        self._ltx_model.set_value(model)
-        self._accepted_ltx_model = self._ltx_model.get_value()
-
-    def _show_notice(self, key: str | None) -> None:
-        if key:
-            self._notice.configure(text=t(key))
-            self._notice.pack(fill="x", padx=12, pady=(0, 8))
-        else:
-            self._notice.pack_forget()
-
-    def _ensure_variant(self, model: str, fast: bool) -> bool:
-        """Make ``(model, fast)`` usable: download it when the user agrees, else switch to an
-        installed variant with a notice. False when the user declined or nothing is installed."""
-        self._show_notice(None)
-        state = self._ltx_models.state
-        if trial_only(state):
-            self.set_trial(True)
-        if self._trial() or state.installed(model, fast):
-            return True
-        if state.downloadable:
-            return self._ltx_models.ensure(model, fast, on_ready=lambda: None)
-        others = [(model, not fast)] + [(m, f) for m in LTX_MODELS if m != model for f in (fast, not fast)]
-        for other_model, other_fast in others:
-            if state.installed(other_model, other_fast):
-                self._set_ltx_model(other_model)
-                self._set_fast(other_fast)
-                if other_model != model:
-                    self._show_notice("model_ltx_variant_not_installed")
-                else:
-                    self._show_notice("model_ltx_fast_not_installed" if fast else "model_ltx_quality_not_installed")
-                return True
-        return False
-
     def _on_card_selected(self, value: str) -> None:
-        if value == "ltx" and not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
-            self._show_model("basicvsrpp")
-            return
         self._show_model(value)
         self._on_modified()
 
-    def _on_ltx_model_selected(self, model: str) -> None:
-        if self._ensure_variant(model, self._fast()):
-            self._accepted_ltx_model = self._ltx_model.get_value()
-        else:
-            self._ltx_model.set_value(self._accepted_ltx_model)
-        self._refresh_widgets()
-        self._on_modified()
-
-    def _on_fast_toggled(self) -> None:
-        if not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
-            self._set_fast(not self._fast())
-        self._refresh_widgets()
-        self._on_modified()
-
-    def _on_trial_toggled(self) -> None:
-        if not self._trial() and not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
-            self.set_trial(True)
+    def _on_ltx_choice_changed(self) -> None:
         self._refresh_widgets()
         self._on_modified()
 
@@ -347,6 +294,12 @@ class RestorationModelSection:
             self._trial_status.pack(fill="x", padx=12, pady=(0, 8), after=self._trial_row)
         else:
             self._trial_status.pack_forget()
+        reason = self.unavailable_reason()
+        if reason:
+            self._notice.configure(text=t(reason))
+            self._notice.pack(fill="x", padx=12, pady=(0, 8))
+        else:
+            self._notice.pack_forget()
 
     def _usable_model(self) -> str:
         """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed
@@ -402,9 +355,8 @@ class RestorationModelSection:
         else:
             self._widgets["ltx_trial"].deselect()
         self._set_auto_split(preset.ltx_auto_split, preset.ltx_auto_split_percent)
-        self._set_ltx_model(preset.ltx_model)
+        self._ltx_model.set_value(preset.ltx_model)
         self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
-        self._show_notice(None)
         self._show_model(self._usable_model())
         self._refresh_download()
 
