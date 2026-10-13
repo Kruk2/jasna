@@ -394,13 +394,35 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
         clock.now = 20.0
         bar.update(50)
 
-    encode_left = (100 * 2.0 * 0.01 + 10 * 0.5) / 2
+    encode_left = 50 * 2.0 * 0.01 + 10 * 0.5
     later = 20.0 + 10 * 4.0 + 3.0 + 100 * 2.0 * 0.02 + 10 * 1.0
     fraction, left, stage = reports[-1]
     assert stage.name == "encode"
     assert stage.seconds_left == pytest.approx(encode_left)
     assert left == pytest.approx(encode_left + later)
     assert fraction == pytest.approx(20.0 / (20.0 + left))
+
+
+def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(monkeypatch):
+    clock = _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress.expect(_RATES)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}))
+    with progress.bar("compose", 100) as bar:
+        bar.update(10)
+        with bar.window(512):
+            clock.now = 2.0
+        clock.now = 3.0
+        bar.update(40)
+
+    compose_work = 100 * 2.0 * 0.02 + 10 * 1.0
+    done_work = 50 * 2.0 * 0.02 + 1.0
+    warm_done_work = done_work - 10 * 2.0 * 0.02
+    fraction, left, stage = reports[-1]
+    assert stage.seconds_left == pytest.approx((compose_work - done_work) * 3.0 / warm_done_work)
+    assert left == pytest.approx(stage.seconds_left)
+    assert fraction == pytest.approx(3.0 / (3.0 + left))
 
 
 def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monkeypatch):

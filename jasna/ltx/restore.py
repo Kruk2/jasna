@@ -129,8 +129,9 @@ class Progress:
     ``(fraction of the whole run, seconds left, the pass's own progress)``. When the speed
     profile's rates (``expect``) cover what the scan planned, seconds left come from them
     from the end of the scan on; else they are 0 until the denoise pass has timed a step.
-    A pass's own seconds left come from its pace so far, else from the profile. Every
-    pass records its timing for the profile."""
+    A pass's own seconds left are the profile's seconds of work it has left, scaled by how
+    long its work so far took against the profile (clock changes, uneven mosaics), else
+    its pace so far. Every pass records its timing for the profile."""
 
     def __init__(self, frames: int, *, disable: bool, report: ProgressReport | None) -> None:
         self.frames = frames
@@ -173,29 +174,42 @@ class Progress:
 
     def begin(self, stage: LtxStage) -> None:
         """Report ``stage`` as started before its model loads, so loading shows as that pass."""
-        self._advanced(stage, 0, 1, None)
+        self._advanced(stage, 0, 1, None, 0.0, 1.0)
 
     def skip(self, *stages: LtxStage) -> None:
         """Count ``stages`` as done, for a run that reuses their results."""
         for stage in stages:
             self._done_share += _STAGE_SHARE[stage]
 
-    def _profile_stage_left(self, stage: LtxStage, stage_fraction: float) -> float | None:
+    def profiled_seconds(self, stage: LtxStage, unit: str, count: float) -> float:
+        """The profile's seconds for ``count`` of ``stage``'s ``unit`` (``frame`` counts
+        frames), 0 when the profile does not cover this run."""
+        if self._estimates is None or stage not in self._estimates:
+            return 0.0
+        if unit == "frame":
+            count *= self._work.megapixels
+        return self._rates[f"{stage}/{unit}"] * count
+
+    def _profile_stage_left(self, stage: LtxStage, profiled_done: float, pace_ratio: float) -> float | None:
         if self._estimates is None or stage not in self._estimates:
             return None
-        return self._estimates[stage][1] * (1.0 - stage_fraction)
+        return max(0.0, self._estimates[stage][1] - profiled_done) * pace_ratio
 
-    def _advanced(self, stage: LtxStage, done: int, total: int, paced_left: float | None) -> float | None:
+    def _advanced(
+        self, stage: LtxStage, done: int, total: int, paced_left: float | None, profiled_done: float, pace_ratio: float
+    ) -> float | None:
         """Report the run's progress; ``paced_left`` is the pass's seconds left at its pace
-        so far. Returns the run's seconds left the profile gives, if any."""
+        so far, ``profiled_done`` the profile's seconds of its work done and ``pace_ratio``
+        its measured seconds per profile second. Returns the run's seconds left the
+        profile gives, if any."""
         stage_fraction = min(1.0, done / total) if total else 1.0
-        profile_stage_left = self._profile_stage_left(stage, stage_fraction)
+        profile_stage_left = self._profile_stage_left(stage, profiled_done, pace_ratio)
         left = None
         if profile_stage_left is not None:
             later = speed.TIMED_PASSES[speed.TIMED_PASSES.index(stage) + 1 :]
             left = profile_stage_left + sum(sum(self._estimates[s]) for s in later)
         if self._report is not None:
-            stage_left = paced_left if paced_left is not None else profile_stage_left or 0.0
+            stage_left = profile_stage_left if profile_stage_left is not None else paced_left or 0.0
             step = StageProgress(stage, _STAGE_NUMBER[stage], len(_STAGE_NUMBER), stage_fraction, stage_left)
             elapsed = time.monotonic() - self._started
             if left is not None:
@@ -221,24 +235,33 @@ class _StageBar:
         self._bar = bar
         self._marks = marks
         self._done = 0
-        self._warm_from: tuple[float, int] | None = None
+        self._profiled_done = 0.0
+        self._warm_from: tuple[float, int, float] | None = None
         self._windows: list[tuple[int, TimingMark, TimingMark]] = []
         self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
-        progress._advanced(stage, 0, bar.total, None)
+        progress._advanced(stage, 0, bar.total, None, 0.0, 1.0)
 
     def update(self, n: int) -> None:
+        self._profiled_done += self._progress.profiled_seconds(self._stage, "frame", n)
+        self._count(n)
+
+    def _count(self, n: int) -> None:
         self._bar.update(n)
         self._done += n
         now = time.monotonic()
         if self._warm_from is None:
-            self._warm_from = (now, self._done)
-        started, warm_done = self._warm_from
+            self._warm_from = (now, self._done, self._profiled_done)
+        started, warm_done, warm_profiled = self._warm_from
         paced_left = (
             (now - started) / (self._done - warm_done) * (self._bar.total - self._done)
             if self._done > warm_done
             else None
         )
-        left = self._progress._advanced(self._stage, self._done, self._bar.total, paced_left)
+        profiled_since_warm = self._profiled_done - warm_profiled
+        pace_ratio = (now - started) / profiled_since_warm if profiled_since_warm > 0 else 1.0
+        left = self._progress._advanced(
+            self._stage, self._done, self._bar.total, paced_left, self._profiled_done, pace_ratio
+        )
         if left is not None:
             self._bar.set_postfix_str(f"run {tqdm.format_interval(left)} left", refresh=False)
 
@@ -250,6 +273,7 @@ class _StageBar:
         yield
         end.record()
         self._windows.append((canvas, start, end))
+        self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", 1)
 
     def track(self, canvas: int, steps: int) -> Callable[[int], None]:
         """``advance`` for one track's denoise: counts its window-steps and marks the stream
@@ -258,7 +282,8 @@ class _StageBar:
         self._tracks.append((canvas, steps, marks))
 
         def advance(n: int) -> None:
-            self.update(n)
+            self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", n / steps)
+            self._count(n)
             mark = self._marks()
             mark.record()
             marks.append((n, mark))
@@ -269,7 +294,7 @@ class _StageBar:
         self._bar.close()
         timing = speed.PassTiming(units=self._done)
         if self._warm_from is not None:
-            started, done = self._warm_from
+            started, done, _ = self._warm_from
             timing.warm_seconds = time.monotonic() - started
             timing.warm_frames = self._done - done
         for canvas, start, end in self._windows:
