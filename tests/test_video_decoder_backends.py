@@ -179,6 +179,7 @@ def _install_fake_vali(monkeypatch, script, fmt=None):
 
     class PyDecoder:
         def __init__(self, file, opts, gpu_id, stream):
+            self.opts = opts
             self.IsAccelerated = True
             self.Format = fmt or _FakeVali.PixelFormat.NV12
             self.Width = 16
@@ -230,6 +231,11 @@ def test_vali_source_batches_and_final_partial_batch(monkeypatch) -> None:
         (2, 3, 16, 16),
         (1, 3, 16, 16),
     ]
+
+
+def test_vali_source_tolerates_sleeping_disk_on_open(monkeypatch) -> None:
+    _install_fake_vali(monkeypatch, [_EOF])
+    assert int(_vali_source().decoder.opts["timeout"]) >= 30_000
 
 
 def test_vali_source_frame_stride_skips_conversion(monkeypatch) -> None:

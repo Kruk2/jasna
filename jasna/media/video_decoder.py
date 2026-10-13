@@ -77,6 +77,10 @@ def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.
     return handle, torch.cuda.ExternalStream(handle, device=device)
 
 
+# VALI aborts open/reads after 3 s by default; a spun-down HDD needs longer to wake.
+_VALI_IO_TIMEOUT_MS = "60000"
+
+
 class _ValiFrameSource:
     """NVDEC decoding through python_vali, converted by the shared CUDA kernel.
 
@@ -115,7 +119,7 @@ class _ValiFrameSource:
         try:
             self.decoder = vali.PyDecoder(
                 file,
-                {},
+                {"timeout": _VALI_IO_TIMEOUT_MS},
                 gpu_id=device.index or 0,
                 stream=self.stream.cuda_stream,
             )
