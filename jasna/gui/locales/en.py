@@ -402,8 +402,8 @@ EN = {
         "ctx_copy": "Copy",
         "ctx_paste": "Paste",
         "ctx_select_all": "Select all",
-        "license_official_sellers": "License codes are sold only on Buy Me a Coffee and Unifans (kruk2). Codes from other sellers are fake.",
-        "license_forged": "This key comes from a known unofficial seller, not Jasna. It cannot activate the official app. Get an official key through Buy Me a Coffee or Unifans (kruk2).",
+        "license_official_sellers": "License codes are sold only on Buy Me a Coffee and Unifans (kruk2), and in China on 闲鱼 (Xianyu). Codes from other sellers are fake.",
+        "license_forged": "This key comes from a known unofficial seller, not Jasna. It cannot activate the official app. Get an official key through Buy Me a Coffee or Unifans (kruk2), or 闲鱼 (Xianyu) in China.",
         "license_retired": "This key is from an earlier activation format. Ask your official seller for an Activation key for this Machine key.",
         "license_invalid": "Could not verify this Activation key. Check the Machine key and full Activation key. Contact your official seller if needed.",
         "license_malformed": "The Activation key is incomplete or has an invalid format. Copy the full Activation key from the activation page or your official seller.",
@@ -489,6 +489,7 @@ EN = {
         # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "Support",
         "unifans_support": "Unifans",
+        "xianyu_support": "闲鱼",
         
         # Tooltips
         "tip_max_clip_size": "How many frames are processed at once. Larger values can improve quality but use more VRAM.\n\nRecommended: 60 or higher. Use 60 even if it means disabling model compilation.\nGuidance: 60 (safe), 90 (good balance), 180 (best quality, needs 12 GB+ VRAM with Compile BasicVSR++ enabled, less with it disabled).\n4K videos use more VRAM — a lower clip size may produce similar quality but process much faster.\nDefault: 90",

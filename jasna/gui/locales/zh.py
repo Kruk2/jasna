@@ -402,8 +402,8 @@ ZH = {
         "ctx_copy": "复制",
         "ctx_paste": "粘贴",
         "ctx_select_all": "全选",
-        "license_official_sellers": "许可证码仅在 Buy Me a Coffee 和 Unifans (kruk2) 出售。其他卖家的许可证码都是假的。",
-        "license_forged": "此密钥来自已知的非官方卖家，并非 Jasna 签发，无法激活官方应用。请通过 Buy Me a Coffee 或 Unifans (kruk2) 获取官方密钥。",
+        "license_official_sellers": "许可证码仅在 Buy Me a Coffee、Unifans (kruk2) 和闲鱼出售。其他卖家的许可证码都是假的。",
+        "license_forged": "此密钥来自已知的非官方卖家，并非 Jasna 签发，无法激活官方应用。请通过 Buy Me a Coffee、Unifans (kruk2) 或闲鱼获取官方密钥。",
         "license_retired": "此密钥使用旧版激活格式。请向官方卖家申请与机器密钥对应的新激活密钥。",
         "license_invalid": "无法验证此激活密钥。请检查机器密钥和完整激活密钥。若仍失败，请联系官方卖家。",
         "license_malformed": "激活密钥不完整或格式无效。请从激活页面或官方卖家处复制完整激活密钥。",
@@ -489,6 +489,7 @@ ZH = {
         # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "支持",
         "unifans_support": "Unifans",
+        "xianyu_support": "闲鱼",
         
         # Tooltips
         "tip_max_clip_size": "一次处理多少帧画面。数值越大，效果可能越好，但占用更多显存。\n\n建议：60 或更高。即使需要关闭模型编译，也建议至少使用 60。\n参考：60（安全）、90（平衡）、180（最佳质量，开启「Compile BasicVSR++」时需要 12GB+ 显存，关闭则更少）。\n4K 视频占用更多显存——较小的片段大小可能产生类似的质量，但处理速度快得多。\n默认值：90",

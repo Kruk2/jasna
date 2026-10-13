@@ -21,7 +21,7 @@ from jasna.gui.branding import (
 from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog, ShutdownCountdownDialog, grab_modal
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -253,12 +253,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
         self._video_player_btn.pack(side="left", padx=(0, 12))
         
-        # Support buttons — back the project on Buy Me a Coffee or Unifans
+        # Support buttons — back the project on Buy Me a Coffee, Unifans or (Chinese UI) Xianyu
         self._bmc_btn = BuyMeCoffeeButton(right, width=100, height=28)
         self._bmc_btn.pack(side="left", padx=(0, 8))
 
+        show_xianyu = shows_xianyu_seller(get_locale().current_language)
         self._unifans_btn = UnifansButton(right, width=110, height=28)
-        self._unifans_btn.pack(side="left", padx=(0, 12))
+        self._unifans_btn.pack(side="left", padx=(0, 8 if show_xianyu else 12))
+        if show_xianyu:
+            XianyuButton(right, width=70, height=28).pack(side="left", padx=(0, 12))
 
         self._license_chip = ctk.CTkButton(
             right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),

@@ -1,4 +1,4 @@
-"""The two support entry points (Buy Me a Coffee + Unifans) point at the right pages."""
+"""The support entry points (Buy Me a Coffee, Unifans, and Xianyu for Chinese) point at the right pages."""
 
 from __future__ import annotations
 
@@ -10,10 +10,14 @@ import pytest
 from jasna.gui.components import (
     BMC_URL,
     UNIFANS_URL,
+    XIANYU_URL,
     BuyMeCoffeeButton,
     UnifansButton,
+    XianyuButton,
     _SupportButton,
+    shows_xianyu_seller,
 )
+from jasna.gui.locales import TRANSLATIONS
 
 
 def test_support_urls():
@@ -21,9 +25,26 @@ def test_support_urls():
     assert UNIFANS_URL == "https://app.unifans.io/c/kruk2"
 
 
-def test_both_buttons_share_support_base():
+def test_xianyu_opens_chinese_readme_seller_section():
+    assert XIANYU_URL == "https://github.com/Kruk2/jasna/blob/main/README.zh.md#在闲鱼购买"
+
+
+def test_xianyu_seller_shown_only_in_chinese():
+    assert shows_xianyu_seller("zh")
+    assert not any(shows_xianyu_seller(lang) for lang in ("en", "ja", "ko", "th"))
+
+
+def test_official_seller_texts_name_xianyu_only_in_chinese_and_english():
+    for lang, strings in TRANSLATIONS.items():
+        names_xianyu = lang in ("zh", "en")
+        assert ("闲鱼" in strings["license_official_sellers"]) is names_xianyu, lang
+        assert ("闲鱼" in strings["license_forged"]) is names_xianyu, lang
+
+
+def test_all_buttons_share_support_base():
     assert issubclass(BuyMeCoffeeButton, _SupportButton)
     assert issubclass(UnifansButton, _SupportButton)
+    assert issubclass(XianyuButton, _SupportButton)
 
 
 def test_support_buttons_do_not_depend_on_emoji_fonts():
@@ -36,6 +57,7 @@ def test_support_buttons_do_not_depend_on_emoji_fonts():
         labels = {
             BuyMeCoffeeButton(root, width=100, height=28).cget("text"),
             UnifansButton(root, width=110, height=28).cget("text"),
+            XianyuButton(root, width=80, height=28).cget("text"),
         }
         assert all(not any(icon in label for icon in "☕🚀💜") for label in labels)
     finally:

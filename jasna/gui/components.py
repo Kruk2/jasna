@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Support page URLs — two ways to back the project
 BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
+XIANYU_URL = "https://github.com/Kruk2/jasna/blob/main/README.zh.md#在闲鱼购买"
 
 
 _MODAL_BINDTAG = "JasnaModal"
@@ -185,6 +186,18 @@ class UnifansButton(_SupportButton):
             master, text=t("unifans_support"), url=UNIFANS_URL,
             fg_color=Colors.UNIFANS_PURPLE, text_color=Colors.UNIFANS_TEXT, width=width, height=height,
         )
+
+
+class XianyuButton(_SupportButton):
+    def __init__(self, master, width: int, height: int):
+        super().__init__(
+            master, text=t("xianyu_support"), url=XIANYU_URL,
+            fg_color=Colors.XIANYU_YELLOW, text_color=Colors.XIANYU_TEXT, width=width, height=height,
+        )
+
+
+def shows_xianyu_seller(language: str) -> bool:
+    return language == "zh"
 
 
 class LicenseDialog(ctk.CTkToplevel):

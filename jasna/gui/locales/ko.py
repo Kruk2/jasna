@@ -489,6 +489,7 @@ KO = {
         # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "후원",
         "unifans_support": "Unifans",
+        "xianyu_support": "闲鱼",
 
         # Tooltips
         "tip_max_clip_size": "한 번에 처리할 프레임 수입니다. 클수록 품질이 좋아질 수 있지만 VRAM을 더 많이 사용합니다.\n\n권장: 60 이상. 모델 컴파일을 끄더라도 최소 60을 유지하세요.\n참고: 60 (안전), 90 (균형), 180 (최고 품질, Compile BasicVSR++ 활성화 시 12GB+ VRAM 필요, 비활성화 시 더 적음).\n4K 영상은 VRAM을 더 많이 사용합니다. 클립 크기를 낮춰도 비슷한 품질로 훨씬 빠르게 처리할 수 있습니다.\n기본값: 90",

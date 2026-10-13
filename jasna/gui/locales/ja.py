@@ -489,6 +489,7 @@ JA = {
         # Support buttons (Buy Me a Coffee + Unifans)
         "bmc_support": "応援する",
         "unifans_support": "Unifans",
+        "xianyu_support": "闲鱼",
 
         # Tooltips
         "tip_max_clip_size": "一度に処理するフレーム数です。大きいほど品質が向上する可能性がありますが、VRAM を多く使います。\n\n推奨：60 以上。モデルコンパイルを無効にしてでも 60 は維持しましょう。\n目安：60（安全）、90（バランス良）、180（最高品質、Compile BasicVSR++ 有効時 12GB 以上の VRAM が必要、無効なら少なめ）。\n4K 動画は VRAM を多く使います。クリップサイズを下げても同等の品質で大幅に高速化できます。\nデフォルト：90",
