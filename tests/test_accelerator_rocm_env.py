@@ -6,7 +6,7 @@ import torch
 from jasna.accelerator import apply_rocm_env_defaults, configure_rocm_process_env
 
 ROCM_DEFAULTS = {
-    "MIOPEN_FIND_MODE": "FAST",
+    "MIOPEN_FIND_MODE": "HYBRID",
     "PYTORCH_ALLOC_CONF": "expandable_segments:False",
     "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:False",
 }

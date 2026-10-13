@@ -11,10 +11,11 @@ from typing import Any
 
 import torch
 
-# NORMAL benchmarks every unseen convolution problem. BasicVSR++ has fixed
-# spatial dimensions but a variable temporal clip length (and therefore variable
-# effective convolution batches), so FAST avoids repeated runtime profiling while
-# still using MIOpen's system/user performance databases. Users can override this.
+# BasicVSR++ meets a new convolution batch for every clip length. FAST never
+# writes the user FindDb, and the Windows ROCm wheels ship no system FindDb
+# (ROCm/TheRock#7958), so every miss falls back to slow heuristic kernels forever.
+# HYBRID runs a real find once per new problem and keeps the result across runs
+# (issue #481: 4x faster primary restoration once the DB is seeded).
 #
 # Expandable segments release memory by unmapping virtual address ranges rather
 # than by a device-synchronizing free, so a VramOffloader empty_cache() could
@@ -22,7 +23,7 @@ import torch
 # #252 caught a restorer fp16 GEMM faulting with "Page not present". The env
 # names cover the versions in the field; whichever one the build reads wins.
 def apply_rocm_env_defaults(environ: MutableMapping[str, str]) -> None:
-    environ.setdefault("MIOPEN_FIND_MODE", "FAST")
+    environ.setdefault("MIOPEN_FIND_MODE", "HYBRID")
     environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:False")
     environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:False")
 
