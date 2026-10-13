@@ -48,7 +48,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### LTX 需要什么
 
-- **许可证**：包含 LTX 的激活密钥（25 美元，同时包含 unet-4x 和 SD 1.5，见
+- **许可证**：包含 LTX 的许可证码（25 美元，同时包含 unet-4x 和 SD 1.5，见
   [支持本项目](../../README.zh.md#支持本项目)）。没有的话，应用会改为提供
   **试用模式（速度测试）**（见下文）；CLI 会报错停止。
 - **GPU**：NVIDIA RTX 20 系列或更新。GTX 16 系列未测试。不支持 AMD。
@@ -154,7 +154,7 @@ Topaz Video 模型文件夹，如下图。`--tvai-args` 可修改 Topaz 的其�
 jasna --input photo.png --output restored.png
 ```
 
-- 付费。一个激活密钥可以同时包含 SD 1.5、unet-4x 和 LTX。见
+- 付费。一个许可证码可以同时包含 SD 1.5、unet-4x 和 LTX。见
   [支持本项目](../../README.zh.md#支持本项目)。
 - 不包含在下载包中。大小约 **6.9 GB**。Jasna 会先询问，再从
   [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 下载。

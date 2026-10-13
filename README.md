@@ -32,12 +32,13 @@ and a command line, and runs on your GPU.
 
 ## What Jasna does
 
-- Finds mosaics in a video and restores them. Everything else stays as it was.
+- Finds mosaics in a video and restores them. The rest of the picture is not
+  touched.
 - Two restoration models: fast **BasicVSR++** (free) and slow but more
-  detailed **LTX** (paid).
+  detailed **LTX** (paid, NVIDIA only).
 - Restores only the parts you choose, with a preview, in the **Segment
   Editor**.
-- Handles VR180 videos, and still images (paid SD 1.5 model).
+- Works with VR180 videos and still images (paid SD 1.5 model).
 - Lets you watch a video restored live in the **Video Player**, without making
   a file.
 
@@ -67,7 +68,7 @@ and a command line, and runs on your GPU.
 ## Quick start
 
 1. Download the release for your system and GPU.
-2. Unpack it into a folder with only English letters in the path.
+2. Unpack it into a folder with only English letters and numbers in the path.
 3. Start the app:
    - Windows: double-click `jasna.exe`.
    - Linux NVIDIA: run the `jasna` file.
@@ -76,19 +77,21 @@ and a command line, and runs on your GPU.
 
 **Your first job is slow.** On NVIDIA, Jasna first prepares the models for
 your exact GPU. This takes about **15–60 minutes**, only once. Close other
-apps and don't use the PC during this time.
+apps and don't use the PC during this time. When you update Jasna, copy the
+`model_weights` folder to the new version, so you don't wait again.
 
-Every setting has a tooltip: move the mouse over the ⓘ icon. Out of VRAM?
-Lower **max clip size**, for example from `90` to `60`.
+Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
+memory (VRAM)? Lower **max clip size**, for example from `90` to `60`. See
+[Tuning](docs/en/tuning.md).
 
 ## Help and community
 
-- [GUI guide](docs/en/gui.md): the queue, presets, output names, the Video
+- [App guide](docs/en/gui.md): the queue, presets, output names, the Video
   Player and activation.
 - SLS Discord: examples, help and settings.
   Please don't be too weird.
-- Problem? The **Logs** button at the bottom of the app can export a log.
-  Attach it when you ask for help.
+- Problem? Click **Logs** at the bottom of the app, then **Export** to save a
+  log file. Attach it when you ask for help.
 
 ## Supporting the project
 
@@ -97,7 +100,7 @@ Supporters get a License code for the paid models:
 
 | Support | Models |
 | --- | --- |
-| **$15 USD** or more in total | **unet-4x**: makes restored areas sharper (256 → 1024).<br>**SD 1.5**: experimental model for still images. |
+| **$15 USD** or more in total | **unet-4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
 | **$25 USD** | **unet-4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA only. Includes future updates of this LTX model. |
 
 Supporters who gave **$15 USD or more before [TBD]** get LTX for free.
@@ -135,16 +138,16 @@ GitHub.
 3. No internet on that PC, or it fails? Choose **Manual**, see
    [Activate paid models](docs/en/gui.md#activate-paid-models).
 
-One License code works on **3 PCs or cloud workspaces**. After that, Jasna
-checks activation offline. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
+One License code works on **3 PCs or cloud workspaces**. After activation,
+Jasna works offline. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
 
 ## Advanced
 
 ### How Jasna works
 
-Everything runs on the GPU, from reading the video to saving it.
+Almost everything runs on the GPU, from reading the video to saving it.
 
-1. **Decode** the video on the GPU (NVDEC on NVIDIA).
+1. **Decode** the video on the GPU (NVDEC on NVIDIA, AMF on AMD).
 2. **Detect** mosaics in each frame (default model `rfdetr-v6`).
 3. **Track** each mosaic over time and group its frames into clips (up to
    **max clip size** frames). Clips end at scene cuts, so two different shots
@@ -156,20 +159,21 @@ Everything runs on the GPU, from reading the video to saving it.
 6. **Blend** the restored picture back into the original frame. Only the
    mosaic area changes.
 7. **Encode** with the GPU encoder (NVENC on NVIDIA, AMF on AMD). Audio is
-   copied.
+   copied (encoded again only if the output format can't hold it).
 
-The first job is slow because the models for steps 2 and 4 are compiled for
-your exact GPU (TensorRT, NVIDIA only). The result is saved in `model_weights`
+The first job is slow because the models for steps 2 and 4 (and unet-4x, if
+used) are compiled for your exact GPU (TensorRT, NVIDIA only). The result is saved in `model_weights`
 and used again later. You can copy it to a newer Jasna version.
 
-LTX works differently: it scans the whole video first, then restores each
-mosaic with a diffusion model in 4 steps (find mosaics, prepare, restore,
-save). It is slower but can add more real detail. See
+LTX works differently. It goes over the video in 4 passes: find mosaics,
+prepare, restore with a diffusion model, save. It is slower but can add more
+real detail. See
 [Choosing models](docs/en/models.md#restoration-model).
 
 ### Command line
 
-The command line can do everything the app does.
+The command line can do most of what the app does (not the Video Player,
+LTX seed previews or mask suggestions).
 
 ```bash
 # One video

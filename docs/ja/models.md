@@ -51,7 +51,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### LTX に必要なもの
 
-- **ライセンス**: LTX を含むアクティベーションキー（25 USD、unet-4x と SD 1.5 も含む、
+- **ライセンス**: LTX を含むライセンスコード（25 USD、unet-4x と SD 1.5 も含む、
   [プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)を参照）。ない場合、アプリでは
   代わりに**お試しモード**を選べます（下記参照）。CLI はエラーで止まります。
 - **GPU**: NVIDIA RTX 20 シリーズ以降。GTX 16 シリーズは未検証です。AMD には
@@ -176,7 +176,7 @@ Topaz Video のモデルフォルダーに、下のように設定してくだ�
 jasna --input photo.png --output restored.png
 ```
 
-- 有料です。1 つのアクティベーションキーに SD 1.5、unet-4x、LTX を含められます。
+- 有料です。1 つのライセンスコードに SD 1.5、unet-4x、LTX を含められます。
   [プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)を
   ご覧ください。
 - ダウンロードには含まれていません。約 **6.9 GB** です。Jasna は

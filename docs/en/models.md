@@ -52,7 +52,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### What LTX needs
 
-- **License**: an Activation key that includes LTX ($25 USD, also gives unet-4x and SD 1.5, see
+- **License**: a License code that includes LTX ($25 USD, also gives unet-4x and SD 1.5, see
   [Supporting the project](../../README.md#supporting-the-project)). Without
   one, the app offers **Trial mode** instead (see below); the CLI stops with
   an error.
@@ -175,7 +175,7 @@ model automatically:
 jasna --input photo.png --output restored.png
 ```
 
-- Paid. One Activation key can include SD 1.5, unet-4x and LTX. See
+- Paid. One License code can include SD 1.5, unet-4x and LTX. See
   [Supporting the project](../../README.md#supporting-the-project).
 - Not included in the download. It is about **6.9 GB**. Jasna asks before it
   downloads it from

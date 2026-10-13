@@ -60,8 +60,8 @@ makes processing about 3x slower.
 
 ## Model compilation
 
-On NVIDIA, Jasna compiles the detection and restoration models for your exact
-GPU (TensorRT). This makes processing much faster. AMD never compiles.
+On NVIDIA, Jasna compiles the detection and restoration models (and unet-4x,
+if used) for your exact GPU (TensorRT). This makes processing much faster. AMD never compiles.
 
 - It happens on the first job and takes about **15–60 minutes**. Close other
   apps and don't use the PC during this time.

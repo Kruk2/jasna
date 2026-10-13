@@ -52,8 +52,8 @@ jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overla
 
 ## 模型编译
 
-在 NVIDIA 上，Jasna 会为你的 GPU 编译检测模型和修复模型（TensorRT）。这样处理
-速度快得多。AMD 从不编译。
+在 NVIDIA 上，Jasna 会为你的 GPU 编译检测模型和修复模型（TensorRT）；如果使用
+unet-4x，也会编译它。这样处理速度快得多。AMD 从不编译。
 
 - 编译在第一个任务时进行，大约需要 **15–60 分钟**。在此期间请关闭其他应用，也不要
   使用电脑。
