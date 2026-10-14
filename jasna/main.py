@@ -1,6 +1,7 @@
 import argparse
 import logging
 import sys
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
@@ -152,8 +153,21 @@ def _resolve_cli_encoder_settings(
     )
 
 
+class _ShortErrorParser(argparse.ArgumentParser):
+    def error(self, message: str):
+        self.exit(2, f"{self.prog}: error: {message}\nRun '{self.prog} --help' to see all options.\n")
+
+
+@contextmanager
+def _usage_errors(parser: argparse.ArgumentParser):
+    try:
+        yield
+    except (ValueError, FileNotFoundError) as exc:
+        parser.error(str(exc))
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="jasna")
+    parser = _ShortErrorParser(prog="jasna")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("--benchmark", action="store_true", help="Run benchmarks instead of processing video")
     parser.add_argument("--input", required=False, type=str, default=None, help="Path to input video, image, or folder")
@@ -306,31 +320,31 @@ def build_parser() -> argparse.ArgumentParser:
         "--sd15-steps",
         type=int,
         default=25,
-        help="SD15 inpaint diffusion steps (default: %(default)s)",
+        help="More steps = more detail, but slower (default: %(default)s)",
     )
     sd15.add_argument(
         "--sd15-strength",
         type=float,
         default=0.6,
-        help="SDEdit denoise strength, clamped to <= 0.7 (default: %(default)s)",
+        help="How much of the image is redrawn, up to 0.7. Higher = bigger changes (default: %(default)s)",
     )
     sd15.add_argument(
         "--sd15-freeu",
         default=True,
         action=argparse.BooleanOptionalAction,
-        help="Apply FreeU (s1=0.9, s2=0.2, b1=1.2, b2=1.4) to the SD15 UNet (default: %(default)s)",
+        help="Small extra detail boost; turn off if results look over-sharpened (default: %(default)s)",
     )
     sd15.add_argument(
         "--sd15-seed",
         type=int,
         default=0,
-        help="Base seed for SD15 inpaint (default: %(default)s)",
+        help="Starting number for the random result. Same seed = same result (default: %(default)s)",
     )
     sd15.add_argument(
         "--sd15-variants",
         type=int,
         default=1,
-        help="Generate N stochastic variants with seeds seed..seed+N-1 (default: %(default)s)",
+        help="Save N versions (name_v1 … name_vN), each with the next seed, so you can pick the best (default: %(default)s)",
     )
 
     license_group = parser.add_argument_group("Activation")
@@ -411,7 +425,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--tvai-args",
         type=str,
         default="preblur=0:noise=0:details=0:halo=0:blur=0:compression=0:estimate=8:blend=0.2:device=-2:vram=1:instances=1",
-        help='Extra params for tvai_up. (default: %(default)s)',
+        help='Extra options for the Topaz model, for advanced users (default: %(default)s)',
     )
     tvai.add_argument(
         "--tvai-workers",
@@ -905,7 +919,8 @@ def main() -> None:
     if is_streaming and args.fmp4:
         parser.error("--fmp4 is only supported for offline exports")
     from jasna.post_export_action import run_post_export_action_safely, validate_post_export_action
-    validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
+    with _usage_errors(parser):
+        validate_post_export_action(str(args.post_export_action), str(args.post_export_command))
 
     def _run_post_export_action() -> None:
         run_post_export_action_safely(
@@ -919,13 +934,13 @@ def main() -> None:
     if args.output is None and not is_streaming:
         parser.error("--output is required when not using --benchmark or --stream")
 
-    _check_system(args)
-    _configure_runtime(args)
-
     input_video = Path(args.input) if args.input else None
     if input_video is not None and not input_video.exists():
-        raise FileNotFoundError(str(input_video))
+        parser.error(f"input not found: {input_video}")
     output_video = Path(args.output) if args.output else (input_video.with_stem(input_video.stem + "_out") if input_video else None)
+    lut_arg = str(args.lut).strip()
+    if lut_arg and not Path(lut_arg).exists():
+        parser.error(f"--lut file not found: {lut_arg}")
 
     from jasna.media.media_files import folder_output_path, is_image
     input_is_image = input_video is not None and is_image(input_video)
@@ -948,13 +963,30 @@ def main() -> None:
             parser.error("--segments requires a single video input, not a folder")
         if args.fmp4:
             parser.error("--fmp4 cannot be combined with --segments")
+    if is_streaming and input_is_dir:
+        parser.error("--stream does not support folder input")
+    if is_streaming and input_is_image:
+        parser.error("Image input does not support --stream")
+
+    restoration_backend = CLI_RESTORATION_MODELS[args.restoration_model_name][0]
+    if not input_is_image:
+        if restoration_backend == "ltx":
+            model_option = f"--restoration-model-name {args.restoration_model_name}"
+            if is_streaming:
+                parser.error(f"{model_option} does not support --stream")
+            if args.secondary_restoration != "none":
+                parser.error(f"{model_option} does not support --secondary-restoration")
+            if args.denoise != "none":
+                parser.error(f"{model_option} does not support --denoise")
+        _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
+
+    _check_system(args)
+    _configure_runtime(args)
 
     folder_images: list[Path] = []
     folder_videos: list[Path] = []
     folder_output_dir: Path | None = None
     if input_is_dir:
-        if is_streaming:
-            parser.error("--stream does not support folder input")
         folder_images, folder_videos, folder_output_dir = _plan_folder(parser, args, input_video, output_video)
         if folder_images:
             from jasna.image_restore import run_image_restoration_folder
@@ -970,8 +1002,6 @@ def main() -> None:
             return
 
     if input_is_image:
-        if is_streaming:
-            parser.error("Image input does not support --stream")
         from jasna.image_restore import run_image_restoration
         run_image_restoration(args)
         _run_post_export_action()
@@ -983,27 +1013,21 @@ def main() -> None:
         resolve_detection_model,
     )
 
-    if not str(args.detection_model_path).strip():
-        available = discover_available_detection_models()
-        requested = coerce_detection_model_name(str(args.detection_model))
-        if available and requested not in available:
-            print(f"Warning: detection model '{requested}' not found in model_weights/. Available: {', '.join(available)}")
-    detection_model_name, detection_model_path, detection_score_threshold = resolve_detection_model(
-        str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
-    )
+    with _usage_errors(parser):
+        if not str(args.detection_model_path).strip():
+            available = discover_available_detection_models()
+            requested = coerce_detection_model_name(str(args.detection_model))
+            if available and requested not in available:
+                print(f"Warning: detection model '{requested}' not found in model_weights/. Available: {', '.join(available)}")
+        detection_model_name, detection_model_path, detection_score_threshold = resolve_detection_model(
+            str(args.detection_model), str(args.detection_model_path), args.detection_score_threshold
+        )
 
-    restoration_backend = CLI_RESTORATION_MODELS[args.restoration_model_name][0]
-    if restoration_backend == "ltx":
-        if is_streaming:
-            parser.error("--restoration-model-name ltx does not support --stream")
-        if args.secondary_restoration != "none" or args.denoise != "none":
-            parser.error("--restoration-model-name ltx does not support --secondary-restoration or --denoise")
-    _reject_options_of_other_restoration_backend(parser, args, restoration_backend)
     restoration_model_path = Path(
         args.restoration_model_path or default_restoration_model_path(restoration_backend)
     )
     if restoration_backend != "ltx" and not restoration_model_path.exists():
-        raise FileNotFoundError(str(restoration_model_path))
+        parser.error(f"restoration model not found: {restoration_model_path}")
 
     segments = None
     splice_plan = None
@@ -1015,27 +1039,23 @@ def main() -> None:
 
     from jasna.accelerator import device_context, vendor_for_device
 
-    encoder_settings = _resolve_cli_encoder_settings(
-        str(args.encoder_settings),
-        cq=args.cq,
-        codec=codec,
-        vendor=vendor_for_device(str(args.device)),
-    )
-
-    lut_arg = str(args.lut).strip()
-    if lut_arg and not Path(lut_arg).exists():
-        raise FileNotFoundError(lut_arg)
-
-    config = _session_config_from_args(
-        args,
-        codec=codec,
-        encoder_settings=encoder_settings,
-        detection_model_name=detection_model_name,
-        detection_model_path=detection_model_path,
-        detection_score_threshold=detection_score_threshold,
-        restoration_model_path=restoration_model_path,
-        lut_path=lut_arg or None,
-    )
+    with _usage_errors(parser):
+        encoder_settings = _resolve_cli_encoder_settings(
+            str(args.encoder_settings),
+            cq=args.cq,
+            codec=codec,
+            vendor=vendor_for_device(str(args.device)),
+        )
+        config = _session_config_from_args(
+            args,
+            codec=codec,
+            encoder_settings=encoder_settings,
+            detection_model_name=detection_model_name,
+            detection_model_path=detection_model_path,
+            detection_score_threshold=detection_score_threshold,
+            restoration_model_path=restoration_model_path,
+            lut_path=lut_arg or None,
+        )
 
     _ensure_ltx_model(config, segments)
 

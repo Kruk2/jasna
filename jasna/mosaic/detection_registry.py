@@ -186,7 +186,7 @@ def resolve_detection_model(
     name = coerce_detection_model_name(name)
     path = Path(explicit_path) if explicit_path.strip() else require_detection_model_weights(name)
     if not path.exists():
-        raise FileNotFoundError(str(path))
+        raise FileNotFoundError(f"Detection model weights not found: {path}")
     threshold = recommended_score_threshold(name) if score_threshold is None else float(score_threshold)
     return name, path, threshold
 

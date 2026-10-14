@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -193,54 +194,65 @@ class TestMainValidation:
     def test_codec_case_normalized(self, tmp_path):
         _run_main_with_args(tmp_path, ["--codec", "AV1"])
 
-    def test_codec_specific_encoder_settings_validated(self, tmp_path):
-        with pytest.raises(ValueError, match="for codec av1.*profile"):
+    def test_codec_specific_encoder_settings_validated(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--codec", "av1", "--encoder-settings", "profile=main"])
+        assert re.search("for codec av1.*profile", capsys.readouterr().err)
 
-    def test_batch_size_zero_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="Batch size must be > 0"):
+    def test_batch_size_zero_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--batch-size", "0"])
+        assert re.search("Batch size must be > 0", capsys.readouterr().err)
 
-    def test_max_clip_size_zero_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="Max clip size must be > 0"):
+    def test_max_clip_size_zero_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--max-clip-size", "0"])
+        assert re.search("Max clip size must be > 0", capsys.readouterr().err)
 
-    def test_temporal_overlap_negative_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="Temporal overlap must be >= 0"):
+    def test_temporal_overlap_negative_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--temporal-overlap", "-1"])
+        assert re.search("Temporal overlap must be >= 0", capsys.readouterr().err)
 
-    def test_temporal_overlap_ge_max_clip_size_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="Temporal overlap must satisfy"):
+    def test_temporal_overlap_ge_max_clip_size_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--max-clip-size", "10", "--temporal-overlap", "10"])
+        assert re.search("Temporal overlap must satisfy", capsys.readouterr().err)
 
-    def test_temporal_overlap_too_large_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="Temporal overlap must satisfy"):
+    def test_temporal_overlap_too_large_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--max-clip-size", "10", "--temporal-overlap", "5"])
+        assert re.search("Temporal overlap must satisfy", capsys.readouterr().err)
 
-    def test_detection_score_threshold_out_of_range_raises(self, tmp_path):
-        with pytest.raises(ValueError, match="Detection score threshold must be in"):
+    def test_detection_score_threshold_out_of_range_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--detection-score-threshold", "1.5"])
+        assert re.search("Detection score threshold must be in", capsys.readouterr().err)
 
     @pytest.mark.parametrize("value", ["1.5", "-0.1"])
-    def test_sharpen_out_of_range_raises(self, tmp_path, value):
-        with pytest.raises(ValueError, match="Sharpening must be in"):
+    def test_sharpen_out_of_range_raises(self, tmp_path, value, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--sharpen", value])
+        assert re.search("Sharpening must be in", capsys.readouterr().err)
 
     def test_sharpen_is_forwarded_to_the_pipeline(self, tmp_path):
         pipeline_cls = _run_main_with_args(tmp_path, ["--sharpen", "0.4"])
         assert pipeline_cls.call_args.kwargs["config"].sharpen_strength == 0.4
 
-    def test_missing_input_file_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
+    def test_missing_input_file_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, [], create_input=False)
+        assert "input not found" in capsys.readouterr().err
 
-    def test_missing_restoration_model_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
+    def test_missing_restoration_model_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, [], create_restoration=False)
+        assert "restoration model not found" in capsys.readouterr().err
 
-    def test_missing_detection_model_raises(self, tmp_path):
-        with pytest.raises(FileNotFoundError):
+    def test_missing_detection_model_raises(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, [], create_detection=False)
+        assert "Detection model weights not found" in capsys.readouterr().err
 
     def test_no_gpu_exits(self, tmp_path):
         input_path = tmp_path / "in.mp4"
@@ -292,3 +304,31 @@ class TestMainValidation:
     def test_fmp4_rejected_with_segments(self, tmp_path):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--segments", "10-20", "--fmp4"])
+
+
+class TestCliErrors:
+    def test_usage_error_is_one_short_message(self, tmp_path, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _run_main_with_args(tmp_path, ["--stream", "--fmp4"])
+        assert exc.value.code == 2
+        assert capsys.readouterr().err.splitlines() == [
+            "jasna: error: --fmp4 is only supported for offline exports",
+            "Run 'jasna --help' to see all options.",
+        ]
+
+    def test_argument_mistakes_are_reported_before_the_gpu_check(self, tmp_path, capsys):
+        with patch("jasna.main._check_system", side_effect=AssertionError("checked the GPU first")):
+            with pytest.raises(SystemExit):
+                _run_main_with_args(tmp_path, ["--restoration-model-name", "ltx-undistilled", "--denoise", "low"])
+        assert "--restoration-model-name ltx-undistilled does not support --denoise" in capsys.readouterr().err
+
+    def test_missing_input_is_reported_before_the_gpu_check(self, tmp_path, capsys):
+        with patch("jasna.main._check_system", side_effect=AssertionError("checked the GPU first")):
+            with pytest.raises(SystemExit):
+                _run_main_with_args(tmp_path, [], create_input=False)
+        assert "input not found" in capsys.readouterr().err
+
+    def test_post_export_command_without_command_is_a_usage_error(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
+            _run_main_with_args(tmp_path, ["--post-export-action", "command"])
+        assert "--post-export-command is required" in capsys.readouterr().err

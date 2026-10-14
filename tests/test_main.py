@@ -1,3 +1,4 @@
+import re
 import sys
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
@@ -486,16 +487,18 @@ class TestArgForwarding:
 
         assert pipe["encoder_settings"] == {"cq": 31}
 
-    def test_direct_cq_conflicts_with_advanced_cq(self, tmp_path):
-        with pytest.raises(ValueError, match="--cq.*--encoder-settings"):
+    def test_direct_cq_conflicts_with_advanced_cq(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             self._capture_run(
                 tmp_path,
                 ["--cq", "28", "--encoder-settings", "cq=22"],
             )
+        assert re.search("--cq.*--encoder-settings", capsys.readouterr().err)
 
-    def test_direct_cq_validated_for_codec(self, tmp_path):
-        with pytest.raises(ValueError, match=r"h264.*1\.\.51"):
+    def test_direct_cq_validated_for_codec(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
             self._capture_run(tmp_path, ["--codec", "h264", "--cq", "52"])
+        assert re.search(r"h264.*1\.\.51", capsys.readouterr().err)
 
     def test_batch_size_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--batch-size", "8"])

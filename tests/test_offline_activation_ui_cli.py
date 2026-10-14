@@ -41,7 +41,7 @@ def test_cli_machine_key_exits_before_runtime_setup(monkeypatch, protection_api,
     assert capsys.readouterr().out.strip() == "JM1-" + "1" * 64
 
 
-def test_cli_activation_only_and_processing_share_the_early_save(monkeypatch, protection_api):
+def test_cli_activation_only_and_processing_share_the_early_save(monkeypatch, protection_api, tmp_path):
     from jasna import main
 
     _, store = protection_api
@@ -51,8 +51,10 @@ def test_cli_activation_only_and_processing_share_the_early_save(monkeypatch, pr
     store.set_license.assert_called_once_with("activation")
     store.set_license.reset_mock()
 
+    photo = tmp_path / "photo.png"
+    photo.touch()
     monkeypatch.setattr(sys, "argv", [
-        "jasna", "--activation-key", "activation", "--input", "photo.png", "--output", "out.png",
+        "jasna", "--activation-key", "activation", "--input", str(photo), "--output", "out.png",
     ])
 
     def stop_before_gpu(args):
@@ -517,15 +519,17 @@ def test_cli_online_activation_exits_before_gpu_setup(monkeypatch, protection_ap
     assert "private-returned-key" not in output.out + output.err
 
 
-def test_cli_online_activation_is_saved_before_processing(monkeypatch, protection_api):
+def test_cli_online_activation_is_saved_before_processing(monkeypatch, protection_api, tmp_path):
     from jasna import main
     from jasna.protection import activation
 
     request = Mock(return_value="activation")
     monkeypatch.setattr(activation, "activate_license_code", request)
     code = "JL1-" + "A" * 43
+    photo = tmp_path / "photo.png"
+    photo.touch()
     monkeypatch.setattr(sys, "argv", [
-        "jasna", "--license-code", code, "--input", "photo.png", "--output", "out.png",
+        "jasna", "--license-code", code, "--input", str(photo), "--output", "out.png",
     ])
 
     def stop_before_gpu(args):
