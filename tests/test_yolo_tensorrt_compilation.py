@@ -149,3 +149,41 @@ def test_compile_yolo_restores_cuda_visible_devices(monkeypatch, tmp_path: Path)
     monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "0")
     compile_yolo_to_tensorrt_engine(pt, batch=8, fp16=True, imgsz=640, device=torch.device("cuda:0"))
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "0"
+
+
+def test_compile_yolo_exports_onnx_without_onnxruntime(monkeypatch, tmp_path: Path) -> None:
+    # Release builds bundle neither onnxruntime nor onnxslim; a missing requirement makes
+    # Ultralytics run pip through the frozen executable.
+    from ultralytics import YOLO
+    import ultralytics.engine.exporter as exporter
+
+    def reject_unbundled_requirements(requirements, *_args, **_kwargs):
+        assert "onnxruntime" not in str(requirements)
+        assert "onnxslim" not in str(requirements)
+        return True
+
+    monkeypatch.setattr(exporter, "check_requirements", reject_unbundled_requirements)
+    monkeypatch.setitem(sys.modules, "onnxruntime", None)
+    monkeypatch.setitem(sys.modules, "onnxslim", None)
+
+    pt = tmp_path / "tiny-seg.pt"
+    YOLO("yolov8n-seg.yaml", task="segment").save(str(pt))
+
+    import jasna.trt as jt
+
+    exported_onnx = []
+
+    def _fake_compile(onnx_path, device, *, batch_size=None, fp16=True, **_kwargs):
+        exported_onnx.append(Path(onnx_path))
+        engine = jt.get_onnx_tensorrt_engine_path(onnx_path, batch_size=batch_size, fp16=fp16)
+        _touch(engine)
+        return engine
+
+    monkeypatch.setattr(jt, "compile_onnx_to_tensorrt_engine", _fake_compile)
+
+    from jasna.mosaic.yolo_tensorrt_compilation import compile_yolo_to_tensorrt_engine
+
+    engine_path = compile_yolo_to_tensorrt_engine(pt, batch=1, fp16=True, imgsz=64, device=torch.device("cuda:0"))
+    assert engine_path.is_file()
+    assert exported_onnx == [pt.with_suffix(".onnx")]
+    assert exported_onnx[0].stat().st_size > 0

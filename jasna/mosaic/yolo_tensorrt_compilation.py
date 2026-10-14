@@ -80,7 +80,9 @@ def compile_yolo_to_tensorrt_engine(
                     dynamic=False,
                     nms=False,
                     batch=int(batch),
-                    half=bool(fp16),
+                    # Simplify and CPU FP16 conversion need onnxruntime, which releases do not bundle;
+                    # TensorRT builds the FP16 engine from the FP32 ONNX.
+                    simplify=False,
                 )
     finally:
         YOLO_LOGGER.setLevel(_prev_yolo_level)

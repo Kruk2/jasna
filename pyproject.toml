@@ -25,7 +25,7 @@ dependencies = [
   "tkinterdnd2",
   "python-vlc==3.0.21203",
   # Older versions cannot reconstruct YOLO checkpoints under the release's weights-only policy.
-  "ultralytics>=8.4.96",
+  "ultralytics>=8.4.96,<8.5",
   # Not imported directly; ultralytics needs it to export YOLO models for TensorRT.
   "onnx",
   "cryptography>=42",

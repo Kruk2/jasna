@@ -15,6 +15,7 @@ def test_ultralytics_dependency_requires_restricted_checkpoint_support():
     requirement = next(Requirement(item) for item in dependencies if Requirement(item).name == "ultralytics")
     assert requirement.specifier
     assert "8.4.60" not in requirement.specifier
+    assert "8.5.0" not in requirement.specifier
     assert metadata.version("ultralytics") in requirement.specifier
 
 

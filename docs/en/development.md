@@ -38,11 +38,13 @@ Ubuntu 22.04 has no Python 3.13 package; build one against `tk-dev` and
 
 On Windows (NVIDIA), run the same `uv pip install` line in a Python 3.13 venv.
 
-Release builders must install the project's required `ultralytics>=8.4.96` before
+Release builders must install the project's required `ultralytics>=8.4.96,<8.5` before
 freezing. Older versions fail to load YOLO checkpoints under the release's
 restricted loading policy, even when the same checkpoint works in development.
-YOLO ONNX export uses an explicit CPU device object to avoid CUDA/NVML discovery;
-the subsequent TensorRT build uses the requested GPU.
+YOLO ONNX export uses an explicit CPU device object to avoid CUDA/NVML discovery
+and exports an unsimplified FP32 ONNX, so it needs neither onnxruntime nor onnxslim
+(releases bundle neither); the subsequent TensorRT build uses the requested GPU and
+builds the FP16 engine.
 The NVIDIA extras also install SciPy directly for the LTX worker; the release
 bundler copies its Python modules, native extensions and bundled BLAS libraries.
 
