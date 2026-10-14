@@ -910,8 +910,14 @@ def _start_server_on_free_port(server: HlsStreamingServer) -> int:
     return server._httpd.server_address[1]
 
 
+def _ipv4_url(port: int, path: str) -> str:
+    # The server listens on IPv4 only; on Windows a "localhost" client first tries ::1
+    # and needs ~2 s to give up on it, which outlasts the timing assertions.
+    return f"http://127.0.0.1:{port}{path}"
+
+
 def _get(port: int, path: str) -> tuple[int, dict | str, dict]:
-    req = urllib.request.Request(f"http://localhost:{port}{path}")
+    req = urllib.request.Request(_ipv4_url(port, path))
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             headers = {k.lower(): v for k, v in resp.getheaders()}
@@ -927,7 +933,7 @@ def _get(port: int, path: str) -> tuple[int, dict | str, dict]:
 
 
 def _request(port: int, path: str, method: str) -> tuple[int, dict | str, dict]:
-    req = urllib.request.Request(f"http://localhost:{port}{path}", method=method)
+    req = urllib.request.Request(_ipv4_url(port, path), method=method)
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
             return resp.status, json.loads(resp.read().decode()), {k.lower(): v for k, v in resp.getheaders()}
@@ -938,7 +944,7 @@ def _request(port: int, path: str, method: str) -> tuple[int, dict | str, dict]:
 def _post(port: int, path: str, body: dict | None = None, timeout: float = 35.0) -> tuple[int, dict | str, dict]:
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(
-        f"http://localhost:{port}{path}",
+        _ipv4_url(port, path),
         method="POST",
         data=data,
         headers={"Content-Type": "application/json"} if data else {},
@@ -961,7 +967,7 @@ def _post(port: int, path: str, body: dict | None = None, timeout: float = 35.0)
 
 
 def _options(port: int, path: str) -> tuple[int, dict]:
-    req = urllib.request.Request(f"http://localhost:{port}{path}", method="OPTIONS")
+    req = urllib.request.Request(_ipv4_url(port, path), method="OPTIONS")
     with urllib.request.urlopen(req, timeout=5) as resp:
         headers = {k.lower(): v for k, v in resp.getheaders()}
         return resp.status, headers

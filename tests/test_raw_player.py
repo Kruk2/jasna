@@ -446,6 +446,7 @@ def test_source_has_audio_uses_ffprobe_process(
         return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(raw_player, "resolve_executable", lambda name: "/tools/ffprobe")
+    monkeypatch.setattr(raw_player, "subprocess_no_window_kwargs", lambda: {"creationflags": 7})
     monkeypatch.setattr(raw_player.subprocess, "run", run)
 
     assert raw_player.source_has_audio("video.mp4") is expected
@@ -467,6 +468,7 @@ def test_source_has_audio_uses_ffprobe_process(
                 "stdout": raw_player.subprocess.PIPE,
                 "stderr": raw_player.subprocess.PIPE,
                 "text": True,
+                "creationflags": 7,
             },
         )
     ]

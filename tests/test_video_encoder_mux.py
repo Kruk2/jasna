@@ -181,6 +181,7 @@ def _make_rich_source(tmp_path: Path) -> Path:
         "-c:s", "srt",
         "-attach", str(attachment),
         "-metadata:s:t:0", "mimetype=text/plain",
+        "-metadata:s:t:0", f"filename={attachment.name}",
         str(source),
     ]
     subprocess.run(cmd, check=True)
