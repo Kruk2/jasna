@@ -157,8 +157,8 @@ if ($vids.Count -gt 0) { $gpuName = ($vids -join ' + ') }
 if (-not $gfx -and $gpuName) {
     $table = @(
         @('RX 7900 XTX|RX 7900 XT|RX 7900 GRE|W7900',   'gfx1100'),
-        @('RX 7800 XT|RX 7700 XT|W7800',               'gfx1101'),
-        @('RX 7600',                                   'gfx1102'),
+        @('RX 7800|RX 7700|W7800',                     'gfx1101'),
+        @('RX 7650|RX 7600',                           'gfx1102'),
         @('RX 9070|RX 9070 GRE',                       'gfx1201'),
         @('RX 9060',                                   'gfx1200'),
         @('Strix Halo|Radeon 80[0-9]S|Radeon 8050S',   'gfx1151'),

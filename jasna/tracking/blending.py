@@ -15,6 +15,15 @@ BLEND_DILATION_RATIO = 0.028
 BLEND_FALLOFF_RATIO = 0.028
 
 
+def _gpu_torch_path(device: torch.device) -> bool:
+    """True for the CUDA-type device class: an NVIDIA card or an AMD card under
+    ROCm (torch spells both ``cuda``). The vendor branch that sent AMD to the
+    cumsum fallbacks below was measured *slower* than the plain torch kernels on
+    an RX 7900 XT, so the fast op is now picked by device class, not by vendor.
+    """
+    return torch.device(device).type == "cuda"
+
+
 def _moving_average(x: torch.Tensor, size: int, dim: int) -> torch.Tensor:
     """Moving average without creating a shape-specific convolution problem."""
     prefix = x.cumsum(dim=dim)
@@ -70,9 +79,26 @@ def _conv_box_blur(x: torch.Tensor, kernel_h: int, kernel_w: int) -> torch.Tenso
     return blurred.squeeze(0).squeeze(0)
 
 
+def _pool_box_blur(x: torch.Tensor, kernel_h: int, kernel_w: int) -> torch.Tensor:
+    """Box mean via reflect-pad + ``avg_pool2d`` — one pooled kernel instead of
+    the cumsum path's ``cat``/``narrow`` chain. Same pixels as ``_prefix_box_blur``
+    and the dense conv reference; measured 3-5x faster than the cumsum path at the
+    mask sizes the blender uses on an RX 7900 XT (ROCm)."""
+    kh = min(kernel_h, 2 * x.shape[0] - 1)
+    kw = min(kernel_w, 2 * x.shape[1] - 1)
+    padded = F.pad(
+        x.unsqueeze(0).unsqueeze(0),
+        (kw // 2, kw // 2, kh // 2, kh // 2),
+        mode="reflect",
+    )
+    return F.avg_pool2d(padded, (kh, kw), stride=1).squeeze(0).squeeze(0)
+
+
 def _box_blur(x: torch.Tensor, kernel_h: int, kernel_w: int) -> torch.Tensor:
     if is_nvidia_device(x.device):
         return _conv_box_blur(x, kernel_h, kernel_w)
+    if _gpu_torch_path(x.device):
+        return _pool_box_blur(x, kernel_h, kernel_w)
     return _prefix_box_blur(x, kernel_h, kernel_w)
 
 
@@ -117,8 +143,10 @@ def _prefix_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
 
 def dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
     """Bool ``[H, W]`` mask dilated on its own device; same pixels as ``cv2.dilate`` with a
-    ``MORPH_ELLIPSE`` kernel of ``2*radius+1``."""
-    if is_nvidia_device(mask.device):
+    ``MORPH_ELLIPSE`` kernel of ``2*radius+1``. The single ``conv2d`` is bit-identical to
+    the cumsum path (see the tests) and 6-13x faster on an RX 7900 XT (ROCm), so both GPU
+    vendors take it; only the CPU keeps the cumsum fallback."""
+    if _gpu_torch_path(mask.device):
         return _conv_dilate_ellipse(mask, radius)
     return _prefix_dilate_ellipse(mask, radius)
 

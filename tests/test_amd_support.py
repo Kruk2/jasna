@@ -421,7 +421,9 @@ def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
 def test_yuv_eager_converter_runs_on_gpu_planes(monkeypatch) -> None:
     import jasna.media.yuv_to_rgb as module
 
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
+    # the converter resolves its kernel through build_kernel(); returning None
+    # puts it on the eager path this test checks
+    monkeypatch.setattr(module, "build_kernel", lambda *_args, **_kwargs: None)
     H = W = 16
     generator = torch.Generator().manual_seed(0)
     y = torch.randint(16, 236, (H, W), dtype=torch.uint8, generator=generator)

@@ -320,6 +320,62 @@ def test_vr_delta_composite_preserves_pixels_outside_mask() -> None:
     assert torch.equal(blended, outside)
 
 
+def _region_sr_with_edge(sharpen_strength: float) -> SecondaryRestoreResult:
+    x1, y1, x2, y2 = 8, 8, 40, 24
+    rh, rw = y2 - y1, x2 - x1
+    frame = torch.empty(3, RSIZE, RSIZE)
+    frame[:, :, :16] = 60.0
+    frame[:, :, 16:] = 200.0
+    return SecondaryRestoreResult(
+        track_id=1,
+        start_frame=0,
+        frame_count=1,
+        frame_shape=(32, 64),
+        frame_device=torch.device("cpu"),
+        masks=[torch.ones(rh, rw, dtype=torch.bool)],
+        restored_frames=[frame.to(torch.uint8)],
+        keep_start=0,
+        keep_end=1,
+        crossfade_weights=None,
+        enlarged_bboxes=[(x1, y1, x2, y2)],
+        crop_shapes=[(rh, rw)],
+        pad_offsets=[(0, 0)],
+        resize_shapes=[(rh, rw)],
+        clip_keep_offset=0,
+        sharpen_strength=sharpen_strength,
+    )
+
+
+def test_secondary_sharpen_changes_only_the_restored_patch() -> None:
+    # A real edge inside the patch must come out sharper, and the sharpening must
+    # stay inside the track's region: everything outside is byte-identical.
+    x1, y1, x2, y2 = 8, 8, 40, 24
+    base = torch.full((3, 32, 64), 90, dtype=torch.uint8)
+
+    off = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+    off.register_frame(0, {1})
+    off.add_result(_region_sr_with_edge(0.0))
+    plain = off.blend_frame(0, base.clone())
+
+    on = BlendBuffer(device=torch.device("cpu"), blend_mask_fn=_identity_blend_mask)
+    on.register_frame(0, {1})
+    on.add_result(_region_sr_with_edge(0.4))
+    sharpened = on.blend_frame(0, base.clone())
+
+    diff = (plain.float() - sharpened.float()).abs()
+    inside = torch.zeros_like(diff, dtype=torch.bool)
+    inside[:, y1:y2, x1:x2] = True
+
+    assert diff[inside].max().item() > 0.0, "the restored region should change"
+    assert diff[~inside].max().item() == 0.0, "pixels outside the patch must not change"
+    # And the region is genuinely sharper (more contrast across the internal edge).
+    def region_grad(img: torch.Tensor) -> float:
+        region = img[:, y1:y2, x1:x2].float()
+        return (region[:, :, 1:] - region[:, :, :-1]).abs().mean().item()
+
+    assert region_grad(sharpened) > region_grad(plain)
+
+
 def test_apply_blend_skips_out_of_range_frame() -> None:
     bb = BlendBuffer(device=torch.device("cpu"))
     bb.register_frame(0, {1})

@@ -361,3 +361,66 @@ class TestBlendBufferOffloadableResults:
     def test_empty_when_no_results(self):
         bb = BlendBuffer(device=torch.device("cpu"))
         assert bb.offloadable_results() == []
+
+
+class TestBlendBufferCounts:
+    def test_counts_track_pending_and_results(self):
+        bb = BlendBuffer(device=torch.device("cpu"))
+        assert bb.counts() == (0, 0)
+        sr = _make_sr(track_id=1, start_frame=0, frame_count=2)
+        bb.register_frame(0, {1})
+        bb.register_frame(1, {1})
+        assert bb.counts() == (2, 0)
+        bb.add_result(sr)
+        assert bb.counts() == (2, 1)
+
+    def test_blend_retires_result_and_pending(self):
+        bb = BlendBuffer(device=torch.device("cpu"))
+        sr = _make_sr(track_id=1, start_frame=0, frame_count=2)
+        bb.register_frame(0, {1})
+        bb.register_frame(1, {1})
+        bb.add_result(sr)
+        bb.blend_frame(0, torch.zeros(3, 8, 8, dtype=torch.uint8))
+        assert bb.counts() == (1, 1)
+        bb.blend_frame(1, torch.zeros(3, 8, 8, dtype=torch.uint8))
+        assert bb.counts() == (0, 0)
+
+
+class TestBlendBufferPruneStranded:
+    """The deep tidy-up drops only results the blend frontier has already passed."""
+
+    def test_no_frontier_prunes_nothing(self):
+        bb = BlendBuffer(device=torch.device("cpu"))
+        bb.add_result(_make_sr(track_id=1, start_frame=0, frame_count=2))
+        assert bb.prune_stranded() == 0
+        assert bb.counts() == (0, 1)
+
+    def test_drops_result_behind_frontier(self):
+        bb = BlendBuffer(device=torch.device("cpu"))
+        bb.add_result(_make_sr(track_id=1, start_frame=0, frame_count=2))  # last=1
+        bb.blend_frame(5, torch.zeros(3, 8, 8, dtype=torch.uint8))  # frontier=5
+        assert bb.prune_stranded() == 1
+        assert bb.counts() == (0, 0)
+        assert bb.prune_stranded() == 0  # idempotent
+
+    def test_keeps_result_at_frontier(self):
+        bb = BlendBuffer(device=torch.device("cpu"))
+        bb.add_result(_make_sr(track_id=1, start_frame=0, frame_count=2))  # last=1
+        bb.blend_frame(1, torch.zeros(3, 8, 8, dtype=torch.uint8))  # frontier==last
+        assert bb.prune_stranded() == 0
+        assert bb.counts() == (0, 1)
+
+    def test_keeps_result_ahead_of_frontier(self):
+        bb = BlendBuffer(device=torch.device("cpu"))
+        bb.add_result(_make_sr(track_id=1, start_frame=10, frame_count=2))  # last=11
+        bb.blend_frame(3, torch.zeros(3, 8, 8, dtype=torch.uint8))  # frontier=3
+        assert bb.prune_stranded() == 0
+        assert bb.counts() == (0, 1)
+
+    def test_only_stranded_of_several(self):
+        bb = BlendBuffer(device=torch.device("cpu"))
+        bb.add_result(_make_sr(track_id=1, start_frame=0, frame_count=2))   # last=1
+        bb.add_result(_make_sr(track_id=2, start_frame=100, frame_count=2))  # last=101
+        bb.blend_frame(5, torch.zeros(3, 8, 8, dtype=torch.uint8))  # frontier=5
+        assert bb.prune_stranded() == 1
+        assert bb.counts() == (0, 1)

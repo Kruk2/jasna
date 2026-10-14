@@ -301,6 +301,14 @@ class SettingsPanel(ctk.CTkFrame):
             self._saved_preset_settings.encoder_cq = int(
                 self._widgets["encoder_cq"].get()
             )
+        if (
+            self._saved_preset_settings.amd_upscale_engine != "amf-sr"
+            and self._saved_preset_settings.amd_upscale_sharpness < 0.0
+        ):
+            # The -1 sentinel is amf-sr's "driver default"; the network engines
+            # display any negative as 0 (see SecondarySection._refresh_amd_rows),
+            # so the snapshot must follow or modification tracking always trips.
+            self._saved_preset_settings.amd_upscale_sharpness = 0.0
         self._sync_temporal_filter_limits(int(self._widgets["max_clip_size"].get()))
 
         self._applying_preset = False  # Re-enable modification tracking

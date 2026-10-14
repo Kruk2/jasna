@@ -27,12 +27,14 @@ CORRUPT_PACKET_TOLERANCE = 10
 
 # Decode backend selection through `JASNA_DECODE_BACKEND`:
 # - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
-#              software, when VALI cannot open or decode the first frame. AMD
-#              keeps its AMF -> software escalation: setup failures fall back at
-#              open time, and a hardware decoder that opens but rejects the first
-#              packet (hevc_amf on Main10) escalates in `_decode_packet`.
+#              software, when VALI cannot open or decode the first frame. On AMD
+#              it decodes in FFmpeg software: measured faster than AMF for H.264
+#              (see the AMD branch in `__enter__`), a wash for HEVC, and the only
+#              option for Main10 HEVC, which hevc_amf cannot decode at all.
 # - "vali":    VALI only; any failure raises (NVIDIA only).
 # - "pyav-hw": skip VALI, use the PyAV hwaccel path with its software fallback.
+#              On AMD this selects the AMF decoder (h264_amf/hevc_amf/av1_amf);
+#              setup failures still fall back to software at open time.
 # - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
 DECODE_BACKEND_ENV = "JASNA_DECODE_BACKEND"
 _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
@@ -69,17 +71,63 @@ class LazyYuvFrame:
     only for frames that really need detection crops or blending, and caches it.
     """
 
-    yuv_host: torch.Tensor  # (H + H//2, W) pinned, nv12 or p010
+    yuv_host: torch.Tensor | None  # (H + H//2, W) pinned, nv12 or p010
     pts: int
     _materialize: Callable[[], torch.Tensor] | None = None
     _rgb: torch.Tensor | None = None
+    _batch_ctx: tuple | None = None
 
     def rgb(self) -> torch.Tensor:
         if self._rgb is None:
             if self._materialize is None:
                 raise RuntimeError("LazyYuvFrame has no RGB materializer")
             self._rgb = self._materialize()
+            self._materialize = None
+            self._batch_ctx = None
         return self._rgb
+
+
+def materialize_lazy_batch(
+    slots: list[LazyYuvFrame], *, keep_host: bool = True
+) -> torch.Tensor:
+    """Materialize a batch of LazyYuvFrame into one contiguous (B, 3, H, W) tensor.
+
+    Performs H2D upload and fused YUV->RGB conversion on the caller's stream with
+    a single synchronization for the whole batch, avoiding per-frame synchronizations
+    and avoiding the extra GPU copy from ``torch.stack``.
+    """
+    count = len(slots)
+    if count == 0:
+        raise ValueError("Cannot materialize an empty LazyYuvFrame batch")
+    ctx = slots[0]._batch_ctx
+    if ctx is None or any(s._rgb is not None or s.yuv_host is None for s in slots):
+        batch = torch.stack([s.rgb() for s in slots])
+        for s in slots:
+            s._materialize = None
+            s._batch_ctx = None
+            if not keep_host:
+                s.yuv_host = None
+        return batch
+
+    device, converter, device_yuv, dtype, H, W = ctx
+    if device_yuv.shape[0] < count:
+        device_yuv = torch.empty((count, H + H // 2, W), dtype=dtype, device=device)
+    stream = current_stream(device)
+    frames_batch = torch.empty((count, 3, H, W), device=device, dtype=torch.uint8)
+    with stream_context(stream):
+        for i, slot in enumerate(slots):
+            device_yuv[i].copy_(slot.yuv_host, non_blocking=True)
+        converter.convert_packed_batch_into(
+            device_yuv[:count], frames_batch, stream.cuda_stream
+        )
+    stream.synchronize()
+    for i, slot in enumerate(slots):
+        slot._rgb = frames_batch[i]
+        slot._materialize = None
+        slot._batch_ctx = None
+        if not keep_host:
+            slot.yuv_host = None
+    return frames_batch
 
 
 def _decode_backend() -> str:
@@ -337,7 +385,21 @@ class VideoReader:
         if software_only:
             ctx.thread_type = "AUTO"
         elif self.vendor is AcceleratorVendor.AMD:
-            self._setup_amf_decoder(ctx)
+            # Measured on an RX 7900 XT (2026-10-11, interleaved A/B, slope of
+            # time-vs-N so the one-time torch.compile is not counted per frame):
+            # for H.264 the AMF decoder is ~1.95x SLOWER than FFmpeg software
+            # decode at steady state (2.289 vs 1.173 ms/frame = 437 vs 852 fps).
+            # h264_amf runs on the same GPU that already carries detection and
+            # restoration, and its decode->download path serializes against that
+            # work. For HEVC the two are a wash (2.242 vs 2.250 ms/frame), and
+            # hevc_amf cannot decode Main10 at all. Decoded output is
+            # bit-identical (max abs channel diff 0 over 40 frames). So AMD
+            # defaults to software decode; JASNA_DECODE_BACKEND=pyav-hw opts back
+            # into AMF.
+            if backend == "pyav-hw":
+                self._setup_amf_decoder(ctx)
+            else:
+                ctx.thread_type = "AUTO"
         elif not ctx.is_hwaccel:
             if self.vendor is AcceleratorVendor.NVIDIA:
                 self._setup_nvdec_decoder(ctx)
@@ -738,14 +800,21 @@ class VideoReader:
                 # batch device buffer; NVIDIA reuses the single staging frame
                 # (H2D + convert ordered on the private stream so the next
                 # overwrite starts only after the prior kernel consumed it).
-                for i in range(len(group)):
-                    plane = staging if staging is not None else device_yuv[i]
-                    plane.copy_(pinned[i], non_blocking=True)
-                    converter.convert_into(
-                        plane[:H],
-                        plane[H:].view(H // 2, W // 2, 2),
-                        batch[i],
+                if device_yuv is not None:
+                    count = len(group)
+                    for i in range(count):
+                        device_yuv[i].copy_(pinned[i], non_blocking=True)
+                    converter.convert_packed_batch_into(
+                        device_yuv[:count], batch, stream.cuda_stream
                     )
+                else:
+                    for i in range(len(group)):
+                        staging.copy_(pinned[i], non_blocking=True)
+                        converter.convert_into(
+                            staging[:H],
+                            staging[H:].view(H // 2, W // 2, 2),
+                            batch[i],
+                        )
 
             next_group = self._read_group(decoded)
             # Sync before yield so other pipeline threads never see in-flight planes.
@@ -791,6 +860,10 @@ class VideoReader:
         reformatter = VideoReformatter()
         color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
         H, W = self.height, self.width
+        device_yuv = torch.empty(
+            (self.batch_size, H + H // 2, W), dtype=dtype, device=self.device
+        )
+        batch_ctx = (self.device, converter, device_yuv, dtype, H, W)
 
         while group:
             slots: list[LazyYuvFrame] = []
@@ -823,7 +896,10 @@ class VideoReader:
                     LazyYuvFrame(
                         yuv_host=host,
                         pts=frame_pts,
-                        _materialize=self._rgb_materializer(host, converter, dtype, H, W),
+                        _materialize=self._rgb_materializer(
+                            host, converter, dtype, H, W
+                        ),
+                        _batch_ctx=batch_ctx,
                     )
                 )
 

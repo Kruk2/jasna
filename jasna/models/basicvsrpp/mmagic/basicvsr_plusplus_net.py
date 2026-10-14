@@ -13,7 +13,7 @@ from mmengine.runner import load_checkpoint
 from torch import Tensor
 
 from jasna.models.basicvsrpp.deformconv import ModulatedDeformConv2d
-from .flow_warp import flow_warp
+from .flow_warp import _identity_grid, flow_warp
 from .model_utils import default_init_weights
 from .model_utils import make_layer
 from .registry import MODELS
@@ -127,13 +127,58 @@ class BasicVSRPlusPlusNet(BaseModule):
         lqs_1 = lqs[:, :-1, :, :, :].reshape(-1, c, h, w)
         lqs_2 = lqs[:, 1:, :, :, :].reshape(-1, c, h, w)
 
-        flows_backward = self.spynet(lqs_1, lqs_2).view(n, t - 1, 2, h, w)
-
-        flows_forward = self.spynet(lqs_2, lqs_1).view(n, t - 1, 2, h, w)
+        flows_both = self.spynet(
+            torch.cat([lqs_1, lqs_2], dim=0),
+            torch.cat([lqs_2, lqs_1], dim=0),
+        )
+        flows_backward, flows_forward = flows_both.chunk(2, dim=0)
+        flows_backward = flows_backward.view(n, t - 1, 2, h, w)
+        flows_forward = flows_forward.view(n, t - 1, 2, h, w)
 
         return flows_forward, flows_backward
 
-    def propagate(self, feats, flows, module_name):
+    def _precompute_direction_flows(self, flows, is_backward: bool):
+        n, t_m1, _, h, w = flows.size()
+        t_full = t_m1 + 1
+        frame_idx = list(range(0, t_full))
+        if is_backward:
+            frame_idx = frame_idx[::-1]
+            f_n1_all = flows.flip(1).contiguous() if t_m1 > 0 else flows
+        else:
+            f_n1_all = flows
+
+        if t_m1 == 0:
+            return frame_idx, f_n1_all, None, None, None
+
+        base_grid = _identity_grid(1, self.mid_channels, h, w, flows.dtype, flows.device, True)
+        if w == h:
+            scale_f = 2.0 / max(w - 1, 1)
+            grid_n1_all = torch.add(base_grid.unsqueeze(1), f_n1_all.permute(0, 1, 3, 4, 2), alpha=scale_f)
+        else:
+            fx = f_n1_all[:, :, 0] * (2.0 / max(w - 1, 1))
+            fy = f_n1_all[:, :, 1] * (2.0 / max(h - 1, 1))
+            grid_n1_all = base_grid.unsqueeze(1) + torch.stack((fx, fy), dim=-1)
+
+        f_n2_all = None
+        grid_n2_all = None
+        if t_full > 2:
+            f_prev_all = f_n1_all[:, :-1].reshape(-1, 2, h, w)
+            f_curr_all = f_n1_all[:, 1:].reshape(-1, 2, h, w)
+            g_curr = grid_n1_all[:, 1:].reshape(-1, h, w, 2)
+            f_n2_warped = f_curr_all + F.grid_sample(
+                f_prev_all, g_curr, mode='bilinear', padding_mode='zeros', align_corners=True
+            )
+            f_n2_all = f_n2_warped.view(n, t_full - 2, 2, h, w)
+            if w == h:
+                grid_n2_all = torch.add(base_grid.unsqueeze(1), f_n2_all.permute(0, 1, 3, 4, 2), alpha=scale_f)
+            else:
+                fx2 = f_n2_all[:, :, 0] * (2.0 / max(w - 1, 1))
+                fy2 = f_n2_all[:, :, 1] * (2.0 / max(h - 1, 1))
+                grid_n2_all = base_grid.unsqueeze(1) + torch.stack((fx2, fy2), dim=-1)
+
+        return frame_idx, f_n1_all, grid_n1_all, f_n2_all, grid_n2_all
+
+    def propagate(self, feats, flows, module_name, precomputed=None):
         """Propagate the latent features throughout the sequence.
 
         Args:
@@ -150,41 +195,45 @@ class BasicVSRPlusPlusNet(BaseModule):
         """
 
         n, t, _, h, w = flows.size()
+        is_backward = 'backward' in module_name
+        if precomputed is None:
+            precomputed = self._precompute_direction_flows(flows, is_backward)
+        frame_idx, f_n1_all, grid_n1_all, f_n2_all, grid_n2_all = precomputed
 
-        # PyTorch 2.0 could not compile data type of 'range'
-        # frame_idx = range(0, t + 1)
-        # flow_idx = range(-1, t)
-        frame_idx = list(range(0, t + 1))
-        flow_idx = list(range(-1, t))
         mapping_idx = list(range(0, len(feats['spatial'])))
         mapping_idx += mapping_idx[::-1]
 
-        if 'backward' in module_name:
-            frame_idx = frame_idx[::-1]
-            flow_idx = frame_idx
-
         feat_prop = flows.new_zeros(n, self.mid_channels, h, w)
+        zero_feat = flows.new_zeros(n, self.mid_channels, h, w)
+        zero_flow = flows.new_zeros(n, 2, h, w)
+
         for i, idx in enumerate(frame_idx):
             feat_current = feats['spatial'][mapping_idx[idx]]
             # second-order deformable alignment
             if i > 0:
-                flow_n1 = flows[:, flow_idx[i], :, :, :]
+                flow_n1 = f_n1_all[:, i - 1]
+                cond_n1 = F.grid_sample(
+                    feat_prop,
+                    grid_n1_all[:, i - 1],
+                    mode='bilinear',
+                    padding_mode='zeros',
+                    align_corners=True,
+                )
 
-                cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
-
-                # initialize second-order features
-                feat_n2 = torch.zeros_like(feat_prop)
-                flow_n2 = torch.zeros_like(flow_n1)
-                cond_n2 = torch.zeros_like(cond_n1)
-
-                if i > 1:  # second-order features
+                if i == 1:
+                    feat_n2 = zero_feat
+                    flow_n2 = zero_flow
+                    cond_n2 = zero_feat
+                else:
                     feat_n2 = feats[module_name][-2]
-
-                    flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
-
-                    flow_n2 = flow_n1 + flow_warp(flow_n2,
-                                                  flow_n1.permute(0, 2, 3, 1))
-                    cond_n2 = flow_warp(feat_n2, flow_n2.permute(0, 2, 3, 1))
+                    flow_n2 = f_n2_all[:, i - 2]
+                    cond_n2 = F.grid_sample(
+                        feat_n2,
+                        grid_n2_all[:, i - 2],
+                        mode='bilinear',
+                        padding_mode='zeros',
+                        align_corners=True,
+                    )
 
                 # flow-guided deformable convolution
                 cond = torch.cat([cond_n1, feat_current, cond_n2], dim=1)
@@ -202,7 +251,7 @@ class BasicVSRPlusPlusNet(BaseModule):
             feat_prop = feat_prop + self.backbone[module_name](feat)
             feats[module_name].append(feat_prop)
 
-        if 'backward' in module_name:
+        if is_backward:
             feats[module_name] = feats[module_name][::-1]
 
         return feats
@@ -219,28 +268,43 @@ class BasicVSRPlusPlusNet(BaseModule):
             Tensor: Output HR sequence with shape (n, t, c, h, w).
         """
 
-        outputs = []
+        n, t, c, h, w = lqs.size()
         num_outputs = len(feats['spatial'])
 
         mapping_idx = list(range(0, num_outputs))
         mapping_idx += mapping_idx[::-1]
 
-        for i in range(0, lqs.size(1)):
-            hr = [feats[k].pop(0) for k in feats if k != 'spatial']
-            hr.insert(0, feats['spatial'][mapping_idx[i]])
-            hr = torch.cat(hr, dim=1)
+        branch_keys = [k for k in feats if k != 'spatial']
+        cat_frames = []
+        for i in range(t):
+            hr_list = [feats['spatial'][mapping_idx[i]]] + [feats[k][i] for k in branch_keys]
+            cat_frames.append(torch.cat(hr_list, dim=1))
+        for k in branch_keys:
+            feats[k].clear()
 
-            hr = self.reconstruction(hr)
+        all_in = torch.cat(cat_frames, dim=0)
+        del cat_frames
+        all_lqs = (
+            lqs.view(t, c, h, w)
+            if n == 1
+            else lqs.transpose(0, 1).reshape(t * n, c, h, w)
+        )
+        out_chunks = []
+        chunk_size = 15
+        for s_idx in range(0, t * n, chunk_size):
+            e_idx = min(s_idx + chunk_size, t * n)
+            hr = self.reconstruction(all_in[s_idx:e_idx])
             hr = self.lrelu(self.upsample1(hr))
             hr = self.lrelu(self.upsample2(hr))
             hr = self.lrelu(self.conv_hr(hr))
             hr = self.conv_last(hr)
+            hr = hr + all_lqs[s_idx:e_idx]
+            out_chunks.append(hr)
 
-            hr += lqs[:, i, :, :, :]
-
-            outputs.append(hr)
-
-        return torch.stack(outputs, dim=1)
+        out = torch.cat(out_chunks, dim=0)
+        if n == 1:
+            return out.unsqueeze(0)
+        return out.view(t, n, c, h, w).transpose(0, 1).contiguous()
 
     def forward(self, lqs):
         """Forward function for BasicVSR++.
@@ -272,6 +336,11 @@ class BasicVSRPlusPlusNet(BaseModule):
             f'but got {h} and {w}.')
         flows_forward, flows_backward = self.compute_flow(lqs_downsample)
 
+        precomputed_flows = {
+            'backward': self._precompute_direction_flows(flows_backward, True),
+            'forward': self._precompute_direction_flows(flows_forward, False),
+        }
+
         # feature propagation
         for iter_ in [1, 2]:
             for direction in ['backward', 'forward']:
@@ -280,7 +349,9 @@ class BasicVSRPlusPlusNet(BaseModule):
                 feats[module] = []
                 flows = flows_backward if direction == 'backward' else flows_forward
 
-                feats = self.propagate(feats, flows, module)
+                feats = self.propagate(
+                    feats, flows, module, precomputed=precomputed_flows[direction]
+                )
 
         return self.upsample(lqs, feats)
 
@@ -498,6 +569,8 @@ class SPyNet(BaseModule):
         h, w = ref.shape[2:4]
         w_up = w if (w % 32) == 0 else 32 * (w // 32 + 1)
         h_up = h if (h % 32) == 0 else 32 * (h // 32 + 1)
+        if w == w_up and h == h_up:
+            return self.compute_flow(ref, supp)
         ref = F.interpolate(
             input=ref, size=(h_up, w_up), mode='bilinear', align_corners=False)
         supp = F.interpolate(

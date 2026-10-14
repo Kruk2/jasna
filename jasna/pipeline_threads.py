@@ -9,13 +9,23 @@ from collections.abc import Callable
 from queue import Empty, Full, Queue
 from typing import Protocol
 
+import psutil
 import torch
 
-from jasna.accelerator import AcceleratorVendor, empty_cache, ipc_collect, vendor_for_device
+from jasna.accelerator import (
+    AcceleratorVendor,
+    MemoryTrend,
+    VramReleaser,
+    empty_cache,
+    ipc_collect,
+    mem_trend_seconds,
+    release_vram_cache,
+    vendor_for_device,
+)
 from jasna.blend_buffer import BlendBuffer
 from jasna.crop_buffer import CropBuffer
 from jasna.frame_queue import FrameQueue
-from jasna.media.video_decoder import VideoReader
+from jasna.media.video_decoder import VideoReader, materialize_lazy_batch
 from jasna.os_utils import env_flag
 from jasna.pipeline_debug_logging import PipelineDebugMemoryLogger
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResult, SecondaryLoopStats, _SENTINEL
@@ -29,6 +39,77 @@ from jasna.tracking.scene_detector import SceneCutDetector
 from jasna.vram_offloader import VramOffloader
 
 log = logging.getLogger(__name__)
+
+#: Bytes of host memory one in-flight single-decode frame holds: a nv12/p010
+#: frame is 1.5 planes, and 10-bit samples are two bytes each.
+_HOST_YUV_BUDGET_ENV = "JASNA_HOST_YUV_BUDGET_GB"
+_HOST_YUV_BUDGET_DEFAULT_GB = 6.0
+#: The cap only engages for frames this large: 32 MiB sits above the biggest
+#: everyday frame (4K P010 is 24.9 MB) and below 8K (49.8 MB nv12, 99.5 MB
+#: P010), so 1080p/4K keep exactly today's depths and today's throughput.
+_LOOKAHEAD_CAP_THRESHOLD_BYTES = 32 * 1024 * 1024
+
+
+def _host_yuv_frame_bytes(height: int, width: int, ten_bit: bool) -> int:
+    return int(height * 1.5) * int(width) * (2 if ten_bit else 1)
+
+
+def _bounded_lookahead_depths(
+    max_clip_size: int,
+    secondary_workers: int,
+    height: int,
+    width: int,
+    ten_bit: bool,
+) -> tuple[int, int, int, int, str]:
+    """Byte-bound the single-decode queues' *look-ahead*.
+
+    The queue depths are counted in frames while the memory they hold is
+    frames x frame_size, and in the single-decode path every queued frame owns a
+    pinned (page-locked) host YUV buffer until it is consumed. At 1080p that is
+    ~3 MB per frame and the configured depths are harmless; a 7680x4320 P010
+    frame is ~100 MB, so the same depths ask for tens of GB of locked host RAM -
+    which is what destabilises amdkmdag on Windows (LiveKernelEvent 0x141, silent
+    exit) and, on the device side, OOMs the whole card.
+
+    Only the look-ahead is capped: a clip is still assembled and restored at its
+    configured size, so the output is unchanged. Below ~4K the configured depths
+    already fit and are returned untouched. Set ``JASNA_HOST_YUV_BUDGET_GB`` to
+    tune it, or <= 0 to disable the cap.
+    """
+    base_clip = int(max_clip_size)
+    base_secondary = int(max_clip_size) * max(1, int(secondary_workers))
+    base_metadata = int(max_clip_size) * 2
+    base_total = base_clip + base_secondary + base_clip + base_metadata
+    try:
+        budget_gb = float(os.environ.get(_HOST_YUV_BUDGET_ENV, "").strip()
+                          or _HOST_YUV_BUDGET_DEFAULT_GB)
+    except ValueError:
+        budget_gb = _HOST_YUV_BUDGET_DEFAULT_GB
+    if budget_gb <= 0:
+        return base_clip, base_secondary, base_clip, base_metadata, ""
+    per_frame = max(1, _host_yuv_frame_bytes(height, width, ten_bit))
+    if per_frame <= _LOOKAHEAD_CAP_THRESHOLD_BYTES:
+        return base_clip, base_secondary, base_clip, base_metadata, ""
+    cap_frames = max(2, int(budget_gb * (1024 ** 3) // per_frame))
+    if base_total <= cap_frames:
+        return base_clip, base_secondary, base_clip, base_metadata, ""
+    scale = cap_frames / base_total
+    note = (
+        "single-decode look-ahead capped for %dx%d%s: %d frames in flight instead of "
+        "%d (the configured depths would pin %.1f GB of host YUV at %.0f MB/frame). "
+        "Clips and output are unchanged; raise %s if you have the RAM."
+        % (width, height, " 10-bit" if ten_bit else "",
+           max(1, int(base_clip * scale)), base_clip,
+           base_total * per_frame / (1024 ** 3), per_frame / (1024 ** 2),
+           _HOST_YUV_BUDGET_ENV)
+    )
+    return (
+        max(1, int(base_clip * scale)),
+        max(1, int(base_secondary * scale)),
+        max(1, int(base_clip * scale)),
+        max(1, int(base_metadata * scale)),
+        note,
+    )
 
 
 class FrameWriter(Protocol):
@@ -167,8 +248,13 @@ def decode_detect_loop(
                     # Forwarding the materialized slots keeps one materialization
                     # per frame and never touches the converter off-thread.
                     forward_slots = frames[:effective_bs]
-                    frames_batch = torch.stack(
-                        [slot.rgb() for slot in frames[:effective_bs]]
+                    keep_host = (
+                        yuv_format_for_reader is not None
+                        and effect_ranges is not None
+                        and not all(_selected(int(p)) for p in pts_list)
+                    )
+                    frames_batch = materialize_lazy_batch(
+                        forward_slots, keep_host=keep_host
                     )
                 else:
                     forward_slots = None
@@ -193,6 +279,9 @@ def decode_detect_loop(
 
                         if selected:
                             effect_active = True
+                            if forward_slots is not None:
+                                for s in forward_slots[offset:group_end]:
+                                    s.yuv_host = None
                             selected_frames = frames_batch[offset:group_end]
                             res = process_frame_batch(
                                 frames=selected_frames,
@@ -457,6 +546,7 @@ def blend_encode_loop(
     frame_stride: int,
     yuv_passthrough: bool = False,
     forwards_frames: bool = False,
+    output_progress: list[int] | None = None,
 ) -> None:
     timer = LoopTimer("blend-encode")
     frames_passthrough = 0
@@ -525,15 +615,24 @@ def blend_encode_loop(
                     # encoder. No device upload, no YUV->RGB->YUV round trip.
                     with timer.measure("write"):
                         frame_writer.write_yuv(original.yuv_host, meta.pts)
+                        original.yuv_host = None
+                        original._rgb = None
+                        original._materialize = None
+                        original._batch_ctx = None
                         frames_encoded += 1
                         frames_passthrough += 1
                         frame_writer.after_write(frames_encoded)
+                    if output_progress is not None:
+                        output_progress[0] = frames_encoded
                     continue
 
                 with timer.measure("materialize"):
                     # Materialize only when the original arrives lazily.
                     if yuv_passthrough or forwards_frames:
                         original_frame = original.rgb()
+                        original.yuv_host = None
+                        original._materialize = None
+                        original._batch_ctx = None
                     else:
                         original_frame = original
 
@@ -568,8 +667,12 @@ def blend_encode_loop(
                         frame_writer.write(blended, meta.pts)
                     else:
                         frame_writer.write(blended, meta.pts, apply_lut=False)
+                    if yuv_passthrough or forwards_frames:
+                        original._rgb = None
                     frames_encoded += 1
                     frame_writer.after_write(frames_encoded)
+                if output_progress is not None:
+                    output_progress[0] = frames_encoded
 
         if forwards_frames:
             _consume()
@@ -855,9 +958,24 @@ def run_restoration_pass(
     max_clip_size = pipeline.max_clip_size
     secondary_workers = max(1, int(restoration_pipeline.secondary_num_workers))
 
-    clip_queue = FrameQueue(max_frames=max_clip_size)
-    secondary_queue = FrameQueue(max_frames=max_clip_size * secondary_workers)
-    encode_queue = FrameQueue(max_frames=max_clip_size)
+    # The queue depths below are counted in frames; the host memory they pin is
+    # frames x frame_size. Cap the *look-ahead* by a byte budget so an 8K frame
+    # cannot pin the whole machine's page-locked memory (amdkmdag dies first on
+    # Windows, without a WER/TDR entry). Clips - and therefore the output - keep
+    # their configured size; below ~4K nothing is clamped.
+    clip_cap, secondary_cap, encode_cap, metadata_cap, depth_note = _bounded_lookahead_depths(
+        max_clip_size,
+        secondary_workers,
+        int(getattr(metadata, "video_height", 0) or 0),
+        int(getattr(metadata, "video_width", 0) or 0),
+        bool(getattr(metadata, "is_10bit", False)),
+    )
+    if depth_note:
+        log.warning(depth_note)
+
+    clip_queue = FrameQueue(max_frames=clip_cap)
+    secondary_queue = FrameQueue(max_frames=secondary_cap)
+    encode_queue = FrameQueue(max_frames=encode_cap)
     # In the single-decode path each queued item carries a decoded frame's
     # device RGB, so the look-ahead depth is a VRAM budget, not free. The blend
     # thread only ever falls behind by one clip (its result-wait for frame i
@@ -865,13 +983,18 @@ def run_restoration_pass(
     # so 2x max_clip_size is enough to reach every emit point without the detect
     # thread blocking before it can emit. The old 5x bound assumed tiny
     # FrameMeta items.
-    metadata_maxsize = max_clip_size * (2 if single_decode else 5)
+    metadata_maxsize = metadata_cap if single_decode else max_clip_size * 5
     metadata_queue: Queue[FrameMeta | object] = Queue(maxsize=metadata_maxsize)
     queues = (clip_queue, secondary_queue, encode_queue, metadata_queue)
 
     error_holder: list[BaseException] = []
     blend_buffer = BlendBuffer(device=device, vr_projector=pipeline.vr_projector)
     crop_buffers: dict[int, CropBuffer] = {}
+    # Output frames written so far, as [count]. The blend/encode thread stamps it
+    # and the supervisor loop reads it to know how much *video* this pass has
+    # produced (frame count / fps) - the basis for the deep consolidation, so the
+    # hour mark is reached at the same point of the film regardless of speed.
+    output_progress: list[int] = [0]
     primary_idle_event = threading.Event()
     vram_offloader = VramOffloader(device=device, blend_buffer=blend_buffer, crop_buffers=crop_buffers)
     if encode_heartbeat is not None:
@@ -968,6 +1091,7 @@ def run_restoration_pass(
                 frame_stride=frame_stride,
                 yuv_passthrough=yuv_passthrough,
                 forwards_frames=single_decode,
+                output_progress=output_progress,
             ),
             name="BlendEncode", daemon=True,
         ),
@@ -976,11 +1100,70 @@ def run_restoration_pass(
     for thread in threads:
         thread.start()
 
+    # A creep that only shows up after an hour is invisible in a short window, so
+    # a long run can opt into its own trajectory: reserved vs live bytes plus the
+    # buffer sizes that can strand. Off unless JASNA_MEM_TREND_S is set.
+    memory_trend = MemoryTrend(
+        mem_trend_seconds(),
+        extra=lambda: _mem_trend_counters(blend_buffer, crop_buffers),
+    )
+    if memory_trend.enabled:
+        log.info(
+            "Memory trend logging enabled: every %.0fs (JASNA_MEM_TREND_S)",
+            memory_trend.period,
+        )
+
+    def _deep_consolidate() -> str:
+        """The hour-scale tidy-up: drop clips the blend frontier has passed, then
+        return the allocator's cold cache and the cross-process cache, and report
+        what is left.
+
+        Runs inside the pass, so progress is untouched: no thread is stopped, no
+        queue is drained, the single output file is never reopened. A frame is
+        only ready once every track pending on it has a result, so a result whose
+        last frame the blender has already emitted can never be asked for again -
+        dropping it discards no frame that is still owed. Freeing the cold cache
+        only hands back blocks the allocator is no longer using, so live tensors
+        are untouched.
+        """
+        dropped = blend_buffer.prune_stranded()
+        release_vram_cache()
+        ipc_collect(device)
+        return f"pruned_results={dropped} " + " ".join(memory_trend.sample())
+
+    def _restored_video_seconds() -> float:
+        """Seconds of video this pass has already produced (frames out / fps)."""
+        if not output_fps:
+            return 0.0
+        return output_progress[0] / float(output_fps)
+
+    # A whole-file render is this one pass, so the clip-boundary defrag can go a
+    # multi-hour job without ever firing; keep the allocator's cold cache in check
+    # on a schedule keyed to *restored video*, not wall clock, so the sweeps land
+    # at the same point of the film however fast or stalled the run is. A light
+    # cold-cache release every JASNA_VRAM_LIGHT_VIDEO_S of video (default 20 min),
+    # and a deep consolidation every JASNA_VRAM_DEEP_VIDEO_S (default 1 h) that
+    # also sweeps the blend buffers - the tidy-up that keeps a 2h job from drifting
+    # into the state where Windows demotes hot pages and the frame rate collapses.
+    vram_releaser = VramReleaser(
+        progress=_restored_video_seconds, deep_hook=_deep_consolidate,
+    )
+    if vram_releaser.enabled:
+        log.info(
+            "VRAM consolidation enabled: cold-cache release every %.0f min of restored "
+            "video (JASNA_VRAM_LIGHT_VIDEO_S), deep consolidation every %.0f min "
+            "(JASNA_VRAM_DEEP_VIDEO_S)",
+            vram_releaser.light_video / 60.0,
+            vram_releaser.deep_video / 60.0,
+        )
+
     while any(thread.is_alive() for thread in threads):
         if poll is not None and poll():
             cancel_event.set()
         if cancel_event.wait(0.05):
             break
+        vram_releaser.tick()
+        memory_trend.tick()
 
     for thread in threads:
         while thread.is_alive():
@@ -995,6 +1178,19 @@ def run_restoration_pass(
     empty_cache(device)
     ipc_collect(device)
     return error
+
+
+def _mem_trend_counters(blend_buffer: BlendBuffer, crop_buffers) -> dict[str, int]:
+    """The counters a long run's ``MEM TREND`` line carries: buffer sizes + RSS."""
+    pending, results = blend_buffer.counts()
+    return {
+        "blend_pending": pending,
+        "blend_results": results,
+        "crop_bufs": len(crop_buffers),
+        "rss_mb": round(
+            psutil.Process(os.getpid()).memory_info().rss / (1024 ** 2)
+        ),
+    }
 
 
 def _drain(queues) -> None:

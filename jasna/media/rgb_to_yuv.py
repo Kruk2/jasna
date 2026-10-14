@@ -15,8 +15,7 @@ from typing import NamedTuple
 
 import torch
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, build_kernel, grid_size
 from jasna.media.yuv_scratch import (
     YuvScratch,
     apply_matrix,
@@ -116,6 +115,7 @@ def _launch_rgb_to_yuv(kernel: Kernel, rgb: torch.Tensor, luma: torch.Tensor, ch
             height, width,
         ),
         torch.cuda.current_stream(rgb.device).cuda_stream,
+        device=rgb.device,
     )
 
 
@@ -144,7 +144,7 @@ class RgbToYuvConverter:
         self._code_range = _CODE_RANGES[pixel_format]
         self._full_range = value_range == "full"
         self._rows = _matrix_rows(standard, self._code_range, self._full_range)
-        self._kernel = Kernel(_FATBIN, variant, _RGB_TO_YUV_ARG_TYPES) if is_nvidia_device(device) else None
+        self._kernel = build_kernel(_FATBIN, variant, _RGB_TO_YUV_ARG_TYPES, device)
         self._scratch: YuvScratch | None = None
 
     @property

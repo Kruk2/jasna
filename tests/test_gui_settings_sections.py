@@ -110,7 +110,6 @@ def _fake_section_widgets() -> dict:
                 "wdn-x4v3": "realesr-general-wdn-x4v3",
                 "lsdir-c3": "4xLSDIRCompactC3",
                 "x4plus": "RealESRGAN_x4plus",
-                "anime-6b": "RealESRGAN_x4plus_anime_6B",
                 "bsrnet": "BSRNet (BSRGAN)",
             },
             "auto",
@@ -416,7 +415,11 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
         from jasna.media.encoder_settings import encoder_cq_spec
 
         expected_cq = encoder_cq_spec("hevc", vendor_for_device()).default
-        assert panel.get_settings() == replace(AppSettings(), encoder_cq=expected_cq)
+        # The sharpness sentinel -1 displays as 0 under the default network
+        # engine (both mean "off" there); see SecondarySection._refresh_amd_rows.
+        assert panel.get_settings() == replace(
+            AppSettings(), encoder_cq=expected_cq, amd_upscale_sharpness=0.0
+        )
         assert panel._saved_preset_settings == panel.get_settings()
     finally:
         root.destroy()
@@ -549,7 +552,10 @@ def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
     for section in panel._sections:
         section.apply(ltx)
 
-    assert panel.get_settings() == ltx
+    # The sharpness sentinel -1 (amf-sr's "driver default") displays as 0 under
+    # the default network engine; 0 is off there too, so the round trip is
+    # value-preserving except for that documented display normalization.
+    assert panel.get_settings() == replace(ltx, amd_upscale_sharpness=0.0)
 
 
 def test_disabling_settings_keeps_unavailable_ltx_disabled(_panel_factory) -> None:

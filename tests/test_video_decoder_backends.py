@@ -108,8 +108,26 @@ def test_forced_vali_backend_requires_nvidia(monkeypatch) -> None:
         reader.__enter__()
 
 
-def test_auto_backend_skips_vali_on_amd(monkeypatch) -> None:
+def test_auto_backend_uses_software_decode_on_amd(monkeypatch) -> None:
+    # Measured 2026-10-11 (RX 7900 XT): AMF is ~1.95x slower than FFmpeg
+    # software decode for H.264, so "auto" must not build the AMF decoder.
     monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
+    vali_factory = MagicMock()
+    monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
+    container = _fake_container(False)
+    monkeypatch.setattr(module.av, "open", MagicMock(return_value=container))
+    reader = _reader(monkeypatch, AcceleratorVendor.AMD)
+    amf_setup = MagicMock()
+    monkeypatch.setattr(reader, "_setup_amf_decoder", amf_setup)
+    reader.__enter__()
+    vali_factory.assert_not_called()
+    amf_setup.assert_not_called()
+    assert module.av.open.call_args.kwargs == {}
+    assert container.streams.video[0].codec_context.thread_type == "AUTO"
+
+
+def test_pyav_hw_backend_selects_amf_on_amd(monkeypatch) -> None:
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-hw")
     vali_factory = MagicMock()
     monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
     monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(False)))

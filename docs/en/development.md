@@ -96,7 +96,8 @@ Developer setup also requires:
 
 Set `JASNA_DECODE_BACKEND` to `vali`, `pyav-hw`, or `pyav-sw` to force a
 decoder backend. The default is `auto`, which prefers VALI on NVIDIA and falls
-back to PyAV.
+back to PyAV. On AMD, `auto` decodes in FFmpeg software, which measures faster
+than the AMF decoder (`pyav-hw` selects AMF) for H.264 and is a wash for HEVC.
 
 Then install Jasna in editable mode:
 
@@ -199,18 +200,21 @@ python jasna/protection/keytool/build_windows_amd.py
 ```
 
 The AMD build uses PyTorch/ROCm for BasicVSR++, YOLO and RF-DETR, and AMF for
-H.264/HEVC/AV1 decode and encode. RF-DETR runs the trained checkpoint through the
+H.264/HEVC/AV1 encode. RF-DETR runs the trained checkpoint through the
 `rfdetr` torch model (`rfdetr==1.8.3` on `transformers==5.1.0`, bundled as
 `rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
 per-model engine precompile step. NVIDIA builds keep the ONNX → TensorRT path
-(`rfdetr-v6.onnx`). Decode falls back to FFmpeg software decoding when AMF cannot
-handle the source. Segment smart rendering works on AMF; H.264 sources with
+(`rfdetr-v6.onnx`). Decode uses FFmpeg software decoding by default on AMD (it
+measures faster than AMF for H.264 and is a wash for HEVC); set
+`JASNA_DECODE_BACKEND=pyav-hw` to use the AMF decoder instead. Segment smart
+rendering works on AMF; H.264 sources with
 more than three consecutive B-frames are fully re-encoded there, with
 restoration still limited to the selected ranges. Secondary restoration remains
 NVIDIA-only.
 
 `--device cuda:N` selects the PyTorch GPU (ROCm reuses the CUDA device API).
 FFmpeg 8's Linux AMF device context currently ignores its adapter
-argument, so AMF decode/encode can use the default Vulkan adapter on a multi-GPU
+argument, so AMF encode (and AMF decode under `pyav-hw`) can use the default
+Vulkan adapter on a multi-GPU
 AMD host. Isolate the target GPU at the container/host level when deterministic
 AMF adapter selection matters.

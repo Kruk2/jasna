@@ -8,18 +8,23 @@ The strength-to-weight curve and the headroom constant are matched to FFmpeg's
 Both were recovered by measuring that filter's output rather than read from its
 source; ``scripts/cas_ffmpeg_oracle.py`` re-derives them and checks parity.
 
-NVIDIA runs the fused kernel in ``cas.cu``; ROCm and CPU use the Torch
-implementation here, which produces identical results.
+NVIDIA runs the fused kernels in ``cas.cu`` from the prebuilt ``cas.fatbin``;
+ROCm compiles the same source at first use through hiprtc. The Torch
+implementation here is the CPU path and the fallback when no kernel is
+available, and it produces the same result.
 """
 from __future__ import annotations
 
 import ctypes
+import logging
 
 import torch
 import torch.nn.functional as F
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, build_kernel, grid_size, is_gpu_kernel_device
+from jasna.os_utils import env_flag
+
+log = logging.getLogger(__name__)
 
 # FFmpeg maps strength onto the CAS weight as -1 / lerp(16, 4, strength).
 _WEIGHT_DIVISOR_AT_ZERO = 16.0
@@ -58,12 +63,15 @@ def _sharpen_band(
     weight_scale: float,
     headroom: float,
     peak: float,
+    floor: bool = True,
 ) -> None:
     """Sharpen one horizontal band.
 
     ``strip`` is ``out``'s rows grown by one replicated row above and below, so
     every output pixel sees the same neighbourhood it would in a whole-frame
-    pass.
+    pass. ``floor`` reproduces FFmpeg's truncating write for integer code units;
+    callers sharpening a fractional plane (an RGB patch's luma) pass ``False`` so
+    the result is not biased down a level.
     """
     padded = F.pad(strip[None, None], (1, 1, 0, 0), mode="replicate")
     height, width = out.shape
@@ -103,8 +111,9 @@ def _sharpen_band(
         centre + delta * weight / denominator,
         centre,
     )
-    # FFmpeg truncates rather than rounds on write; match it.
-    out.copy_(sharpened.clamp_(0.0, peak).floor_())
+    # FFmpeg truncates rather than rounds on write; match it (see ``floor``).
+    value = sharpened.clamp_(0.0, peak)
+    out.copy_(value.floor_() if floor else value)
 
 
 def sharpen_luma(
@@ -113,6 +122,7 @@ def sharpen_luma(
     weight_scale: float,
     headroom: float,
     peak: float,
+    floor: bool = True,
 ) -> torch.Tensor:
     """Sharpen a 2-D float32 luma plane held in code units."""
     height, width = plane.shape
@@ -131,8 +141,111 @@ def sharpen_luma(
             weight_scale=weight_scale,
             headroom=headroom,
             peak=peak,
+            floor=floor,
         )
     return out
+
+
+# Luma coefficients used to lift the luma out of an RGB patch; the sharpened
+# luma's delta is added back to all three channels, so hue is left alone.
+_RGB_LUMA = (0.299, 0.587, 0.114)
+
+_RGB_ARG_TYPES = (
+    ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int, ctypes.c_int, ctypes.c_float, ctypes.c_float,
+)
+
+_PATCH_KERNEL_ENV = "JASNA_PATCH_CAS_KERNEL"
+
+_patch_kernel: Kernel | None = None
+_patch_kernel_disabled = False
+
+
+def _patch_cas_kernel(device: torch.device) -> Kernel | None:
+    """The fused ``cas_rgb_f32`` kernel, or None where the platform lacks it.
+
+    The blend thread runs this once per tracked patch, so the ~100-launch torch
+    chain below is far too expensive to leave on the shared stream. On NVIDIA the
+    shipped ``cas.fatbin`` predates this entry point (it is built from the same
+    ``.cu``), so the lookup fails and the fallback stays in charge; a failure is
+    latched so the driver is never asked again. Set ``JASNA_PATCH_CAS_KERNEL=0``
+    to force the fallback.
+    """
+    global _patch_kernel, _patch_kernel_disabled
+    if _patch_kernel_disabled or not is_gpu_kernel_device(device):
+        return None
+    if _patch_kernel is None:
+        if not env_flag(_PATCH_KERNEL_ENV, default=True):
+            _patch_kernel_disabled = True
+            return None
+        # build_kernel raises only on a non-HIP runtime; NVIDIA's shipped
+        # cas.fatbin predates this entry point, so swallow that and stay on the
+        # torch fallback there too.
+        try:
+            _patch_kernel = build_kernel(_FATBIN, "cas_rgb_f32", _RGB_ARG_TYPES, device)
+        except Exception:
+            _patch_kernel = None
+        if _patch_kernel is None:
+            _patch_kernel_disabled = True
+            return None
+    return _patch_kernel
+
+
+def _sharpen_rgb_patch_fused(patch: torch.Tensor, strength: float) -> torch.Tensor | None:
+    """One-launch CAS of an RGB patch, or None to fall back to the torch chain."""
+    kernel = _patch_cas_kernel(patch.device)
+    if kernel is None:
+        return None
+    global _patch_kernel_disabled
+    patch = patch.contiguous()
+    height, width = patch.shape[1], patch.shape[2]
+    out = torch.empty_like(patch)
+    try:
+        kernel.launch(
+            (grid_size(width, _BLOCK_WIDTH), grid_size(height, _BLOCK_HEIGHT), 1),
+            (_BLOCK_WIDTH, _BLOCK_HEIGHT, 1),
+            (
+                patch.data_ptr(),
+                out.data_ptr(),
+                height,
+                width,
+                cas_weight_scale(min(strength, 1.0)),
+                float(_HEADROOM_MULTIPLIER << 8),
+            ),
+            torch.cuda.current_stream(patch.device).cuda_stream,
+            device=patch.device,
+        )
+    except Exception:
+        _patch_kernel_disabled = True
+        log.warning("patch CAS kernel unavailable, using the torch fallback", exc_info=True)
+        return None
+    return out
+
+
+def sharpen_rgb_patch(patch: torch.Tensor, strength: float) -> torch.Tensor:
+    """CAS-sharpen an RGB patch (float, roughly 0..255 code units) via its luma.
+
+    The per-secondary sharpening has to run at the patch's *final* resolution: the
+    upscaler emits a larger crop that is resampled back down before it is blended,
+    so a sharpen applied on the network output would be averaged away. Only the
+    luma is sharpened and its delta is added to all three channels, so hue is
+    untouched. ``strength`` <= 0 returns the patch unchanged and values above 1 are
+    clamped, mirroring the global ``--sharpen`` control.
+    """
+    if strength <= 0.0:
+        return patch
+    fused = _sharpen_rgb_patch_fused(patch, strength)
+    if fused is not None:
+        return fused
+    weight_scale = cas_weight_scale(min(strength, 1.0))
+    luma = patch[0] * _RGB_LUMA[0] + patch[1] * _RGB_LUMA[1] + patch[2] * _RGB_LUMA[2]
+    sharpened = sharpen_luma(
+        luma,
+        weight_scale=weight_scale,
+        headroom=float(_HEADROOM_MULTIPLIER << 8),
+        peak=255.0,
+        floor=False,
+    )
+    return (patch + (sharpened - luma).unsqueeze(0)).clamp_(0.0, 255.0)
 
 
 _CAS_ARG_TYPES = (
@@ -147,6 +260,7 @@ def _launch_cas(kernel: Kernel, src: torch.Tensor, dst: torch.Tensor, weight_sca
         (_BLOCK_WIDTH, _BLOCK_HEIGHT, 1),
         (src.data_ptr(), dst.data_ptr(), src.stride(0), dst.stride(0), height, width, weight_scale),
         torch.cuda.current_stream(src.device).cuda_stream,
+        device=src.device,
     )
 
 
@@ -161,10 +275,8 @@ class GpuCasSharpener:
         depth = 10 if ten_bit else 8
         self.headroom = float(_HEADROOM_MULTIPLIER << depth)
         self.peak = float((1 << depth) - 1)
-        self._kernel = (
-            Kernel(_FATBIN, "cas_luma10" if ten_bit else "cas_luma8", _CAS_ARG_TYPES)
-            if is_nvidia_device(device)
-            else None
+        self._kernel = build_kernel(
+            _FATBIN, "cas_luma10" if ten_bit else "cas_luma8", _CAS_ARG_TYPES, device
         )
 
     def _sharpen_torch_(self, luma: torch.Tensor) -> None:

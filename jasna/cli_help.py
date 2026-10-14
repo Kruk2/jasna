@@ -55,12 +55,12 @@ CLI_HELP: dict[str, str] = {
         "lsdir-v2 (16-conv 4xLSDIRCompactv2, highest-PSNR of the compact nets), "
         "hfa2k-2x (16-conv 2xHFA2kCompact, 2x-native) "
         "or auto (first match in model_weights/). realesrgan: x4plus (23-block RRDBNet, best "
-        "quality), anime-6b (6-block RRDBNet, slightly softer), bsrnet (KAIR/BSRGAN 23-block) "
+        "quality), bsrnet (KAIR/BSRGAN 23-block) "
         "or auto. Ignored by amf-sr and when --amd-upscale-model-path is given. "
         "(default: %(default)s)"
     ),
     "amd_upscale_model_path": (
-        "Checkpoint for the rocm engine: an RRDBNet (Real-ESRGAN x4plus / x4plus_anime_6B / "
+        "Checkpoint for the rocm engine: an RRDBNet (Real-ESRGAN x4plus / "
         "x2plus, BSRNet) or an SRVGGNetCompact (realesr-general-x4v3 / -wdn-x4v3, "
         "4xLSDIRCompactC3 / 4xLSDIRCompactv2, 2xHFA2kCompact). The architecture is derived "
         "from the checkpoint. Empty "
@@ -75,7 +75,13 @@ CLI_HELP: dict[str, str] = {
         "sr_amf algorithm: sr1-0 / sr1-1 are AMD Video SR (machine learning), "
         "bicubic / bilinear / point are the non-ML fallbacks. (default: %(default)s)"
     ),
-    "amd_upscale_sharpness": "sr_amf sharpness, -1 keeps the driver default (range -1..2) (default: %(default)s)",
+    "amd_upscale_sharpness": (
+        "Sharpening for the chosen AMD upscale engine. amf-sr: the sr_amf sharpness "
+        "(-1 keeps the driver default, 0 disables, up to 2). real-esr / realesrgan: "
+        "CAS sharpening of the restored patch only, applied to the mosaic region and "
+        "not the whole frame (0 disables, 0.2-0.4 is a gentle boost, up to 1.0). "
+        "(default: %(default)s)"
+    ),
     "amd_upscale_ffmpeg_path": (
         "FFmpeg to use for AMD upscaling (needs the AMF filters). Empty uses the bundled "
         "copy or 'ffmpeg' from PATH. (default: %(default)s)"

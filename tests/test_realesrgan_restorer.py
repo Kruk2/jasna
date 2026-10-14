@@ -212,23 +212,17 @@ class TestWeightResolution:
         with pytest.raises(FileNotFoundError, match="No AMD super-res model found"):
             resolve_weights_path(None)
 
-    def test_preset_anime_6b_selects_the_six_block_checkpoint(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
-        wanted = tmp_path / REALESRGAN_MODEL_FILES["anime-6b"][0]
-        wanted.write_bytes(b"")
-        assert resolve_weights_path(None, "anime-6b") == wanted.resolve()
-
     def test_preset_x4plus_ignores_the_anime_checkpoint(self, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
-        (tmp_path / REALESRGAN_MODEL_FILES["anime-6b"][0]).write_bytes(b"")
+        (tmp_path / "realesrgan_x4plus_anime_6B.pth").write_bytes(b"")
         wanted = tmp_path / REALESRGAN_MODEL_FILES["x4plus"][0]
         wanted.write_bytes(b"")
         assert resolve_weights_path(None, "x4plus") == wanted.resolve()
 
     def test_missing_preset_checkpoint_names_the_file(self, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
-        with pytest.raises(FileNotFoundError, match="realesrgan_x4plus_anime_6B.pth"):
-            resolve_weights_path(None, "anime-6b")
+        with pytest.raises(FileNotFoundError, match="realesr-general-wdn-x4v3.pth"):
+            resolve_weights_path(None, "wdn-x4v3")
 
     def test_invalid_preset_is_rejected(self, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
@@ -439,6 +433,7 @@ class TestPresets:
         assert "4xLSDIRCompactC3.pth" in REALESRGAN_WEIGHT_CANDIDATES
         assert "4xLSDIRCompactv2.pth" in REALESRGAN_WEIGHT_CANDIDATES
         assert "2xHFA2kCompact.pth" in REALESRGAN_WEIGHT_CANDIDATES
+        assert "2xParimgCompact.pth" in REALESRGAN_WEIGHT_CANDIDATES
         assert "BSRNet.pth" in REALESRGAN_WEIGHT_CANDIDATES
         assert REALESRGAN_MODEL_CHOICES == (
             "auto",
@@ -447,8 +442,8 @@ class TestPresets:
             "lsdir-c3",
             "lsdir-v2",
             "hfa2k-2x",
+            "parimg-2x",
             "x4plus",
-            "anime-6b",
             "bsrnet",
         )
 
@@ -501,7 +496,7 @@ class TestPresets:
 
     def test_auto_prefers_x4v3_over_the_anime_net(self, tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "model_weights_dir", lambda: tmp_path)
-        (tmp_path / REALESRGAN_MODEL_FILES["anime-6b"][0]).write_bytes(b"")
+        (tmp_path / "realesrgan_x4plus_anime_6B.pth").write_bytes(b"")
         (tmp_path / REALESRGAN_MODEL_FILES["x4v3"][0]).write_bytes(b"")
         assert resolve_weights_path(None, "auto").name == REALESRGAN_MODEL_FILES["x4v3"][0]
 

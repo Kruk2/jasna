@@ -138,10 +138,10 @@ class AppSettings:
     rtx_denoise: str = "medium"  # none, low, medium, high, ultra
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
     amd_upscale_engine: str = "real-esr"  # row 1 = class: real-esr (SRVGGNetCompact, in-process, default), realesrgan (RRDBNet, in-process) or amf-sr (AMD Video SR, D3D11)
-    amd_upscale_model: str = "x4v3"  # row 2 = concrete weight of that engine: real-esr: x4v3 = realesr-general-x4v3 (32-conv SRVGG, fastest), wdn-x4v3 = realesr-general-wdn-x4v3 (denoising), lsdir-c3 = 4xLSDIRCompactC3 (16-conv) or auto; realesrgan: x4plus = RealESRGAN_x4plus (23-block, best quality), anime-6b = RealESRGAN_x4plus_anime_6B (6-block), bsrnet = BSRNet (KAIR, 23-block) or auto
+    amd_upscale_model: str = "x4v3"  # row 2 = concrete weight of that engine: real-esr: x4v3 = realesr-general-x4v3 (32-conv SRVGG, fastest), wdn-x4v3 = realesr-general-wdn-x4v3 (denoising), lsdir-c3 = 4xLSDIRCompactC3 (16-conv) or auto; realesrgan: x4plus = RealESRGAN_x4plus (23-block, best quality), bsrnet = BSRNet (KAIR, 23-block) or auto
     amd_upscale_scale: int = 4  # 2, 4, 6, 8
     amd_upscale_algorithm: str = "sr1-0"  # sr1-0, sr1-1, bicubic, bilinear, point
-    amd_upscale_sharpness: float = -1.0  # -1 (driver default) .. 2
+    amd_upscale_sharpness: float = -1.0  # amf-sr: -1 = driver default, 0..2; real-esr/realesrgan: 0..1 patch CAS (any negative = off, shown as 0)
     amd_upscale_ffmpeg_path: str = ""  # empty: bundled ffmpeg or PATH
     amd_upscale_timeout_s: float = 120.0
     

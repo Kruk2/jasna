@@ -11,6 +11,7 @@ from jasna.gui.settings_sections.widgets import (
     add_setting_label,
     create_slider_value_label,
     get_tooltip,
+    pack_rows,
 )
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.session_config import (
@@ -31,8 +32,8 @@ _AMD_MODEL_LABELS = {
     "lsdir-c3": "4xLSDIRCompactC3",
     "lsdir-v2": "4xLSDIRCompactv2",
     "hfa2k-2x": "2xHFA2kCompact (2x)",
+    "parimg-2x": "2xParimgCompact (2x)",
     "x4plus": "RealESRGAN_x4plus",
-    "anime-6b": "RealESRGAN_x4plus_anime_6B",
     "bsrnet": "BSRNet (BSRGAN)",
 }
 
@@ -360,7 +361,9 @@ class SecondarySection:
         ctk.CTkLabel(amd_sharpness_row, text=t("amd_sharpness"), text_color=Colors.TEXT_PRIMARY).pack(side="left")
         amd_sharpness_tip = ctk.CTkLabel(amd_sharpness_row, text="ⓘ", text_color=Colors.TEXT_PRIMARY, font=(Fonts.FAMILY, Fonts.SIZE_TINY), cursor="hand2")
         amd_sharpness_tip.pack(side="left", padx=4)
-        Tooltip(amd_sharpness_tip, get_tooltip("amd_sharpness"))
+        # The sharpness box changes meaning with the engine, so its tooltip is
+        # swapped in ``_refresh_amd_rows`` to describe whichever engine is active.
+        self._amd_sharpness_tooltip = Tooltip(amd_sharpness_tip, get_tooltip("amd_sharpness"))
         self._widgets["amd_upscale_sharpness"] = ctk.CTkEntry(
             amd_sharpness_row, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
             text_color=Colors.TEXT_PRIMARY, width=80
@@ -398,6 +401,28 @@ class SecondarySection:
             command=self._browse_amd_ffmpeg
         )
         amd_browse_btn.pack(side="right")
+
+        # Two engine families own different rows, and only one set is shown at a
+        # time so the panel means exactly what the selected engine does.
+        #   amf-sr  : rides FFmpeg's ``sr_amf`` filter -> algorithm, process
+        #             timeout and ffmpeg path, and its own 2/4/6/8 scale list;
+        #             it has no checkpoint of its own.
+        #   real-esr / realesrgan : run in process -> a checkpoint row and 2x/4x
+        #             only; they have none of the AMF knobs above.
+        # ``sharpness`` is shared by both but changes meaning (sr_amf sharpness for
+        # amf-sr, CAS sharpening of the restored patch for the network engines).
+        self._amd_rows = [
+            (amd_engine_row, dict(fill="x", pady=(0, 8))),
+            (amd_model_row, dict(fill="x", pady=(0, 8))),
+            (amd_scale_row, dict(fill="x", pady=(0, 8))),
+            (amd_algorithm_row, dict(fill="x", pady=(0, 8))),
+            (amd_sharpness_row, dict(fill="x", pady=(0, 8))),
+            (amd_timeout_row, dict(fill="x", pady=(0, 8))),
+            (amd_path_row, dict(fill="x", pady=(0, 4))),
+        ]
+        self._amd_amf_only_rows = (amd_algorithm_row, amd_timeout_row, amd_path_row)
+        self._amd_net_only_rows = (amd_model_row,)
+        self._refresh_amd_rows("real-esr")
 
     def _browse_amd_ffmpeg(self):
         filepath = filedialog.askopenfilename(
@@ -442,6 +467,48 @@ class SecondarySection:
         menu.configure(state="disabled" if engine == "amf-sr" else "normal")
         if value:
             menu.set_value(value)
+        self._refresh_amd_rows(engine)
+
+    def _refresh_amd_rows(self, engine: str) -> None:
+        """Show only the rows the selected engine actually uses.
+
+        ``amf-sr`` rides FFmpeg's ``sr_amf`` filter: it has the algorithm, timeout
+        and ffmpeg-path rows (and accepts 2x/4x/6x/8x), but no checkpoint.  The
+        network engines (real-esr / realesrgan) run in process: they choose a
+        checkpoint and can only restore at 2x/4x, and have no AMF knobs at all.
+        The shared ``sharpness`` box changes meaning per engine, so its tooltip is
+        swapped too.
+        """
+        amf = engine == "amf-sr"
+        pack_rows(
+            self._amd_rows,
+            self._amd_net_only_rows if amf else self._amd_amf_only_rows,
+        )
+
+        scale = self._widgets["amd_upscale_scale"]
+        values = ["2x", "4x", "6x", "8x"] if amf else ["2x", "4x"]
+        scale.configure(values=values)
+        if scale.get() not in values:
+            scale.set("4x")
+
+        self._amd_sharpness_tooltip.set_text(
+            get_tooltip("amd_sharpness") if amf else get_tooltip("amd_sharpness_patch")
+        )
+
+        # ``-1`` is the amf-sr sentinel for "use the driver default"; the network
+        # engines have no driver, so a negative there is just "off" — displayed
+        # as plain ``0`` so the box reads as the 0..1 range it actually is.  The
+        # runtime already treats any negative as off for these engines, so this
+        # changes display only.
+        if not amf:
+            sharpness = self._widgets["amd_upscale_sharpness"]
+            try:
+                negative = float(sharpness.get()) < 0.0
+            except ValueError:
+                negative = False
+            if negative:
+                sharpness.delete(0, "end")
+                sharpness.insert(0, "0")
 
     def set_model(self, model: str) -> None:
         if model == "ltx":
@@ -472,6 +539,10 @@ class SecondarySection:
         self._widgets["amd_upscale_algorithm"].set(preset.amd_upscale_algorithm)
         self._widgets["amd_upscale_sharpness"].delete(0, "end")
         self._widgets["amd_upscale_sharpness"].insert(0, str(preset.amd_upscale_sharpness))
+        # apply() runs after the constructor's refresh, so re-normalize: a
+        # preset's -1 (the amf-sr sentinel) must not show as -1 under a
+        # network engine.
+        self._refresh_amd_rows(amd_engine)
         self._widgets["amd_upscale_timeout"].delete(0, "end")
         self._widgets["amd_upscale_timeout"].insert(0, str(preset.amd_upscale_timeout_s))
         self._widgets["amd_upscale_ffmpeg_path"].delete(0, "end")

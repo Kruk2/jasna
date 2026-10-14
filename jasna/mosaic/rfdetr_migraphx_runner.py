@@ -408,7 +408,7 @@ class RfDetrMigraphxRunner:
             self._pinned = torch.empty(shape, dtype=torch.float16, pin_memory=True)
             buf = self._pinned
         buf.copy_(x.detach().to(torch.float16), non_blocking=True)
-        torch.cuda.synchronize()
+        torch.cuda.current_stream(self.device).synchronize()
         return buf
 
     def infer(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -426,7 +426,7 @@ class RfDetrMigraphxRunner:
             if name == "masks":
                 results[name] = torch.from_numpy(np_out)
             else:
-                results[name] = torch.from_numpy(np_out.astype(np.float32)).to(self.device)
+                results[name] = torch.from_numpy(np_out).to(device=self.device, dtype=torch.float32)
         return results
 
     def close(self) -> None:

@@ -8,8 +8,7 @@ import torch
 
 from av.video.reformatter import Colorspace as AvColorspace
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, build_kernel, grid_size
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +114,7 @@ def _launch_yuv_to_rgb(
             batch_size, out.shape[-2], out.shape[-1],
         ),
         stream,
+        device=out.device,
     )
 
 
@@ -148,11 +148,12 @@ class YuvToRgbConverter:
         except KeyError as exc:
             raise ValueError(f"Unsupported YUV color space: {color_space}") from exc
 
-        self._cuda_kernel = None
-        if is_nvidia_device(device):
-            bits = 10 if is_10bit else 8
-            value_range = "full" if full_range else "limited"
-            self._cuda_kernel = Kernel(_FATBIN, f"yuv{bits}_{name}_{value_range}", _YUV_TO_RGB_ARG_TYPES)
+        bits = 10 if is_10bit else 8
+        value_range = "full" if full_range else "limited"
+        self._cuda_kernel = build_kernel(
+            _FATBIN, f"yuv{bits}_{name}_{value_range}", _YUV_TO_RGB_ARG_TYPES, device
+        )
+        if self._cuda_kernel is not None:
             return
 
         a, b, c, d = _rgb_from_yuv_coeffs(name)
@@ -331,6 +332,32 @@ class YuvToRgbConverter:
                 uv_ptrs,
                 uv_stride,
                 out[start : start + len(chunk)],
+                stream,
+            )
+
+    def convert_packed_batch_into(
+        self, packed_batch: torch.Tensor, out: torch.Tensor, stream: int | None = None
+    ) -> None:
+        """Convert a batch of packed (B, H + H // 2, W) GPU YUV planes into (B, 3, H, W) RGB."""
+        H, W = self.height, self.width
+        count = int(packed_batch.shape[0])
+        if self._cuda_kernel is None:
+            for i in range(count):
+                plane = packed_batch[i]
+                self.convert_into(plane[:H], plane[H:].view(H // 2, W // 2, 2), out[i])
+            return
+        y_stride = int(packed_batch.stride(1))
+        for start in range(0, count, _CUDA_CONVERSION_BATCH):
+            end = min(start + _CUDA_CONVERSION_BATCH, count)
+            y_ptrs = [int(packed_batch[i, :H].data_ptr()) for i in range(start, end)]
+            uv_ptrs = [int(packed_batch[i, H:].data_ptr()) for i in range(start, end)]
+            _launch_yuv_to_rgb(
+                self._cuda_kernel,
+                y_ptrs,
+                y_stride,
+                uv_ptrs,
+                y_stride,
+                out[start:end],
                 stream,
             )
 

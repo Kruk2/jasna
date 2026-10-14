@@ -55,9 +55,12 @@ def flow_warp(x,
     grid = _identity_grid(n, c, h, w, x.dtype, x.device, align_corners)
 
     # Convert pixel-space flow offsets to normalised [-1, 1] offsets
-    flow_x = flow[..., 0] * (2.0 / max(w - 1, 1))
-    flow_y = flow[..., 1] * (2.0 / max(h - 1, 1))
-    grid_flow = grid + torch.stack((flow_x, flow_y), dim=-1)
+    if w == h:
+        grid_flow = torch.add(grid, flow, alpha=2.0 / max(w - 1, 1))
+    else:
+        flow_x = flow[..., 0] * (2.0 / max(w - 1, 1))
+        flow_y = flow[..., 1] * (2.0 / max(h - 1, 1))
+        grid_flow = grid + torch.stack((flow_x, flow_y), dim=-1)
 
     return F.grid_sample(
         x,

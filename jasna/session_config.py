@@ -19,8 +19,8 @@ LTX_DEFAULT_SEED = 20260923
 SecondaryRestorationName = Literal["none", "unet-4x", "tvai", "rtx-super-res", "amd-upscale"]
 AmdUpscaleEngineName = Literal["amf-sr", "real-esr", "realesrgan"]
 AmdUpscaleModelName = Literal[
-    "auto", "x4v3", "wdn-x4v3", "lsdir-c3", "lsdir-v2", "hfa2k-2x",
-    "x4plus", "anime-6b", "bsrnet",
+    "auto", "x4v3", "wdn-x4v3", "lsdir-c3", "lsdir-v2", "hfa2k-2x", "parimg-2x",
+    "x4plus", "bsrnet",
 ]
 DenoiseStrengthName = Literal["none", "low", "medium", "high"]
 DenoiseStepName = Literal["after_primary", "after_secondary"]
@@ -35,15 +35,15 @@ CodecName = Literal["hevc", "h264", "av1"]
 # checkpoint never sits under a class it does not belong to:
 #   real-esr   - the SRVGGNetCompact family (VGG stack, no convolution at output size,
 #                16-32 convs): realesr-general-x4v3 / -wdn-x4v3, 4xLSDIRCompactC3,
-#                4xLSDIRCompactv2 and 2xHFA2kCompact.
-#   realesrgan - the RRDBNet family (23-block / 6-block, quality ceiling):
-#                RealESRGAN_x4plus / x4plus_anime_6B and BSRNet.
+#                4xLSDIRCompactv2, 2xHFA2kCompact and 2xParimgCompact.
+#   realesrgan - the RRDBNet family (23-block, quality ceiling):
+#                RealESRGAN_x4plus and BSRNet.
 #   amf-sr     - AMD's driver-level Video SR (AMF filter sr_amf): no checkpoint at all.
 AMD_UPSCALE_ENGINE_ORDER: tuple[str, ...] = ("amf-sr", "real-esr", "realesrgan")
 AMD_UPSCALE_ENGINE_MODELS: dict[str, tuple[str, ...]] = {
     "amf-sr": (),
-    "real-esr": ("auto", "x4v3", "wdn-x4v3", "lsdir-c3", "lsdir-v2", "hfa2k-2x"),
-    "realesrgan": ("auto", "x4plus", "anime-6b", "bsrnet"),
+    "real-esr": ("auto", "x4v3", "wdn-x4v3", "lsdir-c3", "lsdir-v2", "hfa2k-2x", "parimg-2x"),
+    "realesrgan": ("auto", "x4plus", "bsrnet"),
 }
 # "auto" fits every class (it takes the first checkpoint found), so the reverse map
 # only covers the explicit presets, which is what repairs stale preset files.

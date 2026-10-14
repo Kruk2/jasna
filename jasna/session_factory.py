@@ -332,6 +332,24 @@ def _restoration_model_path(config: SessionConfig, name: RestorationModelName) -
     return default_restoration_model_path(name)
 
 
+def _secondary_patch_sharpen(config: SessionConfig) -> float:
+    """CAS sharpening for the secondary-restored patch, applied at blend time.
+
+    The AMD panel's sharpness box doubles as this for the network engines: for
+    amf-sr it is the FFmpeg ``sr_amf`` filter's sharpness, but real-esr /
+    realesrgan run their own network and ignore that parameter, so their sharpness
+    is applied to the restored patch at its final resolution instead. Returns 0
+    when there is nothing to sharpen (amf-sr sharpens inside the filter; every
+    other engine has no such knob).
+    """
+    if config.secondary_restoration != "amd-upscale":
+        return 0.0
+    engine = amd_upscale_engine_for(config.amd_upscale_engine, config.amd_upscale_model)
+    if engine == "amf-sr":
+        return 0.0
+    return max(0.0, min(float(config.amd_upscale_sharpness), 1.0))
+
+
 def _build_basicvsrpp_pipeline(
     config: SessionConfig, device: "torch.device", *, log_callback: Callable[[str], None] | None
 ) -> "RestorationPipeline":
@@ -368,6 +386,7 @@ def _build_basicvsrpp_pipeline(
         secondary_restorer=_build_secondary_restorer(config, device),
         denoise_strength=DenoiseStrength(config.denoise_strength),
         denoise_step=DenoiseStep(config.denoise_step),
+        secondary_sharpen=_secondary_patch_sharpen(config),
     )
 
 

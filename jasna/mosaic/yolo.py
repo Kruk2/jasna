@@ -6,6 +6,20 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+# Preloaded on purpose: ultralytics picks its NMS implementation by asking whether
+# "torchvision" is already in sys.modules. Its fallback, TorchNMS.nms, is a
+# synchronous Python loop whose every tiny op costs ~45ms on this ROCm build
+# (measured: ~2.3s for 50 boxes, ~13s for 300), so against the default ~2s NMS wall
+# clock it aborts mid-batch and leaves the rest of that batch with ZERO detections —
+# mosaic that is then never restored. Importing it here makes the fast
+# torchvision.ops.nms path a property of this module instead of of import order.
+# Optional like in ultralytics: a build without torchvision simply keeps its slow
+# fallback rather than failing to import this module.
+try:  # pragma: no cover - torchvision is an optional ultralytics dependency
+    import torchvision  # noqa: F401
+except ImportError:
+    pass
 from ultralytics.utils import nms, ops
 
 from jasna.accelerator import is_nvidia_device
@@ -368,6 +382,12 @@ class YoloMosaicDetectionModel:
             max_det=int(self.max_det),
             nc=max(0, nc),
             end2end=bool(self.end2end),
+            # The default 2.0 + 0.05*bs budget exists to keep NMS from stalling a
+            # validation run. Here it must never fire: the images the loop does not
+            # reach keep the zero pre-fill, i.e. a whole batch silently reports "no
+            # mosaic" and those frames are encoded untouched. Raise it well past any
+            # realistic call so a slow box count can only cost time, never a leak.
+            max_time_img=10.0,
         )
 
         out_h, out_w = (int(target_hw[0]), int(target_hw[1]))

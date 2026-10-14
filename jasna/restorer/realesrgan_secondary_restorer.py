@@ -17,8 +17,8 @@ itself (see ``rrdbnet.py`` / ``srvggnet.py``):
   ~52 fps for the 6-block anime net, uses 38 MB of VRAM instead of 604 MB, and scores
   higher PSNR/SSIM on live-action footage.  ``4xLSDIRCompactC3`` is the smaller
   LSDIR-trained member of the same family (~0.6 M params).
-* ``RRDBNet`` — ``RealESRGAN_x4plus`` (23 blocks), ``RealESRGAN_x4plus_anime_6B``
-  (6 blocks), pixel-unshuffle 2x variants, and KAIR checkpoints such as ``BSRNet``
+* ``RRDBNet`` — ``RealESRGAN_x4plus`` (23 blocks), pixel-unshuffle 2x variants,
+  and KAIR checkpoints such as ``BSRNet``
   (23 blocks, BSRGAN, the highest-fidelity option measured on live-action crops).
 
 A 4x network asked for ``scale=2`` is area-downsampled, which is what the
@@ -66,8 +66,6 @@ REALESRGAN_WEIGHT_CANDIDATES = (
     "RealESRGAN_x4v3.pth",
     "realesr-general-wdn-x4v3.pth",
     "RealESRGAN_x4v3_wdn.pth",
-    "realesrgan_x4plus_anime_6B.pth",
-    "RealESRGAN_x4plus_anime_6B.pth",
     "realesrgan_x4plus.pth",
     "RealESRGAN_x4plus.pth",
     "realesrgan-x4plus.pth",
@@ -76,6 +74,7 @@ REALESRGAN_WEIGHT_CANDIDATES = (
     "4xLSDIRCompactC3.pth",
     "4xLSDIRCompactv2.pth",
     "2xHFA2kCompact.pth",
+    "2xParimgCompact.pth",
     "BSRNet.pth",
 )
 
@@ -84,7 +83,7 @@ REALESRGAN_WEIGHT_CANDIDATES = (
 # (see ``jasna.session_config.AMD_UPSCALE_ENGINE_MODELS``):
 #   real-esr   - SRVGGNetCompact: x4v3 / wdn-x4v3 / lsdir-c3 / lsdir-v2 / hfa2k-2x
 #                (~4.5x cheaper)
-#   realesrgan - RRDBNet: x4plus / anime-6b / bsrnet (quality ceiling)
+#   realesrgan - RRDBNet: x4plus / bsrnet (quality ceiling)
 # The default is x4v3: fastest, highest SSIM, and the most even across mosaic crops
 # (per-crop colour drift and detail ratio both stay below the 6-block anime net),
 # which is what a restore-and-blend pipeline cares about most.
@@ -95,8 +94,8 @@ REALESRGAN_MODEL_CHOICES = (
     "lsdir-c3",
     "lsdir-v2",
     "hfa2k-2x",
+    "parimg-2x",
     "x4plus",
-    "anime-6b",
     "bsrnet",
 )
 REALESRGAN_MODEL_FILES: dict[str, tuple[str, ...]] = {
@@ -105,12 +104,8 @@ REALESRGAN_MODEL_FILES: dict[str, tuple[str, ...]] = {
     "lsdir-c3": ("4xLSDIRCompactC3.pth", "4xLSDIRCompactC3_fp16.pth"),
     "lsdir-v2": ("4xLSDIRCompactv2.pth", "4xLSDIRCompactv2_fp16.pth"),
     "hfa2k-2x": ("2xHFA2kCompact.pth", "2xHFA2kCompact_fp16.pth"),
+    "parimg-2x": ("2xParimgCompact.pth", "2xParimgCompact_fp16.pth"),
     "x4plus": ("realesrgan_x4plus.pth", "RealESRGAN_x4plus.pth", "realesrgan-x4plus.pth"),
-    "anime-6b": (
-        "realesrgan_x4plus_anime_6B.pth",
-        "RealESRGAN_x4plus_anime_6B.pth",
-        "realesrgan-x4plus-anime-6b.pth",
-    ),
     "bsrnet": ("BSRNet.pth", "bsrnet.pth", "BSRGAN.pth"),
 }
 REALESRGAN_MODEL_URLS = {
@@ -119,8 +114,8 @@ REALESRGAN_MODEL_URLS = {
     "lsdir-c3": "https://github.com/Phhofm/models/releases/tag/4xLSDIRCompactC3",
     "lsdir-v2": "https://github.com/Phhofm/models/releases/tag/4xLSDIRCompact2",
     "hfa2k-2x": "https://github.com/Phhofm/models/releases/tag/2xHFA2kCompact",
+    "parimg-2x": "https://github.com/Phhofm/models/releases/tag/2xParimgCompact",
     "x4plus": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
-    "anime-6b": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
     "bsrnet": "https://github.com/cszn/KAIR/releases/download/v1.0/BSRNet.pth",
 }
 
@@ -240,7 +235,7 @@ def resolve_weights_path(model_path: str | Path | None, model: str = "auto") -> 
     """Absolute, existence-checked checkpoint path (Windows-safe: no shell quoting).
 
     ``model_path`` wins when given. ``model`` otherwise picks one of the named
-    presets (``x4v3``, ``wdn-x4v3``, ``lsdir-c3``, ``x4plus``, ``anime-6b``,
+    presets (``x4v3``, ``wdn-x4v3``, ``lsdir-c3``, ``x4plus``,
     ``bsrnet``); ``auto`` keeps the candidate search, which also prefers
     ``realesr-general-x4v3``.  The preset decides the checkpoint, not the engine
     class, so an explicit ``--amd-upscale-model-path`` always wins.

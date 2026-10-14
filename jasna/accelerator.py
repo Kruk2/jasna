@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import MutableMapping
+from collections.abc import Callable, MutableMapping
 from contextlib import nullcontext
 from enum import StrEnum
 import logging
 import os
 from pathlib import Path
+import time
 from typing import Any
 
 import torch
@@ -313,6 +314,244 @@ def maybe_release_vram_cache() -> bool:
     except Exception as exc:  # noqa: BLE001
         logger.warning("VRAM defrag check failed: %s", exc)
     return False
+
+
+#: Restored-video-second cadences for the two sweeps that keep a long pass from
+#: drifting. A whole-file render is a single pass, so the clip-boundary defrag
+#: above only fires when the allocator's reserve crosses a fraction of the *whole
+#: card* - a threshold a job that shares the GPU with a 4K desktop and a
+#: remote-desktop capture (several GB the budget never accounts for) rarely
+#: reaches. The reserve then drifts until Windows demotes pages to shared memory
+#: and the frame rate collapses. On a schedule keyed to how much *video* the pass
+#: has already produced (not wall clock, which a stalled or paused run would
+#: distort), the sweeps land at the same point of the film however fast the
+#: machine is.
+#:
+#: The light sweep returns the allocator's cold cache; 1200 = every 20 minutes of
+#: restored video. The deep sweep additionally pushes stranded clip results out
+#: and drops the cross-process cache; 3600 = first at the 60-minute mark, then
+#: every 60 minutes of restored video. 0 disables each.
+_VRAM_LIGHT_VIDEO_ENV = "JASNA_VRAM_LIGHT_VIDEO_S"
+_VRAM_LIGHT_VIDEO_DEFAULT_S = 1200.0
+_VRAM_DEEP_VIDEO_ENV = "JASNA_VRAM_DEEP_VIDEO_S"
+_VRAM_DEEP_VIDEO_DEFAULT_S = 3600.0
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    """Parse an env var as a positive float; blank/garbage keeps the default, <=0 disables."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("%s=%r is not a number; using %g", name, raw, default)
+        return default
+    return value if value > 0 else 0.0
+
+
+def light_video_seconds() -> float:
+    """Restored-video seconds between light cold-cache releases; 0 disables them."""
+    return _positive_float_env(
+        _VRAM_LIGHT_VIDEO_ENV, _VRAM_LIGHT_VIDEO_DEFAULT_S
+    )
+
+
+def deep_video_seconds() -> float:
+    """Restored-video seconds between deep consolidations; 0 disables them."""
+    return _positive_float_env(
+        _VRAM_DEEP_VIDEO_ENV, _VRAM_DEEP_VIDEO_DEFAULT_S
+    )
+
+
+class VramReleaser:
+    """Runs the "tidy up and carry on" sweeps while one long pass runs.
+
+    A whole-file render is one ``run_restoration_pass``, so without this the only
+    mid-run defrag is the clip-boundary one, gated on the allocator's reserve
+    exceeding a fraction of the entire card - a threshold a job sharing the GPU
+    with a 4K desktop and a remote-desktop capture (several GB the budget never
+    accounts for) never reaches. The reserve then drifts until Windows demotes our
+    hot pages to system memory over PCIe and the frame rate collapses.
+
+    Both sweeps are keyed on ``progress``, not on the clock: the caller passes a
+    callable returning how many seconds of *video* the pass has already produced.
+    Every ``light_video`` seconds of it the cold cache is returned; every
+    ``deep_video`` seconds the heavier ``deep_hook`` additionally sweeps stranded
+    clip results and drops the cross-process cache. Keying on restored video
+    (rather than elapsed time) puts the sweeps at the same point of the film
+    whatever the machine's speed and however much the pass stalls on I/O or encode
+    back-pressure. A deep sweep supersedes the light one due at the same point.
+
+    Neither sweep touches live allocations, stops the pass or reopens the output,
+    so progress is unchanged and the single output file stays one file. ``tick`` is
+    cheap and safe to call from the pass's supervisor loop; without a progress
+    source it is a no-op.
+    """
+
+    def __init__(
+        self,
+        *,
+        deep_video: float | None = None,
+        light_video: float | None = None,
+        progress: Callable[[], float] | None = None,
+        deep_hook: Callable[[], str] | None = None,
+    ) -> None:
+        self._deep_video = (
+            deep_video_seconds() if deep_video is None else float(deep_video)
+        )
+        self._light_video = (
+            light_video_seconds() if light_video is None else float(light_video)
+        )
+        self._progress = progress
+        self._deep_hook = deep_hook
+        # Each sweep fires when restored video reaches its mark, then advances by
+        # another interval. None when there is nothing to key on (0 or no source).
+        self._next_deep: float | None = (
+            self._deep_video
+            if progress is not None and self._deep_video > 0
+            else None
+        )
+        self._next_light: float | None = (
+            self._light_video
+            if progress is not None and self._light_video > 0
+            else None
+        )
+        self._enabled = self._next_deep is not None or self._next_light is not None
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @property
+    def deep_video(self) -> float:
+        return self._deep_video
+
+    @property
+    def light_video(self) -> float:
+        return self._light_video
+
+    def _video_position(self) -> float | None:
+        """Restored-video seconds so far, or None if it cannot be read yet."""
+        if self._progress is None:
+            return None
+        try:
+            return float(self._progress())
+        except Exception:  # noqa: BLE001 - a bad reading is not a sweep trigger
+            return None
+
+    def _run_light(self, position: float) -> None:
+        release_vram_cache()
+        logger.info(
+            "VRAM cold-cache release at %.1f min of restored video", position / 60.0
+        )
+
+    def _run_deep(self, position: float) -> None:
+        detail = ""
+        if self._deep_hook is not None:
+            try:
+                detail = self._deep_hook()
+            except Exception as exc:  # noqa: BLE001 - a failed tidy-up must not end the pass
+                logger.warning("VRAM deep consolidation failed: %r", exc)
+                release_vram_cache()
+                detail = f"hook_failed={exc!r}"
+        else:
+            release_vram_cache()
+        logger.info(
+            "VRAM deep consolidation at %.1f min of restored video%s",
+            position / 60.0, f": {detail}" if detail else "",
+        )
+
+    def tick(self) -> bool:
+        """Fire the due sweep (deep first) once restored video passes its mark."""
+        if not self._enabled:
+            return False
+        position = self._video_position()
+        if position is None:
+            return False
+        if self._next_deep is not None and position >= self._next_deep:
+            # Skip straight to the next un-passed mark so a stalled poll or a coarse
+            # update cannot fire the sweep twice for the same stretch.
+            while self._next_deep <= position:
+                self._next_deep += self._deep_video
+            # A deep sweep subsumes the light one due at the same stretch.
+            if self._next_light is not None:
+                while self._next_light <= position:
+                    self._next_light += self._light_video
+            self._run_deep(position)
+            return True
+        if self._next_light is not None and position >= self._next_light:
+            while self._next_light <= position:
+                self._next_light += self._light_video
+            self._run_light(position)
+            return True
+        return False
+
+
+#: Seconds between memory-trend log lines; 0 (the default) disables them. Opt-in
+#: because the line is for diagnosing a slow *long* run, not for every job.
+_MEM_TREND_ENV = "JASNA_MEM_TREND_S"
+_MEM_TREND_DEFAULT_S = 0.0
+
+
+def mem_trend_seconds() -> float:
+    """Seconds between memory-trend log lines; 0 disables them."""
+    return _positive_float_env(_MEM_TREND_ENV, _MEM_TREND_DEFAULT_S)
+
+
+class MemoryTrend:
+    """Logs the allocator and caller-supplied counters on a fixed schedule.
+
+    A working set that only creeps over an hour is invisible in a short window, so
+    a long run needs its own trajectory. Every ``period`` seconds this writes one
+    ``MEM TREND`` line with the allocator's reserved / allocated / peak bytes - the
+    split that separates "the allocator is holding freed blocks" from "the live
+    set really grew" - plus whatever extra counters the caller passes (buffer
+    sizes, RSS). ``tick`` is cheap and safe from the pass's supervisor loop; with
+    no period it never fires, and without CUDA it still logs the extra counters.
+    """
+
+    def __init__(self, period: float, *, extra=None) -> None:
+        self._period = float(period)
+        self._extra = extra
+        self._next = time.monotonic() + self._period if self._period > 0 else None
+
+    @property
+    def enabled(self) -> bool:
+        return self._next is not None
+
+    @property
+    def period(self) -> float:
+        return self._period
+
+    def sample(self) -> list[str]:
+        """The current counters as ``key=value`` strings (also used by the caller)."""
+        parts: list[str] = []
+        mib = 1024 ** 2
+        try:
+            index = preferred_gpu_index()
+            parts.append(f"reserved={torch.cuda.memory_reserved(index) / mib:.0f}MiB")
+            parts.append(f"allocated={torch.cuda.memory_allocated(index) / mib:.0f}MiB")
+            parts.append(f"peak={torch.cuda.max_memory_allocated(index) / mib:.0f}MiB")
+        except Exception:  # noqa: BLE001 - no CUDA: the extra counters still help
+            parts.append("cuda=unavailable")
+        if self._extra is not None:
+            try:
+                parts.extend(f"{key}={value}" for key, value in self._extra().items())
+            except Exception as exc:  # noqa: BLE001
+                parts.append(f"extra_failed={exc!r}")
+        return parts
+
+    def tick(self) -> bool:
+        """Write one trend line once the period elapses."""
+        if self._next is None:
+            return False
+        now = time.monotonic()
+        if now < self._next:
+            return False
+        self._next = now + self._period
+        logger.info("MEM TREND %s", " ".join(self.sample()))
+        return True
 
 
 def configure_rocm_process_env() -> None:
