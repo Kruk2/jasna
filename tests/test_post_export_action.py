@@ -8,6 +8,7 @@ import pytest
 from jasna.post_export_action import (
     PostExportVideoCommandCancelled,
     PostExportVideoCommandError,
+    _quote_shell_value,
     expand_post_export_video_command,
     run_post_export_action,
     run_post_export_action_safely,
@@ -120,11 +121,33 @@ def test_expand_post_export_video_command_quotes_windows_values(
     assert expanded == f"tool {subprocess.list2cmdline([str(output_path)])}"
 
 
+def test_expand_post_export_video_command_quotes_cmd_operators_on_windows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("jasna.post_export_action.sys.platform", "win32")
+    output_path = tmp_path / "Tom&Jerry^1.mp4"
+
+    expanded = expand_post_export_video_command(
+        "tool {output}",
+        tmp_path / "in.mp4",
+        output_path,
+    )
+
+    assert expanded == f'tool "{output_path}"'
+
+
+def test_windows_quoting_keeps_trailing_backslash_inside_quotes(monkeypatch) -> None:
+    monkeypatch.setattr("jasna.post_export_action.sys.platform", "win32")
+
+    assert _quote_shell_value("C:\\") == '"C:\\\\"'
+
+
 def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: Path) -> None:
     process = MagicMock(pid=123)
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("jasna.post_export_action.subprocess.Popen", popen)
+    monkeypatch.setattr("jasna.post_export_action.subprocess_no_window_kwargs", lambda: {})
     monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
     input_path = tmp_path / "in.mp4"
     output_path = tmp_path / "out.mp4"
@@ -137,7 +160,7 @@ def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: 
     )
 
     popen.assert_called_once_with(
-        f"tool {output_path}",
+        f"tool {shlex.quote(str(output_path))}",
         shell=True,
         cwd=tmp_path,
         start_new_session=True,
