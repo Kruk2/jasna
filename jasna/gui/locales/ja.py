@@ -491,7 +491,7 @@ JA = {
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "闲鱼で購入",
-        "xianyu_scan_hint": "闲鱼アプリでこの QR コードをスキャンしてください。商品名は jasna正版激活码 です。注文後、出品者からライセンスコードが届きます。",
+        "xianyu_scan_hint": "中国のユーザーは「闲鱼」でこの QR コードをスキャンして購入してください。",
 
         # Tooltips
         "tip_max_clip_size": "一度に復元するフレーム数です。大きいほど安定した結果になり速くなりますが、VRAM を多く使います。\n\nVRAM に収まる最大のサイズを使ってください。1080p では 90 で約 4 GB、180 で約 5 GB です。4K では約 1.5 倍必要です。\nVRAM が足りないときは、まずこれを下げてください。\nデフォルト：90",

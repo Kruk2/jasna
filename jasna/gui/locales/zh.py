@@ -491,7 +491,7 @@ ZH = {
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "在闲鱼购买",
-        "xianyu_scan_hint": "用闲鱼 App 扫描这个二维码。商品名称是 jasna正版激活码。下单后，卖家会发给你许可证码。",
+        "xianyu_scan_hint": "中国用户请使用“闲鱼”扫描此二维码进行购买",
         
         # Tooltips
         "tip_max_clip_size": "一起修复的帧数。片段越大，效果越稳定、速度越快，但占用更多显存。\n\n在显存允许的范围内用最大的值。1080p 下，90 约需 4 GB，180 约需 5 GB。4K 约需 1.5 倍。\n显存不足？先降低这个值。\n默认值：90",

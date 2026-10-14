@@ -491,7 +491,7 @@ KO = {
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "Xianyu(闲鱼)에서 구매",
-        "xianyu_scan_hint": "Xianyu 앱으로 이 QR 코드를 스캔하세요. 상품명은 jasna正版激活码입니다. 주문하면 판매자가 라이선스 코드를 보내 줍니다.",
+        "xianyu_scan_hint": "중국 사용자는 Xianyu(闲鱼)로 이 QR 코드를 스캔해 구매하세요.",
 
         # Tooltips
         "tip_max_clip_size": "함께 복원하는 프레임 수입니다. 클수록 결과가 안정적이고 빠르지만 VRAM을 더 사용합니다.\n\nVRAM에 맞는 가장 큰 값을 사용하세요. 1080p에서 90은 약 4GB, 180은 약 5GB가 필요합니다. 4K는 약 1.5배 더 필요합니다.\nVRAM이 부족하면 이 값부터 낮추세요.\n기본값: 90",

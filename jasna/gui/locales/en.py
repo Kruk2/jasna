@@ -491,7 +491,7 @@ EN = {
         "unifans_support": "Unifans",
         "xianyu_support": "闲鱼",
         "xianyu_dialog_title": "Buy on Xianyu",
-        "xianyu_scan_hint": "Scan this QR code with the Xianyu app. The item is called jasna正版激活码. After you order, the seller sends you a License code.",
+        "xianyu_scan_hint": "Users in China: scan this QR code with Xianyu to buy.",
         
         # Tooltips
         "tip_max_clip_size": "How many frames are restored together. Bigger clips give a steadier result and are faster, but use more VRAM.\n\nUse the biggest size that fits in your VRAM. At 1080p, 90 needs about 4 GB and 180 about 5 GB. 4K needs about 1.5x more.\nOut of VRAM? Lower this first.\nDefault: 90",
