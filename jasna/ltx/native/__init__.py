@@ -7,8 +7,9 @@ comfy-kitchen (``sage_attention/``) and the element-wise glue of ``glue.cu``. Py
 every model constant and launch policy value and hands them over in ``Config``.
 
 Source installs build it on first use into the compile cache (needs nvcc, a C++ compiler
-and ninja); a frozen release never builds it and loads it only when ``prebuild`` output is
-shipped in ``PREBUILT``. Without the toolchain, on a GPU it has no kernels for, or with
+and ninja; on Windows MSVC's ``cl`` on PATH, from an x64 Visual Studio developer shell whose
+MSVC this CUDA supports); a frozen release never builds it and loads it only when ``prebuild``
+output is shipped in ``PREBUILT``. Without the toolchain, on a GPU it has no kernels for, or with
 ``JASNA_LTX_NATIVE=0`` the sampler keeps the torch.compile path.
 """
 
@@ -44,6 +45,7 @@ _ATTENTION_SOURCES = ("quant_qk_int8.cu", "quant_v_int8.cu", "sage_attn_launcher
 # glibc 2.35 host headers cannot compile.
 _ATTENTION_NVCC_FLAGS = ("-std=c++17", "-O3", "-DNDEBUG", "--use_fast_math", "--expt-relaxed-constexpr")
 PREBUILT = _HERE / "prebuilt"
+_IS_WINDOWS = os.name == "nt"
 EXTENSION_NAME = "jasna_ltx_native"
 
 
@@ -93,12 +95,13 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
         return None
     if is_frozen():
         return "a release ships no native block to load and cannot build one"
-    from torch.utils.cpp_extension import CUDA_HOME
+    from torch.utils.cpp_extension import CUDA_HOME, get_cxx_compiler
 
-    if CUDA_HOME is None or not (Path(CUDA_HOME) / "bin" / "nvcc").is_file():
+    if CUDA_HOME is None or not _nvcc(Path(CUDA_HOME)).is_file():
         return "no CUDA compiler (nvcc) found to build it"
-    if shutil.which(os.environ.get("CXX", "c++")) is None:
-        return "no C++ compiler found to build it"
+    compiler = get_cxx_compiler()
+    if shutil.which(compiler) is None:
+        return f"no C++ compiler ({compiler}) found to build it"
     if not _ninja_available():
         return "ninja is not installed"
     return None
@@ -110,9 +113,13 @@ def _cache() -> Path:
     return Path(cache_dir()) / "jasna-ltx-native"
 
 
+def _nvcc(cuda_home: Path) -> Path:
+    return cuda_home / "bin" / ("nvcc.exe" if _IS_WINDOWS else "nvcc")
+
+
 def _build_flags(cuda_home: Path) -> dict[str, list[str]]:
     """Compiler and linker flags to build the extension against the CUDA driver API, per platform."""
-    if os.name == "nt":
+    if _IS_WINDOWS:
         return {
             "extra_cflags": ["/O2"],
             "extra_cuda_cflags": ["-O3"],
@@ -129,9 +136,9 @@ def _attention_nvcc_command(cuda_home: Path) -> list[str]:
     """nvcc with every flag but the source and object, for the extension's host compiler and architectures."""
     from torch.utils import cpp_extension
 
-    host = ("/MD", "/Zc:preprocessor") if os.name == "nt" else ("-fPIC", "-fvisibility=hidden")
+    host = ("/MD", "/Zc:preprocessor") if _IS_WINDOWS else ("-fPIC", "-fvisibility=hidden")
     ccbin = ["-ccbin", os.environ["CC"]] if "CC" in os.environ else []
-    return [str(cuda_home / "bin" / "nvcc"), *ccbin, *cpp_extension._get_cuda_arch_flags(), *_ATTENTION_NVCC_FLAGS,
+    return [str(_nvcc(cuda_home)), *ccbin, *cpp_extension._get_cuda_arch_flags(), *_ATTENTION_NVCC_FLAGS,
             *(f"-Xcompiler={flag}" for flag in host)]
 
 
@@ -146,7 +153,7 @@ def _attention_objects(build_directory: Path, cuda_home: Path) -> list[Path]:
     directory.mkdir(parents=True, exist_ok=True)
     objects = []
     for source in _ATTENTION_SOURCES:
-        target = directory / Path(source).with_suffix(".obj" if os.name == "nt" else ".o").name
+        target = directory / Path(source).with_suffix(".obj" if _IS_WINDOWS else ".o").name
         if not target.is_file():
             partial = target.with_name(f"partial-{target.name}")
             subprocess.run([*command, "-c", str(_ATTENTION / source), "-o", str(partial)], check=True)

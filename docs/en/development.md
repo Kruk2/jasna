@@ -17,6 +17,8 @@ inside an installed module still report a failure.
 - Optional, NVIDIA: the CUDA 13 toolkit (`nvcc`), a C++ compiler `nvcc` accepts and
   `ninja` (in the `dev` extra) build the native LTX block on first use (see
   [Benchmarks](#benchmarks)); without them LTX runs its `torch.compile` path.
+  On Windows start jasna from an x64 Developer prompt of VS 2022, so MSVC's
+  `cl` is on `PATH` (CUDA 13.0 does not accept VS 2026's MSVC).
 - Optional, NVIDIA: a `python_vali` wheel built from
   <https://codeberg.org/Kruk2/vali> (needs CUDA 13, `cmake`, `ninja`; on
   Windows also VS Build Tools 2022 with C++). Without that fork the decoder

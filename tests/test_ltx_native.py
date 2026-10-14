@@ -7,7 +7,7 @@ import os
 import sys
 import tomllib
 from importlib.machinery import ModuleSpec
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -126,30 +126,28 @@ def test_vendored_attention_compiles_once_with_comfy_kitchens_flags(monkeypatch,
 
     monkeypatch.setattr(native.subprocess, "run", compile_object)
     monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: ["-gencode=arch=compute_120,code=sm_120"])
-    monkeypatch.setattr(native.os, "name", "posix")
+    monkeypatch.setattr(native, "_IS_WINDOWS", False)
     monkeypatch.setenv("CC", "gcc-15")
-    objects = native._attention_objects(tmp_path, Path("/cuda"))
+    objects = native._attention_objects(tmp_path, PurePosixPath("/cuda"))
     assert [path.name for path in objects] == ["quant_qk_int8.o", "quant_v_int8.o", "sage_attn_launcher.o"]
     assert all(path.read_bytes() == b"object" for path in objects)
     assert [command[-3] for command in commands] == [str(native._ATTENTION / source) for source in native._ATTENTION_SOURCES]
     assert commands[0][:3] == ["/cuda/bin/nvcc", "-ccbin", "gcc-15"]
     assert {"--use_fast_math", "-O3", "-DNDEBUG", "-Xcompiler=-fPIC", "-gencode=arch=compute_120,code=sm_120"} <= set(commands[0])
-    assert native._attention_objects(tmp_path, Path("/cuda")) == objects and len(commands) == 3
+    assert native._attention_objects(tmp_path, PurePosixPath("/cuda")) == objects and len(commands) == 3
 
     monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: ["-gencode=arch=compute_89,code=sm_89"])
-    assert native._attention_objects(tmp_path, Path("/cuda"))[0].parent != objects[0].parent
+    assert native._attention_objects(tmp_path, PurePosixPath("/cuda"))[0].parent != objects[0].parent
 
 
 def test_vendored_attention_compiles_for_the_msvc_runtime_on_windows(monkeypatch):
-    from pathlib import PureWindowsPath
-
     from torch.utils import cpp_extension
 
     monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: [])
-    monkeypatch.setattr(native.os, "name", "nt")
+    monkeypatch.setattr(native, "_IS_WINDOWS", True)
     monkeypatch.delenv("CC", raising=False)
     command = native._attention_nvcc_command(PureWindowsPath("C:/cuda"))
-    assert command[0] == "C:\\cuda\\bin\\nvcc"
+    assert command[0] == "C:\\cuda\\bin\\nvcc.exe"
     assert {"-Xcompiler=/MD", "-Xcompiler=/Zc:preprocessor", "-std=c++17", "--use_fast_math"} <= set(command)
 
 
@@ -160,6 +158,39 @@ def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", None)
     assert "nvcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+
+
+@pytest.mark.parametrize("windows, nvcc", [(True, "nvcc.exe"), (False, "nvcc")])
+def test_source_build_finds_the_platform_nvcc(monkeypatch, tmp_path, windows, nvcc):
+    from torch.utils import cpp_extension
+
+    _cuda_capability(monkeypatch, (12, 0))
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
+    monkeypatch.setattr(native, "_IS_WINDOWS", windows)
+    monkeypatch.setattr(cpp_extension, "CUDA_HOME", str(tmp_path))
+    monkeypatch.setattr(native.shutil, "which", lambda name: name)
+    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / ("nvcc" if windows else "nvcc.exe")).touch()
+    assert "nvcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+    (tmp_path / "bin" / nvcc).touch()
+    assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
+
+
+def test_source_build_looks_for_the_host_compiler_torch_builds_with(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    _cuda_capability(monkeypatch, (12, 0))
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
+    monkeypatch.setattr(cpp_extension, "CUDA_HOME", str(tmp_path))
+    native._nvcc(tmp_path).parent.mkdir()
+    native._nvcc(tmp_path).touch()
+    monkeypatch.delenv("CXX", raising=False)
+    looked_up = []
+    monkeypatch.setattr(native.shutil, "which", looked_up.append)
+    host = "cl" if sys.platform == "win32" else "c++"
+    reason = native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+    assert reason == f"no C++ compiler ({host}) found to build it" and looked_up == [host]
 
 
 def test_release_without_a_prebuilt_block_keeps_the_compiled_path_without_cpp_extension(monkeypatch):
@@ -196,7 +227,7 @@ def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
 
     objects = [tmp_path / "quant_qk_int8.o", tmp_path / "sage_attn_launcher.o"]
     monkeypatch.setattr(native, "_ninja_available", lambda: True)
-    monkeypatch.setattr(native.os, "name", "posix")
+    monkeypatch.setattr(native, "_IS_WINDOWS", False)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
     monkeypatch.setattr(native, "_attention_objects", lambda build_directory, cuda_home: objects)
     monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: kwargs)
@@ -206,14 +237,12 @@ def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
 
 
 def test_build_flags_link_the_platform_cuda_driver_library(monkeypatch):
-    from pathlib import PurePosixPath, PureWindowsPath
-
-    monkeypatch.setattr(native.os, "name", "nt")
+    monkeypatch.setattr(native, "_IS_WINDOWS", True)
     windows = native._build_flags(PureWindowsPath("C:/cuda"))
     assert windows["extra_cflags"] == ["/O2"]
     assert windows["extra_ldflags"] == ["C:\\cuda\\lib\\x64\\cuda.lib"]
 
-    monkeypatch.setattr(native.os, "name", "posix")
+    monkeypatch.setattr(native, "_IS_WINDOWS", False)
     linux = native._build_flags(PurePosixPath("/cuda"))
     assert linux["extra_cflags"] == ["-O3", "-fvisibility=hidden"]
     assert linux["extra_ldflags"] == ["-L/cuda/lib64/stubs", "-lcuda"]
