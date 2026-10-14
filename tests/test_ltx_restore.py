@@ -289,10 +289,10 @@ def test_segment_decode_budget_ignores_free_vram(monkeypatch):
     assert restore.segment_decode_budget(768) == 8 << 30
 
 
-def test_large_canvas_needs_ten_gib_free():
+def test_large_canvas_needs_twelve_gib_free():
     gib = 1 << 30
-    assert restore.large_canvas_fits(True, 10 * gib)
-    assert not restore.large_canvas_fits(True, 9 * gib)
+    assert restore.large_canvas_fits(True, 12 * gib)
+    assert not restore.large_canvas_fits(True, 11 * gib)
     assert not restore.large_canvas_fits(False, 30 * gib)
 
 

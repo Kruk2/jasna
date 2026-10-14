@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 FrameBatches = Iterator[tuple[torch.Tensor, list[int]]]
 FrameSource = Callable[[], FrameBatches]
 DecodeBudget = Callable[[int], int]
-LARGE_CANVAS_MIN_FREE_BYTES = 10 << 30
+LARGE_CANVAS_MIN_FREE_BYTES = 12 << 30
 LARGE_CANVAS_MIN_TOTAL_BYTES = 15 << 30
 SEGMENT_DECODE_BUDGET_BYTES = {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
@@ -677,7 +677,7 @@ def compose_span(
 
 
 def large_canvas_fits(requested: bool, free_bytes: int) -> bool:
-    """768 px windows need ~7.5 GiB of VAE-encoder activations alone; below 10 GiB free
+    """768 px windows need ~7.5 GiB of VAE-encoder activations alone; below 12 GiB free
     every window runs at 512 px instead."""
     if requested and free_bytes < LARGE_CANVAS_MIN_FREE_BYTES:
         logger.warning("LTX: %.1f GiB free VRAM, restoring large mosaics at 512 px", free_bytes / 2**30)
