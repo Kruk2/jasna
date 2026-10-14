@@ -146,6 +146,8 @@ class Progress:
     long its work so far took against the profile (clock changes, uneven mosaics), else
     its pace so far. Every pass records its timing for the profile."""
 
+    _bar_label = "LTX"
+
     def __init__(self, frames: int, *, disable: bool, report: ProgressReport | None) -> None:
         self.frames = frames
         self._disable = disable
@@ -172,7 +174,9 @@ class Progress:
             speed_test_report = lambda fraction, _left, _step: report(
                 0.0, 0.0, StageProgress("speed_test", 1, 1, fraction, 0.0)
             )
-        return Progress(SPEED_TEST_FRAMES, disable=self._disable, report=speed_test_report)
+        speed_test = Progress(min(self.frames, SPEED_TEST_FRAMES), disable=self._disable, report=speed_test_report)
+        speed_test._bar_label = "LTX speed test"
+        return speed_test
 
     def plan(self, work: speed.Work) -> None:
         self._work = work
@@ -190,7 +194,7 @@ class Progress:
         """``marks`` times the pass's windows and steps (``timing_marks``)."""
         tqdm_bar = tqdm(
             total=total,
-            desc=f"LTX {_STAGE_NUMBER[stage]}/4 {stage}",
+            desc=f"{self._bar_label} {_STAGE_NUMBER[stage]}/4 {stage}",
             unit=unit,
             dynamic_ncols=True,
             disable=self._disable,

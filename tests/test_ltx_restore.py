@@ -362,6 +362,33 @@ def test_progress_reports_each_pass_with_its_own_share_and_time_left(monkeypatch
     assert second.seconds_left == pytest.approx(4.0 / 20 * 70)
 
 
+def _recorded_bar_options(monkeypatch) -> list[dict]:
+    options = []
+    real_tqdm = restore.tqdm
+
+    def recording_tqdm(**kwargs):
+        options.append(kwargs)
+        return real_tqdm(**kwargs)
+
+    monkeypatch.setattr(restore, "tqdm", recording_tqdm)
+    return options
+
+
+def test_speed_test_bars_are_labelled_as_the_speed_test(monkeypatch):
+    options = _recorded_bar_options(monkeypatch)
+    run = restore.Progress(1000, disable=True, report=None)
+    with run.speed_test().bar("scan", 10):
+        pass
+    with run.bar("scan", 10):
+        pass
+    assert [option["desc"] for option in options] == ["LTX speed test 1/4 scan", "LTX 1/4 scan"]
+
+
+@pytest.mark.parametrize(("video_frames", "speed_test_frames"), [(61, 61), (1000, restore.SPEED_TEST_FRAMES)])
+def test_speed_test_counts_only_the_frames_the_video_has(video_frames, speed_test_frames):
+    assert restore.Progress(video_frames, disable=True, report=None).speed_test().frames == speed_test_frames
+
+
 def test_progress_begin_shows_the_next_pass_while_its_model_loads(monkeypatch):
     _Clock(monkeypatch)
     reports = []
