@@ -115,3 +115,36 @@ def test_benchmark_harness_runs_three_times_and_takes_median() -> None:
     assert call_count == 3
     assert median_duration == 1.2
     assert result == {"frames": 100}
+
+
+def test_detection_benchmark_compiles_missing_engine_before_loading(tmp_path) -> None:
+    from jasna.benchmark.detection_speed import _run_single
+
+    import torch
+
+    class _CompileRequested(Exception):
+        pass
+
+    video = tmp_path / "video.mp4"
+    video.touch()
+    weights = tmp_path / "model.onnx"
+    weights.touch()
+    with (
+        patch("jasna.benchmark.detection_speed.get_video_meta_data"),
+        patch("jasna.benchmark.detection_speed.detection_model_weights_path", return_value=weights),
+        patch("jasna.engine_compiler.ensure_engines_compiled", side_effect=_CompileRequested) as compile_engines,
+        pytest.raises(_CompileRequested),
+    ):
+        _run_single(
+            "rfdetr-v6",
+            device=torch.device("cpu"),
+            batch_size=4,
+            fp16=True,
+            video_path=video,
+            score_threshold=0.2,
+        )
+
+    request = compile_engines.call_args.args[0]
+    assert request.detection
+    assert request.detection_model_name == "rfdetr-v6"
+    assert request.detection_model_path == str(weights)
