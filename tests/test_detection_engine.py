@@ -219,3 +219,26 @@ def test_migraphx_device_index_defaults_to_zero(monkeypatch):
     monkeypatch.setattr(mod, "hip_device_archs", lambda: [])
     assert mod.migraphx_device_index() == 0
     assert mod.hip_arch() is None
+
+
+def test_detection_resolution_override_roundtrip():
+    registry.set_detection_resolution(None)
+    assert registry.get_detection_resolution_override() is None
+    assert registry.rfdetr_model_config("rfdetr-v6").resolution == 480
+
+    registry.set_detection_resolution(576)
+    assert registry.get_detection_resolution_override() == 576
+    overridden = registry.rfdetr_model_config("rfdetr-v6")
+    assert overridden.resolution == 576
+    # only the input size is overridden; the model keeps its own thresholds
+    assert overridden.score_threshold == 0.35
+
+    registry.set_detection_resolution(None)
+    assert registry.rfdetr_model_config("rfdetr-v6").resolution == 480
+
+
+def test_detection_resolution_rejects_bad_values():
+    for bad in (64, 4096, 500):
+        with pytest.raises(ValueError):
+            registry.set_detection_resolution(bad)
+    registry.set_detection_resolution(None)

@@ -197,6 +197,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument(
+        "--decode-backend",
+        type=str,
+        default=None,
+        choices=("auto", "vali", "pyav-sw", "pyav-hw"),
+        help=(
+            "Video decoder. \"auto\" (the default) uses FFmpeg software decode on AMD and the "
+            "hardware path elsewhere; \"pyav-hw\" opts into AMD's hardware decoder (AMF), "
+            "\"pyav-sw\" forces software and \"vali\" uses the NVDEC/VALI path. Software is the "
+            "AMD default because it is ~1.95x faster than AMF on H.264 with bit-identical "
+            "output, and because hevc_amf cannot decode Main10 at all; hardware decode can still "
+            "win on CPUs slower than the GPU (Ryzen 5000 and below)."
+        ),
+    )
+    parser.add_argument(
         "--fp16",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -521,6 +535,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help=CLI_HELP["max_detection_gap"],
+    )
+    detection.add_argument(
+        "--detection-resolution",
+        type=int,
+        default=None,
+        metavar="PX",
+        help=(
+            "RF-DETR input size in pixels, overriding the model's own default. rfdetr-v6 ships at "
+            "480 (14.2 ms/frame on an RX 7900 XT versus 18.8 at its native 576, recall-neutral on "
+            "our clips); raise it only for footage whose mosaics the default misses. Multiple of 32."
+        ),
     )
     detection.add_argument(
         "--min-detection-duration",
@@ -1147,16 +1172,26 @@ def main() -> None:
         _run_post_export_action()
         return
 
+    from jasna.media.video_decoder import set_decode_backend
     from jasna.mosaic.detection_registry import (
         coerce_detection_model_name,
         discover_available_detection_models,
         resolve_detection_model,
         set_detection_engine,
+        set_detection_resolution,
     )
 
     engine_arg = getattr(args, "detection_engine", None)
     if engine_arg:
         set_detection_engine(str(engine_arg))
+
+    resolution_arg = getattr(args, "detection_resolution", None)
+    if resolution_arg:
+        set_detection_resolution(int(resolution_arg))
+
+    decode_backend_arg = getattr(args, "decode_backend", None)
+    if decode_backend_arg:
+        set_decode_backend(str(decode_backend_arg))
 
     if not str(args.detection_model_path).strip():
         available = discover_available_detection_models()

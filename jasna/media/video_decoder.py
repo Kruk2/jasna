@@ -37,6 +37,9 @@ CORRUPT_PACKET_TOLERANCE = 10
 #              setup failures still fall back to software at open time.
 # - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
 DECODE_BACKEND_ENV = "JASNA_DECODE_BACKEND"
+#: Process-level pin (CLI --decode-backend); the env var stays as the launcher escape
+#: hatch and the CLI value wins when both are set.
+_decode_backend_pinned: str | None = None
 _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
 
 # PyAV's avcodec_find_decoder returns libdav1d for AV1, which carries no NVDEC
@@ -60,6 +63,53 @@ class _HardwareDecoderUnusable(Exception):
     re-decodes the whole stream in software. It never escapes the reader.
     """
 
+
+#: Host bytes one in-flight *decoded* frame costs ffmpeg's frame-threading pool:
+#: a nv12/p010 frame is 1.5 planes, and 10-bit samples are two bytes each.
+_DECODE_THREAD_BUDGET_ENV = "JASNA_DECODE_THREAD_BUDGET_GB"
+_DECODE_THREAD_BUDGET_DEFAULT_GB = 1.0
+
+
+def _decode_thread_count(width: int, height: int, ten_bit: bool) -> tuple[int | None, str]:
+    """Frame-thread depth allowed by a byte budget, plus a note when it binds.
+
+    FFmpeg's frame threading keeps roughly one decoded frame alive per worker, so
+    the decoder's host footprint scales with threads x frame_size. With
+    ``thread_type = "AUTO"`` the depth is the CPU core count: fine at 1080p
+    (~3 MB per thread), fatal at 8K, where a P010 frame is ~95 MB - measured on a
+    7680x4320 clip, threads=1/4/AUTO hold 1.88/2.37/4.42 GB at 4.4/11.4/20.2 fps.
+    Cap the depth so the pool stays inside the budget; frames small enough that
+    the core count already fits are returned untouched. ``<= 0`` disables the cap.
+    """
+    try:
+        budget_gb = float(os.environ.get(_DECODE_THREAD_BUDGET_ENV, "").strip()
+                          or _DECODE_THREAD_BUDGET_DEFAULT_GB)
+    except ValueError:
+        budget_gb = _DECODE_THREAD_BUDGET_DEFAULT_GB
+    cores = os.cpu_count() or 1
+    if budget_gb <= 0:
+        return None, ""
+    frame_bytes = max(1, int(height * 1.5) * int(width) * (2 if ten_bit else 1))
+    allowed = int(budget_gb * (1024 ** 3) // frame_bytes)
+    if allowed >= cores:
+        return None, ""
+    note = (
+        "decode frame-threading capped for %dx%d%s: %d threads instead of %d "
+        "(each in-flight decoded frame is %.0f MB; raise %s if you have the RAM)"
+        % (width, height, " 10-bit" if ten_bit else "", max(1, allowed), cores,
+           frame_bytes / (1024 ** 2), _DECODE_THREAD_BUDGET_ENV)
+    )
+    return max(1, allowed), note
+
+
+def _use_bounded_decode_threads(ctx, width: int, height: int, ten_bit: bool) -> None:
+    """Let ffmpeg pick the threading mode, but not the frame-thread depth."""
+    ctx.thread_type = "AUTO"
+    threads, note = _decode_thread_count(width, height, ten_bit)
+    if threads is not None:
+        ctx.thread_count = threads
+    if note:
+        log.warning(note)
 
 @dataclass
 class LazyYuvFrame:
@@ -130,10 +180,26 @@ def materialize_lazy_batch(
     return frames_batch
 
 
+def set_decode_backend(value: str | None) -> None:
+    """Pin the decode backend for this process (None restores env/auto)."""
+    global _decode_backend_pinned
+    if value is None:
+        _decode_backend_pinned = None
+        return
+    normalized = str(value).strip().lower()
+    if normalized not in _DECODE_BACKENDS:
+        raise ValueError(
+            f"Unknown decode backend {value!r}, expected one of {', '.join(_DECODE_BACKENDS)}"
+        )
+    _decode_backend_pinned = normalized
+
+
 def _decode_backend() -> str:
     # strip/lower: cmd.exe folds the space before ``&&`` into the value
     # (``set JASNA_DECODE_BACKEND=pyav-hw && ...`` -> "pyav-hw "), which would
     # otherwise raise "Unknown decode backend" on a perfectly valid choice.
+    if _decode_backend_pinned is not None:
+        return _decode_backend_pinned
     backend = os.environ.get(DECODE_BACKEND_ENV, "auto").strip().lower()
     if backend not in _DECODE_BACKENDS:
         raise ValueError(
@@ -383,7 +449,7 @@ class VideoReader:
 
         ctx = self.video_stream.codec_context
         if software_only:
-            ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(ctx, ctx.width, ctx.height, self.metadata.is_10bit)
         elif self.vendor is AcceleratorVendor.AMD:
             # Measured on an RX 7900 XT (2026-10-11, interleaved A/B, slope of
             # time-vs-N so the one-time torch.compile is not counted per frame):
@@ -399,14 +465,14 @@ class VideoReader:
             if backend == "pyav-hw":
                 self._setup_amf_decoder(ctx)
             else:
-                ctx.thread_type = "AUTO"
+                _use_bounded_decode_threads(ctx, ctx.width, ctx.height, self.metadata.is_10bit)
         elif not ctx.is_hwaccel:
             if self.vendor is AcceleratorVendor.NVIDIA:
                 self._setup_nvdec_decoder(ctx)
             else:
                 # Definite software decode: let FFmpeg pick frame/slice threading.
                 # CUDA contexts must keep their default threading configuration.
-                ctx.thread_type = "AUTO"
+                _use_bounded_decode_threads(ctx, ctx.width, ctx.height, self.metadata.is_10bit)
         self.width = ctx.width
         self.height = ctx.height
         self._full_range = (
@@ -432,7 +498,7 @@ class VideoReader:
             "av1": "av1_amf",
         }.get(str(source_ctx.name).lower())
         if decoder_name is None:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             return
         try:
             hwaccel = HWAccel(
@@ -465,7 +531,7 @@ class VideoReader:
             self._decoder_ctx = decoder
             log.info("Using AMF hardware decoder %s for %s", decoder_name, self.file)
         except (ValueError, av.FFmpegError, RuntimeError) as exc:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             log.warning(
                 "AMF cannot decode %s (codec %s): %s; using FFmpeg software "
                 "decoding and uploading frames to ROCm",
@@ -477,11 +543,11 @@ class VideoReader:
     def _setup_nvdec_decoder(self, source_ctx) -> None:
         decoder_name = _NVDEC_DECODER_OVERRIDES.get(str(self.metadata.codec_name).lower())
         if decoder_name is None:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             return
         min_width, min_height = _NVDEC_MIN_CODED_SIZE[decoder_name]
         if source_ctx.width < min_width or source_ctx.height < min_height:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             log.info(
                 "Skipping NVDEC decoder %s for %s: %dx%d is below its %dx%d minimum",
                 decoder_name,
@@ -508,7 +574,7 @@ class VideoReader:
             self._decoder_ctx = decoder
             log.info("Using NVDEC decoder %s for %s", decoder_name, self.file)
         except (ValueError, av.FFmpegError, RuntimeError) as exc:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             log.warning(
                 "NVDEC decoder %s unavailable for %s (codec %s): %s; using FFmpeg "
                 "software decoding and uploading frames to CUDA",
@@ -570,7 +636,7 @@ class VideoReader:
             # Definite software decode now: let FFmpeg pick frame/slice
             # threading, matching __enter__'s software branches. CUDA contexts
             # must keep their default threading configuration.
-            self.video_stream.codec_context.thread_type = "AUTO"
+            _use_bounded_decode_threads(self.video_stream.codec_context, self.width, self.height, self.metadata.is_10bit)
         log.warning(
             "%s cannot decode %s (codec %s) without decoding a single frame: %s; "
             "falling back to FFmpeg software decoding and uploading frames to the GPU",

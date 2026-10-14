@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import torch
@@ -109,6 +109,36 @@ RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-vr-v1": RfDetrModelConfig(768, 0.40, None, "large"),
 }
 _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(768, 0.25, None, None)
+
+#: Process-level override of the detector input size (CLI --detection-resolution).
+#: The registry value is the shipped default - v6 at 480, which is 25% cheaper than
+#: its native 576 and kept the recall on our clips - so the override exists only for
+#: footage whose mosaics the smaller input misses.
+_detection_resolution: int | None = None
+_DETECTION_RESOLUTION_MIN = 160
+_DETECTION_RESOLUTION_MAX = 2048
+
+
+def set_detection_resolution(resolution: int | None) -> None:
+    """Pin the RF-DETR input size for this process (None restores the registry)."""
+    global _detection_resolution
+    if resolution is None:
+        _detection_resolution = None
+        return
+    value = int(resolution)
+    if not _DETECTION_RESOLUTION_MIN <= value <= _DETECTION_RESOLUTION_MAX:
+        raise ValueError(
+            f"detection resolution must be between {_DETECTION_RESOLUTION_MIN} and "
+            f"{_DETECTION_RESOLUTION_MAX}, got {value}"
+        )
+    if value % 32:
+        raise ValueError(f"detection resolution must be a multiple of 32, got {value}")
+    _detection_resolution = value
+
+
+def get_detection_resolution_override() -> int | None:
+    """The pinned input size, or None while the registry default applies."""
+    return _detection_resolution
 
 # Which backend executes RF-DETR on AMD: the torch checkpoint path (default) or
 # ONNX Runtime's MIGraphX provider (see jasna/mosaic/rfdetr_migraphx_runner.py).
@@ -227,7 +257,10 @@ def coerce_detection_model_name(name: str) -> str:
 
 
 def rfdetr_model_config(name: str) -> RfDetrModelConfig:
-    return RFDETR_MODEL_CONFIGS.get(coerce_detection_model_name(name), _RFDETR_FALLBACK_CONFIG)
+    config = RFDETR_MODEL_CONFIGS.get(coerce_detection_model_name(name), _RFDETR_FALLBACK_CONFIG)
+    if _detection_resolution is not None and config.resolution != _detection_resolution:
+        config = replace(config, resolution=_detection_resolution)
+    return config
 
 
 def recommended_score_threshold(name: str) -> float:

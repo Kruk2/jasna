@@ -56,6 +56,8 @@ def apply_rocm_env_defaults(environ: MutableMapping[str, str]) -> None:
 # missing.
 _AOTRITON_IMAGES_DIRNAME = "aotriton.images"
 _AOTRITON_IMAGE_GLOB = "*/flash/attn_fwd.zip"
+#: image directories are named amd-<family>, e.g. amd-gfx110x / amd-gfx120x
+_AOTRITON_IMAGES_DIR_PREFIX = "amd-"
 _FORCE_MATH_ENV = "JASNA_FORCE_MATH_SDP"
 _TRUTHY = {"1", "true", "yes", "on"}
 
@@ -67,14 +69,54 @@ def _image_sets(root: Path) -> list[Path]:
     return sorted({marker.parent.parent for marker in root.glob(_AOTRITON_IMAGE_GLOB)})
 
 
-def _device_gcn_arch() -> str:
-    """``gfxNNNN`` for device 0, or an empty string when it cannot be read.
+def _arch_dir_names(arch: str) -> tuple[str, ...]:
+    """Image directory names (without the ``amd-`` prefix) that may serve ``arch``.
 
-    Only consulted when several image sets are installed, so the usual single-set
-    case never initialises the device just to answer this question.
+    The images live under a directory named after the architecture *family*:
+    ``gfx1101`` is served by ``amd-gfx110x``, ``gfx1201`` by ``amd-gfx120x``. An
+    exact-architecture directory, when upstream ships one, wins.
+
+    The family name is derived from the arch (drop the last digit, append ``x``)
+    and never from the family *package* name. RDNA4 is the trap here: its family
+    package is ``amd-torch-device-gfx12-0`` (wheel file ``gfx12_0``) while the
+    images inside it live in ``amd-gfx120x``, so looking up ``gfx120x`` as a
+    package name 404s on AMD's index and looking up ``gfx12_0`` as a directory
+    name finds nothing. ``setup-rocm101-gpu.ps1`` builds the same name the same
+    way, so the two stay in step.
+
+    Verified against every family wheel up to ROCm 10.1: ``amd-gfx110x`` (from
+    amd_torch_device_gfx110x), ``amd-gfx115x`` (gfx115x) and ``amd-gfx120x``
+    (gfx12_0) all follow it. The ``amd-`` prefix is dropped here so that a
+    directory named without it still matches (see ``_image_dir_matches``).
+    """
+    arch = (arch or "").split(":")[0].strip().lower()
+    if not arch.startswith("gfx"):
+        return ()
+    names = [arch]
+    if len(arch) > 1:
+        names.append(arch[:-1] + "x")
+    return tuple(dict.fromkeys(names))
+
+
+def _image_dir_matches(dirname: str, name: str) -> bool:
+    """True when ``dirname`` is the image directory ``name`` (prefix optional).
+
+    Accepts both ``amd-gfx110x`` (what upstream ships) and a bare ``gfx110x``, so
+    a hand-assembled or differently-packaged set is not silently ignored.
+    """
+    return dirname == name or dirname.rsplit("-", 1)[-1] == name
+
+
+def _device_gcn_arch() -> str:
+    """``gfxNNNN`` for the GPU jasna runs on, or an empty string when unreadable.
+
+    Uses :func:`preferred_gpu_index` rather than device 0: on a machine whose
+    device 0 is an integrated GPU (gfx1103/gfx1036 and friends) device 0 reports
+    an arch the pipeline never runs on, so the answer would be wrong on every
+    launch.
     """
     try:
-        name = str(torch.cuda.get_device_properties(0).gcnArchName)
+        name = str(torch.cuda.get_device_properties(preferred_gpu_index()).gcnArchName)
     except Exception:  # pragma: no cover - depends on the runtime
         return ""
     return name.split(":")[0].strip()
@@ -84,33 +126,43 @@ def aotriton_image_dir(lib_dir: Path | str | None = None, *, arch: str | None = 
     """AOTriton image directory usable by this GPU, or ``None`` when there is none.
 
     ``lib_dir`` overrides ``torch/lib`` (used by the tests); ``arch`` overrides the
-    device query. Image sets are named after the architecture family, so a
-    ``gfx1100`` device is served by ``amd-gfx110x`` and a ``gfx1201`` by
-    ``amd-gfx120x``; an exact-architecture directory wins when it exists.
+    device query.
+
+    An installed set only counts when it *covers this GPU*. A portable package is
+    assembled for one family (usually ``amd-gfx110x``, for RDNA3), and a card of
+    another family finds that set installed but useless: returning it would leave
+    FLASH/EFFICIENT SDPA enabled, AOTriton would then find no image for this arch
+    and submit a null kernel - the crash path of ROCm/TheRock#7315. So a set that
+    does not cover this GPU is treated as absent and the MATH backend is used.
+
+    When the arch cannot be read at all, a single installed set is still assumed
+    to be ours (the pre-existing behaviour), so a machine that hides its arch does
+    not silently lose the fast path; several sets are never guessed between.
     """
     base = Path(lib_dir) if lib_dir is not None else Path(torch.__file__).resolve().parent / "lib"
     sets = _image_sets(base / _AOTRITON_IMAGES_DIRNAME)
     if not sets:
         return None
-    if len(sets) == 1:
-        return sets[0]
 
-    # Several families installed (or a shared wheel): pick the one for this GPU.
     resolved_arch = arch if arch is not None else _device_gcn_arch()
-    if not resolved_arch:
+    wanted = _arch_dir_names(resolved_arch)
+    if wanted:
+        for name in wanted:
+            for candidate in sets:
+                if _image_dir_matches(candidate.name, name):
+                    return candidate
         logger.debug(
-            "Several AOTriton image sets found but the GPU arch is unknown; keeping the MATH backend"
+            "AOTriton image sets %s do not cover %s (looked for %s); keeping the MATH backend",
+            [c.name for c in sets],
+            resolved_arch,
+            " / ".join(_AOTRITON_IMAGES_DIR_PREFIX + n for n in wanted),
         )
         return None
-    names = {resolved_arch, resolved_arch[:-1] + "x"} if len(resolved_arch) > 1 else {resolved_arch}
-    for name in (resolved_arch, *sorted(names - {resolved_arch})):
-        for candidate in sets:
-            if candidate.name.rsplit("-", 1)[-1] == name:
-                return candidate
+
+    if len(sets) == 1:
+        return sets[0]
     logger.debug(
-        "AOTriton image sets %s do not cover %s; keeping the MATH backend",
-        [c.name for c in sets],
-        resolved_arch,
+        "Several AOTriton image sets found but the GPU arch is unknown; keeping the MATH backend"
     )
     return None
 
@@ -568,7 +620,8 @@ def configure_rocm_process_env() -> None:
                 "attention cannot be launched (ROCm/TheRock#7315). Falling back to the "
                 "MATH backend: correct but noticeably slower. Install the image package "
                 "for this architecture, e.g. 'amd-torch-device-gfx110x' for gfx1100/1101/"
-                "1102/1103, to get the fast path back."
+                "1102/1103, or 'amd-torch-device-gfx12-0' for gfx1200/1201 (its images then "
+                "land in amd-gfx120x), to get the fast path back."
             )
         else:
             return

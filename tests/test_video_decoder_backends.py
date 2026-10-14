@@ -349,3 +349,22 @@ def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
     source = _vali_source(batch_size=2, frame_stride=2)
     batches = list(source.frames(2.0))
     assert [pts for _batch, pts in batches] == [[30720, 31744]]
+
+
+def test_set_decode_backend_overrides_env(monkeypatch):
+    from jasna.media import video_decoder as vd
+
+    monkeypatch.setenv(vd.DECODE_BACKEND_ENV, "pyav-sw")
+    vd.set_decode_backend(None)
+    assert vd._decode_backend() == "pyav-sw"
+
+    # the CLI pin wins over the environment
+    vd.set_decode_backend("pyav-hw")
+    assert vd._decode_backend() == "pyav-hw"
+
+    with pytest.raises(ValueError):
+        vd.set_decode_backend("nope")
+
+    # None restores env/auto for the next test in this process
+    vd.set_decode_backend(None)
+    assert vd._decode_backend() == "pyav-sw"
