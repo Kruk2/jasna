@@ -5,13 +5,19 @@ import pytest
 
 from jasna.gui import file_actions
 
+VIDEO = Path("/media/video.mp4")
+
+
+def _command(template: list[str]) -> list[str]:
+    return [part.format(file=VIDEO, folder=VIDEO.parent) for part in template]
+
 
 @pytest.mark.parametrize(
     ("system", "command"),
     [
-        ("Windows", ["explorer", "/media"]),
-        ("Linux", ["xdg-open", "/media"]),
-        ("Darwin", ["open", "/media"]),
+        ("Windows", ["explorer", "{folder}"]),
+        ("Linux", ["xdg-open", "{folder}"]),
+        ("Darwin", ["open", "{folder}"]),
     ],
 )
 def test_open_containing_folder_uses_platform_launcher(
@@ -21,17 +27,17 @@ def test_open_containing_folder_uses_platform_launcher(
     monkeypatch.setattr(file_actions.platform, "system", lambda: system)
     monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
 
-    file_actions.open_containing_folder(Path("/media/video.mp4"), parent=MagicMock())
+    file_actions.open_containing_folder(VIDEO, parent=MagicMock())
 
-    launch.assert_called_once_with(command)
+    launch.assert_called_once_with(_command(command))
 
 
 @pytest.mark.parametrize(
     ("system", "command"),
     [
-        ("Windows", ["explorer", "/select,", "/media/video.mp4"]),
-        ("Linux", ["xdg-open", "/media"]),
-        ("Darwin", ["open", "-R", "/media/video.mp4"]),
+        ("Windows", ["explorer", "/select,", "{file}"]),
+        ("Linux", ["xdg-open", "{folder}"]),
+        ("Darwin", ["open", "-R", "{file}"]),
     ],
 )
 def test_open_containing_folder_selects_file_when_supported(
@@ -41,11 +47,9 @@ def test_open_containing_folder_selects_file_when_supported(
     monkeypatch.setattr(file_actions.platform, "system", lambda: system)
     monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
 
-    file_actions.open_containing_folder(
-        Path("/media/video.mp4"), parent=MagicMock(), select_file=True
-    )
+    file_actions.open_containing_folder(VIDEO, parent=MagicMock(), select_file=True)
 
-    launch.assert_called_once_with(command)
+    launch.assert_called_once_with(_command(command))
 
 
 def test_open_containing_folder_shows_localized_error_on_failure(monkeypatch) -> None:
@@ -56,7 +60,7 @@ def test_open_containing_folder_shows_localized_error_on_failure(monkeypatch) ->
     monkeypatch.setattr(file_actions, "t", lambda key, **values: key.format(**values))
     parent = MagicMock()
 
-    file_actions.open_containing_folder(Path("/media/video.mp4"), parent=parent)
+    file_actions.open_containing_folder(VIDEO, parent=parent)
 
     error.assert_called_once_with(
         "open_containing_folder_failed_title",
@@ -68,8 +72,8 @@ def test_open_containing_folder_shows_localized_error_on_failure(monkeypatch) ->
 @pytest.mark.parametrize(
     ("system", "command"),
     [
-        ("Linux", ["xdg-open", "/media/video.mp4"]),
-        ("Darwin", ["open", "/media/video.mp4"]),
+        ("Linux", ["xdg-open", "{file}"]),
+        ("Darwin", ["open", "{file}"]),
     ],
 )
 def test_open_file_uses_platform_launcher(monkeypatch, system: str, command: list[str]) -> None:
@@ -77,9 +81,9 @@ def test_open_file_uses_platform_launcher(monkeypatch, system: str, command: lis
     monkeypatch.setattr(file_actions.platform, "system", lambda: system)
     monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
 
-    file_actions.open_file(Path("/media/video.mp4"), parent=MagicMock())
+    file_actions.open_file(VIDEO, parent=MagicMock())
 
-    launch.assert_called_once_with(command)
+    launch.assert_called_once_with(_command(command))
 
 
 def test_open_file_uses_windows_default_application(monkeypatch) -> None:
@@ -87,6 +91,6 @@ def test_open_file_uses_windows_default_application(monkeypatch) -> None:
     monkeypatch.setattr(file_actions.platform, "system", lambda: "Windows")
     monkeypatch.setattr(file_actions.os, "startfile", startfile, raising=False)
 
-    file_actions.open_file(Path("/media/video.mp4"), parent=MagicMock())
+    file_actions.open_file(VIDEO, parent=MagicMock())
 
-    startfile.assert_called_once_with("/media/video.mp4")
+    startfile.assert_called_once_with(str(VIDEO))

@@ -71,7 +71,7 @@ def test_reset_jobs_for_run_prepares_every_status_and_preserves_job_options(
         widget.set_segments_editable.assert_called_with(True)
 
 
-def test_queue_footer_stacks_count_above_action_buttons() -> None:
+def test_queue_footer_stacks_count_above_action_buttons(show_window) -> None:
     try:
         root = ctk.CTk()
     except TclError as exc:
@@ -81,7 +81,7 @@ def test_queue_footer_stacks_count_above_action_buttons() -> None:
         root.geometry("320x800")
         panel = QueuePanel(root)
         panel.pack(fill="both", expand=True)
-        root.update_idletasks()
+        show_window(root)
 
         count_bottom = panel._queue_count.winfo_rooty() + panel._queue_count.winfo_height()
         actions_top = min(
@@ -571,7 +571,7 @@ def test_repeated_running_state_does_not_reconfigure_queue_rows() -> None:
 
 
 @pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)
-def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi) -> None:
+def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi, show_window) -> None:
     try:
         root = ctk.CTk()
     except TclError as exc:
@@ -590,7 +590,7 @@ def test_main_workspace_starts_wider_and_can_resize_queue_panel(hidpi) -> None:
         root._on_ltx_models_changed = lambda: None
 
         JasnaApp._build_main_body(root)
-        root.update_idletasks()
+        show_window(root)
 
         assert isinstance(root._workspace, tk.PanedWindow)
         assert root._workspace.cget("background") == Colors.BORDER

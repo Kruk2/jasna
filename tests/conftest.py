@@ -1,4 +1,7 @@
 """Load NVIDIA TensorRT DLLs first when the active environment provides them."""
+import gc
+import sys
+import time
 from importlib.util import find_spec
 
 import pytest
@@ -16,6 +19,49 @@ collect_ignore = [] if _HAS_TENSORRT else [
     "test_trt_utils.py",
     "test_unet4x_secondary_restorer.py",
 ]
+
+
+def pytest_configure(config):
+    """Turn off CustomTkinter's per-monitor DPI detection on Windows, as ``run_gui()`` does.
+
+    Otherwise every CTk window multiplies its sizes by the test machine's display scaling,
+    so GUI tests would pass or fail depending on the monitor. With it off, the only scaling
+    is the factor a test sets (see ``hidpi``), exactly as on Linux.
+    """
+    if sys.platform == "win32":
+        import customtkinter as ctk
+
+        ctk.deactivate_automatic_dpi_awareness()
+
+
+@pytest.fixture
+def show_window():
+    """Process Tk events until a window is viewable, so its widgets have real sizes.
+
+    On Windows CustomTkinter withdraws every new window to recolor its title bar and maps
+    it again from an ``after`` callback; until then Tk reports 1x1 geometry, and a single
+    ``update()`` may run before that callback.
+    """
+
+    def show(window) -> None:
+        deadline = time.monotonic() + 2.0
+        window.update()
+        while not window.winfo_viewable() and time.monotonic() < deadline:
+            window.update()
+        assert window.winfo_viewable()
+
+    return show
+
+
+@pytest.fixture
+def tk_garbage_collected():
+    """Finalize Tk objects left by earlier GUI tests on the main thread.
+
+    Code that runs ``gc.collect()`` on a worker thread (the GUI processor does after every
+    job) would otherwise finalize them there, and each Tk call off the main thread waits a
+    second for a main loop that tests never run, outlasting the tests' join timeouts.
+    """
+    gc.collect()
 
 
 @pytest.fixture

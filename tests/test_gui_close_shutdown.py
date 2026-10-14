@@ -3,8 +3,12 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, JobItem, AppSettings
+
+pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
 
 
 def test_processor_join_waits_for_thread():

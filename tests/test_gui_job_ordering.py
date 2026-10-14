@@ -10,8 +10,7 @@ from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobItem, JobStatus, AppSettings
 from jasna.post_export_action import PostExportVideoCommandError
 
-
-pytestmark = pytest.mark.usefixtures("no_gpu_cleanup")
+pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
 
 
 def _make_jobs(*names: str) -> list[JobItem]:
