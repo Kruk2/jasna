@@ -71,6 +71,20 @@ def _relative_error(actual: torch.Tensor, expected: torch.Tensor) -> float:
     return ((actual.float() - expected.float()).norm() / expected.float().norm()).item()
 
 
+def test_native_prompt_key_value_matches_the_python_heads_and_dtype(block):
+    weights, forward, (tolerance, _) = block
+    _x, cond, _prompt, _rope = _inputs(weights, min(CANVAS_SIDES), seed=3)
+    context = torch.randn(1, 1024, weights["scale_shift_table"].shape[1], device=DEVICE).to(torch.bfloat16)
+    expected = T.prompt_key_value(weights, cond, context)
+    linears = [tensor for name in T.LINEAR_NAMES for tensor in native._linear_tensors(weights, name)]
+    actual = forward.block.prompt_key_value(
+        linears, weights["attn2.k_norm.weight"], weights["prompt_scale_shift_table"], cond.prompt_rows, context
+    )
+    for got, want in zip(actual, expected):
+        assert got.dtype == want.dtype == T.prompt_attention_dtype(DEVICE)
+        assert _relative_error(got, want) < tolerance
+
+
 @pytest.mark.parametrize("rows", list(CANVAS_SIDES))
 @pytest.mark.parametrize("skip", [False, True], ids=["full", "stg"])
 def test_native_block_matches_block_forward(block, rows, skip):

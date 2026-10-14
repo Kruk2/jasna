@@ -356,8 +356,14 @@ class Block::Impl {
     const int64_t dim = input.size(-1), heads = config_.heads, head_dim = dim / heads;
     const at::Tensor key = at::empty({input.size(1), dim}, input.options());
     norm_rope(linear(prepared, w[CrossK]), cross_k_norm, nullptr, nullptr, key, head_dim, config_.eps);
-    return {key.view({1, input.size(1), heads, head_dim}).transpose(1, 2),
-            linear(prepared, w[CrossV]).view({1, input.size(1), heads, head_dim}).transpose(1, 2)};
+    const at::ScalarType dtype = prompt_attention_dtype(context);
+    return {key.view({1, input.size(1), heads, head_dim}).transpose(1, 2).to(dtype),
+            linear(prepared, w[CrossV]).view({1, input.size(1), heads, head_dim}).transpose(1, 2).to(dtype)};
+  }
+
+  // transformer.prompt_attention_dtype: no fused attention kernel takes bf16 before SM 8.0.
+  static at::ScalarType prompt_attention_dtype(const at::Tensor& context) {
+    return at::cuda::getDeviceProperties(context.get_device())->major < 8 ? at::kHalf : at::kBFloat16;
   }
 
  private:
