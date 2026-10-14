@@ -46,7 +46,7 @@ def run_post_export_action(action: str, command: str = "") -> None:
         return
 
     if action == POST_EXPORT_ACTION_SHUTDOWN:
-        cmd = ["shutdown", "/s", "/t", "0"] if sys.platform == "win32" else ["shutdown", "-h", "now"]
+        cmd = ["shutdown", "/s", "/t", "0"] if sys.platform == "win32" else ["systemctl", "poweroff"]
         subprocess.Popen(cmd, **subprocess_no_window_kwargs())
         return
 

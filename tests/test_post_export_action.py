@@ -48,7 +48,7 @@ def test_run_post_export_shutdown_linux(monkeypatch) -> None:
 
     run_post_export_action("shutdown")
 
-    assert calls == [(["shutdown", "-h", "now"], {})]
+    assert calls == [(["systemctl", "poweroff"], {})]
 
 
 def test_run_post_export_custom_command_uses_shell(monkeypatch) -> None:
