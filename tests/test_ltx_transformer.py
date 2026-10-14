@@ -209,7 +209,7 @@ def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_lim
 
     monkeypatch.setattr(torch._dynamo.config, "fail_on_recompile_limit_hit", False)
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: fn)
-    compile_static(T.block_forward, mode="default")
+    compile_static(T.block_forward, mode="default", device=torch.device("cpu"))
     assert torch._dynamo.config.fail_on_recompile_limit_hit is True
 
 
@@ -239,7 +239,7 @@ def test_block_forward_compiles_with_autotuning_and_no_cuda_graphs(monkeypatch):
     calls = []
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or fn)
 
-    assert sampler.compiled_block_forward() is T.block_forward
+    assert sampler.compiled_block_forward(torch.device("cpu")) is T.block_forward
     assert calls == [{"dynamic": False, "mode": "max-autotune-no-cudagraphs"}]
 
 

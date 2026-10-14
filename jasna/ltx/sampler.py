@@ -106,8 +106,8 @@ def _block_functions(
         return native_forward, T.prompt_key_value, "native"
     T.enable_int8_attention()
     return (
-        compiled_block_forward(),
-        compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs"),
+        compiled_block_forward(device),
+        compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs", device=device),
         "torch.compile",
     )
 
@@ -347,13 +347,13 @@ def denoise_windows(
     return [unpatchify(window[:, :tokens], frames, height, width) for window in host]
 
 
-def compiled_block_forward():
+def compiled_block_forward(device: torch.device):
     """``transformer.block_forward`` compiled with static shapes when Triton is available
     (one graph per canvas and per STG variant, shared by all blocks), else eager. Kernels
     are autotuned on the first compile and the picks kept in the compile cache
     (``engine_paths.configure_torch_compile_cache``), so later runs reuse them and a seed
     keeps its pixels. No CUDA graphs: every block passes its own weight tensors."""
-    return compile_static(T.block_forward, mode="max-autotune-no-cudagraphs")
+    return compile_static(T.block_forward, mode="max-autotune-no-cudagraphs", device=device)
 
 
 def _euler(sample: torch.Tensor, denoised: torch.Tensor, sigmas: torch.Tensor, step: int) -> torch.Tensor:

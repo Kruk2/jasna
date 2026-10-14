@@ -20,9 +20,12 @@ def pad_batch_with_last(x: torch.Tensor, *, batch_size: int) -> torch.Tensor:
     return torch.cat([x, pad], dim=0)
 
 
-def compile_static(fn: Callable, mode: str) -> Callable:
+def compile_static(fn: Callable, mode: str, device: torch.device) -> Callable:
     """``fn`` compiled with static shapes. Raises dynamo's recompile limits so every shape a run
-    meets gets its own graph, and makes hitting them an error instead of a silent eager run."""
+    meets gets its own graph, and makes hitting them an error instead of a silent eager run.
+    Before SM 8.0 ``fn`` stays eager: inductor refuses bf16 graphs there."""
+    if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
+        return fn
     torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
     torch._dynamo.config.accumulated_cache_size_limit = max(torch._dynamo.config.accumulated_cache_size_limit, 1024)
     torch._dynamo.config.fail_on_recompile_limit_hit = True

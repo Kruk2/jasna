@@ -397,13 +397,13 @@ _slab_attention = _attn_on_w_slab
 _mlp_chunk = modulated_swiglu
 
 
-def compile_diffusion_blocks() -> None:
+def compile_diffusion_blocks(device: torch.device) -> None:
     """Compile the stage-5 attention slab and MLP chunk with static shapes (one graph per
     shape, shared by all blocks); CUDA tensors use them from then on."""
     global _slab_attention, _mlp_chunk
     if _slab_attention is _attn_on_w_slab:
-        _slab_attention = compile_static(_attn_on_w_slab, mode=DECODER_COMPILE_MODE)
-        _mlp_chunk = compile_static(modulated_swiglu, mode=DECODER_COMPILE_MODE)
+        _slab_attention = compile_static(_attn_on_w_slab, mode=DECODER_COMPILE_MODE, device=device)
+        _mlp_chunk = compile_static(modulated_swiglu, mode=DECODER_COMPILE_MODE, device=device)
 
 
 def _upsample_then_ctx(

@@ -38,3 +38,26 @@ def test_pad_batch_with_last_rejects_empty_batch() -> None:
 def test_pad_batch_with_last_rejects_oversized_batch() -> None:
     with pytest.raises(ValueError, match="exceeds target batch_size 4"):
         pad_batch_with_last(torch.ones((5, 1)), batch_size=4)
+
+
+def test_compile_static_runs_eager_where_inductor_has_no_bf16(monkeypatch) -> None:
+    from jasna.tensor_utils import compile_static
+
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (7, 5))
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: pytest.fail("compiled before SM 8.0"))
+
+    def double(x):
+        return x * 2
+
+    assert compile_static(double, mode="default", device=torch.device("cuda")) is double
+
+
+def test_compile_static_compiles_from_sm80(monkeypatch) -> None:
+    from jasna.tensor_utils import compile_static
+
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 6))
+    calls = []
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or "compiled")
+
+    assert compile_static(lambda x: x, mode="default", device=torch.device("cuda")) == "compiled"
+    assert calls == [{"dynamic": False, "mode": "default"}]

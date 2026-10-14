@@ -465,8 +465,8 @@ def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
     calls = []
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append((fn, kwargs)) or (lambda *a: fn(*a)))
 
-    T.compile_diffusion_blocks()
-    T.compile_diffusion_blocks()
+    T.compile_diffusion_blocks(torch.device("cpu"))
+    T.compile_diffusion_blocks(torch.device("cpu"))
     assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu]
     assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)
 

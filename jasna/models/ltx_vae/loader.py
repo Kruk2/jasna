@@ -206,7 +206,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
             overlay[name] = tensor.to(own[name].dtype)
         decoder.load_state_dict(overlay, strict=False)
         enable_fused_attention(device)
-        compile_diffusion_blocks()
+        compile_diffusion_blocks(device)
         complete = True
         return decoder
     except BaseException:

@@ -83,7 +83,7 @@ def test_compiled_diffusion_block_matches_eager(monkeypatch):
 
     eager = run()
     T.enable_fused_attention(torch.device("cuda"))
-    T.compile_diffusion_blocks()
+    T.compile_diffusion_blocks(torch.device("cuda"))
     compiled = run()
 
     torch.testing.assert_close(compiled.float(), eager.float(), atol=5e-2, rtol=5e-2)

@@ -41,7 +41,7 @@ def _twenty_gib_free(device):
 
 
 def _without_compiling(monkeypatch):
-    monkeypatch.setattr(sampler, "compiled_block_forward", lambda: T.block_forward)
+    monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: T.block_forward)
     monkeypatch.setattr(T, "require_kernels", lambda device: None)
     monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
     monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: function)
@@ -222,7 +222,7 @@ def test_opaque_denoise_uses_only_native_complete_block_forward(tmp_path, monkey
     monkeypatch.setattr(sampler, "STG_BLOCK", 1)
     _install_native_store(monkeypatch)
     _without_compiling(monkeypatch)
-    monkeypatch.setattr(sampler, "compiled_block_forward", lambda: pytest.fail("Python block forward compiled"))
+    monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: pytest.fail("Python block forward compiled"))
     monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: pytest.fail("Python function compiled"))
     monkeypatch.setattr(sampler.T, "embed_tokens", lambda top, x, tokens_per_frame: x)
     monkeypatch.setattr(
