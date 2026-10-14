@@ -5,6 +5,7 @@ import tkinter
 import customtkinter as ctk
 import webbrowser
 from jasna.gui import scaling
+from jasna.gui.branding import create_xianyu_qr_image
 from jasna.gui import activation_worker
 from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -14,10 +15,8 @@ from jasna.license_api import protection_available
 logger = logging.getLogger(__name__)
 
 
-# Support page URLs — two ways to back the project
 BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
-XIANYU_URL = "https://github.com/Kruk2/jasna/blob/main/README.zh.md#在闲鱼购买"
 
 
 _MODAL_BINDTAG = "JasnaModal"
@@ -114,9 +113,9 @@ class Tooltip:
 
 
 class _SupportButton(ctk.CTkButton):
-    """Brand-styled button that opens a support page and scales 1.05x on hover."""
+    """Brand-styled support button that scales 1.05x on hover."""
 
-    def __init__(self, master, text: str, url: str, fg_color: str, text_color: str, width: int, height: int):
+    def __init__(self, master, text: str, command, fg_color: str, text_color: str, width: int, height: int):
         super().__init__(
             master,
             text=text,
@@ -127,7 +126,7 @@ class _SupportButton(ctk.CTkButton):
             corner_radius=6,
             height=height,
             width=width,
-            command=lambda: webbrowser.open(url),
+            command=command,
         )
 
         self._original_width = width
@@ -175,7 +174,7 @@ def attach_entry_context_menu(entry: ctk.CTkEntry) -> tkinter.Menu:
 class BuyMeCoffeeButton(_SupportButton):
     def __init__(self, master, width: int, height: int):
         super().__init__(
-            master, text=t("bmc_support"), url=BMC_URL,
+            master, text=t("bmc_support"), command=lambda: webbrowser.open(BMC_URL),
             fg_color=Colors.BMC_YELLOW, text_color=Colors.BMC_TEXT, width=width, height=height,
         )
 
@@ -183,17 +182,54 @@ class BuyMeCoffeeButton(_SupportButton):
 class UnifansButton(_SupportButton):
     def __init__(self, master, width: int, height: int):
         super().__init__(
-            master, text=t("unifans_support"), url=UNIFANS_URL,
+            master, text=t("unifans_support"), command=lambda: webbrowser.open(UNIFANS_URL),
             fg_color=Colors.UNIFANS_PURPLE, text_color=Colors.UNIFANS_TEXT, width=width, height=height,
         )
 
 
 class XianyuButton(_SupportButton):
+    """Xianyu has no web link to the listing, so the button shows its QR code."""
+
     def __init__(self, master, width: int, height: int):
         super().__init__(
-            master, text=t("xianyu_support"), url=XIANYU_URL,
+            master, text=t("xianyu_support"), command=lambda: XianyuQrDialog(self.winfo_toplevel()),
             fg_color=Colors.XIANYU_YELLOW, text_color=Colors.XIANYU_TEXT, width=width, height=height,
         )
+
+
+class XianyuQrDialog(ctk.CTkToplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title(t("xianyu_dialog_title"))
+        self.configure(fg_color=Colors.BG_MAIN)
+        self.resizable(False, False)
+        self.transient(master)
+
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        self.qr_label = ctk.CTkLabel(content, text="", image=create_xianyu_qr_image())
+        self.qr_label.pack(pady=(0, 12))
+        ctk.CTkLabel(
+            content,
+            text=t("xianyu_scan_hint"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text_color=Colors.TEXT_PRIMARY,
+            wraplength=280,
+            justify="left",
+        ).pack(pady=(0, 16))
+        ctk.CTkButton(
+            content,
+            text=t("btn_close"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color=Colors.BG_CARD,
+            hover_color=Colors.BORDER_LIGHT,
+            text_color=Colors.TEXT_PRIMARY,
+            command=self.destroy,
+        ).pack()
+
+        self.update_idletasks()
+        scaling.place_centered_on_parent(self, master, self.winfo_reqwidth(), self.winfo_reqheight())
+        grab_modal(self)
 
 
 def shows_xianyu_seller(language: str) -> bool:

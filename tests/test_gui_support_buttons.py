@@ -10,10 +10,10 @@ import pytest
 from jasna.gui.components import (
     BMC_URL,
     UNIFANS_URL,
-    XIANYU_URL,
     BuyMeCoffeeButton,
     UnifansButton,
     XianyuButton,
+    XianyuQrDialog,
     _SupportButton,
     shows_xianyu_seller,
 )
@@ -25,8 +25,19 @@ def test_support_urls():
     assert UNIFANS_URL == "https://app.unifans.io/c/kruk2"
 
 
-def test_xianyu_opens_chinese_readme_seller_section():
-    assert XIANYU_URL == "https://github.com/Kruk2/jasna/blob/main/README.zh.md#在闲鱼购买"
+def test_xianyu_button_shows_the_qr_code():
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        XianyuButton(root, width=80, height=28).invoke()
+        dialogs = [w for w in root.winfo_children() if isinstance(w, XianyuQrDialog)]
+        assert len(dialogs) == 1
+        assert dialogs[0].qr_label.cget("image") is not None
+    finally:
+        root.destroy()
 
 
 def test_xianyu_seller_shown_only_in_chinese():
