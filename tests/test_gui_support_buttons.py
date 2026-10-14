@@ -75,6 +75,25 @@ def test_support_buttons_do_not_depend_on_emoji_fonts():
         root.destroy()
 
 
+def test_support_button_runs_its_command_on_a_mouse_click(show_window):
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+
+    try:
+        clicks = []
+        button = _SupportButton(root, "Support", lambda: clicks.append(True), "#ffdd00", "#000000", 140, 48)
+        button.pack()
+        show_window(root)
+        button._canvas.event_generate("<Enter>")
+        button._canvas.event_generate("<ButtonRelease-1>")
+        root.update()
+        assert clicks == [True]
+    finally:
+        root.destroy()
+
+
 def test_support_button_hover_scales_from_its_own_size():
     try:
         root = ctk.CTk()
@@ -83,9 +102,9 @@ def test_support_button_hover_scales_from_its_own_size():
 
     try:
         button = BuyMeCoffeeButton(root, width=140, height=48)
-        button._on_enter()
+        button._grow_on_hover()
         assert (button.cget("width"), button.cget("height")) == (147, 50)
-        button._on_leave()
+        button._restore_size()
         assert (button.cget("width"), button.cget("height")) == (140, 48)
     finally:
         root.destroy()

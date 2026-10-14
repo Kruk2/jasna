@@ -132,16 +132,16 @@ class _SupportButton(ctk.CTkButton):
         self._original_width = width
         self._original_height = height
 
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
+        self.bind("<Enter>", self._grow_on_hover)
+        self.bind("<Leave>", self._restore_size)
 
-    def _on_enter(self, event=None):
+    def _grow_on_hover(self, event=None):
         self.configure(
             width=int(self._original_width * 1.05),
             height=int(self._original_height * 1.05),
         )
 
-    def _on_leave(self, event=None):
+    def _restore_size(self, event=None):
         self.configure(width=self._original_width, height=self._original_height)
 
 
