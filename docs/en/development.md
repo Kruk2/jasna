@@ -41,10 +41,8 @@ On Windows (NVIDIA), run the same `uv pip install` line in a Python 3.13 venv.
 Release builders must install the project's required `ultralytics>=8.4.96,<8.5` before
 freezing. Older versions fail to load YOLO checkpoints under the release's
 restricted loading policy, even when the same checkpoint works in development.
-YOLO ONNX export uses an explicit CPU device object to avoid CUDA/NVML discovery
-and exports an unsimplified FP32 ONNX, so it needs neither onnxruntime nor onnxslim
-(releases bundle neither); the subsequent TensorRT build uses the requested GPU and
-builds the FP16 engine.
+YOLO ONNX export needs neither onnxruntime nor onnxslim (releases bundle
+neither).
 The NVIDIA extras also install SciPy directly for the LTX worker; the release
 bundler copies its Python modules, native extensions and bundled BLAS libraries.
 
@@ -71,7 +69,7 @@ python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in to
 ```
 
 A new GPU target needs its `device-gfx*` extra above and in the
-`Dockerfile.amd` keep-list.
+`Dockerfile.amd` keep-list (in the private protection submodule).
 
 AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
 (software decode when AMF can't). Secondary restoration is NVIDIA-only.
@@ -95,7 +93,8 @@ python -m pytest
 ```
 
 GUI tests need a screen; on a headless or locked desktop run them under
-`xvfb-run -a`. GPU tests need the matching GPU.
+`xvfb-run -a -s "-screen 0 1920x1080x24"` (the default 640x480 screen cuts
+off footer widgets). GPU tests need the matching GPU.
 
 ## CUDA kernels
 
@@ -136,34 +135,29 @@ $P scripts/benchmark_na3d.py                                             # Trito
 
 `scripts/bench_memory.py` is the RAM/VRAM sampler the others share.
 
-Source-mode LTX runs the public native block (`jasna/ltx/native/`: one C++/CUDA
-call per transformer block, built on first use into the compile cache, ~1-2 min)
-when the toolchain is there and the GPU is in the kernel tables, else the
-`torch.compile`/Triton path; `JASNA_LTX_NATIVE=0` forces `torch.compile` for an
-A/B in one tree. `jasna.ltx.native.prebuild(dir)` builds the extension and the
-cubins of every table architecture for a release (copy `dir` to
-`jasna/ltx/native/prebuilt/`). Its INT8 self-attention is comfy-kitchen 0.2.36's
-SageAttention kernels vendored in `jasna/ltx/native/sage_attention/` (bf16,
-unmasked subset; provenance and edits in its `NOTICE`), compiled into the
-extension rather than looked up in comfy-kitchen's binary, so the native block
-needs no particular comfy-kitchen build on Linux or Windows. Those sources compile
-apart from the rest with comfy-kitchen's nvcc flags (`--use_fast_math` must not
-reach `glue.cu`) and must stay bit-identical with `comfy_kitchen.int8_attention`
-(`tests/test_ltx_native_gpu.py`); re-vendor them when the torch path's
-comfy-kitchen pin changes. The protected extension statically links the same three
-objects, and release packaging keeps their `NOTICE` in its `licenses/` directory.
-NVIDIA frozen releases keep licensed blocks behind
-the private native `block_forward` boundary; they do not expose protected
-per-Linear operators. The private extension compiles the same `jasna_ltx::Block`
-from `block.cpp`; only Store/authentication, schedule enforcement, anomaly checks
-and canaries remain protection-specific. Protected weights use explicit CUDA
-allocations outside the Torch caching allocator, with two event-synchronized
-streaming slots and wipe-before-reuse/free. Changes to any path must compare identical weights, inputs,
-seeds and warmed caches. The public native block is GPU-qualified on SM 12.0
-(RTX 5090), SM 8.9 (RTX 4090), SM 8.6 (RTX 3090) and SM 7.5 (RTX 2080 Ti). Below SM 12.0
-it is INT8 only: plain Triton GEMMs on SM 8.x (no TMA for stream-K), cuBLAS INT8 GEMMs
-with the Triton epilogue on SM 7.5. Cubins for another SM do not by themselves
-establish support.
+## LTX native block
+
+- Source-mode LTX runs the public native block (`jasna/ltx/native/`): one
+  C++/CUDA call per transformer block, built on first use into the compile
+  cache (~1-2 min). Without the toolchain, or on a GPU missing from the kernel
+  tables, it uses the `torch.compile`/Triton path.
+- `JASNA_LTX_NATIVE=0` forces `torch.compile`, for an A/B in one tree.
+- `jasna.ltx.native.prebuild(dir)` builds the extension and the cubins of every
+  table architecture for a release; copy `dir` to `jasna/ltx/native/prebuilt/`.
+- INT8 self-attention is comfy-kitchen 0.2.36's SageAttention, vendored in
+  `jasna/ltx/native/sage_attention/` (bf16, unmasked subset; provenance and
+  edits in its `NOTICE`). It compiles with comfy-kitchen's nvcc flags
+  (`--use_fast_math` must not reach `glue.cu`) and must stay bit-identical with
+  `comfy_kitchen.int8_attention` (`tests/test_ltx_native_gpu.py`). Re-vendor it
+  when the torch path's comfy-kitchen pin changes.
+- Release builds use a private extension compiled from the same `block.cpp`;
+  release packaging keeps the `NOTICE` in `licenses/`.
+- A change to any path must be compared with identical weights, inputs, seeds
+  and warmed caches.
+- GPU-qualified on SM 12.0 (RTX 5090), SM 8.9 (RTX 4090), SM 8.6 (RTX 3090) and
+  SM 7.5 (RTX 2080 Ti). Below SM 12.0 it is INT8 only: plain Triton GEMMs on
+  SM 8.x, cuBLAS INT8 GEMMs with the Triton epilogue on SM 7.5. Cubins for
+  another SM do not by themselves establish support.
 
 ## Release checklist
 

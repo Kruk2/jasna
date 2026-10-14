@@ -19,8 +19,8 @@
 在 AMD 上，RF-DETR 比在 NVIDIA 上慢。如果速度比检测质量更重要，请用
 `lada-yolo-v4`。
 
-每个模型都有自己的默认置信度（`rfdetr-v6`：0.35，`rfdetr-v6-large`：0.40）。
-用 `--detection-score-threshold` 修改。
+每个模型都有自己的默认检测阈值（`rfdetr-v6`：0.35，`rfdetr-v6-large` 和 `rfdetr-vr-v1`：0.40）。
+在**基本处理**中的**检测阈值**修改，或用 `--detection-score-threshold`。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
@@ -48,7 +48,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### LTX 需要什么
 
-- **许可证**：包含 LTX 的许可证码（25 美元，同时包含 unet-4x 和 SD 1.5，见
+- **许可证**：包含 LTX 的许可证码（25 美元，同时包含 UNet 4x 和 SD 1.5，见
   [支持本项目](../../README.zh.md#支持本项目)）。没有的话，应用会改为提供
   **试用模式（速度测试）**（见下文）；CLI 会报错停止。
 - **GPU**：NVIDIA RTX 20 系列或更新。GTX 16 系列未测试。不支持 AMD。
@@ -112,14 +112,14 @@ Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特�
 看起来模糊。二次模型会先把这张图放大（512x512 或 1024x1024），再放回画面，
 所以结果更清晰。
 
-仅限 NVIDIA。AMD 上没有二次修复。
+仅限 NVIDIA。
 
-- **unet-4x**（付费）：针对修复任务训练，质量接近 TVAI `iris-2`，比 TVAI 快。见
+- **UNet 4x**（付费）：针对修复任务训练，质量接近 TVAI `iris-2`，比 TVAI 快。见
   SLS Discord 上的示例
   和[支持本项目](../../README.zh.md#支持本项目)。
-- **RTX Super Resolution**（免费）：非常快，无需安装任何东西。质量尚可。部分视频
+- **RTX Super Res**（免费）：非常快，无需安装任何东西。质量尚可。部分视频
   会闪烁，请先用短片段测试。
-- **TVAI**：和 unet-4x 相近，但非常慢。需要
+- **Topaz TVAI**：和 UNet 4x 相近，但非常慢。需要
   [Topaz Video](https://www.topazlabs.com/topaz-video)，它是付费软件，且仅支持
   Windows。请使用 `iris-2` 模型。
 
@@ -134,42 +134,42 @@ Topaz Video 模型文件夹，如下图。`--tvai-args` 可修改 Topaz 的其�
 
 <img width="505" height="37" alt="Topaz Video environment variables" src="https://github.com/user-attachments/assets/e19ced9d-d549-4e85-b20f-888e42466f1d" />
 
-### 速度与 VRAM 对比
+### 速度与显存对比
 
-两个 1080p 视频的耗时和 VRAM：
+两个 1080p 视频的耗时和显存：
 
 | 二次修复类型 | CAWD 1080p | K109 1080p |
 | ------------------------ | -----------------:| -----------------:|
 | 无二次修复 | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
-| unet-4x                  | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
-| RTX Super-Res            | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
+| UNet 4x                  | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
+| RTX Super Res            | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
 | TVAI (2 workers, Iris-2) | 52秒 / 12.1 GB VRAM | 24秒 / 12.4 GB VRAM |
 
-## 静态图像修复（SD 1.5）
+## 静态图片修复（SD 1.5）
 
-对于图像，Jasna 使用另一个模型：训练过的 Stable Diffusion 1.5 模型。把图像加入
+对于图片，Jasna 使用另一个模型：训练过的 Stable Diffusion 1.5 模型。把图片加入
 队列（或交给 CLI），Jasna 会自动使用这个模型：
 
 ```bash
 jasna --input photo.png --output restored.png
 ```
 
-- 付费。一个许可证码可以同时包含 SD 1.5、unet-4x 和 LTX。见
+- 付费。一个许可证码可以同时包含 SD 1.5、UNet 4x 和 LTX。见
   [支持本项目](../../README.zh.md#支持本项目)。
 - 不包含在下载包中。大小约 **6.9 GB**。Jasna 会先询问，再从
   [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 下载。
-- 需要约 **7 GB VRAM**，较大的 4K 图像需要更多一点。
+- 需要约 **7 GB 显存**，较大的 4K 图片需要更多一点。
 
-这个模型是实验性的。不同图像的效果差别很大，但有些非常好。多生成几个版本，
+这个模型是实验性的。不同图片的效果差别很大，但有些非常好。多生成几个版本，
 保留最好的：
 
 ```bash
 jasna --input photo.png --output restored.png --sd15-variants 4
 ```
 
-要在 GUI 中逐个尝试种子，请使用[交互式处理图片](gui.md#逐张处理图像)。所有选项
+要在 GUI 中逐个尝试种子，请使用[交互式处理图片](gui.md#逐张处理图片)。所有选项
 （`--sd15-steps`、`--sd15-strength`、`--sd15-seed` 等）都在
-[CLI 参考](cli.md#sd-15-图像修复)中。
+[CLI 参考](cli.md#sd-15-图片修复)中。
 
 示例：
 SLS Discord 上的 SD 1.5 示例

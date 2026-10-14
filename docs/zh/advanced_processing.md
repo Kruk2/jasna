@@ -43,7 +43,7 @@
 jasna --input input.mp4 --output output.mp4 --retarget-high-fps
 ```
 
-不能与[区间处理](segments.md)一起使用。
+不能与[选定区间](segments.md)或流媒体一起使用。
 
 ## 处理过程中即可播放（fMP4）
 
@@ -55,12 +55,12 @@ jasna --input input.mp4 --output output.mp4 --fmp4
 ```
 
 视频每次增长几秒，任务结束前播放器可能显示错误的时长。只适用于 `.mp4` 和 `.mov`
-输出。不能用于流媒体或[区间处理](segments.md)。
+输出。不能用于流媒体或[选定区间](segments.md)。
 
 ## 色彩 LUT
 
 对输出应用 `.cube` 色彩 LUT（1D 或 3D），用于调色。在**编码设置**部分设置
-**色彩 LUT (.cube)**，或使用 `--lut path/to/look.cube`。它在编码前由 GPU 运行，
+**色彩 LUT (.cube)**，或使用 `--lut path/to/look.cube`。它在写入视频时应用，
 几乎没有开销。
 
 ## 锐化
@@ -77,9 +77,8 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 
 ## 编码器质量与自定义设置
 
-**CQ**（`--cq`）设置质量。数值越低，质量越好，文件越大。Jasna 会把数值原样传给
-编码器（只有 AMD AV1 会乘以 5）。Jasna 还会限制输出大小，达到上限时，相近的 CQ 值
-可能得到相同的文件。
+**CQ**（`--cq`）设置质量。数值越低，质量越好，文件越大。Jasna 还会限制输出大小，
+达到上限时，相近的 CQ 值可能得到相同的文件。
 
 ```bash
 jasna --input in.mp4 --output out.mkv --cq 22
@@ -100,18 +99,11 @@ jasna --input folder_in --output folder_out --post-export-action command --post-
 ```
 
 任务运行时也可以更改或关闭这个操作。**关闭电脑**前，GUI 会倒计时 60 秒。按**取消**
-可以不关机。
+可以不关机。CLI 会立即关机。
 
 要在每个视频完成后运行命令，请使用**每个视频完成后的命令**或
 `--post-export-video-command`。Jasna 会等它结束。如果命令失败，该视频会被标记为
 失败。命令在输出文件夹中运行。
 
 占位符：`{input}`、`{output}`、`{output_dir}`、`{output_stem}`、`{output_suffix}`。
-它们已经加好引号。
-
-```bash
-jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
-```
-
-这个示例会保留原始输出，并另写一个文件。要替换文件，请使用先写入临时文件的脚本。
-`ffmpeg` 必须在 `PATH` 中，或写出它的完整路径。
+它们已经加好引号。示例见 [CLI 参考](cli.md#导出后操作)。

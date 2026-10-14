@@ -1,6 +1,6 @@
 > **The only places to get a genuine License code for the paid models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2), [Unifans](https://app.unifans.io/c/kruk2), and for China the seller in the [Chinese README](README.zh.md#在闲鱼购买).**
 >
-> **付费模型的正版密钥只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](README.zh.md#在闲鱼购买) 获取。**
+> **付费模型的正版许可证码只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](README.zh.md#在闲鱼购买) 获取。**
 
 [**English**](README.md) | [日本語](README.ja.md) | [中文](README.zh.md)
 
@@ -47,8 +47,8 @@ and a command line, and runs on your GPU.
 - **NVIDIA** GTX 16-series / RTX 20-series or newer, with a recent driver
   (610+ on Windows, 580+ on Linux). GTX 10-series and older don't work.
 - Or **AMD** Radeon RX 7000/9000 (experimental).
-- A folder on a local disk, with only English letters and numbers in its
-  path.
+- A folder on a local disk, with no Chinese, Japanese, accented or other
+  non-English characters in its path.
 
 <details>
 <summary>More details</summary>
@@ -68,7 +68,8 @@ and a command line, and runs on your GPU.
 ## Quick start
 
 1. Download the release for your system and GPU.
-2. Unpack it into a folder with only English letters and numbers in the path.
+2. Unpack it into a folder with no Chinese, Japanese, accented or other
+   non-English characters in the path.
 3. Start the app:
    - Windows: double-click `jasna.exe`.
    - Linux NVIDIA: run the `jasna` file.
@@ -81,7 +82,7 @@ apps and don't use the PC during this time. When you update Jasna, copy the
 `model_weights` folder to the new version, so you don't wait again.
 
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
-memory (VRAM)? Lower **max clip size**, for example from `90` to `60`. See
+memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
 [Tuning](docs/en/tuning.md).
 
 ## Help and community
@@ -100,8 +101,8 @@ Supporters get a License code for the paid models:
 
 | Support | Models |
 | --- | --- |
-| **$15 USD** or more in total | **unet-4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
-| **$25 USD** | **unet-4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA only. Includes future updates of this LTX model. |
+| **$15 USD** or more in total | **UNet 4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
+| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA only. Includes future updates of this LTX model. |
 
 Supporters who gave **$15 USD or more before [TBD]** get LTX for free.
 
@@ -109,12 +110,12 @@ Supporters who gave **$15 USD or more before [TBD]** get LTX for free.
 
 - Look at the samples in the
   SLS Discord channel.
-- Run LTX in **Trial mode** on your PC. It is free and shows if your GPU can
+- Run LTX in **Trial mode (speed test)** on your PC. It is free and shows if your GPU can
   run LTX and how long it takes. The video is not restored. See
   [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 More examples:
-unet-4x,
+UNet 4x,
 SD 1.5,
 more SD 1.5.
 
@@ -150,20 +151,21 @@ Almost everything runs on the GPU, from reading the video to saving it.
 1. **Decode** the video on the GPU (NVDEC on NVIDIA, AMF on AMD).
 2. **Detect** mosaics in each frame (default model `rfdetr-v6`).
 3. **Track** each mosaic over time and group its frames into clips (up to
-   **max clip size** frames). Clips end at scene cuts, so two different shots
+   **Max Clip Size** frames). Clips end at scene cuts, so two different shots
    are never mixed.
 4. **Restore** each clip as a 256x256 picture with BasicVSR++. Clips overlap a
    little, so there are no visible jumps between them.
-5. Optional **secondary restoration** (unet-4x, RTX Super Resolution or Topaz)
+5. Optional **secondary restoration** (UNet 4x, RTX Super Res or Topaz TVAI)
    makes the restored picture bigger and sharper.
 6. **Blend** the restored picture back into the original frame. Only the
    mosaic area changes.
 7. **Encode** with the GPU encoder (NVENC on NVIDIA, AMF on AMD). Audio is
    copied (encoded again only if the output format can't hold it).
 
-The first job is slow because the models for steps 2 and 4 (and unet-4x, if
-used) are compiled for your exact GPU (TensorRT, NVIDIA only). The result is saved in `model_weights`
-and used again later. You can copy it to a newer Jasna version.
+The first job is slow because the models for steps 2 and 4 (and UNet 4x, if
+used) are prepared for your exact GPU (NVIDIA only). The result is saved in
+`model_weights` and used again later. You can copy it to a newer Jasna
+version.
 
 LTX works differently. It goes over the video in 4 passes: find mosaics,
 prepare, restore with a diffusion model, save. It is slower but can add more
@@ -173,7 +175,7 @@ real detail. See
 ### Command line
 
 The command line can do most of what the app does (not the Video Player,
-LTX seed previews or mask suggestions).
+LTX seed previews, mask suggestions or interactive image mode).
 
 ```bash
 # One video
@@ -187,8 +189,6 @@ jasna --input input_folder --output output_folder
 ```
 
 `jasna --help` lists all options. See the [CLI reference](docs/en/cli.md).
-On Windows, the temporary files can be on an NTFS RAM disk such as ImDisk; see
-[Windows temporary files](docs/en/cli.md#windows-temporary-files).
 
 ### All guides
 

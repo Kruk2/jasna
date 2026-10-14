@@ -3,14 +3,14 @@
 You can run Jasna on a rented GPU. Use the Linux NVIDIA version from the
 command line inside a supported container. Cloud activation is CLI-only in the
 official Linux release; Windows and GitHub source checkouts do not support it.
-Older 0.11.0 builds may reject RunPod activation; use the updated Linux build
-from your seller.
+Older 0.11.0 builds may reject RunPod activation; use the latest Linux release
+from GitHub.
 
 ## What you need
 
 - Your seller has to turn on **cloud** for your License code.
-- A container with its own PID namespace. Updated Linux builds support
-  RunPod's user remapping; Docker's `--pid=host` is not supported.
+- A normal container. RunPod and Vast work. A Docker container started with
+  `--pid=host` doesn't.
 - An NVIDIA GPU with driver **580 or newer**.
 - At least **80 GB** of disk.
 - `NVIDIA_DRIVER_CAPABILITIES=all` in your template or instance settings.
@@ -27,7 +27,7 @@ newer Jasna, change `0.11.0` to your version.
 apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
+for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
 
 cat jasna-linux-nvidia-0.11.0.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
 cd jasna-linux-nvidia-0.11.0
@@ -77,7 +77,7 @@ export XDG_CONFIG_HOME=/root/jasna-config
 The first time, Jasna asks to download the LTX model (15 GB). Type `y`.
 
 On an RTX 50-series GPU, add `--ltx-fast` to restore about 1.4× faster
-(it downloads one more 8 GB model).
+(it downloads about 8 GB more).
 
 To send a video up and get the result back, use your provider's file
 manager, or run this on your PC:
@@ -93,7 +93,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ------- | ------- |
 | `unsigned or modified Jasna runtime` | Unpack again in `/root` as `root`. |
 | `libGL.so.1: cannot open shared object file` | Run the `apt-get` line from Install. |
-| `Cloud workspace activation requires a supported Linux container` | Use the updated Linux build, a container without `--pid=host`, and config under `/root` on RunPod. |
+| `Cloud workspace activation requires a supported Linux container` | Use the latest Linux release, a container without `--pid=host`, and config under `/root` on RunPod. |
 | `Failed to open hevc encoder` | This machine's video encoder is broken. Rent another one. |
 | `enable cloud activation` | Ask your seller to turn on cloud. |
 | `No activation found` or `Cloud workspace identity is missing` | Run the `export` line, then start Jasna again. |
@@ -104,3 +104,13 @@ slower, that's all.
 
 Don't share your `jasna-config` folder. Anyone who has it can use your
 activation.
+
+## Activation servers
+
+Online activation sends only your License code and Machine key, over HTTPS.
+Jasna saves only the Activation key, not your License code. After that, it
+checks activation offline and doesn't contact the server again.
+
+If the main server can't be reached, Jasna tries a server in Hong Kong
+(`47.238.135.110`). With Chinese language it tries Hong Kong first. Both use
+the same 3 slots. Access is not guaranteed, for example in mainland China.

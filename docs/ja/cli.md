@@ -1,20 +1,21 @@
 # CLI リファレンス
 
-コマンドラインには GUI と同じ機能があります。`jasna --help` で常にすべての
-オプションを表示できます。このページでは説明と例を紹介します。
+コマンドラインでは、GUI でできることのほとんどができます。GUI だけの機能は、
+動画プレーヤー、LTX のシードのプレビュー、マスクの提案、対話型画像復元です。
+`jasna --help` で常にすべてのオプションを表示できます。このページでは説明と
+例を紹介します。
 
-公式リリースは、処理の前に起動確認を標準エラー出力に表示します。
-`--no-progress` では短い起動メッセージだけを表示します。インストールや更新後の
-初回起動には時間がかかります。
+インストールや更新後の初回起動は、Jasna がまずファイルを確認するため時間が
+かかります。
 
 ```bash
-# Single video
+# 動画 1 本
 jasna --input input.mp4 --output output.mkv
 
-# Still image (routes to SD 1.5 automatically)
+# 静止画（自動的に SD 1.5 を使います）
 jasna --input photo.png --output restored.png
 
-# Whole folder (images first, then videos)
+# フォルダー全体（画像が先、次に動画）
 jasna --input input_folder --output output_folder
 ```
 
@@ -22,8 +23,8 @@ Windows では、CLI もアプリ本体と同じファイルです: `jasna.exe -
 
 ## Windows の一時ファイル
 
-Jasna の一時実行フォルダーには、書き込み可能な既存の NTFS RAM ディスクを使えます。
-ImDisk にも対応しています。Jasna を起動する前に `TMP` と `TEMP` を設定してください。
+Jasna の一時ファイルは、ImDisk（NTFS）などの RAM ディスクに置けます。
+SSD の負担を減らせます。Jasna を起動する前に `TMP` と `TEMP` を設定してください。
 
 ```powershell
 $env:TMP = 'Z:\Temp'
@@ -31,20 +32,20 @@ $env:TEMP = 'Z:\Temp'
 .\jasna.exe --version
 ```
 
-一時実行フォルダーは `TMP`、次に `TEMP` に従います。`TMPDIR` だけを設定しても
-移動しません。`--working-directory` はセグメント用の一時ファイルを別に指定します。
+Jasna は `TMP`、次に `TEMP` を使います。`TMPDIR` は使いません。
+`--working-directory` は区間と LTX のファイル用のフォルダーを別に指定します。
 
 ## 全般
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
 | `--version` | — | Jasna のバージョンを表示して終了します。 |
-| `--input` | — | 動画、画像、またはフォルダ。 |
-| `--output` | — | 出力ファイル。`--input` がフォルダの場合は出力フォルダ。 |
-| `--output-pattern` | `{original}_out` | フォルダ入力時のファイル名テンプレート。`{original}` は入力ファイル名（拡張子なし）です。画像は元の拡張子を保持し、動画はテンプレートに拡張子があればそれを使います。Jasna は処理前に予定される出力を確認し、2 つの入力が同じファイルに対応する場合はエラーで終了します。 |
+| `--input` | — | 動画、画像、またはフォルダー。 |
+| `--output` | — | 出力ファイル。`--input` がフォルダーの場合は出力フォルダー。 |
+| `--output-pattern` | `{original}_out` | フォルダー入力時のファイル名テンプレート。`{original}` は入力ファイル名（拡張子なし）です。画像は元の拡張子を保持し、動画はテンプレートに拡張子があればそれを使います。Jasna は処理前に予定される出力を確認し、2 つの入力が同じファイルに対応する場合はエラーで終了します。 |
 | `--device` | `cuda:0` | GPU の選択。AMD のカードも ROCm 経由で同じ `cuda:N` の名前を使います。 |
 | `--batch-size` | `4` | 検出のバッチサイズ。旧 `rfdetr-v5` は常に 4 を使います。 |
-| `--fp16` / `--no-fp16` | オン | 対応箇所（復元 + TensorRT）で FP16 を使用。VRAM を抑え、速度が上がる場合があります。 |
+| `--fp16` / `--no-fp16` | オン | 半精度計算。VRAM が減り、速くなることが多く、見た目の画質は落ちません。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
 | `--no-progress` | オフ | プログレスバーを無効にします。 |
 
@@ -52,46 +53,49 @@ $env:TEMP = 'Z:\Temp'
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--restoration-model-name` | `basicvsrpp` | 動画復元モデル：`basicvsrpp`（高速）、`ltx`（より精細、かなり遅い）、`ltx-undistilled`（高画質の LTX モデル：`ltx` より少し良く、約 1.5 倍遅い）。[モデルの選び方](models.md#復元モデル)を参照。 |
-| `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth` | 復元モデルの重み（LTX はフォルダー）。 |
+| `--restoration-model-name` | `basicvsrpp` | 動画復元モデル：`basicvsrpp`（高速）、`ltx`（より精細、かなり遅い）、`ltx-undistilled`（最高の LTX モデル：`ltx` より少し良く、約 1.5 倍遅い）。[モデルの選び方](models.md#復元モデル)を参照。 |
+| `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`、LTX では `model_weights/ltx-restore` | 復元モデルの重み（LTX はフォルダー）。 |
 | `--ltx-fast` / `--no-ltx-fast` | オフ | LTX：約 1.4 倍高速、ディテールはわずかに減ります。RTX 50 シリーズのみ。他の GPU ではエラーで止まります。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | オフ | LTX：大きなモザイクをより精細に。その部分は約 3 倍遅くなります。空き VRAM が約 12 GB 必要です。足りない場合、そのモザイクは通常どおり復元します。 |
 | `--ltx-seed` | `20260923` | LTX：シードを変えると結果が少し変わります。同じシードなら同じ結果になります。 |
 | `--ltx-trial` / `--no-ltx-trial` | オフ | LTX：モデルやライセンスなしで速度を試します。動画は復元されません。 |
 | `--ltx-auto-split` | — | LTX：大きなモザイク（動画の高さのこの割合以上、例 `12`）を LTX、小さなものを BasicVSR++ で復元します。フォルダーにも使えます。`--segments` や `--fmp4` とは併用できません。[区間](segments.md#cli---ltx-auto-split)を参照。 |
-| `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | オン | TensorRT コンパイル: 大幅な高速化、VRAM 増。詳しくは[調整ガイド](tuning.md)。 |
-| `--max-clip-size` | `90` | 追跡するクリップの最大フレーム数。VRAM の主な調整項目です。 |
-| `--temporal-overlap` | `8` | クリップ分割位置でのオーバーラップ+破棄マージン。境界のフリッカーを軽減します。 |
+| `--compile-basicvsrpp` / `--no-compile-basicvsrpp` | オン | BasicVSR++ をお使いの GPU 向けに準備します。約 3 倍速く、VRAM はほとんど増えません。初回は 15～60 分かかります。NVIDIA のみ。詳しくは[調整ガイド](tuning.md)。 |
+| `--max-clip-size` | `90` | 一度に復元するフレーム数。大きいほど安定して速くなりますが、VRAM を多く使います。収まる最大の値を使ってください。 |
+| `--temporal-overlap` | `8` | 隣り合うクリップが共有するフレーム数で、つなぎ目のちらつきを隠します。`8`～`20` が目安で、`--max-clip-size` の半分未満にしてください。 |
 | `--enable-crossfade` / `--no-enable-crossfade` | オン | 処理済みフレームを再利用してクリップ境界をクロスフェード。追加の GPU コストはありません。 |
-| `--denoise` | `none` | 復元済みクロップの空間ノイズ除去: `low`、`medium`、`high`。 |
-| `--denoise-step` | `after_primary` | ノイズ除去をセカンダリの前（`after_primary`）に適用するか、合成の直前（`after_secondary`）に適用するか。 |
+| `--denoise` | `none` | 復元した部分のノイズを除去します: `low`、`medium`、`high`。 |
+| `--denoise-step` | `after_primary` | ノイズ除去を二次復元の前（`after_primary`）に行うか、後（`after_secondary`）に行うか。 |
+
+`--ltx-*` オプションには `--restoration-model-name ltx` または `ltx-undistilled` が必要です。
+`--no-compile-basicvsrpp` は `basicvsrpp` でのみ使えます。
 
 ## 検出
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--detection-model` | `rfdetr-v6` | インストール済みモデルは `model_weights/` から検出されます。`rfdetr-v6`（高速）と `rfdetr-vr-v1`（VR180）は同梱、`rfdetr-v6-large` と `zelefans-vr-yolo-v2` は任意のダウンロードです。詳しくは[モデル](models.md)。 |
+| `--detection-model` | `rfdetr-v6` | インストール済みモデルは `model_weights/` から検出されます。`rfdetr-v6`（高速）、`rfdetr-vr-v1`（VR180）、`lada-yolo-v4` は同梱、`rfdetr-v6-large` と `zelefans-vr-yolo-v2` は任意のダウンロードです。詳しくは[モデル](models.md)。 |
 | `--detection-model-path` | 自動 | デフォルトは `model_weights/<detection-model>` で、カードに合ったファイル形式を使います。RF-DETR は NVIDIA で `.onnx`、AMD で `.pt`。YOLO は常に `.pt`。 |
-| `--detection-score-threshold` | 自動 | モデルの推奨値を既定で使用します（`rfdetr-v6`：0.35、`rfdetr-v6-large`：0.40）。モザイクを見逃す場合は下げ、通常の領域が誤検出される場合は上げてください。 |
+| `--detection-score-threshold` | 自動 | `0` から `1`。デフォルトはモデルの推奨値です（`rfdetr-v6`：0.35、`rfdetr-v6-large` と `rfdetr-vr-v1`：0.40、YOLO モデル：0.25）。モザイクを見逃す場合は下げ、通常の領域が誤検出される場合は上げてください。 |
 | `--max-detection-gap` | `2` | モザイクが同じ位置に再出現する場合、最大 N フレームの検出途切れを補完します。`0` で無効。 |
 | `--min-detection-duration` | `2` | N フレーム未満の検出を誤検出として破棄します（該当フレームは未処理のまま）。`0` で無効。 |
 | `--scene-detection` | オン | ハードカット（シーン切り替え）を検出し、その位置で追跡中のモザイククリップをすべて終了します。クリップが 2 つのショットにまたがりません。`--no-scene-detection` で無効化。 |
 
-## セカンダリ復元
+## 二次復元
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
 | `--secondary-restoration` | `none` | `unet-4x`、`tvai`、または `rtx-super-res`。詳しくは[モデル](models.md)。 |
 | `--rtx-scale` | `4` | RTX Super Res の拡大倍率（`2` または `4`）。 |
-| `--rtx-quality` | `high` | `low`～`ultra`。 |
-| `--rtx-denoise` | `medium` | `none` で無効。 |
-| `--rtx-deblur` | `none` | `none` で無効。 |
-| `--tvai-ffmpeg-path` | Topaz のデフォルトインストールパス | Topaz Video の `ffmpeg.exe` のパス。 |
+| `--rtx-quality` | `high` | `low`、`medium`、`high`、`ultra`。 |
+| `--rtx-denoise` | `medium` | `none`、`low`、`medium`、`high`、`ultra`。 |
+| `--rtx-deblur` | `none` | `none`、`low`、`medium`、`high`、`ultra`。 |
+| `--tvai-ffmpeg-path` | Topaz のデフォルトインストールパス | Topaz Video の `ffmpeg.exe` のパス（Windows のみ）。 |
 | `--tvai-model` | `iris-2` | 例: `iris-2`、`prob-4`、`iris-3`。 |
 | `--tvai-scale` | `4` | 出力サイズは `256*scale`。`1` = 拡大なし。 |
 | `--tvai-args` | `--help` を参照 | 追加の `tvai_up` パラメータ。 |
 | `--tvai-workers` | `2` | 並列で動かす TVAI ffmpeg ワーカー数。 |
-| `--tvai-denoise` | オフ | TVAI の高画質化処理の前にノイズ除去を適用します。 |
+| `--tvai-denoise` | オフ | Topaz モデルの前にノイズを除去します。遅くなり、VRAM を多く使います。 |
 
 ## SD 1.5 画像復元
 
@@ -100,11 +104,11 @@ $env:TEMP = 'Z:\Temp'
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
 | `--image-restoration-model-name` | `sd-15-jav` | 現在唯一の値。 |
-| `--sd15-steps` | `25` | 拡散ステップ数。 |
-| `--sd15-strength` | `0.6` | SDEdit のノイズ除去強度。`<= 0.7` に制限されます。 |
-| `--sd15-freeu` / `--no-sd15-freeu` | オン | FreeU による UNet の調整。 |
-| `--sd15-seed` | `0` | ベースシード。 |
-| `--sd15-variants` | `1` | シード `seed..seed+N-1` で N 個のバリエーションを生成し、最も良いものを残します。 |
+| `--sd15-steps` | `25` | 画像を仕上げる回数。増やすと細部が増えることがありますが、遅くなります。 |
+| `--sd15-strength` | `0.6` | モザイク部分をどれだけ描き直すか。最大 `0.7`。高いほど強いモザイクに効きますが、元の画像と似なくなることがあります。 |
+| `--sd15-freeu` / `--no-sd15-freeu` | オン | 形がくっきりすることが多いです。硬いエッジが出るときはオフにしてください。 |
+| `--sd15-seed` | `0` | シード。同じシードと設定なら同じ結果になります。 |
+| `--sd15-variants` | `1` | N 個のバージョンを `name_v1` … `name_vN` として保存します（シード `seed` … `seed+N-1`）。最も良いものは自分で選んでください。 |
 
 ## VR
 
@@ -117,28 +121,28 @@ $env:TEMP = 'Z:\Temp'
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | オフライン出力用の `hevc`、`h264`、`av1`。HLS ストリーミングは常に H.264 を使います。 |
-| `--cq` | GPU/コーデック別 | エンコーダーへそのまま渡す品質目標。低いほど高品質でファイルは大きくなります。NVIDIA のデフォルト: H.264 25、HEVC 28、AV1 35。AMD: H.264 24、HEVC 25、AV1 32。 |
+| `--cq` | GPU/コーデック別 | 動画の品質。低いほど高品質でファイルは大きくなります。NVIDIA のデフォルト: H.264 25、HEVC 28、AV1 35。AMD: H.264 24、HEVC 25、AV1 32。 |
 | `--encoder-settings` | — | 高度な設定を JSON オブジェクトまたはカンマ区切りの `key=value` で指定。例: `{"rc-lookahead":32}` または `rc-lookahead=32,bf=4`。下記参照。 |
-| `--lut` | — | エンコード前に GPU で適用される `.cube` カラー LUT（1D または 3D）。GUI のエンコードセクションでも設定できます。 |
+| `--lut` | — | 動画の書き出し時に適用される `.cube` カラー LUT（1D または 3D）。GUI のエンコードセクションでも設定できます。 |
 | `--sharpen` | `0` | エンコード前に映像をシャープにします。`0`（無効）〜`1`（最強）。ffmpeg の `cas` フィルターと同じ結果になるため、再エンコードは不要です。詳しくは[高度な処理](advanced_processing.md)。 |
-| `--retarget-high-fps` | オフ | 1 フレームおきに処理して 60 → 30 FPS（および 59.94 → 29.97）に変換。他のレートは変更せず、音声のタイミングは維持されます。 |
-| `--fmp4` | オフ | 作成中の `.mp4` / `.mov` 出力をそのまま再生できます。中断してもファイルは再生可能なままです。`--stream` および `--segments` とは併用できません。詳しくは[高度な処理](advanced_processing.md)。 |
-| `--segments` | — | 選択した範囲だけを復元します。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4` とは併用できません。詳しくは[区間](segments.md)。 |
-| `--working-directory` | 出力ディレクトリ | 区間処理の一時ファイルの書き込み先。詳しくは[区間](segments.md)。 |
+| `--retarget-high-fps` | オフ | 1 フレームおきに残して 60 → 30 FPS（および 59.94 → 29.97）に変換。他のレートは変わらず、音声もずれません。`--stream` や `--segments` とは併用できません。 |
+| `--fmp4` | オフ | 作成中の `.mp4` / `.mov` 出力をそのまま再生できます。中断してもファイルは再生可能なままです。`--stream`、`--segments`、`--ltx-auto-split` とは併用できません。詳しくは[高度な処理](advanced_processing.md)。 |
+| `--segments` | — | 1 本の動画のこの区間だけを復元します。秒または `mm:ss` で指定。例: `10-25,01:10-01:30.5`。`--stream`、`--retarget-high-fps`、`--fmp4`、`--ltx-auto-split` とは併用できず、画像やフォルダーの入力にも使えません。詳しくは[区間](segments.md)。 |
+| `--working-directory` | 出力ディレクトリ | `--segments` と LTX の一時ファイルの書き込み先。詳しくは[区間](segments.md)。 |
 
 ### コーデックの選び方
 
 - **`hevc`**（デフォルト）: ファイルサイズの割に品質が良く、10 ビットです。
-  最近のデバイスならどれでも再生できます。迷ったらこれを使ってください。
+  最近のデバイスならほとんどで再生できます。迷ったらこれを使ってください。
 - **`h264`**: ほぼどこでも再生できます（古いテレビ、ブラウザー、動画編集
   ソフト）。8 ビットのみで、同じ品質ならファイルは大きくなります。
   ストリーミングでは常にこれを使います。
 - **`av1`**: 同じ品質で最も小さなファイルになり、10 ビットです。AV1 で
-  エンコードできる GPU（NVIDIA RTX 40 シリーズ以降）と、新しめの
+  エンコードできる GPU（NVIDIA RTX 40 シリーズ、AMD RX 7000 以降）と、新しめの
   プレーヤーが必要です。
 
-`--segments` を使う場合、出力は常に入力と同じコーデックになり、
-`--codec` は使われません。
+`--segments` を使う場合、出力は常に入力と同じコーデックになります。別の
+`--codec` を指定するとエラーで止まります。
 
 ### エンコーダー設定
 
@@ -174,7 +178,7 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 
 | キー | 説明 |
 | --- | ------------ |
-| `cq` | VBR の目標品質。低いほど高品質でファイルが大きくなります。H.264/HEVC の実値範囲は 1–51（デフォルト 25/28）、AV1 は 1–63（デフォルト 35）。出力サイズの自動上限により、近い値で同じ結果になる場合があります。 |
+| `cq` | VBR の目標品質。低いほど高品質でファイルが大きくなります。H.264/HEVC の範囲は 1–51（デフォルト 25/28）、AV1 は 1–63（デフォルト 35）。出力サイズの自動上限により、近い値で同じ結果になる場合があります。 |
 | `preset` | 速度と品質のトレードオフ。`p1`（最速）から `p7`（最高品質）。デフォルト `p5`。 |
 | `tune` | `hq`（デフォルト）、`ll`、`ull`、または `lossless`。 |
 | `rc` | レート制御モード: `vbr`（デフォルト）、`cbr`、`constqp`。 |
@@ -194,6 +198,14 @@ jasna --input in.mp4 --output out.mkv --cq 22 --encoder-settings "rc-lookahead=3
 | `multipass` | 2 パスエンコード: `disabled`、`qres`、`fullres`。 |
 | `weighted_pred` | 重み付き予測。NVENC は `bf=0` と組み合わせた場合のみ対応します。それ以外（および AV1 では常に）警告付きで無視されます。 |
 | `tf_level` | 時間フィルタリングのレベル。 |
+
+コーデック別の追加キー:
+
+| コーデック | 追加キー |
+| ----- | ---------- |
+| `hevc` | `profile`（`main`、`main10` — デフォルト `main10`）、`tier` |
+| `h264` | `profile`（`baseline`、`main`、`high` — デフォルト `high`）、`coder`（`cabac`/`cavlc`） |
+| `av1` | `tier`、`tile-rows`、`tile-columns`（大きなフレームのデコードを並列化） |
 
 #### 出力サイズの自動上限
 
@@ -217,15 +229,6 @@ NVIDIA H.264 は復元したディテールを保つためにより多くのビ�
 オフになります。ソースにビットレートの情報がない場合、Jasna は警告を記録し、
 上限なしでエンコードします。AMD の HEVC と AV1（10-bit）は固定 QP を使うため、
 上限はありません。
-
-
-コーデック別の追加キー:
-
-| コーデック | 追加キー |
-| ----- | ---------- |
-| `hevc` | `profile`（`main`、`main10` — デフォルト `main10`）、`tier` |
-| `h264` | `profile`（`baseline`、`main`、`high` — デフォルト `high`）、`coder`（`cabac`/`cavlc`） |
-| `av1` | `tier`、`tile-rows`、`tile-columns`（大きなフレームのデコードを並列化） |
 
 #### AMD（AMF）のキー、全コーデック共通
 
@@ -264,7 +267,7 @@ NVIDIA H.264 は復元したディテールを保つためにより多くのビ�
 
 | オプション | デフォルト | 説明 |
 | ------ | ------- | ----- |
-| `--post-export-action` | `none` | `shutdown` または `command`。すべてのエクスポート完了後に実行されます。 |
+| `--post-export-action` | `none` | すべての動画が終わった後に実行します。`shutdown` はすぐに PC の電源を切ります（GUI と違いカウントダウンはありません）。`command` は `--post-export-command` を実行します。 |
 | `--post-export-command` | — | `--post-export-action command` 用のシェルコマンド。 |
 | `--post-export-video-command` | — | 正常に書き出された各動画の後に実行するシェルコマンド。`{input}`、`{output}`、`{output_dir}`、`{output_stem}`、`{output_suffix}` を使用できます。 |
 
@@ -273,6 +276,10 @@ jasna --input input.mp4 --output output.mkv --post-export-action shutdown
 jasna --input folder_in --output folder_out --post-export-action command --post-export-command "echo done"
 jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
 ```
+
+最後の例は元の出力を残し、リマックスした 2 つ目のファイルを書き出します。
+ファイルを置き換えるには、一時ファイルを使うスクリプトを使ってください。
+`ffmpeg` は `PATH` に入れるか、フルパスで書いてください。
 
 ## 有効化
 

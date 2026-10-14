@@ -1,14 +1,13 @@
 # 云 GPU（RunPod、Vast、Docker）
 
-租来的 GPU 也能跑 Jasna。用 Linux NVIDIA 官方版，在受支持容器的命令行里运行。
+租用的 GPU 也能运行 Jasna。用 Linux NVIDIA 官方版，在受支持容器的命令行里运行。
 云激活仅限 CLI，Windows 和 GitHub 源码版不支持。
-较早的 0.11.0 构建可能会拒绝 RunPod 激活，请向卖家获取更新后的 Linux 版。
+较早的 0.11.0 构建可能会拒绝 RunPod 激活，请使用 GitHub 上最新的 Linux 版。
 
 ## 需要准备
 
 - 请卖家为你的许可证码打开**云权限**。
-- 使用有独立 PID 命名空间的容器。更新后的 Linux 版支持 RunPod 的用户映射，
-  但不支持 Docker 的 `--pid=host`。
+- 普通容器即可。RunPod 和 Vast 都能用。用 `--pid=host` 启动的 Docker 容器不行。
 - NVIDIA 显卡，驱动 **580 或更新**。
 - 至少 **80 GB** 磁盘。
 - 在模板或实例设置里加上 `NVIDIA_DRIVER_CAPABILITIES=all`。
@@ -25,7 +24,7 @@
 apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
+for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
 
 cat jasna-linux-nvidia-0.11.0.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
 cd jasna-linux-nvidia-0.11.0
@@ -69,7 +68,7 @@ export XDG_CONFIG_HOME=/root/jasna-config
 
 第一次会问要不要下载 LTX 模型（15 GB），输入 `y`。
 
-RTX 50 系显卡加上 `--ltx-fast`，修复大约快 1.4 倍（会多下载一个 8 GB 的模型）。
+RTX 50 系显卡加上 `--ltx-fast`，修复大约快 1.4 倍（会多下载约 8 GB）。
 
 上传视频和取回结果，可以用服务商的文件管理器，或在电脑上运行：
 
@@ -84,7 +83,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ---- | ------ |
 | `unsigned or modified Jasna runtime` | 用 `root` 重新解压到 `/root`。 |
 | `libGL.so.1: cannot open shared object file` | 运行安装里的 `apt-get` 那一行。 |
-| `Cloud workspace activation requires a supported Linux container` | 使用更新后的 Linux 版和不带 `--pid=host` 的容器。RunPod 上请将设置放在 `/root`。 |
+| `Cloud workspace activation requires a supported Linux container` | 使用最新的 Linux 版和不带 `--pid=host` 的容器。RunPod 上请将设置放在 `/root`。 |
 | `Failed to open hevc encoder` | 这台机器的视频编码器坏了，换一台。 |
 | `enable cloud activation` | 请卖家打开云权限。 |
 | `No activation found` 或 `Cloud workspace identity is missing` | 先运行 `export` 那一行，再重新启动 Jasna。 |
@@ -93,3 +92,11 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 看到 `Bit depth 10 ... not supported` 没关系，只是这个视频读得慢一点。
 
 别把 `jasna-config` 文件夹给别人。谁拿到它都能用你的激活。
+
+## 激活服务器
+
+在线激活只通过 HTTPS 发送许可证码和机器密钥。Jasna 只保存激活密钥，不保存许可证码。
+之后 Jasna 离线检查激活，不会再联系服务器。
+
+如果连不上主服务器，Jasna 会尝试香港服务器（`47.238.135.110`）。语言为中文时会先尝试
+香港。两者共用同样的 3 个名额。无法保证一定能访问，例如在中国大陆。

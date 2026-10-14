@@ -16,7 +16,7 @@ jasna --stream
 实用选项：`--stream-port`（默认 `8765`），以及想自己打开播放器时用的
 `--no-browser`。
 
-串流总是使用 BasicVSR++（不使用 LTX）和 H.264。如果想在应用里观看，请使用
+流媒体总是使用 BasicVSR++（不使用 LTX）和 H.264。如果想在应用里观看，请使用
 [视频播放器](gui.md#视频播放器)。
 
 ## Stash

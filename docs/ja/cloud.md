@@ -4,13 +4,13 @@
 対応するコンテナー内で使います。クラウド有効化は Linux 公式版の CLI 専用で、
 Windows と GitHub のソース版には対応していません。
 以前の 0.11.0 ビルドでは RunPod の有効化が拒否されることがあります。
-販売者から更新された Linux 版を入手してください。
+GitHub から最新の Linux 版を入手してください。
 
 ## 必要なもの
 
 - 販売者にライセンスコードの**クラウド利用**をオンにしてもらう。
-- 独自の PID 名前空間を持つコンテナー。更新された Linux 版は RunPod の
-  ユーザー再マッピングに対応しています。Docker の `--pid=host` は非対応です。
+- 普通のコンテナー。RunPod と Vast は使えます。`--pid=host` で起動した
+  Docker コンテナーは使えません。
 - ドライバー **580 以降**の NVIDIA GPU。
 - **80 GB** 以上のディスク。
 - テンプレートかインスタンスの設定に `NVIDIA_DRIVER_CAPABILITIES=all`。
@@ -27,7 +27,7 @@ Windows と GitHub のソース版には対応していません。
 apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
+for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
 
 cat jasna-linux-nvidia-0.11.0.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
 cd jasna-linux-nvidia-0.11.0
@@ -76,7 +76,7 @@ export XDG_CONFIG_HOME=/root/jasna-config
 最初の 1 回だけ LTX モデル (15 GB) のダウンロードを聞かれます。`y` を入力します。
 
 RTX 50 シリーズでは `--ltx-fast` を付けると約 1.4 倍速く復元できます
-(追加で 8 GB のモデルをダウンロードします)。
+(さらに約 8 GB をダウンロードします)。
 
 動画のアップロードと結果のダウンロードは、レンタル先のファイル画面を使うか、
 PC で次を実行します:
@@ -92,7 +92,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | ---- | -------- |
 | `unsigned or modified Jasna runtime` | `root` で `/root` に展開し直す。 |
 | `libGL.so.1: cannot open shared object file` | インストールの `apt-get` の行を実行する。 |
-| `Cloud workspace activation requires a supported Linux container` | 更新された Linux 版と `--pid=host` のないコンテナーを使う。RunPod では設定を `/root` に置く。 |
+| `Cloud workspace activation requires a supported Linux container` | 最新の Linux 版と `--pid=host` のないコンテナーを使う。RunPod では設定を `/root` に置く。 |
 | `Failed to open hevc encoder` | このマシンの動画エンコーダーが壊れています。別のマシンを借りる。 |
 | `enable cloud activation` | 販売者にクラウド利用をオンにしてもらう。 |
 | `No activation found` または `Cloud workspace identity is missing` | `export` の行を実行してから Jasna を起動し直す。 |
@@ -103,3 +103,13 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 
 `jasna-config` フォルダーは人に渡さないでください。持っている人は誰でも
 あなたの有効化を使えてしまいます。
+
+## 有効化サーバー
+
+オンライン有効化で送るのは、ライセンスコードとマシンキーだけです（HTTPS）。
+Jasna が保存するのはアクティベーションキーだけで、ライセンスコードは保存
+しません。その後はオフラインで確認し、サーバーには接続しません。
+
+メインのサーバーに接続できない場合、Jasna は香港のサーバー
+（`47.238.135.110`）を試します。言語が中国語の場合は香港を先に試します。
+どちらも同じ 3 枠を使います。中国本土などでは、接続は保証されません。

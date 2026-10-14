@@ -39,7 +39,7 @@ The editor can find the mosaic scenes for you.
    accurate) or every 0.25–2 seconds (faster). On an RTX 5090 a scan runs at
    about **2,000 FPS**.
 2. Click **Scan video**. Found ranges show in amber on the timeline.
-3. Move the confidence slider to change what counts as found.
+3. Move the **Detection threshold** slider to change what counts as found.
 4. **Add all ranges** turns the amber ranges into purple ranges, which are
    restored.
 
@@ -51,7 +51,7 @@ The editor can find the mosaic scenes for you.
   side is at least the slider value, as % of the video height. 12% is a good
   start. Check the ranges and change the ones you don't like.
 
-The detection model and confidence are saved for this video and used for the
+The detection model and detection threshold are saved for this video and used for the
 final job. Other videos keep their own settings.
 
 ### Suggest a better mask
@@ -105,11 +105,11 @@ The number is the mosaic size, as % of the video height. The output keeps
 the codec of the source video. If a video can't be processed in parts, it is
 restored whole with LTX. Cannot be used with `--segments` or `--fmp4`.
 
-## Working directory
+## Working Directory
 
 While Jasna puts the video together, it keeps temporary files in a hidden
 folder next to the output. To use another disk (faster or bigger), set
-**Working directory** in the **Encoding** section, or:
+**Working Directory** in the **Encoding** section, or:
 
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch

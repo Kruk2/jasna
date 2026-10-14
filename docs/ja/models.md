@@ -4,7 +4,7 @@
 
 検出モデルは各フレームのモザイクを見つけます。
 
-- **`rfdetr-v6`**（既定、同梱）: 高速で、ほとんどの動画に合います。迷ったら
+- **`rfdetr-v6`**（デフォルト、同梱）: 高速で、ほとんどの動画に合います。迷ったら
   これを使ってください。
 - **`rfdetr-v6-large`**: 検出は良くなりますが遅くなります。4K では良い場合が
   あります。別途ダウンロードです。お使いの GPU 用のファイルを
@@ -21,8 +21,9 @@
 AMD では RF-DETR は NVIDIA より遅くなります。検出品質より速度を優先する
 場合は `lada-yolo-v4` を使ってください。
 
-各モデルには既定の信頼度があります（`rfdetr-v6`: 0.35、
-`rfdetr-v6-large`: 0.40）。`--detection-score-threshold` で変更できます。
+各モデルにはデフォルトの検出しきい値があります（`rfdetr-v6`: 0.35、
+`rfdetr-v6-large` と `rfdetr-vr-v1`: 0.40）。**基本設定**の**検出しきい値**、
+または `--detection-score-threshold` で変更できます。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
@@ -32,7 +33,7 @@ jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 
 ## 復元モデル
 
-| | **BasicVSR++**（既定） | **LTX** |
+| | **BasicVSR++**（デフォルト） | **LTX** |
 | --- | --- | --- |
 | 速度 | 速い | かなり遅い（動画 1 分あたり数分） |
 | 品質 | 良い | より精細で自然 |
@@ -51,7 +52,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### LTX に必要なもの
 
-- **ライセンス**: LTX を含むライセンスコード（25 USD、unet-4x と SD 1.5 も含む、
+- **ライセンス**: LTX を含むライセンスコード（25 USD、UNet 4x と SD 1.5 も含む、
   [プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)を参照）。ない場合、アプリでは
   代わりに**お試しモード**を選べます（下記参照）。CLI はエラーで止まります。
 - **GPU**: NVIDIA RTX 20 シリーズ以降。GTX 16 シリーズは未検証です。AMD には
@@ -73,11 +74,11 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   使います。
 
 LTX は VR180 サイドバイサイド動画とストリーミングでは使えません。LTX では
-セカンダリ復元とノイズ除去はオフになります。
+二次復元とノイズ除去はオフになります。
 
 ### LTX のオプション
 
-- **モデル**: **標準**（既定）または**高画質**。高画質は少し良く、約 1.5 倍
+- **モデル**: **標準**（デフォルト）または**高画質**。高画質は少し良く、約 1.5 倍
   遅くなります。CLI: `--restoration-model-name ltx-undistilled`。
 - **高速モード**（RTX 50 シリーズのみ）: 約 1.4 倍速く、ディテールはわずかに
   減り、ダウンロードも小さくなります。CLI: `--ltx-fast`。
@@ -122,24 +123,24 @@ BasicVSR++ を使います。
   されました」で失敗します。Windhawk を終了するか、`jasna.exe` を除外
   プロセスに追加してください。起動時に Jasna が警告します。
 
-## セカンダリ復元
+## 二次復元
 
 Jasna は各モザイクを 256x256 の画像として復元します。大きなモザイク、
-クローズアップ、4K 動画では、ぼやけて見えることがあります。セカンダリモデルは
+クローズアップ、4K 動画では、ぼやけて見えることがあります。二次復元モデルは
 この画像をフレームに戻す前に大きく（512x512 または 1024x1024）するので、
 結果がよりシャープになります。
 
-NVIDIA のみです。AMD ではセカンダリ復元は使えません。
+NVIDIA のみです。
 
-- **unet-4x**（有料）: 復元用に訓練されており、品質は TVAI `iris-2` に近く、
+- **UNet 4x**（有料）: 復元用に訓練されており、品質は TVAI `iris-2` に近く、
   TVAI より高速です。
   SLS Discord の例
   と[プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)を
   ご覧ください。
-- **RTX Super Resolution**（無料）: 非常に高速で、インストールは不要です。
+- **RTX Super Res**（無料）: 非常に高速で、インストールは不要です。
   品質はまずまずです。一部の動画ではフリッカーが出るので、まず短いクリップで
   試してください。
-- **TVAI**: unet-4x と同程度ですが、非常に遅いです。
+- **Topaz TVAI**: UNet 4x と同程度ですが、非常に遅いです。
   [Topaz Video](https://www.topazlabs.com/topaz-video) が必要です（有料、
   Windows のみ）。`iris-2` モデルを使ってください。
 
@@ -159,11 +160,11 @@ Topaz Video のモデルフォルダーに、下のように設定してくだ�
 
 1080p 動画 2 本での時間と VRAM:
 
-| セカンダリ種別           | CAWD 1080p        | K109 1080p      |
+| 二次復元の種類           | CAWD 1080p        | K109 1080p      |
 | ------------------------ | -----------------:| -----------------:|
-| セカンダリなし           | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
-| unet-4x                  | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
-| RTX Super-Res            | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
+| 二次復元なし             | 22秒 / 10.0 GB VRAM | 11秒 / 10.7 GB VRAM |
+| UNet 4x                  | 29秒 / 12.5 GB VRAM | 14秒 / 12.6 GB VRAM |
+| RTX Super Res            | 25秒 / 11.7 GB VRAM | 13秒 / 11.4 GB VRAM |
 | TVAI (2 workers, Iris-2) | 52秒 / 12.1 GB VRAM | 24秒 / 12.4 GB VRAM |
 
 ## 静止画復元（SD 1.5）
@@ -176,7 +177,7 @@ Topaz Video のモデルフォルダーに、下のように設定してくだ�
 jasna --input photo.png --output restored.png
 ```
 
-- 有料です。1 つのライセンスコードに SD 1.5、unet-4x、LTX を含められます。
+- 有料です。1 つのライセンスコードに SD 1.5、UNet 4x、LTX を含められます。
   [プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)を
   ご覧ください。
 - ダウンロードには含まれていません。約 **6.9 GB** です。Jasna は

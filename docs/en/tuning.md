@@ -11,17 +11,17 @@ These settings are for BasicVSR++. LTX manages its memory by itself, see
 
 Jasna restores mosaics in clips: groups of frames processed together.
 
-- **Max clip size**: the longest clip, in frames. Longer clips give a more
+- **Max Clip Size**: the longest clip, in frames. Longer clips give a more
   stable result but use more VRAM.
-- **Temporal overlap**: smooths the places where two clips meet. More overlap
+- **Temporal Overlap**: smooths the places where two clips meet. More overlap
   takes more time. Above `20` it usually doesn't help.
 
 Good start:
 
-- Use the biggest **max clip size** that fits in your VRAM. Bigger clips are
+- Use the biggest **Max Clip Size** that fits in your VRAM. Bigger clips are
   more stable *and* faster.
-- Set **temporal overlap** between `8` and `20`.
-- Keep **crossfade** on. It costs nothing, because it uses frames that are
+- Set **Temporal Overlap** between `8` and `20`.
+- Keep **Enable Crossfade** on. It costs nothing, because it uses frames that are
   already done.
 
 One 1080p video, overlap 8, RTX 5090. Your times will be different, but the
@@ -47,7 +47,7 @@ jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overla
 
 ## Out of VRAM?
 
-1. Lower **max clip size**. The table above shows what each step costs.
+1. Lower **Max Clip Size**. The table above shows what each step costs.
 2. Turn off secondary restoration, or use a lighter one (see the
    [comparison](models.md#speed-and-vram-comparison)).
 3. Close other apps that use the GPU (browsers, games, video players).
@@ -55,12 +55,12 @@ jasna --input input.mp4 --output output.mkv --max-clip-size 90 --temporal-overla
 Cards with 4–6 GB of VRAM: start with max clip size `30` for 1080p video. 4K
 needs more.
 
-Turning off model compilation does not help: it saves less than 0.5 GB and
+Turning off **Compile BasicVSR++** does not help: it saves less than 0.5 GB and
 makes processing about 3x slower.
 
 ## Model compilation
 
-On NVIDIA, Jasna compiles the detection and restoration models (and unet-4x,
+On NVIDIA, Jasna compiles the detection and restoration models (and UNet 4x,
 if used) for your exact GPU (TensorRT). This makes processing much faster. AMD never compiles.
 
 - It happens on the first job and takes about **15–60 minutes**. Close other

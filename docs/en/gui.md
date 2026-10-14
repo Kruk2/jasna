@@ -7,12 +7,13 @@ the installation check before the main window opens. If the check fails, the
 error stays on screen.
 
 Install Jasna on a local disk (NTFS on Windows; ext4, Btrfs or XFS on Linux),
-in a folder with only English letters and numbers in its path. Network disks
+in a folder whose path has no Chinese, Japanese, accented or other
+non-English characters. Network disks
 are not supported.
 
 ## The queue
 
-- Add videos or images with **Add Files**, or with the folder icon next to it
+- Add videos or images with **Add files**, or with the folder icon next to it
   for a whole folder. You can also drag and drop files onto the queue.
 - Drag an item by its handle to change the order. Jasna processes the queue
   from top to bottom.
@@ -21,29 +22,30 @@ are not supported.
 - Buttons on each video:
   - **Scissors** opens the [Segment Editor](segments.md).
   - **Play** opens the video in the Video Player, paused.
-  - **Three dots** (or right-click) opens the input folder, copies a path,
-    opens the finished output, or puts a finished, failed or skipped item back
-    at the end of the queue.
+  - **Three dots** (or right-click): **Open containing folder**, **Copy path**,
+    **Open restored output**, and **Requeue**, which puts a finished, failed or
+    skipped item back at the end of the queue.
   - **Cross** removes the item.
 - During processing, each item shows progress, FPS and time left.
-- **▶** (start) always processes everything in the queue, also items that are
-  already finished or failed. So you can change settings and press ▶
+- **▶** (start) always processes everything in the queue, including items
+  that are already finished or failed. So you can change settings and press ▶
   again without adding the files again.
-- **■** (stop) ends the run. The current item goes back to **Pending**. The half
-  written output file stays on disk; **File conflict** decides what happens
-  with it next time.
-- **Clear Done** removes finished items. **Clear** removes everything.
+- **■** (stop) ends the run. The current item goes back to **Pending**. The half-written
+  output file stays on disk; **File Conflict** decides what happens with it
+  next time.
+- **Clear done** removes finished items. **Clear** removes everything.
 
 ## Output settings
 
 - **Same as input** saves each result next to its original file.
 - Type a folder path or use the folder button to save somewhere else. This
   turns off **Same as input**. Click **Same as input** to turn it back on.
-- **Filename pattern** sets the output name. `{original}` is the input file
+- **Output pattern** sets the output name. `{original}` is the input file
   name. If a name would overwrite another file, the queue items are marked at
   once.
-- **File conflict** decides what to do when the output file already exists:
-  **Auto rename** (default), **Overwrite** or **Skip**.
+- **File Conflict** (in **Basic Processing**) decides what to do when the
+  output file already exists: **Auto-Rename** (default), **Overwrite** or
+  **Skip**.
 
 ## Presets
 
@@ -53,7 +55,7 @@ and switch with one click. Jasna remembers the last preset after a restart.
 
 ## Per-video settings
 
-The detection model and confidence you set in the [Segment Editor](segments.md)
+The detection model and detection threshold you set in the [Segment Editor](segments.md)
 are saved for that one video. Other videos in the queue keep their own.
 
 ## Video Player
@@ -61,32 +63,32 @@ are saved for that one video. Other videos in the queue keep their own.
 Click **Video Player** in the header to watch a video while Jasna restores it.
 No output file is created.
 
-1. Choose the detection model, confidence and, if you want, RTX Super
-   Resolution or unet-4x.
+1. Choose the detection model, detection threshold and, if you want, a
+   secondary restoration (**RTX Super Res** or **UNet 4x**).
 2. Click **Choose video**.
 3. Press play.
 
 - **Space**: play or pause. **Left/Right**: jump 30 seconds.
 - In full screen, move the mouse to the bottom edge to show the controls.
-- If you change the model, confidence or secondary restoration, playback
+- If you change the model, detection threshold or secondary restoration, playback
   restarts from the same position.
 - The status shows how many seconds are restored ahead. If it drops to zero
   again and again, your GPU is too slow for real time with these settings.
   Audio waits until more frames are ready.
 - The player always uses BasicVSR++, not LTX.
-- It works only when the queue and the restore preview are not running.
+- It works only when the queue and the **Restore preview** are not running.
 
 ## Images, one by one
 
-For still images, **Process images interactively** (in the **Image Restoration** section)
+For still images, **Process images interactively** (in the **Image Restoration (still images)** section)
 opens a side-by-side view. Go through your images, try other seeds, compare
 original, mask and result, and save only the results you like. This is much
 faster than running the whole job again for each try.
 
 ## System check
 
-On the first start of each version, Jasna checks the GPU, driver, memory and
-install path. You can run it again from the header, for example after a driver
+On the first start of each version, Jasna checks FFprobe, the GPU, the driver
+and the install path. You can run it again from the header, for example after a driver
 update.
 
 ## Other settings
@@ -100,7 +102,7 @@ update.
 
 ## Activate paid models
 
-Paid models (unet-4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
+Paid models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
 the header.
 
 - **Online** (default): enter the **License code** from your seller and click
@@ -117,20 +119,12 @@ the header.
 Good to know:
 
 - One License code works on **3 PCs or cloud workspaces**. Activating the same
-  PC again does not use a new slot. Only the owner can free a slot; you can't
-  remove a PC yourself.
+  PC again does not use a new slot. Only the owner can free a slot.
 - An Activation key covers only the models you bought.
-- **Activate online** sends only your License code and Machine key, over HTTPS.
-  Jasna saves only the Activation key, not your License code. After that,
-  Jasna checks activation offline and does not contact the server again.
-- If the main server can't be reached, Jasna tries a
-  [server in Hong Kong](https://47.238.135.110). With Chinese language it
-  tries Hong Kong first. Both use the same 3 slots. Access is not guaranteed,
-  for example in mainland China.
+- **Activate online** sends only your License code and Machine key. After
+  that, Jasna works offline. More in [Cloud GPUs](cloud.md#activation-servers).
 - Key rejected? Check the Machine key and copy the whole Activation key again.
   Keys made for older Jasna versions need a new key from your seller.
-- Rented GPUs (RunPod, Vast) can be activated only from the command line. See
-  [Cloud GPUs](cloud.md).
 
 License codes are sold only on
 [Buy Me a Coffee](https://buymeacoffee.com/kruk2),

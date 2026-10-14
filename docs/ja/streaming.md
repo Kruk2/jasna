@@ -14,7 +14,7 @@ jasna --stream
 
 Windows ではアプリ本体と同じファイルを使います: `jasna.exe --stream`。
 
-便利なオプション: `--stream-port`（既定 `8765`）と、プレーヤーを自分で
+便利なオプション: `--stream-port`（デフォルト `8765`）と、プレーヤーを自分で
 開きたい場合の `--no-browser`。
 
 ストリーミングは常に BasicVSR++（LTX ではありません）と H.264 を使います。

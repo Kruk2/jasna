@@ -52,12 +52,12 @@ are not changed.
 jasna --input input.mp4 --output output.mp4 --retarget-high-fps
 ```
 
-Cannot be used with [segment processing](segments.md).
+Cannot be used with [selected ranges](segments.md) or streaming.
 
-## Playable while processing (fMP4)
+## Playable While Processing (fMP4)
 
-A normal MP4 opens only after the job is done. With **Playable while
-processing** (`--fmp4`) you can play the output while it is still being made,
+A normal MP4 opens only after the job is done. With **Playable While
+Processing** (`--fmp4`) you can play the output while it is still being made,
 for example to check quality early. If the job stops in the middle, the file
 still plays.
 
@@ -67,13 +67,13 @@ jasna --input input.mp4 --output output.mp4 --fmp4
 
 The video grows a few seconds at a time, and players can show the wrong
 length until the job ends. Works only for `.mp4` and `.mov` output. Not
-available with streaming or [segment processing](segments.md).
+available with streaming or [selected ranges](segments.md).
 
 ## Color LUT
 
 Apply a `.cube` color LUT (1D or 3D) to the output, for color grading. Set
 **Color LUT** in the **Encoding** section, or use `--lut path/to/look.cube`.
-It runs on the GPU just before encoding, so it is almost free.
+It is applied as the video is written, so it is almost free.
 
 ## Sharpening
 
@@ -92,15 +92,14 @@ lower CQ. The preview does not show sharpening.
 ## Encoder quality and custom settings
 
 **CQ** (`--cq`) sets the quality. Lower means better quality and a bigger
-file. Jasna sends the number to the encoder as it is (only AMD AV1 multiplies
-it by 5). Jasna also limits the output size, and when that limit is hit,
+file. Jasna also limits the output size, and when that limit is hit,
 close CQ values can give the same file.
 
 ```bash
 jasna --input in.mp4 --output out.mkv --cq 22
 ```
 
-**Encoder custom args** (`--encoder-settings`) is for other encoder options,
+**Custom Args** (`--encoder-settings`) is for other encoder options,
 for example bitrate limits or keyframe interval. CQ can't be set there in the
 GUI; use the CQ control. All keys, ranges and defaults are in the
 [CLI reference](cli.md#encoding).
@@ -109,7 +108,7 @@ GUI; use the CQ control. All keys, ranges and defaults are in the
 
 Run something when the whole queue is finished: **Shutdown PC** or a
 **Custom Command** (for example a script that sends you a message). Set it in
-the **Post-export Action** section or in the CLI:
+the **Post-Export Action** section or in the CLI:
 
 ```bash
 jasna --input input.mp4 --output output.mkv --post-export-action shutdown
@@ -118,19 +117,12 @@ jasna --input folder_in --output folder_out --post-export-action command --post-
 
 You can change or turn off this action while jobs are running. Before
 **Shutdown PC**, the GUI counts down 60 seconds. Press **Cancel** to keep the
-PC on.
+PC on. The CLI shuts down right away.
 
-To run a command after each finished video, use **Command after each video**
+To run a command after each finished video, use **Command After Each Video**
 or `--post-export-video-command`. Jasna waits until it ends. If the command
 fails, that video is marked as failed. The command runs in the output folder.
 
 Placeholders: `{input}`, `{output}`, `{output_dir}`, `{output_stem}`,
-`{output_suffix}`. They are already quoted.
-
-```bash
-jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg -i {output} -map 0 -map_metadata 0 -map_chapters 0 -c copy -movflags +faststart {output_dir}/{output_stem}_remuxed{output_suffix}"
-```
-
-This example keeps the original output and writes a second file. To replace
-the file, use a script with a temporary file. `ffmpeg` must be on `PATH`, or
-write its full path.
+`{output_suffix}`. They are already quoted. There is an example in the
+[CLI reference](cli.md#post-export).

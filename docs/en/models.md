@@ -21,8 +21,9 @@ The detection model finds the mosaics in each frame.
 On AMD, RF-DETR is slower than on NVIDIA. If speed is more important than
 detection quality, use `lada-yolo-v4`.
 
-Each model has its own default confidence (`rfdetr-v6`: 0.35,
-`rfdetr-v6-large`: 0.40). Change it with `--detection-score-threshold`.
+Each model has its own default detection threshold (`rfdetr-v6`: 0.35,
+`rfdetr-v6-large` and `rfdetr-vr-v1`: 0.40). Change it with **Detection
+Threshold** in **Basic Processing**, or with `--detection-score-threshold`.
 
 ```bash
 jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
@@ -52,7 +53,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 ### What LTX needs
 
-- **License**: a License code that includes LTX ($25 USD, also gives unet-4x and SD 1.5, see
+- **License**: a License code that includes LTX ($25 USD, also gives UNet 4x and SD 1.5, see
   [Supporting the project](../../README.md#supporting-the-project)). Without
   one, the app offers **Trial mode** instead (see below); the CLI stops with
   an error.
@@ -130,15 +131,15 @@ Jasna restores each mosaic as a 256x256 picture. On big mosaics, close-ups and
 (512x512 or 1024x1024) before it goes back into the frame, so the result is
 sharper.
 
-NVIDIA only. On AMD there is no secondary restoration.
+NVIDIA only.
 
-- **unet-4x** (paid): trained for restoration, quality close to TVAI `iris-2`, and
+- **UNet 4x** (paid): trained for restoration, quality close to TVAI `iris-2`, and
   faster than TVAI. See the
   examples on SLS Discord
   and [Supporting the project](../../README.md#supporting-the-project).
-- **RTX Super Resolution** (free): very fast, nothing to install. Quality is
+- **RTX Super Res** (free): very fast, nothing to install. Quality is
   OK. Some videos flicker, so test a short clip first.
-- **TVAI**: similar to unet-4x, but very slow. Needs
+- **Topaz TVAI**: similar to UNet 4x, but very slow. Needs
   [Topaz Video](https://www.topazlabs.com/topaz-video), which is paid and
   Windows only. Use the `iris-2` model.
 
@@ -161,8 +162,8 @@ Time and VRAM for two 1080p videos:
 | Secondary type           | CAWD 1080p        | K109 1080p      |
 | ------------------------ | -----------------:| -----------------:|
 | No secondary             | 22s / 10.0 GB VRAM | 11s / 10.7 GB VRAM |
-| unet-4x                  | 29s / 12.5 GB VRAM | 14s / 12.6 GB VRAM |
-| RTX Super-Res            | 25s / 11.7 GB VRAM | 13s / 11.4 GB VRAM |
+| UNet 4x                  | 29s / 12.5 GB VRAM | 14s / 12.6 GB VRAM |
+| RTX Super Res            | 25s / 11.7 GB VRAM | 13s / 11.4 GB VRAM |
 | TVAI (2 workers, Iris-2) | 52s / 12.1 GB VRAM | 24s / 12.4 GB VRAM |
 
 ## Still-image restoration (SD 1.5)
@@ -175,7 +176,7 @@ model automatically:
 jasna --input photo.png --output restored.png
 ```
 
-- Paid. One License code can include SD 1.5, unet-4x and LTX. See
+- Paid. One License code can include SD 1.5, UNet 4x and LTX. See
   [Supporting the project](../../README.md#supporting-the-project).
 - Not included in the download. It is about **6.9 GB**. Jasna asks before it
   downloads it from
