@@ -304,6 +304,31 @@ def apply_vram_budget() -> None:
         logger.warning("VRAM budget not applied: %s", exc)
 
 
+#: Captured CUDA/HIP graph pools, registered by the restorers that own them.
+#: empty_cache() cannot spare a selected pool, so while any graph is registered
+#: release_vram_cache() skips the release entirely - freeing the pool under a
+#: captured graph can leave replay reading re-mapped pages, which corrupts the
+#: graph's output silently. Owners compare hip_graph_pool_generation() against
+#: the value they captured at and re-capture when a release slipped through
+#: another path (a direct torch.cuda.empty_cache elsewhere).
+_graph_pool_owners: set[int] = set()
+_hip_graph_pool_generation = 0
+
+
+def register_graph_pool(token: int) -> None:
+    """Mark a captured graph's pool as exempt from cold-cache releases."""
+    _graph_pool_owners.add(int(token))
+
+
+def unregister_graph_pool(token: int) -> None:
+    _graph_pool_owners.discard(int(token))
+
+
+def hip_graph_pool_generation() -> int:
+    """Bumped whenever a cold-cache release runs; owners compare and re-capture."""
+    return _hip_graph_pool_generation
+
+
 def release_vram_cache() -> None:
     """Return every cached-but-unused block to the driver (defragmentation).
 
@@ -311,14 +336,27 @@ def release_vram_cache() -> None:
     current clip's tensors - are untouched. Only the allocator's cold cache is
     released, which is what otherwise grows until Windows starts demoting the
     hot pages to shared memory and the frame rate collapses.
+
+    Skipped while a captured HIP graph is registered: empty_cache() cannot
+    exclude the graph's static buffers, and freeing the pool under a captured
+    graph can silently corrupt its replays. Owners re-capture on the next clip
+    if a release ran through another path.
     """
+    global _hip_graph_pool_generation
     import gc
 
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
-
+    if not torch.cuda.is_available():
+        return
+    if _graph_pool_owners:
+        _hip_graph_pool_generation += 1
+        logger.debug(
+            "VRAM cold-cache release skipped: %d captured HIP graph pool(s) registered",
+            len(_graph_pool_owners),
+        )
+        return
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
 
 def maybe_release_vram_cache() -> bool:
     """Defragment when the reserve creeps toward the budget; cheap no-op otherwise.

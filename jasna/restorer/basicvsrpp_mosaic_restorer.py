@@ -1,4 +1,5 @@
 import logging
+import threading
 import os
 
 import torch
@@ -6,7 +7,12 @@ import torch
 logger = logging.getLogger(__name__)
 from torch import Tensor
 
-from jasna.accelerator import is_nvidia_device
+from jasna.accelerator import (
+    hip_graph_pool_generation,
+    is_nvidia_device,
+    register_graph_pool,
+    unregister_graph_pool,
+)
 from jasna.models.basicvsrpp.inference import load_model
 from jasna.os_utils import env_flag
 
@@ -50,6 +56,7 @@ class BasicvsrppMosaicRestorer:
         self._split_forward = None
         self.model = None
         self._graphs: dict[int, tuple[Tensor, Tensor, "torch.cuda.CUDAGraph"]] = {}
+        self._graph_pool_generation = 0
         self._graphs_enabled = (
             env_flag(_HIP_GRAPH_ENV, default=True)
             and self.device.type == "cuda"
@@ -81,6 +88,23 @@ class BasicvsrppMosaicRestorer:
     def _prewarm_graphs(self, temporal_overlap: int) -> None:
         """Capture graphs for the two dominant clip lengths before the
         pipeline threads start (mid-pipeline capture is not safe on ROCm)."""
+        self._temporal_overlap = int(temporal_overlap)
+        register_graph_pool(id(self))
+        self._capture_graphs()
+
+    def _capture_graphs(self) -> None:
+        """(Re-)capture the graphs for the dominant clip lengths. Capture must
+        happen off the pipeline threads; when invoked from a replay thread
+        after a slipped release, defer - clips run eager and the graphs
+        return on the next pass."""
+        self._graph_pool_generation = hip_graph_pool_generation()
+        if threading.current_thread() is not threading.main_thread():
+            logger.warning(
+                "HIP graph re-capture skipped: not on the main thread; "
+                "clips run eager until the next pass"
+            )
+            return
+        temporal_overlap = getattr(self, "_temporal_overlap", 0)
         lengths: list[int] = []
         t1 = self.max_clip_size
         t2 = t1 - 2 * int(temporal_overlap)
@@ -131,11 +155,24 @@ class BasicvsrppMosaicRestorer:
         if self._split_forward is not None:
             self._split_forward.close()
             self._split_forward = None
+        unregister_graph_pool(id(self))
         self._graphs.clear()
         self._graphs_enabled = False
         self.model = None
 
     def _forward_graphed(self, batched: Tensor) -> Tensor:
+        # A cold-cache release that slipped past the accelerator's graph-pool
+        # guard (a direct torch.cuda.empty_cache elsewhere) can free the pool
+        # a captured graph replays against; replay would then read re-mapped
+        # pages. Drop the graphs and re-capture before trusting one again.
+        if self._graphs and self._graph_pool_generation != hip_graph_pool_generation():
+            logger.warning(
+                "VRAM cold-cache release ran outside the graph guard; "
+                "re-capturing BasicVSR++ HIP graphs for lengths %s",
+                sorted(self._graphs),
+            )
+            self._graphs.clear()
+            self._capture_graphs()
         entry = self._graphs.get(int(batched.shape[1]))
         if entry is None:
             return self.model(inputs=batched)
