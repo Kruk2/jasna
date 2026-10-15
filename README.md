@@ -90,6 +90,8 @@ memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
 - [App guide](docs/en/gui.md): the queue, presets, output names, the Video
   Player and activation.
 - SLS Discord: examples, help and settings.
+  Jasna has a new channel;
+  older posts stay in the old channel (archived).
   Please don't be too weird.
 - Problem? Click **Logs** at the bottom of the app, then **Export** to save a
   log file. Attach it when you ask for help.
@@ -108,8 +110,9 @@ Supporters who gave **$15 USD or more on or before 14 October 2026** get LTX for
 
 **Before you choose LTX:**
 
-- Look at the samples in the
-  SLS Discord channel.
+- Look at these LTX samples: 1, 2, 3, 4, 5, 6, 7, 8.
+  Explore the new channel and the
+  old channel (archived) on SLS Discord for more samples.
 - Run LTX in **Trial mode (speed test)** on your PC. It is free and shows if your GPU can
   run LTX and how long it takes. The video is not restored. See
   [What LTX needs](docs/en/models.md#what-ltx-needs).

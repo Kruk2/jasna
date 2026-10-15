@@ -42,8 +42,9 @@ for each video.
 | Cost | Free | For supporters ([Supporting the project](../../README.md#supporting-the-project)) |
 
 Use LTX for the videos or scenes you care about most. Before you choose it, look
-at the samples on the
-SLS Discord channel
+at these samples: 1, 2, 3, 4, 5, 6, 7, 8
+(explore the new channel and the
+old channel (archived) on SLS Discord for more samples),
 and run **Trial mode** to see if your PC can run it and how long it takes. Pick it in the
 **Restoration Model** section, or:
 
