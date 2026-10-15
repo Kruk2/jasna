@@ -126,3 +126,41 @@ def test_opaque_load_rejects_cpu_before_decryption(monkeypatch):
         OpaqueBlockStore.from_reader(
             reader, [{"weight": "blocks.0.weight"}], torch.device("cpu"), resident=1,
         )
+
+
+@needs_cuda
+def test_streamed_blocks_are_page_locked_without_power_of_two_rounding():
+    torch.cuda.init()
+    before = torch.cuda.memory.host_memory_stats().get("allocated_bytes.current", 0)
+    store = BlockStore(_blocks(4), torch.device("cuda"), resident=1)
+    assert all(buffer.is_pinned() for buffer in store._host)
+    assert torch.cuda.memory.host_memory_stats().get("allocated_bytes.current", 0) == before
+    store.close()
+
+
+@needs_cuda
+def test_refused_page_locking_keeps_the_rest_in_regular_ram(monkeypatch, caplog):
+    import jasna.ltx.blocks as blocks_module
+
+    register = blocks_module._register
+    calls = []
+
+    def refuse_after_three(buffer):
+        calls.append(buffer)
+        return register(buffer) if len(calls) <= 3 else 2
+
+    monkeypatch.setattr(blocks_module, "_register", refuse_after_three)
+    monkeypatch.setattr(blocks_module, "_PINNED_HEADROOM_BYTES", 1)
+    blocks = _blocks(6)
+    with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
+        store = BlockStore([dict(b) for b in blocks], torch.device("cuda"), resident=0)
+    assert [buffer.is_pinned() for buffer in store._host] == [True, True, False, False, False, False]
+    assert any("4 of 6 weight buffers use regular RAM" in r.getMessage() for r in caplog.records)
+    for _ in range(2):
+        for index, expected in enumerate(blocks):
+            weights = store.acquire(index)
+            for name, tensor in expected.items():
+                assert torch.equal(weights[name].cpu(), tensor)
+            store.release(index)
+    store.close()
+    assert not any(buffer.is_pinned() for buffer in calls[:3])

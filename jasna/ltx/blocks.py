@@ -1,10 +1,11 @@
-"""Transformer block weights, resident on the GPU or streamed from pinned host memory.
+"""Transformer block weights, resident on the GPU or streamed from host memory.
 
 Each block is packed into one flat byte buffer so it moves in a single copy. As many
-leading blocks as the VRAM budget allows stay resident; the rest live in pinned host
-memory and are copied on a side stream into one of two GPU slots, one block ahead of
-the block being computed. Frozen releases keep every transformer-block tensor and the
-complete block forward in the native opaque store; Python sees only block inputs/outputs.
+leading blocks as the VRAM budget allows stay resident; the rest live in host memory,
+page-locked as far as the system allows, and are copied on a side stream into one of two
+GPU slots, one block ahead of the block being computed. Frozen releases keep every
+transformer-block tensor and the complete block forward in the native opaque store;
+Python sees only block inputs/outputs.
 """
 
 from __future__ import annotations
@@ -14,9 +15,13 @@ from dataclasses import dataclass
 
 import torch
 
+from jasna.media.cuda_kernel import check_cuda, cuda_driver
+
 logger = logging.getLogger(__name__)
 
 _ALIGN = 256
+_CU_MEMHOSTREGISTER_PORTABLE = 1
+_PINNED_HEADROOM_BYTES = 1 << 30
 
 
 @dataclass(frozen=True)
@@ -84,6 +89,39 @@ def _staged(stage: torch.Tensor, offset: int, target: torch.Tensor) -> torch.Ten
     return stage[offset : offset + target.nbytes].view(target.dtype).view(target.shape)
 
 
+def _register(buffer: torch.Tensor) -> int:
+    return cuda_driver().cuMemHostRegister_v2(buffer.data_ptr(), buffer.nbytes, _CU_MEMHOSTREGISTER_PORTABLE)
+
+
+def _unregister(buffers: list[torch.Tensor]) -> None:
+    for buffer in buffers:
+        check_cuda(cuda_driver().cuMemHostUnregister(buffer.data_ptr()), "cuMemHostUnregister")
+    buffers.clear()
+
+
+def _pin_while_allowed(buffers: list[torch.Tensor]) -> list[torch.Tensor]:
+    """Page-locks host ``buffers`` in order at their exact size (torch's pinned allocator rounds
+    each one up to a power of two) and returns the pinned ones. Windows caps page-locked memory,
+    often at half the RAM: once refused, the rest stay pageable (slower copies) and the last
+    pinned ones are released so later pinned allocations still fit."""
+    pinned: list[torch.Tensor] = []
+    for buffer in buffers:
+        result = _register(buffer)
+        if result:
+            released = []
+            while pinned and sum(b.nbytes for b in released) < _PINNED_HEADROOM_BYTES:
+                released.append(pinned.pop())
+            _unregister(released)
+            logger.warning(
+                "LTX: the system would not lock more RAM for fast GPU copies (CUDA error %d); "
+                "%d of %d weight buffers use regular RAM, so LTX runs slower. More RAM helps",
+                result, len(buffers) - len(pinned), len(buffers),
+            )
+            break
+        pinned.append(buffer)
+    return pinned
+
+
 class BlockStore:
     """Hands out each block's weights on ``device`` in a fixed cyclic block order. Empties each
     dict of ``blocks`` once packed, so loading never holds the weights twice in RAM."""
@@ -122,12 +160,13 @@ class BlockStore:
         stage_bytes = max(_aligned(max(self._buffer(index).numel() for index in range(self.resident)) // 2),
                           *staged_sizes) if staged_sizes else 0
         groups = _file_order_groups([name for name in reader.offset_keys() if name in targets], targets, stage_bytes)
-        stages, copied = [], []
+        stages, pinned_stages, copied = [], [], []
 
         def destinations():
             try:
                 if stage_bytes:
-                    stages.extend(torch.empty(stage_bytes, dtype=torch.uint8, pin_memory=True) for _ in range(2))
+                    stages.extend(torch.empty(stage_bytes, dtype=torch.uint8) for _ in range(2))
+                    pinned_stages.extend(_pin_while_allowed(stages))
                     copied.extend(torch.cuda.Event() for _ in stages)
                 for number, (group, offsets) in enumerate(groups):
                     slot = number % 2
@@ -145,6 +184,7 @@ class BlockStore:
                     torch.cuda.synchronize(self.device)
                     for stage in stages:
                         stage.zero_()
+                    _unregister(pinned_stages)
 
         stream = destinations()
         try:
@@ -165,8 +205,10 @@ class BlockStore:
         self._resident: list[dict[str, torch.Tensor]] = []
         self._resident_buffers: list[torch.Tensor] = []
         self._host: list[torch.Tensor] = []
+        self._pinned: list[torch.Tensor] = []
         self._slots: list[torch.Tensor] = []
-        slot_bytes = 0
+        streamed_bytes = [nbytes for _, nbytes in layouts[self.resident :]]
+        streamed = len(streamed_bytes)
         try:
             for index, (layout, nbytes) in enumerate(layouts):
                 self._layouts.append(layout)
@@ -174,13 +216,10 @@ class BlockStore:
                     buffer = torch.empty(nbytes, dtype=torch.uint8, device=device)
                     self._resident_buffers.append(buffer)
                     self._resident.append(_views(buffer, layout))
-                else:
-                    buffer = torch.empty(nbytes, dtype=torch.uint8, pin_memory=True)
-                    self._host.append(buffer)
-                    slot_bytes = max(slot_bytes, nbytes)
-            streamed = self.count - self.resident
             for _ in range(min(2, streamed)):
-                self._slots.append(torch.empty(slot_bytes, dtype=torch.uint8, device=device))
+                self._slots.append(torch.empty(max(streamed_bytes), dtype=torch.uint8, device=device))
+            self._host.extend(torch.empty(nbytes, dtype=torch.uint8) for nbytes in streamed_bytes)
+            self._pinned = _pin_while_allowed(self._host)
             self._slot_block = [-1] * len(self._slots)
             self._copy_done = [torch.cuda.Event() for _ in self._slots]
             self._compute_done = [torch.cuda.Event() for _ in self._slots]
@@ -249,6 +288,7 @@ class BlockStore:
             buffer.zero_()
         if self.device.type == "cuda":
             torch.cuda.synchronize(self.device)
+        _unregister(self._pinned)
         self._resident_buffers.clear()
         self._resident.clear()
         self._host.clear()

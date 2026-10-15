@@ -65,6 +65,10 @@ def cuda_driver() -> ctypes.CDLL:
     lib.cuStreamCreate.restype = ctypes.c_int
     lib.cuStreamDestroy.argtypes = [ctypes.c_void_p]
     lib.cuStreamDestroy.restype = ctypes.c_int
+    lib.cuMemHostRegister_v2.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint]
+    lib.cuMemHostRegister_v2.restype = ctypes.c_int
+    lib.cuMemHostUnregister.argtypes = [ctypes.c_void_p]
+    lib.cuMemHostUnregister.restype = ctypes.c_int
     _driver = lib
     return lib
 
