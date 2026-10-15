@@ -111,7 +111,7 @@ REALESRGAN_MODEL_FILES: dict[str, tuple[str, ...]] = {
 REALESRGAN_MODEL_URLS = {
     "x4v3": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
     "wdn-x4v3": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth",
-    "lsdir-c3": "https://github.com/Phhofm/models/releases/tag/4xLSDIRCompactC3",
+    "lsdir-c3": "https://github.com/Phhofm/models/releases/tag/4xLSDIRCompact3",
     "lsdir-v2": "https://github.com/Phhofm/models/releases/tag/4xLSDIRCompact2",
     "hfa2k-2x": "https://github.com/Phhofm/models/releases/tag/2xHFA2kCompact",
     "parimg-2x": "https://github.com/Phhofm/models/releases/tag/2xParimgCompact",
