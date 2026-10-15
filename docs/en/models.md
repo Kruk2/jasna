@@ -57,11 +57,12 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   [Supporting the project](../../README.md#supporting-the-project)). Without
   one, the app offers **Trial mode** instead (see below); the CLI stops with
   an error.
-- **GPU**: NVIDIA RTX 20-series or newer. GTX 16-series is untested. AMD is
-  not supported.
-- **VRAM**: 16 GB or more is best. Smaller cards work but are slower: parts of
-  the model are kept in system RAM. 11 GB is the smallest card tested so far.
-- **System RAM**: 32 GB recommended (loading the model uses about 19 GB).
+- **GPU**: NVIDIA RTX 30, 40 or 50-series. RTX 20-series should work, but
+  only the RTX 2080 Ti was tested. GTX 16-series is untested. AMD is not
+  supported.
+- **VRAM**: 8 GB minimum. More VRAM is faster: on smaller cards parts of the
+  model are kept in system RAM.
+- **System RAM**: 16 GB minimum (LTX uses about 10 GB).
 - **Disk**: the model is not bundled. Jasna asks before downloading it the
   first time you start an LTX job, and downloads only the model you picked:
 

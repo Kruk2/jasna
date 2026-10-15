@@ -55,7 +55,7 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
   LTX は NVIDIA のみです。
 - ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS。ネットワーク
   ディスクは非対応です。
-- LTX にはさらに必要なものがあります（RTX GPU、VRAM 16 GB が理想、RAM 32 GB）。
+- LTX には NVIDIA RTX GPU、8 GB 以上の VRAM、16 GB 以上の RAM が必要です。
   [LTX に必要なもの](docs/ja/models.md#ltx-に必要なもの)をご覧ください。
 
 </details>

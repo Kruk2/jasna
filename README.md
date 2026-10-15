@@ -60,7 +60,7 @@ and a command line, and runs on your GPU.
   restoration and LTX are NVIDIA only.
 - Disk format: NTFS on Windows; ext4, Btrfs or XFS on Linux. Network disks
   are not supported.
-- LTX needs more (RTX GPU, 16 GB VRAM is best, 32 GB RAM). See
+- LTX needs an NVIDIA RTX GPU, at least 8 GB VRAM and 16 GB RAM. See
   [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 </details>
