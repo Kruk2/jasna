@@ -104,7 +104,7 @@ Supporters get a License code for the supporter models:
 | **$15 USD** or more in total | **UNet 4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
 | **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA only. Includes future updates of this LTX model. |
 
-Supporters who gave **$15 USD or more before [TBD]** get LTX for free.
+Supporters who gave **$15 USD or more before 14 October 2026** get LTX for free.
 
 **Before you choose LTX:**
 
