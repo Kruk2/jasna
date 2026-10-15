@@ -286,8 +286,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | オプション | 説明 |
 | ------ | ----- |
 | `--machine-key` | マシンキーを表示して終了します。GPU や GUI の起動は不要です。 |
-| `--license-code CODE` | GPU の準備前に、公式販売者からのライセンスコードでオンラインで有効化します。処理オプションがなければ有効化して終了します。 |
-| `--cloud-workspace` | `--machine-key` または `--license-code` と併用し、クラウドの識別情報を作成または再利用します。対応するコンテナー内で実行する Linux 公式版の CLI 専用で、販売者によるクラウド利用許可が必要です。 |
+| `--license-code CODE` | GPU の準備前に、ライセンスコードでオンラインで有効化します。処理オプションがなければ有効化して終了します。 |
+| `--cloud-workspace` | `--machine-key` または `--license-code` と併用し、クラウドの識別情報を作成または再利用します。対応するコンテナー内で実行する Linux 公式版の CLI 専用で、ライセンスコードのクラウド利用許可が必要です。 |
 | `--activation-key KEY` | このマシンのアクティベーションキーを保存します。処理オプションがなければ有効化して終了します。 |
 
 オンラインでの有効化:
@@ -320,7 +320,7 @@ jasna --activation-key "YOUR_ACTIVATION_KEY"
   RunPod の `/workspace` は使わないでください。非公開のファイル権限が無視されます。
   詳しい手順: [クラウド GPU](cloud.md)。
 - 台数の枠、プライバシー、有効化に失敗したときの対処:
-  [有料モデルの有効化](gui.md#有料モデルの有効化)。
+  [支援者向けモデルの有効化](gui.md#支援者向けモデルの有効化)。
 
 ## ベンチマーク
 

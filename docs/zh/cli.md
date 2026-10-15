@@ -271,8 +271,8 @@ jasna --input folder_in --output folder_out --post-export-video-command "ffmpeg 
 | 选项 | 说明 |
 | ------ | ----- |
 | `--machine-key` | 显示机器密钥后退出，无需启动 GPU 或 GUI。 |
-| `--license-code CODE` | 在 GPU 初始化之前，使用官方卖家的许可证码在线激活。未指定处理选项时，激活后退出。 |
-| `--cloud-workspace` | 与 `--machine-key` 或 `--license-code` 一起使用，创建或复用云身份。仅限受支持的容器内的 Linux 官方版 CLI，且须由卖家开通云权限。 |
+| `--license-code CODE` | 在 GPU 初始化之前，使用你的许可证码在线激活。未指定处理选项时，激活后退出。 |
+| `--cloud-workspace` | 与 `--machine-key` 或 `--license-code` 一起使用，创建或复用云身份。仅限受支持的容器内的 Linux 官方版 CLI，且许可证码须已开通云权限。 |
 | `--activation-key KEY` | 保存本机的激活密钥。未指定处理选项时，激活后退出。 |
 
 在线激活：
@@ -301,7 +301,7 @@ jasna --activation-key "YOUR_ACTIVATION_KEY"
   ```
 
   不要使用 RunPod 的 `/workspace`，它会忽略私有文件权限。完整步骤：[云 GPU](cloud.md)。
-- 设备名额、隐私，以及激活失败时怎么办：[激活付费模型](gui.md#激活付费模型)。
+- 设备名额、隐私，以及激活失败时怎么办：[激活支持者模型](gui.md#激活支持者模型)。
 
 ## 基准测试
 

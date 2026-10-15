@@ -100,19 +100,19 @@ update.
 - **System stats**: the bottom bar shows GPU, VRAM, RAM and CPU use during
   processing.
 
-## Activate paid models
+## Activate supporter models
 
-Paid models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
+Supporter models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
 the header.
 
-- **Online** (default): enter the **License code** from your seller and click
+- **Online** (default): enter your **License code** and click
   **Activate online**.
 - **Manual**, for a PC without internet or when online fails:
   1. Copy the **Machine key**.
   2. On any device with internet, open the
      [activation page](https://jasna-activation.kruk2.workers.dev) (or click
      **Open activation page**) and enter the Machine key and your License code.
-     You can also send both to your seller.
+     You can also send both to where you got your License code.
   3. Paste the **Activation key** you get back into Jasna and click
      **Activate**.
 
@@ -124,10 +124,10 @@ Good to know:
 - **Activate online** sends only your License code and Machine key. After
   that, Jasna works offline. More in [Cloud GPUs](cloud.md#activation-servers).
 - Key rejected? Check the Machine key and copy the whole Activation key again.
-  Keys made for older Jasna versions need a new key from your seller.
+  Keys made for older Jasna versions need a new key from where you got your License code.
 
-License codes are sold only on
+License codes come only from
 [Buy Me a Coffee](https://buymeacoffee.com/kruk2),
-[Unifans](https://app.unifans.io/c/kruk2) and, for China, the seller in the
-[Chinese README](../../README.zh.md#在闲鱼购买). Prices: see
+[Unifans](https://app.unifans.io/c/kruk2) and, for China, the Xianyu seller in the
+[Chinese README](../../README.zh.md#在闲鱼购买). Support tiers: see
 [Supporting the project](../../README.md#supporting-the-project).

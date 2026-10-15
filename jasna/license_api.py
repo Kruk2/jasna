@@ -19,4 +19,4 @@ def protection_available() -> bool:
 
 def require_protection() -> None:
     if not protection_available():
-        raise ProtectionUnavailableError("Paid models and activation require the official Jasna release.")
+        raise ProtectionUnavailableError("Supporter models and activation require the official Jasna release.")

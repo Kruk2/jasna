@@ -35,9 +35,9 @@ jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 | 速度 | 快 | 慢很多（每分钟视频需要几分钟） |
 | 质量 | 好 | 细节更多，更自然 |
 | GPU | 所有支持的 GPU | 仅 NVIDIA |
-| 费用 | 免费 | 付费（[单独购买](../../README.zh.md#支持本项目)） |
+| 费用 | 免费 | 支持者专享（[支持本项目](../../README.zh.md#支持本项目)） |
 
-把 LTX 用在你最在意的视频或场景上。购买前，先看看
+把 LTX 用在你最在意的视频或场景上。选择之前，先看看
 SLS Discord 频道
 上的示例，并运行**试用模式（速度测试）**，看看你的电脑能不能运行它、需要多长时间。
 在**修复模型**部分选择它，或使用：
@@ -115,7 +115,7 @@ Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特�
 
 仅限 NVIDIA。
 
-- **UNet 4x**（付费）：针对修复任务训练，质量接近 TVAI `iris-2`，比 TVAI 快。见
+- **UNet 4x**（支持者专享）：针对修复任务训练，质量接近 TVAI `iris-2`，比 TVAI 快。见
   SLS Discord 上的示例
   和[支持本项目](../../README.zh.md#支持本项目)。
 - **RTX Super Res**（免费）：非常快，无需安装任何东西。质量尚可。部分视频
@@ -155,7 +155,7 @@ Topaz Video 模型文件夹，如下图。`--tvai-args` 可修改 Topaz 的其�
 jasna --input photo.png --output restored.png
 ```
 
-- 付费。一个许可证码可以同时包含 SD 1.5、UNet 4x 和 LTX。见
+- 支持者专享。一个许可证码可以同时包含 SD 1.5、UNet 4x 和 LTX。见
   [支持本项目](../../README.zh.md#支持本项目)。
 - 不包含在下载包中。大小约 **6.9 GB**。Jasna 会先询问，再从
   [huggingface.co/Kruk2/sd-15-jav](https://huggingface.co/Kruk2/sd-15-jav) 下载。

@@ -1,6 +1,6 @@
-> **The only places to get a genuine License code for the paid models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2), [Unifans](https://app.unifans.io/c/kruk2), and for China the seller in the [Chinese README](README.zh.md#在闲鱼购买).**
+> **The only places to get a genuine License code for the supporter models are [Buy Me a Coffee](https://buymeacoffee.com/kruk2), [Unifans](https://app.unifans.io/c/kruk2), and for China the seller in the [Chinese README](README.zh.md#在闲鱼购买).**
 >
-> **付费模型的正版许可证码只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](README.zh.md#在闲鱼购买) 获取。**
+> **支持者模型的正版许可证码只能通过 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、[Unifans](https://app.unifans.io/c/kruk2) 或 [闲鱼](README.zh.md#在闲鱼购买) 获取。**
 
 [**English**](README.md) | [日本語](README.ja.md) | [中文](README.zh.md)
 
@@ -19,7 +19,7 @@ and a command line, and runs on your GPU.
 - [What you need](#what-you-need)
 - [Quick start](#quick-start)
 - [Help and community](#help-and-community)
-- [Supporting the project](#supporting-the-project) (paid models)
+- [Supporting the project](#supporting-the-project) (supporter models)
 
 **Advanced**
 
@@ -35,10 +35,10 @@ and a command line, and runs on your GPU.
 - Finds mosaics in a video and restores them. The rest of the picture is not
   touched.
 - Two restoration models: fast **BasicVSR++** (free) and slow but more
-  detailed **LTX** (paid, NVIDIA only).
+  detailed **LTX** (for supporters, NVIDIA only).
 - Restores only the parts you choose, with a preview, in the **Segment
   Editor**.
-- Works with VR180 videos and still images (paid SD 1.5 model).
+- Works with VR180 videos and still images (SD 1.5, for supporters).
 - Lets you watch a video restored live in the **Video Player**, without making
   a file.
 
@@ -97,7 +97,7 @@ memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
 ## Supporting the project
 
 Jasna is free. Your support pays for training new models, mostly GPU rental.
-Supporters get a License code for the paid models:
+Supporters get a License code for the supporter models:
 
 | Support | Models |
 | --- | --- |
@@ -106,7 +106,7 @@ Supporters get a License code for the paid models:
 
 Supporters who gave **$15 USD or more before [TBD]** get LTX for free.
 
-**Before you buy LTX:**
+**Before you choose LTX:**
 
 - Look at the samples in the
   SLS Discord channel.
@@ -119,9 +119,9 @@ UNet 4x,
 SD 1.5,
 more SD 1.5.
 
-### Where to buy
+### Where to support
 
-License codes are sold **only** here:
+License codes come **only** from here:
 
 - [Buy Me a Coffee](https://buymeacoffee.com/kruk2) (crypto works too)
 - [Unifans](https://app.unifans.io/c/kruk2)
@@ -133,11 +133,11 @@ GitHub.
 
 ### How to activate
 
-1. Buy on one of the pages above. You get a **License code**.
+1. Support on one of the pages above. You get a **License code**.
 2. In Jasna, open **Activate Jasna**, enter the License code and press
    **Activate online**.
 3. No internet on that PC, or it fails? Choose **Manual**, see
-   [Activate paid models](docs/en/gui.md#activate-paid-models).
+   [Activate supporter models](docs/en/gui.md#activate-supporter-models).
 
 One License code works on **3 PCs or cloud workspaces**. After activation,
 Jasna works offline. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
@@ -207,7 +207,7 @@ jasna --input input_folder --output output_folder
 - [Cloud GPUs](docs/en/cloud.md): Jasna on a rented GPU (RunPod, Vast).
 - [CLI reference](docs/en/cli.md): all command line options.
 - [Running from source](docs/en/development.md): for developers. From source
-  you can use the free BasicVSR++; activation and paid models need the
+  you can use the free BasicVSR++; activation and supporter models need the
   official release.
 
 ### Benchmarks

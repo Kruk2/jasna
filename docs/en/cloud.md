@@ -8,7 +8,7 @@ from GitHub.
 
 ## What you need
 
-- Your seller has to turn on **cloud** for your License code.
+- **Cloud** has to be turned on for your License code. Ask where you got it.
 - A normal container. RunPod and Vast work. A Docker container started with
   `--pid=host` doesn't.
 - An NVIDIA GPU with driver **580 or newer**.
@@ -95,7 +95,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `libGL.so.1: cannot open shared object file` | Run the `apt-get` line from Install. |
 | `Cloud workspace activation requires a supported Linux container` | Use the latest Linux release, a container without `--pid=host`, and config under `/root` on RunPod. |
 | `Failed to open hevc encoder` | This machine's video encoder is broken. Rent another one. |
-| `enable cloud activation` | Ask your seller to turn on cloud. |
+| `enable cloud activation` | Ask where you got your License code to turn on cloud. |
 | `No activation found` or `Cloud workspace identity is missing` | Run the `export` line, then start Jasna again. |
 | `unsafe Jasna launch environment` | Start it with `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` |
 

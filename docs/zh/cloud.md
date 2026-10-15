@@ -6,7 +6,7 @@
 
 ## 需要准备
 
-- 请卖家为你的许可证码打开**云权限**。
+- 请向你获得许可证码的地方申请为它打开**云权限**。
 - 普通容器即可。RunPod 和 Vast 都能用。用 `--pid=host` 启动的 Docker 容器不行。
 - NVIDIA 显卡，驱动 **580 或更新**。
 - 至少 **80 GB** 磁盘。
@@ -85,7 +85,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `libGL.so.1: cannot open shared object file` | 运行安装里的 `apt-get` 那一行。 |
 | `Cloud workspace activation requires a supported Linux container` | 使用最新的 Linux 版和不带 `--pid=host` 的容器。RunPod 上请将设置放在 `/root`。 |
 | `Failed to open hevc encoder` | 这台机器的视频编码器坏了，换一台。 |
-| `enable cloud activation` | 请卖家打开云权限。 |
+| `enable cloud activation` | 请向你获得许可证码的地方申请打开云权限。 |
 | `No activation found` 或 `Cloud workspace identity is missing` | 先运行 `export` 那一行，再重新启动 Jasna。 |
 | `unsafe Jasna launch environment` | 用 `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` 启动。 |
 

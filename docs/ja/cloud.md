@@ -8,7 +8,7 @@ GitHub から最新の Linux 版を入手してください。
 
 ## 必要なもの
 
-- 販売者にライセンスコードの**クラウド利用**をオンにしてもらう。
+- ライセンスコードの入手先に**クラウド利用**をオンにしてもらう。
 - 普通のコンテナー。RunPod と Vast は使えます。`--pid=host` で起動した
   Docker コンテナーは使えません。
 - ドライバー **580 以降**の NVIDIA GPU。
@@ -94,7 +94,7 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 | `libGL.so.1: cannot open shared object file` | インストールの `apt-get` の行を実行する。 |
 | `Cloud workspace activation requires a supported Linux container` | 最新の Linux 版と `--pid=host` のないコンテナーを使う。RunPod では設定を `/root` に置く。 |
 | `Failed to open hevc encoder` | このマシンの動画エンコーダーが壊れています。別のマシンを借りる。 |
-| `enable cloud activation` | 販売者にクラウド利用をオンにしてもらう。 |
+| `enable cloud activation` | ライセンスコードの入手先にクラウド利用をオンにしてもらう。 |
 | `No activation found` または `Cloud workspace identity is missing` | `export` の行を実行してから Jasna を起動し直す。 |
 | `unsafe Jasna launch environment` | `env -u PYTHONPATH -u PYTHONHOME -u LD_PRELOAD ./jasna ...` で起動する。 |
 
