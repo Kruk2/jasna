@@ -1,8 +1,9 @@
 # 云 GPU（RunPod、Vast、Docker）
 
+> 云许可证目前暂不出售，以后会开放。
+
 租用的 GPU 也能运行 Jasna。用 Linux NVIDIA 官方版，在受支持容器的命令行里运行。
 云激活仅限 CLI，Windows 和 GitHub 源码版不支持。
-较早的 0.11.0 构建可能会拒绝 RunPod 激活，请使用 GitHub 上最新的 Linux 版。
 
 ## 需要准备
 
@@ -17,17 +18,17 @@
 
 ## 安装
 
-把下面几行粘贴到租来机器的终端里。用的是更新的 Jasna 的话，把 `0.11.0`
+把下面几行粘贴到租来机器的终端里。用的是更新的 Jasna 的话，把 `0.11.1`
 改成你的版本。
 
 ```bash
 apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
+for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.1/jasna-linux-nvidia-0.11.1.tar.zst.part$part; done
 
-cat jasna-linux-nvidia-0.11.0.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
-cd jasna-linux-nvidia-0.11.0
+cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
+cd jasna-linux-nvidia-0.11.1
 ```
 
 像上面这样解压到 `/root`。放在 `/workspace` 或网络盘里 Jasna 启动不了。
@@ -92,11 +93,3 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 看到 `Bit depth 10 ... not supported` 没关系，只是这个视频读得慢一点。
 
 别把 `jasna-config` 文件夹给别人。谁拿到它都能用你的激活。
-
-## 激活服务器
-
-在线激活只通过 HTTPS 发送许可证码和机器密钥。Jasna 只保存激活密钥，不保存许可证码。
-之后 Jasna 离线检查激活，不会再联系服务器。
-
-如果连不上主服务器，Jasna 会尝试香港服务器（`47.238.135.110`）。语言为中文时会先尝试
-香港。两者共用同样的 3 个名额。无法保证一定能访问，例如在中国大陆。

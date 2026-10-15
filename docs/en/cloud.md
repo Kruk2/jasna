@@ -1,10 +1,10 @@
 # Cloud GPUs (RunPod, Vast, Docker)
 
+> Cloud licenses are not sold right now. This will change in the future.
+
 You can run Jasna on a rented GPU. Use the Linux NVIDIA version from the
 command line inside a supported container. Cloud activation is CLI-only in the
 official Linux release; Windows and GitHub source checkouts do not support it.
-Older 0.11.0 builds may reject RunPod activation; use the latest Linux release
-from GitHub.
 
 ## What you need
 
@@ -21,16 +21,16 @@ from GitHub.
 ## Install
 
 Paste these lines into the terminal of your rented machine. If you use a
-newer Jasna, change `0.11.0` to your version.
+newer Jasna, change `0.11.1` to your version.
 
 ```bash
 apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
+for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.1/jasna-linux-nvidia-0.11.1.tar.zst.part$part; done
 
-cat jasna-linux-nvidia-0.11.0.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
-cd jasna-linux-nvidia-0.11.0
+cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
+cd jasna-linux-nvidia-0.11.1
 ```
 
 Unpack in `/root` like above. Jasna won't start from `/workspace` or a
@@ -104,13 +104,3 @@ slower, that's all.
 
 Don't share your `jasna-config` folder. Anyone who has it can use your
 activation.
-
-## Activation servers
-
-Online activation sends only your License code and Machine key, over HTTPS.
-Jasna saves only the Activation key, not your License code. After that, it
-checks activation offline and doesn't contact the server again.
-
-If the main server can't be reached, Jasna tries a server in Hong Kong
-(`47.238.135.110`). With Chinese language it tries Hong Kong first. Both use
-the same 3 slots. Access is not guaranteed, for example in mainland China.

@@ -1,10 +1,10 @@
 # クラウド GPU (RunPod、Vast、Docker)
 
+> クラウドライセンスは現在販売していません。今後、販売する予定です。
+
 レンタルした GPU でも Jasna を使えます。Linux NVIDIA 版をコマンドラインで
 対応するコンテナー内で使います。クラウド有効化は Linux 公式版の CLI 専用で、
 Windows と GitHub のソース版には対応していません。
-以前の 0.11.0 ビルドでは RunPod の有効化が拒否されることがあります。
-GitHub から最新の Linux 版を入手してください。
 
 ## 必要なもの
 
@@ -21,16 +21,16 @@ GitHub から最新の Linux 版を入手してください。
 ## インストール
 
 借りたマシンのターミナルに次の行を貼り付けます。新しい Jasna を使う場合は
-`0.11.0` をそのバージョンに変えてください。
+`0.11.1` をそのバージョンに変えてください。
 
 ```bash
 apt-get update && apt-get install -y zstd wget libgl1 libglib2.0-0
 
 cd /root
-for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.0/jasna-linux-nvidia-0.11.0.tar.zst.part$part; done
+for part in 000 001 002 003; do wget https://github.com/Kruk2/jasna/releases/download/v0.11.1/jasna-linux-nvidia-0.11.1.tar.zst.part$part; done
 
-cat jasna-linux-nvidia-0.11.0.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
-cd jasna-linux-nvidia-0.11.0
+cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
+cd jasna-linux-nvidia-0.11.1
 ```
 
 上のとおり `/root` に展開してください。`/workspace` やネットワークドライブ
@@ -103,13 +103,3 @@ scp -P PORT root@HOST:/root/video-restored.mp4 .
 
 `jasna-config` フォルダーは人に渡さないでください。持っている人は誰でも
 あなたの有効化を使えてしまいます。
-
-## 有効化サーバー
-
-オンライン有効化で送るのは、ライセンスコードとマシンキーだけです（HTTPS）。
-Jasna が保存するのはアクティベーションキーだけで、ライセンスコードは保存
-しません。その後はオフラインで確認し、サーバーには接続しません。
-
-メインのサーバーに接続できない場合、Jasna は香港のサーバー
-（`47.238.135.110`）を試します。言語が中国語の場合は香港を先に試します。
-どちらも同じ 3 枠を使います。中国本土などでは、接続は保証されません。

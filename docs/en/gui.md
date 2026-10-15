@@ -122,7 +122,7 @@ Good to know:
   PC again does not use a new slot. Only the owner can free a slot.
 - An Activation key covers only the models you bought.
 - **Activate online** sends only your License code and Machine key. After
-  that, Jasna works offline. More in [Cloud GPUs](cloud.md#activation-servers).
+  that, Jasna works offline.
 - Key rejected? Check the Machine key and copy the whole Activation key again.
   Keys made for older Jasna versions need a new key from where you got your License code.
 
