@@ -117,23 +117,52 @@ _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(768, 0.25, None, None)
 _detection_resolution: int | None = None
 _DETECTION_RESOLUTION_MIN = 160
 _DETECTION_RESOLUTION_MAX = 2048
+#: rfdetr requires resolution % (patch_size * num_windows) == 0 (rfdetr.detr),
+#: and the block size differs per variant. Every variant this registry maps is a
+#: DINOv2-Seg family (RFDETRSeg*: patch 12, 2 windows -> block 24) except
+#: RFDETRSegNano (patch 12, 1 window -> block 12). All of them accept 480/576/720
+#: and reject 640; only the non-Seg Large/Nano/Small families are patch 16/14.
+#: Kept in step with the installed rfdetr rather than hardcoded per model name.
+_TORCH_VARIANT_BLOCK_SIZE: dict[str, int] = {
+    "nano": 12, "small": 24, "medium": 24, "large": 24, "xlarge": 24,
+    "2xlarge": 24,
+}
 
 
-def set_detection_resolution(resolution: int | None) -> None:
-    """Pin the RF-DETR input size for this process (None restores the registry)."""
-    global _detection_resolution
-    if resolution is None:
-        _detection_resolution = None
-        return
+def _detection_resolution_block_size(model_name: str) -> int:
+    """The divisibility block for one detection model's torch variant (default 32)."""
+    config = rfdetr_model_config(model_name)
+    variant = config.torch_variant
+    if variant is None:
+        return 32
+    return _TORCH_VARIANT_BLOCK_SIZE.get(variant, 24)
+
+
+def validate_detection_resolution(resolution: int, model_name: str | None = None) -> int:
+    """Validate one input size against the divisibility rfdetr itself enforces."""
     value = int(resolution)
     if not _DETECTION_RESOLUTION_MIN <= value <= _DETECTION_RESOLUTION_MAX:
         raise ValueError(
             f"detection resolution must be between {_DETECTION_RESOLUTION_MIN} and "
             f"{_DETECTION_RESOLUTION_MAX}, got {value}"
         )
-    if value % 32:
-        raise ValueError(f"detection resolution must be a multiple of 32, got {value}")
-    _detection_resolution = value
+    block = _detection_resolution_block_size(model_name or DEFAULT_DETECTION_MODEL_NAME)
+    if value % block:
+        raise ValueError(
+            f"detection resolution {value} is not a multiple of {block} for this "
+            f"model (rfdetr requires resolution % (patch_size * num_windows) == 0; "
+            f"every bundled model needs a multiple of {block})"
+        )
+    return value
+
+
+def set_detection_resolution(resolution: int | None, model_name: str | None = None) -> None:
+    """Pin the RF-DETR input size for this process (None restores the registry)."""
+    global _detection_resolution
+    if resolution is None:
+        _detection_resolution = None
+        return
+    _detection_resolution = validate_detection_resolution(resolution, model_name)
 
 
 def get_detection_resolution_override() -> int | None:

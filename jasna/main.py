@@ -544,7 +544,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "RF-DETR input size in pixels, overriding the model's own default. rfdetr-v6 ships at "
             "480 (14.2 ms/frame on an RX 7900 XT versus 18.8 at its native 576, recall-neutral on "
-            "our clips); raise it only for footage whose mosaics the default misses. Multiple of 32."
+            "our clips); raise it only for footage whose mosaics the default misses. Must be a "
+            "multiple of the model's patch block: 24 for rfdetr-v6 (720 works, 640 does not), "
+            "32 for rfdetr-v6-large and rfdetr-vr-v1 (768 works, 720 does not)."
         ),
     )
     detection.add_argument(
@@ -1187,7 +1189,12 @@ def main() -> None:
 
     resolution_arg = getattr(args, "detection_resolution", None)
     if resolution_arg:
-        set_detection_resolution(int(resolution_arg))
+        # the divisibility block is per model (Seg family 24, Large family 32),
+        # so validate against the requested detection model
+        set_detection_resolution(
+            int(resolution_arg),
+            coerce_detection_model_name(str(args.detection_model)),
+        )
 
     decode_backend_arg = getattr(args, "decode_backend", None)
     if decode_backend_arg:

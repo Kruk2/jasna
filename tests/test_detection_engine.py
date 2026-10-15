@@ -242,3 +242,18 @@ def test_detection_resolution_rejects_bad_values():
         with pytest.raises(ValueError):
             registry.set_detection_resolution(bad)
     registry.set_detection_resolution(None)
+
+
+def test_detection_resolution_divisibility_follows_rfdetr():
+    """rfdetr rejects resolution % (patch_size * num_windows) != 0; block 24 for
+    every bundled Seg variant, so 640 works for neither and 720 for both
+    (measured by an 8K VR tester on vr-v1: 768->30.7 ms, 720->25.6 ms with no
+    recall loss, 576 lost 18% of boxes)."""
+    for model in ("rfdetr-v6", "rfdetr-vr-v1"):
+        for bad in (640, 500):
+            with pytest.raises(ValueError):
+                registry.set_detection_resolution(bad, model)
+        registry.set_detection_resolution(720, model)
+        assert registry.rfdetr_model_config(model).resolution == 720
+    registry.set_detection_resolution(None)
+    assert registry.rfdetr_model_config("rfdetr-vr-v1").resolution == 768
