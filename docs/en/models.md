@@ -74,10 +74,30 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | Best, on top of Standard | about 13 GB more |
 
   If Hugging Face can't be reached (for example in China), Jasna uses
-  hf-mirror.com automatically.
+  hf-mirror.com automatically. Download still fails? See
+  [Downloading LTX yourself](#downloading-ltx-yourself).
 
 LTX does not work with VR180 side-by-side videos or streaming. Secondary
 restoration and denoising are turned off with LTX.
+
+### Downloading LTX yourself
+
+If the download in Jasna keeps failing, get the files in your browser from
+[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main)
+(or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main)).
+You need 3 files: one for the model you picked, plus the two VAE files.
+
+| You picked | Files |
+| --- | --- |
+| Standard | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
+| Fast mode | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
+| Best | `ltx-restore-alpha1-int8.safetensors.enc` |
+| Best + Fast mode | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
+| Always | `vae.safetensors.enc` and `vae-decoder.safetensors.enc` |
+
+Put all 3 in `model_weights/ltx-restore` inside your Jasna folder (create the
+`ltx-restore` folder if it is missing). Keep the file names exactly as they are,
+including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
 ### LTX options
 

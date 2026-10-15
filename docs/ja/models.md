@@ -72,10 +72,31 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | 高画質（標準に追加） | さらに約 13 GB |
 
   Hugging Face に接続できない場合（中国など）は、自動で hf-mirror.com を
-  使います。
+  使います。それでも失敗する場合は
+  [LTX を手動でダウンロードする](#ltx-を手動でダウンロードする)を見てください。
 
 LTX は VR180 サイドバイサイド動画とストリーミングでは使えません。LTX では
 二次復元とノイズ除去はオフになります。
+
+### LTX を手動でダウンロードする
+
+Jasna でのダウンロードが何度も失敗する場合は、ブラウザで
+[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main)
+（または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main)）から
+ファイルを取得してください。必要なのは 3 ファイルです：選んだモデルのファイル 1 つと、
+VAE の 2 ファイル。
+
+| 選んだモデル | ファイル |
+| --- | --- |
+| 標準 | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
+| 高速モード | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
+| 高画質 | `ltx-restore-alpha1-int8.safetensors.enc` |
+| 高画質 + 高速モード | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
+| 常に必要 | `vae.safetensors.enc` と `vae-decoder.safetensors.enc` |
+
+3 つとも Jasna フォルダー内の `model_weights/ltx-restore` に置きます（`ltx-restore`
+フォルダーがなければ作成）。ファイル名は `.enc` を含めてそのままにしてください。
+LTX のジョブをもう一度始めると、ダウンロードの確認は出ません。
 
 ### LTX のオプション
 

@@ -66,8 +66,28 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   | 最佳，在标准之外 | 再加约 13 GB |
 
   如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
+  仍然下载失败？见[手动下载 LTX](#手动下载-ltx)。
 
 LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。
+
+### 手动下载 LTX
+
+如果在 Jasna 里下载一直失败，可以用浏览器从
+[hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main)
+（或 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main)）
+下载。需要 3 个文件：你所选模型的文件 1 个，加上 2 个 VAE 文件。
+
+| 你选的模型 | 文件 |
+| --- | --- |
+| 标准 | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
+| 快速模式 | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
+| 最佳 | `ltx-restore-alpha1-int8.safetensors.enc` |
+| 最佳 + 快速模式 | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
+| 都需要 | `vae.safetensors.enc` 和 `vae-decoder.safetensors.enc` |
+
+把这 3 个文件都放到 Jasna 文件夹里的 `model_weights/ltx-restore`（没有
+`ltx-restore` 文件夹就新建一个）。文件名保持原样，包括 `.enc`。重新开始 LTX
+任务，Jasna 就不会再要求下载。
 
 ### LTX 选项
 
