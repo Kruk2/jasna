@@ -9,6 +9,7 @@ ROCM_DEFAULTS = {
     "MIOPEN_FIND_MODE": "HYBRID",
     "PYTORCH_ALLOC_CONF": "expandable_segments:False",
     "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:False",
+    "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": "1",
 }
 
 
