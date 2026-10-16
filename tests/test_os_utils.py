@@ -730,6 +730,7 @@ def _sysfs_disk(root, name: str, rotational: str):
     return disk, partition
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="sysfs device names like 8:1 are not valid Windows file names")
 def test_partition_on_a_spinning_disk_reports_its_disk_as_rotational(tmp_path) -> None:
     _hdd, hdd_partition = _sysfs_disk(tmp_path, "sda", "1")
     ssd, _ssd_partition = _sysfs_disk(tmp_path, "nvme0n1", "0")
