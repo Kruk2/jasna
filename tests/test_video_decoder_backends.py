@@ -108,8 +108,26 @@ def test_forced_vali_backend_requires_nvidia(monkeypatch) -> None:
         reader.__enter__()
 
 
-def test_auto_backend_skips_vali_on_amd(monkeypatch) -> None:
+def test_auto_backend_uses_software_decode_on_amd(monkeypatch) -> None:
+    # Measured 2026-10-11 (RX 7900 XT): AMF is ~1.95x slower than FFmpeg
+    # software decode for H.264, so "auto" must not build the AMF decoder.
     monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
+    vali_factory = MagicMock()
+    monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
+    container = _fake_container(False)
+    monkeypatch.setattr(module.av, "open", MagicMock(return_value=container))
+    reader = _reader(monkeypatch, AcceleratorVendor.AMD)
+    amf_setup = MagicMock()
+    monkeypatch.setattr(reader, "_setup_amf_decoder", amf_setup)
+    reader.__enter__()
+    vali_factory.assert_not_called()
+    amf_setup.assert_not_called()
+    assert module.av.open.call_args.kwargs == {}
+    assert container.streams.video[0].codec_context.thread_type == "AUTO"
+
+
+def test_pyav_hw_backend_selects_amf_on_amd(monkeypatch) -> None:
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "pyav-hw")
     vali_factory = MagicMock()
     monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
     monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(False)))
@@ -337,3 +355,22 @@ def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
     source = _vali_source(batch_size=2, frame_stride=2)
     batches = list(source.frames(2.0))
     assert [pts for _batch, pts in batches] == [[30720, 31744]]
+
+
+def test_set_decode_backend_overrides_env(monkeypatch):
+    from jasna.media import video_decoder as vd
+
+    monkeypatch.setenv(vd.DECODE_BACKEND_ENV, "pyav-sw")
+    vd.set_decode_backend(None)
+    assert vd._decode_backend() == "pyav-sw"
+
+    # the CLI pin wins over the environment
+    vd.set_decode_backend("pyav-hw")
+    assert vd._decode_backend() == "pyav-hw"
+
+    with pytest.raises(ValueError):
+        vd.set_decode_backend("nope")
+
+    # None restores env/auto for the next test in this process
+    vd.set_decode_backend(None)
+    assert vd._decode_backend() == "pyav-sw"

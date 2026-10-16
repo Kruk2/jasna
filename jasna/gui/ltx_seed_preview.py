@@ -27,6 +27,7 @@ from jasna.gui.video_session import build_video_session, release_session_memory,
 from jasna.media.probe import VideoMetadata
 from jasna.media.splice import KeyframeIndex, segment_render_span
 from jasna.segments import SegmentRange, SegmentRestoration
+from jasna.accelerator import preferred_device
 
 DECODE_HEADROOM_BYTES = 2 << 30
 JPEG_QUALITY = 95

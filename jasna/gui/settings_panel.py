@@ -301,6 +301,14 @@ class SettingsPanel(ctk.CTkFrame):
             self._saved_preset_settings.encoder_cq = int(
                 self._widgets["encoder_cq"].get()
             )
+        if (
+            self._saved_preset_settings.amd_upscale_engine != "amf-sr"
+            and self._saved_preset_settings.amd_upscale_sharpness < 0.0
+        ):
+            # The -1 sentinel is amf-sr's "driver default"; the network engines
+            # display any negative as 0 (see SecondarySection._refresh_amd_rows),
+            # so the snapshot must follow or modification tracking always trips.
+            self._saved_preset_settings.amd_upscale_sharpness = 0.0
         self._sync_temporal_filter_limits(int(self._widgets["max_clip_size"].get()))
 
         self._applying_preset = False  # Re-enable modification tracking
@@ -379,10 +387,7 @@ class SettingsPanel(ctk.CTkFrame):
         values: dict = {}
         for section in self._sections:
             values.update(section.collect())
-        return AppSettings(
-            batch_size=4,  # Fixed default value
-            **values,
-        )
+        return AppSettings(**values)
 
     def set_enabled(self, enabled: bool):
         """Enable or disable the settings; the queue-wide post-export action stays editable while processing."""
@@ -405,3 +410,4 @@ class SettingsPanel(ctk.CTkFrame):
                 logger.debug("Widget %r does not support state=%s", key, state, exc_info=True)
         self._model_section.set_enabled(enabled)
         self._secondary_section.set_enabled(enabled)
+

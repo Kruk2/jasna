@@ -53,6 +53,7 @@ class TestPipelineInit:
         with p._ltx_progress(10, cb).bar("scan", 10) as bar:
             bar.update(10)
         assert cb.call_args[0] == (pytest.approx(2.0), 0.0, 0.0, 0, 0, StageProgress("scan", 1, 4, 1.0, 0.0))
+        assert cb.call_args[0] == (pytest.approx(2.0), 0.0, 0.0, 0, 0, "scan")
 
     def test_retarget_high_fps_defaults_off_and_can_be_enabled(self):
         assert _make_pipeline().retarget_high_fps is False

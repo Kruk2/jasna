@@ -16,6 +16,12 @@ from jasna.segments import SegmentRange, SegmentRestoration
 
 def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = tmp_path / "input.mp4"
@@ -99,6 +105,12 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
 
 def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = tmp_path / "input.mp4"
@@ -147,6 +159,12 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
 
 def test_amf_h264_full_reencode_preserves_selected_ranges(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = tmp_path / "input.mp4"
@@ -205,6 +223,12 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
     vendor, max_b_frames
 ) -> None:
     pipeline = object.__new__(Pipeline)
+
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = Path("input.mp4")
@@ -237,6 +261,12 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
 
 def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
     pipeline = object.__new__(Pipeline)
+
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = "basicvsrpp"
     pipeline.ltx_seed = 0
     pipeline.input_video = Path("input.mp4")
@@ -259,6 +289,12 @@ def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
 
 def _mixed_pipeline(tmp_path, default_model: str, segments: tuple[SegmentRange, ...], spans) -> Pipeline:
     pipeline = object.__new__(Pipeline)
+
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = default_model
     pipeline.ltx_seed = 5
     pipeline.input_video = tmp_path / "input.mp4"
@@ -335,7 +371,7 @@ def test_mixed_job_restores_basicvsrpp_spans_before_the_ltx_spans(tmp_path) -> N
 
     concatenate = _run_smart_mocked(pipeline)
 
-    assert [call[0] for call in order.mock_calls] == ["basicvsrpp", "ltx"]
+    assert [call[0] for call in order.mock_calls] == ["ltx", "basicvsrpp"]
     fragments = concatenate.call_args.args[0]
     assert [path.name for path, _ in fragments] == ["0000.ts", "0001.ts", "0002.ts", "0003.ts"]
 
@@ -370,6 +406,35 @@ def test_mixed_job_reports_time_left_from_the_ltx_estimate_until_ltx_reports_its
     assert pipeline.progress_callback.call_args.args[2] == pytest.approx(120.0)
 
 
+def test_mixed_job_reports_one_bar_weighted_by_estimated_work(tmp_path) -> None:
+    ltx = SegmentRestoration("ltx", 42)
+    segments = (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, ltx))
+    spans = (
+        SpliceSpan("copy", 0, 60),
+        SpliceSpan("render", 60, 120, ((75, 90),)),
+        SpliceSpan("copy", 120, 180),
+        SpliceSpan("render", 180, 240, ((195, 210),)),
+    )
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
+    pipeline.progress_callback = MagicMock()
+    pipeline.ltx_files = MagicMock(transformer_name="t")
+
+    with (
+        patch("jasna.ltx.speed.segment_estimate_seconds", return_value=900.0),
+        patch("torch.cuda.get_device_name", return_value="Test GPU"),
+    ):
+        _run_smart_mocked(pipeline)
+
+    # Both modes report through the single job bar, not the raw callback.
+    standard_callback = pipeline._run_pass.call_args.kwargs["progress"].callback
+    (*_, ltx_callback), _ = pipeline._run_ltx_spans.call_args
+    assert standard_callback is not pipeline.progress_callback
+    assert ltx_callback is not pipeline.progress_callback
+    # The LTX estimate (900s) is weighted into the remaining time the standard
+    # pass reports, so the one bar accounts for the work still ahead of it.
+    standard_callback(50.0, 30.0, 10.0, 30, 60, None)
+    assert pipeline.progress_callback.call_args.args[2] == pytest.approx(910.0)
+
 def test_segments_on_the_job_model_follow_an_ltx_job(tmp_path) -> None:
     segments = (SegmentRange(2.5, 3.0),)
     spans = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
@@ -401,6 +466,12 @@ def test_a_render_span_resolving_to_two_models_is_rejected(tmp_path) -> None:
 )
 def test_run_routes_by_the_job_model_and_segments(model, segments, expected) -> None:
     pipeline = object.__new__(Pipeline)
+
+    # Resume/checkpoint state (smart-run keeps finished fragments next to the
+    # output): these hand-built instances must carry the attributes `_run_smart`
+    # reads, the same way `Pipeline.__init__` sets them.
+    pipeline.resume_enabled = False
+    pipeline.resume_dir_override = None
     pipeline.restoration_model_name = model
     pipeline.segments = segments
     pipeline.input_video = Path("input.mp4")

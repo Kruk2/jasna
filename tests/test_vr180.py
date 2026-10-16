@@ -169,6 +169,21 @@ def test_resolve_projection_routes_confident_studios(code: str, kind: str) -> No
     assert resolve_projection(Path(f"{code.lower()}00123-4.mp4")) == kind
 
 
+@pytest.mark.parametrize(
+    "code",
+    ["CCVR", "DSVR", "JPSVR", "KBVR", "KMVR", "MAXVR"],
+)
+def test_new_fisheye_studios_do_not_match_longer_studio_codes(code: str) -> None:
+    assert resolve_projection(Path(f"{code}-001.mp4")) == "fisheye"
+    auto = resolve_vr_mode("auto", _metadata(), Path(f"{code}-001.mp4"))
+    assert auto.resolved == "sbs"
+    assert auto.projection == "fisheye"
+    assert auto.reason == f"routed VR studio {code}"
+
+    longer_code = "BIKMVR" if code == "KMVR" else f"3{code}"
+    assert resolve_projection(Path(f"{longer_code}-001.mp4")) == "raw"
+
+
 def test_resolve_projection_falls_back_to_raw_for_unknown_studio() -> None:
     assert resolve_projection(Path("unknownvr-001.mp4")) == "raw"
     # Direct-SBS token with no routing entry stays raw (its studio prior).

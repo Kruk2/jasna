@@ -6,6 +6,7 @@ import urllib.error
 from unittest.mock import Mock
 
 import certifi
+
 import pytest
 import torch
 from safetensors.torch import save_file
@@ -32,6 +33,7 @@ def test_model_check_precedes_engine_compilation(tmp_path, monkeypatch):
     compile_engines = Mock()
     monkeypatch.setattr(accelerator, "is_nvidia_device", lambda device: True)
     monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: None)
+
     monkeypatch.setattr(engine_compiler, "ensure_engines_compiled", compile_engines)
     monkeypatch.setattr(LtxModelFiles, "from_dir", Mock(side_effect=ValueError("model unavailable")))
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
@@ -56,6 +58,13 @@ def test_installed_checks_the_chosen_model_only(tmp_path):
     assert [f.name for f in model_files.missing_downloads(tmp_path, "distilled", fast=True)] == [
         "ltx-restore-alpha1-distill8-nvfp4.safetensors.enc"
     ]
+
+
+
+def test_download_refuses_without_a_published_location(tmp_path, monkeypatch):
+    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", None)
+    with pytest.raises(RuntimeError, match="not published"):
+        model_files.download_files(tmp_path, model_files.missing_downloads(tmp_path, "distilled", fast=False), None, mirror_first=False)
 
 
 def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):
@@ -191,3 +200,4 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch):
 
     assert "ltx-restore-alpha1-distill8-nvfp4" in asked[0] and "int8" not in asked[0]
     assert "9.2 GB" in asked[0]
+

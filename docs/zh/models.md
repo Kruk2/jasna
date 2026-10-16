@@ -146,6 +146,30 @@ Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特�
   Windows。请使用 `iris-2` 模型。
 
 使用 LTX 时不会用到。
+AMD GPU 使用 `amd-upscale`，它是 RTX Super Resolution 的 AMD 对应实现；其余
+（`unet-4x`、`tvai`、`rtx-super-res`）仍然只在 NVIDIA 上可用。
+
+- **unet-4x**: 支持者模型。当前测试中比 TVAI 更快，质量相近。它在
+  JAV 领域数据集上训练，视觉效果接近 TVAI `iris-2`。可以查看
+  [SLS Discord 上的示例](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260)。
+  使用支持者密钥解锁 — 见[支持本项目](../../README.zh.md)。
+- **RTX Super Resolution**: 非常快、免费、没有额外依赖。质量尚可。
+  部分视频可能会闪烁，请先用短片段测试。
+- **AMD 超分 (`amd-upscale`)**: 在 AMD GPU 上运行，免费、无需额外安装。默认
+  引擎 `amf-sr` 调用 AMD 自家的 **Video SR 1.0/1.1**（AMF 滤镜 `sr_amf`），也就是
+  AMD Software 视频超分所用的同一类模型；在 Windows 上 AMF 通过 **D3D11**
+  初始化（不是 Vulkan）。`--amd-upscale-scale` 决定放大倍数（`2`/`4`/`6`/`8`），
+  `--amd-upscale-algorithm` 可在 `sr1-0`、`sr1-1`（机器学习）与 `bicubic`、`bilinear`、
+  `point`（非机器学习）之间选择，`--amd-upscale-sharpness` 控制额外锐化。
+  另有 `--amd-upscale-engine realesrgan`（Real-ESRGAN RRDBNet 跑在 ROCm/HIP 上，进程内
+  计算，需要 `model_weights/` 里的一份 RRDBNet 权重）。
+  实测（RX 7900 XT，256x256 裁切）: `amf-sr` 2x 约 84 fps、4x 约 55 fps、6x 约 31 fps、
+  8x 约 18 fps；`realesrgan` 引擎约 16.5 fps。6x/8x 仍由 SR 引擎处理（不是退化成普通缩放），
+  由于混合阶段会把修复结果缩回原裁切尺寸，高倍数相当于超采样：边缘更干净、锯齿更少，
+  耗时按比例增加。见 `benchmarks/2026-10-06_amd_secondary_upscale.md`。
+- **TVAI**: 质量优于 RTX Super Resolution，并与 unet-4x 接近，但非常
+  慢。需要 [Topaz Video](https://www.topazlabs.com/topaz-video)，这是
+  付费软件且仅支持 Windows。推荐模型: `iris-2`。
 
 ```bash
 jasna --input input.mp4 --output output.mkv --secondary-restoration unet-4x

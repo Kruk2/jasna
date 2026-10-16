@@ -14,6 +14,7 @@ import torch
 from av.codec.hwaccel import HWAccel
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from conftest import requires_nvidia
 from jasna.media.probe import VideoMetadata
 from jasna.media.video_decoder import VideoReader
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
@@ -224,6 +225,7 @@ def test_seek_into_software_video_lands_at_or_after_target(ffv1_video):
     assert pts[0] == expected_first
 
 
+@requires_nvidia
 def test_software_selection_logged_once(ffv1_video, caplog):
     path, metadata = ffv1_video
     with caplog.at_level(logging.WARNING, logger="jasna.media.video_decoder"):
@@ -253,6 +255,7 @@ def test_h264_444_with_b_frames_falls_back_and_keeps_all_frames(tmp_path):
     assert all_pts == sorted(all_pts)
 
 
+@requires_nvidia
 def test_hardware_input_never_enters_software_path(tmp_path, monkeypatch):
     w, h, n = 128, 96, 24
     frames = [_solid_yuv420p_frame(w, h, 120, 90, 200) for _ in range(n)]

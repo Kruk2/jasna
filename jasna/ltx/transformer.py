@@ -55,6 +55,7 @@ SDPA_PRIORITY = [
     SDPBackend.CUDNN_ATTENTION,
     SDPBackend.FLASH_ATTENTION,
     SDPBackend.EFFICIENT_ATTENTION,
+    SDPBackend.MATH,
 ]
 
 LINEAR_NAMES = tuple(
@@ -276,6 +277,7 @@ def linear(w: Weights, name: str, x: torch.Tensor | QuantizedRows | Fp4Activatio
             w[f"{name}.weight_scale_2"], bias, torch.bfloat16,
         )[None]
     weight = w.get(f"{name}.weight")
+    weight = w.get(f"{name}.weight")
     if weight is None:
         return int8_linear(x, w[f"{name}.qdata"], w[f"{name}.scales"], bias)
     if weight.dtype == torch.uint8:
@@ -388,6 +390,25 @@ def require_kernels(device: torch.device) -> None:
         raise RuntimeError("LTX can't run on this GPU: comfy-kitchen's INT8 attention did not load.")
 
 
+_sage_attention = None
+
+
+def enable_sage_attention() -> bool:
+    """Route video self-attention through SageAttention 2 (an opaque op, so it compiles as
+    one call) when it is installed. Returns whether it is in use."""
+    global _sage_attention
+    if _sage_attention is None and importlib.util.find_spec("sageattention") is not None:
+        from sageattention import sageattn
+
+        @torch.library.custom_op("jasna::sage_attention", mutates_args=())
+        def sage_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+            return sageattn(q, k, v, tensor_layout="HND", is_causal=False).contiguous()
+
+        sage_attention.register_fake(lambda q, k, v: torch.empty_like(q, memory_format=torch.contiguous_format))
+        _sage_attention = sage_attention
+    return _sage_attention is not None
+
+
 _int8_attention = None
 
 
@@ -407,7 +428,10 @@ def enable_int8_attention() -> None:
 
 
 def self_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
-    """Video self-attention ``[1, heads, tokens, d]``: INT8 attention once enabled."""
+    """Video self-attention ``[1, heads, tokens, d]``: SageAttention 2, then INT8 attention,
+    once enabled."""
+    if _sage_attention is not None and q.is_cuda:
+        return _sage_attention(q, k, v)
     if _int8_attention is not None and q.is_cuda:
         return _int8_attention(q, k, v)
     with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
@@ -529,6 +553,39 @@ def _modulate(x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor) -> torc
 
 def _gate(x: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
     return (x.unflatten(1, (2, -1)) * gate[:, :, None]).flatten(1, 2)
+
+
+def _attention(
+    w: Weights,
+    prefix: str,
+    x: torch.Tensor,
+    context: torch.Tensor,
+    rope: Rope | None,
+    heads: int,
+    *,
+    skip: bool,
+) -> torch.Tensor:
+    v = linear(w, f"{prefix}.to_v", context)
+    if skip:
+        out = v
+    else:
+        q = rms_norm(linear(w, f"{prefix}.to_q", x), w[f"{prefix}.q_norm.weight"])
+        k = rms_norm(linear(w, f"{prefix}.to_k", context), w[f"{prefix}.k_norm.weight"])
+        if rope is not None:
+            q, k = _apply_rope(q, rope, heads), _apply_rope(k, rope, heads)
+        else:
+            q = q.unflatten(-1, (heads, -1)).transpose(1, 2)
+            k = k.unflatten(-1, (heads, -1)).transpose(1, 2)
+        v_heads = v.unflatten(-1, (heads, -1)).transpose(1, 2)
+        if rope is not None:
+            out = self_attention(q, k, v_heads)
+        else:
+            with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
+                out = F.scaled_dot_product_attention(q, k, v_heads)
+        out = out.transpose(1, 2).flatten(2)
+    gates = 2.0 * torch.sigmoid(linear(w, f"{prefix}.to_gate_logits", x))
+    out = (out.unflatten(-1, (heads, -1)) * gates.unsqueeze(-1)).flatten(2)
+    return linear(w, f"{prefix}.to_out.0", out)
 
 
 def _heads(x: torch.Tensor, heads: int) -> torch.Tensor:

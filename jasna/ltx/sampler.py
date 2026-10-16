@@ -19,7 +19,6 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
-from jasna.ltx import native
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderHandle, open_tensors
@@ -101,6 +100,8 @@ def _block_functions(
     """(block forward, prompt key/value, backend name) for plain-tensor blocks: the native block
     when it can run here, with eager prompt keys/values (once per block and step), else both
     compiled."""
+    from jasna.ltx import native  # imported lazily: pulls in triton, which the AMD build lacks
+
     native_forward = native.load(device, block_specs)
     if native_forward is not None:
         return native_forward, T.prompt_key_value, "native"

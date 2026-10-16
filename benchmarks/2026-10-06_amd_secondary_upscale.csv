@@ -1,0 +1,5 @@
+clip,backend,frames,wall_s,fps,ram_med_mb,ram_peak_mb,vram_med_mb,vram_peak_mb,flags
+crops_348,secondary=none,348,49.9,6.0,,,,,forced-detect;baseline
+crops_348,secondary=amd-upscale/amf-sr/4x,348,49.8,6.0,,,,,forced-detect;gpu-peak-223pct
+crops_348,secondary=amd-upscale/amf-sr/2x,348,45.4,6.6,,,,,forced-detect;gpu-peak-138pct
+crops_348,secondary=amd-upscale/amf-sr/bicubic/4x,348,45.4,6.6,,,,,forced-detect;gpu-peak-144pct

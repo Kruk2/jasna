@@ -48,7 +48,7 @@ from jasna.ltx.plan import (
 )
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
-from jasna.models.ltx_vae import decode_latent
+from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
 from jasna.mosaic.detections import Detections
 from jasna.progressbar import StageProgress
 from jasna.tracking.scene_detector import SceneCutDetector

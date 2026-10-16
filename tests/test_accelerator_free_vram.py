@@ -4,6 +4,7 @@ import sys
 import pytest
 import torch
 
+from conftest import requires_nvidia
 from jasna import accelerator
 
 GIB = 1 << 30
@@ -33,6 +34,7 @@ sys.stdin.read()
 """
 
 
+@requires_nvidia
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 def test_vram_held_by_another_process_is_not_free():
     device = torch.device("cuda:0")

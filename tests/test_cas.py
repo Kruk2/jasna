@@ -4,7 +4,12 @@ import numpy as np
 import pytest
 import torch
 
-from jasna.media.cas import GpuCasSharpener, cas_weight_scale, sharpen_luma
+from jasna.media.cas import (
+    GpuCasSharpener,
+    cas_weight_scale,
+    sharpen_luma,
+    sharpen_rgb_patch,
+)
 
 
 def _sharpen(plane: torch.Tensor, strength: float, depth: int) -> torch.Tensor:
@@ -162,6 +167,32 @@ def test_sharpener_sharpens_the_luma_plane() -> None:
 
     assert packed[4, 4].item() > 200
     assert packed[4, 3].item() < 100
+
+
+def test_rgb_patch_sharpen_is_a_noop_at_or_below_zero() -> None:
+    patch = torch.full((3, 16, 16), 90.0)
+    assert torch.equal(sharpen_rgb_patch(patch, 0.0), patch)
+    assert torch.equal(sharpen_rgb_patch(patch, -1.0), patch)
+
+
+def test_rgb_patch_sharpen_keeps_a_flat_patch_flat() -> None:
+    # The luma is fractional, so this also guards the unfloored path: a plain
+    # floor would drop the whole patch a level.
+    patch = torch.full((3, 24, 24), 120.0)
+    assert torch.equal(sharpen_rgb_patch(patch, 0.4), patch)
+
+
+def test_rgb_patch_sharpen_adds_one_delta_to_every_channel() -> None:
+    patch = torch.zeros(3, 24, 24)
+    patch[:, :, :12] = torch.tensor([60.0, 30.0, 10.0]).view(3, 1, 1)
+    patch[:, :, 12:] = torch.tensor([180.0, 90.0, 40.0]).view(3, 1, 1)
+
+    delta = sharpen_rgb_patch(patch, 0.3) - patch
+
+    assert delta.abs().max().item() > 1e-3, "the coloured edge should actually change"
+    # Same luma delta on all three channels, so hue is untouched.
+    assert torch.allclose(delta[0], delta[1], atol=1e-4)
+    assert torch.allclose(delta[1], delta[2], atol=1e-4)
 
 
 requires_cuda = pytest.mark.skipif(

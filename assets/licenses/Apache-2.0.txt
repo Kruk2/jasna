@@ -199,3 +199,4 @@
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+... (+57 lines) [see remaining: rtk proxy git '-C' '/home/dominik/tools/vali' show '0e5c01ee57222a8ef4f9c7591284c4324bb3fba5:LICENSE' | tail -n +145]

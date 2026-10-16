@@ -12,6 +12,7 @@ from jasna.pipeline_items import PrimaryRestoreResult, SecondaryRestoreResult
 from jasna.restorer.basicvsrpp_mosaic_restorer import BasicvsrppMosaicRestorer
 from jasna.restorer.denoise import DenoiseStep, DenoiseStrength, apply_denoise, apply_denoise_u8
 from jasna.restorer.secondary_restorer import SecondaryRestorer
+from jasna.accelerator import maybe_release_vram_cache
 from jasna.tracking.clip_tracker import TrackedClip
 
 logger = logging.getLogger(__name__)
@@ -25,16 +26,21 @@ class RestorationPipeline:
         secondary_restorer: SecondaryRestorer | None = None,
         denoise_strength: DenoiseStrength = DenoiseStrength.NONE,
         denoise_step: DenoiseStep = DenoiseStep.AFTER_PRIMARY,
+        secondary_sharpen: float = 0.0,
     ) -> None:
         self.restorer = restorer
         self.secondary_restorer = secondary_restorer
         self._denoise_strength = denoise_strength
         self._denoise_step = denoise_step
+        # CAS sharpening for the secondary patch, applied at blend time (where the
+        # restored crop is back at final resolution). 0 disables it.
+        self._secondary_sharpen = max(0.0, float(secondary_sharpen))
         logger.info(
-            "RestorationPipeline: secondary=%s denoise=%s denoise_step=%s",
+            "RestorationPipeline: secondary=%s denoise=%s denoise_step=%s secondary_sharpen=%.2f",
             secondary_restorer.name if secondary_restorer else "none",
             denoise_strength.name,
             denoise_step.name,
+            self._secondary_sharpen,
         )
 
     @property
@@ -87,6 +93,11 @@ class RestorationPipeline:
         keep_end: int,
         crossfade_weights: dict[int, float] | None,
     ) -> PrimaryRestoreResult:
+        # Make room before this clip's big allocations: when the allocator's
+        # reserve creeps toward the VRAM budget, return its cold cache to the
+        # driver so hot pages (resident models, working set) are never demoted
+        # to shared memory by Windows (see jasna.accelerator).
+        maybe_release_vram_cache()
         resized_crops, enlarged_bboxes, crop_shapes, pad_offsets, resize_shapes = self._prepare_from_raw_crops(raw_crops)
         primary_raw = self.restorer.raw_process(resized_crops)
         if self._denoise_step is DenoiseStep.AFTER_PRIMARY:
@@ -139,4 +150,5 @@ class RestorationPipeline:
             pad_offsets=pr.pad_offsets[ks:ke],
             resize_shapes=pr.resize_shapes[ks:ke],
             clip_keep_offset=ks,
+            sharpen_strength=self._secondary_sharpen,
         )

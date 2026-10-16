@@ -23,6 +23,7 @@ from jasna.ltx.plan import (
     plan_video,
     rejoin_across_cover,
     restart_cameras,
+    track_polygons,
     window_starts,
 )
 from jasna.ltx.regions import trace_region
@@ -144,6 +145,14 @@ def test_filled_frames_interpolate_gaps():
     assert xs == pytest.approx([0, 10, 20, 30, 40])
 
 
+def test_track_polygons_interpolate_gaps():
+    track = Track(0, {0: _group(0, 0, 100), 4: _group(40, 0, 100)})
+    polygons = track_polygons(track)
+    assert len(polygons) == 5
+    xs = [p[0][0][0] for p in polygons]
+    assert xs == pytest.approx([0, 10, 20, 30, 40])
+
+
 def test_window_starts_cover_with_hop():
     assert window_starts(1) == [0]
     assert window_starts(121) == [0]
@@ -214,3 +223,4 @@ def test_gap_polygons_map_points_exactly_as_float64_arithmetic():
     scale_y = (box[3] - box[1]) / (source[3] - source[1])
     expected = [[box[0] + (x - source[0]) * scale_x, box[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
     assert mapped.dtype == np.float64 and mapped.tolist() == expected
+

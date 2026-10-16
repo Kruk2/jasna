@@ -206,7 +206,6 @@ class SegmentEditorState:
         """The restoration of the range holding ``seconds``, else the default."""
         segment = self.segment_at(seconds)
         return self.default_restoration if segment is None else segment.restoration
-
     def delete_selected(self) -> bool:
         if self.selected_index is None:
             return False

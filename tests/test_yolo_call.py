@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import pytest
 
+from conftest import requires_nvidia
 from jasna.mosaic.yolo import YoloMosaicDetectionModel, _batched_nms_keep
 
 
@@ -40,6 +41,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
 
 
 class TestYoloInit:
+    @requires_nvidia
     def test_basic_init_trt(self):
         model, runner = _build_yolo_model()
         assert model.batch_size == 2
@@ -47,6 +49,7 @@ class TestYoloInit:
         assert model.runner is runner
         assert model.stride == 32
 
+    @requires_nvidia
     def test_trt_runner_called_with_input_shapes(self):
         mock_runner_cls = MagicMock()
         mock_runner_cls.return_value.input_names = ["images"]
@@ -152,6 +155,7 @@ class TestYoloCall:
         assert masks[0].sum().item() == 4
         assert masks[0, 1:3, 1:3].all()
 
+    @requires_nvidia
     def test_call_no_detections(self):
         model, mock_runner = _build_yolo_model(batch_size=1, imgsz=640)
 
@@ -168,6 +172,7 @@ class TestYoloCall:
         assert len(det.masks) == 1
         mock_runner.infer.assert_called_once()
 
+    @requires_nvidia
     def test_call_with_detections(self):
         model, mock_runner = _build_yolo_model(batch_size=1, imgsz=640)
 

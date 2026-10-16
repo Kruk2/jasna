@@ -6,7 +6,10 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from conftest import requires_nvidia
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.main import build_parser
+from jasna.media.encoder_settings import encoder_cq_spec
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +177,7 @@ class TestBuildParser:
 # ---------------------------------------------------------------------------
 
 class TestBenchmarkPath:
+    @requires_nvidia
     def test_benchmark_dispatches(self, tmp_path):
         with patch("jasna.benchmark.run_benchmark_cli") as mock_bench:
             with patch.object(sys, "argv", ["jasna", "--benchmark"]):
@@ -266,6 +270,12 @@ class TestSecondaryRestorers:
 
     def test_tvai_secondary(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
+        if vendor_for_device() is AcceleratorVendor.AMD:
+            # The AMD build ships no TVAI restorer; the CLI must say so instead
+            # of failing later inside the pipeline.
+            with pytest.raises(ValueError, match="not available in the AMD build"):
+                _run_main(_base_argv(inp, out, rest, det, ["--secondary-restoration", "tvai"]))
+            return
         mock_tvai = MagicMock()
         with patch("jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer", mock_tvai):
             _run_main(_base_argv(inp, out, rest, det, [
@@ -285,6 +295,7 @@ class TestSecondaryRestorers:
         assert kw.kwargs["tvai_denoise"] is True
         assert "model=prob-4:scale=2:noise=5" in kw.kwargs["tvai_args"]
 
+    @requires_nvidia
     def test_unet4x_secondary(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_unet = MagicMock()
@@ -292,6 +303,7 @@ class TestSecondaryRestorers:
             _run_main(_base_argv(inp, out, rest, det, ["--secondary-restoration", "unet-4x"]))
         mock_unet.assert_called_once()
 
+    @requires_nvidia
     def test_rtx_super_res_secondary(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_rtx = MagicMock()
@@ -310,6 +322,7 @@ class TestSecondaryRestorers:
         assert kw["denoise"] == "high"
         assert kw["deblur"] == "low"
 
+    @requires_nvidia
     def test_rtx_denoise_none_passes_none(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_rtx = MagicMock()
@@ -470,6 +483,13 @@ class TestArgForwarding:
         assert pipe["fp16"] is False
 
     def test_encoder_settings_forwarded(self, tmp_path):
+        # The forwarded pair has to be a key the active encoder accepts:
+        # rc-lookahead is NVENC-only, vbaq is the AMF equivalent that ships in
+        # the AMD defaults.
+        if vendor_for_device() is AcceleratorVendor.AMD:
+            pipe, _ = self._capture_run(tmp_path, ["--encoder-settings", "cq=22,vbaq=1"])
+            assert pipe["encoder_settings"] == {"cq": 22, "vbaq": 1}
+            return
         pipe, _ = self._capture_run(tmp_path, ["--encoder-settings", "cq=22,rc-lookahead=32"])
         assert pipe["encoder_settings"] == {"cq": 22, "rc-lookahead": 32}
 
@@ -478,27 +498,27 @@ class TestArgForwarding:
         h264, _ = self._capture_run(tmp_path, ["--codec", "h264"])
         av1, _ = self._capture_run(tmp_path, ["--codec", "av1"])
 
-        assert hevc["encoder_settings"] == {"cq": 28}
-        assert h264["encoder_settings"] == {"cq": 25}
-        assert av1["encoder_settings"] == {"cq": 35}
+        vendor = vendor_for_device()
+        assert hevc["encoder_settings"] == {"cq": encoder_cq_spec("hevc", vendor).default}
+        assert h264["encoder_settings"] == {"cq": encoder_cq_spec("h264", vendor).default}
+        assert av1["encoder_settings"] == {"cq": encoder_cq_spec("av1", vendor).default}
 
     def test_direct_cq_forwarded_unchanged(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--codec", "h264", "--cq", "31"])
 
         assert pipe["encoder_settings"] == {"cq": 31}
 
-    def test_direct_cq_conflicts_with_advanced_cq(self, tmp_path, capsys):
-        with pytest.raises(SystemExit):
+    def test_direct_cq_conflicts_with_advanced_cq(self, tmp_path):
+        with pytest.raises(ValueError, match="--cq.*--encoder-settings"):
             self._capture_run(
                 tmp_path,
                 ["--cq", "28", "--encoder-settings", "cq=22"],
             )
-        assert re.search("--cq.*--encoder-settings", capsys.readouterr().err)
 
-    def test_direct_cq_validated_for_codec(self, tmp_path, capsys):
-        with pytest.raises(SystemExit):
-            self._capture_run(tmp_path, ["--codec", "h264", "--cq", "52"])
-        assert re.search(r"h264.*1\.\.51", capsys.readouterr().err)
+    def test_direct_cq_validated_for_codec(self, tmp_path):
+        spec = encoder_cq_spec("h264", vendor_for_device())
+        with pytest.raises(ValueError, match=rf"h264.*{spec.minimum}\.\.{spec.maximum}"):
+            self._capture_run(tmp_path, ["--codec", "h264", "--cq", str(spec.maximum + 1)])
 
     def test_batch_size_forwarded(self, tmp_path):
         pipe, _ = self._capture_run(tmp_path, ["--batch-size", "8"])
@@ -1003,6 +1023,10 @@ class TestCleanup:
 
     def test_secondary_restorer_closed(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
+        if vendor_for_device() is AcceleratorVendor.AMD:
+            with pytest.raises(ValueError, match="not available in the AMD build"):
+                _run_main(_base_argv(inp, out, rest, det, ["--secondary-restoration", "tvai"]))
+            return
         mock_tvai = MagicMock()
         tvai_instance = MagicMock()
         mock_tvai.return_value = tvai_instance
@@ -1089,6 +1113,7 @@ class TestRequiredArgs:
 # ---------------------------------------------------------------------------
 
 class TestEngineCompilation:
+    @requires_nvidia
     def test_unet4x_triggers_engine_compilation(self, tmp_path):
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_unet = MagicMock()

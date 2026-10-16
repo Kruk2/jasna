@@ -5,6 +5,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from conftest import requires_nvidia
+from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.media.encoder_settings import encoder_cq_spec
 from jasna.segments import SegmentRange
 
 
@@ -58,10 +61,14 @@ class TestMainValidation:
             pipeline_cls = _run_main_with_args(tmp_path, ["--segments", "1-2"])
 
         assert pipeline_cls.call_args.kwargs["config"].codec == "h264"
-        assert pipeline_cls.call_args.kwargs["config"].encoder_settings == {"cq": 25}
+        # The H.264 default CQ is vendor-specific (AMD 24, NVIDIA 25).
+        assert pipeline_cls.call_args.kwargs["config"].encoder_settings == {
+            "cq": encoder_cq_spec("h264", vendor_for_device()).default
+        }
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
         assert pipeline_cls.call_args.kwargs["splice_plan"] is splice_plan
 
+    @requires_nvidia
     def test_ltx_accepts_segments(self, tmp_path):
         metadata = MagicMock(codec_name="h264", duration=10.0)
         with (
@@ -81,6 +88,7 @@ class TestMainValidation:
         assert (config.restoration_model_name, config.ltx_seed) == ("ltx", 3)
         assert pipeline_cls.call_args.kwargs["segments"] == (SegmentRange(1, 2),)
 
+    @requires_nvidia
     def test_ltx_auto_split_reaches_pipeline_with_the_split_source_codec(self, tmp_path):
         from jasna.segments import SegmentRestoration
         from jasna.session_factory import AutoSplit
@@ -105,6 +113,7 @@ class TestMainValidation:
         assert kwargs["segments"] == segments
         assert kwargs["splice_plan"] is split.splice_plan
 
+    @requires_nvidia
     def test_ltx_auto_split_without_a_split_runs_the_whole_video(self, tmp_path):
         with (
             patch("jasna.session_factory.ltx_auto_split", return_value=None),
@@ -127,6 +136,8 @@ class TestMainValidation:
                 tmp_path, ["--restoration-model-name", "ltx", "--ltx-auto-split", "12", "--segments", "1-2"]
             )
 
+
+    @requires_nvidia
     def test_ltx_trial_needs_no_model_files_or_download(self, tmp_path, capsys):
         with (
             patch("jasna.accelerator.is_nvidia_device", return_value=True),
@@ -170,6 +181,7 @@ class TestMainValidation:
 
         assert pipeline_cls.call_args.kwargs["config"].compile_basicvsrpp is False
 
+
     def test_ltx_rejects_streaming(self, tmp_path):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--stream", "--restoration-model-name", "ltx"])
@@ -195,7 +207,15 @@ class TestMainValidation:
         _run_main_with_args(tmp_path, ["--codec", "AV1"])
 
     def test_codec_specific_encoder_settings_validated(self, tmp_path, capsys):
-        with pytest.raises(SystemExit):
+        if vendor_for_device() is AcceleratorVendor.AMD:
+            # AMF honours `profile` for AV1; the NVENC-only lookahead key is what
+            # the AMD allow-list rejects.
+            with pytest.raises(ValueError, match="for codec av1.*rc-lookahead"):
+                _run_main_with_args(
+                    tmp_path, ["--codec", "av1", "--encoder-settings", "rc-lookahead=32"]
+                )
+            return
+        with pytest.raises(ValueError, match="for codec av1.*profile"):
             _run_main_with_args(tmp_path, ["--codec", "av1", "--encoder-settings", "profile=main"])
         assert re.search("for codec av1.*profile", capsys.readouterr().err)
 

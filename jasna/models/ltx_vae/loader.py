@@ -17,6 +17,7 @@ from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
 from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_attention
+
 from jasna.models.ltx_vae.video_encoder import VideoEncoder
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"

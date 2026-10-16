@@ -12,6 +12,9 @@ import pytest
 
 @pytest.fixture
 def protection_api(monkeypatch):
+    # The activation flow needs the private protection submodule (activation,
+    # signing, machine), which a public source checkout only stubs.
+    pytest.importorskip("jasna.protection.activation")
     from jasna import protection
     from jasna.gui.locales import get_locale
     from jasna.protection import license_store, signing
@@ -129,8 +132,12 @@ runpy.run_module('jasna', run_name='__main__')
 @pytest.fixture
 def root():
     import customtkinter as ctk
+    from tkinter import TclError
 
-    window = ctk.CTk()
+    try:
+        window = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
     yield window
     window.destroy()
 
@@ -432,6 +439,7 @@ def controlled_activation_workers(monkeypatch):
 
 @pytest.mark.parametrize("error", [None, OSError("config volume unavailable")])
 def test_dialog_serializes_machine_read_and_activation(root, controlled_activation_workers, error):
+    pytest.importorskip("jasna.protection.activation")
     from jasna.gui.components import LicenseDialog
 
     pending = controlled_activation_workers
@@ -579,6 +587,7 @@ def test_dialog_defaults_to_online_and_can_use_manual(root, protection_api):
 
 @pytest.mark.parametrize("error_code", [None, "slots_full", "cloud_not_enabled", "network_error"])
 def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(root, controlled_activation_workers, error_code):
+    pytest.importorskip("jasna.protection.activation")
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection.activation import ActivationServiceError

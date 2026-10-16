@@ -6,6 +6,9 @@ from typing import Callable
 
 from tqdm import tqdm
 
+LTX_WORK_PER_FRAME = 30.0
+"""Rough cost of one LTX-restored frame in frames of the standard model."""
+
 
 @dataclass(frozen=True)
 class StageProgress:

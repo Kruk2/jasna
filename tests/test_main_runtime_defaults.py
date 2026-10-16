@@ -5,6 +5,10 @@ import sys
 
 import pytest
 
+# The frozen-runtime bootstrap test drives the private protection submodule's
+# initialize_runtime, which a public source checkout only stubs.
+pytest.importorskip("jasna.protection.runtime")
+
 
 @pytest.mark.parametrize('platform', ('win32', 'linux'))
 @pytest.mark.parametrize('existing', (None, '', 'custom'))

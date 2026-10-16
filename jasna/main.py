@@ -8,6 +8,7 @@ from pathlib import Path
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
 from jasna.engine_paths import default_restoration_model_path
+from jasna.media.probe import UnsupportedColorspaceError
 from jasna.media.probe import UnsupportedVideoError
 from jasna.os_utils import (
     MIN_DRIVER_VERSION,
@@ -18,7 +19,15 @@ from jasna.os_utils import (
     check_windows_nvidia_sysmem_fallback_policy,
     gpu_check_error,
 )
-from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, RestorationModelName, SessionConfig
+from jasna.session_config import (
+    AMD_UPSCALE_ENGINE_ORDER,
+    AMD_UPSCALE_ENGINE_MODELS,
+    LTX_DEFAULT_MODEL,
+    LTX_DEFAULT_SEED,
+    LtxModelName,
+    RestorationModelName,
+    SessionConfig,
+)
 
 # CLI restoration model name -> (restoration backend, LTX model variant).
 CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
@@ -75,6 +84,14 @@ def _session_config_from_args(
         rtx_quality=str(args.rtx_quality).lower(),
         rtx_denoise=str(args.rtx_denoise).lower(),
         rtx_deblur=str(args.rtx_deblur).lower(),
+        amd_upscale_engine=str(args.amd_upscale_engine).lower(),
+        amd_upscale_model=str(args.amd_upscale_model).lower(),
+        amd_upscale_scale=int(args.amd_upscale_scale),
+        amd_upscale_algorithm=str(args.amd_upscale_algorithm).lower(),
+        amd_upscale_sharpness=float(args.amd_upscale_sharpness),
+        amd_upscale_ffmpeg_path=str(args.amd_upscale_ffmpeg_path) or None,
+        amd_upscale_model_path=str(args.amd_upscale_model_path) or None,
+        amd_upscale_timeout_s=float(args.amd_upscale_timeout),
         vr_mode=str(args.vr_mode),
         vr_projection="auto",
         codec=codec,
@@ -197,6 +214,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument(
+        "--decode-backend",
+        type=str,
+        default=None,
+        choices=("auto", "vali", "pyav-sw", "pyav-hw"),
+        help=(
+            "Video decoder. \"auto\" (the default) uses FFmpeg software decode on AMD and the "
+            "hardware path elsewhere; \"pyav-hw\" opts into AMD's hardware decoder (AMF), "
+            "\"pyav-sw\" forces software and \"vali\" uses the NVDEC/VALI path. Software is the "
+            "AMD default because it is ~1.95x faster than AMF on H.264 with bit-identical "
+            "output, and because hevc_amf cannot decode Main10 at all; hardware decode can still "
+            "win on CPUs slower than the GPU (Ryzen 5000 and below)."
+        ),
+    )
+    parser.add_argument(
         "--fp16",
         default=True,
         action=argparse.BooleanOptionalAction,
@@ -304,7 +335,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--secondary-restoration",
         type=str,
         default="none",
-        choices=["none", "unet-4x", "tvai", "rtx-super-res"],
+        choices=["none", "unet-4x", "tvai", "rtx-super-res", "amd-upscale"],
         help=CLI_HELP["secondary_restoration"],
     )
 
@@ -401,6 +432,60 @@ def build_parser() -> argparse.ArgumentParser:
         help="RTX Super Res deblur level, none to disable (default: %(default)s)",
     )
 
+    amd_upscale = parser.add_argument_group("AMD upscaling")
+    amd_upscale.add_argument(
+        "--amd-upscale-engine",
+        type=str,
+        default="real-esr",
+        choices=list(AMD_UPSCALE_ENGINE_ORDER),
+        help=CLI_HELP["amd_upscale_engine"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-model",
+        type=str,
+        default="x4v3",
+        choices=sorted({m for models in AMD_UPSCALE_ENGINE_MODELS.values() for m in models}),
+        help=CLI_HELP["amd_upscale_model"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-scale",
+        type=int,
+        default=4,
+        choices=[2, 4, 6, 8],
+        help=CLI_HELP["amd_upscale_scale"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-algorithm",
+        type=str,
+        default="sr1-0",
+        choices=["sr1-0", "sr1-1", "bicubic", "bilinear", "point"],
+        help=CLI_HELP["amd_upscale_algorithm"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-sharpness",
+        type=float,
+        default=-1.0,
+        help=CLI_HELP["amd_upscale_sharpness"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-ffmpeg-path",
+        type=str,
+        default="",
+        help=CLI_HELP["amd_upscale_ffmpeg_path"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-model-path",
+        type=str,
+        default="",
+        help=CLI_HELP["amd_upscale_model_path"],
+    )
+    amd_upscale.add_argument(
+        "--amd-upscale-timeout",
+        type=float,
+        default=120.0,
+        help=CLI_HELP["amd_upscale_timeout"],
+    )
+
     tvai = parser.add_argument_group("Topaz Video")
     tvai.add_argument(
         "--tvai-ffmpeg-path",
@@ -459,6 +544,21 @@ def build_parser() -> argparse.ArgumentParser:
         help='Optional path to detection weights. If not set, uses "model_weights/<detection-model>.onnx" (RF-DETR) or ".pt" (YOLO).',
     )
     detection.add_argument(
+        "--detection-engine",
+        type=str,
+        default=None,
+        choices=("torch", "migraphx"),
+        help=(
+            "RF-DETR execution engine. AMD default 'migraphx': ONNX Runtime's MIGraphX "
+            "(ROCm) provider on an fp16 ONNX export of the same checkpoint, ~1.5-1.9x "
+            "faster per frame than the torch path (first use exports the ONNX and "
+            "compiles the MIGraphX program, a few minutes, cached in "
+            "model_weights/migraphx-cache; needs the windowsml EP package). "
+            "'torch' restores the previous behaviour. NVIDIA ignores this "
+            "(ONNX -> TensorRT is always used). Default: vendor default"
+        ),
+    )
+    detection.add_argument(
         "--detection-score-threshold",
         type=float,
         default=None,
@@ -469,6 +569,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=2,
         help=CLI_HELP["max_detection_gap"],
+    )
+    detection.add_argument(
+        "--detection-resolution",
+        type=int,
+        default=None,
+        metavar="PX",
+        help=(
+            "RF-DETR input size in pixels, overriding the model's own default. rfdetr-v6 ships at "
+            "its native 576, as upstream does; 480 measured 14.2 ms/frame on an RX 7900 XT against "
+            "18.8 at 576 with the recall intact on our clips, so it is worth trying when detection "
+            "time matters. Must be a multiple of the model's patch block: 24 for rfdetr-v6 (720 "
+            "works, 640 does not), 32 for rfdetr-v6-large and rfdetr-vr-v1 (768 works, 720 does "
+            "not)."
+        ),
     )
     detection.add_argument(
         "--min-detection-duration",
@@ -575,6 +689,40 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Restore only selected ranges and smart-render the rest, for example "
             "10-25,01:10-01:30. Output codec must match the H.264, HEVC, or AV1 input."
+        ),
+    )
+    encoding.add_argument(
+        "--auto-segments",
+        action="store_true",
+        help=(
+            "Scan the video first (one detection sample per --auto-segments-stride "
+            "seconds), restore only the regions that contain mosaics and stream-copy "
+            "the rest. Without this every frame is detected and re-encoded. Has no "
+            "effect together with --segments, --stream or an LTX restoration model."
+        ),
+    )
+    encoding.add_argument(
+        "--auto-segments-stride",
+        type=float,
+        default=1.0,
+        help="Seconds between the samples taken by --auto-segments (default: 1.0).",
+    )
+    encoding.add_argument(
+        "--auto-segments-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Score above which a scanned sample counts as a mosaic (default: the "
+            "detection model's recommended score threshold)."
+        ),
+    )
+    encoding.add_argument(
+        "--auto-segments-max-coverage",
+        type=float,
+        default=0.98,
+        help=(
+            "Run a normal full pass instead when the detected regions cover more than "
+            "this fraction of the video (default: 0.98)."
         ),
     )
 
@@ -700,6 +848,73 @@ def _plan_folder(
     return images, videos, output_dir
 
 
+def _smart_render_plan(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    input_video: Path,
+    output_video: Path,
+    *,
+    codec_was_explicit: bool,
+    segments,
+    fail_hard: bool = True,
+):
+    """Validate smart rendering for `segments` and return (codec, segments, splice_plan).
+
+    An empty `segments` tuple is accepted and means "nothing to render": the whole
+    video is stream-copied, which is what an automatic scan that found no mosaics
+    should produce.
+
+    `fail_hard` is False for the automatic path: segments that the scanner proposed
+    are a suggestion, so a video smart rendering cannot handle (variable frame rate,
+    a mismatching codec, no usable cut points) must fall back to a normal pass
+    instead of aborting the job. Returns None when it falls back.
+    """
+    from jasna.media.probe import get_video_meta_data
+    from jasna.media.splice import (
+        SmartRenderCompatibilityError,
+        build_copy_only_plan,
+        build_splice_plan,
+        canonical_codec,
+        probe_keyframes,
+        validate_smart_render,
+    )
+
+    def give_up(message: str):
+        if fail_hard:
+            parser.error(message)
+        print(f"Auto-segments: {message} Falling back to a normal pass.")
+        return None
+
+    metadata = get_video_meta_data(str(input_video))
+    input_codec = canonical_codec(metadata.codec_name)
+    if codec_was_explicit and str(args.codec).lower() != input_codec:
+        return give_up(
+            f"smart rendering needs the output codec to match the input "
+            f"({input_codec}); pass --codec {input_codec}."
+        )
+    keyframes = probe_keyframes(input_video, metadata)
+    if not segments:
+        # Nothing to render: a plain remux does not depend on frame-rate constancy,
+        # keyframe layout or the output codec, so the smart-render checks that guard
+        # stitching do not apply here.
+        return input_codec, segments, build_copy_only_plan(keyframes)
+    try:
+        validate_smart_render(
+            metadata,
+            output_path=output_video,
+            codec=input_codec,
+            retarget_high_fps=bool(args.retarget_high_fps),
+        )
+        splice_plan = build_splice_plan(
+            segments,
+            keyframes,
+            duration=metadata.duration,
+        )
+    except SmartRenderCompatibilityError as exc:
+        return give_up(str(exc))
+    return input_codec, segments, splice_plan
+
+
 def _resolve_segments(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
@@ -710,13 +925,6 @@ def _resolve_segments(
 ):
     """Parse --segments and return (codec, segments, splice_plan); smart rendering keeps the input codec."""
     from jasna.media.probe import get_video_meta_data
-    from jasna.media.splice import (
-        SmartRenderCompatibilityError,
-        build_splice_plan,
-        canonical_codec,
-        probe_keyframes,
-        validate_smart_render,
-    )
     from jasna.segments import parse_segments
 
     metadata = get_video_meta_data(str(input_video))
@@ -724,24 +932,94 @@ def _resolve_segments(
         segments = parse_segments(str(args.segments).strip(), duration=metadata.duration)
     except ValueError as exc:
         parser.error(f"invalid --segments: {exc}")
-    input_codec = canonical_codec(metadata.codec_name)
-    if codec_was_explicit and str(args.codec).lower() != input_codec:
-        parser.error(f"with --segments output codec must match input; pass --codec {input_codec}")
+    return _smart_render_plan(
+        parser,
+        args,
+        input_video,
+        output_video,
+        codec_was_explicit=codec_was_explicit,
+        segments=segments,
+    )
+
+
+def _auto_segments(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    input_video: Path,
+    output_video: Path,
+    *,
+    codec_was_explicit: bool,
+    detection_model_name: str,
+    detection_model_path: Path,
+    detection_score_threshold: float,
+):
+    """Scan for mosaics before the main pass; None means "use a normal full pass".
+
+    The scan samples the video (one detection sample per --auto-segments-stride
+    seconds) instead of detecting every frame, so a video whose mosaics cover only
+    part of its length renders those parts and stream-copies the rest; a video with
+    no mosaics at all becomes a plain remux.
+    """
+    import torch
+
+    from jasna.accelerator import device_context
+    from jasna.media.probe import get_video_meta_data
+    from jasna.mosaic.auto_segments import plan_auto_segments, scan_video_scores
+    from jasna.mosaic.scan import SCAN_SCORE_FLOOR
+    from jasna.session_factory import build_compiled_detection_model
+
+    metadata = get_video_meta_data(str(input_video))
+    device = torch.device(str(args.device))
+    threshold = (
+        float(args.auto_segments_threshold)
+        if args.auto_segments_threshold is not None
+        else float(detection_score_threshold)
+    )
+    detector = build_compiled_detection_model(
+        detection_model_name,
+        detection_model_path,
+        device=device,
+        batch_size=int(args.batch_size),
+        fp16=bool(args.fp16),
+        score_threshold=SCAN_SCORE_FLOOR,
+        log_callback=None,
+    )
     try:
-        validate_smart_render(
-            metadata,
-            output_path=output_video,
-            codec=input_codec,
-            retarget_high_fps=bool(args.retarget_high_fps),
+        with device_context(device):
+            scan = scan_video_scores(
+                input_video,
+                metadata,
+                detector,
+                device=device,
+                batch_size=int(args.batch_size),
+                stride_seconds=float(args.auto_segments_stride),
+            )
+    finally:
+        detector.close()
+
+    plan = plan_auto_segments(
+        scan,
+        threshold=threshold,
+        coverage_limit=float(args.auto_segments_max_coverage),
+    )
+    print(plan.describe())
+    if not plan.worth_segmenting:
+        print(
+            "Auto-segments: %.1f%% of the video would be rendered, which is at or "
+            "above the %.0f%% limit where a normal full pass is cheaper than "
+            "scanning plus smart rendering."
+            % (plan.coverage * 100.0, plan.coverage_limit * 100.0)
         )
-        splice_plan = build_splice_plan(
-            segments,
-            probe_keyframes(input_video, metadata),
-            duration=metadata.duration,
-        )
-    except SmartRenderCompatibilityError as exc:
-        parser.error(str(exc))
-    return input_codec, segments, splice_plan
+        return None
+    return _smart_render_plan(
+        parser,
+        args,
+        input_video,
+        output_video,
+        codec_was_explicit=codec_was_explicit,
+        segments=plan.segments,
+        fail_hard=False,
+    )
 
 
 def _run_streaming(args: argparse.Namespace, make_pipeline, input_video: Path | None) -> None:
@@ -837,11 +1115,14 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     size = download_size_text(missing)
     if not sys.stdin.isatty():
         raise FileNotFoundError(f"LTX model files missing in {directory}: {names}. Run jasna in a terminal to download them ({size}).")
+    answer = input(f"The LTX {config.ltx_model} model is missing in {directory}:\n  {names}\nDownload {size} now? [y/N]: ")
     answer = input(f"LTX {config.ltx_model} model not found in {directory}:\n  {names}\nDownload it ({size})? [y/N]: ")
     if answer.strip().lower() not in ("y", "yes"):
         raise FileNotFoundError(f"LTX model files missing in {directory}: {names}")
     from tqdm import tqdm
 
+    with tqdm(total=sum(file.size_bytes for file in missing), unit="B", unit_scale=True, desc="LTX download") as bar:
+        download_files(directory, missing, lambda done, total: bar.update(done - bar.n))
     from jasna.gui.locales import get_locale
 
     with tqdm(total=sum(file.size_bytes for file in missing), unit="B", unit_scale=True, desc="LTX download") as bar:
@@ -868,6 +1149,13 @@ def _reject_options_of_other_restoration_backend(
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    # Before anything enumerates GPUs: a leftover HIP_VISIBLE_DEVICES/ROCR_VISIBLE_DEVICES
+    # would hide the discrete card (see allow_all_devices), and the runtime only reads it
+    # while it initialises.
+    from jasna.accelerator import allow_all_devices
+    allow_all_devices()
+
     if args.cloud_workspace and not args.machine_key and args.license_code is None:
         parser.error("--cloud-workspace needs --machine-key or --license-code")
     if args.machine_key and (args.activation_key is not None or args.license_code is not None):
@@ -1007,11 +1295,31 @@ def main() -> None:
         _run_post_export_action()
         return
 
+    from jasna.media.video_decoder import set_decode_backend
     from jasna.mosaic.detection_registry import (
         coerce_detection_model_name,
         discover_available_detection_models,
         resolve_detection_model,
+        set_detection_engine,
+        set_detection_resolution,
     )
+
+    engine_arg = getattr(args, "detection_engine", None)
+    if engine_arg:
+        set_detection_engine(str(engine_arg))
+
+    resolution_arg = getattr(args, "detection_resolution", None)
+    if resolution_arg:
+        # the divisibility block is per model (Seg family 24, Large family 32),
+        # so validate against the requested detection model
+        set_detection_resolution(
+            int(resolution_arg),
+            coerce_detection_model_name(str(args.detection_model)),
+        )
+
+    decode_backend_arg = getattr(args, "decode_backend", None)
+    if decode_backend_arg:
+        set_decode_backend(str(decode_backend_arg))
 
     with _usage_errors(parser):
         if not str(args.detection_model_path).strip():
@@ -1036,16 +1344,30 @@ def main() -> None:
         codec, segments, splice_plan = _resolve_segments(
             parser, args, input_video, output_video, codec_was_explicit=codec_was_explicit
         )
+    elif args.auto_segments and not is_streaming and restoration_backend != "ltx":
+        auto = _auto_segments(
+            parser,
+            args,
+            input_video,
+            output_video,
+            codec_was_explicit=codec_was_explicit,
+            detection_model_name=detection_model_name,
+            detection_model_path=detection_model_path,
+            detection_score_threshold=detection_score_threshold,
+        )
+        if auto is not None:
+            codec, segments, splice_plan = auto
 
     from jasna.accelerator import device_context, vendor_for_device
 
+    encoder_settings = _resolve_cli_encoder_settings(
+        str(args.encoder_settings),
+        cq=args.cq,
+        codec=codec,
+        vendor=vendor_for_device(str(args.device)),
+    )
+
     with _usage_errors(parser):
-        encoder_settings = _resolve_cli_encoder_settings(
-            str(args.encoder_settings),
-            cq=args.cq,
-            codec=codec,
-            vendor=vendor_for_device(str(args.device)),
-        )
         config = _session_config_from_args(
             args,
             codec=codec,
@@ -1105,6 +1427,9 @@ def main() -> None:
             sys.exit(1)
         finally:
             session.close()
+            from jasna.session_factory import release_shared_models
+
+            release_shared_models()
 
 
 if __name__ == "__main__":

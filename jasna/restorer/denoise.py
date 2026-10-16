@@ -6,8 +6,12 @@ from enum import Enum
 import torch
 import torch.nn.functional as F
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import (
+    Kernel,
+    grid_size,
+    handle_kernel_failure,
+    is_gpu_kernel_device,
+)
 
 _FATBIN = "denoise.fatbin"
 _BLOCK_WIDTH = 16
@@ -62,6 +66,7 @@ def _kernel_denoise(
             count, height, width, kernel_size, range_scale, weights.data_ptr(),
         ),
         torch.cuda.current_stream(frames.device).cuda_stream,
+        device=frames.device,
     )
     return out
 
@@ -91,13 +96,17 @@ def spatial_denoise(
     range_scale = -0.5 / (sigma_range ** 2)
 
     if (
-        is_nvidia_device(frames.device)
+        is_gpu_kernel_device(frames.device)
         and frames.dtype is torch.float32
         and frames.ndim == 4
         and frames.shape[1] == 3
         and frames.stride(3) == 1
     ):
-        return _kernel_denoise(frames, kernel_size, range_scale, spatial_weights)
+        try:
+            return _kernel_denoise(frames, kernel_size, range_scale, spatial_weights)
+        except Exception as exc:  # pragma: no cover - depends on the GPU/driver
+            if not handle_kernel_failure("bilateral_denoise_fp32", exc):
+                raise
 
     padded = F.pad(frames, (half, half, half, half), mode="reflect")
 

@@ -101,6 +101,7 @@ def test_plan_splits_models_that_meet_at_a_keyframe() -> None:
     ]
 
 
+
 def test_plan_keeps_each_segment_behind_its_render_span_effect_range() -> None:
     first, third = SegmentRestoration("ltx", 1), SegmentRestoration("ltx", 3)
     plan = build_splice_plan(

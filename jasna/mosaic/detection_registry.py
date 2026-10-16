@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import torch
@@ -45,10 +46,34 @@ DETECTION_MODEL_SPECS: dict[str, DetectionModelSpec] = {
         "yolo",
         "lada_mosaic_detection_model_v2.pt",
     ),
+    # Optional Lada checkpoints (same upstream repo as lada-yolo-v4): the
+    # "accurate" variants trade speed for quality, the 3.1 pair sits in between.
+    # All of them are plain YOLO .pt files, so the vendor-neutral YOLO backend
+    # runs them without a torch variant mapping.
+    "lada-yolo-v3": DetectionModelSpec(
+        "lada-yolo-v3",
+        "yolo",
+        "lada_mosaic_detection_model_v3.pt",
+    ),
+    "lada-yolo-v3.1-fast": DetectionModelSpec(
+        "lada-yolo-v3.1-fast",
+        "yolo",
+        "lada_mosaic_detection_model_v3.1_fast.pt",
+    ),
+    "lada-yolo-v3.1-accurate": DetectionModelSpec(
+        "lada-yolo-v3.1-accurate",
+        "yolo",
+        "lada_mosaic_detection_model_v3.1_accurate.pt",
+    ),
     "lada-yolo-v4": DetectionModelSpec(
         "lada-yolo-v4",
         "yolo",
         "lada_mosaic_detection_model_v4_fast.pt",
+    ),
+    "lada-yolo-v4-accurate": DetectionModelSpec(
+        "lada-yolo-v4-accurate",
+        "yolo",
+        "lada_mosaic_detection_model_v4_accurate.pt",
     ),
     "zelefans-vr-yolo-v2": DetectionModelSpec(
         "zelefans-vr-yolo-v2",
@@ -71,6 +96,13 @@ RFDETR_MODEL_NAMES: frozenset[str] = frozenset(
 
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 
+# resolution is the detector input size; it is the single biggest cost knob for
+# RF-DETR (attention scales with it) and the only place it is defined. Measured on
+# an RX 7900 XT with the AOTriton flash images installed, RF-DETR v6, batch 8, fp16:
+#     576 -> 18.8 ms/frame    480 -> 14.2 ms/frame    384 -> 10.7 ms/frame
+# v6 ships at its native 576, matching upstream. The measurements above show 480 is
+# 25% cheaper with the recall intact on our clips; --detection-resolution 480 (or this
+# table) is how to ask for it.
 RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-v5": RfDetrModelConfig(768, 0.25, 4, None),
     "rfdetr-v6": RfDetrModelConfig(576, 0.35, None, "medium"),
@@ -78,6 +110,110 @@ RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-vr-v1": RfDetrModelConfig(768, 0.40, None, "large"),
 }
 _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(768, 0.25, None, None)
+
+#: Process-level override of the detector input size (CLI --detection-resolution).
+#: The registry value is the shipped default - v6 at its native 576, which is what
+#: upstream ships too. The override exists for the size we measured as cheaper
+#: (480: 14.2 ms/frame against 18.8 at 576, recall intact on our clips) and for
+#: footage whose mosaics the default misses.
+_detection_resolution: int | None = None
+_DETECTION_RESOLUTION_MIN = 160
+_DETECTION_RESOLUTION_MAX = 2048
+#: rfdetr requires resolution % (patch_size * num_windows) == 0 (rfdetr.detr),
+#: and the block size differs per variant. Every variant this registry maps is a
+#: DINOv2-Seg family (RFDETRSeg*: patch 12, 2 windows -> block 24) except
+#: RFDETRSegNano (patch 12, 1 window -> block 12). All of them accept 480/576/720
+#: and reject 640; only the non-Seg Large/Nano/Small families are patch 16/14.
+#: Kept in step with the installed rfdetr rather than hardcoded per model name.
+_TORCH_VARIANT_BLOCK_SIZE: dict[str, int] = {
+    "nano": 12, "small": 24, "medium": 24, "large": 24, "xlarge": 24,
+    "2xlarge": 24,
+}
+
+
+def _detection_resolution_block_size(model_name: str) -> int:
+    """The divisibility block for one detection model's torch variant (default 32)."""
+    config = rfdetr_model_config(model_name)
+    variant = config.torch_variant
+    if variant is None:
+        return 32
+    return _TORCH_VARIANT_BLOCK_SIZE.get(variant, 24)
+
+
+def validate_detection_resolution(resolution: int, model_name: str | None = None) -> int:
+    """Validate one input size against the divisibility rfdetr itself enforces."""
+    value = int(resolution)
+    if not _DETECTION_RESOLUTION_MIN <= value <= _DETECTION_RESOLUTION_MAX:
+        raise ValueError(
+            f"detection resolution must be between {_DETECTION_RESOLUTION_MIN} and "
+            f"{_DETECTION_RESOLUTION_MAX}, got {value}"
+        )
+    block = _detection_resolution_block_size(model_name or DEFAULT_DETECTION_MODEL_NAME)
+    if value % block:
+        raise ValueError(
+            f"detection resolution {value} is not a multiple of {block} for this "
+            f"model (rfdetr requires resolution % (patch_size * num_windows) == 0; "
+            f"every bundled model needs a multiple of {block})"
+        )
+    return value
+
+
+def set_detection_resolution(resolution: int | None, model_name: str | None = None) -> None:
+    """Pin the RF-DETR input size for this process (None restores the registry)."""
+    global _detection_resolution
+    if resolution is None:
+        _detection_resolution = None
+        return
+    _detection_resolution = validate_detection_resolution(resolution, model_name)
+
+
+def get_detection_resolution_override() -> int | None:
+    """The pinned input size, or None while the registry default applies."""
+    return _detection_resolution
+
+# Which backend executes RF-DETR on AMD: the torch checkpoint path (default) or
+# ONNX Runtime's MIGraphX provider (see jasna/mosaic/rfdetr_migraphx_runner.py).
+# "migraphx" is AMD-only and needs the Windows ML EP package plus the windowsml
+# ORT build; it exports an fp16 ONNX from the same checkpoint on first use and
+# compiles a MIGraphX program into model_weights/migraphx-cache (~2.5 min once).
+DETECTION_ENGINES: tuple[str, ...] = ("torch", "migraphx")
+_detection_engine: str | None = None
+
+
+def set_detection_engine(engine: str) -> None:
+    """Pin the RF-DETR AMD engine for this process (CLI flag / GUI plumbing)."""
+    global _detection_engine
+    normalized = str(engine).strip().lower()
+    if normalized not in DETECTION_ENGINES:
+        raise ValueError(
+            f"Unknown detection engine '{engine}'. Valid: {', '.join(DETECTION_ENGINES)}"
+        )
+    _detection_engine = normalized
+
+
+def get_detection_engine() -> str:
+    """The pinned engine, else JASNA_DETECTION_ENGINE, else the vendor default.
+
+    AMD defaults to MIGraphX (measured ~1.5-1.9x faster per frame than the torch
+    path, benchmarks/2026-10-07_amd_migraphx_ep_windows.md); NVIDIA keeps torch
+    (its ONNX path goes to TensorRT instead). RDNA2 (gfx1030, RX 6000) also keeps
+    torch: MIGraphX has no device code for it and the EP dies at init with
+    "RUNTIME_EXCEPTION ... Failed to call function" - the GUI has no engine
+    picker, so an unsupported card must never be defaulted into MIGraphX.
+    """
+    if _detection_engine is not None:
+        return _detection_engine
+    from_env = os.environ.get("JASNA_DETECTION_ENGINE", "").strip().lower()
+    if from_env in DETECTION_ENGINES:
+        return from_env
+    if not is_amd_device():
+        return "torch"
+    from jasna.mosaic.rfdetr_migraphx_runner import MIGRAPHX_SUPPORTED_ARCHS, hip_arch
+
+    arch = hip_arch()
+    if arch and arch not in MIGRAPHX_SUPPORTED_ARCHS:
+        return "torch"
+    return "migraphx"
 
 YOLO_MODEL_FILES: dict[str, str] = {
     name: spec.filename
@@ -152,7 +288,10 @@ def coerce_detection_model_name(name: str) -> str:
 
 
 def rfdetr_model_config(name: str) -> RfDetrModelConfig:
-    return RFDETR_MODEL_CONFIGS.get(coerce_detection_model_name(name), _RFDETR_FALLBACK_CONFIG)
+    config = RFDETR_MODEL_CONFIGS.get(coerce_detection_model_name(name), _RFDETR_FALLBACK_CONFIG)
+    if _detection_resolution is not None and config.resolution != _detection_resolution:
+        config = replace(config, resolution=_detection_resolution)
+    return config
 
 
 def recommended_score_threshold(name: str) -> float:
@@ -205,6 +344,8 @@ def build_detection_model(
         from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
 
         config = rfdetr_model_config(det_name)
+        # the engine only means something on AMD; NVIDIA always goes ONNX -> TensorRT
+        engine = get_detection_engine() if is_amd_device(device) else "torch"
         return RfDetrMosaicDetectionModel(
             weights_path=detection_model_path,
             batch_size=config.engine_batch_size(batch_size),
@@ -214,6 +355,7 @@ def build_detection_model(
             score_threshold=float(score_threshold),
             fp16=bool(fp16),
             torch_variant=config.torch_variant,
+            engine=engine,
         )
     from jasna.mosaic.yolo import YoloMosaicDetectionModel
 

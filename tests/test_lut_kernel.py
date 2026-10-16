@@ -6,7 +6,26 @@ import torch
 
 from jasna.media.lut import GpuLutApplier, parse_cube_text
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+_PROBE_CUBE = "LUT_1D_SIZE 2\n0 0 0\n1 1 1"
+
+
+def _kernel_available() -> bool:
+    """The LUT kernel is an NVIDIA fatbin (`is_nvidia_device` gate).
+
+    Without it the applier applies the cube through the eager torch path, which
+    is what this AMD build uses.
+    """
+    try:
+        applier = GpuLutApplier(parse_cube_text(_PROBE_CUBE), torch.device("cuda:0"))
+        return applier._kernel is not None
+    except Exception:  # noqa: BLE001
+        return False
+
+
+pytestmark = pytest.mark.skipif(
+    not torch.cuda.is_available() or not _kernel_available(),
+    reason="needs the GPU LUT kernel (not built on this platform)",
+)
 
 
 def _cube_3d(size: int, transform, domain: tuple[float, float] | None = None) -> str:

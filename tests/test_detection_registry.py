@@ -4,22 +4,33 @@ from unittest.mock import MagicMock, patch
 import pytest
 import torch
 
+from conftest import requires_nvidia
 from jasna.mosaic.detection_registry import (
     DEFAULT_DETECTION_MODEL_NAME,
     RFDETR_MODEL_NAMES,
     YOLO_MODEL_FILES,
     build_detection_model,
     coerce_detection_model_name,
-    detection_model_weights_path,
     detection_model_choices,
+    detection_model_weights_path,
     discover_available_detection_models,
     is_rfdetr_model,
     is_yolo_model,
     precompile_detection_engine,
     recommended_score_threshold,
     rfdetr_model_config,
+    rfdetr_weights_suffix,
     require_detection_model_weights,
 )
+
+
+def _rfdetr_weights(tmp_path: Path, stem: str) -> None:
+    """Create the RF-DETR weights file with this build's suffix.
+
+    AMD runs the torch checkpoint (`.pt`), NVIDIA compiles the ONNX export
+    (`.onnx`); the registry resolves the suffix from the active vendor.
+    """
+    (tmp_path / f"{stem}{rfdetr_weights_suffix()}").touch()
 
 
 def test_default_detection_model_is_rfdetr_v6() -> None:
@@ -29,7 +40,9 @@ def test_default_detection_model_is_rfdetr_v6() -> None:
 
 
 def test_rfdetr_v6_weights_path() -> None:
-    assert detection_model_weights_path("rfdetr-v6") == Path("model_weights/rfdetr-v6.onnx")
+    assert detection_model_weights_path("rfdetr-v6") == Path(
+        f"model_weights/rfdetr-v6{rfdetr_weights_suffix()}"
+    )
     assert coerce_detection_model_name("rfdetr-v6") == "rfdetr-v6"
 
 
@@ -143,7 +156,9 @@ def test_coerce_yolo_typo_raises_lists_valid_names() -> None:
 # --- detection_model_weights_path for dynamic rfdetr ---
 
 def test_dynamic_rfdetr_weights_path() -> None:
-    assert detection_model_weights_path("rfdetr-v99") == Path("model_weights/rfdetr-v99.onnx")
+    assert detection_model_weights_path("rfdetr-v99") == Path(
+        f"model_weights/rfdetr-v99{rfdetr_weights_suffix()}"
+    )
 
 
 # --- discover_available_detection_models ---
@@ -157,15 +172,15 @@ def test_discover_nonexistent_dir(tmp_path: Path) -> None:
 
 
 def test_discover_rfdetr_only(tmp_path: Path) -> None:
-    (tmp_path / "rfdetr-v5.onnx").touch()
-    (tmp_path / "rfdetr-v3.onnx").touch()
+    _rfdetr_weights(tmp_path, "rfdetr-v5")
+    _rfdetr_weights(tmp_path, "rfdetr-v3")
     result = discover_available_detection_models(tmp_path)
     assert result == ["rfdetr-v5", "rfdetr-v3"]
 
 
 def test_discover_unknown_rfdetr_version(tmp_path: Path) -> None:
-    (tmp_path / "rfdetr-v99.onnx").touch()
-    (tmp_path / "rfdetr-v5.onnx").touch()
+    _rfdetr_weights(tmp_path, "rfdetr-v99")
+    _rfdetr_weights(tmp_path, "rfdetr-v5")
     result = discover_available_detection_models(tmp_path)
     assert result == ["rfdetr-v99", "rfdetr-v5"]
 
@@ -194,8 +209,8 @@ def test_discover_bundled_vr_model(tmp_path: Path) -> None:
 
 
 def test_discover_mixed(tmp_path: Path) -> None:
-    (tmp_path / "rfdetr-v5.onnx").touch()
-    (tmp_path / "rfdetr-v3.onnx").touch()
+    _rfdetr_weights(tmp_path, "rfdetr-v5")
+    _rfdetr_weights(tmp_path, "rfdetr-v3")
     (tmp_path / "lada_mosaic_detection_model_v2.pt").touch()
     (tmp_path / "lada_mosaic_detection_model_v4_fast.pt").touch()
     result = discover_available_detection_models(tmp_path)
@@ -231,7 +246,7 @@ def test_require_detection_model_weights_rejects_missing_path(tmp_path: Path) ->
 
 
 def test_discover_ignores_non_matching_files(tmp_path: Path) -> None:
-    (tmp_path / "rfdetr-v5.onnx").touch()
+    _rfdetr_weights(tmp_path, "rfdetr-v5")
     (tmp_path / "some_random_model.onnx").touch()
     (tmp_path / "random.pt").touch()
     result = discover_available_detection_models(tmp_path)
@@ -244,6 +259,7 @@ def test_precompile_noop_on_cpu() -> None:
     precompile_detection_engine("rfdetr-v5", Path("m.onnx"), 1, torch.device("cpu"), True)
 
 
+@requires_nvidia
 def test_precompile_rfdetr_on_cuda() -> None:
     with patch("jasna.trt.compile_onnx_to_tensorrt_engine") as mock_compile:
         precompile_detection_engine("rfdetr-v5", Path("m.onnx"), 2, torch.device("cuda:0"), True)
@@ -253,6 +269,7 @@ def test_precompile_rfdetr_on_cuda() -> None:
         )
 
 
+@requires_nvidia
 def test_precompile_rfdetr_v6_uses_requested_dynamic_batch() -> None:
     with patch("jasna.trt.compile_onnx_to_tensorrt_engine") as mock_compile:
         precompile_detection_engine(
@@ -268,6 +285,7 @@ def test_precompile_rfdetr_v6_uses_requested_dynamic_batch() -> None:
         )
 
 
+@requires_nvidia
 def test_precompile_yolo_on_cuda() -> None:
     with (
         patch("jasna.mosaic.yolo_tensorrt_compilation.compile_yolo_to_tensorrt_engine") as mock_compile,
@@ -276,6 +294,7 @@ def test_precompile_yolo_on_cuda() -> None:
         mock_compile.assert_called_once()
 
 
+@requires_nvidia
 def test_precompile_zelefans_yolo_on_cuda() -> None:
     with patch(
         "jasna.mosaic.yolo_tensorrt_compilation.compile_yolo_to_tensorrt_engine"

@@ -7,6 +7,8 @@ SDPA (same window semantics) on the CPU, torch SwiGLU, W-chunked diffusion resid
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import math
 
 import numpy as np
@@ -137,6 +139,33 @@ class QKVProjections(nn.Module):
 _fused_na3d = None
 
 
+@functools.cache
+def _natten_na3d():
+    """NATTEN's fused ``na3d`` when installed, else None."""
+    if importlib.util.find_spec("natten") is None:
+        return None
+    import natten
+
+    return natten.na3d
+
+
+def _natten_fused_na3d(
+    q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: list[int], query_w_start: int
+) -> torch.Tensor:
+    """NATTEN's fused kernel behind the decoder's core-column query interface: ``q`` covers only
+    the W columns ``[query_w_start, query_w_start + q.shape[3])``, so it is zero-padded to the
+    K/V width (each query's output depends only on itself) and the full-width result sliced."""
+    fused = _natten_na3d()
+    width = q.shape[3]
+    if width == k.shape[3]:
+        full = q
+    else:
+        full = q.new_zeros(k.shape)
+        full[:, :, :, query_w_start : query_w_start + width] = q
+    out = fused(full, k, v, kernel_size=tuple(kernel_size), scale=1.0)
+    return out[:, :, :, query_w_start : query_w_start + width]
+
+
 @torch.compiler.disable
 def _fp16_eager_na3d(
     q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: list[int], query_w_start: int
@@ -147,9 +176,13 @@ def _fp16_eager_na3d(
 
 
 def enable_fused_attention(device: torch.device) -> None:
-    """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``), or before
-    SM 8.0, where Triton has no tensor-core dot, through the fp16 pure-torch ``na3d``."""
+    """Run CUDA neighborhood attention through NATTEN's fused kernel when installed, else
+    jasna's Triton kernel (``na_triton``), or before SM 8.0, where Triton has no tensor-core dot,
+    through the fp16 pure-torch ``na3d``."""
     global _fused_na3d
+    if device.type == "cuda" and _natten_na3d() is not None:
+        _fused_na3d = _natten_fused_na3d
+        return
     if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
         _fused_na3d = _fp16_eager_na3d
         return

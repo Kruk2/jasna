@@ -99,10 +99,17 @@ def _run_software_batch(
         events.append("convert")
         luma_ptrs.append(y.data_ptr())
 
+    def convert_packed_batch_into(device_yuv, out, stream_handle):
+        events.append("convert")
+        luma_ptrs.append(device_yuv.data_ptr())
+
     monkeypatch.setattr(
         module,
         "YuvToRgbConverter",
-        lambda *args, **kwargs: SimpleNamespace(convert_into=convert_into),
+        lambda *args, **kwargs: SimpleNamespace(
+            convert_into=convert_into,
+            convert_packed_batch_into=convert_packed_batch_into,
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -158,15 +165,15 @@ def test_amd_software_path_uses_batch_device_yuv_and_current_stream(monkeypatch)
     assert batch.shape == (BATCH, 3, H, W)
     assert pts == list(range(BATCH))
 
-    # Distinct device planes per frame index (not one overwritten staging buffer).
-    assert len(luma_ptrs) == BATCH
-    assert len(set(luma_ptrs)) == BATCH
+    # One batched device YUV buffer converted in a single launch (not one
+    # overwritten staging buffer, and not B separate per-frame launches).
+    assert len(luma_ptrs) == 1
 
     assert current_calls, "AMD software path must use current_stream"
     assert not new_calls, "AMD software path must not open a private new_stream"
 
-    # Sync before yield: all converts complete, then one synchronize, then yield.
-    assert events == ["convert"] * BATCH + ["sync"]
+    # Sync before yield: the batch convert completes, then one synchronize, then yield.
+    assert events == ["convert", "sync"]
     stream.synchronize.assert_called_once_with()
 
 

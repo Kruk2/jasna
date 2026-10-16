@@ -13,8 +13,7 @@ import ctypes
 
 import torch
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, build_kernel, grid_size
 
 _FATBIN = "resize_normalize.fatbin"
 _BLOCK_WIDTH = 16
@@ -55,6 +54,7 @@ def _launch_resize_normalize(
             mean.data_ptr(), std.data_ptr(), fill.data_ptr(),
         ),
         torch.cuda.current_stream(frames.device).cuda_stream,
+        device=frames.device,
     )
 
 
@@ -81,8 +81,8 @@ class ResizeNormalizer:
         self._fill = torch.tensor(fill, dtype=torch.float32, device=device)
         function = _FUNCTIONS.get(dtype)
         self._kernel = (
-            Kernel(_FATBIN, function, _RESIZE_NORMALIZE_ARG_TYPES)
-            if function is not None and is_nvidia_device(device)
+            build_kernel(_FATBIN, function, _RESIZE_NORMALIZE_ARG_TYPES, device)
+            if function is not None
             else None
         )
 

@@ -5,6 +5,7 @@ leading blocks as the VRAM budget allows stay resident; the rest live in pinned 
 memory and are copied on a side stream into one of two GPU slots, one block ahead of
 the block being computed. Frozen releases keep every transformer-block tensor and the
 complete block forward in the native opaque store; Python sees only block inputs/outputs.
+the block being computed.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ def _layout(specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]) -> tuple[dict
     for name, (dtype, shape) in specs.items():
         entry = _Entry(offset, dtype, shape)
         layout[name] = entry
-        offset += -(-entry.nbytes // _ALIGN) * _ALIGN
+        offset += _aligned(entry.nbytes)
     return layout, offset
 
 

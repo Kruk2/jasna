@@ -1,7 +1,8 @@
 import logging
 import os
+from dataclasses import dataclass
 from fractions import Fraction
-from typing import Iterator
+from typing import Callable, Iterator
 
 import av
 import torch
@@ -26,12 +27,19 @@ CORRUPT_PACKET_TOLERANCE = 10
 
 # Decode backend selection through `JASNA_DECODE_BACKEND`:
 # - "auto":    NVIDIA tries VALI first and falls back to PyAV hwaccel, then PyAV
-#              software, when VALI cannot open or decode the first frame. AMD
-#              keeps its AMF -> software escalation.
+#              software, when VALI cannot open or decode the first frame. On AMD
+#              it decodes in FFmpeg software: measured faster than AMF for H.264
+#              (see the AMD branch in `__enter__`), a wash for HEVC, and the only
+#              option for Main10 HEVC, which hevc_amf cannot decode at all.
 # - "vali":    VALI only; any failure raises (NVIDIA only).
 # - "pyav-hw": skip VALI, use the PyAV hwaccel path with its software fallback.
+#              On AMD this selects the AMF decoder (h264_amf/hevc_amf/av1_amf);
+#              setup failures still fall back to software at open time.
 # - "pyav-sw": force FFmpeg software decoding with GPU upload on every vendor.
 DECODE_BACKEND_ENV = "JASNA_DECODE_BACKEND"
+#: Process-level pin (CLI --decode-backend); the env var stays as the launcher escape
+#: hatch and the CLI value wins when both are set.
+_decode_backend_pinned: str | None = None
 _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
 
 # PyAV's avcodec_find_decoder returns libdav1d for AV1, which carries no NVDEC
@@ -46,8 +54,153 @@ class VideoDecodeError(RuntimeError):
     pass
 
 
+class _HardwareDecoderUnusable(Exception):
+    """Internal signal: a hardware decoder never transferred a single frame.
+
+    Raised from ``_decode_packet`` when the decoder context fails before any
+    frame reached the CPU (AMD hevc_amf on Main10 fails inside the hw->sw
+    download with EINVAL). ``_decoded_frames`` catches it, drops the decoder and
+    re-decodes the whole stream in software. It never escapes the reader.
+    """
+
+
+#: Host bytes one in-flight *decoded* frame costs ffmpeg's frame-threading pool:
+#: a nv12/p010 frame is 1.5 planes, and 10-bit samples are two bytes each.
+_DECODE_THREAD_BUDGET_ENV = "JASNA_DECODE_THREAD_BUDGET_GB"
+_DECODE_THREAD_BUDGET_DEFAULT_GB = 1.0
+
+
+def _decode_thread_count(width: int, height: int, ten_bit: bool) -> tuple[int | None, str]:
+    """Frame-thread depth allowed by a byte budget, plus a note when it binds.
+
+    FFmpeg's frame threading keeps roughly one decoded frame alive per worker, so
+    the decoder's host footprint scales with threads x frame_size. With
+    ``thread_type = "AUTO"`` the depth is the CPU core count: fine at 1080p
+    (~3 MB per thread), fatal at 8K, where a P010 frame is ~95 MB - measured on a
+    7680x4320 clip, threads=1/4/AUTO hold 1.88/2.37/4.42 GB at 4.4/11.4/20.2 fps.
+    Cap the depth so the pool stays inside the budget; frames small enough that
+    the core count already fits are returned untouched. ``<= 0`` disables the cap.
+    """
+    try:
+        budget_gb = float(os.environ.get(_DECODE_THREAD_BUDGET_ENV, "").strip()
+                          or _DECODE_THREAD_BUDGET_DEFAULT_GB)
+    except ValueError:
+        budget_gb = _DECODE_THREAD_BUDGET_DEFAULT_GB
+    cores = os.cpu_count() or 1
+    if budget_gb <= 0:
+        return None, ""
+    frame_bytes = max(1, int(height * 1.5) * int(width) * (2 if ten_bit else 1))
+    allowed = int(budget_gb * (1024 ** 3) // frame_bytes)
+    if allowed >= cores:
+        return None, ""
+    note = (
+        "decode frame-threading capped for %dx%d%s: %d threads instead of %d "
+        "(each in-flight decoded frame is %.0f MB; raise %s if you have the RAM)"
+        % (width, height, " 10-bit" if ten_bit else "", max(1, allowed), cores,
+           frame_bytes / (1024 ** 2), _DECODE_THREAD_BUDGET_ENV)
+    )
+    return max(1, allowed), note
+
+
+def _use_bounded_decode_threads(ctx, width: int, height: int, ten_bit: bool) -> None:
+    """Let ffmpeg pick the threading mode, but not the frame-thread depth."""
+    ctx.thread_type = "AUTO"
+    threads, note = _decode_thread_count(width, height, ten_bit)
+    if threads is not None:
+        ctx.thread_count = threads
+    if note:
+        log.warning(note)
+
+@dataclass
+class LazyYuvFrame:
+    """A decoded frame kept as normalized host YUV (nv12/p010).
+
+    The AMD no-roundtrip path (``JASNA_AMD_YUV_PASSTHROUGH=1``) hands these
+    straight to the encoder for frames that need no restoration, so a clean
+    frame never touches the device. ``rgb()`` materializes the device RGB tensor
+    only for frames that really need detection crops or blending, and caches it.
+    """
+
+    yuv_host: torch.Tensor | None  # (H + H//2, W) pinned, nv12 or p010
+    pts: int
+    _materialize: Callable[[], torch.Tensor] | None = None
+    _rgb: torch.Tensor | None = None
+    _batch_ctx: tuple | None = None
+
+    def rgb(self) -> torch.Tensor:
+        if self._rgb is None:
+            if self._materialize is None:
+                raise RuntimeError("LazyYuvFrame has no RGB materializer")
+            self._rgb = self._materialize()
+            self._materialize = None
+            self._batch_ctx = None
+        return self._rgb
+
+
+def materialize_lazy_batch(
+    slots: list[LazyYuvFrame], *, keep_host: bool = True
+) -> torch.Tensor:
+    """Materialize a batch of LazyYuvFrame into one contiguous (B, 3, H, W) tensor.
+
+    Performs H2D upload and fused YUV->RGB conversion on the caller's stream with
+    a single synchronization for the whole batch, avoiding per-frame synchronizations
+    and avoiding the extra GPU copy from ``torch.stack``.
+    """
+    count = len(slots)
+    if count == 0:
+        raise ValueError("Cannot materialize an empty LazyYuvFrame batch")
+    ctx = slots[0]._batch_ctx
+    if ctx is None or any(s._rgb is not None or s.yuv_host is None for s in slots):
+        batch = torch.stack([s.rgb() for s in slots])
+        for s in slots:
+            s._materialize = None
+            s._batch_ctx = None
+            if not keep_host:
+                s.yuv_host = None
+        return batch
+
+    device, converter, device_yuv, dtype, H, W = ctx
+    if device_yuv.shape[0] < count:
+        device_yuv = torch.empty((count, H + H // 2, W), dtype=dtype, device=device)
+    stream = current_stream(device)
+    frames_batch = torch.empty((count, 3, H, W), device=device, dtype=torch.uint8)
+    with stream_context(stream):
+        for i, slot in enumerate(slots):
+            device_yuv[i].copy_(slot.yuv_host, non_blocking=True)
+        converter.convert_packed_batch_into(
+            device_yuv[:count], frames_batch, stream.cuda_stream
+        )
+    stream.synchronize()
+    for i, slot in enumerate(slots):
+        slot._rgb = frames_batch[i]
+        slot._materialize = None
+        slot._batch_ctx = None
+        if not keep_host:
+            slot.yuv_host = None
+    return frames_batch
+
+
+def set_decode_backend(value: str | None) -> None:
+    """Pin the decode backend for this process (None restores env/auto)."""
+    global _decode_backend_pinned
+    if value is None:
+        _decode_backend_pinned = None
+        return
+    normalized = str(value).strip().lower()
+    if normalized not in _DECODE_BACKENDS:
+        raise ValueError(
+            f"Unknown decode backend {value!r}, expected one of {', '.join(_DECODE_BACKENDS)}"
+        )
+    _decode_backend_pinned = normalized
+
+
 def _decode_backend() -> str:
-    backend = os.environ.get(DECODE_BACKEND_ENV, "auto")
+    # strip/lower: cmd.exe folds the space before ``&&`` into the value
+    # (``set JASNA_DECODE_BACKEND=pyav-hw && ...`` -> "pyav-hw "), which would
+    # otherwise raise "Unknown decode backend" on a perfectly valid choice.
+    if _decode_backend_pinned is not None:
+        return _decode_backend_pinned
+    backend = os.environ.get(DECODE_BACKEND_ENV, "auto").strip().lower()
     if backend not in _DECODE_BACKENDS:
         raise ValueError(
             f"Unknown decode backend {backend!r} from {DECODE_BACKEND_ENV}, "
@@ -250,6 +403,13 @@ class VideoReader:
         self._decoder_ctx = None
         self._vali_source: _ValiFrameSource | None = None
         self._software_only = False
+        # Frames the hardware decoder has handed to the CPU. A hardware decoder
+        # can open cleanly and still fail before producing anything (AMD hevc_amf
+        # has no Main10 support: the hw->sw download raises EINVAL on the first
+        # frame). Only a zero-progress failure escalates to software; once the
+        # decoder has produced a frame a later failure stays fatal, because
+        # restarting software mid-stream could miss reference frames.
+        self._hw_frames_produced = 0
 
     def __enter__(self):
         current_stream(self.device)
@@ -293,16 +453,30 @@ class VideoReader:
 
         ctx = self.video_stream.codec_context
         if software_only:
-            ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(ctx, ctx.width, ctx.height, self.metadata.is_10bit)
         elif self.vendor is AcceleratorVendor.AMD:
-            self._setup_amf_decoder(ctx)
+            # Measured on an RX 7900 XT (2026-10-11, interleaved A/B, slope of
+            # time-vs-N so the one-time torch.compile is not counted per frame):
+            # for H.264 the AMF decoder is ~1.95x SLOWER than FFmpeg software
+            # decode at steady state (2.289 vs 1.173 ms/frame = 437 vs 852 fps).
+            # h264_amf runs on the same GPU that already carries detection and
+            # restoration, and its decode->download path serializes against that
+            # work. For HEVC the two are a wash (2.242 vs 2.250 ms/frame), and
+            # hevc_amf cannot decode Main10 at all. Decoded output is
+            # bit-identical (max abs channel diff 0 over 40 frames). So AMD
+            # defaults to software decode; JASNA_DECODE_BACKEND=pyav-hw opts back
+            # into AMF.
+            if backend == "pyav-hw":
+                self._setup_amf_decoder(ctx)
+            else:
+                _use_bounded_decode_threads(ctx, ctx.width, ctx.height, self.metadata.is_10bit)
         elif not ctx.is_hwaccel:
             if self.vendor is AcceleratorVendor.NVIDIA:
                 self._setup_nvdec_decoder(ctx)
             else:
                 # Definite software decode: let FFmpeg pick frame/slice threading.
                 # CUDA contexts must keep their default threading configuration.
-                ctx.thread_type = "AUTO"
+                _use_bounded_decode_threads(ctx, ctx.width, ctx.height, self.metadata.is_10bit)
         self.width = ctx.width
         self.height = ctx.height
         self._full_range = (
@@ -328,7 +502,7 @@ class VideoReader:
             "av1": "av1_amf",
         }.get(str(source_ctx.name).lower())
         if decoder_name is None:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             return
         try:
             hwaccel = HWAccel(
@@ -361,7 +535,7 @@ class VideoReader:
             self._decoder_ctx = decoder
             log.info("Using AMF hardware decoder %s for %s", decoder_name, self.file)
         except (ValueError, av.FFmpegError, RuntimeError) as exc:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             log.warning(
                 "AMF cannot decode %s (codec %s): %s; using FFmpeg software "
                 "decoding and uploading frames to ROCm",
@@ -373,11 +547,11 @@ class VideoReader:
     def _setup_nvdec_decoder(self, source_ctx) -> None:
         decoder_name = _NVDEC_DECODER_OVERRIDES.get(str(self.metadata.codec_name).lower())
         if decoder_name is None:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             return
         min_width, min_height = _NVDEC_MIN_CODED_SIZE[decoder_name]
         if source_ctx.width < min_width or source_ctx.height < min_height:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             log.info(
                 "Skipping NVDEC decoder %s for %s: %dx%d is below its %dx%d minimum",
                 decoder_name,
@@ -404,7 +578,7 @@ class VideoReader:
             self._decoder_ctx = decoder
             log.info("Using NVDEC decoder %s for %s", decoder_name, self.file)
         except (ValueError, av.FFmpegError, RuntimeError) as exc:
-            source_ctx.thread_type = "AUTO"
+            _use_bounded_decode_threads(source_ctx, source_ctx.width, source_ctx.height, self.metadata.is_10bit)
             log.warning(
                 "NVDEC decoder %s unavailable for %s (codec %s): %s; using FFmpeg "
                 "software decoding and uploading frames to CUDA",
@@ -432,11 +606,11 @@ class VideoReader:
 
     def _decode_packet(self, packet, consecutive_errors: int) -> tuple[list, int]:
         try:
-            frames = (
-                self._decoder_ctx.decode(packet)
-                if self._decoder_ctx is not None
-                else packet.decode()
-            )
+            if self._decoder_ctx is not None:
+                frames = self._decoder_ctx.decode(packet)
+                self._hw_frames_produced += len(frames)
+            else:
+                frames = packet.decode()
         except av.error.InvalidDataError as e:
             consecutive_errors += 1
             if consecutive_errors > CORRUPT_PACKET_TOLERANCE:
@@ -447,31 +621,70 @@ class VideoReader:
             log.warning("Recovered video corruption in %s: %s", self.file, e)
             return [], consecutive_errors
         except av.FFmpegError as e:
+            if self._decoder_ctx is not None and self._hw_frames_produced == 0:
+                # The hardware decoder opened but never produced a frame. AMD's
+                # hevc_amf cannot decode Main10: the hardware-to-software
+                # download raises EINVAL (av.error.ArgumentError), which is *not*
+                # an InvalidDataError, so without this it would abort the job.
+                # Let _decoded_frames drop the decoder and re-decode in software.
+                raise _HardwareDecoderUnusable(e) from e
             raise VideoDecodeError(f"Failed to decode {self.file}: {e}") from e
         if frames:
             consecutive_errors = 0
         return frames, consecutive_errors
 
+    def _fall_back_to_software(self, exc: BaseException) -> None:
+        name = getattr(self._decoder_ctx, "name", None) or "hardware decoder"
+        self._decoder_ctx = None
+        if self.vendor is not AcceleratorVendor.NVIDIA:
+            # Definite software decode now: let FFmpeg pick frame/slice
+            # threading, matching __enter__'s software branches. CUDA contexts
+            # must keep their default threading configuration.
+            _use_bounded_decode_threads(self.video_stream.codec_context, self.width, self.height, self.metadata.is_10bit)
+        log.warning(
+            "%s cannot decode %s (codec %s) without decoding a single frame: %s; "
+            "falling back to FFmpeg software decoding and uploading frames to the GPU",
+            name,
+            self.file,
+            self.metadata.codec_name,
+            exc.__cause__ or exc,
+        )
+
     def _decoded_frames(self, seek_ts: float | None):
-        target_pts = None
+        start = resolve_video_start_pts(
+            self.video_stream.start_time,
+            self.metadata.start_pts,
+        )
+        seek_target = None
         if seek_ts is not None:
-            start = resolve_video_start_pts(
-                self.video_stream.start_time,
-                self.metadata.start_pts,
-            )
-            target_pts = start + round(seek_ts / self.video_stream.time_base)
-            self.container.seek(target_pts, stream=self.video_stream, backward=True)
+            seek_target = start + round(seek_ts / self.video_stream.time_base)
+            self.container.seek(seek_target, stream=self.video_stream, backward=True)
             if self._decoder_ctx is not None:
                 self._decoder_ctx.flush_buffers()
 
-        consecutive_errors = 0
-        for packet in demux_video(self.container, self.video_stream):
-            frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
-            for frame in frames:
-                if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
-                    continue
-                target_pts = None
-                yield frame
+        while True:
+            target_pts = seek_target
+            consecutive_errors = 0
+            restart = False
+            try:
+                for packet in demux_video(self.container, self.video_stream):
+                    frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
+                    for frame in frames:
+                        if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
+                            continue
+                        target_pts = None
+                        yield frame
+            except _HardwareDecoderUnusable as exc:
+                # The hardware decoder never transferred a frame end-to-end
+                # (e.g. AMD hevc_amf on Main10). Nothing was yielded yet, so drop
+                # it, rewind to the same starting point and decode the whole
+                # stream in software.
+                self._fall_back_to_software(exc)
+                restart = True
+            if not restart:
+                return
+            rewind_pts = seek_target if seek_target is not None else start
+            self.container.seek(rewind_pts, stream=self.video_stream, backward=True)
 
     def _read_group(self, decoded) -> list:
         group = []
@@ -493,7 +706,14 @@ class VideoReader:
     def frames(
         self,
         seek_ts: float | None = None,
-    ) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        *,
+        lazy_yuv: bool = False,
+        yuv_format: str | None = None,
+    ) -> Iterator[tuple[torch.Tensor | list[LazyYuvFrame], list[int]]]:
+        # lazy_yuv (AMD only): yield per-frame LazyYuvFrame objects that hold the
+        # normalized host YUV and materialize device RGB on demand. Used by the
+        # blend/encode reader so clean frames never round-trip through the device;
+        # ignored on the CUDA hardware path, whose frames are already on-device.
         # With seek_ts, strided selection re-anchors at the first decoded frame
         # after the seek instead of the start of the file: sample phase is only
         # stable relative to the seek target.
@@ -523,7 +743,10 @@ class VideoReader:
                     self.metadata.codec_name,
                     group[0].format.name,
                 )
-            backend = self._frames_software(decoded, group)
+            if lazy_yuv and vendor is AcceleratorVendor.AMD:
+                backend = self._frames_lazy_software(decoded, group, yuv_format)
+            else:
+                backend = self._frames_software(decoded, group)
 
         # The backend generator now owns the first group. Drop this outer
         # reference before yielding: retaining four 4K P010 NVDEC surfaces here
@@ -647,17 +870,124 @@ class VideoReader:
                 # batch device buffer; NVIDIA reuses the single staging frame
                 # (H2D + convert ordered on the private stream so the next
                 # overwrite starts only after the prior kernel consumed it).
-                for i in range(len(group)):
-                    plane = staging if staging is not None else device_yuv[i]
-                    plane.copy_(pinned[i], non_blocking=True)
-                    converter.convert_into(
-                        plane[:H],
-                        plane[H:].view(H // 2, W // 2, 2),
-                        batch[i],
+                if device_yuv is not None:
+                    count = len(group)
+                    for i in range(count):
+                        device_yuv[i].copy_(pinned[i], non_blocking=True)
+                    converter.convert_packed_batch_into(
+                        device_yuv[:count], batch, stream.cuda_stream
                     )
+                else:
+                    for i in range(len(group)):
+                        staging.copy_(pinned[i], non_blocking=True)
+                        converter.convert_into(
+                            staging[:H],
+                            staging[H:].view(H // 2, W // 2, 2),
+                            batch[i],
+                        )
 
             next_group = self._read_group(decoded)
             # Sync before yield so other pipeline threads never see in-flight planes.
             stream.synchronize()
             group = next_group
             yield batch, pts
+
+    def _frames_lazy_software(
+        self, decoded, group: list, yuv_format: str | None = None
+    ) -> Iterator[tuple[list[LazyYuvFrame], list[int]]]:
+        # Same decode + CPU reformat as _frames_software, but the normalized host
+        # YUV is kept instead of being uploaded and converted to RGB. The device
+        # RGB tensor is produced lazily, only for frames the pipeline actually
+        # needs; clean frames go straight to the encoder as host YUV. This is the
+        # AMD no-roundtrip path (JASNA_AMD_YUV_PASSTHROUGH).
+        depth = max(
+            (component.bits for component in group[0].format.components if component.bits),
+            default=10 if self.metadata.is_10bit else 8,
+        )
+        ten_bit = depth > 8
+        if depth > 10:
+            log.warning(
+                "Reducing %d-bit source %s to 10-bit P010 before CUDA upload", depth, self.file
+            )
+        target_format = "p010le" if ten_bit else "nv12"
+        if yuv_format is not None:
+            # The encoder dictates the host pixel format (p010le for hevc/av1, nv12
+            # for h264). Reformat to it here so an 8-bit source is depth-converted
+            # by swscale rather than handed to a 10-bit encoder buffer.
+            target_format = yuv_format
+            ten_bit = yuv_format == "p010le"
+        dtype = torch.uint16 if ten_bit else torch.uint8
+        bytes_per_sample = 2 if ten_bit else 1
+
+        converter = YuvToRgbConverter(
+            self.height,
+            self.width,
+            self.metadata.color_space,
+            self._full_range,
+            ten_bit,
+            self.device,
+        )
+        reformatter = VideoReformatter()
+        color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
+        H, W = self.height, self.width
+        device_yuv = torch.empty(
+            (self.batch_size, H + H // 2, W), dtype=dtype, device=self.device
+        )
+        batch_ctx = (self.device, converter, device_yuv, dtype, H, W)
+
+        while group:
+            slots: list[LazyYuvFrame] = []
+            for frame in group:
+                try:
+                    normalized = reformatter.reformat(
+                        frame,
+                        width=W,
+                        height=H,
+                        format=target_format,
+                        src_colorspace=self.metadata.color_space,
+                        dst_colorspace=self.metadata.color_space,
+                        src_color_range=color_range,
+                        dst_color_range=color_range,
+                    )
+                except av.FFmpegError as e:
+                    raise VideoDecodeError(f"Failed to decode {self.file}: {e}") from e
+                y_plane, uv_plane = normalized.planes
+                y = torch.frombuffer(y_plane, dtype=dtype).reshape(
+                    H, y_plane.line_size // bytes_per_sample
+                )[:, :W]
+                uv = torch.frombuffer(uv_plane, dtype=dtype).reshape(
+                    H // 2, uv_plane.line_size // bytes_per_sample
+                )[:, :W]
+                host = torch.empty((H + H // 2, W), dtype=dtype, pin_memory=True)
+                host[:H].copy_(y)
+                host[H:].copy_(uv)
+                frame_pts = int(frame.pts) if frame.pts is not None else 0
+                slots.append(
+                    LazyYuvFrame(
+                        yuv_host=host,
+                        pts=frame_pts,
+                        _materialize=self._rgb_materializer(
+                            host, converter, dtype, H, W
+                        ),
+                        _batch_ctx=batch_ctx,
+                    )
+                )
+
+            next_group = self._read_group(decoded)
+            yield slots, [slot.pts for slot in slots]
+            group = next_group
+
+    def _rgb_materializer(self, host, converter, dtype, H, W):
+        device = self.device
+        stream = current_stream(device)
+
+        def materialize() -> torch.Tensor:
+            plane = torch.empty((H + H // 2, W), dtype=dtype, device=device)
+            rgb = torch.empty((3, H, W), device=device, dtype=torch.uint8)
+            with stream_context(stream):
+                plane.copy_(host, non_blocking=True)
+                converter.convert_into(plane[:H], plane[H:].view(H // 2, W // 2, 2), rgb)
+            stream.synchronize()
+            return rgb
+
+        return materialize

@@ -120,6 +120,7 @@ def test_decoder_state_dict_failure_clears_discarded_qkv_clones(monkeypatch, fai
     assert torch.equal(source, torch.arange(12.0).reshape(6, 2))
 
 
+
 def test_ltx25_decoder_keys_match_module():
     decoder = _meta_ltx25_decoder()
     expected = set(decoder.state_dict())
@@ -177,6 +178,7 @@ def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
             yield reader
 
     monkeypatch.setattr(loader, "open_tensors", record_open)
+
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
@@ -269,6 +271,7 @@ def test_decoder_load_success_preserves_cpu_weights_and_clears_overlay_sources(t
     assert torch.equal(model.weight, torch.full((2, 2), 2, dtype=torch.bfloat16))
     assert loaded[0]["decoder.weight"].untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
     assert torch.count_nonzero(loaded[1]["weight"]).item() == 0
+
 
 
 def test_ltx25_tiling_needs_minimum_budget():
@@ -397,6 +400,7 @@ def test_vae_reader_close_failure_clears_loaded_weights(tmp_path, monkeypatch, s
     assert torch.count_nonzero(retained[0]).item() == 0
 
 
+
 def test_tiny_decoder_multi_tile_decode_is_seeded_and_shaped():
     decoder = _tiny_decoder()
     latent = torch.randn(1, 8, 3, 3, 4)
@@ -506,3 +510,4 @@ def test_decode_tiling_is_logged_once_per_layout(caplog):
             loader._log_tiling(121, 512, 512, tiling)
 
     assert [r.getMessage() for r in caplog.records] == ["LTX decode: 121 frames x 512x512 px in tiles of 88 frames x 512x512 px"]
+

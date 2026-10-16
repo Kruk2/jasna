@@ -29,7 +29,7 @@ LTX_MODELS: tuple[LtxModelName, ...] = get_args(LtxModelName)
 
 # Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}",
 # and from the same path on LTX_MIRROR_URL (reachable from mainland China) when that fails.
-LTX_DOWNLOAD_URL = "https://huggingface.co/Kruk2/ltx-restore/resolve/main"
+LTX_DOWNLOAD_URL: str | None = "https://huggingface.co/Kruk2/ltx-restore/resolve/main"
 LTX_MIRROR_URL = "https://hf-mirror.com/Kruk2/ltx-restore/resolve/main"
 _NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
 
@@ -110,7 +110,10 @@ class _PlaintextHandle:
         return self._source.keys()
 
     def offset_keys(self):
-        return self._source.offset_keys()
+        # ``safe_open.offset_keys`` is only in newer safetensors; older releases expose
+        # the same file order through ``keys``, so fall back to it instead of crashing.
+        keys = getattr(self._source, "offset_keys", None)
+        return list(keys() if keys is not None else self._source.keys())
 
     def metadata(self):
         return self._source.metadata()
@@ -212,6 +215,11 @@ class PlaceholderHandle:
         _fill_tensor_groups(self, group_names, groups)
 
 
+# Branch-local alias: upstream renamed the class to ``PlaceholderHandle``; keep the old
+# private spelling pointing at the same implementation so both names stay usable.
+_PlaceholderHandle = PlaceholderHandle
+
+
 def open_tensors(path: Path | PlaceholderTensors):
     if isinstance(path, PlaceholderTensors):
         return PlaceholderHandle(path)
@@ -309,6 +317,8 @@ def download_files(
     anything. Each file falls back to the other source when the first is unreachable;
     ``mirror_first`` tries the mirror first. ``progress_callback(done_bytes, total_bytes)``
     covers all files together."""
+    if LTX_DOWNLOAD_URL is None:
+        raise RuntimeError("The LTX model download location is not published yet; get the model files manually.")
     context = ssl.create_default_context(cafile=certifi.where())
     sources = (LTX_MIRROR_URL, LTX_DOWNLOAD_URL) if mirror_first else (LTX_DOWNLOAD_URL, LTX_MIRROR_URL)
     directory.mkdir(parents=True, exist_ok=True)

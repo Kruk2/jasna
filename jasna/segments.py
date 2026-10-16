@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+
 from dataclasses import dataclass, replace
 
 from jasna.session_config import RestorationModelName
@@ -128,6 +129,16 @@ def _painted(segments: list[SegmentRange] | tuple[SegmentRange, ...]) -> list[Se
             heapq.heappop(covering)
         if covering and right - left > 1e-9:
             pieces.append(replace(segments[-covering[0]], start=left, end=right))
+    return pieces
+
+
+def _outside(segment: SegmentRange, cut: SegmentRange) -> list[SegmentRange]:
+    """The parts of ``segment`` that ``cut`` does not cover."""
+    pieces = []
+    if cut.start - segment.start > 1e-9:
+        pieces.append(replace(segment, end=min(segment.end, cut.start)))
+    if segment.end - cut.end > 1e-9:
+        pieces.append(replace(segment, start=max(segment.start, cut.end)))
     return pieces
 
 

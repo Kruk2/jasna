@@ -73,6 +73,7 @@ def test_trial_session_uses_placeholders_without_files_or_license():
     with (
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
         patch("jasna.ltx.transformer.require_kernels"),
+
         patch("jasna.engine_compiler.ensure_engines_compiled"),
         patch("jasna.ltx.model_files.LtxModelFiles.from_dir", side_effect=AssertionError("reads model files")),
     ):
@@ -84,6 +85,11 @@ def test_trial_session_uses_placeholders_without_files_or_license():
 @pytest.mark.parametrize("fast", [False, True])
 def test_placeholder_block_runs_on_the_gpu(fast):
     device = torch.device("cuda")
+
+    if fast and not torch.version.cuda:
+        # The fast block is an NVFP4/FP8 one built on torch._scaled_mm, which is
+        # CUDA-only ("only supported on CUDA devices" on ROCm).
+        pytest.skip("the fast (NVFP4) block uses torch._scaled_mm, CUDA-only")
     if fast and torch.cuda.get_device_capability(device)[0] < 10:
         pytest.skip("NVFP4 needs Blackwell")
     with open_tensors(LtxModelFiles.placeholder("distilled", fast=fast).transformer) as handle:
@@ -95,4 +101,5 @@ def test_placeholder_block_runs_on_the_gpu(fast):
     tokens = torch.randn(1, 64, 128, device=device, dtype=torch.bfloat16)
     prompt = T.prompt_key_value(block, cond, top["prompt_context"])
     x = T.block_forward(block, T.embed_tokens(top, tokens, 16), cond, prompt, rope)
+    x = T.block_forward(block, T.embed_tokens(top, tokens, 16), cond, top["prompt_context"], rope)
     assert torch.isfinite(T.velocity(top, x, cond).float()).all()

@@ -14,6 +14,17 @@ and a command line, and runs on your GPU.
 ## Contents
 
 **Start here**
+- [What Jasna Does](#what-jasna-does)
+- [Community](#community)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [First Run](#first-run)
+- [Learn More](#learn-more)
+- [Benchmarks](#benchmarks)
+- [Licensing](#licensing)
+- [Supporting the Project](#supporting-the-project)
+- [Acknowledgments](#acknowledgments)
+- [TODO](#todo)
 
 - [What Jasna does](#what-jasna-does)
 - [What you need](#what-you-need)
@@ -84,6 +95,10 @@ apps and don't use the PC during this time. When you update Jasna, copy the
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
 memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
 [Tuning](docs/en/tuning.md).
+- An NVIDIA **GTX 16-series / RTX 20-series or newer** GPU. GTX 10-series and older cards (GTX 1050/1060/1070/1080) won't work. Not sure about yours? Check NVIDIA's [GPU table](https://developer.nvidia.com/cuda/gpus) — compute capability 7.5+ is required.
+- Nvidia driver **610 or newer** on Windows, **580 or newer** on Linux.
+- AMD support is experimental and needs a ROCm-supported GPU (Radeon RX 7000/9000, Radeon 780M/760M/740M, Ryzen AI iGPUs). On Windows, update the AMD Adrenalin driver to 26.8.1 or newer.
+- Install Jasna into a folder whose path contains only English letters and numbers.
 
 ## Help and community
 
@@ -179,6 +194,14 @@ real detail. See
 
 The command line can do most of what the app does (not the Video Player,
 LTX seed previews, mask suggestions or interactive image mode).
+## Licensing
+
+Jasna's public application source is AGPL-3.0. Models and bundled dependencies
+retain their own terms. See [licensing and source availability](LICENSING.md),
+[model notices](assets/THIRD_PARTY_MODELS.md), and the
+[release source correspondence](RELEASE_SOURCES.md).
+
+## Supporting the Project
 
 ```bash
 # One video
@@ -244,6 +267,12 @@ Times for older versions (v0.4.1: 01:35 / 01:46 / 03:23; v0.5.0: 00:45 /
 full-length videos: [legacy report](benchmarks/2026-07-26_legacy_videos.md).
 
 </details>
+Keys are sold **only** on these two pages. Anyone else selling Jasna, keys or modified files is a scam: their keys do not work with the official app, and their files can run hidden code on your PC. Download Jasna only from GitHub.
+
+If activation fails, check the exact purchase email or handle and copy the full key again.
+An invalid key alone does not prove fraud; Jasna identifies keys from known unofficial sellers separately.
+
+## Acknowledgments
 
 ### Licensing
 

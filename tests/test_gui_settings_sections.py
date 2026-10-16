@@ -20,6 +20,7 @@ from jasna.gui.settings_sections.restoration_model import RestorationModelSectio
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui import ltx_models as ltx_models_module
+
 from factories import ltx_models
 
 
@@ -37,6 +38,10 @@ class _FakeValueMenu:
 
     get_value = ValueOptionMenu.get_value
     set_value = ValueOptionMenu.set_value
+    set_options = ValueOptionMenu.set_options
+
+    def configure(self, **kwargs) -> None:  # state= toggles and values= rewrites
+        pass
 
 
 class _FakeWidget:
@@ -74,12 +79,14 @@ def _fake_section_widgets() -> dict:
         "ltx_trial": _FakeWidget(1),
         "ltx_auto_split": _FakeWidget(1),
         "ltx_auto_split_percent": _FakeWidget(17.6),
+
         "max_clip_size": _FakeWidget(90),
         "fp16_mode": _FakeWidget(1),
         "detection_model": _FakeWidget("rfdetr-v6"),
         "detection_score_threshold": _FakeWidget(0.35),
         "compile_basicvsrpp": _FakeWidget(1),
         "file_conflict": _FakeValueMenu({"auto_rename": "A", "overwrite": "B", "skip": "C"}, "skip"),
+        "batch_size": _FakeValueMenu({"4": "4", "8": "8"}, "8"),
         "temporal_overlap": _FakeWidget(8),
         "max_detection_gap": _FakeWidget(2),
         "min_detection_duration": _FakeWidget(2),
@@ -98,6 +105,25 @@ def _fake_section_widgets() -> dict:
         "rtx_quality": _FakeWidget("Ultra"),
         "rtx_denoise": _FakeWidget("None"),
         "rtx_deblur": _FakeWidget("Low"),
+        "amd_upscale_engine": _FakeValueMenu(
+            {"amf-sr": "AMF-SR", "real-esr": "Real-ESR", "realesrgan": "Real-ESRGAN"}, "amf-sr"
+        ),
+        "amd_upscale_model": _FakeValueMenu(
+            {
+                "auto": "auto",
+                "x4v3": "realesr-general-x4v3",
+                "wdn-x4v3": "realesr-general-wdn-x4v3",
+                "lsdir-c3": "4xLSDIRCompactC3",
+                "x4plus": "RealESRGAN_x4plus",
+                "bsrnet": "BSRNet (BSRGAN)",
+            },
+            "auto",
+        ),
+        "amd_upscale_scale": _FakeWidget("2x"),
+        "amd_upscale_algorithm": _FakeWidget("sr1-1"),
+        "amd_upscale_sharpness": _FakeWidget("0.5"),
+        "amd_upscale_ffmpeg_path": _FakeWidget(" C:\\tools\\ffmpeg.exe "),
+        "amd_upscale_timeout": _FakeWidget("90"),
         "image_restore_steps": _FakeWidget(30),
         "image_restore_strength": _FakeWidget(0.55),
         "image_restore_freeu": _FakeWidget(0),
@@ -137,6 +163,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     values = _collect_all(_fake_section_widgets())
 
     assert values["file_conflict"] == "skip"
+    assert values["batch_size"] == 8
     assert values["vr_mode"] == "off"
     assert values["denoise_strength"] == "high"
     assert values["denoise_step"] == "after_secondary"
@@ -148,6 +175,13 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["tvai_scale"] == 2
     assert values["tvai_denoise"] is True
     assert values["rtx_quality"] == "ultra"
+    assert values["amd_upscale_engine"] == "amf-sr"
+    assert values["amd_upscale_model"] == "auto"
+    assert values["amd_upscale_scale"] == 2
+    assert values["amd_upscale_algorithm"] == "sr1-1"
+    assert values["amd_upscale_sharpness"] == 0.5
+    assert values["amd_upscale_ffmpeg_path"] == " C:\\tools\\ffmpeg.exe "
+    assert values["amd_upscale_timeout_s"] == 90
     assert values["image_restore_seed"] == 0
     assert values["lut_path"] == "/luts/a.cube"
     assert values["enable_crossfade"] is False
@@ -165,11 +199,11 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["ltx_auto_split_percent"] == 18
 
 
+
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
     values = _collect_all(_fake_section_widgets())
 
     defaults_only = {
-        "batch_size",
         "tvai_args",
         "vr_projection",
         "output_folder",
@@ -178,8 +212,9 @@ def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
     expected = {f.name for f in fields(AppSettings)} - defaults_only
     assert set(values) == expected
 
-    settings = AppSettings(batch_size=4, **values)
+    settings = AppSettings(**values)
     assert settings.codec == "av1"
+    assert settings.batch_size == 8
 
 
 @pytest.fixture
@@ -207,6 +242,14 @@ def _basic_section_panel(monkeypatch, tmp_path):
         yield panel, next(section for section in panel._sections if isinstance(section, BasicSection))
     finally:
         root.destroy()
+
+
+def test_batch_size_choice_reaches_settings(_basic_section_panel) -> None:
+    panel, _basic = _basic_section_panel
+
+    assert panel.get_settings().batch_size == 4
+    panel._widgets["batch_size"].set_value("8")
+    assert panel.get_settings().batch_size == 8
 
 
 def test_switching_detection_model_applies_recommended_threshold(_basic_section_panel) -> None:
@@ -374,7 +417,17 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
         from jasna.gui.settings_panel import SettingsPanel
 
         panel = SettingsPanel(root, PresetManager(), ltx_models=ltx_models(root, tmp_path / "ltx", installed=True))
-        assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
+        # `encoder_cq` is the portable `None` sentinel in AppSettings; the panel
+        # resolves it to the active GPU's encoder default (AMD HEVC is 25, NVIDIA 28).
+        from jasna.accelerator import vendor_for_device
+        from jasna.media.encoder_settings import encoder_cq_spec
+
+        expected_cq = encoder_cq_spec("hevc", vendor_for_device()).default
+        # The sharpness sentinel -1 displays as 0 under the default network
+        # engine (both mean "off" there); see SecondarySection._refresh_amd_rows.
+        assert panel.get_settings() == replace(
+            AppSettings(), encoder_cq=expected_cq, amd_upscale_sharpness=0.0
+        )
         assert panel._saved_preset_settings == panel.get_settings()
     finally:
         root.destroy()
@@ -508,7 +561,10 @@ def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
     for section in panel._sections:
         section.apply(ltx)
 
-    assert panel.get_settings() == ltx
+    # The sharpness sentinel -1 (amf-sr's "driver default") displays as 0 under
+    # the default network engine; 0 is off there too, so the round trip is
+    # value-preserving except for that documented display normalization.
+    assert panel.get_settings() == replace(ltx, amd_upscale_sharpness=0.0)
 
 
 def test_processing_locks_secondary_controls_and_keeps_missing_unet4x_disabled(

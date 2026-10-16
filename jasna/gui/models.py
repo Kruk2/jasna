@@ -11,6 +11,7 @@ from pathlib import Path
 from jasna.gui.paths import get_settings_path
 from jasna.segments import SegmentRange
 from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
+from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, amd_upscale_engine_for
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,7 @@ class AppSettings:
     ltx_auto_split: bool = False
     ltx_auto_split_percent: int = LTX_AUTO_DEFAULT_PERCENT
 
+
     # Basic processing
     batch_size: int = 4
     max_clip_size: int = 90
@@ -139,6 +141,13 @@ class AppSettings:
     rtx_quality: str = "high"  # low, medium, high, ultra
     rtx_denoise: str = "medium"  # none, low, medium, high, ultra
     rtx_deblur: str = "none"  # none, low, medium, high, ultra
+    amd_upscale_engine: str = "real-esr"  # row 1 = class: real-esr (SRVGGNetCompact, in-process, default), realesrgan (RRDBNet, in-process) or amf-sr (AMD Video SR, D3D11)
+    amd_upscale_model: str = "x4v3"  # row 2 = concrete weight of that engine: real-esr: x4v3 = realesr-general-x4v3 (32-conv SRVGG, fastest), wdn-x4v3 = realesr-general-wdn-x4v3 (denoising), lsdir-c3 = 4xLSDIRCompactC3 (16-conv) or auto; realesrgan: x4plus = RealESRGAN_x4plus (23-block, best quality), bsrnet = BSRNet (KAIR, 23-block) or auto
+    amd_upscale_scale: int = 4  # 2, 4, 6, 8
+    amd_upscale_algorithm: str = "sr1-0"  # sr1-0, sr1-1, bicubic, bilinear, point
+    amd_upscale_sharpness: float = -1.0  # amf-sr: -1 = driver default, 0..2; real-esr/realesrgan: 0..1 patch CAS (any negative = off, shown as 0)
+    amd_upscale_ffmpeg_path: str = ""  # empty: bundled ffmpeg or PATH
+    amd_upscale_timeout_s: float = 120.0
     
     # Detection
     detection_model: str = "rfdetr-v6"  # RF-DETR, Lada YOLO, or ZeLeFans VR YOLO registry name
@@ -230,6 +239,14 @@ def _migrate_preset_dict(preset_dict: dict) -> dict:
             )
     if "codec" in migrated:
         migrated["codec"] = _normalize_preset_codec(migrated["codec"])
+    if "amd_upscale_engine" in migrated or "amd_upscale_model" in migrated:
+        # Older presets stored "realesrgan" for every Real-ESRGAN-family weight. The
+        # engine now splits into real-esr (SRVGGNetCompact) and realesrgan (RRDBNet),
+        # so re-derive the engine from the weight, which is unambiguous.
+        migrated["amd_upscale_engine"] = amd_upscale_engine_for(
+            migrated.get("amd_upscale_engine", ""),
+            migrated.get("amd_upscale_model", ""),
+        )
     return migrated
 
 

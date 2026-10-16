@@ -20,6 +20,11 @@ class UnsupportedVideoError(Exception):
     pass
 
 
+# Branch-local alias: upstream generalised this error to UnsupportedVideoError, so both
+# spellings refer to the very same class and either ``except`` clause catches it.
+UnsupportedColorspaceError = UnsupportedVideoError
+
+
 @dataclass
 class VideoMetadata:
     video_file: str

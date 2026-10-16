@@ -42,6 +42,7 @@ from jasna.gui.font_backend import (
     inspect_font_backend,
 )
 from jasna._frozen import is_frozen
+from jasna.os_utils import env_flag
 
 logger = logging.getLogger(__name__)
 
@@ -470,6 +471,9 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             if self._processor:
                 self._processor.stop()
                 self._processor.join(timeout=5.0)
+                # The processing session stays warm between batch runs; release it
+                # (and its VRAM) when the window closes.
+                self._processor.release_sessions()
         finally:
             self._stop_system_stats_poller()
             self._main_thread.close()
@@ -632,6 +636,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             jobs, settings
         ):
             self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
+        if (
+            self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded"
+            and any_job_uses_ltx(jobs, settings)
+            and self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
+        ):
             return
         if (
             not settings.ltx_trial
@@ -953,7 +962,7 @@ def run_gui():
 
     scaling.activate_static_dpi(_MIN_WINDOW_SIZE)
 
-    if os.environ.get("JASNA_GUI_FONT_PROBE") == "1":
+    if env_flag("JASNA_GUI_FONT_PROBE"):
         root = ctk.CTk()
         try:
             status = inspect_font_backend(root)

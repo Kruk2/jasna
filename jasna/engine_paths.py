@@ -34,6 +34,7 @@ def configure_torch_compile_cache() -> None:
         logger.warning("Compile cache %s is not writable: every LTX run will tune its kernels again", cache)
 
 
+
 _DEFAULT_RESTORATION_MODELS = {
     "basicvsrpp": "lada_mosaic_restoration_model_generic_v1.2.pth",
     "ltx": "ltx-restore",

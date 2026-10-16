@@ -93,6 +93,10 @@ def test_check_gpu_names_unsupported_amd_arch(monkeypatch):
 
 
 def test_check_gpu_fails_when_no_cuda(monkeypatch):
+    # The wizard reports through the active locale, so pin it before asserting text.
+    from jasna.gui.locales import get_locale
+
+    monkeypatch.setattr(get_locale(), "_current_lang", "en")
     fake_torch = _make_fake_torch(False)
     passed, msg = _call_check_gpu(monkeypatch, fake_torch)
     assert passed is False

@@ -534,3 +534,36 @@ SHARED_LATENT_SHIFT = WINDOW_HOP // TEMPORAL_SCALE
 LEFT_SHARED_LATENTS = range(SHARED_LATENT_SHIFT + 1, LATENT_FRAMES)
 RIGHT_SHARED_LATENTS = range(1, LATENT_FRAMES - SHARED_LATENT_SHIFT)
 FUSION_RAMP = tuple((i + 1) / (len(LEFT_SHARED_LATENTS) + 1) for i in range(len(LEFT_SHARED_LATENTS)))
+
+
+def track_polygons(track: Track) -> list[tuple[Polygon, ...]]:
+    """Per-frame polygons over the whole track span; a detection gap gets the box
+    interpolated between its neighbours and the nearer one's polygons mapped onto it."""
+    anchors = sorted(track.frames)
+    out = []
+    for frame_idx in range(anchors[0], anchors[-1] + 1):
+        group = track.frames.get(frame_idx)
+        if group is not None:
+            out.append(group.polygons)
+            continue
+        position = bisect.bisect_left(anchors, frame_idx)
+        left, right = track.frames[anchors[position - 1]], track.frames[anchors[position]]
+        alpha = (frame_idx - anchors[position - 1]) / (anchors[position] - anchors[position - 1])
+        box = tuple(a + (b - a) * alpha for a, b in zip(left.box, right.box))
+        near = left if alpha <= 0.5 else right
+        out.append(_affine_polygons(near.polygons, near.box, box))
+    return out
+
+
+def polygons_box(polygons: Sequence[Polygon], frame_w: int, frame_h: int) -> Box:
+    points = np.asarray([point for polygon in polygons for point in polygon], dtype=np.float64)
+    if not len(points):
+        raise ValueError("a tracked frame carries no polygon")
+    x1, y1 = points.min(axis=0)
+    x2, y2 = points.max(axis=0)
+    return (
+        float(max(0.0, min(x1, frame_w - 1.0))),
+        float(max(0.0, min(y1, frame_h - 1.0))),
+        float(min(float(frame_w), max(x2, x1 + 1.0))),
+        float(min(float(frame_h), max(y2, y1 + 1.0))),
+    )

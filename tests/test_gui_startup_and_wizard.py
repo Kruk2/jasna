@@ -94,3 +94,4 @@ def test_startup_warns_only_when_windhawk_is_loaded(monkeypatch, loaded):
     expected = [(t("windhawk_warning_title"), t("windhawk_warning_body"))] if loaded else []
     assert shown == expected
     assert logged == [message for _title, message in expected]
+

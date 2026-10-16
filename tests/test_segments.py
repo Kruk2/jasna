@@ -130,3 +130,4 @@ def test_normalize_handles_a_long_scan_quickly() -> None:
     started = time.perf_counter()
     assert normalize_segments(hits) == (SegmentRange(0.0, 5000.5),)
     assert time.perf_counter() - started < 1.0
+

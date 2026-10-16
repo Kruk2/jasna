@@ -88,7 +88,6 @@ def worker_status_text(message: str) -> str:
     return message
 
 
-
 class SegmentEditor(ctk.CTkToplevel):
     """Modal, frame-aware editor for per-job restoration ranges."""
 
@@ -156,6 +155,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._seed_running: tuple[tuple[float, float], int] | None = None
         self._tried_seeds: dict[tuple[float, float], dict[int, tuple[SeedFrame, ...]]] = {}
         self._shown_seed: tuple[tuple[float, float], int] | None = None
+        self._seed_view_on = False
         self._seed_image: tuple[SeedFrame, Image.Image] | None = None
 
         self.title(t("segments_title"))
@@ -451,6 +451,18 @@ class SegmentEditor(ctk.CTkToplevel):
             command=self._render_ltx_preview,
         )
         self._ltx_render_tooltip = Tooltip(self._ltx_render_btn, t("tip_segments_ltx_render"))
+        self._seed_view_control = ctk.CTkFrame(preview_options, fg_color="transparent")
+        self._seed_view_toggle = CompactSwitch(self._seed_view_control, self._toggle_seed_view, Colors.BG_CARD)
+        self._seed_view_toggle.pack(side="right")
+        self._seed_view_label = ctk.CTkLabel(
+            self._seed_view_control,
+            text="",
+            text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+        )
+        self._seed_view_label.pack(side="right", padx=(0, 6))
+        for widget in (self._seed_view_label, self._seed_view_toggle):
+            Tooltip(widget, t("tip_segments_seed_show"))
         projection_names = {
             "raw": t("segments_vr_projection_raw"),
             "fisheye": t("segments_vr_projection_fisheye"),
@@ -699,6 +711,16 @@ class SegmentEditor(ctk.CTkToplevel):
 
         self._seed_box = ctk.CTkFrame(self._inspector, fg_color="transparent")
         self._seed_box.grid_columnconfigure(0, weight=1)
+        self._try_seed_btn = ctk.CTkButton(
+            self._inspector,
+            text=t("segments_try_seed"),
+            width=80,
+            height=28,
+            fg_color=Colors.MODEL_LTX,
+            hover_color=Colors.PRIMARY_HOVER,
+            command=self._try_seed,
+        )
+        self._try_seed_tooltip = Tooltip(self._try_seed_btn, t("tip_segments_try_seed"))
         self._seed_cancel_btn = ctk.CTkButton(
             self._inspector,
             text=t("btn_cancel"),
@@ -798,6 +820,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 self._seed_label,
                 self._seed_entry,
                 self._new_seed_btn,
+                self._try_seed_btn,
                 self._seed_cancel_btn,
                 self._seed_box,
             ):
@@ -822,17 +845,37 @@ class SegmentEditor(ctk.CTkToplevel):
             return "segments_loading_preview"
         return None
 
+    def _try_seed_block_reason(self) -> str | None:
+        """Locale key saying why Try seed is not available now, or None when it is."""
+        blocked = self._ltx_blocked_reason()
+        if blocked is not None:
+            return blocked
+        if self._is_gpu_busy():
+            return "segments_restore_gpu_busy"
+        if self._keyframe_index is None:
+            return "segments_loading_preview"
+        return None
+
     def _refresh_seed_controls(self) -> None:
         self._refresh_ltx_render_button()
         selected = self._require_state().selected_segment
         if selected is None or selected.restoration.model != "ltx":
+            self._refresh_seed_view_control()
             return
         running = self._seed_running is not None
+        reason = self._try_seed_block_reason()
+        self._try_seed_btn.configure(
+            state="disabled" if running or reason is not None or self._scanning() else "normal"
+        )
+        self._try_seed_tooltip.set_text(t(reason) if reason else t("tip_segments_try_seed"))
+        seed_button, hidden_button = (
+            (self._seed_cancel_btn, self._try_seed_btn) if running else (self._try_seed_btn, self._seed_cancel_btn)
+        )
+        hidden_button.grid_forget()
+        seed_button.grid(row=1, column=3, sticky="e", padx=(0, 8), pady=(0, 6))
         if running:
-            self._seed_cancel_btn.grid(row=1, column=3, sticky="e", padx=(0, 8), pady=(0, 6))
             self._seed_progress.grid(row=0, column=0, sticky="ew", pady=(2, 0))
         else:
-            self._seed_cancel_btn.grid_forget()
             self._seed_progress.grid_forget()
         if self._seed_status.cget("text"):
             self._seed_status.grid(row=1, column=0, sticky="ew", pady=(2, 0))
@@ -843,6 +886,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._seed_box.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 6))
         else:
             self._seed_box.grid_forget()
+        self._refresh_seed_view_control()
 
     def _render_seed_chips(self, selected: SegmentRange) -> None:
         for widget in self._seed_chip_widgets:
@@ -989,6 +1033,41 @@ class SegmentEditor(ctk.CTkToplevel):
         self._show_ltx_preview_state()
         return True
 
+    def _refresh_seed_view_control(self) -> None:
+        if self._shown_seed is None:
+            self._seed_view_control.pack_forget()
+            return
+        self._seed_view_label.configure(text=t("segments_seed_show", seed=self._shown_seed[1]))
+        if self._seed_view_on:
+            self._seed_view_toggle.select()
+        else:
+            self._seed_view_toggle.deselect()
+        if not self._seed_view_control.winfo_manager():
+            self._seed_view_control.pack(side="left")
+
+    def _try_seed(self) -> None:
+        selected = self._require_state().selected_segment
+        if selected is None or selected.restoration.model != "ltx" or self._try_seed_block_reason() is not None:
+            return
+        self._claim_gpu_for_seed()
+        if self._seed_worker is None:
+            settings = self._get_settings()
+            work_dir = Path(settings.working_directory) if settings.working_directory else Path(self._job.path).parent
+            self._seed_worker = LtxSeedPreviewWorker(
+                self._job.path,
+                self._metadata,
+                self._keyframe_index,
+                work_dir,
+                on_stopped=lambda: self._set_preview_gpu_busy(False),
+            )
+            self._seed_worker.start()
+        seed = int(selected.restoration.ltx_seed)
+        self._seed_generation = self._seed_worker.try_seed(selected, seed, self._current_video_settings())
+        self._seed_running = (self._range_key(selected), seed)
+        self._seed_progress.set(0.0)
+        self._seed_status.configure(text=t("segments_seed_starting", seed=seed), text_color=Colors.STATUS_PENDING)
+        self._refresh_seed_controls()
+
     def _cancel_seed(self) -> None:
         if self._seed_worker is not None:
             self._seed_worker.cancel()
@@ -999,6 +1078,8 @@ class SegmentEditor(ctk.CTkToplevel):
             self._request_restoration_preview()
 
     def _claim_gpu_for_seed(self) -> None:
+        if self._restore_active:
+            self._deactivate_restoration_preview()
         if self._restoration_worker is not None:
             self._restoration_worker.close()
             self._restoration_worker = None
@@ -1037,6 +1118,11 @@ class SegmentEditor(ctk.CTkToplevel):
             self._seed_status.configure(text="")
             self._shown_seed = (key, seed)
             self._show_ltx_frames(key)
+            self._seed_view_on = True
+            if not key[0] <= self._current < key[1]:
+                self._seek(key[0])
+            self._refresh_all()
+            self._refresh_preview_image()
             return
         elif isinstance(event, SeedFailed):
             self._seed_running = None
@@ -1050,6 +1136,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if selected is None:
             return
         self._shown_seed = (self._range_key(selected), seed)
+        self._seed_view_on = True
         self._show_ltx_frames(self._range_key(selected))
 
     def _show_ltx_frames(self, key: tuple[float, float]) -> None:
@@ -1061,16 +1148,23 @@ class SegmentEditor(ctk.CTkToplevel):
             self._restore_toggle.select()
         self._refresh_all()
         self._request_restoration_preview()
+        self._refresh_seed_controls()
+        self._refresh_preview_image()
 
     def _use_tried_seed(self, seed: int) -> None:
         self._apply_selected_restoration(SegmentRestoration("ltx", seed))
 
+    def _toggle_seed_view(self) -> None:
+        self._seed_view_on = not self._seed_view_on
+        self._refresh_seed_view_control()
+        self._refresh_preview_image()
+
     def _seed_view_image(self) -> Image.Image | None:
-        segment = self._ltx_range_at_playhead() if self._restore_active else None
-        if segment is None:
+        if not self._seed_view_on or self._shown_seed is None:
             return None
-        frames = self._tried_seeds.get(self._range_key(segment), {}).get(self._preview_seed(segment), ())
-        if not frames:
+        key, seed = self._shown_seed
+        frames = self._tried_seeds.get(key, {}).get(seed, ())
+        if not frames or not key[0] <= self._current < key[1]:
             return None
         frame = min(frames, key=lambda item: abs(item.seconds - self._current))
         if self._seed_image is None or self._seed_image[0] != frame:
@@ -1323,6 +1417,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._restore_active and self._ltx_range_at_playhead() is None:
             return self._restored_source
         return None if self._restore_active else self._preview_source
+        return self._restored_source if self._restore_active else self._preview_source
 
     def _preview_image_geometry(
         self,
@@ -1571,6 +1666,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._is_gpu_busy():
             self._restore_toggle.deselect()
             return
+        self._release_seed_gpu()
         self._restore_active = True
         self._set_playing(False)
         self._restore_toggle.select()
@@ -1628,6 +1724,13 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restore_after = None
         if not self._restore_active or self._closed.is_set():
             return
+        if self._playhead_uses_ltx():
+            self._restore_play_pending = False
+            self._restored_clip = ()
+            self._restored_source = None
+            self._play.configure(text="▶")
+            self._show_preview_message(t("segments_restore_ltx_unavailable"), Colors.STATUS_WARNING)
+            return
         self._restore_play_pending = False
         self._restored_clip = ()
         self._play.configure(text="▶")
@@ -1672,6 +1775,8 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         if self._require_state().restoration_at(start_seconds).model == "ltx" or self._seed_running is not None:
             self._request_restoration_preview()
+        if self._require_state().restoration_at(start_seconds).model == "ltx":
+            self._show_preview_message(t("segments_restore_ltx_unavailable"), Colors.STATUS_WARNING)
             return
         if self._restore_after is not None:
             self.after_cancel(self._restore_after)
@@ -1804,6 +1909,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._new_seed_btn,
             self._use_for_all_btn,
             self._ltx_render_btn,
+            self._try_seed_btn,
             *self._timeline_zoom_buttons,
             *self._segment_action_widgets,
         )
@@ -2234,6 +2340,7 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         if self._seed_running is not None and not messagebox.askyesno(
             t("segments_ltx_render_confirm_title"),
+            t("segments_try_seed"),
             t("segments_seed_stop_confirm"),
             parent=self,
         ):

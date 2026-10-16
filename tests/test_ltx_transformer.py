@@ -2,6 +2,7 @@ import os
 import sys
 from types import SimpleNamespace
 
+
 import pytest
 import torch
 
@@ -100,6 +101,14 @@ def test_prompt_attention_runs_in_fp16_before_sm80(major, dtype, monkeypatch):
     assert T.prompt_attention_dtype(torch.device("cpu")) == torch.bfloat16
 
 
+    whole = T.block_forward(weights, x, cond, context, rope, heads=heads)
+    monkeypatch.setattr(T, "CHUNK_ROWS", 5)
+    chunked = T.block_forward(weights, x, cond, context, rope, heads=heads)
+    assert torch.equal(whole, chunked)
+    skipped = T.block_forward(weights, x, cond, context, rope, heads=heads, skip_self_attention=True)
+    assert not torch.equal(whole, skipped)
+
+
 def test_latent_positions_are_causal_seconds():
     positions = T.latent_positions(3, 1, 1)
     assert positions[0].tolist() == pytest.approx([0.5 / 24, 5 / 24, 13 / 24])
@@ -181,6 +190,7 @@ def test_public_block_forward_runs_on_plain_tensors_without_the_protection_modul
     assert not torch.equal(out, x)
 
 
+
 def test_self_attention_falls_back_to_sdpa_off_gpu():
     generator = torch.Generator().manual_seed(0)
     q, k, v = torch.randn(3, 1, 2, 8, 16, generator=generator).unbind(0)
@@ -211,6 +221,14 @@ def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_lim
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: fn)
     compile_static(T.block_forward, mode="default", device=torch.device("cpu"))
     assert torch._dynamo.config.fail_on_recompile_limit_hit is True
+def test_block_forward_runs_eager_without_triton(monkeypatch):
+    import importlib.util
+
+    from jasna.ltx import sampler
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
+    assert sampler.compiled_block_forward() is T.block_forward
 
 
 def test_sampler_settings_come_from_the_model_file():
@@ -241,6 +259,21 @@ def test_block_forward_compiles_with_autotuning_and_no_cuda_graphs(monkeypatch):
 
     assert sampler.compiled_block_forward(torch.device("cpu")) is T.block_forward
     assert calls == [{"dynamic": False, "mode": "max-autotune-no-cudagraphs"}]
+
+
+def test_block_forward_compiles_without_timing_kernels(monkeypatch):
+    import importlib.util
+
+    from jasna.ltx import sampler
+
+    if importlib.util.find_spec("triton") is None:
+        pytest.skip("needs Triton")
+
+    calls = []
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or fn)
+
+    assert sampler.compiled_block_forward() is T.block_forward
+    assert calls == [{"dynamic": False, "options": {"deterministic": True}}]
 
 
 def test_an_unwritable_compile_cache_is_a_warning(tmp_path, monkeypatch, caplog):

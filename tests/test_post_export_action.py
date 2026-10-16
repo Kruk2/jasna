@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from jasna.os_utils import subprocess_no_window_kwargs
 from jasna.post_export_action import (
     PostExportVideoCommandCancelled,
     PostExportVideoCommandError,
@@ -165,6 +166,27 @@ def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: 
         cwd=tmp_path,
         start_new_session=True,
     )
+    popen.assert_called_once()
+    args, kwargs = popen.call_args
+    assert args == (f"tool {shlex.quote(str(output_path))}",)  # POSIX branch quotes paths
+    # STARTUPINFO has no __eq__ and the helper builds a fresh one per call, so it
+    # is dropped from the comparison (the flags themselves are asserted below).
+    comparable = {k: v for k, v in kwargs.items() if k != "startupinfo"}
+    # Read the same (monkeypatched) helper the implementation calls, so the POSIX
+    # no-op patched in above is what the expectation is built from.
+    from jasna import post_export_action
+
+    expected_flags = {
+        k: v
+        for k, v in post_export_action.subprocess_no_window_kwargs().items()
+        if k != "startupinfo"
+    }
+    assert comparable == {
+        "shell": True,
+        "cwd": tmp_path,
+        "start_new_session": True,
+        **expected_flags,
+    }
     process.wait.assert_called_once_with(timeout=0.1)
 
 

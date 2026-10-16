@@ -28,6 +28,15 @@ def tk_root():
     root.destroy()
 
 
+@pytest.fixture
+def english_locale(monkeypatch):
+    """These assertions spell the English strings; pin the locale so a non-English
+    system language on the test machine does not change them."""
+    from jasna.gui.locales import get_locale
+
+    monkeypatch.setattr(get_locale(), "_current_lang", "en")
+
+
 def _job_item(root, **callbacks) -> JobListItem:
     handlers = {
         name: MagicMock()
@@ -271,7 +280,7 @@ def test_control_bar_shows_the_ltx_step_instead_of_fps(tk_root) -> None:
     assert control_bar._fps_label.cget("text") == "FPS: 30.0"
 
 
-def test_status_text_names_the_ltx_step_its_share_and_time_left() -> None:
+def test_status_text_names_the_ltx_step_its_share_and_time_left(english_locale) -> None:
     assert status_text(0.0, StageProgress("scan", 1, 4, 0.0, 0.0), trial=False) == "Step 1 of 4: Finding mosaics…"
     assert status_text(0.0, StageProgress("scan", 1, 4, 0.456, 0.0), trial=False) == "Step 1 of 4: Finding mosaics 45%"
     assert (
@@ -292,7 +301,7 @@ def test_control_bar_progress_rows_fit_its_height(tk_root) -> None:
     assert control_bar._fps_label.winfo_ismapped() and control_bar._eta_label.winfo_ismapped()
 
 
-def test_job_item_shows_the_ltx_step_in_place_of_fps(tk_root) -> None:
+def test_job_item_shows_the_ltx_step_in_place_of_fps(tk_root, english_locale) -> None:
     item = _job_item(tk_root)
     item.set_fps_eta(0.0, 0.0, StageProgress("scan", 1, 4, 0.456, 30.0))
     assert item._fps_label.cget("text") == "Step 1/4: 45%"

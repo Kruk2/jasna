@@ -39,6 +39,14 @@ from jasna.segments import SegmentRange, format_timestamp
 _MASK_CACHE_SIZE = 256
 
 
+def worker_status_text(message: str) -> str:
+    if message == "loading_models":
+        return t("segments_restore_loading_models")
+    if message == "restoring":
+        return t("segments_restore_restoring")
+    return message
+
+
 def clamp_scan_threshold(value: float) -> float:
     return min(1.0, max(SCAN_SCORE_FLOOR, float(value)))
 
@@ -481,7 +489,7 @@ class ScanPanel(ctk.CTkFrame):
 
     def _handle_event(self, event) -> None:
         if isinstance(event, ScanStatus):
-            text = t("segments_scan_loading_model") if event.message == "loading_models" else event.message
+            text = worker_status_text(event.message)
             self._set_status(text, dot_color=Colors.STATUS_PROCESSING)
         elif isinstance(event, ScanProgress):
             self._progress.set(event.fraction)

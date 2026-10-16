@@ -268,8 +268,12 @@ class LicenseDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
         ctk.CTkLabel(
+            outer, text=t("license_crypto_info"), text_color=Colors.STATUS_PENDING,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+        ).pack(anchor="w", pady=(0, 4))
+        ctk.CTkLabel(
             outer, text=t("license_official_sellers"), text_color=Colors.STATUS_PENDING,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
         ctk.CTkLabel(
@@ -491,6 +495,28 @@ class LicenseDialog(ctk.CTkToplevel):
             return
         if isinstance(error, ForgedLicenseError):
             self._show_error(t("license_forged"))
+        from jasna.protection import (
+            ForgedLicenseError, LicenseError, MalformedLicenseError,
+            ProtectionError, RetiredLicenseError, license_store,
+        )
+        email = self._email.get().strip()
+        key = self._key.get().strip()
+        try:
+            license_store.set_license(email, key)
+        except ForgedLicenseError:
+            self._show_error(t("license_forged"))
+            return
+        except RetiredLicenseError:
+            self._show_error(t("license_retired"))
+            return
+        except MalformedLicenseError:
+            self._show_error(t("license_malformed"))
+            return
+        except LicenseError:
+            self._show_error(t("license_invalid"))
+            return
+        except ProtectionError as exc:
+            self._show_error(str(exc))
             return
         if isinstance(error, RetiredLicenseError):
             self._show_error(t("license_retired"))
@@ -511,6 +537,7 @@ class LicenseDialog(ctk.CTkToplevel):
     def _show_error(self, text: str) -> None:
         self._status.configure(text=text, text_color=Colors.STATUS_ERROR)
         self._resize()
+        self._status.configure(text=text, text_color=Colors.STATUS_ERROR, wraplength=220, justify="left")
 
 
 class StatusPill(ctk.CTkFrame):

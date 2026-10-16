@@ -65,8 +65,8 @@ def test_yuv_to_rgb_reuses_one_working_set():
 @pytest.fixture
 def eager_on_cuda(monkeypatch):
     """Force the converters onto the eager path the AMD build takes."""
-    monkeypatch.setattr(rgb_to_yuv_module, "is_nvidia_device", lambda device: False)
-    monkeypatch.setattr(yuv_to_rgb_module, "is_nvidia_device", lambda device: False)
+    monkeypatch.setattr(rgb_to_yuv_module, "build_kernel", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(yuv_to_rgb_module, "build_kernel", lambda *_args, **_kwargs: None)
     return torch.device("cuda:0")
 
 

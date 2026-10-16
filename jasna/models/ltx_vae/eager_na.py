@@ -125,6 +125,7 @@ def na3d(
                 groups.setdefault((rel_t, rel_h, rel_w), []).append(
                     (
                         (slice(t0, t1), slice(h0, h1), slice(w0 - query_w_start, w1 - query_w_start)),
+                        (slice(t0, t1), slice(h0, h1), slice(w0, w1)),
                         (slice(rt0, rt1), slice(rh0, rh1), slice(rw0, rw1)),
                     )
                 )

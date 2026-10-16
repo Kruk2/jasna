@@ -34,6 +34,7 @@ def _process_ended_clips(
     clip_queue: Queue[ClipRestoreItem | object],
     frame_shape: tuple[int, int],
     min_detection_duration: int = 0,
+    stream_end: bool = False,
 ) -> None:
     bf = min(int(blend_frames), int(discard_margin)) if discard_margin > 0 else 0
     if bf > 0 and discard_margin > 0:
@@ -50,8 +51,15 @@ def _process_ended_clips(
             del crop_buf.crops[clip.frame_count:]
             blend_buffer.remove_pending_clip(list(ended_clip.trimmed_frame_indices), clip.track_id)
 
+        # ``min_detection_duration`` drops brief detections as false positives.
+        # It must not be applied to a stream-end flush: a clip still active when
+        # the video (or the current segment) ends was *truncated* by that end,
+        # not brief, so a short length here says nothing about it being noise.
+        # Dropping it would leave the trailing mosaic frames un-restored - a
+        # silent leak of exactly the frames the filter is meant to protect.
         if (
-            min_detection_duration > 1
+            not stream_end
+            and min_detection_duration > 1
             and clip.frame_count < min_detection_duration
             and not ended_clip.split_due_to_max_size
             and not clip.is_continuation
@@ -135,7 +143,14 @@ def process_frame_batch(
     min_detection_duration: int = 0,
     scene_detector: SceneCutDetector | None = None,
     vr_projector=None,
+    forward_slots: list | None = None,
 ) -> BatchProcessResult:
+    """``forward_slots`` (AMD single-decode path): when given, each emitted
+    metadata item is ``(FrameMeta, slot)`` so the blend/encode thread gets the
+    already-decoded original frame instead of re-decoding the input. ``slot`` is
+    a ``LazyYuvFrame`` holding pinned host YUV, materialized to device RGB only
+    when the frame actually needs restoration.
+    """
     effective_bs = len(pts_list)
     if effective_bs == 0:
         return BatchProcessResult(next_frame_idx=int(start_frame_idx), clips_emitted=0)
@@ -159,7 +174,12 @@ def process_frame_batch(
         ended_clips = scene_cut_clips + ended_clips
 
         blend_buffer.register_frame(current_frame_idx, active_track_ids)
-        metadata_queue.put(FrameMeta(frame_idx=current_frame_idx, pts=pts))
+        if forward_slots is None:
+            metadata_queue.put(FrameMeta(frame_idx=current_frame_idx, pts=pts))
+        else:
+            metadata_queue.put(
+                (FrameMeta(frame_idx=current_frame_idx, pts=pts), forward_slots[i])
+            )
 
         for track_id in active_track_ids:
             clip = tracker.active_clips.get(track_id)
@@ -258,4 +278,7 @@ def finalize_processing(
         clip_queue=clip_queue,
         frame_shape=frame_shape,
         min_detection_duration=int(min_detection_duration),
+        # Everything here is still active at the end of the stream, i.e. cut off
+        # by it; restore it instead of discarding it as a short false positive.
+        stream_end=True,
     )

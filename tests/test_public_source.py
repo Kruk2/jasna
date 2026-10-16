@@ -8,6 +8,8 @@ import sys
 
 import pytest
 
+from conftest import requires_nvidia
+
 
 @pytest.fixture(params=["absent", "empty"])
 def public_checkout(tmp_path, request):
@@ -71,6 +73,7 @@ runpy.run_module('jasna', run_name='__main__')
     assert "Traceback" not in result.stderr
 
 
+@requires_nvidia
 def test_public_encrypted_models_fail_before_opening_data(public_checkout):
     result = run_public(public_checkout, """
 from pathlib import Path

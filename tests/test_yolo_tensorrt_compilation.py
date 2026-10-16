@@ -6,7 +6,10 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
 import torch
+
+from conftest import requires_nvidia
 
 
 def _touch(path: Path) -> None:
@@ -14,6 +17,7 @@ def _touch(path: Path) -> None:
     path.write_text("x", encoding="utf-8")
 
 
+@requires_nvidia
 def test_compile_yolo_to_tensorrt_engine_exports_when_missing(monkeypatch, tmp_path: Path) -> None:
     from ultralytics.utils.torch_utils import select_device
 
@@ -99,6 +103,7 @@ def test_compile_yolo_to_tensorrt_engine_skips_when_present(monkeypatch, tmp_pat
     assert out == engine
 
 
+@requires_nvidia
 def test_compile_yolo_restores_cuda_visible_devices(monkeypatch, tmp_path: Path) -> None:
     # Ultralytics' ONNX export sets CUDA_VISIBLE_DEVICES="" and never restores it,
     # which hides every GPU from the subsequent in-process TensorRT builder.
@@ -151,6 +156,7 @@ def test_compile_yolo_restores_cuda_visible_devices(monkeypatch, tmp_path: Path)
     assert os.environ["CUDA_VISIBLE_DEVICES"] == "0"
 
 
+@requires_nvidia
 def test_compile_yolo_exports_onnx_without_onnxruntime(monkeypatch, tmp_path: Path) -> None:
     # Release builds bundle neither onnxruntime nor onnxslim; a missing requirement makes
     # Ultralytics run pip through the frozen executable.

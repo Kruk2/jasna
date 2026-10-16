@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from jasna.crop_buffer import scale_offsets
+from jasna.media.cas import sharpen_rgb_patch
 from jasna.pipeline_items import SecondaryRestoreResult
 from jasna.tracking.blending import create_bbox_blend_mask
 
@@ -31,6 +32,9 @@ class BlendBuffer:
         self.pending_map: dict[int, set[int]] = {}
         self._results: dict[int, SecondaryRestoreResult] = {}
         self._result_last_frame: dict[int, int] = {}
+        # Highest frame index blend_frame has been called for; frames advance
+        # monotonically, so a result whose last frame is below it is stranded.
+        self._max_blended_frame: int | None = None
 
     def register_frame(self, frame_idx: int, pending_track_ids: set[int]) -> None:
         if pending_track_ids:
@@ -72,6 +76,43 @@ class BlendBuffer:
         with self._lock:
             return list(self._results.values())
 
+    def counts(self) -> tuple[int, int]:
+        """(pending frames, held results) - the two structures a long run can leak.
+
+        Neither is expected to grow without bound: a pending frame is popped when
+        it is blended and a result is dropped once its last frame is blended, so a
+        steady long run should keep both small. A trend line that keeps climbing
+        points straight at whichever of them stopped being retired.
+        """
+        with self._lock:
+            return len(self.pending_map), len(self._results)
+
+    def prune_stranded(self) -> int:
+        """Drop results whose last frame is already behind the blend frontier.
+
+        A result is only ever applied to frames up to its own last frame, and the
+        blend loop advances one frame at a time, so once ``_max_blended_frame`` is
+        past a result's last frame it can never be used again. ``blend_frame``
+        normally deletes it at that exact frame; this sweeps up any that were
+        stranded instead (a clip whose tail was trimmed away, or a result that
+        arrived after its last frame had already been blended). Safe to call from
+        the pass supervisor while the blend thread runs: it only removes entries
+        the frontier has already passed. Returns the number dropped.
+        """
+        with self._lock:
+            frontier = self._max_blended_frame
+            if frontier is None:
+                return 0
+            stale = [
+                track_id
+                for track_id, last_frame in self._result_last_frame.items()
+                if last_frame < frontier
+            ]
+            for track_id in stale:
+                self._results.pop(track_id, None)
+                self._result_last_frame.pop(track_id, None)
+            return len(stale)
+
     def is_frame_ready(self, frame_idx: int) -> bool:
         with self._lock:
             pending = self.pending_map.get(frame_idx)
@@ -98,6 +139,8 @@ class BlendBuffer:
 
     def blend_frame(self, frame_idx: int, original_frame: torch.Tensor) -> torch.Tensor:
         with self._lock:
+            if self._max_blended_frame is None or frame_idx > self._max_blended_frame:
+                self._max_blended_frame = frame_idx
             pending = self.pending_map.pop(frame_idx, None)
             if not pending:
                 return original_frame
@@ -174,6 +217,12 @@ class BlendBuffer:
                 resized_back - original_projected, (x1, y1, x2, y2)
             )
             resized_back = original[:, y1:y2, x1:x2].float() + source_delta
+
+        if sr.sharpen_strength > 0.0:
+            # Sharpen the restored patch only, here at the resolution it actually
+            # lands at (the upscaler's output is resampled down above), so the rest
+            # of the frame and every other track stay untouched.
+            resized_back = sharpen_rgb_patch(resized_back, sr.sharpen_strength)
 
         blend_mask = self.blend_mask_fn(mask_lr, (x1, y1, x2, y2), sr.frame_shape)
 

@@ -481,3 +481,40 @@ def test_app_prepares_entire_queue_before_starting_processor() -> None:
         app._on_start()
 
     assert calls == ["reset", "running", "start"]
+
+
+def test_restoration_preview_refuses_ltx_ranges_and_previews_others_with_standard() -> None:
+    from jasna.gui.segment_editor_state import SegmentEditorState
+    from jasna.segments import SegmentRange, SegmentRestoration
+
+    standard = SegmentRestoration("basicvsrpp", None)
+    editor = SegmentEditor.__new__(SegmentEditor)
+    editor._state = SegmentEditorState(
+        duration=10,
+        fps=10,
+        segments=(SegmentRange(1, 2, SegmentRestoration("ltx", 5)),),
+        default_restoration=standard,
+    )
+    editor._restore_active = True
+    editor._closed = threading.Event()
+    editor._restoration_worker = MagicMock()
+    editor._restored_source = None
+    editor._play = MagicMock()
+    editor._vr_projection = "auto"
+    editor._show_preview_message = MagicMock()
+    editor._scan_panel = MagicMock()
+    editor._scan_panel.video_settings.return_value = AppSettings(restoration_model="ltx")
+    # `_request_restoration_preview` refreshes the LTX render button (a widget this
+    # window-less instance never builds) and checks whether an LTX seed is running.
+    editor._ltx_render_btn = MagicMock()
+    editor._seed_running = None
+
+    editor._current = 1.5
+    editor._request_restoration_preview()
+    editor._restoration_worker.request.assert_not_called()
+    editor._show_preview_message.assert_called_once()
+
+    editor._current = 5.0
+    editor._request_restoration_preview()
+    settings = editor._restoration_worker.request.call_args[0][1]
+    assert settings.restoration_model == "basicvsrpp"

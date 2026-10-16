@@ -5,20 +5,71 @@ import time
 from importlib.util import find_spec
 
 import pytest
+import torch
 
 _HAS_TENSORRT = find_spec("tensorrt") is not None
+
+#: The AMD/ROCm build ships without the NVIDIA-only pieces (TensorRT sub-engines,
+#: nvidia-smi driver checks, the CUDA fused preprocess kernel, the unet-4x /
+#: RTX Super Resolution / TVAI secondary restorers) and takes different branches
+#: in vendor-aware code (RF-DETR weights are `.pt` instead of `.onnx`, the driver
+#: string is a ROCm version). Tests for those paths are NVIDIA-only by nature.
+IS_AMD_BUILD = getattr(torch.version, "hip", None) is not None
+
+requires_nvidia = pytest.mark.skipif(
+    IS_AMD_BUILD,
+    reason="NVIDIA-only path: this build has no TensorRT / nvidia-smi / CUDA kernels",
+)
 
 if _HAS_TENSORRT and find_spec("tensorrt_libs") is not None:
     import tensorrt_libs
 
 collect_ignore = [] if _HAS_TENSORRT else [
     "test_basicvsrpp_sub_engines.py",
+    # Imports jasna.restorer.basicvsrpp_sub_engines at module scope, so without
+    # this the import error aborts collection of the WHOLE suite on the AMD build.
+    "test_basicvsrpp_engine_compilation.py",
     "test_rtx_superres_restorer.py",
     "test_torch_tensorrt_export.py",
     "test_trt_runner.py",
     "test_trt_utils.py",
     "test_unet4x_secondary_restorer.py",
 ]
+
+# LTX tests import triton/tensorrt transitively through jasna.ltx; skip them on
+# machines without those modules (the AMD CI box), the same policy as the TRT list.
+for _mod, _tests in (
+    ("triton", [
+        "test_ltx_transformer.py",
+        "test_ltx_vae.py",
+        "test_ltx_inference.py",
+        "test_ltx_restore.py",
+        "test_ltx_sampler_gpu.py",
+        "test_ltx_storage_cleanup.py",
+        "test_ltx_trial.py",
+        "test_ltx_vae_gpu.py",
+        "test_ltx_denoise.py",
+        "test_benchmark_ltx_decode.py",
+        "test_benchmark_ltx_denoise.py",
+        "test_pipeline_init.py",
+        "test_gui_ltx_models.py",
+        "test_ltx_seed_preview.py",
+        "test_segment_editor.py",
+        "test_basicvsrpp_engine_compilation.py",
+    ]),
+    ("tensorrt", [
+        "test_benchmark_ltx_decode.py",
+        "test_benchmark_ltx_denoise.py",
+        "test_pipeline_init.py",
+    ]),
+    # torchtrt cache routing needs the newer protection submodule, which this
+    # checkout does not vendor; skip instead of failing collection.
+    ("jasna.protection.export_cache", [
+        "test_torchtrt_cache_routing.py",
+    ]),
+):
+    if find_spec(_mod) is None:
+        collect_ignore.extend(_tests)
 
 
 def pytest_configure(config):

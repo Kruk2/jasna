@@ -30,6 +30,22 @@ def _mock_gpu_monitoring():
         patch.object(Pipeline, "_log_memory_at_end"),
     ):
         yield
+def _legacy_decode_path(monkeypatch):
+    """Keep the AMD single-decode forward path closed for these tests.
+
+    The fake readers below feed plain ``torch.Tensor`` batches, i.e. the legacy
+    decode path. The AMD single-decode path (on by default on AMD) forwards
+    ``LazyYuvFrame`` slots and materializes them via ``.rgb()``, so on a ROCm host
+    the gate would route these Tensor fixtures into that path and fail. Upstream CI
+    is NVIDIA, where the gate is already closed; pin the vendor off AMD so the
+    suite behaves the same here.
+    """
+    from jasna.accelerator import AcceleratorVendor
+
+    monkeypatch.setattr(
+        pipeline_threads, "vendor_for_device",
+        lambda _device: AcceleratorVendor.NVIDIA,
+    )
 
 
 def _mock_async_restorer(**kwargs) -> MagicMock:

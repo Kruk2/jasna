@@ -28,23 +28,32 @@ def test_box_blur_matches_dense_reference(kernel_size: int) -> None:
     assert torch.allclose(_box_blur(x, kernel_size, kernel_size), dense, atol=1e-4)
 
 
-def test_box_blur_uses_convolution_only_for_nvidia(monkeypatch) -> None:
+def test_box_blur_picks_path_by_device(monkeypatch) -> None:
     import jasna.tracking.blending as module
 
     x = torch.ones((8, 8))
     conv = MagicMock(return_value=x)
+    pool = MagicMock(return_value=x)
     prefix = MagicMock(return_value=x)
     monkeypatch.setattr(module, "_conv_box_blur", conv)
+    monkeypatch.setattr(module, "_pool_box_blur", pool)
     monkeypatch.setattr(module, "_prefix_box_blur", prefix)
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: True)
 
+    # NVIDIA -> conv2d
+    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: True)
     assert module._box_blur(x, 3, 3) is x
     conv.assert_called_once_with(x, 3, 3)
-    prefix.assert_not_called()
 
+    # AMD (CUDA-type but not NVIDIA) -> avg_pool2d
     monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
+    monkeypatch.setattr(module, "_gpu_torch_path", lambda _device: True)
     assert module._box_blur(x, 5, 5) is x
-    prefix.assert_called_once_with(x, 5, 5)
+    pool.assert_called_once_with(x, 5, 5)
+
+    # CPU -> cumsum fallback
+    monkeypatch.setattr(module, "_gpu_torch_path", lambda _device: False)
+    assert module._box_blur(x, 7, 7) is x
+    prefix.assert_called_once_with(x, 7, 7)
 
 
 def test_create_blend_mask_all_ones_stays_ones() -> None:
@@ -167,7 +176,7 @@ def test_dilate_ellipse_matches_opencv(dilate, radius: int) -> None:
     assert np.array_equal(actual, cv2.dilate(mask, kernel) > 0)
 
 
-def test_dilate_ellipse_uses_convolution_only_for_nvidia(monkeypatch) -> None:
+def test_dilate_ellipse_uses_conv_on_gpu_only(monkeypatch) -> None:
     import jasna.tracking.blending as module
 
     mask = torch.ones((8, 8), dtype=torch.bool)
@@ -176,9 +185,38 @@ def test_dilate_ellipse_uses_convolution_only_for_nvidia(monkeypatch) -> None:
     monkeypatch.setattr(module, "_conv_dilate_ellipse", conv)
     monkeypatch.setattr(module, "_prefix_dilate_ellipse", prefix)
 
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
+    # any GPU (NVIDIA or AMD) -> the single conv2d
+    monkeypatch.setattr(module, "_gpu_torch_path", lambda _device: True)
     module.dilate_ellipse(mask, 3)
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: True)
+    # CPU -> cumsum fallback
+    monkeypatch.setattr(module, "_gpu_torch_path", lambda _device: False)
     module.dilate_ellipse(mask, 3)
 
     assert prefix.call_count == 1 and conv.call_count == 1
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("kh,kw", [(7, 7), (15, 15), (31, 31), (9, 15)])
+def test_pool_box_blur_matches_prefix_on_gpu(kh: int, kw: int) -> None:
+    """The AMD fast path (avg_pool2d) must be pixel-identical to the cumsum path."""
+    import jasna.tracking.blending as module
+
+    x = (torch.rand((120, 160), device="cuda") > 0.5).float()
+    assert torch.allclose(
+        module._pool_box_blur(x, kh, kw),
+        module._prefix_box_blur(x, kh, kw),
+        atol=1e-5,
+    )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_conv_dilate_matches_prefix_on_gpu() -> None:
+    """The conv2d dilation taken on AMD must be identical to the cumsum one."""
+    import jasna.tracking.blending as module
+
+    mask = torch.rand((150, 230), device="cuda") > 0.9
+    for radius in (3, 12, 30):
+        assert torch.equal(
+            module._conv_dilate_ellipse(mask, radius),
+            module._prefix_dilate_ellipse(mask, radius),
+        )

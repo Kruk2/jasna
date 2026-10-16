@@ -4,6 +4,7 @@ Frames are ``[3, H, W]`` uint8 RGB tensors. A window paints only its own track's
 feathered mask and never a pixel inside another track's mask; outside every mask the
 source stays bit-exact. A track in a handover (presence below 1) also paints over the
 other tracks' masks and takes that share of its feathered area from them.
+source stays bit-exact.
 """
 
 from __future__ import annotations

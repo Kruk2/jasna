@@ -55,6 +55,16 @@ image), then `uv pip install -e ".[amd,dev]"`.
 
 Windows (Python 3.12, Adrenalin 26.8.1 or newer): install torch from AMD's
 index **first**, otherwise a later dependency pulls the CPU torch from PyPI:
+# AMD Linux (inside the rocm/pytorch ROCm 10.0 image; torch/torchvision+rocm come
+# from the image, see jasna/protection/keytool/Dockerfile.amd)
+uv pip install ".[amd]"
+```
+
+**AMD Windows** (ROCm 10.0.0 — Python 3.12, Adrenalin ≥ 26.8.1). Install torch and
+torchvision from AMD's ROCm index FIRST, with the GPU kernel packs the release
+ships, so pip cannot silently replace them with the CPU `torch==2.12.0` from PyPI
+when a later dependency (rfdetr, …) pulls torch — that swap is the usual cause of
+a "non-ROCm torch/torchvision" env:
 
 ```powershell
 $I = "https://stable.repo.amd.com/rocm/whl-next/"
@@ -65,6 +75,23 @@ uv pip install -e ".[amd,dev]"
 
 Check that ROCm stuck (an unsatisfiable torch pin makes uv silently install the
 CUDA build, which breaks RF-DETR):
+# then the remaining AMD deps (torch/torchvision above already satisfy the pins)
+uv pip install ".[amd]"
+```
+
+Adding a GPU target means adding its `device-gfx*` extra here and keeping it in
+the `Dockerfile.amd` keep-list, so both OSes ship the same targets.
+
+The `rocm_sdk_core` / `rocm_sdk_libraries` / `rocm_sdk_device_gfx*` wheels are the
+ROCm runtime itself, and torch's own GPU kernels sit in `torch/.kpack`.
+`import torch` reaches the runtime through `rocm_sdk`, which resolves the package
+name at call time, so Nuitka sees no import and bundles nothing — both AMD release
+builds copy the wheel trees into the dist verbatim and then assert that every
+library torch preloads resolves there. Without that, the frozen app dies at startup
+with `UnboundLocalError: cannot access local variable 'py_module'` (upstream
+`rocm_sdk.find_libraries` reports an absent payload package that way).
+
+Verify ROCm actually stuck on either OS (the Linux Docker build asserts the same):
 
 ```bash
 python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK')"
@@ -72,6 +99,11 @@ python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in to
 
 A new GPU target needs its `device-gfx*` extra above and in the
 `Dockerfile.amd` keep-list (in the private protection submodule).
+`jasna[amd]` pins `torch==2.12.0` and `torchvision==0.27.0` as plain versions, which
+the ROCm wheels (`2.12.0+rocm10.0.0`, `0.27.0+rocm10.0.0`) satisfy on both OSes. A
+pin no ROCm wheel satisfies makes pip/uv silently install the PyPI CUDA build,
+which breaks `torchvision.ops.nms` (and with it RF-DETR) at runtime. The
+ROCm-build assertion above is the fail-loud guard on top.
 
 AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
 (software decode when AMF can't). Secondary restoration is NVIDIA-only.
@@ -89,6 +121,20 @@ python -m jasna --input in.mp4 --output out.mp4    # CLI (see docs/en/cli.md)
 `auto` prefers VALI on NVIDIA.
 
 ## Tests
+- `ffmpeg` and `ffprobe` on `PATH`; `ffmpeg` major version must be **8**.
+- libVLC 3 installed for GUI player audio. The Python binding is installed
+  from `pyproject.toml`; on Ubuntu install `libvlc5` and `vlc-plugin-base`.
+- Optional: a `python_vali` wheel built from <https://codeberg.org/Kruk2/vali>. Only that
+  fork has `DecodeSingleSurfaceAsyncDetailed` and its corrupt-packet tolerance, which the
+  VALI decode backend needs; with the stock PyPI wheel the reader falls back to PyAV for
+  every video.
+
+Set `JASNA_DECODE_BACKEND` to `vali`, `pyav-hw`, or `pyav-sw` to force a
+decoder backend. The default is `auto`, which prefers VALI on NVIDIA and falls
+back to PyAV. On AMD, `auto` decodes in FFmpeg software, which measures faster
+than the AMF decoder (`pyav-hw` selects AMF) for H.264 and is a wash for HEVC.
+
+Then install Jasna in editable mode:
 
 ```bash
 python -m pytest
@@ -118,6 +164,54 @@ equivalent: ROCm uses it, and the tests use it as the reference.
 Run by the maintainer only, on an otherwise idle GPU. Inputs live in the
 gitignored `assets/benchmark/`. Write results to
 `benchmarks/<date>_<topic>.{csv,md}` and never edit an old CSV.
+Run by the maintainer only, on an otherwise idle GPU — anything else on the
+card makes the numbers incomparable. The suite is deliberately small: **one
+input per resolution plus the 8K VR clip**, all H.264 8-bit.
+
+```bash
+scripts/run_benchmarks.sh benchmarks/scratch            # ~8 min
+scripts/run_benchmarks.sh benchmarks/scratch --codecs   # + HEVC 10-bit and AV1
+scripts/run_benchmarks.sh benchmarks/scratch --scan     # + the GUI mosaic scan
+```
+
+It discards a warmup run, then reports the median of three per clip with RAM and
+per-process VRAM sampled throughout (`scripts/bench_memory.py`). Fixed settings:
+`--max-clip-size 180 --temporal-overlap 15 --secondary-restoration none`.
+
+Why only H.264 by default: across five release steps a HEVC-10-bit or AV1
+encoding of the same resolution never disagreed in sign with its H.264 sibling,
+because the model sees identical 256² crops whatever the container held. H.264
+also has the cheapest decode, so it hides the least of whatever changed
+downstream. The other encodings do carry the decode-path signal — H.264 is
+nearly flat across decode backends while AV1 and HEVC 10-bit spread ~19 % — so
+pass `--codecs` when the change is in decode, encode or pixel-format code.
+
+Write results to `benchmarks/<date>_<topic>.{csv,md}` and keep old CSVs intact —
+the README tables are a summary that drops releases where nothing moved, so the
+CSVs are the only full record. `scripts/benchmark_releases.py` compares frozen
+release archives instead of the working tree, and
+`scripts/benchmark_lada_flatpak.py` refreshes the Lada baseline column.
+
+## Release licensing checklist
+
+Before publishing any platform archive:
+
+1. Set the same version in `pyproject.toml`, `jasna/__init__.py`, the git tag,
+   and `RELEASE_SOURCES.md`.
+2. Confirm `RELEASE_SOURCES.md` matches the PyAV, VALI, FFmpeg, Python, and
+   protection revisions used by the build.
+3. Verify the unpacked package contains `LICENSE`, `LICENSING.md`, `NOTICE`,
+   `RELEASE_SOURCES.md`, `assets/THIRD_PARTY_*.md`, and `licenses/`.
+4. Recalculate every bundled model hash and compare it with
+   `assets/THIRD_PARTY_MODELS.md`.
+5. Upload every archive part **and** its generated `.sha256` file to the same
+   GitHub release.
+
+The release builder copies maintained license texts plus the license files
+from all installed Python distributions. The public VALI fork is the source
+for Jasna's modified `python_vali` wheel.
+
+## AMD release builds
 
 The release suite is one H.264 input per resolution plus the 8K VR clip,
 median of three runs, with `--max-clip-size 180 --temporal-overlap 15
@@ -174,3 +268,22 @@ $P scripts/benchmark_na3d.py                                             # Trito
 
 Release builds (NVIDIA and AMD) live in the private protection submodule
 (`jasna/protection/keytool/`).
+The AMD build uses PyTorch/ROCm for BasicVSR++, YOLO and RF-DETR, and AMF for
+H.264/HEVC/AV1 encode. RF-DETR runs the trained checkpoint through the
+`rfdetr` torch model (`rfdetr==1.8.3` on `transformers==5.1.0`, bundled as
+`rfdetr-v6.pt`) — no ONNX Runtime/MIGraphX, so no
+per-model engine precompile step. NVIDIA builds keep the ONNX → TensorRT path
+(`rfdetr-v6.onnx`). Decode uses FFmpeg software decoding by default on AMD (it
+measures faster than AMF for H.264 and is a wash for HEVC); set
+`JASNA_DECODE_BACKEND=pyav-hw` to use the AMF decoder instead. Segment smart
+rendering works on AMF; H.264 sources with
+more than three consecutive B-frames are fully re-encoded there, with
+restoration still limited to the selected ranges. Secondary restoration remains
+NVIDIA-only.
+
+`--device cuda:N` selects the PyTorch GPU (ROCm reuses the CUDA device API).
+FFmpeg 8's Linux AMF device context currently ignores its adapter
+argument, so AMF encode (and AMF decode under `pyav-hw`) can use the default
+Vulkan adapter on a multi-GPU
+AMD host. Isolate the target GPU at the container/host level when deterministic
+AMF adapter selection matters.

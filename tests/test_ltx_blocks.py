@@ -1,9 +1,12 @@
 import pytest
 import torch
 
+from conftest import requires_nvidia
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 
 needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+
+pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
 
 def _blocks(count: int) -> list[dict[str, torch.Tensor]]:
@@ -91,6 +94,7 @@ def test_blocks_are_read_in_file_order(tmp_path):
         store.close()
 
 
+@requires_nvidia
 @pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
 def test_opaque_load_preserves_native_transaction_failure(error_type, monkeypatch):
     from jasna.ltx.native.aot import BlockDims
@@ -115,6 +119,7 @@ def test_opaque_load_preserves_native_transaction_failure(error_type, monkeypatc
     assert operations == [(1, 1)]
 
 
+@requires_nvidia
 def test_opaque_load_rejects_cpu_before_decryption(monkeypatch):
     from jasna.ltx.native.aot import BlockDims
     from types import SimpleNamespace
@@ -126,3 +131,4 @@ def test_opaque_load_rejects_cpu_before_decryption(monkeypatch):
         OpaqueBlockStore.from_reader(
             reader, [{"weight": "blocks.0.weight"}], torch.device("cpu"), resident=1,
         )
+

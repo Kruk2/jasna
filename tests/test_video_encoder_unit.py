@@ -34,6 +34,23 @@ from jasna.media.video_encoder import (
 from factories import write_double_adts_aac_source
 
 
+@pytest.fixture(autouse=True)
+def _pin_nvenc_vendor(request, monkeypatch):
+    """Pin the vendor to NVIDIA for this module's NVENC-oriented tests.
+
+    They import the NVENC default-option dictionaries plus `ENCODER_SPECS`, and
+    assert the NVENC-specific source-bitrate ceiling. The AMD-branch tests patch
+    `video_encoder_module.vendor_for_device` themselves, which overrides this.
+    """
+    name = request.node.name.lower()
+    if "amf" in name or "amd" in name:
+        return
+    monkeypatch.setattr(
+        video_encoder_module, "vendor_for_device",
+        lambda _device: AcceleratorVendor.NVIDIA,
+    )
+
+
 def _fake_metadata(**overrides) -> VideoMetadata:
     defaults = dict(
         video_file="fake_input.mkv",
@@ -1008,8 +1025,10 @@ class TestWorkerErrorChannel:
 
         worker = threading.Thread(target=enc._encode_worker, daemon=True)
         worker.start()
-        enc._encode_queue.put((MagicMock(), 0, True, None))
-        enc._encode_queue.put((MagicMock(), 1, True, None))
+        # Queue items are (frame, pts, apply_lut, ready_event, host_yuv): the last
+        # slot carries the AMD no-roundtrip host YUV frame and may be None.
+        enc._encode_queue.put((MagicMock(), 0, True, None, None))
+        enc._encode_queue.put((MagicMock(), 1, True, None, None))
         enc._encode_queue.join()
         enc._encode_queue.put(enc._stop_sentinel)
         worker.join(timeout=5)

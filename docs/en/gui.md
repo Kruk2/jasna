@@ -131,3 +131,23 @@ License codes come only from
 [Unifans](https://app.unifans.io/c/kruk2) and, for China, the Xianyu seller in the
 [Chinese README](../../README.zh.md#在闲鱼购买). Support tiers: see
 [Supporting the project](../../README.md#supporting-the-project).
+On the first launch of each version, Jasna runs a system check (GPU, driver,
+memory, install path). You can re-run it any time from the header — useful
+after a driver update or when something misbehaves.
+
+## Other bits worth knowing
+
+- **Language**: the first start follows your system language. Switch it any
+  time from the header dropdown (restart for the full effect).
+- **Logs**: the Logs button in the bottom bar shows live logs with level
+  filters and an export button (the newest 5000 entries) — attach an export when
+  reporting a problem.
+- **System stats**: GPU, VRAM, RAM, and CPU usage are shown in the bottom
+  bar while processing.
+- **License**: enter your supporter key from the header; the chip shows
+  whether it's active.
+  Keys are sold only on Buy Me a Coffee and Unifans (kruk2); keys from other
+  sellers are fake and do not work.
+  If verification fails, check the exact purchase email or handle and paste the complete
+  key again. Known unofficial keys get a separate warning.
+  Updating Jasna does not change which models your key includes.

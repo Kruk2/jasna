@@ -25,6 +25,11 @@ def test_support_urls():
     assert UNIFANS_URL == "https://app.unifans.io/c/kruk2"
 
 
+def test_both_buttons_share_support_base():
+    assert issubclass(BuyMeCoffeeButton, _SupportButton)
+    assert issubclass(UnifansButton, _SupportButton)
+
+
 def test_xianyu_button_shows_the_qr_code():
     try:
         root = ctk.CTk()
