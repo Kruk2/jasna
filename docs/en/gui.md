@@ -9,7 +9,8 @@ error stays on screen.
 Install Jasna on a local disk (NTFS on Windows; ext4, Btrfs or XFS on Linux),
 in a folder whose path has no Chinese, Japanese, accented or other
 non-English characters. Network disks
-are not supported.
+are not supported. Use an SSD: on a hard disk (HDD) Jasna starts and loads
+models slowly, and it warns you at startup.
 
 ## The queue
 

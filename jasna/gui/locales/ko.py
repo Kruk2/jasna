@@ -549,6 +549,7 @@ KO = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk가 실행 중입니다",
         "windhawk_warning_body": "Windhawk가 Jasna에 로드되어 LTX 모델이 \"액세스가 거부되었습니다\" 오류로 실패합니다. Windhawk를 종료하거나 jasna.exe를 제외 프로세스에 추가한 뒤 Jasna를 다시 시작하세요.",
+        "hard_disk_warning": "Jasna가 하드 디스크(HDD)에 설치되어 있어 시작과 모델 로딩이 느립니다. Jasna 폴더를 SSD로 옮기세요.",
         "engine_first_run_title": "첫 실행은 느릴 수 있습니다",
         "engine_first_run_body": "Jasna가 GPU에 맞게 모델을 준비해야 합니다. 첫 실행 때만 진행되며 15-60분이 걸릴 수 있습니다.\n\n다른 모든 앱(브라우저, 게임 등)을 닫고 그동안 PC를 사용하지 마세요. Jasna가 멈춘 것처럼 보일 수 있지만 닫지 마세요.\n\n결과는 저장되어 이후 모든 실행에 사용됩니다.",
         "engine_first_run_missing": "누락된 엔진:",

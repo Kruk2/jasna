@@ -17,6 +17,7 @@ from jasna.os_utils import (
     check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
     gpu_check_error,
+    install_on_hard_disk,
 )
 from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, RestorationModelName, SessionConfig
 
@@ -643,6 +644,10 @@ def _check_system(args: argparse.Namespace) -> None:
         sysmem_ok, sysmem_info = check_windows_nvidia_sysmem_fallback_policy()
         if not sysmem_ok:
             print(f"Warning: CUDA Sysmem Fallback Policy: {sysmem_info}")
+
+    if install_on_hard_disk():
+        print("Warning: Jasna is installed on a hard disk drive (HDD), so it starts and loads models slowly. "
+              "Move the Jasna folder to an SSD.")
 
 
 def _configure_runtime(args: argparse.Namespace) -> None:

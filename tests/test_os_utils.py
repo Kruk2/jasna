@@ -1,6 +1,7 @@
 import os
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -717,3 +718,46 @@ def test_windows_module_loaded_is_false_off_windows(monkeypatch) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "linux")
 
     assert os_utils.windows_module_loaded("kernel32.dll") is False
+
+
+def _sysfs_disk(root, name: str, rotational: str):
+    disk = root / "devices" / name
+    (disk / "queue").mkdir(parents=True)
+    (disk / "queue" / "rotational").write_text(rotational + "\n")
+    partition = disk / f"{name}1"
+    partition.mkdir()
+    (partition / "partition").write_text("1\n")
+    return disk, partition
+
+
+def test_partition_on_a_spinning_disk_reports_its_disk_as_rotational(tmp_path) -> None:
+    _hdd, hdd_partition = _sysfs_disk(tmp_path, "sda", "1")
+    ssd, _ssd_partition = _sysfs_disk(tmp_path, "nvme0n1", "0")
+    links = tmp_path / "dev" / "block"
+    links.mkdir(parents=True)
+    (links / "8:1").symlink_to(hdd_partition)
+    (links / "259:0").symlink_to(ssd)
+
+    assert os_utils.sysfs_block_is_rotational(links / "8:1")
+    assert not os_utils.sysfs_block_is_rotational(links / "259:0")
+    assert not os_utils.sysfs_block_is_rotational(links / "0:79")
+
+
+def test_mount_source_is_the_innermost_mount_holding_the_path() -> None:
+    mountinfo = "\n".join([
+        "29 1 0:26 / / rw,relatime shared:1 - btrfs /dev/mapper/root rw,subvol=/root",
+        "40 29 8:2 / /mnt/media rw,relatime shared:5 - ext4 /dev/sda2 rw",
+        "41 40 0:50 / /mnt/media/old\\040disk rw,relatime shared:6 - btrfs /dev/sdb1 rw",
+        "42 29 0:79 / /mnt/pool rw,relatime shared:7 - fuse.mergerfs pool rw",
+    ])
+
+    assert os_utils.mount_source(mountinfo, Path("/mnt/media/old disk/jasna")) == "/dev/sdb1"
+    assert os_utils.mount_source(mountinfo, Path("/mnt/media/jasna")) == "/dev/sda2"
+    assert os_utils.mount_source(mountinfo, Path("/mnt/mediaX/jasna")) == "/dev/mapper/root"
+    assert os_utils.mount_source(mountinfo, Path("/mnt/pool/jasna")) == "pool"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows storage query")
+def test_windows_seek_penalty_query_answers_for_a_drive_and_skips_network_paths() -> None:
+    assert isinstance(os_utils._windows_drive_has_seek_penalty(Path(os.environ["SystemDrive"] + "\\")), bool)
+    assert not os_utils._windows_drive_has_seek_penalty(Path(r"\\server\share\jasna"))

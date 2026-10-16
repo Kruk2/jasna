@@ -549,6 +549,7 @@ TH = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk กำลังทำงาน",
         "windhawk_warning_body": "Windhawk ถูกโหลดเข้า Jasna ทำให้โมเดล LTX ล้มเหลวด้วย \"Access is denied\" ให้ปิด Windhawk หรือเพิ่ม jasna.exe ในรายการโปรเซสที่ยกเว้น แล้วเปิด Jasna ใหม่",
+        "hard_disk_warning": "Jasna ติดตั้งอยู่บนฮาร์ดดิสก์ (HDD) จึงเริ่มทำงานและโหลดโมเดลได้ช้า โปรดย้ายโฟลเดอร์ Jasna ไปไว้บน SSD",
         "engine_first_run_title": "การรันครั้งแรกอาจช้า",
         "engine_first_run_body": "Jasna ต้องเตรียมโมเดลสำหรับ GPU ของคุณ ทำแค่ครั้งแรกเท่านั้น และอาจใช้เวลา 15-60 นาที\n\nปิดแอปอื่นทั้งหมด (เบราว์เซอร์ เกม ฯลฯ) และอย่าใช้ PC ระหว่างนั้น Jasna อาจดูเหมือนค้าง — อย่าปิด\n\nผลลัพธ์จะถูกบันทึกและใช้ในทุกครั้งต่อไป",
         "engine_first_run_missing": "engine ที่หายไป:",

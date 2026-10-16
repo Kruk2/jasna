@@ -549,6 +549,7 @@ ZH = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk 正在运行",
         "windhawk_warning_body": "Windhawk 已注入 Jasna，LTX 模型会因“拒绝访问”而失败。请退出 Windhawk，或把 jasna.exe 加入其排除进程列表，然后重启 Jasna。",
+        "hard_disk_warning": "Jasna 安装在机械硬盘（HDD）上，启动和加载模型都很慢。请把 Jasna 文件夹移到固态硬盘（SSD）上。",
         "engine_first_run_title": "首次运行可能较慢",
         "engine_first_run_body": "Jasna 需要为你的 GPU 准备模型。这只在首次运行时发生，可能需要 15-60 分钟。\n\n请关闭所有其他应用（浏览器、游戏等），期间不要使用电脑。Jasna 可能看起来无响应——请不要关闭。\n\n结果会被保存，之后每次运行都会使用。",
         "engine_first_run_missing": "缺失的引擎：",

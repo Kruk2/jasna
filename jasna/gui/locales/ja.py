@@ -549,6 +549,7 @@ JA = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk が実行中です",
         "windhawk_warning_body": "Windhawk が Jasna に読み込まれているため、LTX モデルは「アクセスが拒否されました」で失敗します。Windhawk を終了するか、jasna.exe を除外プロセスに追加してから Jasna を再起動してください。",
+        "hard_disk_warning": "Jasna がハードディスク（HDD）にインストールされているため、起動とモデルの読み込みが遅くなります。Jasna フォルダーを SSD に移動してください。",
         "engine_first_run_title": "初回起動は時間がかかる場合があります",
         "engine_first_run_body": "Jasna がモデルを GPU 向けに準備する必要があります。これは初回だけで、15～60 分かかることがあります。\n\n他のアプリ（ブラウザ、ゲームなど）をすべて閉じ、その間は PC を使わないでください。Jasna が固まったように見えても閉じないでください。\n\n結果は保存され、次回以降に使われます。",
         "engine_first_run_missing": "不足しているエンジン:",

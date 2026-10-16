@@ -126,6 +126,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self.after_idle(self._log_startup_timing)
         self.after_idle(self._start_cuda_warmup)
         self.after_idle(self._warn_if_windhawk_loaded)
+        self.after_idle(self._warn_if_installed_on_hard_disk)
 
         if not skip_wizard:
             if self._preset_manager.get_system_check_passed_version() != __version__:
@@ -414,6 +415,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         message = t("windhawk_warning_body")
         self._log_panel.warning(message)
         messagebox.showwarning(t("windhawk_warning_title"), message, parent=self)
+
+    def _warn_if_installed_on_hard_disk(self):
+        if os_utils.install_on_hard_disk():
+            self._log_panel.warning(t("hard_disk_warning"))
 
     def _start_cuda_warmup(self):
         def _run():

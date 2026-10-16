@@ -549,6 +549,7 @@ EN = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk is running",
         "windhawk_warning_body": "Windhawk is loaded into Jasna, so the LTX model will fail with \"Access is denied\". Exit Windhawk, or add jasna.exe to its excluded processes, then restart Jasna.",
+        "hard_disk_warning": "Jasna is installed on a hard disk drive (HDD), so it starts and loads models slowly. Move the Jasna folder to an SSD.",
         "engine_first_run_title": "First run may be slow",
         "engine_first_run_body": "Jasna has to prepare the models for your GPU. This happens only on the first run and can take 15-60 minutes.\n\nClose all other apps (browsers, games, etc.) and don't use the PC meanwhile. Jasna may look frozen — don't close it.\n\nThe result is saved and used on every later run.",
         "engine_first_run_missing": "Missing engines:",

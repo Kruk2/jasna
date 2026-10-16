@@ -54,7 +54,8 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
   Ryzen AI）。Windows では AMD Adrenalin ドライバー 26.8.1 以降。二次復元と
   LTX は NVIDIA のみです。
 - ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS。ネットワーク
-  ディスクは非対応です。
+  ディスクは非対応です。SSD を使ってください。ハードディスク（HDD）では起動と
+  モデルの読み込みが遅くなります。
 - LTX には NVIDIA RTX GPU、8 GB 以上の VRAM、16 GB 以上の RAM が必要です。
   [LTX に必要なもの](docs/ja/models.md#ltx-に必要なもの)をご覧ください。
 

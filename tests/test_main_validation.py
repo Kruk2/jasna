@@ -332,3 +332,19 @@ class TestCliErrors:
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ["--post-export-action", "command"])
         assert "--post-export-command is required" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("hard_disk", [True, False])
+def test_cli_warns_when_installed_on_a_hard_disk(capsys, hard_disk):
+    import argparse
+
+    from jasna import main
+
+    with patch.object(main, "check_ascii_install_path", return_value=(True, "C:/jasna")), \
+         patch.object(main, "check_required_executables"), \
+         patch.object(main, "check_supported_gpu", return_value=(True, "ok")), \
+         patch.object(main, "check_gpu_driver_version", return_value=(True, "620")), \
+         patch("jasna.accelerator.is_nvidia_device", return_value=False), \
+         patch.object(main, "install_on_hard_disk", return_value=hard_disk):
+        main._check_system(argparse.Namespace(device="cuda:0"))
+    assert ("installed on a hard disk drive (HDD)" in capsys.readouterr().out) is hard_disk

@@ -94,3 +94,18 @@ def test_startup_warns_only_when_windhawk_is_loaded(monkeypatch, loaded):
     expected = [(t("windhawk_warning_title"), t("windhawk_warning_body"))] if loaded else []
     assert shown == expected
     assert logged == [message for _title, message in expected]
+
+
+@pytest.mark.parametrize("hard_disk", [True, False])
+def test_startup_warns_when_installed_on_a_hard_disk(monkeypatch, hard_disk):
+    from jasna import os_utils
+    from jasna.gui import app as app_module
+    from jasna.gui.locales import t
+
+    monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: hard_disk)
+    logged = []
+    fake_app = types.SimpleNamespace(_log_panel=types.SimpleNamespace(warning=logged.append))
+
+    app_module.JasnaApp._warn_if_installed_on_hard_disk(fake_app)
+
+    assert logged == ([t("hard_disk_warning")] if hard_disk else [])
