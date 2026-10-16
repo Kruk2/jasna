@@ -78,7 +78,15 @@ def _bounded_lookahead_depths(
     """
     base_clip = int(max_clip_size)
     base_secondary = int(max_clip_size) * max(1, int(secondary_workers))
-    base_metadata = int(max_clip_size) * 2
+    # Correctness floor, not a budget: the blend thread parks on the one frame it is
+    # waiting for, so the detect thread must still be able to publish every frame up to
+    # the boundary of the clip that frame belongs to - up to max_clip_size frames with
+    # nobody draining the queue. Scaling this queue below that window deadlocks the
+    # pipeline (queue full -> the tracker never reaches the clip boundary -> the clip is
+    # never emitted -> blend never advances); reproduced at 8K VR180 (8192x4096, SBS,
+    # rfdetr-vr-v1, JASNA_BV_HIP_GRAPH=0) where the 25-entry scaled depth wedged the run
+    # for 14 minutes, while clip+8 completes it. The other queues absorb the byte budget.
+    base_metadata = int(max_clip_size) + 8
     base_total = base_clip + base_secondary + base_clip + base_metadata
     try:
         budget_gb = float(os.environ.get(_HOST_YUV_BUDGET_ENV, "").strip()
@@ -94,20 +102,25 @@ def _bounded_lookahead_depths(
     if base_total <= cap_frames:
         return base_clip, base_secondary, base_clip, base_metadata, ""
     scale = cap_frames / base_total
+    # The metadata depth stays at its floor: it is the one depth whose shrinkage
+    # deadlocks the pipeline rather than merely slowing it down (see base_metadata).
+    metadata_cap = max(int(base_metadata), int(base_metadata * scale))
     note = (
         "single-decode look-ahead capped for %dx%d%s: %d frames in flight instead of "
-        "%d (the configured depths would pin %.1f GB of host YUV at %.0f MB/frame). "
+        "%d (the configured depths would pin %.1f GB of host YUV at %.0f MB/frame); "
+        "the metadata depth keeps its %d-frame floor so clip catch-up cannot deadlock. "
         "Clips and output are unchanged; raise %s if you have the RAM."
         % (width, height, " 10-bit" if ten_bit else "",
            max(1, int(base_clip * scale)), base_clip,
            base_total * per_frame / (1024 ** 3), per_frame / (1024 ** 2),
+           int(base_metadata),
            _HOST_YUV_BUDGET_ENV)
     )
     return (
         max(1, int(base_clip * scale)),
         max(1, int(base_secondary * scale)),
         max(1, int(base_clip * scale)),
-        max(1, int(base_metadata * scale)),
+        metadata_cap,
         note,
     )
 

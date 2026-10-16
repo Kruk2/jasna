@@ -75,6 +75,35 @@ def compile_rfdetr_engine(
     )
 
 
+def resolve_detection_engine(engine: str) -> str:
+    """The engine this run will really use.
+
+    ``migraphx`` is only returned when the MIGraphX execution provider can actually be
+    initialised here. The provider is a native library that fails by taking the whole
+    process down (an access violation, seen on an RX 7900 XTX inside
+    ``Microsoft.Windows.AI.MachineLearning.dll`` on the ``WinMLEpEnsureReady`` path), so
+    the check runs out of process - see ``migraphx_ep_usable``. When it fails we run the
+    torch engine instead of crashing on first use.
+    """
+    if engine != "migraphx":
+        return engine
+    from jasna.mosaic.rfdetr_migraphx_runner import (
+        MIGRAPHX_PREFLIGHT_ENV,
+        migraphx_ep_usable,
+    )
+
+    usable, reason = migraphx_ep_usable()
+    if usable:
+        return engine
+    logger.warning(
+        "MIGraphX detection engine unavailable (%s); using the torch engine for this run. "
+        "Set %s=0 to skip the probe.",
+        reason,
+        MIGRAPHX_PREFLIGHT_ENV,
+    )
+    return "torch"
+
+
 class RfDetrMosaicDetectionModel:
     DEFAULT_SCORE_THRESHOLD = 0.25
     DEFAULT_MAX_SELECT = 16
@@ -114,6 +143,10 @@ class RfDetrMosaicDetectionModel:
             )
 
         if is_amd_device(self.device):
+            # A MIGraphX run is only started when its EP initialises (probe runs out of
+            # process); otherwise this silently becomes a torch run.
+            self.engine = resolve_detection_engine(self.engine)
+
             if self.engine == "migraphx":
                 from jasna.mosaic.rfdetr_migraphx_runner import RfDetrMigraphxRunner
 

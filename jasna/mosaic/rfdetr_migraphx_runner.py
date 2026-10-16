@@ -34,9 +34,12 @@ from __future__ import annotations
 
 import ctypes
 import glob
+import json
 import logging
 import os
 import shutil
+import subprocess
+import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
@@ -47,6 +50,7 @@ import torch
 from jasna.accelerator import DISCRETE_RADEON_ARCHS
 from jasna.engine_paths import model_weights_dir
 from jasna.mosaic.rfdetr_torch_runner import TorchTensorInfo, _VARIANT_CLASSES
+from jasna.os_utils import env_flag
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +168,105 @@ def _clean_hip_env() -> None:
     # HIP_VISIBLE_DEVICES value reroutes the plugin to the iGPU / DirectML.
     for name in ("HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES"):
         os.environ.pop(name, None)
+
+
+#: Set to 0 to skip the probe below and take the MIGraphX EP on trust.
+MIGRAPHX_PREFLIGHT_ENV = "JASNA_MIGRAPHX_PREFLIGHT"
+#: Seconds the child probe may take before the EP counts as unusable.
+MIGRAPHX_PREFLIGHT_TIMEOUT_S = 120.0
+
+_PROBE_CODE = (
+    "from jasna.mosaic.rfdetr_migraphx_runner import _ep_package, _prepare_ort_for_migraphx;"
+    "_ep_package();"
+    "_prepare_ort_for_migraphx();"
+    "print('migraphx-ep-ok')"
+)
+
+
+def migraphx_preflight_cache_path() -> Path:
+    """Where the probe's verdict is cached (next to the compiled-program cache)."""
+    return migraphx_cache_dir().parent / "migraphx-ep-preflight.json"
+
+
+def migraphx_preflight_fingerprint() -> dict:
+    """What a verdict depends on: the EP runtimes, the interpreter and the HIP target."""
+    local = find_local_ep_dir()
+    provider = {"path": "", "size": 0, "mtime": 0.0}
+    if local is not None:
+        library = local / _MIGRAPHX_PROVIDER_DLL
+        if library.is_file():
+            stat = library.stat()
+            provider = {
+                "path": str(library),
+                "size": int(stat.st_size),
+                "mtime": float(int(stat.st_mtime)),
+            }
+    return {
+        "ep_dir": str(local) if local is not None else "",
+        "provider": provider,
+        "python": sys.executable,
+        "arch": hip_arch() or "",
+    }
+
+
+def migraphx_ep_usable(*, refresh: bool = False) -> tuple[bool, str]:
+    """Whether the MIGraphX EP can be initialised here, decided **out of process**.
+
+    The provider is a native library and fails by taking the process down with an access
+    violation, which no ``try``/``except`` can catch (seen on an RX 7900 XTX as
+    ``0xC0000005`` inside ``Microsoft.Windows.AI.MachineLearning.dll`` on the
+    ``WinMLEpEnsureReady`` path). So the check runs in a child: a crash or a timeout
+    marks the EP unusable and the caller falls back to the torch engine.
+
+    The verdict is cached and keyed by the EP runtimes, the interpreter and the HIP
+    target, so a working machine pays for the probe once.
+    ``JASNA_MIGRAPHX_PREFLIGHT=0`` skips the probe entirely.
+    """
+    if not env_flag(MIGRAPHX_PREFLIGHT_ENV, default=True):
+        return True, "probe disabled (%s=0)" % MIGRAPHX_PREFLIGHT_ENV
+
+    fingerprint = migraphx_preflight_fingerprint()
+    if not refresh:
+        try:
+            cached = json.loads(migraphx_preflight_cache_path().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cached = None
+        if isinstance(cached, dict) and cached.get("fingerprint") == fingerprint:
+            return bool(cached.get("usable")), str(cached.get("reason", "cached verdict"))
+
+    started = time.perf_counter()
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", _PROBE_CODE],
+            capture_output=True,
+            timeout=MIGRAPHX_PREFLIGHT_TIMEOUT_S,
+        )
+        usable = result.returncode == 0
+        reason = "probe ok" if usable else "probe exited with %s" % result.returncode
+    except subprocess.TimeoutExpired:
+        usable = False
+        reason = "probe timed out after %.0fs" % MIGRAPHX_PREFLIGHT_TIMEOUT_S
+    except OSError as exc:  # noqa: BLE001 - a probe that cannot start is not usable
+        usable = False
+        reason = "probe could not start: %r" % exc
+
+    logger.info(
+        "MIGraphX EP preflight: %s (%s, %.1fs)",
+        "usable" if usable else "unusable", reason, time.perf_counter() - started,
+    )
+    payload = {
+        "fingerprint": fingerprint,
+        "usable": usable,
+        "reason": reason,
+        "checked": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    try:
+        path = migraphx_preflight_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    return usable, reason
 
 
 def _ep_package() -> tuple[Path, Path]:
