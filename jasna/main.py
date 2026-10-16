@@ -577,10 +577,11 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PX",
         help=(
             "RF-DETR input size in pixels, overriding the model's own default. rfdetr-v6 ships at "
-            "480 (14.2 ms/frame on an RX 7900 XT versus 18.8 at its native 576, recall-neutral on "
-            "our clips); raise it only for footage whose mosaics the default misses. Must be a "
-            "multiple of the model's patch block: 24 for rfdetr-v6 (720 works, 640 does not), "
-            "32 for rfdetr-v6-large and rfdetr-vr-v1 (768 works, 720 does not)."
+            "its native 576, as upstream does; 480 measured 14.2 ms/frame on an RX 7900 XT against "
+            "18.8 at 576 with the recall intact on our clips, so it is worth trying when detection "
+            "time matters. Must be a multiple of the model's patch block: 24 for rfdetr-v6 (720 "
+            "works, 640 does not), 32 for rfdetr-v6-large and rfdetr-vr-v1 (768 works, 720 does "
+            "not)."
         ),
     )
     detection.add_argument(

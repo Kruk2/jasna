@@ -100,20 +100,22 @@ DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 # RF-DETR (attention scales with it) and the only place it is defined. Measured on
 # an RX 7900 XT with the AOTriton flash images installed, RF-DETR v6, batch 8, fp16:
 #     576 -> 18.8 ms/frame    480 -> 14.2 ms/frame    384 -> 10.7 ms/frame
-# v6 ships at 480: it is 25% cheaper than the native 576 and keeps the recall the
-# larger sizes are chosen for. Raise it back if a clip needs the extra detail.
+# v6 ships at its native 576, matching upstream. The measurements above show 480 is
+# 25% cheaper with the recall intact on our clips; --detection-resolution 480 (or this
+# table) is how to ask for it.
 RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-v5": RfDetrModelConfig(768, 0.25, 4, None),
-    "rfdetr-v6": RfDetrModelConfig(480, 0.35, None, "medium"),
+    "rfdetr-v6": RfDetrModelConfig(576, 0.35, None, "medium"),
     "rfdetr-v6-large": RfDetrModelConfig(768, 0.40, None, "large"),
     "rfdetr-vr-v1": RfDetrModelConfig(768, 0.40, None, "large"),
 }
 _RFDETR_FALLBACK_CONFIG = RfDetrModelConfig(768, 0.25, None, None)
 
 #: Process-level override of the detector input size (CLI --detection-resolution).
-#: The registry value is the shipped default - v6 at 480, which is 25% cheaper than
-#: its native 576 and kept the recall on our clips - so the override exists only for
-#: footage whose mosaics the smaller input misses.
+#: The registry value is the shipped default - v6 at its native 576, which is what
+#: upstream ships too. The override exists for the size we measured as cheaper
+#: (480: 14.2 ms/frame against 18.8 at 576, recall intact on our clips) and for
+#: footage whose mosaics the default misses.
 _detection_resolution: int | None = None
 _DETECTION_RESOLUTION_MIN = 160
 _DETECTION_RESOLUTION_MAX = 2048

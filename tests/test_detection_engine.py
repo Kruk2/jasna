@@ -224,7 +224,7 @@ def test_migraphx_device_index_defaults_to_zero(monkeypatch):
 def test_detection_resolution_override_roundtrip():
     registry.set_detection_resolution(None)
     assert registry.get_detection_resolution_override() is None
-    assert registry.rfdetr_model_config("rfdetr-v6").resolution == 480
+    assert registry.rfdetr_model_config("rfdetr-v6").resolution == 576
 
     registry.set_detection_resolution(576)
     assert registry.get_detection_resolution_override() == 576
@@ -234,7 +234,7 @@ def test_detection_resolution_override_roundtrip():
     assert overridden.score_threshold == 0.35
 
     registry.set_detection_resolution(None)
-    assert registry.rfdetr_model_config("rfdetr-v6").resolution == 480
+    assert registry.rfdetr_model_config("rfdetr-v6").resolution == 576
 
 
 def test_detection_resolution_rejects_bad_values():

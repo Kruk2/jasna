@@ -3,7 +3,7 @@
 
 Runs the detector through ONNX Runtime's classic MIGraphX execution provider instead of
 the torch path. Measured on an RX 7900 XT (benchmarks/2026-10-07_amd_migraphx_ep_windows.md):
-a 480 fp16 export is ~1.5-1.9x faster per frame than the fp16 torch path (5.0-6.8 vs
+an fp16 export at the registry resolution (measured at 480) is ~1.5-1.9x faster per frame than the fp16 torch path (5.0-6.8 vs
 9.63 ms/frame), with identical detection decisions on real frames; the fp32 export is
 numerically exact but slower than torch, so this runner exports fp16.
 
