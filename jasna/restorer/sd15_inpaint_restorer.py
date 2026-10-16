@@ -35,6 +35,9 @@ def _read_checkpoint(model_dir: Path) -> dict:
     if use_plaintext_sd15(model_dir):
         return torch.load(str(model_dir / SD15_CKPT_PATH.name), map_location="cpu", weights_only=True)
 
+    from jasna.license_api import require_protection
+
+    require_protection()
     from jasna.protection import protected_model
 
     enc_path = model_dir / SD15_CKPT_ENC_PATH.name

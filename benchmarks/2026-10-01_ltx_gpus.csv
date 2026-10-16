@@ -1,0 +1,44 @@
+gpu,vram_gb,code,measure,model,canvas,decode_budget,value,unit,blocks_resident,note
+RTX 5090,32,39fd275,denoise,distilled int8,512,,490.7,ms/window-step,48/48,
+RTX 5090,32,6d2d2b7,denoise,distilled int8,768,,1354,ms/window-step,48/48,
+RTX 5090,32,6d2d2b7,denoise,undistilled int8,512,,689,ms/window-step,48/48,STG
+RTX 5090,32,39fd275,denoise,distilled nvfp4,512,,386.0,ms/window-step,48/48,
+RTX 5090,32,b3e6460,denoise,distilled nvfp4,768,,1137.0,ms/window-step,48/48,
+RTX 5090,32,329c6c9,decode,,512,6 GiB segment,1.121,s/window,,
+RTX 5090,32,329c6c9,decode,,512,24 GiB,0.862,s/window,,one tile
+RTX 5090,32,329c6c9,decode,,768,8 GiB segment,2.831,s/window,,
+RTX 5090,32,329c6c9,decode,,768,24 GiB,1.915,s/window,,one tile
+RTX 5090,32,2e67910,e2e 30 s 1080p30 trial,distilled int8,512,free VRAM,147,s,48/48,4.9x realtime
+RTX 5090,32,2e67910,e2e 30 s 1080p30 trial,distilled nvfp4,512,free VRAM,96,s,48/48,3.2x realtime
+RTX 5090,32,2e67910,e2e 30 s 1080p30 trial,undistilled int8,512,free VRAM,205,s,48/48,6.8x realtime
+RTX 5080,16,2e67910,denoise,distilled int8,512,,961.8,ms/window-step,44/48,300 W cap
+RTX 5080,16,2e67910,denoise,distilled int8,768,,2650.8,ms/window-step,44/48,300 W cap
+RTX 5080,16,2e67910,denoise,undistilled int8,512,,1354.9,ms/window-step,44/48,300 W cap
+RTX 5080,16,2e67910,denoise,distilled nvfp4,512,,742.1,ms/window-step,48/48,300 W cap
+RTX 5080,16,2e67910,denoise,distilled nvfp4,768,,2181.9,ms/window-step,48/48,300 W cap
+RTX 5080,16,2e67910,decode,,512,6 GiB segment,2.247,s/window,,
+RTX 5080,16,2e67910,decode,,512,13 GiB,1.746,s/window,,one tile
+RTX 5080,16,2e67910,decode,,768,8 GiB segment,5.709,s/window,,
+RTX 5080,16,2e67910,decode,,768,13 GiB,4.571,s/window,,
+RTX 4090,24,2e67910,denoise,distilled int8,512,,655.3,ms/window-step,48/48,
+RTX 4090,24,2e67910,denoise,distilled int8,768,,1831.4,ms/window-step,48/48,
+RTX 4090,24,2e67910,denoise,undistilled int8,512,,924.1,ms/window-step,48/48,
+RTX 4090,24,2e67910,decode,,512,6 GiB segment,1.711,s/window,,
+RTX 4090,24,2e67910,decode,,512,21 GiB,1.328,s/window,,one tile
+RTX 4090,24,2e67910,decode,,768,8 GiB segment,4.254,s/window,,
+RTX 4090,24,2e67910,decode,,768,21 GiB,2.939,s/window,,one tile
+RTX 3090,24,2e67910,denoise,distilled int8,512,,1541,ms/window-step,48/48,350 W cap
+RTX 3090,24,2e67910,denoise,distilled int8,768,,4603,ms/window-step,48/48,350 W cap
+RTX 3090,24,2e67910,denoise,undistilled int8,512,,2170,ms/window-step,48/48,350 W cap
+RTX 3090,24,2e67910,decode,,512,6 GiB segment,3.298,s/window,,
+RTX 3090,24,2e67910,decode,,512,21 GiB,2.545,s/window,,one tile
+RTX 3090,24,2e67910,decode,,768,8 GiB segment,8.340,s/window,,
+RTX 3090,24,2e67910,decode,,768,21 GiB,5.614,s/window,,one tile
+RTX 2080 Ti,11,e1eb45f,denoise,distilled int8,512,,,ms/window-step,,crashes (no bf16 SDPA kernel below SM 8.0)
+RTX 2080 Ti,11,e1eb45f,decode,,512,6 GiB segment,316.8,s/window,,
+RTX 2080 Ti,11,93bfba7,denoise,distilled int8,512,,3137,ms/window-step,25/48,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,denoise,distilled int8,768,,8658,ms/window-step,25/48,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,denoise,undistilled int8,512,,4412,ms/window-step,25/48,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,decode,,512,6 GiB segment,22.6,s/window,,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,decode,,512,8 GiB,17.7,s/window,,GPU locked at 1350 MHz
+RTX 2080 Ti,11,93bfba7,decode,,768,8 GiB segment,59.5,s/window,,GPU locked at 1350 MHz

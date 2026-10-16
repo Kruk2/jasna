@@ -37,15 +37,45 @@ def _install(directory: Path, model: str, *, fast: bool) -> None:
         (directory / name).touch()
 
 
+@pytest.fixture(autouse=True)
+def public_source(monkeypatch):
+    monkeypatch.setattr(ltx_models_module, "protection_available", lambda: False)
+
+
 @pytest.fixture
 def downloadable(monkeypatch):
-    monkeypatch.setattr(model_files, "LTX_DOWNLOAD_URL", "https://example.invalid/ltx")
+    monkeypatch.setattr(ltx_models_module, "protection_available", lambda: True)
 
 
 def test_model_key_names_each_model_choice() -> None:
     assert model_key("basicvsrpp", "undistilled") == "basicvsrpp"
     assert model_key("ltx", "distilled") == "ltx"
     assert model_key("ltx", "undistilled") == "ltx_undistilled"
+
+
+def test_availability_without_downloads(tmp_path) -> None:
+    _install(tmp_path, "distilled", fast=False)
+    state = read_install_state(tmp_path)
+
+    assert not state.downloadable
+    assert state.installed("distilled", False) and not state.installed("distilled", True)
+    assert card_unavailable_reason(nvidia=True) is None
+    assert card_unavailable_reason(nvidia=False) == "model_ltx_needs_nvidia"
+    assert not trial_only(state) and trial_only(read_install_state(tmp_path / "empty"))
+    assert run_unavailable_reason(state, "undistilled", False, nvidia=True, trial=False) == "model_ltx_not_installed"
+    assert run_unavailable_reason(state, "undistilled", False, nvidia=True, trial=True) is None
+    assert run_unavailable_reason(state, "distilled", False, nvidia=None, trial=False) is None
+    assert run_unavailable_reason(state, "distilled", True, nvidia=True, trial=False) == "model_ltx_not_installed"
+    assert run_unavailable_reason(state, "distilled", True, nvidia=False, trial=True) == "model_ltx_needs_nvidia"
+
+
+def test_availability_with_downloads(tmp_path, downloadable) -> None:
+    state = read_install_state(tmp_path)
+
+    assert state.downloadable
+    assert not trial_only(state)
+    assert run_unavailable_reason(state, "undistilled", False, nvidia=True, trial=False) == "model_ltx_not_downloaded"
+    assert state.download_size("distilled", False) == "14.9 GB"
 
 
 def test_availability_without_a_download_location(tmp_path) -> None:
@@ -127,6 +157,15 @@ def test_ensure_shows_the_download_error(tmp_path, monkeypatch, downloadable) ->
     assert not models.downloading
 
 
+def test_ensure_skips_installed_models_and_unavailable_downloads(tmp_path, monkeypatch) -> None:
+    _answer(monkeypatch, yes=True)
+    _install(tmp_path, "distilled", fast=False)
+    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+
+    assert models.ensure("distilled", False, on_ready=lambda: None)
+    assert not models.ensure("undistilled", False, on_ready=lambda: None)
+
+
 def test_ensure_skips_installed_models_and_unpublished_downloads(tmp_path, monkeypatch) -> None:
     _answer(monkeypatch, yes=True)
     _install(tmp_path, "distilled", fast=False)
@@ -171,7 +210,58 @@ def test_the_model_menu_round_trips_the_undistilled_model(tk_root, tmp_path) -> 
 
 def _pick_ltx_model(section, model: str) -> None:
     section._ltx_model.set_value(model)
-    section._on_ltx_model_selected(model)
+    section._on_ltx_choice_changed()
+
+
+def test_picking_a_missing_variant_never_asks_or_reverts(tk_root, tmp_path, monkeypatch, downloadable) -> None:
+    asked = _answer(monkeypatch, yes=True)
+    models = ltx_models(tk_root, tmp_path / "ltx", installed=False)
+    panel = _panel(tk_root, models)
+    section = panel._model_section
+    section.set_gpu_support(nvidia=True, blackwell=True)
+
+    section._cards["ltx"].radio.invoke()
+    _pick_ltx_model(section, "undistilled")
+    section._widgets["ltx_fast"]._toggle()
+
+    settings = panel.get_settings()
+    assert asked == [] and not models.downloading
+    assert (settings.restoration_model, settings.ltx_model, settings.ltx_fast) == ("ltx", "undistilled", True)
+    assert section._notice.cget("text") == t("model_ltx_not_downloaded")
+    assert section._notice.winfo_manager()
+
+
+def test_start_downloads_only_the_fast_model(tk_root, tmp_path, monkeypatch, downloadable) -> None:
+    from jasna.gui.app import JasnaApp
+
+    _answer(monkeypatch, yes=True)
+    downloaded: list[str] = []
+    monkeypatch.setattr(
+        model_files, "download_files", lambda _directory, files, _progress, **_kw: downloaded.extend(f.name for f in files)
+    )
+    monkeypatch.setattr(ltx_models_module, "start_download", lambda download, _on_percent, on_done: (download(None), on_done(None)))
+    models = LtxModels(tmp_path / "ltx", _NowCalls(), lambda: None)
+    panel = _panel(tk_root, models)
+    section = panel._model_section
+    section.set_gpu_support(nvidia=True, blackwell=True)
+    section._cards["ltx"].radio.invoke()
+    section._widgets["ltx_fast"]._toggle()
+    restarted: list[bool] = []
+    app = SimpleNamespace(
+        _preview_gpu_busy=False,
+        _processor=None,
+        _queue_panel=SimpleNamespace(
+            get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: ""
+        ),
+        _settings_panel=panel,
+        _ltx_models=models,
+        _on_start=lambda: restarted.append(True),
+    )
+
+    JasnaApp._on_start(app)
+
+    assert sorted(downloaded) == sorted(f"{name}.enc" for name in bundle_names("distilled", fast=True))
+    assert restarted == [True]
 
 
 def test_picking_a_missing_model_asks_and_reverts_on_no(tk_root, tmp_path, monkeypatch, downloadable) -> None:
@@ -190,6 +280,17 @@ def test_picking_a_missing_model_asks_and_reverts_on_no(tk_root, tmp_path, monke
     assert not section._install_status.winfo_manager()
 
 
+def test_a_missing_downloadable_model_stays_selectable(tk_root, tmp_path, downloadable) -> None:
+    panel = _panel(tk_root, ltx_models(tk_root, tmp_path / "ltx", installed=False))
+    section = panel._model_section
+
+    section.apply(replace(AppSettings(), restoration_model="ltx", ltx_model="undistilled"))
+
+    assert section._cards["ltx"].radio.cget("state") == "normal"
+    assert section._install_status.cget("text") == t("model_ltx_download_needed", size="14.9 GB")
+    assert section.unavailable_reason() == "model_ltx_not_downloaded"
+
+
 def test_a_missing_model_shows_its_download_size(tk_root, tmp_path, downloadable) -> None:
     panel = _panel(tk_root, ltx_models(tk_root, tmp_path / "ltx", installed=False))
     section = panel._model_section
@@ -199,6 +300,24 @@ def test_a_missing_model_shows_its_download_size(tk_root, tmp_path, downloadable
     assert section._cards["ltx"].radio.cget("state") == "normal"
     assert section._install_status.cget("text") == t("model_ltx_download_needed", size="14.9 GB")
     assert section.unavailable_reason() == "model_ltx_not_downloaded"
+
+
+def test_a_running_download_locks_the_choice(tk_root, tmp_path, monkeypatch, downloadable) -> None:
+    _answer(monkeypatch, yes=True)
+    started = []
+    monkeypatch.setattr(ltx_models_module, "start_download", lambda *args: started.append(args))
+    models = ltx_models(tk_root, tmp_path / "ltx", installed=False)
+    panel = _panel(tk_root, models)
+    models._on_change = panel.refresh_ltx_models
+    panel._model_section._cards["ltx"].radio.invoke()
+
+    models.ensure("distilled", False, on_ready=lambda: None)
+
+    assert len(started) == 1
+    assert panel.get_settings().restoration_model == "ltx"
+    assert panel._model_section._download_row.winfo_manager()
+    assert all(card.radio.cget("state") == "disabled" for card in panel._model_section._cards.values())
+    assert panel._model_section._ltx_model.cget("state") == "disabled"
 
 
 def test_picking_ltx_without_its_files_downloads_and_locks_the_choice(tk_root, tmp_path, monkeypatch, downloadable) -> None:
@@ -243,6 +362,24 @@ def test_fast_mode_without_its_model_falls_back_with_a_notice(tk_root, tmp_path)
 
     assert panel.get_settings().ltx_fast is False
     assert section._notice.cget("text") == t("model_ltx_fast_not_installed")
+
+
+def test_a_missing_variant_without_downloads_stays_selected_with_a_note(tk_root, tmp_path) -> None:
+    directory = tmp_path / "ltx"
+    _install(directory, "distilled", fast=False)
+    panel = _panel(tk_root, ltx_models(tk_root, directory, installed=False))
+    section = panel._model_section
+    section.set_gpu_support(nvidia=True, blackwell=True)
+    section._cards["ltx"].radio.invoke()
+    assert not section._notice.winfo_manager()
+
+    _pick_ltx_model(section, "undistilled")
+    section._widgets["ltx_fast"]._toggle()
+
+    settings = panel.get_settings()
+    assert (settings.ltx_model, settings.ltx_fast, settings.ltx_trial) == ("undistilled", True, False)
+    assert section.unavailable_reason() == "model_ltx_not_installed"
+    assert section._notice.cget("text") == t("model_ltx_not_installed")
 
 
 def test_every_model_option_has_a_tooltip(tk_root, tmp_path, monkeypatch) -> None:
@@ -292,6 +429,33 @@ def test_start_downloads_a_missing_ltx_model_first(monkeypatch) -> None:
     assert ensured == [("undistilled", False)]
 
 
+def test_declining_the_ltx_download_at_start_shows_no_error(tk_root, tmp_path, monkeypatch, downloadable) -> None:
+    from jasna.gui.app import JasnaApp
+
+    asked = _answer(monkeypatch, yes=False)
+    errors: list[str] = []
+    monkeypatch.setattr(messagebox, "showerror", lambda _title, message: errors.append(message))
+    settings = replace(AppSettings(), restoration_model="ltx")
+    app = SimpleNamespace(
+        _preview_gpu_busy=False,
+        _processor=None,
+        _queue_panel=SimpleNamespace(
+            get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: ""
+        ),
+        _settings_panel=SimpleNamespace(
+            get_settings=lambda: settings, ltx_unavailable_reason=lambda: "model_ltx_not_downloaded"
+        ),
+        _ltx_models=ltx_models(tk_root, tmp_path / "ltx", installed=False),
+        _log_panel=SimpleNamespace(error=errors.append),
+    )
+    app._on_start = lambda: None
+
+    JasnaApp._on_start(app)
+
+    assert len(asked) == 1
+    assert errors == []
+
+
 def test_the_trial_switch_round_trips_and_skips_the_download(tk_root, tmp_path, monkeypatch, downloadable) -> None:
     asked = _answer(monkeypatch, yes=True)
     panel = _panel(tk_root, ltx_models(tk_root, tmp_path / "ltx", installed=False))
@@ -306,6 +470,20 @@ def test_the_trial_switch_round_trips_and_skips_the_download(tk_root, tmp_path, 
     assert section._trial_status.cget("text") == t("ltx_trial_notice")
     _pick_ltx_model(section, "distilled")
     assert asked == [] and panel.get_settings().ltx_model == "distilled"
+
+
+def test_turning_the_trial_off_never_asks_for_the_missing_model(tk_root, tmp_path, monkeypatch, downloadable) -> None:
+    asked = _answer(monkeypatch, yes=True)
+    panel = _panel(tk_root, ltx_models(tk_root, tmp_path / "ltx", installed=False))
+    section = panel._model_section
+    section.apply(replace(AppSettings(), restoration_model="ltx", ltx_trial=True))
+    assert not section._notice.winfo_manager()
+
+    section._widgets["ltx_trial"]._toggle()
+
+    assert asked == []
+    assert panel.get_settings().ltx_trial is False
+    assert section._notice.cget("text") == t("model_ltx_not_downloaded")
 
 
 def test_turning_the_trial_off_asks_for_the_missing_model(tk_root, tmp_path, monkeypatch, downloadable) -> None:
@@ -376,9 +554,12 @@ def test_declining_the_trial_offer_does_not_start(monkeypatch) -> None:
     assert len(asked) == 1 and trials == [] and restarted == []
 
 
-def test_trial_session_config_and_key() -> None:
+def test_trial_session_config_and_key(monkeypatch, tmp_path) -> None:
     from jasna.gui.video_session import video_session_config, video_session_key
 
+    detection_path = tmp_path / "rfdetr-v6.onnx"
+    detection_path.touch()
+    monkeypatch.setattr("jasna.mosaic.detection_registry.require_detection_model_weights", lambda _name: detection_path)
     real = replace(AppSettings(), restoration_model="ltx")
     trial = replace(real, ltx_trial=True)
 
@@ -396,7 +577,7 @@ def test_a_trial_seed_preview_never_reuses_a_real_prepared_range() -> None:
     assert prepared_key(segment, real) != prepared_key(segment, replace(real, ltx_trial=True))
 
 
-def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch) -> None:
+def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downloadable) -> None:
     from jasna.protection import LicenseError
 
     directory = tmp_path / "ltx"
@@ -430,12 +611,14 @@ def test_start_with_a_trial_skips_the_license_offer(monkeypatch) -> None:
 
 
 def test_the_progress_stage_is_marked_as_a_trial(tk_root) -> None:
-    from jasna.gui.control_bar import ControlBar
+    from jasna.gui.control_bar import ControlBar, status_text
+    from jasna.progressbar import StageProgress
 
     bar = ControlBar(tk_root)
+    stage = StageProgress("denoise", 3, 4, 0.0, 0.0)
     bar.set_trial(True)
-    bar.update_progress(percent=10, stage="denoise")
-    assert bar._fps_label.cget("text") == t("ltx_trial_stage", stage=t("ltx_stage_denoise"))
+    bar.update_progress(percent=10, stage=stage)
+    assert bar._fps_label.cget("text") == t("ltx_trial_stage", stage=status_text(0.0, stage, trial=False))
     bar.set_trial(False)
-    bar.update_progress(percent=10, stage="denoise")
-    assert bar._fps_label.cget("text") == t("ltx_stage_denoise")
+    bar.update_progress(percent=10, stage=stage)
+    assert bar._fps_label.cget("text") == status_text(0.0, stage, trial=False)

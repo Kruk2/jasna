@@ -28,14 +28,14 @@ def root():
 
 
 @pytest.mark.parametrize("lang", ["en", "zh"])
-def test_about_dialog_fits_content(root, lang):
+def test_about_dialog_fits_content(root, lang, show_window):
     locale = get_locale()
     original = locale.current_language
     locale.set_language(lang)
     try:
         dialog = JasnaApp._show_about(root)
         try:
-            dialog.update_idletasks()
+            show_window(dialog)
             geometry_height = int(dialog.geometry().split("+")[0].split("x")[1])
             required = dialog.winfo_reqheight()
             # The dialog is sized to its content, clamped to the monitor's work

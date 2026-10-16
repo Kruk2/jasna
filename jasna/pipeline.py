@@ -14,7 +14,7 @@ import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.media.container_utils import MOV_SUFFIXES
-from jasna.media.probe import UnsupportedColorspaceError, get_video_meta_data
+from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
 from jasna.media.video_encoder import VideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
 from jasna.media.splice import (
@@ -33,12 +33,13 @@ from jasna.media.splice import (
     validate_smart_render,
 )
 from jasna.pipeline_threads import run_restoration_pass
-from jasna.progressbar import LTX_WORK_PER_FRAME, JobProgress, ProgressCallback, Progressbar
+from jasna.progressbar import JobProgress, ProgressCallback, Progressbar
 from jasna.restorer.secondary_restorer import AsyncSecondaryRestorer
 from jasna.segments import SegmentRange, job_restoration, resolve_restorations
 from jasna.session_config import SessionConfig
 from jasna.vr180 import (
     SbsDetectionAdapter,
+    require_ltx_input,
     resolve_vr_mode,
 )
 from jasna.vr_projection import build_vr_projector
@@ -221,12 +222,15 @@ class Pipeline:
         finally:
             frame_writer.close()
 
-        free, total = torch.cuda.mem_get_info(self.device)
-        log.info("VRAM usage at end — %.1f MiB", (total - free) / (1024 ** 2))
-        log.info("RAM usage at end — %.1f MiB", psutil.Process(os.getpid()).memory_info().rss / (1024 ** 2))
+        self._log_memory_at_end()
         if error is not None:
             error.__traceback__ = None
             raise error
+
+    def _log_memory_at_end(self) -> None:
+        free, total = torch.cuda.mem_get_info(self.device)
+        log.info("VRAM usage at end — %.1f MiB", (total - free) / (1024 ** 2))
+        log.info("RAM usage at end — %.1f MiB", psutil.Process(os.getpid()).memory_info().rss / (1024 ** 2))
 
     def validate_metadata(self, metadata) -> None:
         from av.video.reformatter import Colorspace as AvColorspace
@@ -236,7 +240,7 @@ class Pipeline:
             AvColorspace.ITU601,
             AvColorspace.BT2020,
         ):
-            raise UnsupportedColorspaceError(
+            raise UnsupportedVideoError(
                 f"Unsupported color space: {metadata.color_space!r} in {self.input_video.name}. "
                 "Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported."
             )
@@ -314,7 +318,7 @@ class Pipeline:
 
         report = None
         if callback is not None:
-            report = lambda stage, fraction, eta: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
+            report = lambda fraction, eta, stage: callback(fraction * 100.0, 0.0, eta, 0, 0, stage)
         return Progress(frames, disable=self.disable_progress, report=report)
 
     def _require_ltx_video(self) -> None:
@@ -323,8 +327,9 @@ class Pipeline:
 
     def _run_ltx(self, metadata) -> None:
         from jasna.ltx.restore import Cancelled, restore_video, video_frames
+        from jasna.ltx.speed import profile_path
 
-        self._require_ltx_video()
+        require_ltx_input(self.vr_resolution)
         frame_rate = self._resolve_frame_rate(metadata)
         writer = _OfflineFrameWriter(self._video_encoder(metadata, frame_rate), [time.monotonic()])
         try:
@@ -348,6 +353,7 @@ class Pipeline:
                 seed=self.ltx_seed,
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
+                speed_profile=profile_path(),
                 progress=self._ltx_progress(
                     frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
                 ),
@@ -357,14 +363,16 @@ class Pipeline:
             log.info("LTX restoration cancelled")
         finally:
             writer.close()
+        self._log_memory_at_end()
 
     def ltx_segment_render(self, metadata) -> "LtxRender":
         """How LTX restores segments: the 768 px decision and the decode tiles follow the
         GPU's size, never the VRAM free at that moment, so a segment renders the same in a
         job and in a seed preview."""
         from jasna.ltx.restore import LtxRender, segment_decode_budget, segment_large_canvas
+        from jasna.ltx.speed import profile_path
 
-        self._require_ltx_video()
+        require_ltx_input(self.vr_resolution)
         return LtxRender(
             detector=self.job_detection_model,
             files=self.ltx_files,
@@ -375,7 +383,9 @@ class Pipeline:
                 self.ltx_large_canvas, torch.cuda.get_device_properties(self.device).total_memory
             ),
             budget=segment_decode_budget,
+            budget_name="segment",
             device=self.device,
+            speed_profile=profile_path(),
         )
 
     def ltx_span(
@@ -407,6 +417,19 @@ class Pipeline:
             open_writer,
         )
 
+    def _ltx_estimate_seconds(self, metadata, frames: int) -> float:
+        """About how long LTX takes on ``frames``, before its scan has planned them."""
+        from jasna.ltx.speed import profile_path, segment_estimate_seconds
+
+        return segment_estimate_seconds(
+            profile_path(),
+            torch.cuda.get_device_name(self.device),
+            self.ltx_files.transformer_name,
+            frames=frames,
+            fps=metadata.video_fps,
+            megapixels=metadata.video_height * metadata.video_width / 1e6,
+        )
+
     def _run_ltx_spans(
         self,
         metadata,
@@ -430,6 +453,7 @@ class Pipeline:
             )
         except Cancelled:
             log.info("LTX restoration cancelled")
+        self._log_memory_at_end()
 
     def _run_smart(self, metadata) -> None:
         codec = validate_smart_render(
@@ -492,6 +516,17 @@ class Pipeline:
             self.encoder_settings,
             vendor=vendor_for_device(self.device),
         )
+        standard_frames = sum(
+            _span_frames(span, index, metadata) for span in plan.render_spans if span not in ltx_spans
+        )
+        ltx_callback = standard_callback = self.progress_callback
+        if self.progress_callback is not None and ltx_spans and standard_frames:
+            ltx_frames = sum(_span_frames(span, index, metadata) for span in ltx_spans)
+            job_progress = JobProgress(
+                self.progress_callback,
+                {"standard": 0.0, "ltx": self._ltx_estimate_seconds(metadata, ltx_frames)},
+            )
+            standard_callback, ltx_callback = job_progress.part("standard"), job_progress.part("ltx")
         # --- checkpoint/resume (断点续传) --------------------------------------
         # Fragments are deterministic per span: the same input, segments and
         # settings always produce the same plan, so a stopped job can keep its
@@ -553,25 +588,6 @@ class Pipeline:
             elif resume_state is None and resume_dir.exists() and any(resume_dir.iterdir()):
                 log.info("Discarding an unusable resume checkpoint in %s", resume_dir)
                 clear_resume(resume_dir)
-        standard_frames = sum(
-            _span_frames(span, index, metadata)
-            for span_index, span in enumerate(plan.spans)
-            if span.is_render and span not in ltx_spans and span_index not in completed
-        )
-        ltx_callback = standard_callback = self.progress_callback
-        if self.progress_callback is not None and ltx_spans and standard_frames:
-            job_progress = JobProgress(
-                self.progress_callback,
-                {
-                    "ltx": LTX_WORK_PER_FRAME * sum(
-                        _span_frames(span, index, metadata)
-                        for span_index, span in enumerate(plan.spans)
-                        if span in ltx_spans and span_index not in completed
-                    ),
-                    "standard": float(standard_frames),
-                },
-            )
-            ltx_callback, standard_callback = job_progress.part("ltx"), job_progress.part("standard")
         progress = Progressbar(
             total_frames=max(1, standard_frames),
             video_fps=metadata.video_fps,

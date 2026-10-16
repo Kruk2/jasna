@@ -10,10 +10,10 @@ from jasna.media.probe import get_video_meta_data
 from jasna.media.video_decoder import VideoReader
 from jasna.mosaic.detection_registry import (
     DEFAULT_DETECTION_MODEL_NAME,
-    build_detection_model,
     detection_model_weights_path,
     recommended_score_threshold,
 )
+from jasna.session_factory import build_compiled_detection_model
 
 LADA_YOLO_FAST_MODEL = "lada-yolo-v4"
 
@@ -36,13 +36,14 @@ def _run_single(
     if not model_path.exists():
         raise FileNotFoundError(str(model_path))
 
-    detection_model = build_detection_model(
+    detection_model = build_compiled_detection_model(
         model_name,
         model_path,
         batch_size=batch_size,
         device=device,
         score_threshold=score_threshold,
         fp16=fp16,
+        log_callback=None,
     )
 
     target_hw = (int(metadata.video_height), int(metadata.video_width))

@@ -12,19 +12,19 @@ import tkinter as tk
 from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
-from jasna import startup_timing
+from jasna import os_utils, startup_timing
 from jasna.gui.branding import (
     HEADER_LOGO_SIZE,
     create_header_logo,
     install_window_icon,
 )
 from jasna.gui import scaling
+from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, Toast, LicenseDialog, ShutdownCountdownDialog, grab_modal
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
-from jasna.engine_paths import UNET4X_ONNX_ENC_PATH
 from jasna.gui.control_bar import ControlBar
 from jasna.gui.log_panel import LogPanel
 from jasna.gui.log_filter import runtime_log_level_for_filter
@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 _DEFAULT_WINDOW_SIZE = (1320, 960)
 _MIN_WINDOW_SIZE = (900, 580)
 _SHUTDOWN_COUNTDOWN_SECONDS = 60
+_WINDHAWK_MODULE = "windhawk.dll"
 
 
 def _warm_up_cuda() -> tuple[bool, bool]:
@@ -125,6 +126,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         self.after_idle(self._log_startup_timing)
         self.after_idle(self._start_cuda_warmup)
+        self.after_idle(self._warn_if_windhawk_loaded)
 
         if not skip_wizard:
             if self._preset_manager.get_system_check_passed_version() != __version__:
@@ -252,22 +254,24 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         )
         self._video_player_btn.pack(side="left", padx=(0, 12))
         
-        # Support buttons — back the project on Buy Me a Coffee or Unifans
+        # Support buttons — back the project on Buy Me a Coffee, Unifans or (Chinese UI) Xianyu
         self._bmc_btn = BuyMeCoffeeButton(right, width=100, height=28)
         self._bmc_btn.pack(side="left", padx=(0, 8))
 
+        show_xianyu = shows_xianyu_seller(get_locale().current_language)
         self._unifans_btn = UnifansButton(right, width=110, height=28)
-        self._unifans_btn.pack(side="left", padx=(0, 12))
+        self._unifans_btn.pack(side="left", padx=(0, 8 if show_xianyu else 12))
+        if show_xianyu:
+            XianyuButton(right, width=70, height=28).pack(side="left", padx=(0, 12))
 
-        # Supporter license chip — only shown when the gated (encrypted) model ships.
-        if UNET4X_ONNX_ENC_PATH.exists():
-            self._license_chip = ctk.CTkButton(
-                right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
-                fg_color="transparent", hover_color=Colors.BG_CARD,
-                width=130, command=self._open_license_dialog,
-            )
-            self._license_chip.pack(side="left", padx=(0, 12))
-            self._refresh_license_chip()
+        self._license_chip = ctk.CTkButton(
+            right, font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color="transparent", hover_color=Colors.BG_CARD,
+            text=t("license_chip_inactive"), text_color=Colors.STATUS_WARNING,
+            width=130, command=self._open_license_dialog,
+        )
+        self._license_chip.pack(side="left", padx=(0, 12))
+        self._refresh_license_chip()
 
         self._system_check_btn = ctk.CTkButton(
             right,
@@ -403,6 +407,15 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._t_ui_built - self._t_init_start,
         )
 
+    def _warn_if_windhawk_loaded(self):
+        if not os_utils.windows_module_loaded(_WINDHAWK_MODULE):
+            return
+        from tkinter import messagebox
+
+        message = t("windhawk_warning_body")
+        self._log_panel.warning(message)
+        messagebox.showwarning(t("windhawk_warning_title"), message, parent=self)
+
     def _start_cuda_warmup(self):
         def _run():
             try:
@@ -452,6 +465,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._closing_after_player = True
             self._video_player_dialog.request_close()
             return
+        if not self._queue_panel.close_segment_editor():
+            return
         try:
             if self._processor:
                 self._processor.stop()
@@ -465,8 +480,14 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self.destroy()
         
     def _refresh_license_chip(self):
-        from jasna.protection import license_store
-        licensed = license_store.is_licensed()
+        activation_worker.start_license_info(
+            lambda info, error: self._main_thread.post(lambda: self._license_chip_ready(info, error))
+        )
+
+    def _license_chip_ready(self, info, error):
+        if error is not None:
+            logger.warning("Could not read activation status: %s", error)
+        licensed = error is None and info[1]
         self._license_chip.configure(
             text=t("license_chip_active") if licensed else t("license_chip_inactive"),
             text_color=Colors.STATUS_COMPLETED if licensed else Colors.STATUS_WARNING,
@@ -611,6 +632,10 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
         from jasna.gui.validation import any_job_uses_ltx, validate_gui_start
 
+        if self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded" and any_job_uses_ltx(
+            jobs, settings
+        ):
+            self._ltx_models.ensure(settings.ltx_model, settings.ltx_fast, on_ready=self._on_start)
         if (
             self._settings_panel.ltx_unavailable_reason() == "model_ltx_not_downloaded"
             and any_job_uses_ltx(jobs, settings)
@@ -767,6 +792,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
                 update.fps,
                 update.eta_seconds,
                 elapsed_seconds=job_elapsed,
+                stage=update.stage,
             )
         except Exception:
             logger.warning("Failed to update job status in queue panel", exc_info=True)
@@ -779,10 +805,13 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
 
     def _handle_complete(self, queue_finished: bool):
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
-        elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
-        self._control_bar.set_completed(elapsed_seconds)
+        if queue_finished:
+            elapsed_seconds = time.time() - self._processing_start_time if self._processing_start_time else 0.0
+            self._control_bar.set_completed(elapsed_seconds)
+            self._log_panel.info("All jobs completed")
+        else:
+            self._control_bar.reset()
         self._update_start_button_state()
-        self._log_panel.info("All jobs completed")
         
         # Re-enable settings and output controls
         self._settings_panel.set_enabled(True)
@@ -918,6 +947,8 @@ def run_gui():
     """Entry point to run the GUI application."""
     from jasna._frozen import patch_frozen_torch
     patch_frozen_torch()
+    from jasna.engine_paths import configure_torch_compile_cache
+    configure_torch_compile_cache()
     from jasna.accelerator import configure_rocm_process_env
     configure_rocm_process_env()
 

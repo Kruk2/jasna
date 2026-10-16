@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +14,15 @@ from jasna.mosaic.detection_registry import recommended_score_threshold
 
 _DETECTION_PATH = Path("mw") / "rfdetr-v6.onnx"
 _RESTORATION_PATH = Path("mw") / "lada_mosaic_restoration_model_generic_v1.2.pth"
+
+#: The licensing path (``read_license_info``) imports ``jasna.protection.signing``,
+#: which only ships in the private submodule bundled with release archives. In a
+#: plain source checkout the stand-in package has no ``signing``, so the session
+#: builder raises before it reaches the bundle check under test.
+requires_protection_submodule = pytest.mark.skipif(
+    importlib.util.find_spec("jasna.protection.signing") is None,
+    reason="private jasna.protection submodule (signing) is not vendored here",
+)
 
 
 def _cli_config(extra_args: list[str] | None = None):
@@ -174,6 +184,7 @@ def test_gui_config_maps_settings_fields() -> None:
     assert config.disable_progress is True
 
 
+@requires_protection_submodule
 def test_gui_image_session_requires_installed_sd15_bundle(monkeypatch) -> None:
     from jasna.gui.locales import t
     from jasna.restorer import sd15_download

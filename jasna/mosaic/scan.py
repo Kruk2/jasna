@@ -31,13 +31,15 @@ class MosaicScanResult:
     Sample ``i`` was taken at ``times[i]`` seconds. ``scores`` holds the best
     detection score per sample (0.0 when nothing was detected), ``masks`` a
     uint8 [N, H, W] tensor of merged detection masks downscaled to
-    ``mask_size``. ``completed_until`` is the last scanned timestamp; earlier
-    than ``duration`` when the scan was stopped.
+    ``mask_size``, and ``sizes`` each sample's biggest mosaic (``mosaic_sizes``).
+    ``completed_until`` is the last scanned timestamp; earlier than ``duration``
+    when the scan was stopped.
     """
 
     times: tuple[float, ...]
     scores: tuple[float, ...]
     masks: object
+    sizes: tuple[float, ...]
     stride: float
     duration: float
     completed_until: float

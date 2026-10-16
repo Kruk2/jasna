@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import heapq
+
 from dataclasses import dataclass, replace
 
 from jasna.session_config import RestorationModelName
@@ -98,11 +100,8 @@ def normalize_segments(
                     f"{format_timestamp(duration)}"
                 )
 
-    painted: list[SegmentRange] = []
-    for segment in segments:
-        painted = [piece for old in painted for piece in _outside(old, segment)] + [segment]
     merged: list[SegmentRange] = []
-    for segment in sorted(painted):
+    for segment in _painted(segments):
         previous = merged[-1] if merged else None
         if (
             previous is not None
@@ -113,6 +112,24 @@ def normalize_segments(
         else:
             merged.append(segment)
     return tuple(merged)
+
+
+def _painted(segments: list[SegmentRange] | tuple[SegmentRange, ...]) -> list[SegmentRange]:
+    """Every stretch the ranges cover, in time order, taken by the last range covering it."""
+    points = sorted({point for segment in segments for point in (segment.start, segment.end)})
+    by_start = sorted(range(len(segments)), key=lambda index: segments[index].start)
+    covering: list[int] = []
+    pieces: list[SegmentRange] = []
+    next_start = 0
+    for left, right in zip(points, points[1:]):
+        while next_start < len(by_start) and segments[by_start[next_start]].start <= left:
+            heapq.heappush(covering, -by_start[next_start])
+            next_start += 1
+        while covering and segments[-covering[0]].end <= left:
+            heapq.heappop(covering)
+        if covering and right - left > 1e-9:
+            pieces.append(replace(segments[-covering[0]], start=left, end=right))
+    return pieces
 
 
 def _outside(segment: SegmentRange, cut: SegmentRange) -> list[SegmentRange]:

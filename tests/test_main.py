@@ -1,5 +1,6 @@
+import re
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -14,6 +15,13 @@ from jasna.media.encoder_settings import encoder_cq_spec
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+@pytest.fixture(autouse=True)
+def _mock_device_context():
+    """CLI orchestration tests use mocked models and must not initialize CUDA."""
+    with patch("jasna.accelerator.device_context", side_effect=lambda _device: nullcontext()):
+        yield
+
 
 def _make_model_files(tmp_path, *, create_input=True, create_detection=True, create_restoration=True):
     input_path = tmp_path / "in.mp4"
@@ -734,6 +742,32 @@ class TestFolderBatchProgress:
         assert command.call_count == 2
         assert "Error post-processing a.mp4" in capsys.readouterr().out
 
+    def test_unsupported_video_is_skipped_and_the_folder_continues(self, tmp_path, capsys):
+        in_dir = tmp_path / "in"
+        in_dir.mkdir()
+        (in_dir / "a_vr.mp4").touch()
+        (in_dir / "b_clip.mp4").touch()
+        rest = tmp_path / "restore.pth"
+        rest.touch()
+        det = tmp_path / "det.onnx"
+        det.touch()
+        argv = [
+            "jasna",
+            "--input", str(in_dir),
+            "--output", str(tmp_path / "out"),
+            "--restoration-model-path", str(rest),
+            "--detection-model-path", str(det),
+        ]
+        from jasna.media.probe import UnsupportedVideoError
+
+        rejected, restored = MagicMock(), MagicMock()
+        rejected.run.side_effect = UnsupportedVideoError("LTX does not support VR180 side-by-side video")
+
+        _run_main(argv, pipeline_side_effect=[rejected, restored])
+
+        restored.run.assert_called_once()
+        assert "Error processing a_vr.mp4: LTX does not support VR180 side-by-side video" in capsys.readouterr().out
+
 
 # ---------------------------------------------------------------------------
 # Streaming paths
@@ -894,7 +928,7 @@ class TestStreamingPaths:
         def make_pipeline(**kw):
             return pipeline_mock
 
-        from jasna.media.probe import UnsupportedColorspaceError
+        from jasna.media.probe import UnsupportedVideoError
         call_count = 0
 
         def wait_side_effect():
@@ -912,7 +946,7 @@ class TestStreamingPaths:
                 patch("jasna.streaming.HlsStreamingServer", return_value=mock_hls),
                 patch(
                     "jasna.streaming_pipeline.run_streaming",
-                    side_effect=UnsupportedColorspaceError("bt2020 not supported"),
+                    side_effect=UnsupportedVideoError("bt2020 not supported"),
                 ),
             ):
                 argv = [
@@ -932,16 +966,16 @@ class TestStreamingPaths:
 
 
 # ---------------------------------------------------------------------------
-# UnsupportedColorspaceError in non-streaming
+# UnsupportedVideoError in non-streaming
 # ---------------------------------------------------------------------------
 
 class TestColorspaceError:
     def test_colorspace_error_exits_1(self, tmp_path, capsys):
         inp, out, rest, det = _make_model_files(tmp_path)
-        from jasna.media.probe import UnsupportedColorspaceError
+        from jasna.media.probe import UnsupportedVideoError
 
         pipeline_mock = MagicMock()
-        pipeline_mock.run.side_effect = UnsupportedColorspaceError("yuv422 unsupported")
+        pipeline_mock.run.side_effect = UnsupportedVideoError("yuv422 unsupported")
 
         def make_pipeline(**kw):
             return pipeline_mock

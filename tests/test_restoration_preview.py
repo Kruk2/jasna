@@ -348,8 +348,13 @@ def test_restoration_worker_reports_completed_teardown() -> None:
 
 
 def test_segment_editor_requests_restored_playback_when_no_buffer_exists() -> None:
+    from jasna.gui.segment_editor_state import SegmentEditorState
+    from jasna.segments import SegmentRestoration
+
     editor = SegmentEditor.__new__(SegmentEditor)
-    editor._state = SimpleNamespace(duration=10.0, fps=30.0)
+    editor._state = SegmentEditorState(
+        duration=10.0, fps=30.0, segments=(), default_restoration=SegmentRestoration("basicvsrpp", None)
+    )
     editor._current = 2.0
     editor._restore_active = True
     editor._restore_play_pending = False
@@ -499,6 +504,10 @@ def test_restoration_preview_refuses_ltx_ranges_and_previews_others_with_standar
     editor._show_preview_message = MagicMock()
     editor._scan_panel = MagicMock()
     editor._scan_panel.video_settings.return_value = AppSettings(restoration_model="ltx")
+    # `_request_restoration_preview` refreshes the LTX render button (a widget this
+    # window-less instance never builds) and checks whether an LTX seed is running.
+    editor._ltx_render_btn = MagicMock()
+    editor._seed_running = None
 
     editor._current = 1.5
     editor._request_restoration_preview()

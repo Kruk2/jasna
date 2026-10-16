@@ -23,6 +23,13 @@ from jasna.tracking.clip_tracker import TrackedClip
 
 
 @pytest.fixture(autouse=True)
+def _mock_gpu_monitoring():
+    """Exercise the real thread flow on CPU without GPU memory monitoring."""
+    with (
+        patch("jasna.pipeline_threads.VramOffloader", autospec=True),
+        patch.object(Pipeline, "_log_memory_at_end"),
+    ):
+        yield
 def _legacy_decode_path(monkeypatch):
     """Keep the AMD single-decode forward path closed for these tests.
 
@@ -91,7 +98,7 @@ def _make_pipeline():
             codec="hevc",
             encoder_settings={},
             batch_size=2,
-            device=torch.device("cuda:0"),
+            device=torch.device("cpu"),
             max_clip_size=60,
             temporal_overlap=8,
             max_detection_gap=0,
@@ -150,11 +157,22 @@ class TestPipelineColorspaceCheck:
         mock_meta.return_value = meta
         p = _make_pipeline()
 
-        from jasna.media.probe import UnsupportedColorspaceError
+        from jasna.media.probe import UnsupportedVideoError
         with pytest.raises(
-            UnsupportedColorspaceError,
+            UnsupportedVideoError,
             match="Only BT.709, BT.601, and BT.2020 non-constant-luminance are supported",
         ):
+            p.run()
+
+    @patch("jasna.pipeline.get_video_meta_data")
+    def test_ltx_run_skips_vr_side_by_side_as_unsupported_video(self, mock_meta):
+        meta = _fake_metadata()
+        meta.video_width = 16
+        mock_meta.return_value = meta
+        p = make_pipeline(restoration_model_name="ltx", vr_mode="sbs", vr_projection="raw")
+
+        from jasna.media.probe import UnsupportedVideoError
+        with pytest.raises(UnsupportedVideoError, match="VR180 side-by-side"):
             p.run()
 
 
@@ -1089,7 +1107,7 @@ class TestPipelineRun:
                 codec="hevc",
                 encoder_settings={},
                 batch_size=2,
-                device=torch.device("cuda:0"),
+                device=torch.device("cpu"),
                 max_clip_size=60,
                 temporal_overlap=8,
                 max_detection_gap=0,

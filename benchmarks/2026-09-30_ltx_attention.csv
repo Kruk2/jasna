@@ -1,0 +1,25 @@
+date,commit,label,gpu,model,quant,canvas,windows,steps,stg,int8_attention,inductor,compile_s,s_per_window,ms_per_window_step,peak_vram_gib,runs_s
+2026-09-30,5380b4a,sage2pp-r1,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,6.1,3.9,487.8,12.77,11.63 11.71 11.75
+2026-09-30,e8abe77,kitchen-r1,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,3.4,3.95,493.4,12.77,11.79 11.84 11.86
+2026-09-30,5380b4a,sage2pp-r1,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,9.1,10.76,1344.6,13.59,32.22 32.27 32.33
+2026-09-30,e8abe77,kitchen-r1,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,6.5,10.97,1371.0,13.59,32.76 32.96 32.90
+2026-09-30,5380b4a,sage2pp-r2,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,2.5,3.94,492.5,12.77,11.81 11.82 11.85
+2026-09-30,e8abe77,kitchen-r2,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,4.6,3.96,495.5,12.77,11.86 11.89 11.95
+2026-09-30,5380b4a,sage2pp-r2,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,6.2,10.81,1351.1,13.59,32.35 32.43 32.56
+2026-09-30,e8abe77,kitchen-r2,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,8.4,11.03,1379.2,13.59,33.00 33.10 33.12
+2026-09-30,5380b4a,sage2pp-r1,NVIDIA GeForce RTX 3090,distilled,int8,512,3,8,False,True,,66.7,13.97,1745.7,12.75,43.74 41.90 41.63
+2026-09-30,4bec7d1,kitchen-r1,NVIDIA GeForce RTX 3090,distilled,int8,512,3,8,False,True,,16.5,13.69,1710.9,12.75,42.29 41.06 40.41
+2026-09-30,5380b4a,sage2pp-r1,NVIDIA GeForce RTX 3090,distilled,int8,768,3,8,False,True,,63.5,44.13,5516.7,13.57,133.22 132.12 132.40
+2026-09-30,4bec7d1,kitchen-r1,NVIDIA GeForce RTX 3090,distilled,int8,768,3,8,False,True,,31.2,42.34,5292.8,13.57,130.31 127.03 126.29
+2026-09-30,5380b4a,sage2pp-r2,NVIDIA GeForce RTX 3090,distilled,int8,512,3,8,False,True,,10.8,14.21,1776.0,12.75,44.14 42.62 42.07
+2026-09-30,4bec7d1,kitchen-r2,NVIDIA GeForce RTX 3090,distilled,int8,512,3,8,False,True,,27.2,14.02,1752.8,12.75,44.49 41.85 42.07
+2026-09-30,5380b4a,sage2pp-r2,NVIDIA GeForce RTX 3090,distilled,int8,768,3,8,False,True,,27.1,44.17,5521.7,13.57,132.52 131.28 133.39
+2026-09-30,4bec7d1,kitchen-r2,NVIDIA GeForce RTX 3090,distilled,int8,768,3,8,False,True,,36.5,41.58,5198.0,13.57,124.75 121.99 127.65
+2026-09-30,5380b4a,sage2pp-r1,NVIDIA GeForce RTX 4090,distilled,int8,512,3,8,False,True,,30.3,5.2,650.3,12.75,15.57 15.61 15.61
+2026-09-30,4bec7d1,kitchen-r1,NVIDIA GeForce RTX 4090,distilled,int8,512,3,8,False,True,,10.7,5.18,647.4,12.75,15.51 15.54 15.54
+2026-09-30,5380b4a,sage2pp-r1,NVIDIA GeForce RTX 4090,distilled,int8,768,3,8,False,True,,22.6,14.25,1781.4,13.57,42.71 42.75 42.77
+2026-09-30,4bec7d1,kitchen-r1,NVIDIA GeForce RTX 4090,distilled,int8,768,3,8,False,True,,10.7,14.4,1800.6,13.57,43.17 43.22 43.21
+2026-09-30,5380b4a,sage2pp-r2,NVIDIA GeForce RTX 4090,distilled,int8,512,3,8,False,True,,4.4,5.21,650.8,12.75,15.61 15.62 15.62
+2026-09-30,4bec7d1,kitchen-r2,NVIDIA GeForce RTX 4090,distilled,int8,512,3,8,False,True,,7.1,5.18,647.9,12.75,15.53 15.55 15.55
+2026-09-30,5380b4a,sage2pp-r2,NVIDIA GeForce RTX 4090,distilled,int8,768,3,8,False,True,,9.0,14.26,1782.7,13.57,42.82 42.77 42.79
+2026-09-30,4bec7d1,kitchen-r2,NVIDIA GeForce RTX 4090,distilled,int8,768,3,8,False,True,,11.8,14.4,1799.8,13.57,43.18 43.20 43.20

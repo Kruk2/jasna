@@ -1,0 +1,16 @@
+date,commit,label,gpu,clip,frames,frame_size,live_candidates_1_2,variant,ms_per_frame,max_abs_vs_559968c,frames_differing
+2026-10-01,559968c,offline,NVIDIA GeForce RTX 5090,c0,124,1920x1080,93/31,baseline,2.45,0,0
+2026-10-01,80233a1-median,offline,NVIDIA GeForce RTX 5090,c0,124,1920x1080,93/31,feather_reuse_only,1.43,0,0
+2026-10-01,80233a1,offline,NVIDIA GeForce RTX 5090,c0,124,1920x1080,93/31,feather_reuse+histogram_median,1.21,0,0
+2026-10-01,559968c,offline,NVIDIA GeForce RTX 5090,c1,124,1920x1080,93/31,baseline,5.85,0,0
+2026-10-01,80233a1-median,offline,NVIDIA GeForce RTX 5090,c1,124,1920x1080,93/31,feather_reuse_only,3.08,0,0
+2026-10-01,80233a1,offline,NVIDIA GeForce RTX 5090,c1,124,1920x1080,93/31,feather_reuse+histogram_median,2.96,0,0
+2026-10-01,559968c,offline,NVIDIA GeForce RTX 5090,c2,124,1920x1080,93/31,baseline,2.56,0,0
+2026-10-01,80233a1-median,offline,NVIDIA GeForce RTX 5090,c2,124,1920x1080,93/31,feather_reuse_only,1.49,0,0
+2026-10-01,80233a1,offline,NVIDIA GeForce RTX 5090,c2,124,1920x1080,93/31,feather_reuse+histogram_median,1.27,0,0
+2026-10-01,559968c,in_pipeline,NVIDIA GeForce RTX 5090,c0,124,1920x1080,93/31,baseline,4.39,,
+2026-10-01,80233a1,in_pipeline,NVIDIA GeForce RTX 5090,c0,124,1920x1080,93/31,feather_reuse+histogram_median,2.27,,
+2026-10-01,559968c,in_pipeline,NVIDIA GeForce RTX 5090,c1,124,1920x1080,93/31,baseline,7.19,,
+2026-10-01,80233a1,in_pipeline,NVIDIA GeForce RTX 5090,c1,124,1920x1080,93/31,feather_reuse+histogram_median,3.64,,
+2026-10-01,559968c,in_pipeline,NVIDIA GeForce RTX 5090,c2,124,1920x1080,93/31,baseline,4.22,,
+2026-10-01,80233a1,in_pipeline,NVIDIA GeForce RTX 5090,c2,124,1920x1080,93/31,feather_reuse+histogram_median,2.23,,

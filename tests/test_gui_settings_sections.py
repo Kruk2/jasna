@@ -19,6 +19,8 @@ from jasna.gui.settings_sections.post_export import PostExportSection
 from jasna.gui.settings_sections.restoration_model import RestorationModelSection
 from jasna.gui.settings_sections.secondary import SecondarySection
 from jasna.gui.settings_sections.widgets import ValueOptionMenu
+from jasna.gui import ltx_models as ltx_models_module
+
 from factories import ltx_models
 
 
@@ -75,6 +77,9 @@ def _fake_section_widgets() -> dict:
         "ltx_fast": _FakeWidget(1),
         "ltx_large_canvas": _FakeWidget(0),
         "ltx_trial": _FakeWidget(1),
+        "ltx_auto_split": _FakeWidget(1),
+        "ltx_auto_split_percent": _FakeWidget(17.6),
+
         "max_clip_size": _FakeWidget(90),
         "fp16_mode": _FakeWidget(1),
         "detection_model": _FakeWidget("rfdetr-v6"),
@@ -190,6 +195,9 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["ltx_fast"] is True
     assert values["ltx_large_canvas"] is False
     assert values["ltx_trial"] is True
+    assert values["ltx_auto_split"] is True
+    assert values["ltx_auto_split_percent"] == 18
+
 
 
 def test_sections_collect_covers_all_widget_backed_appsettings_fields() -> None:
@@ -518,7 +526,8 @@ def test_ltx_hides_standard_only_settings_and_restores_them(_panel_factory) -> N
     assert order.index(secondary._section) == order.index(secondary._previous_section) + 1
 
 
-def test_ltx_without_model_files_runs_as_a_trial(_panel_factory) -> None:
+def test_ltx_without_model_files_runs_as_a_trial(_panel_factory, monkeypatch) -> None:
+    monkeypatch.setattr(ltx_models_module, "protection_available", lambda: False)
     panel = _panel_factory(False)
 
     assert panel._model_section._cards["ltx"].radio.cget("state") == "normal"
@@ -556,6 +565,33 @@ def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
     # the default network engine; 0 is off there too, so the round trip is
     # value-preserving except for that documented display normalization.
     assert panel.get_settings() == replace(ltx, amd_upscale_sharpness=0.0)
+
+
+def test_processing_locks_secondary_controls_and_keeps_missing_unet4x_disabled(
+    _panel_factory, monkeypatch, tmp_path, caplog
+) -> None:
+    from jasna import engine_paths
+
+    monkeypatch.setattr(engine_paths, "UNET4X_ONNX_PATH", tmp_path / "missing.onnx")
+    monkeypatch.setattr(engine_paths, "UNET4X_ONNX_ENC_PATH", tmp_path / "missing.onnx.enc")
+    panel = _panel_factory(True)
+    secondary = next(section for section in panel._sections if isinstance(section, SecondarySection))
+    controls = [*secondary._engine_radios.values(), secondary._tvai_denoise_switch]
+
+    with caplog.at_level("DEBUG", logger="jasna.gui.settings_panel"):
+        panel.set_enabled(False)
+        locked = [control.cget("state") for control in controls]
+        panel.set_enabled(True)
+
+    assert locked == ["disabled"] * len(controls)
+    assert {value: radio.cget("state") for value, radio in secondary._engine_radios.items()} == {
+        "none": "normal",
+        "unet-4x": "disabled",
+        "tvai": "normal",
+        "rtx-super-res": "normal",
+    }
+    assert secondary._tvai_denoise_switch.cget("state") == "normal"
+    assert "does not support" not in caplog.text
 
 
 def test_disabling_settings_keeps_unavailable_ltx_disabled(_panel_factory) -> None:

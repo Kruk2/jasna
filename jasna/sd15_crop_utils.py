@@ -1,5 +1,4 @@
-"""SD 1.5 crop geometry ported verbatim from jav-restoration-v2
-(`restoration_v2/dataset/crop_utils.py`).
+"""SD 1.5 crop geometry ported verbatim from the training code.
 
 This is the crop/paste pipeline the SD 1.5 model was trained and tuned with:
 a square crop centered on the detection (sized by ``min_mosaic_fraction``),

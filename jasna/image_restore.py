@@ -201,7 +201,7 @@ def restore_image(
 ) -> list[np.ndarray]:
     """Detect mosaics, SDEdit-inpaint each group, composite back.
 
-    Uses the jav-restoration-v2 crop geometry the model was trained with
+    Uses the crop geometry the model was trained with
     (``sd15_crop_utils``): square crop (``compute_crop_bbox``) + resize/reflect-pad
     (``crop_and_resize_np``) + hard-mask ``paste_back``.
 
@@ -262,10 +262,6 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
     device = torch.device(str(args.device))
     fp16 = bool(args.fp16)
     batch_size = int(args.batch_size)
-
-    if args.license_email and args.license_key:
-        from jasna.protection import license_store
-        license_store.set_license(args.license_email, args.license_key)
 
     ensure_sd15_bundle(SD15_DIR)
 

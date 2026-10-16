@@ -20,6 +20,7 @@ from pathlib import Path
 from jasna.gui.queues import replace_pending
 from jasna.gui.models import AppSettings
 from jasna.media.probe import VideoMetadata
+from jasna.mosaic_scan import mosaic_sizes
 
 # The scan primitives live in jasna.mosaic.scan so the command line can reuse them
 # without importing the GUI; they are re-exported here for existing callers.
@@ -566,6 +567,11 @@ class MosaicScanWorker:
             times=tuple(times),
             scores=tuple(scores),
             masks=masks,
+            sizes=mosaic_sizes(
+                masks.numpy(),
+                frame_width=int(metadata.video_width),
+                frame_height=int(metadata.video_height),
+            ),
             stride=sample_stride_seconds,
             duration=duration,
             completed_until=completed_until,

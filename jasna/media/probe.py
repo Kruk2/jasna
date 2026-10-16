@@ -16,8 +16,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class UnsupportedColorspaceError(Exception):
+class UnsupportedVideoError(Exception):
     pass
+
+
+# Branch-local alias: upstream generalised this error to UnsupportedVideoError, so both
+# spellings refer to the very same class and either ``except`` clause catches it.
+UnsupportedColorspaceError = UnsupportedVideoError
 
 
 @dataclass

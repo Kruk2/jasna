@@ -6,14 +6,19 @@ and tuned decoder. Every file name is unique, so all variants can sit in one fol
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import logging
 import math
+import ssl
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import get_args
+
+import certifi
 
 from jasna._frozen import is_frozen
 from jasna.session_config import LtxModelName
@@ -22,8 +27,11 @@ logger = logging.getLogger(__name__)
 
 LTX_MODELS: tuple[LtxModelName, ...] = get_args(LtxModelName)
 
-# Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}".
-LTX_DOWNLOAD_URL: str | None = None
+# Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}",
+# and from the same path on LTX_MIRROR_URL (reachable from mainland China) when that fails.
+LTX_DOWNLOAD_URL: str | None = "https://huggingface.co/Kruk2/ltx-restore/resolve/main"
+LTX_MIRROR_URL = "https://hf-mirror.com/Kruk2/ltx-restore/resolve/main"
+_NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
 
 DownloadProgressCallback = Callable[[int, int], None]
 
@@ -32,7 +40,7 @@ DownloadProgressCallback = Callable[[int, int], None]
 class DownloadableFile:
     name: str
     size_bytes: int
-    sha256: str | None
+    sha256: str
 
 
 _TRANSFORMER_NAMES: dict[tuple[LtxModelName, bool], str] = {
@@ -43,17 +51,16 @@ _TRANSFORMER_NAMES: dict[tuple[LtxModelName, bool], str] = {
 }
 _SHARED_NAMES = ("vae.safetensors", "vae-decoder.safetensors")
 
-# The published files (``.enc`` in releases): size for the download prompt, and a sha256
-# that is filled in with the release that publishes the file.
+# The published files (``.enc`` in releases): size for the download prompt and sha256.
 LTX_DOWNLOADS: dict[str, DownloadableFile] = {
-    name: DownloadableFile(name, size, None)
-    for name, size in (
-        ("ltx-restore-alpha1-distill8-int8.safetensors", 13_368_044_744),
-        ("ltx-restore-alpha1-distill8-nvfp4.safetensors", 7_733_292_672),
-        ("ltx-restore-alpha1-int8.safetensors", 13_368_044_792),
-        ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_292_712),
-        ("vae.safetensors", 1_472_223_346),
-        ("vae-decoder.safetensors", 38_718_560),
+    name: DownloadableFile(name, size, checksum)
+    for name, size, checksum in (
+        ("ltx-restore-alpha1-distill8-int8.safetensors", 13_368_048_773, "b006342a109c640a46ae91a5cd10e67186d968c63ef2f715c78bedf36936e057"),
+        ("ltx-restore-alpha1-distill8-nvfp4.safetensors", 7_733_295_021, "54f2f4f6f7d3f5d60e18aca7bf6137da206a2b66f282e1a9078743c3173e62e2"),
+        ("ltx-restore-alpha1-int8.safetensors", 13_368_048_821, "c72161b1afefe4d8cc0592fa57afef6c20466dcf912912f3628a451468780f83"),
+        ("ltx-restore-alpha1-nvfp4.safetensors", 7_733_295_061, "8301d5ba17660b577ebe906d343963208f7e5453e589ef2f7470087a3ba2ccb5"),
+        ("vae.safetensors", 1_472_223_815, "b9252d5a799748d1932d4eed60a2d77461949a19f6feb57f2238dbffe08f5e25"),
+        ("vae-decoder.safetensors", 38_718_609, "c60c3572871203bd364d6bb2390225fa4c347f7ea5c64fe468256c900caeea2d"),
     )
 }
 
@@ -68,17 +75,68 @@ class PlaceholderTensors:
     model: LtxModelName
 
 
-LTX_TRIAL_NOTICE = (
-    "LTX trial: placeholder weights, so the output is not restored. Timings match a real run "
-    "except model loading, which skips reading and decrypting the model files."
-)
+LTX_TRIAL_NOTICE = "LTX trial mode: output is not restored. Speed matches a real run, except model loading."
 
 # Chosen so a random INT8 / FP4 weight comes out near 1/sqrt(4096), like a trained one.
 _PLACEHOLDER_SCALES = {".scales": 2e-4, ".weight_scale_2": 5e-3, ".weight_scale": 1.0}
-_TORCH_DTYPES = {"BF16": "bfloat16", "F32": "float32", "I8": "int8", "U8": "uint8", "F8_E4M3": "float8_e4m3fn"}
+_TORCH_DTYPES = {
+    "BOOL": "bool", "U8": "uint8", "I8": "int8", "I16": "int16", "I32": "int32", "I64": "int64",
+    "F16": "float16", "BF16": "bfloat16", "F32": "float32", "F64": "float64",
+    "F8_E4M3": "float8_e4m3fn", "F8_E5M2": "float8_e5m2",
+}
 
 
-class _PlaceholderHandle:
+def _fill_tensor_groups(reader, group_names, groups) -> None:
+    for names, destinations in zip(group_names, groups, strict=True):
+        if tuple(destinations) != tuple(names):
+            raise ValueError("tensor group does not match its declared names")
+        for name, destination in destinations.items():
+            reader.get_tensor_into(name, destination)
+
+
+class _PlaintextHandle:
+    def __init__(self, path: Path) -> None:
+        from safetensors import safe_open
+        self._source = safe_open(str(path), framework="pt", device="cpu")
+
+    def __enter__(self):
+        self._source.__enter__()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._source.__exit__(*exc)
+
+    def keys(self):
+        return self._source.keys()
+
+    def offset_keys(self):
+        # ``safe_open.offset_keys`` is only in newer safetensors; older releases expose
+        # the same file order through ``keys``, so fall back to it instead of crashing.
+        keys = getattr(self._source, "offset_keys", None)
+        return list(keys() if keys is not None else self._source.keys())
+
+    def metadata(self):
+        return self._source.metadata()
+
+    def get_tensor(self, name: str):
+        return self._source.get_tensor(name)
+
+    def tensor_specs(self):
+        import torch
+        result = {}
+        for name in self.keys():
+            tensor = self._source.get_slice(name)
+            result[name] = (getattr(torch, _TORCH_DTYPES[tensor.get_dtype()]), tuple(tensor.get_shape()))
+        return result
+
+    def get_tensor_into(self, name: str, destination) -> None:
+        destination.copy_(self._source.get_tensor(name))
+
+    def read_tensors_into(self, group_names, groups) -> None:
+        _fill_tensor_groups(self, group_names, groups)
+
+
+class PlaceholderHandle:
     """``safe_open``-like reader of placeholder tensors. Every tensor of one dtype is a
     fresh copy of the same seeded random pool, so it costs what reading the file costs in
     RAM, not what generating 13 GB of random numbers would."""
@@ -102,7 +160,7 @@ class _PlaceholderHandle:
             self._specs, self._metadata = dict(S.VAE_DECODER), {}
         self._pools: dict = {}
 
-    def __enter__(self) -> _PlaceholderHandle:
+    def __enter__(self) -> PlaceholderHandle:
         return self
 
     def __exit__(self, *exc) -> None:
@@ -113,6 +171,22 @@ class _PlaceholderHandle:
 
     def keys(self) -> list[str]:
         return list(self._specs)
+
+    def offset_keys(self) -> list[str]:
+        return list(self._specs)
+
+    def tensor_specs(self):
+        import torch
+        return {name: (getattr(torch, _TORCH_DTYPES[dtype]), tuple(shape))
+                for name, (dtype, shape) in self._specs.items()}
+
+    def get_tensor_into(self, name: str, destination) -> None:
+        dtype, shape = self._specs[name]
+        scale = next((value for suffix, value in _PLACEHOLDER_SCALES.items() if name.endswith(suffix)), None)
+        if scale is not None:
+            destination.fill_(scale)
+        else:
+            destination.copy_(self._pool(dtype)[:math.prod(shape)].view(shape))
 
     def get_tensor(self, name: str):
         import torch
@@ -137,13 +211,23 @@ class _PlaceholderHandle:
                 self._pools[dtype] = (torch.randn(numel, generator=generator) * 0.02).to(torch_dtype)
         return self._pools[dtype]
 
+    def read_tensors_into(self, group_names, groups) -> None:
+        _fill_tensor_groups(self, group_names, groups)
+
+
+# Branch-local alias: upstream renamed the class to ``PlaceholderHandle``; keep the old
+# private spelling pointing at the same implementation so both names stay usable.
+_PlaceholderHandle = PlaceholderHandle
+
 
 def open_tensors(path: Path | PlaceholderTensors):
     if isinstance(path, PlaceholderTensors):
-        return _PlaceholderHandle(path)
+        return PlaceholderHandle(path)
     if not is_frozen() and path.suffix != ".enc" and path.is_file():
-        from safetensors import safe_open
-        return safe_open(str(path), framework="pt", device="cpu")
+        return _PlaintextHandle(path)
+    from jasna.license_api import require_protection
+
+    require_protection()
     from jasna.protection.protected_tensors import open_ltx_tensors
     return open_ltx_tensors(path)
 
@@ -164,6 +248,14 @@ class LtxModelFiles:
     vae: Path | PlaceholderTensors
     tuned_decoder: Path | PlaceholderTensors
 
+    @property
+    def transformer_name(self) -> str:
+        """The transformer's published file name (it names the model and precision); a
+        trial's placeholder gets the name of the file it stands in for."""
+        if isinstance(self.transformer, PlaceholderTensors):
+            return _TRANSFORMER_NAMES[(self.transformer.model, self.transformer.part == "nvfp4")]
+        return self.transformer.name.removesuffix(".enc")
+
     @classmethod
     def placeholder(cls, model: LtxModelName, *, fast: bool) -> LtxModelFiles:
         """Random weights shaped like ``model``'s files, for the trial: runs every pass at
@@ -179,6 +271,9 @@ class LtxModelFiles:
         """The bundle of ``model``; ``fast`` picks its NVFP4 transformer over the INT8 one."""
         paths = _bundle_paths(directory, model, fast=fast)
         if any(path.suffix == ".enc" for path in paths):
+            from jasna.license_api import require_protection
+
+            require_protection()
             from jasna.protection.protected_tensors import check_ltx_license
             check_ltx_license()
         missing = [str(path) for path in paths if not path.is_file()]
@@ -212,31 +307,45 @@ def download_size_text(files: list[DownloadableFile]) -> str:
 
 
 def download_files(
-    directory: Path, files: list[DownloadableFile], progress_callback: DownloadProgressCallback | None = None
+    directory: Path,
+    files: list[DownloadableFile],
+    progress_callback: DownloadProgressCallback | None,
+    *,
+    mirror_first: bool,
 ) -> None:
     """Download ``files`` into ``directory``, verifying each sha256 before it replaces
-    anything. ``progress_callback(done_bytes, total_bytes)`` covers all files together."""
+    anything. Each file falls back to the other source when the first is unreachable;
+    ``mirror_first`` tries the mirror first. ``progress_callback(done_bytes, total_bytes)``
+    covers all files together."""
     if LTX_DOWNLOAD_URL is None:
         raise RuntimeError("The LTX model download location is not published yet; get the model files manually.")
-    unverifiable = [f.name for f in files if f.sha256 is None]
-    if unverifiable:
-        raise RuntimeError(f"No published checksum for {', '.join(unverifiable)}; refusing to download.")
+    context = ssl.create_default_context(cafile=certifi.where())
+    sources = (LTX_MIRROR_URL, LTX_DOWNLOAD_URL) if mirror_first else (LTX_DOWNLOAD_URL, LTX_MIRROR_URL)
     directory.mkdir(parents=True, exist_ok=True)
     total = sum(f.size_bytes for f in files)
     done = 0
     for file in files:
         target = directory / file.name
         partial = target.with_name(target.name + ".part")
-        digest = hashlib.sha256()
-        logger.info("Downloading %s", file.name)
-        with urllib.request.urlopen(f"{LTX_DOWNLOAD_URL}/{file.name}") as response, partial.open("wb") as out:
-            while chunk := response.read(1 << 22):
-                out.write(chunk)
-                digest.update(chunk)
-                done += len(chunk)
-                if progress_callback is not None:
-                    progress_callback(done, total)
+        for source, fallback in zip(sources, (*sources[1:], None)):
+            digest = hashlib.sha256()
+            received = 0
+            logger.info("Downloading %s from %s", file.name, source)
+            try:
+                with urllib.request.urlopen(f"{source}/{file.name}", timeout=30, context=context) as response, partial.open("wb") as out:
+                    while chunk := response.read(1 << 22):
+                        out.write(chunk)
+                        digest.update(chunk)
+                        received += len(chunk)
+                        if progress_callback is not None:
+                            progress_callback(done + received, total)
+                break
+            except _NETWORK_ERRORS as error:
+                if fallback is None:
+                    raise
+                logger.warning("Downloading %s from %s failed (%s); trying %s", file.name, source, error, fallback)
+        done += received
         if digest.hexdigest() != file.sha256:
             partial.unlink()
-            raise RuntimeError(f"{file.name} failed its checksum; the download was discarded.")
+            raise RuntimeError(f"{file.name} is corrupted (checksum mismatch). The download was deleted.")
         partial.replace(target)

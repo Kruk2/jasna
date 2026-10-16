@@ -24,7 +24,14 @@ def _make_fake_runner(device: torch.device, dtype: torch.dtype):
 
 
 @pytest.fixture
-def restorer(tmp_path: Path):
+def plaintext_model(tmp_path, monkeypatch):
+    model = tmp_path / "unet-4x.onnx"
+    model.touch()
+    monkeypatch.setattr("jasna.restorer.unet4x_secondary_restorer.UNET4X_ONNX_PATH", model)
+
+
+@pytest.fixture
+def restorer(tmp_path: Path, plaintext_model):
     device = torch.device("cpu")
     fake_engine = tmp_path / "fake_engine.trt"
     fake_engine.write_text("x")
@@ -96,7 +103,7 @@ class TestUnet4xSecondaryRestorer:
 
 
 class TestEngineDtypeMismatch:
-    def test_buffers_match_half_engine_bindings_when_fp16_off(self, tmp_path: Path):
+    def test_buffers_match_half_engine_bindings_when_fp16_off(self, tmp_path: Path, plaintext_model):
         device = torch.device("cpu")
         fake_engine = tmp_path / "fake_engine.trt"
         fake_engine.write_text("x")

@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from jasna.gui.download_worker import start_download
-from jasna.gui.locales import t
+from jasna.gui.activation_worker import read_license_info
+from jasna.gui.locales import get_locale, t
 from jasna.gui.queues import MainThreadCalls
 from jasna.ltx import model_files
 from jasna.ltx.model_files import LTX_MODELS, DownloadableFile, download_size_text
+from jasna.license_api import protection_available
 from jasna.session_config import LtxModelName
 
 Variant = tuple[LtxModelName, bool]
@@ -34,6 +36,7 @@ class LtxInstallState:
     def usable(self, model: LtxModelName, fast: bool) -> bool:
         return self.downloadable or self.installed(model, fast)
 
+
     def download_size(self, model: LtxModelName, fast: bool) -> str:
         return download_size_text(list(self.missing[(model, fast)]))
 
@@ -45,7 +48,7 @@ def read_install_state(directory: Path) -> LtxInstallState:
             for model in LTX_MODELS
             for fast in (False, True)
         },
-        model_files.LTX_DOWNLOAD_URL is not None,
+        protection_available() and model_files.LTX_DOWNLOAD_URL is not None,
     )
 
 
@@ -74,9 +77,14 @@ def run_unavailable_reason(
 def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
     """Whether the installed ``model`` needs a license this PC lacks. Verifies the stored
     license only; reads no model data."""
+    if not protection_available():
+        return not all((directory / name).is_file() for name in model_files.bundle_names(model, fast=fast))
     from jasna.protection import ProtectionError
 
     try:
+        if any(path.suffix == ".enc" for path in model_files._bundle_paths(directory, model, fast=fast)):
+            if not read_license_info()[1]:
+                return True
         model_files.LtxModelFiles.from_dir(directory, model, fast=fast)
     except ProtectionError:
         return True
@@ -116,8 +124,9 @@ class LtxModels:
             return False
         self.percent = 0
         self._on_change()
+        mirror_first = get_locale().current_language == "zh"
         start_download(
-            lambda progress: model_files.download_files(self._directory, list(files), progress),
+            lambda progress: model_files.download_files(self._directory, list(files), progress, mirror_first=mirror_first),
             lambda percent: self._main_thread.post(lambda: self._set_percent(percent)),
             lambda error: self._main_thread.post(lambda: self._finish(error, on_ready)),
         )

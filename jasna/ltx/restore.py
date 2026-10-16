@@ -19,21 +19,38 @@ import logging
 import tempfile
 import threading
 import time
+from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
-from dataclasses import dataclass
+from contextlib import closing, contextmanager
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
 
+import numpy as np
 import torch
 from tqdm import tqdm
 
+from jasna.accelerator import device_free_bytes
+from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
 from jasna.ltx.model_files import LtxModelFiles
-from jasna.ltx.plan import LARGE_CANVAS, Region, TrackPlan, Window, crossfade_weights, feather_pixels, plan_video
+from jasna.ltx.inference import ModelRuntime, WorkerDecoder, WorkerEncoder, WorkerTransformer
+from jasna.ltx.plan import (
+    LARGE_CANVAS,
+    WINDOW_HOP,
+    Region,
+    TrackPlan,
+    Window,
+    crossfade_weights,
+    feather_pixels,
+    plan_video,
+)
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
 from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
+from jasna.mosaic.detections import Detections
+from jasna.progressbar import StageProgress
 from jasna.tracking.scene_detector import SceneCutDetector
 
 logger = logging.getLogger(__name__)
@@ -41,10 +58,12 @@ logger = logging.getLogger(__name__)
 FrameBatches = Iterator[tuple[torch.Tensor, list[int]]]
 FrameSource = Callable[[], FrameBatches]
 DecodeBudget = Callable[[int], int]
-LARGE_CANVAS_MIN_FREE_BYTES = 10 << 30
+LARGE_CANVAS_MIN_FREE_BYTES = 12 << 30
 LARGE_CANVAS_MIN_TOTAL_BYTES = 15 << 30
 SEGMENT_DECODE_BUDGET_BYTES = {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
+SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
+"""Two windows per track: the speed profile leaves out each canvas's cold first window."""
 
 
 class Cancelled(Exception):
@@ -81,67 +100,243 @@ class LtxSpan:
 
 
 LtxStage = Literal["scan", "encode", "denoise", "compose"]
-ProgressReport = Callable[[LtxStage, float, float], None]
+ProgressReport = Callable[[float, float, StageProgress], None]
 _STAGE_NUMBER = {"scan": 1, "encode": 2, "denoise": 3, "compose": 4}
 _STAGE_SHARE = {"scan": 0.02, "encode": 0.08, "denoise": 0.8, "compose": 0.1}
 
 
+class _WallClockMark:
+    """``torch.cuda.Event``'s timing interface on the wall clock."""
+
+    def __init__(self) -> None:
+        self._at = 0.0
+
+    def record(self) -> None:
+        self._at = time.monotonic()
+
+    def synchronize(self) -> None:
+        pass
+
+    def elapsed_time(self, end: _WallClockMark) -> float:
+        return (end._at - self._at) * 1000.0
+
+
+def _cuda_mark() -> torch.cuda.Event:
+    return torch.cuda.Event(enable_timing=True)
+
+
+TimingMark = torch.cuda.Event | _WallClockMark
+
+
+def timing_marks(model) -> Callable[[], TimingMark]:
+    """How to time ``model``'s windows: the LTX worker's GPU work never reaches this process's
+    stream (and Windows batches the event records), but its requests return only once that
+    work is done, so the wall clock times it; local models are timed by CUDA events."""
+    if isinstance(model, (WorkerEncoder, WorkerTransformer, WorkerDecoder)):
+        return _WallClockMark
+    return _cuda_mark
+
+
 class Progress:
     """One console bar per pass; ``frames`` sizes the frame-based passes. ``report`` gets
-    ``(stage, fraction of the whole run, seconds left)``; seconds left is 0 until the
-    denoise pass has timed a step."""
+    ``(fraction of the whole run, seconds left, the pass's own progress)``. When the speed
+    profile's rates (``expect``) cover what the scan planned, seconds left come from them
+    from the end of the scan on; else they are 0 until the denoise pass has timed a step.
+    A pass's own seconds left are the profile's seconds of work it has left, scaled by how
+    long its work so far took against the profile (clock changes, uneven mosaics), else
+    its pace so far. Every pass records its timing for the profile."""
+
+    _bar_label = "LTX"
 
     def __init__(self, frames: int, *, disable: bool, report: ProgressReport | None) -> None:
         self.frames = frames
         self._disable = disable
         self._report = report
         self._started = time.monotonic()
+        self._pass_end = self._started
         self._done_share = 0.0
         self._timed = False
+        self._rates: dict[str, float] = {}
+        self._work: speed.Work | None = None
+        self._estimates: dict[str, tuple[float, float]] | None = None
+        self.timings: dict[str, speed.PassTiming] = {}
 
-    def bar(self, stage: LtxStage, total: int, unit: str = "frame") -> _StageBar:
+    def expect(self, rates: dict[str, float]) -> None:
+        """The profile's ``rates`` for the run, whose passes start now."""
+        self._rates = rates
+        self._pass_end = time.monotonic()
+
+    def speed_test(self) -> Progress:
+        """The progress of the speed test run before this run, reported as its own step."""
+        report = self._report
+        speed_test_report = None
+        if report is not None:
+            speed_test_report = lambda fraction, _left, _step: report(
+                0.0, 0.0, StageProgress("speed_test", 1, 1, fraction, 0.0)
+            )
+        speed_test = Progress(min(self.frames, SPEED_TEST_FRAMES), disable=self._disable, report=speed_test_report)
+        speed_test._bar_label = "LTX speed test"
+        return speed_test
+
+    def plan(self, work: speed.Work) -> None:
+        self._work = work
+        self._estimates = speed.pass_estimates(self._rates, work) if work.windows else None
+
+    def learned_rates(self) -> dict[str, float]:
+        return speed.learned_rates(self.timings, self._work, self._rates)
+
+    def summary(self, profile_key: str, peak_vram_bytes: int, blocks: tuple[int, int] | None) -> list[str]:
+        return speed.run_summary(profile_key, self.timings, self._work, peak_vram_bytes, blocks)
+
+    def bar(
+        self, stage: LtxStage, total: int, unit: str = "frame", marks: Callable[[], TimingMark] = _cuda_mark
+    ) -> _StageBar:
+        """``marks`` times the pass's windows and steps (``timing_marks``)."""
         tqdm_bar = tqdm(
             total=total,
-            desc=f"LTX {_STAGE_NUMBER[stage]}/4 {stage}",
+            desc=f"{self._bar_label} {_STAGE_NUMBER[stage]}/4 {stage}",
             unit=unit,
             dynamic_ncols=True,
             disable=self._disable,
         )
-        return _StageBar(self, stage, tqdm_bar)
+        return _StageBar(self, stage, tqdm_bar, marks)
+
+    def begin(self, stage: LtxStage) -> None:
+        """Report ``stage`` as started before its model loads, so loading shows as that pass."""
+        self._advanced(stage, 0, 1, None, 0.0, 1.0)
 
     def skip(self, *stages: LtxStage) -> None:
         """Count ``stages`` as done, for a run that reuses their results."""
         for stage in stages:
-            self._finished(stage)
+            self._done_share += _STAGE_SHARE[stage]
 
-    def _advanced(self, stage: LtxStage, done: int, total: int) -> None:
-        if self._report is None:
-            return
-        fraction = self._done_share + _STAGE_SHARE[stage] * (min(1.0, done / total) if total else 1.0)
-        self._timed = self._timed or (stage == "denoise" and done > 0)
-        elapsed = time.monotonic() - self._started
-        self._report(stage, fraction, elapsed * (1.0 - fraction) / fraction if self._timed else 0.0)
+    def profiled_seconds(self, stage: LtxStage, unit: str, count: float) -> float:
+        """The profile's seconds for ``count`` of ``stage``'s ``unit`` (``frame`` counts
+        frames), 0 when the profile does not cover this run."""
+        if self._estimates is None or stage not in self._estimates:
+            return 0.0
+        if unit == "frame":
+            count *= self._work.megapixels
+        return self._rates[f"{stage}/{unit}"] * count
 
-    def _finished(self, stage: LtxStage) -> None:
+    def _profile_stage_left(self, stage: LtxStage, profiled_done: float, pace_ratio: float) -> float | None:
+        if self._estimates is None or stage not in self._estimates:
+            return None
+        return max(0.0, self._estimates[stage][1] - profiled_done) * pace_ratio
+
+    def _advanced(
+        self, stage: LtxStage, done: int, total: int, paced_left: float | None, profiled_done: float, pace_ratio: float
+    ) -> float | None:
+        """Report the run's progress; ``paced_left`` is the pass's seconds left at its pace
+        so far, ``profiled_done`` the profile's seconds of its work done and ``pace_ratio``
+        its measured seconds per profile second. Returns the run's seconds left the
+        profile gives, if any."""
+        stage_fraction = min(1.0, done / total) if total else 1.0
+        profile_stage_left = self._profile_stage_left(stage, profiled_done, pace_ratio)
+        left = None
+        if profile_stage_left is not None:
+            later = speed.TIMED_PASSES[speed.TIMED_PASSES.index(stage) + 1 :]
+            left = profile_stage_left + sum(sum(self._estimates[s]) for s in later)
+        if self._report is not None:
+            stage_left = profile_stage_left if profile_stage_left is not None else paced_left or 0.0
+            step = StageProgress(stage, _STAGE_NUMBER[stage], len(_STAGE_NUMBER), stage_fraction, stage_left)
+            elapsed = time.monotonic() - self._started
+            if left is not None:
+                self._report(elapsed / (elapsed + left), left, step)
+            else:
+                fraction = self._done_share + _STAGE_SHARE[stage] * stage_fraction
+                self._timed = self._timed or (stage == "denoise" and done > 0)
+                self._report(fraction, elapsed * (1.0 - fraction) / fraction if self._timed else 0.0, step)
+        return left
+
+    def _finished(self, stage: LtxStage, timing: speed.PassTiming) -> None:
         self._done_share += _STAGE_SHARE[stage]
+        now = time.monotonic()
+        timing.seconds = now - self._pass_end
+        self._pass_end = now
+        self.timings[stage] = timing
 
 
 class _StageBar:
-    def __init__(self, progress: Progress, stage: LtxStage, bar: tqdm) -> None:
+    def __init__(self, progress: Progress, stage: LtxStage, bar: tqdm, marks: Callable[[], TimingMark]) -> None:
         self._progress = progress
         self._stage = stage
         self._bar = bar
+        self._marks = marks
         self._done = 0
-        progress._advanced(stage, 0, bar.total)
+        self._profiled_done = 0.0
+        self._warm_from: tuple[float, int, float] | None = None
+        self._windows: list[tuple[int, TimingMark, TimingMark]] = []
+        self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
+        progress._advanced(stage, 0, bar.total, None, 0.0, 1.0)
 
     def update(self, n: int) -> None:
+        self._profiled_done += self._progress.profiled_seconds(self._stage, "frame", n)
+        self._count(n)
+
+    def _count(self, n: int) -> None:
         self._bar.update(n)
         self._done += n
-        self._progress._advanced(self._stage, self._done, self._bar.total)
+        now = time.monotonic()
+        if self._warm_from is None:
+            self._warm_from = (now, self._done, self._profiled_done)
+        started, warm_done, warm_profiled = self._warm_from
+        paced_left = (
+            (now - started) / (self._done - warm_done) * (self._bar.total - self._done)
+            if self._done > warm_done
+            else None
+        )
+        profiled_since_warm = self._profiled_done - warm_profiled
+        pace_ratio = (now - started) / profiled_since_warm if profiled_since_warm > 0 else 1.0
+        left = self._progress._advanced(
+            self._stage, self._done, self._bar.total, paced_left, self._profiled_done, pace_ratio
+        )
+        if left is not None:
+            self._bar.set_postfix_str(f"run {tqdm.format_interval(left)} left", refresh=False)
+
+    @contextmanager
+    def window(self, canvas: int) -> Iterator[None]:
+        """Time the GPU work of one window with marks, read when the pass closes."""
+        start, end = self._marks(), self._marks()
+        start.record()
+        yield
+        end.record()
+        self._windows.append((canvas, start, end))
+        self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", 1)
+
+    def track(self, canvas: int, steps: int) -> Callable[[int], None]:
+        """``advance`` for one track's denoise: counts its window-steps and marks the stream
+        after each, so the pass can time the track without its first step."""
+        marks: list[tuple[int, torch.cuda.Event]] = []
+        self._tracks.append((canvas, steps, marks))
+
+        def advance(n: int) -> None:
+            self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", n / steps)
+            self._count(n)
+            mark = self._marks()
+            mark.record()
+            marks.append((n, mark))
+
+        return advance
 
     def close(self) -> None:
         self._bar.close()
-        self._progress._finished(self._stage)
+        timing = speed.PassTiming(units=self._done)
+        if self._warm_from is not None:
+            started, done, _ = self._warm_from
+            timing.warm_seconds = time.monotonic() - started
+            timing.warm_frames = self._done - done
+        for canvas, start, end in self._windows:
+            end.synchronize()
+            timing.windows.append((canvas, start.elapsed_time(end) / 1000))
+        for canvas, steps, marks in self._tracks:
+            if len(marks) > 1:
+                marks[-1][1].synchronize()
+                for (_, previous), (n, mark) in zip(marks, marks[1:]):
+                    timing.steps.append((canvas, previous.elapsed_time(mark) / 1000 / n))
+                seconds = marks[0][1].elapsed_time(marks[-1][1]) / 1000
+                timing.windows.append((canvas, seconds / sum(n for n, _ in marks[1:]) * steps))
+        self._progress._finished(self._stage, timing)
 
     def __enter__(self) -> _StageBar:
         return self
@@ -291,13 +486,16 @@ def _vae_pixels(canvases: list[torch.Tensor], device: torch.device) -> torch.Ten
 
 
 class _SegmentEncoder:
-    def __init__(self, plans: list[TrackPlan], encoder, store: LatentStore, device: torch.device) -> None:
+    def __init__(
+        self, plans: list[TrackPlan], encoder, store: LatentStore, device: torch.device, bar: _StageBar
+    ) -> None:
         self._pending = iter(sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start))
         self._upcoming = next(self._pending, None)
         self._active: dict[int, tuple[Window, list[torch.Tensor]]] = {}
         self._encoder = encoder
         self._store = store
         self._device = device
+        self._bar = bar
         self._frame_idx = 0
 
     def frame(self, frame: torch.Tensor) -> None:
@@ -307,8 +505,12 @@ class _SegmentEncoder:
         for index, (window, canvases) in list(self._active.items()):
             canvases.append(crop_to_canvas(frame, window.crops[self._frame_idx - window.start]).cpu())
             if len(canvases) == window.real_frames:
-                with torch.inference_mode():
-                    self._store.put(index, self._encoder(_vae_pixels(canvases, self._device)))
+                with self._bar.window(window.canvas), torch.inference_mode():
+                    pixels = (
+                        torch.stack(canvases + [canvases[-1]] * (WINDOW_FRAMES - len(canvases)), dim=1).unsqueeze(0)
+                        if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(canvases, self._device)
+                    )
+                    self._store.put(index, self._encoder(pixels))
                 del self._active[index]
         self._frame_idx += 1
 
@@ -330,7 +532,7 @@ def encode_span(
     cancel: threading.Event,
 ) -> None:
     """VAE-encode every planned window's reference crops into its segment's store."""
-    encoders = [_SegmentEncoder(p, encoder, store, device) for p, store in zip(plans, stores)]
+    encoders = [_SegmentEncoder(p, encoder, store, device, bar) for p, store in zip(plans, stores)]
     for owner, batch, _pts in segment_batches(frames(), segments, batch_size):
         _check(cancel)
         bar.update(len(batch))
@@ -351,7 +553,7 @@ def denoise_track(
 
 
 def free_vram_budget(device: torch.device) -> DecodeBudget:
-    return lambda _canvas: torch.cuda.mem_get_info(device)[0]
+    return lambda _canvas: device_free_bytes(device)
 
 
 def segment_decode_budget(canvas: int) -> int:
@@ -366,6 +568,8 @@ def _decode_window(
     """Decoded window as uint8 ``[F, 3, S, S]`` on ``device``."""
     torch.cuda.empty_cache()
     free = budget(canvas)
+    if isinstance(decoder, WorkerDecoder):
+        return decoder.decode_window(latent, seed, free, device)
     generator = torch.Generator(device=device).manual_seed(seed)
     with torch.inference_mode():
         video = decode_latent(decoder, latent.to(device), free_bytes=free, generator=generator)
@@ -384,6 +588,7 @@ class _SegmentComposer:
         feather: int,
         budget: DecodeBudget,
         device: torch.device,
+        bar: _StageBar,
     ) -> None:
         self._weights: dict[int, torch.Tensor] = {}
         self._tracks: dict[int, TrackPlan] = {}
@@ -401,6 +606,7 @@ class _SegmentComposer:
         self._feather = feather
         self._budget = budget
         self._device = device
+        self._bar = bar
         self._frame_idx = 0
 
     def frame(self, frame: torch.Tensor) -> torch.Tensor:
@@ -414,14 +620,15 @@ class _SegmentComposer:
         candidates = []
         for window in self._covering:
             if window.index not in self._decoded:
-                self._decoded[window.index] = _decode_window(
-                    self._decoder,
-                    self._finals.get(window.index),
-                    self._seed + window.index,
-                    window.canvas,
-                    self._budget,
-                    self._device,
-                )
+                with self._bar.window(window.canvas):
+                    self._decoded[window.index] = _decode_window(
+                        self._decoder,
+                        self._finals.get(window.index),
+                        self._seed + window.index,
+                        window.canvas,
+                        self._budget,
+                        self._device,
+                    )
             local = frame_idx - window.start
             track = self._tracks[window.index]
             candidates.append(
@@ -429,7 +636,9 @@ class _SegmentComposer:
                     canvas=self._decoded[window.index][local],
                     crop=window.crops[local],
                     weight=float(self._weights[window.index][local]),
+                    track=track.track_id,
                     polygons=track.polygons[frame_idx - track.start],
+                    presence=track.presence[frame_idx - track.start],
                 )
             )
         self._frame_idx += 1
@@ -452,7 +661,9 @@ def compose_span(
     """Write every frame of ``span``: segment frames composited, the rest unchanged."""
     feather = feather_pixels(frame_h)
     composers = [
-        _SegmentComposer(p, decoder, store, seed=segment.seed, feather=feather, budget=budget, device=device)
+        _SegmentComposer(
+            p, decoder, store, seed=segment.seed, feather=feather, budget=budget, device=device, bar=bar
+        )
         for p, store, segment in zip(plans, finals, span.segments)
     ]
     writer = span.open_writer()
@@ -470,7 +681,7 @@ def compose_span(
 
 
 def large_canvas_fits(requested: bool, free_bytes: int) -> bool:
-    """768 px windows need ~7.5 GiB of VAE-encoder activations alone; below 10 GiB free
+    """768 px windows need ~7.5 GiB of VAE-encoder activations alone; below 12 GiB free
     every window runs at 512 px instead."""
     if requested and free_bytes < LARGE_CANVAS_MIN_FREE_BYTES:
         logger.warning("LTX: %.1f GiB free VRAM, restoring large mosaics at 512 px", free_bytes / 2**30)
@@ -489,8 +700,9 @@ def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
 @dataclass(frozen=True)
 class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
-    size, detection batch size, the 768 px decision, the decode budget per canvas and the
-    GPU."""
+    size, detection batch size, the 768 px decision, the decode budget per canvas and its
+    name (decode tiling follows the budget, so it keys the speed profile), the GPU and the
+    speed profile file (``speed.py``)."""
 
     detector: Callable
     files: LtxModelFiles
@@ -499,7 +711,9 @@ class LtxRender:
     batch_size: int
     large_canvas: bool
     budget: DecodeBudget
+    budget_name: str
     device: torch.device
+    speed_profile: Path
 
 
 @dataclass(frozen=True)
@@ -517,7 +731,8 @@ class PreparedSpan:
 
 
 def prepare_spans(
-    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
+    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event,
+    runtime: ModelRuntime | None = None,
 ) -> list[PreparedSpan]:
     """Scan and VAE-encode every span; reference latents go to ``directory``."""
     with progress.bar("scan", progress.frames) as bar:
@@ -543,23 +758,29 @@ def prepare_spans(
         )
         for s, (span, span_plans) in enumerate(zip(spans, plans))
     ]
+    windows = Counter(
+        w.canvas for p in prepared for track_plans in p.plans for plan in track_plans for w in plan.windows
+    )
+    progress.plan(speed.Work(progress.frames, render.frame_h * render.frame_w / 1e6, dict(windows)))
     if sum(p.windows for p in prepared):
-        encoder = load_video_encoder(render.files.vae, render.device)
-        with progress.bar("encode", progress.frames) as bar:
-            for p in prepared:
-                encode_span(
-                    p.span.frames,
-                    p.span.segments,
-                    p.plans,
-                    encoder,
-                    p.references,
-                    batch_size=render.batch_size,
-                    device=render.device,
-                    bar=bar,
-                    cancel=cancel,
-                )
-        del encoder
-        torch.cuda.empty_cache()
+        progress.begin("encode")
+        owned_runtime = runtime is None
+        runtime = runtime or ModelRuntime(render.files, render.device, cancel)
+        try:
+            encoder = runtime.load_encoder()
+            try:
+                with progress.bar("encode", progress.frames, marks=timing_marks(encoder)) as bar:
+                    for p in prepared:
+                        encode_span(
+                            p.span.frames, p.span.segments, p.plans, encoder, p.references,
+                            batch_size=render.batch_size, device=render.device, bar=bar, cancel=cancel,
+                        )
+            finally:
+                del encoder
+                runtime.unload_encoder()
+        finally:
+            if owned_runtime:
+                runtime.close()
     return prepared
 
 
@@ -582,12 +803,15 @@ def denoise_spans(
     """Denoise every track with its segment's seed into ``finals``; ``keep_references``
     keeps the reference latents for another seed."""
     windows = sum(p.windows for p in prepared)
-    with progress.bar("denoise", len(transformer.conditions) * windows, unit="step") as bar:
+    with progress.bar(
+        "denoise", len(transformer.conditions) * windows, unit="step", marks=timing_marks(transformer)
+    ) as bar:
         for p, span_finals in zip(prepared, finals):
             for segment, segment_plans, references, store in zip(p.span.segments, p.plans, p.references, span_finals):
                 for plan in segment_plans:
                     _check(cancel)
-                    latents = denoise_track(plan, transformer, references, seed=segment.seed, advance=bar.update)
+                    advance = bar.track(plan.windows[0].canvas, len(transformer.conditions))
+                    latents = denoise_track(plan, transformer, references, seed=segment.seed, advance=advance)
                     for window, latent in zip(plan.windows, latents):
                         store.put(window.index, latent)
                         if not keep_references:
@@ -603,7 +827,7 @@ def compose_spans(
     progress: Progress,
     cancel: threading.Event,
 ) -> None:
-    with progress.bar("compose", progress.frames) as bar:
+    with progress.bar("compose", progress.frames, marks=timing_marks(decoder)) as bar:
         for p, span_finals in zip(prepared, finals):
             compose_span(
                 p.span,
@@ -619,25 +843,104 @@ def compose_spans(
             )
 
 
+class _SpeedTestMosaics:
+    """A detector that finds the same two mosaics on every frame: a small one and one big
+    enough for the 768 px canvas (when the run allows it)."""
+
+    def __call__(self, batch: torch.Tensor, target_hw: tuple[int, int]) -> Detections:
+        frame_h, frame_w = target_hw
+        side = min(frame_h, frame_w)
+        small, big = side // 12, side * 9 // 10
+        boxes = np.array([[0, 0, small, small], [frame_w - big, frame_h - big, frame_w, frame_h]], dtype=np.float32)
+        masks = torch.zeros((len(boxes), frame_h // 4, frame_w // 4), dtype=torch.bool, device=batch.device)
+        for mask, (x0, y0, x1, y1) in zip(masks, (boxes // 4).astype(int)):
+            mask[y0:y1, x0:x1] = True
+        return Detections([boxes] * len(batch), [masks] * len(batch))
+
+
+class _DiscardedFrames:
+    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+def _first_frames(frames: FrameSource, count: int) -> FrameSource:
+    def first() -> FrameBatches:
+        left = count
+        with closing(frames()) as batches:
+            for batch, pts in batches:
+                yield batch[:left], pts[:left]
+                left -= len(pts)
+                if left <= 0:
+                    return
+
+    return first
+
+
+def _profile_key(render: LtxRender) -> str:
+    return speed.profile_key(torch.cuda.get_device_name(render.device), render.files.transformer_name, render.budget_name)
+
+
 def restore_spans(
     spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, progress: Progress, cancel: threading.Event
 ) -> None:
     """Restore every segment of ``spans`` and write each span's frames to a writer of its own
-    (closed once the span is written)."""
-    with tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-") as temp:
-        prepared = prepare_spans(spans, render, Path(temp), progress=progress, cancel=cancel)
+    (closed once the span is written). Without a speed profile for this GPU and model, a
+    speed test runs first: the first frames of the first span with two made-up mosaics,
+    restored and thrown away, so the run's time left is known once its scan has planned it."""
+    if not speed.load_rates(render.speed_profile, _profile_key(render)):
+        logger.info("LTX speed test: no speed profile for this GPU and model yet")
+        speed_test = LtxSpan(
+            _first_frames(spans[0].frames, SPEED_TEST_FRAMES),
+            (LtxSegment(*WHOLE_VIDEO_PTS, 0),),
+            _DiscardedFrames,
+        )
+        _restore_spans(
+            [speed_test],
+            replace(render, detector=_SpeedTestMosaics()),
+            work_dir=work_dir,
+            progress=progress.speed_test(),
+            cancel=cancel,
+        )
+    _restore_spans(spans, render, work_dir=work_dir, progress=progress, cancel=cancel)
+
+
+def _restore_spans(
+    spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, progress: Progress, cancel: threading.Event
+) -> None:
+    profile_key = _profile_key(render)
+    progress.expect(speed.load_rates(render.speed_profile, profile_key))
+    torch.cuda.reset_peak_memory_stats(render.device)
+    blocks = None
+    with ModelRuntime(render.files, render.device, cancel) as runtime, tempfile.TemporaryDirectory(
+        dir=work_dir, prefix=".ltx-"
+    ) as temp:
+        prepared = prepare_spans(spans, render, Path(temp), progress=progress, cancel=cancel, runtime=runtime)
         finals = final_stores(prepared, Path(temp))
         windows = sum(p.windows for p in prepared)
         if windows:
-            transformer = LtxTransformer(render.files.transformer, render.device)
+            progress.begin("denoise")
+            transformer = runtime.load_transformer()
+            blocks = (transformer.blocks.resident, transformer.blocks.count)
             try:
                 denoise_spans(prepared, finals, transformer, keep_references=False, progress=progress, cancel=cancel)
             finally:
-                transformer.close()
                 del transformer
-                torch.cuda.empty_cache()
-        decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device) if windows else None
-        compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
+                runtime.unload_transformer()
+        progress.begin("compose")
+        decoder = runtime.load_decoder() if windows else None
+        try:
+            compose_spans(prepared, finals, decoder, render, progress=progress, cancel=cancel)
+        finally:
+            del decoder
+            runtime.unload_decoder()
+        peak_vram_bytes = runtime.peak_vram_bytes()
+    for line in progress.summary(profile_key, peak_vram_bytes, blocks):
+        logger.info(line)
+    if windows:
+        speed.save_rates(render.speed_profile, profile_key, progress.learned_rates())
 
 
 def restore_video(
@@ -653,6 +956,7 @@ def restore_video(
     seed: int,
     device: torch.device,
     work_dir: Path,
+    speed_profile: Path,
     progress: Progress,
     cancel: threading.Event,
 ) -> None:
@@ -666,9 +970,11 @@ def restore_video(
             frame_h=frame_h,
             frame_w=frame_w,
             batch_size=batch_size,
-            large_canvas=large_canvas_fits(large_canvas, torch.cuda.mem_get_info(device)[0]),
+            large_canvas=large_canvas_fits(large_canvas, device_free_bytes(device)),
             budget=free_vram_budget(device),
+            budget_name="free VRAM",
             device=device,
+            speed_profile=speed_profile,
         ),
         work_dir=work_dir,
         progress=progress,

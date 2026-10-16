@@ -13,6 +13,30 @@ logger = logging.getLogger(__name__)
 MIN_GPU_COMPUTE = (7, 5)
 MIN_DRIVER_VERSION = 580 if sys.platform == "linux" else 610
 
+
+def get_application_executable() -> str:
+    """Return the running application for subprocess launches."""
+    if sys.platform == "linux" and is_frozen():
+        # Without Nuitka's multiprocessing plugin, sys.executable names a
+        # CPython placeholder in the distribution rather than the compiled app.
+        return os.readlink("/proc/self/exe")
+    if sys.platform == "win32" and is_frozen():
+        import ctypes
+        from ctypes import wintypes
+
+        module_path = ctypes.WinDLL("kernel32", use_last_error=True).GetModuleFileNameW
+        module_path.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+        module_path.restype = wintypes.DWORD
+        size = 260
+        while True:
+            buffer = ctypes.create_unicode_buffer(size)
+            length = module_path(None, buffer, size)
+            if not length:
+                raise ctypes.WinError(ctypes.get_last_error())
+            if length < size:
+                return buffer.value
+            size *= 2
+    return sys.executable
 _TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSY_ENV_VALUES = frozenset({"0", "false", "no", "off"})
 
@@ -335,6 +359,17 @@ def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
     if value == _PREFER_SYSMEM_FALLBACK:
         return False, "Prefer Sysmem Fallback (recommended: Prefer No Sysmem Fallback)"
     return False, "Driver Default (recommended: Prefer No Sysmem Fallback)"
+
+
+def windows_module_loaded(name: str) -> bool:
+    if sys.platform != "win32":
+        return False
+    import ctypes
+
+    get_module_handle = ctypes.WinDLL("kernel32", use_last_error=True).GetModuleHandleW
+    get_module_handle.argtypes = [ctypes.c_wchar_p]
+    get_module_handle.restype = ctypes.c_void_p
+    return bool(get_module_handle(name))
 
 
 def check_gpu_driver_version() -> tuple[bool, str]:

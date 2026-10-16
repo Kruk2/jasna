@@ -39,6 +39,10 @@ def _physical_size(geometry_string: str, factor: float) -> tuple[int, int]:
     return round(int(width) * factor), round(int(height) * factor)
 
 
+def _fake_screen(monkeypatch, size: tuple[int, int]) -> None:
+    monkeypatch.setattr(scaling, "screen_rect", lambda _window: (0, 0, *size))
+
+
 def _root() -> ctk.CTk:
     try:
         return ctk.CTk()
@@ -94,6 +98,7 @@ def test_centered_position_clamps_into_the_given_monitor_rect():
 
 
 def test_screen_rect_falls_back_to_the_full_screen_off_windows(monkeypatch):
+
     # On Windows `screen_rect` asks the OS for the monitor work area through the
     # window's HWND; this test covers the other platforms' fallback.
     monkeypatch.setattr(scaling.sys, "platform", "linux")
@@ -120,12 +125,11 @@ def test_static_scaling_is_identity_when_design_minimum_fits() -> None:
 def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, monkeypatch) -> None:
     factor = scaling._static_scaling(dpi, (2560, 1440), (900, 580), scaling.SCREEN_MARGIN)
     monkeypatch.setattr(scaling, "window_scaling", lambda _window: factor)
+    _fake_screen(monkeypatch, (2560, 1440))
     monkeypatch.setattr(scaling, "screen_rect", lambda _window: (0, 0, 2560, 1440))
     requested: list[str] = []
     minimum: list[tuple[int, int]] = []
     window = SimpleNamespace(
-        winfo_screenwidth=lambda: 2560,
-        winfo_screenheight=lambda: 1440,
         update_idletasks=lambda: None,
         geometry=requested.append,
         minsize=lambda width, height: minimum.append((width, height)),
@@ -141,6 +145,7 @@ def test_main_window_keeps_design_minimum_at_high_dpi_on_1440p(dpi, monkeypatch)
 
 def test_activate_static_dpi_is_a_no_op_off_windows(monkeypatch) -> None:
     monkeypatch.setattr(scaling.sys, "platform", "linux")
+    monkeypatch.setattr(ctk.ScalingTracker, "deactivate_automatic_dpi_awareness", False)
     # Compare against a snapshot rather than against CTk's documented defaults:
     # deactivate_automatic_dpi_awareness is a class attribute another test may
     # have flipped while simulating Windows. "No-op" means "changes nothing".
@@ -164,6 +169,7 @@ def test_activate_static_dpi_windows_path(monkeypatch) -> None:
     monkeypatch.setattr(
         scaling, "_windows_screen_size", lambda: calls.append("screen") or (2560, 1440)
     )
+    monkeypatch.setattr(ctk.ScalingTracker, "deactivate_automatic_dpi_awareness", False)
     try:
         scaling.activate_static_dpi((900, 580))
 
@@ -173,7 +179,6 @@ def test_activate_static_dpi_windows_path(monkeypatch) -> None:
         assert ctk.ScalingTracker.widget_scaling == expected
         assert ctk.ScalingTracker.window_scaling == expected
     finally:
-        ctk.ScalingTracker.deactivate_automatic_dpi_awareness = False
         ctk.set_widget_scaling(1.0)
         ctk.set_window_scaling(1.0)
 
@@ -214,12 +219,11 @@ def test_main_window_fits_screen_at_hidpi(hidpi, monkeypatch) -> None:
 @pytest.mark.parametrize("factor", [1.0, 1.5])
 def test_main_window_fits_a_small_screen(screen, factor, monkeypatch) -> None:
     monkeypatch.setattr(scaling, "window_scaling", lambda _window: factor)
+    _fake_screen(monkeypatch, screen)
     monkeypatch.setattr(scaling, "screen_rect", lambda _window: (0, 0, screen[0], screen[1]))
     requested: list[str] = []
     minimum: list[tuple[int, int]] = []
     window = SimpleNamespace(
-        winfo_screenwidth=lambda: screen[0],
-        winfo_screenheight=lambda: screen[1],
         update_idletasks=lambda: None,
         geometry=requested.append,
         minsize=lambda width, height: minimum.append((width, height)),
@@ -242,10 +246,9 @@ def test_segment_editor_fits_screen_at_hidpi(factor, monkeypatch) -> None:
     from jasna.gui.segment_editor import SegmentEditor
 
     monkeypatch.setattr(segment_editor.scaling, "window_scaling", lambda _window: factor)
+    _fake_screen(monkeypatch, (2560, 1440))
     monkeypatch.setattr(segment_editor.scaling, "screen_rect", lambda _window: (0, 0, 2560, 1440))
     editor = SimpleNamespace(
-        winfo_screenwidth=lambda: 2560,
-        winfo_screenheight=lambda: 1440,
         update_idletasks=lambda: None,
         geometry=lambda spec: requested.append(spec),
         minsize=lambda width, height: minimum.append((width, height)),
@@ -337,6 +340,7 @@ def test_slider_value_label_font_scales_at_hidpi(hidpi) -> None:
         label = create_slider_value_label(root, "90", 4, Colors.BG_PANEL)
 
         expected_size = round(Fonts.SIZE_NORMAL * hidpi)
+        assert root.tk.splitlist(label.cget("font")) == (Fonts.FAMILY, f"-{expected_size}")
         # Tk braces a family name that contains a space, so accept both spellings.
         assert label.cget("font").replace("{", "").replace("}", "") == (
             f"{Fonts.FAMILY} -{expected_size}"
@@ -346,7 +350,7 @@ def test_slider_value_label_font_scales_at_hidpi(hidpi) -> None:
 
 
 @pytest.mark.parametrize("hidpi", [1.0, 1.25, 1.5], indirect=True)
-def test_wizard_button_is_on_screen_at_hidpi(hidpi, monkeypatch) -> None:
+def test_wizard_button_is_on_screen_at_hidpi(hidpi, monkeypatch, show_window) -> None:
     from jasna.gui import wizard as wizard_module
 
     monkeypatch.setattr(
@@ -357,7 +361,7 @@ def test_wizard_button_is_on_screen_at_hidpi(hidpi, monkeypatch) -> None:
         root.geometry("1000x700+0+0")
         root.update()
         wizard = wizard_module.FirstRunWizard(root)
-        root.update()
+        show_window(wizard)
 
         assert wizard.winfo_height() <= wizard.winfo_screenheight()
         assert wizard._continue_btn.winfo_ismapped()

@@ -1,11 +1,14 @@
 """Lightweight engine-path helpers — no torch / tensorrt imports."""
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
 
 from jasna._frozen import is_frozen
+
+logger = logging.getLogger(__name__)
 
 
 def model_weights_dir() -> Path:
@@ -18,6 +21,18 @@ def model_weights_dir() -> Path:
     if is_frozen():
         return Path(sys.executable).parent / "model_weights"
     return Path("model_weights")
+
+
+def configure_torch_compile_cache() -> None:
+    """Keep torch.compile's kernels and autotuning picks under ``model_weights`` (unless
+    ``TORCHINDUCTOR_CACHE_DIR`` is set), so they survive reboots and later runs reuse the same
+    kernels and autotuning picks."""
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str((model_weights_dir() / "torch-compile-cache").resolve()))
+    cache = Path(os.environ["TORCHINDUCTOR_CACHE_DIR"])
+    nearest = next(path for path in (cache, *cache.parents) if path.exists())
+    if not os.access(nearest, os.W_OK):
+        logger.warning("Compile cache %s is not writable: every LTX run will tune its kernels again", cache)
+
 
 
 _DEFAULT_RESTORATION_MODELS = {
@@ -134,4 +149,12 @@ def get_basicvsrpp_sub_engine_paths(model_weights_path: str, fp16: bool) -> dict
 
 
 def all_basicvsrpp_sub_engines_exist(model_weights_path: str, fp16: bool) -> bool:
-    return all(os.path.isfile(p) for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16).values())
+    return all(basicvsrpp_sub_engine_exists(p)
+               for p in get_basicvsrpp_sub_engine_paths(model_weights_path, fp16).values())
+
+
+def basicvsrpp_sub_engine_exists(path: str) -> bool:
+    if sys.platform == "linux" and is_frozen():
+        from jasna.protection.export_cache import available
+        return available(path)
+    return os.path.isfile(path)

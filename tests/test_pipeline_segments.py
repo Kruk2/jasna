@@ -16,6 +16,7 @@ from jasna.segments import SegmentRange, SegmentRestoration
 
 def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+
     # Resume/checkpoint state (smart-run keeps finished fragments next to the
     # output): these hand-built instances must carry the attributes `_run_smart`
     # reads, the same way `Pipeline.__init__` sets them.
@@ -104,6 +105,7 @@ def test_smart_run_processes_only_render_spans_and_assembles_full_output(tmp_pat
 
 def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+
     # Resume/checkpoint state (smart-run keeps finished fragments next to the
     # output): these hand-built instances must carry the attributes `_run_smart`
     # reads, the same way `Pipeline.__init__` sets them.
@@ -157,6 +159,7 @@ def test_smart_run_uses_working_dir_for_temp_files(tmp_path) -> None:
 
 def test_amf_h264_full_reencode_preserves_selected_ranges(tmp_path) -> None:
     pipeline = object.__new__(Pipeline)
+
     # Resume/checkpoint state (smart-run keeps finished fragments next to the
     # output): these hand-built instances must carry the attributes `_run_smart`
     # reads, the same way `Pipeline.__init__` sets them.
@@ -220,6 +223,7 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
     vendor, max_b_frames
 ) -> None:
     pipeline = object.__new__(Pipeline)
+
     # Resume/checkpoint state (smart-run keeps finished fragments next to the
     # output): these hand-built instances must carry the attributes `_run_smart`
     # reads, the same way `Pipeline.__init__` sets them.
@@ -257,6 +261,7 @@ def test_smart_run_keeps_smart_render_unless_amd_exceeds_b_frame_cap(
 
 def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
     pipeline = object.__new__(Pipeline)
+
     # Resume/checkpoint state (smart-run keeps finished fragments next to the
     # output): these hand-built instances must carry the attributes `_run_smart`
     # reads, the same way `Pipeline.__init__` sets them.
@@ -284,6 +289,7 @@ def test_smart_run_rejects_precomputed_plan_for_different_segments() -> None:
 
 def _mixed_pipeline(tmp_path, default_model: str, segments: tuple[SegmentRange, ...], spans) -> Pipeline:
     pipeline = object.__new__(Pipeline)
+
     # Resume/checkpoint state (smart-run keeps finished fragments next to the
     # output): these hand-built instances must carry the attributes `_run_smart`
     # reads, the same way `Pipeline.__init__` sets them.
@@ -349,6 +355,57 @@ def test_mixed_job_batches_ltx_spans_and_keeps_fragments_in_span_order(tmp_path)
 
 
 
+def test_mixed_job_restores_basicvsrpp_spans_before_the_ltx_spans(tmp_path) -> None:
+    ltx = SegmentRestoration("ltx", 42)
+    segments = (SegmentRange(2.5, 3.0, ltx), SegmentRange(6.5, 7.0))
+    spans = (
+        SpliceSpan("copy", 0, 60),
+        SpliceSpan("render", 60, 120, ((75, 90),)),
+        SpliceSpan("copy", 120, 180),
+        SpliceSpan("render", 180, 240, ((195, 210),)),
+    )
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
+    order = MagicMock()
+    order.attach_mock(pipeline._run_pass, "basicvsrpp")
+    order.attach_mock(pipeline._run_ltx_spans, "ltx")
+
+    concatenate = _run_smart_mocked(pipeline)
+
+    assert [call[0] for call in order.mock_calls] == ["ltx", "basicvsrpp"]
+    fragments = concatenate.call_args.args[0]
+    assert [path.name for path, _ in fragments] == ["0000.ts", "0001.ts", "0002.ts", "0003.ts"]
+
+
+def test_mixed_job_reports_time_left_from_the_ltx_estimate_until_ltx_reports_its_own(tmp_path) -> None:
+    ltx = SegmentRestoration("ltx", 42)
+    segments = (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, ltx))
+    spans = (
+        SpliceSpan("copy", 0, 60),
+        SpliceSpan("render", 60, 120, ((75, 90),)),
+        SpliceSpan("copy", 120, 180),
+        SpliceSpan("render", 180, 240, ((195, 210),)),
+    )
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
+    pipeline.progress_callback = MagicMock()
+    pipeline.ltx_files = MagicMock(transformer_name="t")
+
+    with (
+        patch("jasna.ltx.speed.segment_estimate_seconds", return_value=900.0) as estimate,
+        patch("torch.cuda.get_device_name", return_value="Test GPU"),
+    ):
+        _run_smart_mocked(pipeline)
+
+    assert estimate.call_args.kwargs["frames"] == 60
+    standard_callback = pipeline._run_pass.call_args.kwargs["progress"].callback
+    standard_callback(50.0, 30.0, 10.0, 30, 60, None)
+    assert pipeline.progress_callback.call_args.args[2] == pytest.approx(910.0)
+    (*_, ltx_callback), _ = pipeline._run_ltx_spans.call_args
+    ltx_callback(0.0, 0.0, 0.0, 0, 0, "scan")
+    assert pipeline.progress_callback.call_args.args[2] == pytest.approx(900.0)
+    ltx_callback(50.0, 0.0, 120.0, 0, 0, "compose")
+    assert pipeline.progress_callback.call_args.args[2] == pytest.approx(120.0)
+
+
 def test_mixed_job_reports_one_bar_weighted_by_estimated_work(tmp_path) -> None:
     ltx = SegmentRestoration("ltx", 42)
     segments = (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, ltx))
@@ -360,14 +417,23 @@ def test_mixed_job_reports_one_bar_weighted_by_estimated_work(tmp_path) -> None:
     )
     pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
     pipeline.progress_callback = MagicMock()
+    pipeline.ltx_files = MagicMock(transformer_name="t")
 
-    _run_smart_mocked(pipeline)
+    with (
+        patch("jasna.ltx.speed.segment_estimate_seconds", return_value=900.0),
+        patch("torch.cuda.get_device_name", return_value="Test GPU"),
+    ):
+        _run_smart_mocked(pipeline)
 
+    # Both modes report through the single job bar, not the raw callback.
+    standard_callback = pipeline._run_pass.call_args.kwargs["progress"].callback
     (*_, ltx_callback), _ = pipeline._run_ltx_spans.call_args
-    ltx_callback(100.0, 0.0, 0.0, 0, 0, "compose")
-    ltx_share = 30.0 * 60 / (30.0 * 60 + 60)
-    assert pipeline.progress_callback.call_args.args[0] == pytest.approx(100.0 * ltx_share)
-    assert pipeline._run_pass.call_args.kwargs["progress"].callback is not pipeline.progress_callback
+    assert standard_callback is not pipeline.progress_callback
+    assert ltx_callback is not pipeline.progress_callback
+    # The LTX estimate (900s) is weighted into the remaining time the standard
+    # pass reports, so the one bar accounts for the work still ahead of it.
+    standard_callback(50.0, 30.0, 10.0, 30, 60, None)
+    assert pipeline.progress_callback.call_args.args[2] == pytest.approx(910.0)
 
 def test_segments_on_the_job_model_follow_an_ltx_job(tmp_path) -> None:
     segments = (SegmentRange(2.5, 3.0),)
@@ -400,6 +466,7 @@ def test_a_render_span_resolving_to_two_models_is_rejected(tmp_path) -> None:
 )
 def test_run_routes_by_the_job_model_and_segments(model, segments, expected) -> None:
     pipeline = object.__new__(Pipeline)
+
     # Resume/checkpoint state (smart-run keeps finished fragments next to the
     # output): these hand-built instances must carry the attributes `_run_smart`
     # reads, the same way `Pipeline.__init__` sets them.

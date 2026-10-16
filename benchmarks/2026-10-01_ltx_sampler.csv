@@ -1,0 +1,13 @@
+date,commit,label,gpu,model,quant,canvas,windows,steps,stg,int8_attention,inductor,compile_s,s_per_window,ms_per_window_step,peak_vram_gib,runs_s
+2026-10-01,559968c,decode,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,4.0,3.94,492.9,12.77,11.79 11.83 11.87
+2026-10-01,5534c5e,sampler_sync,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,4.3,3.94,493.0,12.77,11.79 11.83 11.85
+2026-10-01,6d2d2b7,sampler_kv,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,3.6,3.9,487.0,12.79,11.64 11.69 11.71
+2026-10-01,559968c,decode,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,4.0,3.94,491.9,12.77,11.76 11.81 11.83
+2026-10-01,559968c,decode,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,7.4,10.86,1357.9,13.59,32.46 32.59 32.64
+2026-10-01,5534c5e,sampler_sync,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,7.0,10.86,1357.4,13.59,32.45 32.58 32.65
+2026-10-01,6d2d2b7,sampler_kv,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,12.8,10.83,1353.6,13.59,32.35 32.49 32.53
+2026-10-01,559968c,decode,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,7.0,10.87,1359.2,13.59,32.47 32.62 32.66
+2026-10-01,559968c,decode,NVIDIA GeForce RTX 5090,undistilled,int8,512,3,15,True,True,,5.7,10.44,696.1,13.02,31.21 31.33 31.33
+2026-10-01,5534c5e,sampler_sync,NVIDIA GeForce RTX 5090,undistilled,int8,512,3,15,True,True,,5.4,10.41,693.7,13.02,31.20 31.22 31.28
+2026-10-01,6d2d2b7,sampler_kv,NVIDIA GeForce RTX 5090,undistilled,int8,512,3,15,True,True,,6.4,10.34,689.3,13.04,30.88 31.02 31.04
+2026-10-01,559968c,decode,NVIDIA GeForce RTX 5090,undistilled,int8,512,3,15,True,True,,5.3,10.44,695.7,13.02,31.19 31.31 31.34

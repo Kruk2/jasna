@@ -10,8 +10,8 @@ import customtkinter as ctk
 
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.locales import t
-from jasna.gui.components import BuyMeCoffeeButton, UnifansButton, grab_modal
+from jasna.gui.locales import get_locale, t
+from jasna.gui.components import BuyMeCoffeeButton, UnifansButton, XianyuButton, grab_modal, shows_xianyu_seller
 from jasna.gui.system_checks import WARNING_ONLY_CHECKS, evaluate_check_results, run_system_checks
 
 logger = logging.getLogger(__name__)
@@ -185,12 +185,14 @@ class FirstRunWizard(ctk.CTkToplevel):
         )
         self._continue_btn.pack(side="left", padx=(0, 12))
         
-        # Support the project — Buy Me a Coffee or Unifans
+        # Support the project — Buy Me a Coffee, Unifans or (Chinese UI) Xianyu
         self._bmc_btn = BuyMeCoffeeButton(btn_container, width=140, height=48)
         self._bmc_btn.pack(side="left")
 
         self._unifans_btn = UnifansButton(btn_container, width=150, height=48)
         self._unifans_btn.pack(side="left", padx=(12, 0))
+        if shows_xianyu_seller(get_locale().current_language):
+            XianyuButton(btn_container, width=110, height=48).pack(side="left", padx=(12, 0))
         
     def _start_checks_in_background(self) -> None:
         self._checks_deadline = time.monotonic() + _CHECKS_TIMEOUT_SECONDS

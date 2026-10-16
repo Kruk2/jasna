@@ -3,6 +3,7 @@ from __future__ import annotations
 import queue
 from dataclasses import replace
 import threading
+import time
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,12 +15,14 @@ import pytest
 import torch
 from PIL import Image
 
-from jasna.gui import segment_editor
+from jasna.gui import ltx_seed_preview, segment_editor, segment_scan_panel
 from jasna.gui.locales import t
+from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.gui.segment_editor_state import PREVIEW_ZOOM_MAX, PreviewView, SegmentEditorState
+from jasna.ltx.restore import Cancelled
 from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange, SegmentRestoration
 
@@ -335,8 +338,6 @@ def test_editor_height_grows_on_tall_screens(monkeypatch) -> None:
     monkeypatch.setattr(segment_editor.scaling, "window_scaling", lambda _window: 1.0)
     monkeypatch.setattr(segment_editor.scaling, "screen_rect", lambda _window: (0, 0, 2560, 1440))
     editor = object.__new__(SegmentEditor)
-    editor.winfo_screenwidth = MagicMock(return_value=2560)
-    editor.winfo_screenheight = MagicMock(return_value=1440)
     editor.geometry = MagicMock()
     editor.minsize = MagicMock()
 
@@ -526,6 +527,7 @@ def test_scan_completed_populates_detections_and_add_button(monkeypatch) -> None
             times=(0.0, 1.0, 2.0, 3.0),
             scores=(0.0, 0.8, 0.9, 0.0),
             masks=[None] * 4,
+            sizes=(0.0,) * 4,
             stride=1.0,
             duration=60.0,
             completed_until=3.0,
@@ -562,6 +564,79 @@ def test_scan_completed_populates_detections_and_add_button(monkeypatch) -> None
         root.destroy()
 
 
+def test_scan_ltx_auto_split_adds_big_mosaics_as_ltx(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch, settings=AppSettings(ltx_seed=5))
+        editor._keyframe_index = KeyframeIndex((0, 45, 120, 180), Fraction(1, 30), 0, 1800)
+        result = MosaicScanResult(
+            times=(0.0, 1.0, 2.0, 3.0),
+            scores=(0.0, 0.8, 0.9, 0.0),
+            masks=torch.zeros((4, 90, 160), dtype=torch.uint8),
+            sizes=(0.0, 0.05, 0.3, 0.0),
+            stride=1.0,
+            duration=60.0,
+            completed_until=3.0,
+        )
+        panel = editor._scan_panel
+        panel._threshold = 0.5
+        panel._worker = MagicMock(events=queue.Queue())
+        panel._handle_event(ScanCompleted(result, stopped=False))
+        editor.geometry("900x640")
+        editor.update()
+        assert panel._ltx_auto_row.winfo_ismapped()
+
+        panel._ltx_auto_toggle.select()
+        panel._toggle_ltx_auto()
+        panel._add_detected_ranges()
+
+        assert editor._state.segments == (
+            SegmentRange(0.5, 1.5, SegmentRestoration("basicvsrpp", None)),
+            SegmentRange(1.5, 3.5, SegmentRestoration("ltx", 5)),
+        )
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_scan_ltx_auto_split_is_hidden_when_ltx_cannot_run(monkeypatch) -> None:
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch, ltx_unavailable_reason="model_ltx_not_downloaded")
+        panel = editor._scan_panel
+        panel._worker = MagicMock()
+        panel._handle_event(
+            ScanCompleted(
+                MosaicScanResult(
+                    times=(0.0, 1.0),
+                    scores=(0.9, 0.9),
+                    masks=torch.zeros((2, 90, 160), dtype=torch.uint8),
+                    sizes=(0.0,) * 2,
+                    stride=1.0,
+                    duration=60.0,
+                    completed_until=1.0,
+                ),
+                stopped=False,
+            )
+        )
+        editor.update_idletasks()
+        assert panel._add_btn.winfo_ismapped()
+        assert not panel._ltx_auto_row.winfo_ismapped()
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
 def test_scan_threshold_updates_ranges_and_add_button(monkeypatch) -> None:
     try:
         root = ctk.CTk()
@@ -574,6 +649,7 @@ def test_scan_threshold_updates_ranges_and_add_button(monkeypatch) -> None:
             times=(0.0, 1.0, 2.0),
             scores=(0.0, 0.8, 0.0),
             masks=torch.zeros((3, 90, 160), dtype=torch.uint8),
+            sizes=(0.0,) * 3,
             stride=1.0,
             duration=60.0,
             completed_until=2.0,
@@ -612,6 +688,7 @@ def test_scan_overlay_respects_dynamic_threshold(monkeypatch) -> None:
             times=(1.0,),
             scores=(0.7,),
             masks=torch.ones((1, 90, 160), dtype=torch.uint8),
+            sizes=(0.0,) * 1,
             stride=1.0,
             duration=10.0,
             completed_until=1.0,
@@ -899,6 +976,160 @@ def _seed_frames(tmp_path, seed, color):
     return tuple(frames)
 
 
+def test_restore_preview_renders_an_ltx_range_then_lets_the_user_compare_and_pick_seeds(monkeypatch, tmp_path) -> None:
+    root = _tk_root()
+    editor = None
+    _FakeSeedWorker.instances = []
+    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
+    try:
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        editor = _build_editor_with_ui(root, monkeypatch, job=job)
+        editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+        editor._seek(1.5)
+        editor._preview_source = Image.new("RGB", (160, 90), "red")
+        root.update()
+
+        editor._toggle_restoration_preview()
+        worker = _FakeSeedWorker.instances[0]
+        assert worker.work_dir == tmp_path
+        assert worker.requests[0][:2] == (job.segments[0], 5)
+        assert editor._restore_active
+        assert editor._preview.cget("text") == t("segments_preview_ltx_rendering", seed=5)
+        assert not editor._ltx_render_btn.winfo_manager()
+        worker.events.put(segment_editor.SeedProgress(5, "denoise", 0.5, 70.0, 1))
+        editor._poll_workers()
+        assert editor._seed_status.cget("text") == t(
+            "segments_seed_progress", seed=5, stage=t("ltx_stage_denoise"), percent=50.0, eta="1m 10s"
+        )
+
+        worker.events.put(segment_editor.SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
+        editor._poll_workers()
+        root.update()
+        assert 1.0 <= editor._current < 2.0
+        assert editor._active_preview_source().getpixel((0, 0))[2] > 200
+
+        editor._new_range_seed()
+        new_seed = editor._state.selected_segment.restoration.ltx_seed
+        root.update()
+        assert editor._preview.cget("text") == t("segments_preview_ltx_not_rendered", seed=new_seed)
+        assert editor._ltx_render_btn.winfo_manager()
+        editor._ltx_render_btn.invoke()
+        assert worker.requests[1][:2] == (editor._state.selected_segment, new_seed)
+        worker.events.put(segment_editor.SeedReady(new_seed, _seed_frames(tmp_path, new_seed, "green"), 2))
+        editor._poll_workers()
+        chips = [w.cget("text") for w in editor._seed_chip_widgets if isinstance(w, ctk.CTkButton)]
+        assert chips == ["5", f"{new_seed} ✓"]
+        assert editor._active_preview_source().getpixel((0, 0))[1] > 100
+
+        editor._show_tried_seed(5)
+        assert editor._active_preview_source().getpixel((0, 0))[2] > 200
+        editor._use_tried_seed(5)
+        assert editor._state.selected_segment.restoration == SegmentRestoration("ltx", 5)
+
+        editor._toggle_restoration_preview()
+        assert editor._active_preview_source().getpixel((0, 0))[0] > 200
+
+        editor._claim_gpu_for_scan()
+        assert worker.released == 1
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+    assert _FakeSeedWorker.instances[0].closed
+
+
+@pytest.mark.parametrize("answer", [False, True])
+def test_restore_preview_asks_before_a_long_ltx_render(monkeypatch, tmp_path, answer) -> None:
+    root = _tk_root()
+    editor = None
+    _FakeSeedWorker.instances = []
+    asked = []
+    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 360.0)
+    monkeypatch.setattr(segment_editor.messagebox, "askyesno", lambda title, text, parent: asked.append(text) or answer)
+    try:
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        editor = _build_editor_with_ui(root, monkeypatch, job=job)
+        editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+        editor._seek(1.5)
+
+        editor._toggle_restoration_preview()
+
+        assert asked == [t("segments_ltx_render_confirm", seed=5, duration="6m 0s")]
+        assert editor._restore_active is answer
+        assert bool(_FakeSeedWorker.instances) is answer
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+class _BlockingSeedRenderer(ltx_seed_preview.SeedRenderer):
+    started = threading.Event()
+
+    def render(self, segment, seed, settings, *, writer_for, report, cancel):
+        self.started.set()
+        cancel.wait(5)
+        time.sleep(0.2)
+        raise Cancelled()
+
+
+class _BlockingSeedWorker(LtxSeedPreviewWorker):
+    def _make_renderer(self):
+        return _BlockingSeedRenderer(self.path, self.metadata, self.index, self.work_dir)
+
+
+@pytest.mark.parametrize("stop_render", [True, False])
+def test_closing_the_app_closes_the_segment_editor_and_its_seed_frames(monkeypatch, tmp_path, stop_render) -> None:
+    from jasna.gui.app import JasnaApp
+    from jasna.gui.queue_panel import QueuePanel
+
+    root = _tk_root()
+    preview = MagicMock()
+    preview.events = queue.Queue()
+    monkeypatch.setattr(segment_editor, "SegmentPreviewWorker", MagicMock(return_value=preview))
+    monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _BlockingSeedWorker)
+    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 0.0)
+    asked: list[str] = []
+    monkeypatch.setattr(
+        segment_editor.messagebox, "askyesno", lambda _title, message, parent: asked.append(message) or stop_render
+    )
+    _BlockingSeedRenderer.started.clear()
+    destroyed: list[bool] = []
+    panel = QueuePanel(root)
+    try:
+        panel.set_segment_editor_context(AppSettings, lambda: False, MagicMock(), lambda: None)
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        panel._edit_segments(job)
+        editor = panel._segment_editor
+        preview.events.put(segment_editor.PreviewLoaded(_fake_metadata()))
+        editor._poll_workers()
+        editor._keyframe_index = KeyframeIndex(pts=(0,), time_base=Fraction(1, 1000), start_pts=0, end_pts=60_000)
+        editor._seek(1.5)
+        editor._toggle_restoration_preview()
+        assert _BlockingSeedRenderer.started.wait(5)
+        app = SimpleNamespace(
+            _ltx_models=SimpleNamespace(downloading=False),
+            _video_player_dialog=None,
+            _queue_panel=panel,
+            _processor=None,
+            _stop_system_stats_poller=lambda: None,
+            _main_thread=MagicMock(),
+            destroy=lambda: destroyed.append(True),
+        )
+
+        JasnaApp._on_close(app)
+
+        assert asked == [t("segments_seed_stop_confirm")]
+        assert bool(destroyed) is stop_render
+        assert (not list(tmp_path.glob(".jasna-seeds-*"))) is stop_render
+    finally:
+        if panel._segment_editor is not None:
+            panel._segment_editor._finish_close()
+        root.destroy()
+
+
 def test_try_seed_shows_progress_then_lets_the_user_compare_and_pick_seeds(monkeypatch, tmp_path) -> None:
     root = _tk_root()
     editor = None
@@ -956,7 +1187,6 @@ def test_try_seed_shows_progress_then_lets_the_user_compare_and_pick_seeds(monke
     assert _FakeSeedWorker.instances[0].closed
 
 
-
 def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(monkeypatch, tmp_path) -> None:
     tips: dict[str, list] = {}
     original = segment_editor.Tooltip.__init__
@@ -970,6 +1200,7 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(monkeypatch, tmp
     editor = None
     _FakeSeedWorker.instances = []
     monkeypatch.setattr(segment_editor, "LtxSeedPreviewWorker", _FakeSeedWorker)
+    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
     try:
         job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
         settings = replace(AppSettings(), ltx_model="undistilled")
@@ -978,11 +1209,13 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(monkeypatch, tmp
         editor._select_range(0)
         editor._preview_source = Image.new("RGB", (160, 90), "red")
         root.update()
-        editor._try_seed_btn.invoke()
+        editor._seek(1.5)
+        editor._toggle_restoration_preview()
         worker = _FakeSeedWorker.instances[0]
         worker.events.put(segment_editor.SeedReady(5, _seed_frames(tmp_path, 5, "blue"), 1))
         editor._poll_workers()
         editor._new_range_seed()
+        editor._show_tried_seed(5)
         root.update()
 
         assert editor._model_radios["ltx"].cget("text") == t("model_ltx_undistilled")
@@ -992,9 +1225,8 @@ def test_seed_controls_have_tooltips_and_name_the_job_ltx_model(monkeypatch, tmp
             "tip_segments_use_for_all": editor._use_for_all_btn,
             "tip_ltx_seed": editor._seed_entry,
             "tip_ltx_new_seed": editor._new_seed_btn,
-            "tip_segments_try_seed": editor._try_seed_btn,
+            "tip_segments_ltx_render": editor._ltx_render_btn,
             "tip_segments_seed_cancel": editor._seed_cancel_btn,
-            "tip_segments_seed_show": editor._seed_view_toggle,
         }
         for key, widget in expected.items():
             assert widget in tips[t(key)], key
@@ -1066,6 +1298,161 @@ def test_range_times_stack_and_controls_scroll_at_minimum_size(monkeypatch) -> N
         assert editor._range_action.grid_info()["row"] == 2
         assert editor._range_controls._parent_canvas.yview()[1] < 1.0
         assert editor._segment_list._parent_canvas.winfo_height() > 0
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_range_list_keeps_its_rows_on_select_seeks_and_scrolls_to_the_selection(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        ranges = tuple(SegmentRange(float(start), start + 0.5) for start in range(0, 40, 2))
+        editor = _build_editor_with_ui(root, monkeypatch, job=JobItem(Path("video.mp4"), segments=ranges))
+        editor.geometry("1400x1000")
+        root.update()
+        rows = list(editor._segment_rows)
+        canvas = editor._segment_list._parent_canvas
+        assert canvas.yview()[0] == 0.0
+
+        editor._select_range_from_list(19)
+        root.update()
+
+        assert editor._segment_rows == rows
+        assert editor._current == pytest.approx(38.0)
+        assert rows[19].cget("fg_color") == segment_editor.Colors.PRIMARY_DARK
+        assert rows[0].cget("fg_color") == segment_editor.Colors.BG_CARD
+        top, bottom = canvas.yview()
+        height = editor._segment_list.winfo_height()
+        assert top > 0.0
+        assert top <= rows[19].winfo_y() / height
+        assert (rows[19].winfo_y() + rows[19].winfo_height()) / height <= bottom + 1e-6
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_footer_shows_the_ltx_share_only_when_a_range_uses_ltx(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        standard, ltx = SegmentRestoration("basicvsrpp", None), SegmentRestoration("ltx", 5)
+        job = JobItem(Path("video.mp4"), segments=(SegmentRange(0.0, 30.0, standard), SegmentRange(40.0, 50.0, ltx)))
+        editor = _build_editor_with_ui(root, monkeypatch, job=job)
+        root.update()
+        assert editor._model_split_bar.winfo_ismapped()
+        assert editor._model_split_bar.get() == pytest.approx(0.25)
+        assert editor._model_split.cget("text") == t(
+            "segments_model_split", ltx="00:00:10", percent=25.0, standard="00:00:30"
+        )
+
+        editor._select_range(1)
+        editor._delete_range(1)
+        root.update()
+        assert not editor._model_split_bar.winfo_ismapped()
+        assert not editor._model_split.winfo_ismapped()
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_restore_preview_uses_basicvsrpp_outside_an_ltx_range(monkeypatch, tmp_path) -> None:
+    root = _tk_root()
+    editor = None
+    preview_worker = MagicMock()
+    monkeypatch.setattr(segment_editor, "RestorationPreviewWorker", MagicMock(return_value=preview_worker))
+    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
+    try:
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        editor = _build_editor_with_ui(root, monkeypatch, job=job)
+        editor._seek(5.0)
+        editor._toggle_restoration_preview()
+        assert preview_worker.request.call_args[0][1].restoration_model == "basicvsrpp"
+
+        editor._seek(1.5)
+        editor._request_restoration_preview()
+        assert preview_worker.request.call_count == 1
+        assert editor._preview.cget("text") == t("segments_preview_ltx_not_rendered", seed=5)
+        assert editor._ltx_render_btn.winfo_manager()
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_ltx_render_button_enables_once_the_keyframes_arrive(monkeypatch, tmp_path) -> None:
+    root = _tk_root()
+    editor = None
+    monkeypatch.setattr(SegmentEditor, "_ltx_render_seconds", lambda self, segment: 60.0)
+    try:
+        job = JobItem(tmp_path / "video.mp4", segments=(SegmentRange(1.0, 2.0, SegmentRestoration("ltx", 5)),))
+        editor = _build_editor_with_ui(root, monkeypatch, job=job)
+        editor._seek(1.5)
+        editor._restore_active = True
+        editor._request_restoration_preview()
+        assert editor._ltx_render_btn.cget("state") == "disabled"
+
+        editor._preview_worker.events.put(
+            segment_editor.PreviewKeyframes(KeyframeIndex((0,), Fraction(1, 1000), 0, 60_000), None)
+        )
+        editor._poll_workers()
+
+        assert editor._ltx_render_btn.cget("state") == "normal"
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+def test_scan_says_it_loads_the_detection_model(monkeypatch) -> None:
+    root = _tk_root()
+    editor = None
+    worker = MagicMock(events=queue.Queue())
+    monkeypatch.setattr(segment_scan_panel, "MosaicScanWorker", MagicMock(return_value=worker))
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        panel = editor._scan_panel
+        panel._start()
+        assert panel._status.cget("text") == t("segments_scan_loading_model")
+
+        worker.events.put(segment_scan_panel.ScanStatus("loading_models"))
+        panel.poll()
+        assert panel._status.cget("text") == t("segments_scan_loading_model")
+    finally:
+        if editor is not None:
+            editor._finish_close()
+        root.destroy()
+
+
+@pytest.mark.parametrize(("auto", "percent", "color"), [(False, 12, "BG_PANEL"), (True, 12, "MODEL_LTX"), (True, 60, "PRIMARY")])
+def test_scan_overlay_tags_each_mosaic_with_its_size(monkeypatch, auto, percent, color) -> None:
+    root = _tk_root()
+    editor = None
+    try:
+        editor = _build_editor_with_ui(root, monkeypatch)
+        panel = editor._scan_panel
+        editor._current = 1.0
+        panel._threshold = 0.5
+        panel._ltx_auto, panel._ltx_percent = auto, percent
+        mask = torch.zeros((1, 90, 160), dtype=torch.uint8)
+        mask[0, 45:90, 80:120] = 1
+        panel._result = MosaicScanResult(
+            times=(1.0,),
+            scores=(0.9,),
+            masks=mask,
+            sizes=(0.5,),
+            stride=1.0,
+            duration=10.0,
+            completed_until=1.0,
+        )
+
+        overlaid = panel.apply_overlay(Image.new("RGB", (1600, 900), "black"))
+
+        expected = Image.new("RGB", (1, 1), getattr(segment_editor.Colors, color)).getpixel((0, 0))
+        assert overlaid.getpixel((802, 447)) == expected
     finally:
         if editor is not None:
             editor._finish_close()

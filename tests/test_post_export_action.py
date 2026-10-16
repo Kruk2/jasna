@@ -9,6 +9,7 @@ from jasna.os_utils import subprocess_no_window_kwargs
 from jasna.post_export_action import (
     PostExportVideoCommandCancelled,
     PostExportVideoCommandError,
+    _quote_shell_value,
     expand_post_export_video_command,
     run_post_export_action,
     run_post_export_action_safely,
@@ -49,7 +50,7 @@ def test_run_post_export_shutdown_linux(monkeypatch) -> None:
 
     run_post_export_action("shutdown")
 
-    assert calls == [(["shutdown", "-h", "now"], {})]
+    assert calls == [(["systemctl", "poweroff"], {})]
 
 
 def test_run_post_export_custom_command_uses_shell(monkeypatch) -> None:
@@ -121,11 +122,33 @@ def test_expand_post_export_video_command_quotes_windows_values(
     assert expanded == f"tool {subprocess.list2cmdline([str(output_path)])}"
 
 
+def test_expand_post_export_video_command_quotes_cmd_operators_on_windows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr("jasna.post_export_action.sys.platform", "win32")
+    output_path = tmp_path / "Tom&Jerry^1.mp4"
+
+    expanded = expand_post_export_video_command(
+        "tool {output}",
+        tmp_path / "in.mp4",
+        output_path,
+    )
+
+    assert expanded == f'tool "{output_path}"'
+
+
+def test_windows_quoting_keeps_trailing_backslash_inside_quotes(monkeypatch) -> None:
+    monkeypatch.setattr("jasna.post_export_action.sys.platform", "win32")
+
+    assert _quote_shell_value("C:\\") == '"C:\\\\"'
+
+
 def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: Path) -> None:
     process = MagicMock(pid=123)
     process.wait.return_value = 0
     popen = MagicMock(return_value=process)
     monkeypatch.setattr("jasna.post_export_action.subprocess.Popen", popen)
+    monkeypatch.setattr("jasna.post_export_action.subprocess_no_window_kwargs", lambda: {})
     monkeypatch.setattr("jasna.post_export_action.sys.platform", "linux")
     input_path = tmp_path / "in.mp4"
     output_path = tmp_path / "out.mp4"
@@ -137,14 +160,26 @@ def test_run_post_export_video_command_waits_for_success(monkeypatch, tmp_path: 
         lambda: False,
     )
 
+    popen.assert_called_once_with(
+        f"tool {shlex.quote(str(output_path))}",
+        shell=True,
+        cwd=tmp_path,
+        start_new_session=True,
+    )
     popen.assert_called_once()
     args, kwargs = popen.call_args
     assert args == (f"tool {shlex.quote(str(output_path))}",)  # POSIX branch quotes paths
     # STARTUPINFO has no __eq__ and the helper builds a fresh one per call, so it
     # is dropped from the comparison (the flags themselves are asserted below).
     comparable = {k: v for k, v in kwargs.items() if k != "startupinfo"}
+    # Read the same (monkeypatched) helper the implementation calls, so the POSIX
+    # no-op patched in above is what the expectation is built from.
+    from jasna import post_export_action
+
     expected_flags = {
-        k: v for k, v in subprocess_no_window_kwargs().items() if k != "startupinfo"
+        k: v
+        for k, v in post_export_action.subprocess_no_window_kwargs().items()
+        if k != "startupinfo"
     }
     assert comparable == {
         "shell": True,

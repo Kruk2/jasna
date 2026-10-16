@@ -20,6 +20,7 @@ from pathlib import Path
 
 import torch
 
+from jasna.accelerator import device_free_bytes
 from jasna.gui.models import AppSettings
 from jasna.gui.queues import replace_pending
 from jasna.gui.video_session import build_video_session, release_session_memory, video_session_key
@@ -109,6 +110,7 @@ class SeedRenderer:
         self._prepared: dict[tuple, object] = {}
         self._transformer = None
         self._transformer_path: Path | None = None
+        self._runtime = None
         self._runs = 0
 
     def render(
@@ -134,8 +136,7 @@ class SeedRenderer:
             final_stores,
             prepare_spans,
         )
-        from jasna.ltx.sampler import LtxTransformer
-        from jasna.models.ltx_vae import load_video_decoder
+        from jasna.ltx.inference import ModelRuntime
         from jasna.session_factory import build_pipeline
 
         settings = replace(settings, restoration_model="ltx")
@@ -145,6 +146,10 @@ class SeedRenderer:
         pipeline = build_pipeline(config, self._session, self.path, self.path, segments=(seeded,))
         pipeline.configure_vr(self.metadata)
         render = pipeline.ltx_segment_render(self.metadata)
+        if self._runtime is None or self._runtime.files != render.files:
+            self._drop_runtime()
+            self._runtime = ModelRuntime(render.files, render.device, cancel)
+        self._runtime.cancel = cancel
         span = segment_render_span(seeded, self.index)
         self._runs += 1
         run_dir = self._temp / f"run-{self._runs}"
@@ -157,9 +162,11 @@ class SeedRenderer:
         key = prepared_key(segment, settings)
         prepared = self._prepared.get(key)
         if prepared is None:
-            directory = self._temp / f"prepared-{len(self._prepared)}"
+            directory = self._temp / f"prepared-{self._runs}"
             directory.mkdir()
-            (prepared,) = prepare_spans([ltx_span], render, directory, progress=progress, cancel=cancel)
+            (prepared,) = prepare_spans(
+                [ltx_span], render, directory, progress=progress, cancel=cancel, runtime=self._runtime
+            )
             self._prepared[key] = prepared
         else:
             progress.skip("scan", "encode")
@@ -167,19 +174,22 @@ class SeedRenderer:
         finals = final_stores([prepared], run_dir)
         decoder = None
         if prepared.windows:
+            progress.begin("denoise")
             if self._transformer is None or self._transformer_path != render.files.transformer:
                 self._drop_transformer()
-                self._transformer = LtxTransformer(render.files.transformer, render.device)
+                self._transformer = self._runtime.load_transformer()
                 self._transformer_path = render.files.transformer
             denoise_spans([prepared], finals, self._transformer, keep_references=True, progress=progress, cancel=cancel)
             decode_bytes = render.budget(LARGE_CANVAS if render.large_canvas else PLAN_CANVAS) + DECODE_HEADROOM_BYTES
-            if torch.cuda.mem_get_info(render.device)[0] < decode_bytes:
+            if device_free_bytes(render.device) < decode_bytes:
                 self._drop_transformer()
-            decoder = load_video_decoder(render.files.vae, render.files.tuned_decoder, render.device)
+            progress.begin("compose")
+            decoder = self._runtime.load_decoder()
         try:
             compose_spans([prepared], finals, decoder, render, progress=progress, cancel=cancel)
         finally:
             del decoder
+            self._runtime.unload_decoder()
             torch.cuda.empty_cache()
         return writer
 
@@ -193,13 +203,20 @@ class SeedRenderer:
 
     def _drop_transformer(self) -> None:
         if self._transformer is not None:
-            self._transformer.close()
             self._transformer = None
             self._transformer_path = None
+            self._runtime.unload_transformer()
             torch.cuda.empty_cache()
 
+    def _drop_runtime(self) -> None:
+        self._transformer = None
+        self._transformer_path = None
+        if self._runtime is not None:
+            self._runtime.close()
+            self._runtime = None
+
     def _drop_session(self) -> None:
-        self._drop_transformer()
+        self._drop_runtime()
         if self._session is not None:
             device = self._session.device
             self._session.close()
@@ -324,15 +341,18 @@ class LtxSeedPreviewWorker:
                         writer_for=lambda directory, effect: SeedFrameWriter(
                             directory, effect, self.metadata, _lut_applier(command.settings)
                         ),
-                        report=lambda stage, fraction, eta: self.events.put(
-                            SeedProgress(command.seed, stage, fraction, eta, generation)
+                        report=lambda fraction, eta, stage: self.events.put(
+                            SeedProgress(command.seed, stage.name, fraction, eta, generation)
                         ),
                         cancel=cancel,
                     )
                     self.events.put(SeedReady(command.seed, tuple(writer.frames), generation))
                 except Cancelled:
-                    pass
+                    if renderer is not None:
+                        renderer.release()
                 except Exception as exc:
+                    if renderer is not None:
+                        renderer.release()
                     if not self._closed.is_set():
                         self.events.put(SeedFailed(str(exc), generation))
                 finally:
@@ -352,4 +372,4 @@ def _lut_applier(settings: AppSettings):
         return None
     from jasna.media.lut import GpuLutApplier, parse_cube_file
 
-    return GpuLutApplier(parse_cube_file(lut_path), preferred_device())
+    return GpuLutApplier(parse_cube_file(lut_path), torch.device("cuda:0"))

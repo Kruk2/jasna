@@ -86,9 +86,14 @@ class SplicePlan:
         return tuple(tuple(next(remaining) for _ in span.effect_ranges) for span in self.render_spans)
 
 
+def _models(segments: tuple[SegmentRange, ...] | list[SegmentRange]) -> set[str]:
+    """The models ``segments`` name; segments still on the job's model match any."""
+    return {segment.restoration.model for segment in segments if segment.restoration is not None}
+
+
 def require_one_model(segments: tuple[SegmentRange, ...]) -> None:
-    """One render span is restored by one model; segments still on the job's model match any."""
-    if len({segment.restoration.model for segment in segments if segment.restoration is not None}) > 1:
+    """One render span is restored by one model."""
+    if len(_models(segments)) > 1:
         raise SmartRenderCompatibilityError(
             "Ranges restored by different models are too close together to split the video "
             "between them; move them apart or use one model for both",
@@ -413,7 +418,10 @@ def build_splice_plan(
 
     merged: list[tuple[int, int, list[tuple[int, int]], list[SegmentRange]]] = []
     for start, end, effects, owners in expanded:
-        if merged and start <= merged[-1][1]:
+        if merged and (
+            start < merged[-1][1]
+            or (start == merged[-1][1] and len(_models(merged[-1][3] + owners)) <= 1)
+        ):
             old_start, old_end, old_effects, old_owners = merged[-1]
             merged[-1] = (old_start, max(old_end, end), old_effects + effects, old_owners + owners)
         else:

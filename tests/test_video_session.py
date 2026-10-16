@@ -76,6 +76,9 @@ def _build(settings: AppSettings):
     unet_cls = None
     with ExitStack() as stack:
         stack.enter_context(patch("jasna._suppress_noise.install"))
+        stack.enter_context(
+            patch("jasna.gui.activation_worker.read_license_info", return_value=(None, False, None))
+        )
         compiled = stack.enter_context(
             patch("jasna.engine_compiler.ensure_engines_compiled", return_value=compile_result)
         )

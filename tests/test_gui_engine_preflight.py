@@ -13,8 +13,10 @@ from jasna.gui.models import AppSettings
 @pytest.fixture(autouse=True)
 def _use_nvidia_preflight_by_default(monkeypatch):
     import jasna.accelerator as accelerator
+    from jasna.mosaic import detection_registry
 
-    monkeypatch.setattr(accelerator, "is_amd_device", lambda _device: False)
+    for module in (accelerator, detection_registry):
+        monkeypatch.setattr(module, "is_amd_device", lambda _device=None: False)
 
 
 def _touch(path: Path) -> None:

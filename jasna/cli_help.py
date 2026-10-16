@@ -7,6 +7,20 @@ them when turning a help string into a tooltip.
 """
 
 CLI_HELP: dict[str, str] = {
+    "machine_key": "Print this machine's Machine key for activation, then exit. No GPU is needed.",
+    "cloud_workspace": (
+        "Use with --machine-key or --license-code to activate a rented GPU (RunPod, Vast) "
+        "with the official Linux release. Cloud must be turned on for your License code (ask where you got it). "
+        "Keep the Jasna config folder on a persistent volume."
+    ),
+    "activation_key": (
+        "Save the Activation key returned for this Machine key by the activation page. "
+        "Without --input, --stream or --benchmark, activate and exit."
+    ),
+    "license_code": (
+        "Activate online using your License code, then save the Activation key for offline use. "
+        "Without --input, --stream or --benchmark, activate and exit."
+    ),
     "restoration_model_name": (
         "Restoration model for video input: basicvsrpp (fast), ltx (diffusion model, much "
         "slower, best quality; no streaming, secondary restoration or denoise) or "
@@ -24,6 +38,12 @@ CLI_HELP: dict[str, str] = {
     "ltx_trial": (
         "Speed test without a license: runs LTX with placeholder weights, so the picture will look "
         "wrong. Use it to see if your GPU can run LTX and how fast. (default: %(default)s)"
+    ),
+    "ltx_auto_split": (
+        "ltx: restore only mosaics at least PERCENT of the video height with LTX and smaller "
+        "ones with BasicVSR++ (12 is a good start). Finds the mosaics in each video first and "
+        "copies the rest unchanged, keeping the video's own codec. Works on folders; a video "
+        "that can't be split is restored whole with LTX."
     ),
     "ltx_large_canvas": (
         "ltx: restore large mosaics at 768 px instead of 512 px. Sharper, but about 3x slower for "

@@ -138,6 +138,31 @@ def _profile_split_forward(split: BasicVSRPlusPlusNetSplit, device: torch.device
 
     print(f"  {'propagate/precompute_all':30s} {total_precompute*1000:8.1f} ms")
     print(f"  {'propagate/loop_body (TRT)':30s} {total_loop_body*1000:8.1f} ms")
+    feats_, flows_fwd, flows_bwd = _timed("preprocess (TRT)", split._preprocess, lqs_flat)
+    h_f, w_f = feats_.shape[2:]
+    feats_ = feats_.view(n, t, -1, h_f, w_f)
+    flows_fwd = flows_fwd.view(n, t - 1, 2, h // 4, w // 4)
+    flows_bwd = flows_bwd.view(n, t - 1, 2, h // 4, w // 4)
+
+    feats: dict[str, list[torch.Tensor]] = {"spatial": [feats_[:, i, :, :, :] for i in range(t)]}
+    grid = BasicVSRPlusPlusNetSplit._make_identity_grid(h_f, w_f, device, dtype)
+
+    flows_by_direction = {"backward": flows_bwd, "forward": flows_fwd}
+    flow_data = _timed(
+        "propagate/precompute_all",
+        lambda: {d: split._precompute_flow_data(f, d, grid) for d, f in flows_by_direction.items()},
+    )
+
+    def propagate_all() -> dict[str, list[torch.Tensor]]:
+        propagated = feats
+        for iter_ in [1, 2]:
+            for direction, flows in flows_by_direction.items():
+                module_name = f"{direction}_{iter_}"
+                propagated[module_name] = []
+                propagated = split.propagate(propagated, flows, module_name, grid, *flow_data[direction])
+        return propagated
+
+    feats = _timed("propagate (TRT loop body)", propagate_all)
 
     _timed("upsample (TRT)", split.upsample, lqs, feats)
 

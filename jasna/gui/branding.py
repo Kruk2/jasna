@@ -15,7 +15,9 @@ from jasna._frozen import is_frozen
 LOGO_SVG = "jasna-logo.svg"
 LOGO_PNG = "jasna-logo.png"
 LOGO_ICO = "jasna-logo.ico"
+XIANYU_QR_PNG = "xianyu-qr.png"
 HEADER_LOGO_SIZE = (28, 28)
+XIANYU_QR_SIZE = (220, 220)
 
 
 def brand_asset_path(filename: str) -> Path:
@@ -36,6 +38,12 @@ def create_header_logo() -> ctk.CTkImage:
         dark_image=image,
         size=HEADER_LOGO_SIZE,
     )
+
+
+def create_xianyu_qr_image() -> ctk.CTkImage:
+    with Image.open(brand_asset_path(XIANYU_QR_PNG)) as source:
+        image = source.convert("RGB")
+    return ctk.CTkImage(light_image=image, dark_image=image, size=XIANYU_QR_SIZE)
 
 
 def install_window_icon(window: tk.Tk) -> tk.PhotoImage:

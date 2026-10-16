@@ -1,0 +1,22 @@
+date,commit,label,gpu,model,quant,canvas,windows,steps,stg,sage,inductor,compile_s,s_per_window,ms_per_window_step,peak_vram_gib,runs_s
+2026-09-29,a0daf57,main-torch,NVIDIA GeForce RTX 3090,distilled,int8,512,3,8,False,False,,112.6,18.54,2318.1,12.78,55.47 55.63 55.73
+2026-09-29,f889b39,arch-tiles,NVIDIA GeForce RTX 3090,distilled,int8,512,3,8,False,False,,37.6,16.21,2026.3,12.73,48.48 48.63 48.64
+2026-09-29,a0daf57,main-torch,NVIDIA GeForce RTX 3090,distilled,int8,768,3,8,False,False,,135.1,60.18,7522.4,13.95,180.45 180.54 180.58
+2026-09-29,f889b39,arch-tiles,NVIDIA GeForce RTX 3090,distilled,int8,768,3,8,False,False,,45.7,55.28,6909.7,13.57,165.83 165.81 166.02
+2026-09-29,a0daf57,main-torch,NVIDIA GeForce RTX 3090,undistilled,int8,512,3,15,True,False,,53.9,48.99,3265.8,13.03,146.96 146.72 147.08
+2026-09-29,f889b39,arch-tiles,NVIDIA GeForce RTX 3090,undistilled,int8,512,3,15,True,False,,27.3,42.35,2823.5,12.98,127.05 127.07 127.06
+2026-09-29,a0daf57,main-torch,NVIDIA GeForce RTX 4090,distilled,int8,512,3,8,False,False,,52.7,8.17,1021.6,12.78,24.47 24.52 24.58
+2026-09-29,f889b39,arch-tiles,NVIDIA GeForce RTX 4090,distilled,int8,512,3,8,False,False,,21.0,6.88,860.4,12.73,20.62 20.65 20.67
+2026-09-29,a0daf57,main-torch,NVIDIA GeForce RTX 4090,distilled,int8,768,3,8,False,False,,70.1,26.12,3264.9,13.95,78.18 78.36 78.37
+2026-09-29,f889b39,arch-tiles,NVIDIA GeForce RTX 4090,distilled,int8,768,3,8,False,False,,20.9,23.05,2881.6,13.57,69.14 69.16 69.18
+2026-09-29,a0daf57,main-torch,NVIDIA GeForce RTX 4090,undistilled,int8,512,3,15,True,False,,28.0,21.68,1445.6,13.03,64.96 65.05 65.10
+2026-09-29,f889b39,arch-tiles,NVIDIA GeForce RTX 4090,undistilled,int8,512,3,15,True,False,,15.3,18.22,1214.7,12.98,54.61 54.66 54.68
+2026-09-29,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 3090,distilled,int8,512,3,8,False,False,,31.7,15.73,1966.8,12.75,46.39 47.20 47.41
+2026-09-29,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 3090,distilled,int8,768,3,8,False,False,,39.0,54.96,6870.0,13.57,164.81 164.88 164.89
+2026-09-29,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 3090,undistilled,int8,512,3,15,True,False,,17.0,41.71,2780.8,13.0,124.78 125.61 125.14
+2026-09-29,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 4090,distilled,int8,512,3,8,False,False,,16.2,6.6,824.5,12.75,19.75 19.79 19.88
+2026-09-29,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 4090,distilled,int8,768,3,8,False,False,,16.9,22.49,2811.5,13.57,67.32 67.47 67.53
+2026-09-29,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 4090,undistilled,int8,512,3,15,True,False,,9.7,17.56,1170.9,13.0,52.62 52.69 52.73
+2026-09-30,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 5090,distilled,int8,512,3,8,False,True,,5.4,3.92,490.4,12.77,11.74 11.77 11.78
+2026-09-30,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 5090,distilled,int8,768,3,8,False,True,,8.2,10.76,1344.5,13.59,32.18 32.27 32.30
+2026-09-30,4dc6a30,merged-4dc6a30,NVIDIA GeForce RTX 5090,undistilled,int8,512,3,15,True,True,,5.4,10.41,694.0,13.02,31.17 31.23 31.27

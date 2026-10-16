@@ -210,6 +210,7 @@ def test_final_mux_preserves_compatible_source_structure(
         "-c:s", "srt",
         "-attach", str(attachment),
         "-metadata:s:t:0", "mimetype=text/plain",
+        "-metadata:s:t:0", f"filename={attachment.name}",
         str(source),
     )
     assembled = tmp_path / "assembled.mkv"

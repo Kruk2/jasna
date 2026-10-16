@@ -1,5 +1,6 @@
 __all__ = ["__version__"]
 
+__version__ = "0.11.1"
 # Local test build (F tree only). Contents so far:
 # - long-run VRAM consolidation - a light cold-cache release every
 #   JASNA_VRAM_LIGHT_VIDEO_S of restored video (default 20 min) and a deep sweep

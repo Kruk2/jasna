@@ -7,8 +7,22 @@ several seconds on every launch. These tests pin the import to stay light.
 """
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
+
+import pytest
+
+#: The portable ROCm distribution injects a ``sitecustomize``/``.pth`` shim that
+#: imports torch at interpreter startup, so even a bare ``import jasna.restorer``
+#: child already has torch in ``sys.modules`` before any Jasna code runs. That is
+#: an environment fact, not a regression in the lazy exports.
+_PRELOADS_TORCH = importlib.util.find_spec("_jasna_rocm_dist_shim") is not None
+
+requires_no_preloaded_torch = pytest.mark.skipif(
+    _PRELOADS_TORCH,
+    reason="interpreter startup (ROCm dist shim) preloads torch; the child cannot be torch-free",
+)
 
 
 def _import_keeps_torch_out(import_stmt: str) -> subprocess.CompletedProcess:
@@ -20,11 +34,13 @@ def _import_keeps_torch_out(import_stmt: str) -> subprocess.CompletedProcess:
     return subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
 
 
+@requires_no_preloaded_torch
 def test_importing_restorer_package_does_not_load_torch():
     result = _import_keeps_torch_out("import jasna.restorer")
     assert result.returncode == 0, result.stderr
 
 
+@requires_no_preloaded_torch
 def test_bundle_present_import_does_not_load_torch():
     result = _import_keeps_torch_out("from jasna.restorer.sd15_download import bundle_present")
     assert result.returncode == 0, result.stderr

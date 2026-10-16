@@ -1,8 +1,22 @@
 import os
 import sys
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def restore_jasna_modules():
+    saved = {name: module for name, module in sys.modules.items() if name.startswith("jasna")}
+    yield
+    for name in [name for name in sys.modules if name.startswith("jasna") and name not in saved]:
+        del sys.modules[name]
+    sys.modules.update(saved)
+    for name, module in saved.items():
+        parent, _, child = name.rpartition(".")
+        if parent in saved:
+            setattr(saved[parent], child, module)
 
 
 def test_no_args_dispatches_to_gui() -> None:
@@ -13,6 +27,23 @@ def test_no_args_dispatches_to_gui() -> None:
             with patch("jasna.main.main"):
                 import jasna.__main__  # noqa: F401
                 run_gui.assert_called_once()
+
+
+@pytest.mark.parametrize("probe", [None, "0", "1"])
+def test_gui_font_probe_preserves_console_output(monkeypatch, probe) -> None:
+    sys.modules.pop("jasna.__main__", None)
+    monkeypatch.setattr(sys, "argv", ["jasna"])
+    if probe is None:
+        monkeypatch.delenv("JASNA_GUI_FONT_PROBE", raising=False)
+    else:
+        monkeypatch.setenv("JASNA_GUI_FONT_PROBE", probe)
+
+    with patch("jasna.os_utils.drop_console_window") as drop_console:
+        with patch("jasna.gui.run_gui") as run_gui:
+            import jasna.__main__  # noqa: F401
+
+    run_gui.assert_called_once()
+    assert drop_console.call_count == (0 if probe == "1" else 1)
 
 
 def test_linux_with_args_dispatches_to_main(monkeypatch) -> None:
@@ -132,3 +163,28 @@ def test_jasna_main_pid_child_exits_without_dispatch(monkeypatch) -> None:
             assert e.value.code == 0
             run_gui.assert_not_called()
             main.assert_not_called()
+
+
+def test_ltx_worker_dispatch_precedes_parent_pid_and_gui(monkeypatch) -> None:
+    sys.modules.pop("jasna.__main__", None)
+    monkeypatch.setenv("JASNA_MAIN_PID", "12345")
+    monkeypatch.setattr(sys, "argv", ["jasna", "--ltx-worker"])
+    worker = MagicMock()
+    monkeypatch.setitem(sys.modules, "jasna.protection.ltx_worker", SimpleNamespace(worker_main=worker))
+    with patch("jasna.gui.run_gui") as gui, patch("jasna.main.main") as cli:
+        with pytest.raises(SystemExit) as exit_info:
+            import jasna.__main__  # noqa: F401
+    assert exit_info.value.code == 0
+    worker.assert_called_once_with()
+    gui.assert_not_called()
+    cli.assert_not_called()
+
+
+def test_ltx_worker_rejects_extra_launch_arguments(monkeypatch) -> None:
+    sys.modules.pop("jasna.__main__", None)
+    monkeypatch.setattr(sys, "argv", ["jasna", "--ltx-worker", "untrusted"])
+    with patch("jasna.gui.run_gui") as gui, patch("jasna.main.main") as cli:
+        with pytest.raises(SystemExit, match="Invalid LTX worker launch"):
+            import jasna.__main__  # noqa: F401
+    gui.assert_not_called()
+    cli.assert_not_called()

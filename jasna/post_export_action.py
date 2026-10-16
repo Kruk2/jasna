@@ -46,7 +46,7 @@ def run_post_export_action(action: str, command: str = "") -> None:
         return
 
     if action == POST_EXPORT_ACTION_SHUTDOWN:
-        cmd = ["shutdown", "/s", "/t", "0"] if sys.platform == "win32" else ["shutdown", "-h", "now"]
+        cmd = ["shutdown", "/s", "/t", "0"] if sys.platform == "win32" else ["systemctl", "poweroff"]
         subprocess.Popen(cmd, **subprocess_no_window_kwargs())
         return
 
@@ -62,9 +62,14 @@ def run_post_export_action_safely(action: str, command: str, report_error: Calla
         return False
 
 
+def _quote_cmd_value(value: str) -> str:
+    trailing_backslashes = len(value) - len(value.rstrip("\\"))
+    return '"' + value + "\\" * trailing_backslashes + '"'
+
+
 def _quote_shell_value(value: str) -> str:
     if sys.platform == "win32":
-        return subprocess.list2cmdline([value])
+        return _quote_cmd_value(value)
     return shlex.quote(value)
 
 

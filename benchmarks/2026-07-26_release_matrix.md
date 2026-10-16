@@ -1,44 +1,17 @@
-# Linux release and performance benchmark
+# Linux release benchmark (2026-07-26)
 
-- Date: 2026-07-26
-- OS: Linux
-- Hardware: NVIDIA RTX 5090 32 GB, driver 595.84; Intel i9-13900K
-- Targets: official Linux NVIDIA releases
-  [v0.4.1](https://github.com/Kruk2/jasna/releases/tag/v0.4.1),
-  [v0.5.0](https://github.com/Kruk2/jasna/releases/tag/v0.5.0),
-  [v0.6.2](https://github.com/Kruk2/jasna/releases/tag/v0.6.2),
-  [v0.7.2](https://github.com/Kruk2/jasna/releases/tag/v0.7.2),
-  [v0.8.1](https://github.com/Kruk2/jasna/releases/tag/v0.8.1), and v0.9.0
-  source commit `4a171c9`
-- Harness: `scripts/benchmark_releases.py`
+`scripts/benchmark_releases.py`, RTX 5090 32 GB, driver 595.84, i9-13900K, live desktop (treat single-digit
+differences as noise unless a paired rerun repeats them). Official Linux NVIDIA releases
+[v0.4.1](https://github.com/Kruk2/jasna/releases/tag/v0.4.1), [v0.5.0](https://github.com/Kruk2/jasna/releases/tag/v0.5.0)
+(v0.5.1 has no Linux build), [v0.6.2](https://github.com/Kruk2/jasna/releases/tag/v0.6.2),
+[v0.7.2](https://github.com/Kruk2/jasna/releases/tag/v0.7.2), [v0.8.1](https://github.com/Kruk2/jasna/releases/tag/v0.8.1)
+and v0.9.0 source `4a171c9` (VALI, PyAV 18.0.0 built with CUDA-stream support, tmpfs scratch).
+`--max-clip-size 180 --temporal-overlap 15 --secondary-restoration none`, each version's default models, HEVC output,
+one warmup discarded. Releases and Lada: one run; v0.9.0: median of three interleaved runs; commit and feature rows:
+median of three. RAM RSS / process VRAM sampled every 0.5 s, median/peak MiB. SONE inputs: six encodings of one
+6,056-frame (202.07 s) source; VR: 8K, 900 frames. v0.8.1 2160p AV1 is excluded (release bug on that input).
 
-## Method
-
-- Settings: `--max-clip-size 180 --temporal-overlap 15
-  --secondary-restoration none`; defaults otherwise, including each version's
-  default models and HEVC output.
-- Each target first restored `assets/test_clip1_1080p.mp4`; that output and all
-  measured outputs were discarded. Frozen-release and Lada rows are one
-  measured run after warmup. Refreshed v0.9.0 rows are medians of three paired
-  runs, interleaved per input with alternating target order. The recent-commit
-  and feature-pair results are medians of three fresh subprocess runs.
-- Source targets forced the VALI decoder. Frozen releases used their own
-  release defaults.
-- The v0.9.0 source target used a locally built PyAV 18.0.0 with explicit CUDA
-  stream support. Its paired runs used tmpfs scratch space. Released targets
-  used their bundled dependencies.
-- RAM RSS and per-process VRAM were sampled every 0.5 seconds. Values below are
-  median/peak MiB for the benchmark process; compositor VRAM is excluded.
-- SONE files are six encodings of the same 6,056-frame, 202.07-second source.
-  The VR input is 8K, 900 frames, and 15 seconds.
-- The frozen binaries exported `LD_LIBRARY_PATH` to child tools. Scratch-only
-  `ffmpeg`, `ffprobe`, and `mkvmerge` launchers unset it before calling the
-  existing `/usr/bin` tools. No Jasna release files, drivers, or system
-  settings were changed.
-- This was a live desktop run, not a locked-down lab environment. Treat small
-  single-digit differences as noise unless a paired result repeats the effect.
-
-## Release results
+## Releases
 
 | Version | Input | Wall | fps | RAM med/peak MiB | VRAM med/peak MiB | Status |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -81,17 +54,7 @@
 | v0.9.0 `4a171c9` | 2160p AV1 10-bit | 01:04.7 | 93.6 | 3360/3394 | 12106/16142 | OK |
 | v0.9.0 `4a171c9` | 8K VR HEVC 8-bit 60 fps | 00:34.5 | 26.1 | 6648/6909 | 17548/18696 | OK |
 
-v0.5.0 is used because
-[v0.5.1](https://github.com/Kruk2/jasna/releases/tag/v0.5.1) has no Linux
-release artifact. v0.7.2 is the latest v0.7.x release. The three v0.8.1 Linux
-NVIDIA archive parts matched their published SHA-256 digests.
-The v0.8.1 2160p AV1 result was excluded because that release has a bug on this
-input.
-
-## Recent performance commits
-
-Broad end-to-end runs used 1080p HEVC, 2160p HEVC, and 8K VR with the normal
-feature defaults. Each cell is the median wall time of three runs.
+## Performance commits (median wall, default features)
 
 | Commit | Change | 1080p HEVC | 2160p HEVC | 8K VR |
 | --- | --- | ---: | ---: | ---: |
@@ -104,13 +67,8 @@ feature defaults. Each cell is the median wall time of three runs.
 | `07fabc2` | Denoise kernel | 38.4 s | 77.4 s | 36.9 s |
 | `7d9cc8c` | Cache VR axes and rotations | 38.6 s | 77.8 s | 37.8 s |
 
-The full series reduced median wall time from baseline to the final pre-stream
-performance commit by 11.7% at 1080p, 11.2% at 2160p, and 11.5% on the default
-8K path. The detector preprocess commit produced the clearest always-on step.
-LUT, denoise, and explicit VR projection are disabled in this broad run, so
-their neighboring rows must not be used to estimate those commits.
-
-### Feature-specific paired runs
+Baseline to `7d9cc8c`: −11.7 % at 1080p, −11.2 % at 2160p, −11.5 % on 8K VR; the detector preprocess kernel is the
+clearest step. LUT, denoise and explicit VR projection are off here, so read those commits from the paired runs:
 
 | Feature and input | Before | After | Wall-time change | RAM med/peak MiB | VRAM med/peak MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -119,15 +77,12 @@ their neighboring rows must not be used to estimate those commits.
 | Medium denoise, 1080p HEVC | 44.19 s | 44.30 s | +0.3% (noise) | 2593/2624 → 2596/2627 | 9633/10239 → 9629/10307 |
 | Explicit `sbs-fisheye`, 8K VR | 40.97 s | 39.89 s | -2.6% | 6967/6975 → 6969/6975 | 17186/18100 → 17392/17782 |
 
-The synthetic blend clip has 1,800 frames and no expected detections. The LUT,
-denoise, and VR options were explicitly enabled for both sides of each pair.
+The blend input is a synthetic 2160p black clip, 1,800 frames, no detections.
 
-## Lada Flatpak results
+## Lada Flatpak 0.11.0
 
-Lada 0.11.0 was measured from its user-scoped Linux Flatpak with the accurate
-`v2` detector, CUDA FP16, `--max-clip-length 180`, and the
-`hevc-nvidia-gpu-hq` encoding preset. One warmup was discarded. RAM includes
-all processes in the Flatpak cgroup, and no 8K input was run.
+Accurate `v2` detector, CUDA FP16, `--max-clip-length 180`, `hevc-nvidia-gpu-hq`; RAM covers the whole Flatpak
+cgroup; no 8K run.
 
 | Input | Wall | fps | RAM med/peak MiB | VRAM med/peak MiB | Jasna v0.9.0 speedup |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -138,14 +93,10 @@ all processes in the Flatpak cgroup, and no 8K input was run.
 | 2160p HEVC 10-bit | 05:10.7 | 19.5 | 12700/17454 | 2613/4079 | 3.9x |
 | 2160p AV1 10-bit | 05:20.9 | 18.9 | 15016/18570 | 2649/3871 | 5.0x |
 
-## Legacy-video interest check
+## Legacy full-length videos
 
-The files from the legacy README table were run last on `9b6a089` (the parent
-of all seven performance commits) and v0.9.0. Official v0.7.2 was then run on
-HUBLK and the three short test inputs; ABF was excluded from that follow-up as
-requested. Their original maximum clip sizes were retained; temporal overlap
-was 8 and secondary restoration was disabled. These are single full-file runs
-after target warmup.
+`9b6a089` (before the performance commits), v0.9.0 and, except ABF, v0.7.2; original clip sizes, temporal overlap 8,
+no secondary restoration, one full-file run each after warmup.
 
 | Input | Version | Wall | fps | RAM med/peak MiB | VRAM med/peak MiB | Status |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -163,18 +114,10 @@ after target warmup.
 | test-007 (3,813 frames) | v0.7.2 | 00:27.4 | 139.3 | 2601/2643 | 3469/3481 | OK |
 | test-007 (3,813 frames) | `9b6a089` | 00:30.7 | 124.0 | 2587/2615 | 3205/3255 | OK |
 | test-007 (3,813 frames) | v0.9.0 | 00:26.8 | 142.5 | 2462/2484 | 3105/3105 | OK |
-v0.9.0 was 2.4% faster on ABF, 3.5% faster on DASS, 4.4% faster on NASK, and
-12.9% faster on test-007. HUBLK was 1.7% slower, within the noise expected from
-a single live-desktop run.
 
-v0.7.2 completed HUBLK in 23:38.1, 23.6% faster than the historical v0.6.2
-result of 30:58 but 33.5% slower than `9b6a089`. Its DASS result was unusually
-slow despite no warning or fallback in the log.
+v0.9.0 vs `9b6a089`: ABF −2.4 %, DASS −3.5 %, NASK −4.4 %, test-007 −12.9 %, HUBLK +1.7 % (noise).
+v0.7.2 HUBLK is 23.6 % faster than the old v0.6.2 result (30:58) but 33.5 % slower than `9b6a089`; its DASS run was
+unusually slow with no warning in the log.
 
-## Raw data
-
-- `2026-07-26_release_matrix.csv`
-- `2026-07-26_perf_commit_series.csv`
-- `2026-07-26_perf_feature_pairs.csv`
-- `2026-07-26_legacy_videos.csv`
-- `2026-07-26_lada_flatpak.csv`
+Raw data: `2026-07-26_release_matrix.csv`, `2026-07-26_perf_commit_series.csv`, `2026-07-26_perf_feature_pairs.csv`,
+`2026-07-26_legacy_videos.csv`, `2026-07-26_lada_flatpak.csv`.

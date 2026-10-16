@@ -11,7 +11,8 @@ from pathlib import Path
 
 from jasna._frozen import is_frozen
 from jasna.engine_paths import all_basicvsrpp_sub_engines_exist
-from jasna.os_utils import subprocess_no_window_kwargs
+from jasna.license_api import require_protection
+from jasna.os_utils import get_application_executable, subprocess_no_window_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ def _unet4x_engine_exists(fp16: bool) -> bool:
     if not engine_path.exists():
         return False
 
+    require_protection()
     from jasna.protection import ProtectionError, protected_model
     try:
         protected_model.decrypt_engine_bytes("unet-4x", engine_path.read_bytes())
@@ -147,9 +149,12 @@ def ensure_engines_compiled(
     missing = _missing_engines(req, nvidia=nvidia)
     if missing.unet4x:
         from jasna.engine_paths import unet4x_plaintext_available
-        from jasna.protection import license_store
-        if not unet4x_plaintext_available() and not license_store.is_licensed():
-            raise RuntimeError("unet-4x is a supporter feature. Enter your license to enable it.")
+        if not unet4x_plaintext_available():
+            require_protection()
+            from jasna.protection import license_store
+
+            if not license_store.is_licensed():
+                raise RuntimeError("unet-4x is a supporter feature. Enter your license to enable it.")
 
     if req.basicvsrpp and nvidia:
         if not req.fp16:
@@ -169,8 +174,9 @@ def ensure_engines_compiled(
     else:
         print(start_msg)
 
-    if is_frozen():
-        cmd = [sys.executable, "--compile-engines", req.to_json()]
+    frozen = is_frozen()
+    if frozen:
+        cmd = [get_application_executable(), "--compile-engines", req.to_json()]
     else:
         cmd = [sys.executable, "-m", "jasna.engine_compiler", req.to_json()]
 
@@ -181,6 +187,9 @@ def ensure_engines_compiled(
         "text": True,
         "bufsize": 1,
     }
+    if frozen:
+        from jasna.protection.runtime import subprocess_environment
+        kwargs["env"] = subprocess_environment()
     proc = subprocess.Popen(cmd, **kwargs, **subprocess_no_window_kwargs())
     assert proc.stdout is not None
     for line in proc.stdout:

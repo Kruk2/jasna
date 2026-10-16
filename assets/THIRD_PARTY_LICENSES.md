@@ -52,6 +52,15 @@ by the LTX-2.x Community License (`assets/licenses/LTX-2.x-Community-License.txt
 `jasna/models/ltx_vae/eager_na.py` originates from Comfy Org comfy-kitchen and
 keeps its Apache-2.0 header.
 
+Jasna's `jasna/ltx/native/sage_attention/` directory is the bf16, unmasked
+subset of the INT8 SageAttention CUDA kernels of
+[Comfy Org comfy-kitchen](https://github.com/Comfy-Org/comfy-kitchen) v0.2.36
+(commit `888b13e2c0e721f6576fe351a2ad79894b1c451f`), themselves derived from
+[SageAttention](https://github.com/thu-ml/SageAttention). They keep their
+Apache-2.0 headers; the directory's `NOTICE` records the upstream notices and
+Jasna's changes.
+
+
 Jasna also contains code derived from
 [Lada](https://codeberg.org/ladaapp/lada), licensed under AGPL-3.0. Jasna's
 root `LICENSE` contains the complete AGPL-3.0 text.

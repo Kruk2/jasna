@@ -42,7 +42,7 @@ from jasna.gui.segment_editor_state import (
     SegmentEditorState,
     smart_render_error_key,
 )
-from jasna.gui.segment_scan_panel import ScanPanel, worker_status_text
+from jasna.gui.segment_scan_panel import ScanPanel
 from jasna.gui.segment_preview import (
     PreviewEnded,
     PreviewFailed,
@@ -70,6 +70,7 @@ from jasna.segments import (
 logger = logging.getLogger(__name__)
 
 RANGE_LIST_MIN_HEIGHT = 3 * 44 + 24
+LTX_RENDER_ASK_SECONDS = 120.0
 RANGE_TIMES_ONE_ROW_MIN_WIDTH = 520
 
 
@@ -77,6 +78,14 @@ def range_controls_height(shared: int, content: int, list_min: int) -> int:
     """Height of the range controls under the range list, which share ``shared`` pixels:
     all of ``content`` while the list keeps ``list_min``, else the rest (never under half)."""
     return max(0, min(content, max(shared - list_min, shared // 2)))
+
+
+def worker_status_text(message: str) -> str:
+    if message == "loading_models":
+        return t("segments_restore_loading_models")
+    if message == "restoring":
+        return t("segments_restore_restoring")
+    return message
 
 
 class SegmentEditor(ctk.CTkToplevel):
@@ -135,6 +144,9 @@ class SegmentEditor(ctk.CTkToplevel):
         self._scan_panel: ScanPanel | None = None
         self._play: ctk.CTkButton | None = None
         self._segment_action_widgets: list = []
+        self._segment_rows: list = []
+        self._segment_rows_key: tuple | None = None
+        self._highlighted_row: int | None = None
         self._timeline_zoom_buttons: list = []
         self._mask_feedback_worker = MaskFeedbackWorker()
         self._suggest_busy = False
@@ -149,7 +161,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self.title(t("segments_title"))
         self.configure(fg_color=Colors.BG_MAIN)
         self.transient(master.winfo_toplevel())
-        self.protocol("WM_DELETE_WINDOW", self._request_close)
+        self.protocol("WM_DELETE_WINDOW", self.request_close)
         self._size_and_center()
         self._build_loading()
         self._bind_shortcuts()
@@ -430,6 +442,15 @@ class SegmentEditor(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
         ).pack(side="right", padx=(0, 6))
         self._restore_toggle_tooltip = Tooltip(self._restore_toggle, t("segments_restore_preview_hint"))
+        self._ltx_render_btn = ctk.CTkButton(
+            preview_options,
+            text="",
+            height=26,
+            fg_color=Colors.MODEL_LTX,
+            hover_color=Colors.PRIMARY_HOVER,
+            command=self._render_ltx_preview,
+        )
+        self._ltx_render_tooltip = Tooltip(self._ltx_render_btn, t("tip_segments_ltx_render"))
         self._seed_view_control = ctk.CTkFrame(preview_options, fg_color="transparent")
         self._seed_view_toggle = CompactSwitch(self._seed_view_control, self._toggle_seed_view, Colors.BG_CARD)
         self._seed_view_toggle.pack(side="right")
@@ -723,6 +744,12 @@ class SegmentEditor(ctk.CTkToplevel):
         self._seed_chips = ctk.CTkFrame(self._seed_box, fg_color="transparent")
         self._seed_chip_widgets: list = []
 
+    def _keyframe_seconds(self) -> tuple[float, ...] | None:
+        index = self._keyframe_index
+        if index is None:
+            return None
+        return tuple(index.seconds_for_pts(pts) for pts in index.pts)
+
     def _ltx_blocked_reason(self) -> str | None:
         """Locale key saying why a range cannot use LTX here, or None when it can."""
         if self._ltx_unavailable_reason is not None:
@@ -743,7 +770,10 @@ class SegmentEditor(ctk.CTkToplevel):
     def _apply_selected_restoration(self, restoration: SegmentRestoration) -> None:
         if self._require_state().set_selected_restoration(restoration):
             self._edit_notice = None
+            self._shown_seed = None
             self._refresh_all()
+            if self._restore_active:
+                self._request_restoration_preview()
         else:
             self._refresh_inspector()
 
@@ -804,6 +834,17 @@ class SegmentEditor(ctk.CTkToplevel):
     def _range_key(segment: SegmentRange) -> tuple[float, float]:
         return (segment.start, segment.end)
 
+    def _ltx_render_block_reason(self) -> str | None:
+        """Locale key saying why an LTX preview render cannot start now, or None when it can."""
+        blocked = self._ltx_blocked_reason()
+        if blocked is not None:
+            return blocked
+        if self._is_gpu_busy():
+            return "segments_restore_gpu_busy"
+        if self._keyframe_index is None:
+            return "segments_loading_preview"
+        return None
+
     def _try_seed_block_reason(self) -> str | None:
         """Locale key saying why Try seed is not available now, or None when it is."""
         blocked = self._ltx_blocked_reason()
@@ -816,6 +857,7 @@ class SegmentEditor(ctk.CTkToplevel):
         return None
 
     def _refresh_seed_controls(self) -> None:
+        self._refresh_ltx_render_button()
         selected = self._require_state().selected_segment
         if selected is None or selected.restoration.model != "ltx":
             self._refresh_seed_view_control()
@@ -896,6 +938,101 @@ class SegmentEditor(ctk.CTkToplevel):
             return None
         return self._shown_seed[1]
 
+    def _preview_seed(self, segment: SegmentRange) -> int:
+        """The seed the preview shows for an LTX range: a tried seed picked from its chips,
+        else the range's own."""
+        shown = self._shown_seed_for(segment)
+        return segment.restoration.ltx_seed if shown is None else shown
+
+    def _ltx_range_at_playhead(self) -> SegmentRange | None:
+        segment = self._require_state().segment_at(self._current)
+        return segment if segment is not None and segment.restoration.model == "ltx" else None
+
+    def _is_rendering(self, segment: SegmentRange) -> bool:
+        return self._seed_running is not None and self._seed_running[0] == self._range_key(segment)
+
+    def _unrendered_ltx_range(self) -> SegmentRange | None:
+        """The LTX range under the playhead while the restore preview is on and its seed has
+        no frames yet."""
+        segment = self._ltx_range_at_playhead() if self._restore_active else None
+        if segment is None or self._is_rendering(segment):
+            return None
+        if self._tried_seeds.get(self._range_key(segment), {}).get(self._preview_seed(segment)):
+            return None
+        return segment
+
+    def _ltx_render_seconds(self, segment: SegmentRange) -> float:
+        import torch
+
+        from jasna.ltx.model_files import bundle_names
+        from jasna.ltx.speed import profile_path, segment_estimate_seconds
+
+        settings = self._current_video_settings()
+        metadata = self._metadata
+        return segment_estimate_seconds(
+            profile_path(),
+            torch.cuda.get_device_name(0),
+            bundle_names(settings.ltx_model, fast=settings.ltx_fast)[0],
+            frames=max(1, round(segment.duration * metadata.video_fps)),
+            fps=float(metadata.video_fps),
+            megapixels=metadata.video_width * metadata.video_height / 1e6,
+        )
+
+    def _refresh_ltx_render_button(self) -> None:
+        segment = self._unrendered_ltx_range()
+        if segment is None:
+            self._ltx_render_btn.pack_forget()
+            return
+        reason = self._ltx_render_block_reason()
+        self._ltx_render_btn.configure(
+            text=t(
+                "segments_ltx_render",
+                seed=self._preview_seed(segment),
+                duration=format_duration(self._ltx_render_seconds(segment)),
+            ),
+            state="disabled" if reason is not None or self._scanning() else "normal",
+        )
+        self._ltx_render_tooltip.set_text(t(reason) if reason else t("tip_segments_ltx_render"))
+        if not self._ltx_render_btn.winfo_manager():
+            self._ltx_render_btn.pack(side="left")
+
+    def _render_ltx_preview(self) -> bool:
+        """Render the LTX range under the playhead with its preview seed, after asking when it
+        takes longer than ``LTX_RENDER_ASK_SECONDS``; returns whether it started."""
+        segment = self._unrendered_ltx_range()
+        if segment is None or self._ltx_render_block_reason() is not None:
+            return False
+        seed = self._preview_seed(segment)
+        seconds = self._ltx_render_seconds(segment)
+        if seconds > LTX_RENDER_ASK_SECONDS and not messagebox.askyesno(
+            t("segments_ltx_render_confirm_title"),
+            t("segments_ltx_render_confirm", seed=seed, duration=format_duration(seconds)),
+            parent=self,
+        ):
+            return False
+        state = self._require_state()
+        state.select(state.segments.index(segment))
+        self._claim_gpu_for_seed()
+        if self._seed_worker is None:
+            settings = self._get_settings()
+            work_dir = Path(settings.working_directory) if settings.working_directory else Path(self._job.path).parent
+            self._seed_worker = LtxSeedPreviewWorker(
+                self._job.path,
+                self._metadata,
+                self._keyframe_index,
+                work_dir,
+                on_stopped=lambda: self._set_preview_gpu_busy(False),
+            )
+            self._seed_worker.start()
+        self._seed_generation = self._seed_worker.try_seed(segment, seed, self._current_video_settings())
+        self._seed_running = (self._range_key(segment), seed)
+        self._shown_seed = (self._range_key(segment), seed)
+        self._seed_progress.set(0.0)
+        self._seed_status.configure(text=t("segments_seed_starting", seed=seed), text_color=Colors.STATUS_PENDING)
+        self._refresh_all()
+        self._show_ltx_preview_state()
+        return True
+
     def _refresh_seed_view_control(self) -> None:
         if self._shown_seed is None:
             self._seed_view_control.pack_forget()
@@ -937,6 +1074,8 @@ class SegmentEditor(ctk.CTkToplevel):
         self._seed_running = None
         self._seed_status.configure(text="")
         self._refresh_seed_controls()
+        if self._restore_active:
+            self._request_restoration_preview()
 
     def _claim_gpu_for_seed(self) -> None:
         if self._restore_active:
@@ -978,6 +1117,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._tried_seeds.setdefault(key, {})[seed] = event.frames
             self._seed_status.configure(text="")
             self._shown_seed = (key, seed)
+            self._show_ltx_frames(key)
             self._seed_view_on = True
             if not key[0] <= self._current < key[1]:
                 self._seek(key[0])
@@ -995,11 +1135,19 @@ class SegmentEditor(ctk.CTkToplevel):
         selected = self._require_state().selected_segment
         if selected is None:
             return
-        key = self._range_key(selected)
-        self._shown_seed = (key, seed)
+        self._shown_seed = (self._range_key(selected), seed)
         self._seed_view_on = True
+        self._show_ltx_frames(self._range_key(selected))
+
+    def _show_ltx_frames(self, key: tuple[float, float]) -> None:
+        """Turn the restore preview on over the rendered LTX range ``key``."""
         if not key[0] <= self._current < key[1]:
             self._seek(key[0])
+        if not self._restore_active:
+            self._restore_active = True
+            self._restore_toggle.select()
+        self._refresh_all()
+        self._request_restoration_preview()
         self._refresh_seed_controls()
         self._refresh_preview_image()
 
@@ -1054,6 +1202,8 @@ class SegmentEditor(ctk.CTkToplevel):
                 else settings.detection_score_threshold
             ),
             left_eye_only=self._preview_left_eye,
+            ltx_seed=None if self._ltx_blocked_reason() is not None else self._job_ltx_seed,
+            keyframes=self._keyframe_seconds,
             base_settings=self._get_settings,
             current_seconds=lambda: self._current,
             is_gpu_busy=self._is_gpu_busy,
@@ -1131,14 +1281,32 @@ class SegmentEditor(ctk.CTkToplevel):
         footer.pack(fill="x", padx=16, pady=(3, 12))
         info_column = ctk.CTkFrame(footer, fg_color="transparent")
         info_column.pack(side="left", fill="x", expand=True)
+        workload_row = ctk.CTkFrame(info_column, fg_color="transparent")
+        workload_row.pack(fill="x")
         self._workload = ctk.CTkLabel(
-            info_column,
+            workload_row,
             text="",
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
             text_color=Colors.TEXT_PRIMARY,
             anchor="w",
         )
-        self._workload.pack(fill="x")
+        self._workload.pack(side="left")
+        self._model_split_bar = ctk.CTkProgressBar(
+            workload_row,
+            width=120,
+            height=8,
+            fg_color=Colors.PRIMARY,
+            progress_color=Colors.MODEL_LTX,
+        )
+        self._model_split = ctk.CTkLabel(
+            workload_row,
+            text="",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL),
+            text_color=Colors.STATUS_PENDING,
+            anchor="w",
+        )
+        for widget in (self._model_split_bar, self._model_split):
+            Tooltip(widget, t("segments_model_split_hint"))
         self._notice = ctk.CTkLabel(
             info_column,
             text="",
@@ -1152,7 +1320,7 @@ class SegmentEditor(ctk.CTkToplevel):
             text=t("btn_cancel"),
             fg_color=Colors.BG_CARD,
             hover_color=Colors.BORDER_LIGHT,
-            command=self._request_close,
+            command=self.request_close,
         )
         self._cancel_btn.pack(side="right")
         self._apply_btn = ctk.CTkButton(
@@ -1183,6 +1351,9 @@ class SegmentEditor(ctk.CTkToplevel):
                     self._keyframe_index = event.index
                     self._analysis_error = event.error
                     self._refresh_workload()
+                    if self._scan_panel is not None:
+                        self._scan_panel.refresh_view()
+                        self._refresh_ltx_render_button()
                 elif isinstance(event, PreviewFrame):
                     self._show_frame(event)
                 elif isinstance(event, PreviewFullFrame):
@@ -1243,6 +1414,9 @@ class SegmentEditor(ctk.CTkToplevel):
         seed_image = self._seed_view_image()
         if seed_image is not None:
             return seed_image
+        if self._restore_active and self._ltx_range_at_playhead() is None:
+            return self._restored_source
+        return None if self._restore_active else self._preview_source
         return self._restored_source if self._restore_active else self._preview_source
 
     def _preview_image_geometry(
@@ -1452,7 +1626,7 @@ class SegmentEditor(ctk.CTkToplevel):
             return
         if self._current >= state.duration - 1 / state.fps:
             self._current = 0.0
-        if self._restore_active:
+        if self._restore_active and not self._playhead_uses_ltx():
             if self._restored_clip_covers(self._current):
                 self._start_restored_playback(self._current)
             else:
@@ -1497,11 +1671,14 @@ class SegmentEditor(ctk.CTkToplevel):
         self._set_playing(False)
         self._restore_toggle.select()
         self._restored_source = None
-        self._show_preview_message(
-            t("segments_restore_restoring"),
-            Colors.STATUS_PENDING,
-        )
+        if self._unrendered_ltx_range() is not None and not self._render_ltx_preview():
+            self._deactivate_restoration_preview()
+            return
+        self._request_restoration_preview()
+
+    def _ensure_restoration_worker(self) -> None:
         if self._restoration_worker is None:
+            self._release_seed_gpu()
             self._set_preview_gpu_busy(True)
             try:
                 self._restoration_worker = RestorationPreviewWorker(
@@ -1517,7 +1694,6 @@ class SegmentEditor(ctk.CTkToplevel):
                 self._restore_toggle.deselect()
                 self._refresh_preview_image()
                 raise
-        self._request_restoration_preview()
 
     def _deactivate_restoration_preview(self) -> None:
         self._restore_active = False
@@ -1532,6 +1708,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restored_source = None
         self._preview_image = None
         self._restore_toggle.deselect()
+        self._refresh_ltx_render_button()
         self._refresh_preview_image()
 
     def _schedule_restoration_preview(self) -> None:
@@ -1557,6 +1734,15 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restore_play_pending = False
         self._restored_clip = ()
         self._play.configure(text="▶")
+        self._refresh_ltx_render_button()
+        if self._playhead_uses_ltx():
+            self._restored_source = None
+            self._show_ltx_preview_state()
+            return
+        if self._seed_running is not None:
+            self._show_preview_message(t("segments_preview_ltx_busy"), Colors.STATUS_PENDING)
+            return
+        self._ensure_restoration_worker()
         self._restore_generation = self._restoration_worker.request(
             self._current,
             self._standard_preview_settings(),
@@ -1568,9 +1754,27 @@ class SegmentEditor(ctk.CTkToplevel):
                 Colors.STATUS_PENDING,
             )
 
+    def _show_ltx_preview_state(self) -> None:
+        """Preview over LTX: its rendered frames, else what it waits for."""
+        segment = self._ltx_range_at_playhead()
+        if segment is None:
+            self._show_preview_message(t("segments_restore_ltx_unavailable"), Colors.STATUS_WARNING)
+        elif self._seed_view_image() is not None:
+            self._refresh_preview_image()
+        elif self._is_rendering(segment):
+            self._show_preview_message(
+                t("segments_preview_ltx_rendering", seed=self._seed_running[1]), Colors.STATUS_PENDING
+            )
+        else:
+            self._show_preview_message(
+                t("segments_preview_ltx_not_rendered", seed=self._preview_seed(segment)), Colors.STATUS_WARNING
+            )
+
     def _request_restoration_playback(self, start_seconds: float) -> None:
         if not self._restore_active or self._closed.is_set():
             return
+        if self._require_state().restoration_at(start_seconds).model == "ltx" or self._seed_running is not None:
+            self._request_restoration_preview()
         if self._require_state().restoration_at(start_seconds).model == "ltx":
             self._show_preview_message(t("segments_restore_ltx_unavailable"), Colors.STATUS_WARNING)
             return
@@ -1670,6 +1874,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self._restore_toggle_tooltip.set_text(
             t("segments_restore_gpu_busy") if busy else t("segments_restore_preview_hint")
         )
+        self._refresh_ltx_render_button()
 
     def _claim_gpu_for_scan(self) -> None:
         self._release_seed_gpu()
@@ -1703,6 +1908,7 @@ class SegmentEditor(ctk.CTkToplevel):
             self._seed_entry,
             self._new_seed_btn,
             self._use_for_all_btn,
+            self._ltx_render_btn,
             self._try_seed_btn,
             *self._timeline_zoom_buttons,
             *self._segment_action_widgets,
@@ -1859,6 +2065,12 @@ class SegmentEditor(ctk.CTkToplevel):
             self._set_entry(self._end_entry, segment.end)
         self._refresh_all()
 
+    def _select_range_from_list(self, index: int) -> None:
+        self._select_range(index)
+        selected = self._require_state().selected_segment
+        if selected is not None:
+            self._seek(selected.start)
+
     def _delete_range(self, index: int) -> None:
         state = self._require_state()
         state.select(index)
@@ -1891,8 +2103,40 @@ class SegmentEditor(ctk.CTkToplevel):
             self._refresh_all()
 
     def _render_segment_list(self) -> None:
+        """Rebuild the rows only when the ranges change; a new selection recolors its
+        row and scrolls the list to it."""
         state = self._require_state()
+        key = (state.segments, self._scanning())
+        if key != self._segment_rows_key:
+            self._segment_rows_key = key
+            self._highlighted_row = None
+            self._build_segment_rows(state)
+        selected = state.selected_index if state.selected_segment is not None else None
+        if selected == self._highlighted_row:
+            return
+        if self._highlighted_row is not None:
+            self._segment_rows[self._highlighted_row].configure(fg_color=Colors.BG_CARD)
+        self._highlighted_row = selected
+        if selected is not None:
+            self._segment_rows[selected].configure(fg_color=Colors.PRIMARY_DARK)
+            self._reveal_segment_row(selected)
+
+    def _reveal_segment_row(self, index: int) -> None:
+        self._segment_list.update_idletasks()
+        content_height = self._segment_list.winfo_height()
+        if content_height <= 1:
+            return
+        row = self._segment_rows[index]
+        canvas = self._segment_list._parent_canvas
+        top, bottom = canvas.yview()
+        row_top = row.winfo_y() / content_height
+        row_bottom = (row.winfo_y() + row.winfo_height()) / content_height
+        if row_top < top or row_bottom > bottom:
+            canvas.yview_moveto(row_top)
+
+    def _build_segment_rows(self, state: SegmentEditorState) -> None:
         self._segment_action_widgets = []
+        self._segment_rows = []
         for child in self._segment_list.winfo_children():
             child.destroy()
         if not state.segments:
@@ -1905,13 +2149,13 @@ class SegmentEditor(ctk.CTkToplevel):
             ).pack(fill="x", padx=8, pady=14)
             return
         for index, segment in enumerate(state.segments):
-            selected = index == state.selected_index
             row = ctk.CTkFrame(
                 self._segment_list,
-                fg_color=Colors.PRIMARY_DARK if selected else Colors.BG_CARD,
+                fg_color=Colors.BG_CARD,
                 corner_radius=Sizing.BORDER_RADIUS,
             )
             row.pack(fill="x", pady=2)
+            self._segment_rows.append(row)
             label = ctk.CTkButton(
                 row,
                 text=t(
@@ -1927,7 +2171,7 @@ class SegmentEditor(ctk.CTkToplevel):
                 hover_color=Colors.BORDER_LIGHT,
                 text_color=Colors.TEXT_PRIMARY,
                 font=(Fonts.FAMILY_MONO, Fonts.SIZE_TINY),
-                command=lambda i=index: self._select_range(i),
+                command=lambda i=index: self._select_range_from_list(i),
             )
             label.pack(side="left", fill="x", expand=True)
             label.configure(state="disabled" if self._scanning() else "normal")
@@ -1986,6 +2230,7 @@ class SegmentEditor(ctk.CTkToplevel):
         if self._state is None:
             return
         state = self._state
+        self._refresh_model_split()
         if not state.segments:
             self._codec_notice.pack_forget()
             self._compatibility_error = None
@@ -2028,6 +2273,28 @@ class SegmentEditor(ctk.CTkToplevel):
         self._refresh_notice()
         self._update_apply_state()
 
+    def _refresh_model_split(self) -> None:
+        """Show how the selected time splits between LTX and BasicVSR++ once a range uses LTX."""
+        state = self._require_state()
+        ltx = state.ltx_duration
+        if not ltx:
+            self._model_split_bar.pack_forget()
+            self._model_split.pack_forget()
+            return
+        total = state.selected_duration
+        self._model_split_bar.set(ltx / total)
+        self._model_split.configure(
+            text=t(
+                "segments_model_split",
+                ltx=format_timestamp(ltx, milliseconds=False),
+                percent=ltx / total * 100,
+                standard=format_timestamp(total - ltx, milliseconds=False),
+            )
+        )
+        if not self._model_split_bar.winfo_manager():
+            self._model_split_bar.pack(side="left", padx=(14, 8))
+            self._model_split.pack(side="left")
+
     def _refresh_notice(self) -> None:
         if self._state is None:
             return
@@ -2067,11 +2334,12 @@ class SegmentEditor(ctk.CTkToplevel):
         self._on_saved(state.output_segments)
         self._finish_close()
 
-    def _request_close(self) -> None:
+    def request_close(self) -> None:
         if self._scanning():
             self._scan_panel.stop()
             return
         if self._seed_running is not None and not messagebox.askyesno(
+            t("segments_ltx_render_confirm_title"),
             t("segments_try_seed"),
             t("segments_seed_stop_confirm"),
             parent=self,
@@ -2107,6 +2375,10 @@ class SegmentEditor(ctk.CTkToplevel):
             self._on_closed()
         self.destroy()
 
+    def join_seed_worker(self, timeout: float) -> None:
+        if self._seed_worker is not None:
+            self._seed_worker.join(timeout)
+
     def _bind_shortcuts(self) -> None:
         self.bind("<space>", lambda event: self._shortcut(event, self._toggle_play))
         self.bind("<KeyPress-i>", lambda event: self._shortcut(event, self._set_mark_in))
@@ -2117,7 +2389,7 @@ class SegmentEditor(ctk.CTkToplevel):
         self.bind("<Right>", lambda event: self._shortcut_step(event, 1))
         self.bind("<Control-z>", lambda event: self._shortcut(event, self._undo, allow_entry=False))
         self.bind("<Control-y>", lambda event: self._shortcut(event, self._redo, allow_entry=False))
-        self.bind("<Escape>", lambda _event: self._request_close())
+        self.bind("<Escape>", lambda _event: self.request_close())
 
     def _shortcut(self, event, action: Callable[[], None], *, allow_entry: bool = False):
         if self._state is None or self._scanning():

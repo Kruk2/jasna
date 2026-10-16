@@ -10,11 +10,12 @@ from typing import Callable
 
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_image_session, build_video_session, release_session_memory, video_session_config
-from jasna.media.probe import UnsupportedColorspaceError
+from jasna.media.probe import UnsupportedVideoError
 from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
+from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
-from jasna.session_factory import RestorationSession, build_pipeline
+from jasna.session_factory import RestorationSession, build_pipeline, ltx_auto_split
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,25 @@ class ProgressUpdate:
     frames_processed: int = 0
     total_frames: int = 0
     message: str = ""
+    stage: StageProgress | None = None
+
+
+class ProgressGate:
+    """Lets one progress update through per ``interval`` seconds, and always the first
+    update of an LTX pass, so a pass that starts by loading a model never shows the last one."""
+
+    def __init__(self, interval: float) -> None:
+        self._interval = interval
+        self._last_time = float("-inf")
+        self._last_stage: str | None = None
+
+    def admits(self, now: float, stage: StageProgress | None) -> bool:
+        name = stage.name if stage is not None else None
+        if now - self._last_time < self._interval and name == self._last_stage:
+            return False
+        self._last_time = now
+        self._last_stage = name
+        return True
     stage: str = ""
 
 
@@ -254,7 +274,7 @@ class Processor:
         except ProcessingStopped:
             self._mark_stopped(job)
 
-        except UnsupportedColorspaceError as e:
+        except UnsupportedVideoError as e:
             e.__traceback__ = None
             job.status = JobStatus.SKIPPED
             self._progress(ProgressUpdate(
@@ -384,15 +404,16 @@ class Processor:
         self._prepare_job_detector(config, s)
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
-        last_update_time = [0.0]
+        gate = ProgressGate(0.1)
 
         def progress_callback(
-            progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int, stage: str
+            progress_pct: float, fps: float, eta_seconds: float, frames_done: int, total: int, stage: StageProgress | None
         ):
+            if not gate.admits(time.monotonic(), stage):
+                return
             current_time = time.time()
             if current_time - last_update_time[0] < 0.1:
                 return
-            last_update_time[0] = current_time
 
             if self._stop_event.is_set():
                 raise ProcessingStopped("Processing stopped")
@@ -407,6 +428,14 @@ class Processor:
                 total_frames=total,
                 stage=stage,
             ))
+
+        if not segments:
+            split = ltx_auto_split(config, s, input_path, output_path, progress_callback=progress_callback)
+            if split is not None:
+                segments, splice_plan = split.segments, split.splice_plan
+                config = video_session_config(
+                    settings, codec=split.codec, encoder_settings=build_job_encoder_settings(settings, split.codec)
+                )
 
         pipeline = None
         try:

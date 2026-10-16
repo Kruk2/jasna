@@ -1,0 +1,25 @@
+date,commit,label,gpu,model,quant,canvas,windows,steps,stg,int8_attention,inductor,compile_s,s_per_window,ms_per_window_step,peak_vram_gib,runs_s
+2026-10-01,559968c,a main r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.9,3.31,414.1,7.81,9.94 9.94 9.95
+2026-10-01,61a8505,a shared_pack r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.9,3.23,403.2,7.81,9.66 9.74 9.68
+2026-10-01,559968c,a main r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,4.4,3.25,405.9,7.81,9.98 9.69 9.74
+2026-10-01,61a8505,a shared_pack r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.8,3.23,404.3,7.81,9.70 9.70 9.73
+2026-10-01,559968c,b main r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.6,3.3,412.2,7.81,9.80 9.89 9.94
+2026-10-01,61a8505,b shared_pack r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.5,3.11,388.2,7.81,9.28 9.32 9.34
+2026-10-01,559968c,b main r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.6,3.18,397.8,7.81,9.51 9.55 9.56
+2026-10-01,61a8505,b shared_pack r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.5,3.11,388.6,7.81,9.29 9.33 9.34
+2026-10-01,559968c,b main r3,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.6,3.18,397.1,7.81,9.51 9.53 9.56
+2026-10-01,61a8505,b shared_pack r3,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.5,3.11,388.4,7.81,9.29 9.32 9.34
+2026-10-01,61a8505,c-reversed shared_pack r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.6,3.11,388.4,7.81,9.28 9.33 9.32
+2026-10-01,559968c,c-reversed main r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.6,3.21,401.3,7.81,9.61 9.63 9.67
+2026-10-01,61a8505,c-reversed shared_pack r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.8,3.12,390.6,7.81,9.34 9.37 9.39
+2026-10-01,559968c,c-reversed main r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,512,3,8,False,True,,3.5,3.21,401.8,7.81,9.64 9.60 9.65
+2026-10-01,559968c,d main r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,True,,16.0,9.35,1168.9,8.81,27.93 28.05 28.09
+2026-10-01,61a8505,d shared_pack r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,True,,6.5,9.09,1136.4,8.81,27.16 27.27 27.30
+2026-10-01,559968c,d main r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,True,,7.0,9.25,1156.3,8.81,27.65 27.75 27.78
+2026-10-01,61a8505,d shared_pack r2,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,True,,6.9,9.1,1137.0,8.81,27.18 27.29 27.32
+2026-10-01,61a8505,d shared_pack r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,True,,6.5,9.1,1137.4,8.81,27.19 27.30 27.33
+2026-10-01,559968c,d main r1,NVIDIA GeForce RTX 5090,distilled,nvfp4,768,3,8,False,True,,6.3,9.26,1157.3,8.81,27.69 27.78 27.81
+2026-10-01,559968c,e main r1,NVIDIA GeForce RTX 5090,undistilled,nvfp4,512,3,15,True,True,,4.7,8.38,558.8,8.06,25.15
+2026-10-01,61a8505,e shared_pack r1,NVIDIA GeForce RTX 5090,undistilled,nvfp4,512,3,15,True,True,,4.2,8.2,546.5,8.06,24.59
+2026-10-01,61a8505,e shared_pack r1,NVIDIA GeForce RTX 5090,undistilled,nvfp4,512,3,15,True,True,,4.1,8.19,545.8,8.06,24.56
+2026-10-01,559968c,e main r1,NVIDIA GeForce RTX 5090,undistilled,nvfp4,512,3,15,True,True,,4.1,8.38,558.9,8.06,25.15

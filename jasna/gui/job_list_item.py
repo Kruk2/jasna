@@ -6,6 +6,7 @@ import customtkinter as ctk
 from jasna.gui.components import Tooltip, format_duration
 from jasna.gui.locales import t
 from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.progressbar import StageProgress
 
 
 class JobListItem(ctk.CTkFrame):
@@ -379,9 +380,13 @@ class JobListItem(ctk.CTkFrame):
             self._progress_visible = True
         self._progress.set(value)
 
-    def set_fps_eta(self, fps: float = 0.0, eta_seconds: float = 0.0):
-        """Update small FPS and ETA labels shown on the tile."""
-        if fps and fps > 0:
+    def set_fps_eta(self, fps: float, eta_seconds: float, stage: StageProgress | None):
+        """Update the small FPS (or LTX step) and ETA labels shown on the tile."""
+        if stage is not None:
+            self._fps_label.configure(
+                text=t("ltx_step_short", number=stage.number, count=stage.count, percent=int(stage.fraction * 100))
+            )
+        elif fps and fps > 0:
             self._fps_label.configure(text=f"{fps:.1f}fps")
         else:
             self._fps_label.configure(text="")

@@ -9,7 +9,7 @@ from jasna.accelerator import AcceleratorVendor
 from jasna.gui.locales import TRANSLATIONS
 from jasna.media.encoder_settings import encoder_cq_spec
 
-_FULL_LOCALES = ["zh", "ja"]
+_FULL_LOCALES = ["zh", "ja", "ko", "th"]
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 
 
@@ -80,11 +80,13 @@ _LICENSE_KEYS = {
     "supporter_title",
     "supporter_blurb",
     "supporter_perks",
-    "license_email_placeholder",
-    "license_key_placeholder",
+    "license_machine_key",
+    "license_activation_key",
+    "license_activation_steps",
+    "license_cloud_cli_only",
+    "license_working",
     "license_activate",
     "license_active",
-    "license_crypto_info",
     "license_chip_inactive",
     "license_chip_active",
 }
@@ -261,7 +263,7 @@ def test_english_activation_copy_uses_app_activation_language() -> None:
     en = TRANSLATIONS["en"]
     assert en["supporter_title"] == "Activate Jasna"
     assert en["license_chip_inactive"] == "Activate Jasna"
-    assert en["secondary_unet_4x_hint"] == "high-quality, fast"
+    assert en["secondary_unet_4x_hint"] == "high quality, fast"
     assert "supporter" not in en["supporter_title"].lower()
     assert "license" not in en["supporter_title"].lower()
 

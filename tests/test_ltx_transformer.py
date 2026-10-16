@@ -1,3 +1,8 @@
+import os
+import sys
+from types import SimpleNamespace
+
+
 import pytest
 import torch
 
@@ -62,6 +67,40 @@ def test_block_matches_across_token_chunking(monkeypatch):
     )
     x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
     context = torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16)
+    prompt = T.prompt_key_value(weights, cond, context, heads=heads)
+    whole = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
+    monkeypatch.setattr(T, "CHUNK_ROWS", 5)
+    chunked = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
+    assert torch.equal(whole, chunked)
+    skipped = T.block_forward(weights, x, cond, prompt, rope, heads=heads, skip_self_attention=True)
+    assert not torch.equal(whole, skipped)
+
+
+def test_fp16_prompt_attention_keeps_the_block_in_bf16():
+    generator = torch.Generator().manual_seed(0)
+    dim, heads = 64, 4
+    weights = _block_weights(dim, heads, generator)
+    rope = T.build_rope(3, 2, 2, dim=dim, heads=heads, device=torch.device("cpu"))
+    cond = T.StepConditioning(
+        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to(torch.bfloat16),
+        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16),
+        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to(torch.bfloat16),
+    )
+    x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
+    prompt = T.prompt_key_value(weights, cond, torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16), heads=heads)
+    bf16 = T.block_forward(weights, x, cond, prompt, rope, heads=heads)
+    fp16 = T.block_forward(weights, x, cond, tuple(t.half() for t in prompt), rope, heads=heads)
+    assert fp16.dtype == torch.bfloat16
+    torch.testing.assert_close(fp16, bf16, atol=2e-2, rtol=2e-2)
+
+
+@pytest.mark.parametrize("major, dtype", [(7, torch.float16), (8, torch.bfloat16)])
+def test_prompt_attention_runs_in_fp16_before_sm80(major, dtype, monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=major))
+    assert T.prompt_attention_dtype(torch.device("cuda")) == dtype
+    assert T.prompt_attention_dtype(torch.device("cpu")) == torch.bfloat16
+
+
     whole = T.block_forward(weights, x, cond, context, rope, heads=heads)
     monkeypatch.setattr(T, "CHUNK_ROWS", 5)
     chunked = T.block_forward(weights, x, cond, context, rope, heads=heads)
@@ -128,6 +167,30 @@ def test_quantize_fp4_reconstructs_within_fp4_error():
     assert (rebuilt - blocks).norm() / blocks.norm() < 0.15
 
 
+def test_public_block_forward_runs_on_plain_tensors_without_the_protection_module(monkeypatch):
+    generator = torch.Generator().manual_seed(0)
+    dim, heads = 256, 2
+    weights = _block_weights(dim, heads, generator)
+    for name in T.LINEAR_NAMES:
+        weight = weights.pop(f"{name}.weight").float()
+        codes, scales = T.quantize_rows(T.rotate(weight))
+        weights[f"{name}.qdata"] = codes[: weight.shape[0]]
+        weights[f"{name}.scales"] = scales[: weight.shape[0]]
+    rope = T.build_rope(3, 2, 2, dim=dim, heads=heads, device=torch.device("cpu"))
+    cond = T.StepConditioning(
+        block_rows=(torch.randn(1, 2, 9, dim, generator=generator) * 0.1).to(torch.bfloat16),
+        output_rows=torch.zeros(1, 2, dim, dtype=torch.bfloat16),
+        prompt_rows=(torch.randn(1, 1, 2, dim, generator=generator) * 0.1).to(torch.bfloat16),
+    )
+    x = torch.randn(1, 24, dim, generator=generator).to(torch.bfloat16)
+    context = torch.randn(1, 5, dim, generator=generator).to(torch.bfloat16)
+    monkeypatch.setitem(sys.modules, "jasna.protection", None)
+    out = T.block_forward(weights, x, cond, T.prompt_key_value(weights, cond, context, heads=heads), rope, heads=heads)
+    assert out.shape == x.shape and torch.isfinite(out.float()).all()
+    assert not torch.equal(out, x)
+
+
+
 def test_self_attention_falls_back_to_sdpa_off_gpu():
     generator = torch.Generator().manual_seed(0)
     q, k, v = torch.randn(3, 1, 2, 8, 16, generator=generator).unbind(0)
@@ -135,6 +198,29 @@ def test_self_attention_falls_back_to_sdpa_off_gpu():
     assert torch.allclose(T.self_attention(q, k, v), expected)
 
 
+@pytest.mark.parametrize("package", ["triton", "comfy_kitchen"])
+def test_ltx_refuses_to_run_without_its_kernels(package, monkeypatch):
+    import importlib.util
+
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == package else real_find_spec(name))
+    with pytest.raises(RuntimeError, match=package):
+        T.require_kernels(torch.device("cuda"))
+
+
+def test_ltx_refuses_a_device_without_int8_attention():
+    pytest.importorskip("comfy_kitchen")
+    with pytest.raises(RuntimeError, match="INT8 attention"):
+        T.require_kernels(torch.device("cpu"))
+
+
+def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch):
+    from jasna.tensor_utils import compile_static
+
+    monkeypatch.setattr(torch._dynamo.config, "fail_on_recompile_limit_hit", False)
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: fn)
+    compile_static(T.block_forward, mode="default", device=torch.device("cpu"))
+    assert torch._dynamo.config.fail_on_recompile_limit_hit is True
 def test_block_forward_runs_eager_without_triton(monkeypatch):
     import importlib.util
 
@@ -160,6 +246,21 @@ def test_window_state_halves_without_stg():
     assert sampler._window_state_bytes(100, stg=True) == 2 * sampler._window_state_bytes(100, stg=False)
 
 
+def test_block_forward_compiles_with_autotuning_and_no_cuda_graphs(monkeypatch):
+    import importlib.util
+
+    from jasna.ltx import sampler
+
+    if importlib.util.find_spec("triton") is None:
+        pytest.skip("needs Triton")
+
+    calls = []
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or fn)
+
+    assert sampler.compiled_block_forward(torch.device("cpu")) is T.block_forward
+    assert calls == [{"dynamic": False, "mode": "max-autotune-no-cudagraphs"}]
+
+
 def test_block_forward_compiles_without_timing_kernels(monkeypatch):
     import importlib.util
 
@@ -173,3 +274,27 @@ def test_block_forward_compiles_without_timing_kernels(monkeypatch):
 
     assert sampler.compiled_block_forward() is T.block_forward
     assert calls == [{"dynamic": False, "options": {"deterministic": True}}]
+
+
+def test_an_unwritable_compile_cache_is_a_warning(tmp_path, monkeypatch, caplog):
+    import os
+
+    from jasna.engine_paths import configure_torch_compile_cache
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(os, "access", lambda path, mode: path != tmp_path)
+    with caplog.at_level("WARNING", logger="jasna.engine_paths"):
+        configure_torch_compile_cache()
+    assert "is not writable" in caplog.text
+
+
+def test_compile_cache_lives_in_model_weights_unless_set(monkeypatch):
+    from jasna.engine_paths import configure_torch_compile_cache, model_weights_dir
+
+    monkeypatch.delenv("TORCHINDUCTOR_CACHE_DIR", raising=False)
+    configure_torch_compile_cache()
+    assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str((model_weights_dir() / "torch-compile-cache").resolve())
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", "/elsewhere")
+    configure_torch_compile_cache()
+    assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == "/elsewhere"

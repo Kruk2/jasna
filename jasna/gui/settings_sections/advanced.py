@@ -216,6 +216,8 @@ class AdvancedSection:
 
         row_gap = dict(fill="x", pady=(0, Sizing.PADDING_SMALL))
         self._rows = [
+            (row1, row_gap), (gap_row, row_gap), (mindur_row, row_gap), (scene_row, row_gap),
+            (row2, row_gap), (row_vr, row_gap), (row3, row_gap), (row4, dict(fill="x")),
             (batch_row, row_gap), (row1, row_gap), (gap_row, row_gap), (mindur_row, row_gap),
             (scene_row, row_gap), (row2, row_gap), (row_vr, row_gap), (row3, row_gap),
             (row4, dict(fill="x")),

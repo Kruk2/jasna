@@ -9,6 +9,10 @@ from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import LtxModels, card_unavailable_reason, run_unavailable_reason, trial_only
+from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, create_slider_value_label, get_tooltip
+from jasna.gui.theme import Colors, Fonts, Sizing
+from jasna.ltx.model_files import LTX_MODELS
+from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
@@ -101,6 +105,7 @@ class RestorationModelSection:
         self._download_label.pack(fill="x")
         self._download_bar = ctk.CTkProgressBar(self._download_row, progress_color=Colors.PRIMARY, fg_color=Colors.BG_CARD)
         self._download_bar.pack(fill="x", pady=(2, 0))
+
         for widget in (self._download_label, self._download_bar):
             Tooltip(widget, get_tooltip("ltx_download"))
 
@@ -122,6 +127,7 @@ class RestorationModelSection:
         )
         self._ltx_model.pack(side="right", padx=12, pady=8)
         Tooltip(self._ltx_model, get_tooltip("ltx_model"))
+        self._ltx_model.set_value(LTX_DEFAULT_MODEL)
         self._set_ltx_model(LTX_DEFAULT_MODEL)
         self._model_row = model_row
         self._install_status = ctk.CTkLabel(
@@ -155,6 +161,7 @@ class RestorationModelSection:
 
         self._fast_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         add_setting_label(self._fast_row, "ltx_fast", in_card=True)
+        self._widgets["ltx_fast"] = CompactSwitch(self._fast_row, self._on_ltx_choice_changed, Colors.BG_CARD)
         self._widgets["ltx_fast"] = CompactSwitch(self._fast_row, self._on_fast_toggled, Colors.BG_CARD)
         self._widgets["ltx_fast"].pack(side="right", padx=12, pady=8)
         Tooltip(self._widgets["ltx_fast"], get_tooltip("ltx_fast"))
@@ -167,6 +174,35 @@ class RestorationModelSection:
         Tooltip(self._widgets["ltx_large_canvas"], get_tooltip("ltx_large_canvas"))
         self._large_row = large_row
 
+        auto_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        auto_row.pack(fill="x")
+        add_setting_label(auto_row, "ltx_auto_split", in_card=True)
+        self._widgets["ltx_auto_split_val"] = create_slider_value_label(
+            auto_row, f"{LTX_AUTO_DEFAULT_PERCENT}%", 4, Colors.BG_CARD
+        )
+        self._widgets["ltx_auto_split_val"].pack(side="right", padx=(0, 12))
+        self._widgets["ltx_auto_split_percent"] = ctk.CTkSlider(
+            auto_row,
+            from_=2,
+            to=50,
+            number_of_steps=48,
+            fg_color=Colors.BG_PANEL,
+            progress_color=Colors.MODEL_LTX,
+            button_color=Colors.MODEL_LTX,
+            width=120,
+            command=self._on_auto_split_percent,
+        )
+        self._widgets["ltx_auto_split_percent"].pack(side="right", padx=(0, 8))
+        self._widgets["ltx_auto_split"] = CompactSwitch(auto_row, self._on_auto_split_toggled, Colors.BG_CARD)
+        self._widgets["ltx_auto_split"].pack(side="right", padx=(0, 10), pady=8)
+        for key in ("ltx_auto_split", "ltx_auto_split_percent"):
+            Tooltip(self._widgets[key], get_tooltip("ltx_auto_split"))
+        self._set_auto_split(False, LTX_AUTO_DEFAULT_PERCENT)
+
+        trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        trial_row.pack(fill="x")
+        add_setting_label(trial_row, "ltx_trial", in_card=True)
+        self._widgets["ltx_trial"] = CompactSwitch(trial_row, self._on_ltx_choice_changed, Colors.BG_CARD)
         trial_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         trial_row.pack(fill="x")
         add_setting_label(trial_row, "ltx_trial", in_card=True)
@@ -193,6 +229,25 @@ class RestorationModelSection:
         else:
             self._widgets["ltx_fast"].deselect()
 
+    def _set_auto_split(self, enabled: bool, percent: int) -> None:
+        if enabled:
+            self._widgets["ltx_auto_split"].select()
+        else:
+            self._widgets["ltx_auto_split"].deselect()
+        self._widgets["ltx_auto_split_percent"].set(percent)
+        self._widgets["ltx_auto_split_val"].configure(text=f"{percent}%")
+        self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
+
+    def _on_auto_split_toggled(self) -> None:
+        enabled = self._widgets["ltx_auto_split"].get() == 1
+        self._widgets["ltx_auto_split_percent"].configure(state="normal" if enabled else "disabled")
+        self._on_modified()
+
+    def _on_auto_split_percent(self, value: float) -> None:
+        self._widgets["ltx_auto_split_val"].configure(text=f"{round(value)}%")
+        self._on_modified()
+
+
     def _trial(self) -> bool:
         return self._widgets["ltx_trial"].get() == 1
 
@@ -202,6 +257,19 @@ class RestorationModelSection:
         else:
             self._widgets["ltx_trial"].deselect()
         self._refresh_widgets()
+
+    def _on_card_selected(self, value: str) -> None:
+        if value == "ltx" and not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
+            self._show_model("basicvsrpp")
+            return
+        self._show_model(value)
+        self._on_modified()
+
+    def _on_ltx_choice_changed(self) -> None:
+        if not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
+            self._set_fast(not self._fast())
+        self._refresh_widgets()
+        self._on_modified()
 
     def _set_ltx_model(self, model: str) -> None:
         self._ltx_model.set_value(model)
@@ -236,13 +304,6 @@ class RestorationModelSection:
                     self._show_notice("model_ltx_fast_not_installed" if fast else "model_ltx_quality_not_installed")
                 return True
         return False
-
-    def _on_card_selected(self, value: str) -> None:
-        if value == "ltx" and not self._ensure_variant(self._ltx_model.get_value(), self._fast()):
-            self._show_model("basicvsrpp")
-            return
-        self._show_model(value)
-        self._on_modified()
 
     def _on_ltx_model_selected(self, model: str) -> None:
         if self._ensure_variant(model, self._fast()):
@@ -311,6 +372,12 @@ class RestorationModelSection:
             self._trial_status.pack(fill="x", padx=12, pady=(0, 8), after=self._trial_row)
         else:
             self._trial_status.pack_forget()
+        reason = self.unavailable_reason()
+        if reason:
+            self._notice.configure(text=t(reason))
+            self._notice.pack(fill="x", padx=12, pady=(0, 8))
+        else:
+            self._notice.pack_forget()
         model, fast = self._ltx_model.get_value(), self._fast()
         if not self._trial() and not state.installed(model, fast) and state.downloadable:
             self._install_status.configure(text=t("model_ltx_download_needed", size=state.download_size(model, fast)))
@@ -371,6 +438,9 @@ class RestorationModelSection:
             self._widgets["ltx_trial"].select()
         else:
             self._widgets["ltx_trial"].deselect()
+        self._set_auto_split(preset.ltx_auto_split, preset.ltx_auto_split_percent)
+        self._ltx_model.set_value(preset.ltx_model)
+        self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
         self._set_ltx_model(preset.ltx_model)
         self._model.set(preset.restoration_model if preset.restoration_model in _MODELS else "basicvsrpp")
         self._show_notice(None)
@@ -385,4 +455,7 @@ class RestorationModelSection:
             "ltx_fast": self._widgets["ltx_fast"].get() == 1,
             "ltx_large_canvas": self._widgets["ltx_large_canvas"].get() == 1,
             "ltx_trial": self._widgets["ltx_trial"].get() == 1,
+            "ltx_auto_split": self._widgets["ltx_auto_split"].get() == 1,
+            "ltx_auto_split_percent": round(self._widgets["ltx_auto_split_percent"].get()),
+
         }

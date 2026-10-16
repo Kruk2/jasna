@@ -77,6 +77,7 @@ class ValueOptionMenu(ctk.CTkOptionMenu):
             label = next(iter(self._value_to_label.values()))
         self.set(label)
 
+
     def set_options(self, options: dict[str, str], value: str | None = None) -> None:
         """Replace the whole value->label mapping (used for engine-dependent lists).
 

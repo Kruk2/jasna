@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from tkinter import TclError
+import time
+
 
 import customtkinter as ctk
 import pytest
@@ -40,10 +42,20 @@ def test_wizard_names_the_official_sellers(monkeypatch):
     ("MalformedLicenseError", "license_malformed"),
 ])
 def test_license_dialog_explains_rejected_keys(monkeypatch, error_name, message_key):
+    # Needs the private protection submodule (license_store._decode, signing);
+    # the source-checkout stub does not provide them.
+    pytest.importorskip("jasna.protection.signing")
     protection = pytest.importorskip("jasna.protection")
     from jasna.gui.components import LicenseDialog
     from jasna.protection import license_store
 
+    def reject(key):
+        raise getattr(protection, error_name)("english text")
+
+    monkeypatch.setattr(license_store, "load_license", lambda: None)
+    monkeypatch.setattr(license_store, "is_licensed", lambda: False)
+    monkeypatch.setattr(license_store, "_decode", lambda key: (b"JM1-" + b"1" * 64, {}))
+    monkeypatch.setattr(protection.signing, "license_identity", lambda proof: proof.decode())
     def reject(email, key):
         raise getattr(protection, error_name)("english text")
 
@@ -53,6 +65,19 @@ def test_license_dialog_explains_rejected_keys(monkeypatch, error_name, message_
     try:
         dialog = LicenseDialog(root, on_activated=lambda: None)
         assert t("license_official_sellers") in _label_texts(dialog)
+        deadline = time.monotonic() + 3
+        while dialog._activate_button.cget("state") != "normal" and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        dialog._activate_button.invoke()
+        expected = t(message_key)
+        if error_name == "LicenseError":
+            expected += "\nenglish text"
+        deadline = time.monotonic() + 3
+        while dialog._status.cget("text") != expected and time.monotonic() < deadline:
+            root.update()
+            time.sleep(0.01)
+        assert dialog._status.cget("text") == expected
         dialog._activate()
         assert dialog._status.cget("text") == t(message_key)
     finally:

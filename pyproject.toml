@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jasna"
-version = "0.11.0"
+version = "0.11.1"
 description = "Jasna"
 requires-python = ">=3.12"
 dependencies = [
@@ -15,6 +15,8 @@ dependencies = [
   "psutil",
   "diffusers",
   "huggingface-hub",
+  "safetensors",
+  "requests",
   "mmengine==0.10.7",
   "opencv-python<5",
   "Pillow",
@@ -22,7 +24,8 @@ dependencies = [
   "customtkinter==6.0.0",
   "tkinterdnd2",
   "python-vlc==3.0.21203",
-  "ultralytics",
+  # Older versions cannot reconstruct YOLO checkpoints under the release's weights-only policy.
+  "ultralytics>=8.4.96,<8.5",
   # Not imported directly; ultralytics needs it to export YOLO models for TensorRT.
   "onnx",
   "cryptography>=42",
@@ -38,7 +41,12 @@ nvidia = [
   "tensorrt==10.16.1.11",
   "torch-tensorrt==2.12.0",
   "nvidia-vfx",
-  # The VALI decode backend needs the corruption-tolerant fork (~/tools/vali,
+  # LTX self-attention kernel (INT8, prebuilt abi3 wheels for Linux and Windows).
+  "comfy-kitchen==0.2.36",
+  "scipy",
+  # torch.compile and the LTX Triton kernels; Linux torch wheels bring triton 3.7.1 themselves.
+  "triton-windows==3.7.1.post27; sys_platform == 'win32'",
+  # The VALI decode backend needs the corruption-tolerant fork (codeberg.org/Kruk2/vali,
   # DecodeSingleSurfaceAsyncDetailed); with the stock PyPI wheel the reader
   # falls back to PyAV at open time. Release builds install the fork wheel from
   # keytool/wheels/ on top of this pin (see keytool/build_linux.sh).
@@ -68,6 +76,13 @@ dev = [
 
 [tool.setuptools]
 include-package-data = false
+
+[tool.setuptools.package-data]
+"jasna.media" = ["*.fatbin"]
+"jasna.ltx.native" = [
+  "*.cpp", "*.cu", "*.h",
+  "sage_attention/*.cu", "sage_attention/*.cuh", "sage_attention/*.h", "sage_attention/NOTICE",
+]
 
 [tool.setuptools.packages.find]
 include = ["jasna*"]

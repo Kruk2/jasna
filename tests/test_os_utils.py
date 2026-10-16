@@ -8,6 +8,84 @@ import torch
 from jasna import os_utils
 
 
+def test_frozen_linux_application_executable_ignores_the_python_placeholder(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "linux")
+    monkeypatch.setattr(os_utils.sys, "executable", "/moved/app/python")
+    monkeypatch.setattr(os_utils.os, "readlink", lambda path: "/moved/app/jasna.bin")
+
+    assert os_utils.get_application_executable() == "/moved/app/jasna.bin"
+
+
+@pytest.mark.parametrize("platform,frozen", [("linux", False), ("win32", False), ("darwin", True)])
+def test_other_application_executables_keep_sys_executable(monkeypatch, platform, frozen) -> None:
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: frozen)
+    monkeypatch.setattr(os_utils.sys, "platform", platform)
+    monkeypatch.setattr(os_utils.sys, "executable", "/application/python")
+
+    assert os_utils.get_application_executable() == "/application/python"
+
+
+@pytest.mark.parametrize("path", ["C:/relocated/app/jasna.exe", "C:/" + "folder/" * 100 + "jasna.exe"])
+def test_frozen_windows_application_executable_uses_complete_running_module_path(monkeypatch, path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    calls = []
+    def module_path(module, buffer, size):
+        calls.append((module, size))
+        buffer.value = path[:size - 1]
+        return len(path) if len(path) < size else size
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **kwargs: types.SimpleNamespace(GetModuleFileNameW=module_path), raising=False)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "win32")
+    monkeypatch.setattr(os_utils.sys, "executable", "C:/relocated/app/python.exe")
+
+    assert os_utils.get_application_executable() == path
+    assert all(module is None for module, size in calls)
+    assert calls[-1][1] > len(path)
+    assert module_path.argtypes == [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    assert module_path.restype is wintypes.DWORD
+
+
+def test_frozen_windows_application_executable_reports_module_lookup_failure(monkeypatch) -> None:
+    import ctypes
+
+    def module_path(module, buffer, size):
+        return 0
+    monkeypatch.setattr(ctypes, "WinDLL", lambda name, **kwargs: types.SimpleNamespace(GetModuleFileNameW=module_path), raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 5, raising=False)
+    monkeypatch.setattr(ctypes, "WinError", lambda error: OSError(error, "module path unavailable"), raising=False)
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "platform", "win32")
+    monkeypatch.setattr(os_utils.sys, "executable", "C:/relocated/app/python.exe")
+
+    with pytest.raises(OSError, match="module path unavailable") as failure:
+        os_utils.get_application_executable()
+    assert failure.value.errno == 5
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows native module path API")
+def test_frozen_windows_application_executable_ignores_placeholder_using_native_api(monkeypatch) -> None:
+    # The native API reports the running process image, which a virtualenv's
+    # launcher redirects away from ``sys.executable`` (the venv stub). Assert
+    # against the module path itself and that the fabricated placeholder loses.
+    import ctypes
+    from ctypes import wintypes
+
+    module_path = ctypes.WinDLL("kernel32", use_last_error=True).GetModuleFileNameW
+    module_path.argtypes = [wintypes.HMODULE, wintypes.LPWSTR, wintypes.DWORD]
+    module_path.restype = wintypes.DWORD
+    buffer = ctypes.create_unicode_buffer(32768)
+    module_path(None, buffer, len(buffer))
+    expected = buffer.value
+
+    monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
+    monkeypatch.setattr(os_utils.sys, "executable", "C:/relocated/app/python.exe")
+
+    result = os_utils.get_application_executable()
+    assert result.casefold() == expected.casefold()
+    assert result != "C:/relocated/app/python.exe"
 @pytest.fixture(autouse=True)
 def _pin_vendor_for_cuda_tests(request, monkeypatch):
     """Pin the vendor to NVIDIA for the CUDA-side tests of this module.
@@ -670,6 +748,16 @@ def test_check_ascii_install_path_uses_executable_when_frozen(monkeypatch, tmp_p
     assert ok is True
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows module lookup")
+def test_windows_module_loaded_reports_modules_of_this_process() -> None:
+    assert os_utils.windows_module_loaded("kernel32.dll") is True
+    assert os_utils.windows_module_loaded("jasna-not-a-loaded-module.dll") is False
+
+
+def test_windows_module_loaded_is_false_off_windows(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "linux")
+
+    assert os_utils.windows_module_loaded("kernel32.dll") is False
 def test_env_flag_unset_and_empty_use_default(monkeypatch) -> None:
     monkeypatch.delenv("JASNA_TEST_FLAG", raising=False)
     assert os_utils.env_flag("JASNA_TEST_FLAG") is False

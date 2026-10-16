@@ -2,7 +2,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from jasna.image_restore import run_image_restoration_folder
+import pytest
+
+from jasna.image_restore import run_image_restoration, run_image_restoration_folder
+from jasna.main import build_parser
 
 
 def test_image_folder_progress_and_output_pattern(tmp_path: Path, capsys):
@@ -25,3 +28,23 @@ def test_image_folder_progress_and_output_pattern(tmp_path: Path, capsys):
         )
 
     assert "[3/4] Processing photo.png -> photo_restored.png" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("folder", [False, True])
+def test_image_jobs_use_current_cli_arguments_without_late_activation(tmp_path, folder):
+    image = tmp_path / "photo.png"
+    output = tmp_path / "restored.png"
+    args = build_parser().parse_args([
+        "--input", str(image), "--output", str(output), "--device", "cpu",
+    ])
+    with (
+        patch("jasna.protection.license_store.set_license") as activate,
+        patch("jasna.restorer.sd15_download.ensure_sd15_bundle", side_effect=RuntimeError("model setup reached")) as prepare,
+        pytest.raises(RuntimeError, match="model setup reached"),
+    ):
+        if folder:
+            run_image_restoration_folder(args, [image], tmp_path / "out")
+        else:
+            run_image_restoration(args)
+    prepare.assert_called_once()
+    activate.assert_not_called()

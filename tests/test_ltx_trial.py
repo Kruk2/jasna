@@ -72,6 +72,8 @@ def test_trial_session_uses_placeholders_without_files_or_license():
     config = session_config(restoration_model_name="ltx", ltx_trial=True, ltx_model="undistilled")
     with (
         patch("jasna.accelerator.is_nvidia_device", return_value=True),
+        patch("jasna.ltx.transformer.require_kernels"),
+
         patch("jasna.engine_compiler.ensure_engines_compiled"),
         patch("jasna.ltx.model_files.LtxModelFiles.from_dir", side_effect=AssertionError("reads model files")),
     ):
@@ -83,6 +85,7 @@ def test_trial_session_uses_placeholders_without_files_or_license():
 @pytest.mark.parametrize("fast", [False, True])
 def test_placeholder_block_runs_on_the_gpu(fast):
     device = torch.device("cuda")
+
     if fast and not torch.version.cuda:
         # The fast block is an NVFP4/FP8 one built on torch._scaled_mm, which is
         # CUDA-only ("only supported on CUDA devices" on ROCm).
@@ -96,5 +99,7 @@ def test_placeholder_block_runs_on_the_gpu(fast):
     cond = T.step_conditioning(top, 0.5, device)
     rope = T.build_rope(2, 4, 4, dim=4096, heads=T.HEADS, device=device)
     tokens = torch.randn(1, 64, 128, device=device, dtype=torch.bfloat16)
+    prompt = T.prompt_key_value(block, cond, top["prompt_context"])
+    x = T.block_forward(block, T.embed_tokens(top, tokens, 16), cond, prompt, rope)
     x = T.block_forward(block, T.embed_tokens(top, tokens, 16), cond, top["prompt_context"], rope)
     assert torch.isfinite(T.velocity(top, x, cond).float()).all()

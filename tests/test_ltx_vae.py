@@ -1,11 +1,16 @@
+import gc
 import json
+import weakref
+from contextlib import contextmanager
 
 import pytest
 import torch
 from safetensors.torch import save_file
 
-from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder
+from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder, loader
+from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
+from jasna.models.ltx_vae.eager_na import na3d
 from jasna.models.ltx_vae.loader import decoder_kwargs, decoder_state_dict, encoder_kwargs, encoder_state_dict
 from jasna.models.ltx_vae.tiling import DimensionSizeConfig, TileSizeConfig, scale_by_masks_1d
 from jasna.models.ltx_vae.video_encoder import VideoEncoder
@@ -94,6 +99,28 @@ def test_decoder_state_dict_rejects_gated_checkpoints():
         decoder_state_dict({"decoder.diff_blocks.0.gate_msa": torch.zeros(1)})
 
 
+@pytest.mark.parametrize("failure", ("gated", "incomplete-qkv"))
+def test_decoder_state_dict_failure_clears_discarded_qkv_clones(monkeypatch, failure):
+    source = torch.arange(12.0).reshape(6, 2)
+    checkpoint = {"decoder.first.qkv.weight": source}
+    checkpoint["decoder.second.gate_msa" if failure == "gated" else "decoder.second.qkv.weight"] = torch.ones(1)
+    clones = []
+    original_clone = torch.Tensor.clone
+
+    def clone(tensor, *args, **kwargs):
+        result = original_clone(tensor, *args, **kwargs)
+        clones.append(result)
+        return result
+
+    monkeypatch.setattr(torch.Tensor, "clone", clone)
+    with pytest.raises(ValueError):
+        decoder_state_dict(checkpoint)
+    assert clones
+    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in clones)
+    assert torch.equal(source, torch.arange(12.0).reshape(6, 2))
+
+
+
 def test_ltx25_decoder_keys_match_module():
     decoder = _meta_ltx25_decoder()
     expected = set(decoder.state_dict())
@@ -132,7 +159,7 @@ def test_tiny_encoder_output_shape_and_frame_crop():
     assert latent.shape == (1, 8, 3, 2, 3)
 
 
-def test_load_video_encoder_from_checkpoint(tmp_path):
+def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
     torch.manual_seed(0)
     source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
     tensors = {f"encoder.{k}": v for k, v in source.state_dict().items() if not k.startswith("per_channel")}
@@ -141,11 +168,110 @@ def test_load_video_encoder_from_checkpoint(tmp_path):
     path = tmp_path / "vae.safetensors"
     save_file(tensors, str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
 
+    opened = []
+    open_tensors = loader.open_tensors
+
+    @contextmanager
+    def record_open(source):
+        opened.append(source)
+        with open_tensors(source) as reader:
+            yield reader
+
+    monkeypatch.setattr(loader, "open_tensors", record_open)
+
+
     encoder = load_video_encoder(path, torch.device("cpu"))
 
     assert all(p.dtype == torch.bfloat16 and not p.requires_grad for p in encoder.parameters())
     assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16())
     assert torch.equal(encoder.per_channel_statistics.get_buffer("std-of-means"), torch.full((8,), 2.0).bfloat16())
+    assert opened == [path]
+
+
+@pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
+def test_weight_state_cleanup_preserves_the_returned_cpu_model(dtype):
+    source = torch.ones(2, 2, dtype=dtype)
+    model = loader._build_bf16(lambda: torch.nn.Linear(2, 2, bias=False), {"weight": source}, torch.device("cpu"))
+    assert torch.equal(model.weight, torch.ones(2, 2, dtype=torch.bfloat16))
+    if dtype == torch.bfloat16:
+        assert source.untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
+        assert torch.count_nonzero(source).item() == 4
+    else:
+        assert torch.count_nonzero(source).item() == 0
+
+
+@pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
+def test_weight_state_failure_clears_sources_and_partially_assigned_parameters(dtype):
+    sources = {"weight": torch.ones(2, 2, dtype=dtype), "unexpected": torch.ones(1, dtype=dtype)}
+    constructed = []
+
+    def factory():
+        model = torch.nn.Linear(2, 2, bias=False)
+        constructed.append(model)
+        return model
+
+    with pytest.raises(RuntimeError, match="Unexpected key"):
+        loader._build_bf16(factory, sources, torch.device("cpu"))
+    assert all(torch.count_nonzero(tensor).item() == 0 for tensor in sources.values())
+    assert torch.count_nonzero(constructed[0].weight).item() == 0
+
+
+@pytest.mark.parametrize("failure", ("stream", "unknown"))
+def test_decoder_load_failure_clears_the_already_built_base_and_owned_sources(tmp_path, monkeypatch, failure):
+    base = {"decoder.weight": torch.ones(2, 2, dtype=torch.bfloat16)}
+    tuned = {"unexpected": torch.ones(1, dtype=torch.bfloat16)}
+    base_path, tuned_path = tmp_path / "base", tmp_path / "tuned"
+    save_file(base, str(base_path))
+    save_file(tuned, str(tuned_path))
+    constructed = []
+    loaded = []
+    read_tensors = loader._read_tensors
+
+    def decoder(**kwargs):
+        model = torch.nn.Linear(2, 2, bias=False)
+        constructed.append(model)
+        return model
+
+    def tensors(reader, prefixes):
+        if loaded and failure == "stream":
+            raise ValueError("synthetic tuned final-check failure")
+        result = read_tensors(reader, prefixes)
+        loaded.append(result)
+        return result
+
+    monkeypatch.setattr(loader, "DiffusionVideoDecoder", decoder)
+    monkeypatch.setattr(loader, "read_vae_config", lambda path: _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))
+    monkeypatch.setattr(loader, "_read_tensors", tensors)
+    exception, message = (ValueError, "final-check") if failure == "stream" else (KeyError, "not in the decoder")
+    with pytest.raises(exception, match=message):
+        loader.load_video_decoder(base_path, tuned_path, torch.device("cpu"))
+    assert torch.count_nonzero(constructed[0].weight).item() == 0
+    assert torch.count_nonzero(loaded[0]["decoder.weight"]).item() == 0
+    if failure == "unknown":
+        assert torch.count_nonzero(loaded[1]["unexpected"]).item() == 0
+
+
+def test_decoder_load_success_preserves_cpu_weights_and_clears_overlay_sources(tmp_path, monkeypatch):
+    base = {"decoder.weight": torch.ones(2, 2, dtype=torch.bfloat16)}
+    tuned = {"weight": torch.full((2, 2), 2, dtype=torch.bfloat16)}
+    base_path, tuned_path = tmp_path / "base", tmp_path / "tuned"
+    save_file(base, str(base_path))
+    save_file(tuned, str(tuned_path))
+    loaded = []
+    read_tensors = loader._read_tensors
+
+    def tensors(reader, prefixes):
+        result = read_tensors(reader, prefixes)
+        loaded.append(result)
+        return result
+    monkeypatch.setattr(loader, "DiffusionVideoDecoder", lambda **kwargs: torch.nn.Linear(2, 2, bias=False))
+    monkeypatch.setattr(loader, "read_vae_config", lambda path: _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))
+    monkeypatch.setattr(loader, "_read_tensors", tensors)
+    model = loader.load_video_decoder(base_path, tuned_path, torch.device("cpu"))
+    assert torch.equal(model.weight, torch.full((2, 2), 2, dtype=torch.bfloat16))
+    assert loaded[0]["decoder.weight"].untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
+    assert torch.count_nonzero(loaded[1]["weight"]).item() == 0
+
 
 
 def test_ltx25_tiling_needs_minimum_budget():
@@ -205,6 +331,76 @@ def _tiny_decoder() -> DiffusionVideoDecoder:
     ).eval()
 
 
+def test_load_video_decoder_opens_base_once(tmp_path, monkeypatch):
+    source = _tiny_decoder()
+    config = {
+        **LTX25_DECODER_CONFIG,
+        "in_channels": 8,
+        "head_dim": 16,
+        "stage_channels": [128, 64, 32, 32, 16],
+        "stage_depths": [1] * 5,
+        "stage_kernels": [[3, 3, 3]] * 5,
+        "stage5_kernel": [3, 3, 3],
+        "stage5_channels": 16,
+        "t_emb_dim": 32,
+    }
+    base, tuned = tmp_path / "base.safetensors", tmp_path / "tuned.safetensors"
+    save_file({f"decoder.{name}": tensor for name, tensor in source.state_dict().items()}, str(base),
+              metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, config)})})
+    name, tensor = next(iter(source.state_dict().items()))
+    overlay = torch.full_like(tensor, 2)
+    save_file({name: overlay}, str(tuned))
+    opened = []
+    open_tensors = loader.open_tensors
+
+    @contextmanager
+    def record_open(path):
+        opened.append(path)
+        with open_tensors(path) as reader:
+            yield reader
+
+    monkeypatch.setattr(loader, "open_tensors", record_open)
+    decoder = loader.load_video_decoder(base, tuned, torch.device("cpu"))
+    assert torch.equal(decoder.state_dict()[name], overlay.bfloat16())
+    assert opened == [base, tuned]
+
+
+@pytest.mark.parametrize("stage", ("encoder", "decoder"))
+def test_vae_reader_close_failure_clears_loaded_weights(tmp_path, monkeypatch, stage):
+    path = tmp_path / "vae.safetensors"
+    config = _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)
+    save_file({f"{stage}.weight": torch.ones(2)}, str(path), metadata={"config": json.dumps({"vae": config})})
+    retained = []
+    open_tensors = loader.open_tensors
+
+    @contextmanager
+    def fail_on_close(source):
+        with open_tensors(source) as reader:
+            load = reader.read_tensors_into
+
+            def record(group_names, groups):
+                def capture():
+                    for group in groups:
+                        retained.extend(group.values())
+                        yield group
+
+                load(group_names, capture())
+
+            reader.read_tensors_into = record
+            yield reader
+        raise ValueError("synthetic reader-close failure")
+
+    monkeypatch.setattr(loader, "open_tensors", fail_on_close)
+    with pytest.raises(ValueError, match="reader-close failure"):
+        if stage == "encoder":
+            loader.load_video_encoder(path, torch.device("cpu"))
+        else:
+            loader.load_video_decoder(path, tmp_path / "unused", torch.device("cpu"))
+    assert len(retained) == 1
+    assert torch.count_nonzero(retained[0]).item() == 0
+
+
+
 def test_tiny_decoder_multi_tile_decode_is_seeded_and_shaped():
     decoder = _tiny_decoder()
     latent = torch.randn(1, 8, 3, 3, 4)
@@ -225,3 +421,93 @@ def test_tiny_decoder_multi_tile_decode_is_seeded_and_shaped():
     assert torch.isfinite(pixels).all()
     assert torch.equal(pixels, torch.cat(decode(1), dim=2))
     assert not torch.equal(pixels, torch.cat(decode(2), dim=2))
+
+
+def test_decode_latent_frees_activations_left_in_reference_cycles(monkeypatch):
+    """torch.compile keeps a call that compiled a new tile shape in reference cycles; the next
+    window's budget must not count those activations as used."""
+    decoder = _tiny_decoder()
+    tiled_decode = decoder.tiled_decode
+    left_behind = []
+
+    def tiled_decode_leaving_a_cycle(latent, tiling, generator):
+        cycle = {"activation": torch.ones(64)}
+        cycle["self"] = cycle
+        left_behind.append(weakref.ref(cycle["activation"]))
+        return tiled_decode(latent, tiling, generator)
+
+    monkeypatch.setattr(decoder, "tiled_decode", tiled_decode_leaving_a_cycle)
+    gc.collect()
+    gc.disable()
+    try:
+        loader.decode_latent(decoder, torch.randn(1, 8, 3, 3, 4), 4 << 30, torch.Generator().manual_seed(1))
+        assert left_behind[0]() is None
+    finally:
+        gc.enable()
+
+
+def test_modulating_mlp_chunks_match_one_unchunked_pass(monkeypatch):
+    monkeypatch.setattr(T, "SWIGLU_TILE_TOKENS", 7)
+    torch.manual_seed(0)
+    mlp = T.SwiGLU(16, 32)
+    norm = torch.nn.RMSNorm(16)
+    x = torch.randn(1, 2, 3, 4, 16)
+    scale = torch.randn(1, 1, 1, 1, 16)
+    shift = torch.randn(1, 1, 1, 1, 16)
+
+    with torch.inference_mode():
+        y = torch.nn.functional.rms_norm(x, (16,), norm.weight, 1e-6) * (1 + scale) + shift
+        expected = x + mlp.w_down(torch.nn.functional.silu(mlp.w_gate(y)) * mlp.w_up(y))
+        actual = T.residual_modulating_mlp(x.clone(), mlp, norm, scale, shift)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
+    monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
+    monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
+    calls = []
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append((fn, kwargs)) or (lambda *a: fn(*a)))
+
+    T.compile_diffusion_blocks(torch.device("cpu"))
+    T.compile_diffusion_blocks(torch.device("cpu"))
+    assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu]
+    assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)
+
+
+def test_slab_attention_of_core_columns_matches_full_slab_attention():
+    torch.manual_seed(0)
+    attn = T.NeighborhoodAttention3D(32, (3, 5, 5), head_dim=16)
+    norm = torch.nn.RMSNorm(32)
+    x = torch.randn(1, 4, 6, 12, 32)
+    scale, shift = torch.randn(2, 1, 1, 1, 1, 32) * 0.1
+    w_pos = torch.arange(12, dtype=torch.float32) + 7
+    halo, core_len = 2, 7
+
+    with torch.inference_mode():
+        y = torch.nn.functional.rms_norm(x, (32,), norm.weight, 1e-6) * (1 + scale) + shift
+        q, k, v = attn.project_qkv(y)
+        q = T.apply_abs_rope_slab(attn.q_norm(q) * attn.scale, attn, w_pos)
+        k = T.apply_abs_rope_slab(attn.k_norm(k), attn, w_pos)
+        full = na3d(q, k, v, attn.kernel_size, 0).reshape(1, 4, 6, 12, 32)
+        expected = attn.proj(full)[:, :, :, halo : halo + core_len]
+        actual = T._attn_on_w_slab(attn, norm, x, w_pos, scale, shift, core_len)
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_decode_tiling_is_logged_once_per_layout(caplog):
+    from jasna.models.ltx_vae import loader
+
+    loader._log_tiling.cache_clear()
+    tiling = TileSizeConfig(
+        frames=DimensionSizeConfig(tile_size=88, overlap=24),
+        height=DimensionSizeConfig(tile_size=512, overlap=64),
+        width=DimensionSizeConfig(tile_size=512, overlap=64),
+    )
+    with caplog.at_level("INFO", logger=loader.__name__):
+        for _ in range(3):
+            loader._log_tiling(121, 512, 512, tiling)
+
+    assert [r.getMessage() for r in caplog.records] == ["LTX decode: 121 frames x 512x512 px in tiles of 88 frames x 512x512 px"]
+

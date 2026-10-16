@@ -92,6 +92,8 @@ def video_session_config(
         ltx_fast=bool(settings.ltx_fast),
         ltx_model=settings.ltx_model,
         ltx_trial=bool(settings.ltx_trial),
+        ltx_auto_split_percent=float(settings.ltx_auto_split_percent) if settings.ltx_auto_split else None,
+
         compile_basicvsrpp=bool(settings.compile_basicvsrpp),
         max_clip_size=int(settings.max_clip_size),
         temporal_overlap=int(settings.temporal_overlap),
@@ -138,8 +140,21 @@ def build_video_session(
     from jasna._suppress_noise import install as _install_noise_filters
     _install_noise_filters()
     from jasna.session_factory import build_restoration_session
+    from jasna.engine_paths import unet4x_plaintext_available
+    from jasna.gui.activation_worker import read_license_info
+    from jasna.gui.locales import t
 
     config = video_session_config(settings, codec=settings.codec, encoder_settings={})
+    encrypted = config.secondary_restoration == "unet-4x" and not unet4x_plaintext_available()
+    if config.restoration_model_name == "ltx" and not config.ltx_trial:
+        from jasna.ltx import model_files
+
+        encrypted = any(path.suffix == ".enc" for path in model_files._bundle_paths(
+            config.restoration_model_path, config.ltx_model, fast=config.ltx_fast))
+    if encrypted:
+        _, _, identity = read_license_info()
+        if identity is not None and identity.startswith("JW1-"):
+            raise ValueError(t("license_cloud_cli_only"))
     return build_restoration_session(config, log_callback=log)
 
 
@@ -156,10 +171,15 @@ def build_image_session(
     from jasna.gui.locales import t
     from jasna.mosaic.detection_registry import resolve_detection_model
     from jasna.restorer.sd15_download import bundle_present
-    from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer
+    from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer, use_plaintext_sd15
     from jasna.session_factory import build_compiled_detection_model
+    from jasna.gui.activation_worker import read_license_info
 
     _install_noise_filters()
+    if not use_plaintext_sd15(SD15_DIR):
+        _, _, identity = read_license_info()
+        if identity is not None and identity.startswith("JW1-"):
+            raise ValueError(t("license_cloud_cli_only"))
     if not bundle_present(SD15_DIR):
         raise FileNotFoundError(t("interactive_model_missing"))
     device = torch.device("cuda:0")

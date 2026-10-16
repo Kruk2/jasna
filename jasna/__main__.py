@@ -1,5 +1,4 @@
 import logging
-import multiprocessing
 import os
 import sys
 from pathlib import Path, PureWindowsPath
@@ -7,11 +6,24 @@ from pathlib import Path, PureWindowsPath
 logger = logging.getLogger(__name__)
 
 from jasna import startup_timing  # noqa: F401  captures PROCESS_START near process start
+from jasna._frozen import is_frozen
 
-if sys.platform == "win32":
-    os.environ.setdefault("OMP_WAIT_POLICY", "passive")
+if __name__ == "__main__":
+    if sys.platform == "win32":
+        os.environ.setdefault("OMP_WAIT_POLICY", "passive")
+    os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
-os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
+if __name__ == "__main__" and sys.platform in ("linux", "win32") and is_frozen():
+    from jasna.protection import initialize_runtime
+    try:
+        initialize_runtime()
+    except Exception as error:
+        if sys.argv[1:2] == ["--ltx-worker"]:
+            from jasna.protection.ltx_worker import report_startup_failure
+            report_startup_failure(error)
+        raise
+
+import multiprocessing
 
 # Wire CUDA/TensorRT/native-lib DLL search before any torch/native import. The Nuitka
 # build has no PyInstaller runtime hook, so this is the only place it runs; without it
@@ -19,6 +31,15 @@ os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 from jasna.packaging.windows_dll_paths import configure_windows_dll_search_paths
 
 configure_windows_dll_search_paths()
+
+if sys.argv[1:2] == ["--ltx-worker"]:
+    expected_args = 6 if is_frozen() else 2
+    if len(sys.argv) != expected_args or any(not value.isascii() or not value.isdecimal() for value in sys.argv[2:]):
+        raise SystemExit("Invalid LTX worker launch.")
+    from jasna.protection.ltx_worker import worker_main
+
+    worker_main()
+    raise SystemExit(0)
 
 if len(sys.argv) >= 3 and sys.argv[1] == "--compile-engines":
     from jasna.engine_compiler import EngineCompilationRequest, _subprocess_compile
@@ -33,7 +54,6 @@ if multiprocessing.parent_process() is not None:
     sys.exit(0)
 os.environ["JASNA_MAIN_PID"] = str(os.getpid())
 
-from jasna._frozen import is_frozen
 from jasna.bootstrap import sanitize_sys_path_for_local_dev
 from jasna.os_utils import drop_console_window
 
@@ -65,7 +85,8 @@ def _wants_cli(argv: list[str]) -> bool:
 
 
 if __name__ == "__main__":
-    multiprocessing.freeze_support()
+    if not (sys.platform in ("linux", "win32") and is_frozen()):
+        multiprocessing.freeze_support()
 
 if multiprocessing.parent_process() is None:
     if _wants_cli(sys.argv):
@@ -79,7 +100,8 @@ if multiprocessing.parent_process() is None:
 
         main()
     else:
-        drop_console_window()
+        if os.environ.get("JASNA_GUI_FONT_PROBE") != "1":
+            drop_console_window()
         _preload_native_libs()
         from jasna.gui import run_gui
 

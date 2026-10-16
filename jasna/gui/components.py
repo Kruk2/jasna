@@ -1,14 +1,20 @@
 """Reusable UI components for Jasna GUI."""
 
+import logging
 import tkinter
 import customtkinter as ctk
 import webbrowser
 from jasna.gui import scaling
+from jasna.gui.branding import create_xianyu_qr_image
+from jasna.gui import activation_worker
+from jasna.gui.queues import MainThreadCalls
 from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.gui.locales import t
+from jasna.gui.locales import get_locale, t
+from jasna.license_api import protection_available
+
+logger = logging.getLogger(__name__)
 
 
-# Support page URLs — two ways to back the project
 BMC_URL = "https://buymeacoffee.com/Kruk2"
 UNIFANS_URL = "https://app.unifans.io/c/kruk2"
 
@@ -107,9 +113,9 @@ class Tooltip:
 
 
 class _SupportButton(ctk.CTkButton):
-    """Brand-styled button that opens a support page and scales 1.05x on hover."""
+    """Brand-styled support button that scales 1.05x on hover."""
 
-    def __init__(self, master, text: str, url: str, fg_color: str, text_color: str, width: int, height: int):
+    def __init__(self, master, text: str, command, fg_color: str, text_color: str, width: int, height: int):
         super().__init__(
             master,
             text=text,
@@ -120,22 +126,22 @@ class _SupportButton(ctk.CTkButton):
             corner_radius=6,
             height=height,
             width=width,
-            command=lambda: webbrowser.open(url),
+            command=command,
         )
 
         self._original_width = width
         self._original_height = height
 
-        self.bind("<Enter>", self._on_enter)
-        self.bind("<Leave>", self._on_leave)
+        self.bind("<Enter>", self._grow_on_hover)
+        self.bind("<Leave>", self._restore_size)
 
-    def _on_enter(self, event=None):
+    def _grow_on_hover(self, event=None):
         self.configure(
             width=int(self._original_width * 1.05),
             height=int(self._original_height * 1.05),
         )
 
-    def _on_leave(self, event=None):
+    def _restore_size(self, event=None):
         self.configure(width=self._original_width, height=self._original_height)
 
 
@@ -168,7 +174,7 @@ def attach_entry_context_menu(entry: ctk.CTkEntry) -> tkinter.Menu:
 class BuyMeCoffeeButton(_SupportButton):
     def __init__(self, master, width: int, height: int):
         super().__init__(
-            master, text=t("bmc_support"), url=BMC_URL,
+            master, text=t("bmc_support"), command=lambda: webbrowser.open(BMC_URL),
             fg_color=Colors.BMC_YELLOW, text_color=Colors.BMC_TEXT, width=width, height=height,
         )
 
@@ -176,19 +182,69 @@ class BuyMeCoffeeButton(_SupportButton):
 class UnifansButton(_SupportButton):
     def __init__(self, master, width: int, height: int):
         super().__init__(
-            master, text=t("unifans_support"), url=UNIFANS_URL,
+            master, text=t("unifans_support"), command=lambda: webbrowser.open(UNIFANS_URL),
             fg_color=Colors.UNIFANS_PURPLE, text_color=Colors.UNIFANS_TEXT, width=width, height=height,
         )
 
 
+class XianyuButton(_SupportButton):
+    """Xianyu has no web link to the listing, so the button shows its QR code."""
+
+    def __init__(self, master, width: int, height: int):
+        super().__init__(
+            master, text=t("xianyu_support"), command=lambda: XianyuQrDialog(self.winfo_toplevel()),
+            fg_color=Colors.XIANYU_YELLOW, text_color=Colors.XIANYU_TEXT, width=width, height=height,
+        )
+
+
+class XianyuQrDialog(ctk.CTkToplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title(t("xianyu_dialog_title"))
+        self.configure(fg_color=Colors.BG_MAIN)
+        self.resizable(False, False)
+        self.transient(master)
+
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+        self.qr_label = ctk.CTkLabel(content, text="", image=create_xianyu_qr_image())
+        self.qr_label.pack(pady=(0, 12))
+        ctk.CTkLabel(
+            content,
+            text=t("xianyu_scan_hint"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text_color=Colors.TEXT_PRIMARY,
+            wraplength=280,
+            justify="left",
+        ).pack(pady=(0, 16))
+        ctk.CTkButton(
+            content,
+            text=t("btn_close"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color=Colors.BG_CARD,
+            hover_color=Colors.BORDER_LIGHT,
+            text_color=Colors.TEXT_PRIMARY,
+            command=self.destroy,
+        ).pack()
+
+        self.update_idletasks()
+        scaling.place_centered_on_parent(self, master, self.winfo_reqwidth(), self.winfo_reqheight())
+        grab_modal(self)
+
+
+def shows_xianyu_seller(language: str) -> bool:
+    return language == "zh"
+
+
 class LicenseDialog(ctk.CTkToplevel):
-    """Modal popup to enter the supporter email + license key. Persisted by
-    license_store (in the user config dir); on success calls on_activated so the
-    header chip can refresh."""
+    """Activate online or save a manually issued offline Activation key."""
 
     def __init__(self, master, on_activated):
         super().__init__(master)
+        self._closed = False
+        self._busy = True
         self._on_activated = on_activated
+        self._main_thread = MainThreadCalls(self, 50)
 
         self.title(t("supporter_title"))
         self.resizable(False, False)
@@ -205,11 +261,11 @@ class LicenseDialog(ctk.CTkToplevel):
         ).pack(anchor="w", pady=(0, 6))
         ctk.CTkLabel(
             outer, text=t("supporter_blurb"), text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 2))
         ctk.CTkLabel(
             outer, text=t("supporter_perks"), text_color=Colors.TEXT_PRIMARY,
-            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 10))
         ctk.CTkLabel(
             outer, text=t("license_crypto_info"), text_color=Colors.STATUS_PENDING,
@@ -220,47 +276,225 @@ class LicenseDialog(ctk.CTkToplevel):
             font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=340, justify="left",
         ).pack(anchor="w", pady=(0, 10))
 
-        self._email = ctk.CTkEntry(
-            outer, width=340, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_email_placeholder"),
+        ctk.CTkLabel(
+            outer, text=t("license_machine_key"), text_color=Colors.TEXT_PRIMARY,
+        ).pack(anchor="w")
+        machine_row = ctk.CTkFrame(outer, fg_color="transparent")
+        machine_row.pack(fill="x", pady=(0, 10))
+        self._machine = ctk.CTkEntry(
+            machine_row, width=370, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, state="readonly",
         )
-        self._email.pack(fill="x", pady=(0, 6))
-        attach_entry_context_menu(self._email)
+        self._machine.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        attach_entry_context_menu(self._machine)
+        self._copy = ctk.CTkButton(
+            machine_row, text=t("ctx_copy"), width=80,
+            command=self._copy_machine_key, state="disabled",
+        )
+        self._copy.pack(side="right")
+        self._method = ctk.CTkSegmentedButton(
+            outer, values=[t("license_online"), t("license_manual")],
+            command=self._select_method, state="disabled",
+        )
+        self._method.set(t("license_online"))
+        self._method.pack(fill="x", pady=(0, 10))
+
+        self._online_frame = ctk.CTkFrame(outer, fg_color="transparent")
+        self._online_frame.pack(fill="x")
+        ctk.CTkLabel(
+            self._online_frame, text=t("license_code"), text_color=Colors.TEXT_PRIMARY,
+        ).pack(anchor="w")
+        self._code = ctk.CTkEntry(
+            self._online_frame, width=460, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_code"),
+        )
+        self._code.pack(fill="x", pady=(0, 10))
+        attach_entry_context_menu(self._code)
+        self._online_activate_button = ctk.CTkButton(
+            self._online_frame, text=t("license_activate_online"),
+            fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER,
+            command=self._activate_online, state="disabled",
+        )
+        self._online_activate_button.pack(anchor="w")
+        ctk.CTkLabel(
+            self._online_frame, text=t("license_online_hint"), text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
+        ).pack(anchor="w", pady=(6, 0))
+
+        self._manual_frame = ctk.CTkFrame(outer, fg_color="transparent")
+        ctk.CTkLabel(
+            self._manual_frame, text=t("license_activation_steps"), text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
+        ).pack(anchor="w", pady=(0, 6))
+        ctk.CTkLabel(
+            self._manual_frame, text=t("license_activation_key"), text_color=Colors.TEXT_PRIMARY,
+        ).pack(anchor="w")
         self._key = ctk.CTkEntry(
-            outer, width=340, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
-            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_key_placeholder"),
+            self._manual_frame, width=460, fg_color=Colors.BG_PANEL, border_color=Colors.BORDER,
+            text_color=Colors.TEXT_PRIMARY, placeholder_text=t("license_activation_key"),
         )
         self._key.pack(fill="x", pady=(0, 10))
         attach_entry_context_menu(self._key)
 
-        action = ctk.CTkFrame(outer, fg_color="transparent")
+        action = ctk.CTkFrame(self._manual_frame, fg_color="transparent")
         action.pack(fill="x")
-        ctk.CTkButton(
+        self._activate_button = ctk.CTkButton(
             action, text=t("license_activate"), width=110,
             fg_color=Colors.PRIMARY, hover_color=Colors.PRIMARY_HOVER, text_color=Colors.TEXT_PRIMARY,
-            command=self._activate,
-        ).pack(side="left")
-        self._status = ctk.CTkLabel(action, text="", text_color=Colors.TEXT_PRIMARY)
-        self._status.pack(side="left", padx=10)
+            command=self._activate, state="disabled",
+        )
+        self._activate_button.pack(side="left")
+        self._activation_page_button = ctk.CTkButton(
+            action, text=t("license_activation_page"), width=180,
+            command=self._open_activation_page,
+        )
+        self._activation_page_button.pack(side="left", padx=(12, 0))
+        self._status = ctk.CTkLabel(
+            outer, text="", text_color=Colors.TEXT_PRIMARY,
+            wraplength=460, justify="left",
+        )
+        self._status.pack(anchor="w", pady=(6, 0))
+        if protection_available():
+            activation_worker.start_license_info(
+                lambda info, error: self._post_result(self._loaded, info, error)
+            )
+        else:
+            self._set_busy(True, lock_inputs=True)
+            self._activation_page_button.configure(state="disabled")
+            self._show_error(t("license_source_unavailable"))
 
-        from jasna.protection import license_store
-        stored = license_store.load_license()
-        if stored:
-            self._email.insert(0, stored[0])
-            self._key.insert(0, stored[1])
-            if license_store.is_licensed():
-                self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+        self._resize()
 
+    def _open_activation_page(self):
+        from jasna.protection.activation import activation_urls
+
+        webbrowser.open(activation_urls(get_locale().current_language == "zh")[0])
+
+    def _select_method(self, method):
+        self._online_frame.pack_forget()
+        self._manual_frame.pack_forget()
+        frame = self._online_frame if method == t("license_online") else self._manual_frame
+        frame.pack(fill="x", before=self._status)
+        self._resize()
+
+    def _set_busy(self, busy, *, lock_inputs=False):
+        self._busy = busy
+        state = "disabled" if busy else "normal"
+        for widget in (self._activate_button, self._method):
+            widget.configure(state=state)
+        for widget in (self._key, self._code):
+            widget.configure(state="disabled" if busy and lock_inputs else "normal")
+        has_machine = bool(self._machine.get()) and not busy
+        self._copy.configure(state="normal" if has_machine else "disabled")
+        self._online_activate_button.configure(state="normal" if has_machine else "disabled")
+
+    def _resize(self):
         self.update_idletasks()
-        minimum_width, _ = scaling.to_physical(self, 388, 0)
+        minimum_width, _ = scaling.to_physical(self, 508, 0)
         scaling.place_centered_on_parent(
             self,
-            master,
+            self.master,
             max(minimum_width, self.winfo_reqwidth()),
             self.winfo_reqheight(),
         )
 
+    def destroy(self):
+        if self._closed:
+            return
+        self._closed = True
+        self._main_thread.close()
+        super().destroy()
+
+    def _post_result(self, callback, *args):
+        if self._closed:
+            logger.debug("Ignoring worker result for closed activation dialog")
+            return
+        self._main_thread.post(lambda: callback(*args))
+
+    def _loaded(self, info, error):
+        self._set_busy(False)
+        if error is not None:
+            self._show_error(str(error))
+            self._load_machine_key()
+            return
+        key, licensed, identity = info
+        if identity is not None and identity.startswith("JW1-"):
+            self._show_error(t("license_cloud_cli_only"))
+        else:
+            if key:
+                self._key.insert(0, key)
+            if licensed:
+                self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+        self._load_machine_key()
+
+    def _load_machine_key(self):
+        self._set_busy(True)
+        self._set_machine_key("")
+        activation_worker.start_machine_key(
+            lambda key, error: self._post_result(self._machine_ready, key, error),
+        )
+
+    def _machine_ready(self, key, error):
+        self._set_busy(False)
+        if error is not None:
+            self._show_error(str(error))
+            return
+        self._set_machine_key(key)
+
+    def _set_machine_key(self, key):
+        self._machine.configure(state="normal")
+        self._machine.delete(0, "end")
+        self._machine.insert(0, key)
+        self._machine.configure(state="readonly")
+        state = "normal" if key and not self._busy else "disabled"
+        self._copy.configure(state=state)
+        self._online_activate_button.configure(state=state)
+
+    def _copy_machine_key(self):
+        self.clipboard_clear()
+        self.clipboard_append(self._machine.get())
+
     def _activate(self):
+        self._set_busy(True, lock_inputs=True)
+        self._status.configure(text=t("license_working"), text_color=Colors.TEXT_PRIMARY)
+        activation_worker.start_activation(
+            self._key.get().strip(),
+            lambda identity, error: self._post_result(self._activation_done, identity, error),
+        )
+
+    def _activate_online(self):
+        code, machine_key = self._code.get().strip(), self._machine.get()
+        self._set_busy(True, lock_inputs=True)
+        self._status.configure(text=t("license_connecting"), text_color=Colors.TEXT_PRIMARY)
+        activation_worker.start_online_activation(
+            code, machine_key,
+            lambda result, error: self._post_result(self._online_activation_done, result, error),
+        )
+
+    def _online_activation_done(self, result, error):
+        if error is None:
+            key, identity = result
+            self._key.configure(state="normal")
+            self._key.delete(0, "end")
+            self._key.insert(0, key)
+            self._code.configure(state="normal")
+            self._code.delete(0, "end")
+        else:
+            identity = None
+        self._activation_done(identity, error)
+
+    def _activation_done(self, identity, error):
+        from jasna.protection.activation import ActivationServiceError
+        from jasna.protection import (
+            ForgedLicenseError, LicenseError, MalformedLicenseError,
+            RetiredLicenseError,
+        )
+        self._set_busy(False)
+        if isinstance(error, ActivationServiceError):
+            self._show_error(t(f"license_service_{error.code}"))
+            return
+        if isinstance(error, ForgedLicenseError):
+            self._show_error(t("license_forged"))
         from jasna.protection import (
             ForgedLicenseError, LicenseError, MalformedLicenseError,
             ProtectionError, RetiredLicenseError, license_store,
@@ -284,10 +518,25 @@ class LicenseDialog(ctk.CTkToplevel):
         except ProtectionError as exc:
             self._show_error(str(exc))
             return
+        if isinstance(error, RetiredLicenseError):
+            self._show_error(t("license_retired"))
+            return
+        if isinstance(error, MalformedLicenseError):
+            self._show_error(t("license_malformed"))
+            return
+        if isinstance(error, LicenseError):
+            self._show_error(f"{t('license_invalid')}\n{error}")
+            return
+        if error is not None:
+            self._show_error(str(error))
+            return
+        self._set_machine_key(identity)
         self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
         self._on_activated()
 
     def _show_error(self, text: str) -> None:
+        self._status.configure(text=text, text_color=Colors.STATUS_ERROR)
+        self._resize()
         self._status.configure(text=text, text_color=Colors.STATUS_ERROR, wraplength=220, justify="left")
 
 

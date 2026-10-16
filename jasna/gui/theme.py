@@ -71,6 +71,10 @@ class Colors:
     UNIFANS_PURPLE = "#8B5CF6"    # Violet-500
     UNIFANS_TEXT = "#FFFFFF"      # White text on violet
 
+    # Xianyu branding
+    XIANYU_YELLOW = "#FFE60F"
+    XIANYU_TEXT = "#0f172a"
+
 
 class Fonts:
     FAMILY, FAMILY_MONO = font_families_for_platform(sys.platform, "en")

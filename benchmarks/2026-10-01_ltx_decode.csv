@@ -1,0 +1,22 @@
+date,commit,label,gpu,canvas,budget_gib,tile,weights,variant,first_s,s_per_window,peak_vram_gib,psnr_vs_first_db,max_abs_vs_first,runs_s
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,eager,3.19,2.556,5.92,inf,0.0,2.558 2.555 2.556
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,kitchen,2.37,2.356,6.09,63.36,0.1046,2.360 2.356 2.355
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,compile,5.69,2.057,6.11,66.18,0.0283,2.050 2.057 2.061
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,kitchen+compile,1.79,1.789,6.11,63.29,0.1314,1.791 1.789 1.789
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,768,24.0,128x768x768,real,eager,6.05,5.425,11.76,inf,0.0,5.417 5.425 5.427
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,768,24.0,128x768x768,real,kitchen,4.89,4.891,12.16,63.33,0.0522,4.891 4.890 4.891
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,768,24.0,128x768x768,real,kitchen+compile,6.76,3.711,12.2,63.27,0.0627,3.708 3.714 3.711
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,512,6.0,88x512x512,real,eager,4.07,3.429,4.63,inf,0.0,3.418 3.429 3.460
+2026-09-30,1da6e40+patch,variants,NVIDIA GeForce RTX 5090,512,6.0,88x512x512,real,kitchen+compile,7.31,2.393,4.83,63.31,0.1113,2.414 2.385 2.393
+2026-10-01,3ae528f-draft,shipped-cold,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,shipped,4.44,1.87,5.94,inf,0.0,1.870 1.868 1.871
+2026-10-01,3ae528f-draft,shipped-cold,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,autotune,13.7,1.844,6.11,67.2,0.019,1.844 1.856 1.844
+2026-10-01,3ae528f-draft,shipped-cold,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,natten,2.23,2.147,6.11,63.52,0.1514,2.156 2.147 2.140
+2026-10-01,3ae528f-draft,shipped-cold,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,eager,2.55,2.561,6.09,66.19,0.0273,2.564 2.561 2.553
+2026-10-01,3ae528f-draft,shipped-warm,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,shipped,2.78,1.909,5.94,inf,0.0,1.911 1.907 1.909
+2026-10-01,3ae528f-draft,shipped-warm,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,autotune,2.02,1.868,6.11,67.2,0.019,1.868 1.862 1.871
+2026-10-01,3ae528f-draft,shipped-cold,NVIDIA GeForce RTX 5090,768,24.0,128x768x768,real,shipped,6.5,3.951,11.8,inf,0.0,3.943 3.989 3.951
+2026-10-01,3ae528f-draft,shipped-cold,NVIDIA GeForce RTX 5090,768,24.0,128x768x768,real,autotune,16.13,3.837,12.2,67.16,0.0166,3.828 3.837 3.849
+2026-10-01,3ae528f,fix-graph-break,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,shipped,3.66,1.909,5.94,inf,0.0,1.897 1.909 1.917
+2026-10-01,3ae528f,fix-graph-break,NVIDIA GeForce RTX 5090,512,24.0,128x512x512,real,natten,3.18,2.189,6.11,63.52,0.1514,2.189 2.159 2.253
+2026-10-01,3ae528f,fix-graph-break,NVIDIA GeForce RTX 5090,768,24.0,128x768x768,real,shipped,5.8,4.038,11.8,inf,0.0,4.038 4.044 3.919
+2026-10-01,3ae528f,fix-graph-break,NVIDIA GeForce RTX 5090,512,6.0,88x512x512,real,shipped,6.24,2.48,4.65,inf,0.0,2.513 2.475 2.480
