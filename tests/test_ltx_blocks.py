@@ -139,7 +139,7 @@ def test_streamed_blocks_are_page_locked_without_power_of_two_rounding():
 
 
 @needs_cuda
-def test_refused_page_locking_keeps_the_rest_in_regular_ram(monkeypatch, caplog):
+def test_refused_page_locking_keeps_the_rest_in_regular_ram_without_unlocking(monkeypatch, caplog):
     import jasna.ltx.blocks as blocks_module
 
     register = blocks_module._register
@@ -149,18 +149,76 @@ def test_refused_page_locking_keeps_the_rest_in_regular_ram(monkeypatch, caplog)
         calls.append(buffer)
         return register(buffer) if len(calls) <= 3 else 2
 
+    def unlocking_fails_at_the_windows_cap(buffers):
+        if buffers:
+            raise RuntimeError("cuMemHostUnregister failed: CUDA_ERROR_OUT_OF_MEMORY: out of memory")
+
     monkeypatch.setattr(blocks_module, "_register", refuse_after_three)
-    monkeypatch.setattr(blocks_module, "_PINNED_HEADROOM_BYTES", 1)
+    monkeypatch.setattr(blocks_module, "_unregister", unlocking_fails_at_the_windows_cap)
     blocks = _blocks(6)
     with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
         store = BlockStore([dict(b) for b in blocks], torch.device("cuda"), resident=0)
-    assert [buffer.is_pinned() for buffer in store._host] == [True, True, False, False, False, False]
-    assert any("4 of 6 weight buffers use regular RAM" in r.getMessage() for r in caplog.records)
+    assert [buffer.is_pinned() for buffer in store._host] == [True, True, True, False, False, False]
+    assert any("(CUDA error 2); 3 of 6 weight buffers use regular RAM" in r.getMessage() for r in caplog.records)
     for _ in range(2):
         for index, expected in enumerate(blocks):
             weights = store.acquire(index)
             for name, tensor in expected.items():
                 assert torch.equal(weights[name].cpu(), tensor)
             store.release(index)
+    monkeypatch.undo()
     store.close()
     assert not any(buffer.is_pinned() for buffer in calls[:3])
+
+
+@needs_cuda
+def test_page_locking_stops_at_the_budget_before_the_system_refuses(monkeypatch, caplog):
+    import jasna.ltx.blocks as blocks_module
+
+    blocks = _blocks(4)
+    block_bytes = BlockStore([dict(b) for b in blocks[:1]], torch.device("cuda"), resident=0)
+    one = block_bytes._host[0].nbytes
+    block_bytes.close()
+    registered = []
+    register = blocks_module._register
+    monkeypatch.setattr(blocks_module, "_page_lock_budget", lambda: 2 * one + one // 2)
+    monkeypatch.setattr(blocks_module, "_register", lambda buffer: registered.append(buffer) or register(buffer))
+    with caplog.at_level("WARNING", logger="jasna.ltx.blocks"):
+        store = BlockStore([dict(b) for b in blocks], torch.device("cuda"), resident=0)
+    assert len(registered) == 2
+    assert [buffer.is_pinned() for buffer in store._host] == [True, True, False, False]
+    assert any("about half the RAM); 2 of 4 weight buffers" in r.getMessage() for r in caplog.records)
+    store.close()
+
+
+def test_windows_page_lock_budget_stays_below_half_the_ram(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    import jasna.ltx.blocks as blocks_module
+
+    gib = 1 << 30
+    monkeypatch.setattr(blocks_module.psutil, "virtual_memory", lambda: SimpleNamespace(total=16 * gib))
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert blocks_module._page_lock_budget() == 6 * gib
+    monkeypatch.setattr(blocks_module.psutil, "virtual_memory", lambda: SimpleNamespace(total=2 * gib))
+    assert blocks_module._page_lock_budget() == 0
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert blocks_module._page_lock_budget() == sys.maxsize
+
+
+@needs_cuda
+def test_failed_load_reports_its_own_error_when_cleanup_also_fails(monkeypatch):
+    import jasna.ltx.blocks as blocks_module
+
+    def refuse(_buffers):
+        raise RuntimeError("cuMemHostRegister failed")
+
+    def cleanup_fails(_store):
+        raise RuntimeError("CUDA error: out of memory")
+
+    monkeypatch.setattr(blocks_module, "_pin_while_allowed", refuse)
+    monkeypatch.setattr(BlockStore, "close", cleanup_fails)
+    with pytest.raises(RuntimeError, match="cuMemHostRegister failed") as raised:
+        BlockStore(_blocks(2), torch.device("cuda"), resident=0)
+    assert "out of memory" in str(raised.value.__cause__)

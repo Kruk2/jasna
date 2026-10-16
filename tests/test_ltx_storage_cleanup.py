@@ -131,6 +131,23 @@ def test_transformer_close_clears_top_context_conditioning_and_blocks(tmp_path, 
     transformer.close()
 
 
+def test_failed_transformer_load_reports_its_own_error_when_cleanup_also_fails(tmp_path, monkeypatch):
+    path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
+    _without_compiling(monkeypatch)
+
+    def load_fails(*_args, **_kwargs):
+        raise RuntimeError("LTX private load rejected: native block commit")
+
+    def cleanup_fails(_transformer):
+        raise RuntimeError("CUDA error: out of memory")
+
+    monkeypatch.setattr(sampler.BlockStore, "from_reader", load_fails)
+    monkeypatch.setattr(sampler.LtxTransformer, "close", cleanup_fails)
+    with pytest.raises(RuntimeError, match="native block commit") as raised:
+        sampler.LtxTransformer(path, torch.device("cpu"), _twenty_gib_free)
+    assert "out of memory" in str(raised.value.__cause__)
+
+
 def test_frozen_trial_keeps_its_placeholder_blocks_in_the_plain_tensor_store(monkeypatch):
     spec = _small_transformer_specs({"weight": (2, 2)})
     top = {name: ("BF16", shape) for name, shape in spec.items() if not name.startswith("blocks.")}

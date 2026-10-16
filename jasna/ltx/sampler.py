@@ -153,8 +153,11 @@ class LtxTransformer:
                 T.enable_int8_attention()
             else:
                 self._block_forward, self._prompt_key_value, self.block_backend = _block_functions(device, block_specs)
-        except BaseException:
-            self.close()
+        except BaseException as primary:
+            try:
+                self.close()
+            except BaseException as cleanup:
+                raise primary from cleanup
             raise
 
     def _resident_blocks(self, sizes: list[int]) -> int:

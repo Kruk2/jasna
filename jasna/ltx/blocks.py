@@ -11,8 +11,10 @@ Python sees only block inputs/outputs.
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 
+import psutil
 import torch
 
 from jasna.media.cuda_kernel import check_cuda, cuda_driver
@@ -21,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _ALIGN = 256
 _CU_MEMHOSTREGISTER_PORTABLE = 1
-_PINNED_HEADROOM_BYTES = 1 << 30
+_PAGE_LOCK_MARGIN_BYTES = 2 << 30
 
 
 @dataclass(frozen=True)
@@ -99,26 +101,37 @@ def _unregister(buffers: list[torch.Tensor]) -> None:
     buffers.clear()
 
 
+def _page_lock_budget() -> int:
+    """Bytes of streamed weights to page-lock. Windows refuses to lock much more than half the
+    RAM, and once it does the CUDA driver has no locked memory left for its own work (every
+    later CUDA call, unlocking included, fails out of memory), so stay well below that cap."""
+    if sys.platform != "win32":
+        return sys.maxsize
+    return max(0, psutil.virtual_memory().total // 2 - _PAGE_LOCK_MARGIN_BYTES)
+
+
 def _pin_while_allowed(buffers: list[torch.Tensor]) -> list[torch.Tensor]:
     """Page-locks host ``buffers`` in order at their exact size (torch's pinned allocator rounds
-    each one up to a power of two) and returns the pinned ones. Windows caps page-locked memory,
-    often at half the RAM: once refused, the rest stay pageable (slower copies) and the last
-    pinned ones are released so later pinned allocations still fit."""
+    each one up to a power of two) within the page-lock budget and returns the pinned ones; the
+    rest stay pageable (slower copies)."""
     pinned: list[torch.Tensor] = []
+    budget = _page_lock_budget()
     for buffer in buffers:
-        result = _register(buffer)
-        if result:
-            released = []
-            while pinned and sum(b.nbytes for b in released) < _PINNED_HEADROOM_BYTES:
-                released.append(pinned.pop())
-            _unregister(released)
-            logger.warning(
-                "LTX: the system would not lock more RAM for fast GPU copies (CUDA error %d); "
-                "%d of %d weight buffers use regular RAM, so LTX runs slower. More RAM helps",
-                result, len(buffers) - len(pinned), len(buffers),
-            )
-            break
-        pinned.append(buffer)
+        if buffer.nbytes > budget:
+            reason = "Windows locks at most about half the RAM"
+        else:
+            result = _register(buffer)
+            if not result:
+                pinned.append(buffer)
+                budget -= buffer.nbytes
+                continue
+            reason = f"CUDA error {result}"
+        logger.warning(
+            "LTX: the system would not lock more RAM for fast GPU copies (%s); "
+            "%d of %d weight buffers use regular RAM, so LTX runs slower. More RAM helps",
+            reason, len(buffers) - len(pinned), len(buffers),
+        )
+        break
     return pinned
 
 
@@ -134,8 +147,11 @@ class BlockStore:
             for index, tensors in enumerate(blocks):
                 _pack(tensors, self._layouts[index], self._buffer(index))
                 tensors.clear()
-        except BaseException:
-            self.close()
+        except BaseException as primary:
+            try:
+                self.close()
+            except BaseException as cleanup:
+                raise primary from cleanup
             raise
 
     @classmethod
@@ -148,8 +164,11 @@ class BlockStore:
         store._allocate(layouts, device, resident)
         try:
             store._read(reader, names)
-        except BaseException:
-            store.close()
+        except BaseException as primary:
+            try:
+                store.close()
+            except BaseException as cleanup:
+                raise primary from cleanup
             raise
         return store
 
@@ -224,8 +243,11 @@ class BlockStore:
             self._copy_done = [torch.cuda.Event() for _ in self._slots]
             self._compute_done = [torch.cuda.Event() for _ in self._slots]
             self._copy_stream = torch.cuda.Stream(device) if self._slots else None
-        except BaseException:
-            self.close()
+        except BaseException as primary:
+            try:
+                self.close()
+            except BaseException as cleanup:
+                raise primary from cleanup
             raise
         logger.info("LTX blocks: %d resident, %d streamed", self.resident, streamed)
         if streamed:
