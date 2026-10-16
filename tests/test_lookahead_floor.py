@@ -15,7 +15,7 @@ def test_metadata_keeps_the_clip_window_while_the_others_shrink(monkeypatch):
     clip, secondary, encode, metadata, note = pt._bounded_lookahead_depths(
         max_clip_size=90, secondary_workers=1, height=4096, width=8192, ten_bit=True
     )
-    assert metadata >= 98, "the clip window must survive the cap"
+    assert metadata >= 180, "the 2x-clip window must survive the cap"
     assert clip < 90, "the other queues do absorb the budget"
     assert note, "the cap must say so"
 
@@ -25,7 +25,7 @@ def test_small_frames_are_left_alone(monkeypatch):
     clip, secondary, encode, metadata, note = pt._bounded_lookahead_depths(
         max_clip_size=24, secondary_workers=1, height=1080, width=1920, ten_bit=False
     )
-    assert (clip, metadata) == (24, 32)
+    assert (clip, metadata) == (24, 48)
     assert note == ""
 
 
@@ -34,6 +34,6 @@ def test_disabling_the_budget_returns_the_configured_depths(monkeypatch):
     clip, secondary, encode, metadata, note = pt._bounded_lookahead_depths(
         max_clip_size=90, secondary_workers=2, height=4320, width=7680, ten_bit=True
     )
-    assert metadata == 98
+    assert metadata == 180
     assert clip == 90 and secondary == 180
     assert note == ""
