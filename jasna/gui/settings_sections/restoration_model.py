@@ -14,8 +14,6 @@ from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
 from jasna.session_config import LTX_AUTO_DEFAULT_PERCENT, LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, get_tooltip
-from jasna.gui.theme import Colors, Fonts, Sizing
-from jasna.ltx.model_files import LTX_MODELS
 from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED
 
 _MODELS = ("basicvsrpp", "ltx")

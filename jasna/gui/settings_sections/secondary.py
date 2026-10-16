@@ -518,12 +518,6 @@ class SecondarySection:
         else:
             self._section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL), after=self._previous_section)
 
-    def set_model(self, model: str) -> None:
-        if model == "ltx":
-            self._section.pack_forget()
-        else:
-            self._section.pack(fill="x", pady=(0, Sizing.PADDING_SMALL), after=self._previous_section)
-
     def set_enabled(self, enabled: bool) -> None:
         state = "normal" if enabled else "disabled"
         for value, radio in self._engine_radios.items():
