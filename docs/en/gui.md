@@ -121,6 +121,9 @@ Good to know:
 
 - One License code works on **3 PCs or cloud workspaces**. Activating the same
   PC again does not use a new slot. Only the owner can free a slot.
+- A new motherboard (Windows) or a fresh Linux install counts as a new PC
+  and uses a slot. Reinstalling Windows or changing the GPU, disk or RAM
+  does not: just activate again.
 - An Activation key covers only the models you bought.
 - **Activate online** sends only your License code and Machine key. After
   that, Jasna works offline.

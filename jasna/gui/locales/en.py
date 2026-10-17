@@ -561,7 +561,7 @@ EN = {
         # About dialog
         "dialog_about_title": "About Jasna",
         "dialog_about_version": "Version {version}",
-        "dialog_about_description": "mosaic restoration tool",
+        "dialog_about_description": "Mosaic restoration tool",
         "dialog_about_credit": "Inspired by Lada",
         "btn_close": "Close",
 

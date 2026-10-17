@@ -146,6 +146,11 @@ GitHub.
 One License code works on **3 PCs or cloud workspaces**. After activation,
 Jasna works offline. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
 
+What counts as a new PC: on Windows, a new motherboard; on Linux, a fresh
+Linux install. Each uses one of your 3 slots. Reinstalling Windows or
+changing the GPU, disk or RAM does not: just activate again with the same
+License code.
+
 ## Advanced
 
 ### How Jasna works
