@@ -241,7 +241,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     restoration.add_argument(
         "--experimental-ltx-less-overlap",
-        default=False,
+        default=True,
         action=argparse.BooleanOptionalAction,
         help=CLI_HELP["experimental_ltx_less_overlap"],
     )

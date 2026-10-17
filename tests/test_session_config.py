@@ -136,10 +136,10 @@ def test_cli_ltx_args_are_mapped() -> None:
     assert config.ltx_seed == 7
 
 
-def test_cli_less_overlap_steps_ltx_windows_by_104_frames() -> None:
-    assert _cli_config(["--restoration-model-name", "ltx"]).ltx_window_hop == 88
-    less = _cli_config(["--restoration-model-name", "ltx", "--experimental-ltx-less-overlap"])
-    assert less.ltx_window_hop == 104
+def test_cli_less_overlap_is_on_by_default_and_steps_ltx_windows_by_104_frames() -> None:
+    assert _cli_config(["--restoration-model-name", "ltx"]).ltx_window_hop == 104
+    more = _cli_config(["--restoration-model-name", "ltx", "--no-experimental-ltx-less-overlap"])
+    assert more.ltx_window_hop == 88
 
 
 def test_restoration_model_path_defaults_per_model() -> None:

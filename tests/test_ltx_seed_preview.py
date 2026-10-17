@@ -42,7 +42,7 @@ def test_prepared_key_follows_detection_and_canvas_but_not_the_look() -> None:
     assert prepared_key(segment, replace(settings, lut_path="x.cube", ltx_seed=5)) == prepared_key(segment, settings)
     assert prepared_key(segment, replace(settings, detection_score_threshold=0.9)) != prepared_key(segment, settings)
     assert prepared_key(segment, replace(settings, ltx_large_canvas=True)) != prepared_key(segment, settings)
-    assert prepared_key(segment, replace(settings, ltx_less_overlap=True)) != prepared_key(segment, settings)
+    assert prepared_key(segment, replace(settings, ltx_less_overlap=False)) != prepared_key(segment, settings)
     assert prepared_key(SegmentRange(1, 3), settings) != prepared_key(segment, settings)
 
 

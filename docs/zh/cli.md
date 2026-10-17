@@ -54,7 +54,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`，LTX 为 `model_weights/ltx-restore` | 修复模型权重（LTX 为文件夹）。 |
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列；其他 GPU 会报错停止。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要约 12 GB 空闲显存；不够时，这些马赛克按普通方式修复。 |
-| `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | 关闭 | LTX（实验性）：长视频约快 13%；结果与默认设置略有不同。 |
+| `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | 开启 | LTX（实验性）：长视频约快 13%。关闭后使用重叠更多的旧模式。 |
 | `--ltx-seed` | `20260923` | LTX：换一个种子，结果会略有不同；同一个种子会重复同样的结果。 |
 | `--ltx-trial` / `--no-ltx-trial` | 关闭 | LTX：不需要模型和许可证即可测试速度。视频不会被修复。 |
 | `--ltx-auto-split` | — | LTX：大马赛克（达到视频高度的这个百分比，例如 `12`）用 LTX，较小的用 BasicVSR++。可用于文件夹。不能与 `--segments` 或 `--fmp4` 一起使用。见[区间](segments.md#cli---ltx-auto-split)。 |

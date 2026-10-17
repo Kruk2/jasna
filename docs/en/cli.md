@@ -57,7 +57,7 @@ Jasna uses `TMP` first, then `TEMP`. `TMPDIR` is not used.
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`, or `model_weights/ltx-restore` for LTX | Restoration weights (a folder for LTX). |
 | `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only; other GPUs stop with an error. |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs about 12 GB of free VRAM; with less, those mosaics are restored normally. |
-| `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | off | LTX, experimental: about 13% faster on long videos; results differ slightly from the default. |
+| `--experimental-ltx-less-overlap` / `--no-experimental-ltx-less-overlap` | on | LTX, experimental: about 13% faster on long videos. Turn it off for the older mode with more overlap. |
 | `--ltx-seed` | `20260923` | LTX: another seed gives a slightly different result; the same seed repeats it. |
 | `--ltx-trial` / `--no-ltx-trial` | off | LTX: test the speed without the model or a license. The video is not restored. |
 | `--ltx-auto-split` | — | LTX: big mosaics (at least this percent of the video height, e.g. `12`) with LTX, smaller ones with BasicVSR++. Works on folders. Cannot be combined with `--segments` or `--fmp4`. See [Segments](segments.md#cli---ltx-auto-split). |

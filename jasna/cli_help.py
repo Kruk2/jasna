@@ -45,7 +45,7 @@ CLI_HELP: dict[str, str] = {
     ),
     "experimental_ltx_less_overlap": (
         "ltx: experimental. Fewer frames shared between the chunks LTX restores, about 13%% "
-        "faster on long videos; results differ slightly from the default. (default: %(default)s)"
+        "faster on long videos. Turn it off for the older mode with more overlap. (default: %(default)s)"
     ),
     "fp16": "Use half precision. Uses less VRAM and is often faster, with no visible quality loss.",
     "compile_basicvsrpp": "Prepare BasicVSR++ for your GPU: about 3x faster, almost no extra VRAM. The first run takes 15-60 minutes. NVIDIA only. (default: %(default)s)",

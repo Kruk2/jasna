@@ -152,7 +152,7 @@ class TestMainValidation:
 
     @pytest.mark.parametrize(
         "ltx_args",
-        [["--ltx-fast"], ["--ltx-large-canvas"], ["--experimental-ltx-less-overlap"], ["--ltx-seed", "7"], ["--ltx-trial"], ["--ltx-auto-split", "12"]],
+        [["--ltx-fast"], ["--ltx-large-canvas"], ["--no-experimental-ltx-less-overlap"], ["--ltx-seed", "7"], ["--ltx-trial"], ["--ltx-auto-split", "12"]],
     )
     def test_basicvsrpp_rejects_ltx_options(self, tmp_path, capsys, ltx_args):
         with pytest.raises(SystemExit):

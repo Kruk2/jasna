@@ -110,7 +110,7 @@ class AppSettings:
     ltx_seed: int = LTX_DEFAULT_SEED
     ltx_fast: bool = False
     ltx_large_canvas: bool = False
-    ltx_less_overlap: bool = False
+    ltx_less_overlap: bool = True
     ltx_trial: bool = False
     ltx_auto_split: bool = False
     ltx_auto_split_percent: int = LTX_AUTO_DEFAULT_PERCENT
