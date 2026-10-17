@@ -158,8 +158,8 @@ sharper.
 
 NVIDIA only.
 
-- **UNet 4x** (for supporters): trained for restoration, quality close to TVAI `iris-2`, and
-  faster than TVAI. See the
+- **UNet 4x** (for supporters): quality close to TVAI `iris-2`, and faster than
+  TVAI. See the
   examples on SLS Discord
   and [Supporting the project](../../README.md#supporting-the-project).
 - **RTX Super Res** (free): very fast, nothing to install. Quality is

@@ -138,7 +138,7 @@ Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特�
 
 仅限 NVIDIA。
 
-- **UNet 4x**（支持者专享）：针对修复任务训练，质量接近 TVAI `iris-2`，比 TVAI 快。见
+- **UNet 4x**（支持者专享）：质量接近 TVAI `iris-2`，比 TVAI 快。见
   SLS Discord 上的示例
   和[支持本项目](../../README.zh.md#支持本项目)。
 - **RTX Super Res**（免费）：非常快，无需安装任何东西。质量尚可。部分视频
