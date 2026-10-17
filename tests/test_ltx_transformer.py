@@ -204,6 +204,18 @@ def test_ltx_refuses_a_device_without_int8_attention():
         T.require_kernels(torch.device("cpu"))
 
 
+def test_ltx_names_why_the_int8_attention_extension_did_not_load(monkeypatch):
+    """#510: a Linux container refused LTX without saying why comfy-kitchen's _C failed to load."""
+    comfy_kitchen = pytest.importorskip("comfy_kitchen")
+    from comfy_kitchen.backends import cuda as kitchen_cuda
+
+    monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: False)
+    monkeypatch.setattr(kitchen_cuda, "_EXT_ERROR", "unverified runtime extension")
+    monkeypatch.setattr(torch.version, "hip", None)
+    with pytest.raises(RuntimeError, match=r"did not load \(unverified runtime extension\)\.$"):
+        T.require_kernels(torch.device("cuda"))
+
+
 def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch):
     from jasna.tensor_utils import compile_static
 
