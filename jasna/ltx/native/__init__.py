@@ -39,7 +39,7 @@ _HERE = Path(__file__).resolve().parent
 _SOURCES = ("module.cpp", "block.cpp", "glue.cu")
 _ATTENTION = _HERE / "sage_attention"
 _ATTENTION_SOURCES = ("quant_qk_int8.cu", "quant_v_int8.cu", "sage_attn_launcher.cu")
-# comfy-kitchen 0.2.36's nvcc flags (its CMakeLists.txt): the vendored attention computes kitchen's
+# comfy-kitchen 0.2.38's nvcc flags (its CMakeLists.txt): the vendored attention computes kitchen's
 # bits only with fast math, which glue.cu must not get, so it compiles apart from the extension.
 # NDEBUG keeps CUDA 13's fp4/fp8 header asserts out of device code, which the release build's
 # glibc 2.35 host headers cannot compile.
@@ -207,7 +207,7 @@ def _kernel_manifest(capability: tuple[int, int], dims: BlockDims, *, fp4: bool)
 
 
 def attention_cta_k(head_dim: int, rows: int) -> int:
-    """The INT8 attention key tile for ``rows`` tokens, as comfy-kitchen 0.2.36 picks it unmasked."""
+    """The INT8 attention key tile for ``rows`` tokens, as comfy-kitchen 0.2.38 picks it unmasked."""
     return 128 if head_dim >= 128 and rows > 1024 else 64
 
 

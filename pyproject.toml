@@ -42,7 +42,7 @@ nvidia = [
   "torch-tensorrt==2.12.0",
   "nvidia-vfx",
   # LTX self-attention kernel (INT8, prebuilt abi3 wheels for Linux and Windows).
-  "comfy-kitchen==0.2.36",
+  "comfy-kitchen==0.2.38",
   "scipy",
   # torch.compile and the LTX Triton kernels; Linux torch wheels bring triton 3.7.1 themselves.
   "triton-windows==3.7.1.post27; sys_platform == 'win32'",

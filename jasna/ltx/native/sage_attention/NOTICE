@@ -1,7 +1,7 @@
 INT8 SageAttention kernels vendored from ComfyKitchen
 
-Source: https://github.com/Comfy-Org/comfy-kitchen, tag v0.2.36
-(commit 888b13e2c0e721f6576fe351a2ad79894b1c451f), files
+Source: https://github.com/Comfy-Org/comfy-kitchen, tag v0.2.38
+(commit 42081bf9bb5fad3992c1256aab4f01b27cbb5816), files
 comfy_kitchen/backends/cuda/sage_attention/{quant_qk_int8.cu, quant_v_int8.cu,
 sage_attn_launcher.cu, qk_int_sv_i8_cuda.cuh, attn_utils.cuh, cp_async.cuh,
 math.cuh, mma.cuh, numeric_conversion.cuh, permuted_smem.cuh} and
@@ -9,11 +9,12 @@ comfy_kitchen/backends/cuda/float_utils.cuh. License: Apache-2.0
 (assets/licenses/Apache-2.0.txt).
 
 Jasna's changes: only the bf16-input, bf16-output, unmasked paths are kept
-(other dtypes, attention masks and the key-mask preparation kernel are
-removed, unused float_utils.cuh helpers dropped), and the three launchers are
-C++ functions in namespace jasna_ltx::sage_attention declared in launchers.h
-instead of extern "C" exports. The kernels themselves are unchanged and are
-compiled with comfy-kitchen's nvcc flags.
+(other dtypes, attention masks, the key-mask preparation kernel and the
+paged-decode quantizers are removed, unused float_utils.cuh helpers dropped),
+and the three launchers are C++ functions in namespace
+jasna_ltx::sage_attention declared in launchers.h instead of extern "C"
+exports. The kernels themselves are unchanged and are compiled with
+comfy-kitchen's nvcc flags.
 
 Upstream NOTICE (relevant parts):
 

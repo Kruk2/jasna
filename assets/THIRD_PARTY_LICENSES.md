@@ -54,8 +54,8 @@ keeps its Apache-2.0 header.
 
 Jasna's `jasna/ltx/native/sage_attention/` directory is the bf16, unmasked
 subset of the INT8 SageAttention CUDA kernels of
-[Comfy Org comfy-kitchen](https://github.com/Comfy-Org/comfy-kitchen) v0.2.36
-(commit `888b13e2c0e721f6576fe351a2ad79894b1c451f`), themselves derived from
+[Comfy Org comfy-kitchen](https://github.com/Comfy-Org/comfy-kitchen) v0.2.38
+(commit `42081bf9bb5fad3992c1256aab4f01b27cbb5816`), themselves derived from
 [SageAttention](https://github.com/thu-ml/SageAttention). They keep their
 Apache-2.0 headers; the directory's `NOTICE` records the upstream notices and
 Jasna's changes.
