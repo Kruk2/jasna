@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from jasna.ltx import inference, restore
-from jasna.ltx.plan import Region
+from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
 MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
@@ -72,7 +72,7 @@ class _Transformer:
         self.conditions = [None] * 8
         self.blocks = SimpleNamespace(resident=40, count=48)
 
-    def denoise_chain(self, references, seeds, advance):
+    def denoise_chain(self, references, seeds, window_hop, advance):
         _Transformer.seeds.append(list(seeds))
         for _ in self.conditions:
             advance(len(references))
@@ -147,6 +147,7 @@ def _render(tmp_path):
         frame_w=64,
         batch_size=4,
         large_canvas=False,
+        window_hop=restore.WINDOW_HOP,
         budget=restore.segment_decode_budget,
         budget_name="segment",
         device=torch.device("cpu"),
@@ -201,6 +202,7 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
             frame_h=64,
             frame_w=64,
             large_canvas=False,
+            window_hop=restore.WINDOW_HOP,
             bar=_Bar(),
             cancel=threading.Event(),
         )
@@ -262,6 +264,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         frame_w=64,
         batch_size=4,
         large_canvas=False,
+        window_hop=restore.WINDOW_HOP,
         seed=5,
         device=torch.device("cpu"),
         work_dir=tmp_path,
@@ -538,7 +541,7 @@ def test_worker_passes_are_timed_on_the_wall_clock(monkeypatch):
             with bar.window(512):
                 clock.now += 2.0
     with progress.bar("denoise", 6, unit="step", marks=restore.timing_marks(transformer)) as bar:
-        transformer.denoise_chain([torch.zeros(1), torch.zeros(1)], [1, 2], bar.track(512, 3))
+        transformer.denoise_chain([torch.zeros(1), torch.zeros(1)], [1, 2], restore.WINDOW_HOP, bar.track(512, 3))
 
     assert progress.timings["encode"].windows == [(512, 2.0), (512, 2.0)]
     assert progress.timings["denoise"].steps == [(512, 0.25), (512, 0.25)]
@@ -575,6 +578,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         frame_w=64,
         batch_size=4,
         large_canvas=False,
+        window_hop=restore.WINDOW_HOP,
         seed=1,
         device=torch.device("cpu"),
         work_dir=tmp_path,
@@ -685,7 +689,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     monkeypatch.setattr(inference.ModelRuntime, "request", request)
     monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, _crop: torch.zeros(3, 2, 2, dtype=torch.uint8))
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
-    render = replace(_render(tmp_path), files=files)
+    render = replace(_render(tmp_path), files=files, window_hop=LESS_OVERLAP_WINDOW_HOP)
     writer = _Writer()
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), lambda: writer)],
@@ -696,7 +700,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
         "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",
         "unload_transformer", "load_decoder", "decode", "unload_decoder",
     ]
-    assert requests[4][1] == {"seeds": [5]}
+    assert requests[4][1] == {"seeds": [5], "window_hop": LESS_OVERLAP_WINDOW_HOP}
 
 
 def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
@@ -733,5 +737,7 @@ def test_a_run_with_a_speed_profile_skips_the_speed_test(fakes, tmp_path):
 def test_the_speed_test_mosaics_plan_two_windows_on_each_canvas(frame_h, frame_w):
     detections = restore._SpeedTestMosaics()(torch.zeros(1, 3, 8, 8), target_hw=(frame_h, frame_w))
     regions = restore.regions_per_frame(detections, frame_h, frame_w) * restore.SPEED_TEST_FRAMES
-    plans = restore.plan_video(regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True)
+    plans = restore.plan_video(
+        regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True, window_hop=restore.WINDOW_HOP
+    )
     assert sorted(w.canvas for plan in plans for w in plan.windows) == [512, 512, 768, 768]

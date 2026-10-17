@@ -294,7 +294,7 @@ def test_every_model_option_has_a_tooltip(tk_root, tmp_path, monkeypatch) -> Non
         assert card.radio in tips[t(f"tip_model_{key}")]
     assert section._ltx_model in tips[t("tip_ltx_model")]
     assert section._new_seed_btn in tips[t("tip_ltx_new_seed")]
-    for key in ("ltx_seed", "ltx_fast", "ltx_large_canvas", "ltx_trial"):
+    for key in ("ltx_seed", "ltx_fast", "ltx_large_canvas", "ltx_less_overlap", "ltx_trial"):
         assert section._widgets[key] in tips[t(f"tip_{key}")]
 
 

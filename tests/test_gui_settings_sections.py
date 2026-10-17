@@ -71,6 +71,7 @@ def _fake_section_widgets() -> dict:
         "ltx_seed": _FakeWidget(" 123 "),
         "ltx_fast": _FakeWidget(1),
         "ltx_large_canvas": _FakeWidget(0),
+        "ltx_less_overlap": _FakeWidget(1),
         "ltx_trial": _FakeWidget(1),
         "ltx_auto_split": _FakeWidget(1),
         "ltx_auto_split_percent": _FakeWidget(17.6),
@@ -160,6 +161,7 @@ def test_sections_collect_internal_values_without_translation_lookups() -> None:
     assert values["ltx_seed"] == 123
     assert values["ltx_fast"] is True
     assert values["ltx_large_canvas"] is False
+    assert values["ltx_less_overlap"] is True
     assert values["ltx_trial"] is True
     assert values["ltx_auto_split"] is True
     assert values["ltx_auto_split_percent"] == 18
@@ -503,7 +505,7 @@ def test_gpu_support_disables_ltx_and_shows_fast_mode_on_blackwell(_panel_factor
 
 def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
     panel = _panel_factory(True)
-    ltx = replace(AppSettings(), restoration_model="ltx", ltx_seed=99, ltx_large_canvas=True, encoder_cq=28)
+    ltx = replace(AppSettings(), restoration_model="ltx", ltx_seed=99, ltx_large_canvas=True, ltx_less_overlap=True, encoder_cq=28)
 
     for section in panel._sections:
         section.apply(ltx)

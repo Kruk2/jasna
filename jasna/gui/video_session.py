@@ -59,6 +59,7 @@ def video_session_config(
     encoder_settings: Mapping[str, object],
 ) -> SessionConfig:
     from jasna.engine_paths import default_restoration_model_path
+    from jasna.ltx.plan import window_hop
     from jasna.mosaic.detection_registry import coerce_detection_model_name, require_detection_model_weights
 
     det_name = coerce_detection_model_name(str(settings.detection_model))
@@ -77,6 +78,7 @@ def video_session_config(
         restoration_model_name=settings.restoration_model,
         restoration_model_path=default_restoration_model_path(settings.restoration_model),
         ltx_large_canvas=bool(settings.ltx_large_canvas),
+        ltx_window_hop=window_hop(bool(settings.ltx_less_overlap)),
         ltx_seed=int(settings.ltx_seed),
         ltx_fast=bool(settings.ltx_fast),
         ltx_model=settings.ltx_model,

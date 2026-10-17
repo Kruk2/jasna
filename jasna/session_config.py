@@ -41,6 +41,7 @@ class SessionConfig:
     restoration_model_name: RestorationModelName
     restoration_model_path: Path
     ltx_large_canvas: bool
+    ltx_window_hop: int
     ltx_seed: int
     ltx_fast: bool
     ltx_model: LtxModelName

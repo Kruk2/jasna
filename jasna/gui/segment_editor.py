@@ -921,6 +921,7 @@ class SegmentEditor(ctk.CTkToplevel):
         import torch
 
         from jasna.ltx.model_files import bundle_names
+        from jasna.ltx.plan import window_hop
         from jasna.ltx.speed import profile_path, segment_estimate_seconds
 
         settings = self._current_video_settings()
@@ -932,6 +933,7 @@ class SegmentEditor(ctk.CTkToplevel):
             frames=max(1, round(segment.duration * metadata.video_fps)),
             fps=float(metadata.video_fps),
             megapixels=metadata.video_width * metadata.video_height / 1e6,
+            window_hop=window_hop(settings.ltx_less_overlap),
         )
 
     def _refresh_ltx_render_button(self) -> None:

@@ -130,6 +130,13 @@ def test_video_session_config_maps_ltx_settings() -> None:
     assert config.restoration_model_name == "ltx"
     assert config.restoration_model_path == Path("weights") / "ltx-restore"
     assert (config.ltx_seed, config.ltx_fast, config.ltx_large_canvas) == (7, True, True)
+    assert config.ltx_window_hop == 88
+
+
+def test_video_session_config_maps_less_overlap_to_the_longer_window_hop() -> None:
+    config = _config(replace(AppSettings(), restoration_model="ltx", ltx_less_overlap=True))
+
+    assert config.ltx_window_hop == 104
 
 
 def test_video_session_config_ignores_standard_only_extras_for_ltx() -> None:

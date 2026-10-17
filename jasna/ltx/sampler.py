@@ -23,7 +23,7 @@ from jasna.ltx import native
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderHandle, open_tensors
-from jasna.ltx.plan import FUSION_RAMP, LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENTS
+from jasna.ltx.plan import SharedLatents, shared_latents
 from jasna.tensor_utils import compile_static
 
 logger = logging.getLogger(__name__)
@@ -43,14 +43,16 @@ def unpatchify(tokens: torch.Tensor, frames: int, height: int, width: int) -> to
     return tokens.transpose(1, 2).reshape(1, -1, frames, height, width)
 
 
-def fuse_overlaps(latents: Sequence[torch.Tensor], tokens_per_frame: int, right_weights: Sequence[float]) -> None:
+def fuse_overlaps(
+    latents: Sequence[torch.Tensor], tokens_per_frame: int, shared: SharedLatents, right_weights: Sequence[float]
+) -> None:
     """Write the weighted mean of each consecutive pair's shared latent frames into both,
     in place. All-zero weights copy the earlier window into the later one."""
     weight = torch.tensor(right_weights, dtype=torch.float32).repeat_interleave(tokens_per_frame).view(1, -1, 1)
     weight = weight.to(latents[0].device, non_blocking=True)
     for left, right in zip(latents, latents[1:]):
-        a = left[:, LEFT_SHARED_LATENTS.start * tokens_per_frame : LEFT_SHARED_LATENTS.stop * tokens_per_frame]
-        b = right[:, RIGHT_SHARED_LATENTS.start * tokens_per_frame : RIGHT_SHARED_LATENTS.stop * tokens_per_frame]
+        a = left[:, shared.left.start * tokens_per_frame : shared.left.stop * tokens_per_frame]
+        b = right[:, shared.right.start * tokens_per_frame : shared.right.stop * tokens_per_frame]
         fused = (a.float() * (1.0 - weight) + b.float() * weight).to(a.dtype)
         a.copy_(fused)
         b.copy_(fused)
@@ -208,11 +210,15 @@ class LtxTransformer:
 
     @torch.inference_mode()
     def denoise_chain(
-        self, references: Sequence[torch.Tensor], seeds: Sequence[int], advance: Callable[[int], None]
+        self,
+        references: Sequence[torch.Tensor],
+        seeds: Sequence[int],
+        window_hop: int,
+        advance: Callable[[int], None],
     ) -> list[torch.Tensor]:
         """Final latents ``[1, 128, F, H, W]`` (on the CPU) of one track's windows, given each window's
-        reference latent (the encoded mosaic crop) and noise seed. ``advance(n)`` reports n
-        window-steps done."""
+        reference latent (the encoded mosaic crop), noise seed and the frames between window
+        starts. ``advance(n)`` reports n window-steps done."""
         frames, height, width = references[0].shape[2:]
         tokens_per_frame = height * width
         rope = self._rope(frames, height, width)
@@ -224,6 +230,7 @@ class LtxTransformer:
             references,
             seeds,
             self.sigmas,
+            window_hop=window_hop,
             steps=len(self.conditions),
             group=self._group_size(len(references), 2 * frames * tokens_per_frame),
             denoise=denoise,
@@ -290,15 +297,16 @@ class _FusedChain:
     """Windows' latents pushed in order: each is fused on the GPU with the one before it,
     which then goes back to its host window."""
 
-    def __init__(self, host: list[torch.Tensor], tokens: int, tokens_per_frame: int) -> None:
+    def __init__(self, host: list[torch.Tensor], tokens: int, tokens_per_frame: int, shared: SharedLatents) -> None:
         self._host = host
+        self._shared = shared
         self._tokens = tokens
         self._tokens_per_frame = tokens_per_frame
         self._held: tuple[int, torch.Tensor] | None = None
 
     def push(self, index: int, latent: torch.Tensor, right_weights: Sequence[float]) -> None:
         if self._held is not None:
-            fuse_overlaps([self._held[1], latent], self._tokens_per_frame, right_weights)
+            fuse_overlaps([self._held[1], latent], self._tokens_per_frame, self._shared, right_weights)
             self._store(*self._held)
         self._held = (index, latent)
 
@@ -315,6 +323,7 @@ def denoise_windows(
     seeds: Sequence[int],
     sigmas: torch.Tensor,
     *,
+    window_hop: int,
     steps: int,
     group: int,
     denoise: Callable[[list[torch.Tensor], int], list[torch.Tensor]],
@@ -331,11 +340,12 @@ def denoise_windows(
     host = _pinned_windows(len(references), (1, 2 * tokens, references[0].shape[1]))
     for window, reference in zip(host, references):
         window[:, tokens:].copy_(patchify(reference))
-    chain = _FusedChain(host, tokens, tokens_per_frame)
+    shared = shared_latents(window_hop)
+    chain = _FusedChain(host, tokens, tokens_per_frame, shared)
     for index, seed in enumerate(seeds):
         generator = torch.Generator(device=device).manual_seed(int(seed))
         noise = torch.randn(1, 2 * tokens, host[0].shape[-1], device=device, dtype=torch.bfloat16, generator=generator)
-        chain.push(index, noise[:, :tokens].clone(), [0.0] * len(FUSION_RAMP))
+        chain.push(index, noise[:, :tokens].clone(), [0.0] * len(shared.ramp))
     chain.flush()
     for step in range(steps):
         for start in range(0, len(host), group):
@@ -343,7 +353,7 @@ def denoise_windows(
             inputs = [host[i].to(device, non_blocking=True) for i in members]
             denoised = denoise(inputs, step)
             for i, x, value in zip(members, inputs, denoised):
-                chain.push(i, _euler(x[:, :tokens], value, sigmas, step), FUSION_RAMP)
+                chain.push(i, _euler(x[:, :tokens], value, sigmas, step), shared.ramp)
             advance(len(members))
         chain.flush()
     torch.cuda.current_stream(device).synchronize()

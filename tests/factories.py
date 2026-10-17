@@ -28,6 +28,7 @@ def session_config(**overrides) -> SessionConfig:
         restoration_model_name="basicvsrpp",
         restoration_model_path=Path("restore.pth"),
         ltx_large_canvas=True,
+        ltx_window_hop=88,
         ltx_seed=0,
         ltx_fast=False,
         ltx_model="distilled",

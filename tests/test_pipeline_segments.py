@@ -261,6 +261,7 @@ def _mixed_pipeline(tmp_path, default_model: str, segments: tuple[SegmentRange, 
     pipeline = object.__new__(Pipeline)
     pipeline.restoration_model_name = default_model
     pipeline.ltx_seed = 5
+    pipeline.ltx_window_hop = 104
     pipeline.input_video = tmp_path / "input.mp4"
     pipeline.output_video = tmp_path / "output.mp4"
     pipeline.codec = "h264"
@@ -360,6 +361,7 @@ def test_mixed_job_reports_time_left_from_the_ltx_estimate_until_ltx_reports_its
         _run_smart_mocked(pipeline)
 
     assert estimate.call_args.kwargs["frames"] == 60
+    assert estimate.call_args.kwargs["window_hop"] == 104
     standard_callback = pipeline._run_pass.call_args.kwargs["progress"].callback
     standard_callback(50.0, 30.0, 10.0, 30, 60, None)
     assert pipeline.progress_callback.call_args.args[2] == pytest.approx(910.0)

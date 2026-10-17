@@ -160,6 +160,13 @@ class RestorationModelSection:
         Tooltip(self._widgets["ltx_large_canvas"], get_tooltip("ltx_large_canvas"))
         self._large_row = large_row
 
+        overlap_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
+        overlap_row.pack(fill="x")
+        add_setting_label(overlap_row, "ltx_less_overlap", in_card=True)
+        self._widgets["ltx_less_overlap"] = CompactSwitch(overlap_row, self._on_modified, Colors.BG_CARD)
+        self._widgets["ltx_less_overlap"].pack(side="right", padx=12, pady=8)
+        Tooltip(self._widgets["ltx_less_overlap"], get_tooltip("ltx_less_overlap"))
+
         auto_row = ctk.CTkFrame(self._ltx_options, fg_color="transparent")
         auto_row.pack(fill="x")
         add_setting_label(auto_row, "ltx_auto_split", in_card=True)
@@ -350,6 +357,10 @@ class RestorationModelSection:
             self._widgets["ltx_large_canvas"].select()
         else:
             self._widgets["ltx_large_canvas"].deselect()
+        if preset.ltx_less_overlap:
+            self._widgets["ltx_less_overlap"].select()
+        else:
+            self._widgets["ltx_less_overlap"].deselect()
         if preset.ltx_trial:
             self._widgets["ltx_trial"].select()
         else:
@@ -367,6 +378,7 @@ class RestorationModelSection:
             "ltx_seed": parse_seed(self._widgets["ltx_seed"].get()),
             "ltx_fast": self._widgets["ltx_fast"].get() == 1,
             "ltx_large_canvas": self._widgets["ltx_large_canvas"].get() == 1,
+            "ltx_less_overlap": self._widgets["ltx_less_overlap"].get() == 1,
             "ltx_trial": self._widgets["ltx_trial"].get() == 1,
             "ltx_auto_split": self._widgets["ltx_auto_split"].get() == 1,
             "ltx_auto_split_percent": round(self._widgets["ltx_auto_split_percent"].get()),

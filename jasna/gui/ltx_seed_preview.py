@@ -92,7 +92,13 @@ class SeedFrameWriter:
 
 def prepared_key(segment: SegmentRange, settings: AppSettings) -> tuple:
     """What a range's plan and reference latents depend on (not the seed)."""
-    return (segment.start, segment.end, video_session_key(settings), settings.ltx_large_canvas)
+    return (
+        segment.start,
+        segment.end,
+        video_session_key(settings),
+        settings.ltx_large_canvas,
+        settings.ltx_less_overlap,
+    )
 
 
 class SeedRenderer:

@@ -114,13 +114,15 @@ UNPROFILED_FIXED_SECONDS = 30.0
 UNPROFILED_SECONDS_PER_VIDEO_SECOND = 5.0
 
 
-def segment_estimate_seconds(path: Path, gpu: str, transformer: str, *, frames: int, fps: float, megapixels: float) -> float:
+def segment_estimate_seconds(
+    path: Path, gpu: str, transformer: str, *, frames: int, fps: float, megapixels: float, window_hop: int
+) -> float:
     """About how long a segment render of ``frames`` takes, for one mosaic at the 512 canvas:
     from this GPU's learned rates when the profile has them, else 30 s plus 5x the range
     (an RTX 5090 run)."""
     from jasna.ltx.plan import window_starts
 
-    work = Work(frames, megapixels, {512: len(window_starts(frames))})
+    work = Work(frames, megapixels, {512: len(window_starts(frames, window_hop))})
     estimates = pass_estimates(load_rates(path, profile_key(gpu, transformer, "segment")), work)
     if estimates is None:
         return UNPROFILED_FIXED_SECONDS + UNPROFILED_SECONDS_PER_VIDEO_SECOND * frames / fps

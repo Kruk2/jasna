@@ -7,8 +7,7 @@ from jasna.ltx.plan import (
     BLEND_FRAMES,
     LARGE_CANVAS,
     LEAD_IN_FRAMES,
-    LEFT_SHARED_LATENTS,
-    RIGHT_SHARED_LATENTS,
+    LESS_OVERLAP_WINDOW_HOP,
     WINDOW_HOP,
     Region,
     RegionGroup,
@@ -23,6 +22,8 @@ from jasna.ltx.plan import (
     plan_video,
     rejoin_across_cover,
     restart_cameras,
+    shared_latents,
+    window_hop,
     window_starts,
 )
 from jasna.ltx.regions import trace_region
@@ -85,7 +86,7 @@ def _split_video() -> list[list[Region]]:
 
 
 def test_a_lasting_split_gets_its_own_camera_with_a_handover():
-    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, large_canvas=False)
+    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP)
     assert [(p.start, p.stop) for p in plans] == [(0, 130), (100 - LEAD_IN_FRAMES, 500)]
     piece = plans[1]
     assert len(piece.presence) == len(piece.polygons) == piece.stop - piece.start
@@ -145,23 +146,54 @@ def test_filled_frames_interpolate_gaps():
 
 
 def test_window_starts_cover_with_hop():
-    assert window_starts(1) == [0]
-    assert window_starts(121) == [0]
-    assert window_starts(122) == [0, WINDOW_HOP]
-    assert window_starts(385) == [0, 88, 176, 264]
-    assert window_starts(386) == [0, 88, 176, 264, 352]
+    assert window_starts(1, WINDOW_HOP) == [0]
+    assert window_starts(121, WINDOW_HOP) == [0]
+    assert window_starts(122, WINDOW_HOP) == [0, WINDOW_HOP]
+    assert window_starts(385, WINDOW_HOP) == [0, 88, 176, 264]
+    assert window_starts(386, WINDOW_HOP) == [0, 88, 176, 264, 352]
 
 
-def test_shared_latents_encode_the_same_frames():
+def test_less_overlap_window_starts_step_104():
+    assert window_starts(121, LESS_OVERLAP_WINDOW_HOP) == [0]
+    assert window_starts(122, LESS_OVERLAP_WINDOW_HOP) == [0, 104]
+    assert window_starts(600, LESS_OVERLAP_WINDOW_HOP) == [0, 104, 208, 312, 416, 520]
+
+
+def test_window_hop_from_the_less_overlap_switch():
+    assert (window_hop(False), window_hop(True)) == (88, 104)
+
+
+def test_default_hop_shares_four_latents():
+    shared = shared_latents(WINDOW_HOP)
+    assert (shared.left, shared.right) == (range(12, 16), range(1, 5))
+    assert shared.ramp == (0.2, 0.4, 0.6, 0.8)
+
+
+def test_less_overlap_hop_shares_two_latents():
+    shared = shared_latents(LESS_OVERLAP_WINDOW_HOP)
+    assert (shared.left, shared.right) == (range(14, 16), range(1, 3))
+    assert shared.ramp == pytest.approx((1 / 3, 2 / 3))
+
+
+@pytest.mark.parametrize("hop", [WINDOW_HOP, LESS_OVERLAP_WINDOW_HOP])
+def test_shared_latents_encode_the_same_frames(hop):
     def first_pixel(latent: int) -> int:
         return 0 if latent == 0 else 8 * latent - 7
 
-    for left, right in zip(LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENTS):
-        assert first_pixel(left) == WINDOW_HOP + first_pixel(right)
+    shared = shared_latents(hop)
+    for left, right in zip(shared.left, shared.right, strict=True):
+        assert first_pixel(left) == hop + first_pixel(right)
+
+
+def test_plan_windows_follow_the_hop():
+    regions = [[_square(300, 300, 120)] for _ in range(300)]
+    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=LESS_OVERLAP_WINDOW_HOP)
+    assert [w.start for w in plan.windows] == [0, 104, 208]
+    assert plan.window_hop == LESS_OVERLAP_WINDOW_HOP
 
 
 def test_crossfade_weights_partition_unity():
-    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, large_canvas=True)
+    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP)
     windows = plans[0].windows
     total = np.zeros(300)
     for window, weight in zip(windows, crossfade_weights(windows)):
@@ -187,9 +219,9 @@ def test_track_camera_contains_support_and_letterboxes():
 
 
 def test_large_crops_use_the_large_canvas():
-    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=True)
+    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP)
     assert plans[0].windows[0].canvas == LARGE_CANVAS
-    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=False)
+    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP)
     assert capped[0].windows[0].canvas == PLAN_CANVAS
     assert letterbox((0, 0, 900, 900), LARGE_CANVAS).resize_hw == (LARGE_CANVAS, LARGE_CANVAS)
 

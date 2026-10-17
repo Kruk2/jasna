@@ -35,7 +35,7 @@ from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx import transformer as T
 from jasna.ltx.model_files import LTX_MODELS, LtxModelFiles
-from jasna.ltx.plan import LATENT_FRAMES
+from jasna.ltx.plan import LATENT_FRAMES, WINDOW_HOP
 from jasna.ltx.sampler import LtxTransformer
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -76,7 +76,7 @@ def run_chain(transformer: LtxTransformer, refs: list[torch.Tensor], steps: int)
     try:
         torch.cuda.synchronize()
         start = time.perf_counter()
-        transformer.denoise_chain(refs, list(range(len(refs))), lambda _n: None)
+        transformer.denoise_chain(refs, list(range(len(refs))), WINDOW_HOP, lambda _n: None)
         torch.cuda.synchronize()
         return time.perf_counter() - start
     finally:

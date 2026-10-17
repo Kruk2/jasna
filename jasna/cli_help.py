@@ -43,6 +43,10 @@ CLI_HELP: dict[str, str] = {
         "ltx: restore large mosaics at 768 px instead of 512 px. More detail, about 3x slower on "
         "those; needs 12 GB of free VRAM (ignored otherwise). (default: %(default)s)"
     ),
+    "experimental_ltx_less_overlap": (
+        "ltx: experimental. Fewer frames shared between the chunks LTX restores, about 13%% "
+        "faster on long videos; results differ slightly from the default. (default: %(default)s)"
+    ),
     "fp16": "Use half precision. Uses less VRAM and is often faster, with no visible quality loss.",
     "compile_basicvsrpp": "Prepare BasicVSR++ for your GPU: about 3x faster, almost no extra VRAM. The first run takes 15-60 minutes. NVIDIA only. (default: %(default)s)",
     "max_clip_size": "Frames restored together. Bigger is steadier and faster but uses more VRAM; use the biggest that fits. (default: %(default)s)",

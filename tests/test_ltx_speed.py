@@ -142,7 +142,9 @@ def test_segment_estimate_uses_the_learned_rates_of_this_gpu_and_model(tmp_path)
     rates.update({"encode/frame": 0.01, "compose/frame": 0.02})
     speed.save_rates(path, speed.profile_key("RTX 5090", "m.safetensors", "segment"), rates)
 
-    seconds = speed.segment_estimate_seconds(path, "RTX 5090", "m.safetensors", frames=300, fps=30.0, megapixels=2.0)
+    seconds = speed.segment_estimate_seconds(
+        path, "RTX 5090", "m.safetensors", frames=300, fps=30.0, megapixels=2.0, window_hop=88
+    )
 
     windows = 4
     assert seconds == pytest.approx(30.0 + windows * (1.0 + 4.0 + 2.0) + 300 * 2.0 * (0.01 + 0.02))
@@ -150,6 +152,6 @@ def test_segment_estimate_uses_the_learned_rates_of_this_gpu_and_model(tmp_path)
 
 def test_segment_estimate_without_a_profile_assumes_five_times_the_range(tmp_path):
     seconds = speed.segment_estimate_seconds(
-        tmp_path / "missing.json", "RTX 5090", "m.safetensors", frames=600, fps=30.0, megapixels=2.0
+        tmp_path / "missing.json", "RTX 5090", "m.safetensors", frames=600, fps=30.0, megapixels=2.0, window_hop=88
     )
     assert seconds == pytest.approx(30.0 + 5 * 20.0)

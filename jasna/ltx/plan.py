@@ -1,8 +1,9 @@
 """Mosaic tracks and their 121-frame model windows for LTX restoration.
 
 Detections are grouped per frame, linked into cut-safe tracks, continuations are folded
-into their track, and each track gets one zooming camera sliced into windows at hop 88.
-Windows of a track are denoised together and share their overlapping latent frames.
+into their track, and each track gets one zooming camera sliced into windows at hop 88
+(104 with less overlap). Windows of a track are denoised together and share their
+overlapping latent frames.
 
 A continuation stays its own track when folding it would cost its camera
 ``SEPARATE_GAIN`` sharpness for at least a window (``worth_separating``), and a track is
@@ -27,6 +28,7 @@ from jasna.tracking.clip_tracker import compute_iou_matrix
 Polygon = np.ndarray
 
 WINDOW_HOP = 88
+LESS_OVERLAP_WINDOW_HOP = 104
 TEMPORAL_SCALE = 8
 GROUP_IOU = 0.05
 LINK_IOU = 0.1
@@ -106,6 +108,7 @@ class TrackPlan:
     polygons: tuple[tuple[Polygon, ...], ...]  # per frame from ``start``
     presence: tuple[float, ...]  # per frame: the track's share of its area, below 1 during a handover
     windows: tuple[Window, ...]
+    window_hop: int
 
     @property
     def stop(self) -> int:
@@ -440,10 +443,14 @@ def support_box(group: RegionGroup, frame_w: int, frame_h: int) -> Box:
     )
 
 
-def window_starts(frames: int) -> list[int]:
+def window_hop(less_overlap: bool) -> int:
+    return LESS_OVERLAP_WINDOW_HOP if less_overlap else WINDOW_HOP
+
+
+def window_starts(frames: int, window_hop: int) -> list[int]:
     starts = [0]
     while starts[-1] + WINDOW_FRAMES < frames:
-        starts.append(starts[-1] + WINDOW_HOP)
+        starts.append(starts[-1] + window_hop)
     return starts
 
 
@@ -455,7 +462,14 @@ def track_canvas(camera: Sequence[CropFrame], *, large_canvas: bool) -> int:
 
 
 def plan_track(
-    track: Track, *, lead: tuple[int, int], first_index: int, frame_w: int, frame_h: int, large_canvas: bool
+    track: Track,
+    *,
+    lead: tuple[int, int],
+    first_index: int,
+    frame_w: int,
+    frame_h: int,
+    large_canvas: bool,
+    window_hop: int,
 ) -> TrackPlan:
     lead_in, lead_out = lead
     own = list(filled_frames(track).values())
@@ -475,7 +489,7 @@ def plan_track(
             real_frames=min(WINDOW_FRAMES, len(polygons) - local),
             crops=tuple(camera[local : local + WINDOW_FRAMES]),
         )
-        for offset, local in enumerate(window_starts(len(polygons)))
+        for offset, local in enumerate(window_starts(len(polygons), window_hop))
     )
     return TrackPlan(
         track_id=track.track_id,
@@ -483,6 +497,7 @@ def plan_track(
         polygons=tuple(polygons),
         presence=handover_presence(len(own), lead_in, lead_out),
         windows=windows,
+        window_hop=window_hop,
     )
 
 
@@ -493,6 +508,7 @@ def plan_video(
     frame_w: int,
     frame_h: int,
     large_canvas: bool,
+    window_hop: int,
 ) -> list[TrackPlan]:
     """Every mosaic track of a video with its windows, in window-index order."""
     groups = [group_regions(regions) for regions in regions_per_frame]
@@ -512,6 +528,7 @@ def plan_video(
             frame_w=frame_w,
             frame_h=frame_h,
             large_canvas=large_canvas,
+            window_hop=window_hop,
         )
         plans.append(plan)
     return plans
@@ -529,8 +546,20 @@ def crossfade_weights(windows: Sequence[Window]) -> list[np.ndarray]:
 
 
 LATENT_FRAMES = 1 + (WINDOW_FRAMES - 1) // TEMPORAL_SCALE
-SHARED_LATENT_SHIFT = WINDOW_HOP // TEMPORAL_SCALE
-# Window k's latents 12..15 encode the same pixel frames as window k+1's latents 1..4.
-LEFT_SHARED_LATENTS = range(SHARED_LATENT_SHIFT + 1, LATENT_FRAMES)
-RIGHT_SHARED_LATENTS = range(1, LATENT_FRAMES - SHARED_LATENT_SHIFT)
-FUSION_RAMP = tuple((i + 1) / (len(LEFT_SHARED_LATENTS) + 1) for i in range(len(LEFT_SHARED_LATENTS)))
+
+
+@dataclass(frozen=True)
+class SharedLatents:
+    """Window k's latents ``left`` encode the same pixel frames as window k+1's latents
+    ``right`` (12..15 and 1..4 at hop 88); ``ramp`` is the later window's fusion weight on each."""
+
+    left: range
+    right: range
+    ramp: tuple[float, ...]
+
+
+def shared_latents(window_hop: int) -> SharedLatents:
+    shift = window_hop // TEMPORAL_SCALE
+    left = range(shift + 1, LATENT_FRAMES)
+    ramp = tuple((i + 1) / (len(left) + 1) for i in range(len(left)))
+    return SharedLatents(left, range(1, LATENT_FRAMES - shift), ramp)

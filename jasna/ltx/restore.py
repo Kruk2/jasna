@@ -453,6 +453,7 @@ def scan_span(
     frame_h: int,
     frame_w: int,
     large_canvas: bool,
+    window_hop: int,
     bar: _StageBar,
     cancel: threading.Event,
 ) -> list[list[TrackPlan]]:
@@ -468,7 +469,14 @@ def scan_span(
         bar.update(len(batch))
     plans = []
     for segment_regions, segment_cuts in zip(regions, cuts):
-        segment_plans = plan_video(segment_regions, segment_cuts, frame_w=frame_w, frame_h=frame_h, large_canvas=large_canvas)
+        segment_plans = plan_video(
+            segment_regions,
+            segment_cuts,
+            frame_w=frame_w,
+            frame_h=frame_h,
+            large_canvas=large_canvas,
+            window_hop=window_hop,
+        )
         logger.info(
             "LTX plan: %d frames, %d scene cuts, %d tracks, %d windows",
             len(segment_regions),
@@ -548,7 +556,10 @@ def denoise_track(
 ) -> list[torch.Tensor]:
     """The final latents of one track's windows, in window order."""
     return transformer.denoise_chain(
-        [references.get(w.index) for w in plan.windows], [seed + w.index for w in plan.windows], advance
+        [references.get(w.index) for w in plan.windows],
+        [seed + w.index for w in plan.windows],
+        plan.window_hop,
+        advance,
     )
 
 
@@ -700,9 +711,9 @@ def segment_large_canvas(requested: bool, total_bytes: int) -> bool:
 @dataclass(frozen=True)
 class LtxRender:
     """What every pass needs besides the spans: the detector, the model files, the frame
-    size, detection batch size, the 768 px decision, the decode budget per canvas and its
-    name (decode tiling follows the budget, so it keys the speed profile), the GPU and the
-    speed profile file (``speed.py``)."""
+    size, detection batch size, the 768 px decision, the frames between window starts, the
+    decode budget per canvas and its name (decode tiling follows the budget, so it keys the
+    speed profile), the GPU and the speed profile file (``speed.py``)."""
 
     detector: Callable
     files: LtxModelFiles
@@ -710,6 +721,7 @@ class LtxRender:
     frame_w: int
     batch_size: int
     large_canvas: bool
+    window_hop: int
     budget: DecodeBudget
     budget_name: str
     device: torch.device
@@ -745,6 +757,7 @@ def prepare_spans(
                 frame_h=render.frame_h,
                 frame_w=render.frame_w,
                 large_canvas=render.large_canvas,
+                window_hop=render.window_hop,
                 bar=bar,
                 cancel=cancel,
             )
@@ -953,6 +966,7 @@ def restore_video(
     frame_w: int,
     batch_size: int,
     large_canvas: bool,
+    window_hop: int,
     seed: int,
     device: torch.device,
     work_dir: Path,
@@ -971,6 +985,7 @@ def restore_video(
             frame_w=frame_w,
             batch_size=batch_size,
             large_canvas=large_canvas_fits(large_canvas, device_free_bytes(device)),
+            window_hop=window_hop,
             budget=free_vram_budget(device),
             budget_name="free VRAM",
             device=device,
