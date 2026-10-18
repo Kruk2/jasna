@@ -17,7 +17,10 @@ def font_families_for_platform(platform: str, language: str) -> tuple[str, str]:
     if platform.startswith("linux"):
         return "sans-serif", "monospace"
     if platform == "win32":
-        return _WINDOWS_UI_FAMILY_BY_LANGUAGE.get(language, "Segoe UI"), "Consolas"
+        script_family = _WINDOWS_UI_FAMILY_BY_LANGUAGE.get(language)
+        if script_family is not None:
+            return script_family, script_family
+        return "Segoe UI", "Consolas"
     return "Segoe UI", "Consolas"
 
 

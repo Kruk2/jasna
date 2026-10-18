@@ -35,17 +35,27 @@ def test_linux_theme_uses_fontconfig_generic_families():
 
 
 @pytest.mark.parametrize(
-    ("language", "ui_family"),
+    ("language", "ui_family", "mono_family"),
     [
-        ("zh", "Microsoft YaHei UI"),
-        ("ja", "Yu Gothic UI"),
-        ("ko", "Malgun Gothic"),
-        ("th", "Leelawadee UI"),
-        ("en", "Segoe UI"),
+        ("zh", "Microsoft YaHei UI", "Microsoft YaHei UI"),
+        ("ja", "Yu Gothic UI", "Yu Gothic UI"),
+        ("ko", "Malgun Gothic", "Malgun Gothic"),
+        ("th", "Leelawadee UI", "Leelawadee UI"),
+        ("en", "Segoe UI", "Consolas"),
     ],
 )
-def test_windows_theme_uses_ui_font_for_language(language, ui_family):
-    assert font_families_for_platform("win32", language) == (ui_family, "Consolas")
+def test_windows_theme_uses_script_font_for_language(language, ui_family, mono_family):
+    assert font_families_for_platform("win32", language) == (ui_family, mono_family)
+
+
+def test_apply_ui_fonts_gives_chinese_log_text_a_cjk_font(monkeypatch):
+    monkeypatch.setattr(Fonts, "FAMILY", Fonts.FAMILY)
+    monkeypatch.setattr(Fonts, "FAMILY_MONO", Fonts.FAMILY_MONO)
+    monkeypatch.setitem(ctk.ThemeManager.theme["CTkFont"], "family", ctk.ThemeManager.theme["CTkFont"]["family"])
+
+    apply_ui_fonts("win32", "zh")
+
+    assert Fonts.FAMILY_MONO == "Microsoft YaHei UI"
 
 
 def test_apply_ui_fonts_sets_customtkinter_theme_font(monkeypatch):
