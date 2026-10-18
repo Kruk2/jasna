@@ -41,6 +41,11 @@ _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
 _NVDEC_DECODER_OVERRIDES = {"av1": "av1"}
 _NVDEC_MIN_CODED_SIZE = {"av1": (128, 128)}
 
+# VALI hands VC-1 to NVIDIA's own parser, which drops every frame before the
+# first keyframe and, outside ASF, replaces missing pts with a 30 fps count
+# from 0. FFmpeg's VC-1 decoder with the NVDEC hwaccel keeps both.
+_CODECS_SKIPPING_VALI = frozenset({"vc1"})
+
 
 class VideoDecodeError(RuntimeError):
     pass
@@ -254,7 +259,9 @@ class VideoReader:
     def __enter__(self):
         current_stream(self.device)
         backend = _decode_backend()
-        if backend in ("auto", "vali"):
+        if backend == "vali" or (
+            backend == "auto" and self.metadata.codec_name not in _CODECS_SKIPPING_VALI
+        ):
             if self.vendor is AcceleratorVendor.NVIDIA:
                 try:
                     self._vali_source = _ValiFrameSource(
@@ -470,6 +477,9 @@ class VideoReader:
         for packet in demux_video(self.container, self.video_stream):
             frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
             for frame in frames:
+                # VC-1 NVDEC returns an empty frame for a stream starting on a P frame.
+                if not frame.planes:
+                    continue
                 if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
                     continue
                 target_pts = None
