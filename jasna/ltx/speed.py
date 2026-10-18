@@ -3,8 +3,9 @@
 A profile (one JSON file) maps a key (Jasna version, GPU, transformer file, decode
 budget: whole videos decode within the free VRAM, segments within a fixed budget, so their
 decode tiling differs) to rates in
-seconds: per pass a fixed part (model load, first-call compile), per frame-megapixel
-for the passes that decode the video, and per window of each canvas. Rates are warm: the
+seconds: per pass a fixed part (model load, first-call compile), per frame-megapixel for
+encode, per megapixel of window crop for compose (blending, which a frame without a mosaic
+skips), and per window of each canvas. Rates are warm: the
 first batch of a pass and the first window of each canvas are left out, and denoise
 leaves out each track's first step. Every finished run replaces the rates it measured.
 The same pass timings make the summary logged at the end of every run (``run_summary``).
@@ -53,17 +54,26 @@ def save_rates(path: Path, key: str, rates: dict[str, float]) -> None:
 
 @dataclass(frozen=True)
 class Work:
-    """What a run restores, known once the scan has planned it."""
+    """What a run restores, known once the scan has planned it; ``crop_megapixels`` sums
+    every window's crop over the frames it covers."""
 
     frames: int
     megapixels: float
     windows: dict[int, int]
+    crop_megapixels: float
+
+    def frame_units(self, stage: str, frames: int) -> dict[str, float]:
+        """The units ``frames`` of the video stand for in ``stage``; compose's are their even
+        share of the crops."""
+        if stage == "encode":
+            return {"encode/frame": frames * self.megapixels}
+        if stage == "compose":
+            return {"compose/crop": self.crop_megapixels * frames / self.frames if self.frames else 0.0}
+        return {}
 
     def units(self, stage: str) -> dict[str, float]:
         units: dict[str, float] = {f"{stage}/window{canvas}": count for canvas, count in self.windows.items()}
-        if stage != "denoise":
-            units[f"{stage}/frame"] = self.frames * self.megapixels
-        return units
+        return {**units, **self.frame_units(stage, self.frames)}
 
 
 @dataclass
@@ -120,9 +130,13 @@ def segment_estimate_seconds(
     """About how long a segment render of ``frames`` takes, for one mosaic at the 512 canvas:
     from this GPU's learned rates when the profile has them, else 30 s plus 5x the range
     (an RTX 5090 run)."""
+    from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
     from jasna.ltx.plan import window_starts
 
-    work = Work(frames, megapixels, {512: len(window_starts(frames, window_hop))})
+    starts = window_starts(frames, window_hop)
+    window_frames = sum(min(WINDOW_FRAMES, frames - start) for start in starts)
+    crop_megapixels = window_frames * min(PLAN_CANVAS * PLAN_CANVAS / 1e6, megapixels)
+    work = Work(frames, megapixels, {512: len(starts)}, crop_megapixels)
     estimates = pass_estimates(load_rates(path, profile_key(gpu, transformer, "segment")), work)
     if estimates is None:
         return UNPROFILED_FIXED_SECONDS + UNPROFILED_SECONDS_PER_VIDEO_SECOND * frames / fps
@@ -137,9 +151,10 @@ def learned_rates(timings: dict[str, PassTiming], work: Work, known: dict[str, f
     for stage, timing in timings.items():
         for canvas, samples in warm_windows(stage, timing).items():
             rates[f"{stage}/window{canvas}"] = mean(samples)
-        if stage != "denoise" and timing.warm_frames:
-            frame_seconds = max(0.0, timing.warm_seconds - sum(seconds for _, seconds in timing.windows))
-            rates[f"{stage}/frame"] = frame_seconds / (timing.warm_frames * work.megapixels)
+        frame_seconds = max(0.0, timing.warm_seconds - sum(seconds for _, seconds in timing.windows))
+        for name, count in work.frame_units(stage, timing.warm_frames).items():
+            if count:
+                rates[name] = frame_seconds / count
     for stage, timing in timings.items():
         merged = {**known, **rates}
         units = work.units(stage)

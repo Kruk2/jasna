@@ -411,7 +411,7 @@ _RATES = {
     "denoise/fixed": 20.0,
     "denoise/window512": 4.0,
     "compose/fixed": 3.0,
-    "compose/frame": 0.02,
+    "compose/crop": 0.1,
     "compose/window512": 1.0,
 }
 
@@ -425,13 +425,13 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
         clock.now = 10.0
         bar.update(100)
     assert reports[-1][:2] == (pytest.approx(0.02), 0.0)
-    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}))
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     with progress.bar("encode", 100) as bar:
         clock.now = 20.0
         bar.update(50)
 
     encode_left = 50 * 2.0 * 0.01 + 10 * 0.5
-    later = 20.0 + 10 * 4.0 + 3.0 + 100 * 2.0 * 0.02 + 10 * 1.0
+    later = 20.0 + 10 * 4.0 + 3.0 + 40.0 * 0.1 + 10 * 1.0
     fraction, left, stage = reports[-1]
     assert stage.name == "encode"
     assert stage.seconds_left == pytest.approx(encode_left)
@@ -444,7 +444,7 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
     reports = []
     progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
-    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}))
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     with progress.bar("compose", 100) as bar:
         bar.update(10)
         with bar.window(512):
@@ -452,9 +452,9 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
         clock.now = 3.0
         bar.update(40)
 
-    compose_work = 100 * 2.0 * 0.02 + 10 * 1.0
-    done_work = 50 * 2.0 * 0.02 + 1.0
-    warm_done_work = done_work - 10 * 2.0 * 0.02
+    compose_work = 40.0 * 0.1 + 10 * 1.0
+    done_work = 40.0 * 0.1 * 50 / 100 + 1.0
+    warm_done_work = done_work - 40.0 * 0.1 * 10 / 100
     fraction, left, stage = reports[-1]
     assert stage.seconds_left == pytest.approx((compose_work - done_work) * 3.0 / warm_done_work)
     assert left == pytest.approx(stage.seconds_left)
@@ -466,7 +466,7 @@ def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monk
     reports = []
     progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
-    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 3, 768: 1}))
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 3, 768: 1}, crop_megapixels=40.0))
     with progress.bar("encode", 100) as bar:
         bar.update(50)
     assert reports[-1][:2] == (pytest.approx(0.04), 0.0)
@@ -595,6 +595,17 @@ def test_progress_without_a_report_only_drives_the_console_bar():
     progress = restore.Progress(3, disable=True, report=None)
     with progress.bar("compose", 3) as bar:
         bar.update(3)
+
+
+def test_the_planned_work_counts_each_window_crop_on_every_frame_it_covers(fakes, tmp_path, monkeypatch):
+    planned = []
+    monkeypatch.setattr(restore.Progress, "plan", lambda self, work: planned.append(work))
+    span = restore.LtxSpan(_source(_video(30, range(3, 28))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)
+    progress = restore.Progress(30, disable=True, report=None)
+    restore.prepare_spans([span], _render(tmp_path), tmp_path, progress=progress, cancel=threading.Event())
+    (work,) = planned
+    assert (work.frames, work.windows) == (30, {512: 1})
+    assert work.crop_megapixels == pytest.approx(25 * 64 * 64 / 1e6)
 
 
 def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
