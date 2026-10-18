@@ -25,6 +25,6 @@ def aac_reencode_args(output_index: int) -> list[str]:
 
 
 def source_audio_codec(path: str) -> str | None:
-    with av.open(path) as container:
+    with av.open(path, metadata_errors="replace") as container:
         audio = container.streams.audio
         return audio[0].codec_context.codec.canonical_name if audio else None

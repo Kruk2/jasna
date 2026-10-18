@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from jasna.accelerator import AcceleratorVendor
+from jasna.media.audio_utils import source_audio_codec
 from jasna.media.probe import get_video_meta_data
 from jasna.media.splice import (
     SpliceSpan,
@@ -20,7 +21,7 @@ from jasna.media.splice import (
 )
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 
-from factories import write_double_adts_aac_source
+from factories import write_double_adts_aac_source, write_non_utf8_metadata_source
 
 
 def _ffmpeg(*args: str) -> None:
@@ -338,3 +339,21 @@ def test_final_mux_copies_double_adts_aac_into_mp4(tmp_path: Path) -> None:
 
     with av.open(str(output)) as container:
         assert sum(1 for _ in container.decode(audio=0)) > 1
+
+
+def test_source_with_non_utf8_tags_probes_and_splices(tmp_path: Path) -> None:
+    source = write_non_utf8_metadata_source(tmp_path / "bad-tags.mp4")
+
+    metadata = get_video_meta_data(str(source))
+    assert source_audio_codec(str(source)) == "aac"
+    index = probe_keyframes(source, metadata)
+    copied = tmp_path / "copy.nut"
+    create_copy_fragment(source, SpliceSpan("copy", index.start_pts, index.pts[1]), index, copied, codec="h264")
+    normalized = tmp_path / "copy.ts"
+    normalize_fragment(copied, normalized, codec="h264")
+    output = tmp_path / "output.mp4"
+    mux_final_output(normalized, source, output, codec="h264")
+
+    with av.open(str(output), metadata_errors="replace") as container:
+        assert container.metadata["title"] == "JASNA\ufffdTAG"
+        assert container.streams.audio

@@ -504,7 +504,7 @@ class VideoEncoder:
                 f"Encoder {self.encoder_name} (codec {self.codec}) is not available in the "
                 f"bundled FFmpeg libraries: {exc}"
             ) from exc
-        self._src = av.open(self.metadata.video_file)
+        self._src = av.open(self.metadata.video_file, metadata_errors="replace")
         in_v = self._src.streams.video[0]
 
         container_options = _mov_container_options(

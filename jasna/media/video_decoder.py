@@ -284,9 +284,11 @@ class VideoReader:
         self._software_only = software_only
         try:
             if not software_only and self.vendor is AcceleratorVendor.NVIDIA:
-                self.container = av.open(self.file, hwaccel=_cuda_hwaccel(self.device))
+                self.container = av.open(
+                    self.file, hwaccel=_cuda_hwaccel(self.device), metadata_errors="replace"
+                )
             else:
-                self.container = av.open(self.file)
+                self.container = av.open(self.file, metadata_errors="replace")
             self.video_stream = self.container.streams.video[0]
         except av.FFmpegError as e:
             raise VideoDecodeError(f"Failed to open {self.file}: {e}") from e

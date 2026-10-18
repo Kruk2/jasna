@@ -167,3 +167,26 @@ def ltx_models(root, directory: Path, *, installed: bool, on_change=lambda: None
                 for name in bundle_names(model, fast=fast):
                     (directory / name).touch()
     return LtxModels(directory, MainThreadCalls(root, 20), on_change)
+
+
+def write_non_utf8_metadata_source(path: Path) -> Path:
+    """H.264 + AAC file whose container, stream and chapter titles hold a raw 0x90 byte."""
+    marker = b"JASNA-TAG"
+    chapters = path.with_name(f"{path.stem}.ffmetadata")
+    chapters.write_text(f";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\ntitle={marker.decode()}\n")
+    subprocess.run(
+        [
+            resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=12:duration=2",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-i", str(chapters), "-map", "0", "-map", "1", "-map_chapters", "2",
+            "-metadata", f"title={marker.decode()}",
+            "-metadata:s:v:0", f"title={marker.decode()}",
+            "-c:v", "libx264", "-g", "12", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path),
+        ],
+        check=True,
+    )
+    data = path.read_bytes()
+    assert data.count(marker) >= 2
+    path.write_bytes(data.replace(marker, b"JASNA\x90TAG"))
+    return path

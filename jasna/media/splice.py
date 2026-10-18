@@ -270,7 +270,7 @@ def resolve_smart_encoder_settings(
 def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
     keyframes: list[int] = []
     packet_pts: list[int] = []
-    with av.open(str(path)) as container:
+    with av.open(str(path), metadata_errors="replace") as container:
         stream = container.streams.video[0]
         codec = canonical_codec(metadata.codec_name)
         extradata = bytes(stream.codec_context.extradata or b"")
@@ -497,7 +497,10 @@ def create_copy_fragment(
         ]
         _run_ffmpeg(args, purpose=f"copy AV1 smart-render span at {start:.3f}s")
         return
-    with av.open(str(source)) as src, av.open(str(destination), "w", format="nut") as dst:
+    with (
+        av.open(str(source), metadata_errors="replace") as src,
+        av.open(str(destination), "w", format="nut") as dst,
+    ):
         in_stream = src.streams.video[0]
         out_stream = dst.add_stream_from_template(in_stream)
         src.seek(span.start_pts, stream=in_stream, backward=True)
@@ -589,7 +592,7 @@ def mux_final_output(
         "-i", str(source),
         "-map", "0:v:0",
     ]
-    with av.open(str(source)) as container:
+    with av.open(str(source), metadata_errors="replace") as container:
         primary_video_index = container.streams.video[0].index
         copied_streams = []
         transcoded_subtitles = {}

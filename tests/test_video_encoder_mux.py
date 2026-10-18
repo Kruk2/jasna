@@ -23,6 +23,8 @@ from jasna.media.video_decoder import VideoReader
 from jasna.media.video_encoder import VideoEncoder
 from jasna.os_utils import resolve_executable
 
+from factories import write_non_utf8_metadata_source
+
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
 DEVICE = torch.device("cuda:0")
@@ -801,3 +803,14 @@ if __name__ == "__main__" and len(sys.argv) == 6 and sys.argv[1] == "pitch-probe
         sys.argv[4],
         int(sys.argv[5]),
     )
+
+
+def test_source_with_non_utf8_tags_transcodes_and_keeps_tags(tmp_path):
+    src = write_non_utf8_metadata_source(tmp_path / "bad-tags.mp4")
+    dst = tmp_path / "out.mp4"
+    _transcode(src, dst)
+
+    with av.open(str(dst), metadata_errors="replace") as c:
+        assert c.metadata["title"] == "JASNA�TAG"
+        assert c.chapters()[0]["metadata"]["title"] == "JASNA�TAG"
+        assert c.streams.audio
