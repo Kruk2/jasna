@@ -433,6 +433,7 @@ class LicenseDialog(ctk.CTkToplevel):
     def _machine_ready(self, key, error):
         self._set_busy(False)
         if error is not None:
+            logger.warning("Machine key unavailable: %s", error)
             self._show_error(str(error))
             return
         self._set_machine_key(key)

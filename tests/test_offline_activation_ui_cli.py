@@ -159,6 +159,19 @@ def test_dialog_copies_only_readonly_system_machine_key(root, protection_api):
     assert "_cloud_workspace" not in vars(dialog)
 
 
+def test_dialog_logs_machine_identity_error(root, protection_api, caplog):
+    from jasna.gui.components import LicenseDialog
+
+    machine, _ = protection_api
+    machine.machine_key.side_effect = RuntimeError("machine identity is unavailable or unsafe")
+    dialog = LicenseDialog(root, on_activated=lambda: None)
+    _wait(root, lambda: "unavailable or unsafe" in dialog._status.cget("text"))
+    assert any(
+        record.levelname == "WARNING" and "unavailable or unsafe" in record.getMessage()
+        for record in caplog.records
+    )
+
+
 def test_dialog_saves_only_activation_key_and_calls_ui_on_main_thread(root, protection_api):
     from jasna.gui.components import LicenseDialog
 
