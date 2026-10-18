@@ -80,6 +80,10 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 LTX does not work with VR180 side-by-side videos or streaming. Secondary
 restoration and denoising are turned off with LTX.
 
+Using ESET? If LTX won't start and the message names `ebehmonl.dll` or
+`ebehmoni.dll`, add the Jasna folder to ESET's Deep Behavioral Inspection
+exclusions. Add it again when you put a new Jasna version in a new folder.
+
 ### Downloading LTX yourself
 
 If the download in Jasna keeps failing, get the files in your browser from

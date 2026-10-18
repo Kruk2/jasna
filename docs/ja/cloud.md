@@ -17,6 +17,8 @@ Windows と GitHub のソース版には対応していません。
   これがないと動画を読み込めず、保存もできません。Vast では Docker
   オプションに `-e NVIDIA_DRIVER_CAPABILITIES=all` を追加します。
 - `root` でログイン。RunPod と Vast は最初からそうなっています。
+- 固定の `/etc/machine-id`。これがないコンテナ（Modal や一部の Docker イメージ
+  など）では有効化に失敗します。イメージに追加してください。
 
 ## インストール
 
@@ -33,8 +35,11 @@ cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
 cd jasna-linux-nvidia-0.11.1
 ```
 
-上のとおり `/root` に展開してください。`/workspace` やネットワークドライブ
-からは起動できません。
+上のとおり `/root` に、Jasna を実行するのと同じユーザーで展開してください。
+Jasna はマシン自身のディスク（ext4、Btrfs、XFS、ZFS、またはコンテナ自身の
+ファイルシステム）に置きます。`/workspace` やネットワークドライブからは起動
+できず、ネットワーク共有やネットワークボリュームでは LTX が読み込めない
+ことがあります。
 
 ## 動画エンコーダーを確認
 

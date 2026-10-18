@@ -17,6 +17,8 @@ official Linux release; Windows and GitHub source checkouts do not support it.
   Jasna can't read or save videos without it. On Vast, add
   `-e NVIDIA_DRIVER_CAPABILITIES=all` to the Docker options.
 - Log in as `root`. RunPod and Vast do this by default.
+- A fixed `/etc/machine-id`. Some containers (for example Modal or some Docker
+  images) don't have one, and activation fails. Add one to your image.
 
 ## Install
 
@@ -33,8 +35,10 @@ cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
 cd jasna-linux-nvidia-0.11.1
 ```
 
-Unpack in `/root` like above. Jasna won't start from `/workspace` or a
-network drive.
+Unpack in `/root` like above, as the same user that runs Jasna. Keep Jasna on
+the machine's own disk (ext4, Btrfs, XFS, ZFS or the container's own
+filesystem). Jasna won't start from `/workspace` or a network drive, and LTX
+may refuse to load from a network share or network volume.
 
 ## Check the video encoder
 

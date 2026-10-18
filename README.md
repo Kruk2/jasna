@@ -151,6 +151,9 @@ Linux install. Each uses one of your 3 slots. Reinstalling Windows or
 changing the GPU, disk or RAM does not: just activate again with the same
 License code.
 
+Have an email and key from Jasna 0.10? They no longer work. Get a new License
+code from where you bought it.
+
 ## Advanced
 
 ### How Jasna works

@@ -105,6 +105,7 @@
 - **在线激活**只发送许可证码和机器密钥。之后 Jasna 离线使用。
 - 密钥被拒绝？请检查机器密钥，并重新复制完整的激活密钥。为旧版 Jasna 生成的
   密钥需要向你获得许可证码的地方申请新密钥。
+- 有 Jasna 0.10 的邮箱和密钥？旧密钥已不能使用，请向购买的地方申请新的许可证码。
 
 许可证码只能从 [Buy Me a Coffee](https://buymeacoffee.com/kruk2)、
 [Unifans](https://app.unifans.io/c/kruk2)，以及面向中国的

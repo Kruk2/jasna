@@ -15,6 +15,8 @@
   不加的话 Jasna 读不了也存不了视频。Vast 上把
   `-e NVIDIA_DRIVER_CAPABILITIES=all` 加到 Docker 选项里。
 - 用 `root` 登录。RunPod 和 Vast 默认就是。
+- 固定的 `/etc/machine-id`。有些容器（例如 Modal 或部分 Docker 镜像）没有它，
+  激活会失败。请把它加到镜像里。
 
 ## 安装
 
@@ -31,7 +33,9 @@ cat jasna-linux-nvidia-0.11.1.tar.zst.part* | zstd -dc | tar -xpf - --same-owner
 cd jasna-linux-nvidia-0.11.1
 ```
 
-像上面这样解压到 `/root`。放在 `/workspace` 或网络盘里 Jasna 启动不了。
+像上面这样，用运行 Jasna 的同一个用户解压到 `/root`。把 Jasna 放在机器自己的
+硬盘上（ext4、Btrfs、XFS、ZFS 或容器自己的文件系统）。放在 `/workspace` 或
+网络盘里 Jasna 启动不了，放在网络共享或网络卷上 LTX 可能无法加载。
 
 ## 检查视频编码器
 

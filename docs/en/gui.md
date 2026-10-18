@@ -129,6 +129,8 @@ Good to know:
   that, Jasna works offline.
 - Key rejected? Check the Machine key and copy the whole Activation key again.
   Keys made for older Jasna versions need a new key from where you got your License code.
+- Have an email and key from Jasna 0.10? That key no longer works. Get a new
+  License code from where you bought it.
 
 License codes come only from
 [Buy Me a Coffee](https://buymeacoffee.com/kruk2),

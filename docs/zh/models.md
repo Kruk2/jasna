@@ -70,6 +70,10 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。
 
+使用 ESET？如果 LTX 启动不了，并且消息里提到 `ebehmonl.dll` 或 `ebehmoni.dll`，
+请在 ESET 的深度行为检查（Deep Behavioral Inspection）排除项里加入 Jasna
+文件夹。把新版 Jasna 放到新文件夹后，需要再加一次。
+
 ### 手动下载 LTX
 
 如果在 Jasna 里下载一直失败，可以用浏览器从
