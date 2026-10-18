@@ -35,6 +35,15 @@ def _make_metadata(duration: float = 60.0, fps: float = 30.0, num_frames: int = 
     return m
 
 
+def _finalize_segments(segments_dir: Path, *numbers: int) -> None:
+    names = [f"seg_{n:05d}.ts" for n in numbers]
+    for name in names:
+        (segments_dir / name).write_bytes(b"complete")
+    (segments_dir / "_hls_internal.m3u8").write_text(
+        "".join(f"#EXTINF:4.000,\n{name}\n" for name in names)
+    )
+
+
 class TestGenerateVodPlaylist:
     def test_basic_playlist_structure(self):
         text, count = _generate_vod_playlist(total_duration=20.0, segment_duration=4.0)
@@ -232,8 +241,10 @@ class TestDemandFlowControl:
         server.notify_segment_requested(0)
         server.wait_for_demand(current_segment=2, max_ahead=3, cancel_event=cancel)
 
-    def test_wait_for_demand_blocks_when_too_far_ahead(self):
+    def test_wait_for_demand_blocks_when_too_far_ahead(self, tmp_path):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.segments_dir = tmp_path
+        _finalize_segments(tmp_path, 0, 3)
         cancel = threading.Event()
         server.notify_segment_requested(0)
         blocked = threading.Event()
@@ -255,8 +266,10 @@ class TestDemandFlowControl:
         assert unblocked.is_set()
         t.join(timeout=2.0)
 
-    def test_wait_for_demand_unblocks_on_cancel(self):
+    def test_wait_for_demand_unblocks_on_cancel(self, tmp_path):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.segments_dir = tmp_path
+        _finalize_segments(tmp_path, 0)
         cancel = threading.Event()
         server.notify_segment_requested(0)
         done = threading.Event()
@@ -272,6 +285,23 @@ class TestDemandFlowControl:
         cancel.set()
         done.wait(timeout=2.0)
         assert done.is_set()
+        t.join(timeout=2.0)
+
+    def test_wait_for_demand_keeps_writing_until_requested_segment_is_finalized(self, tmp_path):
+        server = HlsStreamingServer(segment_duration=2.0, port=0)
+        server.segments_dir = tmp_path
+        _finalize_segments(tmp_path, 130, 131, 132, 133)
+        (tmp_path / "seg_00134.ts").write_bytes(b"open")
+        server.notify_segment_requested(134)
+        done = threading.Event()
+
+        def _writer():
+            server.wait_for_demand(current_segment=138, max_ahead=3, cancel_event=threading.Event())
+            done.set()
+
+        t = threading.Thread(target=_writer, daemon=True)
+        t.start()
+        assert done.wait(timeout=2.0)
         t.join(timeout=2.0)
 
     def test_initial_buffer_without_player(self):
@@ -545,22 +575,58 @@ class TestStreamingEncoder:
         enc.write_frame(_make_rgb_frame(), pts=0)
         assert enc._process is None
 
+    @pytest.mark.parametrize(
+        ("source_codec", "expected_audio_args"),
+        [
+            ("aac", ["-c:a:0", "copy"]),
+            ("mp3", ["-c:a:0", "copy"]),
+            ("ac3", ["-c:a:0", "aac", "-b:a:0", "256k"]),
+            ("eac3", ["-c:a:0", "aac", "-b:a:0", "256k"]),
+            ("flac", ["-c:a:0", "aac", "-b:a:0", "256k"]),
+            ("pcm_s16le", ["-c:a:0", "aac", "-b:a:0", "256k"]),
+        ],
+    )
     @patch('jasna.streaming_encoder.subprocess.Popen')
     @patch('jasna.streaming_encoder.os.path.isfile', return_value=True)
-    def test_audio_copy_when_source_exists(self, mock_isfile, mock_popen, tmp_path):
+    def test_audio_copied_only_when_browsers_play_it(
+        self, mock_isfile, mock_popen, tmp_path, source_codec, expected_audio_args,
+    ):
         mock_popen.return_value = _mock_ffmpeg_process()
         enc = self._make_encoder(tmp_path)
         enc.source_video = "existing.mp4"
-        enc.start(start_number=0)
+        with patch('jasna.streaming_encoder.source_audio_codec', return_value=source_codec):
+            enc.start(start_number=0)
         cmd = mock_popen.call_args[0][0]
-        assert '-c:a' in cmd
-        assert 'copy' in cmd
+        audio_start = cmd.index(expected_audio_args[0])
+        assert cmd[audio_start:audio_start + len(expected_audio_args)] == expected_audio_args
         assert 'existing.mp4' in cmd
         enc.stop()
 
     @patch('jasna.streaming_encoder.subprocess.Popen')
     @patch('jasna.streaming_encoder.os.path.isfile', return_value=True)
-    def test_audio_seek_on_restart(self, mock_isfile, mock_popen, tmp_path):
+    def test_no_audio_args_when_source_has_no_audio(self, mock_isfile, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.source_video = "existing.mp4"
+        with patch('jasna.streaming_encoder.source_audio_codec', return_value=None):
+            enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert not any(arg.startswith('-c:a') for arg in cmd)
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_nvenc_places_keyframes_only_on_gop_boundaries(self, mock_popen, tmp_path):
+        mock_popen.return_value = _mock_ffmpeg_process()
+        enc = self._make_encoder(tmp_path)
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert cmd[cmd.index('-no-scenecut') + 1] == '1'
+        enc.stop()
+
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    @patch('jasna.streaming_encoder.os.path.isfile', return_value=True)
+    @patch('jasna.streaming_encoder.source_audio_codec', return_value='aac')
+    def test_audio_seek_on_restart(self, mock_codec, mock_isfile, mock_popen, tmp_path):
         mock_popen.return_value = _mock_ffmpeg_process()
         enc = self._make_encoder(tmp_path)
         enc.source_video = "existing.mp4"
@@ -1161,6 +1227,42 @@ class TestHttpSegments:
             assert result[0][2]["content-length"] == "8"
         finally:
             server.stop()
+
+
+    def test_last_segment_is_served_when_pass_finishes_during_wait(self):
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        server.load_video(_make_metadata(duration=20.0))
+        server.reset_demand()
+        server.update_production(4)
+        result = []
+        thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00004.ts?epoch=0")))
+        try:
+            thread.start()
+            deadline = time.monotonic() + 2
+            while server._highest_requested_segment < 4 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            _finalize_segments(server.segments_dir, 4)
+            server.mark_finished()
+            thread.join(timeout=2)
+            assert result[0][0:2] == (200, "complete")
+        finally:
+            server.stop()
+
+
+class TestHttpPage:
+    def test_player_waits_longer_for_first_byte_than_server_long_poll(self):
+        import re
+        from jasna.streaming import SEGMENT_WAIT_SECONDS
+
+        server = HlsStreamingServer(segment_duration=4.0)
+        port = _start_server_on_free_port(server)
+        try:
+            page = _get(port, "/")[1]
+        finally:
+            server.stop()
+        first_byte_ms = int(re.search(r"maxTimeToFirstByteMs:(\d+)", page).group(1))
+        assert first_byte_ms > SEGMENT_WAIT_SECONDS * 1000
 
 
 class TestHttpStatusEndpoint:
