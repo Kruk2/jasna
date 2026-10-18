@@ -123,7 +123,8 @@ Good to know:
   PC again does not use a new slot. Only the owner can free a slot.
 - A new motherboard (Windows) or a fresh Linux install counts as a new PC
   and uses a slot. Reinstalling Windows or changing the GPU, disk or RAM
-  does not: just activate again.
+  does not: just activate again. On a few Windows PCs without a real
+  motherboard ID, a new system disk also counts as a new PC.
 - An Activation key covers only the models you bought.
 - **Activate online** sends only your License code and Machine key. After
   that, Jasna works offline.

@@ -149,7 +149,8 @@ Jasna works offline. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
 What counts as a new PC: on Windows, a new motherboard; on Linux, a fresh
 Linux install. Each uses one of your 3 slots. Reinstalling Windows or
 changing the GPU, disk or RAM does not: just activate again with the same
-License code.
+License code. A few Windows PCs have no real motherboard ID; on those, a new
+system disk also counts as a new PC.
 
 Have an email and key from Jasna 0.10? They no longer work. Get a new License
 code from where you bought it.
