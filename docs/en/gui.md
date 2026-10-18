@@ -6,7 +6,7 @@ The first start after an install or update takes longer. A loading window shows
 the installation check before the main window opens. If the check fails, the
 error stays on screen.
 
-Install Jasna on a local disk (NTFS on Windows; ext4, Btrfs or XFS on Linux),
+Install Jasna on a local disk (NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux),
 in a folder whose path has no Chinese, Japanese, accented or other
 non-English characters. Network disks
 are not supported. Use an SSD: on a hard disk (HDD) Jasna starts and loads

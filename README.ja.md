@@ -53,7 +53,7 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 - AMD: ROCm 対応 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、
   Ryzen AI）。Windows では AMD Adrenalin ドライバー 26.8.1 以降。二次復元と
   LTX は NVIDIA のみです。
-- ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS。ネットワーク
+- ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS、ZFS。ネットワーク
   ディスクは非対応です。SSD を使ってください。ハードディスク（HDD）では起動と
   モデルの読み込みが遅くなります。
 - LTX には NVIDIA RTX GPU、8 GB 以上の VRAM、16 GB 以上の RAM が必要です。
