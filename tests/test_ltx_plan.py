@@ -1,3 +1,6 @@
+import hashlib
+import time
+
 import numpy as np
 import pytest
 import torch
@@ -246,3 +249,56 @@ def test_gap_polygons_map_points_exactly_as_float64_arithmetic():
     scale_y = (box[3] - box[1]) / (source[3] - source[1])
     expected = [[box[0] + (x - source[0]) * scale_x, box[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
     assert mapped.dtype == np.float64 and mapped.tolist() == expected
+
+
+def _random_video(seed: int, frames: int) -> tuple[list[list[Region]], set[int]]:
+    """Drifting mosaics of a few sizes with dropped detections, size jumps, nested
+    continuations and random scene cuts."""
+    rng = np.random.default_rng(seed)
+    regions: list[list[Region]] = [[] for _ in range(frames)]
+    for _ in range(frames // 60):
+        start = int(rng.integers(0, frames - 10))
+        length = int(rng.integers(5, 400))
+        x, y = rng.uniform(0, 1500), rng.uniform(0, 800)
+        side = float(rng.choice([40.0, 120.0, 400.0]))
+        child = rng.random() < 0.4
+        for f in range(start, min(frames, start + length)):
+            if rng.random() < 0.08:
+                continue
+            x = min(max(x + rng.normal(0, 3), 0.0), 1400.0)
+            y = min(max(y + rng.normal(0, 3), 0.0), 600.0)
+            if rng.random() < 0.01:
+                side = float(min(max(side * rng.choice([0.5, 2.0]), 40.0), 400.0))
+            regions[f].append(_square(round(x), round(y), side))
+            if child and f > start + 30:
+                regions[f].append(_square(round(x + side / 3), round(y + side / 3), side / 6))
+    cuts = {int(c) for c in rng.choice(np.arange(1, frames), size=frames // 400, replace=False)}
+    return regions, cuts
+
+
+def _plan_digest(plans) -> str:
+    digest = hashlib.sha256()
+    for plan in plans:
+        digest.update(repr((plan.track_id, plan.start, plan.window_hop, np.round(plan.presence, 6).tolist())).encode())
+        for polygons in plan.polygons:
+            for polygon in polygons:
+                digest.update(np.round(np.asarray(polygon, dtype=np.float64), 3).tobytes())
+        for w in plan.windows:
+            crops = [(*crop.crop_box, crop.canvas) for crop in w.crops]
+            digest.update(repr((w.index, w.track_id, w.start, w.real_frames, crops)).encode())
+    return digest.hexdigest()
+
+
+def test_plan_video_output_matches_the_plan_from_before_the_linear_time_rewrite():
+    regions, cuts = _random_video(0, 4000)
+    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
+    assert _plan_digest(plans) == "a58fe552079abc42aafb62149bfc7a0ee41951b343a133506eeeeb6a54f1a93e"
+
+
+def test_plan_video_scales_linearly_with_video_length():
+    frames = 64_000
+    regions = [[_square(100 + f % 50, 100, 200), _square(900, 500, 200)] for f in range(frames)]
+    cuts = set(range(150, frames, 150))
+    started = time.perf_counter()
+    plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
+    assert time.perf_counter() - started < 15.0
