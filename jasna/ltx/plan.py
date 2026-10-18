@@ -445,7 +445,8 @@ def _affine_polygons(polygons: Sequence[Polygon], source: Box, target: Box) -> t
 
 def filled_frames(track: Track) -> dict[int, RegionGroup]:
     """Every frame of the track span; a detection gap gets the box interpolated between
-    its neighbours and the nearer one's polygons mapped onto it."""
+    its neighbours and the nearer one's polygons mapped onto the interpolated polygon
+    bounds (model boxes may reach past the frame, the polygons never do)."""
     anchors = sorted(track.frames)
     out = {}
     for frame_idx in range(anchors[0], anchors[-1] + 1):
@@ -457,8 +458,9 @@ def filled_frames(track: Track) -> dict[int, RegionGroup]:
         left, right = track.frames[anchors[position - 1]], track.frames[anchors[position]]
         alpha = (frame_idx - anchors[position - 1]) / (anchors[position] - anchors[position - 1])
         box = tuple(a + (b - a) * alpha for a, b in zip(left.box, right.box))
+        extent = tuple(a + (b - a) * alpha for a, b in zip(left.extent, right.extent))
         near = left if alpha <= 0.5 else right
-        out[frame_idx] = RegionGroup(box, _affine_polygons(near.polygons, near.box, box))
+        out[frame_idx] = RegionGroup(box, _affine_polygons(near.polygons, near.extent, extent))
     return out
 
 

@@ -241,13 +241,14 @@ def test_traced_polygons_are_compact_int32_points():
 
 def test_gap_polygons_map_points_exactly_as_float64_arithmetic():
     polygon = np.array([[3, 7], [250, 9], [101, 333]], dtype=np.int32)
-    source, target = (2.0, 5.0, 260.0, 340.0), (10.5, 3.25, 300.75, 377.0)
-    track = Track(0, {0: RegionGroup(source, (polygon,)), 2: RegionGroup((18.0, 1.5, 340.5, 413.0), (polygon,))})
+    later = np.array([[11, 2], [301, 20], [140, 401]], dtype=np.int32)
+    track = Track(0, {0: RegionGroup((0.0, 0.0, 1.0, 1.0), (polygon,)), 2: RegionGroup((0.0, 0.0, 1.0, 1.0), (later,))})
     (mapped,) = filled_frames(track)[1].polygons
-    box = tuple(a + (b - a) * 0.5 for a, b in zip(source, (18.0, 1.5, 340.5, 413.0)))
-    scale_x = (box[2] - box[0]) / (source[2] - source[0])
-    scale_y = (box[3] - box[1]) / (source[3] - source[1])
-    expected = [[box[0] + (x - source[0]) * scale_x, box[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
+    source = (3.0, 7.0, 250.0, 333.0)
+    extent = tuple(a + (b - a) * 0.5 for a, b in zip(source, (11.0, 2.0, 301.0, 401.0)))
+    scale_x = (extent[2] - extent[0]) / (source[2] - source[0])
+    scale_y = (extent[3] - extent[1]) / (source[3] - source[1])
+    expected = [[extent[0] + (x - source[0]) * scale_x, extent[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
     assert mapped.dtype == np.float64 and mapped.tolist() == expected
 
 
@@ -289,10 +290,10 @@ def _plan_digest(plans) -> str:
     return digest.hexdigest()
 
 
-def test_plan_video_output_matches_the_plan_from_before_the_linear_time_rewrite():
+def test_plan_video_output_matches_the_recorded_plan():
     regions, cuts = _random_video(0, 4000)
     plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
-    assert _plan_digest(plans) == "a58fe552079abc42aafb62149bfc7a0ee41951b343a133506eeeeb6a54f1a93e"
+    assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
 
 
 def test_plan_video_scales_linearly_with_video_length():
@@ -302,3 +303,13 @@ def test_plan_video_scales_linearly_with_video_length():
     started = time.perf_counter()
     plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
     assert time.perf_counter() - started < 15.0
+
+
+def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
+    outline = np.array([[0, 0], [60, 0], [60, 10], [0, 10]], dtype=np.int32)
+    tall = Region(box=(0.0, -800.0, 100.0, 100.0), polygon=outline)
+    hugging = Region(box=(0.0, -5.0, 100.0, 100.0), polygon=outline)
+    regions = [[tall], [], [], []] + [[hugging] for _ in range(200)]
+    (plan,) = plan_video(regions, set(), frame_w=1280, frame_h=720, large_canvas=False, window_hop=WINDOW_HOP)
+    points = np.concatenate([polygon for polygons in plan.polygons for polygon in polygons])
+    assert points.min() >= 0
