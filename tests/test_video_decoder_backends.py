@@ -137,7 +137,7 @@ def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
         vali_factory.assert_not_called()
         amf_setup.assert_not_called()
         nvdec_setup.assert_not_called()
-        assert module.av.open.call_args.kwargs == {}
+        assert module.av.open.call_args.kwargs == {"metadata_errors": "replace"}
         assert container.streams.video[0].codec_context.thread_type == "AUTO"
 
 
