@@ -521,6 +521,23 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
     assert fraction == pytest.approx(20.0 / (20.0 + left))
 
 
+def test_run_fraction_does_not_count_the_speed_test_before_the_run(monkeypatch):
+    clock = _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    clock.now = 300.0
+    progress.expect(_RATES)
+    with progress.bar("scan", 100) as bar:
+        clock.now = 310.0
+        bar.update(100)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
+    with progress.bar("encode", 100):
+        pass
+
+    fraction, left, _stage = reports[-1]
+    assert fraction == pytest.approx(10.0 / (10.0 + left))
+
+
 def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(monkeypatch):
     clock = _Clock(monkeypatch)
     reports = []

@@ -172,7 +172,7 @@ class Progress:
     def expect(self, rates: dict[str, float]) -> None:
         """The profile's ``rates`` for the run, whose passes start now."""
         self._rates = rates
-        self._pass_end = time.monotonic()
+        self._started = self._pass_end = time.monotonic()
 
     def speed_test(self) -> Progress:
         """The progress of the speed test run before this run, reported as its own step."""
