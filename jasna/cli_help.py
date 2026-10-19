@@ -16,10 +16,10 @@ CLI_HELP: dict[str, str] = {
         "Without --input, --stream or --benchmark, activate and exit."
     ),
     "restoration_model_name": (
-        "Restoration model for video: basicvsrpp (fast), ltx-2step (Standard Quality LTX: fastest LTX, slightly less "
-        "detail), ltx (Good Quality LTX: more detail, much slower; "
-        "NVIDIA RTX only; recommended), ltx-8step (High Quality: slightly more detail, about 1.4x slower than "
-        "ltx) or ltx-undistilled (Top Quality: slightly better, about 2.5-3x slower than ltx). LTX doesn't "
+        "Restoration model for video: basicvsrpp (fast), ltx (Standard Quality LTX: more detail, much slower; "
+        "NVIDIA RTX only; recommended), ltx-4step (Good Quality: a bit more detail, about 1.5x slower than ltx), "
+        "ltx-8step (High Quality: more detail, about 2.5x slower than ltx) or ltx-undistilled (Top Quality: "
+        "slightly better, about 5x slower than ltx). LTX doesn't "
         "support VR side-by-side video, streaming, secondary restoration or denoise. A missing "
         "LTX model is offered for download. (default: %(default)s)"
     ),

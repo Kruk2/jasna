@@ -182,7 +182,8 @@ version.
 
 LTX works differently. It goes over the video in 4 passes: find mosaics,
 prepare, restore with a diffusion model, save. It is slower but can add more
-real detail. See
+real detail. Its quality choices: Standard (default, fastest), Good (about 1.5x
+slower), High (about 2.5x slower) and Top (about 5x slower). See
 [Choosing models](docs/en/models.md#restoration-model).
 
 ### Command line

@@ -125,9 +125,10 @@ def test_cli_ltx_args_are_mapped() -> None:
     assert defaults.restoration_model_name == "basicvsrpp"
     assert defaults.ltx_large_canvas is False
     assert defaults.ltx_seed == 20260923
+    assert defaults.ltx_model == "distilled2"
 
-    assert _cli_config(["--restoration-model-name", "ltx-2step"]).ltx_model == "distilled2"
-    assert _cli_config(["--restoration-model-name", "ltx"]).ltx_model == "distilled4"
+    assert _cli_config(["--restoration-model-name", "ltx"]).ltx_model == "distilled2"
+    assert _cli_config(["--restoration-model-name", "ltx-4step"]).ltx_model == "distilled4"
     assert _cli_config(["--restoration-model-name", "ltx-8step"]).ltx_model == "distilled"
     teacher = _cli_config(["--restoration-model-name", "ltx-undistilled"])
     assert (teacher.restoration_model_name, teacher.ltx_model) == ("ltx", "undistilled")

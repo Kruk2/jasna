@@ -69,9 +69,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
   | Model | Download |
   | --- | ---: |
-  | Good Quality (default) | about 15 GB |
+  | Standard Quality (default) | about 15 GB |
   | Fast mode | about 9 GB |
-  | High or Top Quality, on top | about 13 GB more each |
+  | Good, High or Top Quality, on top | about 13 GB more each |
 
   If Hugging Face can't be reached (for example in China), Jasna uses
   hf-mirror.com automatically. Download still fails? See
@@ -109,12 +109,12 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
 ### LTX options
 
-- **Model**: **Standard Quality**, **Good Quality** (default, recommended), **High Quality** or
-  **Top Quality**. Standard Quality is the fastest, with slightly less detail.
-  High Quality has slightly more detail and is about 1.4x slower. Top Quality is slightly
-  better and about 2.5-3x slower; it is rarely worth it. On an RTX 5090, Good Quality
-  takes about 1.5-3x the video's length. CLI: `--restoration-model-name ltx-2step` (Standard),
-  `ltx` (Good), `ltx-8step` (High) or `ltx-undistilled` (Top).
+- **Model**: **Standard Quality** (default, recommended), **Good Quality**, **High Quality** or
+  **Top Quality**. Standard Quality is the fastest. Good Quality has a bit more detail and is
+  about 1.5x slower. High Quality has more detail and is about 2.5x slower. Top Quality is
+  slightly better than High Quality and about 5x slower; it is rarely worth it. On an RTX 5090,
+  Standard Quality takes about 1-2x the video's length. CLI: `--restoration-model-name ltx` (Standard),
+  `ltx-4step` (Good), `ltx-8step` (High) or `ltx-undistilled` (Top).
 - **Fast mode** (RTX 50-series only): about 1.4x faster, slightly less detail,
   smaller download. CLI: `--ltx-fast`.
 - **Sharper large mosaics**: more detail on big mosaics (close-ups, 4K),
@@ -140,16 +140,17 @@ BasicVSR++.
 ### How long it takes
 
 Rough time for **1 minute of 1080p video with mosaics on screen the whole
-time** (High Quality model). Scenes without mosaics are much quicker. Good Quality
-(default) is about 1.4x faster; Top Quality takes about 2x as long.
+time** (Standard Quality model, the default). Scenes without mosaics are much quicker.
+Good Quality is about 1.5x slower, High Quality about 2.5x slower and Top Quality
+about 5x slower.
 
 | GPU | Time | With Fast mode |
 | --- | ---: | ---: |
-| RTX 5090 | about 5 min | about 3 min |
-| RTX 4090 | about 7 min | not available |
-| RTX 5080 | about 10 min | about 7 min |
-| RTX 3090 | about 15 min | not available |
-| RTX 2080 Ti | about 45 min | not available |
+| RTX 5090 | about 2 min | about 1.5 min |
+| RTX 4090 | about 3 min | not available |
+| RTX 5080 | about 4 min | about 3 min |
+| RTX 3090 | about 6 min | not available |
+| RTX 2080 Ti | about 20 min | not available |
 
 - The first LTX run takes longer while Jasna prepares it for your GPU.
 - Progress shows four steps: finding mosaics, preparing, restoring, saving.

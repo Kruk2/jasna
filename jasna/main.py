@@ -24,8 +24,8 @@ from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelNa
 # CLI restoration model name -> (restoration backend, LTX model variant).
 CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
     "basicvsrpp": ("basicvsrpp", LTX_DEFAULT_MODEL),
-    "ltx-2step": ("ltx", "distilled2"),
-    "ltx": ("ltx", "distilled4"),
+    "ltx": ("ltx", "distilled2"),
+    "ltx-4step": ("ltx", "distilled4"),
     "ltx-8step": ("ltx", "distilled"),
     "ltx-undistilled": ("ltx", "undistilled"),
 }
@@ -876,7 +876,7 @@ def _reject_options_of_other_restoration_backend(
     if restoration_backend == "ltx":
         foreign_dests, needed_models = BASICVSRPP_ONLY_ARG_DESTS, "basicvsrpp"
     else:
-        foreign_dests, needed_models = LTX_ONLY_ARG_DESTS, "ltx-2step, ltx, ltx-8step or ltx-undistilled"
+        foreign_dests, needed_models = LTX_ONLY_ARG_DESTS, "ltx, ltx-4step, ltx-8step or ltx-undistilled"
     for dest in foreign_dests:
         if getattr(args, dest) != parser.get_default(dest):
             option = "--" + dest.replace("_", "-")
