@@ -93,6 +93,8 @@ VAE の 2 ファイル。
 
 | 選んだモデル | ファイル |
 | --- | --- |
+| 標準画質 | `ltx-restore-alpha1-distill2-int8.safetensors.enc` |
+| 標準画質 + 高速モード | `ltx-restore-alpha1-distill2-nvfp4.safetensors.enc` |
 | 良好画質 | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
 | 良好画質 + 高速モード | `ltx-restore-alpha1-distill4-nvfp4.safetensors.enc` |
 | 高画質 | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
@@ -107,10 +109,11 @@ LTX のジョブをもう一度始めると、ダウンロードの確認は出�
 
 ### LTX のオプション
 
-- **モデル**: **良好画質**（デフォルト、おすすめ）、**高画質**、**最高画質**。高画質は
-  見た目がほぼ同じで約 1.4 倍遅くなります。最高画質は少し良く、約 2.5〜3 倍遅く、
+- **モデル**: **標準画質**、**良好画質**（デフォルト、おすすめ）、**高画質**、**最高画質**。
+  標準画質は最も速く、精細さは少し下がります。高画質は
+  少し精細で約 1.4 倍遅くなります。最高画質は少し良く、約 2.5〜3 倍遅く、
   通常は不要です。RTX 5090 では、良好画質は動画の長さの約 1.5〜3 倍の時間がかかります。
-  CLI: `--restoration-model-name ltx`（良好）、`ltx-8step`（高画質）、`ltx-undistilled`（最高）。
+  CLI: `--restoration-model-name ltx-2step`（標準）、`ltx`（良好）、`ltx-8step`（高画質）、`ltx-undistilled`（最高）。
 - **高速モード**（RTX 50 シリーズのみ）: 約 1.4 倍速く、ディテールはわずかに
   減り、ダウンロードも小さくなります。CLI: `--ltx-fast`。
 - **大きなモザイクをより鮮明に**: 大きなモザイク（クローズアップ、4K）を

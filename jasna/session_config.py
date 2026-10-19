@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Literal, Mapping
 
 RestorationModelName = Literal["basicvsrpp", "ltx"]
-LtxModelName = Literal["distilled4", "distilled", "undistilled"]
+LtxModelName = Literal["distilled2", "distilled4", "distilled", "undistilled"]
 LTX_DEFAULT_MODEL: LtxModelName = "distilled4"
 
 LTX_DEFAULT_SEED = 20260923

@@ -42,7 +42,7 @@ def test_model_check_precedes_engine_compilation(tmp_path, monkeypatch):
 
 def test_every_model_choice_has_its_own_transformer_file():
     transformers = {bundle_names(model, fast=fast)[0] for model in model_files.LTX_MODELS for fast in (False, True)}
-    assert len(transformers) == 6
+    assert len(transformers) == 8
     assert all(name in model_files.LTX_DOWNLOADS for name in transformers)
     assert bundle_names("undistilled", fast=True)[1:] == bundle_names("distilled", fast=False)[1:]
 

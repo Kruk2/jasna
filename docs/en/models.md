@@ -93,6 +93,8 @@ You need 3 files: one for the model you picked, plus the two VAE files.
 
 | You picked | Files |
 | --- | --- |
+| Standard Quality | `ltx-restore-alpha1-distill2-int8.safetensors.enc` |
+| Standard Quality + Fast mode | `ltx-restore-alpha1-distill2-nvfp4.safetensors.enc` |
 | Good Quality | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
 | Good Quality + Fast mode | `ltx-restore-alpha1-distill4-nvfp4.safetensors.enc` |
 | High Quality | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
@@ -107,11 +109,12 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
 ### LTX options
 
-- **Model**: **Good Quality** (default, recommended), **High Quality** or **Top Quality**.
-  High Quality looks about the same and is about 1.4x slower. Top Quality is slightly
+- **Model**: **Standard Quality**, **Good Quality** (default, recommended), **High Quality** or
+  **Top Quality**. Standard Quality is the fastest, with slightly less detail.
+  High Quality has slightly more detail and is about 1.4x slower. Top Quality is slightly
   better and about 2.5-3x slower; it is rarely worth it. On an RTX 5090, Good Quality
-  takes about 1.5-3x the video's length. CLI: `--restoration-model-name ltx` (Good),
-  `ltx-8step` (High) or `ltx-undistilled` (Top).
+  takes about 1.5-3x the video's length. CLI: `--restoration-model-name ltx-2step` (Standard),
+  `ltx` (Good), `ltx-8step` (High) or `ltx-undistilled` (Top).
 - **Fast mode** (RTX 50-series only): about 1.4x faster, slightly less detail,
   smaller download. CLI: `--ltx-fast`.
 - **Sharper large mosaics**: more detail on big mosaics (close-ups, 4K),

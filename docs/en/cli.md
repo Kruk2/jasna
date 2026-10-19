@@ -53,7 +53,7 @@ Jasna uses `TMP` first, then `TEMP`. `TMPDIR` is not used.
 
 | Option | Default | Notes |
 | ------ | ------- | ----- |
-| `--restoration-model-name` | `basicvsrpp` | Video restoration model: `basicvsrpp` (fast), `ltx` (Good Quality LTX: more detail, much slower; recommended), `ltx-8step` (High Quality: looks about the same as `ltx`, about 1.4x slower) or `ltx-undistilled` (Top Quality: slightly better, about 2.5-3x slower than `ltx`). See [Choosing models](models.md#restoration-model). |
+| `--restoration-model-name` | `basicvsrpp` | Video restoration model: `basicvsrpp` (fast), `ltx-2step` (Standard Quality LTX: fastest LTX, slightly less detail), `ltx` (Good Quality LTX: more detail, much slower; recommended), `ltx-8step` (High Quality: slightly more detail than `ltx`, about 1.4x slower) or `ltx-undistilled` (Top Quality: slightly better, about 2.5-3x slower than `ltx`). See [Choosing models](models.md#restoration-model). |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`, or `model_weights/ltx-restore` for LTX | Restoration weights (a folder for LTX). |
 | `--ltx-fast` / `--no-ltx-fast` | off | LTX: about 1.4x faster, slightly less detail. RTX 50-series only; other GPUs stop with an error. |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | off | LTX: more detail on large mosaics, about 3x slower on those. Needs about 12 GB of free VRAM; with less, those mosaics are restored normally. |
@@ -68,7 +68,7 @@ Jasna uses `TMP` first, then `TEMP`. `TMPDIR` is not used.
 | `--denoise` | `none` | Removes noise in restored areas: `low`, `medium`, `high`. |
 | `--denoise-step` | `after_primary` | Remove noise before secondary restoration (`after_primary`) or after it (`after_secondary`). |
 
-The `--ltx-*` options need `--restoration-model-name ltx`, `ltx-8step` or `ltx-undistilled`.
+The `--ltx-*` options need `--restoration-model-name ltx-2step`, `ltx`, `ltx-8step` or `ltx-undistilled`.
 `--no-compile-basicvsrpp` works only with `basicvsrpp`.
 
 ## Detection

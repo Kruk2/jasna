@@ -52,6 +52,7 @@ def test_model_key_names_each_model_choice() -> None:
     assert model_key("basicvsrpp", "undistilled") == "basicvsrpp"
     assert model_key("ltx", "distilled") == "ltx_distilled"
     assert model_key("ltx", "distilled4") == "ltx_distilled4"
+    assert model_key("ltx", "distilled2") == "ltx_distilled2"
     assert model_key("ltx", "undistilled") == "ltx_undistilled"
 
 

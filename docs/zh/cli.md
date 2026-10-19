@@ -50,7 +50,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
-| `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx`（良好画质 LTX：细节更多，慢很多；推荐）、`ltx-8step`（高画质：效果与 `ltx` 几乎相同，慢约 1.4 倍）或 `ltx-undistilled`（顶级画质：稍好，比 `ltx` 慢约 2.5–3 倍）。见[选择模型](models.md#修复模型)。 |
+| `--restoration-model-name` | `basicvsrpp` | 视频修复模型：`basicvsrpp`（快）、`ltx-2step`（标准画质 LTX：最快的 LTX，细节稍少）、`ltx`（良好画质 LTX：细节更多，慢很多；推荐）、`ltx-8step`（高画质：细节比 `ltx` 稍多，慢约 1.4 倍）或 `ltx-undistilled`（顶级画质：稍好，比 `ltx` 慢约 2.5–3 倍）。见[选择模型](models.md#修复模型)。 |
 | `--restoration-model-path` | `model_weights/lada_mosaic_restoration_model_generic_v1.2.pth`，LTX 为 `model_weights/ltx-restore` | 修复模型权重（LTX 为文件夹）。 |
 | `--ltx-fast` / `--no-ltx-fast` | 关闭 | LTX：快约 1.4 倍，细节略少。仅限 RTX 50 系列；其他 GPU 会报错停止。 |
 | `--ltx-large-canvas` / `--no-ltx-large-canvas` | 关闭 | LTX：大马赛克细节更多，这部分约慢 3 倍。需要约 12 GB 空闲显存；不够时，这些马赛克按普通方式修复。 |
@@ -65,7 +65,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | `--denoise` | `none` | 去除修复区域中的噪点：`low`、`medium`、`high`。 |
 | `--denoise-step` | `after_primary` | 在二次修复之前（`after_primary`）或之后（`after_secondary`）去除噪点。 |
 
-`--ltx-*` 选项需要 `--restoration-model-name ltx`、`ltx-8step` 或 `ltx-undistilled`。
+`--ltx-*` 选项需要 `--restoration-model-name ltx-2step`、`ltx`、`ltx-8step` 或 `ltx-undistilled`。
 `--no-compile-basicvsrpp` 只能与 `basicvsrpp` 一起使用。
 
 ## 检测

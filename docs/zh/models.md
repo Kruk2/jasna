@@ -83,6 +83,8 @@ LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时�
 
 | 你选的模型 | 文件 |
 | --- | --- |
+| 标准画质 | `ltx-restore-alpha1-distill2-int8.safetensors.enc` |
+| 标准画质 + 快速模式 | `ltx-restore-alpha1-distill2-nvfp4.safetensors.enc` |
 | 良好画质 | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
 | 良好画质 + 快速模式 | `ltx-restore-alpha1-distill4-nvfp4.safetensors.enc` |
 | 高画质 | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
@@ -97,9 +99,10 @@ LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时�
 
 ### LTX 选项
 
-- **模型**：**良好画质**（默认，推荐）、**高画质**或**顶级画质**。高画质效果几乎相同，慢约 1.4 倍；
+- **模型**：**标准画质**、**良好画质**（默认，推荐）、**高画质**或**顶级画质**。标准画质最快，细节稍少；
+  高画质细节稍多，慢约 1.4 倍；
   顶级画质稍好，慢约 2.5–3 倍，通常不值得。在 RTX 5090 上，良好画质耗时约为视频长度的 1.5–3 倍。
-  CLI：`--restoration-model-name ltx`（良好）、`ltx-8step`（高画质）或 `ltx-undistilled`（顶级）。
+  CLI：`--restoration-model-name ltx-2step`（标准）、`ltx`（良好）、`ltx-8step`（高画质）或 `ltx-undistilled`（顶级）。
 - **快速模式**（仅限 RTX 50 系列）：快约 1.4 倍，细节略少，下载更小。
   CLI：`--ltx-fast`。
 - **大马赛克更清晰**：大马赛克（特写、4K）细节更多，这部分约慢 3 倍。

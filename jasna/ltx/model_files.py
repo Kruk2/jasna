@@ -44,6 +44,8 @@ class DownloadableFile:
 
 
 _TRANSFORMER_NAMES: dict[tuple[LtxModelName, bool], str] = {
+    ("distilled2", False): "ltx-restore-alpha1-distill2-int8.safetensors",
+    ("distilled2", True): "ltx-restore-alpha1-distill2-nvfp4.safetensors",
     ("distilled4", False): "ltx-restore-alpha1-distill4-int8.safetensors",
     ("distilled4", True): "ltx-restore-alpha1-distill4-nvfp4.safetensors",
     ("distilled", False): "ltx-restore-alpha1-distill8-int8.safetensors",
@@ -57,6 +59,8 @@ _SHARED_NAMES = ("vae.safetensors", "vae-decoder.safetensors")
 LTX_DOWNLOADS: dict[str, DownloadableFile] = {
     name: DownloadableFile(name, size, checksum)
     for name, size, checksum in (
+        ("ltx-restore-alpha1-distill2-int8.safetensors", 13_368_048_749, "c23559f9d120df49266fc2dbe60ec384058d51834cf1a2da049e54b28aea51ad"),
+        ("ltx-restore-alpha1-distill2-nvfp4.safetensors", 7_733_294_997, "4aa08c146c8cc335e7f90d19aa293cc0dfe4f14520fd85efc257fe809510693b"),
         ("ltx-restore-alpha1-distill4-int8.safetensors", 13_368_048_733, "1c0f1642232813f690d949b05fe90bdc02d3203e0092950de25e9cc961f30965"),
         ("ltx-restore-alpha1-distill4-nvfp4.safetensors", 7_733_294_981, "57098e622d02598467f903049f4d1a613852f832847a01c43da148f506876973"),
         ("ltx-restore-alpha1-distill8-int8.safetensors", 13_368_048_773, "b006342a109c640a46ae91a5cd10e67186d968c63ef2f715c78bedf36936e057"),
