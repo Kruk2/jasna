@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 import logging
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
+from contextlib import ExitStack, closing
 from pathlib import Path
 
 import torch
@@ -22,7 +23,7 @@ from jasna._frozen import is_frozen
 from jasna.ltx import native
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
-from jasna.ltx.model_files import PlaceholderHandle, open_tensors
+from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors, open_tensors
 from jasna.ltx.plan import SharedLatents, shared_latents
 from jasna.tensor_utils import compile_static
 
@@ -73,22 +74,58 @@ def _window_workspace_bytes(tokens: int) -> int:
     return 2 * tokens * 4096 * 2 * 10 + T.CHUNK_ROWS * 16384 * 4 * 3
 
 
-def _read_tensors(reader, names: tuple[str, ...], specs, device: torch.device) -> dict[str, torch.Tensor]:
-    sources = {name: torch.empty(specs[name][1], dtype=specs[name][0], device="cpu") for name in names}
+def _zero(tensors: Iterable[torch.Tensor]) -> None:
+    for tensor in tensors:
+        tensor.view(-1).view(torch.uint8).zero_()
+
+
+def _read_host_tensors(reader, names: tuple[str, ...], specs) -> dict[str, torch.Tensor]:
+    tensors = {name: torch.empty(specs[name][1], dtype=specs[name][0], device="cpu") for name in names}
+    try:
+        reader.read_tensors_into((names,), iter((tensors,)))
+    except BaseException:
+        _zero(tensors.values())
+        raise
+    return tensors
+
+
+def _to_device(tensors: dict[str, torch.Tensor], device: torch.device) -> dict[str, torch.Tensor]:
+    """``tensors`` on ``device``; the host copies left behind are zeroed, also when a copy fails."""
     result = {}
     try:
-        reader.read_tensors_into((names,), iter((sources,)))
-        for name, source in sources.items():
-            result[name] = source.to(device)
+        for name, tensor in tensors.items():
+            result[name] = tensor.to(device)
         return result
     except BaseException:
-        for tensor in result.values():
-            tensor.view(-1).view(torch.uint8).zero_()
+        _zero(result.values())
         raise
     finally:
-        for name, source in sources.items():
-            if result.get(name) is not source:
-                source.view(-1).view(torch.uint8).zero_()
+        _zero(tensor for name, tensor in tensors.items() if result.get(name) is not tensor)
+
+
+class TransformerSource:
+    """A transformer file held open, with its sampler settings and its non-block tensors read into
+    host memory. Opening it uses no GPU memory, so the worker can do it while the encoder still
+    runs; ``LtxTransformer`` takes it over and closes it."""
+
+    def __init__(self, path: Path | PlaceholderTensors) -> None:
+        self._file = ExitStack()
+        self.top: dict[str, torch.Tensor] = {}
+        try:
+            self.handle = self._file.enter_context(open_tensors(path))
+            self.sigmas, self.stg_scale = sampler_settings(self.handle.metadata())
+            self.specs = self.handle.tensor_specs()
+            self.top = _read_host_tensors(
+                self.handle, tuple(name for name in self.specs if not name.startswith("blocks.")), self.specs
+            )
+        except BaseException:
+            self._file.close()
+            raise
+
+    def close(self) -> None:
+        _zero(self.top.values())
+        self.top = {}
+        self._file.close()
 
 
 def _opaque_blocks(reader) -> bool:
@@ -118,7 +155,7 @@ class LtxTransformer:
     """The restoration transformer loaded from a jasna LTX model file; ``free_vram(device)``
     gives the VRAM free on the whole GPU, which sizes the resident blocks and window groups."""
 
-    def __init__(self, path: Path, device: torch.device, free_vram: Callable[[torch.device], int]) -> None:
+    def __init__(self, source: TransformerSource, device: torch.device, free_vram: Callable[[torch.device], int]) -> None:
         self.device = device
         self._free_vram = free_vram
         self.top: dict[str, torch.Tensor] = {}
@@ -128,12 +165,12 @@ class LtxTransformer:
         self.block_backend = "native opaque store"
         self._ropes: dict[tuple[int, int, int], T.Rope] = {}
         try:
-            T.require_kernels(device)
-            with open_tensors(path) as handle:
-                self.sigmas, self.stg_scale = sampler_settings(handle.metadata())
-                specs = handle.tensor_specs()
-                self.top = _read_tensors(handle, tuple(name for name in specs if not name.startswith("blocks.")),
-                                         specs, device)
+            with closing(source):
+                T.require_kernels(device)
+                handle, specs = source.handle, source.specs
+                self.sigmas, self.stg_scale = source.sigmas, source.stg_scale
+                top, source.top = source.top, {}
+                self.top = _to_device(top, device)
                 self.context = self.top.pop("prompt_context")
                 for sigma in self.sigmas[:-1]:
                     self.conditions.append(T.step_conditioning(self.top, float(sigma), device))

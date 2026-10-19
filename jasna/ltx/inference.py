@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,8 +14,10 @@ import torch
 from jasna._frozen import is_frozen
 from jasna.accelerator import device_free_bytes
 from jasna.ltx.model_files import LtxModelFiles, PlaceholderTensors
-from jasna.ltx.sampler import LtxTransformer
+from jasna.ltx.sampler import LtxTransformer, TransformerSource
 from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
+
+logger = logging.getLogger(__name__)
 
 
 def protected_bundle(files: LtxModelFiles) -> bool:
@@ -123,13 +127,20 @@ class ModelRuntime:
             else:
                 torch.cuda.empty_cache()
 
+    def prepare_transformer(self) -> None:
+        """Let the worker open the transformer file and read its host-side part while the GPU is
+        still busy (encode); nothing of the transformer reaches the GPU before ``load_transformer``."""
+        if self.protected and self._transformer is None:
+            self.request("prepare_transformer", {}, [])
+
     def load_transformer(self):
         if self._transformer is None:
             if self.protected:
                 info, _ = self.request("load_transformer", {"free_bytes": device_free_bytes(self.device)}, [])
                 self._transformer = WorkerTransformer(self, info)
             else:
-                self._transformer = LtxTransformer(self.files.transformer, self.device, device_free_bytes)
+                self._transformer = LtxTransformer(TransformerSource(self.files.transformer), self.device,
+                                                   device_free_bytes)
         return self._transformer
 
     def unload_transformer(self) -> None:
@@ -202,6 +213,8 @@ class WorkerBackend:
         self.transformer = None
         self.decoder = None
         self.peak_vram_bytes = 0
+        self._preparer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxTransformerSource")
+        self._prepared: Future[TransformerSource] | None = None
 
     def _unload_module(self, name: str) -> None:
         from jasna.models.ltx_vae.loader import _clear_tensors
@@ -241,11 +254,13 @@ class WorkerBackend:
                 raise RuntimeError("LTX encoder is not loaded")
             pixels = tensors[0].to(self.device).float().div_(127.5).sub_(1.0).to(torch.bfloat16)
             return {}, [self.encoder(pixels).to("cpu").contiguous()]
+        elif op == "prepare_transformer":
+            if self.transformer is None and self._prepared is None:
+                self._prepared = self._preparer.submit(TransformerSource, self.files.transformer)
         elif op == "load_transformer":
             if self.transformer is None:
-                self.transformer = LtxTransformer(
-                    self.files.transformer, self.device, free_vram_beside_parent(self.device, params["free_bytes"])
-                )
+                free_vram = free_vram_beside_parent(self.device, params["free_bytes"])
+                self.transformer = LtxTransformer(self._transformer_source(), self.device, free_vram)
             return {"steps": len(self.transformer.conditions), "resident": self.transformer.blocks.resident,
                     "count": self.transformer.blocks.count}, []
         elif op == "unload_transformer":
@@ -272,6 +287,22 @@ class WorkerBackend:
             raise ValueError("unsupported LTX inference operation")
         return {}, []
 
+    def _transformer_source(self) -> TransformerSource:
+        """The file opened ahead by ``prepare_transformer``, else opened now."""
+        prepared, self._prepared = self._prepared, None
+        return prepared.result() if prepared is not None else TransformerSource(self.files.transformer)
+
+    def _drop_prepared(self) -> None:
+        prepared, self._prepared = self._prepared, None
+        if prepared is None:
+            return
+        try:
+            source = prepared.result()
+        except Exception as error:
+            logger.debug("LTX transformer file opened ahead was never used; opening it had failed: %r", error)
+            return
+        source.close()
+
     def _decode_to_cpu(self, latent: torch.Tensor, seed: int, free_bytes: int) -> torch.Tensor:
         """Decoded window as uint8 ``[F, 3, S, S]`` on the CPU; its GPU copies are freed on return,
         so the caller can hand that cache back before the parent reads the next window's budget."""
@@ -281,6 +312,8 @@ class WorkerBackend:
         return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous().to("cpu")
 
     def close(self) -> None:
+        self._drop_prepared()
+        self._preparer.shutdown()
         self._unload_module("encoder")
         if self.transformer is not None:
             self.transformer.close()

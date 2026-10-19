@@ -1,6 +1,7 @@
 import contextlib
 import json
 import threading
+import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -127,6 +128,7 @@ def fakes(monkeypatch, tmp_path):
     monkeypatch.setattr(restore, "_vae_pixels", lambda canvases, device: torch.zeros(1))
     monkeypatch.setattr(inference, "load_video_encoder", lambda path, device: lambda pixels: torch.zeros(1))
     monkeypatch.setattr(inference, "load_video_decoder", lambda vae, tuned, device: object())
+    monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
     monkeypatch.setattr(inference, "LtxTransformer", _Transformer)
     monkeypatch.setattr(restore, "decode_latent", decode)
     monkeypatch.setattr(restore, "composite_frame", composite)
@@ -822,10 +824,71 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     )
     assert writer.closed
     assert [op for op, _, _ in requests] == [
-        "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",
+        "prepare_transformer", "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",
         "unload_transformer", "load_decoder", "decode", "unload_decoder",
     ]
-    assert requests[4][1] == {"seeds": [5], "window_hop": LESS_OVERLAP_WINDOW_HOP}
+    assert requests[5][1] == {"seeds": [5], "window_hop": LESS_OVERLAP_WINDOW_HOP}
+
+
+def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, monkeypatch, tmp_path):
+    scanning, started = threading.Event(), threading.Event()
+    requests = []
+    scan = restore.scan_span
+
+    def slow_scan(*args, **kwargs):
+        scanning.set()
+        assert started.wait(5), "the worker did not start during the scan"
+        return scan(*args, **kwargs)
+
+    def request(self, op, params, tensors, advance=None):
+        requests.append((op, threading.current_thread() is threading.main_thread()))
+        if op == "prepare_transformer":
+            assert scanning.wait(5)
+            started.set()
+        if op == "load_transformer":
+            return {"steps": 8, "resident": 40, "count": 48}, []
+        if op == "encode":
+            return {}, [torch.zeros(1)]
+        if op == "denoise_chain":
+            advance(8 * len(tensors))
+            return {}, [torch.zeros(1) for _ in tensors]
+        if op == "decode":
+            return {}, [torch.zeros(restore.WINDOW_FRAMES, 3, 2, 2, dtype=torch.uint8)]
+        return {}, []
+
+    monkeypatch.setattr(restore, "scan_span", slow_scan)
+    monkeypatch.setattr(inference.ModelRuntime, "request", request)
+    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
+    files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
+    restore.restore_spans(
+        [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
+        replace(_render(tmp_path), files=files), work_dir=tmp_path,
+        progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
+    )
+    assert requests[0] == ("prepare_transformer", False)
+    assert requests[1:3] == [("load_encoder", True), ("encode", True)]
+
+
+def test_a_failed_scan_waits_for_the_worker_start_before_it_raises(fakes, monkeypatch, tmp_path):
+    finished = []
+
+    def request(self, op, params, tensors, advance=None):
+        time.sleep(0.2)
+        finished.append(op)
+        return {}, []
+
+    def failing_scan(*_args, **_kwargs):
+        raise RuntimeError("synthetic scan failure")
+
+    monkeypatch.setattr(restore, "scan_span", failing_scan)
+    monkeypatch.setattr(inference.ModelRuntime, "request", request)
+    files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
+    runtime = inference.ModelRuntime(files, torch.device("cpu"), threading.Event())
+    with pytest.raises(RuntimeError, match="synthetic scan failure"):
+        restore.prepare_spans([restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
+                              replace(_render(tmp_path), files=files), tmp_path, progress=restore.Progress(12, disable=True, report=None),
+                              cancel=threading.Event(), runtime=runtime)
+    assert finished == ["prepare_transformer"]
 
 
 def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):

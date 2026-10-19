@@ -829,7 +829,53 @@ def prepare_spans(
     spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event,
     runtime: ModelRuntime | None = None,
 ) -> list[PreparedSpan]:
-    """Scan and VAE-encode every span; reference latents go to ``directory``."""
+    """Scan and VAE-encode every span; reference latents go to ``directory``. A ``runtime`` passed
+    in will denoise next, so its worker starts and opens the transformer file during the scan; it
+    holds no model on the GPU before the encoder loads."""
+    starting = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxWorkerStart")
+    worker_ready = starting.submit(runtime.prepare_transformer) if runtime is not None else None
+    starting.shutdown(wait=False)
+    try:
+        prepared = _scan_spans(spans, render, directory, progress=progress, cancel=cancel)
+    except BaseException:
+        _settle(worker_ready)
+        raise
+    if sum(p.windows for p in prepared):
+        progress.begin("encode")
+        owned_runtime = runtime is None
+        runtime = runtime or ModelRuntime(render.files, render.device, cancel)
+        try:
+            if worker_ready is not None:
+                worker_ready.result()
+            encoder = runtime.load_encoder()
+            try:
+                with progress.bar("encode", progress.frames, marks=timing_marks(encoder)) as bar:
+                    for p in prepared:
+                        encode_span(
+                            p.span.frames, p.span.segments, p.plans, encoder, p.references,
+                            batch_size=render.batch_size, device=render.device, bar=bar, cancel=cancel,
+                        )
+            finally:
+                del encoder
+                runtime.unload_encoder()
+        finally:
+            if owned_runtime:
+                runtime.close()
+    else:
+        _settle(worker_ready)
+    return prepared
+
+
+def _settle(worker_ready: Future | None) -> None:
+    """Waits for a worker start nothing needs any more (so the caller can close the worker);
+    its error is only logged."""
+    if worker_ready is not None and (error := worker_ready.exception()) is not None:
+        logger.debug("LTX worker started ahead of a pass that did not need it failed: %r", error)
+
+
+def _scan_spans(
+    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
+) -> list[PreparedSpan]:
     with progress.bar("scan", progress.frames) as bar:
         plans = [
             scan_span(
@@ -866,25 +912,6 @@ def prepare_spans(
             crop_pixels / 1e6,
         )
     )
-    if sum(p.windows for p in prepared):
-        progress.begin("encode")
-        owned_runtime = runtime is None
-        runtime = runtime or ModelRuntime(render.files, render.device, cancel)
-        try:
-            encoder = runtime.load_encoder()
-            try:
-                with progress.bar("encode", progress.frames, marks=timing_marks(encoder)) as bar:
-                    for p in prepared:
-                        encode_span(
-                            p.span.frames, p.span.segments, p.plans, encoder, p.references,
-                            batch_size=render.batch_size, device=render.device, bar=bar, cancel=cancel,
-                        )
-            finally:
-                del encoder
-                runtime.unload_encoder()
-        finally:
-            if owned_runtime:
-                runtime.close()
     return prepared
 
 

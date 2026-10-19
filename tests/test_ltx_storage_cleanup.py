@@ -119,7 +119,7 @@ def test_transformer_close_clears_top_context_conditioning_and_blocks(tmp_path, 
     path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
     original = path.read_bytes()
     _without_compiling(monkeypatch)
-    transformer = sampler.LtxTransformer(path, torch.device("cpu"), _twenty_gib_free)
+    transformer = sampler.LtxTransformer(sampler.TransformerSource(path), torch.device("cpu"), _twenty_gib_free)
     condition = transformer.conditions[0]
     retained = [*transformer.top.values(), transformer.context,
                 condition.block_rows, condition.output_rows, condition.prompt_rows,
@@ -144,7 +144,7 @@ def test_failed_transformer_load_reports_its_own_error_when_cleanup_also_fails(t
     monkeypatch.setattr(sampler.BlockStore, "from_reader", load_fails)
     monkeypatch.setattr(sampler.LtxTransformer, "close", cleanup_fails)
     with pytest.raises(RuntimeError, match="native block commit") as raised:
-        sampler.LtxTransformer(path, torch.device("cpu"), _twenty_gib_free)
+        sampler.LtxTransformer(sampler.TransformerSource(path), torch.device("cpu"), _twenty_gib_free)
     assert "out of memory" in str(raised.value.__cause__)
 
 
@@ -155,7 +155,7 @@ def test_frozen_trial_keeps_its_placeholder_blocks_in_the_plain_tensor_store(mon
     monkeypatch.setattr(sampler, "is_frozen", lambda: True)
     _install_native_store(monkeypatch)
     _without_compiling(monkeypatch)
-    transformer = sampler.LtxTransformer(PlaceholderTensors("int8", "distilled"), torch.device("cpu"), _twenty_gib_free)
+    transformer = sampler.LtxTransformer(sampler.TransformerSource(PlaceholderTensors("int8", "distilled")), torch.device("cpu"), _twenty_gib_free)
     try:
         assert isinstance(transformer.blocks, BlockStore)
         assert transformer.blocks.acquire(0)["weight"].shape == (2, 2)
@@ -246,7 +246,7 @@ def test_opaque_denoise_uses_only_native_complete_block_forward(tmp_path, monkey
     monkeypatch.setattr(
         sampler.T, "velocity", lambda top, x, cond: torch.zeros_like(x[:, : x.shape[1] // 2]),
     )
-    transformer = sampler.LtxTransformer(path, torch.device("cpu"), _twenty_gib_free)
+    transformer = sampler.LtxTransformer(sampler.TransformerSource(path), torch.device("cpu"), _twenty_gib_free)
     transformer.stg_scale = 1.0
     native = transformer.blocks._native
     rope = T.Rope(cos=torch.ones(1, 1, 4, 4), sin=torch.zeros(1, 1, 4, 4))
@@ -300,7 +300,7 @@ def test_top_tensor_loading_uses_one_owned_destination_group(tmp_path):
             load(group_names, groups)
 
         reader.read_tensors_into = observe
-        result = sampler._read_tensors(reader, tuple(expected), reader.tensor_specs(), torch.device("cpu"))
+        result = sampler._read_host_tensors(reader, tuple(expected), reader.tensor_specs())
     assert operations == [(tuple(expected),)]
     assert all(torch.equal(result[name], value) for name, value in expected.items())
 

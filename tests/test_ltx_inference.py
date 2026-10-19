@@ -197,6 +197,7 @@ def test_worker_sizes_the_transformer_from_the_parents_device_wide_free_vram(mon
         def native_vram_bytes(self):
             return 0
 
+    monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
     monkeypatch.setattr(inference, "LtxTransformer", Transformer)
     backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
     backend.dispatch("load_transformer", {"free_bytes": 14 * gib}, [], lambda _n: None)
@@ -206,6 +207,7 @@ def test_worker_sizes_the_transformer_from_the_parents_device_wide_free_vram(mon
 
 def test_local_transformer_reads_device_wide_free_vram(monkeypatch):
     received = []
+    monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
     monkeypatch.setattr(inference, "LtxTransformer", lambda path, device, free_vram: received.append(free_vram))
     runtime = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
     runtime.load_transformer()
@@ -227,3 +229,79 @@ def test_worker_decode_returns_its_vram_before_the_parent_reads_the_next_budget(
     _, (frames,) = backend.dispatch("decode", {"seed": 1, "free_bytes": 4 << 30}, [torch.zeros(1, 128, 5, 16, 16)], lambda _n: None)
     assert frames.device.type == "cpu" and frames.shape == (33, 3, 512, 512)
     assert torch.cuda.memory_reserved(device) == reserved
+
+
+def test_worker_opens_the_transformer_file_ahead_on_its_own_thread(monkeypatch, allocator):
+    """``prepare_transformer`` runs while the encoder holds the GPU: the file is opened on another
+    thread and the later load takes that source instead of opening the file again."""
+    opened, loaded, released = [], [], []
+
+    class Source:
+        def __init__(self, path):
+            opened.append((path, threading.current_thread() is not threading.main_thread()))
+
+        def close(self):
+            released.append(self)
+
+    class Transformer:
+        conditions = [None] * 4
+        blocks = SimpleNamespace(resident=48, count=48)
+
+        def __init__(self, source, device, free_vram):
+            loaded.append(source)
+
+        def native_vram_bytes(self):
+            return 0
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (8 << 30, 32 << 30))
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
+    monkeypatch.setattr(inference, "TransformerSource", Source)
+    monkeypatch.setattr(inference, "LtxTransformer", Transformer)
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
+    backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
+    backend.dispatch("load_transformer", {"free_bytes": 8 << 30}, [], lambda _n: None)
+    backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
+    assert opened == [(Path("t.enc"), True)] and len(loaded) == 1 and isinstance(loaded[0], Source)
+    backend.dispatch("unload_transformer", {}, [], lambda _n: None)
+    backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
+    backend.close()
+    assert len(opened) == 2 and len(released) == 1 and released[0] is not loaded[0]
+
+
+def test_unused_transformer_file_opened_ahead_closes_with_the_worker_even_after_failing(monkeypatch, allocator):
+    def failing(path):
+        raise RuntimeError("synthetic license failure")
+
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (8 << 30, 32 << 30))
+    monkeypatch.setattr(inference, "TransformerSource", failing)
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
+    backend.close()
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    backend.dispatch("prepare_transformer", {}, [], lambda _n: None)
+    with pytest.raises(RuntimeError, match="synthetic license failure"):
+        backend.dispatch("load_transformer", {"free_bytes": 8 << 30}, [], lambda _n: None)
+    backend.close()
+
+
+def test_runtime_asks_the_worker_to_open_the_transformer_only_while_none_is_loaded(monkeypatch):
+    requests = []
+    runtime = inference.ModelRuntime(_files(".enc"), torch.device("cpu"), threading.Event())
+    monkeypatch.setattr(inference, "device_free_bytes", lambda device: 9 << 30)
+
+    def request(op, params, tensors, advance=None):
+        requests.append(op)
+        return ({"steps": 4, "resident": 48, "count": 48} if op == "load_transformer" else {}), []
+
+    monkeypatch.setattr(runtime, "request", request)
+    runtime.prepare_transformer()
+    runtime.load_transformer()
+    runtime.prepare_transformer()
+    assert requests == ["prepare_transformer", "load_transformer"]
+    local = inference.ModelRuntime(LtxModelFiles.placeholder("distilled", fast=False), torch.device("cpu"), threading.Event())
+    monkeypatch.setattr(local, "request", lambda *_args: pytest.fail("trial files have no worker"))
+    local.prepare_transformer()
