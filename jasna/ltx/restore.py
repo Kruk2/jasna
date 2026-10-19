@@ -60,7 +60,13 @@ FrameSource = Callable[[], FrameBatches]
 DecodeBudget = Callable[[int], int]
 LARGE_CANVAS_MIN_FREE_BYTES = 12 << 30
 LARGE_CANVAS_MIN_TOTAL_BYTES = 15 << 30
-SEGMENT_DECODE_BUDGET_BYTES = {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}
+SEGMENT_DECODE_BUDGETS = (
+    (22 << 30, {PLAN_CANVAS: 8 << 30, LARGE_CANVAS: 16 << 30}),
+    (15 << 30, {PLAN_CANVAS: 8 << 30, LARGE_CANVAS: 10 << 30}),
+    (0, {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}),
+)
+"""(least total VRAM, decode budget per canvas): 8 GiB decodes a 512 window in one tile,
+16 GiB a 768 window."""
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
 SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
 """Two windows per track: the speed profile leaves out each canvas's cold first window."""
@@ -564,20 +570,23 @@ def denoise_track(
 
 
 def free_vram_budget(device: torch.device) -> DecodeBudget:
-    return lambda _canvas: device_free_bytes(device)
+    def budget(_canvas: int) -> int:
+        torch.cuda.empty_cache()
+        return device_free_bytes(device)
+
+    return budget
 
 
-def segment_decode_budget(canvas: int) -> int:
-    """A fixed decode budget, so a segment's tile layout (and pixels) never depend on the
-    VRAM free at that moment."""
-    return SEGMENT_DECODE_BUDGET_BYTES[canvas]
+def segment_decode_budget(total_bytes: int) -> DecodeBudget:
+    """A decode budget fixed by the GPU's size, so a segment's tile layout (and pixels) never
+    depend on the VRAM free at that moment."""
+    return next(budgets for least, budgets in SEGMENT_DECODE_BUDGETS if total_bytes >= least).__getitem__
 
 
 def _decode_window(
     decoder, latent: torch.Tensor, seed: int, canvas: int, budget: DecodeBudget, device: torch.device
 ) -> torch.Tensor:
     """Decoded window as uint8 ``[F, 3, S, S]`` on ``device``."""
-    torch.cuda.empty_cache()
     free = budget(canvas)
     if isinstance(decoder, WorkerDecoder):
         return decoder.decode_window(latent, seed, free, device)
@@ -740,6 +749,10 @@ class PreparedSpan:
     @property
     def windows(self) -> int:
         return sum(len(plan.windows) for segment_plans in self.plans for plan in segment_plans)
+
+    @property
+    def largest_canvas(self) -> int:
+        return max(window.canvas for segment_plans in self.plans for plan in segment_plans for window in plan.windows)
 
 
 def prepare_spans(

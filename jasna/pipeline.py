@@ -345,17 +345,16 @@ class Pipeline:
         from jasna.ltx.speed import profile_path
 
         require_ltx_input(self.vr_resolution)
+        total_bytes = torch.cuda.get_device_properties(self.device).total_memory
         return LtxRender(
             detector=self.job_detection_model,
             files=self.ltx_files,
             frame_h=int(metadata.video_height),
             frame_w=int(metadata.video_width),
             batch_size=self.batch_size,
-            large_canvas=segment_large_canvas(
-                self.ltx_large_canvas, torch.cuda.get_device_properties(self.device).total_memory
-            ),
+            large_canvas=segment_large_canvas(self.ltx_large_canvas, total_bytes),
             window_hop=self.ltx_window_hop,
-            budget=segment_decode_budget,
+            budget=segment_decode_budget(total_bytes),
             budget_name="segment",
             device=self.device,
             speed_profile=profile_path(),

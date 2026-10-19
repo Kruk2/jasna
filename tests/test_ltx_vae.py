@@ -7,7 +7,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
-from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder, loader
+from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder, loader, video_encoder
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.eager_na import na3d
@@ -177,13 +177,30 @@ def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
             yield reader
 
     monkeypatch.setattr(loader, "open_tensors", record_open)
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
     assert all(p.dtype == torch.bfloat16 and not p.requires_grad for p in encoder.parameters())
     assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16())
     assert torch.equal(encoder.per_channel_statistics.get_buffer("std-of-means"), torch.full((8,), 2.0).bfloat16())
+    assert encoder.conv_in.conv.weight.is_contiguous(memory_format=torch.channels_last_3d)
+    assert video_encoder._encode_cropped is not video_encoder.encode_cropped
     assert opened == [path]
+
+
+def test_load_video_encoder_keeps_contiguous_eager_weights_without_bf16_compile(tmp_path, monkeypatch):
+    source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
+    path = tmp_path / "vae.safetensors"
+    save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v for k, v in source.state_dict().items()},
+              str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
+    monkeypatch.setattr(loader, "compiles_bf16", lambda device: False)
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+
+    encoder = load_video_encoder(path, torch.device("cpu"))
+
+    assert encoder.conv_in.conv.weight.is_contiguous()
+    assert video_encoder._encode_cropped is video_encoder.encode_cropped
 
 
 @pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
@@ -442,6 +459,7 @@ def test_decode_latent_frees_activations_left_in_reference_cycles(monkeypatch):
         return tiled_decode(latent, tiling, generator)
 
     monkeypatch.setattr(decoder, "tiled_decode", tiled_decode_leaving_a_cycle)
+    monkeypatch.setattr(loader, "_decoded_layouts", set())
     gc.collect()
     gc.disable()
     try:
@@ -471,12 +489,13 @@ def test_modulating_mlp_chunks_match_one_unchunked_pass(monkeypatch):
 def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
     monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
     monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
+    monkeypatch.setattr(T, "_add_context", T.add_folded_context)
     calls = []
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append((fn, kwargs)) or (lambda *a: fn(*a)))
 
     T.compile_diffusion_blocks(torch.device("cpu"))
     T.compile_diffusion_blocks(torch.device("cpu"))
-    assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu]
+    assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu, T.add_folded_context]
     assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)
 
 
@@ -496,22 +515,82 @@ def test_slab_attention_of_core_columns_matches_full_slab_attention():
         k = T.apply_abs_rope_slab(attn.k_norm(k), attn, w_pos)
         full = na3d(q, k, v, attn.kernel_size, 0).reshape(1, 4, 6, 12, 32)
         expected = attn.proj(full)[:, :, :, halo : halo + core_len]
-        actual = T._attn_on_w_slab(attn, norm, x, w_pos, scale, shift, core_len)
+        columns = torch.arange(halo, 12)
+        actual = T._attn_on_w_slab(attn, norm, x[:, :, :, :halo], x, columns, w_pos, scale, shift, core_len)
 
     torch.testing.assert_close(actual, expected)
 
 
-def test_decode_tiling_is_logged_once_per_layout(caplog):
-    from jasna.models.ltx_vae import loader
+def test_decode_latent_logs_and_collects_compile_garbage_only_on_a_layouts_first_decode(monkeypatch, caplog):
+    """A full gc.collect costs ~90 ms per window with a job's heap; only a new layout compiles."""
+    decoder = _tiny_decoder()
+    collections = []
+    monkeypatch.setattr(loader, "_decoded_layouts", set())
+    monkeypatch.setattr(loader, "_free_compile_garbage", lambda: collections.append(True))
 
-    loader._log_tiling.cache_clear()
-    tiling = TileSizeConfig(
-        frames=DimensionSizeConfig(tile_size=88, overlap=24),
-        height=DimensionSizeConfig(tile_size=512, overlap=64),
-        width=DimensionSizeConfig(tile_size=512, overlap=64),
-    )
     with caplog.at_level("INFO", logger=loader.__name__):
         for _ in range(3):
-            loader._log_tiling(121, 512, 512, tiling)
+            loader.decode_latent(decoder, torch.randn(1, 8, 3, 3, 4), 4 << 30, torch.Generator().manual_seed(1))
+        assert len(collections) == 1
+        loader.decode_latent(decoder, torch.randn(1, 8, 3, 4, 4), 4 << 30, torch.Generator().manual_seed(1))
 
-    assert [r.getMessage() for r in caplog.records] == ["LTX decode: 121 frames x 512x512 px in tiles of 88 frames x 512x512 px"]
+    assert len(collections) == 2
+    assert [r.getMessage() for r in caplog.records] == [
+        "LTX decode: 17 frames x 96x128 px in tiles of 24 frames x 96x128 px",
+        "LTX decode: 17 frames x 128x128 px in tiles of 24 frames x 128x128 px",
+    ]
+
+
+@pytest.mark.parametrize("drop_leading_frame", (True, False))
+def test_folded_context_matches_upsample_then_context_proj(drop_leading_frame):
+    torch.manual_seed(0)
+    upsample = T.LinearPixelShuffleUpsample(8, (2, 2, 2), 2)
+    context_proj = torch.nn.Linear(4, 16)
+    stage4 = torch.randn(1, 3, 4, 9, 8)
+    frames = 5 if drop_leading_frame else 6
+    x = torch.randn(1, frames, 8, 17, 16)
+
+    with torch.inference_mode():
+        context = context_proj(upsample(stage4, drop_leading_frame=drop_leading_frame))
+        expected = x + context[:, :, :, :17]
+        actual = T.inject_deferred_context(
+            x.clone(), stage4, upsample, context_proj, drop_leading_frame=drop_leading_frame
+        )
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_w_chunked_attention_equals_one_slab_with_edge_replicated_halos():
+    torch.manual_seed(0)
+    attn = T.NeighborhoodAttention3D(32, (3, 5, 5), head_dim=16).double()
+    norm = torch.nn.RMSNorm(32).double()
+    x = torch.randn(1, 4, 6, 16, 32, dtype=torch.float64)
+    scale, shift = torch.randn(2, 1, 1, 1, 1, 32, dtype=torch.float64) * 0.1
+    halo = 2
+
+    with torch.inference_mode():
+        left, right = x[:, :, :, :1], x[:, :, :, -1:]
+        padded = torch.cat([left.expand(-1, -1, -1, halo, -1), x, right.expand(-1, -1, -1, halo, -1)], dim=3)
+        w_pos = torch.arange(16 + 2 * halo, dtype=torch.float32) - halo
+        columns = torch.arange(halo, 16 + 2 * halo)
+        expected = x + T._attn_on_w_slab(attn, norm, padded[:, :, :, :halo], padded, columns, w_pos, scale, shift, 16)
+        actual = T.w_chunked_attention_residual(x.clone(), attn, norm, scale, shift)
+
+    torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize("compiling", (True, False))
+def test_abs_rope_rotates_each_pair_by_its_axis_position(compiling, monkeypatch):
+    monkeypatch.setattr(torch.compiler, "is_compiling", lambda: compiling)
+    attn = T.NeighborhoodAttention3D(64, (3, 3, 3), head_dim=32)
+    x = torch.randn(1, 5, 3, 4, 2, 32)
+    w_pos = torch.arange(4, dtype=torch.float32) + 9
+
+    d_t, d_h, d_w = attn.rope_dim_split
+    positions = torch.stack(torch.meshgrid(torch.arange(5.0), torch.arange(3.0), w_pos, indexing="ij"), -1)
+    axis = torch.tensor([0] * (d_t // 2) + [1] * (d_h // 2) + [2] * (d_w // 2))
+    angles = positions[..., axis] * torch.cat([attn.rope_inv_t, attn.rope_inv_h, attn.rope_inv_w])
+    pairs = torch.view_as_complex(x.reshape(1, 5, 3, 4, 2, 16, 2).contiguous())
+    expected = torch.view_as_real(pairs * torch.polar(torch.ones_like(angles), angles)[:, :, :, None]).reshape(x.shape)
+
+    torch.testing.assert_close(T.apply_abs_rope_slab(x, attn, w_pos), expected)

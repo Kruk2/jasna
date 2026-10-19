@@ -10,11 +10,11 @@ stage-5 attention slab and MLP chunk compiled):
     shipped   the shipped path unchanged
     kitchen   comfy-kitchen's fused ``na3d`` in place of the Triton one
     natten    NATTEN's fused ``na3d`` in place of the Triton one
-    eager     the stage-5 slab and MLP chunk uncompiled
+    eager     the stage-5 slab, MLP chunk and context inject uncompiled
     autotune  them compiled with ``max-autotune-no-cudagraphs``
 
-``--budget-gib`` sets the tile budget: the default is the fixed segment budget
-(6 GiB at 512, 8 GiB at 768); 24 is roughly a whole-video run on a 32 GB card.
+``--budget-gib`` sets the tile budget: the default is this GPU's segment budget
+(``restore.SEGMENT_DECODE_BUDGETS``); 24 is roughly a whole-video run on a 32 GB card.
 ``--split`` adds a synchronized per-stage time split (slower, for the first variant).
 The default weights are the trial's random ones; ``--model-dir`` loads the real files,
 which the pixel difference needs to be meaningful.
@@ -43,7 +43,7 @@ from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx.model_files import LtxModelFiles
 from jasna.ltx.plan import LATENT_FRAMES
-from jasna.ltx.restore import SEGMENT_DECODE_BUDGET_BYTES
+from jasna.ltx.restore import segment_decode_budget
 from jasna.models.ltx_vae import decode_latent, load_video_decoder
 from jasna.models.ltx_vae import diffusion_video_decoder as D
 from jasna.models.ltx_vae import transformer as T
@@ -102,10 +102,12 @@ def variant_patches(variant: str) -> contextlib.ExitStack:
     if "eager" in options:
         stack.enter_context(patched(T, "_slab_attention", T._attn_on_w_slab))
         stack.enter_context(patched(T, "_mlp_chunk", T.modulated_swiglu))
+        stack.enter_context(patched(T, "_add_context", T.add_folded_context))
     if "autotune" in options:
         mode = "max-autotune-no-cudagraphs"
-        stack.enter_context(patched(T, "_slab_attention", compile_static(T._attn_on_w_slab, mode=mode, device=torch.device("cuda"))))
-        stack.enter_context(patched(T, "_mlp_chunk", compile_static(T.modulated_swiglu, mode=mode, device=torch.device("cuda"))))
+        for name, fn in (("_slab_attention", T._attn_on_w_slab), ("_mlp_chunk", T.modulated_swiglu),
+                         ("_add_context", T.add_folded_context)):
+            stack.enter_context(patched(T, name, compile_static(fn, mode=mode, device=torch.device("cuda"))))
     return stack
 
 
@@ -185,7 +187,8 @@ def main() -> None:
         else LtxModelFiles.placeholder("distilled", fast=False)
     )
     decoder = load_video_decoder(files.vae, files.tuned_decoder, device)
-    budget = int(args.budget_gib * 2**30) if args.budget_gib else SEGMENT_DECODE_BUDGET_BYTES[args.canvas]
+    total_bytes = torch.cuda.get_device_properties(device).total_memory
+    budget = int(args.budget_gib * 2**30) if args.budget_gib else segment_decode_budget(total_bytes)(args.canvas)
     side = args.canvas // LATENT_SPATIAL_SCALE
     latent = torch.randn(
         1, LATENT_CHANNELS, LATENT_FRAMES, side, side, device=device, dtype=torch.bfloat16,

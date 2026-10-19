@@ -265,7 +265,6 @@ class WorkerBackend:
         elif op == "decode":
             if self.decoder is None:
                 raise RuntimeError("LTX decoder is not loaded")
-            torch.cuda.empty_cache()
             frames = self._decode_to_cpu(tensors[0], params["seed"], params["free_bytes"])
             torch.cuda.empty_cache()
             return {}, [frames]

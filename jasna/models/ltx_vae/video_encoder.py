@@ -9,8 +9,11 @@ from torch import nn
 
 from jasna.models.ltx_vae.ops import PerChannelStatistics, PixelNorm, patchify
 from jasna.models.ltx_vae.tiling import SpatioTemporalScaleFactors
+from jasna.tensor_utils import compile_static
 
 logger = logging.getLogger(__name__)
+
+ENCODER_COMPILE_MODE = "default"
 
 
 class CausalConv3d(nn.Module):
@@ -151,15 +154,31 @@ class VideoEncoder(nn.Module):
             )
             sample = sample[:, :, :-frames_to_crop, ...]
 
-        sample = patchify(sample, patch_size_hw=self.patch_size)
-        sample = self.conv_in(sample)
+        encode = _encode_cropped if sample.is_cuda else encode_cropped
+        return encode(self, sample)
 
-        for down_block in self.down_blocks:
-            sample = down_block(sample)
 
-        sample = self.conv_norm_out(sample)
-        sample = self.conv_act(sample)
-        sample = self.conv_out(sample)
+def encode_cropped(encoder: VideoEncoder, sample: torch.Tensor) -> torch.Tensor:
+    sample = patchify(sample, patch_size_hw=encoder.patch_size)
+    sample = encoder.conv_in(sample)
 
-        means = sample[:, :-1, ...]
-        return self.per_channel_statistics.normalize(means)
+    for down_block in encoder.down_blocks:
+        sample = down_block(sample)
+
+    sample = encoder.conv_norm_out(sample)
+    sample = encoder.conv_act(sample)
+    sample = encoder.conv_out(sample)
+
+    means = sample[:, :-1, ...]
+    return encoder.per_channel_statistics.normalize(means)
+
+
+_encode_cropped = encode_cropped
+
+
+def compile_video_encoder(device: torch.device) -> None:
+    """Compile the encoder's layers with static shapes (one graph per window shape); CUDA
+    inputs use it from then on."""
+    global _encode_cropped
+    if _encode_cropped is encode_cropped:
+        _encode_cropped = compile_static(encode_cropped, mode=ENCODER_COMPILE_MODE, device=device)

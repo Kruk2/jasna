@@ -132,6 +132,7 @@ $P scripts/benchmark_releases.py --release v0.9.0=/path/to/jasna --source HEAD=.
 $P scripts/benchmark_lada_flatpak.py --workdir WORKDIR/lada --csv out.csv   # Lada baseline
 $P scripts/benchmark_ltx_denoise.py --model undistilled --csv out.csv    # LTX denoise, trial weights
 $P scripts/benchmark_ltx_decode.py --variants shipped,kitchen,eager      # LTX VAE decode
+$P scripts/benchmark_ltx_encode.py --variants fp32,eager,shipped        # LTX VAE encode, real weights
 $P scripts/benchmark_na3d.py                                             # Triton NA kernel
 ```
 

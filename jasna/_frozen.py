@@ -20,7 +20,8 @@ import sys
 _patched = False
 
 LTX_TRACED_MODULES = ("jasna.ltx.transformer", "jasna.ltx.kernels",
-                      "jasna.models.ltx_vae.na_triton", "jasna.models.ltx_vae.transformer")
+                      "jasna.models.ltx_vae.na_triton", "jasna.models.ltx_vae.transformer",
+                      "jasna.models.ltx_vae.video_encoder", "jasna.models.ltx_vae.ops")
 
 
 def is_frozen() -> bool:

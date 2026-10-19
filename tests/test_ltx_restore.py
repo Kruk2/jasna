@@ -148,7 +148,7 @@ def _render(tmp_path):
         batch_size=4,
         large_canvas=False,
         window_hop=restore.WINDOW_HOP,
-        budget=restore.segment_decode_budget,
+        budget=restore.segment_decode_budget(12 << 30),
         budget_name="segment",
         device=torch.device("cpu"),
         speed_profile=tmp_path / "speed.json",
@@ -222,7 +222,7 @@ def test_restore_spans_seeds_segments_and_leaves_other_frames_untouched(fakes, t
     _run_spans(tmp_path, [restore.LtxSpan(_source(video), segments, lambda: writer)])
 
     assert _Transformer.seeds == [[100], [7]]
-    assert budgets == [restore.SEGMENT_DECODE_BUDGET_BYTES[512]] * 2
+    assert budgets == [6 << 30] * 2
     assert bars[2].total == bars[2].n == 16
     inside = {pts for pts in range(50, 150, 10)} | {pts for pts in range(200, 260, 10)}
     assert [pts for pts, _, _ in writer.frames] == list(range(0, 300, 10))
@@ -286,10 +286,20 @@ def test_decode_window_converts_a_float32_decode(monkeypatch):
     assert frames[:, 0, 0, 0].tolist() == [0, 128, 255]
 
 
-def test_segment_decode_budget_ignores_free_vram(monkeypatch):
+def test_segment_decode_budget_follows_the_gpu_size_not_free_vram(monkeypatch):
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (1, 1))
-    assert restore.segment_decode_budget(512) == 6 << 30
-    assert restore.segment_decode_budget(768) == 8 << 30
+    gib = 1 << 30
+    for total_gib, budget_512, budget_768 in ((11.7, 6, 8), (15.5, 8, 10), (21.9, 8, 10), (23.6, 8, 16), (31.8, 8, 16)):
+        budget = restore.segment_decode_budget(int(total_gib * gib))
+        assert (budget(512), budget(768)) == (budget_512 * gib, budget_768 * gib)
+
+
+def test_free_vram_budget_returns_the_cache_before_reading_free_vram(monkeypatch):
+    events = []
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: events.append("empty_cache"))
+    monkeypatch.setattr(restore, "device_free_bytes", lambda device: events.append("read") or 5 << 30)
+    assert restore.free_vram_budget(torch.device("cpu"))(512) == 5 << 30
+    assert events == ["empty_cache", "read"]
 
 
 def test_large_canvas_needs_twelve_gib_free():
@@ -629,6 +639,7 @@ def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
 
     assert _Transformer.seeds == [[11], [22]]
     assert prepared.windows == 1
+    assert prepared.largest_canvas == 512
 
 
 def test_restore_spans_shows_each_pass_before_its_model_loads(fakes, monkeypatch, tmp_path):

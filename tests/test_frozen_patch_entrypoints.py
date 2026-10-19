@@ -117,6 +117,7 @@ def test_gui_run_gui_patches_frozen_torch():
 @pytest.mark.parametrize("module", (
     "jasna.ltx.transformer", "jasna.ltx.kernels",
     "jasna.models.ltx_vae.transformer", "jasna.models.ltx_vae.na_triton",
+    "jasna.models.ltx_vae.video_encoder", "jasna.models.ltx_vae.ops",
 ))
 def test_frozen_ltx_sources_support_inspect_without_a_jasna_directory(monkeypatch, tmp_path, module):
     from jasna import _frozen

@@ -1,0 +1,7 @@
+date,state,gpu,weights,canvas,budget_gib,tile,old_s_per_window,new_s_per_window,change_pct,old_peak_vram_gib,new_peak_vram_gib,psnr_vs_old_db,max_abs_vs_old,runs
+2026-10-19,c3dcae6+worktree,NVIDIA GeForce RTX 5090,real,512,24,128x512x512,0.921,0.744,-19.2,5.15,4.64,66.6,0.0432,5
+2026-10-19,c3dcae6+worktree,NVIDIA GeForce RTX 5090,real,768,24,128x768x768,2.001,1.647,-17.7,10.22,9.18,66.6,0.0234,5
+2026-10-19,c3dcae6+worktree,NVIDIA GeForce RTX 5090,real,512,6,88x512x512,1.172,0.943,-19.5,4.09,3.72,66.7,0.0361,5
+2026-10-19,c3dcae6+worktree,NVIDIA GeForce RTX 5090,real,768,8,128x480x480,2.975,2.375,-20.2,5.76,5.30,66.7,0.0215,5
+2026-10-19,c3dcae6+worktree,NVIDIA GeForce RTX 5090,real,512,8,128x512x512,0.904,0.730,-19.3,5.15,4.64,66.6,0.0432,5
+2026-10-19,c3dcae6+worktree,NVIDIA GeForce RTX 5090,real,768,16,128x768x768,1.987,1.638,-17.5,10.22,9.18,66.6,0.0181,5

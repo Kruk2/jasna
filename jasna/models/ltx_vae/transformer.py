@@ -17,7 +17,7 @@ from torch import nn
 from jasna.models.ltx_vae.eager_na import na3d
 from jasna.tensor_utils import compile_static
 
-DET_ROPE_NUM_TILES = 4
+EAGER_ROPE_T_TILES = 4
 DIFFUSION_W_CHUNKS = 4
 SWIGLU_TILE_TOKENS = 16_384
 DECODER_COMPILE_MODE = "default"
@@ -81,44 +81,47 @@ def rope_inv_freqs(dim: int) -> torch.Tensor:
     return torch.from_numpy(1.0 / np.power(10000.0, exponents)).to(torch.float32)
 
 
-def rot_abs_axis_impl(xc: torch.Tensor, pos: torch.Tensor, inv: torch.Tensor, axis: int) -> torch.Tensor:
-    """Absolute RoPE (fp32 math) on one axis chunk ``xc[..., D]``."""
-    out_dtype = xc.dtype
-    pairs = xc.reshape(*xc.shape[:-1], xc.shape[-1] // 2, 2)
+def _broadcast_axis_tables(table_t: torch.Tensor, table_h: torch.Tensor, table_w: torch.Tensor) -> torch.Tensor:
+    """Per-axis ``(length, pairs)`` tables -> ``(T, H, W, 1, all pairs)``."""
+    t, h, w = table_t.shape[0], table_h.shape[0], table_w.shape[0]
+    return torch.cat(
+        [
+            table_t[:, None, None].expand(t, h, w, -1),
+            table_h[None, :, None].expand(t, h, w, -1),
+            table_w[None, None].expand(t, h, w, -1),
+        ],
+        dim=-1,
+    )[:, :, :, None]
+
+
+def _rotate_pairs(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
+    pairs = x.reshape(*x.shape[:-1], x.shape[-1] // 2, 2)
     xe = pairs[..., 0].to(torch.float32)
     xo = pairs[..., 1].to(torch.float32)
-    shape = [1, 1, 1, 1, 1, inv.shape[0]]
-    shape[axis] = pos.shape[0]
-    ang = (pos[:, None] * inv[None, :]).reshape(shape)
-    c = ang.cos()
-    s = ang.sin()
-    re = xe * c - xo * s
-    ro = xe * s + xo * c
-    out = torch.stack([re, ro], dim=-1).reshape(xc.shape)
-    return out.to(out_dtype) if out.dtype != out_dtype else out
+    return torch.stack([xe * cos - xo * sin, xe * sin + xo * cos], dim=-1).reshape(x.shape)
 
 
 def apply_abs_rope_slab(x: torch.Tensor, attn: NeighborhoodAttention3D, w_pos: torch.Tensor) -> torch.Tensor:
-    """Rotate one W-extent ``(B, T, H, W, NH, HD)``; T/H positions are local, W positions are ``w_pos``."""
-    d_t, d_h, _ = attn.rope_dim_split
-    t_pos = torch.arange(x.shape[1], dtype=torch.float32, device=x.device)
-    h_pos = torch.arange(x.shape[2], dtype=torch.float32, device=x.device)
-    xt = rot_abs_axis_impl(x[..., :d_t], t_pos, attn.rope_inv_t, axis=1)
-    xh = rot_abs_axis_impl(x[..., d_t : d_t + d_h], h_pos, attn.rope_inv_h, axis=2)
-    xw = rot_abs_axis_impl(x[..., d_t + d_h :], w_pos, attn.rope_inv_w, axis=3)
-    return torch.cat([xt, xh, xw], dim=-1)
-
-
-def apply_tiled_abs_rope(x: torch.Tensor, attn: NeighborhoodAttention3D) -> torch.Tensor:
-    """Full-volume abs-RoPE computed over ``DET_ROPE_NUM_TILES`` W slabs."""
-    w_off = 0
-    parts: list[torch.Tensor] = []
-    for slab in torch.chunk(x, DET_ROPE_NUM_TILES, dim=3):
-        w_slab = slab.shape[3]
-        w_pos = torch.arange(w_slab, dtype=torch.float32, device=x.device) + w_off
-        parts.append(apply_abs_rope_slab(slab, attn, w_pos))
-        w_off = w_off + w_slab
-    return torch.cat(parts, dim=3)
+    """Rotate one W-extent ``(B, T, H, W, NH, HD)`` with absolute RoPE (fp32 math); T/H positions are
+    local, W positions are ``w_pos``. cos/sin come from small per-axis tables: a compiled caller
+    rotates every channel pair in one elementwise pass, eager runs ``EAGER_ROPE_T_TILES`` T tiles to
+    bound the fp32 temporaries."""
+    t, h = x.shape[1], x.shape[2]
+    angles = (
+        torch.arange(t, dtype=torch.float32, device=x.device)[:, None] * attn.rope_inv_t,
+        torch.arange(h, dtype=torch.float32, device=x.device)[:, None] * attn.rope_inv_h,
+        w_pos[:, None] * attn.rope_inv_w,
+    )
+    cos = _broadcast_axis_tables(*(angle.cos() for angle in angles))
+    sin = _broadcast_axis_tables(*(angle.sin() for angle in angles))
+    if torch.compiler.is_compiling():
+        return _rotate_pairs(x, cos, sin).to(x.dtype)
+    out = torch.empty_like(x)
+    step = -(-t // EAGER_ROPE_T_TILES)
+    for start in range(0, t, step):
+        tile = slice(start, start + step)
+        out[:, tile] = _rotate_pairs(x[:, tile], cos[tile], sin[tile])
+    return out
 
 
 class QKVProjections(nn.Module):
@@ -212,8 +215,9 @@ class NeighborhoodAttention3D(nn.Module):
         q = self.q_norm(q)
         k = self.k_norm(k)
         q = q * self.scale
-        q = apply_tiled_abs_rope(q, self)
-        k = apply_tiled_abs_rope(k, self)
+        w_pos = torch.arange(w, dtype=torch.float32, device=x.device)
+        q = apply_abs_rope_slab(q, self, w_pos)
+        k = apply_abs_rope_slab(k, self, w_pos)
         out = neighborhood_attention(self, q.contiguous(), k.contiguous(), v.contiguous(), 0)
         out = out.reshape(batch, t, h, w, self.dim)
         return self.proj(out)
@@ -262,13 +266,14 @@ def modulated_swiglu(
     norm_weight: torch.Tensor,
     scale: torch.Tensor,
     shift: torch.Tensor,
-    w_gate: torch.Tensor,
-    w_up: torch.Tensor,
+    w_gate_up: torch.Tensor,
     w_down: torch.Tensor,
 ) -> torch.Tensor:
-    """``swiglu(modulate(rms_norm(xc)))`` of one token chunk."""
+    """``swiglu(modulate(rms_norm(xc)))`` of one token chunk; ``w_gate_up`` stacks the gate and up
+    weights so both come from one GEMM."""
     y = F.rms_norm(xc, (xc.shape[-1],), norm_weight, _NORM_EPS) * (1.0 + scale) + shift
-    return F.linear(F.silu(F.linear(y, w_gate)) * F.linear(y, w_up), w_down)
+    gate, up = F.linear(y, w_gate_up).chunk(2, dim=-1)
+    return F.linear(F.silu(gate) * up, w_down)
 
 
 def residual_modulating_mlp(
@@ -282,9 +287,10 @@ def residual_modulating_mlp(
     s = scale.reshape(-1, dim)
     sh = shift.reshape(-1, dim)
     chunk_mlp = _mlp_chunk if x.is_cuda else modulated_swiglu
+    w_gate_up = torch.cat([mlp.w_gate.weight, mlp.w_up.weight])
     for start in range(0, x_flat.shape[0], SWIGLU_TILE_TOKENS):
         xc = x_flat[start : start + SWIGLU_TILE_TOKENS]
-        xc.add_(chunk_mlp(xc, norm.weight, s, sh, mlp.w_gate.weight, mlp.w_up.weight, mlp.w_down.weight))
+        xc.add_(chunk_mlp(xc, norm.weight, s, sh, w_gate_up, mlp.w_down.weight))
     return x
 
 
@@ -306,14 +312,18 @@ class NABlock(nn.Module):
 def _attn_on_w_slab(
     attn: NeighborhoodAttention3D,
     norm: nn.RMSNorm,
-    x_chunk: torch.Tensor,
+    left_halo: torch.Tensor,
+    x: torch.Tensor,
+    columns: torch.Tensor,
     w_pos: torch.Tensor,
     scale: torch.Tensor,
     shift: torch.Tensor,
     core_len: int,
 ) -> torch.Tensor:
-    """One W slab: rms_norm + modulate + QKV / in-slab RoPE / NA / proj, output for the ``core_len``
-    columns after the ``kernel_w // 2`` halo only."""
+    """One W slab, ``left_halo`` then ``x``'s W ``columns`` (compiled, that gather fuses into the
+    slab's first read): rms_norm + modulate + QKV / in-slab RoPE / NA / proj, output for the
+    ``core_len`` columns after the ``kernel_w // 2`` halo only."""
+    x_chunk = torch.cat([left_halo, x.index_select(3, columns)], dim=3)
     batch, t, h, ext_w, _ = x_chunk.shape
     halo = attn.kernel_size[2] // 2
     y = F.rms_norm(x_chunk, (attn.dim,), norm.weight, _NORM_EPS)
@@ -321,7 +331,8 @@ def _attn_on_w_slab(
 
     head_shape = (batch, t, h, ext_w, attn.num_heads, attn.head_dim)
     core_shape = (batch, t, h, core_len, attn.num_heads, attn.head_dim)
-    q = F.linear(y[:, :, :, halo : halo + core_len], attn.qkv.to_q.weight, attn.qkv.to_q.bias).view(core_shape)
+    y_core = y[:, :, :, halo : halo + core_len].reshape(-1, attn.dim)
+    q = F.linear(y_core, attn.qkv.to_q.weight, attn.qkv.to_q.bias).view(core_shape)
     q = F.rms_norm(q, (attn.head_dim,), attn.q_norm.weight, _NORM_EPS) * float(attn.scale)
     q = apply_abs_rope_slab(q, attn, w_pos[halo : halo + core_len])
     k = F.linear(y, attn.qkv.to_k.weight, attn.qkv.to_k.bias).view(head_shape)
@@ -344,15 +355,16 @@ def w_chunked_attention_residual(
 ) -> torch.Tensor:
     """In-place ``x += NA(modulate(norm(x)))`` over ``DIFFUSION_W_CHUNKS`` fixed-extent W slabs.
 
-    Each slab carries ``kernel_w // 2`` halo columns copied from its neighbors; missing
-    halo slots at the true W boundary are edge-replicated so NA never sees zero padding.
+    Each slab carries ``kernel_w // 2`` halo columns from its neighbors, the left ones as they were
+    before the previous slab's update; missing halo slots at the true W boundary are edge-replicated
+    so NA never sees zero padding.
     """
     w_chunks = DIFFUSION_W_CHUNKS
     halo = attn.kernel_size[2] // 2
-    _, _, _, w, c = x.shape
+    w = x.shape[3]
     chunk_w = (w + w_chunks - 1) // w_chunks
     extent = chunk_w + 2 * halo
-    left_halo: torch.Tensor | None = None
+    left_halo = x[:, :, :, :1].expand(-1, -1, -1, halo, -1).contiguous()
     slab_attention = _slab_attention if x.is_cuda else _attn_on_w_slab
 
     for i in range(w_chunks):
@@ -362,33 +374,17 @@ def w_chunked_attention_residual(
         if core_len <= 0:
             break
 
-        buf = x.new_zeros(*x.shape[:3], extent, c)
-        if i > 0:
-            lh = left_halo.shape[3]
-            buf[:, :, :, halo - lh : halo, :] = left_halo
-        buf[:, :, :, halo : halo + core_len, :] = x[:, :, :, core_start:core_end, :]
-        right_filled = 0
-        if i + 1 < w_chunks:
-            right_end = min(w, core_end + halo)
-            right = x[:, :, :, core_end:right_end, :]
-            right_filled = right.shape[3]
-            buf[:, :, :, halo + core_len : halo + core_len + right_filled, :] = right
-
-        if i == 0 and halo > 0 and core_len > 0:
-            edge_l = buf[:, :, :, halo : halo + 1, :]
-            buf[:, :, :, :halo, :] = edge_l.expand(*x.shape[:3], halo, c)
-        missing_right = extent - (halo + core_len + right_filled)
-        if missing_right > 0 and core_len > 0:
-            edge_r = buf[:, :, :, halo + core_len - 1 : halo + core_len, :]
-            lo_r = halo + core_len + right_filled
-            buf[:, :, :, lo_r:extent, :] = edge_r.expand(*x.shape[:3], missing_right, c)
-
+        right_end = min(w, core_end + halo) if i + 1 < w_chunks else core_end
+        columns = torch.arange(core_start, core_start + extent - halo, device=x.device)
+        columns = torch.where(columns < right_end, columns, core_end - 1)
+        w_pos = torch.arange(extent, device=x.device, dtype=torch.float32) + (core_start - halo)
+        slab_left_halo = left_halo
         if i + 1 < w_chunks:
             take = min(halo, core_len)
-            left_halo = x[:, :, :, core_end - take : core_end, :].clone()
-
-        w_pos = torch.arange(extent, device=x.device, dtype=torch.float32) + (core_start - halo)
-        x[:, :, :, core_start:core_end, :].add_(slab_attention(attn, norm, buf, w_pos, scale, shift, core_len))
+            left_halo = x.new_zeros(*x.shape[:3], halo, x.shape[4])
+            left_halo[:, :, :, halo - take :] = x[:, :, :, core_end - take : core_end]
+        out = slab_attention(attn, norm, slab_left_halo, x, columns, w_pos, scale, shift, core_len)
+        x[:, :, :, core_start:core_end, :].add_(out)
 
     return x
 
@@ -398,22 +394,48 @@ _mlp_chunk = modulated_swiglu
 
 
 def compile_diffusion_blocks(device: torch.device) -> None:
-    """Compile the stage-5 attention slab and MLP chunk with static shapes (one graph per
-    shape, shared by all blocks); CUDA tensors use them from then on."""
-    global _slab_attention, _mlp_chunk
+    """Compile the stage-5 attention slab, MLP chunk and context inject with static shapes (one
+    graph per shape, shared by all blocks); CUDA tensors use them from then on."""
+    global _slab_attention, _mlp_chunk, _add_context
     if _slab_attention is _attn_on_w_slab:
         _slab_attention = compile_static(_attn_on_w_slab, mode=DECODER_COMPILE_MODE, device=device)
         _mlp_chunk = compile_static(modulated_swiglu, mode=DECODER_COMPILE_MODE, device=device)
+        _add_context = compile_static(add_folded_context, mode=DECODER_COMPILE_MODE, device=device)
 
 
-def _upsample_then_ctx(
-    feat: torch.Tensor, upsample: LinearPixelShuffleUpsample, context_proj: nn.Linear, *, drop_leading_frame: bool
-) -> torch.Tensor:
-    """``context_proj(pixel_shuffle(upsample.proj(feat)))``."""
-    up = pixel_shuffle_channels_last(F.linear(feat, upsample.proj.weight, upsample.proj.bias), upsample.stride)
-    if upsample.stride[0] == 2 and drop_leading_frame:
-        up = up[:, 1:, :, :, :]
-    return F.linear(up, context_proj.weight, context_proj.bias)
+def fold_context_projection(
+    upsample: LinearPixelShuffleUpsample, context_proj: nn.Linear
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """``context_proj ∘ upsample.proj`` as one linear (fp32 fold) whose output channels keep the
+    pixel-shuffle order: one GEMM at stage-4 resolution instead of a second one after the shuffle."""
+    positions = math.prod(upsample.stride)
+    in_channels = upsample.proj.in_features
+    up_weight = upsample.proj.weight.float().view(-1, positions, in_channels)
+    ctx_weight = context_proj.weight.float()
+    weight = torch.einsum("oc,cpi->opi", ctx_weight, up_weight).reshape(-1, in_channels)
+    bias = ctx_weight @ upsample.proj.bias.float().view(-1, positions) + context_proj.bias.float()[:, None]
+    dtype = upsample.proj.weight.dtype
+    return weight.to(dtype), bias.reshape(-1).to(dtype)
+
+
+def add_folded_context(
+    x_slab: torch.Tensor,
+    feat_chunk: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    stride: tuple[int, int, int],
+    drop_leading_frame: bool,
+) -> None:
+    """``x_slab += pixel_shuffle(feat_chunk @ weightᵀ + bias)``, cropped to ``x_slab``'s width."""
+    batch, t, h, w, channels = feat_chunk.shape
+    folded = F.linear(feat_chunk.reshape(-1, channels), weight, bias).view(batch, t, h, w, -1)
+    ctx = pixel_shuffle_channels_last(folded, stride)
+    if stride[0] == 2 and drop_leading_frame:
+        ctx = ctx[:, 1:]
+    x_slab.add_(ctx[:, :, :, : x_slab.shape[3]])
+
+
+_add_context = add_folded_context
 
 
 def inject_deferred_context(
@@ -424,13 +446,14 @@ def inject_deferred_context(
     *,
     drop_leading_frame: bool,
 ) -> torch.Tensor:
-    """Chunk stage-4 feat along W, upsample + ``context_proj`` each slab, ``add_`` into ``x``."""
+    """``x += context_proj(upsample(stage4_feat))`` over ``DIFFUSION_W_CHUNKS`` stage-4 W slabs."""
+    weight, bias = fold_context_projection(upsample, context_proj)
+    add_context = _add_context if x.is_cuda else add_folded_context
     w_hi = x.shape[3]
     lo = 0
     for feat_chunk in torch.chunk(stage4_feat, DIFFUSION_W_CHUNKS, dim=3):
         hi = min(w_hi, lo + feat_chunk.shape[3] * upsample.stride[2])
-        ctx = _upsample_then_ctx(feat_chunk, upsample, context_proj, drop_leading_frame=drop_leading_frame)
-        x[:, :, :, lo:hi, :].add_(ctx[:, :, :, : hi - lo, :])
+        add_context(x[:, :, :, lo:hi, :], feat_chunk, weight, bias, tuple(upsample.stride), drop_leading_frame)
         lo = hi
     return x
 

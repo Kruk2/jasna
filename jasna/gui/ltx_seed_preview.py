@@ -131,8 +131,6 @@ class SeedRenderer:
         """Restore ``segment`` with ``seed``; returns the writer ``writer_for(directory,
         effect range)`` made, after every frame of the range went through it."""
         from jasna.gui.video_session import video_session_config
-        from jasna.ltx.plan import LARGE_CANVAS
-        from jasna.ltx.camera import PLAN_CANVAS
         from jasna.ltx.restore import (
             PreparedSpan,
             Progress,
@@ -185,7 +183,7 @@ class SeedRenderer:
                 self._transformer = self._runtime.load_transformer()
                 self._transformer_path = render.files.transformer
             denoise_spans([prepared], finals, self._transformer, keep_references=True, progress=progress, cancel=cancel)
-            decode_bytes = render.budget(LARGE_CANVAS if render.large_canvas else PLAN_CANVAS) + DECODE_HEADROOM_BYTES
+            decode_bytes = render.budget(prepared.largest_canvas) + DECODE_HEADROOM_BYTES
             if device_free_bytes(render.device) < decode_bytes:
                 self._drop_transformer()
             progress.begin("compose")

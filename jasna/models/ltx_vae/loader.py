@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import gc
 import json
 import logging
@@ -17,7 +16,8 @@ from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
 from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_attention
-from jasna.models.ltx_vae.video_encoder import VideoEncoder
+from jasna.models.ltx_vae.video_encoder import VideoEncoder, compile_video_encoder
+from jasna.tensor_utils import compiles_bf16
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"
 _DECODER_CLASS_NAME = "NADiffusionDecoder"
@@ -181,6 +181,11 @@ def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
             kwargs = encoder_kwargs(read_vae_config(reader))
             checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
         encoder = _build_bf16(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device)
+        if compiles_bf16(device):
+            contiguous_weights = list(encoder.state_dict().values())
+            encoder.to(memory_format=torch.channels_last_3d)
+            _clear_tensors(contiguous_weights, encoder)
+            compile_video_encoder(device)
         return encoder
     finally:
         _clear_tensors(checkpoint.values(), encoder)
@@ -217,6 +222,10 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
         _clear_tensors([*checkpoint.values(), *tuned.values(), *overlay.values()], decoder if complete else None)
 
 
+_decoded_layouts: set[tuple[int, int, int, TileSizeConfig]] = set()
+"""Tile shapes are static per layout, so only a layout's first decode can compile."""
+
+
 @torch.inference_mode()
 def decode_latent(
     decoder: DiffusionVideoDecoder,
@@ -235,23 +244,27 @@ def decode_latent(
     tiling = decoder.recommended_tiling_config(
         height=pixel_height, width=pixel_width, num_frames=pixel_frames, free_bytes=free_bytes
     )
-    _log_tiling(pixel_frames, pixel_height, pixel_width, tiling)
+    layout = (pixel_frames, pixel_height, pixel_width, tiling)
+    first_of_layout = layout not in _decoded_layouts
+    if first_of_layout:
+        _log_tiling(*layout)
     video = torch.cat(list(decoder.tiled_decode(latent, tiling, generator)), dim=2)
-    _free_compile_garbage()
+    if first_of_layout:
+        _decoded_layouts.add(layout)
+        _free_compile_garbage()
     return video
 
 
 def _free_compile_garbage() -> None:
     """A call that compiled a new tile shape stays referenced from torch.compile's frames in
     reference cycles, activations included (GiBs at 768 px); collect them so the next window's
-    decode budget sees that memory free."""
+    decode budget sees that memory free. A full collection costs ~90 ms with a job's heap."""
     gc.collect()
     torch.cuda.empty_cache()
 
 
-@functools.cache
 def _log_tiling(frames: int, height: int, width: int, tiling: TileSizeConfig) -> None:
-    """Once per layout: a window decoded in several tiles is noticeably slower."""
+    """A window decoded in several tiles is noticeably slower."""
     logger.info(
         "LTX decode: %d frames x %dx%d px in tiles of %d frames x %dx%d px",
         frames,
