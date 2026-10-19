@@ -117,3 +117,20 @@ class TestJobProgress:
         compose = StageProgress("compose", 4, 4, 0.5, 50.0)
         ltx(90.0, 0.0, 50.0, 0, 0, compose)
         assert calls[-1] == (pytest.approx(100.0 * 100.0 / 150.0), 0.0, 50.0, 0, 0, compose)
+
+    def test_percent_never_drops_when_the_ltx_estimate_grows_but_time_left_stays_honest(self, monkeypatch):
+        from jasna import progressbar
+
+        clock = [0.0]
+        monkeypatch.setattr(progressbar.time, "monotonic", lambda: clock[0])
+        calls = []
+        job = progressbar.JobProgress(lambda *args: calls.append(args), {"standard": 0.0, "ltx": 600.0})
+        standard, ltx = job.part("standard"), job.part("ltx")
+
+        clock[0] = 300.0
+        standard(100.0, 30.0, 0.0, 120, 120, None)
+        assert calls[-1][0] == pytest.approx(100.0 * 300.0 / 900.0)
+
+        scan = StageProgress("scan", 1, 4, 1.0, 1500.0)
+        ltx(5.0, 0.0, 1500.0, 0, 0, scan)
+        assert calls[-1] == (pytest.approx(100.0 * 300.0 / 900.0), 0.0, 1500.0, 0, 0, scan)

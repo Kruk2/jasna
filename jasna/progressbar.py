@@ -27,12 +27,14 @@ class JobProgress:
     """One bar for a job made of parts run one after another (e.g. BasicVSR++ ranges, then
     LTX ranges). ``estimates`` holds each part's seconds before it runs, in run order. Time
     left is the running part's own estimate (else its share of ``estimates``) plus the
-    estimates of the parts after it; the bar shows the elapsed share of the whole."""
+    estimates of the parts after it; the bar shows the elapsed share of the whole and never
+    goes back when an estimate grows."""
 
     def __init__(self, callback: ProgressCallback, estimates: dict[str, float]) -> None:
         self._callback = callback
         self._estimates = estimates
         self._started = time.monotonic()
+        self._reported_percent = 0.0
 
     def part(self, name: str) -> ProgressCallback:
         parts = list(self._estimates)
@@ -44,7 +46,9 @@ class JobProgress:
             own = eta_seconds if eta_seconds > 0 else self._estimates[name] * (1.0 - percent / 100.0)
             left = own + later
             elapsed = time.monotonic() - self._started
-            self._callback(100.0 * elapsed / (elapsed + left) if elapsed + left > 0 else 0.0, fps, left, done, total, stage)
+            job_percent = 100.0 * elapsed / (elapsed + left) if elapsed + left > 0 else 0.0
+            self._reported_percent = max(self._reported_percent, job_percent)
+            self._callback(self._reported_percent, fps, left, done, total, stage)
 
         return report
 
