@@ -218,14 +218,13 @@ class Progress:
         for stage in stages:
             self._done_share += _STAGE_SHARE[stage]
 
-    def profiled_seconds(self, stage: LtxStage, unit: str, count: float) -> float:
-        """The profile's seconds for ``count`` of ``stage``'s ``unit`` (``frame`` counts
-        frames), 0 when the profile does not cover this run."""
+    def profiled_seconds(self, stage: LtxStage, frames: int, windows: dict[int, float]) -> float:
+        """The profile's seconds for ``frames`` and ``windows`` (count per canvas) of
+        ``stage``, 0 when the profile does not cover this run."""
         if self._estimates is None or stage not in self._estimates:
             return 0.0
-        if unit == "frame":
-            return sum(self._rates[name] * units for name, units in self._work.frame_units(stage, count).items())
-        return self._rates[f"{stage}/{unit}"] * count
+        units = {f"{stage}/window{canvas}": count for canvas, count in windows.items()}
+        return speed.variable_seconds(self._rates, stage, {**units, **self._work.frame_units(stage, frames)})
 
     def _profile_stage_left(self, stage: LtxStage, profiled_done: float, pace_ratio: float) -> float | None:
         if self._estimates is None or stage not in self._estimates:
@@ -274,33 +273,34 @@ class _StageBar:
         self._bar = bar
         self._marks = marks
         self._done = 0
-        self._profiled_done = 0.0
+        self._frames_done = 0
+        self._windows_done: Counter[int] = Counter()
         self._warm_from: tuple[float, int, float] | None = None
         self._windows: list[tuple[int, TimingMark, TimingMark]] = []
+        self._waits: list[tuple[TimingMark, TimingMark]] = []
         self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
         progress._advanced(stage, 0, bar.total, None, 0.0, 1.0)
 
     def update(self, n: int) -> None:
-        self._profiled_done += self._progress.profiled_seconds(self._stage, "frame", n)
+        self._frames_done += n
         self._count(n)
 
     def _count(self, n: int) -> None:
         self._bar.update(n)
         self._done += n
         now = time.monotonic()
+        profiled_done = self._progress.profiled_seconds(self._stage, self._frames_done, self._windows_done)
         if self._warm_from is None:
-            self._warm_from = (now, self._done, self._profiled_done)
+            self._warm_from = (now, self._done, profiled_done)
         started, warm_done, warm_profiled = self._warm_from
         paced_left = (
             (now - started) / (self._done - warm_done) * (self._bar.total - self._done)
             if self._done > warm_done
             else None
         )
-        profiled_since_warm = self._profiled_done - warm_profiled
+        profiled_since_warm = profiled_done - warm_profiled
         pace_ratio = (now - started) / profiled_since_warm if profiled_since_warm > 0 else 1.0
-        left = self._progress._advanced(
-            self._stage, self._done, self._bar.total, paced_left, self._profiled_done, pace_ratio
-        )
+        left = self._progress._advanced(self._stage, self._done, self._bar.total, paced_left, profiled_done, pace_ratio)
         if left is not None:
             self._bar.set_postfix_str(f"run {tqdm.format_interval(left)} left", refresh=False)
 
@@ -314,9 +314,19 @@ class _StageBar:
         end.record()
         self._windows.append((canvas, start, end))
 
+    @contextmanager
+    def waiting(self) -> Iterator[None]:
+        """Time the frame loop waiting for a window decoded on another thread; on CUDA the
+        marks go on the loop's stream, so they time how long it ran dry."""
+        start, end = self._marks(), self._marks()
+        start.record()
+        yield
+        end.record()
+        self._waits.append((start, end))
+
     def windows_done(self, canvas: int, count: float) -> None:
         """Count ``count`` windows of ``canvas`` as done toward the time left."""
-        self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", count)
+        self._windows_done[canvas] += count
 
     def track(self, canvas: int, steps: int) -> Callable[[int], None]:
         """``advance`` for one track's denoise: counts its window-steps and marks the stream
@@ -343,6 +353,9 @@ class _StageBar:
         for canvas, start, end in self._windows:
             end.synchronize()
             timing.windows.append((canvas, start.elapsed_time(end) / 1000))
+        for start, end in self._waits:
+            end.synchronize()
+            timing.waited_seconds += start.elapsed_time(end) / 1000
         for canvas, steps, marks in self._tracks:
             if len(marks) > 1:
                 marks[-1][1].synchronize()
@@ -709,7 +722,8 @@ class _SegmentComposer:
             self._decoding[window.index] = self._decodes.submit(self._decode, window)
 
     def _decoded_window(self, window: Window) -> torch.Tensor:
-        video = self._decoding.pop(window.index).result()
+        with self._bar.waiting():
+            video = self._decoding.pop(window.index).result()
         if self._stream is not None:
             video.record_stream(torch.cuda.current_stream(self._device))
         self._decode_next()

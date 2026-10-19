@@ -69,7 +69,11 @@ def test_learned_rates_leave_out_cold_windows_and_take_the_rest_per_frame():
 
 
 def test_the_fixed_part_uses_known_rates_for_what_one_window_cannot_time():
-    timings = {"compose": speed.PassTiming(seconds=20.0, warm_seconds=6.0, warm_frames=100, windows=[(512, 9.0)])}
+    timings = {
+        "compose": speed.PassTiming(
+            seconds=20.0, warm_seconds=6.0, warm_frames=100, waited_seconds=9.0, windows=[(512, 9.0)]
+        )
+    }
     work = speed.Work(frames=100, megapixels=1.0, windows={512: 1}, crop_megapixels=30.0)
     rates = speed.learned_rates(timings, work, known={"compose/window512": 1.0})
     assert "compose/window512" not in rates
@@ -87,7 +91,7 @@ def test_pass_estimates_need_every_rate_the_plan_uses():
     assert speed.pass_estimates(rates, WORK) == {
         "encode": (1.0, pytest.approx(100 * 2.0 * 0.1 + 3 * 2.0)),
         "denoise": (10.0, 12.0),
-        "compose": (3.0, pytest.approx(50.0 * 0.2 + 3 * 1.0)),
+        "compose": (3.0, pytest.approx(max(50.0 * 0.2, 3 * 1.0))),
     }
     assert speed.pass_estimates(rates, speed.Work(frames=100, megapixels=2.0, windows={768: 1}, crop_megapixels=5.0)) is None
 
@@ -150,7 +154,7 @@ def test_segment_estimate_uses_the_learned_rates_of_this_gpu_and_model(tmp_path)
     window_frames = 3 * 121 + (300 - 3 * 88)
     crop_megapixels = window_frames * 512 * 512 / 1e6
     assert seconds == pytest.approx(
-        30.0 + windows * (1.0 + 4.0 + 2.0) + 300 * 2.0 * 0.01 + crop_megapixels * 0.1
+        30.0 + windows * (1.0 + 4.0) + 300 * 2.0 * 0.01 + max(windows * 2.0, crop_megapixels * 0.1)
     )
 
 
@@ -163,14 +167,15 @@ def test_segment_estimate_without_a_profile_assumes_five_times_the_range(tmp_pat
 
 def _speed_test_timings() -> dict[str, speed.PassTiming]:
     """An RTX 3080 speed test (0.11.2 log): 209 frames at 1080p, 6 windows at 512, 15 steps;
-    compose's 108.9 s split into a 20 s decoder load, 6 decodes of 4.25 s and blending."""
+    compose's 108.9 s split into a 20 s decoder load, 6 decodes of 4.25 s it waited for and blending."""
     return {
         "encode": speed.PassTiming(
             seconds=103.1, units=209, warm_seconds=6 * 1.86 + 2.0, warm_frames=201, windows=[(512, 1.86)] * 6
         ),
         "denoise": speed.PassTiming(seconds=266.7, units=90, windows=[(512, 2.31 * 15)] * 3),
         "compose": speed.PassTiming(
-            seconds=108.9, units=209, warm_seconds=108.9 - 20.0, warm_frames=201, windows=[(512, 4.25)] * 6
+            seconds=108.9, units=209, warm_seconds=108.9 - 20.0, warm_frames=201, waited_seconds=6 * 4.25,
+            windows=[(512, 4.25)] * 6,
         ),
     }
 
@@ -199,3 +204,26 @@ def test_a_long_video_with_few_mosaics_is_estimated_from_the_speed_test_within_a
 def test_a_video_of_unknown_length_counts_no_crop_per_frame():
     work = speed.Work(frames=0, megapixels=2.0, windows={512: 1}, crop_megapixels=30.0)
     assert work.frame_units("compose", 10) == {"compose/crop": 0.0}
+
+
+def test_compose_learned_while_decode_bound_estimates_a_blend_bound_run():
+    """Compose decodes the next window while it blends frames, so it takes the longer of
+    the two: here 10 decodes of 2 s hide 4 s of blending (the frame loop waits 16 s)."""
+    decode_bound = speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0)
+    timings = {
+        "compose": speed.PassTiming(
+            seconds=25.0, units=100, warm_seconds=20.0, warm_frames=100, waited_seconds=16.0,
+            windows=[(512, 2.0)] * 10,
+        )
+    }
+    rates = speed.learned_rates(timings, decode_bound, known={})
+    blend_bound = speed.Work(frames=100, megapixels=2.0, windows={512: 2}, crop_megapixels=400.0)
+
+    fixed, variable = speed.pass_estimates(
+        {**rates, "encode/fixed": 0.0, "encode/frame": 0.0, "encode/window512": 0.0,
+         "denoise/fixed": 0.0, "denoise/window512": 0.0},
+        blend_bound,
+    )["compose"]
+
+    actual = 5.0 + max(2 * 2.0, 400.0 * 4.0 / 40.0)
+    assert fixed + variable == pytest.approx(actual)

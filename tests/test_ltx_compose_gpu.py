@@ -57,7 +57,12 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
 
     monkeypatch.setattr(restore, "_decode_window", decode)
     monkeypatch.setattr(restore, "composite_frame", lambda source, candidates, *, feather: source)
-    bar = SimpleNamespace(update=lambda n: None, window=lambda canvas: contextlib.nullcontext())
+    bar = SimpleNamespace(
+        update=lambda n: None,
+        window=lambda canvas: contextlib.nullcontext(),
+        waiting=contextlib.nullcontext,
+        windows_done=lambda canvas, count: None,
+    )
     span = restore.LtxSpan(frames, (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 0),), Writer)
     restore.compose_span(
         span, [[plan]], None, [SimpleNamespace(get=lambda index: index)], frame_h=64, batch_size=6,

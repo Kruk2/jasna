@@ -5,7 +5,9 @@ budget: whole videos decode within the free VRAM, segments within a fixed budget
 decode tiling differs) to rates in
 seconds: per pass a fixed part (model load, first-call compile), per frame-megapixel for
 encode, per megapixel of window crop for compose (blending, which a frame without a mosaic
-skips), and per window of each canvas. Rates are warm: the
+skips), and per window of each canvas. Compose decodes the next window while it blends
+frames, so it takes the longer of its decodes and its blending, and blending is learned
+from the time its frame loop did not wait for a decode. Rates are warm: the
 first batch of a pass and the first window of each canvas are left out, and denoise
 leaves out each track's first step. Every finished run replaces the rates it measured.
 The same pass timings make the summary logged at the end of every run (``run_summary``).
@@ -80,7 +82,8 @@ class Work:
 class PassTiming:
     """One pass of a run: ``seconds`` since the previous pass ended (model load included);
     ``units`` it counted (frames, or window-steps for denoise); ``warm_seconds`` and
-    ``warm_frames`` after its first batch; ``windows`` the ``(canvas, seconds)`` of each
+    ``warm_frames`` after its first batch; ``waited_seconds`` (compose) how long its frame
+    loop waited for a window decode; ``windows`` the ``(canvas, seconds)`` of each
     window in order (denoise: seconds per window of a track without its first step);
     ``steps`` (denoise) the ``(canvas, seconds per window-step)`` of every window group's
     step after a track's first."""
@@ -89,6 +92,7 @@ class PassTiming:
     units: int = 0
     warm_seconds: float = 0.0
     warm_frames: int = 0
+    waited_seconds: float = 0.0
     windows: list[tuple[int, float]] = field(default_factory=list)
     steps: list[tuple[int, float]] = field(default_factory=list)
 
@@ -109,6 +113,16 @@ def warm_windows(stage: str, timing: PassTiming) -> dict[int, list[float]]:
     }
 
 
+def variable_seconds(rates: dict[str, float], stage: str, units: dict[str, float]) -> float:
+    """Seconds of ``stage``'s ``units`` without its fixed part; compose decodes windows while
+    it blends frames, so it takes the longer of the two."""
+    seconds = {name: rates[name] * count for name, count in units.items()}
+    if stage == "compose":
+        blending = seconds.pop("compose/crop", 0.0)
+        return max(blending, sum(seconds.values()))
+    return sum(seconds.values())
+
+
 def pass_estimates(rates: dict[str, float], work: Work) -> dict[str, tuple[float, float]] | None:
     """``(fixed, per-unit)`` seconds of each timed pass, or None when a rate is missing."""
     estimates = {}
@@ -116,7 +130,7 @@ def pass_estimates(rates: dict[str, float], work: Work) -> dict[str, tuple[float
         units = work.units(stage)
         if any(name not in rates for name in [*units, f"{stage}/fixed"]):
             return None
-        estimates[stage] = (rates[f"{stage}/fixed"], sum(rates[name] * count for name, count in units.items()))
+        estimates[stage] = (rates[f"{stage}/fixed"], variable_seconds(rates, stage, units))
     return estimates
 
 
@@ -151,7 +165,8 @@ def learned_rates(timings: dict[str, PassTiming], work: Work, known: dict[str, f
     for stage, timing in timings.items():
         for canvas, samples in warm_windows(stage, timing).items():
             rates[f"{stage}/window{canvas}"] = mean(samples)
-        frame_seconds = max(0.0, timing.warm_seconds - sum(seconds for _, seconds in timing.windows))
+        window_seconds = timing.waited_seconds if stage == "compose" else sum(s for _, s in timing.windows)
+        frame_seconds = max(0.0, timing.warm_seconds - window_seconds)
         for name, count in work.frame_units(stage, timing.warm_frames).items():
             if count:
                 rates[name] = frame_seconds / count
@@ -159,8 +174,7 @@ def learned_rates(timings: dict[str, PassTiming], work: Work, known: dict[str, f
         merged = {**known, **rates}
         units = work.units(stage)
         if all(name in merged for name in units):
-            variable = sum(merged[name] * count for name, count in units.items())
-            rates[f"{stage}/fixed"] = max(0.0, timing.seconds - variable)
+            rates[f"{stage}/fixed"] = max(0.0, timing.seconds - variable_seconds(merged, stage, units))
     return rates
 
 

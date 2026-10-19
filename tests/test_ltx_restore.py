@@ -58,6 +58,9 @@ class _Bar:
     def window(self, canvas):
         return contextlib.nullcontext()
 
+    def waiting(self):
+        return contextlib.nullcontext()
+
     def windows_done(self, canvas, count):
         pass
 
@@ -513,7 +516,7 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
         bar.update(50)
 
     encode_left = 50 * 2.0 * 0.01 + 10 * 0.5
-    later = 20.0 + 10 * 4.0 + 3.0 + 40.0 * 0.1 + 10 * 1.0
+    later = 20.0 + 10 * 4.0 + 3.0 + max(40.0 * 0.1, 10 * 1.0)
     fraction, left, stage = reports[-1]
     assert stage.name == "encode"
     assert stage.seconds_left == pytest.approx(encode_left)
@@ -551,9 +554,9 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
         clock.now = 3.0
         bar.update(40)
 
-    compose_work = 40.0 * 0.1 + 10 * 1.0
-    done_work = 40.0 * 0.1 * 50 / 100 + 1.0
-    warm_done_work = done_work - 40.0 * 0.1 * 10 / 100
+    compose_work = max(40.0 * 0.1, 10 * 1.0)
+    done_work = max(40.0 * 0.1 * 50 / 100, 1.0)
+    warm_done_work = done_work - max(40.0 * 0.1 * 10 / 100, 0.0)
     fraction, left, stage = reports[-1]
     assert stage.seconds_left == pytest.approx((compose_work - done_work) * 3.0 / warm_done_work)
     assert left == pytest.approx(stage.seconds_left)
@@ -597,7 +600,7 @@ def test_compose_time_left_falls_steadily_while_windows_decode_ahead(monkeypatch
                     bar.windows_done(canvas, share)
 
     lefts = [left for _fraction, left, _stage in reports[2:]]
-    assert lefts == sorted(lefts, reverse=True)
+    assert all(later <= earlier + 1e-9 for earlier, later in zip(lefts, lefts[1:]))
 
 
 def test_run_fraction_never_goes_back_when_the_pace_drops(monkeypatch):
@@ -641,6 +644,8 @@ def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
         bar.update(4)
         with bar.window(512):
             clock.now = 4.5
+        with bar.waiting():
+            clock.now = 5.0
         clock.now = 6.0
         bar.update(6)
     with progress.bar("denoise", 6, unit="step") as bar:
@@ -657,6 +662,7 @@ def test_stage_bars_time_warm_units_for_the_profile(monkeypatch):
     compose, denoise = progress.timings["compose"], progress.timings["denoise"]
     assert (compose.seconds, compose.warm_seconds, compose.warm_frames) == (6.0, 3.0, 6)
     assert compose.windows == [(512, 1.5)]
+    assert compose.waited_seconds == 0.5
     assert compose.units == 10
     assert denoise.seconds == 14.0
     assert denoise.units == 8
