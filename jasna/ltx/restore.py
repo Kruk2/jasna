@@ -570,11 +570,7 @@ def denoise_track(
 
 
 def free_vram_budget(device: torch.device) -> DecodeBudget:
-    def budget(_canvas: int) -> int:
-        torch.cuda.empty_cache()
-        return device_free_bytes(device)
-
-    return budget
+    return lambda _canvas: device_free_bytes(device)
 
 
 def segment_decode_budget(total_bytes: int) -> DecodeBudget:
@@ -587,6 +583,7 @@ def _decode_window(
     decoder, latent: torch.Tensor, seed: int, canvas: int, budget: DecodeBudget, device: torch.device
 ) -> torch.Tensor:
     """Decoded window as uint8 ``[F, 3, S, S]`` on ``device``."""
+    torch.cuda.empty_cache()
     free = budget(canvas)
     if isinstance(decoder, WorkerDecoder):
         return decoder.decode_window(latent, seed, free, device)

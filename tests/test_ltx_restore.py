@@ -294,12 +294,16 @@ def test_segment_decode_budget_follows_the_gpu_size_not_free_vram(monkeypatch):
         assert (budget(512), budget(768)) == (budget_512 * gib, budget_768 * gib)
 
 
-def test_free_vram_budget_returns_the_cache_before_reading_free_vram(monkeypatch):
+def test_each_window_decode_returns_the_cache_before_reading_its_budget(monkeypatch):
     events = []
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: events.append("empty_cache"))
-    monkeypatch.setattr(restore, "device_free_bytes", lambda device: events.append("read") or 5 << 30)
-    assert restore.free_vram_budget(torch.device("cpu"))(512) == 5 << 30
-    assert events == ["empty_cache", "read"]
+    monkeypatch.setattr(
+        restore, "decode_latent", lambda decoder, latent, free_bytes, generator: torch.zeros(1, 3, 2, 4, 4)
+    )
+    budget = lambda canvas: events.append("budget") or 5 << 30
+    for _ in range(2):
+        restore._decode_window(object(), torch.zeros(1), 7, 512, budget, torch.device("cpu"))
+    assert events == ["empty_cache", "budget"] * 2
 
 
 def test_large_canvas_needs_twelve_gib_free():
