@@ -58,6 +58,9 @@ class _Bar:
     def window(self, canvas):
         return contextlib.nullcontext()
 
+    def windows_done(self, canvas, count):
+        pass
+
     def track(self, canvas, steps):
         return self.update
 
@@ -526,8 +529,8 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
     progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     with progress.bar("compose", 100) as bar:
         bar.update(10)
-        with bar.window(512):
-            clock.now = 2.0
+        clock.now = 2.0
+        bar.windows_done(512, 1)
         clock.now = 3.0
         bar.update(40)
 
@@ -538,6 +541,66 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
     assert stage.seconds_left == pytest.approx((compose_work - done_work) * 3.0 / warm_done_work)
     assert left == pytest.approx(stage.seconds_left)
     assert fraction == pytest.approx(3.0 / (3.0 + left))
+
+
+def _window(index: int, start: int, frames: int, canvas: int = 512) -> Window:
+    return Window(index, 0, start, frames, (CropFrame((0, 0, 4, 4), (canvas, canvas), (0, 0, 0, 0)),) * frames)
+
+
+def test_decode_shares_spread_each_window_over_the_frames_it_decodes_during():
+    shares = restore._decode_shares([_window(0, 2, 4), _window(1, 2, 4), _window(2, 6, 4, canvas=768)])
+
+    assert shares == {
+        0: [(512, 0.5)],
+        1: [(512, 0.5)],
+        2: [(512, 1.0), (768, 0.25)],
+        3: [(768, 0.25)],
+        4: [(768, 0.25)],
+        5: [(768, 0.25)],
+    }
+
+
+def test_compose_time_left_falls_steadily_while_windows_decode_ahead(monkeypatch):
+    clock = _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress.expect(_RATES)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
+    shares = restore._decode_shares([_window(index, index * 10, 10) for index in range(10)])
+    first_window_blocking_decode_seconds = 1.0
+    clock.now = 100.0
+    with progress.bar("compose", 100) as bar:
+        for batch_start in range(0, 100, 5):
+            clock.now += 0.5
+            bar.update(5)
+            if batch_start == 0:
+                clock.now += first_window_blocking_decode_seconds
+            for frame_idx in range(batch_start, batch_start + 5):
+                for canvas, share in shares.get(frame_idx, ()):
+                    bar.windows_done(canvas, share)
+
+    lefts = [left for _fraction, left, _stage in reports[2:]]
+    assert lefts == sorted(lefts, reverse=True)
+
+
+def test_run_fraction_never_goes_back_when_the_pace_drops(monkeypatch):
+    clock = _Clock(monkeypatch)
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
+    progress.expect(_RATES)
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
+    clock.now = 100.0
+    with progress.bar("compose", 100) as bar:
+        bar.update(10)
+        clock.now = 101.0
+        bar.windows_done(512, 1)
+        bar.update(10)
+        clock.now = 110.0
+        bar.update(10)
+
+    fractions = [fraction for fraction, _left, _stage in reports]
+    assert reports[-1][1] > reports[-2][1]
+    assert fractions == sorted(fractions)
 
 
 def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monkeypatch):

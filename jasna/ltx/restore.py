@@ -162,6 +162,7 @@ class Progress:
         self._started = time.monotonic()
         self._pass_end = self._started
         self._done_share = 0.0
+        self._reported_fraction = 0.0
         self._timed = False
         self._rates: dict[str, float] = {}
         self._work: speed.Work | None = None
@@ -249,11 +250,13 @@ class Progress:
             step = StageProgress(stage, _STAGE_NUMBER[stage], len(_STAGE_NUMBER), stage_fraction, stage_left)
             elapsed = time.monotonic() - self._started
             if left is not None:
-                self._report(elapsed / (elapsed + left), left, step)
+                fraction, seconds_left = elapsed / (elapsed + left), left
             else:
                 fraction = self._done_share + _STAGE_SHARE[stage] * stage_fraction
                 self._timed = self._timed or (stage == "denoise" and done > 0)
-                self._report(fraction, elapsed * (1.0 - fraction) / fraction if self._timed else 0.0, step)
+                seconds_left = elapsed * (1.0 - fraction) / fraction if self._timed else 0.0
+            self._reported_fraction = max(self._reported_fraction, fraction)
+            self._report(self._reported_fraction, seconds_left, step)
         return left
 
     def _finished(self, stage: LtxStage, timing: speed.PassTiming) -> None:
@@ -275,12 +278,10 @@ class _StageBar:
         self._warm_from: tuple[float, int, float] | None = None
         self._windows: list[tuple[int, TimingMark, TimingMark]] = []
         self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
-        self._profiled_lock = threading.Lock()
         progress._advanced(stage, 0, bar.total, None, 0.0, 1.0)
 
     def update(self, n: int) -> None:
-        with self._profiled_lock:
-            self._profiled_done += self._progress.profiled_seconds(self._stage, "frame", n)
+        self._profiled_done += self._progress.profiled_seconds(self._stage, "frame", n)
         self._count(n)
 
     def _count(self, n: int) -> None:
@@ -312,8 +313,10 @@ class _StageBar:
         yield
         end.record()
         self._windows.append((canvas, start, end))
-        with self._profiled_lock:
-            self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", 1)
+
+    def windows_done(self, canvas: int, count: float) -> None:
+        """Count ``count`` windows of ``canvas`` as done toward the time left."""
+        self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", count)
 
     def track(self, canvas: int, steps: int) -> Callable[[int], None]:
         """``advance`` for one track's denoise: counts its window-steps and marks the stream
@@ -322,7 +325,7 @@ class _StageBar:
         self._tracks.append((canvas, steps, marks))
 
         def advance(n: int) -> None:
-            self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", n / steps)
+            self.windows_done(canvas, n / steps)
             self._count(n)
             mark = self._marks()
             mark.record()
@@ -558,6 +561,7 @@ class _SegmentEncoder:
                         if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(window_pixels, self._device)
                     )
                     self._store.put(index, self._encoder(pixels))
+                self._bar.windows_done(window.canvas, 1)
                 self._buffers.give_back(window.canvas, window_pixels)
                 del self._active[index]
         self._frame_idx += 1
@@ -629,6 +633,20 @@ def _decode_window(
         return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous()
 
 
+def _decode_shares(windows: list[Window]) -> dict[int, list[tuple[int, float]]]:
+    """Per segment frame, the ``(canvas, share)`` of each window decode it counts: a window
+    decodes from the previous window's start (the first from frame 0) to its own start, so
+    its decode counts evenly over those frames, or all at its start when there are none."""
+    shares: dict[int, list[tuple[int, float]]] = {}
+    submitted = 0
+    for window in windows:
+        frames = range(submitted, window.start) or range(window.start, window.start + 1)
+        for frame_idx in frames:
+            shares.setdefault(frame_idx, []).append((window.canvas, 1 / len(frames)))
+        submitted = window.start
+    return shares
+
+
 class _SegmentComposer:
     def __init__(
         self,
@@ -650,7 +668,8 @@ class _SegmentComposer:
             for window, weight in zip(plan.windows, crossfade_weights(plan.windows)):
                 self._weights[window.index] = weight
                 self._tracks[window.index] = plan
-        self._pending = iter(sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start))
+        windows = sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start)
+        self._pending = iter(windows)
         self._upcoming = next(self._pending, None)
         self._covering: list[Window] = []
         self._decoded: dict[int, torch.Tensor] = {}
@@ -664,7 +683,8 @@ class _SegmentComposer:
         self._frame_idx = 0
         self._decodes = decodes
         self._stream = stream
-        self._decode_order = iter(sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start))
+        self._decode_order = iter(windows)
+        self._decode_shares = _decode_shares(windows)
         self._decoding: dict[int, Future[torch.Tensor]] = {}
 
     def _decode(self, window: Window) -> torch.Tensor:
@@ -721,6 +741,8 @@ class _SegmentComposer:
                     presence=track.presence[frame_idx - track.start],
                 )
             )
+        for canvas, share in self._decode_shares.get(frame_idx, ()):
+            self._bar.windows_done(canvas, share)
         self._frame_idx += 1
         return composite_frame(frame, candidates, feather=self._feather)
 
