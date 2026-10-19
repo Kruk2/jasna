@@ -21,6 +21,7 @@ import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -274,10 +275,12 @@ class _StageBar:
         self._warm_from: tuple[float, int, float] | None = None
         self._windows: list[tuple[int, TimingMark, TimingMark]] = []
         self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
+        self._profiled_lock = threading.Lock()
         progress._advanced(stage, 0, bar.total, None, 0.0, 1.0)
 
     def update(self, n: int) -> None:
-        self._profiled_done += self._progress.profiled_seconds(self._stage, "frame", n)
+        with self._profiled_lock:
+            self._profiled_done += self._progress.profiled_seconds(self._stage, "frame", n)
         self._count(n)
 
     def _count(self, n: int) -> None:
@@ -302,13 +305,15 @@ class _StageBar:
 
     @contextmanager
     def window(self, canvas: int) -> Iterator[None]:
-        """Time the GPU work of one window with marks, read when the pass closes."""
+        """Time the GPU work of one window with marks, read when the pass closes; the marks go
+        on the calling thread's stream, so a decode thread can time its own windows."""
         start, end = self._marks(), self._marks()
         start.record()
         yield
         end.record()
         self._windows.append((canvas, start, end))
-        self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", 1)
+        with self._profiled_lock:
+            self._profiled_done += self._progress.profiled_seconds(self._stage, f"window{canvas}", 1)
 
     def track(self, canvas: int, steps: int) -> Callable[[int], None]:
         """``advance`` for one track's denoise: counts its window-steps and marks the stream
@@ -494,37 +499,66 @@ def scan_span(
     return plans
 
 
-def _vae_pixels(canvases: list[torch.Tensor], device: torch.device) -> torch.Tensor:
-    stacked = torch.stack(canvases + [canvases[-1]] * (WINDOW_FRAMES - len(canvases)), dim=1)
-    return stacked.to(device).float().div_(127.5).sub_(1.0).to(torch.bfloat16).unsqueeze(0)
+def _vae_pixels(window_pixels: torch.Tensor, device: torch.device) -> torch.Tensor:
+    return window_pixels.to(device).float().div_(127.5).sub_(1.0).to(torch.bfloat16).unsqueeze(0)
+
+
+class _WindowBuffers:
+    """Host ``[3, WINDOW_FRAMES, canvas, canvas]`` uint8 pixels for the open windows, reused once
+    a window is encoded, so no window stacks its frames or faults in fresh pages."""
+
+    def __init__(self) -> None:
+        self._free: dict[int, list[torch.Tensor]] = {}
+
+    def take(self, canvas: int) -> torch.Tensor:
+        free = self._free.setdefault(canvas, [])
+        return free.pop() if free else torch.empty((3, WINDOW_FRAMES, canvas, canvas), dtype=torch.uint8)
+
+    def give_back(self, canvas: int, pixels: torch.Tensor) -> None:
+        self._free[canvas].append(pixels)
+
+
+def _copy_canvas(window_pixels: torch.Tensor, position: int, real_frames: int, canvas: torch.Tensor) -> None:
+    """``canvas`` into frame ``position``; the last real frame also fills the padding frames."""
+    last = position == real_frames - 1
+    window_pixels[:, position : WINDOW_FRAMES if last else position + 1].copy_(canvas.unsqueeze(1))
 
 
 class _SegmentEncoder:
     def __init__(
-        self, plans: list[TrackPlan], encoder, store: LatentStore, device: torch.device, bar: _StageBar
+        self,
+        plans: list[TrackPlan],
+        encoder,
+        store: LatentStore,
+        buffers: _WindowBuffers,
+        device: torch.device,
+        bar: _StageBar,
     ) -> None:
         self._pending = iter(sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start))
         self._upcoming = next(self._pending, None)
-        self._active: dict[int, tuple[Window, list[torch.Tensor]]] = {}
+        self._active: dict[int, tuple[Window, torch.Tensor]] = {}
         self._encoder = encoder
         self._store = store
+        self._buffers = buffers
         self._device = device
         self._bar = bar
         self._frame_idx = 0
 
     def frame(self, frame: torch.Tensor) -> None:
         while self._upcoming is not None and self._upcoming.start == self._frame_idx:
-            self._active[self._upcoming.index] = (self._upcoming, [])
+            self._active[self._upcoming.index] = (self._upcoming, self._buffers.take(self._upcoming.canvas))
             self._upcoming = next(self._pending, None)
-        for index, (window, canvases) in list(self._active.items()):
-            canvases.append(crop_to_canvas(frame, window.crops[self._frame_idx - window.start]).cpu())
-            if len(canvases) == window.real_frames:
+        for index, (window, window_pixels) in list(self._active.items()):
+            position = self._frame_idx - window.start
+            _copy_canvas(window_pixels, position, window.real_frames, crop_to_canvas(frame, window.crops[position]))
+            if position == window.real_frames - 1:
                 with self._bar.window(window.canvas), torch.inference_mode():
                     pixels = (
-                        torch.stack(canvases + [canvases[-1]] * (WINDOW_FRAMES - len(canvases)), dim=1).unsqueeze(0)
-                        if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(canvases, self._device)
+                        window_pixels.unsqueeze(0)
+                        if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(window_pixels, self._device)
                     )
                     self._store.put(index, self._encoder(pixels))
+                self._buffers.give_back(window.canvas, window_pixels)
                 del self._active[index]
         self._frame_idx += 1
 
@@ -546,7 +580,8 @@ def encode_span(
     cancel: threading.Event,
 ) -> None:
     """VAE-encode every planned window's reference crops into its segment's store."""
-    encoders = [_SegmentEncoder(p, encoder, store, device, bar) for p, store in zip(plans, stores)]
+    buffers = _WindowBuffers()
+    encoders = [_SegmentEncoder(p, encoder, store, buffers, device, bar) for p, store in zip(plans, stores)]
     for owner, batch, _pts in segment_batches(frames(), segments, batch_size):
         _check(cancel)
         bar.update(len(batch))
@@ -606,6 +641,8 @@ class _SegmentComposer:
         budget: DecodeBudget,
         device: torch.device,
         bar: _StageBar,
+        decodes: ThreadPoolExecutor,
+        stream: torch.cuda.Stream | None,
     ) -> None:
         self._weights: dict[int, torch.Tensor] = {}
         self._tracks: dict[int, TrackPlan] = {}
@@ -625,9 +662,43 @@ class _SegmentComposer:
         self._device = device
         self._bar = bar
         self._frame_idx = 0
+        self._decodes = decodes
+        self._stream = stream
+        self._decode_order = iter(sorted((w for plan in plans for w in plan.windows), key=lambda w: w.start))
+        self._decoding: dict[int, Future[torch.Tensor]] = {}
+
+    def _decode(self, window: Window) -> torch.Tensor:
+        with torch.cuda.stream(self._stream), self._bar.window(window.canvas):
+            video = _decode_window(
+                self._decoder,
+                self._finals.get(window.index),
+                self._seed + window.index,
+                window.canvas,
+                self._budget,
+                self._device,
+            )
+        if self._stream is not None:
+            self._stream.synchronize()
+        return video
+
+    def _decode_next(self) -> None:
+        """Start decoding the next window in start order, so it decodes while the frames
+        before its start are composited and written."""
+        window = next(self._decode_order, None)
+        if window is not None:
+            self._decoding[window.index] = self._decodes.submit(self._decode, window)
+
+    def _decoded_window(self, window: Window) -> torch.Tensor:
+        video = self._decoding.pop(window.index).result()
+        if self._stream is not None:
+            video.record_stream(torch.cuda.current_stream(self._device))
+        self._decode_next()
+        return video
 
     def frame(self, frame: torch.Tensor) -> torch.Tensor:
         frame_idx = self._frame_idx
+        if frame_idx == 0:
+            self._decode_next()
         while self._upcoming is not None and self._upcoming.start == frame_idx:
             self._covering.append(self._upcoming)
             self._upcoming = next(self._pending, None)
@@ -637,15 +708,7 @@ class _SegmentComposer:
         candidates = []
         for window in self._covering:
             if window.index not in self._decoded:
-                with self._bar.window(window.canvas):
-                    self._decoded[window.index] = _decode_window(
-                        self._decoder,
-                        self._finals.get(window.index),
-                        self._seed + window.index,
-                        window.canvas,
-                        self._budget,
-                        self._device,
-                    )
+                self._decoded[window.index] = self._decoded_window(window)
             local = frame_idx - window.start
             track = self._tracks[window.index]
             candidates.append(
@@ -675,26 +738,36 @@ def compose_span(
     bar: _StageBar,
     cancel: threading.Event,
 ) -> None:
-    """Write every frame of ``span``: segment frames composited, the rest unchanged."""
+    """Write every frame of ``span``: segment frames composited, the rest unchanged. Windows
+    decode one ahead on a thread; on CUDA on a stream of their own, below the priority of the
+    frames' stream, whose short kernels would otherwise queue behind the decode's."""
     feather = feather_pixels(frame_h)
-    composers = [
-        _SegmentComposer(
-            p, decoder, store, seed=segment.seed, feather=feather, budget=budget, device=device, bar=bar
-        )
-        for p, store, segment in zip(plans, finals, span.segments)
-    ]
-    writer = span.open_writer()
+    decodes = ThreadPoolExecutor(max_workers=1, thread_name_prefix="LtxDecode")
+    cuda = device.type == "cuda"
+    decode_stream = torch.cuda.Stream(device) if cuda else None
     try:
-        for owner, batch, pts in segment_batches(span.frames(), span.segments, batch_size):
-            _check(cancel)
-            bar.update(len(batch))
-            for frame, frame_pts in zip(batch, pts):
-                if owner is None:
-                    writer.write(frame, frame_pts, apply_lut=False)
-                else:
-                    writer.write(composers[owner].frame(frame), frame_pts)
+        composers = [
+            _SegmentComposer(
+                p, decoder, store, seed=segment.seed, feather=feather, budget=budget, device=device, bar=bar,
+                decodes=decodes, stream=decode_stream,
+            )
+            for p, store, segment in zip(plans, finals, span.segments)
+        ]
+        with torch.cuda.stream(torch.cuda.Stream(device, priority=-1) if cuda else None):
+            writer = span.open_writer()
+            try:
+                for owner, batch, pts in segment_batches(span.frames(), span.segments, batch_size):
+                    _check(cancel)
+                    bar.update(len(batch))
+                    for frame, frame_pts in zip(batch, pts):
+                        if owner is None:
+                            writer.write(frame, frame_pts, apply_lut=False)
+                        else:
+                            writer.write(composers[owner].frame(frame), frame_pts)
+            finally:
+                writer.close()
     finally:
-        writer.close()
+        decodes.shutdown(cancel_futures=True)
 
 
 def large_canvas_fits(requested: bool, free_bytes: int) -> bool:

@@ -81,11 +81,6 @@ def _ellipse_structuring_element(radius: int) -> np.ndarray:
 
 
 @functools.cache
-def _ellipse_kernel(radius: int, device: torch.device) -> torch.Tensor:
-    return torch.from_numpy(_ellipse_structuring_element(radius).astype(np.float32)).to(device)[None, None]
-
-
-@functools.cache
 def _ellipse_levels(radius: int) -> tuple[tuple[int, int], ...]:
     """``(half width, vertical reach)`` per distinct row width of the ellipse: its rows are
     centred runs that narrow away from the middle, so the dilation is the union of one
@@ -97,9 +92,29 @@ def _ellipse_levels(radius: int) -> tuple[tuple[int, int], ...]:
     )
 
 
-def _conv_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
-    padded = F.pad(mask[None, None].float(), (radius,) * 4)
-    return F.conv2d(padded, _ellipse_kernel(radius, mask.device))[0, 0] > 0.5
+@functools.cache
+def _ellipse_row_reach(radius: int, device: torch.device) -> torch.Tensor:
+    """Per horizontal distance ``0..radius``, the farthest row offset whose ellipse row still
+    spans it; one more entry, far below zero, for anything farther."""
+    widths = [radius - int(np.flatnonzero(row)[0]) for row in _ellipse_structuring_element(radius)]
+    reach = [max(abs(dy - radius) for dy, width in enumerate(widths) if width >= d) for d in range(radius + 1)]
+    return torch.tensor(reach + [-(1 << 30)], dtype=torch.int32, device=device)
+
+
+def _scan_dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
+    """A pixel at row distance ``d`` from its row's nearest set pixel covers the rows within
+    ``reach[d]`` of it; both distances come from running max/min scans, so the cost does not
+    grow with the radius."""
+    height, width = mask.shape
+    cols = torch.arange(width, dtype=torch.int32, device=mask.device)
+    left = torch.where(mask, cols, -2 * width - radius).cummax(1).values
+    right = torch.where(mask, cols, 3 * width + radius).flip(1).cummin(1).values.flip(1)
+    distance = torch.minimum(cols - left, right - cols).clamp_(max=radius + 1)
+    reach = _ellipse_row_reach(radius, mask.device)[distance].t().contiguous()
+    rows = torch.arange(height, dtype=torch.int32, device=mask.device)
+    from_above = (reach + rows).cummax(1).values - rows
+    from_below = (reach - rows).flip(1).cummax(1).values.flip(1) + rows
+    return (torch.maximum(from_above, from_below) >= 0).t()
 
 
 def _any_in_window(x: torch.Tensor, half: int, dim: int) -> torch.Tensor:
@@ -119,7 +134,7 @@ def dilate_ellipse(mask: torch.Tensor, radius: int) -> torch.Tensor:
     """Bool ``[H, W]`` mask dilated on its own device; same pixels as ``cv2.dilate`` with a
     ``MORPH_ELLIPSE`` kernel of ``2*radius+1``."""
     if is_nvidia_device(mask.device):
-        return _conv_dilate_ellipse(mask, radius)
+        return _scan_dilate_ellipse(mask, radius)
     return _prefix_dilate_ellipse(mask, radius)
 
 

@@ -2,6 +2,7 @@ import contextlib
 import json
 import threading
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from dataclasses import replace
@@ -11,7 +12,8 @@ import pytest
 import torch
 
 from jasna.ltx import inference, restore
-from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region
+from jasna.ltx.camera import CropFrame
+from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region, Window
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
 MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
@@ -284,6 +286,67 @@ def test_decode_window_converts_a_float32_decode(monkeypatch):
     frames = restore._decode_window(None, torch.zeros(1, 128, 1, 1, 1), 0, 512, lambda canvas: 1, torch.device("cpu"))
     assert frames.dtype == torch.uint8 and frames.shape == (3, 3, 1, 1)
     assert frames[:, 0, 0, 0].tolist() == [0, 128, 255]
+
+
+def _two_window_composer(monkeypatch, decode, composite):
+    crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
+    windows = (Window(0, 0, 0, 5, (crop,) * 5), Window(1, 0, 3, 5, (crop,) * 5))
+    plan = restore.TrackPlan(0, 0, ((),) * 8, (1.0,) * 8, windows, 3)
+    monkeypatch.setattr(restore, "_decode_window", decode)
+    monkeypatch.setattr(restore, "composite_frame", composite)
+    decodes = ThreadPoolExecutor(max_workers=1)
+    composer = restore._SegmentComposer(
+        [plan], None, SimpleNamespace(get=lambda index: index), seed=0, feather=1, budget=lambda canvas: 0,
+        device=torch.device("cpu"), bar=_Bar(), decodes=decodes, stream=None,
+    )
+    return composer, decodes
+
+
+def test_composer_decodes_the_next_window_while_earlier_frames_are_composited(monkeypatch):
+    second_started = threading.Event()
+    started_before_its_start = []
+
+    def decode(decoder, latent, seed, canvas, budget, device):
+        if latent == 1:
+            second_started.set()
+        return torch.full((5, 3, 4, 4), latent, dtype=torch.uint8)
+
+    def composite(source, candidates, *, feather):
+        if int(source[0, 0, 0]) == 2:
+            started_before_its_start.append(second_started.wait(timeout=5))
+        return torch.stack([c.canvas for c in candidates]).max(0).values
+
+    composer, decodes = _two_window_composer(monkeypatch, decode, composite)
+    try:
+        out = [int(composer.frame(torch.full((3, 4, 4), i, dtype=torch.uint8))[0, 0, 0]) for i in range(8)]
+    finally:
+        decodes.shutdown()
+    assert started_before_its_start == [True]
+    assert out == [0, 0, 0, 1, 1, 1, 1, 1]
+
+
+def test_composer_decodes_nothing_before_its_first_frame(monkeypatch):
+    decoded = []
+
+    def decode(decoder, latent, seed, canvas, budget, device):
+        decoded.append(latent)
+        return torch.full((5, 3, 4, 4), latent, dtype=torch.uint8)
+
+    composer, decodes = _two_window_composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
+    decodes.shutdown()
+    assert decoded == []
+
+
+def test_composer_raises_a_failed_window_decode(monkeypatch):
+    def decode(decoder, latent, seed, canvas, budget, device):
+        raise RuntimeError("decode failed")
+
+    composer, decodes = _two_window_composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
+    try:
+        with pytest.raises(RuntimeError, match="decode failed"):
+            composer.frame(torch.zeros(3, 4, 4, dtype=torch.uint8))
+    finally:
+        decodes.shutdown()
 
 
 def test_segment_decode_budget_follows_the_gpu_size_not_free_vram(monkeypatch):
@@ -688,6 +751,42 @@ def test_restore_spans_frees_the_decoder_and_its_cached_memory_after_compose(fak
     assert decoders and released[-1] is True
 
 
+_CUDA = pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA"))
+
+
+@pytest.mark.parametrize("device", ["cpu", _CUDA])
+def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device):
+    crop = CropFrame(crop_box=(0, 0, 8, 8), resize_hw=(8, 8), pad=(0, 0, 0, 0))
+    windows = (Window(0, 0, 1, 3, (crop,) * 3), Window(1, 0, 2, 2, (crop,) * 2), Window(2, 0, 4, 1, (crop,)))
+    encoded = {}
+    store = SimpleNamespace(put=lambda index, latent: encoded.__setitem__(index, latent.cpu()))
+    buffers = restore._WindowBuffers()
+    encoder = restore._SegmentEncoder(
+        [SimpleNamespace(windows=windows)], lambda pixels: pixels, store, buffers, torch.device(device), _Bar()
+    )
+    for value in range(5):
+        encoder.frame(torch.full((3, 16, 16), value * 10, dtype=torch.uint8, device=device))
+    encoder.finish()
+
+    def expected(values):
+        frames = values + [values[-1]] * (restore.WINDOW_FRAMES - len(values))
+        pixels = torch.tensor(frames, dtype=torch.float32).view(1, 1, -1, 1, 1).expand(1, 3, -1, 8, 8)
+        return pixels.div(127.5).sub(1.0).to(torch.bfloat16)
+
+    assert torch.equal(encoded[0], expected([10, 20, 30]))
+    assert torch.equal(encoded[1], expected([20, 30]))
+    assert torch.equal(encoded[2], expected([40]))
+
+
+def test_window_buffers_reuse_an_encoded_windows_buffer():
+    buffers = restore._WindowBuffers()
+    first = buffers.take(8)
+    assert first.shape == (3, restore.WINDOW_FRAMES, 8, 8) and not first.is_pinned()
+    buffers.give_back(8, first)
+    assert buffers.take(8) is first
+    assert buffers.take(8) is not first
+
+
 def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp_path):
     requests = []
 
@@ -700,7 +799,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
             return {"steps": 8, "resident": 40, "count": 48}, []
         if op == "encode":
             assert tensors[0].dtype == torch.uint8
-            assert tensors[0].shape == (1, 3, restore.WINDOW_FRAMES, 2, 2)
+            assert tensors[0].shape == (1, 3, restore.WINDOW_FRAMES, 512, 512)
             return {}, [torch.zeros(1)]
         if op == "denoise_chain":
             advance(8 * len(tensors))
@@ -713,7 +812,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     monkeypatch.setattr(inference, "load_video_decoder", forbidden)
     monkeypatch.setattr(inference, "LtxTransformer", forbidden)
     monkeypatch.setattr(inference.ModelRuntime, "request", request)
-    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, _crop: torch.zeros(3, 2, 2, dtype=torch.uint8))
+    monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, crop: torch.zeros(3, crop.canvas, crop.canvas, dtype=torch.uint8))
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
     render = replace(_render(tmp_path), files=files, window_hop=LESS_OVERLAP_WINDOW_HOP)
     writer = _Writer()
