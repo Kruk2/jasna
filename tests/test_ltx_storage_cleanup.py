@@ -5,6 +5,7 @@ from safetensors.torch import save_file
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderTensors, open_tensors
 from jasna.ltx import sampler, trial_shapes, transformer as T
+from jasna.ltx import blocks as blocks_module
 from jasna.models.ltx_vae import loader as vae_loader
 
 
@@ -128,6 +129,23 @@ def test_transformer_close_clears_top_context_conditioning_and_blocks(tmp_path, 
     assert all(torch.count_nonzero(tensor).item() == 0 for tensor in retained)
     assert path.read_bytes() == original
     transformer.close()
+
+
+def test_failed_transformer_load_reports_its_own_error_when_cleanup_also_fails(tmp_path, monkeypatch):
+    path = _small_transformer_file(tmp_path / "small-transformer.safetensors")
+    _without_compiling(monkeypatch)
+
+    def load_fails(*_args, **_kwargs):
+        raise RuntimeError("LTX private load rejected: native block commit")
+
+    def cleanup_fails(_transformer):
+        raise RuntimeError("CUDA error: out of memory")
+
+    monkeypatch.setattr(sampler.BlockStore, "from_reader", load_fails)
+    monkeypatch.setattr(sampler.LtxTransformer, "close", cleanup_fails)
+    with pytest.raises(RuntimeError, match="native block commit") as raised:
+        sampler.LtxTransformer(path, torch.device("cpu"), _twenty_gib_free)
+    assert "out of memory" in str(raised.value.__cause__)
 
 
 def test_frozen_trial_keeps_its_placeholder_blocks_in_the_plain_tensor_store(monkeypatch):
@@ -394,19 +412,19 @@ def test_cuda_staging_failure_closes_the_store(tmp_path, monkeypatch):
     path = tmp_path / "blocks.safetensors"
     save_file({"blocks.0.weight": torch.ones(4)}, str(path))
     stores = []
-    allocate, empty = BlockStore._allocate, torch.empty
+    allocate = BlockStore._allocate
 
     def observe_allocation(store, layouts, device, resident):
         allocate(store, layouts, device, resident)
         stores.append(store)
 
-    def no_pinned_memory(*args, **kwargs):
-        if kwargs.get("pin_memory"):
+    def no_pinned_memory(buffers):
+        if buffers:
             raise RuntimeError("synthetic pinned allocation failure")
-        return empty(*args, **kwargs)
+        return []
 
     monkeypatch.setattr(BlockStore, "_allocate", observe_allocation)
-    monkeypatch.setattr(torch, "empty", no_pinned_memory)
+    monkeypatch.setattr(blocks_module, "_pin_while_allowed", no_pinned_memory)
     with open_tensors(path) as reader, pytest.raises(RuntimeError, match="pinned allocation"):
         BlockStore.from_reader(reader, [{"weight": "blocks.0.weight"}], torch.device("cuda"), resident=1)
     assert stores and not stores[0]._resident_buffers

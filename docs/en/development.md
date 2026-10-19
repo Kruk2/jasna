@@ -241,7 +241,7 @@ $P scripts/benchmark_na3d.py                                             # Trito
 - `JASNA_LTX_NATIVE=0` forces `torch.compile`, for an A/B in one tree.
 - `jasna.ltx.native.prebuild(dir)` builds the extension and the cubins of every
   table architecture for a release; copy `dir` to `jasna/ltx/native/prebuilt/`.
-- INT8 self-attention is comfy-kitchen 0.2.36's SageAttention, vendored in
+- INT8 self-attention is comfy-kitchen 0.2.38's SageAttention, vendored in
   `jasna/ltx/native/sage_attention/` (bf16, unmasked subset; provenance and
   edits in its `NOTICE`). It compiles with comfy-kitchen's nvcc flags
   (`--use_fast_math` must not reach `glue.cu`) and must stay bit-identical with

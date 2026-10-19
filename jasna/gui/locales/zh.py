@@ -267,6 +267,7 @@ ZH = {
         "ltx_seed": "种子",
         "ltx_fast": "快速模式",
         "ltx_large_canvas": "大马赛克更清晰",
+        "ltx_less_overlap": "减少重叠（实验性，更快）",
         "ltx_auto_split": "仅大马赛克用 LTX",
         "ltx_trial": "试用模式（速度测试）",
         "ltx_trial_notice": "试用模式：视频不会被修复。",
@@ -523,6 +524,7 @@ ZH = {
         "tip_ltx_new_seed": "随机种子",
         "tip_ltx_fast": "约快 1.4 倍，细节略少。\n仅限 RTX 50 系列。",
         "tip_ltx_large_canvas": "大马赛克细节更多，这些部分约慢 3 倍。\n需要 12 GB 可用显存。",
+        "tip_ltx_less_overlap": "马赛克持续超过 4 秒的场景约快 13%。\n关闭后使用重叠更多的旧模式。",
         "tip_ltx_auto_split": "大马赛克用 LTX 修复，较小的用更快的 BasicVSR++。马赛克最长边达到视频高度的这个比例即算大。没有马赛克的部分直接复制。\n在区间编辑器中设置的区间按原样使用。",
         "tip_ltx_trial": "无需模型文件即可运行 LTX，用于测试速度。\n输出不会被修复。",
         "tip_model_basicvsrpp": "默认模型。速度快，适合大多数视频。",
@@ -575,6 +577,7 @@ ZH = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk 正在运行",
         "windhawk_warning_body": "Windhawk 已注入 Jasna，LTX 模型会因“拒绝访问”而失败。请退出 Windhawk，或把 jasna.exe 加入其排除进程列表，然后重启 Jasna。",
+        "hard_disk_warning": "Jasna 安装在机械硬盘（HDD）上，启动和加载模型都很慢。请把 Jasna 文件夹移到固态硬盘（SSD）上。",
         "engine_first_run_title": "首次运行可能较慢",
         "engine_first_run_body": "Jasna 需要为你的 GPU 准备模型。这只在首次运行时发生，可能需要 15-60 分钟。\n\n请关闭所有其他应用（浏览器、游戏等），期间不要使用电脑。Jasna 可能看起来无响应——请不要关闭。\n\n结果会被保存，之后每次运行都会使用。",
         "engine_first_run_missing": "缺失的引擎：",
@@ -584,7 +587,7 @@ ZH = {
         # About dialog
         "dialog_about_title": "关于 Jasna",
         "dialog_about_version": "版本 {version}",
-        "dialog_about_description": "JAV 马赛克修复工具",
+        "dialog_about_description": "马赛克修复工具",
         "dialog_about_credit": "灵感来源于 Lada",
         "btn_close": "关闭",
 

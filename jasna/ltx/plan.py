@@ -1,8 +1,9 @@
 """Mosaic tracks and their 121-frame model windows for LTX restoration.
 
 Detections are grouped per frame, linked into cut-safe tracks, continuations are folded
-into their track, and each track gets one zooming camera sliced into windows at hop 88.
-Windows of a track are denoised together and share their overlapping latent frames.
+into their track, and each track gets one zooming camera sliced into windows at hop 88
+(104 with less overlap). Windows of a track are denoised together and share their
+overlapping latent frames.
 
 A continuation stays its own track when folding it would cost its camera
 ``SEPARATE_GAIN`` sharpness for at least a window (``worth_separating``), and a track is
@@ -27,6 +28,7 @@ from jasna.tracking.clip_tracker import compute_iou_matrix
 Polygon = np.ndarray
 
 WINDOW_HOP = 88
+LESS_OVERLAP_WINDOW_HOP = 104
 TEMPORAL_SCALE = 8
 GROUP_IOU = 0.05
 LINK_IOU = 0.1
@@ -68,15 +70,15 @@ class RegionGroup:
 @dataclass
 class Track:
     track_id: int
-    frames: dict[int, RegionGroup] = field(default_factory=dict)
+    frames: dict[int, RegionGroup] = field(default_factory=dict)  # in ascending frame order
 
     @property
     def first(self) -> int:
-        return min(self.frames)
+        return next(iter(self.frames))
 
     @property
     def last(self) -> int:
-        return max(self.frames)
+        return next(reversed(self.frames))
 
 
 @dataclass(frozen=True)
@@ -106,6 +108,7 @@ class TrackPlan:
     polygons: tuple[tuple[Polygon, ...], ...]  # per frame from ``start``
     presence: tuple[float, ...]  # per frame: the track's share of its area, below 1 during a handover
     windows: tuple[Window, ...]
+    window_hop: int
 
     @property
     def stop(self) -> int:
@@ -123,6 +126,21 @@ def _union_box(boxes: Sequence[Box]) -> Box:
         max(box[2] for box in boxes),
         max(box[3] for box in boxes),
     )
+
+
+def _first_cut_after(sorted_cuts: Sequence[int], frame_idx: int, default: int) -> int:
+    position = bisect.bisect_right(sorted_cuts, frame_idx)
+    return sorted_cuts[position] if position < len(sorted_cuts) else default
+
+
+def _cut_between(sorted_cuts: Sequence[int], last: int, frame_idx: int) -> bool:
+    """Whether a scene cut separates frame ``last`` from the later ``frame_idx``."""
+    return _first_cut_after(sorted_cuts, last, frame_idx + 1) <= frame_idx
+
+
+def _last_cut_at_or_before(sorted_cuts: Sequence[int], frame_idx: int) -> int:
+    position = bisect.bisect_right(sorted_cuts, frame_idx)
+    return sorted_cuts[position - 1] if position > 0 else 0
 
 
 def group_regions(regions: Sequence[Region]) -> list[RegionGroup]:
@@ -158,14 +176,14 @@ def group_regions(regions: Sequence[Region]) -> list[RegionGroup]:
 def build_tracks(groups_per_frame: Sequence[Sequence[RegionGroup]], cuts: set[int]) -> list[Track]:
     """Greedy best-IoU linking; a track tolerates ``MAX_GAP`` missing frames and never
     crosses a scene cut (``cuts`` holds first-frame-after-cut indices)."""
+    sorted_cuts = sorted(cuts)
     tracks: list[Track] = []
     active: list[Track] = []
     for frame_idx, groups in enumerate(groups_per_frame):
         active = [
             track
             for track in active
-            if frame_idx - track.last - 1 <= MAX_GAP
-            and not any(track.last < cut <= frame_idx for cut in cuts)
+            if frame_idx - track.last - 1 <= MAX_GAP and not _cut_between(sorted_cuts, track.last, frame_idx)
         ]
         candidates: list[tuple[float, int, int]] = []
         if active and groups:
@@ -235,7 +253,7 @@ def worth_separating(parent: dict[int, RegionGroup], child: dict[int, RegionGrou
     """Whether the child's own camera beats the folded track's (``_gains``), judged on the
     parent's frames within a window of the child."""
     first, last = next(iter(child)), next(reversed(child))
-    near = {idx: group for idx, group in parent.items() if first - WINDOW_FRAMES <= idx <= last + WINDOW_FRAMES}
+    near = {idx: parent[idx] for idx in range(first - WINDOW_FRAMES, last + WINDOW_FRAMES + 1) if idx in parent}
     return _gains(filled_frames(Track(-1, _fold(near, child))), child, frame_w, frame_h)
 
 
@@ -299,17 +317,17 @@ def merge_continuations(tracks: Sequence[Track], cuts: set[int], *, frame_w: int
     track's box from <= ``MAX_GAP`` frames before (no cut between) into that track:
     a mosaic the detector split in two, or a link lost for a few frames. A continuation
     whose own camera would be much sharper stays a track (``worth_separating``)."""
+    sorted_cuts = sorted(cuts)
     merged: list[Track] = []
+    continuable: list[Track] = []
     for track in sorted(tracks, key=lambda item: (item.first, item.track_id)):
         head_idx = track.first
         head = track.frames[head_idx]
+        continuable = [candidate for candidate in continuable if head_idx - candidate.last - 1 <= MAX_GAP]
         parent, best = None, CONTINUATION_COVER
-        for candidate in merged:
-            before = [idx for idx in candidate.frames if idx < head_idx]
-            if not before:
-                continue
-            last = max(before)
-            if head_idx - last - 1 > MAX_GAP or any(last < cut <= head_idx for cut in cuts):
+        for candidate in continuable:
+            last = next((idx for idx in range(head_idx - 1, head_idx - 2 - MAX_GAP, -1) if idx in candidate.frames), None)
+            if last is None or _cut_between(sorted_cuts, last, head_idx):
                 continue
             cover = _cover(candidate.frames[last].box, head.box)
             if cover >= best:
@@ -317,16 +335,24 @@ def merge_continuations(tracks: Sequence[Track], cuts: set[int], *, frame_w: int
         frames = filled_frames(track)
         if parent is None or worth_separating(parent.frames, frames, frame_w, frame_h):
             merged.append(Track(track_id=track.track_id, frames=frames))
+            continuable.append(merged[-1])
             continue
         parent.frames = _fold(parent.frames, frames)
     return merged
 
 
-def _covered_at(tracks: Sequence[Track], track: Track, box: Box, frame_idx: int) -> Track | None:
+def _tracks_by_frame(tracks: Sequence[Track]) -> dict[int, list[Track]]:
+    by_frame: dict[int, list[Track]] = {}
+    for track in tracks:
+        for frame_idx in track.frames:
+            by_frame.setdefault(frame_idx, []).append(track)
+    return by_frame
+
+
+def _covered_at(tracks_by_frame: dict[int, list[Track]], track: Track, box: Box, frame_idx: int) -> Track | None:
     """Another track whose box at ``frame_idx`` holds ``box`` >= ``CONTINUATION_COVER``."""
-    for other in tracks:
-        group = other.frames.get(frame_idx)
-        if other is not track and group is not None and _cover(group.box, box) >= CONTINUATION_COVER:
+    for other in tracks_by_frame.get(frame_idx, ()):
+        if other is not track and _cover(other.frames[frame_idx].box, box) >= CONTINUATION_COVER:
             return other
     return None
 
@@ -336,19 +362,23 @@ def rejoin_across_cover(tracks: Sequence[Track], cuts: set[int]) -> list[Track]:
     same spot (cover >= ``CONTINUATION_COVER``, no cut) while other tracks covered that
     spot on every frame between: one mosaic briefly detected as part of a bigger one,
     which would otherwise hand over twice."""
+    sorted_cuts = sorted(cuts)
     ordered = sorted(tracks, key=lambda item: (item.first, item.track_id))
+    ordered_by_frame = _tracks_by_frame(ordered)
     kept: list[Track] = []
+    recent: list[Track] = []
     for track in ordered:
         head = track.frames[track.first].box
+        recent = [other for other in recent if track.first - other.last <= LEAD_IN_FRAMES + 1]
         earlier = next(
             (
                 other
-                for other in kept
-                if 1 < track.first - other.last <= LEAD_IN_FRAMES + 1
-                and not any(other.last < cut <= track.first for cut in cuts)
+                for other in recent
+                if 1 < track.first - other.last
+                and not _cut_between(sorted_cuts, other.last, track.first)
                 and _cover(other.frames[other.last].box, head) >= CONTINUATION_COVER
                 and all(
-                    _covered_at(ordered, other, other.frames[other.last].box, idx) is not None
+                    _covered_at(ordered_by_frame, other, other.frames[other.last].box, idx) is not None
                     for idx in range(other.last + 1, track.first)
                 )
             ),
@@ -356,6 +386,7 @@ def rejoin_across_cover(tracks: Sequence[Track], cuts: set[int]) -> list[Track]:
         )
         if earlier is None:
             kept.append(Track(track_id=track.track_id, frames=dict(track.frames)))
+            recent.append(kept[-1])
         else:
             earlier.frames = filled_frames(Track(earlier.track_id, _fold(earlier.frames, track.frames)))
     return kept
@@ -366,6 +397,8 @@ def handover_leads(tracks: Sequence[Track], cuts: set[int], frame_count: int) ->
     a lead-in when it starts inside another track (a separated continuation), a lead-out
     when another track covers it right after it ends. Leads stop at cuts and at the
     covering track's ends."""
+    sorted_cuts = sorted(cuts)
+    by_frame = _tracks_by_frame(tracks)
     leads = []
     for track in tracks:
         first, last = track.first, track.last
@@ -373,17 +406,17 @@ def handover_leads(tracks: Sequence[Track], cuts: set[int], frame_count: int) ->
         for idx in range(first - 1, max(first - 2 - MAX_GAP, -1), -1):
             if idx + 1 in cuts:
                 break
-            parent = _covered_at(tracks, track, track.frames[first].box, idx)
+            parent = _covered_at(by_frame, track, track.frames[first].box, idx)
             if parent is not None:
-                since_cut = max((cut for cut in cuts if cut <= first), default=0)
+                since_cut = _last_cut_at_or_before(sorted_cuts, first)
                 lead_in = min(LEAD_IN_FRAMES, first - max(parent.first, since_cut))
                 break
         for idx in range(last + 1, min(last + 2 + MAX_GAP, frame_count)):
             if idx in cuts:
                 break
-            heir = _covered_at(tracks, track, track.frames[last].box, idx)
+            heir = _covered_at(by_frame, track, track.frames[last].box, idx)
             if heir is not None:
-                next_cut = min((cut for cut in cuts if cut > last), default=frame_count)
+                next_cut = _first_cut_after(sorted_cuts, last, frame_count)
                 lead_out = min(BLEND_FRAMES, heir.last - last, next_cut - 1 - last)
                 break
         leads.append((lead_in, lead_out))
@@ -412,7 +445,8 @@ def _affine_polygons(polygons: Sequence[Polygon], source: Box, target: Box) -> t
 
 def filled_frames(track: Track) -> dict[int, RegionGroup]:
     """Every frame of the track span; a detection gap gets the box interpolated between
-    its neighbours and the nearer one's polygons mapped onto it."""
+    its neighbours and the nearer one's polygons mapped onto the interpolated polygon
+    bounds (model boxes may reach past the frame, the polygons never do)."""
     anchors = sorted(track.frames)
     out = {}
     for frame_idx in range(anchors[0], anchors[-1] + 1):
@@ -424,8 +458,9 @@ def filled_frames(track: Track) -> dict[int, RegionGroup]:
         left, right = track.frames[anchors[position - 1]], track.frames[anchors[position]]
         alpha = (frame_idx - anchors[position - 1]) / (anchors[position] - anchors[position - 1])
         box = tuple(a + (b - a) * alpha for a, b in zip(left.box, right.box))
+        extent = tuple(a + (b - a) * alpha for a, b in zip(left.extent, right.extent))
         near = left if alpha <= 0.5 else right
-        out[frame_idx] = RegionGroup(box, _affine_polygons(near.polygons, near.box, box))
+        out[frame_idx] = RegionGroup(box, _affine_polygons(near.polygons, near.extent, extent))
     return out
 
 
@@ -440,10 +475,14 @@ def support_box(group: RegionGroup, frame_w: int, frame_h: int) -> Box:
     )
 
 
-def window_starts(frames: int) -> list[int]:
+def window_hop(less_overlap: bool) -> int:
+    return LESS_OVERLAP_WINDOW_HOP if less_overlap else WINDOW_HOP
+
+
+def window_starts(frames: int, window_hop: int) -> list[int]:
     starts = [0]
     while starts[-1] + WINDOW_FRAMES < frames:
-        starts.append(starts[-1] + WINDOW_HOP)
+        starts.append(starts[-1] + window_hop)
     return starts
 
 
@@ -455,7 +494,14 @@ def track_canvas(camera: Sequence[CropFrame], *, large_canvas: bool) -> int:
 
 
 def plan_track(
-    track: Track, *, lead: tuple[int, int], first_index: int, frame_w: int, frame_h: int, large_canvas: bool
+    track: Track,
+    *,
+    lead: tuple[int, int],
+    first_index: int,
+    frame_w: int,
+    frame_h: int,
+    large_canvas: bool,
+    window_hop: int,
 ) -> TrackPlan:
     lead_in, lead_out = lead
     own = list(filled_frames(track).values())
@@ -475,7 +521,7 @@ def plan_track(
             real_frames=min(WINDOW_FRAMES, len(polygons) - local),
             crops=tuple(camera[local : local + WINDOW_FRAMES]),
         )
-        for offset, local in enumerate(window_starts(len(polygons)))
+        for offset, local in enumerate(window_starts(len(polygons), window_hop))
     )
     return TrackPlan(
         track_id=track.track_id,
@@ -483,6 +529,7 @@ def plan_track(
         polygons=tuple(polygons),
         presence=handover_presence(len(own), lead_in, lead_out),
         windows=windows,
+        window_hop=window_hop,
     )
 
 
@@ -493,6 +540,7 @@ def plan_video(
     frame_w: int,
     frame_h: int,
     large_canvas: bool,
+    window_hop: int,
 ) -> list[TrackPlan]:
     """Every mosaic track of a video with its windows, in window-index order."""
     groups = [group_regions(regions) for regions in regions_per_frame]
@@ -512,6 +560,7 @@ def plan_video(
             frame_w=frame_w,
             frame_h=frame_h,
             large_canvas=large_canvas,
+            window_hop=window_hop,
         )
         plans.append(plan)
     return plans
@@ -529,11 +578,23 @@ def crossfade_weights(windows: Sequence[Window]) -> list[np.ndarray]:
 
 
 LATENT_FRAMES = 1 + (WINDOW_FRAMES - 1) // TEMPORAL_SCALE
-SHARED_LATENT_SHIFT = WINDOW_HOP // TEMPORAL_SCALE
-# Window k's latents 12..15 encode the same pixel frames as window k+1's latents 1..4.
-LEFT_SHARED_LATENTS = range(SHARED_LATENT_SHIFT + 1, LATENT_FRAMES)
-RIGHT_SHARED_LATENTS = range(1, LATENT_FRAMES - SHARED_LATENT_SHIFT)
-FUSION_RAMP = tuple((i + 1) / (len(LEFT_SHARED_LATENTS) + 1) for i in range(len(LEFT_SHARED_LATENTS)))
+
+
+@dataclass(frozen=True)
+class SharedLatents:
+    """Window k's latents ``left`` encode the same pixel frames as window k+1's latents
+    ``right`` (12..15 and 1..4 at hop 88); ``ramp`` is the later window's fusion weight on each."""
+
+    left: range
+    right: range
+    ramp: tuple[float, ...]
+
+
+def shared_latents(window_hop: int) -> SharedLatents:
+    shift = window_hop // TEMPORAL_SCALE
+    left = range(shift + 1, LATENT_FRAMES)
+    ramp = tuple((i + 1) / (len(left) + 1) for i in range(len(left)))
+    return SharedLatents(left, range(1, LATENT_FRAMES - shift), ramp)
 
 
 def track_polygons(track: Track) -> list[tuple[Polygon, ...]]:

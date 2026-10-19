@@ -4,7 +4,7 @@
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna
 
-Jasna 修复 JAV 视频和图片中的马赛克。Jasna 免费，提供简单的应用和命令行，在你的 GPU
+Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应用和命令行，在你的 GPU
 上运行。
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
@@ -52,7 +52,8 @@ Jasna 修复 JAV 视频和图片中的马赛克。Jasna 免费，提供简单的
   中需要计算能力 7.5 或更高。
 - AMD：ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI）。
   Windows 上需要 AMD Adrenalin 驱动 26.8.1 或更新。二次修复和 LTX 仅限 NVIDIA。
-- 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs 或 XFS。不支持网络磁盘。
+- 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
+  固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
 - LTX 需要 NVIDIA RTX GPU，至少 8 GB 显存和 16 GB 内存。见
   [LTX 需要什么](docs/zh/models.md#ltx-需要什么)。
 - NVIDIA **GTX 16 系列 / RTX 20 系列或更新**的 GPU。GTX 10 系列及更旧的显卡（GTX 1050/1060/1070/1080）无法使用。不确定自己的显卡？请查看 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus) — 需要计算能力 7.5 或更高。
@@ -154,6 +155,13 @@ Jasna 的公开应用程序源代码采用 AGPL-3.0。模型和捆绑依赖项�
 
 一个许可证码可用于 **3 台电脑或云工作区**。激活后，Jasna 可以离线使用。租用的 GPU：
 见[云 GPU](docs/zh/cloud.md)。
+
+什么算新电脑：Windows 上是更换主板；Linux 上是重新安装 Linux。每种情况都会占用
+3 个名额中的 1 个。重装 Windows 或更换显卡、硬盘、内存不会占用新名额：用同一个
+许可证码重新激活即可。少数 Windows 电脑的主板没有真正的 ID，在这些电脑上更换
+系统盘也算新电脑。
+
+Jasna 0.10 的邮箱和密钥已不能使用，请向购买的地方申请新的许可证码。
 
 ## 高级
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Launchers of the INT8 attention vendored from comfy-kitchen 0.2.36 (see NOTICE), with the
+// Launchers of the INT8 attention vendored from comfy-kitchen 0.2.38 (see NOTICE), with the
 // signatures of its CUDA extension's launchers. Only bf16 inputs and outputs and unmasked
 // attention are compiled; any other dtype code or a mask throws.
 #pragma once

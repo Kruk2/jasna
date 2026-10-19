@@ -65,7 +65,7 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
     runtime.unload_encoder()
     transformer = runtime.load_transformer()
     steps = []
-    assert transformer.denoise_chain([latent], [43], steps.append) == [latent]
+    assert transformer.denoise_chain([latent], [43], 104, steps.append) == [latent]
     assert steps == [8]
     assert len(transformer.conditions) == 8
     assert transformer.blocks == inference.BlockLayout(40, 48)
@@ -80,7 +80,7 @@ def test_protected_runtime_never_loads_models_in_parent(monkeypatch):
         "unload_transformer", "load_decoder", "decode", "unload_decoder",
     ]
     assert requests[3][1] == {"free_bytes": 9 << 30}
-    assert requests[4][1] == {"seeds": [43]}
+    assert requests[4][1] == {"seeds": [43], "window_hop": 104}
     assert requests[7][1] == {"seed": 43, "free_bytes": 123}
 
 
@@ -163,7 +163,7 @@ def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
         def native_vram_bytes(self):
             return 13 << 30
 
-        def denoise_chain(self, references, seeds, advance):
+        def denoise_chain(self, references, seeds, window_hop, advance):
             allocator["peak"] = 5 << 30
             return references
 
@@ -173,7 +173,7 @@ def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
     backend.encoder = lambda pixels: allocator.update(peak=9 << 30) or torch.zeros(1, 128, 16, 16, 16)
     backend.dispatch("encode", {}, [torch.zeros(1, 3, 121, 512, 512, dtype=torch.uint8)], lambda _n: None)
     backend.transformer = Transformer()
-    backend.dispatch("denoise_chain", {"seeds": [1]}, [torch.zeros(1)], lambda _n: None)
+    backend.dispatch("denoise_chain", {"seeds": [1], "window_hop": 88}, [torch.zeros(1)], lambda _n: None)
     backend.dispatch("unload_transformer", {}, [], lambda _n: None)
 
     stats, _ = backend.dispatch("stats", {}, [], lambda _n: None)

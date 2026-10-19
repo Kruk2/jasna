@@ -18,6 +18,7 @@ from jasna.os_utils import (
     check_supported_gpu,
     check_windows_nvidia_sysmem_fallback_policy,
     gpu_check_error,
+    install_on_hard_disk,
 )
 from jasna.session_config import (
     AMD_UPSCALE_ENGINE_ORDER,
@@ -49,6 +50,8 @@ def _session_config_from_args(
     restoration_model_path: Path,
     lut_path: str | None,
 ) -> SessionConfig:
+    from jasna.ltx.plan import window_hop
+
     return SessionConfig(
         device=str(args.device),
         fp16=bool(args.fp16),
@@ -62,6 +65,7 @@ def _session_config_from_args(
         restoration_model_name=CLI_RESTORATION_MODELS[args.restoration_model_name][0],
         restoration_model_path=restoration_model_path,
         ltx_large_canvas=bool(args.ltx_large_canvas),
+        ltx_window_hop=window_hop(bool(args.experimental_ltx_less_overlap)),
         ltx_seed=int(args.ltx_seed),
         ltx_fast=bool(args.ltx_fast),
         ltx_model=CLI_RESTORATION_MODELS[args.restoration_model_name][1],
@@ -265,6 +269,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         action=argparse.BooleanOptionalAction,
         help=CLI_HELP["ltx_large_canvas"],
+    )
+    restoration.add_argument(
+        "--experimental-ltx-less-overlap",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help=CLI_HELP["experimental_ltx_less_overlap"],
     )
     restoration.add_argument(
         "--ltx-seed",
@@ -792,6 +802,10 @@ def _check_system(args: argparse.Namespace) -> None:
         if not sysmem_ok:
             print(f"Warning: CUDA Sysmem Fallback Policy: {sysmem_info}")
 
+    if install_on_hard_disk():
+        print("Warning: Jasna is installed on a hard disk drive (HDD), so it starts and loads models slowly. "
+              "Move the Jasna folder to an SSD.")
+
 
 def _configure_runtime(args: argparse.Namespace) -> None:
     logging.basicConfig(
@@ -1129,7 +1143,9 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
         download_files(directory, missing, lambda done, total: bar.update(done - bar.n), mirror_first=get_locale().current_language == "zh")
 
 
-LTX_ONLY_ARG_DESTS = ("ltx_fast", "ltx_large_canvas", "ltx_seed", "ltx_trial", "ltx_auto_split")
+LTX_ONLY_ARG_DESTS = (
+    "ltx_fast", "ltx_large_canvas", "experimental_ltx_less_overlap", "ltx_seed", "ltx_trial", "ltx_auto_split"
+)
 BASICVSRPP_ONLY_ARG_DESTS = ("compile_basicvsrpp",)
 
 

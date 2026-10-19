@@ -693,22 +693,26 @@ struct PackedU8RowSum {
   float denominator;
 };
 
+// may_be_nan: a bf16-min mask can make the exponent NaN, which needs the full clamp.
+template <bool may_be_nan>
 __device__ __forceinline__ PackedU8RowSum
 pack_scaled_exp2_u8x4(const int32_t a, const int32_t b, const int32_t c,
                       const int32_t d, const float scale,
                       const float negative_m) {
   const float probability_a =
-      math::ptx_exp2(fmaf(__int2float_rz(a), scale, negative_m));
+      math::ptx_exp2(fmaf(math::i2f_exact(a), scale, negative_m));
   const float probability_b =
-      math::ptx_exp2(fmaf(__int2float_rz(b), scale, negative_m));
+      math::ptx_exp2(fmaf(math::i2f_exact(b), scale, negative_m));
   const float probability_c =
-      math::ptx_exp2(fmaf(__int2float_rz(c), scale, negative_m));
+      math::ptx_exp2(fmaf(math::i2f_exact(c), scale, negative_m));
   const float probability_d =
-      math::ptx_exp2(fmaf(__int2float_rz(d), scale, negative_m));
-  const uint32_t probabilities = mma::pack_u8x4(
-      probability_a, probability_b, probability_c, probability_d);
+      math::ptx_exp2(fmaf(math::i2f_exact(d), scale, negative_m));
+  const uint32_t probabilities =
+      may_be_nan ? mma::pack_u8x4_exact(probability_a, probability_b, probability_c, probability_d)
+                 : mma::pack_u8x4_exact_nonneg(probability_a, probability_b, probability_c,
+                                               probability_d);
   const uint32_t denominator = __dp4a(probabilities, 0x01010101u, 0u);
-  return {probabilities, __uint2float_rn(denominator)};
+  return {probabilities, math::i2f_exact(static_cast<int32_t>(denominator))};
 }
 
 template <uint32_t num_tiles_q, uint32_t num_tiles_k,
@@ -755,11 +759,11 @@ __device__ __forceinline__ void update_mdo_i32_u8(
       const float negative_m = add_bias ? tile_bias - tile_m : -tile_m;
 #pragma unroll
       for (uint32_t fk = 0; fk < num_tiles_k / 2; fk++) {
-        const PackedU8RowSum probabilities_0 = pack_scaled_exp2_u8x4(
+        const PackedU8RowSum probabilities_0 = pack_scaled_exp2_u8x4<add_bias>(
             RS[fq][fk * 2][k * 2], RS[fq][fk * 2][k * 2 + 1],
             RS[fq][fk * 2][k * 2 + 4], RS[fq][fk * 2][k * 2 + 5],
             sm_scale, negative_m);
-        const PackedU8RowSum probabilities_1 = pack_scaled_exp2_u8x4(
+        const PackedU8RowSum probabilities_1 = pack_scaled_exp2_u8x4<add_bias>(
             RS[fq][fk * 2 + 1][k * 2],
             RS[fq][fk * 2 + 1][k * 2 + 1],
             RS[fq][fk * 2 + 1][k * 2 + 4],
@@ -786,8 +790,8 @@ pack_exp2_u8x4(const float a, const float b, const float c,
   const float pb = math::ptx_exp2(b + negative_m);
   const float pc = math::ptx_exp2(c + negative_m);
   const float pd = math::ptx_exp2(d + negative_m);
-  const uint32_t packed = mma::pack_u8x4(pa, pb, pc, pd);
-  return {packed, __uint2float_rn(__dp4a(packed, 0x01010101u, 0u))};
+  const uint32_t packed = mma::pack_u8x4_exact(pa, pb, pc, pd);
+  return {packed, math::i2f_exact(static_cast<int32_t>(__dp4a(packed, 0x01010101u, 0u)))};
 }
 
 template <uint32_t num_tiles_q, uint32_t num_tiles_k,
@@ -861,16 +865,16 @@ RS_to_u8(T RS[][num_tiles_k][8], uint32_t RS_u8[][num_tiles_k / 2][4]) {
 #pragma unroll
     for (uint32_t fk = 0; fk < num_tiles_k / 2; fk++) {
       RS_u8[fq][fk][0] =
-          mma::pack_u8x4(RS[fq][fk * 2][0], RS[fq][fk * 2][1],
+          mma::pack_u8x4_exact(RS[fq][fk * 2][0], RS[fq][fk * 2][1],
                          RS[fq][fk * 2][4], RS[fq][fk * 2][5]);
       RS_u8[fq][fk][1] =
-          mma::pack_u8x4(RS[fq][fk * 2][2], RS[fq][fk * 2][3],
+          mma::pack_u8x4_exact(RS[fq][fk * 2][2], RS[fq][fk * 2][3],
                          RS[fq][fk * 2][6], RS[fq][fk * 2][7]);
       RS_u8[fq][fk][2] =
-          mma::pack_u8x4(RS[fq][fk * 2 + 1][0], RS[fq][fk * 2 + 1][1],
+          mma::pack_u8x4_exact(RS[fq][fk * 2 + 1][0], RS[fq][fk * 2 + 1][1],
                          RS[fq][fk * 2 + 1][4], RS[fq][fk * 2 + 1][5]);
       RS_u8[fq][fk][3] =
-          mma::pack_u8x4(RS[fq][fk * 2 + 1][2], RS[fq][fk * 2 + 1][3],
+          mma::pack_u8x4_exact(RS[fq][fk * 2 + 1][2], RS[fq][fk * 2 + 1][3],
                          RS[fq][fk * 2 + 1][6], RS[fq][fk * 2 + 1][7]);
     }
   }
@@ -1168,7 +1172,7 @@ compute_int8_sv_pipelined_n8(const smem_t<swizzle_mode, stride> &smem_V,
 #pragma unroll
     for (uint32_t k = 0; k < 4; ++k) {
       float &output = RO[0][frag / 2][(frag % 2) * 4 + k];
-      output = fmaf(__int2float_rn(partial[k]),
+      output = fmaf(math::i2f_exact(partial[k]),
                     __int_as_float(RS_scale[0][0][k / 2]), output);
     }
   };
@@ -1228,7 +1232,7 @@ compute_int8_sv(const smem_t<swizzle_mode, stride> &smem_V,
       }
 #pragma unroll
       for (uint32_t k = 0; k < 8; k++) {
-        RO[fq][fv][k] = fmaf(__int2float_rn(partial[k]),
+        RO[fq][fv][k] = fmaf(math::i2f_exact(partial[k]),
                               __int_as_float(RS_scale[fq][0][(k % 4) / 2]),
                               RO[fq][fv][k]);
       }

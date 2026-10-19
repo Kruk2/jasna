@@ -70,6 +70,10 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
 LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。
 
+使用 ESET？如果 LTX 启动不了，并且消息里提到 `ebehmonl.dll` 或 `ebehmoni.dll`，
+请在 ESET 的深度行为检查（Deep Behavioral Inspection）排除项里加入 Jasna
+文件夹。把新版 Jasna 放到新文件夹后，需要再加一次。
+
 ### 手动下载 LTX
 
 如果在 Jasna 里下载一直失败，可以用浏览器从
@@ -98,6 +102,8 @@ LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时�
 - **大马赛克更清晰**：大马赛克（特写、4K）细节更多，这部分约慢 3 倍。
   需要约 12 GB 空闲显存（区间编辑器中的区间需要 16 GB 显卡）；否则 Jasna 会
   按普通方式修复它们。CLI：`--ltx-large-canvas`。
+- **减少重叠（实验性，更快）**：默认开启，马赛克持续超过 4 秒的场景约快 13%。关闭后使用重叠更多的
+  旧模式。CLI：`--no-experimental-ltx-less-overlap`。
 - **种子**：换一个种子，结果会略有不同；同一个种子得到同样的结果。
   CLI：`--ltx-seed 7`。
 - **试用模式（速度测试）**：不需要模型和许可证，以全速运行 LTX，让你看看它在
@@ -136,7 +142,7 @@ Jasna 把每个马赛克修复成一张 256x256 的图。在大马赛克、特�
 
 仅限 NVIDIA。
 
-- **UNet 4x**（支持者专享）：在 JAV 上训练，质量接近 TVAI `iris-2`，比 TVAI 快。见
+- **UNet 4x**（支持者专享）：质量接近 TVAI `iris-2`，比 TVAI 快。见
   [SLS Discord 上的示例](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260)
   和[支持本项目](../../README.zh.md#支持本项目)。
 - **RTX Super Res**（免费）：非常快，无需安装任何东西。质量尚可。部分视频

@@ -49,6 +49,11 @@ _DECODE_BACKENDS = ("auto", "vali", "pyav-hw", "pyav-sw")
 _NVDEC_DECODER_OVERRIDES = {"av1": "av1"}
 _NVDEC_MIN_CODED_SIZE = {"av1": (128, 128)}
 
+# VALI hands VC-1 to NVIDIA's own parser, which drops every frame before the
+# first keyframe and, outside ASF, replaces missing pts with a 30 fps count
+# from 0. FFmpeg's VC-1 decoder with the NVDEC hwaccel keeps both.
+_CODECS_SKIPPING_VALI = frozenset({"vc1"})
+
 
 class VideoDecodeError(RuntimeError):
     pass
@@ -414,7 +419,9 @@ class VideoReader:
     def __enter__(self):
         current_stream(self.device)
         backend = _decode_backend()
-        if backend in ("auto", "vali"):
+        if backend == "vali" or (
+            backend == "auto" and self.metadata.codec_name not in _CODECS_SKIPPING_VALI
+        ):
             if self.vendor is AcceleratorVendor.NVIDIA:
                 try:
                     self._vali_source = _ValiFrameSource(
@@ -444,9 +451,11 @@ class VideoReader:
         self._software_only = software_only
         try:
             if not software_only and self.vendor is AcceleratorVendor.NVIDIA:
-                self.container = av.open(self.file, hwaccel=_cuda_hwaccel(self.device))
+                self.container = av.open(
+                    self.file, hwaccel=_cuda_hwaccel(self.device), metadata_errors="replace"
+                )
             else:
-                self.container = av.open(self.file)
+                self.container = av.open(self.file, metadata_errors="replace")
             self.video_stream = self.container.streams.video[0]
         except av.FFmpegError as e:
             raise VideoDecodeError(f"Failed to open {self.file}: {e}") from e
@@ -651,12 +660,12 @@ class VideoReader:
         )
 
     def _decoded_frames(self, seek_ts: float | None):
-        start = resolve_video_start_pts(
-            self.video_stream.start_time,
-            self.metadata.start_pts,
-        )
         seek_target = None
         if seek_ts is not None:
+            start = resolve_video_start_pts(
+                self.video_stream.start_time,
+                self.metadata.start_pts,
+            )
             seek_target = start + round(seek_ts / self.video_stream.time_base)
             self.container.seek(seek_target, stream=self.video_stream, backward=True)
             if self._decoder_ctx is not None:
@@ -670,6 +679,9 @@ class VideoReader:
                 for packet in demux_video(self.container, self.video_stream):
                     frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
                     for frame in frames:
+                        # VC-1 NVDEC returns an empty frame for a stream starting on a P frame.
+                        if not frame.planes:
+                            continue
                         if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
                             continue
                         target_pts = None
@@ -683,7 +695,15 @@ class VideoReader:
                 restart = True
             if not restart:
                 return
-            rewind_pts = seek_target if seek_target is not None else start
+            rewind_pts = seek_target
+            if rewind_pts is None:
+                # Nothing was seeked: restart from the stream's first frame. Resolved
+                # here rather than up front so a reader without a stream object (unit
+                # tests drive _decoded_frames directly) still works.
+                rewind_pts = resolve_video_start_pts(
+                    self.video_stream.start_time,
+                    self.metadata.start_pts,
+                )
             self.container.seek(rewind_pts, stream=self.video_stream, backward=True)
 
     def _read_group(self, decoded) -> list:

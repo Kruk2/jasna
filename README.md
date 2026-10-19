@@ -6,7 +6,7 @@
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna 
 
-Jasna restores mosaics in JAV videos and images. It is free, has a simple app
+Jasna restores mosaics in videos and images. It is free, has a simple app
 and a command line, and runs on your GPU.
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
@@ -69,8 +69,9 @@ and a command line, and runs on your GPU.
 - AMD: a GPU supported by ROCm (Radeon RX 7000/9000, Radeon 780M/760M/740M,
   Ryzen AI). On Windows, AMD Adrenalin driver 26.8.1 or newer. Secondary
   restoration and LTX are NVIDIA only.
-- Disk format: NTFS on Windows; ext4, Btrfs or XFS on Linux. Network disks
-  are not supported.
+- Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
+  are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
+  models slowly.
 - LTX needs an NVIDIA RTX GPU, at least 8 GB VRAM and 16 GB RAM. See
   [What LTX needs](docs/en/models.md#what-ltx-needs).
 
@@ -159,6 +160,15 @@ GitHub.
 
 One License code works on **3 PCs or cloud workspaces**. After activation,
 Jasna works offline. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
+
+What counts as a new PC: on Windows, a new motherboard; on Linux, a fresh
+Linux install. Each uses one of your 3 slots. Reinstalling Windows or
+changing the GPU, disk or RAM does not: just activate again with the same
+License code. A few Windows PCs have no real motherboard ID; on those, a new
+system disk also counts as a new PC.
+
+Have an email and key from Jasna 0.10? They no longer work. Get a new License
+code from where you bought it.
 
 ## Advanced
 

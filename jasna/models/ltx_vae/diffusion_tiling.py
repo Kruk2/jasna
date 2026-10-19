@@ -78,7 +78,9 @@ def recommended_decode_tiling_config(
 
     Enumerates legal tile sizes, drops those whose peak-bytes estimate exceeds
     ``free - max(model, 1 GiB) - 1 GiB - stage4_feature``, and picks the one with the
-    least overlap recompute (then the largest volume).
+    least overlap recompute (then the largest volume). When nothing fits, it tries again
+    without the model term: a ``free_bytes`` read after the decoder loaded already excludes
+    its weights.
     """
     overlap_t, overlap_hw = recommended_pixel_overlaps(tile_halos, pixel_scale)
 
@@ -100,7 +102,6 @@ def recommended_decode_tiling_config(
         stage4_channels=stage4_channels,
         natten_trailing_pad_latent_frames=natten_trailing_pad_latent_frames,
     )
-    usable = max(0, free_bytes - model_cost - _BUDGET_SAFETY_BYTES - s4_feat_bytes)
     s5_bytes_per_token = max(1.0, float(stage5_channels) * float(_ELEMENT_SIZE) * _STAGE5_MEM_COEF)
     acc_bytes_per_pixel = out_channels * _ELEMENT_SIZE
 
@@ -108,20 +109,27 @@ def recommended_decode_tiling_config(
     h_cands = _axis_candidates(height, overlap_hw, min_h_px, step_h)
     w_cands = _axis_candidates(width, overlap_hw, min_w_px, step_w)
 
-    scored: list[tuple[float, int, int, int, int, int]] = []
-    for tile_t, n_t in t_cands:
-        # Current group buffer + still-live emit/stub during temporal handoff.
-        acc_bytes = 2 * tile_t * height * width * acc_bytes_per_pixel
-        if acc_bytes >= usable:
-            continue
-        max_s5_tokens = int((usable - acc_bytes) // s5_bytes_per_token)
-        for tile_h, n_h in h_cands:
-            for tile_w, n_w in w_cands:
-                if stage5_tokens_for_pixel_tile(tile_t, tile_h, tile_w, patch_size=patch_size) > max_s5_tokens:
-                    continue
-                waste = (n_t * n_h * n_w * tile_t * tile_h * tile_w) / max(1, num_frames * height * width)
-                scored.append((waste, -tile_t * tile_h * tile_w, n_t * n_h * n_w, tile_t, tile_h, tile_w))
+    def tiles_fitting(usable: int) -> list[tuple[float, int, int, int, int, int]]:
+        scored = []
+        for tile_t, n_t in t_cands:
+            # Current group buffer + still-live emit/stub during temporal handoff.
+            acc_bytes = 2 * tile_t * height * width * acc_bytes_per_pixel
+            if acc_bytes >= usable:
+                continue
+            max_s5_tokens = int((usable - acc_bytes) // s5_bytes_per_token)
+            for tile_h, n_h in h_cands:
+                for tile_w, n_w in w_cands:
+                    if stage5_tokens_for_pixel_tile(tile_t, tile_h, tile_w, patch_size=patch_size) > max_s5_tokens:
+                        continue
+                    waste = (n_t * n_h * n_w * tile_t * tile_h * tile_w) / max(1, num_frames * height * width)
+                    scored.append((waste, -tile_t * tile_h * tile_w, n_t * n_h * n_w, tile_t, tile_h, tile_w))
+        return scored
 
+    usable = max(0, free_bytes - model_cost - _BUDGET_SAFETY_BYTES - s4_feat_bytes)
+    scored = tiles_fitting(usable)
+    if not scored:
+        usable = max(0, free_bytes - _BUDGET_SAFETY_BYTES - s4_feat_bytes)
+        scored = tiles_fitting(usable)
     if not scored:
         raise ValueError(
             "Cannot fit a DiffVAE decode tile under the memory budget: "

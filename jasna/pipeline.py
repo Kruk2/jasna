@@ -126,6 +126,7 @@ class Pipeline:
         self.ltx_files = session.ltx_files
         self.restoration_model_name = config.restoration_model_name
         self.ltx_large_canvas = config.ltx_large_canvas
+        self.ltx_window_hop = config.ltx_window_hop
         self.ltx_seed = config.ltx_seed
         self.disable_progress = config.disable_progress
         self.progress_callback = progress_callback
@@ -350,6 +351,7 @@ class Pipeline:
                 frame_w=int(metadata.video_width),
                 batch_size=self.batch_size,
                 large_canvas=self.ltx_large_canvas,
+                window_hop=self.ltx_window_hop,
                 seed=self.ltx_seed,
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
@@ -382,6 +384,7 @@ class Pipeline:
             large_canvas=segment_large_canvas(
                 self.ltx_large_canvas, torch.cuda.get_device_properties(self.device).total_memory
             ),
+            window_hop=self.ltx_window_hop,
             budget=segment_decode_budget,
             budget_name="segment",
             device=self.device,
@@ -428,6 +431,7 @@ class Pipeline:
             frames=frames,
             fps=metadata.video_fps,
             megapixels=metadata.video_height * metadata.video_width / 1e6,
+            window_hop=self.ltx_window_hop,
         )
 
     def _run_ltx_spans(

@@ -267,6 +267,7 @@ EN = {
         "ltx_seed": "Seed",
         "ltx_fast": "Fast mode",
         "ltx_large_canvas": "Sharper large mosaics",
+        "ltx_less_overlap": "Less overlap (experimental, faster)",
         "ltx_auto_split": "LTX only for big mosaics",
         "ltx_trial": "Trial mode (speed test)",
         "ltx_trial_notice": "Trial mode: videos won't be restored.",
@@ -523,6 +524,7 @@ EN = {
         "tip_ltx_new_seed": "Random seed",
         "tip_ltx_fast": "About 1.4x faster, slightly less detail.\nRTX 50-series only.",
         "tip_ltx_large_canvas": "More detail on large mosaics, about 3x slower on those.\nNeeds 12 GB of free VRAM.",
+        "tip_ltx_less_overlap": "About 13% faster when a mosaic stays on screen for more than 4 seconds.\nTurn it off for the older mode with more overlap.",
         "tip_ltx_auto_split": "Restores big mosaics with LTX and smaller ones with the faster BasicVSR++. A mosaic is big when its longest side is at least this share of the video height. Parts without mosaics are copied.\nRanges set in the Segment Editor are used as they are.",
         "tip_ltx_trial": "Runs LTX without the model files to test speed.\nOutput is not restored.",
         "tip_model_basicvsrpp": "Default model. Fast and works well on most videos.",
@@ -575,6 +577,7 @@ EN = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk is running",
         "windhawk_warning_body": "Windhawk is loaded into Jasna, so the LTX model will fail with \"Access is denied\". Exit Windhawk, or add jasna.exe to its excluded processes, then restart Jasna.",
+        "hard_disk_warning": "Jasna is installed on a hard disk drive (HDD), so it starts and loads models slowly. Move the Jasna folder to an SSD.",
         "engine_first_run_title": "First run may be slow",
         "engine_first_run_body": "Jasna has to prepare the models for your GPU. This happens only on the first run and can take 15-60 minutes.\n\nClose all other apps (browsers, games, etc.) and don't use the PC meanwhile. Jasna may look frozen — don't close it.\n\nThe result is saved and used on every later run.",
         "engine_first_run_missing": "Missing engines:",
@@ -584,7 +587,7 @@ EN = {
         # About dialog
         "dialog_about_title": "About Jasna",
         "dialog_about_version": "Version {version}",
-        "dialog_about_description": "JAV mosaic restoration tool",
+        "dialog_about_description": "Mosaic restoration tool",
         "dialog_about_credit": "Inspired by Lada",
         "btn_close": "Close",
 

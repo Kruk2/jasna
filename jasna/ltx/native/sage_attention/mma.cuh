@@ -785,6 +785,38 @@ __device__ __forceinline__ uint32_t pack_u8x4(float a, float b, float c,
   return packed;
 }
 
+/*! \brief pack_u8x4 off the XU pipe below sm_89, same bytes for every input.
+ *
+ * The clamp saturates (and maps NaN to 0, like cvt.rni); adding 2^23 rounds to nearest even
+ * into the low byte. sm_89+ keeps pack_u8x4.
+ */
+__device__ __forceinline__ uint32_t pack_u8x4_exact(float a, float b, float c,
+                                                    float d) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 890
+  const uint32_t qa = __float_as_uint(fminf(fmaxf(a, 0.f), 255.f) + 8388608.0f);
+  const uint32_t qb = __float_as_uint(fminf(fmaxf(b, 0.f), 255.f) + 8388608.0f);
+  const uint32_t qc = __float_as_uint(fminf(fmaxf(c, 0.f), 255.f) + 8388608.0f);
+  const uint32_t qd = __float_as_uint(fminf(fmaxf(d, 0.f), 255.f) + 8388608.0f);
+  return __byte_perm(__byte_perm(qa, qb, 0x0040), __byte_perm(qc, qd, 0x0040), 0x5410);
+#else
+  return pack_u8x4(a, b, c, d);
+#endif
+}
+
+/*! \brief pack_u8x4_exact for inputs >= 0 and not NaN: no clamp at 0. */
+__device__ __forceinline__ uint32_t pack_u8x4_exact_nonneg(float a, float b, float c,
+                                                           float d) {
+#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ < 890
+  const uint32_t qa = __float_as_uint(fminf(a, 255.f) + 8388608.0f);
+  const uint32_t qb = __float_as_uint(fminf(b, 255.f) + 8388608.0f);
+  const uint32_t qc = __float_as_uint(fminf(c, 255.f) + 8388608.0f);
+  const uint32_t qd = __float_as_uint(fminf(d, 255.f) + 8388608.0f);
+  return __byte_perm(__byte_perm(qa, qb, 0x0040), __byte_perm(qc, qd, 0x0040), 0x5410);
+#else
+  return pack_u8x4(a, b, c, d);
+#endif
+}
+
 /*!
  * \brief Use mma instructions to compute rowsum.
  */

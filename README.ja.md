@@ -4,7 +4,7 @@
 
 # <img width="32" src="https://github.com/Kruk2/jasna/blob/main/assets/jasna-logo.png?raw=true" /> Jasna 
 
-Jasna は JAV の動画と画像のモザイクを復元します。無料で、シンプルなアプリと
+Jasna は動画と画像のモザイクを復元します。無料で、シンプルなアプリと
 コマンドラインがあり、GPU で動きます。
 
 <img width="1200" height="907" alt="image" src="https://github.com/user-attachments/assets/d59a914b-482d-4f37-ae72-5c59eb5dc9bb" />
@@ -55,8 +55,9 @@ Jasna は JAV の動画と画像のモザイクを復元します。無料で、
 - AMD: ROCm 対応 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、
   Ryzen AI）。Windows では AMD Adrenalin ドライバー 26.8.1 以降。二次復元と
   LTX は NVIDIA のみです。
-- ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS。ネットワーク
-  ディスクは非対応です。
+- ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS、ZFS。ネットワーク
+  ディスクは非対応です。SSD を使ってください。ハードディスク（HDD）では起動と
+  モデルの読み込みが遅くなります。
 - LTX には NVIDIA RTX GPU、8 GB 以上の VRAM、16 GB 以上の RAM が必要です。
   [LTX に必要なもの](docs/ja/models.md#ltx-に必要なもの)をご覧ください。
 - NVIDIA の **GTX 16 シリーズ / RTX 20 シリーズ以降**の GPU。GTX 10 シリーズ以前のカード（GTX 1050/1060/1070/1080）では動作しません。自分の GPU が対応か分からない場合は、NVIDIA の [GPU 一覧](https://developer.nvidia.com/cuda/gpus)で確認してください — コンピュート能力 7.5 以上が必要です。
@@ -145,6 +146,15 @@ GitHub からのみダウンロードしてください。
 1 つのライセンスコードは **3 台の PC またはクラウドワークスペース**で使えます。
 有効化した後は、Jasna はオフラインで動きます。レンタル GPU については
 [クラウド GPU](docs/ja/cloud.md) をご覧ください。
+
+新しい PC として数えられるのは、Windows ではマザーボードの交換、Linux では
+Linux の再インストールです。どちらも 3 つの枠のうち 1 つを使います。Windows の
+再インストールや GPU、ディスク、メモリの交換では枠を使いません。同じ
+ライセンスコードでもう一度有効化してください。ただし、マザーボードに正しい ID が
+ない一部の Windows PC では、システムディスクの交換も新しい PC として数えられます。
+
+Jasna 0.10 のメールアドレスとキーはもう使えません。購入先から新しい
+ライセンスコードをもらってください。
 
 ## 上級者向け
 

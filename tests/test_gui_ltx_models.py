@@ -403,7 +403,7 @@ def test_every_model_option_has_a_tooltip(tk_root, tmp_path, monkeypatch) -> Non
     assert section._install_status in tips[t("tip_ltx_download")]
     assert section._new_seed_btn in tips[t("tip_ltx_new_seed")]
     assert section._download_bar in tips[t("tip_ltx_download")]
-    for key in ("ltx_seed", "ltx_fast", "ltx_large_canvas", "ltx_trial"):
+    for key in ("ltx_seed", "ltx_fast", "ltx_large_canvas", "ltx_less_overlap", "ltx_trial"):
         assert section._widgets[key] in tips[t(f"tip_{key}")]
 
 

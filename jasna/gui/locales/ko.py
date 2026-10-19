@@ -267,6 +267,7 @@ KO = {
         "ltx_seed": "시드",
         "ltx_fast": "빠른 모드",
         "ltx_large_canvas": "큰 모자이크 더 선명하게",
+        "ltx_less_overlap": "겹침 줄이기 (실험적, 더 빠름)",
         "ltx_auto_split": "큰 모자이크만 LTX",
         "ltx_trial": "체험 모드(속도 테스트)",
         "ltx_trial_notice": "체험 모드: 비디오가 복원되지 않습니다.",
@@ -523,6 +524,7 @@ KO = {
         "tip_ltx_new_seed": "무작위 시드",
         "tip_ltx_fast": "약 1.4배 빠르고 디테일이 조금 줄어듭니다.\nRTX 50 시리즈 전용.",
         "tip_ltx_large_canvas": "큰 모자이크가 더 세밀해지고, 해당 부분은 약 3배 느려집니다.\n여유 VRAM 12 GB가 필요합니다.",
+        "tip_ltx_less_overlap": "모자이크가 4초 넘게 이어지는 장면에서 약 13% 빨라집니다.\n끄면 겹침이 더 많은 이전 방식을 사용합니다.",
         "tip_ltx_auto_split": "큰 모자이크는 LTX로, 작은 모자이크는 더 빠른 BasicVSR++로 복원합니다. 가장 긴 변이 비디오 높이의 이 비율 이상이면 큰 모자이크입니다. 모자이크가 없는 부분은 그대로 복사됩니다.\n구간 편집기에서 정한 구간은 그대로 사용됩니다.",
         "tip_ltx_trial": "모델 파일 없이 LTX를 실행해 속도를 테스트합니다.\n출력은 복원되지 않습니다.",
         "tip_model_basicvsrpp": "기본 모델입니다. 빠르고 대부분의 비디오에 잘 맞습니다.",
@@ -574,6 +576,7 @@ KO = {
         # Engine compilation / first run warnings
         "windhawk_warning_title": "Windhawk가 실행 중입니다",
         "windhawk_warning_body": "Windhawk가 Jasna에 로드되어 LTX 모델이 \"액세스가 거부되었습니다\" 오류로 실패합니다. Windhawk를 종료하거나 jasna.exe를 제외 프로세스에 추가한 뒤 Jasna를 다시 시작하세요.",
+        "hard_disk_warning": "Jasna가 하드 디스크(HDD)에 설치되어 있어 시작과 모델 로딩이 느립니다. Jasna 폴더를 SSD로 옮기세요.",
         "engine_first_run_title": "첫 실행은 느릴 수 있습니다",
         "engine_first_run_body": "Jasna가 GPU에 맞게 모델을 준비해야 합니다. 첫 실행 때만 진행되며 15-60분이 걸릴 수 있습니다.\n\n다른 모든 앱(브라우저, 게임 등)을 닫고 그동안 PC를 사용하지 마세요. Jasna가 멈춘 것처럼 보일 수 있지만 닫지 마세요.\n\n결과는 저장되어 이후 모든 실행에 사용됩니다.",
         "engine_first_run_missing": "누락된 엔진:",
@@ -583,7 +586,7 @@ KO = {
         # About dialog
         "dialog_about_title": "Jasna 정보",
         "dialog_about_version": "버전 {version}",
-        "dialog_about_description": "JAV 모자이크 복원 도구",
+        "dialog_about_description": "모자이크 복원 도구",
         "dialog_about_credit": "Lada에서 영감을 받음",
         "btn_close": "닫기",
 

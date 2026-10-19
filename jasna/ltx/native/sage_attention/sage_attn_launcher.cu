@@ -76,6 +76,27 @@ void launch_impl(int8_t *q, int8_t *k, int8_t *v, DTypeOut *o, float *q_scale,
   }
 }
 
+// Compute capability (major * 10 + minor), cached per device.
+int current_device_sm() {
+  static int cached[64] = {};
+  int device = 0;
+  cudaError_t error = cudaGetDevice(&device);
+  const bool cacheable = error == cudaSuccess && device >= 0 && device < 64;
+  if (cacheable && cached[device] != 0) return cached[device];
+  int major = 0, minor = 0;
+  if (error == cudaSuccess)
+    error = cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, device);
+  if (error == cudaSuccess)
+    error = cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, device);
+  if (error != cudaSuccess)
+    throw std::runtime_error(std::string("sage_attn device query failed: ") +
+                             cudaGetErrorString(error));
+  if (cacheable) cached[device] = major * 10 + minor;
+  return major * 10 + minor;
+}
+
+bool is_ampere(int sm) { return sm >= 80 && sm < 89; }
+
 } // anonymous namespace
 
 namespace jasna_ltx::sage_attention {
@@ -169,6 +190,14 @@ void launch_sage_attn_kernel(
     LAUNCH(HD, 64, MaskMode::kNone, nv_bfloat16, false);                       \
   } else {                                                                     \
     LAUNCH_CTA(HD, MaskMode::kNone, nv_bfloat16, true);                        \
+  }
+
+  // Ampere: 64-row tiles fit two CTAs per SM, 2-4% faster on a 3080 up to 38k keys. Longer
+  // sequences lose: each CTA re-reads K/V, which costs power (6-22% slower on a 300 W A6000).
+  if (mask == nullptr && head_dim == 128 && cta_k == 128 && kv_len <= 40960 &&
+      is_ampere(current_device_sm())) {
+    LAUNCH_Q(128, 128, MaskMode::kNone, nv_bfloat16, true, 64);
+    return;
   }
 
   // Keep smaller unmasked query tiles limited to Blackwell image shapes.

@@ -47,9 +47,15 @@ class WorkerTransformer:
         self.blocks = BlockLayout(info["resident"], info["count"])
 
     def denoise_chain(
-        self, references: Sequence[torch.Tensor], seeds: Sequence[int], advance: Callable[[int], None]
+        self,
+        references: Sequence[torch.Tensor],
+        seeds: Sequence[int],
+        window_hop: int,
+        advance: Callable[[int], None],
     ) -> list[torch.Tensor]:
-        _, tensors = self._runtime.request("denoise_chain", {"seeds": list(seeds)}, list(references), advance)
+        _, tensors = self._runtime.request(
+            "denoise_chain", {"seeds": list(seeds), "window_hop": window_hop}, list(references), advance
+        )
         return tensors
 
     def close(self) -> None:
@@ -250,7 +256,7 @@ class WorkerBackend:
         elif op == "denoise_chain":
             if self.transformer is None:
                 raise RuntimeError("LTX transformer is not loaded")
-            return {}, self.transformer.denoise_chain(tensors, params["seeds"], advance)
+            return {}, self.transformer.denoise_chain(tensors, params["seeds"], params["window_hop"], advance)
         elif op == "load_decoder":
             if self.decoder is None:
                 self.decoder = load_video_decoder(self.files.vae, self.files.tuned_decoder, self.device)

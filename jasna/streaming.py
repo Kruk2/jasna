@@ -19,6 +19,7 @@ from jasna.media.probe import VideoMetadata
 log = logging.getLogger(__name__)
 
 _FORWARD_SEEK_THRESHOLD = 5
+SEGMENT_WAIT_SECONDS = 30.0
 
 _PAGE_HTML = """\
 <!DOCTYPE html>
@@ -81,7 +82,7 @@ function showPlayer(){
 function startHls(){
   var v=document.getElementById('v');
   if(hls){hls.destroy();hls=null}
-  if(Hls.isSupported()){hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30});hls.loadSource('/stream.m3u8');hls.attachMedia(v)}
+  if(Hls.isSupported()){hls=new Hls({maxBufferLength:10,maxMaxBufferLength:30,fragLoadPolicy:{default:{maxTimeToFirstByteMs:__FIRST_BYTE_MS__,maxLoadTimeMs:120000,timeoutRetry:{maxNumRetry:4,retryDelayMs:0,maxRetryDelayMs:0},errorRetry:{maxNumRetry:6,retryDelayMs:1000,maxRetryDelayMs:8000}}}});hls.loadSource('/stream.m3u8');hls.attachMedia(v)}
   else if(v.canPlayType('application/vnd.apple.mpegurl')){v.src='/stream.m3u8'}}
 async function changeVideo(){
   await fetch('/open',{method:'DELETE'});
@@ -91,7 +92,7 @@ async function changeVideo(){
   document.getElementById('picker').style.display='flex';
   loaded=false}
 </script></body></html>
-"""
+""".replace("__FIRST_BYTE_MS__", str(int((SEGMENT_WAIT_SECONDS + 5) * 1000)))
 
 
 def _generate_vod_playlist(
@@ -223,19 +224,19 @@ class _StreamRequestHandler(SimpleHTTPRequestHandler):
                 return
             self._state.notify_segment_requested(seg_num)
 
-            deadline = time.monotonic() + 30.0
+            deadline = time.monotonic() + SEGMENT_WAIT_SECONDS
             while time.monotonic() < deadline:
                 if not self._state.is_loaded:
-                    self.send_error(404)
-                    return
-                if not self._state.can_wait_for_segment(seg_num, generation, seeking):
                     self.send_error(404)
                     return
                 if self._state.segment_is_ready(seg_path):
                     sz = seg_path.stat().st_size
                     log.debug("[stream-server] serving %s (%d bytes, waited %.1fs)",
-                              seg_name, sz, 30.0 - (deadline - time.monotonic()))
+                              seg_name, sz, SEGMENT_WAIT_SECONDS - (deadline - time.monotonic()))
                     self._serve_file(seg_path)
+                    return
+                if not self._state.can_wait_for_segment(seg_num, generation, seeking):
+                    self.send_error(404)
                     return
                 time.sleep(0.2)
 
@@ -577,20 +578,26 @@ class HlsStreamingServer:
         cancel_event: threading.Event,
     ) -> None:
         with self._demand_lock:
-            if (
-                self._highest_requested_segment >= 0
-                and current_segment > self._highest_requested_segment + max_ahead
-            ):
+            if self._writer_is_ahead_of_player(current_segment, max_ahead):
                 log.debug(
                     "[stream-server] pausing pipeline at segment %d (player at %d, max_ahead=%d)",
                     current_segment, self._highest_requested_segment, max_ahead,
                 )
             while (
-                self._highest_requested_segment >= 0
-                and current_segment > self._highest_requested_segment + max_ahead
+                self._writer_is_ahead_of_player(current_segment, max_ahead)
                 and not cancel_event.is_set()
             ):
                 self._demand_lock.wait(timeout=0.5)
+
+    def _writer_is_ahead_of_player(self, current_segment: int, max_ahead: int) -> bool:
+        # current_segment is a frame-count estimate that drifts ahead of the muxer's
+        # keyframe cuts; pausing before the requested segment is muxed would deadlock.
+        requested = self._highest_requested_segment
+        return (
+            requested >= 0
+            and current_segment > requested + max_ahead
+            and self.segment_is_ready(self.segments_dir / f"seg_{requested:05d}.ts")
+        )
 
     def update_production(self, segment: int) -> None:
         with self._demand_lock:

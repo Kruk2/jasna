@@ -165,7 +165,7 @@ class SegmentPreviewWorker:
                 name=f"segment-keyframes-{self.path.name}",
                 daemon=True,
             ).start()
-            with av.open(str(self.path)) as container:
+            with av.open(str(self.path), metadata_errors="replace") as container:
                 stream = container.streams.video[0]
                 start_pts = resolve_video_start_pts(stream.start_time, metadata.start_pts)
                 if not stream.codec_context.is_hwaccel:

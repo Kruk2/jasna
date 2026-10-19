@@ -6,10 +6,11 @@ The first start after an install or update takes longer. A loading window shows
 the installation check before the main window opens. If the check fails, the
 error stays on screen.
 
-Install Jasna on a local disk (NTFS on Windows; ext4, Btrfs or XFS on Linux),
+Install Jasna on a local disk (NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux),
 in a folder whose path has no Chinese, Japanese, accented or other
 non-English characters. Network disks
-are not supported.
+are not supported. Use an SSD: on a hard disk (HDD) Jasna starts and loads
+models slowly, and it warns you at startup.
 
 ## The queue
 
@@ -120,11 +121,17 @@ Good to know:
 
 - One License code works on **3 PCs or cloud workspaces**. Activating the same
   PC again does not use a new slot. Only the owner can free a slot.
+- A new motherboard (Windows) or a fresh Linux install counts as a new PC
+  and uses a slot. Reinstalling Windows or changing the GPU, disk or RAM
+  does not: just activate again. On a few Windows PCs without a real
+  motherboard ID, a new system disk also counts as a new PC.
 - An Activation key covers only the models you bought.
 - **Activate online** sends only your License code and Machine key. After
   that, Jasna works offline.
 - Key rejected? Check the Machine key and copy the whole Activation key again.
   Keys made for older Jasna versions need a new key from where you got your License code.
+- Have an email and key from Jasna 0.10? That key no longer works. Get a new
+  License code from where you bought it.
 
 License codes come only from
 [Buy Me a Coffee](https://buymeacoffee.com/kruk2),

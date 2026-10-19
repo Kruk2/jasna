@@ -10,6 +10,7 @@ from pathlib import Path
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.media.audio_utils import aac_reencode_args, needs_audio_reencode, source_audio_codec
 from jasna.media.probe import VideoMetadata
 from jasna.os_utils import find_executable, subprocess_no_window_kwargs
 
@@ -17,6 +18,7 @@ log = logging.getLogger(__name__)
 
 _WRITE_QUEUE_SIZE = 16
 _WRITER_STOP_TIMEOUT = 5.0
+_BROWSER_HLS_AUDIO_CODECS = frozenset({'aac', 'mp3'})
 
 
 class StreamingEncodeError(RuntimeError):
@@ -179,6 +181,7 @@ class StreamingEncoder:
                 '-spatial-aq', '1',
                 '-temporal-aq', '1',
                 '-rc-lookahead', '8',
+                '-no-scenecut', '1',
                 '-gpu', str(self._gpu_index),
                 '-g', str(self._gop_size),
                 '-pix_fmt', 'yuv420p',
@@ -189,7 +192,7 @@ class StreamingEncoder:
             cmd += ['-vf', f'setsar={sar.numerator}/{sar.denominator}']
 
         if has_source:
-            cmd += ['-c:a', 'copy']
+            cmd += _browser_audio_args(self.source_video)
 
         if seek_time > 0:
             cmd += ['-output_ts_offset', f'{seek_time:.3f}']
@@ -313,3 +316,13 @@ class StreamingEncoder:
             self._stderr_thread.join(timeout=2.0)
             self._stderr_thread = None
         self._process = None
+
+
+def _browser_audio_args(source_video: str) -> list[str]:
+    codec = source_audio_codec(source_video)
+    if codec is None:
+        return []
+    if needs_audio_reencode(codec, '.ts', _BROWSER_HLS_AUDIO_CODECS):
+        log.info("[stream-enc] re-encoding audio %s -> aac for the browser", codec)
+        return aac_reencode_args(0)
+    return ['-c:a:0', 'copy']

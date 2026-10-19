@@ -80,6 +80,10 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 LTX does not work with VR180 side-by-side videos or streaming. Secondary
 restoration and denoising are turned off with LTX.
 
+Using ESET? If LTX won't start and the message names `ebehmonl.dll` or
+`ebehmoni.dll`, add the Jasna folder to ESET's Deep Behavioral Inspection
+exclusions. Add it again when you put a new Jasna version in a new folder.
+
 ### Downloading LTX yourself
 
 If the download in Jasna keeps failing, get the files in your browser from
@@ -109,6 +113,9 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
   about 3x slower on those. Needs about 12 GB of free VRAM (16 GB cards for
   Segment Editor ranges); otherwise Jasna restores them normally. CLI:
   `--ltx-large-canvas`.
+- **Less overlap (experimental, faster)**: on by default, about 13% faster when a
+  mosaic stays on screen for more than 4 seconds. Turn it off for the older mode with more overlap. CLI:
+  `--no-experimental-ltx-less-overlap`.
 - **Seed**: a different seed gives a slightly different result; the same seed
   gives the same result. CLI: `--ltx-seed 7`.
 - **Trial mode**: runs LTX at full speed without the model or a license, so
@@ -155,8 +162,8 @@ sharper.
 
 NVIDIA only.
 
-- **UNet 4x** (for supporters): trained on JAV, quality close to TVAI `iris-2`, and
-  faster than TVAI. See the
+- **UNet 4x** (for supporters): quality close to TVAI `iris-2`, and faster than
+  TVAI. See the
   [examples on SLS Discord](https://discord.com/channels/1196376491815092265/1199059436199759943/1516497879684874260)
   and [Supporting the project](../../README.md#supporting-the-project).
 - **RTX Super Res** (free): very fast, nothing to install. Quality is

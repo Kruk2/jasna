@@ -7,6 +7,7 @@ import pytest
 import torch
 
 from jasna.ltx import transformer as T
+from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, WINDOW_HOP, shared_latents
 from jasna.ltx.sampler import fuse_overlaps, patchify, unpatchify
 
 
@@ -125,11 +126,24 @@ def test_fuse_overlaps_writes_the_same_mean_to_both_windows():
     left = torch.randn(1, 16 * tokens_per_frame, 4)
     right = torch.randn(1, 16 * tokens_per_frame, 4)
     right_before = right.clone()
-    fuse_overlaps([left, right], tokens_per_frame, [0.0, 0.0, 0.0, 0.0])
+    shared = shared_latents(WINDOW_HOP)
+    fuse_overlaps([left, right], tokens_per_frame, shared, [0.0, 0.0, 0.0, 0.0])
     assert torch.equal(right[:, 2:10], left[:, 24:32])
     assert torch.equal(right[:, 10:], right_before[:, 10:])
-    fuse_overlaps([left, right], tokens_per_frame, [0.2, 0.4, 0.6, 0.8])
+    fuse_overlaps([left, right], tokens_per_frame, shared, shared.ramp)
     assert torch.equal(right[:, 2:10], left[:, 24:32])
+
+
+def test_less_overlap_fuses_two_latent_frames():
+    tokens_per_frame = 2
+    left = torch.randn(1, 16 * tokens_per_frame, 4)
+    right = torch.randn(1, 16 * tokens_per_frame, 4)
+    left_before, right_before = left.clone(), right.clone()
+    shared = shared_latents(LESS_OVERLAP_WINDOW_HOP)
+    fuse_overlaps([left, right], tokens_per_frame, shared, shared.ramp)
+    assert torch.equal(right[:, 2:6], left[:, 28:32])
+    assert torch.equal(right[:, 6:], right_before[:, 6:])
+    assert torch.equal(left[:, :28], left_before[:, :28])
 
 
 def test_fp4_codes_round_half_to_even_and_saturate():
@@ -212,6 +226,18 @@ def test_ltx_refuses_a_device_without_int8_attention():
     pytest.importorskip("comfy_kitchen")
     with pytest.raises(RuntimeError, match="INT8 attention"):
         T.require_kernels(torch.device("cpu"))
+
+
+def test_ltx_names_why_the_int8_attention_extension_did_not_load(monkeypatch):
+    """#510: a Linux container refused LTX without saying why comfy-kitchen's _C failed to load."""
+    comfy_kitchen = pytest.importorskip("comfy_kitchen")
+    from comfy_kitchen.backends import cuda as kitchen_cuda
+
+    monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: False)
+    monkeypatch.setattr(kitchen_cuda, "_EXT_ERROR", "unverified runtime extension")
+    monkeypatch.setattr(torch.version, "hip", None)
+    with pytest.raises(RuntimeError, match=r"did not load \(unverified runtime extension\)\.$"):
+        T.require_kernels(torch.device("cuda"))
 
 
 def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_limit(monkeypatch):

@@ -1,3 +1,6 @@
+import hashlib
+import time
+
 import numpy as np
 import pytest
 import torch
@@ -7,8 +10,7 @@ from jasna.ltx.plan import (
     BLEND_FRAMES,
     LARGE_CANVAS,
     LEAD_IN_FRAMES,
-    LEFT_SHARED_LATENTS,
-    RIGHT_SHARED_LATENTS,
+    LESS_OVERLAP_WINDOW_HOP,
     WINDOW_HOP,
     Region,
     RegionGroup,
@@ -24,6 +26,8 @@ from jasna.ltx.plan import (
     rejoin_across_cover,
     restart_cameras,
     track_polygons,
+    shared_latents,
+    window_hop,
     window_starts,
 )
 from jasna.ltx.regions import trace_region
@@ -86,7 +90,7 @@ def _split_video() -> list[list[Region]]:
 
 
 def test_a_lasting_split_gets_its_own_camera_with_a_handover():
-    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, large_canvas=False)
+    plans = plan_video(_split_video(), set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP)
     assert [(p.start, p.stop) for p in plans] == [(0, 130), (100 - LEAD_IN_FRAMES, 500)]
     piece = plans[1]
     assert len(piece.presence) == len(piece.polygons) == piece.stop - piece.start
@@ -154,23 +158,54 @@ def test_track_polygons_interpolate_gaps():
 
 
 def test_window_starts_cover_with_hop():
-    assert window_starts(1) == [0]
-    assert window_starts(121) == [0]
-    assert window_starts(122) == [0, WINDOW_HOP]
-    assert window_starts(385) == [0, 88, 176, 264]
-    assert window_starts(386) == [0, 88, 176, 264, 352]
+    assert window_starts(1, WINDOW_HOP) == [0]
+    assert window_starts(121, WINDOW_HOP) == [0]
+    assert window_starts(122, WINDOW_HOP) == [0, WINDOW_HOP]
+    assert window_starts(385, WINDOW_HOP) == [0, 88, 176, 264]
+    assert window_starts(386, WINDOW_HOP) == [0, 88, 176, 264, 352]
 
 
-def test_shared_latents_encode_the_same_frames():
+def test_less_overlap_window_starts_step_104():
+    assert window_starts(121, LESS_OVERLAP_WINDOW_HOP) == [0]
+    assert window_starts(122, LESS_OVERLAP_WINDOW_HOP) == [0, 104]
+    assert window_starts(600, LESS_OVERLAP_WINDOW_HOP) == [0, 104, 208, 312, 416, 520]
+
+
+def test_window_hop_from_the_less_overlap_switch():
+    assert (window_hop(False), window_hop(True)) == (88, 104)
+
+
+def test_default_hop_shares_four_latents():
+    shared = shared_latents(WINDOW_HOP)
+    assert (shared.left, shared.right) == (range(12, 16), range(1, 5))
+    assert shared.ramp == (0.2, 0.4, 0.6, 0.8)
+
+
+def test_less_overlap_hop_shares_two_latents():
+    shared = shared_latents(LESS_OVERLAP_WINDOW_HOP)
+    assert (shared.left, shared.right) == (range(14, 16), range(1, 3))
+    assert shared.ramp == pytest.approx((1 / 3, 2 / 3))
+
+
+@pytest.mark.parametrize("hop", [WINDOW_HOP, LESS_OVERLAP_WINDOW_HOP])
+def test_shared_latents_encode_the_same_frames(hop):
     def first_pixel(latent: int) -> int:
         return 0 if latent == 0 else 8 * latent - 7
 
-    for left, right in zip(LEFT_SHARED_LATENTS, RIGHT_SHARED_LATENTS):
-        assert first_pixel(left) == WINDOW_HOP + first_pixel(right)
+    shared = shared_latents(hop)
+    for left, right in zip(shared.left, shared.right, strict=True):
+        assert first_pixel(left) == hop + first_pixel(right)
+
+
+def test_plan_windows_follow_the_hop():
+    regions = [[_square(300, 300, 120)] for _ in range(300)]
+    (plan,) = plan_video(regions, set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=LESS_OVERLAP_WINDOW_HOP)
+    assert [w.start for w in plan.windows] == [0, 104, 208]
+    assert plan.window_hop == LESS_OVERLAP_WINDOW_HOP
 
 
 def test_crossfade_weights_partition_unity():
-    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, large_canvas=True)
+    plans = plan_video([[_square(300 + t, 300, 120)] for t in range(300)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP)
     windows = plans[0].windows
     total = np.zeros(300)
     for window, weight in zip(windows, crossfade_weights(windows)):
@@ -196,9 +231,9 @@ def test_track_camera_contains_support_and_letterboxes():
 
 
 def test_large_crops_use_the_large_canvas():
-    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=True)
+    plans = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=True, window_hop=WINDOW_HOP)
     assert plans[0].windows[0].canvas == LARGE_CANVAS
-    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=False)
+    capped = plan_video([[_square(200, 100, 700)] for _ in range(50)], set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=WINDOW_HOP)
     assert capped[0].windows[0].canvas == PLAN_CANVAS
     assert letterbox((0, 0, 900, 900), LARGE_CANVAS).resize_hw == (LARGE_CANVAS, LARGE_CANVAS)
 
@@ -215,12 +250,75 @@ def test_traced_polygons_are_compact_int32_points():
 
 def test_gap_polygons_map_points_exactly_as_float64_arithmetic():
     polygon = np.array([[3, 7], [250, 9], [101, 333]], dtype=np.int32)
-    source, target = (2.0, 5.0, 260.0, 340.0), (10.5, 3.25, 300.75, 377.0)
-    track = Track(0, {0: RegionGroup(source, (polygon,)), 2: RegionGroup((18.0, 1.5, 340.5, 413.0), (polygon,))})
+    later = np.array([[11, 2], [301, 20], [140, 401]], dtype=np.int32)
+    track = Track(0, {0: RegionGroup((0.0, 0.0, 1.0, 1.0), (polygon,)), 2: RegionGroup((0.0, 0.0, 1.0, 1.0), (later,))})
     (mapped,) = filled_frames(track)[1].polygons
-    box = tuple(a + (b - a) * 0.5 for a, b in zip(source, (18.0, 1.5, 340.5, 413.0)))
-    scale_x = (box[2] - box[0]) / (source[2] - source[0])
-    scale_y = (box[3] - box[1]) / (source[3] - source[1])
-    expected = [[box[0] + (x - source[0]) * scale_x, box[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
+    source = (3.0, 7.0, 250.0, 333.0)
+    extent = tuple(a + (b - a) * 0.5 for a, b in zip(source, (11.0, 2.0, 301.0, 401.0)))
+    scale_x = (extent[2] - extent[0]) / (source[2] - source[0])
+    scale_y = (extent[3] - extent[1]) / (source[3] - source[1])
+    expected = [[extent[0] + (x - source[0]) * scale_x, extent[1] + (y - source[1]) * scale_y] for x, y in polygon.tolist()]
     assert mapped.dtype == np.float64 and mapped.tolist() == expected
 
+
+def _random_video(seed: int, frames: int) -> tuple[list[list[Region]], set[int]]:
+    """Drifting mosaics of a few sizes with dropped detections, size jumps, nested
+    continuations and random scene cuts."""
+    rng = np.random.default_rng(seed)
+    regions: list[list[Region]] = [[] for _ in range(frames)]
+    for _ in range(frames // 60):
+        start = int(rng.integers(0, frames - 10))
+        length = int(rng.integers(5, 400))
+        x, y = rng.uniform(0, 1500), rng.uniform(0, 800)
+        side = float(rng.choice([40.0, 120.0, 400.0]))
+        child = rng.random() < 0.4
+        for f in range(start, min(frames, start + length)):
+            if rng.random() < 0.08:
+                continue
+            x = min(max(x + rng.normal(0, 3), 0.0), 1400.0)
+            y = min(max(y + rng.normal(0, 3), 0.0), 600.0)
+            if rng.random() < 0.01:
+                side = float(min(max(side * rng.choice([0.5, 2.0]), 40.0), 400.0))
+            regions[f].append(_square(round(x), round(y), side))
+            if child and f > start + 30:
+                regions[f].append(_square(round(x + side / 3), round(y + side / 3), side / 6))
+    cuts = {int(c) for c in rng.choice(np.arange(1, frames), size=frames // 400, replace=False)}
+    return regions, cuts
+
+
+def _plan_digest(plans) -> str:
+    digest = hashlib.sha256()
+    for plan in plans:
+        digest.update(repr((plan.track_id, plan.start, plan.window_hop, np.round(plan.presence, 6).tolist())).encode())
+        for polygons in plan.polygons:
+            for polygon in polygons:
+                digest.update(np.round(np.asarray(polygon, dtype=np.float64), 3).tobytes())
+        for w in plan.windows:
+            crops = [(*crop.crop_box, crop.canvas) for crop in w.crops]
+            digest.update(repr((w.index, w.track_id, w.start, w.real_frames, crops)).encode())
+    return digest.hexdigest()
+
+
+def test_plan_video_output_matches_the_recorded_plan():
+    regions, cuts = _random_video(0, 4000)
+    plans = plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
+    assert _plan_digest(plans) == "1099f21ad72e3a86d0a9e3b1e2d94dc4b126535674cfdddf8d70d4c3e12f3e30"
+
+
+def test_plan_video_scales_linearly_with_video_length():
+    frames = 64_000
+    regions = [[_square(100 + f % 50, 100, 200), _square(900, 500, 200)] for f in range(frames)]
+    cuts = set(range(150, frames, 150))
+    started = time.perf_counter()
+    plan_video(regions, cuts, frame_w=1920, frame_h=1080, large_canvas=True, window_hop=window_hop(True))
+    assert time.perf_counter() - started < 15.0
+
+
+def test_gap_fill_keeps_outlines_inside_the_frame_when_boxes_leave_it():
+    outline = np.array([[0, 0], [60, 0], [60, 10], [0, 10]], dtype=np.int32)
+    tall = Region(box=(0.0, -800.0, 100.0, 100.0), polygon=outline)
+    hugging = Region(box=(0.0, -5.0, 100.0, 100.0), polygon=outline)
+    regions = [[tall], [], [], []] + [[hugging] for _ in range(200)]
+    (plan,) = plan_video(regions, set(), frame_w=1280, frame_h=720, large_canvas=False, window_hop=WINDOW_HOP)
+    points = np.concatenate([polygon for polygons in plan.polygons for polygon in polygons])
+    assert points.min() >= 0

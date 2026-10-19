@@ -186,7 +186,7 @@ def test_preset_manager_saves_do_not_overwrite_keys_changed_elsewhere(monkeypatc
 def test_preset_manager_persists_ltx_settings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-    ltx = AppSettings(restoration_model="ltx", ltx_seed=42, ltx_fast=True, ltx_large_canvas=True)
+    ltx = AppSettings(restoration_model="ltx", ltx_seed=42, ltx_fast=True, ltx_large_canvas=True, ltx_less_overlap=True)
 
     assert PresetManager().create_preset("Ltx", ltx)
 

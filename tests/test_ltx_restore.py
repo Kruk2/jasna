@@ -11,7 +11,7 @@ import pytest
 import torch
 
 from jasna.ltx import inference, restore
-from jasna.ltx.plan import Region
+from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
 MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
@@ -72,7 +72,7 @@ class _Transformer:
         self.conditions = [None] * 8
         self.blocks = SimpleNamespace(resident=40, count=48)
 
-    def denoise_chain(self, references, seeds, advance):
+    def denoise_chain(self, references, seeds, window_hop, advance):
         _Transformer.seeds.append(list(seeds))
         for _ in self.conditions:
             advance(len(references))
@@ -147,6 +147,7 @@ def _render(tmp_path):
         frame_w=64,
         batch_size=4,
         large_canvas=False,
+        window_hop=restore.WINDOW_HOP,
         budget=restore.segment_decode_budget,
         budget_name="segment",
         device=torch.device("cpu"),
@@ -201,6 +202,7 @@ def test_a_segment_plans_the_same_wherever_decoding_starts(fakes):
             frame_h=64,
             frame_w=64,
             large_canvas=False,
+            window_hop=restore.WINDOW_HOP,
             bar=_Bar(),
             cancel=threading.Event(),
         )
@@ -262,6 +264,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         frame_w=64,
         batch_size=4,
         large_canvas=False,
+        window_hop=restore.WINDOW_HOP,
         seed=5,
         device=torch.device("cpu"),
         work_dir=tmp_path,
@@ -415,7 +418,7 @@ _RATES = {
     "denoise/fixed": 20.0,
     "denoise/window512": 4.0,
     "compose/fixed": 3.0,
-    "compose/frame": 0.02,
+    "compose/crop": 0.1,
     "compose/window512": 1.0,
 }
 
@@ -429,13 +432,13 @@ def test_progress_estimates_the_time_left_from_the_speed_profile_once_planned(mo
         clock.now = 10.0
         bar.update(100)
     assert reports[-1][:2] == (pytest.approx(0.02), 0.0)
-    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}))
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     with progress.bar("encode", 100) as bar:
         clock.now = 20.0
         bar.update(50)
 
     encode_left = 50 * 2.0 * 0.01 + 10 * 0.5
-    later = 20.0 + 10 * 4.0 + 3.0 + 100 * 2.0 * 0.02 + 10 * 1.0
+    later = 20.0 + 10 * 4.0 + 3.0 + 40.0 * 0.1 + 10 * 1.0
     fraction, left, stage = reports[-1]
     assert stage.name == "encode"
     assert stage.seconds_left == pytest.approx(encode_left)
@@ -448,7 +451,7 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
     reports = []
     progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
-    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}))
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 10}, crop_megapixels=40.0))
     with progress.bar("compose", 100) as bar:
         bar.update(10)
         with bar.window(512):
@@ -456,9 +459,9 @@ def test_pass_time_left_is_the_profile_work_left_scaled_by_the_measured_pace(mon
         clock.now = 3.0
         bar.update(40)
 
-    compose_work = 100 * 2.0 * 0.02 + 10 * 1.0
-    done_work = 50 * 2.0 * 0.02 + 1.0
-    warm_done_work = done_work - 10 * 2.0 * 0.02
+    compose_work = 40.0 * 0.1 + 10 * 1.0
+    done_work = 40.0 * 0.1 * 50 / 100 + 1.0
+    warm_done_work = done_work - 40.0 * 0.1 * 10 / 100
     fraction, left, stage = reports[-1]
     assert stage.seconds_left == pytest.approx((compose_work - done_work) * 3.0 / warm_done_work)
     assert left == pytest.approx(stage.seconds_left)
@@ -470,7 +473,7 @@ def test_progress_without_rates_for_a_planned_canvas_keeps_the_fixed_shares(monk
     reports = []
     progress = restore.Progress(100, disable=True, report=lambda *args: reports.append(args))
     progress.expect(_RATES)
-    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 3, 768: 1}))
+    progress.plan(restore.speed.Work(frames=100, megapixels=2.0, windows={512: 3, 768: 1}, crop_megapixels=40.0))
     with progress.bar("encode", 100) as bar:
         bar.update(50)
     assert reports[-1][:2] == (pytest.approx(0.04), 0.0)
@@ -545,7 +548,7 @@ def test_worker_passes_are_timed_on_the_wall_clock(monkeypatch):
             with bar.window(512):
                 clock.now += 2.0
     with progress.bar("denoise", 6, unit="step", marks=restore.timing_marks(transformer)) as bar:
-        transformer.denoise_chain([torch.zeros(1), torch.zeros(1)], [1, 2], bar.track(512, 3))
+        transformer.denoise_chain([torch.zeros(1), torch.zeros(1)], [1, 2], restore.WINDOW_HOP, bar.track(512, 3))
 
     assert progress.timings["encode"].windows == [(512, 2.0), (512, 2.0)]
     assert progress.timings["denoise"].steps == [(512, 0.25), (512, 0.25)]
@@ -582,6 +585,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         frame_w=64,
         batch_size=4,
         large_canvas=False,
+        window_hop=restore.WINDOW_HOP,
         seed=1,
         device=torch.device("cpu"),
         work_dir=tmp_path,
@@ -598,6 +602,17 @@ def test_progress_without_a_report_only_drives_the_console_bar():
     progress = restore.Progress(3, disable=True, report=None)
     with progress.bar("compose", 3) as bar:
         bar.update(3)
+
+
+def test_the_planned_work_counts_each_window_crop_on_every_frame_it_covers(fakes, tmp_path, monkeypatch):
+    planned = []
+    monkeypatch.setattr(restore.Progress, "plan", lambda self, work: planned.append(work))
+    span = restore.LtxSpan(_source(_video(30, range(3, 28))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)
+    progress = restore.Progress(30, disable=True, report=None)
+    restore.prepare_spans([span], _render(tmp_path), tmp_path, progress=progress, cancel=threading.Event())
+    (work,) = planned
+    assert (work.frames, work.windows) == (30, {512: 1})
+    assert work.crop_megapixels == pytest.approx(25 * 64 * 64 / 1e6)
 
 
 def test_a_prepared_span_denoises_with_many_seeds(fakes, tmp_path):
@@ -692,7 +707,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     monkeypatch.setattr(inference.ModelRuntime, "request", request)
     monkeypatch.setattr(restore, "crop_to_canvas", lambda _frame, _crop: torch.zeros(3, 2, 2, dtype=torch.uint8))
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
-    render = replace(_render(tmp_path), files=files)
+    render = replace(_render(tmp_path), files=files, window_hop=LESS_OVERLAP_WINDOW_HOP)
     writer = _Writer()
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), lambda: writer)],
@@ -703,7 +718,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
         "load_encoder", "encode", "unload_encoder", "load_transformer", "denoise_chain",
         "unload_transformer", "load_decoder", "decode", "unload_decoder",
     ]
-    assert requests[4][1] == {"seeds": [5]}
+    assert requests[4][1] == {"seeds": [5], "window_hop": LESS_OVERLAP_WINDOW_HOP}
 
 
 def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
@@ -740,5 +755,7 @@ def test_a_run_with_a_speed_profile_skips_the_speed_test(fakes, tmp_path):
 def test_the_speed_test_mosaics_plan_two_windows_on_each_canvas(frame_h, frame_w):
     detections = restore._SpeedTestMosaics()(torch.zeros(1, 3, 8, 8), target_hw=(frame_h, frame_w))
     regions = restore.regions_per_frame(detections, frame_h, frame_w) * restore.SPEED_TEST_FRAMES
-    plans = restore.plan_video(regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True)
+    plans = restore.plan_video(
+        regions, set(), frame_w=frame_w, frame_h=frame_h, large_canvas=True, window_hop=restore.WINDOW_HOP
+    )
     assert sorted(w.canvas for plan in plans for w in plan.windows) == [512, 512, 768, 768]

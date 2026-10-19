@@ -122,7 +122,9 @@ def test_auto_backend_uses_software_decode_on_amd(monkeypatch) -> None:
     reader.__enter__()
     vali_factory.assert_not_called()
     amf_setup.assert_not_called()
-    assert module.av.open.call_args.kwargs == {}
+    # upstream adds metadata_errors="replace"; what matters here is that no
+    # hardware-acceleration keyword was requested.
+    assert "hwaccel" not in module.av.open.call_args.kwargs
     assert container.streams.video[0].codec_context.thread_type == "AUTO"
 
 
@@ -155,8 +157,36 @@ def test_pyav_sw_backend_skips_hwaccel_and_amf(monkeypatch) -> None:
         vali_factory.assert_not_called()
         amf_setup.assert_not_called()
         nvdec_setup.assert_not_called()
-        assert module.av.open.call_args.kwargs == {}
+        assert module.av.open.call_args.kwargs == {"metadata_errors": "replace"}
         assert container.streams.video[0].codec_context.thread_type == "AUTO"
+
+
+def test_auto_backend_decodes_vc1_with_pyav_hwaccel(monkeypatch) -> None:
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
+    vali_factory = MagicMock()
+    monkeypatch.setattr(module, "_ValiFrameSource", vali_factory)
+    monkeypatch.setattr(module.av, "open", MagicMock(return_value=_fake_container(True)))
+    monkeypatch.setattr(module, "vendor_for_device", lambda _device: AcceleratorVendor.NVIDIA)
+    monkeypatch.setattr(module, "current_stream", lambda _device: None)
+    metadata = _metadata()
+    metadata.codec_name = "vc1"
+    reader = module.VideoReader("input.mkv", 4, torch.device("cuda:0"), metadata)
+    reader.__enter__()
+    vali_factory.assert_not_called()
+    assert "hwaccel" in module.av.open.call_args.kwargs
+
+
+def test_pyav_reader_skips_frames_without_planes(monkeypatch) -> None:
+    # FFmpeg's VC-1 NVDEC hwaccel returns one empty frame when a stream starts
+    # with a P frame (a cut that is not keyframe aligned).
+    empty = SimpleNamespace(pts=33, planes=())
+    picture = SimpleNamespace(pts=33, planes=("y", "uv"))
+    reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
+    reader.container = None
+    reader.video_stream = None
+    monkeypatch.setattr(module, "demux_video", lambda _container, _stream: ["packet"])
+    monkeypatch.setattr(reader, "_decode_packet", lambda _packet, errors: ([empty, picture], errors))
+    assert list(reader._decoded_frames(None)) == [picture]
 
 
 def test_unknown_backend_raises(monkeypatch) -> None:
