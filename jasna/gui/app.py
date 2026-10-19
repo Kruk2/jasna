@@ -729,10 +729,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._update_video_player_button_state()
                 
     def _on_stop(self):
-        if self._processor:
-            self._processor.stop()
-            self._log_panel.info("Processing stopped by user")
-            
+        if self._processor is None or not self._processor.is_running():
+            return
+        self._processor.stop()
+        self._log_panel.info("Processing stopped by user")
+
         self._status_pill.set_status("IDLE", Colors.STATUS_PENDING)
         self._control_bar.reset()
         # Start stays disabled until the worker thread has finished unwinding;

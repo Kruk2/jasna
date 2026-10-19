@@ -168,6 +168,34 @@ def test_stop_button_stops_only_after_confirmation(monkeypatch, confirmed) -> No
     assert control_bar._on_stop.called is confirmed
 
 
+def test_stop_confirmed_after_queue_finished_keeps_completed_state(monkeypatch) -> None:
+    processor = MagicMock()
+    processor.is_running.return_value = True
+    app = SimpleNamespace(
+        _processor=processor,
+        _log_panel=MagicMock(),
+        _status_pill=MagicMock(),
+        _control_bar=MagicMock(),
+        _settings_panel=MagicMock(),
+        _queue_panel=MagicMock(),
+    )
+    control_bar = object.__new__(ControlBar)
+    control_bar._on_stop = lambda: JasnaApp._on_stop(app)
+
+    def queue_finishes_while_dialog_is_open(*_args, **_kwargs):
+        processor.is_running.return_value = False
+        return True
+
+    monkeypatch.setattr("jasna.gui.control_bar.messagebox.askyesno", queue_finishes_while_dialog_is_open)
+
+    ControlBar._handle_stop(control_bar)
+
+    processor.stop.assert_not_called()
+    app._log_panel.info.assert_not_called()
+    app._control_bar.reset.assert_not_called()
+    app._control_bar.set_start_enabled.assert_not_called()
+
+
 def test_completed_job_combines_status_and_elapsed_time(tk_root) -> None:
     item = _job_item(tk_root)
     item.set_fps_eta(30.0, 10.0, None)
