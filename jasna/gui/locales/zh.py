@@ -264,6 +264,8 @@ ZH = {
         "ltx_downloading_short": "正在下载模型",
         "ltx_download_failed": "下载失败：{message}",
         "ltx_download_close_confirm": "仍在下载。停止并关闭？",
+        "stop_confirm_title": "停止处理",
+        "stop_confirm": "停止处理？当前视频的进度将会丢失。",
         "ltx_seed": "种子",
         "ltx_fast": "快速模式",
         "ltx_large_canvas": "大马赛克更清晰",

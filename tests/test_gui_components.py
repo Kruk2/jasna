@@ -157,6 +157,17 @@ def test_updating_disabled_start_button_hides_previous_tooltip() -> None:
     tooltip.hide.assert_called_once_with()
 
 
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_stop_button_stops_only_after_confirmation(monkeypatch, confirmed) -> None:
+    control_bar = object.__new__(ControlBar)
+    control_bar._on_stop = MagicMock()
+    monkeypatch.setattr("jasna.gui.control_bar.messagebox.askyesno", lambda *a, **k: confirmed)
+
+    ControlBar._handle_stop(control_bar)
+
+    assert control_bar._on_stop.called is confirmed
+
+
 def test_completed_job_combines_status_and_elapsed_time(tk_root) -> None:
     item = _job_item(tk_root)
     item.set_fps_eta(30.0, 10.0, None)

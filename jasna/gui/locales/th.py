@@ -264,6 +264,8 @@ TH = {
         "ltx_downloading_short": "กำลังดาวน์โหลดโมเดล",
         "ltx_download_failed": "ดาวน์โหลดไม่สำเร็จ: {message}",
         "ltx_download_close_confirm": "ยังดาวน์โหลดอยู่ หยุดแล้วปิดไหม?",
+        "stop_confirm_title": "หยุดการประมวลผล",
+        "stop_confirm": "หยุดการประมวลผลไหม? ความคืบหน้าของวิดีโอปัจจุบันจะหายไป",
         "ltx_seed": "ซีด",
         "ltx_fast": "โหมดเร็ว",
         "ltx_large_canvas": "โมเสกขนาดใหญ่คมชัดขึ้น",

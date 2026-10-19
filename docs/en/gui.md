@@ -31,7 +31,7 @@ models slowly, and it warns you at startup.
 - **▶** (start) always processes everything in the queue, including items
   that are already finished or failed. So you can change settings and press ▶
   again without adding the files again.
-- **■** (stop) ends the run. The current item goes back to **Pending**. The half-written
+- **■** (stop) asks first, then ends the run. The current item goes back to **Pending**. The half-written
   output file stays on disk; **File Conflict** decides what happens with it
   next time.
 - **Clear done** removes finished items. **Clear** removes everything.

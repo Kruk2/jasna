@@ -264,6 +264,8 @@ KO = {
         "ltx_downloading_short": "모델 다운로드 중",
         "ltx_download_failed": "다운로드 실패: {message}",
         "ltx_download_close_confirm": "다운로드가 진행 중입니다. 중지하고 닫을까요?",
+        "stop_confirm_title": "처리 중지",
+        "stop_confirm": "처리를 중지할까요? 현재 영상의 진행 상황이 사라집니다.",
         "ltx_seed": "시드",
         "ltx_fast": "빠른 모드",
         "ltx_large_canvas": "큰 모자이크 더 선명하게",

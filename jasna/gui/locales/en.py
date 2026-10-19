@@ -264,6 +264,8 @@ EN = {
         "ltx_downloading_short": "Downloading model",
         "ltx_download_failed": "Download failed: {message}",
         "ltx_download_close_confirm": "A download is still running. Stop it and close?",
+        "stop_confirm_title": "Stop processing",
+        "stop_confirm": "Stop processing? Progress on the current video will be lost.",
         "ltx_seed": "Seed",
         "ltx_fast": "Fast mode",
         "ltx_large_canvas": "Sharper large mosaics",

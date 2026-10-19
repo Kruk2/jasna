@@ -264,6 +264,8 @@ JA = {
         "ltx_downloading_short": "モデルをダウンロード中",
         "ltx_download_failed": "ダウンロードに失敗しました：{message}",
         "ltx_download_close_confirm": "ダウンロード中です。中止して閉じますか？",
+        "stop_confirm_title": "処理を停止",
+        "stop_confirm": "処理を停止しますか？現在の動画の進行状況は失われます。",
         "ltx_seed": "シード",
         "ltx_fast": "高速モード",
         "ltx_large_canvas": "大きなモザイクをより鮮明に",

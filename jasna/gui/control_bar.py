@@ -1,6 +1,7 @@
 """Control bar - bottom playback controls and progress display."""
 
 import logging
+from tkinter import messagebox
 
 import customtkinter as ctk
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -362,6 +363,8 @@ class ControlBar(ctk.CTkFrame):
             self._on_start()
             
     def _handle_stop(self):
+        if not messagebox.askyesno(t("stop_confirm_title"), t("stop_confirm"), parent=self):
+            return
         if self._on_stop:
             self._on_stop()
             
