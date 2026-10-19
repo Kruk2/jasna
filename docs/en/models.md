@@ -142,15 +142,15 @@ BasicVSR++.
 Rough time for **1 minute of 1080p video with mosaics on screen the whole
 time** (Standard Quality model, the default). Scenes without mosaics are much quicker.
 Good Quality is about 1.5x slower, High Quality about 2.5x slower and Top Quality
-about 5x slower.
+about 5x slower. With **Sharper large mosaics** on, large mosaics take about 2.5x as long.
 
 | GPU | Time | With Fast mode |
 | --- | ---: | ---: |
-| RTX 5090 | about 2 min | about 1.5 min |
-| RTX 4090 | about 3 min | not available |
-| RTX 5080 | about 4 min | about 3 min |
-| RTX 3090 | about 6 min | not available |
-| RTX 2080 Ti | about 20 min | not available |
+| RTX 5090 | about 1 min | under 1 min |
+| RTX 4090 | about 1.5 min | not available |
+| RTX 5080 | about 2 min | about 1.5 min |
+| RTX 3090 | about 3 min | not available |
+| RTX 2080 Ti | about 10 min | not available |
 
 - The first LTX run takes longer while Jasna prepares it for your GPU.
 - Progress shows four steps: finding mosaics, preparing, restoring, saving.
