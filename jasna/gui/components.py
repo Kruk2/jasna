@@ -835,6 +835,78 @@ class ConfirmDialog(ctk.CTkToplevel):
         self.destroy()
 
 
+class CloseWhileProcessingDialog(ctk.CTkToplevel):
+    def __init__(self, master, on_minimize: callable, on_quit: callable):
+        super().__init__(master)
+
+        self.title(t("close_running_title"))
+        self.configure(fg_color=Colors.BG_MAIN)
+        self.resizable(False, False)
+        self.transient(master)
+        grab_modal(self)
+
+        self._on_minimize = on_minimize
+        self._on_quit = on_quit
+
+        self.update_idletasks()
+        scaling.place_centered_on_parent(self, master, *scaling.to_physical(self, 380, 140))
+
+        content = ctk.CTkFrame(self, fg_color="transparent")
+        content.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            content,
+            text=t("close_running_message"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            text_color=Colors.TEXT_PRIMARY,
+            wraplength=340,
+        ).pack(pady=(0, 16))
+
+        btn_frame = ctk.CTkFrame(content, fg_color="transparent")
+        btn_frame.pack(fill="x")
+
+        ctk.CTkButton(
+            btn_frame,
+            text=t("btn_cancel"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color="transparent",
+            hover_color=Colors.BG_CARD,
+            text_color=Colors.TEXT_PRIMARY,
+            width=80,
+            command=self.destroy,
+        ).pack(side="right", padx=(8, 0))
+
+        self.quit_button = ctk.CTkButton(
+            btn_frame,
+            text=t("btn_stop_and_quit"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color=Colors.STATUS_ERROR,
+            hover_color="#dc2626",
+            text_color=Colors.TEXT_PRIMARY,
+            command=self._quit,
+        )
+        self.quit_button.pack(side="right", padx=(8, 0))
+
+        self.minimize_button = ctk.CTkButton(
+            btn_frame,
+            text=t("btn_minimize"),
+            font=(Fonts.FAMILY, Fonts.SIZE_NORMAL),
+            fg_color=Colors.PRIMARY,
+            hover_color=Colors.PRIMARY_HOVER,
+            text_color=Colors.TEXT_PRIMARY,
+            command=self._minimize,
+        )
+        self.minimize_button.pack(side="right")
+
+    def _minimize(self):
+        self.destroy()
+        self._on_minimize()
+
+    def _quit(self):
+        self.destroy()
+        self._on_quit()
+
+
 class ShutdownCountdownDialog(ctk.CTkToplevel):
     """Counts down before shutting the PC down; Cancel or closing the window aborts it."""
 

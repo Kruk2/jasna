@@ -310,3 +310,30 @@ def test_job_item_shows_the_ltx_step_in_place_of_fps(tk_root) -> None:
     assert item._eta_label.cget("text") == ""
     item.set_fps_eta(30.0, 10.0, None)
     assert item._fps_label.cget("text") == "30.0fps"
+
+
+@pytest.mark.parametrize("running", [True, False])
+def test_window_close_asks_only_while_processing(monkeypatch, running) -> None:
+    app = object.__new__(JasnaApp)
+    app._processor = MagicMock(is_running=MagicMock(return_value=running))
+    app._on_close = MagicMock()
+    dialog = MagicMock()
+    monkeypatch.setattr(app_module, "CloseWhileProcessingDialog", dialog)
+
+    JasnaApp._on_close_requested(app)
+
+    assert dialog.called is running
+    assert app._on_close.called is not running
+
+
+@pytest.mark.parametrize("button", ["minimize_button", "quit_button"])
+def test_close_while_processing_dialog_runs_chosen_action(tk_root, button) -> None:
+    on_minimize = MagicMock()
+    on_quit = MagicMock()
+    dialog = components.CloseWhileProcessingDialog(tk_root, on_minimize=on_minimize, on_quit=on_quit)
+
+    getattr(dialog, button).invoke()
+
+    assert not dialog.winfo_exists()
+    assert on_minimize.called is (button == "minimize_button")
+    assert on_quit.called is (button == "quit_button")

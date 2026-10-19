@@ -21,7 +21,7 @@ from jasna.gui.branding import (
 from jasna.gui import scaling
 from jasna.gui import activation_worker
 from jasna.gui.theme import Colors, Fonts, Sizing, apply_ui_fonts
-from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, grab_modal
+from jasna.gui.components import StatusPill, BuyMeCoffeeButton, UnifansButton, XianyuButton, shows_xianyu_seller, Toast, LicenseDialog, ShutdownCountdownDialog, CloseWhileProcessingDialog, grab_modal
 from jasna.gui.icons import create_icon, create_native_icon_image
 from jasna.gui.queue_panel import QueuePanel
 from jasna.gui.settings_panel import SettingsPanel
@@ -121,7 +121,7 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         self._setup_processor()
         self._start_system_stats_poller()
 
-        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.protocol("WM_DELETE_WINDOW", self._on_close_requested)
 
         self.after_idle(self._log_startup_timing)
         self.after_idle(self._start_cuda_warmup)
@@ -458,6 +458,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _on_ltx_models_changed(self):
         self._settings_panel.refresh_ltx_models()
         self._update_start_button_state()
+
+    def _on_close_requested(self):
+        if self._processor and self._processor.is_running():
+            CloseWhileProcessingDialog(self, on_minimize=self.iconify, on_quit=self._on_close)
+            return
+        self._on_close()
 
     def _on_close(self):
         if self._ltx_models.downloading:

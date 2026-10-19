@@ -34,6 +34,8 @@ models slowly, and it warns you at startup.
 - **■** (stop) asks first, then ends the run. The current item goes back to **Pending**. The half-written
   output file stays on disk; **File Conflict** decides what happens with it
   next time.
+- Closing the window while a video is processing asks first: **Minimize** keeps
+  it running, **Stop and quit** ends it.
 - **Clear done** removes finished items. **Clear** removes everything.
 
 ## Output settings
