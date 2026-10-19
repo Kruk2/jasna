@@ -69,9 +69,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
   | Model | Download |
   | --- | ---: |
-  | Standard | about 15 GB |
+  | Good Quality (default) | about 15 GB |
   | Fast mode | about 9 GB |
-  | Best, on top of Standard | about 13 GB more |
+  | High or Top Quality, on top | about 13 GB more each |
 
   If Hugging Face can't be reached (for example in China), Jasna uses
   hf-mirror.com automatically. Download still fails? See
@@ -93,10 +93,12 @@ You need 3 files: one for the model you picked, plus the two VAE files.
 
 | You picked | Files |
 | --- | --- |
-| Standard | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
-| Fast mode | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
-| Best | `ltx-restore-alpha1-int8.safetensors.enc` |
-| Best + Fast mode | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
+| Good Quality | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
+| Good Quality + Fast mode | `ltx-restore-alpha1-distill4-nvfp4.safetensors.enc` |
+| High Quality | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
+| High Quality + Fast mode | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
+| Top Quality | `ltx-restore-alpha1-int8.safetensors.enc` |
+| Top Quality + Fast mode | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
 | Always | `vae.safetensors.enc` and `vae-decoder.safetensors.enc` |
 
 Put all 3 in `model_weights/ltx-restore` inside your Jasna folder (create the
@@ -105,8 +107,11 @@ including `.enc`. Start the LTX job again; Jasna will not ask to download.
 
 ### LTX options
 
-- **Model**: **Standard** (default) or **Best**. Best is slightly better and about 1.5x
-  slower. CLI: `--restoration-model-name ltx-undistilled`.
+- **Model**: **Good Quality** (default, recommended), **High Quality** or **Top Quality**.
+  High Quality looks about the same and is about 1.4x slower. Top Quality is slightly
+  better and about 2.5-3x slower; it is rarely worth it. On an RTX 5090, Good Quality
+  takes about 1.5-3x the video's length. CLI: `--restoration-model-name ltx` (Good),
+  `ltx-8step` (High) or `ltx-undistilled` (Top).
 - **Fast mode** (RTX 50-series only): about 1.4x faster, slightly less detail,
   smaller download. CLI: `--ltx-fast`.
 - **Sharper large mosaics**: more detail on big mosaics (close-ups, 4K),
@@ -132,8 +137,8 @@ BasicVSR++.
 ### How long it takes
 
 Rough time for **1 minute of 1080p video with mosaics on screen the whole
-time** (Standard model). Scenes without mosaics are much quicker. Best takes
-about 1.5x as long.
+time** (High Quality model). Scenes without mosaics are much quicker. Good Quality
+(default) is about 1.4x faster; Top Quality takes about 2x as long.
 
 | GPU | Time | With Fast mode |
 | --- | ---: | ---: |

@@ -157,7 +157,7 @@ class TestMainValidation:
     def test_basicvsrpp_rejects_ltx_options(self, tmp_path, capsys, ltx_args):
         with pytest.raises(SystemExit):
             _run_main_with_args(tmp_path, ltx_args)
-        assert "needs --restoration-model-name ltx or ltx-undistilled" in capsys.readouterr().err
+        assert "needs --restoration-model-name ltx, ltx-8step or ltx-undistilled" in capsys.readouterr().err
 
     @pytest.mark.parametrize("model", ["ltx", "ltx-undistilled"])
     def test_ltx_rejects_disabling_basicvsrpp_compile(self, tmp_path, capsys, model):
@@ -348,3 +348,10 @@ def test_cli_warns_when_installed_on_a_hard_disk(capsys, hard_disk):
          patch.object(main, "install_on_hard_disk", return_value=hard_disk):
         main._check_system(argparse.Namespace(device="cuda:0"))
     assert ("installed on a hard disk drive (HDD)" in capsys.readouterr().out) is hard_disk
+
+
+def test_ltx_is_the_four_step_model_and_ltx_8step_the_eight_step_one():
+    from jasna.main import CLI_RESTORATION_MODELS
+
+    assert CLI_RESTORATION_MODELS["ltx"] == ("ltx", "distilled4")
+    assert CLI_RESTORATION_MODELS["ltx-8step"] == ("ltx", "distilled")

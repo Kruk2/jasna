@@ -106,7 +106,7 @@ class JobItem:
 class AppSettings:
     # Restoration model
     restoration_model: str = "basicvsrpp"  # basicvsrpp, ltx
-    ltx_model: str = LTX_DEFAULT_MODEL  # distilled, undistilled
+    ltx_model: str = LTX_DEFAULT_MODEL  # distilled4, distilled, undistilled
     ltx_seed: int = LTX_DEFAULT_SEED
     ltx_fast: bool = False
     ltx_large_canvas: bool = False

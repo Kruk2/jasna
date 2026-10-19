@@ -17,6 +17,7 @@ from PIL import Image
 
 from jasna.gui import ltx_seed_preview, segment_editor, segment_scan_panel
 from jasna.gui.locales import t
+from jasna.gui.ltx_models import model_key
 from jasna.gui.ltx_seed_preview import LtxSeedPreviewWorker
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.mosaic_scan import MosaicScanResult, ScanCompleted
@@ -25,6 +26,7 @@ from jasna.gui.segment_editor_state import PREVIEW_ZOOM_MAX, PreviewView, Segmen
 from jasna.ltx.restore import Cancelled
 from jasna.media.splice import KeyframeIndex
 from jasna.segments import SegmentRange, SegmentRestoration
+from jasna.session_config import LTX_DEFAULT_MODEL
 
 
 def test_out_of_bounds_range_uses_specific_message() -> None:
@@ -912,7 +914,7 @@ def test_new_ranges_follow_the_job_model_and_rows_name_it(monkeypatch) -> None:
         root.update()
         assert editor._state.segments[0].restoration == SegmentRestoration("ltx", 9)
         texts = [w.cget("text") for w in editor._segment_action_widgets if isinstance(w, ctk.CTkButton)]
-        assert any(f"{t('model_ltx')} 9" in text for text in texts)
+        assert any(f"{t('model_' + model_key('ltx', LTX_DEFAULT_MODEL))} 9" in text for text in texts)
     finally:
         if editor is not None:
             editor._finish_close()

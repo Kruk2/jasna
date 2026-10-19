@@ -298,11 +298,12 @@ def test_gui_cloud_restriction_keeps_plaintext_trial_and_free_paths(protection_a
     from jasna.ltx import model_files
     from jasna.protection import signing
     from jasna.mosaic import detection_registry
+    from jasna.session_config import LTX_DEFAULT_MODEL
 
     _, store = protection_api
     directory = tmp_path / "ltx-restore"
     directory.mkdir()
-    for name in model_files.bundle_names("distilled", fast=False):
+    for name in model_files.bundle_names(LTX_DEFAULT_MODEL, fast=False):
         (directory / (name + ".enc")).touch()
         if mode == "plaintext":
             (directory / name).touch()
@@ -311,7 +312,7 @@ def test_gui_cloud_restriction_keeps_plaintext_trial_and_free_paths(protection_a
     monkeypatch.setattr(store, "is_licensed", lambda: True)
     monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
     if mode == "plaintext":
-        assert not ltx_models.license_missing(directory, "distilled", False)
+        assert not ltx_models.license_missing(directory, LTX_DEFAULT_MODEL, False)
     built = Mock()
     monkeypatch.setattr("jasna.engine_paths.model_weights_dir", lambda: tmp_path)
     monkeypatch.setattr(detection_registry, "require_detection_model_weights", lambda name: tmp_path / "det.onnx")

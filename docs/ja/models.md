@@ -67,9 +67,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 
   | モデル | ダウンロード |
   | --- | ---: |
-  | 標準 | 約 15 GB |
+  | 良好画質（デフォルト） | 約 15 GB |
   | 高速モード | 約 9 GB |
-  | 高画質（標準に追加） | さらに約 13 GB |
+  | 高画質・最高画質（追加） | それぞれさらに約 13 GB |
 
   Hugging Face に接続できない場合（中国など）は、自動で hf-mirror.com を
   使います。それでも失敗する場合は
@@ -93,10 +93,12 @@ VAE の 2 ファイル。
 
 | 選んだモデル | ファイル |
 | --- | --- |
-| 標準 | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
-| 高速モード | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
-| 高画質 | `ltx-restore-alpha1-int8.safetensors.enc` |
-| 高画質 + 高速モード | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
+| 良好画質 | `ltx-restore-alpha1-distill4-int8.safetensors.enc` |
+| 良好画質 + 高速モード | `ltx-restore-alpha1-distill4-nvfp4.safetensors.enc` |
+| 高画質 | `ltx-restore-alpha1-distill8-int8.safetensors.enc` |
+| 高画質 + 高速モード | `ltx-restore-alpha1-distill8-nvfp4.safetensors.enc` |
+| 最高画質 | `ltx-restore-alpha1-int8.safetensors.enc` |
+| 最高画質 + 高速モード | `ltx-restore-alpha1-nvfp4.safetensors.enc` |
 | 常に必要 | `vae.safetensors.enc` と `vae-decoder.safetensors.enc` |
 
 3 つとも Jasna フォルダー内の `model_weights/ltx-restore` に置きます（`ltx-restore`
@@ -105,8 +107,10 @@ LTX のジョブをもう一度始めると、ダウンロードの確認は出�
 
 ### LTX のオプション
 
-- **モデル**: **標準**（デフォルト）または**高画質**。高画質は少し良く、約 1.5 倍
-  遅くなります。CLI: `--restoration-model-name ltx-undistilled`。
+- **モデル**: **良好画質**（デフォルト、おすすめ）、**高画質**、**最高画質**。高画質は
+  見た目がほぼ同じで約 1.4 倍遅くなります。最高画質は少し良く、約 2.5〜3 倍遅く、
+  通常は不要です。RTX 5090 では、良好画質は動画の長さの約 1.5〜3 倍の時間がかかります。
+  CLI: `--restoration-model-name ltx`（良好）、`ltx-8step`（高画質）、`ltx-undistilled`（最高）。
 - **高速モード**（RTX 50 シリーズのみ）: 約 1.4 倍速く、ディテールはわずかに
   減り、ダウンロードも小さくなります。CLI: `--ltx-fast`。
 - **大きなモザイクをより鮮明に**: 大きなモザイク（クローズアップ、4K）を
@@ -132,8 +136,8 @@ BasicVSR++ を使います。
 ### 所要時間
 
 **モザイクが常に映っている 1080p 動画 1 分**あたりのおおよその時間
-（標準モデル）です。モザイクのないシーンはずっと速く終わります。高画質は
-約 1.5 倍かかります。
+（高画質モデル）です。モザイクのないシーンはずっと速く終わります。良好画質
+（デフォルト）は約 1.4 倍速く、最高画質は約 2 倍かかります。
 
 | GPU | 時間 | 高速モード |
 | --- | ---: | ---: |

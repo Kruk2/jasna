@@ -20,7 +20,7 @@ def model_key(restoration_model: str, ltx_model: str) -> str:
     """Locale stem naming a restoration choice: ``model_<key>`` and ``tip_model_<key>``."""
     if restoration_model != "ltx":
         return "basicvsrpp"
-    return "ltx" if ltx_model == "distilled" else f"ltx_{ltx_model}"
+    return f"ltx_{ltx_model}"
 
 
 @dataclass(frozen=True)

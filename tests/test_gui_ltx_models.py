@@ -24,6 +24,7 @@ from jasna.gui.models import AppSettings, JobItem, PresetManager
 from jasna.ltx import model_files
 from jasna.ltx.model_files import bundle_names
 from jasna.segments import SegmentRange, SegmentRestoration
+from jasna.session_config import LTX_DEFAULT_MODEL
 
 
 class _NowCalls:
@@ -49,7 +50,8 @@ def downloadable(monkeypatch):
 
 def test_model_key_names_each_model_choice() -> None:
     assert model_key("basicvsrpp", "undistilled") == "basicvsrpp"
-    assert model_key("ltx", "distilled") == "ltx"
+    assert model_key("ltx", "distilled") == "ltx_distilled"
+    assert model_key("ltx", "distilled4") == "ltx_distilled4"
     assert model_key("ltx", "undistilled") == "ltx_undistilled"
 
 
@@ -225,7 +227,7 @@ def test_start_downloads_only_the_fast_model(tk_root, tmp_path, monkeypatch, dow
 
     JasnaApp._on_start(app)
 
-    assert sorted(downloaded) == sorted(f"{name}.enc" for name in bundle_names("distilled", fast=True))
+    assert sorted(downloaded) == sorted(f"{name}.enc" for name in bundle_names(LTX_DEFAULT_MODEL, fast=True))
     assert restarted == [True]
 
 
@@ -259,7 +261,7 @@ def test_a_running_download_locks_the_choice(tk_root, tmp_path, monkeypatch, dow
 
 def test_a_missing_variant_without_downloads_stays_selected_with_a_note(tk_root, tmp_path) -> None:
     directory = tmp_path / "ltx"
-    _install(directory, "distilled", fast=False)
+    _install(directory, LTX_DEFAULT_MODEL, fast=False)
     panel = _panel(tk_root, ltx_models(tk_root, directory, installed=False))
     section = panel._model_section
     section.set_gpu_support(nvidia=True, blackwell=True)
