@@ -22,6 +22,15 @@ class SceneCutDetector:
     raises it and suppresses false positives). No cut can fire until the
     score window is full, so the first ``window_size`` frames of a stream
     are never split — tracks barely exist there anyway.
+
+    Repeated frames (a 30 fps video doubled to 60, 3:2 pulldown) score about
+    zero right after each real change and would drag the median to zero, so
+    ordinary motion between two real frames would fire as a cut. A pair that
+    follows a real change (a non-repeat scoring at least ``min_repeat_score``)
+    and scores under ``repeat_ratio`` times that change (or
+    ``min_repeat_score``) is a repeat: it never fires and stays out of the
+    window. Everything else is scored as before, so still shots, slow motion
+    and flashes keep their old behavior.
     """
 
     def __init__(
@@ -31,19 +40,25 @@ class SceneCutDetector:
         min_content: float = 15.0,
         window_size: int = 5,
         min_scene_len: int = 2,
+        repeat_ratio: float = 0.1,
+        min_repeat_score: float = 0.5,
     ) -> None:
         self.adaptive_ratio = float(adaptive_ratio)
         self.min_content = float(min_content)
         self.window_size = int(window_size)
         self.min_scene_len = int(min_scene_len)
+        self.repeat_ratio = float(repeat_ratio)
+        self.min_repeat_score = float(min_repeat_score)
         self._prev_small: torch.Tensor | None = None
         self._recent_scores: deque[float] = deque(maxlen=self.window_size)
         self._frames_since_cut = self.min_scene_len
+        self._last_change: float | None = None
 
     def reset(self) -> None:
         self._prev_small = None
         self._recent_scores.clear()
         self._frames_since_cut = self.min_scene_len
+        self._last_change = None
 
     def find_cuts(self, frames_uint8_bchw: torch.Tensor) -> set[int]:
         """Return batch offsets whose frame starts a new scene.
@@ -74,13 +89,23 @@ class SceneCutDetector:
         cuts: set[int] = set()
         for pair_idx in range(scores.shape[0]):
             score = float(scores[pair_idx])
+            if self._is_repeat(score):
+                self._frames_since_cut += 1
+                self._last_change = None
+                continue
             if self._is_cut(score):
                 cuts.add(first_offset + pair_idx)
                 self._frames_since_cut = 1
             else:
                 self._frames_since_cut += 1
             self._recent_scores.append(score)
+            self._last_change = score if score >= self.min_repeat_score else None
         return cuts
+
+    def _is_repeat(self, score: float) -> bool:
+        if self._last_change is None:
+            return False
+        return score < max(self.min_repeat_score, self.repeat_ratio * self._last_change)
 
     def _is_cut(self, score: float) -> bool:
         if self._frames_since_cut < self.min_scene_len:

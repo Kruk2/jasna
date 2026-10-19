@@ -91,6 +91,26 @@ def test_reset_forgets_previous_frame_and_window() -> None:
     assert detector.find_cuts(_solid(5, (250, 250, 250))) == set()
 
 
+def _ramp(shift: int, flip: bool = False) -> torch.Tensor:
+    ramp = torch.linspace(0, 255, 96).round().to(torch.uint8)
+    if flip:
+        ramp = 255 - ramp
+    return ramp.view(1, 1, 96).expand(3, 64, 96).roll(shifts=shift, dims=2).contiguous()
+
+
+def test_motion_between_repeated_frames_is_not_a_cut() -> None:
+    frames = torch.stack([_ramp(8 * (i // 2)) for i in range(24)])
+
+    assert SceneCutDetector().find_cuts(frames) == set()
+
+
+def test_cut_between_repeated_frames_is_still_detected() -> None:
+    moving = [_ramp(2 * (i // 2)) for i in range(16)]
+    frames = torch.stack(moving + [_ramp(0, flip=True)] * 8)
+
+    assert SceneCutDetector().find_cuts(frames) == {16}
+
+
 def test_empty_batch_returns_no_cuts() -> None:
     frames = torch.zeros((0, 3, 64, 96), dtype=torch.uint8)
 
