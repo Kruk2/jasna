@@ -192,7 +192,8 @@ def _build_extension(build_directory: Path):
 def _extension():
     prebuilt = _prebuilt_extension()
     if prebuilt is None:
-        return _build_extension(_cache() / f"extension-torch{torch.__version__}")
+        checkout = hashlib.sha256(str(_HERE).encode()).hexdigest()[:12]
+        return _build_extension(_cache() / f"extension-torch{torch.__version__}-{checkout}")
     spec = importlib.util.spec_from_file_location(EXTENSION_NAME, prebuilt)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

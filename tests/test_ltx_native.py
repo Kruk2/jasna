@@ -398,3 +398,17 @@ def test_sampler_compiles_blocks_when_native_cannot_run(monkeypatch):
 def test_native_package_imports_without_the_protection_module(monkeypatch):
     monkeypatch.setitem(sys.modules, "jasna.protection", None)
     assert native.load(torch.device("cpu"), {}) is None
+
+
+def test_each_source_checkout_builds_its_extension_in_its_own_directory(monkeypatch, tmp_path):
+    """Two checkouts sharing one compile cache would otherwise rebuild the extension on every
+    switch (~12 s), since the build commands name each checkout's source paths."""
+    built = []
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
+    monkeypatch.setattr(native, "_cache", lambda: tmp_path)
+    monkeypatch.setattr(native, "_build_extension", built.append)
+    for checkout in ("/work/jasna-a/jasna/ltx/native", "/work/jasna-b/jasna/ltx/native", "/work/jasna-a/jasna/ltx/native"):
+        monkeypatch.setattr(native, "_HERE", Path(checkout))
+        native._extension()
+    assert built[0] != built[1] and built[0] == built[2]
+    assert all(path.parent == tmp_path and path.name.startswith(f"extension-torch{torch.__version__}") for path in built)
