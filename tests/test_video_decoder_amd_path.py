@@ -186,6 +186,7 @@ def test_nvidia_software_path_reuses_single_staging_on_private_stream(monkeypatc
     assert len(set(luma_ptrs)) == 1
 
     assert new_calls, "NVIDIA software fallback must use a private new_stream"
-    assert not current_calls, "NVIDIA software fallback must not switch to current_stream"
+    assert current_calls == [True], "NVIDIA software fallback reads current_stream only to wait on it"
+    stream.wait_stream.assert_called_once_with(stream)
     assert events == ["convert"] * BATCH + ["sync"]
     stream.synchronize.assert_called_once_with()

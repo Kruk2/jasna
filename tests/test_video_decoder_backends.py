@@ -228,7 +228,7 @@ def _install_fake_vali(monkeypatch, script, fmt=None):
         Surface=_FakeVali.Surface,
     )
     monkeypatch.setitem(sys.modules, "python_vali", fake)
-    stream = SimpleNamespace(cuda_stream=0, synchronize=lambda: None)
+    stream = SimpleNamespace(cuda_stream=0, synchronize=lambda: None, wait_stream=lambda _stream: None)
     monkeypatch.setattr(module, "_create_blocking_cuda_stream", lambda _device: (None, stream))
     converter = MagicMock()
     monkeypatch.setattr(module, "YuvToRgbConverter", MagicMock(return_value=converter))
@@ -365,3 +365,37 @@ def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
     source = _vali_source(batch_size=2, frame_stride=2)
     batches = list(source.frames(2.0))
     assert [pts for _batch, pts in batches] == [[30720, 31744]]
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available() or not TEST_CLIP.exists() or not _vali_fork_available(),
+    reason="needs a GPU, the test clip and the python_vali fork",
+)
+@pytest.mark.parametrize("backend", ["vali", "pyav-hw", "pyav-sw"])
+def test_batch_written_after_queued_work_of_a_non_default_consumer_stream(monkeypatch, backend: str) -> None:
+    from jasna.media.probe import get_video_meta_data
+
+    metadata = get_video_meta_data(str(TEST_CLIP))
+    device = torch.device("cuda", 0)
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
+    with module.VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=metadata) as reader:
+        frames = reader.frames()
+        next(frames)
+        expected = next(frames)[0].clone()
+
+    consumer = torch.cuda.Stream(device)
+    with torch.cuda.stream(consumer), module.VideoReader(
+        str(TEST_CLIP), batch_size=4, device=device, metadata=metadata
+    ) as reader:
+        frames = reader.frames()
+        next(frames)
+        sevens = torch.full_like(expected, 7)
+        recycled = torch.empty_like(expected)
+        recycled_ptr = recycled.data_ptr()
+        torch.cuda._sleep(2_000_000_000)
+        recycled.copy_(sevens)
+        del recycled
+        batch, _ = next(frames)
+        consumer.synchronize()
+        assert batch.data_ptr() == recycled_ptr
+        assert torch.equal(batch, expected)

@@ -82,6 +82,14 @@ def _create_blocking_cuda_stream(device: torch.device) -> tuple[int, torch.cuda.
     return handle, torch.cuda.ExternalStream(handle, device=device)
 
 
+def _empty_batch(frames: int, height: int, width: int, device: torch.device, writer) -> torch.Tensor:
+    """A uint8 RGB batch that ``writer`` fills. Its memory comes from the caller's stream, whose
+    queued work may still use it, so ``writer`` waits for that work first."""
+    batch = torch.empty((frames, 3, height, width), device=device, dtype=torch.uint8)
+    writer.wait_stream(current_stream(device))
+    return batch
+
+
 # VALI aborts open/reads after 3 s by default; a spun-down HDD needs longer to wake.
 _VALI_IO_TIMEOUT_MS = "60000"
 
@@ -192,11 +200,7 @@ class _ValiFrameSource:
         self._first_pts = None
         frame_index = 0
         while not exhausted:
-            batch = torch.empty(
-                (self.batch_size, 3, self.height, self.width),
-                device=self.device,
-                dtype=torch.uint8,
-            )
+            batch = _empty_batch(self.batch_size, self.height, self.width, self.device, self.stream)
             pts: list[int] = []
             while len(pts) < self.batch_size:
                 if pending_pts is not None:
@@ -561,9 +565,7 @@ class VideoReader:
         if self._raw_stream is None:
             self._raw_stream, self.stream = _create_blocking_cuda_stream(self.device)
         while group:
-            batch = torch.empty(
-                (len(group), 3, self.height, self.width), device=self.device, dtype=torch.uint8
-            )
+            batch = _empty_batch(len(group), self.height, self.width, self.device, self.stream)
             pts = [frame.pts for frame in group]
             with torch.cuda.stream(self.stream):
                 converter.convert_frames_into(group, batch, self.stream.cuda_stream)
@@ -628,7 +630,7 @@ class VideoReader:
             stream = new_stream(self.device)
 
         while group:
-            batch = torch.empty((len(group), 3, H, W), device=self.device, dtype=torch.uint8)
+            batch = _empty_batch(len(group), H, W, self.device, stream)
             pts = [frame.pts for frame in group]
             for i, frame in enumerate(group):
                 try:
