@@ -9,8 +9,6 @@ import sys
 from types import ModuleType
 import warnings
 
-import av
-
 _installed = False
 
 
@@ -109,7 +107,6 @@ def install() -> None:
         module=r"^torch_tensorrt\.dynamo\._exporter$",
     )
 
-    av.logging.set_level(logging.ERROR)
     logging.getLogger("torch.export.pt2_archive._package").setLevel(logging.ERROR)
     for _name in (
         "torch_tensorrt",

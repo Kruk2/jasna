@@ -216,3 +216,22 @@ def test_tensorrt_proxy_misses_attributes_without_printing() -> None:
         [sys.executable, "-c", script], cwd=Path(__file__).parents[1], capture_output=True, text=True, check=True
     )
     assert "AttributeError" not in result.stdout
+
+
+@pytest.mark.skipif(not Path("assets/test_clip1_1080p.mp4").exists(), reason="needs the test clip")
+def test_threaded_decoders_stop_early_after_install() -> None:
+    script = (
+        "import av\n"
+        "from jasna._suppress_noise import install\n"
+        "install()\n"
+        "for _ in range(5):\n"
+        "    with av.open('assets/test_clip1_1080p.mp4') as container:\n"
+        "        stream = container.streams.video[0]\n"
+        "        stream.codec_context.thread_type = 'AUTO'\n"
+        "        for index, _frame in enumerate(container.decode(stream)):\n"
+        "            if index == 5:\n"
+        "                break\n"
+    )
+    subprocess.run(
+        [sys.executable, "-c", script], cwd=Path(__file__).parents[1], capture_output=True, check=True, timeout=60
+    )
