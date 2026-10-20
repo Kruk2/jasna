@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import heapq
+import math
 from dataclasses import dataclass, replace
 
 from jasna.session_config import RestorationModelName
@@ -60,6 +61,8 @@ def parse_timestamp(value: str) -> float:
         numbers = [float(part) for part in parts]
     except ValueError as exc:
         raise ValueError(f"invalid timestamp: {value!r}") from exc
+    if not all(math.isfinite(number) for number in numbers):
+        raise ValueError(f"invalid timestamp: {value!r}")
     if any(number < 0 for number in numbers):
         raise ValueError(f"timestamp must be >= 0: {value!r}")
     if len(numbers) == 1:
