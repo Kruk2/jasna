@@ -27,10 +27,17 @@ def test_parse_timestamp(text: str, seconds: float) -> None:
     assert parse_timestamp(text) == seconds
 
 
-@pytest.mark.parametrize("text", ["", "1:60", "1:60:00", "a", "1:2:3:4", "-1"])
+@pytest.mark.parametrize("text", ["", "1:60", "1:60:00", "a", "1:2:3:4", "-1", "nan", "inf", "1:nan", "infinity"])
 def test_parse_timestamp_rejects_invalid_values(text: str) -> None:
     with pytest.raises(ValueError):
         parse_timestamp(text)
+
+
+def test_parse_segments_rejects_non_finite_bounds() -> None:
+    with pytest.raises(ValueError):
+        parse_segments("1-inf")
+    with pytest.raises(ValueError):
+        parse_segments("nan-5")
 
 
 def test_parse_segments_sorts_and_merges_ranges() -> None:
