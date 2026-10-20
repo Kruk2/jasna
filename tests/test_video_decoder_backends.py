@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from contextlib import closing
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -378,16 +379,19 @@ def test_batch_written_after_queued_work_of_a_non_default_consumer_stream(monkey
     metadata = get_video_meta_data(str(TEST_CLIP))
     device = torch.device("cuda", 0)
     monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
-    with module.VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=metadata) as reader:
-        frames = reader.frames()
+    with (
+        module.VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=metadata) as reader,
+        closing(reader.frames()) as frames,
+    ):
         next(frames)
         expected = next(frames)[0].clone()
 
     consumer = torch.cuda.Stream(device)
-    with torch.cuda.stream(consumer), module.VideoReader(
-        str(TEST_CLIP), batch_size=4, device=device, metadata=metadata
-    ) as reader:
-        frames = reader.frames()
+    with (
+        torch.cuda.stream(consumer),
+        module.VideoReader(str(TEST_CLIP), batch_size=4, device=device, metadata=metadata) as reader,
+        closing(reader.frames()) as frames,
+    ):
         next(frames)
         sevens = torch.full_like(expected, 7)
         recycled = torch.empty_like(expected)
