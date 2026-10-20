@@ -70,8 +70,7 @@ CUDA build, which breaks RF-DETR):
 python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK')"
 ```
 
-A new GPU target needs its `device-gfx*` extra above and in the
-`Dockerfile.amd` keep-list (in the private protection submodule).
+A new GPU target needs its matching `device-gfx*` extra above.
 
 AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
 (software decode when AMF can't). Secondary restoration is NVIDIA-only.
@@ -109,8 +108,8 @@ scripts/build_fatbins.sh        # every kernel
 scripts/build_fatbins.sh cas    # just jasna/media/cas.cu
 ```
 
-Add a new fatbin to the release packaging configuration. Every kernel needs a Torch
-equivalent: ROCm uses it, and the tests use it as the reference.
+Keep the release kernel inventory in sync when adding kernels. Every kernel needs
+a Torch equivalent: ROCm uses it, and the tests use it as the reference.
 
 ## Benchmarks
 
@@ -153,8 +152,7 @@ $P scripts/benchmark_na3d.py                                             # Trito
   (`--use_fast_math` must not reach `glue.cu`) and must stay bit-identical with
   `comfy_kitchen.int8_attention` (`tests/test_ltx_native_gpu.py`). Re-vendor it
   when the torch path's comfy-kitchen pin changes.
-- Release builds use a private extension compiled from the same `block.cpp`;
-  release packaging keeps the `NOTICE` in `licenses/`.
+- Release packaging keeps the vendored kernels' `NOTICE` in `licenses/`.
 - A change to any path must be compared with identical weights, inputs, seeds
   and warmed caches.
 - GPU-qualified on SM 12.0 (RTX 5090), SM 8.9 (RTX 4090), SM 8.6 (RTX 3090) and
@@ -166,10 +164,10 @@ $P scripts/benchmark_na3d.py                                             # Trito
 
 1. Same version in `pyproject.toml`, `jasna/__init__.py`, the git tag and
    `RELEASE_SOURCES.md`; that file must match the PyAV, VALI, FFmpeg, Python
-   and protection revisions used by the build.
+   and other dependency revisions used by the build.
 2. The unpacked package contains `LICENSE`, `LICENSING.md`, `NOTICE`,
    `RELEASE_SOURCES.md`, `assets/THIRD_PARTY_*.md` and `licenses/`.
 3. Every bundled model hash matches `assets/THIRD_PARTY_MODELS.md`.
 4. Upload every archive part **and** its `.sha256` to the same GitHub release.
 
-Release archives use maintainer-only packaging tools.
+Official release packaging is maintained separately.
