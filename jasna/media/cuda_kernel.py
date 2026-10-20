@@ -322,22 +322,42 @@ def destroy_stream(stream: int) -> None:
     check_cuda(cuda_driver().cuStreamDestroy(ctypes.c_void_p(stream)), "cuStreamDestroy")
 
 
-def _compile_or_load_hsaco(fatbin_name: str, dev_idx: int) -> bytes:
+def _runtime_tag() -> str:
+    """ROCm build the cached binary was compiled against.
+
+    A .hsaco only loads into the runtime that produced it, and the cache name carries
+    the *source* digest, which does not change when ROCm does. Without this tag a
+    binary left behind by another ROCm build is reused, hipModuleLoadData answers
+    hipErrorNoBinaryForGpu, and that error latches onto the context: the torch fallback
+    the caller logs right after it fails too. A stale artifact in the tree is enough to
+    trigger it, so the name now says which runtime it belongs to.
+    """
+    hip = getattr(torch.version, "hip", None) or "unknown"
+    return "".join(ch for ch in hip if ch.isalnum())
+
+
+def _compile_or_load_hsaco(fatbin_name: str, dev_idx: int, *, refresh: bool = False) -> bytes:
     cu_name = Path(fatbin_name).with_suffix(".cu").name
     cu_path = fatbin_path(cu_name)
     src_bytes = cu_path.read_bytes()
     props = torch.cuda.get_device_properties(dev_idx)
     arch = getattr(props, "gcnArchName", "gfx1100").split(":")[0]
     digest = hashlib.sha256(src_bytes).hexdigest()[:8]
-    hsaco_name = f"{cu_path.stem}.{arch}.{digest}.hsaco"
+    hsaco_name = f"{cu_path.stem}.{arch}.{_runtime_tag()}.{digest}.hsaco"
 
     local_cache = cu_path.with_name(hsaco_name)
-    if local_cache.is_file():
-        return local_cache.read_bytes()
-
     temp_cache = Path(tempfile.gettempdir()) / "jasna-hiprtc-cache" / hsaco_name
-    if temp_cache.is_file():
-        return temp_cache.read_bytes()
+    if refresh:
+        for stale in (local_cache, temp_cache):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+    else:
+        if local_cache.is_file():
+            return local_cache.read_bytes()
+        if temp_cache.is_file():
+            return temp_cache.read_bytes()
 
     hiprtc = _load_hiprtc()
     src = src_bytes.decode("utf-8")
@@ -405,9 +425,19 @@ def load_module(fatbin_name: str, dev_idx: int | None = None) -> ctypes.c_void_p
             cached = _modules.get(key)
             if cached is not None:
                 return cached
-            image = ctypes.create_string_buffer(_compile_or_load_hsaco(fatbin_name, dev_idx))
-            module = ctypes.c_void_p()
-            check_cuda(lib.cuModuleLoadData(ctypes.byref(module), image), "hipModuleLoadData")
+            try:
+                image = ctypes.create_string_buffer(_compile_or_load_hsaco(fatbin_name, dev_idx))
+                module = ctypes.c_void_p()
+                check_cuda(lib.cuModuleLoadData(ctypes.byref(module), image), "hipModuleLoadData")
+            except RuntimeError:
+                # A binary this runtime cannot load latches hipErrorNoBinaryForGpu onto the
+                # context, so every later kernel - the caller's torch fallback included -
+                # fails. Rebuild from source once and retry: a successful load clears it.
+                image = ctypes.create_string_buffer(
+                    _compile_or_load_hsaco(fatbin_name, dev_idx, refresh=True)
+                )
+                module = ctypes.c_void_p()
+                check_cuda(lib.cuModuleLoadData(ctypes.byref(module), image), "hipModuleLoadData")
             _modules[key] = module
             return module
 

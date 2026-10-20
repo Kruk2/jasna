@@ -1,5 +1,6 @@
 """Load NVIDIA TensorRT DLLs first when the active environment provides them."""
 import gc
+import re
 import sys
 import time
 from importlib.util import find_spec
@@ -70,6 +71,57 @@ for _mod, _tests in (
 ):
     if find_spec(_mod) is None:
         collect_ignore.extend(_tests)
+
+
+def _has_module(name: str) -> bool:
+    try:
+        return find_spec(name) is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False
+
+
+#: ``jasna/protection`` is not vendored in this checkout: the licensing code only ships
+#: in the official release. Tests that drive it cannot run here and must skip instead of
+#: failing inside mock with an AttributeError.
+PROTECTION_MISSING = not _has_module("jasna.protection.license_store")
+_PROTECTION_REF = re.compile(r"jasna\.protection\.(\w+)")
+
+if PROTECTION_MISSING:
+    # The whole module is the activation dialog; every test in it needs the package.
+    collect_ignore.extend(["test_offline_activation_ui_cli.py"])
+
+# Same package, different entry point: the opaque LTX boundary tests cannot even be
+# collected without it (module-scope fixture), so they error rather than fail.
+if not _has_module("jasna.protection.opaque_ltx"):
+    collect_ignore.extend(["test_opaque_ltx_native_boundary.py"])
+
+# Node ids that need the package without naming it in their own body.
+_UNVENDORED_PROTECTION_TESTS = {
+    "tests/test_ltx_model_files.py::test_cli_offers_the_missing_model_only_when_ltx_runs",
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    if not PROTECTION_MISSING:
+        return
+    import inspect
+
+    reason = "needs the private jasna.protection package, which this checkout does not vendor"
+    for item in items:
+        if item.nodeid in _UNVENDORED_PROTECTION_TESTS:
+            item.add_marker(pytest.mark.skip(reason=reason))
+            continue
+        function = getattr(item, "function", None)
+        if function is None:
+            continue
+        try:
+            source = inspect.getsource(function)
+        except (OSError, TypeError):
+            continue
+        referenced = {name for name in _PROTECTION_REF.findall(source)
+                      if not _has_module("jasna.protection." + name)}
+        if referenced:
+            item.add_marker(pytest.mark.skip(reason=reason))
 
 
 def pytest_configure(config):

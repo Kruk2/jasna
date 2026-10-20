@@ -9,6 +9,9 @@ __pycache__/
 *.pyo
 *.pdb
 *.so
+# HIP kernel cache built at runtime (jasna/media/cuda_kernel.py); the name carries
+# the ROCm build, so committing one only ever breaks a different runtime.
+*.hsaco
 
 .agents/
 .serena/
