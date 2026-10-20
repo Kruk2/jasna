@@ -357,3 +357,35 @@ def test_source_with_non_utf8_tags_probes_and_splices(tmp_path: Path) -> None:
     with av.open(str(output), metadata_errors="replace") as container:
         assert container.metadata["title"] == "JASNA\ufffdTAG"
         assert container.streams.audio
+
+
+def test_source_with_long_title_splices_without_failing(tmp_path: Path) -> None:
+    """A title longer than the MPEG-TS service name limit must not fail the render."""
+    title = "Jasna-" * 60
+    assert len(title.encode("utf-8")) > 255
+    source = tmp_path / "long-title.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=64x64:rate=12:duration=1",
+        "-an",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-metadata", f"title={title}",
+        str(source),
+    )
+    fragment = tmp_path / "0000-raw.nut"
+    # A rendered fragment carries the source's container tags, like VideoEncoder copies them.
+    with av.open(str(source)) as src, av.open(str(fragment), "w", format="nut") as dst:
+        dst.metadata.update(src.metadata)
+        out_stream = dst.add_stream_from_template(src.streams.video[0])
+        for packet in src.demux(src.streams.video[0]):
+            packet.stream = out_stream
+            dst.mux(packet)
+    with av.open(str(fragment)) as container:
+        assert container.metadata["title"] == title
+    normalized = tmp_path / "0000.ts"
+    normalize_fragment(fragment, normalized, codec="h264")
+    output = tmp_path / "output.mp4"
+    mux_final_output(normalized, source, output, codec="h264")
+
+    with av.open(str(output)) as container:
+        assert container.metadata["title"] == title

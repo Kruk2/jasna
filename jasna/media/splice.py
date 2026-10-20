@@ -530,6 +530,10 @@ def normalize_fragment(source: Path, destination: Path, *, codec: str) -> None:
             "-c:v", "copy",
             "-bsf:v", bitstream_filter,
             *container_args,
+            # The MPEG-TS muxer writes the container title as the service name,
+            # which is limited to 255 bytes, so a longer title would fail the
+            # render. The final mux takes the tags from the source.
+            "-map_metadata", "-1",
             "-f", muxer,
             str(destination),
         ],
