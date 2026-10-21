@@ -15,7 +15,7 @@ from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
-from jasna.session_factory import RestorationSession, build_pipeline, ltx_auto_split
+from jasna.session_factory import RestorationSession, build_pipeline, ltx_auto_split, segment_job_config
 
 logger = logging.getLogger(__name__)
 
@@ -363,17 +363,19 @@ class Processor:
     ):
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
-        codec = settings.codec
+        config = video_session_config(
+            settings, codec=settings.codec, encoder_settings=build_job_encoder_settings(settings, settings.codec)
+        )
         splice_plan = None
         if segments:
             from jasna.media.probe import get_video_meta_data
             from jasna.media.splice import build_splice_plan, canonical_codec, probe_keyframes, validate_smart_render
             metadata = get_video_meta_data(str(input_path))
-            codec = canonical_codec(metadata.codec_name)
+            source_codec = canonical_codec(metadata.codec_name)
             validate_smart_render(
                 metadata,
                 output_path=output_path,
-                codec=codec,
+                codec=source_codec,
                 retarget_high_fps=settings.retarget_high_fps,
             )
             splice_plan = build_splice_plan(
@@ -381,8 +383,7 @@ class Processor:
                 probe_keyframes(input_path, metadata),
                 duration=metadata.duration,
             )
-        encoder_settings = build_job_encoder_settings(settings, codec)
-        config = video_session_config(settings, codec=codec, encoder_settings=encoder_settings)
+            config = segment_job_config(config, source_codec, input_path)
         self._ensure_video_session(settings)
         s = self._video_session
         self._prepare_job_detector(config, s)
@@ -413,10 +414,7 @@ class Processor:
         if not segments:
             split = ltx_auto_split(config, s, input_path, output_path, progress_callback=progress_callback)
             if split is not None:
-                segments, splice_plan = split.segments, split.splice_plan
-                config = video_session_config(
-                    settings, codec=split.codec, encoder_settings=build_job_encoder_settings(settings, split.codec)
-                )
+                config, segments, splice_plan = split.config, split.segments, split.splice_plan
 
         pipeline = None
         try:

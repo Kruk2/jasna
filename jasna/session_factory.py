@@ -11,7 +11,7 @@ All heavy imports (torch, restorers, pipeline) stay inside the functions.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -267,11 +267,33 @@ def _ltx_model_files(
     return files
 
 
+def segment_job_config(config: SessionConfig, source_codec: str, input_video: Path) -> SessionConfig:
+    """A segment job copies the parts it leaves alone, so its output keeps the source codec.
+    The CQ and custom encoder settings were chosen for ``config.codec`` (``tune=uhq`` of
+    av1_nvenc fails on h264_nvenc), so another codec gets only its own default CQ."""
+    if source_codec == config.codec:
+        return config
+    from jasna.accelerator import vendor_for_device
+    from jasna.media.encoder_settings import encoder_cq_spec
+
+    cq = encoder_cq_spec(source_codec, vendor_for_device(config.device)).default
+    logger.warning(
+        "%s: the output keeps the source codec %s so the parts without changes can be copied; "
+        "the CQ and custom encoder settings are for %s and are not used (%s CQ %d)",
+        input_video.name,
+        source_codec.upper(),
+        config.codec.upper(),
+        source_codec.upper(),
+        cq,
+    )
+    return replace(config, codec=source_codec, encoder_settings={"cq": cq})
+
+
 @dataclass(frozen=True)
 class AutoSplit:
-    """A job's LTX auto split: the source codec it keeps, its ranges and their smart-render plan."""
+    """A job's LTX auto split: its config in the source codec, its ranges and their smart-render plan."""
 
-    codec: str
+    config: SessionConfig
     segments: "tuple[SegmentRange, ...]"
     splice_plan: "SplicePlan"
 
@@ -355,7 +377,7 @@ def ltx_auto_split(
         ltx_seconds,
         ltx_seconds / mosaic_seconds * 100,
     )
-    return AutoSplit(codec, segments, splice_plan)
+    return AutoSplit(segment_job_config(config, codec, input_video), segments, splice_plan)
 
 
 def build_pipeline(

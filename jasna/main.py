@@ -2,7 +2,6 @@ import argparse
 import logging
 import sys
 from contextlib import contextmanager
-from dataclasses import replace
 from pathlib import Path
 
 from jasna import __version__
@@ -1100,15 +1099,8 @@ def main() -> None:
             split = None if segments else ltx_auto_split(config, session, vid_input, out_path, progress_callback=None)
             if split is None:
                 return build_pipeline(config, session, vid_input, out_path, segments=segments, splice_plan=splice_plan)
-            split_config = replace(
-                config,
-                codec=split.codec,
-                encoder_settings=_resolve_cli_encoder_settings(
-                    str(args.encoder_settings), cq=args.cq, codec=split.codec, vendor=vendor_for_device(str(args.device))
-                ),
-            )
             return build_pipeline(
-                split_config, session, vid_input, out_path, segments=split.segments, splice_plan=split.splice_plan
+                split.config, session, vid_input, out_path, segments=split.segments, splice_plan=split.splice_plan
             )
 
         def output_path_for(vid: Path) -> Path:

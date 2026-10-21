@@ -222,13 +222,26 @@ def _samples(sizes):
 def test_ltx_auto_split_sends_big_mosaics_to_ltx_and_keeps_the_source_codec() -> None:
     config = session_config(restoration_model_name="ltx", ltx_seed=3, ltx_auto_split_percent=12.0)
     split, scan = _auto_split(config, samples=_samples((0.05, 0.3)))
-    assert split.codec == "hevc"
+    assert split.config == config
     assert split.segments == (
         SegmentRange(0.5, 2.0, SegmentRestoration("basicvsrpp", None)),
         SegmentRange(2.0, 4.5, SegmentRestoration("ltx", 3)),
     )
     assert len(split.splice_plan.render_spans) == 2
     assert scan.call_args.kwargs["batch_size"] == config.batch_size
+
+
+def test_ltx_auto_split_gives_the_source_codec_its_default_cq_not_settings_meant_for_another(caplog) -> None:
+    from jasna.accelerator import vendor_for_device
+    from jasna.media.encoder_settings import encoder_cq_spec
+
+    config = session_config(
+        restoration_model_name="ltx", ltx_auto_split_percent=12.0, codec="av1", encoder_settings={"cq": 38, "tune": "uhq"}
+    )
+    split, _ = _auto_split(config, samples=_samples((0.05, 0.3)))
+    default_cq = encoder_cq_spec("hevc", vendor_for_device(config.device)).default
+    assert (split.config.codec, split.config.encoder_settings) == ("hevc", {"cq": default_cq})
+    assert "source codec HEVC" in caplog.text and "for AV1" in caplog.text
 
 
 @pytest.mark.parametrize(

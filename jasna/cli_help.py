@@ -38,7 +38,8 @@ CLI_HELP: dict[str, str] = {
     "ltx_auto_split": (
         "ltx: restore only mosaics at least PERCENT of the video height with LTX and smaller "
         "ones with BasicVSR++ (12 is a good start). Finds the mosaics in each video first and "
-        "copies the rest unchanged, keeping the video's own codec. Works on folders; a video "
+        "copies the rest unchanged, keeping the video's own codec (--cq and --encoder-settings apply "
+        "only when that is --codec). Works on folders; a video "
         "that can't be split is restored whole with LTX."
     ),
     "ltx_large_canvas": (

@@ -8,6 +8,8 @@ from jasna.gui.processor import Processor
 from jasna.segments import SegmentRange
 from jasna.session_factory import RestorationSession
 
+from factories import session_config
+
 
 def test_pending_job_segments_can_be_replaced() -> None:
     job = JobItem(Path("video.mp4"))
@@ -143,7 +145,14 @@ def test_ensure_video_session_delegates_to_factory_and_close_unloads() -> None:
 def _run_ltx_job(tmp_path, segments, split):
     pipeline = MagicMock()
     processor = Processor()
-    settings = AppSettings(restoration_model="ltx", ltx_auto_split=True, ltx_auto_split_percent=20, codec="av1")
+    settings = AppSettings(
+        restoration_model="ltx",
+        ltx_auto_split=True,
+        ltx_auto_split_percent=20,
+        codec="av1",
+        encoder_cq=38,
+        encoder_custom_args="tune=uhq",
+    )
     processor._settings = settings
     processor._video_session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
     processor._ensure_video_session = MagicMock()
@@ -167,11 +176,11 @@ def test_ltx_auto_split_job_runs_the_split_ranges_in_the_source_codec(tmp_path) 
     from jasna.segments import SegmentRestoration
     from jasna.session_factory import AutoSplit
 
-    split = AutoSplit("h264", (SegmentRange(1, 2, SegmentRestoration("ltx", 1)),), MagicMock())
+    split = AutoSplit(session_config(codec="h264"), (SegmentRange(1, 2, SegmentRestoration("ltx", 1)),), MagicMock())
     auto_split, kwargs = _run_ltx_job(tmp_path, (), split)
 
     assert auto_split.call_args.args[0].ltx_auto_split_percent == 20.0
-    assert kwargs["config"].codec == "h264"
+    assert kwargs["config"] is split.config
     assert kwargs["segments"] == split.segments
     assert kwargs["splice_plan"] is split.splice_plan
 
@@ -182,3 +191,12 @@ def test_ranges_set_in_the_editor_override_the_ltx_auto_split(tmp_path) -> None:
     auto_split.assert_not_called()
     assert kwargs["segments"] == (SegmentRange(1, 2),)
     assert kwargs["config"].codec == "hevc"
+
+
+def test_editor_ranges_give_the_source_codec_its_default_cq_not_settings_meant_for_another(tmp_path) -> None:
+    from jasna.accelerator import vendor_for_device
+    from jasna.media.encoder_settings import encoder_cq_spec
+
+    _, kwargs = _run_ltx_job(tmp_path, (SegmentRange(1, 2),), None)
+
+    assert kwargs["config"].encoder_settings == {"cq": encoder_cq_spec("hevc", vendor_for_device()).default}

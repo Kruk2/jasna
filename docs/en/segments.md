@@ -26,8 +26,9 @@ Open it with the scissors button on a video in the queue.
   **Reset view** goes back.
 - With ranges selected, the output keeps the codec of the source video. The
   **Codec** setting in **Encoding** is not used, because the parts between
-  ranges are copied. If a video can't be processed in parts, the editor tells
-  you at once.
+  ranges are copied. If another codec is chosen there, its CQ and custom
+  encoder settings are not used either. If a video can't be processed in
+  parts, the editor tells you at once.
 - A BasicVSR++ range and an LTX range need some space between them. If they
   are too close, the editor tells you.
 
@@ -102,7 +103,8 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 ```
 
 The number is the mosaic size, as % of the video height. The output keeps
-the codec of the source video. If a video can't be processed in parts, it is
+the codec of the source video. If that is not `--codec`, `--cq` and
+`--encoder-settings` are not used for it. If a video can't be processed in parts, it is
 restored whole with LTX. Cannot be used with `--segments` or `--fmp4`.
 
 ## Working Directory

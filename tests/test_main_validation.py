@@ -7,6 +7,8 @@ import pytest
 
 from jasna.segments import SegmentRange
 
+from factories import session_config
+
 
 def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detection=True, create_restoration=True):
     input_path = tmp_path / "in.mp4"
@@ -86,7 +88,7 @@ class TestMainValidation:
         from jasna.session_factory import AutoSplit
 
         segments = (SegmentRange(1, 2, SegmentRestoration("ltx", 3)),)
-        split = AutoSplit("h264", segments, MagicMock())
+        split = AutoSplit(session_config(codec="h264"), segments, MagicMock())
         with (
             patch("jasna.session_factory.ltx_auto_split", return_value=split) as auto_split,
             patch("jasna.accelerator.is_nvidia_device", return_value=True),
@@ -100,8 +102,7 @@ class TestMainValidation:
 
         assert auto_split.call_args.args[0].ltx_auto_split_percent == 12.0
         kwargs = pipeline_cls.call_args.kwargs
-        assert kwargs["config"].codec == "h264"
-        assert kwargs["config"].encoder_settings == {"cq": 25}
+        assert kwargs["config"] is split.config
         assert kwargs["segments"] == segments
         assert kwargs["splice_plan"] is split.splice_plan
 
