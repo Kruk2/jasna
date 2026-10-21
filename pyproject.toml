@@ -63,6 +63,8 @@ amd = [
   # Windows ROCm torch wheel intentionally has no distributed_c10d extension.
   "transformers==5.1.0",
   "numpy==1.26.4",
+  # LTX kernels: the same wheels carry prebuilt HIP backends (Linux and Windows).
+  "comfy-kitchen==0.2.38",
 ]
 dev = [
   "nuitka>=2.4",

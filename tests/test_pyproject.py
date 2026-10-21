@@ -16,3 +16,13 @@ def test_every_precompiled_kernel_ships_as_package_data(suffix) -> None:
     assert images
     for image in images:
         assert any(fnmatch(image.name, pattern) for pattern in package_data["jasna.media"])
+
+
+def test_both_vendors_install_the_same_comfy_kitchen_for_ltx() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as file:
+        extras = tomllib.load(file)["project"]["optional-dependencies"]
+
+    def kitchen(vendor):
+        return [pin for pin in extras[vendor] if pin.startswith("comfy-kitchen")]
+
+    assert kitchen("amd") == kitchen("nvidia") == ["comfy-kitchen==0.2.38"]
