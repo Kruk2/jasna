@@ -708,6 +708,32 @@ class TestStreamingEncoder:
         _StreamingFrameWriter(enc, server, start_segment=10, cancel_event=threading.Event())
         server._cleanup_segments()
 
+    def test_reencoded_surround_audio_plays_from_any_segment(self, tmp_path):
+        import subprocess
+
+        import av
+
+        from jasna.os_utils import resolve_executable
+        from jasna.streaming_encoder import _browser_audio_args
+        ffmpeg = resolve_executable("ffmpeg")
+        source = tmp_path / "source.mka"
+        subprocess.run(
+            [ffmpeg, "-y", "-loglevel", "error", "-f", "lavfi",
+             "-i", "sine=d=7,aformat=channel_layouts=5.1(side)", "-c:a", "ac3", str(source)],
+            check=True,
+        )
+        subprocess.run(
+            [ffmpeg, "-y", "-loglevel", "error", "-i", str(source), "-map", "0:a:0",
+             *_browser_audio_args(str(source)),
+             "-f", "hls", "-hls_time", "2", "-hls_segment_type", "mpegts",
+             "-hls_segment_filename", str(tmp_path / "seg_%05d.ts"), "-hls_list_size", "0",
+             str(tmp_path / "_hls_internal.m3u8")],
+            check=True,
+        )
+        with av.open(str(tmp_path / "seg_00002.ts")) as segment:
+            frame = next(segment.decode(audio=0))
+        assert frame.layout.name == "5.1"
+
 
 class TestStreamingEncoderGpuIdx:
     def test_cuda_device_extracts_gpu_index(self, tmp_path):

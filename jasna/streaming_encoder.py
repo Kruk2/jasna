@@ -21,6 +21,9 @@ log = logging.getLogger(__name__)
 _WRITE_QUEUE_SIZE = 16
 _WRITER_STOP_TIMEOUT = 5.0
 _BROWSER_HLS_AUDIO_CODECS = frozenset({'aac', 'mp3'})
+# ADTS carries any other layout only in the first frame's PCE, so a player that starts at a
+# later segment gets no channel layout and no sound.
+_ADTS_CHANNEL_LAYOUTS = 'mono|stereo|3.0|4.0|5.0|5.1|7.1'
 
 
 class StreamingEncodeError(RuntimeError):
@@ -327,5 +330,5 @@ def _browser_audio_args(source_video: str) -> list[str]:
         return []
     if needs_audio_reencode(codec, '.ts', _BROWSER_HLS_AUDIO_CODECS):
         log.info("[stream-enc] re-encoding audio %s -> aac for the browser", codec)
-        return aac_reencode_args(0)
+        return [*aac_reencode_args(0), '-filter:a:0', f'aformat=channel_layouts={_ADTS_CHANNEL_LAYOUTS}']
     return ['-c:a:0', 'copy']
