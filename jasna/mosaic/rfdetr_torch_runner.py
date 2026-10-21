@@ -70,6 +70,7 @@ class RfDetrTorchRunner:
 
         self.device = torch.device(device)
         self.fp16 = bool(fp16)
+        self._dtype = torch.float16 if self.fp16 else torch.float32
 
         state = torch.load(weights_path, map_location="cpu", weights_only=True)["model"]
         num_classes = int(state["class_embed.weight"].shape[0]) - 1
@@ -96,7 +97,7 @@ class RfDetrTorchRunner:
         interpolate_position_embeddings(state, wrapper.model_config.positional_encoding_size)
         core.load_state_dict(state)
         self._wrapper = wrapper
-        self._core = core.to(self.device).eval()
+        self._core = core.to(device=self.device, dtype=self._dtype).eval()
 
         if isinstance(input_shapes, dict):
             input_shapes = list(input_shapes.values())
@@ -127,10 +128,8 @@ class RfDetrTorchRunner:
     def infer(self, inputs: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         if self._core is None:
             raise RuntimeError("RF-DETR torch runner is closed")
-        x = inputs["input"].to(device=self.device, dtype=torch.float32)
-        with torch.no_grad(), torch.autocast(
-            self.device.type, dtype=torch.float16, enabled=self.fp16
-        ):
+        x = inputs["input"].to(device=self.device, dtype=self._dtype)
+        with torch.no_grad():
             out = self._core(x)
         return {
             "dets": out["pred_boxes"].float(),

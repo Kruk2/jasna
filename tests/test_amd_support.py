@@ -466,8 +466,11 @@ def test_amf_8bit_downgrade_drops_bitdepth(monkeypatch, tmp_path) -> None:
 class _FakeRfDetrCore:
     def __init__(self):
         self.loaded_state = None
+        self.dtype = torch.float32
+        self.input_dtypes: list[torch.dtype] = []
 
-    def to(self, _device):
+    def to(self, *, device, dtype):
+        self.dtype = dtype
         return self
 
     def eval(self):
@@ -477,11 +480,12 @@ class _FakeRfDetrCore:
         self.loaded_state = state
 
     def __call__(self, x):
+        self.input_dtypes.append(x.dtype)
         batch = x.shape[0]
         return {
-            "pred_boxes": torch.zeros(batch, 5, 4),
-            "pred_logits": torch.zeros(batch, 5, 3),
-            "pred_masks": torch.zeros(batch, 5, 8, 8),
+            "pred_boxes": torch.zeros(batch, 5, 4, dtype=self.dtype),
+            "pred_logits": torch.zeros(batch, 5, 3, dtype=self.dtype),
+            "pred_masks": torch.zeros(batch, 5, 8, 8, dtype=self.dtype),
         }
 
 
@@ -577,6 +581,34 @@ def test_rfdetr_torch_runner_loads_the_checkpoint_once_weights_only(monkeypatch,
     assert runner._wrapper.kwargs["pretrain_weights"] is None
     assert runner._core.loaded_state is state
     assert state["interpolated_to"] == 48
+
+
+def test_rfdetr_torch_runner_fp16_runs_a_half_model_without_autocast(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.rfdetr_torch_runner as module
+
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"pt")
+    _install_fake_rfdetr(monkeypatch, {"model": {"class_embed.weight": torch.zeros(3, 256)}})
+    monkeypatch.setattr(
+        module.torch,
+        "autocast",
+        lambda *_a, **_k: pytest.fail("autocast recasts the weights on every call"),
+    )
+
+    runner = module.RfDetrTorchRunner(
+        weights,
+        input_shapes=[(2, 3, 576, 576)],
+        device=torch.device("cpu"),
+        fp16=True,
+        resolution=576,
+        variant="medium",
+    )
+    out = runner.infer({"input": torch.zeros(2, 3, 576, 576)})
+
+    assert runner._core.dtype == torch.float16
+    assert runner._core.input_dtypes[-1] == torch.float16
+    assert out["dets"].dtype == torch.float32
+    assert out["labels"].dtype == torch.float32
 
 
 def test_rfdetr_torch_runner_rejects_unknown_variant(monkeypatch, tmp_path) -> None:
