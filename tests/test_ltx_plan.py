@@ -204,6 +204,20 @@ def test_crossfade_weights_partition_unity():
     assert np.allclose(total, 1.0)
 
 
+@pytest.mark.parametrize("hop", [WINDOW_HOP, LESS_OVERLAP_WINDOW_HOP])
+def test_crossfade_hides_a_later_windows_unfused_lead_frames(hop):
+    """A later window's free latent 0 sits in front of fused latents, and the decoder
+    garbles the colour of that latent and the next one (#580): its first 9 frames get no weight."""
+    plans = plan_video([[_square(300, 300, 120)] for _ in range(400)], set(), frame_w=1920, frame_h=1080, large_canvas=False, window_hop=hop)
+    windows = plans[0].windows
+    weights = crossfade_weights(windows)
+    overlap = windows[0].stop - windows[1].start
+    for weight in weights[1:]:
+        assert set(weight[:9]) == {0.0}
+        assert weight[9] > 0.0
+        assert np.all(np.diff(weight[:overlap]) >= 0.0) and weight[overlap - 1] == 1.0
+
+
 def test_zoom_sides_cover_raw_and_respect_rate():
     raw = np.array([200] * 100 + [800] * 100 + [200] * 200)
     sides = zoom_crop_sides(raw)

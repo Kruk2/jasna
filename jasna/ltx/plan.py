@@ -566,12 +566,19 @@ def plan_video(
     return plans
 
 
+UNFUSED_LEAD_FRAMES = 1 + TEMPORAL_SCALE
+"""A later window's free latent 0 sits in front of latents fused with the earlier window, and
+the decoder garbles the colour of the frames of that latent and the next one."""
+
+
 def crossfade_weights(windows: Sequence[Window]) -> list[np.ndarray]:
-    """Per-frame compose weights of one track's windows: linear ramps across each overlap."""
+    """Per-frame compose weights of one track's windows: across each overlap the earlier
+    window alone over the later one's ``UNFUSED_LEAD_FRAMES``, then a linear ramp."""
     weights = [np.ones(window.real_frames, dtype=np.float32) for window in windows]
     for index, (left, right) in enumerate(zip(windows, windows[1:])):
         overlap = left.stop - right.start
-        ramp = np.linspace(0.0, 1.0, overlap, dtype=np.float32)
+        ramp = np.zeros(overlap, dtype=np.float32)
+        ramp[UNFUSED_LEAD_FRAMES - 1 :] = np.linspace(0.0, 1.0, overlap - UNFUSED_LEAD_FRAMES + 1, dtype=np.float32)
         weights[index][len(weights[index]) - overlap :] = 1.0 - ramp
         weights[index + 1][:overlap] = ramp
     return weights

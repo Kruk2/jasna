@@ -299,8 +299,8 @@ def test_decode_window_converts_a_float32_decode(monkeypatch):
 
 def _two_window_composer(monkeypatch, decode, composite):
     crop = CropFrame((0, 0, 4, 4), (4, 4), (0, 0, 0, 0))
-    windows = (Window(0, 0, 0, 5, (crop,) * 5), Window(1, 0, 3, 5, (crop,) * 5))
-    plan = restore.TrackPlan(0, 0, ((),) * 8, (1.0,) * 8, windows, 3)
+    windows = (Window(0, 0, 0, 13, (crop,) * 13), Window(1, 0, 3, 13, (crop,) * 13))
+    plan = restore.TrackPlan(0, 0, ((),) * 16, (1.0,) * 16, windows, 3)
     monkeypatch.setattr(restore, "_decode_window", decode)
     monkeypatch.setattr(restore, "composite_frame", composite)
     decodes = ThreadPoolExecutor(max_workers=1)
@@ -318,7 +318,7 @@ def test_composer_decodes_the_next_window_while_earlier_frames_are_composited(mo
     def decode(decoder, latent, seed, canvas, budget, device):
         if latent == 1:
             second_started.set()
-        return torch.full((5, 3, 4, 4), latent, dtype=torch.uint8)
+        return torch.full((13, 3, 4, 4), latent, dtype=torch.uint8)
 
     def composite(source, candidates, *, feather):
         if int(source[0, 0, 0]) == 2:
@@ -327,11 +327,11 @@ def test_composer_decodes_the_next_window_while_earlier_frames_are_composited(mo
 
     composer, decodes = _two_window_composer(monkeypatch, decode, composite)
     try:
-        out = [int(composer.frame(torch.full((3, 4, 4), i, dtype=torch.uint8))[0, 0, 0]) for i in range(8)]
+        out = [int(composer.frame(torch.full((3, 4, 4), i, dtype=torch.uint8))[0, 0, 0]) for i in range(16)]
     finally:
         decodes.shutdown()
     assert started_before_its_start == [True]
-    assert out == [0, 0, 0, 1, 1, 1, 1, 1]
+    assert out == [0, 0, 0] + [1] * 13
 
 
 def test_composer_decodes_nothing_before_its_first_frame(monkeypatch):
@@ -339,7 +339,7 @@ def test_composer_decodes_nothing_before_its_first_frame(monkeypatch):
 
     def decode(decoder, latent, seed, canvas, budget, device):
         decoded.append(latent)
-        return torch.full((5, 3, 4, 4), latent, dtype=torch.uint8)
+        return torch.full((13, 3, 4, 4), latent, dtype=torch.uint8)
 
     composer, decodes = _two_window_composer(monkeypatch, decode, lambda source, candidates, *, feather: source)
     decodes.shutdown()
