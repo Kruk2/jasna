@@ -64,7 +64,10 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 3. 启动应用：
    - Windows：双击 `jasna.exe`。
    - Linux NVIDIA：运行 `jasna` 文件。
-   - Linux AMD：运行 `run_jasna_amd.sh`。
+   - Linux AMD：先安装一次 AMD 的 AMF 视频运行库：从
+     [repo.radeon.com/amf](https://repo.radeon.com/amf/) 最新的文件夹下载
+     `amf_installer_<version>.zip`，解压后运行 `sudo ./amf_installer_<version>.sh`。
+     然后运行 `run_jasna_amd.sh`。
 4. 添加视频，选择设置，点击界面底部的 **▶** 按钮。
 
 **第一个任务会很慢。** 在 NVIDIA 上，Jasna 会先为你的 GPU 准备模型。这大约需要

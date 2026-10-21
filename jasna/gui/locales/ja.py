@@ -614,6 +614,10 @@ JA = {
         "wizard_cuda_version_compute": "CUDA {version}、compute {major}.{minor}",
         "wizard_not_available": "利用不可",
         "wizard_sysmem_how_to_fix": "修正方法",
+        "wizard_check_amf": "AMD 動画ランタイム（AMF）",
+        "wizard_amf_missing_linux": "インストールされていません。AMD の AMF インストーラーでインストールしてください。",
+        "wizard_amf_missing_windows": "見つかりません。AMD グラフィックスドライバーを更新してください。",
+        "wizard_amf_how_to_fix": "修正方法",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "Topaz Video：TVAI_MODEL_DATA_DIR が設定されていません。モデルガイドの Topaz の項を参照してください。",

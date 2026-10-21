@@ -77,6 +77,11 @@
 每个版本首次启动时，Jasna 会检查 FFprobe、GPU、驱动和安装路径。你可以从页眉
 再次运行它，例如在更新驱动后。
 
+在 AMD 上，它还会检查 AMD 的 AMF 视频运行库，Jasna 读写视频需要它。Windows 上它随
+AMD 驱动一起安装。Linux 上请用 AMD 的 [AMF 安装程序](https://repo.radeon.com/amf/)
+安装一次：打开最新的文件夹，下载 `amf_installer_<version>.zip`，解压后运行
+`sudo ./amf_installer_<version>.sh`。
+
 ## 其他设置
 
 - **语言**：首次启动时使用系统语言。可在页眉中更改。重启 Jasna 后所有文字

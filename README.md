@@ -74,7 +74,10 @@ and a command line, and runs on your GPU.
 3. Start the app:
    - Windows: double-click `jasna.exe`.
    - Linux NVIDIA: run the `jasna` file.
-   - Linux AMD: run `run_jasna_amd.sh`.
+   - Linux AMD: first install AMD's AMF video runtime once: download
+     `amf_installer_<version>.zip` from the newest folder at
+     [repo.radeon.com/amf](https://repo.radeon.com/amf/), unpack it and run
+     `sudo ./amf_installer_<version>.sh`. Then run `run_jasna_amd.sh`.
 4. Add a video, choose settings and click the **▶** button at the bottom.
 
 **Your first job is slow.** On NVIDIA, Jasna first prepares the models for

@@ -109,3 +109,44 @@ def test_startup_warns_when_installed_on_a_hard_disk(monkeypatch, hard_disk):
     app_module.JasnaApp._warn_if_installed_on_hard_disk(fake_app)
 
     assert logged == ([t("hard_disk_warning")] if hard_disk else [])
+
+
+def test_evaluate_amf_failure_blocks():
+    assert evaluate_check_results({"gpu": (True, ""), "amf": (False, "")}, ["gpu", "amf"]) == (False, True)
+
+
+@pytest.mark.parametrize("amd", [True, False])
+def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
+    from jasna import accelerator, os_utils
+    from jasna.gui import system_checks
+
+    for name in ("check_ascii_install_path", "check_gpu_driver_version", "check_windows_nvidia_sysmem_fallback_policy"):
+        monkeypatch.setattr(os_utils, name, lambda: (True, ""))
+    for name in ("check_ffprobe", "check_gpu", "check_cuda"):
+        monkeypatch.setattr(system_checks, name, lambda: (True, ""))
+    monkeypatch.setattr(os_utils, "check_amd_amf_runtime", lambda: (True, "libamfrt64.so.1"))
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: amd)
+
+    results = {}
+    system_checks.run_system_checks(results)
+
+    assert ("amf" in results) is amd
+
+
+@pytest.mark.parametrize(
+    "platform,message",
+    [
+        ("linux", "Not installed. Install it with AMD's AMF installer."),
+        ("win32", "Not found. Update your AMD graphics driver."),
+    ],
+)
+def test_missing_amf_runtime_tells_the_user_what_to_do(monkeypatch, platform, message):
+    from jasna import os_utils
+    from jasna.gui import system_checks
+    from jasna.gui.locales import get_locale
+
+    monkeypatch.setattr(get_locale(), "_current_lang", "en")
+    monkeypatch.setattr(system_checks.sys, "platform", platform)
+    monkeypatch.setattr(os_utils, "check_amd_amf_runtime", lambda: (False, "cannot open"))
+
+    assert system_checks.check_amf() == (False, message)

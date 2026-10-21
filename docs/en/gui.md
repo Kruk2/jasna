@@ -94,6 +94,12 @@ On the first start of each version, Jasna checks FFprobe, the GPU, the driver
 and the install path. You can run it again from the header, for example after a driver
 update.
 
+On AMD it also checks AMD's AMF video runtime, which Jasna needs to read and
+write videos. On Windows it comes with the AMD driver. On Linux, install it once
+with AMD's [AMF installer](https://repo.radeon.com/amf/): open the newest folder,
+download `amf_installer_<version>.zip`, unpack it and run
+`sudo ./amf_installer_<version>.sh`.
+
 ## Other settings
 
 - **Language**: the first start uses your system language. Change it in the

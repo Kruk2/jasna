@@ -10,7 +10,10 @@ from jasna.cli_help import CLI_HELP
 from jasna.engine_paths import default_restoration_model_path
 from jasna.media.probe import UnsupportedVideoError
 from jasna.os_utils import (
+    AMD_DRIVER_URL,
+    AMF_LINUX_INSTALL_URL,
     MIN_DRIVER_VERSION,
+    check_amd_amf_runtime,
     check_ascii_install_path,
     check_gpu_driver_version,
     check_required_executables,
@@ -649,7 +652,18 @@ def _check_system(args: argparse.Namespace) -> None:
             print(f"Please update your NVIDIA driver to version {MIN_DRIVER_VERSION} or newer.")
         sys.exit(1)
 
-    from jasna.accelerator import is_nvidia_device
+    from jasna.accelerator import is_amd_device, is_nvidia_device
+
+    if is_amd_device():
+        amf_ok, amf_info = check_amd_amf_runtime()
+        if not amf_ok:
+            print(f"Error: AMD's AMF video runtime is missing, so Jasna can't decode or encode video ({amf_info}).")
+            if sys.platform == "win32":
+                print(f"Update or reinstall your AMD graphics driver: {AMD_DRIVER_URL}")
+            else:
+                print(f"Install it with AMD's AMF installer: open the newest version folder at {AMF_LINUX_INSTALL_URL}, "
+                      "download amf_installer_<version>.zip, unpack it and run sudo ./amf_installer_<version>.sh")
+            sys.exit(1)
 
     if sys.platform == "win32" and is_nvidia_device():
         sysmem_ok, sysmem_info = check_windows_nvidia_sysmem_fallback_policy()

@@ -387,6 +387,22 @@ def check_gpu_driver_version() -> tuple[bool, str]:
     return True, version_str
 
 
+AMF_LINUX_INSTALL_URL = "https://repo.radeon.com/amf/"
+AMD_DRIVER_URL = "https://www.amd.com/en/support/download/drivers.html"
+
+
+def check_amd_amf_runtime() -> tuple[bool, str]:
+    """AMD decode/encode needs AMD's AMF runtime: the Windows driver ships it, Linux needs AMD's AMF installer."""
+    import ctypes
+
+    library = "amfrt64.dll" if sys.platform == "win32" else "libamfrt64.so.1"
+    try:
+        ctypes.CDLL(library)
+    except OSError as e:
+        return False, str(e)
+    return True, library
+
+
 def _install_dir() -> Path:
     return Path(sys.executable).parent if is_frozen() else Path(__file__).resolve().parent
 

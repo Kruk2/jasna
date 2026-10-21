@@ -3,6 +3,7 @@
 import logging
 import os
 import subprocess
+import sys
 from collections.abc import Iterable
 
 from jasna import os_utils
@@ -38,6 +39,18 @@ def run_system_checks(results: dict[str, tuple[bool, str]]) -> None:
     results["driver"] = os_utils.check_gpu_driver_version()
     if os.name == "nt":
         results["sysmem"] = os_utils.check_windows_nvidia_sysmem_fallback_policy()
+    from jasna.accelerator import is_amd_device
+
+    if is_amd_device():
+        results["amf"] = check_amf()
+
+
+def check_amf() -> tuple[bool, str]:
+    ok, info = os_utils.check_amd_amf_runtime()
+    if ok:
+        return True, info
+    logger.warning("AMD AMF runtime did not load: %s", info)
+    return False, t("wizard_amf_missing_windows" if sys.platform == "win32" else "wizard_amf_missing_linux")
 
 
 def check_ffprobe() -> tuple[bool, str]:

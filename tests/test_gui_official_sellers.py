@@ -72,3 +72,21 @@ def test_license_dialog_explains_rejected_keys(monkeypatch, error_name, message_
         assert dialog._status.cget("text") == expected
     finally:
         root.destroy()
+
+
+def test_wizard_blocks_amd_without_amf_and_links_the_fix(monkeypatch):
+    from jasna import accelerator
+
+    monkeypatch.setattr(wizard, "run_system_checks", lambda results: None)
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: True)
+    root = _root()
+    try:
+        dialog = wizard.FirstRunWizard(root)
+        assert t("wizard_check_amf") in _label_texts(dialog)
+        dialog._check_results.update({key: (True, "") for key in dialog._check_labels})
+        dialog._check_results["amf"] = (False, t("wizard_amf_missing_linux"))
+        dialog._apply_check_results_to_ui()
+        assert dialog._has_required_failure
+        assert dialog._check_labels["amf"][2].winfo_manager() == "pack"
+    finally:
+        root.destroy()

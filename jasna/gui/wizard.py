@@ -2,12 +2,14 @@
 
 import logging
 import os
+import sys
 import threading
 import time
 import webbrowser
 
 import customtkinter as ctk
 
+from jasna import os_utils
 from jasna.gui import scaling
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.locales import get_locale, t
@@ -20,6 +22,7 @@ _CHECKS_TIMEOUT_SECONDS = 30.0
 
 _HELP_URLS = {
     "sysmem": "https://docs.cognex.com/deep-learning_420/web/EN/deep-learning/Content/Topics/optimization/gpu-disable-shared.htm?TocPath=Optimization%20Guidelines%7CNVIDIA%C2%AE%20GPU%20Guidelines%7C_____6",
+    "amf": os_utils.AMD_DRIVER_URL if sys.platform == "win32" else os_utils.AMF_LINUX_INSTALL_URL,
 }
 
 
@@ -108,6 +111,10 @@ class FirstRunWizard(ctk.CTkToplevel):
         ]
         if os.name == "nt":
             checks.append(("sysmem", t("wizard_check_sysmem")))
+        from jasna.accelerator import is_amd_device
+
+        if is_amd_device():
+            checks.append(("amf", t("wizard_check_amf")))
         
         for key, label in checks:
             row = ctk.CTkFrame(self._checks_frame, fg_color="transparent")

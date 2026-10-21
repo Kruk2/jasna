@@ -614,6 +614,10 @@ EN = {
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "Not available",
         "wizard_sysmem_how_to_fix": "How to fix",
+        "wizard_check_amf": "AMD video runtime (AMF)",
+        "wizard_amf_missing_linux": "Not installed. Install it with AMD's AMF installer.",
+        "wizard_amf_missing_windows": "Not found. Update your AMD graphics driver.",
+        "wizard_amf_how_to_fix": "How to fix",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "Topaz Video: TVAI_MODEL_DATA_DIR isn't set. See Topaz in the Models guide.",

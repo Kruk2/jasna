@@ -614,6 +614,10 @@ KO = {
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "사용 불가",
         "wizard_sysmem_how_to_fix": "해결 방법",
+        "wizard_check_amf": "AMD 비디오 런타임 (AMF)",
+        "wizard_amf_missing_linux": "설치되지 않았습니다. AMD AMF 설치 프로그램으로 설치하세요.",
+        "wizard_amf_missing_windows": "찾을 수 없습니다. AMD 그래픽 드라이버를 업데이트하세요.",
+        "wizard_amf_how_to_fix": "해결 방법",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "Topaz Video: TVAI_MODEL_DATA_DIR가 설정되지 않았습니다. 모델 가이드의 Topaz 항목을 참고하세요.",

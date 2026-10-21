@@ -614,6 +614,10 @@ ZH = {
         "wizard_cuda_version_compute": "CUDA {version}，计算能力 {major}.{minor}",
         "wizard_not_available": "不可用",
         "wizard_sysmem_how_to_fix": "如何修复",
+        "wizard_check_amf": "AMD 视频运行库（AMF）",
+        "wizard_amf_missing_linux": "未安装。请用 AMD 的 AMF 安装程序安装。",
+        "wizard_amf_missing_windows": "未找到。请更新 AMD 显卡驱动。",
+        "wizard_amf_how_to_fix": "如何修复",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "Topaz Video：未设置 TVAI_MODEL_DATA_DIR。请参阅模型指南中的 Topaz 部分。",

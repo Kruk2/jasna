@@ -614,6 +614,10 @@ TH = {
         "wizard_cuda_version_compute": "CUDA {version}, compute {major}.{minor}",
         "wizard_not_available": "ไม่พร้อมใช้งาน",
         "wizard_sysmem_how_to_fix": "วิธีแก้ไข",
+        "wizard_check_amf": "รันไทม์วิดีโอ AMD (AMF)",
+        "wizard_amf_missing_linux": "ยังไม่ได้ติดตั้ง ติดตั้งด้วยตัวติดตั้ง AMF ของ AMD",
+        "wizard_amf_missing_windows": "ไม่พบ อัปเดตไดรเวอร์กราฟิก AMD",
+        "wizard_amf_how_to_fix": "วิธีแก้ไข",
 
         # Validation errors
         "error_tvai_data_dir_not_set": "Topaz Video: ยังไม่ได้ตั้งค่า TVAI_MODEL_DATA_DIR ดูหัวข้อ Topaz ในคู่มือโมเดล",

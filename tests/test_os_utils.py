@@ -775,3 +775,27 @@ def test_mount_source_is_the_innermost_mount_holding_the_path() -> None:
 def test_windows_seek_penalty_query_answers_for_a_drive_and_skips_network_paths() -> None:
     assert isinstance(os_utils._windows_drive_has_seek_penalty(Path(os.environ["SystemDrive"] + "\\")), bool)
     assert not os_utils._windows_drive_has_seek_penalty(Path(r"\\server\share\jasna"))
+
+
+@pytest.mark.parametrize("platform,library", [("linux", "libamfrt64.so.1"), ("win32", "amfrt64.dll")])
+def test_amf_runtime_check_loads_the_platform_library(monkeypatch, platform, library) -> None:
+    import ctypes
+
+    loaded = []
+    monkeypatch.setattr(os_utils.sys, "platform", platform)
+    monkeypatch.setattr(ctypes, "CDLL", loaded.append)
+
+    assert os_utils.check_amd_amf_runtime() == (True, library)
+    assert loaded == [library]
+
+
+def test_amf_runtime_check_reports_the_load_error(monkeypatch) -> None:
+    import ctypes
+
+    def missing(name):
+        raise OSError(f"{name}: cannot open shared object file")
+
+    monkeypatch.setattr(os_utils.sys, "platform", "linux")
+    monkeypatch.setattr(ctypes, "CDLL", missing)
+
+    assert os_utils.check_amd_amf_runtime() == (False, "libamfrt64.so.1: cannot open shared object file")
