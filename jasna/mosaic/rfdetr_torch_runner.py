@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,22 +71,30 @@ class RfDetrTorchRunner:
         self.device = torch.device(device)
         self.fp16 = bool(fp16)
 
-        checkpoint = torch.load(weights_path, map_location="cpu", weights_only=False)
-        state = checkpoint["model"]
+        state = torch.load(weights_path, map_location="cpu", weights_only=True)["model"]
         num_classes = int(state["class_embed.weight"].shape[0]) - 1
 
+        # rfdetr's own checkpoint loader unpickles arbitrary objects, so the model
+        # is built empty and gets the weights-only state the way that loader would.
+        from rfdetr.config import PretrainWeightsCompatibilityWarning
+        from rfdetr.models.weights import interpolate_position_embeddings
+
         model_cls = getattr(rfdetr, cls_name)
-        wrapper = model_cls(
-            num_classes=num_classes,
-            resolution=int(resolution),
-            pretrain_weights=str(weights_path),
-            device=str(self.device),
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", PretrainWeightsCompatibilityWarning)
+            wrapper = model_cls(
+                num_classes=num_classes,
+                resolution=int(resolution),
+                pretrain_weights=None,
+                device=str(self.device),
+            )
         core = wrapper.model.model
         if core is None:
             raise RuntimeError(
                 "rfdetr model is unavailable after load (inplace-optimized checkpoint)"
             )
+        interpolate_position_embeddings(state, wrapper.model_config.positional_encoding_size)
+        core.load_state_dict(state)
         self._wrapper = wrapper
         self._core = core.to(self.device).eval()
 

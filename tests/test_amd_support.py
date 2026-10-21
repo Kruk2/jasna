@@ -421,7 +421,7 @@ def test_amf_decoder_survives_pyav18_time_base_regression(monkeypatch) -> None:
 def test_yuv_eager_converter_runs_on_gpu_planes(monkeypatch) -> None:
     import jasna.media.yuv_to_rgb as module
 
-    monkeypatch.setattr(module, "is_nvidia_device", lambda _device: False)
+    monkeypatch.setattr(module, "has_precompiled_kernels", lambda _device: False)
     H = W = 16
     generator = torch.Generator().manual_seed(0)
     y = torch.randint(16, 236, (H, W), dtype=torch.uint8, generator=generator)
@@ -463,38 +463,68 @@ def test_amf_8bit_downgrade_drops_bitdepth(monkeypatch, tmp_path) -> None:
     assert encoder.encoder_options["forced_idr"] == "1"
     assert "bitdepth" not in encoder.encoder_options
 
+class _FakeRfDetrCore:
+    def __init__(self):
+        self.loaded_state = None
+
+    def to(self, _device):
+        return self
+
+    def eval(self):
+        return self
+
+    def load_state_dict(self, state):
+        self.loaded_state = state
+
+    def __call__(self, x):
+        batch = x.shape[0]
+        return {
+            "pred_boxes": torch.zeros(batch, 5, 4),
+            "pred_logits": torch.zeros(batch, 5, 3),
+            "pred_masks": torch.zeros(batch, 5, 8, 8),
+        }
+
+
+class _FakeRfDetrModel:
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.model_config = SimpleNamespace(positional_encoding_size=48)
+        self.model = SimpleNamespace(model=_FakeRfDetrCore())
+
+
+def _install_fake_rfdetr(monkeypatch, checkpoint: dict) -> list[tuple]:
+    import jasna.mosaic.rfdetr_torch_runner as module
+
+    loads: list[tuple] = []
+
+    def load(*args, **kwargs):
+        loads.append((args, kwargs))
+        return checkpoint
+
+    def interpolate_position_embeddings(state, positional_encoding_size):
+        state["interpolated_to"] = positional_encoding_size
+
+    monkeypatch.setitem(sys.modules, "rfdetr", SimpleNamespace(RFDETRSegMedium=_FakeRfDetrModel))
+    monkeypatch.setitem(
+        sys.modules,
+        "rfdetr.config",
+        SimpleNamespace(PretrainWeightsCompatibilityWarning=UserWarning),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "rfdetr.models.weights",
+        SimpleNamespace(interpolate_position_embeddings=interpolate_position_embeddings),
+    )
+    monkeypatch.setattr(module.torch, "load", load)
+    return loads
+
+
 def test_rfdetr_torch_runner_maps_outputs(monkeypatch, tmp_path) -> None:
     import jasna.mosaic.rfdetr_torch_runner as module
 
     weights = tmp_path / "rfdetr-v6.pt"
     weights.write_bytes(b"pt")
-
-    class FakeCore:
-        def to(self, _device):
-            return self
-
-        def eval(self):
-            return self
-
-        def __call__(self, x):
-            batch = x.shape[0]
-            return {
-                "pred_boxes": torch.zeros(batch, 5, 4),
-                "pred_logits": torch.zeros(batch, 5, 3),
-                "pred_masks": torch.zeros(batch, 5, 8, 8),
-            }
-
-    class FakeModel:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            self.model = SimpleNamespace(model=FakeCore())
-
-    monkeypatch.setitem(sys.modules, "rfdetr", SimpleNamespace(RFDETRSegMedium=FakeModel))
-    monkeypatch.setattr(
-        module.torch,
-        "load",
-        lambda *_a, **_k: {"model": {"class_embed.weight": torch.zeros(3, 256)}},
-    )
+    _install_fake_rfdetr(monkeypatch, {"model": {"class_embed.weight": torch.zeros(3, 256)}})
 
     runner = module.RfDetrTorchRunner(
         weights,
@@ -524,6 +554,29 @@ def test_rfdetr_torch_runner_maps_outputs(monkeypatch, tmp_path) -> None:
     runner.close()
     with pytest.raises(RuntimeError, match="closed"):
         runner.infer({"input": torch.zeros(2, 3, 576, 576)})
+
+
+def test_rfdetr_torch_runner_loads_the_checkpoint_once_weights_only(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.rfdetr_torch_runner as module
+
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"pt")
+    state = {"class_embed.weight": torch.zeros(3, 256)}
+    loads = _install_fake_rfdetr(monkeypatch, {"model": state})
+
+    runner = module.RfDetrTorchRunner(
+        weights,
+        input_shapes=[(2, 3, 576, 576)],
+        device=torch.device("cpu"),
+        fp16=False,
+        resolution=576,
+        variant="medium",
+    )
+
+    assert loads == [((weights,), {"map_location": "cpu", "weights_only": True})]
+    assert runner._wrapper.kwargs["pretrain_weights"] is None
+    assert runner._core.loaded_state is state
+    assert state["interpolated_to"] == 48
 
 
 def test_rfdetr_torch_runner_rejects_unknown_variant(monkeypatch, tmp_path) -> None:
