@@ -278,3 +278,27 @@ def test_ltx_auto_split_falls_back_to_the_whole_video(caplog) -> None:
     split, _ = _auto_split(config, samples=MagicMock(times=(1.0,), scores=(0.0,), sizes=(0.0,), stride=1.0))
     assert split is None
     assert "no mosaics" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("nvidia", "capability", "allowed"),
+    [(True, (12, 0), True), (True, (8, 9), False), (False, (12, 0), False)],
+)
+def test_fast_ltx_needs_a_blackwell_nvidia_gpu(nvidia, capability, allowed) -> None:
+    import torch
+
+    from jasna.session_factory import _ltx_model_files
+
+    config = session_config(restoration_model_name="ltx", ltx_fast=True, ltx_trial=True)
+    with (
+        patch("jasna.ltx.transformer.require_kernels"),
+        patch("jasna.accelerator.is_nvidia_device", return_value=nvidia),
+        patch("torch.cuda.get_device_capability", return_value=capability),
+        patch("jasna.engine_compiler.ensure_engines_compiled") as compiled,
+    ):
+        if allowed:
+            _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+            compiled.assert_called_once()
+        else:
+            with pytest.raises(ValueError, match="Blackwell"):
+                _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
