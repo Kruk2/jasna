@@ -40,11 +40,15 @@ class PerChannelStatistics(nn.Module):
 
 
 class PixelNorm(nn.Module):
-    """Per-location RMS normalization over the channel dimension."""
+    """Per-location RMS normalization over the channel dimension; fp16 inputs take the mean
+    square in fp32, since squares overflow fp16 above 256."""
 
     eps = 1e-8
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.dtype == torch.float16:
+            norm = torch.linalg.vector_norm(x, dim=1, keepdim=True, dtype=torch.float32)
+            return x / torch.sqrt(norm.square() / x.shape[1] + self.eps).to(x.dtype)
         mean_sq = torch.mean(x**2, dim=1, keepdim=True)
         rms = torch.sqrt(mean_sq + self.eps)
         return x / rms

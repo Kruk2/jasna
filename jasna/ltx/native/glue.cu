@@ -8,6 +8,7 @@
 #include <c10/cuda/CUDAException.h>
 #include <c10/util/Exception.h>
 #include <cuda_bf16.h>
+#include <cuda_fp16.h>
 
 namespace jasna_ltx {
 namespace {
@@ -38,6 +39,25 @@ __device__ __forceinline__ void store8(bf16* p, const Vec& in) {
 }
 
 __device__ __forceinline__ float round_bf16(float x) { return __bfloat162float(__float2bfloat16_rn(x)); }
+
+// fp16 holds the prompt attention before SM 8.0; the values passing through it are bf16-rounded,
+// as ``.to(torch.float16)`` of a bf16 tensor and ``.to(torch.bfloat16)`` of the fp16 result.
+__device__ __forceinline__ Vec load8(const __half* p) {
+  const uint4 raw = *reinterpret_cast<const uint4*>(p);
+  const __half* values = reinterpret_cast<const __half*>(&raw);
+  Vec out;
+#pragma unroll
+  for (int i = 0; i < kVector; ++i) out.v[i] = round_bf16(__half2float(values[i]));
+  return out;
+}
+
+__device__ __forceinline__ void store8(__half* p, const Vec& in) {
+  uint4 raw;
+  __half* values = reinterpret_cast<__half*>(&raw);
+#pragma unroll
+  for (int i = 0; i < kVector; ++i) values[i] = __float2half_rn(round_bf16(in.v[i]));
+  *reinterpret_cast<uint4*>(p) = raw;
+}
 
 __device__ __forceinline__ void atomic_max_nonnegative(float* address, float value) {
   atomicMax(reinterpret_cast<int*>(address), __float_as_int(value));
@@ -91,12 +111,13 @@ __global__ void rms_modulate_kernel(const bf16* x, const bf16* shift, const bf16
   }
 }
 
-__global__ void norm_rope_kernel(const bf16* x, const bf16* weight, const bf16* cos, const bf16* sin, bf16* out,
+template <class Out>
+__global__ void norm_rope_kernel(const bf16* x, const bf16* weight, const bf16* cos, const bf16* sin, Out* out,
                                  int dim, int head_dim, int tokens, int64_t rope_stride_head,
                                  int64_t rope_stride_token, float eps) {
   const int row = blockIdx.x;
   const bf16* in = x + static_cast<int64_t>(row) * dim;
-  bf16* dst = out + static_cast<int64_t>(row) * dim;
+  Out* dst = out + static_cast<int64_t>(row) * dim;
   float squares = 0.f;
   for (int c = threadIdx.x * kVector; c < dim; c += blockDim.x * kVector) {
     const Vec a = load8(in + c);
@@ -136,7 +157,8 @@ __global__ void norm_rope_kernel(const bf16* x, const bf16* weight, const bf16* 
   }
 }
 
-__global__ void gate_heads_kernel(const bf16* attention, int64_t stride_token, int64_t stride_head, const bf16* logits,
+template <class In>
+__global__ void gate_heads_kernel(const In* attention, int64_t stride_token, int64_t stride_head, const bf16* logits,
                                   bf16* out, int64_t rows, int heads, int head_dim, float* amax) {
   const int dim = heads * head_dim;
   float peak = 0.f;
@@ -237,7 +259,9 @@ void rms_modulate(const at::Tensor& x, const at::Tensor& shift, const at::Tensor
 void norm_rope(const at::Tensor& x, const at::Tensor& weight, const at::Tensor* cos, const at::Tensor* sin,
                const at::Tensor& out, int64_t head_dim, double eps) {
   check_rows(x, "x");
-  check_rows(out, "out");
+  TORCH_CHECK(out.is_cuda() && (out.scalar_type() == at::kBFloat16 || out.scalar_type() == at::kHalf) &&
+              out.sizes() == x.sizes() && out.is_contiguous() && reinterpret_cast<uintptr_t>(out.data_ptr()) % 16 == 0,
+              "out must be a contiguous bf16/fp16 tensor shaped like x");
   check_bf16(weight, "weight");
   const int64_t rows = x.size(0), dim = x.size(1);
   TORCH_CHECK(dim % head_dim == 0 && (head_dim / 2) % kVector == 0 && weight.is_contiguous() && weight.numel() == dim,
@@ -254,17 +278,25 @@ void norm_rope(const at::Tensor& x, const at::Tensor& weight, const at::Tensor* 
     stride_head = cos->stride(1);
     stride_token = cos->stride(2);
   }
-  norm_rope_kernel<<<rows, kThreads, 0, at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<const bf16*>(x.data_ptr()), reinterpret_cast<const bf16*>(weight.data_ptr()),
-      cos ? reinterpret_cast<const bf16*>(cos->data_ptr()) : nullptr,
-      sin ? reinterpret_cast<const bf16*>(sin->data_ptr()) : nullptr, reinterpret_cast<bf16*>(out.data_ptr()),
-      static_cast<int>(dim), static_cast<int>(head_dim), static_cast<int>(std::max<int64_t>(tokens, 1)),
-      stride_head, stride_token, static_cast<float>(eps));
+  const auto launch = [&](auto* destination) {
+    norm_rope_kernel<<<rows, kThreads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        reinterpret_cast<const bf16*>(x.data_ptr()), reinterpret_cast<const bf16*>(weight.data_ptr()),
+        cos ? reinterpret_cast<const bf16*>(cos->data_ptr()) : nullptr,
+        sin ? reinterpret_cast<const bf16*>(sin->data_ptr()) : nullptr, destination,
+        static_cast<int>(dim), static_cast<int>(head_dim), static_cast<int>(std::max<int64_t>(tokens, 1)),
+        stride_head, stride_token, static_cast<float>(eps));
+  };
+  if (out.scalar_type() == at::kHalf)
+    launch(reinterpret_cast<__half*>(out.data_ptr()));
+  else
+    launch(reinterpret_cast<bf16*>(out.data_ptr()));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void gate_heads(const at::Tensor& attention, const at::Tensor& logits, const at::Tensor& out, float* amax) {
-  check_bf16(attention, "attention");
+  TORCH_CHECK(attention.is_cuda() && (attention.scalar_type() == at::kBFloat16 || attention.scalar_type() == at::kHalf) &&
+              reinterpret_cast<uintptr_t>(attention.data_ptr()) % 16 == 0,
+              "attention must be a 16-byte aligned CUDA bf16/fp16 tensor");
   check_bf16(logits, "logits");
   check_rows(out, "out");
   TORCH_CHECK(attention.dim() == 3 && attention.stride(2) == 1 && attention.size(2) % kVector == 0 &&
@@ -273,10 +305,15 @@ void gate_heads(const at::Tensor& attention, const at::Tensor& logits, const at:
   const int64_t rows = attention.size(0), heads = attention.size(1), head_dim = attention.size(2);
   TORCH_CHECK(logits.dim() == 2 && logits.is_contiguous() && logits.size(0) == rows && logits.size(1) == heads &&
               out.size(0) == rows && out.size(1) == heads * head_dim, "gate logits must be (rows, heads)");
-  gate_heads_kernel<<<elementwise_blocks(out.numel()), kThreads, 0, at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<const bf16*>(attention.data_ptr()), attention.stride(0), attention.stride(1),
-      reinterpret_cast<const bf16*>(logits.data_ptr()), reinterpret_cast<bf16*>(out.data_ptr()), rows,
-      static_cast<int>(heads), static_cast<int>(head_dim), amax);
+  const auto launch = [&](const auto* values) {
+    gate_heads_kernel<<<elementwise_blocks(out.numel()), kThreads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        values, attention.stride(0), attention.stride(1), reinterpret_cast<const bf16*>(logits.data_ptr()),
+        reinterpret_cast<bf16*>(out.data_ptr()), rows, static_cast<int>(heads), static_cast<int>(head_dim), amax);
+  };
+  if (attention.scalar_type() == at::kHalf)
+    launch(reinterpret_cast<const __half*>(attention.data_ptr()));
+  else
+    launch(reinterpret_cast<const bf16*>(attention.data_ptr()));
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

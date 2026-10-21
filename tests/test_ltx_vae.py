@@ -189,18 +189,63 @@ def test_load_video_encoder_from_checkpoint(tmp_path, monkeypatch):
     assert opened == [path]
 
 
-def test_load_video_encoder_keeps_contiguous_eager_weights_without_bf16_compile(tmp_path, monkeypatch):
+def test_load_video_encoder_before_sm80_compiles_fp16_with_a_float32_tail(tmp_path, monkeypatch):
     source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
     path = tmp_path / "vae.safetensors"
-    save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v for k, v in source.state_dict().items()},
+    save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v.bfloat16()
+               for k, v in source.state_dict().items()},
               str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
+    compiled = []
     monkeypatch.setattr(loader, "half_dtype", lambda device: torch.float16)
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+    monkeypatch.setattr(video_encoder, "compile_static",
+                        lambda fn, mode, device, dtype: compiled.append(dtype) or fn)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
 
-    assert encoder.conv_in.conv.weight.is_contiguous()
-    assert video_encoder._encode_cropped is video_encoder.encode_cropped
+    assert encoder.conv_in.conv.weight.dtype == torch.float16
+    assert torch.equal(encoder.conv_in.conv.weight, source.conv_in.conv.weight.bfloat16().half())
+    assert encoder.conv_out.conv.weight.dtype == torch.float32
+    assert encoder.conv_in.conv.weight.is_contiguous(memory_format=torch.channels_last_3d)
+    assert compiled == [torch.float16]
+
+
+def test_fp16_with_float32_tail_splits_at_the_fp16_safe_blocks():
+    config = {**TINY_ENCODER_CONFIG, "blocks": [["res_x", {"num_layers": 1}]] * (video_encoder.FP16_DOWN_BLOCKS + 2)}
+    encoder = VideoEncoder(**encoder_kwargs(_vae_config(config, {}))).to_fp16_with_float32_tail()
+
+    dtypes = [next(block.parameters()).dtype for block in encoder.down_blocks]
+
+    assert dtypes == [torch.float16] * video_encoder.FP16_DOWN_BLOCKS + [torch.float32] * 2
+    assert encoder.conv_in.conv.weight.dtype == torch.float16
+    assert encoder.conv_out.conv.weight.dtype == torch.float32
+    assert encoder.get_buffer("per_channel_statistics.std-of-means").dtype == torch.float32
+
+
+def test_fp16_with_float32_tail_encodes_close_to_float32_and_returns_bf16():
+    torch.manual_seed(0)
+    encoder = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG))).eval()
+    pixels = torch.rand(1, 3, 17, 64, 96) * 2 - 1
+    with torch.inference_mode():
+        reference = encoder(pixels)
+        latent = encoder.to_fp16_with_float32_tail()(pixels.half())
+
+    assert latent.dtype == torch.bfloat16
+    torch.testing.assert_close(latent.float(), reference.float(), atol=3e-2, rtol=3e-2)
+
+
+def test_pixel_norm_fp16_survives_squares_past_fp16_range():
+    x = torch.tensor([300.0, -400.0, 0.5, 2e3]).view(1, 4, 1, 1, 1)
+
+    normed = video_encoder.PixelNorm()(x.half())
+
+    assert normed.dtype == torch.float16
+    torch.testing.assert_close(normed.float(), video_encoder.PixelNorm()(x), atol=2e-3, rtol=2e-3)
+
+
+def test_pixel_norm_fp16_keeps_eps_for_all_zero_locations():
+    assert torch.equal(video_encoder.PixelNorm()(torch.zeros(1, 4, 1, 1, 1, dtype=torch.float16)),
+                       torch.zeros(1, 4, 1, 1, 1, dtype=torch.float16))
 
 
 @pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
@@ -388,6 +433,42 @@ def test_load_video_decoder_opens_base_once(tmp_path, monkeypatch):
     assert opened == [base, tuned]
 
 
+def test_load_video_decoder_builds_and_compiles_in_the_devices_half_dtype(tmp_path, monkeypatch):
+    source = _tiny_decoder()
+    config = {**LTX25_DECODER_CONFIG, "in_channels": 8, "head_dim": 16, "stage_channels": [128, 64, 32, 32, 16],
+              "stage_depths": [1] * 5, "stage_kernels": [[3, 3, 3]] * 5, "stage5_kernel": [3, 3, 3],
+              "stage5_channels": 16, "t_emb_dim": 32}
+    base, tuned = tmp_path / "base.safetensors", tmp_path / "tuned.safetensors"
+    save_file({f"decoder.{name}": tensor for name, tensor in source.state_dict().items()}, str(base),
+              metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, config)})})
+    name, tensor = next(iter(source.state_dict().items()))
+    save_file({name: tensor.bfloat16()}, str(tuned))
+    compiled = []
+    monkeypatch.setattr(loader, "half_dtype", lambda device: torch.float16)
+    monkeypatch.setattr(loader, "compile_diffusion_blocks", lambda device, dtype: compiled.append(dtype))
+
+    decoder = loader.load_video_decoder(base, tuned, torch.device("cpu"))
+
+    assert {p.dtype for p in decoder.parameters()} == {torch.float16}
+    assert compiled == [torch.float16]
+
+
+def test_decode_latent_computes_in_the_decoder_dtype_and_returns_the_latent_dtype(monkeypatch):
+    decoder = _tiny_decoder()
+    tiled_decode = decoder.tiled_decode
+    seen = []
+    monkeypatch.setattr(decoder, "tiled_decode",
+                        lambda latent, tiling, generator: seen.append(latent.dtype) or tiled_decode(latent, tiling, generator))
+    latent = torch.randn(1, 8, 3, 3, 4).bfloat16()
+
+    video = loader.decode_latent(decoder, latent, 4 << 30, torch.Generator().manual_seed(1))
+    reference = loader.decode_latent(decoder, latent.float(), 4 << 30, torch.Generator().manual_seed(1))
+
+    assert seen == [torch.float32, torch.float32]
+    assert video.dtype == torch.bfloat16
+    assert torch.equal(video, reference.bfloat16())
+
+
 @pytest.mark.parametrize("stage", ("encoder", "decoder"))
 def test_vae_reader_close_failure_clears_loaded_weights(tmp_path, monkeypatch, stage):
     path = tmp_path / "vae.safetensors"
@@ -493,8 +574,8 @@ def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
     calls = []
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append((fn, kwargs)) or (lambda *a: fn(*a)))
 
-    T.compile_diffusion_blocks(torch.device("cpu"))
-    T.compile_diffusion_blocks(torch.device("cpu"))
+    T.compile_diffusion_blocks(torch.device("cpu"), torch.bfloat16)
+    T.compile_diffusion_blocks(torch.device("cpu"), torch.bfloat16)
     assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu, T.add_folded_context]
     assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)
 

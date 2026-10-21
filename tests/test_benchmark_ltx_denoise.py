@@ -17,6 +17,7 @@ def test_kernels_are_grouped_by_kind():
     assert bench.kernel_kind("triton_tem_fused__int_mm_mul_0") == "gemm"
     assert bench.kernel_kind("triton_poi_fused_abs_amax_round_1") == "fused triton"
     assert bench.kernel_kind("Memcpy HtoD (Pinned -> Device)") == "other"
+    assert bench.kernel_kind("fmha_cutlassF_f16_aligned_32x128_rf_sm75(PyTorchMemEffAttention::AttentionKernel") == "attention"
 
 
 def test_inductor_flags_are_set_from_literals(monkeypatch):

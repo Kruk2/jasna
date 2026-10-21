@@ -52,6 +52,7 @@ from jasna.ltx.sampler import LtxTransformer
 from jasna.models.ltx_vae import decode_latent
 from jasna.mosaic.detections import Detections
 from jasna.progressbar import StageProgress
+from jasna.tensor_utils import half_dtype
 from jasna.tracking.scene_detector import SceneCutDetector
 
 logger = logging.getLogger(__name__)
@@ -516,7 +517,7 @@ def scan_span(
 
 
 def _vae_pixels(window_pixels: torch.Tensor, device: torch.device) -> torch.Tensor:
-    return window_pixels.to(device).float().div_(127.5).sub_(1.0).to(torch.bfloat16).unsqueeze(0)
+    return window_pixels.to(device).float().div_(127.5).sub_(1.0).to(half_dtype(device)).unsqueeze(0)
 
 
 class _WindowBuffers:

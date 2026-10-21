@@ -5,13 +5,14 @@ Encodes the first 121 frames of a clip, center-cropped to the canvas, through
 turn, and reports seconds per window, peak VRAM and the latent difference against the
 first variant. Needs an otherwise idle GPU.
 
-A variant is ``+``-joined options:
-    shipped   the shipped encoder (``channels_last_3d`` weights, compiled layers)
-    eager     contiguous weights, layers uncompiled (the base the options below change)
+A variant is ``+``-joined options, each on a freshly loaded encoder:
+    shipped   the encoder as ``load_video_encoder`` returns it
+    eager     bf16 contiguous weights, layers uncompiled (the base the options below change)
     cl3d      weights and input in ``channels_last_3d``
     compile   the layers compiled with static shapes
     benchmark cuDNN autotuning (``cudnn.benchmark``) around the call
     fp32      weights and input in float32 (a numerics reference: list it first)
+    fp16tail  fp16 weights with an fp32 tail (``to_fp16_with_float32_tail``), fp16 input
 
 ``--profile`` prints a torch.profiler kernel table for the first variant.
 
@@ -41,15 +42,15 @@ from jasna._suppress_noise import install as install_noise_filters
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx.plan import WINDOW_FRAMES
 from jasna.models.ltx_vae import load_video_encoder
-from jasna.models.ltx_vae.video_encoder import ENCODER_COMPILE_MODE, VideoEncoder, encode_cropped
+from jasna.models.ltx_vae.video_encoder import ENCODER_COMPILE_MODE, encode_cropped
 from jasna.tensor_utils import compile_static
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OPTIONS = ("shipped", "eager", "cl3d", "benchmark", "compile", "fp32")
+OPTIONS = ("shipped", "eager", "cl3d", "benchmark", "compile", "fp32", "fp16tail")
 
 
 def clip_pixels(clip: Path, canvas: int, device: torch.device) -> torch.Tensor:
-    """``(1, 3, 121, canvas, canvas)`` bf16 pixels in [-1, 1], center-cropped like a window canvas."""
+    """``(1, 3, 121, canvas, canvas)`` uint8 pixels, center-cropped like a window canvas."""
     frames = []
     with av.open(str(clip)) as container:
         for frame in container.decode(video=0):
@@ -60,27 +61,35 @@ def clip_pixels(clip: Path, canvas: int, device: torch.device) -> torch.Tensor:
     height, width = video.shape[1:3]
     top, left = (height - canvas) // 2, (width - canvas) // 2
     video = video[:, top : top + canvas, left : left + canvas].permute(3, 0, 1, 2).unsqueeze(0)
-    return video.float().div(127.5).sub(1.0).to(torch.bfloat16).contiguous()
+    return video.contiguous()
 
 
-def variant_encoder(variant: str, encoder: VideoEncoder) -> tuple[callable, contextlib.ExitStack]:
+def variant_encoder(variant: str, vae: Path, device: torch.device) -> tuple[callable, contextlib.ExitStack]:
     options = variant.split("+")
     unknown = set(options) - set(OPTIONS)
     if unknown:
         raise ValueError(f"unknown variant options {sorted(unknown)}; choose from {OPTIONS}")
     stack = contextlib.ExitStack()
-    shipped = "shipped" in options
-    memory_format = torch.channels_last_3d if shipped or "cl3d" in options else torch.contiguous_format
-    dtype = torch.float32 if "fp32" in options else torch.bfloat16
-    encoder.to(dtype=dtype, memory_format=memory_format)
-    fn = encoder if shipped else functools.partial(encode_cropped, encoder)
-    if "compile" in options:
-        fn = compile_static(fn, mode=ENCODER_COMPILE_MODE, device=torch.device("cuda"), dtype=dtype)
+    encoder = load_video_encoder(vae, device)
+    if "shipped" in options:
+        fn = encoder
+    else:
+        memory_format = torch.channels_last_3d if "cl3d" in options else torch.contiguous_format
+        if "fp16tail" in options:
+            encoder.to_fp16_with_float32_tail()
+        else:
+            encoder.to(torch.float32 if "fp32" in options else torch.bfloat16)
+        encoder.to(memory_format=memory_format)
+        fn = functools.partial(encode_cropped, encoder)
+        if "compile" in options:
+            fn = compile_static(fn, mode=ENCODER_COMPILE_MODE, device=device, dtype=encoder.conv_in.conv.weight.dtype)
     if "benchmark" in options:
         stack.enter_context(torch.backends.cudnn.flags(enabled=True, benchmark=True))
+    input_dtype = encoder.conv_in.conv.weight.dtype
+    input_format = torch.channels_last_3d if "cl3d" in options else torch.contiguous_format
 
     def run(pixels: torch.Tensor) -> torch.Tensor:
-        return fn(pixels.to(dtype).contiguous(memory_format=torch.channels_last_3d) if "cl3d" in options else pixels.to(dtype))
+        return fn(pixels.float().div_(127.5).sub_(1.0).to(input_dtype).contiguous(memory_format=input_format))
 
     return run, stack
 
@@ -129,13 +138,12 @@ def main() -> None:
     install_noise_filters()
     configure_torch_compile_cache()
     device = torch.device("cuda")
-    encoder = load_video_encoder(args.vae, device)
     pixels = clip_pixels(args.clip, args.canvas, device)
     print(f"{torch.cuda.get_device_name(device)} | canvas {args.canvas} | {args.clip.name}")
 
     reference: torch.Tensor | None = None
     for index, variant in enumerate(args.variants.split(",")):
-        fn, stack = variant_encoder(variant, encoder)
+        fn, stack = variant_encoder(variant, args.vae, device)
         with stack:
             torch.cuda.empty_cache()
             torch.cuda.reset_peak_memory_stats(device)
@@ -149,6 +157,7 @@ def main() -> None:
             peak = torch.cuda.max_memory_allocated(device) / 2**30
             if args.profile and index == 0:
                 print_profile(fn, pixels)
+        del fn, stack
         if reference is None:
             reference = latent
         row = {

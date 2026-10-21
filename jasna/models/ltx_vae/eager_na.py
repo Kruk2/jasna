@@ -19,8 +19,9 @@ from torch.nn import functional
 # smaller one: smaller tiles waste fewer masked scores (fastest on an RTX 2080 Ti).
 NA_SCORE_BUDGET = 2**25
 NA_CUDA_SCORE_BUDGET = 2**21
-# Element budget for the stacked K/V copies of one batched SDPA call on CUDA.
-NA_KV_STACK_BUDGET = 2**28
+# Element budget for the stacked K/V copies of one batched SDPA call on CUDA: as fast as
+# 2**28 on an RTX 2080 Ti and ~0.6 GiB lower decode peak, which small cards need.
+NA_KV_STACK_BUDGET = 2**26
 
 
 def _window_bounds(length: int, kernel: int) -> tuple[list[int], list[int]]:

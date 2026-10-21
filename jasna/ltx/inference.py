@@ -16,6 +16,7 @@ from jasna.accelerator import device_free_bytes
 from jasna.ltx.model_files import LtxModelFiles, PlaceholderTensors
 from jasna.ltx.sampler import LtxTransformer, TransformerSource
 from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
+from jasna.tensor_utils import half_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -252,7 +253,7 @@ class WorkerBackend:
         elif op == "encode":
             if self.encoder is None:
                 raise RuntimeError("LTX encoder is not loaded")
-            pixels = tensors[0].to(self.device).float().div_(127.5).sub_(1.0).to(torch.bfloat16)
+            pixels = tensors[0].to(self.device).float().div_(127.5).sub_(1.0).to(half_dtype(self.device))
             return {}, [self.encoder(pixels).to("cpu").contiguous()]
         elif op == "prepare_transformer":
             if self.transformer is None and self._prepared is None:

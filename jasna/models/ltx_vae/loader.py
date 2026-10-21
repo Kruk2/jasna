@@ -176,25 +176,29 @@ def _build(
 
 
 def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
-    """bf16 eval ``VideoEncoder``; call it on ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1]."""
+    """Eval ``VideoEncoder`` in ``half_dtype(device)`` (before SM 8.0 fp16 with an fp32 tail);
+    call it on ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1] for bf16 latents."""
     checkpoint, encoder = {}, None
     try:
         with open_tensors(vae_path) as reader:
             kwargs = encoder_kwargs(read_vae_config(reader))
             checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
         encoder = _build(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device, torch.bfloat16)
-        if half_dtype(device) == torch.bfloat16:
-            contiguous_weights = list(encoder.state_dict().values())
-            encoder.to(memory_format=torch.channels_last_3d)
-            _clear_tensors(contiguous_weights, encoder)
-            compile_video_encoder(device)
+        dtype = half_dtype(device)
+        bf16_contiguous_weights = list(encoder.state_dict().values())
+        if dtype == torch.float16:
+            encoder.to_fp16_with_float32_tail()
+        encoder.to(memory_format=torch.channels_last_3d)
+        _clear_tensors(bf16_contiguous_weights, encoder)
+        compile_video_encoder(device, dtype)
         return encoder
     finally:
         _clear_tensors(checkpoint.values(), encoder)
 
 
 def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.device) -> DiffusionVideoDecoder:
-    """bf16 eval ``DiffusionVideoDecoder`` with the fine-tuned decoder tensors overlaid."""
+    """Eval ``DiffusionVideoDecoder`` in ``half_dtype(device)`` (fp16 before SM 8.0) with the
+    fine-tuned decoder tensors overlaid."""
     decoder, complete = None, False
     checkpoint, tuned, overlay = {}, {}, {}
     try:
@@ -202,7 +206,8 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
             kwargs = decoder_kwargs(read_vae_config(reader))
             checkpoint = _read_tensors(reader, ("decoder.", "per_channel_statistics."))
         state = decoder_state_dict(checkpoint)
-        decoder = _build(lambda: DiffusionVideoDecoder(**kwargs), state, device, torch.bfloat16)
+        dtype = half_dtype(device)
+        decoder = _build(lambda: DiffusionVideoDecoder(**kwargs), state, device, dtype)
         with open_tensors(tuned_decoder_path) as reader:
             tuned = _read_tensors(reader, ("",))
         own = decoder.state_dict()
@@ -213,7 +218,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
             overlay[name] = tensor.to(own[name].dtype)
         decoder.load_state_dict(overlay, strict=False)
         enable_fused_attention(device)
-        compile_diffusion_blocks(device)
+        compile_diffusion_blocks(device, dtype)
         complete = True
         return decoder
     except BaseException:
@@ -237,8 +242,9 @@ def decode_latent(
 ) -> torch.Tensor:
     """Tiled decode of a normalized ``(B, 128, T, h, w)`` latent to ``(B, 3, F, H, W)`` pixels in ~[-1, 1].
 
-    The tile layout is chosen from ``free_bytes`` (activation budget); raises ``ValueError``
-    when even the minimum tile does not fit.
+    The decoder computes in its own dtype; the pixels come back in ``latent``'s. The tile layout
+    is chosen from ``free_bytes`` (activation budget); raises ``ValueError`` when even the
+    minimum tile does not fit.
     """
     _b, _c, frames, height, width = latent.shape
     scale = decoder.video_downscale_factors
@@ -250,7 +256,8 @@ def decode_latent(
     first_of_layout = layout not in _decoded_layouts
     if first_of_layout:
         _log_tiling(*layout)
-    video = torch.cat(list(decoder.tiled_decode(latent, tiling, generator)), dim=2)
+    chunks = decoder.tiled_decode(latent.to(decoder.conv_in.weight.dtype), tiling, generator)
+    video = torch.cat(list(chunks), dim=2).to(latent.dtype)
     if first_of_layout:
         _decoded_layouts.add(layout)
         _free_compile_garbage()

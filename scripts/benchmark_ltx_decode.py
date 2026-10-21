@@ -47,7 +47,7 @@ from jasna.ltx.restore import segment_decode_budget
 from jasna.models.ltx_vae import decode_latent, load_video_decoder
 from jasna.models.ltx_vae import diffusion_video_decoder as D
 from jasna.models.ltx_vae import transformer as T
-from jasna.tensor_utils import compile_static
+from jasna.tensor_utils import compile_static, half_dtype
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LATENT_CHANNELS = 128
@@ -104,10 +104,10 @@ def variant_patches(variant: str) -> contextlib.ExitStack:
         stack.enter_context(patched(T, "_mlp_chunk", T.modulated_swiglu))
         stack.enter_context(patched(T, "_add_context", T.add_folded_context))
     if "autotune" in options:
-        mode = "max-autotune-no-cudagraphs"
+        mode, device = "max-autotune-no-cudagraphs", torch.device("cuda")
         for name, fn in (("_slab_attention", T._attn_on_w_slab), ("_mlp_chunk", T.modulated_swiglu),
                          ("_add_context", T.add_folded_context)):
-            stack.enter_context(patched(T, name, compile_static(fn, mode=mode, device=torch.device("cuda"), dtype=torch.bfloat16)))
+            stack.enter_context(patched(T, name, compile_static(fn, mode=mode, device=device, dtype=half_dtype(device))))
     return stack
 
 

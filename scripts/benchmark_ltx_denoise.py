@@ -1,15 +1,16 @@
 """Benchmark the LTX denoise pass (the ~80 % of an LTX run) on this GPU.
 
 Runs ``LtxTransformer.denoise_chain`` on one track of overlapping windows with the
-trial's random weights: same shapes, kernels and sampler steps as the real model, so
-the speed matches, but nothing is restored. Needs an otherwise idle GPU.
+trial's random weights (or a real model file with ``--transformer``): same shapes, kernels
+and sampler steps as the real model, so the speed matches, but nothing is restored. Needs
+an otherwise idle GPU.
 
 The first call compiles (with autotuning on an empty compile cache) and is reported as
 ``compile_s``; the timed repeats run the full sampler after that.
 
 Usage:
     ~/.virtualenvs/jasna-linux/bin/python scripts/benchmark_ltx_denoise.py \\
-        [--model distilled|undistilled] [--fast] [--canvas 512|768] [--windows 3] \\
+        [--model distilled|undistilled] [--fast] [--transformer FILE] [--canvas 512|768] [--windows 3] \\
         [--repeats 3] [--fresh-cache] [--inductor force_fuse_int_mm_with_mul=True] \\
         [--profile] [--trace trace.json] [--csv out.csv] [--label text]
 
@@ -32,16 +33,17 @@ from pathlib import Path
 import torch
 
 from jasna._suppress_noise import install as install_noise_filters
+from jasna.accelerator import device_free_bytes
 from jasna.engine_paths import configure_torch_compile_cache
 from jasna.ltx import transformer as T
 from jasna.ltx.model_files import LTX_MODELS, LtxModelFiles
 from jasna.ltx.plan import LATENT_FRAMES, WINDOW_HOP
-from jasna.ltx.sampler import LtxTransformer
+from jasna.ltx.sampler import LtxTransformer, TransformerSource
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LATENT_CHANNELS = 128
 KERNEL_KINDS = (
-    ("gemm", re.compile(r"^triton_tem|gemm|cutlass|nvjet|xmma|gemv|cublas", re.I)),
+    ("gemm", re.compile(r"^triton_tem|gemm|(?<!fmha_)cutlass|nvjet|xmma|gemv|cublas", re.I)),
     ("fused triton", re.compile(r"^triton_")),
     ("attention", re.compile(r"attn|fmha|flash|attention|sdpa|QuantInt8Kernel|TransposePadPermute", re.I)),
 )
@@ -116,6 +118,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", choices=LTX_MODELS, default="distilled")
     parser.add_argument("--fast", action="store_true", help="NVFP4 transformer (Blackwell)")
+    parser.add_argument("--transformer", type=Path, help="a real transformer file instead of the trial's random weights")
     parser.add_argument("--canvas", type=int, choices=(512, 768), default=512)
     parser.add_argument("--windows", type=int, default=3)
     parser.add_argument("--repeats", type=int, default=3)
@@ -133,8 +136,8 @@ def main() -> None:
     configure_torch_compile_cache()
     set_inductor_flags(args.inductor)
     device = torch.device("cuda")
-    files = LtxModelFiles.placeholder(args.model, fast=args.fast)
-    transformer = LtxTransformer(files.transformer, device)
+    weights = args.transformer or LtxModelFiles.placeholder(args.model, fast=args.fast).transformer
+    transformer = LtxTransformer(TransformerSource(weights), device, device_free_bytes)
     refs = references(args.windows, args.canvas, device)
     steps = len(transformer.conditions)
     stg = bool(transformer.stg_scale)

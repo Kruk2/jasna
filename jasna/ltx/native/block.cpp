@@ -293,11 +293,11 @@ class Block::Impl {
 
     // gated prompt cross-attention
     Activation query = modulated(h, ada[6], ada[7], fp4, rows);
-    const at::Tensor q = at::empty({rows, dim}, x.options());
+    // in the prompt key/value dtype; project_gated takes fp16 attention as it is
+    const at::Tensor q = at::empty({rows, dim}, x.options().dtype(prompt_key.scalar_type()));
     norm_rope(linear(query, w[CrossQ]), cross_q_norm, nullptr, nullptr, q, head_dim, config_.eps);
-    const at::Tensor q_heads = q.view({1, rows, heads, head_dim}).transpose(1, 2).to(prompt_key.scalar_type());
-    const at::Tensor cross =
-        at::scaled_dot_product_attention(q_heads, prompt_key, prompt_value).to(at::kBFloat16)[0].transpose(0, 1);
+    const at::Tensor q_heads = q.view({1, rows, heads, head_dim}).transpose(1, 2);
+    const at::Tensor cross = at::scaled_dot_product_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
     h = project_gated(cross, linear(query, w[CrossGate]), w[CrossOut], h, ada[8], rows, fp4);
 
     // feed-forward with gated residual, quantized or modulated over all rows, then in row chunks
