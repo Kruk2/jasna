@@ -468,6 +468,7 @@ class _FakeRfDetrCore:
         self.loaded_state = None
         self.dtype = torch.float32
         self.input_dtypes: list[torch.dtype] = []
+        self.runs_sync_free_export = False
 
     def to(self, *, device, dtype):
         self.dtype = dtype
@@ -482,11 +483,11 @@ class _FakeRfDetrCore:
     def __call__(self, x):
         self.input_dtypes.append(x.dtype)
         batch = x.shape[0]
-        return {
-            "pred_boxes": torch.zeros(batch, 5, 4, dtype=self.dtype),
-            "pred_logits": torch.zeros(batch, 5, 3, dtype=self.dtype),
-            "pred_masks": torch.zeros(batch, 5, 8, 8, dtype=self.dtype),
-        }
+        return (
+            torch.zeros(batch, 5, 4, dtype=self.dtype),
+            torch.zeros(batch, 5, 3, dtype=self.dtype),
+            torch.zeros(batch, 5, 8, 8, dtype=self.dtype),
+        )
 
 
 class _FakeRfDetrModel:
@@ -520,6 +521,7 @@ def _install_fake_rfdetr(monkeypatch, checkpoint: dict) -> list[tuple]:
         SimpleNamespace(interpolate_position_embeddings=interpolate_position_embeddings),
     )
     monkeypatch.setattr(module.torch, "load", load)
+    monkeypatch.setattr(module, "export_without_host_syncs", lambda core: setattr(core, "runs_sync_free_export", True))
     return loads
 
 
@@ -548,6 +550,7 @@ def test_rfdetr_torch_runner_maps_outputs(monkeypatch, tmp_path) -> None:
     assert runner.outputs["masks"].ndim == 4
     # num_classes derived from class_embed rows - 1 (rfdetr adds a reserve slot).
     assert runner._wrapper.kwargs["num_classes"] == 2
+    assert runner._core.runs_sync_free_export
 
     out = runner.infer({"input": torch.zeros(2, 3, 576, 576)})
     assert set(out) == {"dets", "labels", "masks"}

@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 
 from jasna.accelerator import device_name
+from jasna.mosaic.rfdetr_sync_free import export_without_host_syncs
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,8 @@ class RfDetrTorchRunner:
     """AMD/ROCm RF-DETR path: run the trained checkpoint through the rfdetr torch
     model instead of ONNX + MIGraphX. Mirrors the runner contract consumed by
     ``RfDetrMosaicDetectionModel`` (``input_names``/``input_dtypes``/``outputs``/
-    ``output_names``/``infer``/``close``) and emits the same ``dets``/``labels``/
-    ``masks`` tensors the ONNX export produces (LWDETR ``pred_boxes``/
-    ``pred_logits``/``pred_masks``)."""
+    ``output_names``/``infer``/``close``) and runs the export forward the ONNX
+    graph is traced from, so it emits the same ``dets``/``labels``/``masks``."""
 
     def __init__(
         self,
@@ -98,6 +98,7 @@ class RfDetrTorchRunner:
         core.load_state_dict(state)
         self._wrapper = wrapper
         self._core = core.to(device=self.device, dtype=self._dtype).eval()
+        export_without_host_syncs(self._core)
 
         if isinstance(input_shapes, dict):
             input_shapes = list(input_shapes.values())
@@ -130,9 +131,5 @@ class RfDetrTorchRunner:
             raise RuntimeError("RF-DETR torch runner is closed")
         x = inputs["input"].to(device=self.device, dtype=self._dtype)
         with torch.no_grad():
-            out = self._core(x)
-        return {
-            "dets": out["pred_boxes"].float(),
-            "labels": out["pred_logits"].float(),
-            "masks": out["pred_masks"],
-        }
+            boxes, logits, masks = self._core(x)
+        return {"dets": boxes.float(), "labels": logits.float(), "masks": masks}

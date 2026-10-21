@@ -74,6 +74,9 @@ A new GPU target needs its matching `device-gfx*` extra above.
 
 AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
 (software decode when AMF can't). Secondary restoration is NVIDIA-only.
+The model runs rfdetr's export forward with Jasna's own transformer and
+deformable-attention forwards (`mosaic/rfdetr_sync_free.py`), which never wait
+for the GPU; recheck them against rfdetr's code when bumping the `rfdetr` pin.
 `--device cuda:N` picks the GPU, but FFmpeg 8's Linux AMF ignores the adapter,
 so isolate the GPU at the container or host level on multi-GPU machines.
 
