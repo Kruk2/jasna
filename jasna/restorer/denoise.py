@@ -6,10 +6,9 @@ from enum import Enum
 import torch
 import torch.nn.functional as F
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
 
-_FATBIN = "denoise.fatbin"
+_KERNEL_MODULE = "denoise"
 _BLOCK_WIDTH = 16
 _BLOCK_HEIGHT = 16
 
@@ -34,7 +33,7 @@ _DENOISE_PARAMS: dict[DenoiseStrength, tuple[int, float, float]] = {
 
 
 _kernel = Kernel(
-    _FATBIN,
+    _KERNEL_MODULE,
     "bilateral_denoise_fp32",
     (
         ctypes.c_uint64, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
@@ -91,11 +90,11 @@ def spatial_denoise(
     range_scale = -0.5 / (sigma_range ** 2)
 
     if (
-        is_nvidia_device(frames.device)
-        and frames.dtype is torch.float32
+        frames.dtype is torch.float32
         and frames.ndim == 4
         and frames.shape[1] == 3
         and frames.stride(3) == 1
+        and has_precompiled_kernels(frames.device)
     ):
         return _kernel_denoise(frames, kernel_size, range_scale, spatial_weights)
 

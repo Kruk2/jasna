@@ -1,24 +1,62 @@
-"""Loading and launching ahead-of-time compiled CUDA kernels.
+"""Loading and launching ahead-of-time compiled GPU kernels.
 
-Kernels ship as ``.fatbin`` files built from the ``.cu`` sources next to this
-module (see ``docs/en/development.md``) and are loaded through the CUDA driver
-API, so no toolkit is needed at run time.
+Each ``.cu`` source next to this module is built twice (see
+``docs/en/development.md``): into a ``.fatbin`` loaded through the CUDA driver
+API on NVIDIA, and into a ``.hipfb`` offload bundle loaded through the HIP
+module API on AMD. Neither needs a compiler at run time.
 """
 import ctypes
 import os
 import sys
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import NamedTuple
+
+import torch
 
 from jasna._frozen import is_frozen
+from jasna.accelerator import is_amd_device, is_nvidia_device
+
+HIP_KERNEL_ARCHITECTURES = frozenset({
+    "gfx1030",
+    "gfx1100", "gfx1101", "gfx1102", "gfx1103",
+    "gfx1150", "gfx1151",
+    "gfx1200", "gfx1201",
+    "gfx908", "gfx90a", "gfx942", "gfx950",
+})
 
 _driver: ctypes.CDLL | None = None
+_hip: ctypes.CDLL | None = None
 _driver_lock = threading.Lock()
 _modules: dict[tuple[int, str], ctypes.c_void_p] = {}
 
+_LAUNCH_ARGTYPES = [
+    ctypes.c_void_p,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_uint,
+    ctypes.c_void_p,
+    ctypes.POINTER(ctypes.c_void_p),
+    ctypes.POINTER(ctypes.c_void_p),
+]
 
-def fatbin_path(name: str) -> Path:
+
+def has_precompiled_kernels(device: torch.device | str) -> bool:
+    """Whether ``device`` runs the precompiled kernels instead of their Torch equivalents."""
+    if is_nvidia_device(device):
+        return True
+    if not is_amd_device(device):
+        return False
+    architecture = torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]
+    return architecture in HIP_KERNEL_ARCHITECTURES
+
+
+def kernel_image_path(name: str) -> Path:
     if is_frozen():
         return Path(sys.executable).resolve().parent / name
     return Path(__file__).resolve().with_name(name)
@@ -43,19 +81,7 @@ def cuda_driver() -> ctypes.CDLL:
         ctypes.c_char_p,
     ]
     lib.cuModuleGetFunction.restype = ctypes.c_int
-    lib.cuLaunchKernel.argtypes = [
-        ctypes.c_void_p,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_uint,
-        ctypes.c_void_p,
-        ctypes.POINTER(ctypes.c_void_p),
-        ctypes.POINTER(ctypes.c_void_p),
-    ]
+    lib.cuLaunchKernel.argtypes = _LAUNCH_ARGTYPES
     lib.cuLaunchKernel.restype = ctypes.c_int
     lib.cuGetErrorName.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_char_p)]
     lib.cuGetErrorName.restype = ctypes.c_int
@@ -71,6 +97,46 @@ def cuda_driver() -> ctypes.CDLL:
     lib.cuMemHostUnregister.restype = ctypes.c_int
     _driver = lib
     return lib
+
+
+def hip_runtime() -> ctypes.CDLL:
+    """The HIP runtime Torch itself loaded (ROCm SDK wheel on Linux and Windows)."""
+    global _hip
+    if _hip is not None:
+        return _hip
+
+    from torch.cuda._utils import _get_hip_runtime_library
+
+    lib = _get_hip_runtime_library()
+    lib.hipGetDevice.argtypes = [ctypes.POINTER(ctypes.c_int)]
+    lib.hipGetDevice.restype = ctypes.c_int
+    lib.hipModuleLoadData.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p]
+    lib.hipModuleLoadData.restype = ctypes.c_int
+    lib.hipModuleGetFunction.argtypes = [
+        ctypes.POINTER(ctypes.c_void_p),
+        ctypes.c_void_p,
+        ctypes.c_char_p,
+    ]
+    lib.hipModuleGetFunction.restype = ctypes.c_int
+    lib.hipModuleLaunchKernel.argtypes = _LAUNCH_ARGTYPES
+    lib.hipModuleLaunchKernel.restype = ctypes.c_int
+    lib.hipGetErrorName.argtypes = [ctypes.c_int]
+    lib.hipGetErrorName.restype = ctypes.c_char_p
+    lib.hipGetErrorString.argtypes = [ctypes.c_int]
+    lib.hipGetErrorString.restype = ctypes.c_char_p
+    _hip = lib
+    return lib
+
+
+def check_hip(result: int, operation: str) -> None:
+    if result == 0:
+        return
+    lib = hip_runtime()
+    name = lib.hipGetErrorName(result)
+    message = lib.hipGetErrorString(result)
+    name_text = name.decode(errors="replace") if name else f"HIP error {result}"
+    message_text = message.decode(errors="replace") if message else "unknown error"
+    raise RuntimeError(f"{operation} failed: {name_text}: {message_text}")
 
 
 def check_cuda(result: int, operation: str) -> None:
@@ -104,39 +170,72 @@ def destroy_stream(stream: int) -> None:
     check_cuda(cuda_driver().cuStreamDestroy(ctypes.c_void_p(stream)), "cuStreamDestroy")
 
 
-def load_module(fatbin_name: str) -> ctypes.c_void_p:
-    lib = cuda_driver()
-    check_cuda(lib.cuInit(0), "cuInit")
+class ModuleApi(NamedTuple):
+    """The vendor's module-loading entry points; HIP mirrors the CUDA driver signatures."""
 
+    image_suffix: str
+    owner: Callable[[], int]
+    load_data: Callable
+    get_function: Callable
+    launch_kernel: Callable
+    check: Callable[[int, str], None]
+
+
+def _current_cuda_context() -> int:
+    check_cuda(cuda_driver().cuInit(0), "cuInit")
     context = current_context()
     if not context.value:
-        raise RuntimeError(f"No current CUDA context while loading {fatbin_name}")
+        raise RuntimeError("No current CUDA context while loading a precompiled kernel")
+    return context.value
+
+
+def _current_hip_device() -> int:
+    device = ctypes.c_int()
+    check_hip(hip_runtime().hipGetDevice(ctypes.byref(device)), "hipGetDevice")
+    return device.value
+
+
+def module_api() -> ModuleApi:
+    if is_amd_device():
+        lib = hip_runtime()
+        return ModuleApi(
+            ".hipfb", _current_hip_device,
+            lib.hipModuleLoadData, lib.hipModuleGetFunction, lib.hipModuleLaunchKernel, check_hip,
+        )
+    lib = cuda_driver()
+    return ModuleApi(
+        ".fatbin", _current_cuda_context,
+        lib.cuModuleLoadData, lib.cuModuleGetFunction, lib.cuLaunchKernel, check_cuda,
+    )
+
+
+def load_module(api: ModuleApi, module_name: str) -> ctypes.c_void_p:
+    image_name = module_name + api.image_suffix
+    owner = api.owner()
 
     with _driver_lock:
-        key = (context.value, fatbin_name)
+        key = (owner, image_name)
         cached = _modules.get(key)
         if cached is not None:
             return cached
 
-        path = fatbin_path(fatbin_name)
+        path = kernel_image_path(image_name)
         try:
             image = ctypes.create_string_buffer(path.read_bytes())
         except OSError as exc:
-            raise RuntimeError(f"Missing precompiled CUDA kernel: {path}") from exc
+            raise RuntimeError(f"Missing precompiled GPU kernel: {path}") from exc
         module = ctypes.c_void_p()
-        check_cuda(lib.cuModuleLoadData(ctypes.byref(module), image), "cuModuleLoadData")
+        api.check(api.load_data(ctypes.byref(module), image), api.load_data.__name__)
         _modules[key] = module
         return module
 
 
-def resolve_function(fatbin_name: str, function_name: str) -> ctypes.c_void_p:
-    module = load_module(fatbin_name)
+def resolve_function(api: ModuleApi, module_name: str, function_name: str) -> ctypes.c_void_p:
+    module = load_module(api, module_name)
     function = ctypes.c_void_p()
-    check_cuda(
-        cuda_driver().cuModuleGetFunction(
-            ctypes.byref(function), module, function_name.encode("ascii")
-        ),
-        f"cuModuleGetFunction({function_name})",
+    api.check(
+        api.get_function(ctypes.byref(function), module, function_name.encode("ascii")),
+        f"{api.get_function.__name__}({function_name})",
     )
     return function
 
@@ -146,16 +245,18 @@ def grid_size(extent: int, block: int) -> int:
 
 
 class Kernel:
-    """One fatbin function launched through a reused argument buffer.
+    """One precompiled function launched through a reused argument buffer.
 
-    ``arg_types`` are the ctypes of the kernel parameters in order; ``launch``
-    fills them from plain Python ints/floats. The lock keeps one instance safe
-    to share between threads.
+    ``module_name`` is the ``.cu`` stem; the vendor picks ``.fatbin`` or
+    ``.hipfb``. ``arg_types`` are the ctypes of the kernel parameters in order;
+    ``launch`` fills them from plain Python ints/floats. The lock keeps one
+    instance safe to share between threads.
     """
 
-    def __init__(self, fatbin_name: str, function_name: str, arg_types: Sequence[type]):
-        self.fatbin_name = fatbin_name
+    def __init__(self, module_name: str, function_name: str, arg_types: Sequence[type]):
+        self.module_name = module_name
         self.function_name = function_name
+        self._api: ModuleApi | None = None
         self._function: ctypes.c_void_p | None = None
         self._values = [arg_type() for arg_type in arg_types]
         self._params = (ctypes.c_void_p * len(self._values))(
@@ -172,12 +273,14 @@ class Kernel:
     ) -> None:
         with self._lock:
             if self._function is None:
-                self._function = resolve_function(self.fatbin_name, self.function_name)
+                self._api = module_api()
+                self._function = resolve_function(self._api, self.module_name, self.function_name)
             for value, arg in zip(self._values, args, strict=True):
                 value.value = arg
-            check_cuda(
-                cuda_driver().cuLaunchKernel(
+            api = self._api
+            api.check(
+                api.launch_kernel(
                     self._function, *grid, *block, 0, ctypes.c_void_p(stream), self._params, None
                 ),
-                f"cuLaunchKernel({self.function_name})",
+                f"{api.launch_kernel.__name__}({self.function_name})",
             )

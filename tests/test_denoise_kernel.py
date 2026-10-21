@@ -16,7 +16,7 @@ def torch_path(monkeypatch):
     """Runs spatial_denoise through the Torch expression the kernel replaced."""
 
     def run(callable_):
-        monkeypatch.setattr(denoise, "is_nvidia_device", lambda device: False)
+        monkeypatch.setattr(denoise, "has_precompiled_kernels", lambda device: False)
         try:
             return callable_()
         finally:

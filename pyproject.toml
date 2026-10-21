@@ -77,7 +77,7 @@ dev = [
 include-package-data = false
 
 [tool.setuptools.package-data]
-"jasna.media" = ["*.fatbin"]
+"jasna.media" = ["*.fatbin", "*.hipfb"]
 "jasna.ltx.native" = [
   "*.cpp", "*.cu", "*.h",
   "sage_attention/*.cu", "sage_attention/*.cuh", "sage_attention/*.h", "sage_attention/NOTICE",

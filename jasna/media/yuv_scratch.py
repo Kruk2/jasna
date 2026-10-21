@@ -1,7 +1,8 @@
 """Reusable working buffers for the eager RGB↔YUV conversions.
 
-NVIDIA converts with a fused kernel that writes straight into caller-owned
-planes. Everywhere else the conversion is eager Torch math, running from decode
+GPUs with precompiled kernels convert with a fused kernel that writes straight
+into caller-owned planes. Everywhere else (CPU, AMD architectures missing from
+the HIP bundle) the conversion is eager Torch math, running from decode
 and encode worker threads while the restorer allocates and frees fp16 tensors.
 Allocating conversion temporaries per frame let ROCm hand those blocks to the
 restorer mid-conversion, which replaced whole frames with fp16 garbage (issue

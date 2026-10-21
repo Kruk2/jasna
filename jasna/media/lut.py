@@ -12,10 +12,9 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
 
-_FATBIN = "lut.fatbin"
+_KERNEL_MODULE = "lut"
 _BLOCK_WIDTH = 32
 _BLOCK_HEIGHT = 8
 
@@ -171,8 +170,8 @@ class GpuLutApplier:
             self._table = self._lut_1d.contiguous()
 
         self._kernel = (
-            Kernel(_FATBIN, "lut3d_u8" if lut.is_3d else "lut1d_u8", _LUT_ARG_TYPES)
-            if is_nvidia_device(device)
+            Kernel(_KERNEL_MODULE, "lut3d_u8" if lut.is_3d else "lut1d_u8", _LUT_ARG_TYPES)
+            if has_precompiled_kernels(device)
             else None
         )
         self._domain_min_flat = dmin.flatten().contiguous()

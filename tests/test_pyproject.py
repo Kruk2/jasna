@@ -2,14 +2,17 @@ import tomllib
 from fnmatch import fnmatch
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_every_cuda_fatbin_ships_as_package_data() -> None:
+@pytest.mark.parametrize("suffix", [".fatbin", ".hipfb"])
+def test_every_precompiled_kernel_ships_as_package_data(suffix) -> None:
     with (ROOT / "pyproject.toml").open("rb") as file:
         package_data = tomllib.load(file)["tool"]["setuptools"]["package-data"]
-    fatbins = sorted((ROOT / "jasna" / "media").glob("*.fatbin"))
+    images = sorted((ROOT / "jasna" / "media").glob(f"*{suffix}"))
 
-    assert fatbins
-    for fatbin in fatbins:
-        assert any(fnmatch(fatbin.name, pattern) for pattern in package_data["jasna.media"])
+    assert images
+    for image in images:
+        assert any(fnmatch(image.name, pattern) for pattern in package_data["jasna.media"])

@@ -8,8 +8,8 @@ The strength-to-weight curve and the headroom constant are matched to FFmpeg's
 Both were recovered by measuring that filter's output rather than read from its
 source; ``scripts/cas_ffmpeg_oracle.py`` re-derives them and checks parity.
 
-NVIDIA runs the fused kernel in ``cas.cu``; ROCm and CPU use the Torch
-implementation here, which produces identical results.
+GPUs with precompiled kernels run the fused kernel in ``cas.cu``; others use
+the Torch implementation here, which produces identical results.
 """
 from __future__ import annotations
 
@@ -18,8 +18,7 @@ import ctypes
 import torch
 import torch.nn.functional as F
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
 
 # FFmpeg maps strength onto the CAS weight as -1 / lerp(16, 4, strength).
 _WEIGHT_DIVISOR_AT_ZERO = 16.0
@@ -32,7 +31,7 @@ _HEADROOM_MULTIPLIER = 2
 # P010 carries 10-bit codes in the high bits of each 16-bit sample.
 _P010_SCALE = 64.0
 
-_FATBIN = "cas.fatbin"
+_KERNEL_MODULE = "cas"
 _BLOCK_WIDTH = 32
 _BLOCK_HEIGHT = 8
 
@@ -162,8 +161,8 @@ class GpuCasSharpener:
         self.headroom = float(_HEADROOM_MULTIPLIER << depth)
         self.peak = float((1 << depth) - 1)
         self._kernel = (
-            Kernel(_FATBIN, "cas_luma10" if ten_bit else "cas_luma8", _CAS_ARG_TYPES)
-            if is_nvidia_device(device)
+            Kernel(_KERNEL_MODULE, "cas_luma10" if ten_bit else "cas_luma8", _CAS_ARG_TYPES)
+            if has_precompiled_kernels(device)
             else None
         )
 

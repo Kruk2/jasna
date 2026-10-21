@@ -99,17 +99,27 @@ off footer widgets). GPU tests need the matching GPU.
 
 ## CUDA kernels
 
-`jasna/media/*.cu` are prebuilt into the committed `.fatbin` files next to
-them, so running Jasna needs no CUDA toolkit. After editing a `.cu`, rebuild
-with CUDA 13 and `g++-15` (override with `CCBIN=`):
+`jasna/media/*.cu` are prebuilt into committed binaries next to them, so
+running Jasna needs no GPU compiler: a `.fatbin` for NVIDIA and a `.hipfb`
+offload bundle for AMD (same source, loaded through the HIP module API on Linux
+and Windows). After editing a `.cu`, rebuild both. The fatbin needs CUDA 13 and
+`g++-15` (override with `CCBIN=`); the bundle needs ROCm's `hipcc` (override with
+`HIPCC=`), e.g. on the AMD test machine:
 
 ```bash
 scripts/build_fatbins.sh        # every kernel
 scripts/build_fatbins.sh cas    # just jasna/media/cas.cu
+scripts/build_hipfbs.sh         # every kernel, all AMD targets
+scripts/build_hipfbs.sh cas
 ```
 
-Keep the release kernel inventory in sync when adding kernels. Every kernel needs
-a Torch equivalent: ROCm uses it, and the tests use it as the reference.
+The AMD target list in `build_hipfbs.sh` must match
+`cuda_kernel.HIP_KERNEL_ARCHITECTURES` (`tests/test_cuda_kernel.py` checks the
+committed bundles). Keep the release kernel inventory in sync when adding kernels.
+Every
+kernel needs a Torch equivalent: AMD GPUs outside the bundle and CPU use it, and
+the tests use it as the reference. The GPU parity tests run on whichever vendor
+the machine has.
 
 ## Benchmarks
 

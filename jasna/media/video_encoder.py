@@ -560,10 +560,10 @@ class VideoEncoder:
         # Keeping conversion and NVENC in one context also avoids a ~500 MiB
         # secondary CUDA context and cross-context scheduling overhead.
         # NVENC consumes device memory, so conversion runs on its own stream and
-        # overlaps the rest of the pipeline. AMF consumes host memory and the
-        # conversion is eager Torch math, so on AMD everything stays on the
-        # current stream: a private stream there let ROCm recycle in-flight
-        # conversion buffers into the restorer's allocations (issue #252).
+        # overlaps the rest of the pipeline. AMF consumes host memory, so on AMD
+        # everything stays on the current stream: a private stream there let
+        # ROCm recycle in-flight conversion buffers into the restorer's
+        # allocations (issue #252).
         height = self.metadata.video_height
         width = self.metadata.video_width
         self._cuda_ctx = None

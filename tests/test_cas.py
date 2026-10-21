@@ -165,7 +165,7 @@ def test_sharpener_sharpens_the_luma_plane() -> None:
 
 
 requires_cuda = pytest.mark.skipif(
-    not torch.cuda.is_available(), reason="requires an NVIDIA GPU"
+    not torch.cuda.is_available(), reason="requires a GPU"
 )
 
 

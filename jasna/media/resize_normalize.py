@@ -4,8 +4,8 @@ Detectors cast the whole frame to their input dtype and divide by 255 at source
 resolution, then downscale. At 8K VR that writes a 384 MiB intermediate to
 produce a 5 MiB one. ``ResizeNormalizer`` reads the frame once instead.
 
-NVIDIA runs ``resize_normalize.cu``; ROCm and CPU keep the Torch expression the
-caller already had, which is also what the kernel is tested against.
+GPUs with precompiled kernels run ``resize_normalize.cu``; others keep the Torch
+expression the caller already had, which is also what the kernel is tested against.
 """
 from __future__ import annotations
 
@@ -13,10 +13,9 @@ import ctypes
 
 import torch
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
 
-_FATBIN = "resize_normalize.fatbin"
+_KERNEL_MODULE = "resize_normalize"
 _BLOCK_WIDTH = 16
 _BLOCK_HEIGHT = 16
 
@@ -81,8 +80,8 @@ class ResizeNormalizer:
         self._fill = torch.tensor(fill, dtype=torch.float32, device=device)
         function = _FUNCTIONS.get(dtype)
         self._kernel = (
-            Kernel(_FATBIN, function, _RESIZE_NORMALIZE_ARG_TYPES)
-            if function is not None and is_nvidia_device(device)
+            Kernel(_KERNEL_MODULE, function, _RESIZE_NORMALIZE_ARG_TYPES)
+            if function is not None and has_precompiled_kernels(device)
             else None
         )
 

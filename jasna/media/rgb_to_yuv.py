@@ -1,7 +1,8 @@
 """Planar RGB to packed NV12/P010 conversion for the encoder.
 
-NVIDIA runs the fused kernel in ``rgb_to_yuv.cu``; ROCm and CPU use the Torch
-implementation below, which is also the reference the kernel is tested against.
+GPUs with precompiled kernels run the fused kernel in ``rgb_to_yuv.cu``; others
+use the Torch implementation below, which is also the reference the kernel is
+tested against.
 
 The kernel takes separate luma and chroma destinations. That lets the caller
 place the two planes in different buffers, which is what lets CAS sharpen
@@ -15,8 +16,7 @@ from typing import NamedTuple
 
 import torch
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
 from jasna.media.yuv_scratch import (
     YuvScratch,
     apply_matrix,
@@ -24,7 +24,7 @@ from jasna.media.yuv_scratch import (
     interleave_chroma,
 )
 
-_FATBIN = "rgb_to_yuv.fatbin"
+_KERNEL_MODULE = "rgb_to_yuv"
 _BLOCK_WIDTH = 16
 _BLOCK_HEIGHT = 16
 
@@ -144,7 +144,7 @@ class RgbToYuvConverter:
         self._code_range = _CODE_RANGES[pixel_format]
         self._full_range = value_range == "full"
         self._rows = _matrix_rows(standard, self._code_range, self._full_range)
-        self._kernel = Kernel(_FATBIN, variant, _RGB_TO_YUV_ARG_TYPES) if is_nvidia_device(device) else None
+        self._kernel = Kernel(_KERNEL_MODULE, variant, _RGB_TO_YUV_ARG_TYPES) if has_precompiled_kernels(device) else None
         self._scratch: YuvScratch | None = None
 
     @property

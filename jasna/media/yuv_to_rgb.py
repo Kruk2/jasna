@@ -4,8 +4,7 @@ import torch
 
 from av.video.reformatter import Colorspace as AvColorspace
 
-from jasna.accelerator import is_nvidia_device
-from jasna.media.cuda_kernel import Kernel, grid_size
+from jasna.media.cuda_kernel import Kernel, grid_size, has_precompiled_kernels
 
 # YUV->RGB from standard luma coefficients (Kr, Kb):
 #   R = Y' + 2(1-Kr) * V'
@@ -41,7 +40,7 @@ def _rgb_from_yuv_coeffs(name: str) -> tuple[float, float, float, float]:
 
 
 _CUDA_CONVERSION_BATCH = 8
-_FATBIN = "yuv_to_rgb.fatbin"
+_KERNEL_MODULE = "yuv_to_rgb"
 
 
 _YUV_TO_RGB_ARG_TYPES = (
@@ -87,9 +86,10 @@ def _launch_yuv_to_rgb(
 class YuvToRgbConverter:
     """NV12/P010 planes -> planar RGB uint8 (3, H, W) on GPU.
 
-    CUDA conversion is one ahead-of-time-compiled kernel that writes directly
-    into the destination tensor. The CPU implementation is the unit-test/reference
-    path. 10-bit output uses the same 8x8 Bayer ordered dither as the VALI decoder.
+    GPU conversion is one ahead-of-time-compiled kernel that writes directly
+    into the destination tensor. The eager implementation is the unit-test/reference
+    path and the fallback for AMD architectures missing from the HIP bundle.
+    10-bit output uses the same 8x8 Bayer ordered dither as the VALI decoder.
     """
 
     def __init__(
@@ -115,10 +115,10 @@ class YuvToRgbConverter:
             raise ValueError(f"Unsupported YUV color space: {color_space}") from exc
 
         self._cuda_kernel = None
-        if is_nvidia_device(device):
+        if has_precompiled_kernels(device):
             bits = 10 if is_10bit else 8
             value_range = "full" if full_range else "limited"
-            self._cuda_kernel = Kernel(_FATBIN, f"yuv{bits}_{name}_{value_range}", _YUV_TO_RGB_ARG_TYPES)
+            self._cuda_kernel = Kernel(_KERNEL_MODULE, f"yuv{bits}_{name}_{value_range}", _YUV_TO_RGB_ARG_TYPES)
             return
 
         a, b, c, d = _rgb_from_yuv_coeffs(name)
@@ -256,8 +256,6 @@ class YuvToRgbConverter:
         """
         if y.is_cuda:
             if self._cuda_kernel is None:
-                # AMD/ROCm path: the coefficient tensors already live on the
-                # device, so the eager math runs there directly.
                 self._convert_eager(y, uv, out)
                 return
             expected = torch.uint16 if self.is_10bit else torch.uint8
