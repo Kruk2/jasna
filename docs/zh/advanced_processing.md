@@ -61,7 +61,8 @@ jasna --input input.mp4 --output output.mp4 --fmp4
 
 对输出应用 `.cube` 色彩 LUT（1D 或 3D），用于调色。在**编码设置**部分设置
 **色彩 LUT (.cube)**，或使用 `--lut path/to/look.cube`。它在写入视频时应用，
-几乎没有开销。
+几乎没有开销。有[选定区间](segments.md)时，区间之间的部分会重新编码而不是复制，
+让 LUT 覆盖整个视频。
 
 ## 锐化
 

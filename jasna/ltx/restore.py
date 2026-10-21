@@ -81,7 +81,7 @@ class Cancelled(Exception):
 
 
 class FrameWriter(Protocol):
-    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None: ...
+    def write(self, frame: torch.Tensor, pts: int) -> None: ...
 
     def close(self) -> None: ...
 
@@ -799,7 +799,7 @@ def compose_span(
                     bar.update(len(batch))
                     for frame, frame_pts in zip(batch, pts):
                         if owner is None:
-                            writer.write(frame, frame_pts, apply_lut=False)
+                            writer.write(frame, frame_pts)
                         else:
                             writer.write(composers[owner].frame(frame), frame_pts)
             finally:
@@ -1028,7 +1028,7 @@ class _SpeedTestMosaics:
 
 
 class _DiscardedFrames:
-    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame: torch.Tensor, pts: int) -> None:
         pass
 
     def close(self) -> None:

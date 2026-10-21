@@ -73,14 +73,14 @@ class SeedFrameWriter:
         self._lut_applier = lut_applier
         self.frames: list[SeedFrame] = []
 
-    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame: torch.Tensor, pts: int) -> None:
         if not self._start_pts <= int(pts) < self._end_pts:
             return
         from jasna.gui.restoration_preview import frame_image
 
         size = (int(self._metadata.video_width), int(self._metadata.video_height))
         path = self._directory / f"{int(pts)}.jpg"
-        frame_image(frame, size, self._lut_applier, apply_lut=apply_lut).save(
+        frame_image(frame, size, self._lut_applier).save(
             path, quality=JPEG_QUALITY, subsampling=0
         )
         seconds = (int(pts) - self._metadata.start_pts) * float(self._metadata.time_base)

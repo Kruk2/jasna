@@ -94,11 +94,11 @@ class _Transformer:
 
 class _Writer:
     def __init__(self):
-        self.frames: list[tuple[int, int, bool]] = []
+        self.frames: list[tuple[int, int]] = []
         self.closed = False
 
-    def write(self, frame, pts, *, apply_lut=True):
-        self.frames.append((pts, int(frame[2, 0, 0]), apply_lut))
+    def write(self, frame, pts):
+        self.frames.append((pts, int(frame[2, 0, 0])))
 
     def close(self):
         self.closed = True
@@ -236,9 +236,9 @@ def test_restore_spans_seeds_segments_and_leaves_other_frames_untouched(fakes, t
     assert budgets == [6 << 30] * 2
     assert bars[2].total == bars[2].n == 16
     inside = {pts for pts in range(50, 150, 10)} | {pts for pts in range(200, 260, 10)}
-    assert [pts for pts, _, _ in writer.frames] == list(range(0, 300, 10))
-    for pts, marker, apply_lut in writer.frames:
-        assert (marker, apply_lut) == ((1, True) if pts in inside else (0, False))
+    assert [pts for pts, _ in writer.frames] == list(range(0, 300, 10))
+    for pts, marker in writer.frames:
+        assert marker == (1 if pts in inside else 0)
     assert writer.closed
 
 
@@ -286,7 +286,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
     assert budgets == [123 << 20]
     assert _Transformer.seeds == [[5]]
     assert bars[2].total == bars[2].n == 8
-    assert [apply_lut for _, _, apply_lut in writer.frames] == [True] * 12
+    assert len(writer.frames) == 12
 
 
 def test_decode_window_converts_a_float32_decode(monkeypatch):

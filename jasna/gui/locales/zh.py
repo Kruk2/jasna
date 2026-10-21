@@ -376,7 +376,7 @@ ZH = {
         "working_directory_placeholder": "可选，存放临时文件的文件夹",
         "dialog_select_working_directory": "选择工作目录",
         "tip_working_directory": "修复选定区间或使用 LTX 时存放临时文件的文件夹。\n留空则使用输出视频所在文件夹。",
-        "tip_lut_path": "可选的 .cube 色彩 LUT，在写入视频时应用。\n支持 1D 和 3D LUT（例如 Adobe Premiere 或 DaVinci Resolve 导出的文件）。\n可用来修正黑色发灰、白平衡等问题。",
+        "tip_lut_path": "可选的 .cube 色彩 LUT，在写入视频时应用。\n支持 1D 和 3D LUT（例如 Adobe Premiere 或 DaVinci Resolve 导出的文件）。\n可用来修正黑色发灰、白平衡等问题。\n使用区间编辑器的区间或“仅大马赛克用 LTX”时，中间的部分会重新编码而不是复制，因此耗时更长。",
         "sharpen_strength": "锐化",
         "retarget_high_fps": "将 60 FPS 降至 30 FPS",
         "tip_sharpen_strength": "让边缘和细节更清晰，在导出时应用。\n0 表示关闭。0.2-0.5 为轻微增强；1.0 最强，可能显得生硬。\n画面越锐利所需文件越大，如果效果变差请调低 CQ 值。\n预览中不显示。",

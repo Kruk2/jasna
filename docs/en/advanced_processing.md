@@ -73,7 +73,9 @@ available with streaming or [selected ranges](segments.md).
 
 Apply a `.cube` color LUT (1D or 3D) to the output, for color grading. Set
 **Color LUT** in the **Encoding** section, or use `--lut path/to/look.cube`.
-It is applied as the video is written, so it is almost free.
+It is applied as the video is written, so it is almost free. With
+[selected ranges](segments.md), the parts between them are encoded again
+instead of copied, so the LUT covers the whole video.
 
 ## Sharpening
 

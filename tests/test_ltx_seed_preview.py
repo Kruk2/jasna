@@ -29,7 +29,7 @@ def test_seed_frame_writer_keeps_only_the_range_frames(tmp_path) -> None:
     writer = SeedFrameWriter(tmp_path, (100, 300), METADATA, None)
 
     for pts in (0, 100, 200, 300):
-        writer.write(torch.full((3, 4, 8), 200, dtype=torch.uint8), pts, apply_lut=pts != 0)
+        writer.write(torch.full((3, 4, 8), 200, dtype=torch.uint8), pts)
 
     assert writer.frames == [SeedFrame(1.0, tmp_path / "100.jpg"), SeedFrame(2.0, tmp_path / "200.jpg")]
     assert all(frame.path.is_file() for frame in writer.frames)

@@ -184,7 +184,7 @@ class RawFrameWriter:
                 max(2, int(max_size[1])),
             )
 
-    def write(self, frame, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame, pts: int) -> None:
         seconds = max(
             0.0,
             (int(pts) - int(self._metadata.start_pts)) * float(self._metadata.time_base),
@@ -195,7 +195,7 @@ class RawFrameWriter:
             and seconds - self._last_emitted_seconds < minimum_interval - 1e-6
         ):
             return
-        if apply_lut and self._lut_applier is not None:
+        if self._lut_applier is not None:
             frame = self._lut_applier.apply(frame)
         with self._size_lock:
             max_size = self._max_size

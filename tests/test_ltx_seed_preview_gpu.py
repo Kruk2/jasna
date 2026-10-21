@@ -30,7 +30,7 @@ class _Capture:
         self.start, self.end = effect_range
         self.frames: dict[int, torch.Tensor] = {}
 
-    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame: torch.Tensor, pts: int) -> None:
         if self.start <= int(pts) < self.end:
             self.frames[int(pts)] = frame.cpu()
 

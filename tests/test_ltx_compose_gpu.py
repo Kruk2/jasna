@@ -48,7 +48,7 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
         return torch.zeros(6, 3, 4, 4, dtype=torch.uint8, device=device)
 
     class Writer:
-        def write(self, frame, pts, *, apply_lut=True):
+        def write(self, frame, pts):
             writes.append(torch.cuda.current_stream().priority)
 
         def close(self):

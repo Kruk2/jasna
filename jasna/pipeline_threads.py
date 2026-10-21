@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 
 
 class FrameWriter(Protocol):
-    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None: ...
+    def write(self, frame: torch.Tensor, pts: int) -> None: ...
     def after_write(self, frames_written: int) -> None: ...
 
 
@@ -410,10 +410,7 @@ def blend_encode_loop(
                             original_frame,
                         )
                 with timer.measure("write"):
-                    if meta.apply_effect:
-                        frame_writer.write(blended, meta.pts)
-                    else:
-                        frame_writer.write(blended, meta.pts, apply_lut=False)
+                    frame_writer.write(blended, meta.pts)
                     frames_encoded += 1
                     frame_writer.after_write(frames_encoded)
 

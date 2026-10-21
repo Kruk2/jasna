@@ -483,7 +483,6 @@ class VideoEncoder:
 
         self._converter = RgbToYuvConverter(f"{pixel_format}_{color_variant}", device=self.device)
 
-        self._lut_flags: deque[bool] = deque()
         # Only AMD reuses one packed frame (set in __enter__); NVENC still holds
         # its input frame after encode() returns, so NVIDIA allocates per frame.
         self._packed: torch.Tensor | None = None
@@ -588,7 +587,6 @@ class VideoEncoder:
             )
         self.pts_heap: list[int] = []
         self.frame_buffer: deque = deque()
-        self._lut_flags.clear()
         self.pts_set: set[int] = set()
         self._last_emitted_pts: int | None = None
         self._video_started = False
@@ -772,10 +770,10 @@ class VideoEncoder:
                 if item is self._stop_sentinel:
                     return
                 if self._worker_error is None:
-                    frame, pts, apply_lut, ready_event = item
+                    frame, pts, ready_event = item
                     self.stream.wait_event(ready_event)
                     frame.record_stream(self.stream)
-                    self._encode_frame(frame, pts, apply_lut=apply_lut)
+                    self._encode_frame(frame, pts)
             except Exception as exc:
                 self._worker_error = exc
                 logger.exception("[encoder-worker] crashed")
@@ -786,12 +784,11 @@ class VideoEncoder:
         self,
         frame: torch.Tensor,
         pts: int,
-        apply_lut: bool,
-    ) -> tuple[torch.Tensor, int, bool, object]:
+    ) -> tuple[torch.Tensor, int, object]:
         producer_stream = current_stream(self.device)
         ready_event = new_event(self.device)
         producer_stream.record_event(ready_event)
-        return frame, pts, apply_lut, ready_event
+        return frame, pts, ready_event
 
     def _validate_encoder_options(self):
         leftover = dict(self.out_stream.codec_context.options)
@@ -947,7 +944,7 @@ class VideoEncoder:
             self.pts_set.remove(pts_to_assign)
             pts_to_assign = self._clamp_pts_monotonic(pts_to_assign)
             self._encode_queue.put(
-                self._build_encode_item(frame_to_encode, pts_to_assign, self._lut_flags.popleft())
+                self._build_encode_item(frame_to_encode, pts_to_assign)
             )
 
     def _encoder_open_error(self, exc: Exception) -> RuntimeError:
@@ -994,10 +991,10 @@ class VideoEncoder:
         self._cas.sharpen_into(luma, packed[:height])
         return packed
 
-    def _encode_frame(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
+    def _encode_frame(self, frame: torch.Tensor, pts: int):
         height = self.metadata.video_height
         with stream_context(self.stream):
-            if apply_lut and self._lut_applier is not None:
+            if self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
             packed = self._to_yuv(frame, height)
             if self.vendor is AcceleratorVendor.NVIDIA:
@@ -1041,7 +1038,7 @@ class VideoEncoder:
         for packet in packets:
             self._mux_video(packet)
 
-    def encode(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True):
+    def encode(self, frame: torch.Tensor, pts: int):
         if self._worker_error is not None:
             raise self._worker_error
         pts = int(pts) - self.pts_origin
@@ -1049,6 +1046,5 @@ class VideoEncoder:
             pts += 1
         heapq.heappush(self.pts_heap, pts)
         self.frame_buffer.append(frame)
-        self._lut_flags.append(bool(apply_lut))
         self.pts_set.add(pts)
         self._process_buffer()

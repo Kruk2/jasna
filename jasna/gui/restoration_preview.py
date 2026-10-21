@@ -111,12 +111,11 @@ def frame_image(
     max_size: tuple[int, int],
     lut_applier=None,
     *,
-    apply_lut: bool = True,
     left_eye_only: bool = False,
 ) -> Image.Image:
     if left_eye_only:
         frame = frame[:, :, : frame.shape[-1] // 2]
-    if apply_lut and lut_applier is not None:
+    if lut_applier is not None:
         frame = lut_applier.apply(frame)
     image = Image.fromarray(frame.cpu().permute(1, 2, 0).numpy()).copy()
     max_width, max_height = max_size
@@ -149,14 +148,14 @@ class _CenterFrameCollector:
         self._best_frame = None
         self.done = False
 
-    def write(self, frame, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame, pts: int) -> None:
         if self.done:
             return
         if self._best_pts is None or abs(pts - self._center_pts) < abs(self._best_pts - self._center_pts):
             self._best_pts = pts
             if self._left_eye_only:
                 frame = frame[:, :, : frame.shape[-1] // 2]
-            if apply_lut and self._lut_applier is not None:
+            if self._lut_applier is not None:
                 frame = self._lut_applier.apply(frame)
             self._best_frame = frame.cpu()
         if pts >= self._center_pts:
@@ -171,7 +170,7 @@ class _CenterFrameCollector:
         return self._best_frame is not None
 
     def result_image(self, max_size: tuple[int, int]) -> Image.Image:
-        return frame_image(self._best_frame, max_size, apply_lut=False)
+        return frame_image(self._best_frame, max_size)
 
 
 class _PlaybackFrameCollector:
@@ -193,7 +192,7 @@ class _PlaybackFrameCollector:
     def done(self) -> bool:
         return bool(self._frames)
 
-    def write(self, frame, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame, pts: int) -> None:
         self._frames.append(
             (
                 pts,
@@ -201,7 +200,6 @@ class _PlaybackFrameCollector:
                     frame,
                     self._max_size,
                     self._lut_applier,
-                    apply_lut=apply_lut,
                     left_eye_only=self._left_eye_only,
                 ),
             )

@@ -3,6 +3,8 @@
 You don't have to restore the whole video. Choose only the scenes with mosaics.
 Jasna copies the rest without changes, so it is much faster and the other
 parts keep their original quality. The output is still the full video.
+With a [Color LUT](advanced_processing.md#color-lut), the rest is encoded
+again instead, so the LUT covers the whole video. This takes longer.
 
 ## Segment Editor (GUI)
 

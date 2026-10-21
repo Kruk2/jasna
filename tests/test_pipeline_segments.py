@@ -393,6 +393,55 @@ def test_a_render_span_resolving_to_two_models_is_rejected(tmp_path) -> None:
         _run_smart_mocked(pipeline)
 
 
+def test_a_lut_job_encodes_the_parts_between_ranges_again_so_the_lut_covers_them(tmp_path) -> None:
+    ltx = SegmentRestoration("ltx", 42)
+    segments = (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, ltx))
+    spans = (
+        SpliceSpan("copy", 0, 60),
+        SpliceSpan("render", 60, 120, ((75, 90),)),
+        SpliceSpan("copy", 120, 180),
+        SpliceSpan("render", 180, 240, ((195, 210),)),
+    )
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
+    pipeline.lut_path = "look.cube"
+    pipeline._reencode_span = MagicMock()
+
+    with (
+        patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.NVIDIA),
+        patch("jasna.pipeline.validate_smart_render", return_value="h264"),
+        patch("jasna.pipeline.resolve_smart_encoder_settings", return_value={}),
+        patch("jasna.pipeline.VideoEncoder") as encoder,
+        patch("jasna.pipeline.Progressbar") as progressbar,
+        patch("jasna.pipeline.create_copy_fragment") as copy_fragment,
+        patch("jasna.pipeline.normalize_fragment"),
+        patch("jasna.pipeline.concatenate_fragments") as concatenate,
+        patch("jasna.pipeline.mux_final_output"),
+    ):
+        pipeline._run_smart(MagicMock(duration=8.0, video_fps=30.0, video_fps_exact=Fraction(30, 1)))
+
+    copy_fragment.assert_not_called()
+    assert [reencode.args[2] for reencode in pipeline._reencode_span.call_args_list] == [spans[0], spans[2]]
+    assert {made.kwargs["lut_path"] for made in encoder.call_args_list} == {"look.cube"}
+    assert progressbar.call_args.kwargs["total_frames"] == 180
+    assert len(concatenate.call_args.args[0]) == 4
+
+
+def test_reencoded_span_writes_every_decoded_frame_and_closes_its_writer(tmp_path) -> None:
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", (), ())
+    pipeline.batch_size = 2
+    index = KeyframeIndex((0, 60), Fraction(1, 30), 0, 120)
+    batches = [(torch.zeros(2, 3, 4, 4), [60, 61]), (torch.zeros(1, 3, 4, 4), [62])]
+    writer, progress = MagicMock(), MagicMock()
+
+    with patch("jasna.ltx.restore.video_frames", return_value=lambda: iter(batches)) as frames:
+        pipeline._reencode_span(MagicMock(), index, SpliceSpan("copy", 60, 120), writer, progress)
+
+    assert (frames.call_args.kwargs["seek_ts"], frames.call_args.kwargs["end_pts"]) == (2.0, 120)
+    assert [written.args[1] for written in writer.write.call_args_list] == [60, 61, 62]
+    assert [update.args[0] for update in progress.update.call_args_list] == [2, 1]
+    writer.close.assert_called_once_with()
+
+
 @pytest.mark.parametrize(
     ("model", "segments", "expected"),
     [

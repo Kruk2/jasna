@@ -692,16 +692,16 @@ class TestOfflineFrameWriter:
         writer = _OfflineFrameWriter(MagicMock(), [0.0])
         writer.after_write(1)
 
-    def test_write_can_bypass_lut_for_bridge_frame(self):
+    def test_write_encodes_the_frame(self):
         from jasna.pipeline import _OfflineFrameWriter
         mock_enc = MagicMock()
         mock_enc.__enter__ = MagicMock(return_value=mock_enc)
         writer = _OfflineFrameWriter(mock_enc, [0.0])
         frame = torch.zeros(3, 8, 8)
 
-        writer.write(frame, pts=10, apply_lut=False)
+        writer.write(frame, pts=10)
 
-        mock_enc.encode.assert_called_once_with(frame, 10, apply_lut=False)
+        mock_enc.encode.assert_called_once_with(frame, 10)
 
     def test_close_exits_ctx(self):
         from jasna.pipeline import _OfflineFrameWriter

@@ -60,11 +60,11 @@ class _OfflineFrameWriter:
         self._encode_heartbeat = encode_heartbeat
         self._entered = False
 
-    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame: torch.Tensor, pts: int) -> None:
         if not self._entered:
             self._encoder_ctx.__enter__()
             self._entered = True
-        self._encoder_ctx.encode(frame, pts, apply_lut=apply_lut)
+        self._encoder_ctx.encode(frame, pts)
         self._encode_heartbeat[0] = time.monotonic()
 
     def after_write(self, frames_written: int) -> None:
@@ -428,6 +428,31 @@ class Pipeline:
             log.info("LTX restoration cancelled")
         self._log_memory_at_end()
 
+    def _reencode_span(
+        self, metadata, index: KeyframeIndex, span: SpliceSpan, writer: _OfflineFrameWriter, progress: Progressbar
+    ) -> None:
+        """A span with nothing to restore, encoded again so the LUT covers it as well."""
+        from jasna.ltx.restore import video_frames
+
+        frames = video_frames(
+            self.input_video,
+            metadata,
+            batch_size=self.batch_size,
+            device=self.device,
+            frame_stride=1,
+            seek_ts=index.seconds_for_pts(span.start_pts),
+            end_pts=span.end_pts,
+        )
+        try:
+            for batch, pts in frames():
+                if self._cancel_event.is_set():
+                    return
+                for frame, frame_pts in zip(batch, pts):
+                    writer.write(frame, frame_pts)
+                progress.update(len(pts))
+        finally:
+            writer.close()
+
     def _run_smart(self, metadata) -> None:
         codec = validate_smart_render(
             metadata,
@@ -482,8 +507,13 @@ class Pipeline:
             self.encoder_settings,
             vendor=vendor_for_device(self.device),
         )
+        reencode_copies = self.lut_path is not None
+        if reencode_copies:
+            log.info("%s: a color LUT is set, so the parts without ranges are encoded again", self.input_video.name)
         standard_frames = sum(
-            _span_frames(span, index, metadata) for span in plan.render_spans if span not in ltx_spans
+            _span_frames(span, index, metadata)
+            for span in plan.spans
+            if span not in ltx_spans and (span.is_render or reencode_copies)
         )
         ltx_callback = standard_callback = self.progress_callback
         if self.progress_callback is not None and ltx_spans and standard_frames:
@@ -538,7 +568,9 @@ class Pipeline:
                 for span_index, span in enumerate(plan.spans):
                     if self._cancel_event.is_set():
                         return
-                    if not span.is_render:
+                    if not span.is_render and reencode_copies:
+                        self._reencode_span(metadata, index, span, fragment_writer(span_index, span)(), progress)
+                    elif not span.is_render:
                         create_copy_fragment(self.input_video, span, index, raw_path(span_index), codec=codec)
                     elif span not in ltx_spans:
                         self._run_pass(

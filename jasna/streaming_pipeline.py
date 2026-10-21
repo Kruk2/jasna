@@ -31,7 +31,7 @@ class _StreamingFrameWriter:
         self._t0 = time.monotonic()
         self._cancel_event = cancel_event
 
-    def write(self, frame: torch.Tensor, pts: int, *, apply_lut: bool = True) -> None:
+    def write(self, frame: torch.Tensor, pts: int) -> None:
         self._encoder.write_frame(frame, pts)
 
     def after_write(self, frames_written: int) -> None:

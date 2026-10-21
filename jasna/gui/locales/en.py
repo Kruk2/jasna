@@ -376,7 +376,7 @@ EN = {
         "working_directory_placeholder": "Optional, folder for temporary files",
         "dialog_select_working_directory": "Select working directory",
         "tip_working_directory": "Folder for temporary files when restoring selected ranges or with LTX.\nLeave empty to use the output video's folder.",
-        "tip_lut_path": "Optional .cube color LUT applied as the video is written.\nWorks with 1D and 3D LUTs (e.g. from Adobe Premiere or DaVinci Resolve).\nUse it to fix raised blacks, white balance and similar.",
+        "tip_lut_path": "Optional .cube color LUT applied as the video is written.\nWorks with 1D and 3D LUTs (e.g. from Adobe Premiere or DaVinci Resolve).\nUse it to fix raised blacks, white balance and similar.\nWith Segment Editor ranges or LTX only for big mosaics, the parts in between are encoded again instead of copied, so this takes longer.",
         "sharpen_strength": "Sharpening",
         "retarget_high_fps": "Reduce 60 FPS to 30 FPS",
         "tip_sharpen_strength": "Makes edges and fine detail look crisper as the video is written.\n0 turns it off. 0.2-0.5 is a gentle boost; 1.0 is the strongest and can look harsh.\nA sharper picture needs a bigger file, so lower the CQ value if the result looks worse.\nNot shown in the preview.",

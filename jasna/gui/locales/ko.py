@@ -376,7 +376,7 @@ KO = {
         "working_directory_placeholder": "선택 사항, 임시 파일용 폴더",
         "dialog_select_working_directory": "작업 디렉터리 선택",
         "tip_working_directory": "선택한 구간을 복원하거나 LTX를 사용할 때 임시 파일을 저장하는 폴더입니다.\n비워 두면 출력 비디오의 폴더를 사용합니다.",
-        "tip_lut_path": "선택 사항인 .cube 컬러 LUT로, 비디오를 쓰는 동안 적용됩니다.\n1D 및 3D LUT 모두 지원합니다 (예: Adobe Premiere, DaVinci Resolve에서 내보낸 파일).\n들뜬 검정, 화이트 밸런스 등을 보정할 때 사용하세요.",
+        "tip_lut_path": "선택 사항인 .cube 컬러 LUT로, 비디오를 쓰는 동안 적용됩니다.\n1D 및 3D LUT 모두 지원합니다 (예: Adobe Premiere, DaVinci Resolve에서 내보낸 파일).\n들뜬 검정, 화이트 밸런스 등을 보정할 때 사용하세요.\n구간 편집기의 구간이나 '큰 모자이크만 LTX'를 쓰면 사이 부분도 복사하지 않고 다시 인코딩하므로 시간이 더 걸립니다.",
         "sharpen_strength": "샤프닝",
         "retarget_high_fps": "60 FPS를 30 FPS로 줄이기",
         "tip_sharpen_strength": "내보내는 동안 가장자리와 세부를 또렷하게 만듭니다.\n0이면 끔. 0.2~0.5는 약한 효과, 1.0은 가장 강하며 거칠어 보일 수 있습니다.\n선명할수록 파일이 커지므로 결과가 나빠지면 CQ 값을 낮추세요.\n미리보기에는 표시되지 않습니다.",

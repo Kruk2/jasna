@@ -376,7 +376,7 @@ JA = {
         "working_directory_placeholder": "オプション。一時ファイル用のフォルダー",
         "dialog_select_working_directory": "作業ディレクトリを選択",
         "tip_working_directory": "選択した区間の復元や LTX で使う一時ファイルの置き場所です。\n空欄の場合は出力動画のフォルダーを使います。",
-        "tip_lut_path": "オプションの .cube カラー LUT。動画の書き出し時に適用されます。\n1D / 3D LUT の両方に対応（Adobe Premiere や DaVinci Resolve からの書き出しなど）。\n黒浮きやホワイトバランスなどの補正に使えます。",
+        "tip_lut_path": "オプションの .cube カラー LUT。動画の書き出し時に適用されます。\n1D / 3D LUT の両方に対応（Adobe Premiere や DaVinci Resolve からの書き出しなど）。\n黒浮きやホワイトバランスなどの補正に使えます。\n区間エディターの区間や「大きなモザイクだけ LTX」では、間の部分もコピーせずにエンコードし直すため、時間がかかります。",
         "sharpen_strength": "シャープネス",
         "retarget_high_fps": "60 FPS を 30 FPS に変換",
         "tip_sharpen_strength": "書き出しながら輪郭や細部をくっきりさせます。\n0 で無効。0.2〜0.5 は控えめな効果、1.0 は最も強く、不自然に見えることがあります。\nシャープにするとファイルが大きくなるため、結果が悪化する場合は CQ 値を下げてください。\nプレビューには反映されません。",
