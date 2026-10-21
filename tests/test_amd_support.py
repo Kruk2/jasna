@@ -467,7 +467,7 @@ class _FakeRfDetrCore:
     def __init__(self):
         self.loaded_state = None
         self.dtype = torch.float32
-        self.input_dtypes: list[torch.dtype] = []
+        self.inputs: list[torch.Tensor] = []
 
     def to(self, *, device, dtype):
         self.dtype = dtype
@@ -480,7 +480,7 @@ class _FakeRfDetrCore:
         self.loaded_state = state
 
     def __call__(self, x):
-        self.input_dtypes.append(x.dtype)
+        self.inputs.append(x)
         batch = x.shape[0]
         return {
             "pred_boxes": torch.zeros(batch, 5, 4, dtype=self.dtype),
@@ -606,7 +606,7 @@ def test_rfdetr_torch_runner_fp16_runs_a_half_model_without_autocast(monkeypatch
     out = runner.infer({"input": torch.zeros(2, 3, 576, 576)})
 
     assert runner._core.dtype == torch.float16
-    assert runner._core.input_dtypes[-1] == torch.float16
+    assert runner._core.inputs[-1].dtype == torch.float16
     assert out["dets"].dtype == torch.float32
     assert out["labels"].dtype == torch.float32
 
@@ -630,6 +630,25 @@ def test_rfdetr_torch_runner_fp16_keeps_the_masks_half(monkeypatch, tmp_path) ->
 
     assert runner.outputs["masks"].dtype == torch.float16
     assert out["masks"].dtype == torch.float16
+
+
+def test_rfdetr_torch_runner_warms_up_at_the_load_batch_shape(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.rfdetr_torch_runner as module
+
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"pt")
+    _install_fake_rfdetr(monkeypatch, {"model": {"class_embed.weight": torch.zeros(3, 256)}})
+
+    runner = module.RfDetrTorchRunner(
+        weights,
+        input_shapes=[(4, 3, 576, 576)],
+        device=torch.device("cpu"),
+        fp16=False,
+        resolution=576,
+        variant="medium",
+    )
+
+    assert [tuple(x.shape) for x in runner._core.inputs] == [(4, 3, 576, 576)]
 
 
 def test_rfdetr_torch_runner_rejects_unknown_variant(monkeypatch, tmp_path) -> None:
