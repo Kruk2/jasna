@@ -344,17 +344,10 @@ class VideoReader:
             source_ctx.thread_type = "AUTO"
             return
         try:
-            hwaccel = HWAccel(
-                "amf",
-                device=str(self.device.index or 0),
-                allow_software_fallback=False,
-                is_hw_owned=False,
-            )
-            decoder = av.CodecContext.create(
-                decoder_name,
-                "r",
-                hwaccel=hwaccel,
-            )
+            # Without an FFmpeg hwaccel the AMF decoder downloads each surface in
+            # its own format. With one, FFmpeg 8.1 downloads 10-bit HEVC as NV12
+            # and fails with EINVAL.
+            decoder = av.CodecContext.create(decoder_name, "r")
             decoder.extradata = source_ctx.extradata
             decoder.width = source_ctx.width
             decoder.height = source_ctx.height

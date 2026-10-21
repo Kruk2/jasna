@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 import av
 import numpy as np
+import pytest
 import torch
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
@@ -190,3 +191,57 @@ def test_nvidia_software_path_reuses_single_staging_on_private_stream(monkeypatc
     stream.wait_stream.assert_called_once_with(stream)
     assert events == ["convert"] * BATCH + ["sync"]
     stream.synchronize.assert_called_once_with()
+
+
+def test_amf_decoder_has_no_ffmpeg_hwaccel(monkeypatch):
+    create = MagicMock()
+    monkeypatch.setattr(module.av, "CodecContext", SimpleNamespace(create=create))
+    reader = _reader(AcceleratorVendor.AMD)
+    source = SimpleNamespace(
+        name="hevc", extradata=b"", width=W, height=H, framerate=None, sample_aspect_ratio=None
+    )
+
+    reader._setup_amf_decoder(source)
+
+    create.assert_called_once_with("hevc_amf", "r")
+
+
+def _write_hevc_main10(path, frame_count: int) -> None:
+    rng = np.random.default_rng(0)
+    with av.open(str(path), "w") as container:
+        stream = container.add_stream("libx265", rate=24)
+        stream.width, stream.height, stream.pix_fmt = 320, 240, "yuv420p10le"
+        stream.options = {"x265-params": "log-level=error"}
+        for _ in range(frame_count):
+            data = rng.integers(64, 940, (240 * 3 // 2, 320), dtype=np.uint16)
+            container.mux(stream.encode(av.VideoFrame.from_ndarray(data, format="yuv420p10le")))
+        container.mux(stream.encode(None))
+
+
+def _decode_all(path, backend: str, monkeypatch) -> tuple[torch.Tensor, list[int], bool]:
+    from jasna.media.probe import get_video_meta_data
+
+    monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
+    batches, pts = [], []
+    with module.VideoReader(str(path), 4, torch.device("cuda:0"), get_video_meta_data(str(path))) as reader:
+        for batch, batch_pts in reader.frames():
+            batches.append(batch.cpu())
+            pts += batch_pts
+        uses_amf = reader._decoder_ctx is not None
+    return torch.cat(batches), pts, uses_amf
+
+
+@pytest.mark.skipif(
+    not (torch.cuda.is_available() and torch.version.hip and "hevc_amf" in av.codecs_available),
+    reason="needs an AMD GPU with the AMF decoder",
+)
+def test_amf_decodes_hevc_main10_like_software(tmp_path, monkeypatch):
+    path = tmp_path / "main10.mp4"
+    _write_hevc_main10(path, 12)
+
+    amf_frames, amf_pts, uses_amf = _decode_all(path, "auto", monkeypatch)
+    sw_frames, sw_pts, _ = _decode_all(path, "pyav-sw", monkeypatch)
+
+    assert uses_amf
+    assert amf_pts == sw_pts
+    assert torch.equal(amf_frames, sw_frames)
