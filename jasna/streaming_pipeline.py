@@ -27,7 +27,7 @@ class _StreamingFrameWriter:
         self._encoder = streaming_encoder
         self._hls_server = hls_server
         self._start_segment = start_segment
-        self._frames_per_seg = hls_server.frames_per_segment()
+        self._frames_per_seg = streaming_encoder.frames_per_segment
         self._t0 = time.monotonic()
         self._cancel_event = cancel_event
 

@@ -509,9 +509,6 @@ class HlsStreamingServer:
         fps = self.metadata.video_fps
         return int(segment_index * self.segment_duration * fps)
 
-    def frames_per_segment(self) -> int:
-        return max(1, int(self.metadata.video_fps * self.segment_duration))
-
     def request_seek(
         self,
         segment_index: int,
@@ -591,8 +588,8 @@ class HlsStreamingServer:
                 self._demand_lock.wait(timeout=0.5)
 
     def _writer_is_ahead_of_player(self, current_segment: int, max_ahead: int) -> bool:
-        # current_segment is a frame-count estimate that drifts ahead of the muxer's
-        # keyframe cuts; pausing before the requested segment is muxed would deadlock.
+        # current_segment counts frames handed to ffmpeg; the muxer lists a segment only after
+        # the next keyframe clears NVENC, so pausing before the requested one is listed deadlocks.
         requested = self._highest_requested_segment
         return (
             requested >= 0

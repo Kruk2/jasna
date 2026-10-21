@@ -108,13 +108,6 @@ class TestHlsStreamingServer:
         assert server.segment_start_frame(2) == 240
         server._cleanup_segments()
 
-    def test_frames_per_segment(self):
-        meta = _make_metadata(duration=20.0, fps=30.0)
-        server = HlsStreamingServer(segment_duration=4.0, port=0)
-        server.load_video(meta)
-        assert server.frames_per_segment() == 120
-        server._cleanup_segments()
-
     def test_playlist_being_replaced_reads_as_not_ready(self, tmp_path, monkeypatch):
         server = HlsStreamingServer(segment_duration=2.0, port=0)
         server.segments_dir = tmp_path
@@ -665,6 +658,55 @@ class TestStreamingEncoder:
         cmd = mock_popen.call_args[0][0]
         assert '-output_ts_offset' not in cmd
         enc.stop()
+
+    @pytest.mark.parametrize(
+        ("fps", "duration", "frames"),
+        [
+            (Fraction(30000, 1001), 2.0, 60),
+            (Fraction(30000, 1001), 4.0, 120),
+            (Fraction(24000, 1001), 2.0, 48),
+            (Fraction(25), 2.0, 50),
+            (Fraction(121, 5), 2.0, 49),
+        ],
+    )
+    @patch('jasna.streaming_encoder.subprocess.Popen')
+    def test_every_segment_is_one_gop(self, mock_popen, tmp_path, fps, duration, frames):
+        from jasna.streaming_encoder import StreamingEncoder
+        mock_popen.return_value = _mock_ffmpeg_process()
+        meta = _make_metadata()
+        meta.video_fps_exact = fps
+        enc = StreamingEncoder(segments_dir=tmp_path, segment_duration=duration, metadata=meta, source_video="")
+        enc.start(start_number=0)
+        cmd = mock_popen.call_args[0][0]
+        assert cmd[cmd.index('-g') + 1] == str(frames)
+        assert enc.frames_per_segment == frames
+        enc.stop()
+
+    def test_writer_counts_segments_like_the_muxer(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        from jasna.streaming_pipeline import _StreamingFrameWriter
+        meta = _make_metadata()
+        meta.video_fps_exact = Fraction(30000, 1001)
+        meta.video_fps = 30000 / 1001
+        server = HlsStreamingServer(segment_duration=2.0, port=0)
+        server.load_video(meta)
+        server.reset_demand(20)
+        enc = StreamingEncoder(server.segments_dir, server.segment_duration, meta, source_video="")
+        writer = _StreamingFrameWriter(enc, server, start_segment=20, cancel_event=threading.Event())
+        writer.after_write(590)
+        assert server._produced_segment == 29
+        server._cleanup_segments()
+
+    def test_pass_can_start_after_a_video_switch_unloaded_the_server(self, tmp_path):
+        from jasna.streaming_encoder import StreamingEncoder
+        from jasna.streaming_pipeline import _StreamingFrameWriter
+        meta = _make_metadata()
+        server = HlsStreamingServer(segment_duration=2.0, port=0)
+        server.load_video(meta)
+        enc = StreamingEncoder(server.segments_dir, server.segment_duration, meta, source_video="")
+        server.select_video(Path("next.mp4"), 0.0)
+        _StreamingFrameWriter(enc, server, start_segment=10, cancel_event=threading.Event())
+        server._cleanup_segments()
 
 
 class TestStreamingEncoderGpuIdx:

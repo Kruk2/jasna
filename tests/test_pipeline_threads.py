@@ -732,7 +732,7 @@ class TestStreamingFrameWriter:
         from jasna.streaming_pipeline import _StreamingFrameWriter
         mock_enc = MagicMock()
         mock_server = MagicMock()
-        mock_server.frames_per_segment.return_value = 120
+        mock_enc.frames_per_segment = 120
 
         writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
         frame = torch.zeros(3, 8, 8)
@@ -744,7 +744,7 @@ class TestStreamingFrameWriter:
         from jasna.streaming_pipeline import _StreamingFrameWriter
         mock_enc = MagicMock()
         mock_server = MagicMock()
-        mock_server.frames_per_segment.return_value = 120
+        mock_enc.frames_per_segment = 120
 
         cancel = threading.Event()
         writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5, cancel_event=cancel)
@@ -758,7 +758,7 @@ class TestStreamingFrameWriter:
         mock_enc = MagicMock()
         mock_enc.raise_if_failed.side_effect = RuntimeError("writer failed")
         mock_server = MagicMock()
-        mock_server.frames_per_segment.return_value = 120
+        mock_enc.frames_per_segment = 120
         writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5, cancel_event=threading.Event())
 
         with pytest.raises(RuntimeError, match="writer failed"):
@@ -770,7 +770,7 @@ class TestStreamingFrameWriter:
         from jasna.streaming_pipeline import _StreamingFrameWriter
         mock_enc = MagicMock()
         mock_server = MagicMock()
-        mock_server.frames_per_segment.return_value = 10
+        mock_enc.frames_per_segment = 10
 
         writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=3, cancel_event=threading.Event())
 
@@ -781,7 +781,7 @@ class TestStreamingFrameWriter:
         from jasna.streaming_pipeline import _StreamingFrameWriter
         mock_enc = MagicMock()
         mock_server = MagicMock()
-        mock_server.frames_per_segment.return_value = 120
+        mock_enc.frames_per_segment = 120
 
         writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
         writer.after_write(1)
@@ -792,7 +792,7 @@ class TestStreamingFrameWriter:
         from jasna.streaming_pipeline import _StreamingFrameWriter
         mock_enc = MagicMock()
         mock_server = MagicMock()
-        mock_server.frames_per_segment.return_value = 120
+        mock_enc.frames_per_segment = 120
 
         writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
         writer.after_write(100)
@@ -842,8 +842,8 @@ class TestRunStreamingPass:
         mock_server = MagicMock()
         mock_server.video_change = threading.Event()
         mock_server.consume_seek_for_pass.return_value = None
-        mock_server.frames_per_segment.return_value = 120
         mock_enc = MagicMock()
+        mock_enc.frames_per_segment = 120
         cancel = threading.Event()
 
         with (
@@ -912,8 +912,8 @@ class TestRunStreamingPass:
         mock_server = MagicMock()
         mock_server.video_change = threading.Event()
         mock_server.consume_seek_for_pass.return_value = 10
-        mock_server.frames_per_segment.return_value = 120
         mock_enc = MagicMock()
+        mock_enc.frames_per_segment = 120
         cancel = threading.Event()
 
         with (

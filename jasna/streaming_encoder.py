@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
 import queue
 import subprocess
 import threading
+from fractions import Fraction
 from pathlib import Path
 
 import torch
@@ -45,7 +47,8 @@ class StreamingEncoder:
         self._width = metadata.video_width
         self._height = metadata.video_height
         self._fps = metadata.video_fps_exact
-        self._gop_size = max(1, round(float(metadata.video_fps_exact) * segment_duration))
+        # A GOP never shorter than -hls_time makes the muxer cut every segment at exactly one GOP.
+        self.frames_per_segment = math.ceil(metadata.video_fps_exact * Fraction(str(segment_duration)))
         self._frame_bytes = self._width * self._height * 3
 
         gpu_idx = 0
@@ -166,7 +169,7 @@ class StreamingEncoder:
                 '-qvbr_quality_level', '19',
                 '-bf', '0',
                 '-profile:v', 'high',
-                '-g', str(self._gop_size),
+                '-g', str(self.frames_per_segment),
                 '-pix_fmt', 'yuv420p',
             ]
         else:
@@ -183,7 +186,7 @@ class StreamingEncoder:
                 '-rc-lookahead', '8',
                 '-no-scenecut', '1',
                 '-gpu', str(self._gpu_index),
-                '-g', str(self._gop_size),
+                '-g', str(self.frames_per_segment),
                 '-pix_fmt', 'yuv420p',
             ]
 
