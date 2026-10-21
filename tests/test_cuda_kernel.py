@@ -128,3 +128,41 @@ def test_amd_launch_failure_names_the_hip_error(monkeypatch):
 
     with pytest.raises(RuntimeError, match=r"hipModuleLaunchKernel\(cas_luma8\) failed: hipErrorLaunchFailure"):
         kernel.launch((1, 1, 1), (1, 1, 1), (0,), 0)
+
+
+class _HostRegisterRecorder:
+    def __init__(self):
+        self.calls = []
+
+    def hipHostRegister(self, pointer, nbytes, flags):
+        self.calls.append(("hipHostRegister", pointer, nbytes, flags))
+        return 0
+
+    def hipHostUnregister(self, pointer):
+        self.calls.append(("hipHostUnregister", pointer))
+        return 0
+
+    def cuMemHostRegister_v2(self, pointer, nbytes, flags):
+        self.calls.append(("cuMemHostRegister_v2", pointer, nbytes, flags))
+        return 0
+
+    def cuMemHostUnregister(self, pointer):
+        self.calls.append(("cuMemHostUnregister", pointer))
+        return 0
+
+
+@pytest.mark.parametrize(
+    ("hip", "register", "unregister"),
+    [("7.15.26333", "hipHostRegister", "hipHostUnregister"), (None, "cuMemHostRegister_v2", "cuMemHostUnregister")],
+)
+def test_host_memory_is_page_locked_portably_through_the_vendor_runtime(monkeypatch, hip, register, unregister):
+    recorder = _HostRegisterRecorder()
+    monkeypatch.setattr(torch.version, "hip", hip)
+    monkeypatch.setattr(torch.version, "cuda", None if hip else "13.0")
+    monkeypatch.setattr(cuda_kernel, "hip_runtime", lambda: recorder)
+    monkeypatch.setattr(cuda_kernel, "cuda_driver", lambda: recorder)
+
+    assert cuda_kernel.host_register(4096, 1 << 20) == 0
+    cuda_kernel.host_unregister(4096)
+
+    assert recorder.calls == [(register, 4096, 1 << 20, 1), (unregister, 4096)]

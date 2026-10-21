@@ -123,6 +123,10 @@ def hip_runtime() -> ctypes.CDLL:
     lib.hipGetErrorName.restype = ctypes.c_char_p
     lib.hipGetErrorString.argtypes = [ctypes.c_int]
     lib.hipGetErrorString.restype = ctypes.c_char_p
+    lib.hipHostRegister.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_uint]
+    lib.hipHostRegister.restype = ctypes.c_int
+    lib.hipHostUnregister.argtypes = [ctypes.c_void_p]
+    lib.hipHostUnregister.restype = ctypes.c_int
     _hip = lib
     return lib
 
@@ -149,6 +153,24 @@ def check_cuda(result: int, operation: str) -> None:
     name_text = name.value.decode(errors="replace") if name.value else f"CUDA error {result}"
     message_text = message.value.decode(errors="replace") if message.value else "unknown error"
     raise RuntimeError(f"{operation} failed: {name_text}: {message_text}")
+
+
+_HOST_REGISTER_PORTABLE = 1
+
+
+def host_register(pointer: int, nbytes: int) -> int:
+    """Page-locks ``nbytes`` of host memory at ``pointer`` for every GPU context; returns the
+    driver status (0 on success) so the caller can stop at the system's page-lock cap."""
+    if is_amd_device():
+        return hip_runtime().hipHostRegister(pointer, nbytes, _HOST_REGISTER_PORTABLE)
+    return cuda_driver().cuMemHostRegister_v2(pointer, nbytes, _HOST_REGISTER_PORTABLE)
+
+
+def host_unregister(pointer: int) -> None:
+    if is_amd_device():
+        check_hip(hip_runtime().hipHostUnregister(pointer), "hipHostUnregister")
+    else:
+        check_cuda(cuda_driver().cuMemHostUnregister(pointer), "cuMemHostUnregister")
 
 
 def current_context() -> ctypes.c_void_p:

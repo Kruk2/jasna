@@ -17,12 +17,11 @@ from dataclasses import dataclass
 import psutil
 import torch
 
-from jasna.media.cuda_kernel import check_cuda, cuda_driver
+from jasna.media.cuda_kernel import host_register, host_unregister
 
 logger = logging.getLogger(__name__)
 
 _ALIGN = 256
-_CU_MEMHOSTREGISTER_PORTABLE = 1
 _PAGE_LOCK_MARGIN_BYTES = 2 << 30
 
 
@@ -92,12 +91,12 @@ def _staged(stage: torch.Tensor, offset: int, target: torch.Tensor) -> torch.Ten
 
 
 def _register(buffer: torch.Tensor) -> int:
-    return cuda_driver().cuMemHostRegister_v2(buffer.data_ptr(), buffer.nbytes, _CU_MEMHOSTREGISTER_PORTABLE)
+    return host_register(buffer.data_ptr(), buffer.nbytes)
 
 
 def _unregister(buffers: list[torch.Tensor]) -> None:
     for buffer in buffers:
-        check_cuda(cuda_driver().cuMemHostUnregister(buffer.data_ptr()), "cuMemHostUnregister")
+        host_unregister(buffer.data_ptr())
     buffers.clear()
 
 
