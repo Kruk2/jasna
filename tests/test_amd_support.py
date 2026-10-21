@@ -611,6 +611,27 @@ def test_rfdetr_torch_runner_fp16_runs_a_half_model_without_autocast(monkeypatch
     assert out["labels"].dtype == torch.float32
 
 
+def test_rfdetr_torch_runner_fp16_keeps_the_masks_half(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.rfdetr_torch_runner as module
+
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"pt")
+    _install_fake_rfdetr(monkeypatch, {"model": {"class_embed.weight": torch.zeros(3, 256)}})
+
+    runner = module.RfDetrTorchRunner(
+        weights,
+        input_shapes=[(2, 3, 576, 576)],
+        device=torch.device("cpu"),
+        fp16=True,
+        resolution=576,
+        variant="medium",
+    )
+    out = runner.infer({"input": torch.zeros(2, 3, 576, 576)})
+
+    assert runner.outputs["masks"].dtype == torch.float16
+    assert out["masks"].dtype == torch.float16
+
+
 def test_rfdetr_torch_runner_rejects_unknown_variant(monkeypatch, tmp_path) -> None:
     import jasna.mosaic.rfdetr_torch_runner as module
 

@@ -109,7 +109,7 @@ class RfDetrTorchRunner:
         self.outputs: dict[str, TorchTensorInfo] = {
             "dets": TorchTensorInfo((batch_size, -1, 4), torch.float32),
             "labels": TorchTensorInfo((batch_size, -1, num_classes + 1), torch.float32),
-            "masks": TorchTensorInfo((batch_size, -1, -1, -1), torch.float32),
+            "masks": TorchTensorInfo((batch_size, -1, -1, -1), self._dtype),
         }
 
         logger.info(
@@ -134,5 +134,5 @@ class RfDetrTorchRunner:
         return {
             "dets": out["pred_boxes"].float(),
             "labels": out["pred_logits"].float(),
-            "masks": out["pred_masks"].float(),
+            "masks": out["pred_masks"],
         }
