@@ -5,11 +5,15 @@ from contextlib import nullcontext
 import ctypes
 from enum import StrEnum
 import functools
+import logging
 import os
+from pathlib import Path
 import sys
 from typing import Any
 
 import torch
+
+log = logging.getLogger(__name__)
 
 # BasicVSR++ meets a new convolution batch for every clip length. FAST never
 # writes the user FindDb, and the Windows ROCm wheels ship no system FindDb
@@ -29,10 +33,21 @@ def apply_rocm_env_defaults(environ: MutableMapping[str, str]) -> None:
     environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 
+def has_aotriton_flash_images(torch_lib: Path) -> bool:
+    return any((torch_lib / "aotriton.images").glob("*/flash/attn_fwd.zip"))
+
+
 def configure_rocm_process_env() -> None:
     """Apply the ROCm defaults to this process; call at entry points before GPU work."""
-    if torch.version.hip:
-        apply_rocm_env_defaults(os.environ)
+    if not torch.version.hip:
+        return
+    apply_rocm_env_defaults(os.environ)
+    # Windows ROCm ships the AOTriton kernel images in a separate device wheel;
+    # without them the first flash/mem-efficient SDPA launch dies with a HIP error.
+    if not has_aotriton_flash_images(Path(torch.__file__).parent / "lib"):
+        log.warning("PyTorch has no AOTriton attention kernels installed; attention runs slower without them")
+        torch.backends.cuda.enable_flash_sdp(False)
+        torch.backends.cuda.enable_mem_efficient_sdp(False)
 
 
 class AcceleratorVendor(StrEnum):
