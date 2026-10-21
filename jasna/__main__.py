@@ -9,8 +9,7 @@ from jasna import startup_timing  # noqa: F401  captures PROCESS_START near proc
 from jasna._frozen import is_frozen
 
 if __name__ == "__main__":
-    if sys.platform == "win32":
-        os.environ.setdefault("OMP_WAIT_POLICY", "passive")
+    os.environ.setdefault("OMP_WAIT_POLICY", "passive")
     os.environ.setdefault("CUDA_MODULE_LOADING", "LAZY")
 
 if __name__ == "__main__" and sys.platform in ("linux", "win32") and is_frozen():
