@@ -212,27 +212,24 @@ class RfDetrMosaicDetectionModel:
         topk_values, topk_indexes = torch.topk(prob.view(b, -1), k, dim=1)
         topk_boxes = topk_indexes // c
 
-        x_c, y_c, w, h = pred_boxes.unbind(-1)
-        boxes = torch.stack((x_c - 0.5 * w, y_c - 0.5 * h, x_c + 0.5 * w, y_c + 0.5 * h), dim=-1)
-        boxes = boxes.gather(1, topk_boxes.unsqueeze(-1).expand(b, k, 4))
-
         th, tw = target_hw
-        boxes = boxes * boxes.new_tensor((tw, th, tw, th))
+        x_c, y_c, w, h = pred_boxes.unbind(-1)
+        boxes = torch.stack(
+            ((x_c - 0.5 * w) * tw, (y_c - 0.5 * h) * th, (x_c + 0.5 * w) * tw, (y_c + 0.5 * h) * th), dim=-1
+        )
+        boxes = boxes.gather(1, topk_boxes.unsqueeze(-1).expand(b, k, 4))
 
         hm, wm = pred_masks.shape[-2], pred_masks.shape[-1]
         masks = pred_masks.gather(1, topk_boxes[:, :, None, None].expand(b, k, hm, wm)) > 0.0
 
-        valid_mask = topk_values > score_threshold  # (B, K)
-        boxes_cpu = boxes.to(device='cpu', dtype=torch.float32).numpy()  # (B, K, 4)
-        valid_mask_cpu = valid_mask.cpu().numpy()  # (B, K)
-        
-        boxes_list: list[np.ndarray] = []
-        masks_list: list[torch.Tensor] = []
-        for i in range(b):
-            valid_i = valid_mask_cpu[i]
-            boxes_list.append(boxes_cpu[i][valid_i])  # (N_i, 4) CPU
-            masks_list.append(masks[i][valid_mask[i]])  # (N_i, Hm, Wm) GPU
-        
+        # topk is sorted, so each frame's detections above the threshold are a prefix of its K.
+        counts = (topk_values > score_threshold).sum(1)
+        boxes_and_counts = torch.cat((boxes.float().reshape(b, k * 4), counts[:, None].float()), 1).cpu().numpy()
+        boxes_cpu = boxes_and_counts[:, :-1].reshape(b, k, 4)
+        counts_cpu = boxes_and_counts[:, -1].astype(np.int64)
+
+        boxes_list = [boxes_cpu[i, : counts_cpu[i]] for i in range(b)]
+        masks_list = [masks[i, : counts_cpu[i]].clone() for i in range(b)]
         return boxes_list, masks_list
 
     def scan_scores_masks(

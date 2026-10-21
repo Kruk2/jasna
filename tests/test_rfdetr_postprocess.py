@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -133,6 +134,79 @@ class TestRfDetrPostprocess:
         assert box[1] == pytest.approx(0.0, abs=1)
         assert box[2] == pytest.approx(640.0, abs=1)
         assert box[3] == pytest.approx(480.0, abs=1)
+
+
+def _boolean_mask_postprocess(*, pred_boxes, pred_logits, pred_masks, target_hw, score_threshold, max_select):
+    b, q, c = pred_logits.shape
+    k = min(max_select, q)
+    topk_values, topk_indexes = torch.topk(pred_logits.sigmoid().view(b, -1), k, dim=1)
+    topk_boxes = topk_indexes // c
+    x_c, y_c, w, h = pred_boxes.unbind(-1)
+    boxes = torch.stack((x_c - 0.5 * w, y_c - 0.5 * h, x_c + 0.5 * w, y_c + 0.5 * h), dim=-1)
+    boxes = boxes.gather(1, topk_boxes.unsqueeze(-1).expand(b, k, 4)) * pred_boxes.new_tensor(
+        (target_hw[1], target_hw[0], target_hw[1], target_hw[0])
+    )
+    hm, wm = pred_masks.shape[-2:]
+    masks = pred_masks.gather(1, topk_boxes[:, :, None, None].expand(b, k, hm, wm)) > 0.0
+    valid = topk_values > score_threshold
+    boxes_cpu = boxes.float().cpu().numpy()
+    valid_cpu = valid.cpu().numpy()
+    return [boxes_cpu[i][valid_cpu[i]] for i in range(b)], [masks[i][valid[i]] for i in range(b)]
+
+
+_DEVICES = ["cpu"] + (["cuda"] if torch.cuda.is_available() else [])
+
+
+@pytest.mark.parametrize("device", _DEVICES)
+def test_postprocess_matches_boolean_mask_selection(device):
+    generator = torch.Generator().manual_seed(3)
+    b, q, c = 5, 200, 2
+    logits = torch.randn(b, q, c, generator=generator) * 3
+    logits[1] = -20.0
+    logits[2, :40] = torch.linspace(1.0, 5.0, 80).view(40, 2)
+    kwargs = dict(
+        pred_boxes=torch.rand(b, q, 4, generator=generator).to(device),
+        pred_logits=logits.to(device),
+        pred_masks=torch.randn(b, q, 16, 16, generator=generator).half().to(device),
+        target_hw=(1080, 1920),
+        score_threshold=0.35,
+        max_select=16,
+    )
+
+    boxes, masks = RfDetrMosaicDetectionModel._postprocess(**kwargs)
+    expected_boxes, expected_masks = _boolean_mask_postprocess(**kwargs)
+
+    assert [len(frame) for frame in boxes] == [len(frame) for frame in expected_boxes]
+    assert len(boxes[1]) == 0 and len(boxes[2]) == 16
+    for got, want in zip(boxes, expected_boxes):
+        np.testing.assert_array_equal(got, want)
+    for got, want in zip(masks, expected_masks):
+        assert torch.equal(got, want)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_postprocess_waits_for_the_gpu_once():
+    b, q = 4, 200
+    kwargs = dict(
+        pred_boxes=torch.rand(b, q, 4, device="cuda"),
+        pred_logits=torch.randn(b, q, 2, device="cuda"),
+        pred_masks=torch.randn(b, q, 16, 16, device="cuda"),
+        target_hw=(1080, 1920),
+        score_threshold=0.35,
+        max_select=16,
+    )
+    RfDetrMosaicDetectionModel._postprocess(**kwargs)
+    torch.cuda.synchronize()
+
+    torch.cuda.set_sync_debug_mode("warn")
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            RfDetrMosaicDetectionModel._postprocess(**kwargs)
+    finally:
+        torch.cuda.set_sync_debug_mode("default")
+
+    assert len([w for w in caught if "called a synchronizing" in str(w.message)]) == 1
 
 
 def _build_rfdetr_model():
