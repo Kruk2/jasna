@@ -112,8 +112,6 @@ class RfDetrTorchRunner:
             "masks": TorchTensorInfo((batch_size, -1, -1, -1), self._dtype),
         }
 
-        self._warm_up(batch_size, int(resolution))
-
         logger.info(
             "RF-DETR torch model loaded: %s (%s) on %s (num_classes=%d, fp16=%s)",
             weights_path,
@@ -122,10 +120,6 @@ class RfDetrTorchRunner:
             num_classes,
             self.fp16,
         )
-
-    def _warm_up(self, batch_size: int, resolution: int) -> None:
-        """Run one batch at load so MIOpen's first kernel search happens before the pipeline starts."""
-        self.infer({"input": torch.zeros(batch_size, 3, resolution, resolution, device=self.device)})
 
     def close(self) -> None:
         self._core = None
