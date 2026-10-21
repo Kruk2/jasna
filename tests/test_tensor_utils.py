@@ -73,3 +73,17 @@ def test_compile_static_compiles_fp16_everywhere_and_bf16_from_sm80(major, dtype
 
     assert compile_static(lambda x: x, mode="default", device=torch.device("cuda"), dtype=dtype) == "compiled"
     assert calls == [{"dynamic": False, "mode": "default"}]
+
+
+def test_compile_static_runs_eager_without_triton(monkeypatch) -> None:
+    import torch.utils._triton
+
+    from jasna.tensor_utils import compile_static
+
+    monkeypatch.setattr(torch.utils._triton, "has_triton_package", lambda: False)
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: pytest.fail("compiled without Triton"))
+
+    def double(x):
+        return x * 2
+
+    assert compile_static(double, mode="default", device=torch.device("cuda"), dtype=torch.float16) is double

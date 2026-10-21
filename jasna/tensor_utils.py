@@ -31,9 +31,12 @@ def half_dtype(device: torch.device) -> torch.dtype:
 def compile_static(fn: Callable, mode: str, device: torch.device, dtype: torch.dtype) -> Callable:
     """``fn`` (computing in ``dtype``) compiled with static shapes. Raises dynamo's recompile
     limits so every shape a run meets gets its own graph, and makes hitting them an error
-    instead of a silent eager run. A bf16 ``fn`` stays eager where inductor has no bf16
-    (:func:`half_dtype` is fp16)."""
-    if dtype == torch.bfloat16 and half_dtype(device) != torch.bfloat16:
+    instead of a silent eager run. ``fn`` stays eager without Triton (Windows ROCm ships none, so
+    inductor has no GPU backend there) and, in bf16, where inductor has no bf16 (:func:`half_dtype`
+    is fp16)."""
+    from torch.utils._triton import has_triton_package
+
+    if not has_triton_package() or (dtype == torch.bfloat16 and half_dtype(device) != torch.bfloat16):
         return fn
     torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
     torch._dynamo.config.accumulated_cache_size_limit = max(torch._dynamo.config.accumulated_cache_size_limit, 1024)
