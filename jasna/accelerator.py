@@ -75,6 +75,11 @@ def is_amd_device(device: torch.device | str | None = None) -> bool:
     return vendor_for_device(device) is AcceleratorVendor.AMD
 
 
+def amd_gpu_architecture(device: torch.device | str) -> str:
+    """The AMD GPU's architecture without target features, e.g. ``gfx1201``."""
+    return torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]
+
+
 def device_module(device: torch.device | str):
     return torch.get_device_module(torch.device(device))
 

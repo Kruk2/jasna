@@ -526,6 +526,7 @@ def _as_amd_build(monkeypatch, fake_torch) -> None:
     import jasna.accelerator as accelerator
 
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(accelerator, "torch", fake_torch)
     monkeypatch.setattr(accelerator, "vendor_for_device", lambda _device: accelerator.AcceleratorVendor.AMD)
 
 

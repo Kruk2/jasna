@@ -1,10 +1,10 @@
 import ctypes
-import struct
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import torch
+from factories import offload_bundle_targets
 
 import jasna.media.cuda_kernel as cuda_kernel
 from jasna.media.cuda_kernel import HIP_KERNEL_ARCHITECTURES, Kernel, has_precompiled_kernels
@@ -20,21 +20,6 @@ def _use_rocm(monkeypatch, architecture: str = "gfx1201") -> None:
         "get_device_properties",
         lambda _device: SimpleNamespace(gcnArchName=f"{architecture}:sramecc-:xnack-"),
     )
-
-
-def _bundle_targets(path: Path) -> set[str]:
-    data = path.read_bytes()
-    magic = b"__CLANG_OFFLOAD_BUNDLE__"
-    assert data.startswith(magic), f"{path.name} is not an uncompressed offload bundle"
-    (count,) = struct.unpack_from("<Q", data, len(magic))
-    offset = len(magic) + 8
-    targets = set()
-    for _ in range(count):
-        _, _, id_length = struct.unpack_from("<QQQ", data, offset)
-        offset += 24
-        targets.add(data[offset:offset + id_length].decode())
-        offset += id_length
-    return targets
 
 
 def test_nvidia_always_runs_the_kernels(monkeypatch):
@@ -62,7 +47,7 @@ def test_amd_falls_back_to_torch_on_an_architecture_missing_from_the_bundle(monk
 @pytest.mark.parametrize("source", KERNEL_SOURCES, ids=lambda path: path.stem)
 def test_every_kernel_ships_for_both_vendors(source):
     assert source.with_suffix(".fatbin").is_file()
-    targets = _bundle_targets(source.with_suffix(".hipfb"))
+    targets = offload_bundle_targets(source.with_suffix(".hipfb"))
     assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == (
         HIP_KERNEL_ARCHITECTURES
     )
@@ -95,7 +80,7 @@ class _FakeHip:
             return 0
 
         def launch(function, gx, gy, gz, bx, by, bz, shared, stream, params, extra):
-            self.launches.append((function.value, (gx, gy, gz), (bx, by, bz), stream.value))
+            self.launches.append((function.value, (gx, gy, gz), (bx, by, bz), shared, stream.value))
             return self.launch_result
 
         for name, body in (
@@ -122,7 +107,18 @@ def test_amd_kernel_loads_the_hip_bundle_and_launches_on_the_given_stream(monkey
 
     assert hip.loaded == [(MEDIA / "cas.hipfb").read_bytes()]
     assert hip.functions == [b"cas_luma8"]
-    assert hip.launches == [(0x2000, (4, 2, 1), (32, 8, 1), 0xBEEF)] * 2
+    assert hip.launches == [(0x2000, (4, 2, 1), (32, 8, 1), 0, 0xBEEF)] * 2
+
+
+def test_kernel_launches_with_its_dynamic_shared_memory(monkeypatch):
+    _use_rocm(monkeypatch)
+    hip = _FakeHip()
+    hip.install(monkeypatch)
+    kernel = Kernel("cas", "cas_luma8", (ctypes.c_uint64,), 8192)
+
+    kernel.launch((128, 1, 1), (128, 1, 1), (0,), 0xBEEF)
+
+    assert hip.launches == [(0x2000, (128, 1, 1), (128, 1, 1), 8192, 0xBEEF)]
 
 
 def test_amd_launch_failure_names_the_hip_error(monkeypatch):

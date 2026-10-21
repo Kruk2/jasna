@@ -1,6 +1,7 @@
 """Builders shared by tests that need a SessionConfig, a Pipeline, or test media."""
 from __future__ import annotations
 
+import struct
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -190,3 +191,19 @@ def write_non_utf8_metadata_source(path: Path) -> Path:
     assert data.count(marker) >= 2
     path.write_bytes(data.replace(marker, b"JASNA\x90TAG"))
     return path
+
+
+def offload_bundle_targets(path: Path) -> set[str]:
+    """Target IDs in an uncompressed clang offload bundle (``.hipfb``)."""
+    data = path.read_bytes()
+    magic = b"__CLANG_OFFLOAD_BUNDLE__"
+    assert data.startswith(magic), f"{path.name} is not an uncompressed offload bundle"
+    (count,) = struct.unpack_from("<Q", data, len(magic))
+    offset = len(magic) + 8
+    targets = set()
+    for _ in range(count):
+        _, _, id_length = struct.unpack_from("<QQQ", data, offset)
+        offset += 24
+        targets.add(data[offset:offset + id_length].decode())
+        offset += id_length
+    return targets

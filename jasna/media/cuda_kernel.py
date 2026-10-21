@@ -16,7 +16,7 @@ from typing import NamedTuple
 import torch
 
 from jasna._frozen import is_frozen
-from jasna.accelerator import is_amd_device, is_nvidia_device
+from jasna.accelerator import amd_gpu_architecture, is_amd_device, is_nvidia_device
 
 HIP_KERNEL_ARCHITECTURES = frozenset({
     "gfx1030",
@@ -52,8 +52,7 @@ def has_precompiled_kernels(device: torch.device | str) -> bool:
         return True
     if not is_amd_device(device):
         return False
-    architecture = torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]
-    return architecture in HIP_KERNEL_ARCHITECTURES
+    return amd_gpu_architecture(device) in HIP_KERNEL_ARCHITECTURES
 
 
 def kernel_image_path(name: str) -> Path:
@@ -249,13 +248,22 @@ class Kernel:
 
     ``module_name`` is the ``.cu`` stem; the vendor picks ``.fatbin`` or
     ``.hipfb``. ``arg_types`` are the ctypes of the kernel parameters in order;
-    ``launch`` fills them from plain Python ints/floats. The lock keeps one
+    ``launch`` fills them from plain Python ints/floats.
+    ``shared_memory_bytes`` is the dynamic shared memory each block gets
+    (Triton-built kernels declare theirs that way). The lock keeps one
     instance safe to share between threads.
     """
 
-    def __init__(self, module_name: str, function_name: str, arg_types: Sequence[type]):
+    def __init__(
+        self,
+        module_name: str,
+        function_name: str,
+        arg_types: Sequence[type],
+        shared_memory_bytes: int = 0,
+    ):
         self.module_name = module_name
         self.function_name = function_name
+        self.shared_memory_bytes = shared_memory_bytes
         self._api: ModuleApi | None = None
         self._function: ctypes.c_void_p | None = None
         self._values = [arg_type() for arg_type in arg_types]
@@ -280,7 +288,8 @@ class Kernel:
             api = self._api
             api.check(
                 api.launch_kernel(
-                    self._function, *grid, *block, 0, ctypes.c_void_p(stream), self._params, None
+                    self._function, *grid, *block, self.shared_memory_bytes, ctypes.c_void_p(stream),
+                    self._params, None,
                 ),
                 f"{api.launch_kernel.__name__}({self.function_name})",
             )
