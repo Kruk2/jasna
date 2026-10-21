@@ -393,6 +393,18 @@ def test_a_render_span_resolving_to_two_models_is_rejected(tmp_path) -> None:
         _run_smart_mocked(pipeline)
 
 
+def test_a_sharpened_job_encodes_the_parts_between_ranges_again_so_sharpening_covers_them(tmp_path) -> None:
+    segments = (SegmentRange(2.5, 3.0),)
+    spans = (SpliceSpan("copy", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
+    pipeline.sharpen_strength = 0.4
+    pipeline._reencode_span = MagicMock()
+
+    _run_smart_mocked(pipeline)
+
+    assert [reencode.args[2] for reencode in pipeline._reencode_span.call_args_list] == [spans[0], spans[2]]
+
+
 def test_a_lut_job_encodes_the_parts_between_ranges_again_so_the_lut_covers_them(tmp_path) -> None:
     ltx = SegmentRestoration("ltx", 42)
     segments = (SegmentRange(2.5, 3.0), SegmentRange(6.5, 7.0, ltx))

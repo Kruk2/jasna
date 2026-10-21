@@ -89,7 +89,9 @@ jasna --input in.mp4 --output out.mkv --sharpen 0.5
 
 `0` is off, `0.2`–`0.5` is a small boost, `1` is the strongest and can look
 too hard. A sharper picture needs more bits. If the result looks worse, also
-lower CQ. The preview does not show sharpening.
+lower CQ. The preview does not show sharpening. With
+[selected ranges](segments.md), the parts between them are encoded again
+instead of copied, so sharpening covers the whole video.
 
 ## Encoder quality and custom settings
 

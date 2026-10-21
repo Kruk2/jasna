@@ -431,7 +431,7 @@ class Pipeline:
     def _reencode_span(
         self, metadata, index: KeyframeIndex, span: SpliceSpan, writer: _OfflineFrameWriter, progress: Progressbar
     ) -> None:
-        """A span with nothing to restore, encoded again so the LUT covers it as well."""
+        """A span with nothing to restore, encoded again so the LUT and sharpening cover it as well."""
         from jasna.ltx.restore import video_frames
 
         frames = video_frames(
@@ -507,9 +507,12 @@ class Pipeline:
             self.encoder_settings,
             vendor=vendor_for_device(self.device),
         )
-        reencode_copies = self.lut_path is not None
+        reencode_copies = self.lut_path is not None or self.sharpen_strength > 0
         if reencode_copies:
-            log.info("%s: a color LUT is set, so the parts without ranges are encoded again", self.input_video.name)
+            log.info(
+                "%s: a color LUT or sharpening is set, so the parts without ranges are encoded again",
+                self.input_video.name,
+            )
         standard_frames = sum(
             _span_frames(span, index, metadata)
             for span in plan.spans

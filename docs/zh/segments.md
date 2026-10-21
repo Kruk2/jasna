@@ -2,8 +2,8 @@
 
 你不必修复整个视频。只选有马赛克的场景即可。Jasna 会原样复制其余部分，
 所以快得多，其他部分也保持原始质量。输出仍然是完整的视频。
-设置了[色彩 LUT](advanced_processing.md#色彩-lut) 时，其余部分会重新编码，
-让 LUT 覆盖整个视频，因此耗时更长。
+设置了[色彩 LUT](advanced_processing.md#色彩-lut) 或[锐化](advanced_processing.md#锐化)
+时，其余部分会重新编码，让它们覆盖整个视频，因此耗时更长。
 
 ## 区间编辑器（GUI）
 
