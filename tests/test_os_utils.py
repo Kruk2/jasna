@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from jasna import os_utils
+from jasna import accelerator, os_utils
 
 
 def test_frozen_linux_application_executable_ignores_the_python_placeholder(monkeypatch) -> None:
@@ -441,6 +441,18 @@ def test_check_sysmem_fallback_returns_false_on_oserror(monkeypatch) -> None:
     ok, info = os_utils.check_windows_nvidia_sysmem_fallback_policy()
     assert ok is False
     assert "nvdrsdb0.bin not found" in info
+
+
+def test_check_sysmem_fallback_skips_nvidia_drs_on_amd(monkeypatch) -> None:
+    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda: True)
+
+    def _read_drs_setting(setting_id):
+        raise AssertionError("AMD must not read the NVIDIA DRS database")
+
+    monkeypatch.setattr(os_utils, "_read_drs_setting", _read_drs_setting)
+
+    assert os_utils.check_windows_nvidia_sysmem_fallback_policy() == (True, "N/A (AMD)")
 
 
 def test_check_sysmem_fallback_returns_na_on_non_windows(monkeypatch) -> None:

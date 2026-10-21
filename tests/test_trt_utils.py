@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -8,7 +9,7 @@ import torch
 
 from jasna.trt import (
     _engine_io_names,
-    _TRT_LOGGER,
+    _error_only_trt_logger,
     _trt_dtype_to_torch,
     get_onnx_tensorrt_engine_path,
     get_trt_logger,
@@ -16,10 +17,21 @@ from jasna.trt import (
 )
 
 
+def test_split_basicvsrpp_imports_without_tensorrt_installed():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['tensorrt'] = None; import jasna.restorer.basicvsrpp_sub_engines",
+        ],
+        check=True,
+    )
+
+
 class TestGetTrtLogger:
     def test_returns_fallback_when_torch_tensorrt_not_imported(self):
         with patch.dict("sys.modules", {"torch_tensorrt": None}):
-            assert get_trt_logger() is _TRT_LOGGER
+            assert get_trt_logger() is _error_only_trt_logger()
 
     def test_returns_torch_tensorrt_logger_when_available(self):
         sentinel = MagicMock()
@@ -170,9 +182,9 @@ class TestCompileOnnxToTensorrtEngine:
         onnx_path, engine_path, mock_builder, mock_parser, mock_config, _ = _setup_trt_mocks(tmp_path)
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
             patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
@@ -186,9 +198,9 @@ class TestCompileOnnxToTensorrtEngine:
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, parse_ok=False)
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(ValueError, match="ONNX parse failed"):
                 compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
@@ -197,9 +209,9 @@ class TestCompileOnnxToTensorrtEngine:
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, dynamic_shape=True)
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(ValueError, match="dynamic shape"):
                 compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=True, workspace_gb=20)
@@ -212,9 +224,9 @@ class TestCompileOnnxToTensorrtEngine:
         profile = mock_builder.create_optimization_profile.return_value
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
             patch(
                 "jasna.trt.torch.cuda.device",
                 return_value=MagicMock(
@@ -251,9 +263,9 @@ class TestCompileOnnxToTensorrtEngine:
         )
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(
                 ValueError,
@@ -275,9 +287,9 @@ class TestCompileOnnxToTensorrtEngine:
         network.get_input.return_value.shape = (4, 3, 64, 64)
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(
                 ValueError,
@@ -298,9 +310,9 @@ class TestCompileOnnxToTensorrtEngine:
         network.get_input.return_value.shape = (-1, 3, -1, 64)
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(ValueError, match="non-batch dynamic shape"):
                 compile_onnx_to_tensorrt_engine(
@@ -316,9 +328,9 @@ class TestCompileOnnxToTensorrtEngine:
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path, build_result=None)
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
             patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             with pytest.raises(ValueError, match="engine build returned None"):
@@ -328,9 +340,9 @@ class TestCompileOnnxToTensorrtEngine:
         onnx_path, _, mock_builder, mock_parser, _, _ = _setup_trt_mocks(tmp_path)
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
         ):
             with pytest.raises(ValueError, match="optimization_level must be in"):
                 compile_onnx_to_tensorrt_engine(
@@ -356,9 +368,9 @@ class TestCompileOnnxToTensorrtEngine:
         mock_builder.build_serialized_network.return_value = b"fp32_engine"
 
         with (
-            patch("jasna.trt.trt.Logger"),
-            patch("jasna.trt.trt.Builder", return_value=mock_builder),
-            patch("jasna.trt.trt.OnnxParser", return_value=mock_parser),
+            patch("tensorrt.Logger"),
+            patch("tensorrt.Builder", return_value=mock_builder),
+            patch("tensorrt.OnnxParser", return_value=mock_parser),
             patch("jasna.trt.torch.cuda.device", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
         ):
             result = compile_onnx_to_tensorrt_engine(onnx_path, torch.device("cuda:0"), fp16=False, workspace_gb=20)

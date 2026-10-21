@@ -1,23 +1,36 @@
 from __future__ import annotations
 
+import functools
 import logging
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import tensorrt as trt
 import torch
 
-_TRT_LOGGER = trt.Logger(trt.Logger.ERROR)
+from jasna.engine_paths import get_onnx_tensorrt_engine_path
+
+if TYPE_CHECKING:
+    import tensorrt as trt
+
+
+@functools.cache
+def _error_only_trt_logger() -> trt.ILogger:
+    import tensorrt as trt
+
+    return trt.Logger(trt.Logger.ERROR)
 
 
 def get_trt_logger() -> trt.ILogger:
     torchtrt = sys.modules.get("torch_tensorrt")
     if torchtrt is not None:
         return torchtrt.logging.TRT_LOGGER
-    return _TRT_LOGGER
+    return _error_only_trt_logger()
 
 
 def _engine_io_names(engine: trt.ICudaEngine) -> tuple[list[str], list[str]]:
+    import tensorrt as trt
+
     input_names: list[str] = []
     output_names: list[str] = []
 
@@ -40,6 +53,8 @@ def _engine_io_names(engine: trt.ICudaEngine) -> tuple[list[str], list[str]]:
 
 
 def _trt_dtype_to_torch(trt_dtype: trt.DataType) -> torch.dtype:
+    import tensorrt as trt
+
     if trt_dtype == trt.DataType.FLOAT:
         return torch.float32
     if trt_dtype == trt.DataType.HALF:
@@ -53,9 +68,6 @@ def _trt_dtype_to_torch(trt_dtype: trt.DataType) -> torch.dtype:
     raise ValueError(f"Unsupported TensorRT dtype: {trt_dtype}")
 
 
-from jasna.engine_paths import get_onnx_tensorrt_engine_path  # noqa: E402
-
-
 def _build_serialized_engine(
     onnx_bytes: bytes,
     device: torch.device,
@@ -66,6 +78,8 @@ def _build_serialized_engine(
     workspace_gb: int,
     dynamic_batch: bool = False,
 ) -> bytes:
+    import tensorrt as trt
+
     logger = get_trt_logger()
     builder = trt.Builder(logger)
     explicit_batch = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)

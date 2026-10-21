@@ -325,6 +325,10 @@ def _read_drs_setting(setting_id: int) -> int | None:
 def check_windows_nvidia_sysmem_fallback_policy() -> tuple[bool, str]:
     if sys.platform != "win32":
         return True, "N/A"
+    from jasna.accelerator import is_amd_device
+
+    if is_amd_device():
+        return True, "N/A (AMD)"
 
     try:
         value = _read_drs_setting(_CUDA_SYSMEM_FALLBACK_POLICY_ID)
