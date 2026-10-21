@@ -526,6 +526,7 @@ def normalize_fragment(source: Path, destination: Path, *, codec: str) -> None:
         [
             "-i", str(source),
             "-map", "0:v:0",
+            "-map_metadata", "-1",
             "-an",
             "-c:v", "copy",
             "-bsf:v", bitstream_filter,

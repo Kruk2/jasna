@@ -357,3 +357,28 @@ def test_source_with_non_utf8_tags_probes_and_splices(tmp_path: Path) -> None:
     with av.open(str(output), metadata_errors="replace") as container:
         assert container.metadata["title"] == "JASNA\ufffdTAG"
         assert container.streams.audio
+
+
+def test_restored_fragment_with_long_multibyte_title_splices_and_keeps_title(tmp_path: Path) -> None:
+    title = "長いタイトル" * 20
+    assert len(title) < 255 < len(title.encode("utf-8"))
+    source = tmp_path / "long-title.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=12:duration=1",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-metadata", f"title={title}",
+        str(source),
+    )
+    restored = tmp_path / "restored.nut"
+    _ffmpeg("-i", str(source), "-map", "0:v:0", "-c:v", "libx264", "-f", "nut", str(restored))
+    with av.open(str(restored)) as container:
+        assert container.metadata["title"] == title
+
+    normalized = tmp_path / "restored.ts"
+    normalize_fragment(restored, normalized, codec="h264")
+    output = tmp_path / "output.mp4"
+    mux_final_output(normalized, source, output, codec="h264")
+
+    with av.open(str(output)) as container:
+        assert container.metadata["title"] == title
