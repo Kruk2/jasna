@@ -15,6 +15,7 @@ from jasna.ltx import native
 from jasna.ltx import transformer as T
 from jasna.ltx.kernels import supports
 from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors
+from jasna.tensor_utils import half_dtype
 
 pytestmark = pytest.mark.skipif(
     not torch.cuda.is_available() or torch.version.cuda is None or not supports(torch.device("cuda")),
@@ -81,7 +82,7 @@ def test_native_prompt_key_value_matches_the_python_heads_and_dtype(block):
         linears, weights["attn2.k_norm.weight"], weights["prompt_scale_shift_table"], cond.prompt_rows, context
     )
     for got, want in zip(actual, expected):
-        assert got.dtype == want.dtype == T.prompt_attention_dtype(DEVICE)
+        assert got.dtype == want.dtype == half_dtype(DEVICE)
         assert _relative_error(got, want) < tolerance
 
 

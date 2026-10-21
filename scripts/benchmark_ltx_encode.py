@@ -75,7 +75,7 @@ def variant_encoder(variant: str, encoder: VideoEncoder) -> tuple[callable, cont
     encoder.to(dtype=dtype, memory_format=memory_format)
     fn = encoder if shipped else functools.partial(encode_cropped, encoder)
     if "compile" in options:
-        fn = compile_static(fn, mode=ENCODER_COMPILE_MODE, device=torch.device("cuda"))
+        fn = compile_static(fn, mode=ENCODER_COMPILE_MODE, device=torch.device("cuda"), dtype=dtype)
     if "benchmark" in options:
         stack.enter_context(torch.backends.cudnn.flags(enabled=True, benchmark=True))
 

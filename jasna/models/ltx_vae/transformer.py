@@ -398,9 +398,9 @@ def compile_diffusion_blocks(device: torch.device) -> None:
     graph per shape, shared by all blocks); CUDA tensors use them from then on."""
     global _slab_attention, _mlp_chunk, _add_context
     if _slab_attention is _attn_on_w_slab:
-        _slab_attention = compile_static(_attn_on_w_slab, mode=DECODER_COMPILE_MODE, device=device)
-        _mlp_chunk = compile_static(modulated_swiglu, mode=DECODER_COMPILE_MODE, device=device)
-        _add_context = compile_static(add_folded_context, mode=DECODER_COMPILE_MODE, device=device)
+        _slab_attention = compile_static(_attn_on_w_slab, mode=DECODER_COMPILE_MODE, device=device, dtype=torch.bfloat16)
+        _mlp_chunk = compile_static(modulated_swiglu, mode=DECODER_COMPILE_MODE, device=device, dtype=torch.bfloat16)
+        _add_context = compile_static(add_folded_context, mode=DECODER_COMPILE_MODE, device=device, dtype=torch.bfloat16)
 
 
 def fold_context_projection(

@@ -361,7 +361,7 @@ class Block::Impl {
             linear(prepared, w[CrossV]).view({1, input.size(1), heads, head_dim}).transpose(1, 2).to(dtype)};
   }
 
-  // transformer.prompt_attention_dtype: no fused attention kernel takes bf16 before SM 8.0.
+  // tensor_utils.half_dtype: no fused attention kernel takes bf16 before SM 8.0.
   static at::ScalarType prompt_attention_dtype(const at::Tensor& context) {
     return at::cuda::getDeviceProperties(context.get_device())->major < 8 ? at::kHalf : at::kBFloat16;
   }

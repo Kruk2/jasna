@@ -1,6 +1,5 @@
 import os
 import sys
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -92,13 +91,6 @@ def test_fp16_prompt_attention_keeps_the_block_in_bf16():
     fp16 = T.block_forward(weights, x, cond, tuple(t.half() for t in prompt), rope, heads=heads)
     assert fp16.dtype == torch.bfloat16
     torch.testing.assert_close(fp16, bf16, atol=2e-2, rtol=2e-2)
-
-
-@pytest.mark.parametrize("major, dtype", [(7, torch.float16), (8, torch.bfloat16)])
-def test_prompt_attention_runs_in_fp16_before_sm80(major, dtype, monkeypatch):
-    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=major))
-    assert T.prompt_attention_dtype(torch.device("cuda")) == dtype
-    assert T.prompt_attention_dtype(torch.device("cpu")) == torch.bfloat16
 
 
 def test_latent_positions_are_causal_seconds():
@@ -235,7 +227,7 @@ def test_compiled_functions_fail_instead_of_running_eager_past_the_recompile_lim
 
     monkeypatch.setattr(torch._dynamo.config, "fail_on_recompile_limit_hit", False)
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: fn)
-    compile_static(T.block_forward, mode="default", device=torch.device("cpu"))
+    compile_static(T.block_forward, mode="default", device=torch.device("cpu"), dtype=torch.bfloat16)
     assert torch._dynamo.config.fail_on_recompile_limit_hit is True
 
 

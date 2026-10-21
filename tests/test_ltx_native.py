@@ -389,7 +389,7 @@ def test_sampler_compiles_blocks_when_native_cannot_run(monkeypatch):
     monkeypatch.setattr(native, "load", lambda device, specs: None)
     monkeypatch.setattr(T, "enable_int8_attention", lambda: enabled.append(True))
     monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: "compiled block")
-    monkeypatch.setattr(sampler, "compile_static", lambda function, mode, device: ("compiled", function))
+    monkeypatch.setattr(sampler, "compile_static", lambda function, mode, device, dtype: ("compiled", function))
     assert sampler._block_functions(torch.device("cuda"), {}) == (
         "compiled block", ("compiled", T.prompt_key_value), "torch.compile")
     assert enabled

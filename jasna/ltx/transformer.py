@@ -30,6 +30,8 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
+from jasna.tensor_utils import half_dtype
+
 Weights = Mapping[str, torch.Tensor]
 
 NUM_BLOCKS = 48
@@ -561,14 +563,6 @@ def _self_attention(w: Weights, x: torch.Tensor | QuantizedRows, rope: Rope, hea
     return _gated(w, "attn1", x, out, heads)
 
 
-def prompt_attention_dtype(device: torch.device) -> torch.dtype:
-    """Dtype of the prompt key/value heads: bf16, or fp16 on CUDA GPUs before SM 8.0, where
-    no fused attention kernel takes bf16."""
-    if device.type == "cuda" and torch.cuda.get_device_properties(device).major < 8:
-        return torch.float16
-    return torch.bfloat16
-
-
 def prompt_key_value(
     w: Weights, cond: StepConditioning, context: torch.Tensor, *, heads: int = HEADS
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -580,7 +574,7 @@ def prompt_key_value(
         prompt = QuantizedRows(*_quant_kernels.int8_rotate_quantize(prompt[0]))
     prompt = _shared_fp4_input(w, "attn2.to_v", prompt)
     key = rms_norm(linear(w, "attn2.to_k", prompt), w["attn2.k_norm.weight"])
-    dtype = prompt_attention_dtype(context.device)
+    dtype = half_dtype(context.device)
     return _heads(key, heads).to(dtype), _heads(linear(w, "attn2.to_v", prompt), heads).to(dtype)
 
 

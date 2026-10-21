@@ -109,7 +109,8 @@ def test_compiled_channels_last_encoder_matches_eager(monkeypatch):
         eager = encoder(pixels)
         encoder.to(memory_format=torch.channels_last_3d)
         monkeypatch.setattr(video_encoder, "_encode_cropped",
-                            compile_static(video_encoder.encode_cropped, mode="default", device=torch.device("cuda")))
+                            compile_static(video_encoder.encode_cropped, mode="default", device=torch.device("cuda"),
+                                           dtype=torch.bfloat16))
         compiled = encoder(pixels)
 
     torch.testing.assert_close(compiled.float(), eager.float(), atol=5e-2, rtol=5e-2)

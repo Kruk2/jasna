@@ -181,4 +181,4 @@ def compile_video_encoder(device: torch.device) -> None:
     inputs use it from then on."""
     global _encode_cropped
     if _encode_cropped is encode_cropped:
-        _encode_cropped = compile_static(encode_cropped, mode=ENCODER_COMPILE_MODE, device=device)
+        _encode_cropped = compile_static(encode_cropped, mode=ENCODER_COMPILE_MODE, device=device, dtype=torch.bfloat16)

@@ -20,16 +20,20 @@ def pad_batch_with_last(x: torch.Tensor, *, batch_size: int) -> torch.Tensor:
     return torch.cat([x, pad], dim=0)
 
 
-def compiles_bf16(device: torch.device) -> bool:
-    """Inductor refuses bf16 graphs on CUDA before SM 8.0."""
-    return device.type != "cuda" or torch.cuda.get_device_capability(device) >= (8, 0)
+def half_dtype(device: torch.device) -> torch.dtype:
+    """The 16-bit float for tensor-core math on ``device``: bf16, or fp16 on CUDA GPUs before
+    SM 8.0, which have no bf16 tensor cores, no fused bf16 attention and no Inductor bf16."""
+    if device.type == "cuda" and torch.cuda.get_device_properties(device).major < 8:
+        return torch.float16
+    return torch.bfloat16
 
 
-def compile_static(fn: Callable, mode: str, device: torch.device) -> Callable:
-    """``fn`` compiled with static shapes. Raises dynamo's recompile limits so every shape a run
-    meets gets its own graph, and makes hitting them an error instead of a silent eager run.
-    Where inductor has no bf16 (:func:`compiles_bf16`) ``fn`` stays eager."""
-    if not compiles_bf16(device):
+def compile_static(fn: Callable, mode: str, device: torch.device, dtype: torch.dtype) -> Callable:
+    """``fn`` (computing in ``dtype``) compiled with static shapes. Raises dynamo's recompile
+    limits so every shape a run meets gets its own graph, and makes hitting them an error
+    instead of a silent eager run. A bf16 ``fn`` stays eager where inductor has no bf16
+    (:func:`half_dtype` is fp16)."""
+    if dtype == torch.bfloat16 and half_dtype(device) != torch.bfloat16:
         return fn
     torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
     torch._dynamo.config.accumulated_cache_size_limit = max(torch._dynamo.config.accumulated_cache_size_limit, 1024)

@@ -17,7 +17,7 @@ from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
 from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_attention
 from jasna.models.ltx_vae.video_encoder import VideoEncoder, compile_video_encoder
-from jasna.tensor_utils import compiles_bf16
+from jasna.tensor_utils import half_dtype
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"
 _DECODER_CLASS_NAME = "NADiffusionDecoder"
@@ -155,14 +155,16 @@ def decoder_state_dict(checkpoint: dict[str, torch.Tensor]) -> dict[str, torch.T
         raise
 
 
-def _build_bf16(factory: Callable[[], _Model], state: dict[str, torch.Tensor], device: torch.device) -> _Model:
+def _build(
+    factory: Callable[[], _Model], state: dict[str, torch.Tensor], device: torch.device, dtype: torch.dtype
+) -> _Model:
     model, result = None, None
     converted = {}
     try:
         with torch.device("meta"):
             model = factory()
         for name, tensor in state.items():
-            converted[name] = tensor.to(torch.bfloat16)
+            converted[name] = tensor.to(dtype)
         model.load_state_dict(converted, strict=True, assign=True)
         result = model.to(device).eval().requires_grad_(False)
         return result
@@ -180,8 +182,8 @@ def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
         with open_tensors(vae_path) as reader:
             kwargs = encoder_kwargs(read_vae_config(reader))
             checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
-        encoder = _build_bf16(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device)
-        if compiles_bf16(device):
+        encoder = _build(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device, torch.bfloat16)
+        if half_dtype(device) == torch.bfloat16:
             contiguous_weights = list(encoder.state_dict().values())
             encoder.to(memory_format=torch.channels_last_3d)
             _clear_tensors(contiguous_weights, encoder)
@@ -200,7 +202,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
             kwargs = decoder_kwargs(read_vae_config(reader))
             checkpoint = _read_tensors(reader, ("decoder.", "per_channel_statistics."))
         state = decoder_state_dict(checkpoint)
-        decoder = _build_bf16(lambda: DiffusionVideoDecoder(**kwargs), state, device)
+        decoder = _build(lambda: DiffusionVideoDecoder(**kwargs), state, device, torch.bfloat16)
         with open_tensors(tuned_decoder_path) as reader:
             tuned = _read_tensors(reader, ("",))
         own = decoder.state_dict()

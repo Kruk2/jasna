@@ -194,7 +194,7 @@ def test_load_video_encoder_keeps_contiguous_eager_weights_without_bf16_compile(
     path = tmp_path / "vae.safetensors"
     save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v for k, v in source.state_dict().items()},
               str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
-    monkeypatch.setattr(loader, "compiles_bf16", lambda device: False)
+    monkeypatch.setattr(loader, "half_dtype", lambda device: torch.float16)
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
@@ -206,7 +206,7 @@ def test_load_video_encoder_keeps_contiguous_eager_weights_without_bf16_compile(
 @pytest.mark.parametrize("dtype", (torch.float32, torch.bfloat16))
 def test_weight_state_cleanup_preserves_the_returned_cpu_model(dtype):
     source = torch.ones(2, 2, dtype=dtype)
-    model = loader._build_bf16(lambda: torch.nn.Linear(2, 2, bias=False), {"weight": source}, torch.device("cpu"))
+    model = loader._build(lambda: torch.nn.Linear(2, 2, bias=False), {"weight": source}, torch.device("cpu"), torch.bfloat16)
     assert torch.equal(model.weight, torch.ones(2, 2, dtype=torch.bfloat16))
     if dtype == torch.bfloat16:
         assert source.untyped_storage().data_ptr() == model.weight.untyped_storage().data_ptr()
@@ -226,7 +226,7 @@ def test_weight_state_failure_clears_sources_and_partially_assigned_parameters(d
         return model
 
     with pytest.raises(RuntimeError, match="Unexpected key"):
-        loader._build_bf16(factory, sources, torch.device("cpu"))
+        loader._build(factory, sources, torch.device("cpu"), torch.bfloat16)
     assert all(torch.count_nonzero(tensor).item() == 0 for tensor in sources.values())
     assert torch.count_nonzero(constructed[0].weight).item() == 0
 

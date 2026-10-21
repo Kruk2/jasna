@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 import torch
 
@@ -40,24 +42,34 @@ def test_pad_batch_with_last_rejects_oversized_batch() -> None:
         pad_batch_with_last(torch.ones((5, 1)), batch_size=4)
 
 
-def test_compile_static_runs_eager_where_inductor_has_no_bf16(monkeypatch) -> None:
+@pytest.mark.parametrize("major, dtype", [(7, torch.float16), (8, torch.bfloat16)])
+def test_half_dtype_is_fp16_before_sm80(major, dtype, monkeypatch) -> None:
+    from jasna.tensor_utils import half_dtype
+
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=major))
+    assert half_dtype(torch.device("cuda")) == dtype
+    assert half_dtype(torch.device("cpu")) == torch.bfloat16
+
+
+def test_compile_static_runs_bf16_eager_where_inductor_has_no_bf16(monkeypatch) -> None:
     from jasna.tensor_utils import compile_static
 
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (7, 5))
-    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: pytest.fail("compiled before SM 8.0"))
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=7))
+    monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: pytest.fail("compiled bf16 before SM 8.0"))
 
     def double(x):
         return x * 2
 
-    assert compile_static(double, mode="default", device=torch.device("cuda")) is double
+    assert compile_static(double, mode="default", device=torch.device("cuda"), dtype=torch.bfloat16) is double
 
 
-def test_compile_static_compiles_from_sm80(monkeypatch) -> None:
+@pytest.mark.parametrize("major, dtype", [(7, torch.float16), (8, torch.bfloat16)])
+def test_compile_static_compiles_fp16_everywhere_and_bf16_from_sm80(major, dtype, monkeypatch) -> None:
     from jasna.tensor_utils import compile_static
 
-    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (8, 6))
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda device: SimpleNamespace(major=major))
     calls = []
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append(kwargs) or "compiled")
 
-    assert compile_static(lambda x: x, mode="default", device=torch.device("cuda")) == "compiled"
+    assert compile_static(lambda x: x, mode="default", device=torch.device("cuda"), dtype=dtype) == "compiled"
     assert calls == [{"dynamic": False, "mode": "default"}]

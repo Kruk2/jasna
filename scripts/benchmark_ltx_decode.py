@@ -107,7 +107,7 @@ def variant_patches(variant: str) -> contextlib.ExitStack:
         mode = "max-autotune-no-cudagraphs"
         for name, fn in (("_slab_attention", T._attn_on_w_slab), ("_mlp_chunk", T.modulated_swiglu),
                          ("_add_context", T.add_folded_context)):
-            stack.enter_context(patched(T, name, compile_static(fn, mode=mode, device=torch.device("cuda"))))
+            stack.enter_context(patched(T, name, compile_static(fn, mode=mode, device=torch.device("cuda"), dtype=torch.bfloat16)))
     return stack
 
 

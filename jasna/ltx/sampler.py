@@ -146,7 +146,7 @@ def _block_functions(
     T.enable_int8_attention()
     return (
         compiled_block_forward(device),
-        compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs", device=device),
+        compile_static(T.prompt_key_value, mode="max-autotune-no-cudagraphs", device=device, dtype=torch.bfloat16),
         "torch.compile",
     )
 
@@ -403,7 +403,7 @@ def compiled_block_forward(device: torch.device):
     are autotuned on the first compile and the picks kept in the compile cache
     (``engine_paths.configure_torch_compile_cache``), so later runs reuse them and a seed
     keeps its pixels. No CUDA graphs: every block passes its own weight tensors."""
-    return compile_static(T.block_forward, mode="max-autotune-no-cudagraphs", device=device)
+    return compile_static(T.block_forward, mode="max-autotune-no-cudagraphs", device=device, dtype=torch.bfloat16)
 
 
 def _euler(sample: torch.Tensor, denoised: torch.Tensor, sigmas: torch.Tensor, step: int) -> torch.Tensor:
