@@ -462,7 +462,8 @@ class HlsStreamingServer:
             return False
         try:
             playlist = (self.segments_dir / "_hls_internal.m3u8").read_text()
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
+            # Windows refuses the open while ffmpeg renames the next playlist over it.
             return False
         return segment_path.name in playlist.splitlines()
 

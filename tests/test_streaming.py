@@ -115,6 +115,17 @@ class TestHlsStreamingServer:
         assert server.frames_per_segment() == 120
         server._cleanup_segments()
 
+    def test_playlist_being_replaced_reads_as_not_ready(self, tmp_path, monkeypatch):
+        server = HlsStreamingServer(segment_duration=2.0, port=0)
+        server.segments_dir = tmp_path
+        _finalize_segments(tmp_path, 0)
+
+        def _replaced_by_ffmpeg(path, *args, **kwargs):
+            raise PermissionError(13, "Permission denied", str(path))
+
+        monkeypatch.setattr(Path, "read_text", _replaced_by_ffmpeg)
+        assert server.segment_is_ready(tmp_path / "seg_00000.ts") is False
+
     def test_seek_request_and_consume(self):
         server = HlsStreamingServer(segment_duration=4.0, port=0)
         assert server.consume_seek() is None
