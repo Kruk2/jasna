@@ -121,3 +121,19 @@ def test_split_forward_path_used_when_available(monkeypatch) -> None:
     assert len(captured) == 1
     assert captured[0].shape == (1, 1, 3, 256, 256)
     assert model.captured_inputs is None
+
+
+def test_amd_device_uses_eager_split_forward(monkeypatch) -> None:
+    import jasna.restorer.basicvsrpp_mosaic_restorer as br
+    import jasna.restorer.basicvsrpp_sub_engines as sub_engines
+
+    model = _CaptureIdentityModel()
+    split_models: list[object] = []
+    monkeypatch.setattr(br, "is_amd_device", lambda device: True)
+    monkeypatch.setattr(sub_engines, "create_eager_split_forward", lambda m: split_models.append(m) or "split")
+
+    restorer = _make_restorer(monkeypatch, model)
+
+    assert split_models == [model]
+    assert restorer._split_forward == "split"
+    assert restorer.model is None

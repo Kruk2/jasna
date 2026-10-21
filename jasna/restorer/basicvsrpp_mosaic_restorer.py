@@ -5,7 +5,7 @@ import torch
 logger = logging.getLogger(__name__)
 from torch import Tensor
 
-from jasna.accelerator import is_nvidia_device
+from jasna.accelerator import is_amd_device, is_nvidia_device
 from jasna.models.basicvsrpp.inference import load_model
 
 
@@ -42,6 +42,11 @@ class BasicvsrppMosaicRestorer:
             else:
                 self.model = pytorch_model
                 logger.info("BasicVSR++ sub-engines not found, using PyTorch model (fp16=%s)", fp16)
+        elif is_amd_device(self.device):
+            from jasna.restorer.basicvsrpp_sub_engines import create_eager_split_forward
+
+            self._split_forward = create_eager_split_forward(load_model(config, checkpoint_path, self.device, fp16))
+            logger.info("BasicVSR++ using the split forward with PyTorch sub-modules (fp16=%s)", fp16)
         else:
             self.model = load_model(config, checkpoint_path, self.device, fp16)
             logger.info("BasicVSR++ loaded from checkpoint: %s (fp16=%s)", checkpoint_path, fp16)

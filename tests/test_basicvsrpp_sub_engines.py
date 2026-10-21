@@ -10,13 +10,16 @@ import torch.nn as nn
 
 from jasna.restorer.basicvsrpp_sub_engines import (
     DIRECTIONS,
+    EAGER_UPSAMPLE_BATCH,
     FEATURE_SIZE,
+    UPSAMPLE_BATCH,
     BasicVSRPlusPlusNetSplit,
     _PreprocessWrapper,
     _PropagateBodyWrapper,
     _SPyNetWrapper,
     _UpsampleWrapper,
     _get_inference_generator,
+    create_eager_split_forward,
     load_sub_engines,
 )
 from jasna.engine_paths import (
@@ -137,6 +140,7 @@ def test_create_split_forward_cudagraphs_env_gates_warmup(
     assert split is not None
     assert warmups == [1]
     assert split._loop_body_cudagraphs is True
+    assert split._upsample_batch == UPSAMPLE_BATCH
 
 
 def test_propagate_body_wrapper_forward_shape() -> None:
@@ -216,26 +220,7 @@ def test_spynet_wrapper_matches_original() -> None:
 
 
 def _build_split_from_net(net):
-    """Build a BasicVSRPlusPlusNetSplit using PyTorch modules as engines."""
-
-    class _UpsamplePassthrough(nn.Module):
-        def __init__(self, parent):
-            super().__init__()
-            self.parent = parent
-
-        def forward(self, x: torch.Tensor) -> torch.Tensor:
-            x = self.parent.reconstruction(x)
-            x = self.parent.lrelu(self.parent.upsample1(x))
-            x = self.parent.lrelu(self.parent.upsample2(x))
-            x = self.parent.lrelu(self.parent.conv_hr(x))
-            return self.parent.conv_last(x)
-
-    return BasicVSRPlusPlusNetSplit(
-        net,
-        {d: _PropagateBodyWrapper(net.deform_align[d], net.backbone[d]) for d in DIRECTIONS},
-        _PreprocessWrapper(net.feat_extract, net.spynet),
-        _UpsamplePassthrough(net),
-    )
+    return create_eager_split_forward(MagicMock(generator_ema=net))
 
 
 @pytest.mark.parametrize("T", [1, 2, 3, 60, 71])
@@ -250,7 +235,6 @@ def test_split_forward_matches_pytorch_forward(T: int) -> None:
     net.eval()
 
     split = _build_split_from_net(net)
-    split.eval()
 
     torch.manual_seed(7)
     lqs = torch.randn(1, T, 3, 256, 256)
@@ -268,7 +252,6 @@ def test_upsample_runs_in_fixed_size_batches() -> None:
     """The upsample stage is per-frame, so it is called in UPSAMPLE_BATCH-sized
     batches; a b180 TensorRT engine would reserve ~3.2 GB more scratch than b30
     for the same work."""
-    from jasna.restorer.basicvsrpp_sub_engines import UPSAMPLE_BATCH
 
     batch_sizes: list[int] = []
 
@@ -280,6 +263,7 @@ def test_upsample_runs_in_fixed_size_batches() -> None:
     split = BasicVSRPlusPlusNetSplit.__new__(BasicVSRPlusPlusNetSplit)
     nn.Module.__init__(split)
     split._upsample_engine = _RecordingUpsample()
+    split._upsample_batch = UPSAMPLE_BATCH
 
     t = 2 * UPSAMPLE_BATCH + 11
     lqs = torch.randn(1, t, 3, 8, 8)
@@ -357,3 +341,20 @@ def test_benchmark_profile_split_forward_runs_on_fused_preprocess(monkeypatch) -
 
     with torch.inference_mode():
         basicvsrpp_restoration._profile_split_forward(split, torch.device("cpu"), torch.float32)
+
+
+def test_eager_split_forward_never_touches_torch_tensorrt(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
+
+    monkeypatch.setitem(sys.modules, "torch_tensorrt", None)
+    monkeypatch.delenv("JASNA_TRT_CUDAGRAPHS", raising=False)
+    net = BasicVSRPlusPlusNet(mid_channels=16, num_blocks=2, spynet_pretrained=None).eval()
+    split = create_eager_split_forward(MagicMock(generator_ema=net))
+
+    with torch.inference_mode():
+        out = split(torch.randn(1, 4, 3, 256, 256))
+
+    assert out.shape == (1, 4, 3, 256, 256)
+    assert split._upsample_batch == EAGER_UPSAMPLE_BATCH
