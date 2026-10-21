@@ -65,10 +65,12 @@ LARGE_CANVAS_MIN_TOTAL_BYTES = 15 << 30
 SEGMENT_DECODE_BUDGETS = (
     (22 << 30, {PLAN_CANVAS: 8 << 30, LARGE_CANVAS: 16 << 30}),
     (15 << 30, {PLAN_CANVAS: 8 << 30, LARGE_CANVAS: 10 << 30}),
-    (0, {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}),
+    (7 << 30, {PLAN_CANVAS: 6 << 30, LARGE_CANVAS: 8 << 30}),
+    (0, {PLAN_CANVAS: 11 << 29, LARGE_CANVAS: 8 << 30}),
 )
 """(least total VRAM, decode budget per canvas): 8 GiB decodes a 512 window in one tile,
-16 GiB a 768 window."""
+16 GiB a 768 window; 5.5 GiB leaves a 6 GB card room for the rest of the job (768 px
+windows need 15 GiB, see ``segment_large_canvas``)."""
 WHOLE_VIDEO_PTS = (-(1 << 63), (1 << 63) - 1)
 SPEED_TEST_FRAMES = WINDOW_FRAMES + WINDOW_HOP
 """Two windows per track: the speed profile leaves out each canvas's cold first window."""
@@ -635,16 +637,17 @@ def segment_decode_budget(total_bytes: int) -> DecodeBudget:
 def _decode_window(
     decoder, latent: torch.Tensor, seed: int, canvas: int, budget: DecodeBudget, device: torch.device
 ) -> torch.Tensor:
-    """Decoded window as uint8 ``[F, 3, S, S]`` on ``device``."""
+    """Decoded window as uint8 ``[F, 3, S, S]`` in host memory: a frame can need every open
+    window of its tracks, and holding them on the GPU would shrink the next decode's budget."""
     torch.cuda.empty_cache()
     free = budget(canvas)
     if isinstance(decoder, WorkerDecoder):
-        return decoder.decode_window(latent, seed, free, device)
+        return decoder.decode_window(latent, seed, free)
     generator = torch.Generator(device=device).manual_seed(seed)
     with torch.inference_mode():
         video = decode_latent(decoder, latent.to(device), free_bytes=free, generator=generator)
         video = ((video + 1.0) / 2.0).clamp(0.0, 1.0)[0].float()
-        return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous()
+        return video.mul_(255.0).round_().to(torch.uint8).permute(1, 0, 2, 3).contiguous().cpu()
 
 
 def _decode_shares(windows: list[Window]) -> dict[int, list[tuple[int, float]]]:
@@ -725,8 +728,6 @@ class _SegmentComposer:
     def _decoded_window(self, window: Window) -> torch.Tensor:
         with self._bar.waiting():
             video = self._decoding.pop(window.index).result()
-        if self._stream is not None:
-            video.record_stream(torch.cuda.current_stream(self._device))
         self._decode_next()
         return video
 
@@ -748,7 +749,7 @@ class _SegmentComposer:
             track = self._tracks[window.index]
             candidates.append(
                 Candidate(
-                    canvas=self._decoded[window.index][local],
+                    canvas=self._decoded[window.index][local].to(self._device),
                     crop=window.crops[local],
                     weight=float(self._weights[window.index][local]),
                     track=track.track_id,

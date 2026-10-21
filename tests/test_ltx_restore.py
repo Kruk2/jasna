@@ -15,6 +15,7 @@ import torch
 from jasna.ltx import inference, restore
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region, Window
+from jasna.tensor_utils import half_dtype
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
 MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
@@ -360,7 +361,9 @@ def test_composer_raises_a_failed_window_decode(monkeypatch):
 def test_segment_decode_budget_follows_the_gpu_size_not_free_vram(monkeypatch):
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (1, 1))
     gib = 1 << 30
-    for total_gib, budget_512, budget_768 in ((11.7, 6, 8), (15.5, 8, 10), (21.9, 8, 10), (23.6, 8, 16), (31.8, 8, 16)):
+    for total_gib, budget_512, budget_768 in (
+        (5.8, 5.5, 8), (7.8, 6, 8), (11.7, 6, 8), (15.5, 8, 10), (21.9, 8, 10), (23.6, 8, 16), (31.8, 8, 16)
+    ):
         budget = restore.segment_decode_budget(int(total_gib * gib))
         assert (budget(512), budget(768)) == (budget_512 * gib, budget_768 * gib)
 
@@ -859,7 +862,7 @@ def test_segment_encoder_feeds_each_window_its_crops_padded_with_the_last(device
     def expected(values):
         frames = values + [values[-1]] * (restore.WINDOW_FRAMES - len(values))
         pixels = torch.tensor(frames, dtype=torch.float32).view(1, 1, -1, 1, 1).expand(1, 3, -1, 8, 8)
-        return pixels.div(127.5).sub(1.0).to(torch.bfloat16)
+        return pixels.div(127.5).sub(1.0).to(half_dtype(torch.device(device)))
 
     assert torch.equal(encoded[0], expected([10, 20, 30]))
     assert torch.equal(encoded[1], expected([20, 30]))

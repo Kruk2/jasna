@@ -71,9 +71,9 @@ class WorkerDecoder:
     def __init__(self, runtime: ModelRuntime) -> None:
         self._runtime = runtime
 
-    def decode_window(self, latent: torch.Tensor, seed: int, free_bytes: int, device: torch.device) -> torch.Tensor:
+    def decode_window(self, latent: torch.Tensor, seed: int, free_bytes: int) -> torch.Tensor:
         _, tensors = self._runtime.request("decode", {"seed": seed, "free_bytes": free_bytes}, [latent])
-        return tensors[0].to(device)
+        return tensors[0]
 
 
 class ModelRuntime:
