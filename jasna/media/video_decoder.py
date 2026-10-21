@@ -339,7 +339,7 @@ class VideoReader:
             "h264": "h264_amf",
             "hevc": "hevc_amf",
             "av1": "av1_amf",
-        }.get(str(source_ctx.name).lower())
+        }.get(str(self.metadata.codec_name).lower())
         if decoder_name is None:
             source_ctx.thread_type = "AUTO"
             return

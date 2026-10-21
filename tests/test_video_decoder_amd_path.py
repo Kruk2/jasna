@@ -8,6 +8,7 @@ NVIDIA software fallback.
 from __future__ import annotations
 
 from contextlib import nullcontext
+from dataclasses import replace
 from fractions import Fraction
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -197,6 +198,7 @@ def test_amf_decoder_has_no_ffmpeg_hwaccel(monkeypatch):
     create = MagicMock()
     monkeypatch.setattr(module.av, "CodecContext", SimpleNamespace(create=create))
     reader = _reader(AcceleratorVendor.AMD)
+    reader.metadata = replace(reader.metadata, codec_name="hevc")
     source = SimpleNamespace(
         name="hevc", extradata=b"", width=W, height=H, framerate=None, sample_aspect_ratio=None
     )
@@ -206,19 +208,34 @@ def test_amf_decoder_has_no_ffmpeg_hwaccel(monkeypatch):
     create.assert_called_once_with("hevc_amf", "r")
 
 
-def _write_hevc_main10(path, frame_count: int) -> None:
+def test_amf_decoder_follows_the_stream_codec_not_the_software_decoder(monkeypatch):
+    create = MagicMock()
+    monkeypatch.setattr(module.av, "CodecContext", SimpleNamespace(create=create))
+    reader = _reader(AcceleratorVendor.AMD)
+    reader.metadata = replace(reader.metadata, codec_name="av1")
+    source = SimpleNamespace(
+        name="libdav1d", extradata=b"", width=W, height=H, framerate=None, sample_aspect_ratio=None
+    )
+
+    reader._setup_amf_decoder(source)
+
+    create.assert_called_once_with("av1_amf", "r")
+
+
+def _write_clip(path, encoder: str, pix_fmt: str, options: dict[str, str], frame_count: int) -> None:
     rng = np.random.default_rng(0)
+    low, high, dtype = (64, 940, np.uint16) if pix_fmt.endswith("10le") else (16, 235, np.uint8)
     with av.open(str(path), "w") as container:
-        stream = container.add_stream("libx265", rate=24)
-        stream.width, stream.height, stream.pix_fmt = 320, 240, "yuv420p10le"
-        stream.options = {"x265-params": "log-level=error"}
+        stream = container.add_stream(encoder, rate=24)
+        stream.width, stream.height, stream.pix_fmt = 320, 240, pix_fmt
+        stream.options = options
         for _ in range(frame_count):
-            data = rng.integers(64, 940, (240 * 3 // 2, 320), dtype=np.uint16)
-            container.mux(stream.encode(av.VideoFrame.from_ndarray(data, format="yuv420p10le")))
+            data = rng.integers(low, high, (240 * 3 // 2, 320), dtype=dtype)
+            container.mux(stream.encode(av.VideoFrame.from_ndarray(data, format=pix_fmt)))
         container.mux(stream.encode(None))
 
 
-def _decode_all(path, backend: str, monkeypatch) -> tuple[torch.Tensor, list[int], bool]:
+def _decode_all(path, backend: str, monkeypatch) -> tuple[torch.Tensor, list[int], str | None]:
     from jasna.media.probe import get_video_meta_data
 
     monkeypatch.setenv("JASNA_DECODE_BACKEND", backend)
@@ -227,21 +244,29 @@ def _decode_all(path, backend: str, monkeypatch) -> tuple[torch.Tensor, list[int
         for batch, batch_pts in reader.frames():
             batches.append(batch.cpu())
             pts += batch_pts
-        uses_amf = reader._decoder_ctx is not None
-    return torch.cat(batches), pts, uses_amf
+        decoder = reader._decoder_ctx.name if reader._decoder_ctx is not None else None
+    return torch.cat(batches), pts, decoder
 
 
 @pytest.mark.skipif(
     not (torch.cuda.is_available() and torch.version.hip and "hevc_amf" in av.codecs_available),
     reason="needs an AMD GPU with the AMF decoder",
 )
-def test_amf_decodes_hevc_main10_like_software(tmp_path, monkeypatch):
-    path = tmp_path / "main10.mp4"
-    _write_hevc_main10(path, 12)
+@pytest.mark.parametrize(
+    ("encoder", "pix_fmt", "options", "amf_decoder"),
+    [
+        ("libx265", "yuv420p10le", {"x265-params": "log-level=error"}, "hevc_amf"),
+        ("libsvtav1", "yuv420p10le", {}, "av1_amf"),
+        ("libsvtav1", "yuv420p", {}, "av1_amf"),
+    ],
+)
+def test_amf_decodes_like_software(tmp_path, monkeypatch, encoder, pix_fmt, options, amf_decoder):
+    path = tmp_path / "clip.mp4"
+    _write_clip(path, encoder, pix_fmt, options, 12)
 
-    amf_frames, amf_pts, uses_amf = _decode_all(path, "auto", monkeypatch)
+    amf_frames, amf_pts, decoder = _decode_all(path, "auto", monkeypatch)
     sw_frames, sw_pts, _ = _decode_all(path, "pyav-sw", monkeypatch)
 
-    assert uses_amf
+    assert decoder == amf_decoder
     assert amf_pts == sw_pts
     assert torch.equal(amf_frames, sw_frames)
