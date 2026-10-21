@@ -1328,6 +1328,33 @@ class TestHttpSegments:
         finally:
             server.stop()
 
+    def test_open_seek_to_a_nearby_segment_serves_it_from_the_new_pass(self, tmp_path):
+        video_file = tmp_path / "test.mp4"
+        video_file.write_bytes(b"fake")
+        server = HlsStreamingServer(segment_duration=2.0)
+        port = _start_server_on_free_port(server)
+        server._current_video_path = video_file
+        server.load_video(_make_metadata(duration=200.0))
+        server.reset_demand(20)
+        server.update_production(22)
+        result = []
+        try:
+            assert _post(port, "/open", {"path": str(video_file), "start": 50.001})[0] == 200
+            thread = threading.Thread(target=lambda: result.append(_get(port, "/seg_00025.ts?epoch=1")))
+            thread.start()
+            deadline = time.monotonic() + 2
+            while server._highest_requested_segment < 25 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert server.consume_seek_for_pass(20) == 25
+            server.reset_demand(25)
+            server.notify_segment_requested(25)
+            time.sleep(0.4)
+            _finalize_segments(server.segments_dir, 25)
+            thread.join(timeout=2)
+            assert result[0][0:2] == (200, "complete")
+        finally:
+            server.stop()
+
 
 class TestHttpPage:
     def test_player_waits_longer_for_first_byte_than_server_long_poll(self):

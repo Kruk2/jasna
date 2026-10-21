@@ -479,8 +479,7 @@ class HlsStreamingServer:
         with self._demand_lock:
             if self._pass_generation != generation:
                 return (
-                    seeking
-                    and self._pass_generation == generation + 1
+                    self._pass_generation == generation + 1
                     and self._current_pass_start == segment
                     and pending_target in (None, segment)
                     and latest_target == segment
