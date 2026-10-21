@@ -1585,6 +1585,18 @@ class TestWaitUntilFirstSegment:
         server.select_video(Path("new.mp4"), 0.0)
         assert not server._first_segment_ready.is_set()
 
+    def test_outgoing_pass_does_not_mark_the_next_video_ready(self):
+        server = HlsStreamingServer(segment_duration=4.0, port=0)
+        server.load_video(_make_metadata(duration=20.0))
+        server.update_production(3)
+        server.select_video(Path("next.mp4"), 0.0)
+        server.update_production(4)
+        assert not server.wait_until_first_segment(timeout=0)
+        server.load_video(_make_metadata(duration=20.0))
+        server.update_production(0)
+        assert server.wait_until_first_segment(timeout=0)
+        server._cleanup_segments()
+
 
 class TestCurrentVideoPath:
     def test_select_video_sets_current_path(self):

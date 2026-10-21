@@ -400,9 +400,10 @@ class HlsStreamingServer:
         with self._seek_lock:
             self.playback_epoch += 1
         self._current_video_path = path
-        self._first_segment_ready.clear()
-        if self.metadata is not None:
-            self.stop_current()
+        with self._demand_lock:
+            if self.metadata is not None:
+                self.stop_current()
+            self._first_segment_ready.clear()
         self._video_selected.set()
 
     def wait_for_video(self) -> Path:
@@ -600,8 +601,8 @@ class HlsStreamingServer:
         with self._demand_lock:
             if segment > self._produced_segment:
                 self._produced_segment = segment
-        if not self._first_segment_ready.is_set():
-            self._first_segment_ready.set()
+            if self.is_loaded:
+                self._first_segment_ready.set()
 
     def needs_seek(self, segment: int) -> bool:
         with self._demand_lock:
