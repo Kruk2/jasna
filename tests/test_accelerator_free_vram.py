@@ -23,6 +23,14 @@ def test_linux_reads_cuda_alone(monkeypatch):
     assert accelerator.device_free_bytes(torch.device("cuda:0")) == 11 * GIB
 
 
+def test_amd_windows_reads_hip_without_nvml(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(torch.version, "hip", "7.15.26333")
+    monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (20 * GIB, 32 * GIB))
+    monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: pytest.fail("NVML read on AMD"))
+    assert accelerator.device_free_bytes(torch.device("cuda:0")) == 20 * GIB
+
+
 _HOLD_VRAM = """
 import sys
 import torch

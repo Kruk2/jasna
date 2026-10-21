@@ -185,9 +185,10 @@ def _nvml_free_bytes(device: torch.device) -> int:
 
 def device_free_bytes(device: torch.device) -> int:
     """VRAM free on the whole GPU. On Windows, CUDA counts only this process's memory (WDDM
-    hides every other process's), so NVML's device-wide figure caps it there."""
+    hides every other process's), so NVML's device-wide figure caps it on NVIDIA there; AMD
+    reads HIP's figure alone."""
     free = torch.cuda.mem_get_info(device)[0]
-    if sys.platform == "win32":
+    if sys.platform == "win32" and is_nvidia_device(device):
         return min(free, _nvml_free_bytes(device))
     return free
 
