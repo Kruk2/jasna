@@ -18,6 +18,7 @@ from jasna.engine_paths import (
     basicvsrpp_sub_engine_exists,
     get_basicvsrpp_sub_engine_paths,
 )
+from jasna.restorer.basicvsrpp_fused_body import FusedPropagateBody, has_fused_body_kernels
 from jasna.trt.torch_tensorrt_export import (
     compile_and_save_torchtrt_dynamo,
     get_workspace_size_bytes,
@@ -767,12 +768,19 @@ def create_split_forward(
     )
 
 
+def _eager_propagate_body(deform_align: nn.Module, backbone: nn.Module) -> nn.Module:
+    if has_fused_body_kernels(deform_align.weight):
+        return FusedPropagateBody(deform_align, backbone)
+    return _PropagateBodyWrapper(deform_align, backbone)
+
+
 def create_eager_split_forward(model: nn.Module) -> BasicVSRPlusPlusNetSplit:
     generator = _get_inference_generator(model)
     loop_bodies = {
-        d: _PropagateBodyWrapper(generator.deform_align[d], generator.backbone[d]).eval()
+        d: _eager_propagate_body(generator.deform_align[d], generator.backbone[d]).eval()
         for d in DIRECTIONS
     }
+    logger.info("BasicVSR++ propagation runs %s", type(loop_bodies[DIRECTIONS[0]]).__name__)
     preprocess = _PreprocessWrapper(generator.feat_extract, generator.spynet).eval()
     upsample = _UpsampleWrapper(
         generator.reconstruction, generator.upsample1, generator.upsample2,
