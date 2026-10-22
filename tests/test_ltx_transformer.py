@@ -315,3 +315,12 @@ def test_nvidia_without_triton_kernels_keeps_the_torch_linears(monkeypatch):
     _without_triton(monkeypatch, None)
     assert T.enable_quant_kernels(torch.device("cuda")) is None
 
+
+@pytest.mark.parametrize("hip, expected", [("7.0", "int8"), (None, "sdpa")])
+def test_prompt_cross_attention_runs_int8_attention_only_on_amd(monkeypatch, hip, expected):
+    q, k, v = torch.randn(1, 2, 8, 64), torch.randn(1, 2, 4, 64), torch.randn(1, 2, 4, 64)
+    monkeypatch.setattr(T, "_int8_attention", lambda q, k, v: "int8")
+    monkeypatch.setattr(torch.version, "hip", hip)
+    monkeypatch.setattr(torch.Tensor, "is_cuda", property(lambda self: True))
+    monkeypatch.setattr(T.F, "scaled_dot_product_attention", lambda q, k, v: "sdpa")
+    assert T.cross_attention(q, k, v) == expected

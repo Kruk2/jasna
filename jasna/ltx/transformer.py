@@ -432,6 +432,16 @@ def self_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.T
         return F.scaled_dot_product_attention(q, k, v)
 
 
+def cross_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """Prompt cross-attention ``[1, heads, tokens, d]`` against ``[1, heads, prompt, d]``: INT8 attention
+    on AMD once enabled (twice AOTriton's flash speed on RDNA4, and Windows ROCm ships no AOTriton
+    kernels), else SDPA (on NVIDIA INT8 is slower here)."""
+    if _int8_attention is not None and torch.version.hip and q.is_cuda:
+        return _int8_attention(q, k, v)
+    with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
+        return F.scaled_dot_product_attention(q, k, v)
+
+
 def rms_norm(x: torch.Tensor, weight: torch.Tensor | None = None) -> torch.Tensor:
     return F.rms_norm(x, (x.shape[-1],), weight=weight, eps=EPS)
 
@@ -597,8 +607,7 @@ def _cross_attention(
     prompt key/value dtype."""
     q = rms_norm(linear(w, "attn2.to_q", x), w["attn2.q_norm.weight"])
     key, value = prompt
-    with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
-        out = F.scaled_dot_product_attention(_heads(q, heads).to(key.dtype), key, value).to(q.dtype)
+    out = cross_attention(_heads(q, heads).to(key.dtype), key, value).to(q.dtype)
     return _gated(w, "attn2", x, out.transpose(1, 2).flatten(2), heads)
 
 
