@@ -12,11 +12,17 @@ from typing import TypeVar
 import torch
 from torch import nn
 
+from jasna.accelerator import is_amd_device
 from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
 from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_attention
-from jasna.models.ltx_vae.video_encoder import VideoEncoder, compile_video_encoder
+from jasna.models.ltx_vae.video_encoder import (
+    KITCHEN_DOWN_BLOCKS,
+    VideoEncoder,
+    compile_video_encoder,
+    enable_kitchen_conv3d,
+)
 from jasna.tensor_utils import half_dtype
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"
@@ -176,8 +182,9 @@ def _build(
 
 
 def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
-    """Eval ``VideoEncoder`` in ``half_dtype(device)`` (before SM 8.0 fp16 with an fp32 tail);
-    call it on ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1] for bf16 latents."""
+    """Eval ``VideoEncoder`` in ``half_dtype(device)`` (before SM 8.0 fp16 with an fp32 tail; on
+    AMD the full-resolution head in fp16 on comfy-kitchen's conv3d); call it on
+    ``(B, 3, 1+8k, H, W)`` pixels in [-1, 1] for bf16 latents."""
     checkpoint, encoder = {}, None
     try:
         with open_tensors(vae_path) as reader:
@@ -188,6 +195,9 @@ def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
         bf16_contiguous_weights = list(encoder.state_dict().values())
         if dtype == torch.float16:
             encoder.to_fp16_with_float32_tail()
+        elif is_amd_device(device):
+            encoder.to_fp16_head(KITCHEN_DOWN_BLOCKS)
+            enable_kitchen_conv3d()
         encoder.to(memory_format=torch.channels_last_3d)
         _clear_tensors(bf16_contiguous_weights, encoder)
         compile_video_encoder(device, dtype)

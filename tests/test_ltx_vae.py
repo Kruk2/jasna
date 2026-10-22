@@ -210,6 +210,54 @@ def test_load_video_encoder_before_sm80_compiles_fp16_with_a_float32_tail(tmp_pa
     assert compiled == [torch.float16]
 
 
+def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_path, monkeypatch):
+    source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
+    path = tmp_path / "vae.safetensors"
+    save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v.bfloat16()
+               for k, v in source.state_dict().items()},
+              str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
+    compiled = []
+    monkeypatch.setattr(loader, "is_amd_device", lambda device: True)
+    monkeypatch.setattr(video_encoder, "_kitchen_conv3d", False)
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+    monkeypatch.setattr(video_encoder, "compile_static",
+                        lambda fn, mode, device, dtype: compiled.append(dtype) or fn)
+
+    encoder = load_video_encoder(path, torch.device("cpu"))
+
+    head = video_encoder.KITCHEN_DOWN_BLOCKS
+    assert [next(block.parameters()).dtype for block in encoder.down_blocks] == (
+        [torch.float16] * head + [torch.bfloat16] * (len(encoder.down_blocks) - head))
+    assert encoder.conv_in.conv.weight.dtype == torch.float16
+    assert encoder.conv_out.conv.weight.dtype == torch.bfloat16
+    assert video_encoder._kitchen_conv3d
+    assert compiled == [torch.bfloat16]
+
+
+def test_kitchen_conv3d_matches_the_causal_conv_and_fuses_the_residual(monkeypatch):
+    torch.manual_seed(0)
+    block = video_encoder.ResnetBlock3D(16).half()
+    x = torch.randn(1, 16, 5, 6, 7).half()
+    with torch.inference_mode():
+        reference = block(x).float()
+        monkeypatch.setattr(video_encoder, "_kitchen_conv3d", True)
+        video_encoder.enable_kitchen_conv3d()
+        out = block(x)
+
+    assert out.dtype == torch.float16
+    assert out.is_contiguous(memory_format=torch.channels_last_3d)
+    torch.testing.assert_close(out.float(), reference, atol=1e-2, rtol=1e-2)
+
+
+def test_kitchen_conv3d_leaves_non_fp16_layers_on_the_torch_conv(monkeypatch):
+    conv = video_encoder.CausalConv3d(4, 8).bfloat16()
+    monkeypatch.setattr(video_encoder, "_kitchen_conv3d", True)
+    monkeypatch.setattr(torch.ops.comfy_kitchen, "fp16_conv3d", None, raising=False)
+    x = torch.randn(1, 4, 3, 5, 5).bfloat16()
+
+    assert conv(x).dtype == torch.bfloat16
+
+
 def test_fp16_with_float32_tail_splits_at_the_fp16_safe_blocks():
     config = {**TINY_ENCODER_CONFIG, "blocks": [["res_x", {"num_layers": 1}]] * (video_encoder.FP16_DOWN_BLOCKS + 2)}
     encoder = VideoEncoder(**encoder_kwargs(_vae_config(config, {}))).to_fp16_with_float32_tail()
