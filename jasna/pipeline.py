@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
+from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -13,6 +17,7 @@ import psutil
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
+from jasna.job_resume import ResumeJob, ResumeMismatchError, commit_file, read_json, resume_directory, write_json
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
 from jasna.media.video_encoder import VideoEncoder
@@ -76,6 +81,19 @@ class _OfflineFrameWriter:
             self._entered = False
 
 
+class _FragmentFrameWriter(_OfflineFrameWriter):
+    def __init__(self, encoder: VideoEncoder, cancel: threading.Event, commit: Callable[[], None]) -> None:
+        super().__init__(encoder, [time.monotonic()])
+        self._cancel = cancel
+        self._commit = commit
+
+    def close(self) -> None:
+        entered = self._entered
+        super().close()
+        if entered and sys.exc_info()[0] is None and not self._cancel.is_set():
+            self._commit()
+
+
 class Pipeline:
     def __init__(
         self,
@@ -88,6 +106,8 @@ class Pipeline:
         segments: tuple[SegmentRange, ...] | None,
         splice_plan: SplicePlan | None,
     ) -> None:
+        self.config = config
+        self.resume: ResumeJob | None = None
         self.input_video = input_video
         self.output_video = output_video
         self.working_dir = config.working_dir
@@ -326,6 +346,7 @@ class Pipeline:
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
                 speed_profile=profile_path(),
+                resume_dir=self.resume.directory / "ltx" if self.resume is not None else None,
                 progress=self._ltx_progress(
                     frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
                 ),
@@ -421,6 +442,7 @@ class Pipeline:
                 [self.ltx_span(metadata, index, span, segments, open_writer) for span, segments, open_writer in spans],
                 render,
                 work_dir=work_dir,
+                resume_dir=self.resume.directory / "ltx" if self.resume is not None else None,
                 progress=self._ltx_progress(frames, progress_callback),
                 cancel=self._cancel_event,
             )
@@ -468,6 +490,13 @@ class Pipeline:
             if plan.segments != tuple(self.segments or ()):
                 raise ValueError("Precomputed splice plan does not match pipeline segments")
             index = plan.index
+        if self.resume is not None:
+            plan_path = self.resume.directory / "splice.json"
+            plan_data = json.loads(json.dumps(asdict(plan), default=str))
+            saved_plan = read_json(plan_path)
+            if saved_plan is not None and saved_plan != plan_data:
+                raise ResumeMismatchError(self.resume.root)
+            write_json(plan_path, plan_data)
         default = job_restoration(self.restoration_model_name, self.ltx_seed)
         segments_of = {
             span: resolve_restorations(segments, default)
@@ -537,20 +566,31 @@ class Pipeline:
         work_root.mkdir(parents=True, exist_ok=True)
 
         try:
-            with TemporaryDirectory(
-                dir=work_root,
-                prefix=f".{self.output_video.stem}.segments-",
-            ) as temp_dir_name:
+            directory = (
+                nullcontext(self.resume.directory / "segments") if self.resume is not None
+                else TemporaryDirectory(dir=work_root, prefix=f".{self.output_video.stem}.segments-")
+            )
+            with directory as temp_dir_name:
                 temp_dir = Path(temp_dir_name)
+                temp_dir.mkdir(parents=True, exist_ok=True)
                 fragments: list[tuple[Path, float]] = []
                 fragment_suffix = ".ts" if codec in {"h264", "hevc"} else ".mkv"
 
                 def raw_path(span_index: int) -> Path:
                     return temp_dir / f"{span_index:04d}-raw.nut"
 
+                def partial_path(span_index: int) -> Path:
+                    return temp_dir / f"{span_index:04d}-partial.nut" if self.resume is not None else raw_path(span_index)
+
+                def commit_fragment(span_index: int) -> None:
+                    if self.resume is not None and not self._cancel_event.is_set():
+                        with partial_path(span_index).open("r+b") as stream:
+                            os.fsync(stream.fileno())
+                        commit_file(partial_path(span_index), raw_path(span_index))
+
                 def fragment_encoder(span_index: int, span: SpliceSpan) -> VideoEncoder:
                     return VideoEncoder(
-                        str(raw_path(span_index)),
+                        str(partial_path(span_index)),
                         device=self.device,
                         metadata=metadata,
                         codec=codec,
@@ -563,7 +603,11 @@ class Pipeline:
                     )
 
                 def fragment_writer(span_index: int, span: SpliceSpan) -> Callable[[], _OfflineFrameWriter]:
-                    return lambda: _OfflineFrameWriter(fragment_encoder(span_index, span), [time.monotonic()])
+                    if self.resume is None:
+                        return lambda: _OfflineFrameWriter(fragment_encoder(span_index, span), [time.monotonic()])
+                    return lambda: _FragmentFrameWriter(
+                        fragment_encoder(span_index, span), self._cancel_event, lambda: commit_fragment(span_index)
+                    )
 
                 def duration(span: SpliceSpan) -> float:
                     return float((span.end_pts - span.start_pts) * index.time_base)
@@ -571,8 +615,13 @@ class Pipeline:
                 for span_index, span in enumerate(plan.spans):
                     if self._cancel_event.is_set():
                         return
+                    if raw_path(span_index).is_file():
+                        if span not in ltx_spans and (span.kind != "copy" or reencode_copies):
+                            progress.update(_span_frames(span, index, metadata))
+                        continue
                     if span.kind == "copy" and not reencode_copies:
-                        create_copy_fragment(self.input_video, span, index, raw_path(span_index), codec=codec)
+                        create_copy_fragment(self.input_video, span, index, partial_path(span_index), codec=codec)
+                        commit_fragment(span_index)
                     elif not span.is_render:
                         self._reencode_span(metadata, index, span, fragment_writer(span_index, span)(), progress)
                     elif span not in ltx_spans:
@@ -585,19 +634,17 @@ class Pipeline:
                             effect_ranges=span.effect_ranges,
                             output_frame_count=max(1, round(duration(span) * metadata.video_fps)),
                         )
-                if ltx_spans:
+                        commit_fragment(span_index)
+                pending_ltx = [
+                    (span, segments_of[span], fragment_writer(span_index, span))
+                    for span_index, span in enumerate(plan.spans)
+                    if span in ltx_spans and not raw_path(span_index).is_file()
+                ]
+                if pending_ltx:
                     self._run_ltx_spans(
                         metadata,
                         index,
-                        [
-                            (
-                                span,
-                                segments_of[span],
-                                fragment_writer(span_index, span),
-                            )
-                            for span_index, span in enumerate(plan.spans)
-                            if span in ltx_spans
-                        ],
+                        pending_ltx,
                         work_root,
                         ltx_callback,
                     )
@@ -628,6 +675,17 @@ class Pipeline:
         metadata = get_video_meta_data(str(self.input_video))
         self.validate_metadata(metadata)
         self.configure_vr(metadata)
+        uses_ltx = (
+            any(segment.restoration.model == "ltx" for segment in resolve_restorations(
+                self.segments, job_restoration(self.restoration_model_name, self.ltx_seed)
+            )) if self.segments else self.restoration_model_name == "ltx"
+        )
+        if uses_ltx:
+            require_ltx_input(self.vr_resolution)
+        auto_split = self.restoration_model_name == "ltx" and self.config.ltx_auto_split_percent is not None
+        if uses_ltx or auto_split or (resume_directory(self.config, self.output_video) / "render").exists():
+            self.resume = ResumeJob(self.config, self.input_video, self.output_video, metadata, self.segments)
+            self.resume.prepare()
         if self.segments:
             if self.fmp4:
                 log.warning(
@@ -641,3 +699,5 @@ class Pipeline:
         else:
             self._run_full(metadata)
         self.completed = not self._cancel_event.is_set()
+        if self.completed and self.resume is not None:
+            self.resume.finish()

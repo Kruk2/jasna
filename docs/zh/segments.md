@@ -99,3 +99,7 @@ Jasna 拼接视频时，会把临时文件放在输出旁边的隐藏文件夹�
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
+
+LTX 会把进度保存在同一文件夹（默认在输出旁边）的 `.{输出名}.jasna-resume` 中，
+包括区间任务和自动分配任务。它可能占用数 GB。暂停、出错、关闭应用或从队列移除后都会保留，
+仅在视频成功完成后删除。继续时请使用同一工作目录。

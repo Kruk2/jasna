@@ -119,3 +119,8 @@ folder next to the output. To use another disk (faster or bigger), set
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
+
+LTX keeps saved work in `.{output name}.jasna-resume` in the same folder
+(default: next to the output), including range jobs and auto split. It can take several GB.
+It stays after pause, an error, closing Jasna or removing a queue item, and is deleted
+after the video finishes successfully. Keep the same Working Directory when continuing.

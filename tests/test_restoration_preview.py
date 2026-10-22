@@ -450,14 +450,25 @@ def test_app_start_guard_blocks_running_queue_reset() -> None:
     app._queue_panel.get_jobs.assert_not_called()
 
 
-def test_app_prepares_entire_queue_before_starting_processor() -> None:
+@pytest.mark.parametrize("stopped", [False, True])
+@pytest.mark.parametrize("pending", [False, True])
+def test_app_prepares_queue_or_continues_after_pause(tmp_path, stopped, pending) -> None:
+    from jasna.gui.models import JobItem, JobStatus
+    from jasna.gui.processor import Processor
+
     app = JasnaApp.__new__(JasnaApp)
     app._preview_gpu_busy = False
-    app._processor = MagicMock()
-    app._processor.is_running.return_value = False
+    app._processor = Processor()
+    if stopped:
+        app._processor.stop()
+    app._processor.start = MagicMock()
     app._queue_panel = MagicMock()
-    app._queue_panel.get_jobs.return_value = [object(), object()]
-    app._queue_panel.get_jobs_ref.return_value = [object(), object()]
+    finished = JobItem(tmp_path / "finished.mp4", status=JobStatus.COMPLETED, output_path=tmp_path / "restored.mp4")
+    skipped = JobItem(tmp_path / "skipped.mp4", status=JobStatus.SKIPPED)
+    paused = JobItem(tmp_path / "paused.mp4", status=JobStatus.PENDING if pending else JobStatus.COMPLETED)
+    jobs = [finished, skipped, paused]
+    app._queue_panel.get_jobs.return_value = jobs
+    app._queue_panel.get_jobs_ref.return_value = jobs
     app._queue_panel.get_output_folder.return_value = ""
     app._queue_panel.get_output_pattern.return_value = "{original}_restored.mp4"
     app._settings_panel = MagicMock()
@@ -475,9 +486,17 @@ def test_app_prepares_entire_queue_before_starting_processor() -> None:
     preflight = SimpleNamespace(missing=(), should_warn_first_run_slow=False)
 
     with (
-        patch("jasna.gui.validation.validate_gui_start", return_value=[]),
+        patch("jasna.gui.validation.validate_gui_start", return_value=[]) as validate,
         patch("jasna.gui.engine_preflight.run_engine_preflight", return_value=preflight),
     ):
         app._on_start()
 
-    assert calls == ["reset", "running", "start"]
+    continuing = stopped and pending
+    assert calls == (["running", "start"] if continuing else ["reset", "running", "start"])
+    assert validate.call_args.args[1] == ([paused] if continuing else jobs)
+    if continuing:
+        assert finished.status is JobStatus.COMPLETED
+        assert finished.output_path == tmp_path / "restored.mp4"
+        assert skipped.status is JobStatus.SKIPPED
+        app._processor._jobs = app._processor.start.call_args.args[0]
+        assert app._processor._next_pending_job() is paused

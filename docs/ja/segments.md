@@ -118,3 +118,8 @@ jasna --input videos/ --output restored/ --restoration-model-name ltx --ltx-auto
 ```bash
 jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directory /fast/scratch
 ```
+
+LTX は区間指定や自動分割も含め、同じフォルダー（既定は出力の隣）の
+`.{出力名}.jasna-resume` に進行状況を保存します。数 GB 必要になる場合があります。
+一時停止、エラー、アプリ終了、キューからの削除後も残り、動画が正常に完了すると削除されます。
+再開時は同じ作業フォルダーを使ってください。

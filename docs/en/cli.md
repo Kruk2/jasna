@@ -117,6 +117,14 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 | ------ | ------- | ----- |
 | `--vr-mode` | `auto` | `auto`, `off`, `sbs`, `sbs-fisheye`. See [VR180](vr180.md). |
 
+## Continuing LTX jobs
+
+After Ctrl+C, an error or closing the app, run the same LTX command again to continue
+from saved work. This also works with `--segments` and `--ltx-auto-split`. The unfinished
+track may run again, and writing the output starts over. If the input, settings or app
+version changed, Jasna asks before replacing saved work; without a terminal, it stops
+and keeps the saved work.
+
 ## Encoding
 
 | Option | Default | Notes |
@@ -129,7 +137,7 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 | `--retarget-high-fps` | off | 60 → 30 FPS (and 59.94 → 29.97) by keeping every second frame. Other rates unchanged; audio stays in sync. Not available with `--stream` or `--segments`. |
 | `--fmp4` | off | Play `.mp4`/`.mov` output while it is still being made; it also survives an interrupted job. Not available with `--stream`, `--segments` or `--ltx-auto-split`. See [Advanced processing](advanced_processing.md). |
 | `--segments` | — | Restore only these ranges of one video, in seconds or `mm:ss`, e.g. `10-25,01:10-01:30.5`. Cannot be combined with `--stream`, `--retarget-high-fps`, `--fmp4` or `--ltx-auto-split`, or with image or folder input. See [Segments](segments.md). |
-| `--working-directory` | output dir | Where temporary files for `--segments` and LTX are written. See [Segments](segments.md). |
+| `--working-directory` | output dir | Where temporary files and saved LTX progress are written. See [Segments](segments.md). |
 
 ### Choosing a codec
 

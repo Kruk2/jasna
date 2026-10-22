@@ -4,10 +4,12 @@ import logging
 import threading
 import traceback
 import time
+from concurrent.futures import Future
 from pathlib import Path
 from dataclasses import dataclass, replace
 from typing import Callable
 
+from jasna.job_resume import ResumeMismatchError, find_resume_output, resume_directories
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_image_session, build_video_session, release_session_memory, video_session_config
 from jasna.media.probe import UnsupportedVideoError
@@ -31,6 +33,7 @@ class ProgressUpdate:
     total_frames: int = 0
     message: str = ""
     stage: StageProgress | None = None
+    resumable: bool | None = None
 
 
 class ProgressGate:
@@ -112,10 +115,12 @@ class Processor:
         on_progress: Callable[[ProgressUpdate], None] = None,
         on_log: Callable[[str, str], None] = None,
         on_complete: Callable[[bool], None] = None,
+        on_resume_conflict: Callable[[Path], Future[bool]] | None = None,
     ):
         self._on_progress = on_progress
         self._on_log = on_log
         self._on_complete = on_complete
+        self._on_resume_conflict = on_resume_conflict
         
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -162,6 +167,10 @@ class Processor:
 
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def was_stopped(self) -> bool:
+        return self._stop_event.is_set()
         
     def _log(self, level: str, message: str):
         if self._on_log:
@@ -206,11 +215,14 @@ class Processor:
         if snapshot is None:
             return
         segments = snapshot.segments
+        from jasna.gui.validation import any_job_uses_ltx
+
         self._log("INFO", f"Started processing {job.filename}")
         self._progress(ProgressUpdate(
             job_id=job.id,
             status=JobStatus.PROCESSING,
             message=f"Starting {job.filename}",
+            resumable=not media_files.is_image(job.path) and any_job_uses_ltx([job], self._settings),
         ))
         
         input_path = job.path
@@ -229,26 +241,37 @@ class Processor:
 
         output_path = folder_output_path(self._output_folder or input_path.parent, input_path, self._output_pattern)
         
-        # Handle file conflict based on settings
-        if output_path.exists():
-            file_conflict = self._settings.file_conflict
-            if file_conflict == "skip":
-                job.status = JobStatus.SKIPPED
-                self._progress(ProgressUpdate(
-                    job_id=job.id,
-                    status=JobStatus.SKIPPED,
-                    message=f"Output file already exists: {output_path.name}",
-                ))
-                self._log("WARNING", f"Skipped {job.filename}: output file already exists")
-                return
-            elif file_conflict == "auto_rename":
-                output_path = unique_path(output_path)
-                self._log("INFO", f"Renamed output to {output_path.name} to avoid overwrite")
-            # "overwrite" - just proceed and let the file be replaced
-        
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
+            resumed_output = None
+            if not is_image:
+                root = Path(job_settings.working_directory) if job_settings.working_directory else output_path.parent
+                if resume_directories(root, output_path):
+                    config = video_session_config(
+                        job_settings, codec=job_settings.codec,
+                        encoder_settings=build_job_encoder_settings(job_settings, job_settings.codec),
+                    )
+                    resumed_output = find_resume_output(config, input_path, output_path, segments)
+            if resumed_output is not None:
+                output_path = resumed_output
+            # Handle file conflict based on settings
+            if output_path.exists() and resumed_output is None:
+                file_conflict = self._settings.file_conflict
+                if file_conflict == "skip":
+                    job.status = JobStatus.SKIPPED
+                    self._progress(ProgressUpdate(
+                        job_id=job.id,
+                        status=JobStatus.SKIPPED,
+                        message=f"Output file already exists: {output_path.name}",
+                    ))
+                    self._log("WARNING", f"Skipped {job.filename}: output file already exists")
+                    return
+                elif file_conflict == "auto_rename":
+                    output_path = unique_path(output_path)
+                    self._log("INFO", f"Renamed output to {output_path.name} to avoid overwrite")
+                # "overwrite" - just proceed and let the file be replaced
+        
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
             if is_image:
                 self._close_video_session()
             else:
@@ -352,7 +375,25 @@ class Processor:
         )
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
 
-    def _run_video_job(
+    def _run_video_job(self, job_id, input_path, output_path, *, segments, settings):
+        while True:
+            try:
+                return self._run_video_pipeline(job_id, input_path, output_path, segments=segments, settings=settings)
+            except ResumeMismatchError as error:
+                if self._on_resume_conflict is None:
+                    raise
+                answer = self._on_resume_conflict(error.directory)
+                while not answer.done():
+                    if self._stop_event.wait(0.1):
+                        answer.cancel()
+                        raise ProcessingStopped("Processing stopped")
+                if self._stop_event.is_set() or not answer.result():
+                    self.stop()
+                    raise ProcessingStopped("Saved progress kept")
+                error.discard()
+                self._log("INFO", "Saved LTX progress replaced after confirmation")
+
+    def _run_video_pipeline(
         self,
         job_id: int,
         input_path: Path,

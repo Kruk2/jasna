@@ -56,6 +56,15 @@ class _Bar:
     def update(self, n):
         self.n += n
 
+    def reuse(self, n, windows):
+        self.n += n
+
+    def encoded_frame(self, n):
+        pass
+
+    def encoded_window(self, canvas):
+        self.n += 1
+
     def window(self, canvas):
         return contextlib.nullcontext()
 
@@ -1008,6 +1017,138 @@ def test_a_run_with_a_speed_profile_skips_the_speed_test(fakes, tmp_path):
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)],
     )
     assert _Transformer.seeds == [[7]]
+
+
+def _resume_spans(tmp_path, spans):
+    restore.restore_spans(
+        spans, _render(tmp_path), work_dir=tmp_path, resume_dir=tmp_path / "saved",
+        progress=restore.Progress(50, disable=True, report=None), cancel=threading.Event(),
+    )
+
+
+def _two_tracks():
+    video = _video(50, range(0))
+    for index in [*range(2, 10), *range(30, 38)]:
+        video[index][0][0, 0, 0] = 1
+    return [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)]
+
+
+def test_resume_reuses_plans_and_encoded_windows_after_encode_failure(fakes, monkeypatch, tmp_path):
+    spans = _two_tracks()
+    put = restore.LatentStore.put
+    encoded = []
+
+    def interrupted(store, index, latent):
+        if store._kind.endswith("reference"):
+            encoded.append(index)
+            if len(encoded) == 2:
+                raise RuntimeError("encode interrupted")
+        put(store, index, latent)
+
+    monkeypatch.setattr(restore.LatentStore, "put", interrupted)
+    with pytest.raises(RuntimeError, match="encode interrupted"):
+        _resume_spans(tmp_path, spans)
+    encoded.clear()
+    monkeypatch.setattr(restore, "scan_span", lambda *_a, **_k: pytest.fail("scan repeated"))
+    monkeypatch.setattr(restore.LatentStore, "put", lambda store, index, latent: (
+        encoded.append(index) if store._kind.endswith("reference") else None, put(store, index, latent)
+    )[-1])
+    _resume_spans(tmp_path, spans)
+    assert encoded == [1]
+    assert _Transformer.seeds == [[7], [8]]
+
+
+def test_resume_skips_finished_tracks_and_does_not_load_encoder(fakes, monkeypatch, tmp_path):
+    spans = _two_tracks()
+    denoise = restore.denoise_track
+
+    def interrupted(plan, *args, **kwargs):
+        if plan.track_id == 1:
+            raise RuntimeError("denoise interrupted")
+        return denoise(plan, *args, **kwargs)
+
+    monkeypatch.setattr(restore, "denoise_track", interrupted)
+    with pytest.raises(RuntimeError, match="denoise interrupted"):
+        _resume_spans(tmp_path, spans)
+    assert _Transformer.seeds == [[7]]
+    monkeypatch.setattr(restore, "denoise_track", denoise)
+    monkeypatch.setattr(inference, "load_video_encoder", lambda *_a: pytest.fail("encoder loaded again"))
+    monkeypatch.setattr(restore, "scan_span", lambda *_a, **_k: pytest.fail("scan repeated"))
+    _Transformer.seeds.clear()
+    _resume_spans(tmp_path, spans)
+    assert _Transformer.seeds == [[8]]
+
+
+def test_resume_after_compose_failure_loads_only_decoder(fakes, monkeypatch, tmp_path):
+    spans = _two_tracks()
+    compose = restore.compose_spans
+    monkeypatch.setattr(restore, "compose_spans", lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("compose failed")))
+    with pytest.raises(RuntimeError, match="compose failed"):
+        _resume_spans(tmp_path, spans)
+    monkeypatch.setattr(restore, "compose_spans", compose)
+    monkeypatch.setattr(inference, "load_video_encoder", lambda *_a: pytest.fail("encoder loaded again"))
+    monkeypatch.setattr(inference, "LtxTransformer", lambda *_a: pytest.fail("transformer loaded again"))
+    _resume_spans(tmp_path, spans)
+
+
+def test_incomplete_track_keeps_all_references_until_finals_are_committed(fakes, monkeypatch, tmp_path):
+    spans = [restore.LtxSpan(_source(_video(180, range(2, 178))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)]
+    put = restore.LatentStore.put
+    written = []
+
+    def interrupted(store, index, latent):
+        if store._kind.endswith("final"):
+            written.append(index)
+            if len(written) == 2:
+                raise RuntimeError("final write interrupted")
+        put(store, index, latent)
+
+    monkeypatch.setattr(restore.LatentStore, "put", interrupted)
+    with pytest.raises(RuntimeError, match="final write interrupted"):
+        _resume_spans(tmp_path, spans)
+    assert len(list((tmp_path / "saved").glob("*.reference.pt"))) == 2
+    assert not list((tmp_path / "saved").glob("*.done"))
+    monkeypatch.setattr(restore.LatentStore, "put", put)
+    monkeypatch.setattr(inference, "load_video_encoder", lambda *_a: pytest.fail("references were lost"))
+    _Transformer.seeds.clear()
+    _resume_spans(tmp_path, spans)
+    assert _Transformer.seeds == [[7, 8]]
+
+
+def test_resume_replays_whole_video_canvas_decision(fakes, monkeypatch, tmp_path):
+    kwargs = dict(
+        detector=_Detector(), files=FILES, frame_h=64, frame_w=64, batch_size=4,
+        window_hop=88, seed=7, device=torch.device("cpu"), work_dir=tmp_path,
+        speed_profile=tmp_path / "speed.json", resume_dir=tmp_path / "saved",
+    )
+    def run():
+        restore.restore_video(
+            _source(_video(12, range(2, 10))), _Writer(), large_canvas=True,
+            progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(), **kwargs,
+        )
+
+    run()
+    saved = next((tmp_path / "saved").glob("*.plans.json"))
+    assert json.loads(saved.read_text())["large_canvas"] is False
+    monkeypatch.setattr(restore, "large_canvas_fits", lambda *_a: pytest.fail("canvas decision repeated"))
+    run()
+
+
+def test_resuming_only_the_remaining_span_uses_its_original_latents(fakes, monkeypatch, tmp_path):
+    video = _video(50, range(2, 48))
+    first = restore.LtxSpan(_source(video[:20]), (restore.LtxSegment(20, 180, 7),), _Writer)
+
+    class FailedWriter(_Writer):
+        def write(self, frame, pts):
+            raise RuntimeError("second span interrupted")
+
+    second = restore.LtxSpan(_source(video, 20), (restore.LtxSegment(220, 480, 9),), FailedWriter)
+    with pytest.raises(RuntimeError, match="second span interrupted"):
+        _resume_spans(tmp_path, [first, second])
+    monkeypatch.setattr(restore, "scan_span", lambda *_a, **_k: pytest.fail("span rescanned"))
+    monkeypatch.setattr(inference, "load_video_encoder", lambda *_a: pytest.fail("span reencoded"))
+    monkeypatch.setattr(inference, "LtxTransformer", lambda *_a: pytest.fail("span denoised again"))
+    _resume_spans(tmp_path, [replace(second, open_writer=_Writer)])
 
 
 @pytest.mark.parametrize(("frame_h", "frame_w"), [(720, 1280), (1080, 1920), (2160, 3840)])

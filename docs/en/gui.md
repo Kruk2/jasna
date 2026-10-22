@@ -28,12 +28,14 @@ models slowly, and it warns you at startup.
     skipped item back at the end of the queue.
   - **Cross** removes the item.
 - During processing, each item shows progress, FPS and time left.
-- **▶** (start) always processes everything in the queue, including items
-  that are already finished or failed. So you can change settings and press ▶
-  again without adding the files again.
-- **■** (stop) asks first, then ends the run. The current item goes back to **Pending**. The half-written
-  output file stays on disk; **File Conflict** decides what happens with it
-  next time.
+- **▶** (start) continues a paused queue from its pending items. Finished items
+  stay finished. After the queue finishes, press ▶ to process everything again
+  with your current settings.
+- **Ⅱ** (pause) appears for jobs using LTX. It asks first, then keeps saved work
+  and puts the current item back to **Pending**. Press **▶** to continue.
+  If the input, settings or Jasna version changed, Jasna asks before replacing saved work.
+- **■** (stop) is used for other jobs. They start over next time;
+  **File Conflict** decides what happens to any unfinished output.
 - Closing the window while a video is processing asks first: **Minimize** keeps
   it running, **Stop and quit** ends it.
 - **Clear done** removes finished items. **Clear** removes everything.

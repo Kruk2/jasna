@@ -214,6 +214,7 @@ class ControlBar(ctk.CTkFrame):
         self._on_toggle_logs: callable = None
         self._start_disabled_tooltip = None
         self._trial = False
+        self._resumable = False
         
         
         self._build_controls()
@@ -256,6 +257,8 @@ class ControlBar(ctk.CTkFrame):
             command=self._handle_stop,
         )
         
+        self._stop_tooltip = Tooltip(self._stop_btn, t("stop_confirm_title"))
+
     def _build_progress(self):
         progress_area = ctk.CTkFrame(self, fg_color="transparent")
         progress_area.pack(side="left", fill="both", expand=True, padx=Sizing.PADDING_MEDIUM, pady=Sizing.PADDING_MEDIUM)
@@ -363,7 +366,8 @@ class ControlBar(ctk.CTkFrame):
             self._on_start()
             
     def _handle_stop(self):
-        if not messagebox.askyesno(t("stop_confirm_title"), t("stop_confirm"), parent=self):
+        title, message = ("pause_confirm_title", "pause_confirm") if self._resumable else ("stop_confirm_title", "stop_confirm")
+        if not messagebox.askyesno(t(title), t(message), parent=self):
             return
         if self._on_stop:
             self._on_stop()
@@ -397,6 +401,15 @@ class ControlBar(ctk.CTkFrame):
     def set_trial(self, trial: bool) -> None:
         """Mark the LTX stages of this run as a trial."""
         self._trial = trial
+
+    def set_resumable(self, resumable: bool) -> None:
+        self._resumable = resumable
+        self._stop_btn.configure(
+            text="Ⅱ" if resumable else "■",
+            fg_color=Colors.PRIMARY if resumable else Colors.STATUS_ERROR,
+            hover_color=Colors.PRIMARY_HOVER if resumable else "#b91c1c",
+        )
+        self._stop_tooltip.set_text(t("pause_confirm_title" if resumable else "stop_confirm_title"))
 
     def set_running(self, running: bool):
         

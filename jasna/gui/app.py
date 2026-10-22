@@ -397,7 +397,24 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             on_progress=self._on_processor_progress,
             on_log=self._on_processor_log,
             on_complete=self._on_processor_complete,
+            on_resume_conflict=self._confirm_resume_restart,
         )
+
+    def _confirm_resume_restart(self, directory):
+        from concurrent.futures import Future
+        from tkinter import messagebox
+
+        answer = Future()
+
+        def ask():
+            if not answer.set_running_or_notify_cancel():
+                return
+            answer.set_result(messagebox.askyesno(
+                t("resume_restart_title"), t("resume_restart_confirm"), parent=self,
+            ))
+
+        self._main_thread.post(ask)
+        return answer
 
     def _log_startup_timing(self):
         logger.info(
@@ -629,6 +646,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         ):
             return
         jobs = self._queue_panel.get_jobs()
+        continuing = self._processor is not None and self._processor.was_stopped and any(
+            job.status is JobStatus.PENDING for job in jobs
+        )
+        if continuing:
+            jobs = [job for job in jobs if job.status is JobStatus.PENDING]
         if not jobs:
             self._log_panel.warning(t("toast_no_files"))
             return
@@ -701,9 +723,11 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
             self._show_toast(t("toast_ltx_trial"), "warning")
             self._log_panel.warning(t("toast_ltx_trial"))
         self._control_bar.set_trial(trial)
-        self._queue_panel.reset_jobs_for_run()
+        if not continuing:
+            self._queue_panel.reset_jobs_for_run()
         
         self._status_pill.set_status("PROCESSING", Colors.STATUS_PROCESSING)
+        self._control_bar.set_resumable(any_job_uses_ltx(jobs, settings))
         self._control_bar.set_running(True)
         self._video_player_btn.configure(state="disabled")
         
@@ -759,6 +783,8 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
         job_id = update.job_id
         
         if update.status == JobStatus.PROCESSING:
+            if update.resumable is not None:
+                self._control_bar.set_resumable(update.resumable)
             self._job_start_times.setdefault(job_id, time.time())
             # Resolve current queue position for control bar display
             filename = ""

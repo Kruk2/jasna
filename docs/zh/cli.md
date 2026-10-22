@@ -114,6 +114,12 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | ------ | ------- | ----- |
 | `--vr-mode` | `auto` | `auto`、`off`、`sbs`、`sbs-fisheye`。见 [VR180](vr180.md)。 |
 
+## 继续 LTX 任务
+
+按 Ctrl+C、出错或关闭应用后，重新运行同一 LTX 命令即可从已保存的进度继续。
+`--segments` 和 `--ltx-auto-split` 也支持。未完成的跟踪段可能需要重做，输出保存会从头开始。
+如果输入、设置或应用版本改变，替换进度前会先询问；没有交互终端时会停止并保留进度。
+
 ## 编码
 
 | 选项 | 默认值 | 说明 |
@@ -126,7 +132,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | `--retarget-high-fps` | 关闭 | 每两帧保留一帧，实现 60 → 30 FPS（以及 59.94 → 29.97）。其他帧率不变；音频保持同步。不能与 `--stream` 或 `--segments` 同时使用。 |
 | `--fmp4` | 关闭 | `.mp4`/`.mov` 输出在生成过程中即可播放，任务中断后仍可播放。不能与 `--stream`、`--segments` 或 `--ltx-auto-split` 同时使用。见[高级处理](advanced_processing.md)。 |
 | `--segments` | — | 只修复一个视频中的这些区间，单位为秒或 `mm:ss`，例如 `10-25,01:10-01:30.5`。不能与 `--stream`、`--retarget-high-fps`、`--fmp4` 或 `--ltx-auto-split` 同时使用，也不能用于图片或文件夹输入。见[区间](segments.md)。 |
-| `--working-directory` | 输出目录 | `--segments` 和 LTX 临时文件的写入位置。见[区间](segments.md)。 |
+| `--working-directory` | 输出目录 | `--segments` 临时文件和 LTX 保存进度的写入位置。见[区间](segments.md)。 |
 
 ### 选择编解码器
 
