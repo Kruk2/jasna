@@ -20,7 +20,7 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
-from jasna.ltx import native
+from jasna.accelerator import is_nvidia_device
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors, open_tensors
@@ -140,9 +140,13 @@ def _block_functions(
     """(block forward, prompt key/value, backend name) for plain-tensor blocks: the native block
     when it can run here, with eager prompt keys/values (once per block and step), else both
     compiled."""
-    native_forward = native.load(device, block_specs)
-    if native_forward is not None:
-        return native_forward, T.prompt_key_value, "native"
+    if is_nvidia_device(device):
+        # The native block is NVIDIA-only and imports Triton, which Windows ROCm ships without.
+        from jasna.ltx import native
+
+        native_forward = native.load(device, block_specs)
+        if native_forward is not None:
+            return native_forward, T.prompt_key_value, "native"
     T.enable_int8_attention()
     return (
         compiled_block_forward(device),

@@ -392,6 +392,7 @@ def test_linear_slots_follow_the_transformer_names():
 
 
 def test_sampler_runs_native_blocks_with_eager_prompt_projections(monkeypatch):
+    monkeypatch.setattr(sampler, "is_nvidia_device", lambda device: True)
     native_forward = object()
     monkeypatch.setattr(native, "load", lambda device, specs: native_forward)
     monkeypatch.setattr(T, "enable_int8_attention", lambda: pytest.fail("compiled-path attention enabled"))
@@ -400,6 +401,7 @@ def test_sampler_runs_native_blocks_with_eager_prompt_projections(monkeypatch):
 
 
 def test_sampler_compiles_blocks_when_native_cannot_run(monkeypatch):
+    monkeypatch.setattr(sampler, "is_nvidia_device", lambda device: True)
     enabled = []
     monkeypatch.setattr(native, "load", lambda device, specs: None)
     monkeypatch.setattr(T, "enable_int8_attention", lambda: enabled.append(True))
@@ -408,6 +410,15 @@ def test_sampler_compiles_blocks_when_native_cannot_run(monkeypatch):
     assert sampler._block_functions(torch.device("cuda"), {}) == (
         "compiled block", ("compiled", T.prompt_key_value), "torch.compile")
     assert enabled
+
+
+def test_amd_blocks_compile_without_importing_the_native_block(monkeypatch):
+    monkeypatch.setattr(sampler, "is_nvidia_device", lambda device: False)
+    monkeypatch.setattr(native, "load", lambda device, specs: pytest.fail("native block loaded on AMD"))
+    monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
+    monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: "compiled block")
+    monkeypatch.setattr(sampler, "compile_static", lambda function, mode, device, dtype: ("compiled", function))
+    assert sampler._block_functions(torch.device("cuda"), {})[2] == "torch.compile"
 
 
 def test_native_package_imports_without_the_protection_module(monkeypatch):

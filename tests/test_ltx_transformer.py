@@ -198,6 +198,7 @@ def test_self_attention_falls_back_to_sdpa_off_gpu():
 def test_ltx_refuses_to_run_without_its_kernels(package, monkeypatch):
     import importlib.util
 
+    monkeypatch.setattr(torch.version, "hip", None)
     real_find_spec = importlib.util.find_spec
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == package else real_find_spec(name))
     with pytest.raises(RuntimeError, match=package):
@@ -324,3 +325,15 @@ def test_prompt_cross_attention_runs_int8_attention_only_on_amd(monkeypatch, hip
     monkeypatch.setattr(torch.Tensor, "is_cuda", property(lambda self: True))
     monkeypatch.setattr(T.F, "scaled_dot_product_attention", lambda q, k, v: "sdpa")
     assert T.cross_attention(q, k, v) == expected
+
+
+def test_amd_runs_ltx_without_triton(monkeypatch):
+    """Windows ROCm ships no Triton; its LTX runs comfy-kitchen and prebuilt kernels instead."""
+    import importlib.util
+
+    comfy_kitchen = pytest.importorskip("comfy_kitchen")
+    real_find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
+    monkeypatch.setattr(torch.version, "hip", "7.0")
+    monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: True)
+    T.require_kernels(torch.device("cuda"))

@@ -391,9 +391,10 @@ def _triton_ops(kernels) -> SimpleNamespace:
 
 
 def require_kernels(device: torch.device) -> None:
-    """Fail unless Triton and comfy-kitchen's INT8 attention can run on ``device``: without them
-    every LTX pass would run on far slower fallbacks."""
-    for package in ("triton", "comfy_kitchen"):
+    """Fail unless Triton (NVIDIA; AMD without it runs comfy-kitchen and prebuilt kernels) and
+    comfy-kitchen's INT8 attention can run on ``device``: without them every LTX pass would run on
+    far slower fallbacks."""
+    for package in ("comfy_kitchen",) if torch.version.hip else ("triton", "comfy_kitchen"):
         if importlib.util.find_spec(package) is None:
             raise RuntimeError(f"LTX restoration needs {package}, which is missing from this install. Reinstall Jasna.")
     import comfy_kitchen
