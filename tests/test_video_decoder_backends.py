@@ -329,6 +329,17 @@ def test_vali_source_raises_on_hard_decode_failure(monkeypatch) -> None:
         list(source.frames(None))
 
 
+def test_vali_source_reads_a_seek_to_the_start_from_its_first_frame(monkeypatch) -> None:
+    # VALI's own seek to 0 jumps to the next keyframe when the first one lies before
+    # the stream start (an MP4 cut mid-GOP).
+    script = [_frame(0), _frame(512), _EOF]
+    calls, _converter = _install_fake_vali(monkeypatch, script)
+    source = _vali_source(batch_size=4)
+    batches = list(source.frames(0.0))
+    assert [pts for _batch, pts in batches] == [[0, 512]]
+    assert calls == [None, None, None]
+
+
 def test_vali_source_seek_discards_smoke_frame(monkeypatch) -> None:
     script = [_frame(0), _frame(30720), _frame(31232), _EOF]
     calls, _converter = _install_fake_vali(monkeypatch, script)

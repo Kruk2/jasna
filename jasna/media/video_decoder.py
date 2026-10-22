@@ -258,6 +258,11 @@ class _ValiFrameSource:
         # seconds past the stream start, so shift by the start offset. VALI's
         # own StartTime is unreliable (wrong scale), use the probed metadata.
         seek_ctx = None
+        # Nothing is decoded past the first frame yet, so the start needs no seek.
+        # VALI's own seek to 0 jumps to the next keyframe when the first one lies
+        # before the stream start (an MP4 cut mid-GOP).
+        if seek_ts == 0 and self._first_pts is not None:
+            seek_ts = None
         if seek_ts is not None:
             start_seconds = float(
                 self.metadata.start_pts * self.metadata.time_base

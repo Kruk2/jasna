@@ -159,3 +159,24 @@ class TestSeekBehavior:
             f"({start_seconds + seek_ts:.3f}s)"
         )
         assert first_seconds < start_seconds + seek_ts + 0.5
+
+    def test_seek_to_the_start_of_a_mid_gop_cut_reads_every_shown_frame(self, tmp_path):
+        import subprocess
+
+        import av
+        from jasna.os_utils import resolve_executable
+
+        full = tmp_path / "full.mp4"
+        cut = tmp_path / "cut.mp4"
+        ffmpeg = [resolve_executable("ffmpeg"), "-y", "-loglevel", "error"]
+        subprocess.run(
+            [*ffmpeg, "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=12:duration=4",
+             "-c:v", "libx264", "-pix_fmt", "yuv420p", "-bf", "3", "-g", "24", str(full)],
+            check=True,
+        )
+        subprocess.run([*ffmpeg, "-ss", "1.5", "-i", str(full), "-c", "copy", str(cut)], check=True)
+        with av.open(str(cut)) as container:
+            shown_pts = [frame.pts for frame in container.decode(video=0)]
+        with VideoReader(str(cut), batch_size=8, device=torch.device("cuda:0"), metadata=get_video_meta_data(str(cut))) as reader:
+            pts = [int(p) for _, batch_pts in reader.frames(seek_ts=0.0) for p in batch_pts]
+        assert pts == shown_pts
