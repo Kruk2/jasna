@@ -80,6 +80,22 @@ class TestFolderOutputPath:
         out = folder_output_path(Path("/out"), Path("/in/clip.mkv"), "{original}_restored")
         assert out == Path("/out/clip_restored.mkv")
 
+    def test_pattern_without_suffix_keeps_dotted_video_stem(self):
+        out = folder_output_path(Path("/out"), Path("/in/clip.v2.mkv"), "{original}_restored")
+        assert out == Path("/out/clip.v2_restored.mkv")
+
+    def test_pattern_keeps_dotted_image_stem(self):
+        out = folder_output_path(Path("/out"), Path("/in/a.b.png"), "{original}_restored")
+        assert out == Path("/out/a.b_restored.png")
+
+    def test_pattern_with_suffix_and_dotted_stem(self):
+        out = folder_output_path(Path("/out"), Path("/in/a.b.jpg"), "{original}_restored.mp4")
+        assert out == Path("/out/a.b_restored.jpg")
+
+    def test_pattern_with_only_original_and_suffix_keeps_dotted_video_stem(self):
+        out = folder_output_path(Path("/out"), Path("/in/clip.v2.mkv"), "{original}.mp4")
+        assert out == Path("/out/clip.v2.mp4")
+
 
 def test_file_dialog_patterns_are_sorted_globs():
     assert file_dialog_patterns(frozenset({".png", ".jpg"})) == "*.jpg *.png"

@@ -61,11 +61,13 @@ def folder_output_path(output_dir: str | Path, input_path: str | Path, output_pa
     if not output_pattern:
         return Path(output_dir) / f"{input_path.stem}_out{input_path.suffix}"
 
+    pattern_suffix = Path(output_pattern.replace("{original}", "x")).suffix
     output_name = output_pattern.replace("{original}", input_path.stem)
-    output_path = Path(output_dir) / output_name
-    if is_image(input_path) or not output_path.suffix:
-        output_path = output_path.with_suffix(input_path.suffix)
-    return output_path
+    if is_image(input_path) or not pattern_suffix:
+        if pattern_suffix:
+            output_name = output_name[: -len(pattern_suffix)]
+        output_name += input_path.suffix
+    return Path(output_dir) / output_name
 
 
 def unique_path(path: Path) -> Path:
