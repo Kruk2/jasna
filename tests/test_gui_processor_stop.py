@@ -116,7 +116,7 @@ def test_failing_job_still_marked_error(tmp_path):
 
 
 @pytest.mark.parametrize("accepted", [False, True])
-def test_changed_progress_requires_confirmation_and_declining_stops_queue(tmp_path, accepted):
+def test_changed_progress_requires_confirmation_and_declining_skips_only_that_job(tmp_path, accepted):
     from concurrent.futures import Future
     from unittest.mock import MagicMock
 
@@ -127,8 +127,10 @@ def test_changed_progress_requires_confirmation_and_declining_stops_queue(tmp_pa
     marker = directory / "saved"
     marker.touch()
     processor, job, updates = _processor_with_job(tmp_path, lambda *_a, **_k: None)
+    next_job = JobItem(path=tmp_path / "next.mp4")
+    processor._jobs.append(next_job)
     error = ResumeMismatchError(directory)
-    processor._run_video_pipeline = MagicMock(side_effect=[error, None])
+    processor._run_video_pipeline = MagicMock(side_effect=[error, None, None])
     processor._run_pipeline = processor._run_video_job
     answer = Future()
     answer.set_result(accepted)
@@ -138,9 +140,10 @@ def test_changed_progress_requires_confirmation_and_declining_stops_queue(tmp_pa
     processor._run()
     processor._on_resume_conflict.assert_called_once_with(directory)
     assert marker.exists() is not accepted
-    assert processor._run_video_pipeline.call_count == (2 if accepted else 1)
-    assert job.status is (JobStatus.COMPLETED if accepted else JobStatus.PENDING)
-    assert completions == [accepted]
+    assert processor._run_video_pipeline.call_count == (3 if accepted else 2)
+    assert job.status is (JobStatus.COMPLETED if accepted else JobStatus.SKIPPED)
+    assert next_job.status is JobStatus.COMPLETED
+    assert completions == [True]
 
 
 @pytest.mark.parametrize("file_conflict", ["auto_rename", "skip"])

@@ -175,7 +175,6 @@ def find_resume_output(config: SessionConfig, source: Path, output: Path, segmen
     from jasna.session_factory import segment_job_config
 
     metadata = get_video_meta_data(str(source))
-    previous_output = None
     for directory in candidates:
         manifest = read_json(directory / "render" / "job.json")
         if manifest is None:
@@ -186,8 +185,6 @@ def find_resume_output(config: SessionConfig, source: Path, output: Path, segmen
             or resume_directory(config, saved_output).resolve() != directory.resolve()
         ):
             continue
-        if manifest.get("input") == str(source.resolve()):
-            previous_output = saved_output
         effective_config, effective_segments = config, segments
         if not segments and config.ltx_auto_split_percent is not None and config.restoration_model_name == "ltx":
             split = read_json(directory / "split.json")
@@ -200,4 +197,4 @@ def find_resume_output(config: SessionConfig, source: Path, output: Path, segmen
         job = ResumeJob(effective_config, source, saved_output, metadata, effective_segments)
         if job.matches():
             return saved_output
-    return previous_output
+    return None

@@ -269,7 +269,7 @@ EN = {
         "pause_confirm_title": "Pause processing",
         "pause_confirm": "Pause processing? Saved LTX work will be kept. Press Start to continue. The current unfinished track may need to run again.",
         "resume_restart_title": "Replace saved progress?",
-        "resume_restart_confirm": "The input, settings or Jasna version changed. Replace the saved LTX work and start over? Choose No to keep it.",
+        "resume_restart_confirm": "The input, settings or Jasna version changed. Replace the saved LTX work and start over? Choose No to keep it and skip this video.",
         "stop_confirm_title": "Stop processing",
         "stop_confirm": "Stop processing? Progress on the current video will be lost.",
         "close_running_title": "Processing is running",

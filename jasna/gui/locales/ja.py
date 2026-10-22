@@ -269,7 +269,7 @@ JA = {
         "pause_confirm_title": "処理を一時停止",
         "pause_confirm": "処理を一時停止しますか？保存済みの LTX の進行状況は残ります。開始を押すと再開します。処理中のトラックはやり直す場合があります。",
         "resume_restart_title": "保存済みの進行状況を置き換えますか？",
-        "resume_restart_confirm": "入力、設定、または Jasna のバージョンが変わりました。保存済みの LTX の処理を破棄して最初から始めますか？残す場合は「いいえ」を選んでください。",
+        "resume_restart_confirm": "入力、設定、または Jasna のバージョンが変わりました。保存済みの LTX の処理を破棄して最初から始めますか？残してこの動画を飛ばす場合は「いいえ」を選んでください。",
         "stop_confirm_title": "処理を停止",
         "stop_confirm": "処理を停止しますか？現在の動画の進行状況は失われます。",
         "close_running_title": "処理中",

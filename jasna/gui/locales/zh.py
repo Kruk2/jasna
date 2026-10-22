@@ -269,7 +269,7 @@ ZH = {
         "pause_confirm_title": "暂停处理",
         "pause_confirm": "暂停处理？已保存的 LTX 进度会保留。点击开始可继续。当前未完成的跟踪段可能需要重新处理。",
         "resume_restart_title": "替换已保存的进度？",
-        "resume_restart_confirm": "输入、设置或 Jasna 版本已更改。要替换已保存的 LTX 进度并重新开始吗？选择“否”可保留进度。",
+        "resume_restart_confirm": "输入、设置或 Jasna 版本已更改。要替换已保存的 LTX 进度并重新开始吗？选择“否”可保留进度并跳过此视频。",
         "stop_confirm_title": "停止处理",
         "stop_confirm": "停止处理？当前视频的进度将会丢失。",
         "close_running_title": "正在处理",

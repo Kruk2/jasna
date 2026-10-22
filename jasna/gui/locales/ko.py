@@ -269,7 +269,7 @@ KO = {
         "pause_confirm_title": "처리 일시 정지",
         "pause_confirm": "처리를 일시 정지할까요? 저장된 LTX 진행 상황은 유지됩니다. 시작을 누르면 계속합니다. 현재 진행 중인 트랙은 다시 처리할 수 있습니다.",
         "resume_restart_title": "저장된 진행 상황을 바꿀까요?",
-        "resume_restart_confirm": "입력, 설정 또는 Jasna 버전이 변경되었습니다. 저장된 LTX 작업을 지우고 처음부터 시작할까요? 유지하려면 아니요를 선택하세요.",
+        "resume_restart_confirm": "입력, 설정 또는 Jasna 버전이 변경되었습니다. 저장된 LTX 작업을 지우고 처음부터 시작할까요? 유지하고 이 동영상을 건너뛰려면 아니요를 선택하세요.",
         "stop_confirm_title": "처리 중지",
         "stop_confirm": "처리를 중지할까요? 현재 영상의 진행 상황이 사라집니다.",
         "close_running_title": "처리 중",

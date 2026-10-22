@@ -293,6 +293,15 @@ class Processor:
         except ProcessingStopped:
             self._mark_stopped(job)
 
+        except ResumeMismatchError:
+            job.status = JobStatus.SKIPPED
+            self._progress(ProgressUpdate(
+                job_id=job.id,
+                status=JobStatus.SKIPPED,
+                message="Saved LTX work kept",
+            ))
+            self._log("WARNING", f"Skipped {job.filename}: saved LTX work kept")
+
         except UnsupportedVideoError as e:
             e.__traceback__ = None
             job.status = JobStatus.SKIPPED
@@ -386,9 +395,10 @@ class Processor:
                     if self._stop_event.wait(0.1):
                         answer.cancel()
                         raise ProcessingStopped("Processing stopped")
-                if self._stop_event.is_set() or not answer.result():
-                    self.stop()
-                    raise ProcessingStopped("Saved progress kept")
+                if self._stop_event.is_set():
+                    raise ProcessingStopped("Processing stopped")
+                if not answer.result():
+                    raise
                 error.discard()
                 self._log("INFO", "Saved LTX progress replaced after confirmation")
 

@@ -228,7 +228,7 @@ def test_find_saved_output_before_file_conflict_even_after_auto_rename(job, rena
     saved.touch()
     with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
         assert find_resume_output(config, source, output, ()) == saved
-        assert find_resume_output(replace(config, ltx_seed=42), source, output, ()) == saved
+        assert find_resume_output(replace(config, ltx_seed=42), source, output, ()) is None
 
 
 def test_resume_lookup_handles_brackets_and_only_follows_actual_auto_rename_names(job):

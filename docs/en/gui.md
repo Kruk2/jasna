@@ -33,7 +33,8 @@ models slowly, and it warns you at startup.
   with your current settings.
 - **Ⅱ** (pause) appears for jobs using LTX. It asks first, then keeps saved work
   and puts the current item back to **Pending**. Press **▶** to continue.
-  If the input, settings or Jasna version changed, Jasna asks before replacing saved work.
+  If the input, settings or Jasna version changed, Jasna asks before replacing saved work;
+  **No** keeps it and skips that video.
 - **■** (stop) is used for other jobs. They start over next time;
   **File Conflict** decides what happens to any unfinished output.
 - Closing the window while a video is processing asks first: **Minimize** keeps
