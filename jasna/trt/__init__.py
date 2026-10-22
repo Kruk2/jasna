@@ -34,18 +34,9 @@ def _engine_io_names(engine: trt.ICudaEngine) -> tuple[list[str], list[str]]:
     input_names: list[str] = []
     output_names: list[str] = []
 
-    if hasattr(engine, "num_io_tensors"):
-        for i in range(engine.num_io_tensors):
-            name = engine.get_tensor_name(i)
-            if engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
-                input_names.append(name)
-            else:
-                output_names.append(name)
-        return input_names, output_names
-
-    for i in range(engine.num_bindings):
-        name = engine.get_binding_name(i)
-        if engine.binding_is_input(i):
+    for i in range(engine.num_io_tensors):
+        name = engine.get_tensor_name(i)
+        if engine.get_tensor_mode(name) == trt.TensorIOMode.INPUT:
             input_names.append(name)
         else:
             output_names.append(name)

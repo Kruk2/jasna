@@ -115,16 +115,6 @@ class TestEngineIoNames:
         assert inputs == ["input"]
         assert outputs == ["output1", "output2"]
 
-    def test_legacy_bindings_api(self):
-        engine = MagicMock(spec=[])
-        engine.num_bindings = 2
-        engine.get_binding_name = lambda i: ["input", "output"][i]
-        engine.binding_is_input = lambda i: i == 0
-
-        inputs, outputs = _engine_io_names(engine)
-        assert inputs == ["input"]
-        assert outputs == ["output"]
-
 
 def _setup_trt_mocks(tmp_path, *, num_inputs=1, num_outputs=1, dynamic_shape=False, parse_ok=True, build_result=b"engine_bytes"):
     onnx_path = tmp_path / "model.onnx"
