@@ -121,6 +121,7 @@ jasna --input input.mp4 --output output.mp4 --segments "10-25" --working-directo
 ```
 
 LTX keeps saved work in `.{output name}.jasna-resume` in the same folder
-(default: next to the output), including range jobs and auto split. It can take several GB.
+(default: next to the output; in a Working Directory the name also gets a short code),
+including range jobs and auto split. It can take several GB.
 It stays after pause, an error, closing Jasna or removing a queue item, and is deleted
 after the video finishes successfully. Keep the same Working Directory when continuing.

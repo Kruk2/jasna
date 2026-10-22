@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -61,7 +62,12 @@ def read_json(path: Path):
 
 
 def resume_directory(config: SessionConfig, output: Path) -> Path:
-    return (config.working_dir or output.parent) / f".{output.stem}.jasna-resume"
+    """Next to the output, or in the working directory with a short hash of the output path,
+    since outputs of the same name in different folders share it."""
+    if config.working_dir is None:
+        return output.parent / f".{output.stem}.jasna-resume"
+    output_key = hashlib.sha256(str(output.resolve()).encode()).hexdigest()[:8]
+    return config.working_dir / f".{output.stem}.{output_key}.jasna-resume"
 
 
 def _has_render_work(render: Path) -> bool:
@@ -75,12 +81,10 @@ def has_saved_work(root: Path) -> bool:
 
 
 def resume_directories(root: Path, output: Path) -> list[Path]:
-    candidates = []
-    for path in root.glob(".*.jasna-resume"):
-        tail = path.name.removeprefix(f".{output.stem}").removesuffix(".jasna-resume")
-        if not tail or (tail.startswith(" (") and tail.endswith(")") and tail[2:-1].isdecimal()):
-            candidates.append(path)
-    return sorted(candidates, key=lambda path: (path.name != f".{output.stem}.jasna-resume", path.name))
+    """Checkpoint folders in ``root`` that may belong to ``output`` or one of its auto-renamed names."""
+    name = re.compile(rf"\.{re.escape(output.stem)}(?: \(\d+\))?(?:\.[0-9a-f]{{8}})?\.jasna-resume")
+    candidates = [path for path in root.glob(".*.jasna-resume") if name.fullmatch(path.name)]
+    return sorted(candidates, key=lambda path: (len(path.name), path.name))
 
 
 def _model_identity(path: Path) -> list:

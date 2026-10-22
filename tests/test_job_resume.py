@@ -376,3 +376,16 @@ def test_partial_files_are_not_saved_work(job):
         partial.parent.mkdir(parents=True, exist_ok=True)
         partial.write_bytes(b"unfinished")
     ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ()).prepare()
+
+
+def test_outputs_with_the_same_name_keep_separate_checkpoints_in_a_working_directory(job, tmp_path):
+    config, source, _output, metadata = job
+    config = replace(config, working_dir=tmp_path / "scratch")
+    first, second = tmp_path / "a" / "clip.mp4", tmp_path / "b" / "clip.mp4"
+    assert job_resume.resume_directory(config, first) != job_resume.resume_directory(config, second)
+    renamed = first.with_stem("clip (1)")
+    ResumeJob(config, source, renamed, metadata, ()).prepare()
+    ResumeJob(config, source, second, metadata, ()).prepare()
+    with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
+        assert find_resume_output(config, source, first, ()) == renamed
+        assert find_resume_output(config, source, second, ()) == second
