@@ -64,6 +64,16 @@ def resume_directory(config: SessionConfig, output: Path) -> Path:
     return (config.working_dir or output.parent) / f".{output.stem}.jasna-resume"
 
 
+def _has_render_work(render: Path) -> bool:
+    return any(any(render.glob(pattern)) for pattern in ("ltx/*.plans.npz", "ltx/*.pt", "segments/*-raw.nut"))
+
+
+def has_saved_work(root: Path) -> bool:
+    """Whether the checkpoint ``root`` holds finished work: an auto split, track plans,
+    latents or fragments. A checkpoint without any is replaced without asking."""
+    return (root / "split.json").is_file() or _has_render_work(root / "render")
+
+
 def resume_directories(root: Path, output: Path) -> list[Path]:
     candidates = []
     for path in root.glob(".*.jasna-resume"):
@@ -139,8 +149,10 @@ class ResumeJob:
         if self.matches():
             log.info("Resuming saved LTX progress for %s", self.output.name)
             return
-        if self.directory.exists():
+        if _has_render_work(self.directory):
             raise ResumeMismatchError(self.root)
+        if self.directory.exists():
+            shutil.rmtree(self.directory)
         self.directory.mkdir(parents=True)
         write_json(self.directory / "job.json", {"fingerprint": self.fingerprint, "input": str(self.source), "output": str(self.output)})
 

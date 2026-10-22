@@ -342,6 +342,7 @@ def ltx_auto_split(
 
     from jasna.job_resume import (
         ResumeMismatchError,
+        has_saved_work,
         job_fingerprint,
         read_json,
         resume_directory,
@@ -356,7 +357,7 @@ def ltx_auto_split(
         segments = segments_from_json(cached["segments"])
         logger.info("Reusing saved LTX auto split for %s", input_video.name)
     else:
-        if cached is not None or (root / "render").exists():
+        if has_saved_work(root):
             raise ResumeMismatchError(root)
         samples = scan_mosaic_sizes(
             session.detection_model_for(config),

@@ -16,7 +16,15 @@ import psutil
 import torch
 
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
-from jasna.job_resume import ResumeJob, ResumeMismatchError, commit_file, read_json, resume_directory, write_json
+from jasna.job_resume import (
+    ResumeJob,
+    ResumeMismatchError,
+    commit_file,
+    has_saved_work,
+    read_json,
+    resume_directory,
+    write_json,
+)
 from jasna.media.container_utils import MOV_SUFFIXES
 from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
@@ -497,7 +505,7 @@ class Pipeline:
             plan_path = self.resume.directory / "splice.json"
             plan_data = json.loads(json.dumps(asdict(plan), default=str))
             saved_plan = read_json(plan_path)
-            if saved_plan is not None and saved_plan != plan_data:
+            if saved_plan is not None and saved_plan != plan_data and has_saved_work(self.resume.root):
                 raise ResumeMismatchError(self.resume.root)
             write_json(plan_path, plan_data)
         default = job_restoration(self.restoration_model_name, self.ltx_seed)

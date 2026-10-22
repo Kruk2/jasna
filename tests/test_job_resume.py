@@ -36,6 +36,11 @@ def job(tmp_path):
     return config, source, output, metadata
 
 
+def _save_work(checkpoint: ResumeJob) -> None:
+    (checkpoint.directory / "ltx").mkdir(parents=True, exist_ok=True)
+    (checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt").write_bytes(b"latent")
+
+
 def test_plans_round_trip_preserves_crops_float64_polygons_and_weights(tmp_path):
     crop = CropFrame((1, 2, 640, 480), (384, 512), (64, 64, 0, 0))
     integer = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.int32)
@@ -89,6 +94,7 @@ def test_resume_rejects_changed_lut_contents_even_with_same_size_and_timestamp(j
     config = replace(config, lut_path=str(lut))
     checkpoint = ResumeJob(config, source, output, metadata, ())
     checkpoint.prepare()
+    _save_work(checkpoint)
     stat = lut.stat()
     lut.write_bytes(b"1 1 1\n0 0 0\n")
     os.utime(lut, ns=(stat.st_atime_ns, stat.st_mtime_ns))
@@ -118,6 +124,7 @@ def test_resume_rejects_model_replaced_at_the_same_path(job, tmp_path, monkeypat
             path = path.rename(path.with_name(path.name + ".enc"))
     checkpoint = ResumeJob(config, source, output, metadata, ranges)
     checkpoint.prepare()
+    _save_work(checkpoint)
     stat = path.stat()
     path.write_bytes(b"updated")
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
@@ -154,6 +161,7 @@ def test_removed_model_rejects_checkpoint_without_deleting_saved_progress(job):
     config, source, output, metadata = job
     checkpoint = ResumeJob(config, source, output, metadata, ())
     checkpoint.prepare()
+    _save_work(checkpoint)
     config.detection_model_path.unlink()
     with pytest.raises(ResumeMismatchError):
         ResumeJob(config, source, output, metadata, ()).prepare()
@@ -197,7 +205,8 @@ def test_mismatch_preserves_every_file_until_confirmed(job):
     config, source, output, metadata = job
     original = ResumeJob(config, source, output, metadata, ())
     original.prepare()
-    latent = original.directory / "latent.pt"
+    latent = original.directory / "ltx" / "000000.0-1-0.reference.pt"
+    latent.parent.mkdir()
     latent.write_bytes(b"saved")
     changed = ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ())
     with pytest.raises(ResumeMismatchError) as raised:
@@ -307,3 +316,63 @@ def test_auto_split_reuses_saved_detection_and_rejects_changed_settings(job, ren
         assert (checkpoint.root / "split.json").read_bytes() == saved_split
         if render_started:
             assert checkpoint.matches()
+
+
+def test_auto_split_scans_past_a_checkpoint_without_saved_work(job):
+    from jasna.media.splice import KeyframeIndex
+    from jasna.mosaic_scan import MosaicSamples
+    from jasna.session_factory import ltx_auto_split
+
+    config, source, output, metadata = job
+    config = replace(config, ltx_auto_split_percent=12.0, vr_mode="off")
+    metadata.duration = 6.0
+    metadata.num_frames = 180
+    metadata.video_width, metadata.video_height = 1920, 1080
+    metadata.sample_aspect_ratio = Fraction(1, 1)
+    ResumeJob(replace(config, ltx_seed=42), source, output, metadata, ()).prepare()
+    samples = MosaicSamples(times=(1.0, 3.0), scores=(0.9, 0.9), sizes=(0.05, 0.3), stride=1.0)
+    with (
+        patch("jasna.media.probe.get_video_meta_data", return_value=metadata),
+        patch("jasna.media.splice.validate_smart_render"),
+        patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 60, 120), Fraction(1,30), 0, 180)),
+        patch("jasna.mosaic_scan.scan_mosaic_sizes", return_value=samples) as scan,
+    ):
+        assert ltx_auto_split(config, MagicMock(), source, output, progress_callback=None) is not None
+    scan.assert_called_once()
+
+
+def test_changed_settings_replace_a_checkpoint_without_saved_work(job):
+    config, source, output, metadata = job
+    ResumeJob(config, source, output, metadata, ()).prepare()
+    changed = ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ())
+    changed.prepare()
+    assert changed.matches()
+
+
+@pytest.mark.parametrize("work", ["plans", "latent", "fragment"])
+def test_changed_settings_ask_once_work_is_saved(job, work):
+    config, source, output, metadata = job
+    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint.prepare()
+    saved = {
+        "plans": checkpoint.directory / "ltx" / "0-1.plans.npz",
+        "latent": checkpoint.directory / "ltx" / "000000.0-1-0.final.pt",
+        "fragment": checkpoint.directory / "segments" / "0000-raw.nut",
+    }[work]
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    saved.write_bytes(b"saved")
+    with pytest.raises(ResumeMismatchError):
+        ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ()).prepare()
+
+
+def test_partial_files_are_not_saved_work(job):
+    config, source, output, metadata = job
+    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint.prepare()
+    for partial in (
+        checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt.part",
+        checkpoint.directory / "segments" / "0000-partial.nut",
+    ):
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes(b"unfinished")
+    ResumeJob(replace(config, ltx_seed=7), source, output, metadata, ()).prepare()
