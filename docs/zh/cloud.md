@@ -8,7 +8,9 @@
 ## 需要准备
 
 - 请向你获得许可证码的地方申请为它打开**云权限**。
-- 普通容器即可。RunPod 和 Vast 都能用。用 `--pid=host` 启动的 Docker 容器不行。
+- 普通容器即可。Vast 能用。用 `--pid=host` 启动的 Docker 容器不行。
+- 目前 RunPod 上不能用 LTX。RunPod 会替换 pod 里的 root 用户，LTX 无法确认
+  驱动文件是真的。BasicVSR++ 可以用。要用 LTX 请选 Vast。
 - NVIDIA 显卡，驱动 **580 或更新**。
 - 至少 **80 GB** 磁盘。
 - 在模板或实例设置里加上 `NVIDIA_DRIVER_CAPABILITIES=all`。

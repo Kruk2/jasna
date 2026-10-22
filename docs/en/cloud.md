@@ -9,8 +9,11 @@ official Linux release; Windows and GitHub source checkouts do not support it.
 ## What you need
 
 - **Cloud** has to be turned on for your License code. Ask where you got it.
-- A normal container. RunPod and Vast work. A Docker container started with
+- A normal container. Vast works. A Docker container started with
   `--pid=host` doesn't.
+- For now LTX doesn't work on RunPod. RunPod changes the root user in its
+  pods, so LTX can't check that the driver files are real. BasicVSR++ works
+  there. For LTX use Vast.
 - An NVIDIA GPU with driver **580 or newer**.
 - At least **80 GB** of disk.
 - `NVIDIA_DRIVER_CAPABILITIES=all` in your template or instance settings.
