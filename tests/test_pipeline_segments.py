@@ -466,6 +466,7 @@ def test_reencoded_span_writes_every_decoded_frame_and_closes_its_writer(tmp_pat
     assert (frames.call_args.kwargs["seek_ts"], frames.call_args.kwargs["end_pts"]) == (2.0, 120)
     assert [written.args[1] for written in writer.write.call_args_list] == [60, 61, 62]
     assert [update.args[0] for update in progress.update.call_args_list] == [2, 1]
+    writer.finish.assert_called_once_with()
     writer.close.assert_called_once_with()
 
 
@@ -536,12 +537,11 @@ def test_ltx_smart_resume_keeps_completed_fragments_and_retries_partial_span(tmp
     def ltx_run(_metadata, _index, pending, *_args):
         restored.extend(span for span, _, _ in pending)
         writer = pending[0][2]()
-        try:
-            writer.write(torch.zeros(1), 75)
-            if len(restored) == 1:
-                raise RuntimeError("compose interrupted")
-        finally:
+        writer.write(torch.zeros(1), 75)
+        if len(restored) == 1:
             writer.close()
+            raise RuntimeError("compose interrupted")
+        writer.finish()
 
     pipeline._run_ltx_spans = ltx_run
     pipeline._run_pass = MagicMock(side_effect=lambda **kwargs: kwargs["encoder_ctx"].path.write_bytes(b"basicvsrpp"))

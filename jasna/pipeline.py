@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
 import threading
 import time
 from collections.abc import Callable
@@ -76,6 +75,9 @@ class _OfflineFrameWriter:
     def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         pass
 
+    def finish(self) -> None:
+        self.close()
+
     def close(self) -> None:
         if self._entered:
             self._encoder_ctx.__exit__(None, None, None)
@@ -83,16 +85,15 @@ class _OfflineFrameWriter:
 
 
 class _FragmentFrameWriter(_OfflineFrameWriter):
-    def __init__(self, encoder: VideoEncoder, cancel: threading.Event, commit: Callable[[], None]) -> None:
+    """Writes a smart-render fragment; ``finish`` publishes it once every frame is written."""
+
+    def __init__(self, encoder: VideoEncoder, commit: Callable[[], None]) -> None:
         super().__init__(encoder, [time.monotonic()])
-        self._cancel = cancel
         self._commit = commit
 
-    def close(self) -> None:
-        entered = self._entered
-        super().close()
-        if entered and sys.exc_info()[0] is None and not self._cancel.is_set():
-            self._commit()
+    def finish(self) -> None:
+        self.close()
+        self._commit()
 
 
 class Pipeline:
@@ -473,6 +474,7 @@ class Pipeline:
                 for frame, frame_pts in zip(batch, pts):
                     writer.write(frame, frame_pts)
                 progress.update(len(pts))
+            writer.finish()
         finally:
             writer.close()
 
@@ -584,7 +586,7 @@ class Pipeline:
                     return temp_dir / f"{span_index:04d}-partial.nut" if self.resume is not None else raw_path(span_index)
 
                 def commit_fragment(span_index: int) -> None:
-                    if self.resume is not None and not self._cancel_event.is_set():
+                    if self.resume is not None:
                         with partial_path(span_index).open("r+b") as stream:
                             os.fsync(stream.fileno())
                         commit_file(partial_path(span_index), raw_path(span_index))
@@ -603,11 +605,9 @@ class Pipeline:
                         smart_fragment=True,
                     )
 
-                def fragment_writer(span_index: int, span: SpliceSpan) -> Callable[[], _OfflineFrameWriter]:
-                    if self.resume is None:
-                        return lambda: _OfflineFrameWriter(fragment_encoder(span_index, span), [time.monotonic()])
+                def fragment_writer(span_index: int, span: SpliceSpan) -> Callable[[], _FragmentFrameWriter]:
                     return lambda: _FragmentFrameWriter(
-                        fragment_encoder(span_index, span), self._cancel_event, lambda: commit_fragment(span_index)
+                        fragment_encoder(span_index, span), lambda: commit_fragment(span_index)
                     )
 
                 def duration(span: SpliceSpan) -> float:
@@ -635,7 +635,8 @@ class Pipeline:
                             effect_ranges=span.effect_ranges,
                             output_frame_count=max(1, round(duration(span) * metadata.video_fps)),
                         )
-                        commit_fragment(span_index)
+                        if not self._cancel_event.is_set():
+                            commit_fragment(span_index)
                 pending_ltx = [
                     (span, segments_of[span], fragment_writer(span_index, span))
                     for span_index, span in enumerate(plan.spans)

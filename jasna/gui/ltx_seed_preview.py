@@ -86,6 +86,9 @@ class SeedFrameWriter:
         seconds = (int(pts) - self._metadata.start_pts) * float(self._metadata.time_base)
         self.frames.append(SeedFrame(max(0.0, seconds), path))
 
+    def finish(self) -> None:
+        pass
+
     def close(self) -> None:
         pass
 

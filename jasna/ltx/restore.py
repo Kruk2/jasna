@@ -85,7 +85,11 @@ class Cancelled(Exception):
 
 
 class FrameWriter(Protocol):
+    """``finish`` once every frame is written; ``close`` (also after ``finish``) releases it."""
+
     def write(self, frame: torch.Tensor, pts: int) -> None: ...
+
+    def finish(self) -> None: ...
 
     def close(self) -> None: ...
 
@@ -840,6 +844,7 @@ def compose_span(
                             writer.write(frame, frame_pts)
                         else:
                             writer.write(composers[owner].frame(frame), frame_pts)
+                writer.finish()
             finally:
                 writer.close()
     finally:
@@ -1134,6 +1139,9 @@ class _SpeedTestMosaics:
 
 class _DiscardedFrames:
     def write(self, frame: torch.Tensor, pts: int) -> None:
+        pass
+
+    def finish(self) -> None:
         pass
 
     def close(self) -> None:

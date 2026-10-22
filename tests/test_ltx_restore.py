@@ -104,6 +104,9 @@ class _Writer:
     def write(self, frame, pts):
         self.frames.append((pts, int(frame[2, 0, 0])))
 
+    def finish(self):
+        self.finished = True
+
     def close(self):
         self.closed = True
 
