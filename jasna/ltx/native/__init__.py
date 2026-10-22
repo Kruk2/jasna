@@ -423,6 +423,11 @@ def release_architectures() -> list[tuple[int, int]] | list[str]:
     those with tuned INT8 kernels (SMs, or gfx names under ROCm, where gfx1103 has none)."""
     if torch.version.hip is not None:
         return sorted(policy.AMD_INT8_MM_TILES)
+    return nvidia_release_architectures()
+
+
+def nvidia_release_architectures() -> list[tuple[int, int]]:
+    """The SMs a release compiles the native block for, whatever GPU vendor builds it."""
     return sorted({*policy.INT8_MM_TILES, *policy.CUBLAS_INT8_MM})
 
 
