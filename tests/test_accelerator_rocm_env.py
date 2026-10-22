@@ -83,3 +83,20 @@ def test_process_env_gets_rocm_defaults_on_rocm(monkeypatch, sdpa_switches):
         monkeypatch.delenv(name, raising=False)
     configure_rocm_process_env()
     assert {name: os.environ[name] for name in ROCM_DEFAULTS} == ROCM_DEFAULTS
+
+
+@pytest.mark.parametrize("triton", [True, False])
+def test_miopen_runs_channels_last_convs_natively_only_where_they_compile(monkeypatch, sdpa_switches, triton):
+    monkeypatch.setattr(torch.version, "hip", "7.2")
+    monkeypatch.setenv("PYTORCH_MIOPEN_SUGGEST_NHWC", "restored after the test")
+    monkeypatch.delenv("PYTORCH_MIOPEN_SUGGEST_NHWC")
+    monkeypatch.setattr("torch.utils._triton.has_triton_package", lambda: triton)
+    configure_rocm_process_env()
+    assert os.environ.get("PYTORCH_MIOPEN_SUGGEST_NHWC") == ("1" if triton else None)
+
+
+def test_process_env_is_left_alone_off_rocm_including_the_channels_last_convs(monkeypatch):
+    monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.delenv("PYTORCH_MIOPEN_SUGGEST_NHWC", raising=False)
+    configure_rocm_process_env()
+    assert "PYTORCH_MIOPEN_SUGGEST_NHWC" not in os.environ

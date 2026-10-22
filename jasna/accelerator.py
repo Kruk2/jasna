@@ -48,6 +48,14 @@ def configure_rocm_process_env() -> None:
     if not torch.version.hip:
         return
     apply_rocm_env_defaults(os.environ)
+    # MIOpen then runs channels-last 3D convs in NDHWC instead of transposing every input, weight
+    # and output: the compiled LTX VAE encoder 5 % faster and 0.5 GiB lighter on an R9700. Eager
+    # encoders (no Triton: Windows ROCm, AMD releases) run 1.6x slower with it, and BasicVSR++ and
+    # RF-DETR pass no channels-last conv inputs.
+    from torch.utils._triton import has_triton_package
+
+    if has_triton_package():
+        os.environ.setdefault("PYTORCH_MIOPEN_SUGGEST_NHWC", "1")
     # Windows ROCm ships the AOTriton kernel images in a separate device wheel;
     # without them the first flash/mem-efficient SDPA launch dies with a HIP error.
     if not has_aotriton_flash_images(Path(torch.__file__).parent / "lib"):
