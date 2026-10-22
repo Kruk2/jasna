@@ -11,6 +11,8 @@ GIB = 1 << 30
 
 def test_windows_caps_the_process_view_with_the_device_wide_free_vram(monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.setattr(torch.version, "cuda", "13.0")
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda device: (30 * GIB, 32 * GIB))
     monkeypatch.setattr(accelerator, "_nvml_free_bytes", lambda device: 12 * GIB)
     assert accelerator.device_free_bytes(torch.device("cuda:0")) == 12 * GIB
