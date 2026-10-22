@@ -1,6 +1,8 @@
 import logging
 import os
+import threading
 from fractions import Fraction
+from queue import Full, Queue
 from typing import Iterator
 
 import av
@@ -12,6 +14,7 @@ from jasna.accelerator import (
     AcceleratorVendor,
     current_stream,
     new_stream,
+    set_device,
     stream_context,
     vendor_for_device,
 )
@@ -88,6 +91,71 @@ def _empty_batch(frames: int, height: int, width: int, device: torch.device, wri
     batch = torch.empty((frames, 3, height, width), device=device, dtype=torch.uint8)
     writer.wait_stream(current_stream(device))
     return batch
+
+
+def _empty_batch_on(
+    frames: int, height: int, width: int, device: torch.device, stream
+) -> torch.Tensor:
+    """A uint8 RGB batch owned by ``stream``'s allocator pool; every consumer stream must
+    ``record_stream`` it before the caching allocator may hand the block back to ``stream``."""
+    with stream_context(stream):
+        return torch.empty((frames, 3, height, width), device=device, dtype=torch.uint8)
+
+
+_PREFETCH_DONE = object()
+
+
+class _BatchPrefetcher:
+    """Runs a batch generator on its own thread so decoding overlaps the consumer.
+
+    Batches come from the producer's private stream, fully synchronized before hand-off.
+    Each one is recorded on the consumer's current stream, so its block is not reused for a
+    later batch while work the consumer queued may still read it (issue #252).
+    """
+
+    def __init__(self, batches: Iterator[tuple[torch.Tensor, list[int]]], device: torch.device):
+        self._batches = batches
+        self._device = device
+        self._queue: Queue = Queue(maxsize=1)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._produce, name="DecodePrefetch", daemon=True)
+        self._thread.start()
+
+    def _produce(self) -> None:
+        try:
+            set_device(self._device)
+            for item in self._batches:
+                if not self._put(item):
+                    return
+            self._put(_PREFETCH_DONE)
+        except BaseException as exc:
+            self._put(exc)
+        finally:
+            self._batches.close()
+
+    def _put(self, item) -> bool:
+        while not self._stop.is_set():
+            try:
+                self._queue.put(item, timeout=0.05)
+                return True
+            except Full:
+                continue
+        return False
+
+    def __iter__(self) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        while True:
+            item = self._queue.get()
+            if item is _PREFETCH_DONE:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            batch, pts = item
+            batch.record_stream(current_stream(self._device))
+            yield batch, pts
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join()
 
 
 # VALI aborts open/reads after 3 s by default; a spun-down HDD needs longer to wake.
@@ -258,6 +326,7 @@ class VideoReader:
         self.vendor = vendor_for_device(device)
         self._decoder_ctx = None
         self._vali_source: _ValiFrameSource | None = None
+        self._prefetcher: _BatchPrefetcher | None = None
         self._software_only = False
 
     def __enter__(self):
@@ -425,6 +494,7 @@ class VideoReader:
             source, self._vali_source = self._vali_source, None
             source.close()
             return
+        self._close_prefetcher()
         self.container.close()
         self._decoder_ctx = None
         if self._raw_stream is None:
@@ -499,10 +569,29 @@ class VideoReader:
             if frame_index % self.frame_stride == 0:
                 yield frame
 
+    def _close_prefetcher(self) -> None:
+        if self._prefetcher is not None:
+            prefetcher, self._prefetcher = self._prefetcher, None
+            prefetcher.close()
+
     def frames(
         self,
         seek_ts: float | None = None,
     ) -> Iterator[tuple[torch.Tensor, list[int]]]:
+        if self.vendor is not AcceleratorVendor.AMD:
+            yield from self._decoded_batches(seek_ts)
+            return
+        # AMD decodes on the CPU (AMF downloads every surface), so decode on a
+        # thread of its own instead of between the consumer's batches.
+        self._close_prefetcher()
+        prefetcher = _BatchPrefetcher(self._decoded_batches(seek_ts), self.device)
+        self._prefetcher = prefetcher
+        try:
+            yield from prefetcher
+        finally:
+            prefetcher.close()
+
+    def _decoded_batches(self, seek_ts: float | None) -> Iterator[tuple[torch.Tensor, list[int]]]:
         # With seek_ts, strided selection re-anchors at the first decoded frame
         # after the seek instead of the start of the file: sample phase is only
         # stable relative to the seek target.
@@ -599,31 +688,28 @@ class VideoReader:
         color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
         H, W = self.height, self.width
 
-        # Pinned host batch is shared. Device staging is gated on
-        # AcceleratorVendor.AMD (not "if not NVIDIA") so Intel/CPU keep the
-        # historical single-staging private-stream fallback unless AMD-specific.
-        # NVIDIA: one staging frame on a private stream (H2D+convert ordered so
-        # the next overwrite starts only after the prior kernel consumed it).
-        # AMD (issue #252): batch device YUV on current_stream. Isolated D1 was
-        # clean; residual glitches are pipeline-contended (Phase 0). Per-frame
-        # staging reuse under multi-thread load can race; batch staging removes
-        # overwrite races. Phase 4 on gfx1201 cleared full-pipeline static.
-        # Extra VRAM ≈ (batch_size - 1) × (1.5 × H × W × bytes) — a few MiB at
-        # batch 4 @ 1080p8.
+        # AMD (issue #252): one device YUV plane per batch frame on a private stream;
+        # each batch is allocated from that stream's pool, so the conversion never waits
+        # for other threads' work, and the consumer records its own stream on it.
+        # NVIDIA: one staging frame on a private stream (H2D+convert ordered so the next
+        # overwrite starts only after the prior kernel consumed it); the batch comes from
+        # the caller's stream.
         pinned = torch.empty((self.batch_size, H + H // 2, W), dtype=dtype, pin_memory=True)
+        stream = new_stream(self.device)
         if self.vendor is AcceleratorVendor.AMD:
-            device_yuv = torch.empty(
-                (self.batch_size, H + H // 2, W), dtype=dtype, device=self.device
-            )
+            with stream_context(stream):
+                device_yuv = torch.empty(
+                    (self.batch_size, H + H // 2, W), dtype=dtype, device=self.device
+                )
             staging = None
-            stream = current_stream(self.device)
+            new_batch = _empty_batch_on
         else:
             device_yuv = None
             staging = torch.empty((H + H // 2, W), dtype=dtype, device=self.device)
-            stream = new_stream(self.device)
+            new_batch = _empty_batch
 
         while group:
-            batch = _empty_batch(len(group), H, W, self.device, stream)
+            batch = new_batch(len(group), H, W, self.device, stream)
             pts = [frame.pts for frame in group]
             for i, frame in enumerate(group):
                 try:
@@ -664,7 +750,7 @@ class VideoReader:
                     )
 
             next_group = self._read_group(decoded)
-            # Sync before yield so other pipeline threads never see in-flight planes.
+            # Sync the private stream before yield so consumers never see in-flight planes.
             stream.synchronize()
             group = next_group
             yield batch, pts
