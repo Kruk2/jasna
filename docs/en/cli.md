@@ -44,7 +44,7 @@ Jasna uses `TMP` first, then `TEMP`. `TMPDIR` is not used.
 | `--output` | — | Output file, or output folder when `--input` is a folder. |
 | `--output-pattern` | `{original}_out` | Filename template for folder input. `{original}` is the input stem. Images keep their source extension; videos use the template extension when provided. Jasna checks planned outputs before processing and errors out if two inputs map to the same file. |
 | `--device` | `cuda:0` | GPU selection. AMD cards use the same `cuda:N` names through ROCm. |
-| `--batch-size` | `4`, AMD `8` | Detection batch size. Legacy `rfdetr-v5` always uses 4. |
+| `--batch-size` | `4` | Detection batch size. Legacy `rfdetr-v5` always uses 4. |
 | `--fp16` / `--no-fp16` | on | Half precision: less VRAM, often faster, no visible quality loss. |
 | `--log-level` | `error` | `debug`, `info`, `warning`, `error`. |
 | `--no-progress` | off | Disable the progress bar. |

@@ -8,7 +8,6 @@ from dataclasses import asdict
 
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.gui.models import AppSettings, PresetManager
-from jasna.mosaic.detection_registry import default_detection_batch_size
 from jasna.gui.components import (
     AutoHidingScrollableFrame,
     ConfirmDialog,
@@ -381,7 +380,7 @@ class SettingsPanel(ctk.CTkFrame):
         for section in self._sections:
             values.update(section.collect())
         return AppSettings(
-            batch_size=default_detection_batch_size("cuda:0"),
+            batch_size=4,  # Fixed default value
             **values,
         )
 

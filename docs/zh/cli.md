@@ -41,7 +41,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | `--output` | — | 输出文件；当 `--input` 是文件夹时为输出文件夹。 |
 | `--output-pattern` | `{original}_out` | 文件夹输入的文件名模板。`{original}` 是输入文件名主干。图片保留源扩展名；视频在模板提供扩展名时使用该扩展名。Jasna 会在处理前检查计划输出路径，如果两个输入映射到同一个文件则报错退出。 |
 | `--device` | `cuda:0` | GPU 选择。AMD 显卡通过 ROCm 也使用相同的 `cuda:N` 名称。 |
-| `--batch-size` | `4`，AMD 为 `8` | 检测批处理大小。旧版 `rfdetr-v5` 始终使用 4。 |
+| `--batch-size` | `4` | 检测批处理大小。旧版 `rfdetr-v5` 始终使用 4。 |
 | `--fp16` / `--no-fp16` | 开启 | 半精度：占用更少显存，通常更快，看不出画质损失。 |
 | `--log-level` | `error` | `debug`、`info`、`warning`、`error`。 |
 | `--no-progress` | 关闭 | 禁用进度条。 |
