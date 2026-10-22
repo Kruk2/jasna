@@ -280,6 +280,9 @@ class _ValiFrameSource:
                     if frame_pts is None:
                         exhausted = True
                         break
+                # The hidden lead-in of an MP4 cut mid-GOP, which PyAV's decoders drop.
+                if frame_pts < self.metadata.start_pts:
+                    continue
                 selected = frame_index % self.frame_stride == 0
                 frame_index += 1
                 if not selected:
@@ -541,11 +544,18 @@ class VideoReader:
                 self._decoder_ctx.flush_buffers()
 
         consecutive_errors = 0
+        discarded_pts: set[int] = set()
         for packet in demux_video(self.container, self.video_stream):
+            if packet.is_discard:
+                discarded_pts.add(packet.pts)
             frames, consecutive_errors = self._decode_packet(packet, consecutive_errors)
             for frame in frames:
                 # VC-1 NVDEC returns an empty frame for a stream starting on a P frame.
                 if not frame.planes:
+                    continue
+                # AMF decoders also return the frames of packets the demuxer marks
+                # discard (the hidden lead-in of an MP4 cut mid-GOP); FFmpeg's own decoders drop them.
+                if frame.pts in discarded_pts:
                     continue
                 if target_pts is not None and frame.pts is not None and frame.pts < target_pts:
                     continue

@@ -645,6 +645,35 @@ def test_av_skew_preserved(tmp_path):
     assert _skew(dst) == pytest.approx(_skew(src), abs=0.05)
 
 
+def test_b_frame_h264_encode_of_a_mid_gop_cut_keeps_only_the_shown_frames(tmp_path):
+    # The cut keeps the GOP's lead-in as discarded packets; their frames reached
+    # h264_amf with negative pts, which it rejects with B-frames (ERANGE).
+    full = _make_source(tmp_path, "full.mp4", acodec=None, duration=4, extra=["-bf", "3", "-g", "24"])
+    src = tmp_path / "cut.mp4"
+    subprocess.run(
+        [resolve_executable("ffmpeg"), "-y", "-loglevel", "error", "-ss", "1.5", "-i", str(full), "-c", "copy", str(src)],
+        check=True,
+    )
+    with av.open(str(src)) as container:
+        shown_pts = [frame.pts for frame in container.decode(video=0)]
+    metadata = get_video_meta_data(str(src))
+    dst = tmp_path / "out.mp4"
+
+    decoded_pts = []
+    with (
+        VideoReader(str(src), batch_size=4, device=DEVICE, metadata=metadata) as reader,
+        VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec="h264", encoder_settings={"bf": 3}) as encoder,
+    ):
+        for frames, pts_list in reader.frames():
+            for index, pts in enumerate(pts_list):
+                encoder.encode(frames[index], pts)
+            decoded_pts += pts_list
+
+    assert decoded_pts == shown_pts
+    with av.open(str(dst)) as container:
+        assert sum(1 for _ in container.decode(video=0)) == len(shown_pts)
+
+
 def test_zero_frame_job_closes_cleanly(tmp_path):
     src = _make_source(tmp_path, "src.mp4")
     metadata = get_video_meta_data(str(src))

@@ -165,9 +165,32 @@ def test_pyav_reader_skips_frames_without_planes(monkeypatch) -> None:
     reader = _reader(monkeypatch, AcceleratorVendor.NVIDIA)
     reader.container = None
     reader.video_stream = None
-    monkeypatch.setattr(module, "demux_video", lambda _container, _stream: ["packet"])
+    packet = SimpleNamespace(pts=33, is_discard=False)
+    monkeypatch.setattr(module, "demux_video", lambda _container, _stream: [packet])
     monkeypatch.setattr(reader, "_decode_packet", lambda _packet, errors: ([empty, picture], errors))
     assert list(reader._decoded_frames(None)) == [picture]
+
+
+def test_pyav_reader_drops_frames_of_discarded_packets(monkeypatch) -> None:
+    # An MP4 cut mid-GOP keeps the GOP's lead-in as packets the demuxer marks
+    # discard. AMF decoders still return their frames, one packet late here.
+    packets = [
+        SimpleNamespace(pts=-1024, is_discard=True),
+        SimpleNamespace(pts=-512, is_discard=True),
+        SimpleNamespace(pts=0, is_discard=False),
+        SimpleNamespace(pts=512, is_discard=False),
+    ]
+    frames = [SimpleNamespace(pts=packet.pts, planes=("y", "uv")) for packet in packets]
+    reader = _reader(monkeypatch, AcceleratorVendor.AMD)
+    reader.container = None
+    reader.video_stream = None
+    monkeypatch.setattr(module, "demux_video", lambda _container, _stream: packets)
+    monkeypatch.setattr(
+        reader,
+        "_decode_packet",
+        lambda packet, errors: (frames[: packets.index(packet)][-1:], errors),
+    )
+    assert [frame.pts for frame in reader._decoded_frames(None)] == [0]
 
 
 def test_unknown_backend_raises(monkeypatch) -> None:
@@ -260,6 +283,15 @@ def test_vali_source_batches_and_final_partial_batch(monkeypatch) -> None:
         (2, 3, 16, 16),
         (1, 3, 16, 16),
     ]
+
+
+def test_vali_source_drops_the_lead_in_before_the_stream_start(monkeypatch) -> None:
+    script = [_frame(pts) for pts in (-1024, -512, 0, 512, 1024)] + [_EOF]
+    _calls, converter = _install_fake_vali(monkeypatch, script)
+    source = _vali_source(batch_size=4, frame_stride=2)
+    batches = list(source.frames(None))
+    assert [pts for _batch, pts in batches] == [[0, 1024]]
+    assert converter.convert_surface_into.call_count == 2
 
 
 def test_vali_source_tolerates_sleeping_disk_on_open(monkeypatch) -> None:
