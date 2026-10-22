@@ -31,6 +31,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import torch
@@ -63,8 +64,17 @@ _HIP_ATTENTION_SOURCES = (_HERE / "norm_rope_quant.hip", _HIP_ATTENTION / "quant
                           _HIP_ATTENTION / "int8_attn.hip")
 _HIP_ATTENTION_FLAGS = ("-std=c++20", "-O3", "-DNDEBUG", "-ffast-math", "-mno-wavefrontsize64")
 HIP_ATTENTION_CTA_K = 64
-PREBUILT = _HERE / "prebuilt"
 _IS_WINDOWS = os.name == "nt"
+
+
+def _prebuilt_directory() -> Path:
+    """A frozen Linux release ships it beside its executable, which takes the package's ``jasna`` name."""
+    if is_frozen() and not _IS_WINDOWS:
+        return Path(sys.executable).resolve().parent / "ltx/native/prebuilt"
+    return _HERE / "prebuilt"
+
+
+PREBUILT = _prebuilt_directory()
 EXTENSION_NAME = "jasna_ltx_native"
 
 
@@ -463,6 +473,11 @@ def prebuild(directory: Path) -> None:
     """Release build: kernels for every architecture of the kernel tables and the extension for
     all of them, laid out as ``PREBUILT`` expects (copy ``directory`` there)."""
     prebuild_kernels(directory)
+    prebuild_extension(directory)
+
+
+def prebuild_extension(directory: Path) -> None:
+    """The extension for every ``release_architectures`` entry, into ``directory`` as ``PREBUILT`` expects."""
     if torch.version.hip is not None:
         os.environ["PYTORCH_ROCM_ARCH"] = ";".join(release_architectures())
     else:

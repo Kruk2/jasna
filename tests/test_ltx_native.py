@@ -455,6 +455,18 @@ def test_shipped_kernels_must_fit_the_models_widths_and_gpu(monkeypatch, tmp_pat
         native._kernel_manifest("gfx1100", aot.BlockDims(4096, 16384, 32), fp4=False)
 
 
+@pytest.mark.parametrize("frozen,windows,expected", [
+    (False, False, native._HERE / "prebuilt"),
+    (True, True, native._HERE / "prebuilt"),
+    (True, False, Path("/opt/dist/ltx/native/prebuilt")),
+])
+def test_frozen_linux_release_ships_the_prebuilt_block_beside_its_executable(monkeypatch, frozen, windows, expected):
+    monkeypatch.setattr(native, "is_frozen", lambda: frozen)
+    monkeypatch.setattr(native, "_IS_WINDOWS", windows)
+    monkeypatch.setattr(native.sys, "executable", "/opt/dist/jasna")
+    assert native._prebuilt_directory() == expected
+
+
 def test_native_block_and_its_policy_import_without_triton():
     blocker = "import sys; sys.modules['triton'] = None; import jasna.ltx.native, jasna.ltx.kernel_policy, jasna.ltx.sampler"
     subprocess.run([sys.executable, "-c", blocker], check=True, cwd=native._HERE.parents[2])
