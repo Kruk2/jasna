@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from jasna.gui.models import AppSettings
 from jasna.gui.video_session import (
@@ -10,6 +13,8 @@ from jasna.gui.video_session import (
     video_session_config,
     video_session_key,
 )
+
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
 
 def test_video_session_key_stable_for_identical_settings() -> None:
@@ -80,7 +85,9 @@ def _build(settings: AppSettings):
         patch("jasna.mosaic.detection_registry.require_detection_model_weights") as det_path,
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer") as restorer_cls,
         patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as pipeline_cls,
-        patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,
+        patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer")
+        if settings.secondary_restoration == "unet-4x"
+        else nullcontext() as unet_cls,
     ):
         det_path.return_value = "det.engine"
         session = build_video_session(settings, log=lambda _msg: None)
@@ -97,6 +104,7 @@ def test_build_video_session_without_secondary() -> None:
 
 
 def test_build_video_session_selects_unet_secondary() -> None:
+    pytest.importorskip("tensorrt")
     settings = replace(AppSettings(), secondary_restoration="unet-4x")
     session, compiled, _restorer_cls, pipeline_cls, unet_cls = _build(settings)
 
@@ -105,6 +113,7 @@ def test_build_video_session_selects_unet_secondary() -> None:
 
 
 def test_video_session_close_closes_restorers() -> None:
+    pytest.importorskip("tensorrt")
     session, *_ = _build(replace(AppSettings(), secondary_restoration="unet-4x"))
 
     session.close()

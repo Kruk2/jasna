@@ -110,6 +110,11 @@ GUI tests need a screen; on a headless or locked desktop run them under
 `xvfb-run -a -s "-screen 0 1920x1080x24"` (the default 640x480 screen cuts
 off footer widgets). GPU tests need the matching GPU.
 
+The suite passes on NVIDIA and AMD hosts and in a public checkout without the
+protection submodule. A test of NVIDIA-only behavior that mocks the GPU takes the
+`nvidia_vendor` fixture (`tests/conftest.py`); tests that need TensorRT, NVDEC,
+NVFP4 or the protection source skip when they are missing.
+
 ## CUDA kernels
 
 `jasna/media/*.cu` are prebuilt into committed binaries next to them, so

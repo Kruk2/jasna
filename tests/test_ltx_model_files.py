@@ -25,12 +25,11 @@ def test_source_model_bundle_and_reader(tmp_path):
         assert torch.equal(handle.get_tensor("weight"), value)
 
 
-def test_model_check_precedes_engine_compilation(tmp_path, monkeypatch):
+def test_model_check_precedes_engine_compilation(tmp_path, monkeypatch, nvidia_vendor):
     from factories import session_config
-    from jasna import accelerator, engine_compiler, session_factory
+    from jasna import engine_compiler, session_factory
 
     compile_engines = Mock()
-    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda device: True)
     monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: None)
     monkeypatch.setattr(engine_compiler, "ensure_engines_compiled", compile_engines)
     monkeypatch.setattr(LtxModelFiles, "from_dir", Mock(side_effect=ValueError("model unavailable")))
@@ -143,7 +142,7 @@ def test_mirror_first_tries_the_mirror_before_the_main_source(tmp_path, monkeypa
         model_files.download_files(tmp_path / "models", [file], None, mirror_first=False)
 
 
-def test_cli_offers_the_missing_model_only_when_ltx_runs(tmp_path, monkeypatch):
+def test_cli_offers_the_missing_model_only_when_ltx_runs(tmp_path, monkeypatch, nvidia_vendor):
     import sys
 
     from factories import session_config
@@ -151,6 +150,7 @@ def test_cli_offers_the_missing_model_only_when_ltx_runs(tmp_path, monkeypatch):
 
     asked = []
     monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
     main._ensure_ltx_model(session_config(restoration_model_name="basicvsrpp"), None)
     assert asked == []
 
@@ -174,7 +174,7 @@ def test_import_does_not_load_ca_or_start_downloads(monkeypatch):
     runpy.run_path(model_files.__file__)
 
 
-def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch):
+def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch, nvidia_vendor):
     import sys
 
     from factories import session_config

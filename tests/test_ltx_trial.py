@@ -84,8 +84,8 @@ def test_trial_session_uses_placeholders_without_files_or_license():
 @pytest.mark.parametrize("fast", [False, True])
 def test_placeholder_block_runs_on_the_gpu(fast):
     device = torch.device("cuda")
-    if fast and torch.cuda.get_device_capability(device)[0] < 10:
-        pytest.skip("NVFP4 needs Blackwell")
+    if fast and (torch.version.hip or torch.cuda.get_device_capability(device)[0] < 10):
+        pytest.skip("NVFP4 needs an NVIDIA Blackwell GPU")
     with open_tensors(LtxModelFiles.placeholder("distilled", fast=fast).transformer) as handle:
         keys = handle.keys()
         top = {k: handle.get_tensor(k).to(device) for k in keys if not k.startswith("blocks.")}

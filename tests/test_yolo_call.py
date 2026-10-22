@@ -7,6 +7,10 @@ import pytest
 
 from jasna.mosaic.yolo import YoloMosaicDetectionModel, _batched_nms_keep
 
+tensorrt_gpu_only = pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.version.hip is not None, reason="the TensorRT YOLO path runs on NVIDIA only"
+)
+
 
 def _mock_engine_path():
     p = MagicMock()
@@ -39,6 +43,7 @@ def _build_yolo_model(*, batch_size=2, imgsz=640):
     return model, mock_runner
 
 
+@pytest.mark.usefixtures("nvidia_vendor")
 class TestYoloInit:
     def test_basic_init_trt(self):
         model, runner = _build_yolo_model()
@@ -152,6 +157,7 @@ class TestYoloCall:
         assert masks[0].sum().item() == 4
         assert masks[0, 1:3, 1:3].all()
 
+    @tensorrt_gpu_only
     def test_call_no_detections(self):
         model, mock_runner = _build_yolo_model(batch_size=1, imgsz=640)
 
@@ -168,6 +174,7 @@ class TestYoloCall:
         assert len(det.masks) == 1
         mock_runner.infer.assert_called_once()
 
+    @tensorrt_gpu_only
     def test_call_with_detections(self):
         model, mock_runner = _build_yolo_model(batch_size=1, imgsz=640)
 

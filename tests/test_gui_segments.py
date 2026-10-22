@@ -3,12 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from jasna.gui.models import AppSettings, JobItem, JobStatus
 from jasna.gui.processor import Processor
 from jasna.segments import SegmentRange
 from jasna.session_factory import RestorationSession
 
 from factories import session_config, no_resume_conflict
+
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
 
 
 def test_pending_job_segments_can_be_replaced() -> None:

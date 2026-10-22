@@ -28,6 +28,8 @@ from jasna.ltx.model_files import bundle_names
 from jasna.segments import SegmentRange, SegmentRestoration
 from jasna.session_config import LTX_DEFAULT_MODEL
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 NVIDIA, AMD, CPU = AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD, AcceleratorVendor.CPU
 
 
@@ -476,6 +478,7 @@ def test_a_trial_seed_preview_never_reuses_a_real_prepared_range() -> None:
 
 
 def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downloadable) -> None:
+    pytest.importorskip("jasna.protection.license_store")
     from jasna.protection import LicenseError
 
     directory = tmp_path / "ltx"

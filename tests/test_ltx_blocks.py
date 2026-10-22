@@ -93,6 +93,7 @@ def test_blocks_are_read_in_file_order(tmp_path):
 
 @pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
 def test_opaque_load_preserves_native_transaction_failure(error_type, monkeypatch):
+    pytest.importorskip("jasna.protection.opaque_ltx")
     from jasna.ltx.native.aot import BlockDims
 
     primary = error_type("original native transaction failure")
@@ -116,6 +117,7 @@ def test_opaque_load_preserves_native_transaction_failure(error_type, monkeypatc
 
 
 def test_opaque_load_rejects_cpu_before_decryption(monkeypatch):
+    pytest.importorskip("jasna.protection.opaque_ltx")
     from jasna.ltx.native.aot import BlockDims
     from types import SimpleNamespace
 

@@ -22,6 +22,8 @@ from jasna.gui.settings_sections.widgets import ValueOptionMenu
 from jasna.gui import ltx_models as ltx_models_module
 from factories import ltx_models
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 class _FakeValueMenu:
     def __init__(self, options: dict[str, str], value: str):

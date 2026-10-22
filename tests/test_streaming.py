@@ -13,6 +13,8 @@ import pytest
 
 from jasna.streaming import HlsStreamingServer, _generate_vod_playlist
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 def _make_metadata(duration: float = 60.0, fps: float = 30.0, num_frames: int = 1800):
     from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange

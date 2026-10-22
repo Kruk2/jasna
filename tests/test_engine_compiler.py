@@ -17,6 +17,8 @@ from jasna.engine_compiler import (
     ensure_engines_compiled,
 )
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 def _mock_proc(lines: list[str], returncode: int = 0) -> MagicMock:
     stdout = MagicMock()
@@ -104,6 +106,7 @@ def test_ensure_subprocess_failure_raises(monkeypatch) -> None:
 
 
 def test_ensure_frozen_exe_uses_compile_engines_flag(monkeypatch) -> None:
+    pytest.importorskip("jasna.protection.runtime")
     monkeypatch.setattr("jasna.engine_compiler.all_basicvsrpp_sub_engines_exist", lambda *_a, **_kw: False)
     monkeypatch.setattr("jasna.engine_compiler.is_frozen", lambda: True)
     monkeypatch.setattr("jasna.engine_compiler.get_application_executable", lambda: "C:/app/jasna.exe")
@@ -150,6 +153,7 @@ def test_frozen_linux_engine_compiler_uses_the_running_binary(monkeypatch) -> No
     import jasna.engine_compiler as compiler
     from jasna import os_utils
 
+    pytest.importorskip("jasna.protection.runtime")
     monkeypatch.setattr(compiler, "is_frozen", lambda: True)
     monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
     monkeypatch.setattr(os_utils.sys, "platform", "linux")
@@ -316,6 +320,7 @@ def test_unet4x_engine_exists_plaintext(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_unet4x_engine_exists_encrypted(monkeypatch, tmp_path: Path) -> None:
+    pytest.importorskip("jasna.protection.protected_model")
     onnx_path = tmp_path / "unet-4x.onnx"  # absent → encrypted branch
     monkeypatch.setattr("jasna.engine_paths.UNET4X_ONNX_PATH", onnx_path)
     enc_engine = tmp_path / "unet-4x.fp16.linux.engine.enc"

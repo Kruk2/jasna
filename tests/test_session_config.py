@@ -11,6 +11,8 @@ from jasna.gui.video_session import build_image_session, video_session_config
 from jasna.main import _session_config_from_args, build_parser
 from jasna.mosaic.detection_registry import recommended_score_threshold
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 _DETECTION_PATH = Path("mw") / "rfdetr-v6.onnx"
 _RESTORATION_PATH = Path("mw") / "lada_mosaic_restoration_model_generic_v1.2.pth"
 

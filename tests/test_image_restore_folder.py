@@ -32,6 +32,7 @@ def test_image_folder_progress_and_output_pattern(tmp_path: Path, capsys):
 
 @pytest.mark.parametrize("folder", [False, True])
 def test_image_jobs_use_current_cli_arguments_without_late_activation(tmp_path, folder):
+    pytest.importorskip("jasna.protection.license_store")
     image = tmp_path / "photo.png"
     output = tmp_path / "restored.png"
     args = build_parser().parse_args([

@@ -9,6 +9,7 @@ import pytest
 @pytest.mark.parametrize('platform', ('win32', 'linux'))
 @pytest.mark.parametrize('existing', (None, '', 'custom'))
 def test_entry_defaults_precede_frozen_torch_initialization(monkeypatch, platform, existing):
+    pytest.importorskip("jasna.protection.runtime")
     from jasna import _frozen, protection
 
     monkeypatch.setattr(sys, 'platform', platform)

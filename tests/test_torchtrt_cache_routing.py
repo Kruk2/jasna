@@ -2,11 +2,13 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 import sys
 
+import pytest
 import torch
 
 from jasna import engine_paths
-from jasna.protection import export_cache
 from jasna.trt import torch_tensorrt_export as exports
+
+export_cache = pytest.importorskip("jasna.protection.export_cache")
 
 
 def test_frozen_engine_preflight_checks_each_cached_module(monkeypatch):

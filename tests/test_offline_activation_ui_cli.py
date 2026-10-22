@@ -12,6 +12,7 @@ import pytest
 
 @pytest.fixture
 def protection_api(monkeypatch):
+    pytest.importorskip("jasna.protection.license_store")
     from jasna import protection
     from jasna.gui.locales import get_locale
     from jasna.protection import license_store, signing
@@ -99,6 +100,7 @@ def test_cli_rejection_keeps_machine_diagnostic_without_printing_key(monkeypatch
 
 @pytest.mark.skipif(sys.platform != "linux", reason="System identity is currently available on Linux")
 def test_machine_key_command_imports_no_torch_cuda_or_gui(tmp_path):
+    pytest.importorskip("jasna.protection.license_store")
     script = """
 import builtins
 import runpy
@@ -434,6 +436,7 @@ def test_gui_online_activation_rejects_cloud_identity_before_request(protection_
 
 @pytest.fixture
 def controlled_activation_workers(monkeypatch):
+    pytest.importorskip("jasna.protection.license_store")
     from jasna.gui import activation_worker
 
     pending = SimpleNamespace(info=[], machine=[], activation=[], online=[])

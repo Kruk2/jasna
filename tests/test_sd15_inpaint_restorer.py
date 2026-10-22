@@ -4,6 +4,7 @@ import io
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import torch
 import torch.nn.functional as F
 
@@ -28,6 +29,7 @@ class TestModelId:
 
 class TestCheckpointPathSelection:
     def test_plaintext_loaded_directly_when_present(self, tmp_path: Path):
+        pytest.importorskip("jasna.protection.protected_model")
         _write_bundle(tmp_path, with_plaintext=True, with_enc=True)
         with (
             patch.object(sd15, "is_frozen", return_value=False),
@@ -40,6 +42,7 @@ class TestCheckpointPathSelection:
             assert str(tmp_path / SD15_CKPT_PATH.name) == mock_load.call_args.args[0]
 
     def test_encrypted_path_when_no_plaintext(self, tmp_path: Path):
+        pytest.importorskip("jasna.protection.protected_model")
         _write_bundle(tmp_path, with_plaintext=False, with_enc=True)
         with (
             patch.object(sd15, "is_frozen", return_value=False),

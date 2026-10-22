@@ -33,6 +33,8 @@ from jasna.media.video_encoder import (
 
 from factories import write_double_adts_aac_source
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 def _fake_metadata(**overrides) -> VideoMetadata:
     defaults = dict(

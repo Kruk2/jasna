@@ -71,28 +71,40 @@ runpy.run_module('jasna', run_name='__main__')
     assert "Traceback" not in result.stderr
 
 
-def test_public_encrypted_models_fail_before_opening_data(public_checkout):
-    result = run_public(public_checkout, """
-from pathlib import Path
+_ASSERT_EVERY_OPERATION_NEEDS_PROTECTION = """
 from jasna.license_api import ProtectionUnavailableError
-from jasna.ltx.model_files import LtxModelFiles, open_tensors
-from jasna.restorer.sd15_inpaint_restorer import _read_checkpoint
-from jasna.restorer.unet4x_secondary_restorer import compile_unet4x_engine, Unet4xSecondaryRestorer
-from jasna.gui.ltx_models import license_missing, read_install_state
-for operation in (lambda: open_tensors(Path('missing.enc')),
-                  lambda: LtxModelFiles.from_dir(Path('missing'), 'distilled', fast=False),
-                  lambda: _read_checkpoint(Path('missing')),
-                  lambda: compile_unet4x_engine('cpu'),
-                  lambda: Unet4xSecondaryRestorer(device='cpu')):
+for operation in operations:
     try:
         operation()
     except ProtectionUnavailableError:
         pass
     else:
         raise AssertionError('Paid model was accessible without protection')
+"""
+
+
+def test_public_encrypted_models_fail_before_opening_data(public_checkout):
+    result = run_public(public_checkout, """
+from pathlib import Path
+from jasna.ltx.model_files import LtxModelFiles, open_tensors
+from jasna.restorer.sd15_inpaint_restorer import _read_checkpoint
+from jasna.gui.ltx_models import license_missing, read_install_state
+operations = (lambda: open_tensors(Path('missing.enc')),
+              lambda: LtxModelFiles.from_dir(Path('missing'), 'distilled', fast=False),
+              lambda: _read_checkpoint(Path('missing')))
+""" + _ASSERT_EVERY_OPERATION_NEEDS_PROTECTION + """
 assert license_missing(Path('missing'), 'distilled', False)
 assert not read_install_state(Path('missing')).downloadable
 """)
+    assert result.returncode == 0, result.stderr
+
+
+def test_public_unet4x_fails_before_opening_data(public_checkout):
+    pytest.importorskip("tensorrt")
+    result = run_public(public_checkout, """
+from jasna.restorer.unet4x_secondary_restorer import compile_unet4x_engine, Unet4xSecondaryRestorer
+operations = (lambda: compile_unet4x_engine('cpu'), lambda: Unet4xSecondaryRestorer(device='cpu'))
+""" + _ASSERT_EVERY_OPERATION_NEEDS_PROTECTION)
     assert result.returncode == 0, result.stderr
 
 

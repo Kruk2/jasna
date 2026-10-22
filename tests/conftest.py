@@ -87,6 +87,15 @@ def hidpi(request):
 
 
 @pytest.fixture
+def nvidia_vendor(monkeypatch):
+    """Report a CUDA build of torch, so tests of NVIDIA behavior run the same on a ROCm host."""
+    import torch
+
+    monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.setattr(torch.version, "cuda", "13.0")
+
+
+@pytest.fixture
 def no_gpu_cleanup(monkeypatch):
     """Skip the per-job torch cleanup: it initializes CUDA, which can outlast thread joins in a busy run."""
     monkeypatch.setattr("jasna.gui.processor._cleanup_torch", lambda torch_mod: None)

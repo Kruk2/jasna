@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -11,13 +12,24 @@ from factories import session_config
 from jasna.session_config import SessionConfig
 from jasna.session_factory import RestorationSession, build_pipeline, build_restoration_session
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
+
+_SECONDARY_RESTORER_CLASSES = {
+    "tvai": "jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer",
+    "unet-4x": "jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer",
+    "rtx-super-res": "jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer",
+}
+
 
 def _build_session(
     config: SessionConfig,
     *,
     amd: bool = False,
 ):
+    """Mocks the configured secondary restorer only: the TensorRT ones import only on NVIDIA builds."""
     compile_result = MagicMock(use_basicvsrpp_tensorrt=True)
+    secondary_class = _SECONDARY_RESTORER_CLASSES.get(config.secondary_restoration)
     with (
         patch("jasna.accelerator.is_amd_device", return_value=amd),
         patch(
@@ -26,15 +38,13 @@ def _build_session(
         ) as compiled,
         patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer") as restorer_cls,
         patch("jasna.restorer.restoration_pipeline.RestorationPipeline") as pipeline_cls,
-        patch("jasna.restorer.tvai_secondary_restorer.TvaiSecondaryRestorer") as tvai_cls,
-        patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer") as unet_cls,
-        patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer") as rtx_cls,
+        patch(secondary_class) if secondary_class else nullcontext() as secondary_cls,
     ):
         session = build_restoration_session(
             config,
             log_callback=None,
         )
-    return session, compiled, restorer_cls, pipeline_cls, tvai_cls, unet_cls, rtx_cls
+    return session, compiled, restorer_cls, pipeline_cls, secondary_cls
 
 
 def test_session_without_secondary() -> None:
@@ -54,7 +64,7 @@ def test_session_without_secondary() -> None:
 
 
 def test_session_selects_tvai_secondary() -> None:
-    session, _, _, pipeline_cls, tvai_cls, *_ = _build_session(
+    session, _, _, pipeline_cls, tvai_cls = _build_session(
         session_config(secondary_restoration="tvai", tvai_scale=2, tvai_workers=1, tvai_denoise=True)
     )
 
@@ -73,7 +83,8 @@ def test_tvai_denoise_requires_tvai_secondary() -> None:
 
 
 def test_session_selects_unet_secondary() -> None:
-    session, compiled, _, pipeline_cls, _, unet_cls, _ = _build_session(
+    pytest.importorskip("tensorrt")
+    session, compiled, _, pipeline_cls, unet_cls = _build_session(
         session_config(secondary_restoration="unet-4x")
     )
 
@@ -83,7 +94,8 @@ def test_session_selects_unet_secondary() -> None:
 
 
 def test_session_selects_rtx_secondary_and_maps_none_levels() -> None:
-    session, _, _, pipeline_cls, _, _, rtx_cls = _build_session(
+    pytest.importorskip("tensorrt")
+    session, _, _, pipeline_cls, rtx_cls = _build_session(
         session_config(secondary_restoration="rtx-super-res", rtx_denoise="none", rtx_deblur="low")
     )
 
@@ -107,6 +119,7 @@ def test_amd_disables_basicvsrpp_compilation() -> None:
 
 
 def test_session_close_closes_restorers() -> None:
+    pytest.importorskip("tensorrt")
     session, *_ = _build_session(session_config(secondary_restoration="unet-4x"))
 
     session.close()

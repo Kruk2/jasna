@@ -8,6 +8,8 @@ import pytest
 
 from jasna.main import build_parser
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -286,6 +288,7 @@ class TestSecondaryRestorers:
         assert "model=prob-4:scale=2:noise=5" in kw.kwargs["tvai_args"]
 
     def test_unet4x_secondary(self, tmp_path):
+        pytest.importorskip("tensorrt")
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_unet = MagicMock()
         with patch("jasna.restorer.unet4x_secondary_restorer.Unet4xSecondaryRestorer", mock_unet):
@@ -293,6 +296,7 @@ class TestSecondaryRestorers:
         mock_unet.assert_called_once()
 
     def test_rtx_super_res_secondary(self, tmp_path):
+        pytest.importorskip("tensorrt")
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_rtx = MagicMock()
         with patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer", mock_rtx):
@@ -311,6 +315,7 @@ class TestSecondaryRestorers:
         assert kw["deblur"] == "low"
 
     def test_rtx_denoise_none_passes_none(self, tmp_path):
+        pytest.importorskip("tensorrt")
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_rtx = MagicMock()
         with patch("jasna.restorer.rtx_superres_secondary_restorer.RtxSuperresSecondaryRestorer", mock_rtx):
@@ -1090,6 +1095,7 @@ class TestRequiredArgs:
 
 class TestEngineCompilation:
     def test_unet4x_triggers_engine_compilation(self, tmp_path):
+        pytest.importorskip("tensorrt")
         inp, out, rest, det = _make_model_files(tmp_path)
         mock_unet = MagicMock()
 

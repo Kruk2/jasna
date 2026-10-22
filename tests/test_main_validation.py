@@ -9,6 +9,8 @@ from jasna.segments import SegmentRange
 
 from factories import session_config
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 def _run_main_with_args(tmp_path, extra_args, *, create_input=True, create_detection=True, create_restoration=True):
     input_path = tmp_path / "in.mp4"

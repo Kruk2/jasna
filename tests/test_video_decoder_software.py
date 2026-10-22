@@ -19,6 +19,7 @@ from jasna.media.video_decoder import VideoReader
 from jasna.media.yuv_to_rgb import YuvToRgbConverter
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+nvdec_only = pytest.mark.skipif(torch.version.hip is not None, reason="NVDEC selection; AMD always decodes to CPU frames and uploads them")
 
 DEVICE = torch.device("cuda:0")
 
@@ -224,6 +225,7 @@ def test_seek_into_software_video_lands_at_or_after_target(ffv1_video):
     assert pts[0] == expected_first
 
 
+@nvdec_only
 def test_software_selection_logged_once(ffv1_video, caplog):
     path, metadata = ffv1_video
     with caplog.at_level(logging.WARNING, logger="jasna.media.video_decoder"):
@@ -253,6 +255,7 @@ def test_h264_444_with_b_frames_falls_back_and_keeps_all_frames(tmp_path):
     assert all_pts == sorted(all_pts)
 
 
+@nvdec_only
 def test_hardware_input_never_enters_software_path(tmp_path, monkeypatch):
     w, h, n = 128, 96, 24
     frames = [_solid_yuv420p_frame(w, h, 120, 90, 200) for _ in range(n)]
@@ -308,6 +311,7 @@ def test_av1_decodes_on_nvdec_not_software(tmp_path, monkeypatch):
     assert sum(len(pts) for _, pts in batches) == n
 
 
+@nvdec_only
 @pytest.mark.skipif(not _has_av1_software_encoder(), reason="libsvtav1 unavailable")
 def test_subminimum_av1_uses_software_decoder(tmp_path):
     w, h, n = 128, 96, 4

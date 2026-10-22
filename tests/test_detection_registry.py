@@ -21,6 +21,8 @@ from jasna.mosaic.detection_registry import (
     require_detection_model_weights,
 )
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 def test_default_detection_model_is_rfdetr_v6() -> None:
     assert DEFAULT_DETECTION_MODEL_NAME == "rfdetr-v6"

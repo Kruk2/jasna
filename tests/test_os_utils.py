@@ -7,6 +7,8 @@ import pytest
 
 from jasna import accelerator, os_utils
 
+pytestmark = pytest.mark.usefixtures("nvidia_vendor")
+
 
 def test_frozen_linux_application_executable_ignores_the_python_placeholder(monkeypatch) -> None:
     monkeypatch.setattr(os_utils, "is_frozen", lambda: True)
