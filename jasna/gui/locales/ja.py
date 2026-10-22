@@ -248,6 +248,7 @@ JA = {
         "model_ltx": "LTX",
         "model_ltx_description": "最高画質・低速",
         "model_ltx_needs_nvidia": "NVIDIA GPU が必要",
+        "model_ltx_licensed_needs_nvidia": "LTX の本番モデルは今のところ NVIDIA GPU が必要です。AMD ではお試しモードを使えます。",
         "model_ltx_not_installed": "この PC に LTX モデルがありません。",
         "ltx_model": "モデル",
         "ltx_model_distilled2": "標準画質（おすすめ）",

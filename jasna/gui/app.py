@@ -13,6 +13,7 @@ from tkinterdnd2 import TkinterDnD
 
 from jasna import __version__
 from jasna import os_utils, startup_timing
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.branding import (
     HEADER_LOGO_SIZE,
     create_header_logo,
@@ -51,22 +52,22 @@ _SHUTDOWN_COUNTDOWN_SECONDS = 60
 _WINDHAWK_MODULE = "windhawk.dll"
 
 
-def _warm_up_cuda() -> tuple[bool, bool]:
+def _warm_up_cuda() -> tuple[AcceleratorVendor, bool]:
     """Import torch and create the CUDA context. Run off the UI thread after the window
     paints, so the window shows first and the first job skips cold torch/CUDA init.
     An unsupported GPU gets no kernel launch; the system check reports it instead.
-    Returns (NVIDIA GPU, Blackwell GPU) for the LTX model options."""
+    Returns (GPU vendor, Blackwell GPU) for the LTX model options; CPU without a supported GPU."""
     from jasna.os_utils import check_supported_gpu
 
     gpu_ok, _ = check_supported_gpu()
     if not gpu_ok:
-        return False, False
+        return AcceleratorVendor.CPU, False
     import torch
-    from jasna.accelerator import is_nvidia_device
+    from jasna.accelerator import vendor_for_device
 
     torch.zeros(1, device="cuda")
-    nvidia = is_nvidia_device()
-    return nvidia, nvidia and torch.cuda.get_device_capability(0)[0] >= 10
+    vendor = vendor_for_device()
+    return vendor, vendor is AcceleratorVendor.NVIDIA and torch.cuda.get_device_capability(0)[0] >= 10
 
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
@@ -440,12 +441,12 @@ class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):
     def _start_cuda_warmup(self):
         def _run():
             try:
-                nvidia, blackwell = _warm_up_cuda()
+                vendor, blackwell = _warm_up_cuda()
             except Exception:
                 logger.warning("CUDA warm-up failed", exc_info=True)
-                nvidia, blackwell = False, False
+                vendor, blackwell = AcceleratorVendor.CPU, False
             self._main_thread.post(
-                lambda: self._settings_panel.set_gpu_support(nvidia=nvidia, blackwell=blackwell)
+                lambda: self._settings_panel.set_gpu_support(vendor=vendor, blackwell=blackwell)
             )
 
         threading.Thread(target=_run, daemon=True, name="cuda-warmup").start()

@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.download_worker import start_download
 from jasna.gui.activation_worker import read_license_info
 from jasna.gui.locales import get_locale, t
@@ -25,47 +26,58 @@ def model_key(restoration_model: str, ltx_model: str) -> str:
 
 @dataclass(frozen=True)
 class LtxInstallState:
-    """The files each (model, fast) variant still needs, and whether they can be downloaded."""
+    """The files each (model, fast) variant still needs, whether they can be downloaded, and
+    which variants need a license (the protected files)."""
 
     missing: Mapping[Variant, tuple[DownloadableFile, ...]]
     downloadable: bool
+    licensed: Mapping[Variant, bool]
 
     def installed(self, model: LtxModelName, fast: bool) -> bool:
         return not self.missing[(model, fast)]
 
-    def usable(self, model: LtxModelName, fast: bool) -> bool:
+    def usable(self, model: LtxModelName, fast: bool, vendor: AcceleratorVendor | None) -> bool:
+        if vendor is AcceleratorVendor.AMD:
+            return self.installed(model, fast) and not self.licensed[(model, fast)]
         return self.downloadable or self.installed(model, fast)
 
 
 def read_install_state(directory: Path) -> LtxInstallState:
+    variants = [(model, fast) for model in LTX_MODELS for fast in (False, True)]
     return LtxInstallState(
-        {
-            (model, fast): tuple(model_files.missing_downloads(directory, model, fast=fast))
-            for model in LTX_MODELS
-            for fast in (False, True)
-        },
+        {(model, fast): tuple(model_files.missing_downloads(directory, model, fast=fast)) for model, fast in variants},
         protection_available(),
+        {(model, fast): model_files.needs_license(directory, model, fast=fast) for model, fast in variants},
     )
 
 
-def card_unavailable_reason(*, nvidia: bool | None) -> str | None:
-    """Locale key saying why the LTX card cannot be picked; ``nvidia`` is None until the GPU is known.
+def card_unavailable_reason(vendor: AcceleratorVendor | None) -> str | None:
+    """Locale key saying why the LTX card cannot be picked; ``vendor`` is None until the GPU is known.
     Without model files LTX still runs as a trial."""
-    return "model_ltx_needs_nvidia" if nvidia is False else None
+    return "model_ltx_needs_nvidia" if vendor is AcceleratorVendor.CPU else None
 
 
-def trial_only(state: LtxInstallState) -> bool:
-    """No LTX model is installed or downloadable, so only a trial run is possible."""
-    return not any(state.usable(model, fast) for model in LTX_MODELS for fast in (False, True))
+def trial_only(state: LtxInstallState, vendor: AcceleratorVendor | None) -> bool:
+    """No LTX model can run here, so only a trial run is possible."""
+    return not any(state.usable(model, fast, vendor) for model in LTX_MODELS for fast in (False, True))
+
+
+def trial_only_reason(vendor: AcceleratorVendor | None) -> str:
+    """Locale key saying why only a trial run is possible."""
+    return "model_ltx_licensed_needs_nvidia" if vendor is AcceleratorVendor.AMD else "model_ltx_trial_only"
 
 
 def run_unavailable_reason(
-    state: LtxInstallState, model: LtxModelName, fast: bool, *, nvidia: bool | None, trial: bool
+    state: LtxInstallState, model: LtxModelName, fast: bool, vendor: AcceleratorVendor | None, *, trial: bool
 ) -> str | None:
     """Locale key saying why LTX cannot restore right now with this variant."""
-    if nvidia is False:
+    if vendor is AcceleratorVendor.CPU:
         return "model_ltx_needs_nvidia"
-    if trial or state.installed(model, fast):
+    if trial:
+        return None
+    if vendor is AcceleratorVendor.AMD and not state.usable(model, fast, vendor):
+        return "model_ltx_licensed_needs_nvidia"
+    if state.installed(model, fast):
         return None
     return "model_ltx_not_downloaded" if state.downloadable else "model_ltx_not_installed"
 
@@ -78,7 +90,7 @@ def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
     from jasna.protection import ProtectionError
 
     try:
-        if any(path.suffix == ".enc" for path in model_files.bundle_paths(directory, model, fast=fast)):
+        if model_files.needs_license(directory, model, fast=fast):
             if not read_license_info()[1]:
                 return True
         model_files.LtxModelFiles.from_dir(directory, model, fast=fast)

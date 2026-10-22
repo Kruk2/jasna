@@ -191,3 +191,35 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch):
 
     assert "ltx-restore-alpha1-distill8-nvfp4" in asked[0] and "int8" not in asked[0]
     assert "9.2 GB" in asked[0]
+
+
+@pytest.mark.parametrize(("trial", "source_files", "refused"), [(False, False, True), (True, False, False), (False, True, False)])
+def test_only_licensed_ltx_is_refused_on_amd(tmp_path, monkeypatch, trial, source_files, refused):
+    from factories import session_config
+    from jasna import accelerator, session_factory
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: True)
+    if source_files:
+        for name in bundle_names("distilled", fast=False):
+            (tmp_path / name).touch()
+    config = session_config(
+        restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_model="distilled", ltx_trial=trial
+    )
+    assert session_factory.licensed_ltx_on_amd(config) is refused
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: False)
+    assert not session_factory.licensed_ltx_on_amd(config)
+
+
+def test_licensed_ltx_on_amd_stops_before_the_download_offer_and_the_session(tmp_path, monkeypatch):
+    from factories import session_config
+    from jasna import accelerator, main, session_factory
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("offered a download"))
+    monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: pytest.fail("loaded LTX"))
+    config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
+
+    with pytest.raises(SystemExit, match="LTX quality models need an NVIDIA GPU"):
+        main._ensure_ltx_model(config, None)
+    with pytest.raises(ValueError, match="LTX quality models need an NVIDIA GPU"):
+        session_factory._ltx_model_files(config, torch.device("cuda:0"), log_callback=None)

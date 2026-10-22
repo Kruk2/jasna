@@ -232,6 +232,24 @@ def _build_basicvsrpp_pipeline(
     )
 
 
+LICENSED_LTX_NEEDS_NVIDIA = (
+    "LTX quality models need an NVIDIA GPU for now. On AMD you can try the free LTX trial (--ltx-trial)."
+)
+
+
+def licensed_ltx_on_amd(config: SessionConfig) -> bool:
+    """Whether this LTX job needs the licensed model files on an AMD GPU, where their
+    protected loader does not run yet; the trial and plain source files do."""
+    from jasna.accelerator import is_amd_device
+    from jasna.ltx.model_files import needs_license
+
+    return (
+        not config.ltx_trial
+        and is_amd_device(config.device)
+        and needs_license(restoration_model_path_for(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
+    )
+
+
 def _ltx_model_files(
     config: SessionConfig, device: "torch.device", *, log_callback: Callable[[str], None] | None
 ) -> "LtxModelFiles":
@@ -243,6 +261,8 @@ def _ltx_model_files(
     from jasna.accelerator import is_nvidia_device
     from jasna.ltx.transformer import require_kernels
 
+    if licensed_ltx_on_amd(config):
+        raise ValueError(LICENSED_LTX_NEEDS_NVIDIA)
     require_kernels(device)
     if config.ltx_fast and not (is_nvidia_device(device) and torch.cuda.get_device_capability(device)[0] >= 10):
         raise ValueError("The fast LTX model needs an RTX 50-series (Blackwell) GPU")

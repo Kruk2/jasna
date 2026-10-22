@@ -4,6 +4,7 @@ import types
 import pytest
 
 from jasna import startup_timing
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.system_checks import evaluate_check_results
 
 
@@ -38,7 +39,7 @@ def test_evaluate_sysmem_only_failure_is_warning_not_required():
     assert required_failure is False  # but sysmem is warning-only, not blocking
 
 
-def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, nvidia=True, major=8) -> tuple[dict, tuple]:
+def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=AcceleratorVendor.NVIDIA, major=8) -> tuple[dict, tuple]:
     from jasna import accelerator, os_utils
 
     calls = {}
@@ -48,7 +49,7 @@ def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, nvidia=True, major
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: gpu_check_result)
-    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda: nvidia)
+    monkeypatch.setattr(accelerator, "vendor_for_device", lambda: vendor)
     from jasna.gui.app import _warm_up_cuda
 
     return calls, _warm_up_cuda()
@@ -57,12 +58,18 @@ def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, nvidia=True, major
 def test_warm_up_cuda_inits_context_when_gpu_supported(monkeypatch):
     calls, support = _warm_up_with_gpu_check(monkeypatch, (True, "RTX 4090"))
     assert calls["device"] == "cuda"
-    assert support == (True, False)
+    assert support == (AcceleratorVendor.NVIDIA, False)
 
 
-@pytest.mark.parametrize(("nvidia", "major", "support"), [(True, 12, (True, True)), (False, 12, (False, False))])
-def test_warm_up_cuda_reports_ltx_gpu_support(monkeypatch, nvidia, major, support):
-    assert _warm_up_with_gpu_check(monkeypatch, (True, "GPU"), nvidia=nvidia, major=major)[1] == support
+@pytest.mark.parametrize(
+    ("vendor", "major", "support"),
+    [
+        (AcceleratorVendor.NVIDIA, 12, (AcceleratorVendor.NVIDIA, True)),
+        (AcceleratorVendor.AMD, 12, (AcceleratorVendor.AMD, False)),
+    ],
+)
+def test_warm_up_cuda_reports_ltx_gpu_support(monkeypatch, vendor, major, support):
+    assert _warm_up_with_gpu_check(monkeypatch, (True, "GPU"), vendor=vendor, major=major)[1] == support
 
 
 @pytest.mark.parametrize(
@@ -72,7 +79,7 @@ def test_warm_up_cuda_reports_ltx_gpu_support(monkeypatch, nvidia, major, suppor
 def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_check_result):
     calls, support = _warm_up_with_gpu_check(monkeypatch, gpu_check_result)
     assert calls == {}
-    assert support == (False, False)
+    assert support == (AcceleratorVendor.CPU, False)
 
 
 @pytest.mark.parametrize("loaded", [True, False])

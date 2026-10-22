@@ -10,6 +10,7 @@ import pytest
 
 from factories import ltx_models
 from jasna import os_utils
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui import ltx_models as ltx_models_module
 from jasna.gui.locales import t
 from jasna.gui.ltx_models import (
@@ -19,12 +20,15 @@ from jasna.gui.ltx_models import (
     read_install_state,
     run_unavailable_reason,
     trial_only,
+    trial_only_reason,
 )
 from jasna.gui.models import AppSettings, JobItem, PresetManager
 from jasna.ltx import model_files
 from jasna.ltx.model_files import bundle_names
 from jasna.segments import SegmentRange, SegmentRestoration
 from jasna.session_config import LTX_DEFAULT_MODEL
+
+NVIDIA, AMD, CPU = AcceleratorVendor.NVIDIA, AcceleratorVendor.AMD, AcceleratorVendor.CPU
 
 
 class _NowCalls:
@@ -62,22 +66,35 @@ def test_availability_without_downloads(tmp_path) -> None:
 
     assert not state.downloadable
     assert state.installed("distilled", False) and not state.installed("distilled", True)
-    assert card_unavailable_reason(nvidia=True) is None
-    assert card_unavailable_reason(nvidia=False) == "model_ltx_needs_nvidia"
-    assert not trial_only(state) and trial_only(read_install_state(tmp_path / "empty"))
-    assert run_unavailable_reason(state, "undistilled", False, nvidia=True, trial=False) == "model_ltx_not_installed"
-    assert run_unavailable_reason(state, "undistilled", False, nvidia=True, trial=True) is None
-    assert run_unavailable_reason(state, "distilled", False, nvidia=None, trial=False) is None
-    assert run_unavailable_reason(state, "distilled", True, nvidia=True, trial=False) == "model_ltx_not_installed"
-    assert run_unavailable_reason(state, "distilled", True, nvidia=False, trial=True) == "model_ltx_needs_nvidia"
+    assert card_unavailable_reason(NVIDIA) is None
+    assert card_unavailable_reason(AMD) is None
+    assert card_unavailable_reason(CPU) == "model_ltx_needs_nvidia"
+    assert not trial_only(state, NVIDIA) and trial_only(read_install_state(tmp_path / "empty"), NVIDIA)
+    assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=False) == "model_ltx_not_installed"
+    assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=True) is None
+    assert run_unavailable_reason(state, "distilled", False, None, trial=False) is None
+    assert run_unavailable_reason(state, "distilled", True, NVIDIA, trial=False) == "model_ltx_not_installed"
+    assert run_unavailable_reason(state, "distilled", True, CPU, trial=True) == "model_ltx_needs_nvidia"
 
 
 def test_availability_with_downloads(tmp_path, downloadable) -> None:
     state = read_install_state(tmp_path)
 
     assert state.downloadable
-    assert not trial_only(state)
-    assert run_unavailable_reason(state, "undistilled", False, nvidia=True, trial=False) == "model_ltx_not_downloaded"
+    assert not trial_only(state, NVIDIA)
+    assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=False) == "model_ltx_not_downloaded"
+
+
+def test_amd_runs_the_trial_and_source_models_but_not_licensed_ones(tmp_path, downloadable) -> None:
+    _install(tmp_path, "distilled", fast=False)
+    state = read_install_state(tmp_path)
+
+    assert not trial_only(state, AMD) and trial_only(read_install_state(tmp_path / "empty"), AMD)
+    assert run_unavailable_reason(state, "distilled", False, AMD, trial=False) is None
+    assert run_unavailable_reason(state, "undistilled", False, AMD, trial=False) == "model_ltx_licensed_needs_nvidia"
+    assert run_unavailable_reason(state, "undistilled", False, AMD, trial=True) is None
+    assert trial_only_reason(AMD) == "model_ltx_licensed_needs_nvidia"
+    assert trial_only_reason(NVIDIA) == "model_ltx_trial_only"
 
 
 def _answer(monkeypatch, yes: bool) -> list[str]:
@@ -186,7 +203,7 @@ def test_picking_a_missing_variant_never_asks_or_reverts(tk_root, tmp_path, monk
     models = ltx_models(tk_root, tmp_path / "ltx", installed=False)
     panel = _panel(tk_root, models)
     section = panel._model_section
-    section.set_gpu_support(nvidia=True, blackwell=True)
+    section.set_gpu_support(vendor=NVIDIA, blackwell=True)
 
     section._cards["ltx"].radio.invoke()
     _pick_ltx_model(section, "undistilled")
@@ -211,7 +228,7 @@ def test_start_downloads_only_the_fast_model(tk_root, tmp_path, monkeypatch, dow
     models = LtxModels(tmp_path / "ltx", _NowCalls(), lambda: None)
     panel = _panel(tk_root, models)
     section = panel._model_section
-    section.set_gpu_support(nvidia=True, blackwell=True)
+    section.set_gpu_support(vendor=NVIDIA, blackwell=True)
     section._cards["ltx"].radio.invoke()
     section._widgets["ltx_fast"]._toggle()
     restarted: list[bool] = []
@@ -265,7 +282,7 @@ def test_a_missing_variant_without_downloads_stays_selected_with_a_note(tk_root,
     _install(directory, LTX_DEFAULT_MODEL, fast=False)
     panel = _panel(tk_root, ltx_models(tk_root, directory, installed=False))
     section = panel._model_section
-    section.set_gpu_support(nvidia=True, blackwell=True)
+    section.set_gpu_support(vendor=NVIDIA, blackwell=True)
     section._cards["ltx"].radio.invoke()
     assert not section._notice.winfo_manager()
 

@@ -49,7 +49,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 - NVIDIA：你的 GPU 在 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus)
   中需要计算能力 7.5 或更高。
 - AMD：ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI）。
-  Windows 上需要 AMD Adrenalin 驱动 26.8.1 或更新。二次修复和 LTX 仅限 NVIDIA。
+  Windows 上需要 AMD Adrenalin 驱动 26.8.1 或更新。二次修复和 LTX 仅限 NVIDIA；LTX 试用模式可在 AMD 上运行。
 - 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
   固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
 - LTX 需要 NVIDIA RTX GPU，至少 8 GB 显存和 16 GB 内存。见

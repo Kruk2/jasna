@@ -248,6 +248,7 @@ EN = {
         "model_ltx": "LTX",
         "model_ltx_description": "Best quality, slow",
         "model_ltx_needs_nvidia": "Needs an NVIDIA GPU",
+        "model_ltx_licensed_needs_nvidia": "LTX quality models need an NVIDIA GPU for now. On AMD you can try Trial mode.",
         "model_ltx_not_installed": "The LTX model isn't on this PC.",
         "ltx_model": "Model",
         "ltx_model_distilled2": "Standard Quality (recommended)",

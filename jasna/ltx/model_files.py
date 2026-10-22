@@ -242,6 +242,11 @@ def bundle_paths(directory: Path, model: LtxModelName, *, fast: bool) -> list[Pa
     return [path.with_name(path.name + ".enc") if is_frozen() or not path.is_file() else path for path in paths]
 
 
+def needs_license(directory: Path, model: LtxModelName, *, fast: bool) -> bool:
+    """Whether this model choice runs from the protected (``.enc``) files, which need a license."""
+    return any(path.suffix == ".enc" for path in bundle_paths(directory, model, fast=fast))
+
+
 @dataclass(frozen=True)
 class LtxModelFiles:
     transformer: Path | PlaceholderTensors

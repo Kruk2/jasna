@@ -5,10 +5,17 @@ from typing import Callable
 
 import customtkinter as ctk
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.gui.components import CollapsibleSection, Tooltip
 from jasna.gui.icons import CompactSwitch, NativeIconButton
 from jasna.gui.locales import t
-from jasna.gui.ltx_models import LtxModels, card_unavailable_reason, run_unavailable_reason, trial_only
+from jasna.gui.ltx_models import (
+    LtxModels,
+    card_unavailable_reason,
+    run_unavailable_reason,
+    trial_only,
+    trial_only_reason,
+)
 from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, create_slider_value_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
 from jasna.ltx.model_files import LTX_MODELS
@@ -73,7 +80,7 @@ class RestorationModelSection:
         self._on_modified = on_modified
         self._on_model_changed = on_model_changed
         self._ltx_models = ltx_models
-        self._nvidia: bool | None = None
+        self._vendor: AcceleratorVendor | None = None
         self._enabled = True
 
         section = CollapsibleSection(parent, t("section_restoration_model"), expanded=True)
@@ -276,13 +283,13 @@ class RestorationModelSection:
     def unavailable_reason(self) -> str | None:
         """Why the chosen LTX model cannot restore right now (None when it can)."""
         return run_unavailable_reason(
-            self._ltx_models.state, self._ltx_model.get_value(), self._fast(), nvidia=self._nvidia, trial=self._trial()
+            self._ltx_models.state, self._ltx_model.get_value(), self._fast(), self._vendor, trial=self._trial()
         )
 
     def _refresh_widgets(self) -> None:
         state = self._ltx_models.state
         editable = self._enabled and not self._ltx_models.downloading
-        reason = card_unavailable_reason(nvidia=self._nvidia)
+        reason = card_unavailable_reason(self._vendor)
         self._cards["basicvsrpp"].set_enabled(editable)
         ltx_card = self._cards["ltx"]
         ltx_card.set_enabled(editable and reason is None)
@@ -292,12 +299,12 @@ class RestorationModelSection:
         )
         self._ltx_model.configure(state="normal" if editable else "disabled")
         self._new_seed_btn.configure(state="normal" if self._enabled else "disabled")
-        locked = trial_only(state)
+        locked = trial_only(state, self._vendor)
         if locked:
             self._widgets["ltx_trial"].select()
         self._widgets["ltx_trial"].configure(state="normal" if editable and not locked else "disabled")
         if self._trial():
-            self._trial_status.configure(text=t("model_ltx_trial_only" if locked else "ltx_trial_notice"))
+            self._trial_status.configure(text=t(trial_only_reason(self._vendor) if locked else "ltx_trial_notice"))
             self._trial_status.pack(fill="x", padx=12, pady=(0, 8), after=self._trial_row)
         else:
             self._trial_status.pack_forget()
@@ -312,10 +319,10 @@ class RestorationModelSection:
         """The chosen model, or BasicVSR++ when LTX cannot run; switches to the installed
         precision when only that one is there."""
         state = self._ltx_models.state
-        if self._model.get() != "ltx" or card_unavailable_reason(nvidia=self._nvidia) is not None:
+        if self._model.get() != "ltx" or card_unavailable_reason(self._vendor) is not None:
             return "basicvsrpp"
         model, fast = self._ltx_model.get_value(), self._fast()
-        if not self._trial() and not state.usable(model, fast) and state.installed(model, not fast):
+        if not self._trial() and not state.usable(model, fast, self._vendor) and state.installed(model, not fast):
             self._set_fast(not fast)
         return "ltx"
 
@@ -337,8 +344,8 @@ class RestorationModelSection:
             self._refresh_widgets()
         self._refresh_download()
 
-    def set_gpu_support(self, *, nvidia: bool, blackwell: bool) -> None:
-        self._nvidia = nvidia
+    def set_gpu_support(self, *, vendor: AcceleratorVendor, blackwell: bool) -> None:
+        self._vendor = vendor
         if blackwell:
             self._fast_row.pack(fill="x", before=self._large_row)
         else:

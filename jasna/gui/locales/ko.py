@@ -248,6 +248,7 @@ KO = {
         "model_ltx": "LTX",
         "model_ltx_description": "최고 화질, 느림",
         "model_ltx_needs_nvidia": "NVIDIA GPU 필요",
+        "model_ltx_licensed_needs_nvidia": "LTX 정식 모델은 현재 NVIDIA GPU가 필요합니다. AMD에서는 체험 모드를 사용할 수 있습니다.",
         "model_ltx_not_installed": "이 PC에 LTX 모델이 없습니다.",
         "ltx_model": "모델",
         "ltx_model_distilled2": "표준 화질 (추천)",

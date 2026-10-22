@@ -490,17 +490,46 @@ def test_gpu_support_disables_ltx_and_shows_fast_mode_on_blackwell(_panel_factor
     section = panel._model_section
     section.apply(AppSettings(restoration_model="ltx", ltx_fast=True))
 
-    section.set_gpu_support(nvidia=True, blackwell=True)
+    section.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=True)
     assert section._fast_row.winfo_manager()
     assert panel.get_settings().ltx_fast is True
 
-    section.set_gpu_support(nvidia=True, blackwell=False)
+    section.set_gpu_support(vendor=AcceleratorVendor.NVIDIA, blackwell=False)
     assert not section._fast_row.winfo_manager()
     assert panel.get_settings().ltx_fast is False
 
-    section.set_gpu_support(nvidia=False, blackwell=False)
+    section.set_gpu_support(vendor=AcceleratorVendor.CPU, blackwell=False)
     assert panel.get_settings().restoration_model == "basicvsrpp"
     assert section._cards["ltx"].radio.cget("state") == "disabled"
+
+
+@pytest.mark.parametrize("downloadable", [True, False])
+def test_amd_without_source_models_runs_ltx_as_a_locked_trial(_panel_factory, monkeypatch, downloadable) -> None:
+    from jasna.gui.locales import t
+
+    monkeypatch.setattr(ltx_models_module, "protection_available", lambda: downloadable)
+    panel = _panel_factory(False)
+    section = panel._model_section
+    section.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False)
+
+    _select_ltx(panel)
+
+    settings = panel.get_settings()
+    assert (settings.restoration_model, settings.ltx_trial) == ("ltx", True)
+    assert section._widgets["ltx_trial"].cget("state") == "disabled"
+    assert section._trial_status.cget("text") == t("model_ltx_licensed_needs_nvidia")
+    assert section.unavailable_reason() is None
+
+
+def test_amd_runs_installed_source_models_without_the_trial(_panel_factory) -> None:
+    panel = _panel_factory(True)
+    section = panel._model_section
+    section.set_gpu_support(vendor=AcceleratorVendor.AMD, blackwell=False)
+
+    _select_ltx(panel)
+
+    assert panel.get_settings().ltx_trial is False
+    assert section.unavailable_reason() is None
 
 
 def test_ltx_settings_round_trip_through_panel(_panel_factory) -> None:
@@ -542,7 +571,7 @@ def test_processing_locks_secondary_controls_and_keeps_missing_unet4x_disabled(
 
 def test_disabling_settings_keeps_unavailable_ltx_disabled(_panel_factory) -> None:
     panel = _panel_factory(True)
-    panel._model_section.set_gpu_support(nvidia=False, blackwell=False)
+    panel._model_section.set_gpu_support(vendor=AcceleratorVendor.CPU, blackwell=False)
 
     panel.set_enabled(False)
     panel.set_enabled(True)

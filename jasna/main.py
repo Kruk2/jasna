@@ -880,6 +880,10 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     if config.ltx_trial:
         print(LTX_TRIAL_NOTICE)
         return
+    from jasna.session_factory import LICENSED_LTX_NEEDS_NVIDIA, licensed_ltx_on_amd
+
+    if licensed_ltx_on_amd(config):
+        sys.exit(f"Error: {LICENSED_LTX_NEEDS_NVIDIA}")
     directory = config.restoration_model_path if config.restoration_model_name == "ltx" else default_restoration_model_path("ltx")
     missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
     if not missing:

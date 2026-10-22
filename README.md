@@ -57,7 +57,7 @@ and a command line, and runs on your GPU.
   [GPU table](https://developer.nvidia.com/cuda/gpus).
 - AMD: a GPU supported by ROCm (Radeon RX 7000/9000, Radeon 780M/760M/740M,
   Ryzen AI). On Windows, AMD Adrenalin driver 26.8.1 or newer. Secondary
-  restoration and LTX are NVIDIA only.
+  restoration and LTX are NVIDIA only; LTX Trial mode runs on AMD.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
