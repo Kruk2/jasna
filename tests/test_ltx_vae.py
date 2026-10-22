@@ -249,6 +249,17 @@ def test_kitchen_conv3d_matches_the_causal_conv_and_fuses_the_residual(monkeypat
     torch.testing.assert_close(out.float(), reference, atol=1e-2, rtol=1e-2)
 
 
+@pytest.mark.parametrize("memory_format", (torch.contiguous_format, torch.channels_last_3d))
+def test_causal_frames_repeat_the_first_frame_in_the_input_memory_format(memory_format):
+    conv = video_encoder.CausalConv3d(4, 8)
+    x = torch.randn(1, 4, 3, 5, 6).contiguous(memory_format=memory_format)
+
+    padded = conv._causal_frames(x)
+
+    assert torch.equal(padded, torch.cat((x[:, :, :1].repeat(1, 1, 2, 1, 1), x), dim=2))
+    assert padded.is_contiguous(memory_format=memory_format)
+
+
 def test_kitchen_conv3d_leaves_non_fp16_layers_on_the_torch_conv(monkeypatch):
     conv = video_encoder.CausalConv3d(4, 8).bfloat16()
     monkeypatch.setattr(video_encoder, "_kitchen_conv3d", True)

@@ -36,8 +36,10 @@ class CausalConv3d(nn.Module):
         self.conv = nn.Conv3d(in_channels, out_channels, 3, padding=(0, 1, 1), padding_mode="zeros")
 
     def _causal_frames(self, x: torch.Tensor) -> torch.Tensor:
-        first_frame_pad = x[:, :, :1, :, :].repeat((1, 1, self.time_kernel_size - 1, 1, 1))
-        return torch.concatenate((first_frame_pad, x), dim=2)
+        # Views of x keep its memory format: a contiguous ``repeat`` beside a channels-last x makes
+        # the concatenation a strided transpose, 60x slower on ROCm (an eager encoder 2.26 -> 1.40 s).
+        first_frame = x[:, :, :1, :, :]
+        return torch.concatenate((first_frame,) * (self.time_kernel_size - 1) + (x,), dim=2)
 
     def _runs_on_kitchen(self) -> bool:
         return _kitchen_conv3d and self.conv.weight.dtype == torch.float16
