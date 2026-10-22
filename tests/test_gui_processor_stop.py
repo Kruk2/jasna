@@ -4,6 +4,7 @@ import pytest
 
 from jasna.gui.models import AppSettings, JobItem, JobStatus
 from jasna.gui.processor import Processor, ProgressUpdate
+from factories import no_resume_conflict
 
 pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
 
@@ -20,7 +21,7 @@ class _FakePipeline:
 def _processor_with_job(tmp_path, run_pipeline):
     job = JobItem(path=tmp_path / "clip.mp4")
     updates: list[ProgressUpdate] = []
-    processor = Processor(on_progress=updates.append)
+    processor = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
     processor._run_pipeline = run_pipeline
     processor._jobs = [job]
     processor._settings = AppSettings()

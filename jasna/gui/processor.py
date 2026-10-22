@@ -115,7 +115,8 @@ class Processor:
         on_progress: Callable[[ProgressUpdate], None] = None,
         on_log: Callable[[str, str], None] = None,
         on_complete: Callable[[bool], None] = None,
-        on_resume_conflict: Callable[[Path], Future[bool]] | None = None,
+        *,
+        on_resume_conflict: Callable[[Path], Future[bool]],
     ):
         self._on_progress = on_progress
         self._on_log = on_log
@@ -380,8 +381,6 @@ class Processor:
             try:
                 return self._run_video_pipeline(job_id, input_path, output_path, segments=segments, settings=settings)
             except ResumeMismatchError as error:
-                if self._on_resume_conflict is None:
-                    raise
                 answer = self._on_resume_conflict(error.directory)
                 while not answer.done():
                     if self._stop_event.wait(0.1):

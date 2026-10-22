@@ -7,6 +7,7 @@ import pytest
 
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobStatus, JobItem, AppSettings
+from factories import no_resume_conflict
 
 pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
 
@@ -14,7 +15,7 @@ pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
 def test_processor_join_waits_for_thread():
     """stop() + join() should wait for the background thread to finish."""
     entered = threading.Event()
-    p = Processor()
+    p = Processor(on_resume_conflict=no_resume_conflict)
 
     class FakeJob:
         path = None
@@ -44,13 +45,13 @@ def test_processor_join_waits_for_thread():
 
 def test_processor_join_noop_when_not_started():
     """join() should be safe to call when no thread was started."""
-    p = Processor()
+    p = Processor(on_resume_conflict=no_resume_conflict)
     p.join(timeout=1.0)
 
 
 def test_processor_join_noop_after_thread_finished():
     """join() should be safe to call after thread has already exited."""
-    p = Processor()
+    p = Processor(on_resume_conflict=no_resume_conflict)
 
     p._run = lambda: None
     p._thread = threading.Thread(target=p._run, daemon=True)
@@ -68,7 +69,7 @@ def test_processor_error_logs_full_traceback():
     def on_log(level: str, message: str) -> None:
         logs.append((level, message))
 
-    p = Processor(on_log=on_log)
+    p = Processor(on_resume_conflict=no_resume_conflict, on_log=on_log)
     job = JobItem(path=Path("test.mp4"))
     settings = AppSettings()
 

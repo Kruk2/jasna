@@ -9,6 +9,7 @@ import pytest
 from jasna.gui.processor import Processor, ProgressUpdate
 from jasna.gui.models import JobItem, JobStatus, AppSettings
 from jasna.post_export_action import PostExportVideoCommandError
+from factories import no_resume_conflict
 
 pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
 
@@ -19,14 +20,14 @@ def _make_jobs(*names: str) -> list[JobItem]:
 
 class TestNextPendingJob:
     def test_returns_first_pending(self):
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
         jobs[0].status = JobStatus.COMPLETED
         p._jobs = jobs
         assert p._next_pending_job() is jobs[1]
 
     def test_returns_none_when_all_done(self):
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs("a.mp4", "b.mp4")
         jobs[0].status = JobStatus.COMPLETED
         jobs[1].status = JobStatus.ERROR
@@ -34,7 +35,7 @@ class TestNextPendingJob:
         assert p._next_pending_job() is None
 
     def test_respects_reordered_list(self):
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
         jobs[0].status = JobStatus.COMPLETED
         # Simulate reorder: move c before b
@@ -44,7 +45,7 @@ class TestNextPendingJob:
         assert result.filename == "c.mp4"
 
     def test_picks_up_newly_added_job(self):
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs("a.mp4")
         jobs[0].status = JobStatus.COMPLETED
         p._jobs = jobs
@@ -57,7 +58,7 @@ class TestNextPendingJob:
 class TestProcessorPullLoop:
     def test_processes_jobs_in_order_by_status(self):
         processed_ids: list[int] = []
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
         def fake_pipeline(job_id, inp, out, **_kwargs):
@@ -79,7 +80,7 @@ class TestProcessorPullLoop:
         from jasna.media.probe import UnsupportedVideoError
 
         updates: list[ProgressUpdate] = []
-        p = Processor(on_progress=updates.append)
+        p = Processor(on_resume_conflict=no_resume_conflict, on_progress=updates.append)
         jobs = _make_jobs("a_vr.mp4", "b_clip.mp4")
         reason = "LTX does not support VR180 side-by-side video; restore it with BasicVSR++"
 
@@ -92,7 +93,7 @@ class TestProcessorPullLoop:
 
     def test_skips_removed_pending_job(self):
         processed_ids: list[int] = []
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
         call_count = [0]
@@ -119,7 +120,7 @@ class TestProcessorPullLoop:
 
     def test_progress_update_carries_job_id(self):
         updates: list[ProgressUpdate] = []
-        p = Processor(on_progress=lambda u: updates.append(u))
+        p = Processor(on_resume_conflict=no_resume_conflict, on_progress=lambda u: updates.append(u))
         jobs = _make_jobs("a.mp4")
 
         with patch.object(p, "_run_pipeline"):
@@ -137,7 +138,7 @@ class TestProcessorPullLoop:
 
     def test_reorder_during_processing_respects_new_order(self):
         processed_filenames: list[str] = []
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
 
         call_count = [0]
@@ -166,7 +167,7 @@ class TestProcessorPullLoop:
 
     def test_reports_finished_queue_on_complete(self):
         finished: list[bool] = []
-        p = Processor(on_complete=finished.append)
+        p = Processor(on_resume_conflict=no_resume_conflict, on_complete=finished.append)
         jobs = _make_jobs("a.mp4")
 
         with patch.object(p, "_run_pipeline"):
@@ -182,7 +183,7 @@ class TestProcessorPullLoop:
 
     def test_reports_stopped_queue_on_complete(self):
         finished: list[bool] = []
-        p = Processor(on_complete=finished.append)
+        p = Processor(on_resume_conflict=no_resume_conflict, on_complete=finished.append)
         p._settings = AppSettings(post_export_action="shutdown")
         p._stop_event.set()
 
@@ -192,7 +193,7 @@ class TestProcessorPullLoop:
 
     def test_runs_post_export_video_command_after_each_video(self, tmp_path):
         calls: list[tuple[str, Path, Path]] = []
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
 
         with (
@@ -227,7 +228,7 @@ class TestProcessorPullLoop:
         assert all(job.status is JobStatus.COMPLETED for job in jobs)
 
     def test_post_export_video_command_failure_marks_job_error_and_continues(self, tmp_path):
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs(str(tmp_path / "a.mp4"), str(tmp_path / "b.mp4"))
 
         def run_command(_command, _input_path, output_path, _cancel):
@@ -254,7 +255,7 @@ class TestProcessorPullLoop:
 
     def test_post_export_video_command_skips_images(self, tmp_path):
         command = MagicMock()
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs(str(tmp_path / "image.png"))
 
         with (
@@ -274,7 +275,7 @@ class TestProcessorPullLoop:
     def test_post_export_video_command_receives_auto_renamed_output(self, tmp_path):
         (tmp_path / "clip_restored.mp4").touch()
         command = MagicMock()
-        p = Processor()
+        p = Processor(on_resume_conflict=no_resume_conflict)
         jobs = _make_jobs(str(tmp_path / "clip.mp4"))
 
         with (

@@ -50,7 +50,7 @@ def commit_file(partial: Path, path: Path) -> None:
 
 def write_json(path: Path, data) -> None:
     with atomic_write(path, "w") as stream:
-        json.dump(data, stream, ensure_ascii=True, allow_nan=False, separators=(",", ":"), default=str)
+        json.dump(data, stream, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
 
 
 def read_json(path: Path):
@@ -74,7 +74,6 @@ def resume_directories(root: Path, output: Path) -> list[Path]:
 
 
 def _model_identity(path: Path) -> list:
-    # shortcut: size/mtime miss preserved-stat replacements; hash weights if model updates preserve both.
     resolved = str(path.resolve())
     try:
         stat = path.stat()
@@ -84,8 +83,8 @@ def _model_identity(path: Path) -> list:
 
 
 def job_fingerprint(config: SessionConfig, source: Path, output: Path, metadata, segments) -> str:
-    from jasna.ltx.model_files import _bundle_paths
-    from jasna.session_factory import _restoration_model_path
+    from jasna.ltx.model_files import bundle_paths
+    from jasna.session_factory import restoration_model_path_for
 
     stat = source.stat()
     settings = asdict(config)
@@ -97,11 +96,11 @@ def job_fingerprint(config: SessionConfig, source: Path, output: Path, metadata,
     models = {segment.restoration.model for segment in ranges} if ranges else {config.restoration_model_name}
     assets = {"detection": _model_identity(config.detection_model_path)}
     if "basicvsrpp" in models:
-        assets["basicvsrpp"] = _model_identity(_restoration_model_path(config, "basicvsrpp"))
+        assets["basicvsrpp"] = _model_identity(restoration_model_path_for(config, "basicvsrpp"))
     if "ltx" in models and not config.ltx_trial:
         assets["ltx"] = [
-            _model_identity(path) for path in _bundle_paths(
-                _restoration_model_path(config, "ltx"), config.ltx_model, fast=config.ltx_fast
+            _model_identity(path) for path in bundle_paths(
+                restoration_model_path_for(config, "ltx"), config.ltx_model, fast=config.ltx_fast
             )
         ]
     identity = {
@@ -134,7 +133,7 @@ class ResumeJob:
 
     def matches(self) -> bool:
         manifest = read_json(self.directory / "job.json")
-        return isinstance(manifest, dict) and manifest.get("fingerprint") == self.fingerprint
+        return manifest is not None and manifest["fingerprint"] == self.fingerprint
 
     def prepare(self) -> None:
         if self.matches():
@@ -163,7 +162,7 @@ def find_resume_output(config: SessionConfig, source: Path, output: Path, segmen
     previous_output = None
     for directory in candidates:
         manifest = read_json(directory / "render" / "job.json")
-        if not isinstance(manifest, dict) or not isinstance(manifest.get("output"), str):
+        if manifest is None:
             continue
         saved_output = Path(manifest["output"])
         if (
@@ -177,7 +176,7 @@ def find_resume_output(config: SessionConfig, source: Path, output: Path, segmen
         if not segments and config.ltx_auto_split_percent is not None and config.restoration_model_name == "ltx":
             split = read_json(directory / "split.json")
             key = job_fingerprint(config, source, saved_output, metadata, ())
-            if not isinstance(split, dict) or split.get("fingerprint") != key:
+            if split is None or split["fingerprint"] != key:
                 continue
             effective_segments = segments_from_json(split["segments"])
         if effective_segments:

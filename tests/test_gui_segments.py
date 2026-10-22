@@ -8,7 +8,7 @@ from jasna.gui.processor import Processor
 from jasna.segments import SegmentRange
 from jasna.session_factory import RestorationSession
 
-from factories import session_config
+from factories import session_config, no_resume_conflict
 
 
 def test_pending_job_segments_can_be_replaced() -> None:
@@ -45,7 +45,7 @@ def test_processor_passes_frozen_segments_to_video_job(tmp_path) -> None:
     source.touch()
     segments = (SegmentRange(1, 2),)
     job = JobItem(source, segments=segments)
-    processor = Processor()
+    processor = Processor(on_resume_conflict=no_resume_conflict)
     processor._settings = AppSettings()
     processor._output_pattern = "{original}_restored.mp4"
 
@@ -68,7 +68,7 @@ def test_processor_uses_each_videos_detection_and_projection_overrides(tmp_path)
         detection_score_threshold=0.55,
         vr_projection="fisheye",
     )
-    processor = Processor()
+    processor = Processor(on_resume_conflict=no_resume_conflict)
     processor._settings = AppSettings(
         detection_model="rfdetr-v5",
         detection_score_threshold=0.25,
@@ -97,7 +97,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
     metadata = MagicMock(codec_name="h264", duration=10.0)
     splice_plan = MagicMock()
     pipeline = MagicMock()
-    processor = Processor()
+    processor = Processor(on_resume_conflict=no_resume_conflict)
     processor._settings = AppSettings()
     processor._video_session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
     processor._ensure_video_session = MagicMock()
@@ -124,7 +124,7 @@ def test_video_job_passes_precomputed_splice_plan_to_pipeline(tmp_path) -> None:
 
 
 def test_ensure_video_session_delegates_to_factory_and_close_unloads() -> None:
-    processor = Processor()
+    processor = Processor(on_resume_conflict=no_resume_conflict)
     processor._settings = AppSettings()
     session = MagicMock()
 
@@ -144,7 +144,7 @@ def test_ensure_video_session_delegates_to_factory_and_close_unloads() -> None:
 
 def _run_ltx_job(tmp_path, segments, split):
     pipeline = MagicMock()
-    processor = Processor()
+    processor = Processor(on_resume_conflict=no_resume_conflict)
     settings = AppSettings(
         restoration_model="ltx",
         ltx_auto_split=True,

@@ -186,7 +186,7 @@ def provide_restoration_models(
         session.ltx_files = _ltx_model_files(config, session.device, log_callback=log_callback)
 
 
-def _restoration_model_path(config: SessionConfig, name: RestorationModelName) -> Path:
+def restoration_model_path_for(config: SessionConfig, name: RestorationModelName) -> Path:
     from jasna.engine_paths import default_restoration_model_path
 
     if name == config.restoration_model_name:
@@ -203,7 +203,7 @@ def _build_basicvsrpp_pipeline(
     from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
 
-    model_path = _restoration_model_path(config, "basicvsrpp")
+    model_path = restoration_model_path_for(config, "basicvsrpp")
     compile_result = ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
@@ -252,7 +252,7 @@ def _ltx_model_files(
         logger.warning(LTX_TRIAL_NOTICE)
         files = LtxModelFiles.placeholder(config.ltx_model, fast=config.ltx_fast)
     else:
-        files = LtxModelFiles.from_dir(_restoration_model_path(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
+        files = LtxModelFiles.from_dir(restoration_model_path_for(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
@@ -340,12 +340,19 @@ def ltx_auto_split(
         if progress_callback is not None:
             progress_callback(0.0, 0.0, 0.0, 0, 0, StageProgress("split", 1, 1, fraction, 0.0))
 
-    from jasna.job_resume import ResumeMismatchError, job_fingerprint, read_json, resume_directory, segments_from_json, write_json
+    from jasna.job_resume import (
+        ResumeMismatchError,
+        job_fingerprint,
+        read_json,
+        resume_directory,
+        segments_from_json,
+        write_json,
+    )
 
     root = resume_directory(config, output_video)
     key = job_fingerprint(config, input_video, output_video, metadata, ())
     cached = read_json(root / "split.json")
-    if isinstance(cached, dict) and cached.get("fingerprint") == key:
+    if cached is not None and cached["fingerprint"] == key:
         segments = segments_from_json(cached["segments"])
         logger.info("Reusing saved LTX auto split for %s", input_video.name)
     else:

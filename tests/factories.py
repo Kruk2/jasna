@@ -67,6 +67,10 @@ def session_config(**overrides) -> SessionConfig:
     return SessionConfig(**base)
 
 
+def no_resume_conflict(directory: Path):
+    raise AssertionError(f"unexpected saved-progress conflict: {directory}")
+
+
 def fake_session(*, device: torch.device, restoration_pipeline, detection_model=None) -> SimpleNamespace:
     detection_model = MagicMock() if detection_model is None else detection_model
     return SimpleNamespace(

@@ -78,7 +78,7 @@ def license_missing(directory: Path, model: LtxModelName, fast: bool) -> bool:
     from jasna.protection import ProtectionError
 
     try:
-        if any(path.suffix == ".enc" for path in model_files._bundle_paths(directory, model, fast=fast)):
+        if any(path.suffix == ".enc" for path in model_files.bundle_paths(directory, model, fast=fast)):
             if not read_license_info()[1]:
                 return True
         model_files.LtxModelFiles.from_dir(directory, model, fast=fast)

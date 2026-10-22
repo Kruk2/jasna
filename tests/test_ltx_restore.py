@@ -1,5 +1,6 @@
 import contextlib
 import json
+import tempfile
 import threading
 import time
 import weakref
@@ -173,11 +174,15 @@ def _render(tmp_path):
     )
 
 
+def _new_dir(tmp_path):
+    return Path(tempfile.mkdtemp(dir=tmp_path))
+
+
 def _run_spans(tmp_path, spans):
     restore.restore_spans(
         spans,
         _render(tmp_path),
-        work_dir=tmp_path,
+        work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
     )
@@ -285,7 +290,7 @@ def test_restore_video_decodes_with_the_free_vram(fakes, tmp_path):
         window_hop=restore.WINDOW_HOP,
         seed=5,
         device=torch.device("cpu"),
-        work_dir=tmp_path,
+        work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(12, disable=True, report=None),
         cancel=threading.Event(),
@@ -756,7 +761,7 @@ def test_a_whole_video_keeps_its_speed_profile_apart_from_segment_renders(fakes,
         window_hop=restore.WINDOW_HOP,
         seed=1,
         device=torch.device("cpu"),
-        work_dir=tmp_path,
+        work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         speed_profile=tmp_path / "speed.json",
         progress=restore.Progress(0, disable=True, report=None),
         cancel=threading.Event(),
@@ -825,7 +830,7 @@ def test_restore_spans_shows_each_pass_before_its_model_loads(fakes, monkeypatch
     restore.restore_spans(
         [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 1),), _Writer)],
         _render(tmp_path),
-        work_dir=tmp_path,
+        work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
         cancel=threading.Event(),
     )
@@ -916,7 +921,7 @@ def test_encrypted_span_uses_worker_for_every_model_pass(fakes, monkeypatch, tmp
     writer = _Writer()
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), lambda: writer)],
-        render, work_dir=tmp_path, progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
+        render, work_dir=tmp_path, resume_dir=_new_dir(tmp_path), progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
     )
     assert writer.closed
     assert [op for op, _, _ in requests] == [
@@ -958,7 +963,7 @@ def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, mo
     files = restore.LtxModelFiles(Path("t.enc"), Path("v.enc"), Path("d.enc"))
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 5),), _Writer)],
-        replace(_render(tmp_path), files=files), work_dir=tmp_path,
+        replace(_render(tmp_path), files=files), work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         progress=restore.Progress(12, disable=True, report=None), cancel=threading.Event(),
     )
     assert requests[0] == ("prepare_transformer", False)
@@ -995,7 +1000,7 @@ def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
     restore.restore_spans(
         [restore.LtxSpan(_source(video), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), lambda: writer)],
         _render(tmp_path),
-        work_dir=tmp_path,
+        work_dir=tmp_path, resume_dir=_new_dir(tmp_path),
         progress=restore.Progress(12, disable=True, report=lambda *args: reports.append(args)),
         cancel=threading.Event(),
     )
@@ -1014,7 +1019,7 @@ def test_a_fresh_encode_pass_counts_frames_and_warms_up_after_its_first_batch(fa
     progress = restore.Progress(12, disable=True, report=None)
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)],
-        _render(tmp_path), work_dir=tmp_path, progress=progress, cancel=threading.Event(),
+        _render(tmp_path), work_dir=tmp_path, resume_dir=_new_dir(tmp_path), progress=progress, cancel=threading.Event(),
     )
     timing = progress.timings["encode"]
     assert (timing.units, timing.warm_frames) == (12, 8)

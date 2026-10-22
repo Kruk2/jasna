@@ -26,6 +26,7 @@ from jasna.gui.restoration_preview import (
 )
 from jasna.gui.segment_editor import SegmentEditor
 from jasna.media.probe import VideoMetadata
+from factories import no_resume_conflict
 
 
 def _metadata(*, fps=30.0, duration=10.0, time_base=Fraction(1, 90000), start_pts=0) -> VideoMetadata:
@@ -458,7 +459,7 @@ def test_app_prepares_queue_or_continues_after_pause(tmp_path, stopped, pending)
 
     app = JasnaApp.__new__(JasnaApp)
     app._preview_gpu_busy = False
-    app._processor = Processor()
+    app._processor = Processor(on_resume_conflict=no_resume_conflict)
     if stopped:
         app._processor.stop()
     app._processor.start = MagicMock()

@@ -348,7 +348,7 @@ class Pipeline:
                 device=self.device,
                 work_dir=self.working_dir or self.output_video.parent,
                 speed_profile=profile_path(),
-                resume_dir=self.resume.directory / "ltx" if self.resume is not None else None,
+                resume_dir=self.resume.directory / "ltx",
                 progress=self._ltx_progress(
                     frame_rate.output_frame_count(metadata.num_frames), self.progress_callback
                 ),
@@ -444,7 +444,7 @@ class Pipeline:
                 [self.ltx_span(metadata, index, span, segments, open_writer) for span, segments, open_writer in spans],
                 render,
                 work_dir=work_dir,
-                resume_dir=self.resume.directory / "ltx" if self.resume is not None else None,
+                resume_dir=self.resume.directory / "ltx",
                 progress=self._ltx_progress(frames, progress_callback),
                 cancel=self._cancel_event,
             )

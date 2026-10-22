@@ -131,7 +131,7 @@ def build_video_session(
     if config.restoration_model_name == "ltx" and not config.ltx_trial:
         from jasna.ltx import model_files
 
-        encrypted = any(path.suffix == ".enc" for path in model_files._bundle_paths(
+        encrypted = any(path.suffix == ".enc" for path in model_files.bundle_paths(
             config.restoration_model_path, config.ltx_model, fast=config.ltx_fast))
     if encrypted:
         _, _, identity = read_license_info()

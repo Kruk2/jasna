@@ -237,7 +237,7 @@ def bundle_names(model: LtxModelName, *, fast: bool) -> tuple[str, str, str]:
     return (_TRANSFORMER_NAMES[(model, fast)], *_SHARED_NAMES)
 
 
-def _bundle_paths(directory: Path, model: LtxModelName, *, fast: bool) -> list[Path]:
+def bundle_paths(directory: Path, model: LtxModelName, *, fast: bool) -> list[Path]:
     paths = [directory / name for name in bundle_names(model, fast=fast)]
     return [path.with_name(path.name + ".enc") if is_frozen() or not path.is_file() else path for path in paths]
 
@@ -269,7 +269,7 @@ class LtxModelFiles:
     @classmethod
     def from_dir(cls, directory: Path, model: LtxModelName, *, fast: bool) -> LtxModelFiles:
         """The bundle of ``model``; ``fast`` picks its NVFP4 transformer over the INT8 one."""
-        paths = _bundle_paths(directory, model, fast=fast)
+        paths = bundle_paths(directory, model, fast=fast)
         if any(path.suffix == ".enc" for path in paths):
             from jasna.license_api import require_protection
 
@@ -284,7 +284,7 @@ class LtxModelFiles:
 
 def model_installed(directory: Path, model: LtxModelName, *, fast: bool) -> bool:
     """Whether every file of this model choice is on disk; checks no license."""
-    return all(path.is_file() for path in _bundle_paths(directory, model, fast=fast))
+    return all(path.is_file() for path in bundle_paths(directory, model, fast=fast))
 
 
 def bundle_present(directory: Path) -> bool:
@@ -295,7 +295,7 @@ def bundle_present(directory: Path) -> bool:
 def missing_downloads(directory: Path, model: LtxModelName, *, fast: bool) -> list[DownloadableFile]:
     """The files this model choice still needs, as published (``.enc`` in releases)."""
     missing = []
-    for path in _bundle_paths(directory, model, fast=fast):
+    for path in bundle_paths(directory, model, fast=fast):
         if not path.is_file():
             entry = LTX_DOWNLOADS[path.name.removesuffix(".enc")]
             missing.append(DownloadableFile(path.name, entry.size_bytes, entry.sha256))

@@ -23,7 +23,7 @@ import time
 from collections import Counter
 from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import closing, contextmanager, nullcontext
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, Protocol
@@ -1183,12 +1183,13 @@ def _profile_key(render: LtxRender) -> str:
 
 
 def restore_spans(
-    spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, progress: Progress, cancel: threading.Event,
-    resume_dir: Path | None = None,
+    spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, resume_dir: Path, progress: Progress,
+    cancel: threading.Event,
 ) -> None:
     """Restore every segment of ``spans`` and write each span's frames to a writer of its own
-    (closed once the span is written). Without a speed profile for this GPU and model, a
-    speed test runs first: the first frames of the first span with two made-up mosaics,
+    (closed once the span is written); plans and latents are kept in ``resume_dir`` to resume.
+    Without a speed profile for this GPU and model, a speed test runs first in a temporary
+    directory under ``work_dir``: the first frames of the first span with two made-up mosaics,
     restored and thrown away, so the run's time left is known once its scan has planned it."""
     if not speed.load_rates(render.speed_profile, _profile_key(render)):
         logger.info("LTX speed test: no speed profile for this GPU and model yet")
@@ -1197,31 +1198,29 @@ def restore_spans(
             (LtxSegment(*WHOLE_VIDEO_PTS, 0),),
             _DiscardedFrames,
         )
-        _restore_spans(
-            [speed_test],
-            replace(render, detector=_SpeedTestMosaics()),
-            work_dir=work_dir,
-            progress=progress.speed_test(),
-            cancel=cancel,
-        )
-    _restore_spans(spans, render, work_dir=work_dir, progress=progress, cancel=cancel, resume_dir=resume_dir)
+        with tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-") as temp:
+            _restore_spans(
+                [speed_test],
+                replace(render, detector=_SpeedTestMosaics()),
+                Path(temp),
+                progress=progress.speed_test(),
+                cancel=cancel,
+            )
+    resume_dir.mkdir(parents=True, exist_ok=True)
+    _restore_spans(spans, render, resume_dir, progress=progress, cancel=cancel)
 
 
 def _restore_spans(
-    spans: Sequence[LtxSpan], render: LtxRender, *, work_dir: Path, progress: Progress, cancel: threading.Event,
-    resume_dir: Path | None = None,
+    spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
 ) -> None:
     profile_key = _profile_key(render)
     progress.expect(speed.load_rates(render.speed_profile, profile_key))
     torch.cuda.reset_peak_memory_stats(render.device)
     blocks = None
-    resuming = resume_dir is not None and any(resume_dir.glob("*.plans.npz"))
-    if resume_dir is not None:
-        resume_dir.mkdir(parents=True, exist_ok=True)
-    directory = nullcontext(resume_dir) if resume_dir is not None else tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-")
-    with ModelRuntime(render.files, render.device, cancel) as runtime, directory as temp:
-        prepared = prepare_spans(spans, render, Path(temp), progress=progress, cancel=cancel, runtime=runtime)
-        finals = final_stores(prepared, Path(temp))
+    resuming = any(directory.glob("*.plans.npz"))
+    with ModelRuntime(render.files, render.device, cancel) as runtime:
+        prepared = prepare_spans(spans, render, directory, progress=progress, cancel=cancel, runtime=runtime)
+        finals = final_stores(prepared, directory)
         windows = sum(p.windows for p in prepared)
         pending_tracks = any(
             not store.has_track(plan)
@@ -1268,13 +1267,13 @@ def restore_video(
     work_dir: Path,
     speed_profile: Path,
     progress: Progress,
+    resume_dir: Path,
     cancel: threading.Event,
-    resume_dir: Path | None = None,
 ) -> None:
     """Restore every mosaic of the video ``frames`` yields as one segment; the 768 px
     decision and the decode tiles follow the VRAM free when they are made."""
     span = LtxSpan(frames, (LtxSegment(*WHOLE_VIDEO_PTS, seed),), lambda: writer)
-    saved = _saved_plans(span, resume_dir) if resume_dir is not None else None
+    saved = _saved_plans(span, resume_dir)
     canvas = saved.large_canvas if saved is not None else large_canvas_fits(large_canvas, device_free_bytes(device))
     restore_spans(
         [span],
