@@ -102,10 +102,14 @@ def _run_software_batch(
         events.append("convert")
         luma_ptrs.append(y.data_ptr())
 
+    def converter(*args, **kwargs):
+        events.append("initialize converter")
+        return SimpleNamespace(convert_into=convert_into)
+
     monkeypatch.setattr(
         module,
         "YuvToRgbConverter",
-        lambda *args, **kwargs: SimpleNamespace(convert_into=convert_into),
+        converter,
     )
     monkeypatch.setattr(
         module,
@@ -175,9 +179,13 @@ def test_amd_software_path_owns_its_batch_on_a_private_stream(monkeypatch):
     assert not current_calls, "AMD conversion must not wait for the caller's stream"
     stream.wait_stream.assert_not_called()
 
-    # Planes and batch are allocated on the private stream, then converts, then
-    # one synchronize of that stream before yield.
-    assert events == ["enter", "exit", "enter", "exit", "enter"] + ["convert"] * BATCH + ["exit", "sync"]
+    # Converter scratch, planes and batch belong to the private stream, with
+    # one synchronize after conversion before yield.
+    assert events == (
+        ["enter", "initialize converter", "exit"]
+        + ["enter", "exit"] * 2
+        + ["enter"] + ["convert"] * BATCH + ["exit", "sync"]
+    )
     stream.synchronize.assert_called_once_with()
 
 
@@ -199,7 +207,10 @@ def test_nvidia_software_path_reuses_single_staging_on_private_stream(monkeypatc
     assert new_calls, "NVIDIA software fallback must use a private new_stream"
     assert current_calls == [True], "NVIDIA software fallback reads current_stream only to wait on it"
     stream.wait_stream.assert_called_once_with(stream)
-    assert events == ["enter"] + ["convert"] * BATCH + ["exit", "sync"]
+    assert events == (
+        ["enter", "initialize converter", "exit", "enter"]
+        + ["convert"] * BATCH + ["exit", "sync"]
+    )
     stream.synchronize.assert_called_once_with()
 
 

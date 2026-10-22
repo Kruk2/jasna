@@ -691,14 +691,16 @@ class VideoReader:
         dtype = torch.uint16 if ten_bit else torch.uint8
         bytes_per_sample = 2 if ten_bit else 1
 
-        converter = YuvToRgbConverter(
-            self.height,
-            self.width,
-            self.metadata.color_space,
-            self._full_range,
-            ten_bit,
-            self.device,
-        )
+        stream = new_stream(self.device)
+        with stream_context(stream):
+            converter = YuvToRgbConverter(
+                self.height,
+                self.width,
+                self.metadata.color_space,
+                self._full_range,
+                ten_bit,
+                self.device,
+            )
         reformatter = VideoReformatter()
         color_range = AvColorRange.JPEG if self._full_range else AvColorRange.MPEG
         H, W = self.height, self.width
@@ -710,7 +712,6 @@ class VideoReader:
         # overwrite starts only after the prior kernel consumed it); the batch comes from
         # the caller's stream.
         pinned = torch.empty((self.batch_size, H + H // 2, W), dtype=dtype, pin_memory=True)
-        stream = new_stream(self.device)
         if self.vendor is AcceleratorVendor.AMD:
             with stream_context(stream):
                 device_yuv = torch.empty(
