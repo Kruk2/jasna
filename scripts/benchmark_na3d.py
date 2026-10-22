@@ -1,6 +1,6 @@
 """Benchmark the Triton 3D neighborhood attention against comfy-kitchen and NATTEN.
 
-Times the shipped Triton config (``na_triton.config_for``), comfy-kitchen's and NATTEN's
+Times the shipped Triton config for this GPU's vendor (``na_triton.config_for``), comfy-kitchen's and NATTEN's
 ``na3d`` (when installed) on the LTX DiffVAE decoder's NA shapes: stage 5 at 512 and 768 px
 as the decoder calls it (W slab with 5 halo columns each side, queries on the core columns
 only; 4 slab chunks or 1) and stage 4. Prints effective TFLOPS (useful FLOPs only:
@@ -32,15 +32,20 @@ SHAPES = {
     "s4-768": ((1, 69, 96, 96, 8, 64), (3, 5, 5), 0, 96),
 }
 SWEEP = [
-    tile_config(tile, block_n, warps, stages)
+    tile_config(tile, block_n, warps, stages, False)
     for tile in ((4, 4, 4), (4, 4, 2), (2, 8, 4), (4, 2, 4), (2, 4, 4), (2, 4, 8))
-    for block_n, warps, stages in itertools.product((32, 64), (2, 4), (2, 3, 4))
+    for block_n, warps, stages in itertools.product((32, 64), (2, 4), (1, 2, 3, 4))
+] + [
+    tile_config(tile, 16, warps, 1, True)
+    for tile in ((4, 4, 4), (4, 2, 4), (2, 4, 4), (1, 4, 4), (2, 2, 4), (4, 4, 2))
+    for warps in (1, 2, 4)
 ]
 
 
 def config_name(config: triton.Config) -> str:
     kw = config.kwargs
-    return f"{kw['TILE_T']}x{kw['TILE_H']}x{kw['TILE_W']} n{kw['BLOCK_N']} w{config.num_warps} s{config.num_stages}"
+    walk = " rows" if kw["BOX_ROWS"] else ""
+    return f"{kw['TILE_T']}x{kw['TILE_H']}x{kw['TILE_W']} n{kw['BLOCK_N']} w{config.num_warps} s{config.num_stages}{walk}"
 
 
 def time_ms(fn) -> float:
@@ -81,7 +86,7 @@ def run_benchmark(names: list[str], sweep: bool) -> None:
                 "natten",
                 lambda: natten.na3d(full_q, k, v, kernel_size=kernel, scale=1.0)[:, :, :, w_start : w_start + w_len],
             )
-        shipped = config_for(kernel)
+        shipped = config_for(kernel, amd=torch.version.hip is not None)
         report(f"triton {config_name(shipped)}", lambda: na3d_with_config(q, k, v, kernel, w_start, shipped))
         for config in SWEEP if sweep else []:
             report(f"  {config_name(config)}", lambda config=config: na3d_with_config(q, k, v, kernel, w_start, config))

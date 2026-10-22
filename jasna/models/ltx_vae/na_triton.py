@@ -3,40 +3,47 @@
 Each program owns a TILE_T x TILE_H x TILE_W block of queries of one (batch, head). Its KV
 range is the union of those queries' windows ("dynamic KV tiling", GNA arXiv 2504.16922): per
 axis from the window start of the tile's first query to the window end of its last, at most
-tile + kernel - 1 positions. The box is walked flattened (w fastest) in BLOCK_N-token chunks
-with an FA2 online softmax, each score masked to its own query's window.
+tile + kernel - 1 positions. The box is walked in BLOCK_N-token chunks with an FA2 online
+softmax, each score masked to its own query's window: flattened (w fastest), or with
+``BOX_ROWS`` one (t, h) row of the box per chunk, so only W is masked per score and T/H per query
+(BLOCK_N >= the box width; 2.3x faster on RDNA4, where the flattened walk's per-score index math
+and masks dominate).
 
 Queries may cover only W columns ``[query_w_start, query_w_start + Wq)`` of the K/V grid, so a
 W slab with halo columns attends from its core columns alone.
 """
 
-import math
-
 import torch
 import triton
 import triton.language as tl
+
+from jasna.accelerator import is_amd_device
+from jasna.models.ltx_vae import na_geometry
 
 LOG2E = tl.constexpr(1.4426950408889634)
 MASKED_SCORE = tl.constexpr(-1.0e30)
 
 
-def tile_config(tile: tuple[int, int, int], block_n: int, num_warps: int, num_stages: int) -> triton.Config:
+def tile_config(
+    tile: tuple[int, int, int], block_n: int, num_warps: int, num_stages: int, box_rows: bool
+) -> triton.Config:
     tile_t, tile_h, tile_w = tile
     return triton.Config(
-        {"TILE_T": tile_t, "TILE_H": tile_h, "TILE_W": tile_w, "BLOCK_N": block_n},
+        {"TILE_T": tile_t, "TILE_H": tile_h, "TILE_W": tile_w, "BLOCK_N": block_n, "BOX_ROWS": box_rows},
         num_warps=num_warps,
         num_stages=num_stages,
     )
 
 
-# Fastest on an RTX 5090 in scripts/benchmark_na3d.py: stage 5 (11x11x11 windows) and stages 1-4 (3x5x5, 3x7x7).
-LARGE_WINDOW_CONFIG = tile_config((4, 4, 4), 32, 2, 3)
-SMALL_WINDOW_CONFIG = tile_config((2, 4, 4), 32, 2, 2)
-LARGE_WINDOW_MIN_VOLUME = 512
+_CONFIGS = {config: tile_config(*config) for config in na_geometry.CONFIGS}
+LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.LARGE_WINDOW]
+SMALL_WINDOW_CONFIG = _CONFIGS[na_geometry.SMALL_WINDOW]
+AMD_LARGE_WINDOW_CONFIG = _CONFIGS[na_geometry.AMD_LARGE_WINDOW]
+AMD_SMALL_WINDOW_CONFIG = _CONFIGS[na_geometry.AMD_SMALL_WINDOW]
 
 
-def config_for(kernel_size: tuple[int, int, int]) -> triton.Config:
-    return LARGE_WINDOW_CONFIG if math.prod(kernel_size) >= LARGE_WINDOW_MIN_VOLUME else SMALL_WINDOW_CONFIG
+def config_for(kernel_size: tuple[int, int, int], amd: bool) -> triton.Config:
+    return _CONFIGS[na_geometry.config_for(kernel_size, amd)]
 
 
 @triton.jit
@@ -57,6 +64,7 @@ def _na3d_fwd_kernel(
     q_stride_b, q_stride_t, q_stride_h, q_stride_w, kv_stride_b, kv_stride_t, kv_stride_h, kv_stride_w,
     KERNEL_T: tl.constexpr, KERNEL_H: tl.constexpr, KERNEL_W: tl.constexpr, HEAD_DIM: tl.constexpr,
     TILE_T: tl.constexpr, TILE_H: tl.constexpr, TILE_W: tl.constexpr, BLOCK_N: tl.constexpr,
+    BOX_ROWS: tl.constexpr,
 ):
     BLOCK_M: tl.constexpr = TILE_T * TILE_H * TILE_W
     tile = tl.program_id(0)
@@ -103,32 +111,52 @@ def _na3d_fwd_kernel(
     row_max = tl.full((BLOCK_M,), float("-inf"), tl.float32)
     row_sum = tl.zeros((BLOCK_M,), tl.float32)
     acc = tl.zeros((BLOCK_M, HEAD_DIM), tl.float32)
-    for chunk_start in range(0, box_size, BLOCK_N):
-        n = chunk_start + tl.arange(0, BLOCK_N)
-        n_valid = n < box_size
-        n = tl.minimum(n, box_size - 1)
-        kt = n // extent_hw
-        rest = n - kt * extent_hw
-        kh = rest // extent_w
-        kw = rest - kh * extent_w
-        kv_offsets = ((box_t + kt) * kv_stride_t + (box_h + kh) * kv_stride_h + (box_w + kw) * kv_stride_w)
-        kv_offsets = kv_offsets[:, None] + dims[None, :]
-        k = tl.load(k_ptr + kv_offsets)
-        v = tl.load(v_ptr + kv_offsets)
+    if BOX_ROWS:
+        kw = tl.arange(0, BLOCK_N)
+        w_visible = (kw[None, :] < extent_w) & _in_window(kw, win_w, KERNEL_W)
+        w_offsets = ((box_w + tl.minimum(kw, extent_w - 1)) * kv_stride_w)[:, None] + dims[None, :]
+        for kt in range(0, extent_t):
+            t_visible = (kt - win_t).to(tl.uint32, bitcast=True) < KERNEL_T
+            for kh in range(0, extent_h):
+                row_visible = t_visible & ((kh - win_h).to(tl.uint32, bitcast=True) < KERNEL_H)
+                kv_offsets = (box_t + kt) * kv_stride_t + (box_h + kh) * kv_stride_h + w_offsets
+                k = tl.load(k_ptr + kv_offsets)
+                v = tl.load(v_ptr + kv_offsets)
+                visible = row_visible[:, None] & w_visible
+                scores = tl.where(visible, tl.dot(q, tl.trans(k)) * LOG2E, MASKED_SCORE)
+                new_max = tl.maximum(row_max, tl.max(scores, 1))
+                rescale = tl.math.exp2(row_max - new_max)
+                p = tl.math.exp2(scores - new_max[:, None])
+                row_sum = row_sum * rescale + tl.sum(p, 1)
+                acc = tl.dot(p.to(v.dtype), v, acc * rescale[:, None])
+                row_max = new_max
+    else:
+        for chunk_start in range(0, box_size, BLOCK_N):
+            n = chunk_start + tl.arange(0, BLOCK_N)
+            n_valid = n < box_size
+            n = tl.minimum(n, box_size - 1)
+            kt = n // extent_hw
+            rest = n - kt * extent_hw
+            kh = rest // extent_w
+            kw = rest - kh * extent_w
+            kv_offsets = ((box_t + kt) * kv_stride_t + (box_h + kh) * kv_stride_h + (box_w + kw) * kv_stride_w)
+            kv_offsets = kv_offsets[:, None] + dims[None, :]
+            k = tl.load(k_ptr + kv_offsets)
+            v = tl.load(v_ptr + kv_offsets)
 
-        visible = (
-            n_valid[None, :]
-            & _in_window(kt, win_t, KERNEL_T)
-            & _in_window(kh, win_h, KERNEL_H)
-            & _in_window(kw, win_w, KERNEL_W)
-        )
-        scores = tl.where(visible, tl.dot(q, tl.trans(k)) * LOG2E, MASKED_SCORE)
-        new_max = tl.maximum(row_max, tl.max(scores, 1))
-        rescale = tl.math.exp2(row_max - new_max)
-        p = tl.math.exp2(scores - new_max[:, None])
-        row_sum = row_sum * rescale + tl.sum(p, 1)
-        acc = tl.dot(p.to(v.dtype), v, acc * rescale[:, None])
-        row_max = new_max
+            visible = (
+                n_valid[None, :]
+                & _in_window(kt, win_t, KERNEL_T)
+                & _in_window(kh, win_h, KERNEL_H)
+                & _in_window(kw, win_w, KERNEL_W)
+            )
+            scores = tl.where(visible, tl.dot(q, tl.trans(k)) * LOG2E, MASKED_SCORE)
+            new_max = tl.maximum(row_max, tl.max(scores, 1))
+            rescale = tl.math.exp2(row_max - new_max)
+            p = tl.math.exp2(scores - new_max[:, None])
+            row_sum = row_sum * rescale + tl.sum(p, 1)
+            acc = tl.dot(p.to(v.dtype), v, acc * rescale[:, None])
+            row_max = new_max
 
     out = acc / row_sum[:, None]
     tl.store(o_ptr + q_offsets, out.to(o_ptr.dtype.element_ty), mask=q_valid[:, None])
@@ -142,24 +170,16 @@ def na3d_with_config(
     query_w_start: int,
     config: triton.Config,
 ) -> torch.Tensor:
-    batch, t, h, w, num_heads, head_dim = k.shape
-    query_w_len = q.shape[3]
-    if v.shape != k.shape or q.shape[:3] != k.shape[:3] or q.shape[4:] != k.shape[4:]:
-        raise ValueError(f"q {tuple(q.shape)} must match k/v {tuple(k.shape)} in all but W, and k must match v")
-    if not 0 <= query_w_start <= w - query_w_len:
-        raise ValueError(f"query columns [{query_w_start}, {query_w_start + query_w_len}) exceed W={w}")
-    if math.prod(k.shape[1:]) >= 2**31:
-        raise ValueError(f"one batch item of {tuple(k.shape)} overflows int32 offsets")
     q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
-    kernel_t, kernel_h, kernel_w = (min(kernel, length) for kernel, length in zip(kernel_size, (t, h, w), strict=True))
-    tile_t, tile_h, tile_w = config.kwargs["TILE_T"], config.kwargs["TILE_H"], config.kwargs["TILE_W"]
-    tiles_t, tiles_h, tiles_w = triton.cdiv(t, tile_t), triton.cdiv(h, tile_h), triton.cdiv(query_w_len, tile_w)
+    kw = config.kwargs
+    launch = na_geometry.na_launch(
+        q, k, v, kernel_size, query_w_start, (kw["TILE_T"], kw["TILE_H"], kw["TILE_W"]), kw["BLOCK_N"], kw["BOX_ROWS"]
+    )
+    kernel_t, kernel_h, kernel_w = launch.kernel
     out = torch.empty_like(q)
-    _na3d_fwd_kernel[(tiles_t * tiles_h * tiles_w, batch * num_heads)](
-        q, k, v, out,
-        t, h, w, query_w_start, query_w_len, num_heads, tiles_h, tiles_w,
-        *q.stride()[:4], *k.stride()[:4],
-        KERNEL_T=kernel_t, KERNEL_H=kernel_h, KERNEL_W=kernel_w, HEAD_DIM=head_dim,
+    _na3d_fwd_kernel[launch.grid](
+        q, k, v, out, *launch.scalars,
+        KERNEL_T=kernel_t, KERNEL_H=kernel_h, KERNEL_W=kernel_w, HEAD_DIM=k.shape[5],
         num_warps=config.num_warps, num_stages=config.num_stages, **config.kwargs,
     )
     return out
@@ -174,7 +194,7 @@ def na3d(
     ``q`` holds the queries of W columns ``[query_w_start, query_w_start + q.shape[3])``.
     """
     kernel = tuple(kernel_size)
-    return na3d_with_config(q, k, v, kernel, query_w_start, config_for(kernel))
+    return na3d_with_config(q, k, v, kernel, query_w_start, config_for(kernel, is_amd_device(q.device)))
 
 
 @na3d.register_fake
