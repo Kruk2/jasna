@@ -92,8 +92,9 @@ with the same output and settings. In the command line, run the same command aga
 
 The current unfinished track may run again, and saving the output starts over; completed
 parts of a range job are kept. A long single shot can be one track. Jasna asks before
-replacing saved work if the input, settings or app version changed. BasicVSR++ whole-video
-jobs, previews and streaming do not resume.
+replacing saved work if the input, the detection or LTX settings or the app version changed.
+Changing only output settings (codec, quality, color LUT, sharpening) keeps the saved LTX work.
+BasicVSR++ whole-video jobs, previews and streaming do not resume.
 
 ### Downloading LTX yourself
 

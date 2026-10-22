@@ -10,7 +10,7 @@ import torch
 
 from factories import session_config
 from jasna import job_resume
-from jasna.job_resume import ResumeJob, ResumeMismatchError, atomic_write, find_resume_output, job_fingerprint, write_json
+from jasna.job_resume import ResumeJob, ResumeMismatchError, atomic_write, find_resume_output, job_fingerprints, write_json
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.model_files import bundle_names
 from jasna.ltx.plan import TrackPlan, Window, plans_from_arrays, plans_to_arrays
@@ -84,10 +84,10 @@ def test_latents_ignore_part_files_and_load_only_weights(tmp_path):
 def test_fingerprint_ignores_progress_and_working_directory(job, tmp_path):
     config, source, output, metadata = job
     changed = replace(config, disable_progress=True, working_dir=tmp_path / "scratch")
-    assert job_fingerprint(config, source, output, metadata, ()) == job_fingerprint(changed, source, output, metadata, ())
+    assert job_fingerprints(config, source, output, metadata, ()) == job_fingerprints(changed, source, output, metadata, ())
 
 
-def test_resume_rejects_changed_lut_contents_even_with_same_size_and_timestamp(job, tmp_path):
+def test_changed_lut_contents_redo_the_output_even_with_same_size_and_timestamp(job, tmp_path):
     config, source, output, metadata = job
     lut = tmp_path / "colors.cube"
     lut.write_bytes(b"0 0 0\n1 1 1\n")
@@ -98,8 +98,9 @@ def test_resume_rejects_changed_lut_contents_even_with_same_size_and_timestamp(j
     stat = lut.stat()
     lut.write_bytes(b"1 1 1\n0 0 0\n")
     os.utime(lut, ns=(stat.st_atime_ns, stat.st_mtime_ns))
-    with pytest.raises(ResumeMismatchError):
-        ResumeJob(config, source, output, metadata, ()).prepare()
+    changed = ResumeJob(config, source, output, metadata, ())
+    assert changed.fingerprint != checkpoint.fingerprint
+    assert changed.latents == checkpoint.latents
 
 
 @pytest.mark.parametrize("asset, encrypted", [
@@ -107,7 +108,7 @@ def test_resume_rejects_changed_lut_contents_even_with_same_size_and_timestamp(j
     ("transformer", False), ("vae", False), ("decoder", False),
     ("transformer", True), ("vae", True), ("decoder", True),
 ])
-def test_resume_rejects_model_replaced_at_the_same_path(job, tmp_path, monkeypatch, asset, encrypted):
+def test_model_replaced_at_the_same_path_changes_the_fingerprint(job, tmp_path, monkeypatch, asset, encrypted):
     config, source, output, metadata = job
     ranges = ()
     if asset == "detector":
@@ -128,8 +129,13 @@ def test_resume_rejects_model_replaced_at_the_same_path(job, tmp_path, monkeypat
     stat = path.stat()
     path.write_bytes(b"updated")
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000))
-    with pytest.raises(ResumeMismatchError):
-        ResumeJob(config, source, output, metadata, ranges).prepare()
+    changed = ResumeJob(config, source, output, metadata, ranges)
+    assert changed.fingerprint != checkpoint.fingerprint
+    if asset == "basicvsrpp":
+        assert changed.latents == checkpoint.latents
+    else:
+        with pytest.raises(ResumeMismatchError):
+            changed.prepare()
 
 
 def test_frozen_fingerprint_uses_encrypted_bundle_even_when_plaintext_exists(job, monkeypatch):
@@ -137,12 +143,12 @@ def test_frozen_fingerprint_uses_encrypted_bundle_even_when_plaintext_exists(job
     for path in tuple(config.restoration_model_path.iterdir()):
         path.with_name(path.name + ".enc").write_bytes(b"encrypted")
     monkeypatch.setattr("jasna.ltx.model_files.is_frozen", lambda: True)
-    original = job_fingerprint(config, source, output, metadata, ())
+    original = job_fingerprints(config, source, output, metadata, ())
     transformer = config.restoration_model_path / bundle_names(config.ltx_model, fast=config.ltx_fast)[0]
     transformer.write_bytes(b"unused plaintext")
-    assert job_fingerprint(config, source, output, metadata, ()) == original
+    assert job_fingerprints(config, source, output, metadata, ()) == original
     transformer.with_name(transformer.name + ".enc").write_bytes(b"changed encrypted")
-    assert job_fingerprint(config, source, output, metadata, ()) != original
+    assert job_fingerprints(config, source, output, metadata, ()) != original
 
 
 def test_fingerprint_ignores_ltx_files_when_every_range_uses_basicvsrpp(job, tmp_path, monkeypatch):
@@ -151,10 +157,10 @@ def test_fingerprint_ignores_ltx_files_when_every_range_uses_basicvsrpp(job, tmp
     basic.write_bytes(b"weights")
     monkeypatch.setattr("jasna.engine_paths.default_restoration_model_path", lambda name: basic)
     ranges = (SegmentRange(0, 1, SegmentRestoration("basicvsrpp", None)),)
-    original = job_fingerprint(config, source, output, metadata, ranges)
+    original = job_fingerprints(config, source, output, metadata, ranges)
     for path in config.restoration_model_path.iterdir():
         path.unlink()
-    assert job_fingerprint(config, source, output, metadata, ranges) == original
+    assert job_fingerprints(config, source, output, metadata, ranges) == original
 
 
 def test_removed_model_rejects_checkpoint_without_deleting_saved_progress(job):
@@ -171,16 +177,16 @@ def test_removed_model_rejects_checkpoint_without_deleting_saved_progress(job):
 def test_trial_fingerprint_ignores_installed_ltx_models(job):
     config, source, output, metadata = job
     config = replace(config, ltx_trial=True)
-    original = job_fingerprint(config, source, output, metadata, ())
+    original = job_fingerprints(config, source, output, metadata, ())
     for path in config.restoration_model_path.iterdir():
         path.unlink()
-    assert job_fingerprint(config, source, output, metadata, ()) == original
+    assert job_fingerprints(config, source, output, metadata, ()) == original
 
 
 @pytest.mark.parametrize("change", ["seed", "model", "settings", "ranges", "input", "version", "output", "metadata"])
 def test_fingerprint_detects_changes(job, monkeypatch, change):
     config, source, output, metadata = job
-    original = job_fingerprint(config, source, output, metadata, ())
+    original = job_fingerprints(config, source, output, metadata, ())
     ranges = ()
     if change == "seed":
         config = replace(config, ltx_seed=42)
@@ -198,7 +204,7 @@ def test_fingerprint_detects_changes(job, monkeypatch, change):
         output = output.with_suffix(".mkv")
     else:
         metadata = SimpleNamespace(num_frames=120, time_base=Fraction(1, 24), duration=5.0)
-    assert job_fingerprint(config, source, output, metadata, ranges) != original
+    assert job_fingerprints(config, source, output, metadata, ranges) != original
 
 
 def test_mismatch_preserves_every_file_until_confirmed(job):
@@ -253,7 +259,7 @@ def test_find_auto_split_checkpoint_with_effective_codec_and_ranges(job):
     checkpoint = ResumeJob(effective, source, output, metadata, segments)
     checkpoint.prepare()
     write_json(checkpoint.root / "split.json", {
-        "fingerprint": job_fingerprint(config, source, output, metadata, ()),
+        "fingerprint": job_fingerprints(config, source, output, metadata, ())[1],
         "segments": [asdict(segment) for segment in segments],
     })
     with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
@@ -389,3 +395,49 @@ def test_outputs_with_the_same_name_keep_separate_checkpoints_in_a_working_direc
     with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
         assert find_resume_output(config, source, first, ()) == renamed
         assert find_resume_output(config, source, second, ()) == second
+
+
+@pytest.mark.parametrize("change", [
+    {"codec": "av1"}, {"encoder_settings": {"cq": 12}}, {"lut_path": "lut"}, {"sharpen_strength": 0.5},
+    {"fmp4": True}, {"max_clip_size": 120}, {"compile_basicvsrpp": False}, {"secondary_restoration": "unet-4x"},
+])
+def test_output_only_settings_keep_the_latent_fingerprint(job, tmp_path, change):
+    config, source, output, metadata = job
+    if "lut_path" in change:
+        (tmp_path / "lut").write_bytes(b"0 0 0\n")
+        change = {"lut_path": str(tmp_path / "lut")}
+    job_key, latents = job_fingerprints(config, source, output, metadata, ())
+    changed_job, changed_latents = job_fingerprints(replace(config, **change), source, output, metadata, ())
+    assert changed_latents == latents
+    assert changed_job != job_key
+
+
+@pytest.mark.parametrize("change", [
+    {"ltx_seed": 1}, {"ltx_model": "distilled2"}, {"ltx_window_hop": 104}, {"ltx_large_canvas": False},
+    {"detection_score_threshold": 0.5}, {"batch_size": 8}, {"fp16": False}, {"retarget_high_fps": True},
+    {"vr_mode": "off"},
+])
+def test_scan_encode_and_denoise_settings_change_the_latent_fingerprint(job, change):
+    config, source, output, metadata = job
+    for name in bundle_names("distilled2", fast=False):
+        (config.restoration_model_path / name).write_bytes(b"weights")
+    latents = job_fingerprints(config, source, output, metadata, ())[1]
+    assert job_fingerprints(replace(config, **change), source, output, metadata, ())[1] != latents
+
+
+def test_output_only_change_keeps_latents_and_redoes_fragments(job):
+    config, source, output, metadata = job
+    checkpoint = ResumeJob(config, source, output, metadata, ())
+    checkpoint.prepare()
+    _save_work(checkpoint)
+    fragment = checkpoint.directory / "segments" / "0000-raw.nut"
+    fragment.parent.mkdir()
+    fragment.write_bytes(b"old codec")
+    changed = replace(config, codec="av1", encoder_settings={"cq": 30})
+    ResumeJob(changed, source, output, metadata, ()).prepare()
+    assert (checkpoint.directory / "ltx" / "000000.0-1-0.reference.pt").exists()
+    assert not fragment.exists()
+    assert ResumeJob(changed, source, output, metadata, ()).matches()
+    output.touch()
+    with patch("jasna.media.probe.get_video_meta_data", return_value=metadata):
+        assert find_resume_output(changed, source, output, ()) == output

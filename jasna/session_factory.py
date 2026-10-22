@@ -343,7 +343,7 @@ def ltx_auto_split(
     from jasna.job_resume import (
         ResumeMismatchError,
         has_saved_work,
-        job_fingerprint,
+        job_fingerprints,
         read_json,
         resume_directory,
         segments_from_json,
@@ -351,7 +351,7 @@ def ltx_auto_split(
     )
 
     root = resume_directory(config, output_video)
-    key = job_fingerprint(config, input_video, output_video, metadata, ())
+    key = job_fingerprints(config, input_video, output_video, metadata, ())[1]
     cached = read_json(root / "split.json")
     if cached is not None and cached["fingerprint"] == key:
         segments = segments_from_json(cached["segments"])
