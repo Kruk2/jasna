@@ -252,6 +252,7 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
     from jasna.engine_paths import SD15_DIR
     from jasna.media import image_io
     from jasna.mosaic.detection_registry import resolve_detection_model
+    from jasna.main import batch_size_from_args
     from jasna.session_factory import build_compiled_detection_model
     from jasna.restorer.sd15_download import ensure_sd15_bundle
     from jasna.restorer.sd15_inpaint_restorer import DEFAULT_FREEU, Sd15InpaintRestorer
@@ -261,7 +262,7 @@ def _run_image_jobs(args, jobs: list[tuple[Path, Path]], progress_callback=None)
 
     device = torch.device(str(args.device))
     fp16 = bool(args.fp16)
-    batch_size = int(args.batch_size)
+    batch_size = batch_size_from_args(args)
 
     ensure_sd15_bundle(SD15_DIR)
 

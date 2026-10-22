@@ -34,6 +34,12 @@ CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
 
 
 
+def batch_size_from_args(args: argparse.Namespace) -> int:
+    from jasna.mosaic.detection_registry import default_detection_batch_size
+
+    return int(args.batch_size) if args.batch_size is not None else default_detection_batch_size(args.device)
+
+
 def _session_config_from_args(
     args: argparse.Namespace,
     *,
@@ -50,7 +56,7 @@ def _session_config_from_args(
     return SessionConfig(
         device=str(args.device),
         fp16=bool(args.fp16),
-        batch_size=int(args.batch_size),
+        batch_size=batch_size_from_args(args),
         detection_model_name=detection_model_name,
         detection_model_path=detection_model_path,
         detection_score_threshold=detection_score_threshold,
@@ -202,7 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Directory for temporary files created while assembling segment output (default: the output video's directory)",
     )
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument(
         "--fp16",
