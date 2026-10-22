@@ -1015,7 +1015,10 @@ def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
 
 
 def test_a_fresh_encode_pass_counts_frames_and_warms_up_after_its_first_batch(fakes, monkeypatch, tmp_path):
-    monkeypatch.setattr(restore.Progress, "bar", REAL_BAR)
+    monkeypatch.setattr(
+        restore.Progress, "bar",
+        lambda self, stage, total, unit="frame", marks=None: REAL_BAR(self, stage, total, unit, restore._WallClockMark),
+    )
     progress = restore.Progress(12, disable=True, report=None)
     restore.restore_spans(
         [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)],
