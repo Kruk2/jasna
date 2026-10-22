@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
+from torch.utils._triton import has_triton_package
 
 from jasna._frozen import is_frozen
 from jasna.accelerator import device_free_bytes
@@ -88,6 +90,7 @@ class ModelRuntime:
         self._encoder = None
         self._transformer = None
         self._decoder = None
+        self._transformer_source: TransformerSource | None = None
 
     def request(self, op: str, params: dict, tensors: list[torch.Tensor], advance=None):
         if self._client is None:
@@ -129,10 +132,16 @@ class ModelRuntime:
                 torch.cuda.empty_cache()
 
     def prepare_transformer(self) -> None:
-        """Let the worker open the transformer file and read its host-side part while the GPU is
-        still busy (encode); nothing of the transformer reaches the GPU before ``load_transformer``."""
-        if self.protected and self._transformer is None:
+        """Open the transformer file and read its host-side part (in the worker when protected) while
+        the GPU is still busy (scan, encode); nothing of the transformer reaches the GPU before
+        ``load_transformer``. Locally it also loads the GPU libraries the later passes call first."""
+        if self._transformer is not None:
+            return
+        if self.protected:
             self.request("prepare_transformer", {}, [])
+        elif self._transformer_source is None:
+            load_gpu_libraries_ahead(self.device)
+            self._transformer_source = TransformerSource(self.files.transformer)
 
     def load_transformer(self):
         if self._transformer is None:
@@ -140,7 +149,8 @@ class ModelRuntime:
                 info, _ = self.request("load_transformer", {"free_bytes": device_free_bytes(self.device)}, [])
                 self._transformer = WorkerTransformer(self, info)
             else:
-                self._transformer = LtxTransformer(TransformerSource(self.files.transformer), self.device,
+                source, self._transformer_source = self._transformer_source, None
+                self._transformer = LtxTransformer(source or TransformerSource(self.files.transformer), self.device,
                                                    device_free_bytes)
         return self._transformer
 
@@ -181,6 +191,9 @@ class ModelRuntime:
             self.unload_encoder()
             self.unload_transformer()
             self.unload_decoder()
+            if self._transformer_source is not None:
+                self._transformer_source.close()
+                self._transformer_source = None
 
     def peak_vram_bytes(self) -> int:
         parent_peak = torch.cuda.max_memory_allocated(self.device)
@@ -194,6 +207,21 @@ class ModelRuntime:
 
     def __exit__(self, *_exc) -> None:
         self.close()
+
+
+def load_gpu_libraries_ahead(device: torch.device) -> None:
+    """Pay what a process's first bf16 ``x @ wᵀ`` (transformer AdaLN), first fp32 ``a @ b`` (decoder
+    context fold) and first ``torch.compile`` (hashing the Triton install) cost once, off the critical
+    path: on ROCm each loads a library (one per dtype and layout) or hashes ~1 GB, 0.4-0.8 s apiece."""
+    if device.type != "cuda":
+        return
+    square = torch.zeros(8, 8, device=device, dtype=torch.bfloat16)
+    F.linear(square, square)
+    square.float() @ square.float()
+    if has_triton_package():
+        from triton.runtime.cache import triton_key
+
+        triton_key()
 
 
 def free_vram_beside_parent(device: torch.device, parent_free_bytes: int) -> Callable[[torch.device], int]:

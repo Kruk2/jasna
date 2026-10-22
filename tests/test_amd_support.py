@@ -624,6 +624,29 @@ def test_rfdetr_torch_runner_loads_the_checkpoint_once_weights_only(monkeypatch,
     assert state["interpolated_to"] == 48
 
 
+def test_rfdetr_torch_runner_loads_the_first_batch_libraries_on_a_thread_before_building(monkeypatch, tmp_path) -> None:
+    import jasna.mosaic.rfdetr_torch_runner as module
+
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"pt")
+    loads = _install_fake_rfdetr(monkeypatch, {"model": {"class_embed.weight": torch.zeros(3, 256)}})
+    started = []
+
+    class Thread:
+        def __init__(self, target, args, name, daemon):
+            self.call = (target, args, daemon)
+
+        def start(self):
+            started.append((self.call, len(loads)))
+
+    monkeypatch.setattr(module.threading, "Thread", Thread)
+    module.RfDetrTorchRunner(
+        weights, input_shapes=[(2, 3, 576, 576)], device=torch.device("cpu"), fp16=True, resolution=576, variant="medium"
+    )
+    assert started == [((module.load_first_batch_libraries, (torch.device("cpu"), torch.float16), True), 0)]
+    module.load_first_batch_libraries(torch.device("cpu"), torch.float32)
+
+
 def test_rfdetr_torch_runner_fp16_runs_a_half_model_without_autocast(monkeypatch, tmp_path) -> None:
     import jasna.mosaic.rfdetr_torch_runner as module
 

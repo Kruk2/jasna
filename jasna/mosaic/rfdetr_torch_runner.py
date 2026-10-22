@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import threading
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 from jasna.accelerator import device_name
 from jasna.mosaic.rfdetr_fused_head import fuse_segmentation_head
@@ -38,6 +40,15 @@ class TorchTensorInfo:
         return len(self.shape)
 
 
+def load_first_batch_libraries(device: torch.device, dtype: torch.dtype) -> None:
+    """Load MIOpen and the ``x @ wᵀ`` GEMM library of ``dtype``, which a process's first conv and
+    linear otherwise load on the first detection batch (1.2 s + 0.5 s on an R9700); a thread
+    started before the model is built overlaps them with the import and build."""
+    square = torch.zeros(8, 8, device=device, dtype=dtype)
+    F.conv2d(square[None, None], square[None, None, :3, :3])
+    F.linear(square, square)
+
+
 class RfDetrTorchRunner:
     """AMD/ROCm RF-DETR path: run the trained checkpoint through the rfdetr torch
     model instead of ONNX + MIGraphX. Mirrors the runner contract consumed by
@@ -55,6 +66,12 @@ class RfDetrTorchRunner:
         resolution: int,
         variant: str,
     ) -> None:
+        self.device = torch.device(device)
+        self.fp16 = bool(fp16)
+        self._dtype = torch.float16 if self.fp16 else torch.float32
+        threading.Thread(
+            target=load_first_batch_libraries, args=(self.device, self._dtype), name="RfDetrLibraries", daemon=True
+        ).start()
         try:
             import rfdetr
         except ImportError as exc:
@@ -68,10 +85,6 @@ class RfDetrTorchRunner:
                 f"RF-DETR torch runner: unsupported variant {variant!r}; "
                 f"known: {', '.join(sorted(_VARIANT_CLASSES))}"
             )
-
-        self.device = torch.device(device)
-        self.fp16 = bool(fp16)
-        self._dtype = torch.float16 if self.fp16 else torch.float32
 
         state = torch.load(weights_path, map_location="cpu", weights_only=True)["model"]
         num_classes = int(state["class_embed.weight"].shape[0]) - 1

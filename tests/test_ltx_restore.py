@@ -143,7 +143,7 @@ def fakes(monkeypatch, tmp_path):
     monkeypatch.setattr(restore, "_vae_pixels", lambda canvases, device: torch.zeros(1))
     monkeypatch.setattr(inference, "load_video_encoder", lambda path, device: lambda pixels: torch.zeros(1))
     monkeypatch.setattr(inference, "load_video_decoder", lambda vae, tuned, device: object())
-    monkeypatch.setattr(inference, "TransformerSource", lambda path: path)
+    monkeypatch.setattr(inference, "TransformerSource", lambda path: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr(inference, "LtxTransformer", _Transformer)
     monkeypatch.setattr(restore, "decode_latent", decode)
     monkeypatch.setattr(restore, "composite_frame", composite)
