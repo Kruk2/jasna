@@ -1,7 +1,8 @@
 """Triton kernels for the LTX quantized linears (NVIDIA and AMD GPUs with Triton).
 
 Same arithmetic as the torch path in ``transformer.py``, which stays the reference:
-- ``rotate_quantize``: ConvRot rotation + per-row int8 in one read of the activations.
+- ``rotate_quantize``: ConvRot rotation + per-row int8 in one read of the activations
+  (``gated_rotate_quantize``: of a gated attention output read straight from its heads layout).
   The rotation runs as radix-4 butterflies in fp32 and is rounded to bf16 like the
   reference's bf16 matmul, so codes differ from it only where the two fp32 summation
   orders round to different bf16 values (a few per million, by one code).
@@ -71,6 +72,12 @@ def _rotate_quantize_kernel(
         half = row // half_rows
         x = x * (1 + tl.load(scale_ptr + half * K + cols).to(tl.float32)) + tl.load(shift_ptr + half * K + cols).to(tl.float32)
         x = x.to(tl.bfloat16).to(tl.float32)
+    _rotate_quantize_row(x, row, j, q_ptr, s_ptr, K)
+
+
+@triton.jit
+def _rotate_quantize_row(x, row, j, q_ptr, s_ptr, K: tl.constexpr):
+    """Stores the int8 codes and scale of fp32 row ``x``, loaded with its 256-column blocks reversed."""
     x = tl.reshape(x, (K // 256, 4, 4, 4, 4))
     x = 0.5 * (tl.sum(x, axis=1, keep_dims=True) - 2 * x)
     x = 0.5 * (tl.sum(x, axis=2, keep_dims=True) - 2 * x)
@@ -82,6 +89,20 @@ def _rotate_quantize_kernel(
     tl.store(s_ptr + row, scale)
     codes = libdevice.rint(tl.math.div_rn(x, scale))
     tl.store(q_ptr + row * K + j, tl.minimum(tl.maximum(codes, -127.0), 127.0).to(tl.int8))
+
+
+@triton.jit
+def _gated_rotate_quantize_kernel(o_ptr, g_ptr, q_ptr, s_ptr, rows, K: tl.constexpr, HEAD_DIM: tl.constexpr):
+    # Row t of ``o (heads, rows, HEAD_DIM)`` read as one token row of width K, each head times
+    # 2 * sigmoid of its gate logit ``g[t, head]`` and rounded to bf16 as the torch path stores it.
+    row = tl.program_id(0)
+    j = tl.arange(0, K)
+    cols = (j // 256) * 256 + 255 - j % 256
+    head = cols // HEAD_DIM
+    x = tl.load(o_ptr + head * rows * HEAD_DIM + row * HEAD_DIM + cols % HEAD_DIM).to(tl.float32)
+    gate = tl.load(g_ptr + row * (K // HEAD_DIM) + head).to(tl.float32)
+    x = (x * (2.0 * tl.sigmoid(gate))).to(tl.bfloat16).to(tl.float32)
+    _rotate_quantize_row(x, row, j, q_ptr, s_ptr, K)
 
 
 def _rotate_quantize(x, shift, scale, modulate):
@@ -100,6 +121,21 @@ def _rotate_quantize(x, shift, scale, modulate):
 def rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     """``(rows, k)`` bf16 -> (int8 codes ``(rows, k)``, fp32 row scales ``(rows,)``)."""
     return _rotate_quantize(x, x, x, False)
+
+
+def gated_rotate_quantize(heads: torch.Tensor, gate_logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """``rotate_quantize`` of attention output ``heads`` ``(heads, rows, head_dim)`` bf16 as token rows,
+    each head times ``2 * sigmoid(gate_logits[row, head])``."""
+    count, rows, head_dim = heads.shape
+    k = count * head_dim
+    if k % 256 or k & (k - 1):
+        raise ValueError(f"gated_rotate_quantize needs a power-of-two width of at least 256, got {k}")
+    codes = torch.empty(rows, k, dtype=torch.int8, device=heads.device)
+    scales = torch.empty(rows, dtype=torch.float32, device=heads.device)
+    _gated_rotate_quantize_kernel[(rows,)](
+        heads, gate_logits, codes, scales, rows, K=k, HEAD_DIM=head_dim, num_warps=ROTATE_QUANTIZE_WARPS,
+    )
+    return codes, scales
 
 
 def modulate_rotate_quantize(
@@ -351,6 +387,24 @@ def int8_scaled_mm(
     when ``gelu``."""
     out = torch.empty(codes.shape[0], qdata.shape[0], dtype=torch.bfloat16, device=codes.device)
     return _mm(codes, act_scales, qdata, scales, bias, out, gelu=gelu, residual=None, gate=None, half_rows=1, row_offset=0)
+
+
+def int8_residual_mm(
+    codes: torch.Tensor,
+    act_scales: torch.Tensor,
+    qdata: torch.Tensor,
+    scales: torch.Tensor,
+    bias: torch.Tensor | None,
+    residual: torch.Tensor,
+    gate: torch.Tensor,
+) -> torch.Tensor:
+    """``residual + gate[half] * int8_scaled_mm(...)``: the first half of the rows takes gate row 0, the
+    second row 1."""
+    residual, gate = residual.contiguous(), gate.contiguous()
+    out = torch.empty_like(residual)
+    rows = codes.shape[0]
+    return _mm(codes, act_scales, qdata, scales, bias, out, gelu=False, residual=residual, gate=gate,
+               half_rows=rows // 2, row_offset=0)
 
 
 def int8_feed_forward(

@@ -345,6 +345,31 @@ def _triton_ops(kernels) -> SimpleNamespace:
     def _(codes, act_scales, qdata, scales, bias):
         return codes.new_empty(codes.shape[0], qdata.shape[0], dtype=torch.bfloat16)
 
+    @torch.library.custom_op("jasna::int8_gated_rotate_quantize", mutates_args=())
+    def int8_gated_rotate_quantize(heads: torch.Tensor, gate_logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return kernels.gated_rotate_quantize(heads.contiguous(), gate_logits.contiguous())
+
+    @int8_gated_rotate_quantize.register_fake
+    def _(heads, gate_logits):
+        count, rows, head_dim = heads.shape
+        return heads.new_empty(rows, count * head_dim, dtype=torch.int8), heads.new_empty(rows, dtype=torch.float32)
+
+    @torch.library.custom_op("jasna::int8_residual_mm", mutates_args=())
+    def int8_residual_mm(
+        codes: torch.Tensor,
+        act_scales: torch.Tensor,
+        qdata: torch.Tensor,
+        scales: torch.Tensor,
+        bias: torch.Tensor | None,
+        residual: torch.Tensor,
+        gate: torch.Tensor,
+    ) -> torch.Tensor:
+        return kernels.int8_residual_mm(codes, act_scales, qdata, scales, bias, residual, gate)
+
+    @int8_residual_mm.register_fake
+    def _(codes, act_scales, qdata, scales, bias, residual, gate):
+        return torch.empty_like(residual, memory_format=torch.contiguous_format)
+
     @torch.library.custom_op("jasna::int8_feed_forward", mutates_args=())
     def int8_feed_forward(
         codes: torch.Tensor,
@@ -385,7 +410,12 @@ def _triton_ops(kernels) -> SimpleNamespace:
         int8_rotate_quantize=int8_rotate_quantize,
         int8_modulate_rotate_quantize=int8_modulate_rotate_quantize,
         int8_scaled_mm=int8_scaled_mm,
+        int8_gated_rotate_quantize=int8_gated_rotate_quantize,
+        int8_residual_mm=int8_residual_mm,
         int8_feed_forward=int8_feed_forward,
+        # AMD also quantizes gated attention outputs straight from their heads and adds the attention
+        # residuals in the output projections' epilogue (fewer passes over the block's activations).
+        attention_epilogues=torch.version.hip is not None,
         quantize_fp4=quantize_fp4_op,
     )
 
@@ -571,19 +601,42 @@ def _gated(w: Weights, prefix: str, x: torch.Tensor | QuantizedRows, out: torch.
     return (out.unflatten(-1, (heads, -1)) * gates.unsqueeze(-1)).flatten(2)
 
 
-def _self_attention(w: Weights, x: torch.Tensor | QuantizedRows, rope: Rope, heads: int, *, skip: bool) -> torch.Tensor:
+def _gated_heads(
+    w: Weights, prefix: str, x: torch.Tensor | QuantizedRows, out: torch.Tensor, heads: int
+) -> torch.Tensor | QuantizedRows:
+    """``_gated`` of attention output heads ``[1, heads, tokens, d]``, quantized for the output
+    projection when the attention epilogues are fused."""
+    if isinstance(x, QuantizedRows) and _quant_kernels.attention_epilogues:
+        logits = linear(w, f"{prefix}.to_gate_logits", x)
+        return QuantizedRows(*_quant_kernels.int8_gated_rotate_quantize(out[0], logits[0]))
+    return _gated(w, prefix, x, out.transpose(1, 2).flatten(2), heads)
+
+
+def _residual_linear(
+    w: Weights, name: str, x: torch.Tensor | QuantizedRows, residual: torch.Tensor, gate: torch.Tensor
+) -> torch.Tensor:
+    """``residual + _gate(linear(w, name, x), gate)``, in the GEMM epilogue for quantized ``x`` when the
+    attention epilogues are fused."""
+    if isinstance(x, QuantizedRows) and _quant_kernels.attention_epilogues:
+        return _quant_kernels.int8_residual_mm(
+            x.codes, x.scales, w[f"{name}.qdata"], w[f"{name}.scales"], w.get(f"{name}.bias"), residual[0], gate[0],
+        )[None]
+    return residual + _gate(linear(w, name, x), gate)
+
+
+def _self_attention(
+    w: Weights, x: torch.Tensor | QuantizedRows, rope: Rope, heads: int, *, skip: bool
+) -> torch.Tensor | QuantizedRows:
     """Gated video self-attention output before its ``to_out.0`` projection; NVFP4 Q/K/V
     projections share one quantization of ``x``."""
     qkv_in = _shared_fp4_input(w, "attn1.to_v", x)
     v = linear(w, "attn1.to_v", qkv_in)
     if skip:
-        out = v
-    else:
-        q = rms_norm(linear(w, "attn1.to_q", qkv_in), w["attn1.q_norm.weight"])
-        k = rms_norm(linear(w, "attn1.to_k", qkv_in), w["attn1.k_norm.weight"])
-        out = self_attention(_apply_rope(q, rope, heads), _apply_rope(k, rope, heads), _heads(v, heads))
-        out = out.transpose(1, 2).flatten(2)
-    return _gated(w, "attn1", x, out, heads)
+        return _gated(w, "attn1", x, v, heads)
+    q = rms_norm(linear(w, "attn1.to_q", qkv_in), w["attn1.q_norm.weight"])
+    k = rms_norm(linear(w, "attn1.to_k", qkv_in), w["attn1.k_norm.weight"])
+    out = self_attention(_apply_rope(q, rope, heads), _apply_rope(k, rope, heads), _heads(v, heads))
+    return _gated_heads(w, "attn1", x, out, heads)
 
 
 def prompt_key_value(
@@ -603,13 +656,13 @@ def prompt_key_value(
 
 def _cross_attention(
     w: Weights, x: torch.Tensor | QuantizedRows, prompt: tuple[torch.Tensor, torch.Tensor], heads: int
-) -> torch.Tensor:
+) -> torch.Tensor | QuantizedRows:
     """Gated prompt cross-attention output before its ``to_out.0`` projection, computed in the
     prompt key/value dtype."""
     q = rms_norm(linear(w, "attn2.to_q", x), w["attn2.q_norm.weight"])
     key, value = prompt
     out = cross_attention(_heads(q, heads).to(key.dtype), key, value).to(q.dtype)
-    return _gated(w, "attn2", x, out.transpose(1, 2).flatten(2), heads)
+    return _gated_heads(w, "attn2", x, out, heads)
 
 
 def block_forward(
@@ -628,10 +681,10 @@ def block_forward(
     fused = _quant_kernels is not None and x.is_cuda and "ff.net.2.qdata" in w
     attn_in = _modulated(x, ada[:, :, 0], ada[:, :, 1], fused)
     attn_out = _self_attention(w, attn_in, rope, heads, skip=skip_self_attention)
-    x = x + _gate(linear(w, "attn1.to_out.0", attn_out), ada[:, :, 2])
+    x = _residual_linear(w, "attn1.to_out.0", attn_out, x, ada[:, :, 2])
     query = _modulated(x, ada[:, :, 6], ada[:, :, 7], fused)
     attn_out = _cross_attention(w, query, prompt, heads)
-    x = x + _gate(linear(w, "attn2.to_out.0", attn_out), ada[:, :, 8])
+    x = _residual_linear(w, "attn2.to_out.0", attn_out, x, ada[:, :, 8])
     ff_in = _modulated(x, ada[:, :, 3], ada[:, :, 4], fused)
     if fused:
         return _quant_kernels.int8_feed_forward(
