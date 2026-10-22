@@ -84,6 +84,17 @@ Using ESET? If LTX won't start and the message names `ebehmonl.dll` or
 `ebehmoni.dll`, add the Jasna folder to ESET's Deep Behavioral Inspection
 exclusions. Add it again when you put a new Jasna version in a new folder.
 
+### Pause and continue
+
+LTX saves progress automatically, including jobs with ranges or **LTX only for big mosaics**.
+Use **Ⅱ** to pause and **▶** to continue. After closing Jasna, add the same video again
+with the same output and settings. In the command line, run the same command again.
+
+The current unfinished track may run again, and saving the output starts over; completed
+parts of a range job are kept. A long single shot can be one track. Jasna asks before
+replacing saved work if the input, settings or app version changed. BasicVSR++ whole-video
+jobs, previews and streaming do not resume.
+
 ### Downloading LTX yourself
 
 If the download in Jasna keeps failing, get the files in your browser from

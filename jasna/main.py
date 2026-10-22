@@ -814,6 +814,7 @@ def _run_videos(
     total: int,
 ) -> bool:
     """Process videos one by one; returns False when a per-video command failed in a folder batch."""
+    from jasna.job_resume import ResumeMismatchError
     from jasna.post_export_action import PostExportVideoCommandError, run_post_export_video_command
 
     post_export_video_command = str(args.post_export_video_command).strip()
@@ -823,8 +824,10 @@ def _run_videos(
         if in_folder:
             print(f"[{i}/{total}] Processing {vid.name} -> {out_path.name}")
         try:
-            make_pipeline(vid, out_path).run()
-        except UnsupportedVideoError as e:
+            _run_resumable_video(make_pipeline, vid, out_path)
+        except (UnsupportedVideoError, ResumeMismatchError) as e:
+            if isinstance(e, ResumeMismatchError):
+                all_commands_ok = False
             print(f"Error processing {vid.name}: {e}")
             if not in_folder:
                 sys.exit(1)
@@ -840,6 +843,22 @@ def _run_videos(
                 sys.exit(1)
             all_commands_ok = False
     return all_commands_ok
+
+
+def _run_resumable_video(make_pipeline, source: Path, output: Path) -> None:
+    from jasna.job_resume import ResumeMismatchError
+
+    while True:
+        try:
+            make_pipeline(source, output).run()
+            return
+        except ResumeMismatchError as error:
+            if not sys.stdin.isatty():
+                raise ResumeMismatchError(error.directory) from None
+            answer = input(f"{error}\nReplace saved progress and start over? [y/N]: ")
+            if answer.strip().lower() not in ("y", "yes"):
+                raise
+            error.discard()
 
 
 def _ensure_ltx_model(config: SessionConfig, segments) -> None:

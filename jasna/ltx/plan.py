@@ -115,6 +115,65 @@ class TrackPlan:
         return self.start + len(self.polygons)
 
 
+def plans_to_json(plans: Sequence[TrackPlan]) -> list[dict]:
+    return [
+        {
+            "track_id": plan.track_id,
+            "start": plan.start,
+            "polygons": [
+                [{"dtype": polygon.dtype.name, "points": polygon.tolist()} for polygon in frame]
+                for frame in plan.polygons
+            ],
+            "presence": plan.presence,
+            "window_hop": plan.window_hop,
+            "windows": [
+                {
+                    "index": window.index,
+                    "track_id": window.track_id,
+                    "start": window.start,
+                    "real_frames": window.real_frames,
+                    "crops": [
+                        {"crop_box": crop.crop_box, "resize_hw": crop.resize_hw, "pad": crop.pad}
+                        for crop in window.crops
+                    ],
+                }
+                for window in plan.windows
+            ],
+        }
+        for plan in plans
+    ]
+
+
+def plans_from_json(data: list[dict]) -> list[TrackPlan]:
+    def polygon(item: dict) -> Polygon:
+        if item["dtype"] not in ("int32", "float64"):
+            raise ValueError("invalid saved polygon dtype")
+        points = np.asarray(item["points"], dtype=item["dtype"])
+        if points.ndim != 2 or points.shape[1] != 2 or not np.isfinite(points).all():
+            raise ValueError("invalid saved polygon")
+        return points
+
+    plans = []
+    for item in data:
+        windows = tuple(
+            Window(
+                index=w["index"], track_id=w["track_id"], start=w["start"], real_frames=w["real_frames"],
+                crops=tuple(CropFrame(tuple(c["crop_box"]), tuple(c["resize_hw"]), tuple(c["pad"])) for c in w["crops"]),
+            )
+            for w in item["windows"]
+        )
+        plan = TrackPlan(
+            item["track_id"], item["start"], tuple(tuple(polygon(p) for p in frame) for frame in item["polygons"]),
+            tuple(item["presence"]), windows, item["window_hop"],
+        )
+        if len(plan.presence) != len(plan.polygons) or any(
+            len(w.crops) != w.real_frames or not 0 < w.real_frames <= WINDOW_FRAMES for w in windows
+        ):
+            raise ValueError("invalid saved track plan")
+        plans.append(plan)
+    return plans
+
+
 def feather_pixels(frame_h: int) -> int:
     return max(1, int(round(FEATHER_FRACTION * frame_h)))
 

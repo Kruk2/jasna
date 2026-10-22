@@ -195,6 +195,7 @@ def test_build_pipeline_keeps_a_session_that_holds_the_job_model() -> None:
 
 def _auto_split(config, *, samples, validate=None, plan_error=None):
     from fractions import Fraction
+    from tempfile import TemporaryDirectory
 
     from jasna.media.splice import KeyframeIndex
     from jasna.session_factory import ltx_auto_split
@@ -202,15 +203,18 @@ def _auto_split(config, *, samples, validate=None, plan_error=None):
     session = MagicMock()
     progress = MagicMock()
     with (
-        patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="hevc", duration=6.0)),
+        TemporaryDirectory() as temp,
+        patch("jasna.media.probe.get_video_meta_data", return_value=MagicMock(codec_name="hevc", duration=6.0, num_frames=180, time_base=Fraction(1,30))),
         patch("jasna.media.splice.validate_smart_render", side_effect=validate),
         patch("jasna.media.splice.probe_keyframes", return_value=KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180)),
         patch("jasna.mosaic_scan.scan_mosaic_sizes", return_value=samples) as scan,
     ):
+        source, output = Path(temp) / "in.mp4", Path(temp) / "out.mp4"
+        source.touch()
         if plan_error is not None:
             with patch("jasna.media.splice.build_splice_plan", side_effect=plan_error):
-                return ltx_auto_split(config, session, Path("in.mp4"), Path("out.mp4"), progress_callback=progress), scan
-        return ltx_auto_split(config, session, Path("in.mp4"), Path("out.mp4"), progress_callback=progress), scan
+                return ltx_auto_split(config, session, source, output, progress_callback=progress), scan
+        return ltx_auto_split(config, session, source, output, progress_callback=progress), scan
 
 
 def _samples(sizes):

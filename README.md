@@ -189,6 +189,8 @@ real detail. Its quality choices: Standard (default, fastest), Good (about 1.5x
 slower), High (about 2.5x slower) and Top (about 5x slower). See
 [Choosing models](docs/en/models.md#restoration-model).
 
+LTX jobs can pause and continue, including range jobs and auto split. See [Pause and continue](docs/en/models.md#pause-and-continue).
+
 ### Command line
 
 The command line can do most of what the app does (not the Video Player,

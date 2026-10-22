@@ -158,8 +158,8 @@ def test_updating_disabled_start_button_hides_previous_tooltip() -> None:
 
 
 @pytest.mark.parametrize("confirmed", [True, False])
-def test_stop_button_stops_only_after_confirmation(monkeypatch, confirmed) -> None:
-    control_bar = object.__new__(ControlBar)
+def test_stop_button_stops_only_after_confirmation(tk_root, monkeypatch, confirmed) -> None:
+    control_bar = ControlBar(tk_root)
     control_bar._on_stop = MagicMock()
     monkeypatch.setattr("jasna.gui.control_bar.messagebox.askyesno", lambda *a, **k: confirmed)
 
@@ -168,7 +168,7 @@ def test_stop_button_stops_only_after_confirmation(monkeypatch, confirmed) -> No
     assert control_bar._on_stop.called is confirmed
 
 
-def test_stop_confirmed_after_queue_finished_keeps_completed_state(monkeypatch) -> None:
+def test_stop_confirmed_after_queue_finished_keeps_completed_state(tk_root, monkeypatch) -> None:
     processor = MagicMock()
     processor.is_running.return_value = True
     app = SimpleNamespace(
@@ -179,7 +179,7 @@ def test_stop_confirmed_after_queue_finished_keeps_completed_state(monkeypatch) 
         _settings_panel=MagicMock(),
         _queue_panel=MagicMock(),
     )
-    control_bar = object.__new__(ControlBar)
+    control_bar = ControlBar(tk_root)
     control_bar._on_stop = lambda: JasnaApp._on_stop(app)
 
     def queue_finishes_while_dialog_is_open(*_args, **_kwargs):

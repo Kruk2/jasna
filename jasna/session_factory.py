@@ -11,7 +11,7 @@ All heavy imports (torch, restorers, pipeline) stay inside the functions.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -340,26 +340,39 @@ def ltx_auto_split(
         if progress_callback is not None:
             progress_callback(0.0, 0.0, 0.0, 0, 0, StageProgress("split", 1, 1, fraction, 0.0))
 
-    samples = scan_mosaic_sizes(
-        session.detection_model_for(config),
-        input_video,
-        metadata,
-        batch_size=config.batch_size,
-        device=session.device,
-        disable_progress=config.disable_progress,
-        on_progress=on_progress,
-    )
-    segments = ltx_auto_segments(
-        samples.times,
-        samples.scores,
-        samples.sizes,
-        threshold=config.detection_score_threshold,
-        ltx_min_size=config.ltx_auto_split_percent / 100,
-        stride=samples.stride,
-        duration=metadata.duration,
-        keyframes=index.keyframe_seconds(),
-        ltx_seed=config.ltx_seed,
-    )
+    from jasna.job_resume import ResumeMismatchError, job_fingerprint, read_json, resume_directory, segments_from_json, write_json
+
+    root = resume_directory(config, output_video)
+    key = job_fingerprint(config, input_video, output_video, metadata, ())
+    cached = read_json(root / "split.json")
+    if isinstance(cached, dict) and cached.get("fingerprint") == key:
+        segments = segments_from_json(cached["segments"])
+        logger.info("Reusing saved LTX auto split for %s", input_video.name)
+    else:
+        if cached is not None or (root / "render").exists():
+            raise ResumeMismatchError(root)
+        samples = scan_mosaic_sizes(
+            session.detection_model_for(config),
+            input_video,
+            metadata,
+            batch_size=config.batch_size,
+            device=session.device,
+            disable_progress=config.disable_progress,
+            on_progress=on_progress,
+        )
+        segments = ltx_auto_segments(
+            samples.times,
+            samples.scores,
+            samples.sizes,
+            threshold=config.detection_score_threshold,
+            ltx_min_size=config.ltx_auto_split_percent / 100,
+            stride=samples.stride,
+            duration=metadata.duration,
+            keyframes=index.keyframe_seconds(),
+            ltx_seed=config.ltx_seed,
+        )
+        root.mkdir(parents=True, exist_ok=True)
+        write_json(root / "split.json", {"fingerprint": key, "segments": [asdict(segment) for segment in segments]})
     if not segments:
         logger.warning("%s: LTX auto split found no mosaics; restoring the whole video with LTX", input_video.name)
         return None

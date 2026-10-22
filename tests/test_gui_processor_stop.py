@@ -114,6 +114,110 @@ def test_failing_job_still_marked_error(tmp_path):
     assert updates[-1].status is JobStatus.ERROR
 
 
+@pytest.mark.parametrize("accepted", [False, True])
+def test_changed_progress_requires_confirmation_and_declining_stops_queue(tmp_path, accepted):
+    from concurrent.futures import Future
+    from unittest.mock import MagicMock
+
+    from jasna.job_resume import ResumeMismatchError
+
+    directory = tmp_path / ".saved.jasna-resume"
+    directory.mkdir()
+    marker = directory / "saved"
+    marker.touch()
+    processor, job, updates = _processor_with_job(tmp_path, lambda *_a, **_k: None)
+    error = ResumeMismatchError(directory)
+    processor._run_video_pipeline = MagicMock(side_effect=[error, None])
+    processor._run_pipeline = processor._run_video_job
+    answer = Future()
+    answer.set_result(accepted)
+    processor._on_resume_conflict = MagicMock(return_value=answer)
+    completions = []
+    processor._on_complete = completions.append
+    processor._run()
+    processor._on_resume_conflict.assert_called_once_with(directory)
+    assert marker.exists() is not accepted
+    assert processor._run_video_pipeline.call_count == (2 if accepted else 1)
+    assert job.status is (JobStatus.COMPLETED if accepted else JobStatus.PENDING)
+    assert completions == [accepted]
+
+
+@pytest.mark.parametrize("file_conflict", ["auto_rename", "skip"])
+def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conflict):
+    from fractions import Fraction
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from factories import session_config
+    from jasna.job_resume import ResumeJob
+
+    run = MagicMock()
+    processor, job, _updates = _processor_with_job(tmp_path, run)
+    job.path.touch()
+    output = tmp_path / "clip_restored.mp4"
+    output.touch()
+    processor._settings.restoration_model = "ltx"
+    processor._settings.file_conflict = file_conflict
+    config = session_config(restoration_model_name="ltx")
+    metadata = SimpleNamespace(num_frames=120, duration=4.0, time_base=Fraction(1,30))
+    ResumeJob(config, job.path, output, metadata, ()).prepare()
+    monkeypatch.setattr("jasna.gui.processor.video_session_config", lambda *_a, **_k: config)
+    monkeypatch.setattr("jasna.gui.processor.build_job_encoder_settings", lambda *_a: {})
+    monkeypatch.setattr("jasna.media.probe.get_video_meta_data", lambda *_a: metadata)
+    processor._run()
+    assert run.call_args.args[2] == output
+    assert job.status is JobStatus.COMPLETED
+
+
+def test_control_bar_shows_pause_for_ltx_and_uses_pause_confirmation():
+    from tkinter import TclError
+    from unittest.mock import MagicMock, patch
+
+    import customtkinter as ctk
+
+    from jasna.gui.control_bar import ControlBar
+    from jasna.gui.locales import t
+
+    try:
+        root = ctk.CTk()
+    except TclError as exc:
+        pytest.skip(f"Tk display unavailable: {exc}")
+    try:
+        bar = ControlBar(root)
+        stop = MagicMock()
+        bar.set_callbacks(on_stop=stop)
+        bar.set_resumable(True)
+        assert bar._stop_btn.cget("text") == "Ⅱ"
+        with patch("jasna.gui.control_bar.messagebox.askyesno", return_value=True) as ask:
+            bar._handle_stop()
+        assert ask.call_args.args == (t("pause_confirm_title"), t("pause_confirm"))
+        stop.assert_called_once()
+        bar.set_resumable(False)
+        assert bar._stop_btn.cget("text") == "■"
+    finally:
+        root.destroy()
+
+
+@pytest.mark.parametrize("cancel_before_show", [False, True])
+def test_resume_confirmation_is_posted_to_main_thread_and_can_be_cancelled(cancel_before_show):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from jasna.gui.app import JasnaApp
+
+    posted = []
+    app = SimpleNamespace(_main_thread=SimpleNamespace(post=posted.append))
+    answer = JasnaApp._confirm_resume_restart(app, None)
+    assert not answer.done()
+    if cancel_before_show:
+        assert answer.cancel()
+    with patch("tkinter.messagebox.askyesno", return_value=True) as ask:
+        posted.pop()()
+    assert ask.called is not cancel_before_show
+    if not cancel_before_show:
+        assert answer.result() is True
+
+
 @pytest.mark.parametrize("cancel_requested,completed,expected", [
     (False, True, False),
     (True, False, True),
