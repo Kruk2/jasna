@@ -534,21 +534,6 @@ class TestEncoderOptions:
         assert enc.encoder_options["maxrate"] == "40000000"
         assert enc.encoder_options["bufsize"] == "80000000"
 
-    def test_amf_h264_output_keeps_source_codec_ceiling(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            video_encoder_module,
-            "vendor_for_device",
-            lambda _device: AcceleratorVendor.AMD,
-        )
-        enc = _make_encoder(
-            tmp_path,
-            codec="h264",
-            codec_name="h264",
-            video_bitrate=20_000_000,
-        )
-        assert enc.encoder_options["maxrate"] == "20000000"
-        assert enc.encoder_options["bufsize"] == "40000000"
-
     def test_no_ceiling_without_source_bitrate(self, tmp_path):
         enc = _make_encoder(tmp_path, video_bitrate=0)
         assert "maxrate" not in enc.encoder_options

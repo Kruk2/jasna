@@ -74,7 +74,7 @@ CLI_HELP: dict[str, str] = {
     "codec": "Offline output video codec (HLS streaming always uses H.264). Default: %(default)s",
     "cq": (
         "Video quality (CQ). Lower is better quality and bigger files. NVIDIA defaults: "
-        "H.264 25, HEVC 28, AV1 35; AMD defaults: H.264 24, HEVC 25, AV1 32."
+        "H.264 25, HEVC 28, AV1 35; AMD defaults: H.264 24, HEVC 25, AV1 16."
     ),
     "encoder_settings": 'Advanced encoder settings, as a JSON object or comma-separated key=value pairs (e.g. {"rc-lookahead":32} or rc-lookahead=32,bf=4)',
     "post_export_action": (

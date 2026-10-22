@@ -107,8 +107,44 @@ def test_video_encoder_selects_amf_and_normalizes_cq(monkeypatch, tmp_path) -> N
     )
     assert encoder.encoder_name == "h264_amf"
     assert encoder.spec.frame_format == "nv12"
-    assert encoder.encoder_options["qvbr_quality_level"] == "21"
+    assert encoder.encoder_options["rc"] == "cqp"
+    assert all(encoder.encoder_options[key] == "21" for key in ("qp_i", "qp_p", "qp_b"))
     assert "cq" not in encoder.encoder_options
+    assert "qvbr_quality_level" not in encoder.encoder_options
+
+
+def test_amf_h264_defaults_to_constant_qp_without_bitrate_cap() -> None:
+    from jasna.media.video_encoder import resolve_encoder_options
+
+    _, options = resolve_encoder_options(
+        AcceleratorVendor.AMD,
+        "h264",
+        replace(_metadata(), video_bitrate=20_000_000),
+        {},
+        smart_fragment=False,
+    )
+    assert options["rc"] == "cqp"
+    assert all(options[key] == "24" for key in ("qp_i", "qp_p", "qp_b"))
+    assert options["preanalysis"] == "0"
+    assert options["vbaq"] == "0"
+    assert "qvbr_quality_level" not in options
+    assert "maxrate" not in options
+
+
+def test_amf_h264_qvbr_override_keeps_cq_and_source_bitrate_cap() -> None:
+    from jasna.media.video_encoder import resolve_encoder_options
+
+    _, options = resolve_encoder_options(
+        AcceleratorVendor.AMD,
+        "h264",
+        replace(_metadata(), video_bitrate=20_000_000),
+        {"cq": 21, "rc": "qvbr"},
+        smart_fragment=False,
+    )
+    assert options["rc"] == "qvbr"
+    assert options["qvbr_quality_level"] == "21"
+    assert not {"qp_i", "qp_p", "qp_b"} & options.keys()
+    assert options["maxrate"] == "20000000"
 
 
 def test_amf_hevc_maps_cq_to_constant_qp(monkeypatch, tmp_path) -> None:
@@ -156,7 +192,7 @@ def test_amf_hevc_cqp_skips_source_bitrate_cap(monkeypatch, tmp_path) -> None:
 @pytest.mark.parametrize(
     ("settings", "smart_fragment", "frame_format", "expected_qindex"),
     [
-        ({}, False, "p010le", "160"),
+        ({}, False, "p010le", "80"),
         ({"cq": 21}, False, "p010le", "105"),
         ({"qvbr_quality_level": 51}, False, "p010le", "255"),
         ({"cq": 1}, True, "nv12", "5"),

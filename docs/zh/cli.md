@@ -119,7 +119,7 @@ Jasna 优先使用 `TMP`，其次使用 `TEMP`。不使用 `TMPDIR`。
 | 选项 | 默认值 | 说明 |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | 离线输出可选 `hevc`、`h264` 或 `av1`。HLS 流媒体始终使用 H.264。 |
-| `--cq` | 根据 GPU/编解码器 | 视频质量。越低质量越好、文件越大。NVIDIA 默认值：H.264 25、HEVC 28、AV1 35；AMD 默认值：H.264 24、HEVC 25、AV1 32。 |
+| `--cq` | 根据 GPU/编解码器 | 视频质量。越低质量越好、文件越大。NVIDIA 默认值：H.264 25、HEVC 28、AV1 35；AMD 默认值：H.264 24、HEVC 25、AV1 16。 |
 | `--encoder-settings` | — | JSON 对象或逗号分隔的高级 `key=value` 设置，例如 `{"rc-lookahead":32}` 或 `rc-lookahead=32,bf=4`。见下文。 |
 | `--lut` | — | `.cube` 色彩 LUT（1D 或 3D），在写入视频时应用。也可在 GUI 的编码设置部分设置。 |
 | `--sharpen` | `0` | 编码前锐化画面，取值 `0`（关闭）到 `1`（最强）。与 ffmpeg 的 `cas` 滤镜一致，无需二次转码。见[高级处理](advanced_processing.md)。 |
@@ -215,21 +215,21 @@ NVIDIA H.264 的余量更大，因为它需要更多码率来保留修复后的�
 源有影响。高码率的源本来就低于上限。达到上限时，相近的 CQ 值可能得到相同的文件大小。
 
 自己设置 `maxrate` 可替换这个上限，设一个很大的值则相当于关闭。如果源没有码率信息，
-Jasna 会记录警告，并且不设上限。AMD HEVC 和 AV1（10-bit）使用固定 QP，没有上限。
+Jasna 会记录警告，并且不设上限。AMD 默认使用固定 QP，没有上限。
 
 #### AMD (AMF) 参数，所有编解码器
 
 | 参数 | 作用 |
 | --- | ------------ |
-| `cq` | AMF 的质量值：H.264 使用 QVBR，10-bit HEVC/AV1 使用固定 QP（AV1 内部刻度更细，CQ 会乘以 5 后传入）。越低越好；默认值依次为 24、25、32。 |
+| `cq` | AMF 的质量值，作为固定 QP 传入（AV1 内部刻度更细，CQ 会乘以 5 后传入）。H.264 设置 `rc=qvbr` 时改为 QVBR 质量等级。越低越好；默认值：H.264 24、HEVC 25、AV1 16。 |
 | `qvbr_quality_level` | 旧版 CQ 别名。省略 `--cq` 时可用于 CLI 高级设置；GUI 自定义参数中不接受。 |
 | `usage` | 编码器用途配置。默认 `high_quality`。 |
 | `quality` | 速度/质量预设：`speed`、`balanced`、`quality`（默认）。 |
-| `rc` | 码率控制模式。H.264 默认 `qvbr`；10-bit HEVC/AV1 默认 `cqp`。 |
+| `rc` | 码率控制模式。默认 `cqp`。 |
 | `preset` | AMF 预设。 |
 | `g` | 关键帧间隔（帧数）。默认 250。 |
 | `bf` | 最大连续 B 帧数。 |
-| `preanalysis` | 预分析。H.264 默认开启，10-bit HEVC/AV1 默认关闭。 |
+| `preanalysis` | 预分析。默认关闭。 |
 | `maxrate` / `bufsize` | 码率上限和 VBV 缓冲区大小（比特/秒）。除 CQP 模式外，会根据源码率自动设置。 |
 | `profile` / `level` | 编解码器 profile 和 level。 |
 
@@ -238,7 +238,7 @@ Jasna 会记录警告，并且不设上限。AMD HEVC 和 AV1（10-bit）使用�
 | 编解码器 | 额外参数 |
 | ----- | ---------- |
 | `hevc` | `tier`、`bitdepth`（默认 10）、`vbaq`（默认关闭） |
-| `h264` | `coder`、`bf_ref`（B 帧引用）、`pa_adaptive_mini_gop`（自适应 B 帧排列）、`vbaq`（默认开启） |
+| `h264` | `coder`、`bf_ref`（B 帧引用）、`pa_adaptive_mini_gop`（自适应 B 帧排列）、`vbaq`（默认关闭） |
 | `av1` | `bitdepth`（默认 10）、`aq_mode`（默认关闭） |
 
 ## 流媒体

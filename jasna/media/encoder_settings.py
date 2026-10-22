@@ -28,7 +28,7 @@ _ENCODER_CQ_SPECS: dict[
     AcceleratorVendor.AMD: {
         "h264": EncoderCqSpec(default=24, minimum=0, maximum=51),
         "hevc": EncoderCqSpec(default=25, minimum=0, maximum=51),
-        "av1": EncoderCqSpec(default=32, minimum=1, maximum=51),
+        "av1": EncoderCqSpec(default=16, minimum=1, maximum=51),
     },
 }
 
@@ -111,7 +111,7 @@ SUPPORTED_ENCODER_SETTINGS_BY_CODEC: dict[str, frozenset[str]] = {
 }
 
 # User-facing AMF settings. ``cq`` is kept as a portable Jasna option; the
-# encoder maps it to QVBR for H.264 and constant QP for HEVC/AV1.
+# encoder maps it to constant QP, or to the QVBR level with ``rc=qvbr``.
 _COMMON_AMF_ENCODER_SETTINGS: frozenset[str] = frozenset(
     {
         "preset",

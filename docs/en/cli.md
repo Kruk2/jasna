@@ -122,7 +122,7 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 | Option | Default | Notes |
 | ------ | ------- | ----- |
 | `--codec` | `hevc` | `hevc`, `h264`, or `av1` for offline output. HLS streaming always uses H.264. |
-| `--cq` | GPU/codec-specific | Video quality. Lower is better quality and a larger file. NVIDIA defaults: H.264 25, HEVC 28, AV1 35. AMD defaults: H.264 24, HEVC 25, AV1 32. |
+| `--cq` | GPU/codec-specific | Video quality. Lower is better quality and a larger file. NVIDIA defaults: H.264 25, HEVC 28, AV1 35. AMD defaults: H.264 24, HEVC 25, AV1 16. |
 | `--encoder-settings` | — | Advanced settings as a JSON object or comma-separated `key=value` pairs, e.g. `{"rc-lookahead":32}` or `rc-lookahead=32,bf=4`. See below. |
 | `--lut` | — | `.cube` color LUT (1D or 3D) applied as the video is written. Also available in the GUI's Encoding section. |
 | `--sharpen` | `0` | Sharpen the picture before encoding, from `0` (off) to `1` (strongest). Matches ffmpeg's `cas` filter, so no second pass is needed. See [Advanced processing](advanced_processing.md). |
@@ -226,21 +226,21 @@ the same file size.
 
 Set your own `maxrate` to replace the limit, or a very high one to turn it off.
 If the source has no bitrate information, Jasna logs a warning and uses no
-limit. AMD HEVC and AV1 (10-bit) use constant QP and have no limit.
+limit. AMD uses constant QP by default and has no limit.
 
 #### AMD (AMF) keys, all codecs
 
 | Key | What it does |
 | --- | ------------ |
-| `cq` | Quality value for AMF: QVBR for H.264, constant QP for 10-bit HEVC/AV1 (AV1 uses a finer internal scale, so CQ is multiplied by 5). Lower = better. Defaults: 24, 25, and 32 respectively. |
+| `cq` | Quality value for AMF, sent as constant QP (AV1 uses a finer internal scale, so CQ is multiplied by 5). With `rc=qvbr` on H.264 it sets the QVBR level instead. Lower = better. Defaults: H.264 24, HEVC 25, AV1 16. |
 | `qvbr_quality_level` | Legacy CQ alias in CLI advanced settings when `--cq` is omitted; not accepted in the GUI custom-args field. |
 | `usage` | Encoder usage profile. Default `high_quality`. |
 | `quality` | Speed/quality preset: `speed`, `balanced`, `quality` (default). |
-| `rc` | Rate-control mode. H.264 defaults to `qvbr`; 10-bit HEVC/AV1 default to `cqp`. |
+| `rc` | Rate-control mode. Default `cqp`. |
 | `preset` | AMF preset. |
 | `g` | Keyframe interval in frames. Default 250. |
 | `bf` | Max consecutive B-frames. |
-| `preanalysis` | Pre-analysis pass. Enabled for H.264, disabled for 10-bit HEVC/AV1 by default. |
+| `preanalysis` | Pre-analysis pass. Off by default. |
 | `maxrate` / `bufsize` | Bitrate cap and VBV buffer size, in bits per second. Set automatically from the source bitrate except in CQP mode. |
 | `profile` / `level` | Codec profile and level. |
 
@@ -249,7 +249,7 @@ Per-codec extras:
 | Codec | Extra keys |
 | ----- | ---------- |
 | `hevc` | `tier`, `bitdepth` (default 10), `vbaq` (off by default) |
-| `h264` | `coder`, `bf_ref` (B-frame references), `pa_adaptive_mini_gop` (adaptive B-frame placement), `vbaq` (on by default) |
+| `h264` | `coder`, `bf_ref` (B-frame references), `pa_adaptive_mini_gop` (adaptive B-frame placement), `vbaq` (off by default) |
 | `av1` | `bitdepth` (default 10), `aq_mode` (off by default) |
 
 ## Streaming

@@ -15,7 +15,7 @@ from jasna.media.encoder_settings import encoder_cq_spec, validate_encoder_cq
         (AcceleratorVendor.NVIDIA, "av1", 35, 1, 63),
         (AcceleratorVendor.AMD, "h264", 24, 0, 51),
         (AcceleratorVendor.AMD, "hevc", 25, 0, 51),
-        (AcceleratorVendor.AMD, "av1", 32, 1, 51),
+        (AcceleratorVendor.AMD, "av1", 16, 1, 51),
     ],
 )
 def test_encoder_cq_specs_follow_supported_vendor_ranges(
@@ -68,7 +68,7 @@ def test_cli_cq_defaults_follow_amd_codec() -> None:
         cq=None,
         codec="av1",
         vendor=AcceleratorVendor.AMD,
-    ) == {"cq": 32}
+    ) == {"cq": 16}
 
 
 def test_cli_legacy_amf_quality_alias_suppresses_default() -> None:

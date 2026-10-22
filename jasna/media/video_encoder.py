@@ -108,16 +108,28 @@ DEFAULT_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "b_ref_mode": "middle",
 }
 
+def _amf_av1_qindex(cq: int) -> int:
+    # AMF AV1 frame QPs are AV1 qindex 0..255; CQ uses the H.264/HEVC QP scale 0..51.
+    return cq * 255 // 51
+
+
+def _amf_constant_qp(codec: str, cq: int) -> dict[str, str]:
+    if codec == "av1":
+        qindex = str(_amf_av1_qindex(cq))
+        return {"qp_i": qindex, "qp_p": qindex, "qp_b": qindex}
+    if codec == "h264":
+        return {"qp_i": str(cq), "qp_p": str(cq), "qp_b": str(cq)}
+    return {"qp_i": str(cq), "qp_p": str(cq)}
+
+
 DEFAULT_AMF_H264_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
-    "rc": "qvbr",
-    "qvbr_quality_level": str(
-        encoder_cq_spec("h264", AcceleratorVendor.AMD).default
-    ),
+    "rc": "cqp",
+    **_amf_constant_qp("h264", encoder_cq_spec("h264", AcceleratorVendor.AMD).default),
     "g": "250",
-    "preanalysis": "1",
-    "vbaq": "1",
+    "preanalysis": "0",
+    "vbaq": "0",
     "profile": "high",
 }
 
@@ -125,8 +137,7 @@ DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
     "rc": "cqp",
-    "qp_i": str(encoder_cq_spec("hevc", AcceleratorVendor.AMD).default),
-    "qp_p": str(encoder_cq_spec("hevc", AcceleratorVendor.AMD).default),
+    **_amf_constant_qp("hevc", encoder_cq_spec("hevc", AcceleratorVendor.AMD).default),
     "g": "250",
     "preanalysis": "0",
     "vbaq": "0",
@@ -135,20 +146,11 @@ DEFAULT_AMF_HEVC_ENCODER_OPTIONS: dict[str, str] = {
 }
 
 
-def _amf_av1_qindex(cq: int) -> int:
-    # AMF AV1 frame QPs are AV1 qindex 0..255; CQ uses the H.264/HEVC QP scale 0..51.
-    return cq * 255 // 51
-
-
-_AMF_AV1_DEFAULT_QINDEX = str(_amf_av1_qindex(encoder_cq_spec("av1", AcceleratorVendor.AMD).default))
-
 DEFAULT_AMF_AV1_ENCODER_OPTIONS: dict[str, str] = {
     "usage": "high_quality",
     "quality": "quality",
     "rc": "cqp",
-    "qp_i": _AMF_AV1_DEFAULT_QINDEX,
-    "qp_p": _AMF_AV1_DEFAULT_QINDEX,
-    "qp_b": _AMF_AV1_DEFAULT_QINDEX,
+    **_amf_constant_qp("av1", encoder_cq_spec("av1", AcceleratorVendor.AMD).default),
     "g": "250",
     "preanalysis": "0",
     "aq_mode": "none",
@@ -312,7 +314,7 @@ def _normalize_amf_cq(
     rc = overrides.get("rc", defaults["rc"])
     cqp_modes = {"cqp", "0"}
     qvbr_modes = {"qvbr", "hqvbr", "4", "5"}
-    if codec in {"hevc", "av1"} and rc not in cqp_modes:
+    if rc not in cqp_modes:
         defaults.pop("qp_i", None)
         defaults.pop("qp_p", None)
         defaults.pop("qp_b", None)
@@ -331,19 +333,12 @@ def _normalize_amf_cq(
         return
 
     value = overrides.pop(aliases[0])
-    if codec in {"hevc", "av1"}:
-        if rc in cqp_modes and codec == "av1":
-            qindex = str(_amf_av1_qindex(int(value)))
-            overrides.update(qp_i=qindex, qp_p=qindex, qp_b=qindex)
-        elif rc in cqp_modes:
-            overrides["qp_i"] = value
-            overrides["qp_p"] = value
-        elif not ten_bit and rc in qvbr_modes:
-            overrides["qvbr_quality_level"] = value
-        else:
-            raise ValueError(f"AMD {codec.upper()} CQ requires rc=cqp")
-    else:
+    if rc in cqp_modes:
+        overrides.update(_amf_constant_qp(codec, int(value)))
+    elif codec == "h264" or (not ten_bit and rc in qvbr_modes):
         overrides["qvbr_quality_level"] = value
+    else:
+        raise ValueError(f"AMD {codec.upper()} CQ requires rc=cqp")
 
 
 def _align_yuv_pitch(packed: torch.Tensor) -> torch.Tensor:
@@ -422,7 +417,6 @@ def resolve_encoder_options(
             _drop_unsupported_nvenc_overrides(codec, overrides, encoder_options)
     uses_amf_cqp = (
         vendor is AcceleratorVendor.AMD
-        and codec in {"hevc", "av1"}
         and overrides.get("rc", encoder_options["rc"]) in {"cqp", "0"}
     )
     if "maxrate" not in overrides and not uses_amf_cqp:
