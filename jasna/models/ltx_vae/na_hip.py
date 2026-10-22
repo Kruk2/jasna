@@ -1,5 +1,5 @@
 """Neighborhood attention through ``na_triton``'s kernel built ahead of time for AMD
-(``scripts/build_ltx_na_hipfbs.py``), for GPUs without Triton: Windows ROCm ships none."""
+(``scripts/build_ltx_vae_hipfbs.py``), for GPUs without Triton: Windows ROCm ships none."""
 
 import ctypes
 import functools
@@ -34,7 +34,7 @@ def module_name(window: tuple[int, int, int]) -> str:
 
 @functools.cache
 def _kernel(architecture: str, window: tuple[int, int, int]) -> tuple[Kernel, int]:
-    from jasna.models.ltx_vae.na_hip_launch import KERNEL_LAUNCH
+    from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 
     kernels = KERNEL_LAUNCH.get(architecture, {})
     if module_name(window) not in kernels:

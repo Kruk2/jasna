@@ -16,7 +16,7 @@ from jasna.accelerator import is_amd_device
 from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
-from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_attention
+from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_kernels
 from jasna.models.ltx_vae.video_encoder import (
     KITCHEN_DOWN_BLOCKS,
     VideoEncoder,
@@ -227,7 +227,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
         for name, tensor in tuned.items():
             overlay[name] = tensor.to(own[name].dtype)
         decoder.load_state_dict(overlay, strict=False)
-        enable_fused_attention(device)
+        enable_fused_kernels(device)
         compile_diffusion_blocks(device, dtype)
         complete = True
         return decoder

@@ -15,6 +15,7 @@ import torch.nn.functional as F
 from torch import nn
 from torch.utils._triton import has_triton_package
 
+from jasna.accelerator import is_amd_device
 from jasna.models.ltx_vae.eager_na import na3d
 from jasna.tensor_utils import compile_static
 
@@ -139,6 +140,7 @@ class QKVProjections(nn.Module):
 
 
 _fused_na3d = None
+_fused_residual_swiglu = None
 
 
 @torch.compiler.disable
@@ -150,22 +152,28 @@ def _fp16_eager_na3d(
     return na3d(q.half(), k.half(), v.half(), tuple(kernel_size), query_w_start).to(q.dtype)
 
 
-def enable_fused_attention(device: torch.device) -> None:
+def enable_fused_kernels(device: torch.device) -> None:
     """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``): JIT, or on
     AMD without Triton (Windows ROCm) built ahead of time (``na_hip``); before SM 8.0, where Triton
-    has no tensor-core dot, through the fp16 pure-torch ``na3d``."""
-    global _fused_na3d
+    has no tensor-core dot, through the fp16 pure-torch ``na3d``. On AMD the diffusion blocks'
+    residual MLP also runs as one kernel (``swiglu_triton``, ahead of time ``swiglu_hip``)."""
+    global _fused_na3d, _fused_residual_swiglu
     if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
         _fused_na3d = _fp16_eager_na3d
         return
     if not has_triton_package():
-        from jasna.models.ltx_vae import na_hip
+        from jasna.models.ltx_vae import na_hip, swiglu_hip
 
         _fused_na3d = na_hip.na3d
+        _fused_residual_swiglu = swiglu_hip.residual_swiglu_
         return
     from jasna.models.ltx_vae import na_triton
 
     _fused_na3d = na_triton.na3d
+    if is_amd_device(device):
+        from jasna.models.ltx_vae import swiglu_triton
+
+        _fused_residual_swiglu = swiglu_triton.residual_swiglu_
 
 
 def neighborhood_attention(
@@ -293,6 +301,13 @@ def residual_modulating_mlp(
     x_flat = x.reshape(-1, dim)
     s = scale.reshape(-1, dim)
     sh = shift.reshape(-1, dim)
+    if _fused_residual_swiglu is not None and x.is_cuda:
+        for start in range(0, x_flat.shape[0], SWIGLU_TILE_TOKENS):
+            _fused_residual_swiglu(
+                x_flat[start : start + SWIGLU_TILE_TOKENS], norm.weight, s[0], sh[0],
+                mlp.w_gate.weight, mlp.w_up.weight, mlp.w_down.weight,
+            )
+        return x
     chunk_mlp = _mlp_chunk if x.is_cuda else modulated_swiglu
     w_gate_up = torch.cat([mlp.w_gate.weight, mlp.w_up.weight])
     for start in range(0, x_flat.shape[0], SWIGLU_TILE_TOKENS):

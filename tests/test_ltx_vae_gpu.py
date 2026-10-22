@@ -46,7 +46,7 @@ def test_cuda_na3d_matches_the_eager_windows(kernel, kernel_size, query_w, monke
 def test_gpus_without_triton_tensor_core_dots_use_the_fp16_eager_na3d(capability, kernel, monkeypatch):
     monkeypatch.setattr(T, "_fused_na3d", None)
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability)
-    T.enable_fused_attention(torch.device("cuda"))
+    T.enable_fused_kernels(torch.device("cuda"))
     assert T._fused_na3d is kernel
 
 
@@ -89,7 +89,7 @@ def test_compiled_diffusion_block_matches_eager(dtype, monkeypatch):
             return block(x.clone(), stage4, modulation, upsample, drop_leading_frame=True)
 
     eager = run()
-    T.enable_fused_attention(torch.device("cuda"))
+    T.enable_fused_kernels(torch.device("cuda"))
     T.compile_diffusion_blocks(torch.device("cuda"), dtype)
     compiled = run()
 
