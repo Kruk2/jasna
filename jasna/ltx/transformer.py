@@ -294,7 +294,7 @@ def enable_quant_kernels(device: torch.device) -> bool:
     as calls; an INT8 block also fuses its norms, AdaLN modulation and feed-forward residual
     into them. Returns whether they are in use."""
     global _quant_kernels
-    if _quant_kernels is None and device.type == "cuda" and torch.version.cuda is not None:
+    if _quant_kernels is None and device.type == "cuda":
         from jasna.ltx import kernels
 
         if not kernels.supports(device):

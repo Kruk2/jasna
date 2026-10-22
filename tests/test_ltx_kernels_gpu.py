@@ -1,5 +1,5 @@
 """The Triton kernels for the LTX quantized linears against the torch path they replace.
-Needs a GPU architecture ``kernels.supports`` and Triton; the NVFP4 tests
+Needs a GPU architecture ``kernels.supports`` (NVIDIA or AMD) and Triton; the NVFP4 tests
 need consumer Blackwell (SM 12.x)."""
 
 from __future__ import annotations
@@ -14,9 +14,7 @@ from jasna.ltx import transformer as T
 from jasna.ltx.kernels import supports
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available()
-    or torch.version.cuda is None
-    or not supports(torch.device("cuda")),
+    not torch.cuda.is_available() or not supports(torch.device("cuda")),
     reason="needs a GPU the INT8 kernels support and Triton",
 )
 needs_bf16_sdpa = pytest.mark.skipif(
@@ -24,7 +22,8 @@ needs_bf16_sdpa = pytest.mark.skipif(
     reason="the bf16 SDPA self-attention these blocks run needs SM 8.0",
 )
 needs_blackwell = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability()[0] != 12, reason="NVFP4 needs consumer Blackwell"
+    not torch.cuda.is_available() or torch.version.cuda is None or torch.cuda.get_device_capability()[0] != 12,
+    reason="NVFP4 needs consumer Blackwell",
 )
 
 
@@ -74,7 +73,7 @@ def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeyp
 
 
 def test_cublas_gemm_with_triton_epilogue_is_bit_exact(kernels, monkeypatch):
-    monkeypatch.setattr(kernels, "_cublas_int8_mm", lambda device: True)
+    monkeypatch.setattr(kernels, "_cached_gpu_architecture", lambda device: next(iter(kernels.CUBLAS_INT8_MM)))
     test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeypatch)
     test_fused_norm_modulation_and_feed_forward(kernels)
 
@@ -222,6 +221,6 @@ def test_kernels_reject_widths_they_would_compute_wrong(kernels):
         kernels.quantize_fp4(x, torch.ones((), device="cuda"), False)
     codes = torch.zeros(8, 288, dtype=torch.int8, device="cuda")
     weights = torch.zeros(256, 288, dtype=torch.int8, device="cuda")
-    if not kernels._cublas_int8_mm(codes.device):  # the cuBLAS GEMM takes any width divisible by 8
+    if kernels.gpu_architecture(codes.device) not in kernels.CUBLAS_INT8_MM:  # cuBLAS takes any width divisible by 8
         with pytest.raises(ValueError):
             kernels.int8_scaled_mm(codes, torch.ones(8, device="cuda"), weights, torch.ones(256, device="cuda"), None, False)

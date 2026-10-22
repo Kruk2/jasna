@@ -1,4 +1,4 @@
-"""Triton kernels for the LTX quantized linears (NVIDIA GPUs with Triton).
+"""Triton kernels for the LTX quantized linears (NVIDIA and AMD GPUs with Triton).
 
 Same arithmetic as the torch path in ``transformer.py``, which stays the reference:
 - ``rotate_quantize``: ConvRot rotation + per-row int8 in one read of the activations.
@@ -21,7 +21,13 @@ import triton.language as tl
 from triton.language.extra import libdevice
 from triton.tools.tensor_descriptor import TensorDescriptor
 
+from jasna.accelerator import amd_gpu_architecture
+
 EPS = tl.constexpr(1e-6)
+# HIP has no add_rn: AMD compiles the GEMM kernels without fp fusion (``GEMM_OPTIONS``), so a
+# plain add stays a separate rounding there.
+HIP = tl.constexpr(torch.version.hip is not None)
+GEMM_OPTIONS = {"enable_fp_fusion": False} if torch.version.hip else {}
 
 # Launch parameters shared with the native block (``jasna/ltx/native``), which launches these
 # kernels ahead-of-time compiled: one definition here, read by both.
@@ -128,7 +134,11 @@ def _mm_epilogue(
     b_scales = tl.load(bs_ptr + offs_n, mask=n_mask, other=0.0)
     out = acc.to(tl.float32) * (a_scales[:, None] * b_scales[None, :])
     if HAS_BIAS:
-        out = libdevice.add_rn(out, tl.load(bias_ptr + offs_n, mask=n_mask, other=0.0).to(tl.float32)[None, :])
+        bias = tl.load(bias_ptr + offs_n, mask=n_mask, other=0.0).to(tl.float32)[None, :]
+        if HIP:
+            out = out + bias
+        else:
+            out = libdevice.add_rn(out, bias)
     out = out.to(tl.bfloat16)
     if GELU:
         v = out.to(tl.float32)
@@ -252,33 +262,39 @@ INT8_MM_TILES = {
     (12, 0): ((128, 256, 128, 3, 8), (128, 128, 128, 3, 4)),  # RTX 5090
     (12, 1): ((128, 256, 128, 3, 8), (128, 128, 128, 3, 4)),
 }
+# The same per AMD architecture, keyed by name: ROCm reports gfx1201 as capability 12.0. Swept on
+# a Radeon AI PRO R9700 (gfx1201); waves_per_eu, stages 1-3 and 4 vs 8 warps moved the
+# plateau tiles by under 2 %. gfx1200 and RDNA3 (gfx110x) take the same tiles, unmeasured.
+AMD_INT8_MM_TILES = dict.fromkeys(("gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201"),
+                                  ((128, 256, 128, 2, 8), (128, 128, 128, 1, 8)))
 # GPUs on which Triton runs dots as scalar FMA (it has no tensor-core dot below SM 8.0): the
 # int8 GEMM runs on cuBLAS (``torch._int_mm``) and only its epilogue in Triton.
 CUBLAS_INT8_MM = {(7, 5)}  # RTX 20 series
 
 
-def has_tma(capability: tuple[int, int]) -> bool:
-    return capability[0] >= 9
+def has_tma(architecture: tuple[int, int] | str) -> bool:
+    return not isinstance(architecture, str) and architecture[0] >= 9
 
 
-def gemm_tile(n: int, k: int, capability: tuple[int, int]) -> tuple[int, int, int, int, int]:
+def gemm_tile(n: int, k: int, architecture: tuple[int, int] | str) -> tuple[int, int, int, int, int]:
     """(BM, BN, BK, stages, warps) of the Triton int8 GEMM for ``n`` outputs of width ``k``."""
-    return SMALL_MM_TILE if n < SMALL_MM_MAX_N else INT8_MM_TILES[capability][k > WIDE_K]
+    if n < SMALL_MM_MAX_N:
+        return SMALL_MM_TILE
+    tiles = AMD_INT8_MM_TILES if isinstance(architecture, str) else INT8_MM_TILES
+    return tiles[architecture][k > WIDE_K]
+
+
+def gpu_architecture(device: torch.device) -> tuple[int, int] | str:
+    """Key of the tile tables: the CUDA capability on NVIDIA, the gfx name on AMD."""
+    return amd_gpu_architecture(device) if torch.version.hip else torch.cuda.get_device_capability(device)
+
+
+_cached_gpu_architecture = functools.cache(gpu_architecture)
 
 
 def supports(device: torch.device) -> bool:
-    capability = torch.cuda.get_device_capability(device)
-    return capability in INT8_MM_TILES or capability in CUBLAS_INT8_MM
-
-
-@functools.cache
-def _cublas_int8_mm(device: torch.device) -> bool:
-    return torch.cuda.get_device_capability(device) in CUBLAS_INT8_MM
-
-
-@functools.cache
-def _capability(device: torch.device) -> tuple[int, int]:
-    return torch.cuda.get_device_capability(device)
+    architecture = gpu_architecture(device)
+    return architecture in INT8_MM_TILES or architecture in AMD_INT8_MM_TILES or architecture in CUBLAS_INT8_MM
 
 
 def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, half_rows, row_offset):
@@ -288,25 +304,25 @@ def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, ha
         act_scales, scales, bias if bias is not None else scales,
         residual if residual is not None else out, gate if gate is not None else scales, out,
     )
-    if _cublas_int8_mm(codes.device):
+    architecture = _cached_gpu_architecture(codes.device)
+    if architecture in CUBLAS_INT8_MM:
         bm, bn = CUBLAS_EPILOGUE_TILE
         # torch._int_mm needs more than 16 rows; on SM 7.5 also a multiple of 16 output features
         acc = torch._int_mm(F.pad(codes, (0, 0, 0, 17 - m)) if m <= 16 else codes, qdata.t())
         _int8_epilogue_kernel[(triton.cdiv(m, bm), triton.cdiv(n, bn))](
             acc, *args, m, n, half_rows, row_offset,
             HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=bm, BN=bn,
-            num_warps=CUBLAS_EPILOGUE_WARPS,
+            num_warps=CUBLAS_EPILOGUE_WARPS, **GEMM_OPTIONS,
         )
         return out
-    capability = _capability(codes.device)
-    bm, bn, bk, stages, warps = gemm_tile(n, k, capability)
+    bm, bn, bk, stages, warps = gemm_tile(n, k, architecture)
     if k % bk:
         raise ValueError(f"int8_scaled_mm needs a width divisible by {bk}, got {k}")
     flags = dict(HAS_BIAS=bias is not None, GELU=gelu, RESIDUAL=residual is not None, BM=bm, BN=bn, BK=bk, GROUP_M=GROUP_M)
     tiles = triton.cdiv(m, bm) * triton.cdiv(n, bn)
     sms = programs(codes.device)
     # A short grid whose last wave is mostly idle loses most to that wave: split it along K.
-    splits = stream_k_splits(m, n, k, bm, bn, bk, sms) if has_tma(capability) else 0
+    splits = stream_k_splits(m, n, k, bm, bn, bk, sms) if has_tma(architecture) else 0
     if splits:
         tail = tiles % sms
         workspace = torch.zeros(tail * bm * bn + tail, dtype=torch.int32, device=codes.device)
@@ -317,7 +333,8 @@ def _mm(codes, act_scales, qdata, scales, bias, out, *, gelu, residual, gate, ha
         )
     else:
         _int8_mm_kernel[(tiles,)](
-            codes, qdata, *args, m, n, k, half_rows, row_offset, num_stages=stages, num_warps=warps, **flags
+            codes, qdata, *args, m, n, k, half_rows, row_offset, num_stages=stages, num_warps=warps, **flags,
+            **GEMM_OPTIONS,
         )
     return out
 

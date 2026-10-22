@@ -70,6 +70,21 @@ def test_every_projection_has_a_variant_with_and_without_bias():
 def _cuda_capability(monkeypatch, capability):
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: capability)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
+    monkeypatch.setattr(torch.version, "hip", None)
+
+
+def test_amd_gpus_take_their_tiles_by_architecture_name_not_their_reported_capability(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 0))
+    monkeypatch.setattr(torch.version, "hip", "7.0")
+    monkeypatch.setattr(kernels, "amd_gpu_architecture", lambda device: "gfx1201")
+    device = torch.device("cuda")
+    assert kernels.gpu_architecture(device) == "gfx1201" and kernels.supports(device)
+    assert kernels.gemm_tile(4096, 4096, "gfx1201") == kernels.AMD_INT8_MM_TILES["gfx1201"][0]
+    assert kernels.gemm_tile(4096, 16384, "gfx1201") == kernels.AMD_INT8_MM_TILES["gfx1201"][1]
+    assert kernels.gemm_tile(32, 4096, "gfx1201") == kernels.SMALL_MM_TILE
+    assert not kernels.has_tma("gfx1201")
+    monkeypatch.setattr(kernels, "amd_gpu_architecture", lambda device: "gfx90a")
+    assert not kernels.supports(device)
 
 
 @pytest.mark.parametrize("capability, quantization, reason", [
