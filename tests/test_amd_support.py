@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 from dataclasses import replace
 from fractions import Fraction
@@ -643,8 +644,26 @@ def test_rfdetr_torch_runner_loads_the_first_batch_libraries_on_a_thread_before_
     module.RfDetrTorchRunner(
         weights, input_shapes=[(2, 3, 576, 576)], device=torch.device("cpu"), fp16=True, resolution=576, variant="medium"
     )
-    assert started == [((module.load_first_batch_libraries, (torch.device("cpu"), torch.float16), True), 0)]
+    assert started == [((module.load_first_batch_libraries, (torch.device("cpu"), torch.float16), False), 0)]
     module.load_first_batch_libraries(torch.device("cpu"), torch.float32)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_rfdetr_torch_runner_load_failure_exits_without_a_teardown_crash(tmp_path) -> None:
+    pytest.importorskip("rfdetr")
+    weights = tmp_path / "rfdetr-v6.pt"
+    weights.write_bytes(b"not a checkpoint")
+    code = (
+        "import sys, torch, rfdetr\n"
+        "from jasna.accelerator import configure_rocm_process_env\n"
+        "from jasna.mosaic.rfdetr_torch_runner import RfDetrTorchRunner\n"
+        "configure_rocm_process_env()\n"
+        "torch.zeros(1, device='cuda')\n"
+        "RfDetrTorchRunner(sys.argv[1], [(2, 3, 576, 576)], torch.device('cuda'), "
+        "fp16=True, resolution=576, variant='medium')\n"
+    )
+    result = subprocess.run([sys.executable, "-c", code, str(weights)], capture_output=True, text=True)
+    assert result.returncode == 1, result.stderr
 
 
 def test_rfdetr_torch_runner_fp16_runs_a_half_model_without_autocast(monkeypatch, tmp_path) -> None:

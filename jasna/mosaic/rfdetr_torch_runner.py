@@ -70,7 +70,7 @@ class RfDetrTorchRunner:
         self.fp16 = bool(fp16)
         self._dtype = torch.float16 if self.fp16 else torch.float32
         threading.Thread(
-            target=load_first_batch_libraries, args=(self.device, self._dtype), name="RfDetrLibraries", daemon=True
+            target=load_first_batch_libraries, args=(self.device, self._dtype), name="RfDetrLibraries", daemon=False
         ).start()
         try:
             import rfdetr
