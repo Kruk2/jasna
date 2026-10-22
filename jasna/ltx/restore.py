@@ -1015,10 +1015,7 @@ def _scan_spans(
                 )
                 _check(cancel)
                 with atomic_write(_plan_path(span, directory), "wb") as stream:
-                    np.savez(
-                        stream, frames=np.array(count), large_canvas=np.array(render.large_canvas),
-                        **plans_to_arrays(span_plans),
-                    )
+                    np.savez(stream, frames=np.array(count), **plans_to_arrays(span_plans))
                 plans.append(span_plans)
     prepared = [
         PreparedSpan(span, tuple(span_plans), _span_stores(span, directory, "reference"))
@@ -1050,8 +1047,11 @@ def _plan_path(span: LtxSpan, directory: Path) -> Path:
 @dataclass(frozen=True)
 class _SavedPlans:
     frames: int
-    large_canvas: bool
     plans: list[list[TrackPlan]]
+
+    @property
+    def large_canvas(self) -> bool:
+        return any(w.canvas == LARGE_CANVAS for segment in self.plans for plan in segment for w in plan.windows)
 
 
 def _saved_plans(span: LtxSpan, directory: Path) -> _SavedPlans | None:
@@ -1059,7 +1059,7 @@ def _saved_plans(span: LtxSpan, directory: Path) -> _SavedPlans | None:
     if not path.is_file():
         return None
     with np.load(path, allow_pickle=False) as arrays:
-        return _SavedPlans(int(arrays["frames"]), bool(arrays["large_canvas"]), plans_from_arrays(arrays))
+        return _SavedPlans(int(arrays["frames"]), plans_from_arrays(arrays))
 
 
 def _saved_frames(span: LtxSpan, directory: Path) -> int:
@@ -1274,7 +1274,17 @@ def restore_video(
     decision and the decode tiles follow the VRAM free when they are made."""
     span = LtxSpan(frames, (LtxSegment(*WHOLE_VIDEO_PTS, seed),), lambda: writer)
     saved = _saved_plans(span, resume_dir)
-    canvas = saved.large_canvas if saved is not None else large_canvas_fits(large_canvas, device_free_bytes(device))
+    if saved is None:
+        canvas = large_canvas_fits(large_canvas, device_free_bytes(device))
+    else:
+        canvas = saved.large_canvas
+        free = device_free_bytes(device)
+        if canvas and free < LARGE_CANVAS_MIN_FREE_BYTES:
+            raise RuntimeError(
+                f"The saved LTX work for this video uses 768 px windows, which need "
+                f"{LARGE_CANVAS_MIN_FREE_BYTES / 2**30:.0f} GiB of free GPU memory; {free / 2**30:.1f} GiB is free. "
+                "Close other programs that use the GPU and try again."
+            )
     restore_spans(
         [span],
         LtxRender(

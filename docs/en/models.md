@@ -94,6 +94,7 @@ The current unfinished track may run again, and saving the output starts over; c
 parts of a range job are kept. A long single shot can be one track. Jasna asks before
 replacing saved work if the input, the detection or LTX settings or the app version changed.
 Changing only output settings (codec, quality, color LUT, sharpening) keeps the saved LTX work.
+Work saved with sharper large mosaics (768 px) needs 12 GB of free GPU memory again to continue.
 BasicVSR++ whole-video jobs, previews and streaming do not resume.
 
 ### Downloading LTX yourself
