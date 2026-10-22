@@ -194,8 +194,13 @@ $P scripts/benchmark_na3d.py                                             # Trito
   cache (~1-2 min). Without the toolchain, or on a GPU missing from the kernel
   tables, it uses the `torch.compile`/Triton path.
 - `JASNA_LTX_NATIVE=0` forces `torch.compile`, for an A/B in one tree.
-- `jasna.ltx.native.prebuild(dir)` builds the extension and the cubins of every
-  table architecture for a release; copy `dir` to `jasna/ltx/native/prebuilt/`.
+- `jasna.ltx.native.prebuild(dir)` builds the extension and the kernels of every
+  table architecture of the build's vendor for a release (cubins per SM; under
+  ROCm `.hsaco` per gfx name, gfx1100/1101/1102/1200/1201, as gfx1103 has no
+  tuned tiles); copy `dir` to `jasna/ltx/native/prebuilt/`. Shipped kernels load
+  without Triton.
+- Launch constants and tile tables live in `jasna/ltx/kernel_policy.py`, which
+  imports no Triton; `kernels.py` and the native block both read it.
 - INT8 self-attention is comfy-kitchen 0.2.38's SageAttention, vendored in
   `jasna/ltx/native/sage_attention/` (bf16, unmasked subset; provenance and
   edits in its `NOTICE`). It compiles with comfy-kitchen's nvcc flags
@@ -211,8 +216,10 @@ $P scripts/benchmark_na3d.py                                             # Trito
   The q/k norm and RoPE run inside comfy-kitchen's Q/K quantization
   (`norm_rope_quant.hip`, compiled with its `quant_qk_int8.hip`); its codes must
   stay equal to `glue.cu`'s `norm_rope` followed by the vendored quantizer.
-  `PYTORCH_ROCM_ARCH` picks the gfx targets (default: this GPU). Windows ROCm
-  has no Triton and keeps the eager path.
+  `PYTORCH_ROCM_ARCH` picks the gfx targets (default: this GPU). Without
+  Triton (Windows ROCm) the block needs shipped kernels; checked on Linux with
+  Triton blocked. The Windows extension build (MSVC + HIP SDK flags) is
+  untested.
 - Release packaging keeps the vendored kernels' `NOTICE` in `licenses/`.
 - A change to any path must be compared with identical weights, inputs, seeds
   and warmed caches.

@@ -7,7 +7,7 @@ comfy-kitchen (``sage_attention/``) and the element-wise glue of ``glue.cu``. Py
 every model constant and launch policy value and hands them over in ``Config``.
 
 The same sources build for AMD (ROCm PyTorch, ``gpu_runtime.h`` maps the CUDA spellings):
-INT8 blocks only, with the AMD tiles of ``kernels.AMD_INT8_MM_TILES`` and, as the AMD torch
+INT8 blocks only, with the AMD tiles of ``kernel_policy.AMD_INT8_MM_TILES`` and, as the AMD torch
 path does, comfy-kitchen's HIP INT8 attention (``sage_attention_hip/``) for the self- and
 prompt cross-attention and the attention epilogue ``kernels.gated_rotate_quantize``; the q/k
 norm and RoPE run inside that attention's INT8 quantization (``norm_rope_quant.hip``). hipcc
@@ -16,8 +16,10 @@ compiles ``glue.cu`` and the attention into objects that the host compiler's ext
 Source installs build it on first use into the compile cache (needs nvcc or hipcc, a C++
 compiler and ninja; on Windows MSVC's ``cl`` on PATH, from an x64 Visual Studio developer shell
 whose MSVC this CUDA supports); a frozen release never builds it and loads it only when
-``prebuild`` output is shipped in ``PREBUILT``. Without the toolchain, on a GPU it has no kernels
-for, or with ``JASNA_LTX_NATIVE=0`` the sampler keeps the torch.compile path.
+``prebuild`` output is shipped in ``PREBUILT``. Kernels shipped in ``PREBUILT/kernels`` load
+without Triton (Windows ROCm has none); otherwise Triton compiles them into the cache. Without
+the toolchain, on a GPU it has no kernels for, or with ``JASNA_LTX_NATIVE=0`` the sampler keeps
+the torch.compile path.
 """
 
 from __future__ import annotations
@@ -36,9 +38,9 @@ import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel
 
 from jasna._frozen import is_frozen
-from jasna.ltx import kernels
+from jasna.ltx import kernel_policy as policy
 from jasna.ltx import transformer as T
-from jasna.ltx.native.aot import FP4_ARCHS, BlockDims, build_kernels, is_amd
+from jasna.ltx.kernel_policy import FP4_ARCHS, BlockDims, is_amd
 
 logger = logging.getLogger(__name__)
 
@@ -105,13 +107,18 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
     quantization = block_quantization(block_specs)
     if quantization is None:
         return "the model's linears are not INT8 or NVFP4"
-    architecture = kernels.gpu_architecture(device)
-    if not kernels.supports(device):
+    architecture = policy.gpu_architecture(device)
+    if not policy.supports(device):
         return f"there are no tuned kernels for {_architecture_name(architecture)}"
     if quantization == "nvfp4" and architecture not in FP4_ARCHS:
         return f"NVFP4 blocks need SM {' / '.join(f'{a}.{b}' for a, b in FP4_ARCHS)}"
     if dims.dim // dims.heads not in (64, 128, 256) or dims.dim % dims.heads:
         return f"INT8 attention has no kernel for {dims.dim // dims.heads}-wide heads"
+    if (PREBUILT / "kernels").is_dir():
+        if _prebuilt_manifest(architecture, dims, fp4=quantization == "nvfp4") is None:
+            return f"no shipped kernels for {_architecture_name(architecture)} fit this model"
+    elif importlib.util.find_spec("triton") is None:
+        return "Triton is not installed to compile its kernels and none are shipped"
     if _prebuilt_extension() is not None:
         return None
     if is_frozen():
@@ -194,7 +201,7 @@ def hip_architectures() -> list[str]:
     """The gfx targets an AMD build compiles for: ``PYTORCH_ROCM_ARCH`` (``;``- or space-separated,
     as PyTorch reads it), else this machine's GPU."""
     requested = os.environ.get("PYTORCH_ROCM_ARCH", "").replace(";", " ").split()
-    return requested or [kernels.gpu_architecture(torch.device("cuda"))]
+    return requested or [policy.gpu_architecture(torch.device("cuda"))]
 
 
 def _hip_build_flags(rocm_home: Path) -> dict[str, list[str]]:
@@ -300,10 +307,29 @@ def _extension():
     return module
 
 
+def _prebuilt_manifest(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool) -> Path | None:
+    """The shipped kernel manifest of this architecture whose quantizers are specialized for ``dims``
+    (``aot.variants``: the only variants that depend on the block's widths)."""
+    widths = set() if fp4 else {("rotate_quantize", dims.dim, None), ("rotate_quantize", dims.ff_dim, None)}
+    if is_amd(architecture) and not fp4:
+        widths.add(("gated_rotate_quantize", dims.dim, dims.dim // dims.heads))
+    for manifest in sorted((PREBUILT / "kernels").glob(f"{policy.profile_name(architecture, fp4=fp4)}-*/manifest.json")):
+        entries = json.loads(manifest.read_text())
+        if {(e["family"], e["constexprs"]["K"], e["constexprs"].get("HEAD_DIM")) for e in entries
+                if "K" in e["constexprs"]} == widths:
+            return manifest
+    return None
+
+
 def _kernel_manifest(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool) -> Path:
-    prebuilt = PREBUILT / "kernels"
-    if prebuilt.is_dir():
-        return build_kernels(architecture, dims, fp4=fp4, cache=prebuilt)
+    """Shipped kernels in a release (no Triton needed), else ones Triton compiles into the cache."""
+    if (PREBUILT / "kernels").is_dir():
+        manifest = _prebuilt_manifest(architecture, dims, fp4=fp4)
+        if manifest is None:
+            raise RuntimeError(f"no shipped native-block kernels for {_architecture_name(architecture)} fit this model")
+        return manifest
+    from jasna.ltx.native.aot import build_kernels
+
     return build_kernels(architecture, dims, fp4=fp4, cache=_cache() / "kernels")
 
 
@@ -329,7 +355,7 @@ class NativeBlockForward:
             setattr(config, name, value)
         self.block = module.Block(config)
         self.head_dim = dims.dim // dims.heads
-        self._amd = is_amd(kernels.gpu_architecture(device))
+        self._amd = is_amd(policy.gpu_architecture(device))
 
     def __call__(
         self, w: T.Weights, x: torch.Tensor, cond: T.StepConditioning,
@@ -345,20 +371,20 @@ class NativeBlockForward:
 
 
 def block_parameters(architecture: tuple[int, int] | str, heads: int) -> dict[str, object]:
-    """Public launch policy from architecture (``kernels.gpu_architecture``) only; no device or
+    """Public launch policy from architecture (``kernel_policy.gpu_architecture``) only; no device or
     kernel queries."""
-    table = kernels.AMD_INT8_MM_TILES if is_amd(architecture) else kernels.INT8_MM_TILES
-    tiles = table.get(architecture, (kernels.SMALL_MM_TILE,) * 2)
+    table = policy.AMD_INT8_MM_TILES if is_amd(architecture) else policy.INT8_MM_TILES
+    tiles = table.get(architecture, (policy.SMALL_MM_TILE,) * 2)
     return {
         "heads": heads, "eps": T.EPS, "chunk_rows": T.CHUNK_ROWS,
-        "cublas_int8": architecture in kernels.CUBLAS_INT8_MM,
-        "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(kernels.SMALL_MM_TILE),
-        "small_max_n": kernels.SMALL_MM_MAX_N, "wide_k": kernels.WIDE_K, "group_m": kernels.GROUP_M,
-        "stream_k_max_waves": kernels.STREAM_K_MAX_WAVES,
-        "has_tma": kernels.has_tma(architecture), "epilogue_tile": list(kernels.CUBLAS_EPILOGUE_TILE),
+        "cublas_int8": architecture in policy.CUBLAS_INT8_MM,
+        "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(policy.SMALL_MM_TILE),
+        "small_max_n": policy.SMALL_MM_MAX_N, "wide_k": policy.WIDE_K, "group_m": policy.GROUP_M,
+        "stream_k_max_waves": policy.STREAM_K_MAX_WAVES,
+        "has_tma": policy.has_tma(architecture), "epilogue_tile": list(policy.CUBLAS_EPILOGUE_TILE),
         "fp4_tensor_scale_divisor": T.FP4_MAX * T.FP8_E4M3_MAX, "fp4_block": T.FP4_BLOCK,
-        "fp4_quantize_rows": kernels.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": kernels.FP4_QUANTIZE_COLS,
-        "fp4_scale_tile_rows": kernels.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernels.FP4_SCALE_TILE_COLS,
+        "fp4_quantize_rows": policy.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": policy.FP4_QUANTIZE_COLS,
+        "fp4_scale_tile_rows": policy.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": policy.FP4_SCALE_TILE_COLS,
         "fp4_recipe": [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value],
         "fp4_swizzle": [F.SwizzleType.SWIZZLE_32_4_4.value, F.SwizzleType.NO_SWIZZLE.value],
     }
@@ -368,8 +394,8 @@ def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict
     """Typed native-block configuration shared by public and protected bindings."""
     return {
         "device": device.index if device.index is not None else torch.cuda.current_device(),
-        **block_parameters(kernels.gpu_architecture(device), dims.heads),
-        "programs": kernels.programs(device),
+        **block_parameters(policy.gpu_architecture(device), dims.heads),
+        "programs": policy.programs(device),
         "kernels": json.loads(manifest.read_text()), "kernel_directory": str(manifest.parent),
     }
 
@@ -384,7 +410,7 @@ def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[i
     dims = BlockDims.from_specs(block_specs)
     try:
         manifest = _kernel_manifest(
-            kernels.gpu_architecture(device), dims, fp4=block_quantization(block_specs) == "nvfp4"
+            policy.gpu_architecture(device), dims, fp4=block_quantization(block_specs) == "nvfp4"
         )
         return NativeBlockForward(_extension(), device, dims, manifest)
     except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
@@ -392,9 +418,12 @@ def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[i
         return None
 
 
-def release_architectures() -> list[tuple[int, int]]:
-    """Every SM a release build compiles the native block for: those with tuned INT8 kernels."""
-    return sorted({*kernels.INT8_MM_TILES, *kernels.CUBLAS_INT8_MM})
+def release_architectures() -> list[tuple[int, int]] | list[str]:
+    """Every architecture of this build's GPU vendor a release compiles the native block for:
+    those with tuned INT8 kernels (SMs, or gfx names under ROCm, where gfx1103 has none)."""
+    if torch.version.hip is not None:
+        return sorted(policy.AMD_INT8_MM_TILES)
+    return sorted({*policy.INT8_MM_TILES, *policy.CUBLAS_INT8_MM})
 
 
 def cuda_arch_list() -> str:
@@ -402,7 +431,7 @@ def cuda_arch_list() -> str:
     return ";".join(f"{major}.{minor}" for major, minor in release_architectures())
 
 
-def prebuild_profiles() -> list[tuple[tuple[int, int], BlockDims, bool]]:
+def prebuild_profiles() -> list[tuple[tuple[int, int] | str, BlockDims, bool]]:
     """The public architecture and model-shape profiles compiled into a release."""
     from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors
 
@@ -411,23 +440,28 @@ def prebuild_profiles() -> list[tuple[tuple[int, int], BlockDims, bool]]:
     for quantization in ("int8", "nvfp4"):
         specs = PlaceholderHandle(PlaceholderTensors(quantization, "distilled")).tensor_specs()
         dims = BlockDims.from_specs({name.split(".", 2)[2]: spec for name, spec in specs.items() if name.startswith("blocks.0.")})
-        for capability in archs:
-            if quantization == "int8" or capability in FP4_ARCHS:
-                profiles.append((capability, dims, quantization == "nvfp4"))
+        for architecture in archs:
+            if quantization == "int8" or architecture in FP4_ARCHS:
+                profiles.append((architecture, dims, quantization == "nvfp4"))
     return profiles
 
 
 def prebuild_kernels(directory: Path) -> None:
     """Build release kernel profiles without building the native extension or querying a GPU."""
-    for capability, dims, fp4 in prebuild_profiles():
-        build_kernels(capability, dims, fp4=fp4, cache=directory / "kernels")
+    from jasna.ltx.native.aot import build_kernels
+
+    for architecture, dims, fp4 in prebuild_profiles():
+        build_kernels(architecture, dims, fp4=fp4, cache=directory / "kernels")
 
 
 def prebuild(directory: Path) -> None:
     """Release build: kernels for every architecture of the kernel tables and the extension for
     all of them, laid out as ``PREBUILT`` expects (copy ``directory`` there)."""
     prebuild_kernels(directory)
-    os.environ["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list()
+    if torch.version.hip is not None:
+        os.environ["PYTORCH_ROCM_ARCH"] = ";".join(release_architectures())
+    else:
+        os.environ["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list()
     module = _build_extension(directory / "build")
     shutil.copy2(module.__file__, directory / Path(module.__file__).name)
     shutil.rmtree(directory / "build")

@@ -10,11 +10,13 @@ import torch
 pytest.importorskip("triton")
 
 from jasna.ltx import native
+from jasna.ltx.kernel_policy import BlockDims
 from jasna.ltx.model_files import PlaceholderHandle
-from jasna.ltx.native.aot import BlockDims
+from jasna.ltx.native import aot
 
 
 PROFILES = [(7, 5), (8, 6), (8, 9), (12, 0), (12, 1)]
+AMD_PROFILES = ["gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201"]
 
 
 def _forbidden(*args, **kwargs):
@@ -32,12 +34,17 @@ def _no_runtime_work(monkeypatch):
     monkeypatch.setattr(native.subprocess, "run", _forbidden)
 
 
+def _vendor(monkeypatch, hip: str | None):
+    monkeypatch.setattr(torch.version, "hip", hip)
+
+
 def test_kernel_only_prebuild_uses_exact_public_profiles_and_shapes(monkeypatch):
     _no_runtime_work(monkeypatch)
+    _vendor(monkeypatch, None)
     monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", "unchanged")
     monkeypatch.setattr(native, "cuda_arch_list", _forbidden)
     calls = []
-    monkeypatch.setattr(native, "build_kernels", lambda capability, dims, *, fp4, cache:
+    monkeypatch.setattr(aot, "build_kernels", lambda capability, dims, *, fp4, cache:
                         calls.append((capability, dims, fp4, cache)))
     directory = Path("owned-kernel-prebuild")
     assert native.prebuild_kernels(directory) is None
@@ -50,7 +57,8 @@ def test_kernel_only_prebuild_uses_exact_public_profiles_and_shapes(monkeypatch)
 
 def test_prebuild_profiles_are_seven_pure_public_architecture_specs(monkeypatch):
     _no_runtime_work(monkeypatch)
-    monkeypatch.setattr(native, "build_kernels", _forbidden)
+    _vendor(monkeypatch, None)
+    monkeypatch.setattr(aot, "build_kernels", _forbidden)
     monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", "unchanged")
     expected = [(capability, BlockDims(4096, 16384, 32), False) for capability in PROFILES]
     expected += [(capability, BlockDims(4096, 16384, 32), True) for capability in [(12, 0), (12, 1)]]
@@ -66,7 +74,7 @@ def test_kernel_only_route_delegates_profile_selection(monkeypatch):
     calls = []
     monkeypatch.setattr(native, "prebuild_profiles", lambda: [profile])
     monkeypatch.setattr(native, "release_architectures", _forbidden)
-    monkeypatch.setattr(native, "build_kernels", lambda capability, dims, *, fp4, cache:
+    monkeypatch.setattr(aot, "build_kernels", lambda capability, dims, *, fp4, cache:
                         calls.append((capability, dims, fp4, cache)))
     native.prebuild_kernels(Path("owned-kernel-prebuild"))
     assert calls == [(*profile, Path("owned-kernel-prebuild/kernels"))]
@@ -86,6 +94,7 @@ def test_no_import_time_prebuild_work():
 @pytest.mark.parametrize("failure_index", [0, 3, 6])
 def test_kernel_failure_propagates_without_later_compilation(monkeypatch, failure_index):
     _no_runtime_work(monkeypatch)
+    _vendor(monkeypatch, None)
     calls = []
     failure = RuntimeError("owned compiler failure")
 
@@ -94,7 +103,7 @@ def test_kernel_failure_propagates_without_later_compilation(monkeypatch, failur
         if len(calls) == failure_index + 1:
             raise failure
 
-    monkeypatch.setattr(native, "build_kernels", compile_kernel)
+    monkeypatch.setattr(aot, "build_kernels", compile_kernel)
     with pytest.raises(RuntimeError) as caught:
         native.prebuild_kernels(Path("owned-kernel-prebuild"))
     assert caught.value is failure
@@ -108,6 +117,7 @@ def test_prebuild_delegates_then_preserves_extension_copy_and_cleanup(monkeypatc
     monkeypatch.setattr(native, "prebuild_kernels", lambda path: calls.append(("kernels", path)))
     monkeypatch.setattr(native, "cuda_arch_list", lambda: "7.5;8.6;8.9;12.0;12.1")
     monkeypatch.setenv("TORCH_CUDA_ARCH_LIST", "previous")
+    _vendor(monkeypatch, None)
 
     def extension(path):
         calls.append(("extension", path, native.os.environ["TORCH_CUDA_ARCH_LIST"]))
@@ -155,3 +165,25 @@ def test_prebuild_extension_failure_propagates_without_copy_or_cleanup(monkeypat
         native.prebuild(Path("owned-public-prebuild"))
     assert caught.value is failure
     assert calls == [Path("owned-public-prebuild")]
+
+
+def test_amd_prebuild_profiles_are_int8_per_tuned_gfx_architecture(monkeypatch):
+    _no_runtime_work(monkeypatch)
+    _vendor(monkeypatch, "7.15")
+    assert native.release_architectures() == AMD_PROFILES
+    assert native.prebuild_profiles() == [(gfx, BlockDims(4096, 16384, 32), False) for gfx in AMD_PROFILES]
+
+
+def test_amd_prebuild_targets_the_extension_at_the_profiled_architectures(monkeypatch):
+    directory = Path("owned-public-prebuild")
+    module = SimpleNamespace(__file__=str(directory / "build" / "jasna_ltx_native.so"))
+    targets = []
+    _vendor(monkeypatch, "7.15")
+    monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1103")
+    monkeypatch.setattr(native, "prebuild_kernels", lambda path: None)
+    monkeypatch.setattr(native, "cuda_arch_list", _forbidden)
+    monkeypatch.setattr(native, "_build_extension", lambda path: targets.append(native.os.environ["PYTORCH_ROCM_ARCH"]) or module)
+    monkeypatch.setattr(native.shutil, "copy2", lambda source, target: None)
+    monkeypatch.setattr(native.shutil, "rmtree", lambda path: None)
+    native.prebuild(directory)
+    assert targets == [";".join(AMD_PROFILES)]

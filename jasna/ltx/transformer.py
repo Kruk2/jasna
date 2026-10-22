@@ -293,15 +293,15 @@ _kitchen_int8_linear = None
 
 def enable_quant_kernels(device: torch.device) -> str | None:
     """Route the INT8 and NVFP4 linears through fused kernels: the Triton kernels of ``kernels.py``
-    on the GPU architectures ``kernels.supports``, as opaque ops so they compile as calls (an INT8
+    on the GPU architectures ``kernel_policy.supports``, as opaque ops so they compile as calls (an INT8
     block also fuses its norms, AdaLN modulation and feed-forward residual into them); else on AMD
     comfy-kitchen's ConvRot INT8 linear (Windows ROCm has no Triton). Returns the kernels in use."""
     global _quant_kernels, _kitchen_int8_linear
     if _quant_kernels is None and _kitchen_int8_linear is None and device.type == "cuda":
         if importlib.util.find_spec("triton") is not None:
-            from jasna.ltx import kernels
+            from jasna.ltx import kernel_policy, kernels
 
-            if kernels.supports(device):
+            if kernel_policy.supports(device):
                 _quant_kernels = _triton_ops(kernels)
         if _quant_kernels is None and torch.version.hip:
             import comfy_kitchen

@@ -10,7 +10,6 @@ reuses the conditional pass's hidden state up to that block (skipped at scale 0)
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import logging
 import math
@@ -21,7 +20,6 @@ from pathlib import Path
 import torch
 
 from jasna._frozen import is_frozen
-from jasna.accelerator import is_nvidia_device
 from jasna.ltx import transformer as T
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors, open_tensors
@@ -135,23 +133,17 @@ def _opaque_blocks(reader) -> bool:
     return is_frozen() and not isinstance(reader, PlaceholderHandle)
 
 
-def _native_block_importable(device: torch.device) -> bool:
-    """The native block builds its kernels with Triton, which Windows ROCm ships without."""
-    return is_nvidia_device(device) or importlib.util.find_spec("triton") is not None
-
-
 def _block_functions(
     device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]
 ) -> tuple[Callable, Callable, str]:
     """(block forward, prompt key/value, backend name) for plain-tensor blocks: the native block
     when it can run here, with eager prompt keys/values (once per block and step), else both
     compiled."""
-    if _native_block_importable(device):
-        from jasna.ltx import native
+    from jasna.ltx import native
 
-        native_forward = native.load(device, block_specs)
-        if native_forward is not None:
-            return native_forward, T.prompt_key_value, "native"
+    native_forward = native.load(device, block_specs)
+    if native_forward is not None:
+        return native_forward, T.prompt_key_value, "native"
     T.enable_int8_attention()
     return (
         compiled_block_forward(device),

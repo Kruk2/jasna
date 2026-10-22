@@ -1,5 +1,5 @@
 """The native LTX block against ``transformer.block_forward`` on the same trial-shaped weights
-and inputs. Needs a GPU ``kernels.supports`` (NVIDIA or AMD), Triton, comfy-kitchen and the
+and inputs. Needs a GPU ``kernel_policy.supports`` (NVIDIA or AMD), Triton, comfy-kitchen and the
 toolchain that builds the native block; NVFP4 needs SM 12.x."""
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ pytest.importorskip("comfy_kitchen")
 
 from jasna.ltx import native
 from jasna.ltx import transformer as T
-from jasna.ltx.kernels import supports
+from jasna.ltx.kernel_policy import supports
 from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors
 from jasna.tensor_utils import half_dtype
 

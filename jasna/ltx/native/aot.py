@@ -4,8 +4,8 @@ native block.
 Each kernel variant the native block launches is compiled for one GPU architecture the way
 ``triton.tools.compile`` compiles a kernel (``triton.compile`` of an ``ASTSource`` with
 explicit constexprs, divisibility hints and target), so no GPU is needed and a release can
-build every architecture of ``kernels.INT8_MM_TILES`` / ``kernels.CUBLAS_INT8_MM`` on one
-machine; AMD architectures (``kernels.AMD_INT8_MM_TILES``, keyed by gfx name) are compiled with
+build every architecture of ``kernel_policy.INT8_MM_TILES`` / ``CUBLAS_INT8_MM`` on one
+machine; AMD architectures (``kernel_policy.AMD_INT8_MM_TILES``, keyed by gfx name) are compiled with
 the hints and options the Triton JIT uses there and need a ROCm Triton. ``triton.tools.compile``
 itself emits C launchers that cannot pass the stream-K GEMM's TMA descriptors, so the images go
 to a manifest that the native launcher reads instead: kernel name, shared memory, warps and the
@@ -24,30 +24,9 @@ import triton
 from triton.backends.compiler import GPUTarget
 from triton.backends.nvidia.driver import expand_signature
 
+from jasna.ltx import kernel_policy as policy
 from jasna.ltx import kernels
-
-FP4_ARCHS = ((12, 0), (12, 1))
-
-
-@dataclass(frozen=True)
-class BlockDims:
-    """Widths of one transformer block: hidden, feed-forward and attention heads."""
-
-    dim: int
-    ff_dim: int
-    heads: int
-
-    @classmethod
-    def from_specs(cls, specs: dict[str, tuple[object, tuple[int, ...]]]) -> BlockDims:
-        """From a block's ``{name: (dtype, shape)}``; works for INT8 and NVFP4 files."""
-        def out_features(name: str) -> int:
-            return specs[f"{name}.qdata" if f"{name}.qdata" in specs else f"{name}.weight"][1][0]
-
-        return cls(
-            dim=specs["attn1.q_norm.weight"][1][0],
-            ff_dim=out_features("ff.net.0.proj"),
-            heads=out_features("attn1.to_gate_logits"),
-        )
+from jasna.ltx.kernel_policy import BlockDims, is_amd
 
 
 @dataclass(frozen=True)
@@ -71,7 +50,7 @@ def _rotate_quantize(k: int, modulate: bool) -> Variant:
         "rotate_quantize", kernels._rotate_quantize_kernel,
         ("*bf16", "*bf16", "*bf16", "*i8", "*fp32", "i32", "i32"),
         ("x_ptr", "shift_ptr", "scale_ptr", "q_ptr", "s_ptr", "stride_x"),
-        (("K", k), ("MODULATE", modulate)), kernels.ROTATE_QUANTIZE_WARPS, 3, (),
+        (("K", k), ("MODULATE", modulate)), policy.ROTATE_QUANTIZE_WARPS, 3, (),
     )
 
 
@@ -79,7 +58,7 @@ def _gated_rotate_quantize(k: int, head_dim: int) -> Variant:
     return Variant(
         "gated_rotate_quantize", kernels._gated_rotate_quantize_kernel,
         ("*bf16", "*bf16", "*i8", "*fp32", "i32"), ("o_ptr", "g_ptr", "q_ptr", "s_ptr"),
-        (("K", k), ("HEAD_DIM", head_dim)), kernels.ROTATE_QUANTIZE_WARPS, 3, (),
+        (("K", k), ("HEAD_DIM", head_dim)), policy.ROTATE_QUANTIZE_WARPS, 3, (),
     )
 
 
@@ -97,7 +76,7 @@ def _mm(tile, bias: bool, gelu: bool, residual: bool) -> Variant:
         "mm", kernels._int8_mm_kernel,
         ("*i8", "*i8", *_MM_TYPES, "i32", "i32", "i32", "i32", "i32"),
         ("a_ptr", "b_ptr", *_MM_POINTERS, "M", "N", "K"),
-        (*_flags(bias, gelu, residual), ("BM", bm), ("BN", bn), ("BK", bk), ("GROUP_M", kernels.GROUP_M)),
+        (*_flags(bias, gelu, residual), ("BM", bm), ("BN", bn), ("BK", bk), ("GROUP_M", policy.GROUP_M)),
         warps, stages, tuple(kernels.GEMM_OPTIONS.items()),
     )
 
@@ -108,18 +87,18 @@ def _mm_stream_k(tile, bias: bool, gelu: bool, residual: bool) -> Variant:
         "mm_stream_k", kernels._int8_mm_stream_k_kernel,
         (f"tensordesc<i8[{bm}, {bk}]>", f"tensordesc<i8[{bn}, {bk}]>", *_MM_TYPES, "*i32", "*i32", *("i32",) * 8),
         (*_MM_POINTERS, "ws_ptr", "count_ptr", "M", "N", "K"),
-        (*_flags(bias, gelu, residual), ("BM", bm), ("BN", bn), ("BK", bk), ("GROUP_M", kernels.GROUP_M)),
+        (*_flags(bias, gelu, residual), ("BM", bm), ("BN", bn), ("BK", bk), ("GROUP_M", policy.GROUP_M)),
         warps, stages, (),
     )
 
 
 def _epilogue(bias: bool, gelu: bool, residual: bool) -> Variant:
-    bm, bn = kernels.CUBLAS_EPILOGUE_TILE
+    bm, bn = policy.CUBLAS_EPILOGUE_TILE
     return Variant(
         "epilogue", kernels._int8_epilogue_kernel,
         ("*i32", *_MM_TYPES, "i32", "i32", "i32", "i32"),
         ("acc_ptr", *_MM_POINTERS, "M", "N"),
-        (*_flags(bias, gelu, residual), ("BM", bm), ("BN", bn)), kernels.CUBLAS_EPILOGUE_WARPS, 3,
+        (*_flags(bias, gelu, residual), ("BM", bm), ("BN", bn)), policy.CUBLAS_EPILOGUE_WARPS, 3,
         tuple(kernels.GEMM_OPTIONS.items()),
     )
 
@@ -129,14 +108,9 @@ def _quantize_fp4(gelu: bool) -> Variant:
         "quantize_fp4", kernels._quantize_fp4_kernel,
         ("*bf16", "*fp32", "*u8", "*u8", "i32", "i32", "i32"),
         ("x_ptr", "q_ptr", "s_ptr", "M", "K", "stride_x"),
-        (("GELU", gelu), ("BM", kernels.FP4_QUANTIZE_ROWS), ("BK", kernels.FP4_QUANTIZE_COLS)),
-        kernels.FP4_QUANTIZE_WARPS, 3, (),
+        (("GELU", gelu), ("BM", policy.FP4_QUANTIZE_ROWS), ("BK", policy.FP4_QUANTIZE_COLS)),
+        policy.FP4_QUANTIZE_WARPS, 3, (),
     )
-
-
-def is_amd(architecture: tuple[int, int] | str) -> bool:
-    """Whether ``architecture`` (``kernels.gpu_architecture``) is an AMD gfx name."""
-    return isinstance(architecture, str)
 
 
 def variants(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool) -> list[Variant]:
@@ -156,12 +130,12 @@ def variants(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool)
     )
     for n, k, gelu, residual in projections:
         for bias in (False, True):
-            if architecture in kernels.CUBLAS_INT8_MM:
+            if architecture in policy.CUBLAS_INT8_MM:
                 found.append(_epilogue(bias, gelu, residual))
                 continue
-            tile = kernels.gemm_tile(n, k, architecture)
+            tile = policy.gemm_tile(n, k, architecture)
             found.append(_mm(tile, bias, gelu, residual))
-            if kernels.has_tma(architecture) and n >= kernels.SMALL_MM_MAX_N:
+            if policy.has_tma(architecture) and n >= policy.SMALL_MM_MAX_N:
                 found.append(_mm_stream_k(tile, bias, gelu, residual))
     return list({variant.key: variant for variant in found}.values())
 
@@ -250,15 +224,11 @@ def _entry(variant: Variant, image: str, metadata, args: list[str], divisible: l
     }
 
 
-def _profile_name(architecture: tuple[int, int] | str) -> str:
-    return architecture if is_amd(architecture) else f"sm{architecture[0]}{architecture[1]}"
-
-
 def build_kernels(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool, cache: Path) -> Path:
-    """Compile the block's kernels for ``architecture`` (``kernels.gpu_architecture``) into
+    """Compile the block's kernels for ``architecture`` (``kernel_policy.gpu_architecture``) into
     ``cache/<digest>/`` unless done already; returns the manifest path."""
     chosen = variants(architecture, dims, fp4=fp4)
-    name = f"{_profile_name(architecture)}-{'nvfp4' if fp4 else 'int8'}-{_source_digest(architecture, chosen)}"
+    name = f"{policy.profile_name(architecture, fp4=fp4)}-{_source_digest(architecture, chosen)}"
     directory = cache / name
     manifest = directory / "manifest.json"
     if not manifest.is_file():
