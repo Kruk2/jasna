@@ -51,6 +51,9 @@ def test_compose_span_decodes_on_a_thread_below_the_priority_of_the_frame_loop(m
         def write(self, frame, pts):
             writes.append(torch.cuda.current_stream().priority)
 
+        def finish(self):
+            pass
+
         def close(self):
             pass
 
