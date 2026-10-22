@@ -1148,8 +1148,8 @@ def test_resume_replays_whole_video_canvas_decision(fakes, monkeypatch, tmp_path
         )
 
     run()
-    saved = next((tmp_path / "saved").glob("*.plans.json"))
-    assert json.loads(saved.read_text())["large_canvas"] is False
+    with np.load(next((tmp_path / "saved").glob("*.plans.npz"))) as saved:
+        assert not saved["large_canvas"]
     monkeypatch.setattr(restore, "large_canvas_fits", lambda *_a: pytest.fail("canvas decision repeated"))
     run()
 

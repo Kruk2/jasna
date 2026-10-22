@@ -13,7 +13,7 @@ from jasna import job_resume
 from jasna.job_resume import ResumeJob, ResumeMismatchError, atomic_write, find_resume_output, job_fingerprint, write_json
 from jasna.ltx.camera import CropFrame
 from jasna.ltx.model_files import bundle_names
-from jasna.ltx.plan import TrackPlan, Window, plans_from_json, plans_to_json
+from jasna.ltx.plan import TrackPlan, Window, plans_from_arrays, plans_to_arrays
 from jasna.ltx.restore import LatentStore
 from jasna.segments import SegmentRange, SegmentRestoration
 
@@ -40,14 +40,17 @@ def test_plans_round_trip_preserves_crops_float64_polygons_and_weights(tmp_path)
     crop = CropFrame((1, 2, 640, 480), (384, 512), (64, 64, 0, 0))
     integer = np.array([[1, 2], [3, 4], [5, 6]], dtype=np.int32)
     floating = integer.astype(np.float64) + 0.1234567890123456
-    plans = [TrackPlan(7, 12, ((integer,), (floating,)), (0.1, 1.0), (Window(3, 7, 12, 2, (crop, crop)),), 104)]
-    path = tmp_path / "plans.json"
-    write_json(path, plans_to_json(plans))
-    (restored,) = plans_from_json(job_resume.read_json(path))
+    plans = [TrackPlan(7, 12, ((integer,), (floating, integer)), (0.1, 1.0), (Window(3, 7, 12, 2, (crop, crop)),), 104)]
+    path = tmp_path / "plans.npz"
+    np.savez(path, **plans_to_arrays([[], plans]))
+    with np.load(path, allow_pickle=False) as arrays:
+        empty, (restored,) = plans_from_arrays(arrays)
+    assert empty == []
     assert restored.windows == plans[0].windows
     assert restored.presence == plans[0].presence
     assert (restored.track_id, restored.start, restored.window_hop) == (7, 12, 104)
-    for expected, actual in zip((integer, floating), (restored.polygons[0][0], restored.polygons[1][0])):
+    assert [len(frame) for frame in restored.polygons] == [1, 2]
+    for expected, actual in zip((integer, floating, integer), (*restored.polygons[0], *restored.polygons[1])):
         assert actual.dtype == expected.dtype
         np.testing.assert_array_equal(actual, expected)
 

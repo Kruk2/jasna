@@ -33,7 +33,7 @@ import torch
 from tqdm import tqdm
 
 from jasna.accelerator import device_free_bytes
-from jasna.job_resume import atomic_write, read_json, write_json
+from jasna.job_resume import atomic_write, write_json
 from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas
@@ -48,8 +48,8 @@ from jasna.ltx.plan import (
     crossfade_weights,
     feather_pixels,
     plan_video,
-    plans_from_json,
-    plans_to_json,
+    plans_from_arrays,
+    plans_to_arrays,
 )
 from jasna.ltx.regions import regions_per_frame
 from jasna.ltx.sampler import LtxTransformer
@@ -987,17 +987,17 @@ def _scan_spans(
     spans: Sequence[LtxSpan], render: LtxRender, directory: Path, *, progress: Progress, cancel: threading.Event
 ) -> list[PreparedSpan]:
     plans = []
-    cached = [read_json(_plan_path(span, directory)) for span in spans]
+    cached = [_saved_plans(span, directory) for span in spans]
     if all(item is not None for item in cached):
         progress.skip_saved("scan")
-        plans = [[plans_from_json(segment) for segment in item["plans"]] for item in cached]
+        plans = [item.plans for item in cached]
     else:
         with progress.bar("scan", progress.frames) as bar:
             for span, saved in zip(spans, cached):
                 _check(cancel)
                 if saved is not None:
-                    plans.append([plans_from_json(segment) for segment in saved["plans"]])
-                    bar.reuse(saved["frames"], saved["frames"], Counter())
+                    plans.append(saved.plans)
+                    bar.reuse(saved.frames, saved.frames, Counter())
                     continue
                 count = 0
 
@@ -1014,10 +1014,11 @@ def _scan_spans(
                     large_canvas=render.large_canvas, window_hop=render.window_hop, bar=bar, cancel=cancel,
                 )
                 _check(cancel)
-                write_json(_plan_path(span, directory), {
-                    "frames": count, "large_canvas": render.large_canvas,
-                    "plans": [plans_to_json(segment) for segment in span_plans],
-                })
+                with atomic_write(_plan_path(span, directory), "wb") as stream:
+                    np.savez(
+                        stream, frames=np.array(count), large_canvas=np.array(render.large_canvas),
+                        **plans_to_arrays(span_plans),
+                    )
                 plans.append(span_plans)
     prepared = [
         PreparedSpan(span, tuple(span_plans), _span_stores(span, directory, "reference"))
@@ -1043,11 +1044,27 @@ def _span_key(span: LtxSpan) -> str:
 
 
 def _plan_path(span: LtxSpan, directory: Path) -> Path:
-    return directory / f"{_span_key(span)}.plans.json"
+    return directory / f"{_span_key(span)}.plans.npz"
+
+
+@dataclass(frozen=True)
+class _SavedPlans:
+    frames: int
+    large_canvas: bool
+    plans: list[list[TrackPlan]]
+
+
+def _saved_plans(span: LtxSpan, directory: Path) -> _SavedPlans | None:
+    path = _plan_path(span, directory)
+    if not path.is_file():
+        return None
+    with np.load(path, allow_pickle=False) as arrays:
+        return _SavedPlans(int(arrays["frames"]), bool(arrays["large_canvas"]), plans_from_arrays(arrays))
 
 
 def _saved_frames(span: LtxSpan, directory: Path) -> int:
-    return read_json(_plan_path(span, directory))["frames"]
+    with np.load(_plan_path(span, directory), allow_pickle=False) as arrays:
+        return int(arrays["frames"])
 
 
 def _span_stores(span: LtxSpan, directory: Path, kind: str) -> tuple[LatentStore, ...]:
@@ -1198,7 +1215,7 @@ def _restore_spans(
     progress.expect(speed.load_rates(render.speed_profile, profile_key))
     torch.cuda.reset_peak_memory_stats(render.device)
     blocks = None
-    resuming = resume_dir is not None and any(resume_dir.glob("*.plans.json"))
+    resuming = resume_dir is not None and any(resume_dir.glob("*.plans.npz"))
     if resume_dir is not None:
         resume_dir.mkdir(parents=True, exist_ok=True)
     directory = nullcontext(resume_dir) if resume_dir is not None else tempfile.TemporaryDirectory(dir=work_dir, prefix=".ltx-")
@@ -1257,8 +1274,8 @@ def restore_video(
     """Restore every mosaic of the video ``frames`` yields as one segment; the 768 px
     decision and the decode tiles follow the VRAM free when they are made."""
     span = LtxSpan(frames, (LtxSegment(*WHOLE_VIDEO_PTS, seed),), lambda: writer)
-    saved = read_json(_plan_path(span, resume_dir)) if resume_dir is not None else None
-    canvas = saved["large_canvas"] if saved is not None else large_canvas_fits(large_canvas, device_free_bytes(device))
+    saved = _saved_plans(span, resume_dir) if resume_dir is not None else None
+    canvas = saved.large_canvas if saved is not None else large_canvas_fits(large_canvas, device_free_bytes(device))
     restore_spans(
         [span],
         LtxRender(
