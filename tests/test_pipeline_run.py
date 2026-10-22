@@ -11,6 +11,7 @@ import torch
 import pytest
 from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
+from jasna.accelerator import AcceleratorVendor
 from jasna.media.probe import VideoMetadata
 from jasna import pipeline_threads
 from factories import make_pipeline
@@ -1328,3 +1329,22 @@ class TestEarliestBlockingSeqs:
         pr1 = self._make_pr(start_frame=10, n_frames=180, keep_start=0, keep_end=180)
         result = earliest_blocking_seqs({0: pr0, 1: pr1})
         assert result == {1}
+
+
+@patch("jasna.pipeline.get_video_meta_data")
+def test_run_rejects_a_video_too_small_for_the_amd_encoder_before_processing(mock_meta):
+    from jasna.media.encoder_settings import AMF_MIN_SIZE
+    from jasna.media.probe import UnsupportedVideoError
+
+    meta = _fake_metadata()
+    meta.video_width, meta.video_height = AMF_MIN_SIZE["hevc"][0] - 2, 240
+    mock_meta.return_value = meta
+    p = _make_pipeline()
+    p._run_full = MagicMock()
+
+    with (
+        patch("jasna.pipeline.vendor_for_device", return_value=AcceleratorVendor.AMD),
+        pytest.raises(UnsupportedVideoError, match="AMD video encoder"),
+    ):
+        p.run()
+    p._run_full.assert_not_called()

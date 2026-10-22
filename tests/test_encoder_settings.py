@@ -108,3 +108,26 @@ def test_cli_rejects_both_legacy_amf_cq_aliases() -> None:
             codec="hevc",
             vendor=AcceleratorVendor.AMD,
         )
+
+
+def test_amd_rejects_a_video_smaller_than_its_encoder_takes_and_names_codecs_that_fit() -> None:
+    from jasna.media.encoder_settings import AMF_MIN_SIZE, require_encodable_size
+    from jasna.media.probe import UnsupportedVideoError
+
+    min_width, min_height = AMF_MIN_SIZE["hevc"]
+    with pytest.raises(UnsupportedVideoError) as exc:
+        require_encodable_size(AcceleratorVendor.AMD, "hevc", min_width - 2, 240)
+    assert str(exc.value) == (
+        f"The AMD video encoder can't make HEVC videos smaller than {min_width}x{min_height} pixels, "
+        f"and this video is {min_width - 2}x240. Choose H.264 or AV1 instead."
+    )
+    with pytest.raises(UnsupportedVideoError, match="smaller than"):
+        require_encodable_size(AcceleratorVendor.AMD, "hevc", 1920, min_height - 2)
+
+
+def test_amd_takes_its_minimum_size_and_nvidia_has_no_size_check() -> None:
+    from jasna.media.encoder_settings import AMF_MIN_SIZE, require_encodable_size
+
+    for codec, (width, height) in AMF_MIN_SIZE.items():
+        require_encodable_size(AcceleratorVendor.AMD, codec, width, height)
+        require_encodable_size(AcceleratorVendor.NVIDIA, codec, 16, 16)

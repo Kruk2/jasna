@@ -86,6 +86,10 @@ conv benchmarks across runs, and `MIOPEN_DEBUG_CONV_GEMM=0` keeps the first
 benchmark of a new shape from trying the im2col/GEMM solvers, whose workspace
 (17 GiB for the LTX VAE encoder at 768) runs a 16 GB card out of memory.
 
+AMF encodes nothing smaller than 96x38 (H.264), 384x128 (HEVC) or 320x128 (AV1) on an R9700;
+smaller frames fail or hang, so `encoder_settings.require_encodable_size` rejects such
+videos before the job. `av1_amf` pads the width to a multiple of 8 (854 → 856); that is left as is.
+
 ## Run
 
 ```bash

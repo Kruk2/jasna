@@ -19,6 +19,7 @@ import torch
 from jasna.accelerator import AcceleratorVendor, vendor_for_device
 from jasna.job_resume import ResumeJob, ResumeMismatchError, commit_file, read_json, resume_directory, write_json
 from jasna.media.container_utils import MOV_SUFFIXES
+from jasna.media.encoder_settings import require_encodable_size
 from jasna.media.probe import UnsupportedVideoError, get_video_meta_data
 from jasna.media.video_encoder import VideoEncoder
 from jasna.media.frame_rate import resolve_frame_rate_retarget
@@ -674,6 +675,7 @@ class Pipeline:
     def run(self) -> None:
         metadata = get_video_meta_data(str(self.input_video))
         self.validate_metadata(metadata)
+        require_encodable_size(vendor_for_device(self.device), self.codec, metadata.video_width, metadata.video_height)
         self.configure_vr(metadata)
         uses_ltx = (
             any(segment.restoration.model == "ltx" for segment in resolve_restorations(

@@ -484,6 +484,8 @@ def test_run_routes_by_the_job_model_and_segments(tmp_path, model, segments, exp
     pipeline.input_video = tmp_path / "input.mp4"
     pipeline.input_video.touch()
     pipeline.output_video = tmp_path / "output.mp4"
+    pipeline.device = torch.device("cpu")
+    pipeline.codec = "hevc"
     pipeline.fmp4 = False
     pipeline.ltx_files = MagicMock()
     pipeline._cancel_event = threading.Event()

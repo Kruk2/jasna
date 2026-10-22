@@ -7,6 +7,7 @@ import math
 from dataclasses import dataclass
 
 from jasna.accelerator import AcceleratorVendor
+from jasna.media.probe import UnsupportedVideoError
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,31 @@ _ENCODER_CQ_SPECS: dict[
         "av1": EncoderCqSpec(default=16, minimum=1, maximum=51),
     },
 }
+
+
+# The smallest frame (width, height) each AMF encoder opens on an R9700 (AMF 26.20).
+# Smaller frames fail with an FFmpeg "Internal bug" error, or hang the encoder.
+AMF_MIN_SIZE = {"h264": (96, 38), "hevc": (384, 128), "av1": (320, 128)}
+_CODEC_NAMES = {"h264": "H.264", "hevc": "HEVC", "av1": "AV1"}
+
+
+def _fits(codec: str, width: int, height: int) -> bool:
+    min_width, min_height = AMF_MIN_SIZE[codec]
+    return width >= min_width and height >= min_height
+
+
+def require_encodable_size(vendor: AcceleratorVendor, codec: str, width: int, height: int) -> None:
+    if vendor is not AcceleratorVendor.AMD or _fits(codec, width, height):
+        return
+    min_width, min_height = AMF_MIN_SIZE[codec]
+    message = (
+        f"The AMD video encoder can't make {_CODEC_NAMES[codec]} videos smaller than "
+        f"{min_width}x{min_height} pixels, and this video is {width}x{height}."
+    )
+    fitting = [_CODEC_NAMES[other] for other in AMF_MIN_SIZE if _fits(other, width, height)]
+    if fitting:
+        message += f" Choose {' or '.join(fitting)} instead."
+    raise UnsupportedVideoError(message)
 
 
 def encoder_cq_spec(
