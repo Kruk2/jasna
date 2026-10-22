@@ -11,7 +11,7 @@ import benchmark_ltx_encode as bench
 
 def test_unknown_variant_option_is_rejected():
     with pytest.raises(ValueError, match="fast"):
-        bench.variant_encoder("eager+fast", encoder=None)
+        bench.variant_encoder("eager+fast", vae=None, device=None)
 
 
 def test_psnr_is_over_the_reference_latent_range():
