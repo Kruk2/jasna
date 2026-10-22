@@ -223,9 +223,14 @@ class Progress:
 
     def skip(self, *stages: LtxStage) -> None:
         """Count ``stages`` as done, for a run that reuses their results."""
-        self._resumed = True
         for stage in stages:
             self._done_share += _STAGE_SHARE[stage]
+
+    def skip_saved(self, *stages: LtxStage) -> None:
+        """Count ``stages`` as done and left with no time, for a run resuming their saved results."""
+        self._resumed = True
+        self.skip(*stages)
+        for stage in stages:
             if self._estimates is not None:
                 self._estimates[stage] = (0.0, 0.0)
         self._reported_fraction = max(self._reported_fraction, self._done_share)
@@ -290,7 +295,6 @@ class _StageBar:
         self._frames_done = 0
         self._windows_done: Counter[int] = Counter()
         self._warm_from: tuple[float, int, float] | None = None
-        self._warm_frames = 0
         self._windows: list[tuple[int, TimingMark, TimingMark]] = []
         self._waits: list[tuple[TimingMark, TimingMark]] = []
         self._tracks: list[tuple[int, int, list[tuple[int, TimingMark]]]] = []
@@ -300,20 +304,17 @@ class _StageBar:
         self._frames_done += n
         self._count(n)
 
-    def reuse(self, n: int, windows: Counter[int]) -> None:
-        if n == 0:
+    def reuse(self, done: int, frames: int, windows: Counter[int]) -> None:
+        """Count saved work a resumed run skips: ``done`` units holding ``frames`` frames and
+        ``windows`` (count per canvas). Its pace is timed from the next work it does."""
+        if done == 0 and not windows:
             return
         self._progress._resumed = True
+        self._frames_done += frames
         self._windows_done.update(windows)
-        self._count(n)
-        self._warm_from = None
-
-    def encoded_frame(self, n: int) -> None:
-        self._frames_done += n
-
-    def encoded_window(self, canvas: int) -> None:
-        self.windows_done(canvas, 1)
-        self._count(1)
+        if done:
+            self._count(done)
+            self._warm_from = None
 
     def _count(self, n: int) -> None:
         self._bar.update(n)
@@ -322,7 +323,6 @@ class _StageBar:
         profiled_done = self._progress.profiled_seconds(self._stage, self._frames_done, self._windows_done)
         if self._warm_from is None:
             self._warm_from = (now, self._done, profiled_done)
-            self._warm_frames = self._frames_done
         started, warm_done, warm_profiled = self._warm_from
         paced_left = (
             (now - started) / (self._done - warm_done) * (self._bar.total - self._done)
@@ -380,7 +380,7 @@ class _StageBar:
         if self._warm_from is not None:
             started, done, _ = self._warm_from
             timing.warm_seconds = time.monotonic() - started
-            timing.warm_frames = self._frames_done - self._warm_frames
+            timing.warm_frames = self._done - done
         for canvas, start, end in self._windows:
             end.synchronize()
             timing.windows.append((canvas, start.elapsed_time(end) / 1000))
@@ -615,7 +615,7 @@ class _SegmentEncoder:
                         if isinstance(self._encoder, WorkerEncoder) else _vae_pixels(window_pixels, self._device)
                     )
                     self._store.put(index, self._encoder(pixels))
-                self._bar.encoded_window(window.canvas)
+                self._bar.windows_done(window.canvas, 1)
                 self._buffers.give_back(window.canvas, window_pixels)
                 del self._active[index]
         self._frame_idx += 1
@@ -642,7 +642,7 @@ def encode_span(
     encoders = [_SegmentEncoder(p, encoder, store, buffers, device, bar) for p, store in zip(plans, stores)]
     for owner, batch, _pts in segment_batches(frames(), segments, batch_size):
         _check(cancel)
-        bar.encoded_frame(len(batch))
+        bar.update(len(batch))
         if owner is not None:
             for frame in batch:
                 encoders[owner].frame(frame)
@@ -946,10 +946,14 @@ def prepare_spans(
                 worker_ready.result()
             encoder = runtime.load_encoder()
             try:
-                with progress.bar("encode", sum(p.windows for p in prepared), unit="window", marks=timing_marks(encoder)) as bar:
-                    bar.reuse(sum(reused.values()), reused)
-                    for p in pending:
-                        if p.windows:
+                with progress.bar("encode", progress.frames, marks=timing_marks(encoder)) as bar:
+                    encoded = [p.windows > 0 or not done.windows for p, done in zip(pending, prepared)]
+                    saved_frames = sum(
+                        _saved_frames(p.span, directory) for p, encode in zip(prepared, encoded) if not encode
+                    )
+                    bar.reuse(saved_frames, saved_frames, reused)
+                    for p, encode in zip(pending, encoded):
+                        if encode:
                             encode_span(
                                 p.span.frames, p.span.segments, p.plans, encoder, p.references,
                                 batch_size=render.batch_size, device=render.device, bar=bar, cancel=cancel,
@@ -961,7 +965,8 @@ def prepare_spans(
             if owned_runtime:
                 runtime.close()
     else:
-        progress.skip("encode")
+        if reused:
+            progress.skip_saved("encode")
         _settle(worker_ready)
     return prepared
 
@@ -979,7 +984,7 @@ def _scan_spans(
     plans = []
     cached = [read_json(_plan_path(span, directory)) for span in spans]
     if all(item is not None for item in cached):
-        progress.skip("scan")
+        progress.skip_saved("scan")
         plans = [[plans_from_json(segment) for segment in item["plans"]] for item in cached]
     else:
         with progress.bar("scan", progress.frames) as bar:
@@ -987,7 +992,7 @@ def _scan_spans(
                 _check(cancel)
                 if saved is not None:
                     plans.append([plans_from_json(segment) for segment in saved["plans"]])
-                    bar.reuse(saved["frames"], Counter())
+                    bar.reuse(saved["frames"], saved["frames"], Counter())
                     continue
                 count = 0
 
@@ -1036,6 +1041,10 @@ def _plan_path(span: LtxSpan, directory: Path) -> Path:
     return directory / f"{_span_key(span)}.plans.json"
 
 
+def _saved_frames(span: LtxSpan, directory: Path) -> int:
+    return read_json(_plan_path(span, directory))["frames"]
+
+
 def _span_stores(span: LtxSpan, directory: Path, kind: str) -> tuple[LatentStore, ...]:
     return tuple(LatentStore(directory, f"{_span_key(span)}-{g}.{kind}") for g in range(len(span.segments)))
 
@@ -1066,7 +1075,7 @@ def denoise_spans(
             for plan in plans if not keep_references and store.has_track(plan)
             for window in plan.windows
         )
-        bar.reuse(sum(reused.values()) * len(transformer.conditions), reused)
+        bar.reuse(sum(reused.values()) * len(transformer.conditions), 0, reused)
         for p, span_finals in zip(prepared, finals):
             for segment, segment_plans, references, store in zip(p.span.segments, p.plans, p.references, span_finals):
                 for plan in segment_plans:
@@ -1202,8 +1211,8 @@ def _restore_spans(
             finally:
                 del transformer
                 runtime.unload_transformer()
-        else:
-            progress.skip("denoise")
+        elif windows:
+            progress.skip_saved("denoise")
         progress.begin("compose")
         decoder = runtime.load_decoder() if windows else None
         try:

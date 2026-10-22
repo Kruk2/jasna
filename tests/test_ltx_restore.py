@@ -18,6 +18,7 @@ from jasna.ltx.plan import LESS_OVERLAP_WINDOW_HOP, Region, Window
 from jasna.tensor_utils import half_dtype
 
 FILES = restore.LtxModelFiles(Path("t"), Path("v"), Path("d"))
+REAL_BAR = restore.Progress.bar
 MOSAIC = Region(box=(10.0, 10.0, 40.0, 40.0), polygon=np.array([[10, 10], [40, 10], [40, 40], [10, 40]], dtype=np.int32))
 
 
@@ -56,14 +57,8 @@ class _Bar:
     def update(self, n):
         self.n += n
 
-    def reuse(self, n, windows):
-        self.n += n
-
-    def encoded_frame(self, n):
-        pass
-
-    def encoded_window(self, canvas):
-        self.n += 1
+    def reuse(self, done, frames, windows):
+        self.n += done
 
     def window(self, canvas):
         return contextlib.nullcontext()
@@ -1009,6 +1004,28 @@ def test_a_run_without_a_speed_profile_runs_a_speed_test_first(fakes, tmp_path):
     assert reports.index(next(r for r in reports if r[2].name == "encode")) > max(
         i for i, r in enumerate(reports) if r[2].name == "speed_test"
     )
+
+
+def test_a_fresh_encode_pass_counts_frames_and_warms_up_after_its_first_batch(fakes, monkeypatch, tmp_path):
+    monkeypatch.setattr(restore.Progress, "bar", REAL_BAR)
+    progress = restore.Progress(12, disable=True, report=None)
+    restore.restore_spans(
+        [restore.LtxSpan(_source(_video(12, range(2, 10))), (restore.LtxSegment(*restore.WHOLE_VIDEO_PTS, 7),), _Writer)],
+        _render(tmp_path), work_dir=tmp_path, progress=progress, cancel=threading.Event(),
+    )
+    timing = progress.timings["encode"]
+    assert (timing.units, timing.warm_frames) == (12, 8)
+
+
+def test_skipping_reused_passes_keeps_the_profile_paced_fraction(monkeypatch):
+    estimates = {"encode": (0.0, 100.0), "denoise": (0.0, 1000.0), "compose": (0.0, 100.0)}
+    monkeypatch.setattr(restore.speed, "pass_estimates", lambda _rates, _work: dict(estimates))
+    reports = []
+    progress = restore.Progress(100, disable=True, report=lambda fraction, _left, _step: reports.append(fraction))
+    progress.plan(restore.speed.Work(100, 1.0, {512: 1}, 1.0))
+    progress.skip("scan", "encode")
+    progress.begin("denoise")
+    assert reports[-1] < 0.01
 
 
 def test_a_run_with_a_speed_profile_skips_the_speed_test(fakes, tmp_path):
