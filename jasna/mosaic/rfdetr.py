@@ -9,7 +9,7 @@ from torch.nn import functional as F
 
 logger = logging.getLogger(__name__)
 
-from jasna.accelerator import is_amd_device, is_nvidia_device
+from jasna.accelerator import current_stream, is_amd_device, is_nvidia_device, new_stream, stream_context
 from jasna.engine_paths import get_onnx_tensorrt_engine_path
 from jasna.media.resize_normalize import ResizeNormalizer
 from jasna.mosaic.detections import Detections
@@ -103,6 +103,7 @@ class RfDetrMosaicDetectionModel:
                 variant=torch_variant,
             )
             self.engine_path = self.weights_path
+            self._stream = new_stream(self.device)
         elif is_nvidia_device(self.device):
             self.engine_path = get_onnx_tensorrt_engine_path(
                 self.weights_path, batch_size=self.batch_size, fp16=bool(fp16),
@@ -120,6 +121,7 @@ class RfDetrMosaicDetectionModel:
                 ],
                 device=self.device,
             )
+            self._stream = None
         else:
             raise RuntimeError(
                 f"RF-DETR is not supported on device backend {self.device.type!r}"
@@ -250,6 +252,32 @@ class RfDetrMosaicDetectionModel:
         return scores, merged[:, 0]
 
     def __call__(self, frames_uint8_bchw: torch.Tensor, *, target_hw: tuple[int, int]) -> Detections:
+        if self._stream is None:
+            return self._detect(frames_uint8_bchw, target_hw)
+        return self._detect_on_own_stream(frames_uint8_bchw, target_hw)
+
+    def _detect_on_own_stream(self, frames_uint8_bchw: torch.Tensor, target_hw: tuple[int, int]) -> Detections:
+        """Detect on the model's stream, so the pipeline's restore and blend work on the
+        caller's stream does not queue between the detector's kernels.
+
+        The model stream first waits for the caller's work (the frames' writers). Every
+        intermediate is allocated and freed on it, so the allocator reuses them in stream
+        order. ``_postprocess`` copies to the host on it, which returns only after every
+        read of the frames, so the frames need no ``record_stream``. Only the masks leave:
+        the caller's stream waits for them, and each is recorded on it so its block is not
+        handed back to the model stream while the caller's queued work still reads it
+        (issue #252).
+        """
+        caller = current_stream(self.device)
+        self._stream.wait_stream(caller)
+        with stream_context(self._stream):
+            detections = self._detect(frames_uint8_bchw, target_hw)
+        caller.wait_stream(self._stream)
+        for masks in detections.masks:
+            masks.record_stream(caller)
+        return detections
+
+    def _detect(self, frames_uint8_bchw: torch.Tensor, target_hw: tuple[int, int]) -> Detections:
         x = self._preprocess(frames_uint8_bchw)
         outs = self._infer(x)
         boxes_list, masks_list = self._postprocess(
