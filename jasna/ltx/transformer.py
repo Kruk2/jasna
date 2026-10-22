@@ -118,6 +118,8 @@ def int8_linear(
         codes, act_scales = _quant_kernels.int8_rotate_quantize(flat)
         out = _quant_kernels.int8_scaled_mm(codes, act_scales, qdata, scales, bias)
         return out.reshape(*x.shape[:-1], out_features)
+    if _kitchen_int8_linear is not None and x.is_cuda:
+        return _kitchen_int8_linear(x, qdata, scales, bias)
     out = torch.empty(flat.shape[0], out_features, dtype=x.dtype, device=x.device)
     for start in range(0, flat.shape[0], CHUNK_ROWS):
         chunk = flat[start : start + CHUNK_ROWS]
@@ -286,96 +288,106 @@ def linear(w: Weights, name: str, x: torch.Tensor | QuantizedRows | Fp4Activatio
 
 
 _quant_kernels = None
+_kitchen_int8_linear = None
 
 
-def enable_quant_kernels(device: torch.device) -> bool:
-    """Route the INT8 and NVFP4 linears through the fused Triton kernels (``kernels.py``,
-    on the GPU architectures ``kernels.supports``) as opaque ops, so they compile
-    as calls; an INT8 block also fuses its norms, AdaLN modulation and feed-forward residual
-    into them. Returns whether they are in use."""
-    global _quant_kernels
-    if _quant_kernels is None and device.type == "cuda":
-        from jasna.ltx import kernels
+def enable_quant_kernels(device: torch.device) -> str | None:
+    """Route the INT8 and NVFP4 linears through fused kernels: the Triton kernels of ``kernels.py``
+    on the GPU architectures ``kernels.supports``, as opaque ops so they compile as calls (an INT8
+    block also fuses its norms, AdaLN modulation and feed-forward residual into them); else on AMD
+    comfy-kitchen's ConvRot INT8 linear (Windows ROCm has no Triton). Returns the kernels in use."""
+    global _quant_kernels, _kitchen_int8_linear
+    if _quant_kernels is None and _kitchen_int8_linear is None and device.type == "cuda":
+        if importlib.util.find_spec("triton") is not None:
+            from jasna.ltx import kernels
 
-        if not kernels.supports(device):
-            return False
+            if kernels.supports(device):
+                _quant_kernels = _triton_ops(kernels)
+        if _quant_kernels is None and torch.version.hip:
+            import comfy_kitchen
 
-        @torch.library.custom_op("jasna::int8_rotate_quantize", mutates_args=())
-        def int8_rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-            return kernels.rotate_quantize(x.contiguous())
+            _kitchen_int8_linear = functools.partial(comfy_kitchen.int8_linear, convrot=True, convrot_groupsize=ROT_SIZE)
+    if _quant_kernels is not None:
+        return "Triton kernels"
+    return "comfy-kitchen" if _kitchen_int8_linear is not None else None
 
-        @int8_rotate_quantize.register_fake
-        def _(x):
-            return x.new_empty(x.shape, dtype=torch.int8), x.new_empty(x.shape[0], dtype=torch.float32)
 
-        @torch.library.custom_op("jasna::int8_modulate_rotate_quantize", mutates_args=())
-        def int8_modulate_rotate_quantize(
-            x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor
-        ) -> tuple[torch.Tensor, torch.Tensor]:
-            return kernels.modulate_rotate_quantize(x.contiguous(), shift, scale)
+def _triton_ops(kernels) -> SimpleNamespace:
+    @torch.library.custom_op("jasna::int8_rotate_quantize", mutates_args=())
+    def int8_rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        return kernels.rotate_quantize(x.contiguous())
 
-        @int8_modulate_rotate_quantize.register_fake
-        def _(x, shift, scale):
-            return x.new_empty(x.shape, dtype=torch.int8), x.new_empty(x.shape[0], dtype=torch.float32)
+    @int8_rotate_quantize.register_fake
+    def _(x):
+        return x.new_empty(x.shape, dtype=torch.int8), x.new_empty(x.shape[0], dtype=torch.float32)
 
-        @torch.library.custom_op("jasna::int8_scaled_mm", mutates_args=())
-        def int8_scaled_mm(
-            codes: torch.Tensor,
-            act_scales: torch.Tensor,
-            qdata: torch.Tensor,
-            scales: torch.Tensor,
-            bias: torch.Tensor | None,
-        ) -> torch.Tensor:
-            return kernels.int8_scaled_mm(codes, act_scales, qdata, scales, bias, False)
+    @torch.library.custom_op("jasna::int8_modulate_rotate_quantize", mutates_args=())
+    def int8_modulate_rotate_quantize(
+        x: torch.Tensor, shift: torch.Tensor, scale: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return kernels.modulate_rotate_quantize(x.contiguous(), shift, scale)
 
-        @int8_scaled_mm.register_fake
-        def _(codes, act_scales, qdata, scales, bias):
-            return codes.new_empty(codes.shape[0], qdata.shape[0], dtype=torch.bfloat16)
+    @int8_modulate_rotate_quantize.register_fake
+    def _(x, shift, scale):
+        return x.new_empty(x.shape, dtype=torch.int8), x.new_empty(x.shape[0], dtype=torch.float32)
 
-        @torch.library.custom_op("jasna::int8_feed_forward", mutates_args=())
-        def int8_feed_forward(
-            codes: torch.Tensor,
-            act_scales: torch.Tensor,
-            up_qdata: torch.Tensor,
-            up_scales: torch.Tensor,
-            up_bias: torch.Tensor | None,
-            down_qdata: torch.Tensor,
-            down_scales: torch.Tensor,
-            down_bias: torch.Tensor | None,
-            residual: torch.Tensor,
-            gate: torch.Tensor,
-        ) -> torch.Tensor:
-            return kernels.int8_feed_forward(
-                codes, act_scales, up_qdata, up_scales, up_bias, down_qdata, down_scales, down_bias,
-                residual, gate, CHUNK_ROWS,
-            )
+    @torch.library.custom_op("jasna::int8_scaled_mm", mutates_args=())
+    def int8_scaled_mm(
+        codes: torch.Tensor,
+        act_scales: torch.Tensor,
+        qdata: torch.Tensor,
+        scales: torch.Tensor,
+        bias: torch.Tensor | None,
+    ) -> torch.Tensor:
+        return kernels.int8_scaled_mm(codes, act_scales, qdata, scales, bias, False)
 
-        @int8_feed_forward.register_fake
-        def _(codes, act_scales, up_qdata, up_scales, up_bias, down_qdata, down_scales, down_bias, residual, gate):
-            return torch.empty_like(residual, memory_format=torch.contiguous_format)
+    @int8_scaled_mm.register_fake
+    def _(codes, act_scales, qdata, scales, bias):
+        return codes.new_empty(codes.shape[0], qdata.shape[0], dtype=torch.bfloat16)
 
-        @torch.library.custom_op("jasna::quantize_fp4", mutates_args=())
-        def quantize_fp4_op(
-            x: torch.Tensor, tensor_scale: torch.Tensor, gelu: bool
-        ) -> tuple[torch.Tensor, torch.Tensor]:
-            return kernels.quantize_fp4(x.contiguous(), tensor_scale, gelu)
-
-        @quantize_fp4_op.register_fake
-        def _(x, tensor_scale, gelu):
-            rows, k = x.shape
-            return (
-                x.new_empty(rows, k // 2, dtype=torch.uint8),
-                x.new_empty(kernels.fp4_scale_shape(rows, k), dtype=torch.float8_e4m3fn),
-            )
-
-        _quant_kernels = SimpleNamespace(
-            int8_rotate_quantize=int8_rotate_quantize,
-            int8_modulate_rotate_quantize=int8_modulate_rotate_quantize,
-            int8_scaled_mm=int8_scaled_mm,
-            int8_feed_forward=int8_feed_forward,
-            quantize_fp4=quantize_fp4_op,
+    @torch.library.custom_op("jasna::int8_feed_forward", mutates_args=())
+    def int8_feed_forward(
+        codes: torch.Tensor,
+        act_scales: torch.Tensor,
+        up_qdata: torch.Tensor,
+        up_scales: torch.Tensor,
+        up_bias: torch.Tensor | None,
+        down_qdata: torch.Tensor,
+        down_scales: torch.Tensor,
+        down_bias: torch.Tensor | None,
+        residual: torch.Tensor,
+        gate: torch.Tensor,
+    ) -> torch.Tensor:
+        return kernels.int8_feed_forward(
+            codes, act_scales, up_qdata, up_scales, up_bias, down_qdata, down_scales, down_bias,
+            residual, gate, CHUNK_ROWS,
         )
-    return _quant_kernels is not None
+
+    @int8_feed_forward.register_fake
+    def _(codes, act_scales, up_qdata, up_scales, up_bias, down_qdata, down_scales, down_bias, residual, gate):
+        return torch.empty_like(residual, memory_format=torch.contiguous_format)
+
+    @torch.library.custom_op("jasna::quantize_fp4", mutates_args=())
+    def quantize_fp4_op(
+        x: torch.Tensor, tensor_scale: torch.Tensor, gelu: bool
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return kernels.quantize_fp4(x.contiguous(), tensor_scale, gelu)
+
+    @quantize_fp4_op.register_fake
+    def _(x, tensor_scale, gelu):
+        rows, k = x.shape
+        return (
+            x.new_empty(rows, k // 2, dtype=torch.uint8),
+            x.new_empty(kernels.fp4_scale_shape(rows, k), dtype=torch.float8_e4m3fn),
+        )
+
+    return SimpleNamespace(
+        int8_rotate_quantize=int8_rotate_quantize,
+        int8_modulate_rotate_quantize=int8_modulate_rotate_quantize,
+        int8_scaled_mm=int8_scaled_mm,
+        int8_feed_forward=int8_feed_forward,
+        quantize_fp4=quantize_fp4_op,
+    )
 
 
 def require_kernels(device: torch.device) -> None:

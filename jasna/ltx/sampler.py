@@ -187,7 +187,7 @@ class LtxTransformer:
                     self.blocks = OpaqueBlockStore.from_reader(handle, names, device, resident=resident)
                 else:
                     self.blocks = BlockStore.from_reader(handle, names, device, resident=resident)
-            logger.info("LTX quantized linears: %s", "Triton kernels" if T.enable_quant_kernels(device) else "torch")
+            logger.info("LTX quantized linears: %s", T.enable_quant_kernels(device) or "torch")
             if isinstance(self.blocks, OpaqueBlockStore):
                 T.enable_int8_attention()
             else:
