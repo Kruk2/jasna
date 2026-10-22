@@ -96,8 +96,8 @@ def _unpack(weight: torch.Tensor) -> torch.Tensor:
     return weight.reshape(3, 3, in_channels, out_channels).permute(3, 2, 0, 1)
 
 
-def _reference_launch(self, stream, *tensors):
-    if self.kernel.module_name == "basicvsrpp_dcn":
+def _reference_launch(self, grid, stream, *tensors):
+    if self.module_name == "basicvsrpp_dcn":
         xa, xb, om, flow_1, flow_2, weight, bias, out = tensors
         o1, o2, mask = torch.chunk(om, 3, dim=1)
         offset_1, offset_2 = torch.chunk(fused_body.MAX_RESIDUE_MAGNITUDE * torch.tanh(torch.cat((o1, o2), 1)), 2, 1)
@@ -111,13 +111,13 @@ def _reference_launch(self, stream, *tensors):
         return
     x, weight, bias, residual, out = tensors
     conv = F.conv2d(x, _unpack(weight), bias, padding=1)
-    out.copy_(F.relu(conv) if self.kernel.module_name == "basicvsrpp_conv3x3_relu" else residual + conv)
+    out.copy_(F.relu(conv) if self.module_name == "basicvsrpp_conv3x3_relu" else residual + conv)
 
 
 def test_fused_body_feeds_each_kernel_the_tensors_of_the_eager_body(monkeypatch):
     _use_rocm(monkeypatch, "gfx1201")
     monkeypatch.setattr(torch.cuda, "current_stream", lambda device: SimpleNamespace(cuda_stream=0))
-    monkeypatch.setattr(fused_body._LaunchedKernel, "__call__", _reference_launch)
+    monkeypatch.setattr(cuda_kernel.TritonKernel, "launch", _reference_launch)
     net = _net()
     inputs = _body_inputs("cpu", torch.float32)
 

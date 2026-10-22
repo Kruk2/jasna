@@ -558,6 +558,7 @@ def _install_fake_rfdetr(monkeypatch, checkpoint: dict) -> list[tuple]:
     )
     monkeypatch.setattr(module.torch, "load", load)
     monkeypatch.setattr(module, "export_without_host_syncs", lambda core: setattr(core, "runs_sync_free_export", True))
+    monkeypatch.setattr(module, "fuse_segmentation_head", lambda core, resolution: setattr(core, "fused_head_resolution", resolution))
     return loads
 
 
@@ -587,6 +588,7 @@ def test_rfdetr_torch_runner_maps_outputs(monkeypatch, tmp_path) -> None:
     # num_classes derived from class_embed rows - 1 (rfdetr adds a reserve slot).
     assert runner._wrapper.kwargs["num_classes"] == 2
     assert runner._core.runs_sync_free_export
+    assert runner._core.fused_head_resolution == 576
 
     out = runner.infer({"input": torch.zeros(2, 3, 576, 576)})
     assert set(out) == {"dets", "labels", "masks"}

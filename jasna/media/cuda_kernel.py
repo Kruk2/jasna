@@ -315,3 +315,25 @@ class Kernel:
                 ),
                 f"{api.launch_kernel.__name__}({self.function_name})",
             )
+
+
+_TRITON_SCRATCH_ARGS = 2
+
+
+class TritonKernel:
+    """A Triton kernel built ahead of time by ``scripts/triton_hipfb.py``, with its launch-table entry.
+
+    ``launch`` is ``(function, grid, threads per block, dynamic shared memory bytes)``.
+    The kernel takes the tensors' pointers, then Triton's scratch pointers, which
+    the build guarantees are unused.
+    """
+
+    def __init__(self, module_name: str, launch: tuple[str, tuple[int, int, int], int, int], pointer_count: int):
+        function, self.grid, threads, shared = launch
+        self.module_name = module_name
+        self.block = (threads, 1, 1)
+        self._scratch = (0,) * _TRITON_SCRATCH_ARGS
+        self._kernel = Kernel(module_name, function, (ctypes.c_void_p,) * (pointer_count + _TRITON_SCRATCH_ARGS), shared)
+
+    def launch(self, grid: tuple[int, int, int], stream: int, *tensors: torch.Tensor) -> None:
+        self._kernel.launch(grid, self.block, (*(t.data_ptr() for t in tensors), *self._scratch), stream)

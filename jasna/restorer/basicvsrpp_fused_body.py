@@ -9,14 +9,12 @@ HIP-graph safe, but graphs are not used.
 """
 from __future__ import annotations
 
-import ctypes
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from jasna.accelerator import amd_gpu_architecture, is_amd_device
-from jasna.media.cuda_kernel import Kernel
+from jasna.media.cuda_kernel import TritonKernel
 from jasna.restorer.basicvsrpp_hip_launch import KERNEL_LAUNCH
 
 CHANNELS = 64
@@ -27,7 +25,6 @@ LEAKY_SLOPE = 0.1
 _CONV_RELU = "basicvsrpp_conv3x3_relu"
 _CONV_RESIDUAL = "basicvsrpp_conv3x3_residual"
 _DCN = "basicvsrpp_dcn"
-_TRITON_SCRATCH_ARGS = 2
 
 
 def has_fused_body_kernels(weight: torch.Tensor) -> bool:
@@ -43,19 +40,6 @@ def pack_conv3x3_weight(weight: torch.Tensor) -> torch.Tensor:
     """``[out, in, 3, 3]`` → ``[9, in, out]``, the kernels' GEMM layout."""
     out_channels, in_channels = weight.shape[:2]
     return weight.permute(2, 3, 1, 0).reshape(9, in_channels, out_channels).contiguous()
-
-
-class _LaunchedKernel:
-    def __init__(self, module_name: str, architecture: str, pointer_count: int):
-        function, self.grid, threads, shared = KERNEL_LAUNCH[architecture][module_name]
-        self.block = (threads, 1, 1)
-        self.scratch = (0,) * _TRITON_SCRATCH_ARGS
-        self.kernel = Kernel(
-            module_name, function, (ctypes.c_void_p,) * (pointer_count + _TRITON_SCRATCH_ARGS), shared,
-        )
-
-    def __call__(self, stream: int, *tensors: torch.Tensor) -> None:
-        self.kernel.launch(self.grid, self.block, (*(t.data_ptr() for t in tensors), *self.scratch), stream)
 
 
 class FusedPropagateBody(nn.Module):
@@ -79,9 +63,10 @@ class FusedPropagateBody(nn.Module):
             for b in blocks
         ]
         architecture = amd_gpu_architecture(deform_align.weight.device)
-        self._conv_relu = _LaunchedKernel(_CONV_RELU, architecture, 5)
-        self._conv_residual = _LaunchedKernel(_CONV_RESIDUAL, architecture, 5)
-        self._dcn = _LaunchedKernel(_DCN, architecture, 8)
+        launch = KERNEL_LAUNCH[architecture]
+        self._conv_relu = TritonKernel(_CONV_RELU, launch[_CONV_RELU], 5)
+        self._conv_residual = TritonKernel(_CONV_RESIDUAL, launch[_CONV_RESIDUAL], 5)
+        self._dcn = TritonKernel(_DCN, launch[_DCN], 8)
 
     def forward(
         self,
@@ -100,15 +85,16 @@ class FusedPropagateBody(nn.Module):
         offset_and_mask = self.conv_offset(torch.cat([cond_n1, feat_current, cond_n2, flow_1, flow_2], dim=1))
 
         feat_prop_new = torch.empty_like(feat_prop)
-        self._dcn(
-            stream, feat_prop, feat_n2, offset_and_mask, flow_1, flow_2, self.dcn_weight, self.dcn_bias, feat_prop_new,
+        self._dcn.launch(
+            self._dcn.grid, stream,
+            feat_prop, feat_n2, offset_and_mask, flow_1, flow_2, self.dcn_weight, self.dcn_bias, feat_prop_new,
         )
 
         feat = F.leaky_relu_(self.conv_in(torch.cat([backbone_prefix, feat_prop_new], dim=1)), LEAKY_SLOPE)
         hidden = torch.empty_like(feat)
         for weight_1, bias_1, weight_2, bias_2 in self._block_weights:
-            self._conv_relu(stream, feat, weight_1, bias_1, feat, hidden)
+            self._conv_relu.launch(self._conv_relu.grid, stream, feat, weight_1, bias_1, feat, hidden)
             out = torch.empty_like(feat)
-            self._conv_residual(stream, hidden, weight_2, bias_2, feat, out)
+            self._conv_residual.launch(self._conv_residual.grid, stream, hidden, weight_2, bias_2, feat, out)
             feat = out
         return feat_prop_new + feat

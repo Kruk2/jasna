@@ -124,20 +124,26 @@ kernel needs a Torch equivalent: AMD GPUs outside the bundle and CPU use it, and
 the tests use it as the reference. The GPU parity tests run on whichever vendor
 the machine has.
 
-The AMD BasicVSR++ propagation step (`restorer/basicvsrpp_fused_body.py`) runs
-Triton kernels compiled ahead of time, since AMD ships Triton for Linux only.
-`scripts/build_basicvsrpp_hipfbs.py` holds their source and builds them on a
-Linux ROCm machine with the ROCm Torch + Triton venv into
-`jasna/media/basicvsrpp_*.hipfb` (RDNA3, RDNA3.5, RDNA4) plus the launch table
-`jasna/restorer/basicvsrpp_hip_launch.py`; commit all of them. Shapes and tiles
-are fixed; `--tune` times tile candidates on the local GPU (current tiles were
-picked on a gfx1201). Other GPUs and fp32 run the eager sub-modules, which
-are the reference for the parity test in `tests/test_basicvsrpp_fused_body.py`.
-The bundles are AMD-only (`AMD_GPU_KERNEL_MODULES` in `build_nuitka.py`).
+Two AMD paths run Triton kernels compiled ahead of time, since AMD ships
+Triton for Linux only: the BasicVSR++ propagation step
+(`restorer/basicvsrpp_fused_body.py`) and the RF-DETR segmentation-head blocks
+(`mosaic/rfdetr_fused_head.py`). `scripts/build_basicvsrpp_hipfbs.py` and
+`scripts/build_rfdetr_hipfbs.py` hold their source; both build through
+`scripts/triton_hipfb.py` on a Linux ROCm machine with the ROCm Torch + Triton
+venv into `jasna/media/basicvsrpp_*.hipfb` / `rfdetr_dwblock_*.hipfb` (RDNA3,
+RDNA3.5, RDNA4) plus the launch tables `jasna/restorer/basicvsrpp_hip_launch.py`
+/ `jasna/mosaic/rfdetr_hip_launch.py`; commit all of them. Shapes and tiles
+are fixed (RF-DETR: 144² and 192² mask features, 256 channels); `--tune` times
+tile candidates on the local GPU (current tiles were picked on a gfx1201).
+Other GPUs and fp32 run the torch modules, which are the reference for the
+parity tests in `tests/test_basicvsrpp_fused_body.py` and
+`tests/test_rfdetr_fused_head.py`. The bundles are AMD-only
+(`AMD_GPU_KERNEL_MODULES` in `build_nuitka.py`).
 
 ```bash
 python scripts/build_basicvsrpp_hipfbs.py          # ~1 min, all targets
-python scripts/build_basicvsrpp_hipfbs.py --tune   # needs an AMD GPU
+python scripts/build_rfdetr_hipfbs.py              # ~30 s, all targets
+python scripts/build_basicvsrpp_hipfbs.py --tune   # needs an AMD GPU (same for rfdetr)
 ```
 
 ## Benchmarks

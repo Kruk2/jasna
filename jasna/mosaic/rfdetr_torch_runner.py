@@ -8,6 +8,7 @@ from pathlib import Path
 import torch
 
 from jasna.accelerator import device_name
+from jasna.mosaic.rfdetr_fused_head import fuse_segmentation_head
 from jasna.mosaic.rfdetr_sync_free import export_without_host_syncs
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ class RfDetrTorchRunner:
         self._wrapper = wrapper
         self._core = core.to(device=self.device, dtype=self._dtype).eval()
         export_without_host_syncs(self._core)
+        fuse_segmentation_head(self._core, int(resolution))
 
         if isinstance(input_shapes, dict):
             input_shapes = list(input_shapes.values())
