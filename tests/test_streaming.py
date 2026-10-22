@@ -692,8 +692,8 @@ class TestStreamingEncoder:
         server.load_video(meta)
         server.reset_demand(20)
         enc = StreamingEncoder(server.segments_dir, server.segment_duration, meta, source_video="")
-        writer = _StreamingFrameWriter(enc, server, start_segment=20, cancel_event=threading.Event())
-        writer.after_write(590)
+        writer = _StreamingFrameWriter(enc, server, start_segment=20)
+        writer.after_write(590, threading.Event())
         assert server._produced_segment == 29
         server._cleanup_segments()
 
@@ -705,7 +705,7 @@ class TestStreamingEncoder:
         server.load_video(meta)
         enc = StreamingEncoder(server.segments_dir, server.segment_duration, meta, source_video="")
         server.select_video(Path("next.mp4"), 0.0)
-        _StreamingFrameWriter(enc, server, start_segment=10, cancel_event=threading.Event())
+        _StreamingFrameWriter(enc, server, start_segment=10)
         server._cleanup_segments()
 
     def test_reencoded_surround_audio_plays_from_any_segment(self, tmp_path):

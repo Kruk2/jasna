@@ -72,7 +72,7 @@ class _OfflineFrameWriter:
         self._encoder_ctx.encode(frame, pts)
         self._encode_heartbeat[0] = time.monotonic()
 
-    def after_write(self, frames_written: int) -> None:
+    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         pass
 
     def close(self) -> None:

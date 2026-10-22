@@ -162,7 +162,7 @@ class _CenterFrameCollector:
             self.done = True
             self._cancel_event.set()
 
-    def after_write(self, frames_written: int) -> None:
+    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         pass
 
     @property
@@ -205,7 +205,7 @@ class _PlaybackFrameCollector:
             )
         )
 
-    def after_write(self, frames_written: int) -> None:
+    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         pass
 
     def result_frames(self) -> tuple[RestoredClipFrame, ...]:

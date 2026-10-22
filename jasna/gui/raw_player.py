@@ -208,7 +208,7 @@ class RawFrameWriter:
             self._last_emitted_seconds = seconds
             self.frames_written += 1
 
-    def after_write(self, frames_written: int) -> None:
+    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         pass
 
 

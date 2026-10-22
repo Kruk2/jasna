@@ -91,7 +91,7 @@ class _RecordingWriter:
     def write(self, frame: torch.Tensor, pts: int) -> None:
         self.written.append((frame, pts))
 
-    def after_write(self, frames_written: int) -> None:
+    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         self.after_write_calls.append(frames_written)
 
 
@@ -690,7 +690,7 @@ class TestOfflineFrameWriter:
     def test_after_write_is_noop(self):
         from jasna.pipeline import _OfflineFrameWriter
         writer = _OfflineFrameWriter(MagicMock(), [0.0])
-        writer.after_write(1)
+        writer.after_write(1, threading.Event())
 
     def test_write_encodes_the_frame(self):
         from jasna.pipeline import _OfflineFrameWriter
@@ -734,7 +734,7 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_enc.frames_per_segment = 120
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0)
         frame = torch.zeros(3, 8, 8)
         writer.write(frame, pts=42)
 
@@ -747,11 +747,11 @@ class TestStreamingFrameWriter:
         mock_enc.frames_per_segment = 120
 
         cancel = threading.Event()
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5, cancel_event=cancel)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5)
 
-        writer.after_write(1)
+        writer.after_write(1, cancel)
         mock_server.update_production.assert_called_once_with(5)
-        mock_server.wait_for_demand.assert_called_once()
+        mock_server.wait_for_demand.assert_called_once_with(5, 3, cancel)
 
     def test_after_write_propagates_encoder_failure(self):
         from jasna.streaming_pipeline import _StreamingFrameWriter
@@ -759,10 +759,10 @@ class TestStreamingFrameWriter:
         mock_enc.raise_if_failed.side_effect = RuntimeError("writer failed")
         mock_server = MagicMock()
         mock_enc.frames_per_segment = 120
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5, cancel_event=threading.Event())
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=5)
 
         with pytest.raises(RuntimeError, match="writer failed"):
-            writer.after_write(1)
+            writer.after_write(1, threading.Event())
 
         mock_server.update_production.assert_not_called()
 
@@ -772,9 +772,9 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_enc.frames_per_segment = 10
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=3, cancel_event=threading.Event())
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=3)
 
-        writer.after_write(25)
+        writer.after_write(25, threading.Event())
         mock_server.update_production.assert_called_with(5)
 
     def test_after_write_first_frame_logging(self):
@@ -783,8 +783,8 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_enc.frames_per_segment = 120
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
-        writer.after_write(1)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0)
+        writer.after_write(1, threading.Event())
 
         mock_server.update_production.assert_called_once()
 
@@ -794,8 +794,8 @@ class TestStreamingFrameWriter:
         mock_server = MagicMock()
         mock_enc.frames_per_segment = 120
 
-        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0, cancel_event=threading.Event())
-        writer.after_write(100)
+        writer = _StreamingFrameWriter(mock_enc, mock_server, start_segment=0)
+        writer.after_write(100, threading.Event())
 
         mock_server.update_production.assert_called_once()
 
@@ -805,6 +805,60 @@ class TestStreamingFrameWriter:
 # ---------------------------------------------------------------------------
 
 class TestRunStreamingPass:
+    def test_worker_failure_stops_a_writer_waiting_for_player_demand(self):
+        from jasna.streaming_pipeline import _run_streaming_pass
+
+        demand_entered = threading.Event()
+        demand_stopped = []
+        failure = RuntimeError("decode failed")
+        cancel = threading.Event()
+        pipeline = MagicMock()
+        pipeline.device = torch.device("cpu")
+        pipeline.max_clip_size = 2
+        pipeline.restoration_pipeline.secondary_num_workers = 1
+        encoder = MagicMock()
+        encoder.frames_per_segment = 1
+        server = MagicMock()
+        server.video_change = threading.Event()
+        server.consume_seek_for_pass.return_value = None
+
+        def wait_for_demand(segment, max_ahead, stop_event):
+            demand_entered.set()
+            demand_stopped.append(stop_event.wait(timeout=2))
+
+        def fail_decode(**kwargs):
+            kwargs["metadata_queue"].put(FrameMeta(0, 0, apply_effect=False))
+            assert demand_entered.wait(timeout=2)
+            kwargs["error_holder"].append(failure)
+
+        def wait_for_stop(**kwargs):
+            assert kwargs["cancel_event"].wait(timeout=3)
+
+        server.wait_for_demand.side_effect = wait_for_demand
+        reader = _mock_reader([(torch.zeros(1, 3, 8, 8), [0])])
+        with (
+            patch("jasna.pipeline_threads.VideoReader", return_value=reader),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.decode_detect_loop", side_effect=fail_decode),
+            patch("jasna.pipeline_threads.primary_restore_loop", side_effect=wait_for_stop),
+            patch("jasna.pipeline_threads.secondary_restore_loop", side_effect=wait_for_stop),
+            patch("jasna.pipeline_threads.VramOffloader"),
+        ):
+            with pytest.raises(RuntimeError, match="decode failed") as caught:
+                _run_streaming_pass(
+                    pipeline=pipeline,
+                    metadata=_fake_metadata(num_frames=1),
+                    hls_server=server,
+                    streaming_encoder=encoder,
+                    start_segment=0,
+                    start_time=0.0,
+                    cancel_event=cancel,
+                )
+
+        assert demand_stopped == [True]
+        assert caught.value is failure
+        assert not cancel.is_set()
+
     def test_pass_completes_normally(self):
         from jasna.streaming_pipeline import _run_streaming_pass
         from jasna.pipeline_processing import BatchProcessResult

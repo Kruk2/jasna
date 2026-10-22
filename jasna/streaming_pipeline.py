@@ -22,19 +22,17 @@ class _StreamingFrameWriter:
         streaming_encoder: StreamingEncoder,
         hls_server: HlsStreamingServer,
         start_segment: int,
-        cancel_event: threading.Event,
     ):
         self._encoder = streaming_encoder
         self._hls_server = hls_server
         self._start_segment = start_segment
         self._frames_per_seg = streaming_encoder.frames_per_segment
         self._t0 = time.monotonic()
-        self._cancel_event = cancel_event
 
     def write(self, frame: torch.Tensor, pts: int) -> None:
         self._encoder.write_frame(frame, pts)
 
-    def after_write(self, frames_written: int) -> None:
+    def after_write(self, frames_written: int, stop_event: threading.Event) -> None:
         self._encoder.raise_if_failed()
         if frames_written == 1:
             log.debug("[stream-blend-encode] first frame encoded: %.2fs", time.monotonic() - self._t0)
@@ -46,7 +44,7 @@ class _StreamingFrameWriter:
 
         current_seg = self._start_segment + frames_written // self._frames_per_seg
         self._hls_server.update_production(current_seg)
-        self._hls_server.wait_for_demand(current_seg, _MAX_SEGMENTS_AHEAD, self._cancel_event)
+        self._hls_server.wait_for_demand(current_seg, _MAX_SEGMENTS_AHEAD, stop_event)
 
 
 def run_streaming(pipeline, hls_server: HlsStreamingServer) -> None:
@@ -144,7 +142,7 @@ def _run_streaming_pass(
     start_time: float,
     cancel_event: threading.Event,
 ) -> int | None:
-    frame_writer = _StreamingFrameWriter(streaming_encoder, hls_server, start_segment, cancel_event)
+    frame_writer = _StreamingFrameWriter(streaming_encoder, hls_server, start_segment)
     seek_target: int | None = None
     encoder_error: StreamingEncodeError | None = None
 
