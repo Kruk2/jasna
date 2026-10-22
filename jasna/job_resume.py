@@ -16,7 +16,7 @@ from jasna.segments import SegmentRange, SegmentRestoration, job_restoration, no
 from jasna.session_config import SessionConfig
 
 log = logging.getLogger(__name__)
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 
 class ResumeMismatchError(ValueError):
@@ -73,8 +73,19 @@ def resume_directories(root: Path, output: Path) -> list[Path]:
     return sorted(candidates, key=lambda path: (path.name != f".{output.stem}.jasna-resume", path.name))
 
 
+def _model_identity(path: Path) -> list:
+    # shortcut: size/mtime miss preserved-stat replacements; hash weights if model updates preserve both.
+    resolved = str(path.resolve())
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return [resolved, None]
+    return [resolved, stat.st_size, stat.st_mtime_ns]
+
+
 def job_fingerprint(config: SessionConfig, source: Path, output: Path, metadata, segments) -> str:
-    from jasna.ltx.model_files import bundle_names
+    from jasna.ltx.model_files import _bundle_paths
+    from jasna.session_factory import _restoration_model_path
 
     stat = source.stat()
     settings = asdict(config)
@@ -83,6 +94,16 @@ def job_fingerprint(config: SessionConfig, source: Path, output: Path, metadata,
     ranges = resolve_restorations(
         normalize_segments(tuple(segments or ())), job_restoration(config.restoration_model_name, config.ltx_seed)
     )
+    models = {segment.restoration.model for segment in ranges} if ranges else {config.restoration_model_name}
+    assets = {"detection": _model_identity(config.detection_model_path)}
+    if "basicvsrpp" in models:
+        assets["basicvsrpp"] = _model_identity(_restoration_model_path(config, "basicvsrpp"))
+    if "ltx" in models and not config.ltx_trial:
+        assets["ltx"] = [
+            _model_identity(path) for path in _bundle_paths(
+                _restoration_model_path(config, "ltx"), config.ltx_model, fast=config.ltx_fast
+            )
+        ]
     identity = {
         "format": FORMAT_VERSION,
         "version": __version__,
@@ -91,7 +112,8 @@ def job_fingerprint(config: SessionConfig, source: Path, output: Path, metadata,
         "video": [metadata.num_frames, str(metadata.time_base), metadata.duration],
         "settings": settings,
         "segments": [asdict(segment) for segment in ranges],
-        "transformer": bundle_names(config.ltx_model, fast=config.ltx_fast)[0],
+        "models": assets,
+        "lut": hashlib.sha256(Path(config.lut_path).read_bytes()).hexdigest() if config.lut_path else None,
     }
     return hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()
 
