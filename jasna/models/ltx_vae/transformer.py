@@ -16,6 +16,7 @@ from torch import nn
 from torch.utils._triton import has_triton_package
 
 from jasna.accelerator import is_amd_device
+from jasna.models.ltx_vae.diffusion_hip import QKV_DIMS
 from jasna.models.ltx_vae.eager_na import na3d
 from jasna.tensor_utils import compile_static
 
@@ -158,7 +159,7 @@ def enable_fused_kernels(device: torch.device) -> None:
     AMD without Triton (Windows ROCm) built ahead of time (``na_hip``); before SM 8.0, where Triton
     has no tensor-core dot, through the fp16 pure-torch ``na3d``. On AMD the diffusion blocks'
     residual MLP and the slab Q/K/V projections run as fused kernels (``diffusion_triton``, ahead of
-    time ``diffusion_hip``)."""
+    time ``diffusion_hip``); the Q/K/V kernel also serves the 512-wide deterministic stages."""
     global _fused_na3d, _fused_residual_swiglu, _fused_slab_qkv
     if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
         _fused_na3d = _fp16_eager_na3d
@@ -215,6 +216,23 @@ class NeighborhoodAttention3D(nn.Module):
         self.q_norm = nn.RMSNorm(head_dim, eps=_NORM_EPS)
         self.k_norm = nn.RMSNorm(head_dim, eps=_NORM_EPS)
 
+    def fused_qkv(
+        self, y: torch.Tensor, w_pos: torch.Tensor, core_len: int, halo: int
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Q (scaled) of the core columns and K/V of every column of ``y`` through the fused Q/K/V kernel."""
+        qkv = self.qkv
+        return _fused_slab_qkv(
+            y,
+            [qkv.to_q.weight, qkv.to_q.bias, qkv.to_k.weight, qkv.to_k.bias, qkv.to_v.weight, qkv.to_v.bias,
+             self.q_norm.weight, self.k_norm.weight],
+            torch.cat([self.rope_inv_t, self.rope_inv_h, self.rope_inv_w]),
+            w_pos,
+            [self.rope_inv_t.numel(), self.rope_inv_h.numel()],
+            core_len,
+            halo,
+            float(self.scale),
+        )
+
     def project_qkv(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         batch, t, h, w, _ = x.shape
         q, k, v = self.qkv(x)
@@ -230,13 +248,16 @@ class NeighborhoodAttention3D(nn.Module):
                 f"3D neighborhood attention requires spatial dims >= kernel_size; "
                 f"got (T,H,W)=({t},{h},{w}) vs kernel={self.kernel_size}"
             )
-        q, k, v = self.project_qkv(x)
-        q = self.q_norm(q)
-        k = self.k_norm(k)
-        q = q * self.scale
         w_pos = torch.arange(w, dtype=torch.float32, device=x.device)
-        q = apply_abs_rope_slab(q, self, w_pos)
-        k = apply_abs_rope_slab(k, self, w_pos)
+        if _fused_slab_qkv is not None and x.is_cuda and self.dim in QKV_DIMS:
+            q, k, v = self.fused_qkv(x.contiguous(), w_pos, w, 0)
+        else:
+            q, k, v = self.project_qkv(x)
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+            q = q * self.scale
+            q = apply_abs_rope_slab(q, self, w_pos)
+            k = apply_abs_rope_slab(k, self, w_pos)
         out = neighborhood_attention(self, q.contiguous(), k.contiguous(), v.contiguous(), 0)
         out = out.reshape(batch, t, h, w, self.dim)
         return self.proj(out)
@@ -356,17 +377,7 @@ def _attn_on_w_slab(
     y = y * (1.0 + scale) + shift
 
     if _fused_slab_qkv is not None and y.is_cuda:
-        q, k, v = _fused_slab_qkv(
-            y,
-            [attn.qkv.to_q.weight, attn.qkv.to_q.bias, attn.qkv.to_k.weight, attn.qkv.to_k.bias,
-             attn.qkv.to_v.weight, attn.qkv.to_v.bias, attn.q_norm.weight, attn.k_norm.weight],
-            torch.cat([attn.rope_inv_t, attn.rope_inv_h, attn.rope_inv_w]),
-            w_pos,
-            [attn.rope_inv_t.numel(), attn.rope_inv_h.numel()],
-            core_len,
-            halo,
-            float(attn.scale),
-        )
+        q, k, v = attn.fused_qkv(y, w_pos, core_len, halo)
     else:
         head_shape = (batch, t, h, ext_w, attn.num_heads, attn.head_dim)
         core_shape = (batch, t, h, core_len, attn.num_heads, attn.head_dim)

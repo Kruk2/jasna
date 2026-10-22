@@ -136,3 +136,36 @@ def test_the_fused_slab_qkv_compiles_into_the_slab_without_a_graph_break(monkeyp
         explanation = torch._dynamo.explain(T._attn_on_w_slab)(*_slab())
 
     assert explanation.graph_break_count == 0
+
+
+def _deterministic_stage(dim: int):
+    torch.manual_seed(0)
+    attn = T.NeighborhoodAttention3D(dim, (3, 5, 5), head_dim=diffusion_hip.HEAD_DIM).cuda().bfloat16().eval()
+    with torch.no_grad():
+        for parameter in (attn.q_norm.weight, attn.k_norm.weight):
+            parameter.uniform_(0.5, 1.5)
+    return attn, torch.randn(1, 5, 6, 9, dim, device="cuda", dtype=torch.bfloat16)
+
+
+@amd_only
+@pytest.mark.parametrize("fused", ["triton", "aot"])
+def test_the_512_wide_deterministic_stages_take_the_fused_qkv(fused, monkeypatch):
+    from jasna.models.ltx_vae import diffusion_triton
+
+    monkeypatch.setattr(T, "_fused_na3d", None)
+    attn, x = _deterministic_stage(512)
+    with torch.inference_mode():
+        monkeypatch.setattr(T, "_fused_slab_qkv", None)
+        expected = attn(x)
+        monkeypatch.setattr(T, "_fused_slab_qkv", diffusion_triton.slab_qkv if fused == "triton" else diffusion_hip.slab_qkv)
+        actual = attn(x)
+
+    torch.testing.assert_close(actual, expected, atol=3e-2, rtol=2e-2)
+
+
+def test_the_wider_deterministic_stages_keep_the_torch_qkv(monkeypatch):
+    monkeypatch.setattr(T, "_fused_na3d", None)
+    monkeypatch.setattr(T, "_fused_slab_qkv", lambda *_args: pytest.fail("no fused Q/K/V at width 1024"))
+    attn, x = _deterministic_stage(1024)
+    with torch.inference_mode():
+        assert attn(x).shape == x.shape

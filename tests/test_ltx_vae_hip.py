@@ -22,7 +22,7 @@ def test_every_window_ships_a_code_object_for_every_architecture(window):
     assert all(module in kernels for kernels in KERNEL_LAUNCH.values())
 
 
-@pytest.mark.parametrize("module", [diffusion_hip.SWIGLU_MODULE, diffusion_hip.QKV_MODULE])
+@pytest.mark.parametrize("module", [diffusion_hip.SWIGLU_MODULE, *map(diffusion_hip.qkv_module, diffusion_hip.QKV_DIMS)])
 def test_every_diffusion_kernel_ships_a_code_object_for_every_architecture(module):
     targets = offload_bundle_targets(MEDIA / f"{module}.hipfb")
 

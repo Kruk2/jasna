@@ -11,6 +11,7 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
     'gfx1101': {
         'ltx_na3d_11x11x11': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
@@ -18,6 +19,7 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
     'gfx1102': {
         'ltx_na3d_11x11x11': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
@@ -25,6 +27,7 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
     'gfx1103': {
         'ltx_na3d_11x11x11': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
@@ -32,6 +35,7 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
     'gfx1150': {
         'ltx_na3d_11x11x11': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
@@ -39,6 +43,7 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
     'gfx1151': {
         'ltx_na3d_11x11x11': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
@@ -46,6 +51,7 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
     'gfx1200': {
         'ltx_na3d_11x11x11': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
@@ -53,6 +59,7 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
     'gfx1201': {
         'ltx_na3d_11x11x11': ('_na3d_fwd_kernel', (0, 0, 0), 64, 4096),
@@ -60,5 +67,6 @@ KERNEL_LAUNCH = {
         'ltx_na3d_3x5x5': ('_na3d_fwd_kernel', (0, 0, 0), 32, 2048),
         'ltx_swiglu_256x1024': ('_residual_swiglu_kernel', (0, 0, 0), 256, 65536),
         'ltx_slab_qkv_256x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 32768),
+        'ltx_slab_qkv_512x64': ('_slab_qkv_kernel', (0, 0, 0), 256, 65536),
     },
 }

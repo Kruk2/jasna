@@ -2,8 +2,8 @@
 
 Compiled ahead of time, bf16: ``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
 shipped DiffVAE decoder with that size's AMD ``na_geometry`` config, and ``diffusion_triton``'s residual
-SwiGLU and slab Q/K/V kernels at the shipped diffusion-block shapes. Windows ROCm ships no Triton, so
-``na_hip`` and ``diffusion_hip`` launch these there.
+SwiGLU and slab Q/K/V kernels at the shipped diffusion-block shapes (Q/K/V also at the 512-wide
+deterministic stages). Windows ROCm ships no Triton, so ``na_hip`` and ``diffusion_hip`` launch these there.
 
 Usage (Linux, ROCm Torch + Triton, ROCm's clang-offload-bundler):
     python scripts/build_ltx_vae_hipfbs.py
@@ -43,12 +43,13 @@ def _kernel_specs():
         {"DIM": aot.DIM, "HIDDEN": aot.HIDDEN, "BLOCK_ROWS": aot.SWIGLU_BLOCK_ROWS, "BLOCK_HIDDEN": aot.SWIGLU_BLOCK_HIDDEN},
         aot.SWIGLU_WARPS, 1,
     )
-    specs[aot.QKV_MODULE] = (
-        _slab_qkv_kernel, aot.QKV_ARGUMENTS,
-        {"DIM": aot.DIM, "HEAD_DIM": aot.HEAD_DIM, "PAIRS_T": aot.ROPE_PAIRS[0], "PAIRS_H": aot.ROPE_PAIRS[1],
-         "BLOCK_ROWS": aot.QKV_BLOCK_ROWS},
-        aot.QKV_WARPS, 1,
-    )
+    for dim in aot.QKV_DIMS:
+        specs[aot.qkv_module(dim)] = (
+            _slab_qkv_kernel, aot.QKV_ARGUMENTS,
+            {"DIM": dim, "HEAD_DIM": aot.HEAD_DIM, "PAIRS_T": aot.ROPE_PAIRS[0], "PAIRS_H": aot.ROPE_PAIRS[1],
+             "BLOCK_ROWS": aot.QKV_BLOCK_ROWS},
+            aot.QKV_WARPS, 1,
+        )
     return specs
 
 

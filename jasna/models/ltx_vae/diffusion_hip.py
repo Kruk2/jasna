@@ -11,7 +11,7 @@ from jasna.media.cuda_kernel import _TRITON_SCRATCH_ARGS, Kernel
 
 # Launch configs, fastest on a Radeon AI PRO R9700 (gfx1201). Residual SwiGLU: rows per program,
 # hidden columns per step, warps (swept 64/128 rows, 32/64 columns, 4/8 warps, 1/2 stages). Slab
-# Q/K/V: rows per program and warps (swept 16-128 rows, 4-16 warps).
+# Q/K/V: rows per program and warps (swept 16-128 rows, 4-16 warps, at widths 256 and 512).
 SWIGLU_BLOCK_ROWS = 128
 SWIGLU_BLOCK_HIDDEN = 64
 SWIGLU_WARPS = 8
@@ -22,8 +22,14 @@ HIDDEN = 1024
 HEAD_DIM = 64
 ROPE_PAIRS = (8, 12, 12)
 """The shipped DiffVAE decoder's diffusion blocks: width, MLP width, head dim, RoPE pairs per (T, H, W)."""
+QKV_DIMS = (DIM, 512)
+"""Widths the Q/K/V kernel is built for: the diffusion blocks' and the 512-wide deterministic stages 3-4
+(the 1024/2048-wide stages 1-2 do not fit its one-tile projections)."""
 SWIGLU_MODULE = f"ltx_swiglu_{DIM}x{HIDDEN}"
-QKV_MODULE = f"ltx_slab_qkv_{DIM}x{HEAD_DIM}"
+
+
+def qkv_module(dim: int) -> str:
+    return f"ltx_slab_qkv_{dim}x{HEAD_DIM}"
 
 _SWIGLU_POINTERS = ("x_ptr", "norm_ptr", "scale_ptr", "shift_ptr", "gate_ptr", "up_ptr", "down_ptr")
 SWIGLU_ARGUMENTS = {**{name: "*bf16" for name in _SWIGLU_POINTERS}, "rows": "i32"}
@@ -61,7 +67,8 @@ def _launch(module: str, arg_types: tuple, rows_per_program: int, rows: int, dev
 
 def _require_bf16(tensors, shapes_match: bool) -> None:
     if not shapes_match or {t.dtype for t in tensors} != {torch.bfloat16} or not all(t.is_contiguous() for t in tensors):
-        raise ValueError(f"the ahead-of-time diffusion-block kernels take contiguous bf16 tensors of width {DIM}")
+        raise ValueError(f"the ahead-of-time diffusion-block kernels take contiguous bf16 tensors of width {DIM}"
+                         f" (Q/K/V: {' or '.join(map(str, QKV_DIMS))})")
 
 
 def residual_swiglu_(
@@ -91,13 +98,13 @@ def slab_qkv(
     q_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """``diffusion_triton.slab_qkv`` at the shipped decoder's shapes."""
-    _require_bf16((y, *weights), y.shape[4] == DIM and weights[7].shape == (HEAD_DIM,) and tuple(rope_pairs) == ROPE_PAIRS[:2])
-    batch, t, h, ext, _ = y.shape
-    q = y.new_empty(batch, t, h, core_len, DIM // HEAD_DIM, HEAD_DIM)
-    k = y.new_empty(batch, t, h, ext, DIM // HEAD_DIM, HEAD_DIM)
+    batch, t, h, ext, dim = y.shape
+    _require_bf16((y, *weights), dim in QKV_DIMS and weights[7].shape == (HEAD_DIM,) and tuple(rope_pairs) == ROPE_PAIRS[:2])
+    q = y.new_empty(batch, t, h, core_len, dim // HEAD_DIM, HEAD_DIM)
+    k = y.new_empty(batch, t, h, ext, dim // HEAD_DIM, HEAD_DIM)
     v = torch.empty_like(k)
     rows = batch * t * h * ext
     pointers = (y, *weights, inv_freqs.float().contiguous(), w_pos.float().contiguous(), q, k, v)
-    _launch(QKV_MODULE, _QKV_TYPES, QKV_BLOCK_ROWS, rows, y.device,
+    _launch(qkv_module(dim), _QKV_TYPES, QKV_BLOCK_ROWS, rows, y.device,
             (*(p.data_ptr() for p in pointers), rows, h, ext, halo, core_len, q_scale))
     return q, k, v
