@@ -552,19 +552,19 @@ class VideoEncoder:
         # initialized it; current_ctx leaves the context and its flags alone.
         # Keeping conversion and NVENC in one context also avoids a ~500 MiB
         # secondary CUDA context and cross-context scheduling overhead.
-        # NVENC consumes device memory, so conversion runs on its own stream and
-        # overlaps the rest of the pipeline. AMF consumes host memory, so on AMD
-        # everything stays on the current stream: a private stream there let
-        # ROCm recycle in-flight conversion buffers into the restorer's
-        # allocations (issue #252).
+        # Conversion runs on its own stream so it overlaps the rest of the
+        # pipeline. The worker makes that stream wait for the producer's event
+        # and records it on the input frame, and the AMD buffers below live for
+        # the whole encode, so no block is recycled while a conversion still
+        # reads it (issue #252).
         height = self.metadata.video_height
         width = self.metadata.video_width
         self._cuda_ctx = None
         self._host_yuv = None
+        self.stream = new_stream(self.device)
         if self.vendor is AcceleratorVendor.NVIDIA:
             from av.video.frame import CudaContext
 
-            self.stream = new_stream(self.device)
             self._cuda_ctx = CudaContext(
                 device_id=self.device.index or 0,
                 primary_ctx=False,
@@ -572,14 +572,14 @@ class VideoEncoder:
                 cuda_stream=self.stream.cuda_stream,
             )
         else:
-            self.stream = current_stream(self.device)
-            self._packed = torch.empty(
-                (height + height // 2, width),
-                dtype=self._converter.sample_dtype,
-                device=self.device,
-            )
-            if self._cas is not None:
-                self._cas_luma = torch.empty_like(self._packed[:height])
+            with stream_context(self.stream):
+                self._packed = torch.empty(
+                    (height + height // 2, width),
+                    dtype=self._converter.sample_dtype,
+                    device=self.device,
+                )
+                if self._cas is not None:
+                    self._cas_luma = torch.empty_like(self._packed[:height])
             self._host_yuv = torch.empty(
                 (height + height // 2, width),
                 dtype=torch.uint16 if self.spec.ten_bit else torch.uint8,
