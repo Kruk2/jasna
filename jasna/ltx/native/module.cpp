@@ -1,4 +1,5 @@
 #include "block.h"
+#include "glue.h"
 
 namespace py = pybind11;
 
@@ -23,5 +24,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
       .def_readwrite("fp4_recipe", &Config::fp4_recipe).def_readwrite("fp4_swizzle", &Config::fp4_swizzle)
       .def_readwrite("kernels", &Config::kernels).def_readwrite("kernel_directory", &Config::kernel_directory);
   py::class_<Block>(m, "Block").def(py::init<const Config&>()).def("forward", &Block::forward)
-      .def("self_attention", &Block::self_attention).def("prompt_key_value", &Block::prompt_key_value);
+      .def("self_attention", &Block::self_attention).def("normed_self_attention", &Block::normed_self_attention)
+      .def("prompt_key_value", &Block::prompt_key_value);
+  m.def("norm_rope", [](const at::Tensor& x, const at::Tensor& weight, const at::Tensor& cos, const at::Tensor& sin,
+                        const at::Tensor& out, int64_t head_dim, double eps) {
+    jasna_ltx::norm_rope(x, weight, &cos, &sin, out, head_dim, eps);
+  });
 }

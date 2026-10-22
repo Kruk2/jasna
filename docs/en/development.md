@@ -208,6 +208,9 @@ $P scripts/benchmark_na3d.py                                             # Trito
   `comfy_kitchen.int8_attention` there) into objects, and the host compiler
   builds `block.cpp` (nothing is hipified). INT8 only, AMD tiles by gfx name,
   INT8 cross-attention and the gated-quantize epilogue as the AMD torch path.
+  The q/k norm and RoPE run inside comfy-kitchen's Q/K quantization
+  (`norm_rope_quant.hip`, compiled with its `quant_qk_int8.hip`); its codes must
+  stay equal to `glue.cu`'s `norm_rope` followed by the vendored quantizer.
   `PYTORCH_ROCM_ARCH` picks the gfx targets (default: this GPU). Windows ROCm
   has no Triton and keeps the eager path.
 - Release packaging keeps the vendored kernels' `NOTICE` in `licenses/`.

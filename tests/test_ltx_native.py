@@ -107,7 +107,7 @@ def test_native_block_runs_its_own_int8_attention_whatever_comfy_kitchen_is_inst
 def test_extension_sources_look_up_no_launchers_at_runtime():
     sources = [path for path in native._HERE.rglob("*") if path.suffix in (".cpp", ".cu", ".cuh", ".h", ".hip")]
     assert {path.name for path in sources} >= {
-        "block.cpp", "glue.cu", *native._ATTENTION_SOURCES, *native._HIP_ATTENTION_SOURCES}
+        "block.cpp", "glue.cu", *native._ATTENTION_SOURCES, *(path.name for path in native._HIP_ATTENTION_SOURCES)}
     for path in sources:
         text = path.read_text()
         for lookup in ("dlopen", "dlsym", "GetProcAddress", "GetModuleHandle", 'extern "C" void', "kitchen_library"):
@@ -568,9 +568,9 @@ def test_hip_objects_compile_glue_and_attention_once_with_their_own_flags(monkey
     monkeypatch.setattr(cpp_extension, "include_paths", lambda device_type: ["/torch/include"])
     monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1100;gfx1201")
     objects = native._hip_objects(tmp_path, PurePosixPath("/rocm"))
-    assert [path.name for path in objects] == ["glue.o", "quant_qk_int8.o", "quant_v_int8.o", "int8_attn.o"]
+    assert [path.name for path in objects] == ["glue.o", "norm_rope_quant.o", "quant_v_int8.o", "int8_attn.o"]
     assert [command[-3] for command in commands] == [
-        str(native._HERE / "glue.cu"), *(str(native._HIP_ATTENTION / source) for source in native._HIP_ATTENTION_SOURCES)]
+        str(native._HERE / "glue.cu"), *(str(source) for source in native._HIP_ATTENTION_SOURCES)]
     glue, *attention = commands
     assert glue[0] == "/rocm/bin/hipcc" and {"-x", "hip", "-I/torch/include", "-DUSE_ROCM=1"} <= set(glue)
     assert "-ffast-math" not in glue and all("-ffast-math" in command for command in attention)

@@ -144,6 +144,34 @@ def test_native_int8_attention_is_comfy_kitchens_bit_for_bit(int8_block, head_di
     assert _relative_error(attention, exact[0].transpose(0, 1)) < 3e-2
 
 
+# 100 / 500 / 4096 tokens per half: comfy-kitchen's short-key rotation, lengths off the tiles, a 512 canvas
+@pytest.mark.parametrize("frames, side", [(1, 10), (5, 10), (16, 16)])
+def test_native_normed_self_attention_is_norm_rope_then_self_attention(int8_block, frames, side):
+    rows, dim, heads = 2 * frames * side * side, 4096, T.HEADS
+    head_dim = dim // heads
+    generator = torch.Generator(device=DEVICE).manual_seed(rows)
+
+    def projection(shared: float) -> torch.Tensor:  # rows of widely different norms, some outlier channels
+        values = torch.randn(rows, dim, generator=generator, device=DEVICE) + shared * torch.randn(
+            dim, generator=generator, device=DEVICE)
+        values *= torch.logspace(-3, 2, rows, device=DEVICE)[torch.randperm(rows, generator=generator, device=DEVICE)][:, None]
+        values[:, ::97] *= 20
+        return values.to(torch.bfloat16)
+
+    # keys sharing a direction, so comfy-kitchen's K anchor subtraction kicks in
+    q_projection, k_projection, v = projection(0), projection(4), projection(0)
+    q_norm, k_norm = ((1 + 0.2 * torch.randn(dim, generator=generator, device=DEVICE)).to(torch.bfloat16) for _ in range(2))
+    rope = T.build_rope(frames, side, side, dim=dim, heads=heads, device=DEVICE)
+    cta_k = native.HIP_ATTENTION_CTA_K if AMD else native.attention_cta_k(head_dim, rows)
+    module = native._extension()
+    q, k = torch.empty_like(q_projection), torch.empty_like(k_projection)
+    module.norm_rope(q_projection, q_norm, rope.cos, rope.sin, q, head_dim, T.EPS)
+    module.norm_rope(k_projection, k_norm, rope.cos, rope.sin, k, head_dim, T.EPS)
+    expected = int8_block.block.self_attention(q, k, v, rows, heads, head_dim, cta_k)
+    actual = int8_block.block.normed_self_attention(q_projection, k_projection, v, q_norm, k_norm, rope.cos, rope.sin, cta_k)
+    assert torch.equal(actual, expected)
+
+
 def test_native_block_is_deterministic(block):
     weights, forward, _ = block
     x, cond, prompt, rope = _inputs(weights, 8192, seed=4)

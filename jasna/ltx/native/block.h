@@ -45,6 +45,9 @@ class Block {
                      int64_t cta_k, bool skip_self_attention);
   at::Tensor self_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t rows, int64_t heads,
                             int64_t head_dim, int64_t cta_k);
+  at::Tensor normed_self_attention(const at::Tensor& q_projection, const at::Tensor& k_projection, const at::Tensor& v,
+                                   const at::Tensor& q_norm, const at::Tensor& k_norm, const at::Tensor& rope_cos,
+                                   const at::Tensor& rope_sin, int64_t cta_k);
   std::pair<at::Tensor, at::Tensor> prompt_key_value(
       const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& cross_k_norm,
       const at::Tensor& prompt_scale_shift_table, const at::Tensor& prompt_rows, const at::Tensor& context);

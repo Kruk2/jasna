@@ -9,7 +9,8 @@ every model constant and launch policy value and hands them over in ``Config``.
 The same sources build for AMD (ROCm PyTorch, ``gpu_runtime.h`` maps the CUDA spellings):
 INT8 blocks only, with the AMD tiles of ``kernels.AMD_INT8_MM_TILES`` and, as the AMD torch
 path does, comfy-kitchen's HIP INT8 attention (``sage_attention_hip/``) for the self- and
-prompt cross-attention and the attention epilogue ``kernels.gated_rotate_quantize``. hipcc
+prompt cross-attention and the attention epilogue ``kernels.gated_rotate_quantize``; the q/k
+norm and RoPE run inside that attention's INT8 quantization (``norm_rope_quant.hip``). hipcc
 compiles ``glue.cu`` and the attention into objects that the host compiler's extension links.
 
 Source installs build it on first use into the compile cache (needs nvcc or hipcc, a C++
@@ -55,7 +56,9 @@ _ATTENTION_NVCC_FLAGS = ("-std=c++17", "-O3", "-DNDEBUG", "--use_fast_math", "--
 # comfy-kitchen 0.2.38's HIP backend: its CMakeLists.txt flags for the kernels and the key tile it
 # always launches (``_sage_cta_k``).
 _HIP_ATTENTION = _HERE / "sage_attention_hip"
-_HIP_ATTENTION_SOURCES = ("quant_qk_int8.hip", "quant_v_int8.hip", "int8_attn.hip")
+# norm_rope_quant.hip compiles comfy-kitchen's quant_qk_int8.hip together with the norm fused into it
+_HIP_ATTENTION_SOURCES = (_HERE / "norm_rope_quant.hip", _HIP_ATTENTION / "quant_v_int8.hip",
+                          _HIP_ATTENTION / "int8_attn.hip")
 _HIP_ATTENTION_FLAGS = ("-std=c++20", "-O3", "-DNDEBUG", "-ffast-math", "-mno-wavefrontsize64")
 HIP_ATTENTION_CTA_K = 64
 PREBUILT = _HERE / "prebuilt"
@@ -230,13 +233,14 @@ def _hip_objects(build_directory: Path, rocm_home: Path) -> list[Path]:
     directory named after their sources and commands so a change relinks the extension."""
     commands = {
         _HERE / "glue.cu": _hipcc_command(rocm_home, _glue_hipcc_flags()),
-        **{_HIP_ATTENTION / source: _hipcc_command(rocm_home, (*_HIP_ATTENTION_FLAGS, f"-I{_HIP_ATTENTION}"))
+        **{source: _hipcc_command(rocm_home, (*_HIP_ATTENTION_FLAGS, f"-I{_HIP_ATTENTION}"))
            for source in _HIP_ATTENTION_SOURCES},
     }
     digest = hashlib.sha256()
     for source, command in commands.items():
         digest.update("\0".join(command).encode() + b"\0" + source.read_bytes())
-    for path in sorted([*_HIP_ATTENTION.iterdir(), *(_HERE / name for name in ("glue.h", "gpu_runtime.h"))]):
+    for path in sorted([*_HIP_ATTENTION.iterdir(),
+                        *(_HERE / name for name in ("glue.h", "gpu_runtime.h", "norm_rope_quant.h"))]):
         digest.update(path.name.encode() + b"\0" + path.read_bytes())
     directory = build_directory / f"hip-objects-{digest.hexdigest()[:16]}"
     directory.mkdir(parents=True, exist_ok=True)

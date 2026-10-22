@@ -26,6 +26,7 @@
 #include "block.h"
 #include "gpu_runtime.h"
 #ifdef USE_ROCM
+#include "norm_rope_quant.h"
 #include "sage_attention_hip/launchers.h"
 #else
 #include "sage_attention/launchers.h"
@@ -290,22 +291,21 @@ class Block::Impl {
     if (skip_self_attention) {
       attention = v.view({rows, heads, head_dim});
     } else {
-      const at::Tensor q = at::empty_like(v), k = at::empty_like(v);
-      norm_rope(linear(attn_in, w[SelfQ]), q_norm, &rope_cos, &rope_sin, q, head_dim, config_.eps);
-      norm_rope(linear(attn_in, w[SelfK]), k_norm, &rope_cos, &rope_sin, k, head_dim, config_.eps);
-      attention = self_attention(q, k, v, rows, heads, head_dim, cta_k);
+      attention = normed_self_attention([&] { return linear(attn_in, w[SelfQ]); },
+                                        [&] { return linear(attn_in, w[SelfK]); }, v, q_norm, k_norm, rope_cos,
+                                        rope_sin, cta_k);
     }
     at::Tensor h = project_gated(attention, linear(attn_in, w[SelfGate]), w[SelfOut], xin, ada[2], rows, fp4);
 
     // gated prompt cross-attention
     Activation query = modulated(h, ada[6], ada[7], fp4, rows);
+#ifdef USE_ROCM
+    const at::Tensor cross = normed_cross_attention(linear(query, w[CrossQ]), cross_q_norm, prompt_key, prompt_value);
+#else
     // in the prompt key/value dtype; project_gated takes fp16 attention as it is
     const at::Tensor q = at::empty({rows, dim}, x.options().dtype(prompt_key.scalar_type()));
     norm_rope(linear(query, w[CrossQ]), cross_q_norm, nullptr, nullptr, q, head_dim, config_.eps);
     const at::Tensor q_heads = q.view({1, rows, heads, head_dim}).transpose(1, 2);
-#ifdef USE_ROCM
-    const at::Tensor cross = int8_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
-#else
     const at::Tensor cross = at::scaled_dot_product_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
 #endif
     h = project_gated(cross, linear(query, w[CrossGate]), w[CrossOut], h, ada[8], rows, fp4);
@@ -360,6 +360,36 @@ class Block::Impl {
 #endif
   }
 
+  // self_attention of the q/k projections (rows, heads * head_dim) after norm_rope, each projection
+  // made when it is normalized; on AMD the norm runs inside comfy-kitchen's Q/K quantization
+  // (norm_rope_quant.h), with the same result.
+  template <class ProjectQ, class ProjectK>
+  at::Tensor normed_self_attention(const ProjectQ& q_projection, const ProjectK& k_projection, const at::Tensor& v,
+                                   const at::Tensor& q_norm, const at::Tensor& k_norm, const at::Tensor& rope_cos,
+                                   const at::Tensor& rope_sin, int64_t cta_k) {
+    const int64_t rows = v.size(0), heads = config_.heads, head_dim = v.size(1) / heads;
+#ifdef USE_ROCM
+    TORCH_CHECK(cta_k == kHipAttentionCtaK, "AMD INT8 attention runs ", kHipAttentionCtaK, "-key tiles");
+    TORCH_CHECK(v.scalar_type() == at::kBFloat16 && v.dim() == 2 && v.stride(1) == 1, "v must be (rows, heads * head_dim) bf16");
+    const Int8QK qk = int8_qk(heads, rows, rows, head_dim, v.options());
+    const gpu::Stream stream = at::cuda::getCurrentCUDAStream();
+    sage_attention_hip::launch_norm_rope_quant_q(norm_rope_rows(q_projection(), q_norm, &rope_cos, &rope_sin, head_dim),
+                                                 qk.q.data_ptr(), qk.q_scale.data_ptr(),
+                                                 static_cast<int>(qk.padded_queries()), qk.rotation(), stream);
+    const at::Tensor samples = at::empty({kAnchorSamples, v.size(1)}, v.options());
+    sage_attention_hip::launch_norm_rope_quant_k(norm_rope_rows(k_projection(), k_norm, &rope_cos, &rope_sin, head_dim),
+                                                 qk.k.data_ptr(), qk.k_scale.data_ptr(), samples.data_ptr(),
+                                                 qk.anchors.data_ptr(), static_cast<int>(qk.key_groups()),
+                                                 qk.rotation(), stream);
+    return int8_attend(qk, v.view({1, rows, heads, head_dim}).transpose(1, 2))[0].transpose(0, 1);
+#else
+    const at::Tensor q = at::empty_like(v), k = at::empty_like(v);
+    norm_rope(q_projection(), q_norm, &rope_cos, &rope_sin, q, head_dim, config_.eps);
+    norm_rope(k_projection(), k_norm, &rope_cos, &rope_sin, k, head_dim, config_.eps);
+    return self_attention(q, k, v, rows, heads, head_dim, cta_k);
+#endif
+  }
+
   std::pair<at::Tensor, at::Tensor> prompt_key_value(
       const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& cross_k_norm,
       const at::Tensor& prompt_scale_shift_table, const at::Tensor& prompt_rows, const at::Tensor& context) {
@@ -378,12 +408,62 @@ class Block::Impl {
   }
 
 #ifdef USE_ROCM
-  // comfy-kitchen's HIP tiles: 128 queries, 64 keys, one key scale per 16 keys.
-  static constexpr int64_t kHipAttentionCtaQ = 128, kHipAttentionCtaK = 64, kHipKeyGroup = 16;
+  // comfy-kitchen's HIP tiles: 128 queries, 64 keys, one key scale per 16 keys; nine anchor candidates.
+  static constexpr int64_t kHipAttentionCtaQ = 128, kHipAttentionCtaK = 64, kHipKeyGroup = 16, kAnchorSamples = 9;
+
+  // comfy-kitchen's INT8 Q/K of queries against keys, in the layouts launch_quant_qk_int8 writes.
+  struct Int8QK {
+    at::Tensor q, q_scale, k, k_scale, anchors;
+    int64_t heads, queries, keys, head_dim;
+
+    int64_t padded_queries() const { return cdiv(queries, kHipAttentionCtaQ) * kHipAttentionCtaQ; }
+    int64_t padded_keys() const { return cdiv(keys, kHipAttentionCtaK) * kHipAttentionCtaK; }
+    int64_t key_groups() const { return padded_keys() / kHipKeyGroup; }
+    // comfy-kitchen's sage_rotation: short keys H4, longer ones the widest Hadamard of the head
+    int rotation() const { return keys <= 256 ? 4 : head_dim >= 256 ? 129 : head_dim >= 128 ? 128 : 64; }
+  };
+
+  static Int8QK int8_qk(int64_t heads, int64_t queries, int64_t keys, int64_t head_dim, const at::TensorOptions& like) {
+    TORCH_CHECK(head_dim == 64 || head_dim == 128 || head_dim == 256, "INT8 attention needs a head size of 64/128/256");
+    Int8QK qk{{}, {}, {}, {}, {}, heads, queries, keys, head_dim};
+    const auto i8 = like.dtype(at::kChar), f32 = like.dtype(at::kFloat);
+    qk.q = at::empty({1, heads, queries, head_dim}, i8);
+    qk.q_scale = at::empty({1, heads, qk.padded_queries()}, f32);
+    qk.k = at::empty({1, heads, keys, head_dim}, i8);
+    qk.k_scale = at::empty({1, heads, qk.key_groups()}, f32);
+    qk.anchors = at::empty({1, heads}, like.dtype(at::kInt));
+    return qk;
+  }
+
+  // comfy-kitchen's HIP INT8 attention of quantized q/k against v [1, heads, keys, d] (any token/head
+  // strides, contiguous d), launched the way comfy_kitchen.backends.hip.sage_int8_sdpa launches it
+  // unmasked: a contiguous [1, heads, queries, d] result.
+  static at::Tensor int8_attend(const Int8QK& qk, const at::Tensor& v) {
+    namespace sage = sage_attention_hip;
+    TORCH_CHECK(v.scalar_type() == at::kBFloat16 && v.dim() == 4 && v.size(0) == 1 && v.size(1) == qk.heads &&
+                v.size(2) == qk.keys && v.size(3) == qk.head_dim && v.stride(3) == 1,
+                "INT8 attention values must be [1, heads, keys, head_dim] bf16 with a contiguous head_dim");
+    const int64_t H = qk.heads, Lq = qk.queries, Lk = qk.keys, D = qk.head_dim, padded_k = qk.padded_keys();
+    const at::Tensor v_int8 = at::empty({H * D, padded_k}, v.options().dtype(at::kChar));
+    const at::Tensor v_scale = at::empty({H * D}, v.options().dtype(at::kFloat));
+    const at::Tensor out = at::empty({1, H, Lq, D}, v.options());
+    const gpu::Stream stream = at::cuda::getCurrentCUDAStream();
+    const int h = static_cast<int>(H), lq = static_cast<int>(Lq), lk = static_cast<int>(Lk), d = static_cast<int>(D);
+    sage::launch_quant_v_int8(v.data_ptr(), v_int8.data_ptr(), v_scale.data_ptr(), 1, h, lk, d,
+                              static_cast<int>(padded_k), v.stride(0), v.stride(1), v.stride(2), sage::kBFloat16,
+                              stream);
+    sage::launch_int8_attn(qk.q.data_ptr(), qk.k.data_ptr(), v_int8.data_ptr(), out.data_ptr(), qk.q_scale.data_ptr(),
+                           qk.k_scale.data_ptr(), v_scale.data_ptr(), nullptr, 0, 0, 0, 0, 0,
+                           static_cast<int>(kHipAttentionCtaK), 1, lq, lk, static_cast<int>(qk.padded_queries()), h, h, d,
+                           static_cast<int>(qk.key_groups()), H * Lq * D, Lq * D, H * Lk * D, Lk * D, H * D * padded_k,
+                           D * padded_k, padded_k, H * Lq * D, Lq * D, D,
+                           static_cast<float>(1.0 / std::sqrt(static_cast<double>(D))), sage::kBFloat16, stream);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return out;
+  }
 
   // comfy-kitchen's HIP INT8 attention of q [1, heads, rows, d] against k/v [1, heads, keys, d]
-  // (any token/head strides, contiguous d), launched the way comfy_kitchen.backends.hip.sage_int8_sdpa
-  // launches it unmasked: a contiguous [1, heads, rows, d] result.
+  // (any token/head strides, contiguous d), as comfy_kitchen.backends.hip.sage_int8_sdpa runs it unmasked.
   static at::Tensor int8_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v) {
     namespace sage = sage_attention_hip;
     for (const auto* t : {&q, &k, &v})
@@ -391,35 +471,61 @@ class Block::Impl {
                   "INT8 attention takes [1, heads, tokens, head_dim] bf16 with a contiguous head_dim");
     TORCH_CHECK(k.sizes() == v.sizes() && k.size(1) == q.size(1) && k.size(3) == q.size(3),
                 "INT8 attention keys and values must match the query heads");
-    const int64_t H = q.size(1), Lq = q.size(2), Lk = k.size(2), D = q.size(3);
-    TORCH_CHECK(D == 64 || D == 128 || D == 256, "INT8 attention needs a head size of 64/128/256");
-    const int64_t padded_q = cdiv(Lq, kHipAttentionCtaQ) * kHipAttentionCtaQ;
-    const int64_t padded_k = cdiv(Lk, kHipAttentionCtaK) * kHipAttentionCtaK, key_groups = padded_k / kHipKeyGroup;
-    // comfy-kitchen's sage_rotation: short keys H4, longer ones the widest Hadamard of the head
-    const int rotation = Lk <= 256 ? 4 : D >= 256 ? 129 : D >= 128 ? 128 : 64;
-    const auto i8 = q.options().dtype(at::kChar), f32 = q.options().dtype(at::kFloat);
-    const at::Tensor q_int8 = at::empty({1, H, Lq, D}, i8), k_int8 = at::empty({1, H, Lk, D}, i8);
-    const at::Tensor q_scale = at::empty({1, H, padded_q}, f32), k_scale = at::empty({1, H, key_groups}, f32);
-    const at::Tensor v_int8 = at::empty({H * D, padded_k}, i8), v_scale = at::empty({H * D}, f32);
-    const at::Tensor anchors = at::empty({1, H}, q.options().dtype(at::kInt));
-    const at::Tensor out = at::empty({1, H, Lq, D}, q.options());
+    const Int8QK qk = int8_qk(q.size(1), q.size(2), k.size(2), q.size(3), q.options());
+    const int h = static_cast<int>(qk.heads);
+    sage::launch_quant_qk_int8(q.data_ptr(), qk.q.data_ptr(), qk.q_scale.data_ptr(), k.data_ptr(), qk.k.data_ptr(),
+                               qk.k_scale.data_ptr(), qk.anchors.data_ptr(), 1, h, static_cast<int>(qk.queries),
+                               static_cast<int>(qk.padded_queries()), h, static_cast<int>(qk.keys),
+                               static_cast<int>(qk.key_groups()), static_cast<int>(qk.head_dim), q.stride(0),
+                               q.stride(1), q.stride(2), k.stride(0), k.stride(1), k.stride(2), sage::kBFloat16,
+                               qk.rotation(), at::cuda::getCurrentCUDAStream());
+    return int8_attend(qk, v);
+  }
+
+  // comfy-kitchen's HIP INT8 attention of the cross-attention queries after norm_rope (no RoPE) against
+  // the prompt keys/values [1, heads, keys, d]: a (rows, heads, d) view.
+  at::Tensor normed_cross_attention(const at::Tensor& q_projection, const at::Tensor& q_norm, const at::Tensor& key,
+                                    const at::Tensor& value) const {
+    TORCH_CHECK(key.scalar_type() == at::kBFloat16 && key.dim() == 4 && key.size(0) == 1 && key.stride(3) == 1 &&
+                key.sizes() == value.sizes(), "prompt keys/values must be [1, heads, keys, head_dim] bf16");
+    const int64_t rows = q_projection.size(0), heads = key.size(1), head_dim = key.size(3);
+    const Int8QK qk = int8_qk(heads, rows, key.size(2), head_dim, key.options());
     const gpu::Stream stream = at::cuda::getCurrentCUDAStream();
-    const int h = static_cast<int>(H), lq = static_cast<int>(Lq), lk = static_cast<int>(Lk), d = static_cast<int>(D);
-    sage::launch_quant_qk_int8(q.data_ptr(), q_int8.data_ptr(), q_scale.data_ptr(), k.data_ptr(), k_int8.data_ptr(),
-                               k_scale.data_ptr(), anchors.data_ptr(), 1, h, lq, static_cast<int>(padded_q), h, lk,
-                               static_cast<int>(key_groups), d, q.stride(0), q.stride(1), q.stride(2), k.stride(0),
-                               k.stride(1), k.stride(2), sage::kBFloat16, rotation, stream);
-    sage::launch_quant_v_int8(v.data_ptr(), v_int8.data_ptr(), v_scale.data_ptr(), 1, h, lk, d,
-                              static_cast<int>(padded_k), v.stride(0), v.stride(1), v.stride(2), sage::kBFloat16,
-                              stream);
-    sage::launch_int8_attn(q_int8.data_ptr(), k_int8.data_ptr(), v_int8.data_ptr(), out.data_ptr(), q_scale.data_ptr(),
-                           k_scale.data_ptr(), v_scale.data_ptr(), nullptr, 0, 0, 0, 0, 0,
-                           static_cast<int>(kHipAttentionCtaK), 1, lq, lk, static_cast<int>(padded_q), h, h, d,
-                           static_cast<int>(key_groups), H * Lq * D, Lq * D, H * Lk * D, Lk * D, H * D * padded_k,
-                           D * padded_k, padded_k, H * Lq * D, Lq * D, D,
-                           static_cast<float>(1.0 / std::sqrt(static_cast<double>(D))), sage::kBFloat16, stream);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    return out;
+    sage_attention_hip::launch_norm_rope_quant_q(norm_rope_rows(q_projection, q_norm, nullptr, nullptr, head_dim),
+                                                 qk.q.data_ptr(), qk.q_scale.data_ptr(),
+                                                 static_cast<int>(qk.padded_queries()), qk.rotation(), stream);
+    sage_attention_hip::launch_quant_k_int8(key.data_ptr(), qk.k.data_ptr(), qk.k_scale.data_ptr(),
+                                            qk.anchors.data_ptr(), static_cast<int>(heads), static_cast<int>(qk.keys),
+                                            static_cast<int>(qk.key_groups()), static_cast<int>(head_dim),
+                                            key.stride(1), key.stride(2), qk.rotation(), stream);
+    return int8_attend(qk, value)[0].transpose(0, 1);
+  }
+
+  // norm_rope's inputs as norm_rope_quant.h takes them, checked as glue.cu's norm_rope checks them.
+  sage_attention_hip::NormRope norm_rope_rows(const at::Tensor& x, const at::Tensor& weight, const at::Tensor* cos,
+                                              const at::Tensor* sin, int64_t head_dim) const {
+    TORCH_CHECK(x.is_cuda() && x.scalar_type() == at::kBFloat16 && x.dim() == 2 && x.is_contiguous() &&
+                reinterpret_cast<uintptr_t>(x.data_ptr()) % 16 == 0, "x must be contiguous 16-byte aligned bf16 rows");
+    const int64_t rows = x.size(0), dim = x.size(1), tokens = rows / 2;
+    TORCH_CHECK(weight.scalar_type() == at::kBFloat16 && weight.is_contiguous() && weight.numel() == dim &&
+                dim % head_dim == 0, "norm_rope needs a (dim,) bf16 weight and whole heads");
+    sage_attention_hip::NormRope p{x.data_ptr(), weight.data_ptr(), nullptr, nullptr, 0, 0, static_cast<int>(rows),
+                                   static_cast<int>(std::max<int64_t>(tokens, 1)), static_cast<int>(dim / head_dim),
+                                   static_cast<int>(head_dim), static_cast<float>(config_.eps)};
+    if (cos != nullptr) {
+      // [1, heads, rows / 2, head_dim / 2], innermost contiguous, both halves of the rows at the same positions
+      TORCH_CHECK(cos->scalar_type() == at::kBFloat16 && sin->scalar_type() == at::kBFloat16 && cos->dim() == 4 &&
+                  cos->size(1) * head_dim == dim && cos->size(2) == tokens && cos->size(3) * 2 == head_dim &&
+                  cos->stride(3) == 1 && cos->strides() == sin->strides() && cos->stride(1) % 4 == 0 &&
+                  cos->stride(2) % 4 == 0 && reinterpret_cast<uintptr_t>(cos->data_ptr()) % 8 == 0 &&
+                  reinterpret_cast<uintptr_t>(sin->data_ptr()) % 8 == 0,
+                  "rope tables must be [1, heads, rows / 2, head_dim / 2]");
+      p.cos = cos->data_ptr();
+      p.sin = sin->data_ptr();
+      p.rope_stride_head = cos->stride(1);
+      p.rope_stride_token = cos->stride(2);
+    }
+    return p;
   }
 #endif
 
@@ -693,6 +799,12 @@ at::Tensor Block::forward(const std::vector<std::optional<at::Tensor>>& linear_t
 at::Tensor Block::self_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v, int64_t rows,
                                  int64_t heads, int64_t head_dim, int64_t cta_k) {
   return impl_->self_attention(q, k, v, rows, heads, head_dim, cta_k);
+}
+at::Tensor Block::normed_self_attention(const at::Tensor& q_projection, const at::Tensor& k_projection,
+                                        const at::Tensor& v, const at::Tensor& q_norm, const at::Tensor& k_norm,
+                                        const at::Tensor& rope_cos, const at::Tensor& rope_sin, int64_t cta_k) {
+  return impl_->normed_self_attention([&] { return q_projection; }, [&] { return k_projection; }, v, q_norm, k_norm,
+                                      rope_cos, rope_sin, cta_k);
 }
 std::pair<at::Tensor, at::Tensor> Block::prompt_key_value(
     const std::vector<std::optional<at::Tensor>>& linear_tensors, const at::Tensor& cross_k_norm,
