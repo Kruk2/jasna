@@ -1,11 +1,11 @@
-"""The ahead-of-time AMD decoder kernels (``na_hip``, ``swiglu_hip``) and their routing; no GPU needed."""
+"""The ahead-of-time AMD decoder kernels (``na_hip``, ``diffusion_hip``) and their routing; no GPU needed."""
 
 from pathlib import Path
 
 import pytest
 import torch
 
-from jasna.models.ltx_vae import na_hip, swiglu_hip
+from jasna.models.ltx_vae import diffusion_hip, na_hip
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 from factories import offload_bundle_targets
@@ -22,9 +22,8 @@ def test_every_window_ships_a_code_object_for_every_architecture(window):
     assert all(module in kernels for kernels in KERNEL_LAUNCH.values())
 
 
-@pytest.mark.parametrize("shape", swiglu_hip.SHAPES)
-def test_every_swiglu_shape_ships_a_code_object_for_every_architecture(shape):
-    module = swiglu_hip.module_name(shape)
+@pytest.mark.parametrize("module", [diffusion_hip.SWIGLU_MODULE, diffusion_hip.QKV_MODULE])
+def test_every_diffusion_kernel_ships_a_code_object_for_every_architecture(module):
     targets = offload_bundle_targets(MEDIA / f"{module}.hipfb")
 
     assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == set(KERNEL_LAUNCH)
@@ -34,23 +33,33 @@ def test_every_swiglu_shape_ships_a_code_object_for_every_architecture(shape):
 def test_without_triton_the_decoder_runs_the_ahead_of_time_kernels(monkeypatch):
     monkeypatch.setattr(T, "_fused_na3d", None)
     monkeypatch.setattr(T, "_fused_residual_swiglu", None)
+    monkeypatch.setattr(T, "_fused_slab_qkv", None)
     monkeypatch.setattr(T, "has_triton_package", lambda: False)
 
     T.enable_fused_kernels(torch.device("cpu"))
 
     assert T._fused_na3d is na_hip.na3d
-    assert T._fused_residual_swiglu is swiglu_hip.residual_swiglu_
+    assert T._fused_residual_swiglu is diffusion_hip.residual_swiglu_
+    assert T._fused_slab_qkv is diffusion_hip.slab_qkv
 
 
-def test_the_swiglu_kernel_rejects_inputs_it_was_not_built_for():
-    x = torch.zeros(4, 256, dtype=torch.float16)
+def test_the_diffusion_kernels_reject_inputs_they_were_not_built_for():
+    vector = torch.zeros(256, dtype=torch.bfloat16)
     with pytest.raises(ValueError, match="contiguous bf16"):
-        swiglu_hip.residual_swiglu_(x, *(torch.zeros(256, dtype=torch.bfloat16),) * 3, *(x.bfloat16(),) * 3)
+        diffusion_hip.residual_swiglu_(torch.zeros(4, 256, dtype=torch.float16), vector, vector, vector,
+                                       *(torch.zeros(1024, 256, dtype=torch.bfloat16),) * 2,
+                                       torch.zeros(256, 1024, dtype=torch.bfloat16))
+    with pytest.raises(ValueError, match="width 256"):
+        diffusion_hip.residual_swiglu_(torch.zeros(4, 512, dtype=torch.bfloat16), *(vector,) * 6)
+    y = torch.zeros(1, 2, 2, 12, 256, dtype=torch.bfloat16)
+    weights = [torch.zeros(256, 256, dtype=torch.bfloat16), vector] * 3 + [torch.zeros(32, dtype=torch.bfloat16)] * 2
+    with pytest.raises(ValueError, match="width 256"):
+        diffusion_hip.slab_qkv(y, weights, torch.zeros(32), torch.zeros(12), [8, 12], 2, 5, 0.125)
 
 
-def test_a_swiglu_shape_without_a_built_kernel_fails_loudly():
-    with pytest.raises(RuntimeError, match="no ahead-of-time SwiGLU kernel"):
-        swiglu_hip._kernel("gfx1201", (512, 2048))
+def test_a_module_without_a_built_kernel_fails_loudly():
+    with pytest.raises(RuntimeError, match="no ahead-of-time kernel"):
+        diffusion_hip._kernel("gfx1201", "ltx_swiglu_512x2048", ())
 
 
 def test_rejects_inputs_the_kernel_was_not_built_for():

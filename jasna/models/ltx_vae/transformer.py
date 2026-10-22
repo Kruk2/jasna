@@ -141,6 +141,7 @@ class QKVProjections(nn.Module):
 
 _fused_na3d = None
 _fused_residual_swiglu = None
+_fused_slab_qkv = None
 
 
 @torch.compiler.disable
@@ -156,24 +157,27 @@ def enable_fused_kernels(device: torch.device) -> None:
     """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``): JIT, or on
     AMD without Triton (Windows ROCm) built ahead of time (``na_hip``); before SM 8.0, where Triton
     has no tensor-core dot, through the fp16 pure-torch ``na3d``. On AMD the diffusion blocks'
-    residual MLP also runs as one kernel (``swiglu_triton``, ahead of time ``swiglu_hip``)."""
-    global _fused_na3d, _fused_residual_swiglu
+    residual MLP and the slab Q/K/V projections run as fused kernels (``diffusion_triton``, ahead of
+    time ``diffusion_hip``)."""
+    global _fused_na3d, _fused_residual_swiglu, _fused_slab_qkv
     if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
         _fused_na3d = _fp16_eager_na3d
         return
     if not has_triton_package():
-        from jasna.models.ltx_vae import na_hip, swiglu_hip
+        from jasna.models.ltx_vae import diffusion_hip, na_hip
 
         _fused_na3d = na_hip.na3d
-        _fused_residual_swiglu = swiglu_hip.residual_swiglu_
+        _fused_residual_swiglu = diffusion_hip.residual_swiglu_
+        _fused_slab_qkv = diffusion_hip.slab_qkv
         return
     from jasna.models.ltx_vae import na_triton
 
     _fused_na3d = na_triton.na3d
     if is_amd_device(device):
-        from jasna.models.ltx_vae import swiglu_triton
+        from jasna.models.ltx_vae import diffusion_triton
 
-        _fused_residual_swiglu = swiglu_triton.residual_swiglu_
+        _fused_residual_swiglu = diffusion_triton.residual_swiglu_
+        _fused_slab_qkv = diffusion_triton.slab_qkv
 
 
 def neighborhood_attention(
@@ -351,16 +355,29 @@ def _attn_on_w_slab(
     y = F.rms_norm(x_chunk, (attn.dim,), norm.weight, _NORM_EPS)
     y = y * (1.0 + scale) + shift
 
-    head_shape = (batch, t, h, ext_w, attn.num_heads, attn.head_dim)
-    core_shape = (batch, t, h, core_len, attn.num_heads, attn.head_dim)
-    y_core = y[:, :, :, halo : halo + core_len].reshape(-1, attn.dim)
-    q = F.linear(y_core, attn.qkv.to_q.weight, attn.qkv.to_q.bias).view(core_shape)
-    q = F.rms_norm(q, (attn.head_dim,), attn.q_norm.weight, _NORM_EPS) * float(attn.scale)
-    q = apply_abs_rope_slab(q, attn, w_pos[halo : halo + core_len])
-    k = F.linear(y, attn.qkv.to_k.weight, attn.qkv.to_k.bias).view(head_shape)
-    k = F.rms_norm(k, (attn.head_dim,), attn.k_norm.weight, _NORM_EPS)
-    k = apply_abs_rope_slab(k, attn, w_pos)
-    v = F.linear(y, attn.qkv.to_v.weight, attn.qkv.to_v.bias).view(head_shape)
+    if _fused_slab_qkv is not None and y.is_cuda:
+        q, k, v = _fused_slab_qkv(
+            y,
+            [attn.qkv.to_q.weight, attn.qkv.to_q.bias, attn.qkv.to_k.weight, attn.qkv.to_k.bias,
+             attn.qkv.to_v.weight, attn.qkv.to_v.bias, attn.q_norm.weight, attn.k_norm.weight],
+            torch.cat([attn.rope_inv_t, attn.rope_inv_h, attn.rope_inv_w]),
+            w_pos,
+            [attn.rope_inv_t.numel(), attn.rope_inv_h.numel()],
+            core_len,
+            halo,
+            float(attn.scale),
+        )
+    else:
+        head_shape = (batch, t, h, ext_w, attn.num_heads, attn.head_dim)
+        core_shape = (batch, t, h, core_len, attn.num_heads, attn.head_dim)
+        y_core = y[:, :, :, halo : halo + core_len].reshape(-1, attn.dim)
+        q = F.linear(y_core, attn.qkv.to_q.weight, attn.qkv.to_q.bias).view(core_shape)
+        q = F.rms_norm(q, (attn.head_dim,), attn.q_norm.weight, _NORM_EPS) * float(attn.scale)
+        q = apply_abs_rope_slab(q, attn, w_pos[halo : halo + core_len])
+        k = F.linear(y, attn.qkv.to_k.weight, attn.qkv.to_k.bias).view(head_shape)
+        k = F.rms_norm(k, (attn.head_dim,), attn.k_norm.weight, _NORM_EPS)
+        k = apply_abs_rope_slab(k, attn, w_pos)
+        v = F.linear(y, attn.qkv.to_v.weight, attn.qkv.to_v.bias).view(head_shape)
     del y
 
     out = neighborhood_attention(attn, q.contiguous(), k.contiguous(), v.contiguous(), halo)

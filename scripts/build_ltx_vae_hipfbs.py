@@ -1,24 +1,25 @@
 """Build the LTX VAE decoder's Triton kernels into committed AMD .hipfb bundles.
 
 Compiled ahead of time, bf16: ``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
-shipped DiffVAE decoder with that size's AMD ``na_geometry`` config, and
-``swiglu_triton._residual_swiglu_kernel`` once per diffusion-block MLP shape. Windows ROCm ships no
-Triton, so ``na_hip`` and ``swiglu_hip`` launch these there.
+shipped DiffVAE decoder with that size's AMD ``na_geometry`` config, and ``diffusion_triton``'s residual
+SwiGLU and slab Q/K/V kernels at the shipped diffusion-block shapes. Windows ROCm ships no Triton, so
+``na_hip`` and ``diffusion_hip`` launch these there.
 
 Usage (Linux, ROCm Torch + Triton, ROCm's clang-offload-bundler):
     python scripts/build_ltx_vae_hipfbs.py
 
-Writes ``jasna/media/ltx_na3d_*.hipfb``, ``jasna/media/ltx_swiglu_*.hipfb`` and the launch table
+Writes ``jasna/media/ltx_na3d_*.hipfb``, ``ltx_swiglu_*.hipfb``, ``ltx_slab_qkv_*.hipfb`` and the launch table
 ``jasna/models/ltx_vae/hip_launch.py`` (the grids come from the launchers).
 """
 from __future__ import annotations
 
 from triton_hipfb import ARCHITECTURES, MEDIA, REPO, WARP_SIZE, _write_launch_table, bundle, compile_code_object
 
-from jasna.models.ltx_vae import na_hip, swiglu_hip
+from jasna.models.ltx_vae import diffusion_hip as aot
+from jasna.models.ltx_vae import na_hip
+from jasna.models.ltx_vae.diffusion_triton import _residual_swiglu_kernel, _slab_qkv_kernel
 from jasna.models.ltx_vae.na_geometry import config_for
 from jasna.models.ltx_vae.na_triton import _na3d_fwd_kernel
-from jasna.models.ltx_vae.swiglu_triton import _residual_swiglu_kernel
 
 LAUNCH_TABLE = REPO / "jasna" / "models" / "ltx_vae" / "hip_launch.py"
 
@@ -37,13 +38,17 @@ def _kernel_specs():
         specs[na_hip.module_name(window)] = (
             _na3d_fwd_kernel, na_hip.KERNEL_ARGUMENTS, constants, config.num_warps, config.num_stages,
         )
-    for dim, hidden in swiglu_hip.SHAPES:
-        constants = {
-            "DIM": dim, "HIDDEN": hidden, "BLOCK_ROWS": swiglu_hip.BLOCK_ROWS, "BLOCK_HIDDEN": swiglu_hip.BLOCK_HIDDEN,
-        }
-        specs[swiglu_hip.module_name((dim, hidden))] = (
-            _residual_swiglu_kernel, swiglu_hip.KERNEL_ARGUMENTS, constants, swiglu_hip.NUM_WARPS, 1,
-        )
+    specs[aot.SWIGLU_MODULE] = (
+        _residual_swiglu_kernel, aot.SWIGLU_ARGUMENTS,
+        {"DIM": aot.DIM, "HIDDEN": aot.HIDDEN, "BLOCK_ROWS": aot.SWIGLU_BLOCK_ROWS, "BLOCK_HIDDEN": aot.SWIGLU_BLOCK_HIDDEN},
+        aot.SWIGLU_WARPS, 1,
+    )
+    specs[aot.QKV_MODULE] = (
+        _slab_qkv_kernel, aot.QKV_ARGUMENTS,
+        {"DIM": aot.DIM, "HEAD_DIM": aot.HEAD_DIM, "PAIRS_T": aot.ROPE_PAIRS[0], "PAIRS_H": aot.ROPE_PAIRS[1],
+         "BLOCK_ROWS": aot.QKV_BLOCK_ROWS},
+        aot.QKV_WARPS, 1,
+    )
     return specs
 
 
