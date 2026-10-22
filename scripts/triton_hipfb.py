@@ -23,17 +23,22 @@ ARCHITECTURES = ("gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151
 WARP_SIZE = 32
 
 
-def compile_code_object(kernel, pointer_args, constants, num_warps, architecture):
-    signature = {name: "*fp16" for name in pointer_args}
+def compile_code_object(kernel, arguments, constants, options, architecture):
+    """``arguments`` maps each runtime argument to its Triton type; ``"i32:16"`` is an int the caller
+    guarantees divisible by 16."""
+    signature = {name: kind.removesuffix(":16") for name, kind in arguments.items()}
     signature.update({name: "constexpr" for name in constants})
     # Every tensor is at most a few hundred MB: 16-byte aligned and inside the 2 GB range of AMD buffer loads.
-    pointer_attrs = {
-        (index,): [["tt.divisibility", 16], ["tt.pointer_range", 32]] for index in range(len(pointer_args))
-    }
+    attrs = {}
+    for index, kind in enumerate(arguments.values()):
+        if kind.startswith("*"):
+            attrs[(index,)] = [["tt.divisibility", 16], ["tt.pointer_range", 32]]
+        elif kind.endswith(":16"):
+            attrs[(index,)] = [["tt.divisibility", 16]]
     compiled = triton.compile(
-        ASTSource(kernel, signature, constants, pointer_attrs),
+        ASTSource(kernel, signature, constants, attrs),
         target=GPUTarget("hip", architecture, WARP_SIZE),
-        options={"num_warps": num_warps, "num_stages": 1},
+        options=options,
     )
     metadata = compiled.metadata
     if metadata.global_scratch_size or metadata.profile_scratch_size:
@@ -58,12 +63,14 @@ def bundle(code_objects: dict[str, bytes], output: Path) -> None:
 
 
 def build(kernel_specs: dict[str, tuple], launch_table: Path, title: str, script: str) -> None:
-    """Compile and bundle every ``stem -> (kernel, pointer args, constexprs, num_warps, grid)``."""
+    """Compile and bundle every ``stem -> (kernel, fp16 pointer args, constexprs, num_warps, grid)``."""
     launch: dict[str, dict[str, tuple]] = {architecture: {} for architecture in ARCHITECTURES}
     for stem, (kernel, pointer_args, constants, num_warps, grid) in kernel_specs.items():
         code_objects = {}
+        arguments = {name: "*fp16" for name in pointer_args}
+        options = {"num_warps": num_warps, "num_stages": 1}
         for architecture in ARCHITECTURES:
-            code, name, shared = compile_code_object(kernel, pointer_args, constants, num_warps, architecture)
+            code, name, shared = compile_code_object(kernel, arguments, constants, options, architecture)
             code_objects[architecture] = code
             launch[architecture][stem] = (name, grid, num_warps * WARP_SIZE, shared)
         output = MEDIA / f"{stem}.hipfb"

@@ -1,5 +1,5 @@
-"""The DiffVAE's AMD paths: the encoder's comfy-kitchen conv3d head against MIOpen. Needs an AMD
-GPU with Triton (Linux ROCm)."""
+"""The DiffVAE's AMD paths: the ahead-of-time NA kernel against the JIT one, and the encoder's
+comfy-kitchen conv3d head against MIOpen. Needs an AMD GPU with Triton (Linux ROCm)."""
 
 import importlib.util
 
@@ -14,6 +14,26 @@ pytestmark = pytest.mark.skipif(
     or importlib.util.find_spec("triton") is None,
     reason="needs an AMD GPU and Triton",
 )
+
+
+@pytest.mark.parametrize("kernel_size, shape, query_w", [
+    ((11, 11, 11), (1, 24, 20, 30, 4, 64), (5, 20)),
+    ((11, 11, 11), (1, 12, 13, 14, 2, 64), (0, 14)),
+    ((3, 7, 7), (1, 9, 16, 16, 8, 64), (0, 16)),
+    ((3, 5, 5), (2, 5, 9, 12, 3, 64), (2, 7)),
+])
+def test_ahead_of_time_na3d_matches_the_jit_kernel(kernel_size, shape, query_w):
+    from jasna.models.ltx_vae import na_hip, na_triton
+
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    k, v, q_full = (torch.randn(shape, device="cuda", dtype=torch.bfloat16, generator=generator) for _ in range(3))
+    w_start, w_len = query_w
+    q = q_full[:, :, :, w_start : w_start + w_len].contiguous() * 0.125
+
+    aot = na_hip.na3d(q, k, v, list(kernel_size), w_start)
+    jit = na_triton.na3d(q, k, v, list(kernel_size), w_start)
+
+    torch.testing.assert_close(aot, jit, atol=1e-2, rtol=1e-2)
 
 
 def test_kitchen_resnet_block_matches_miopen(monkeypatch):

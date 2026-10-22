@@ -13,6 +13,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
+from torch.utils._triton import has_triton_package
 
 from jasna.models.ltx_vae.eager_na import na3d
 from jasna.tensor_utils import compile_static
@@ -150,11 +151,17 @@ def _fp16_eager_na3d(
 
 
 def enable_fused_attention(device: torch.device) -> None:
-    """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``), or before
-    SM 8.0, where Triton has no tensor-core dot, through the fp16 pure-torch ``na3d``."""
+    """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``): JIT, or on
+    AMD without Triton (Windows ROCm) built ahead of time (``na_hip``); before SM 8.0, where Triton
+    has no tensor-core dot, through the fp16 pure-torch ``na3d``."""
     global _fused_na3d
     if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
         _fused_na3d = _fp16_eager_na3d
+        return
+    if not has_triton_package():
+        from jasna.models.ltx_vae import na_hip
+
+        _fused_na3d = na_hip.na3d
         return
     from jasna.models.ltx_vae import na_triton
 
