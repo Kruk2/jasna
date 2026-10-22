@@ -10,6 +10,7 @@ from jasna.accelerator import apply_rocm_env_defaults, configure_rocm_process_en
 
 ROCM_DEFAULTS = {
     "MIOPEN_FIND_MODE": "HYBRID",
+    "MIOPEN_DEBUG_CONV_GEMM": "0",
     "PYTORCH_ALLOC_CONF": "expandable_segments:False",
     "PYTORCH_HIP_ALLOC_CONF": "expandable_segments:False",
     "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": "1",
@@ -27,6 +28,12 @@ def test_a_user_setting_wins():
     apply_rocm_env_defaults(environ)
     assert environ["PYTORCH_ALLOC_CONF"] == "expandable_segments:True"
     assert environ["PYTORCH_HIP_ALLOC_CONF"] == "expandable_segments:False"
+
+
+def test_a_user_can_turn_miopen_gemm_convs_back_on():
+    environ = {"MIOPEN_DEBUG_CONV_GEMM": "1"}
+    apply_rocm_env_defaults(environ)
+    assert environ["MIOPEN_DEBUG_CONV_GEMM"] == "1"
 
 
 def test_process_env_is_left_alone_off_rocm(monkeypatch):

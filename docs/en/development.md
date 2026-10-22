@@ -80,6 +80,12 @@ for the GPU; recheck them against rfdetr's code when bumping the `rfdetr` pin.
 `--device cuda:N` picks the GPU, but FFmpeg 8's Linux AMF ignores the adapter,
 so isolate the GPU at the container or host level on multi-GPU machines.
 
+`accelerator.configure_rocm_process_env` sets MIOpen defaults at start-up; a
+variable already in the environment wins. `MIOPEN_FIND_MODE=HYBRID` keeps the
+conv benchmarks across runs, and `MIOPEN_DEBUG_CONV_GEMM=0` keeps the first
+benchmark of a new shape from trying the im2col/GEMM solvers, whose workspace
+(17 GiB for the LTX VAE encoder at 768) runs a 16 GB card out of memory.
+
 ## Run
 
 ```bash

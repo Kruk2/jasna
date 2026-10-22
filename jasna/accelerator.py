@@ -21,6 +21,11 @@ log = logging.getLogger(__name__)
 # HYBRID runs a real find once per new problem and keeps the result across runs
 # (issue #481: 4x faster primary restoration once the DB is seeded).
 #
+# That first find also benchmarks the im2col/GEMM conv solvers, whose workspace
+# is about 27x the conv input: 17 GiB for the LTX VAE encoder at 768, so a
+# 16 GB card runs out of memory, the find never finishes and every run fails.
+# The CK solvers win those benchmarks anyway; without GEMM the peak is 4.3 GiB.
+#
 # Expandable segments release memory by unmapping virtual address ranges rather
 # than by a device-synchronizing free, so a VramOffloader empty_cache() could
 # pull pages out from under kernels another thread still had in flight — issue
@@ -28,6 +33,7 @@ log = logging.getLogger(__name__)
 # names cover the versions in the field; whichever one the build reads wins.
 def apply_rocm_env_defaults(environ: MutableMapping[str, str]) -> None:
     environ.setdefault("MIOPEN_FIND_MODE", "HYBRID")
+    environ.setdefault("MIOPEN_DEBUG_CONV_GEMM", "0")
     environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:False")
     environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:False")
     environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
