@@ -398,7 +398,7 @@ def check_amd_amf_runtime() -> tuple[bool, str]:
     library = "amfrt64.dll" if sys.platform == "win32" else "libamfrt64.so.1"
     try:
         ctypes.CDLL(library)
-    except OSError as e:
+    except (OSError, ImportError) as e:
         return False, str(e)
     return True, library
 

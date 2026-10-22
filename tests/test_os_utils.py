@@ -789,11 +789,12 @@ def test_amf_runtime_check_loads_the_platform_library(monkeypatch, platform, lib
     assert loaded == [library]
 
 
-def test_amf_runtime_check_reports_the_load_error(monkeypatch) -> None:
+@pytest.mark.parametrize('error', [OSError, ImportError])
+def test_amf_runtime_check_reports_the_load_error(monkeypatch, error) -> None:
     import ctypes
 
     def missing(name):
-        raise OSError(f"{name}: cannot open shared object file")
+        raise error(f"{name}: cannot open shared object file")
 
     monkeypatch.setattr(os_utils.sys, "platform", "linux")
     monkeypatch.setattr(ctypes, "CDLL", missing)
