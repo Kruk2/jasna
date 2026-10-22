@@ -232,6 +232,7 @@ def test_extension_build_finds_ninja_from_its_package_when_off_path(monkeypatch,
     ninja.BIN_DIR = str(tmp_path / "ninja-bin")
     monkeypatch.setitem(sys.modules, "ninja", ninja)
     monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
     monkeypatch.setattr(native, "_attention_objects", lambda build_directory, cuda_home: [])
     monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: os.environ["PATH"].split(os.pathsep))
@@ -242,6 +243,7 @@ def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
     from torch.utils import cpp_extension
 
     objects = [tmp_path / "quant_qk_int8.o", tmp_path / "sage_attn_launcher.o"]
+    monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(native, "_ninja_available", lambda: True)
     monkeypatch.setattr(native, "_IS_WINDOWS", False)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
