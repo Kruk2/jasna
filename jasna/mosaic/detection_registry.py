@@ -71,6 +71,15 @@ RFDETR_MODEL_NAMES: frozenset[str] = frozenset(
 
 DEFAULT_DETECTION_MODEL_NAME = "rfdetr-v6"
 
+
+def default_detection_batch_size(device: torch.device | str) -> int:
+    """Frames per detector call (and decode batch) when the user sets none.
+
+    AMD runs RF-DETR as a torch model, which is ~6 % faster end to end at 8;
+    NVIDIA's TensorRT engines are built for 4.
+    """
+    return 8 if is_amd_device(device) else 4
+
 RFDETR_MODEL_CONFIGS: dict[str, RfDetrModelConfig] = {
     "rfdetr-v5": RfDetrModelConfig(768, 0.25, 4, None),
     "rfdetr-v6": RfDetrModelConfig(576, 0.35, None, "medium"),
