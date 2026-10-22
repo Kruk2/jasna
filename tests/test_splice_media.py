@@ -23,7 +23,11 @@ from jasna.media.splice import (
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
 from jasna.segments import SegmentRange
 
-from factories import write_double_adts_aac_source, write_non_utf8_metadata_source
+from factories import (
+    write_double_adts_aac_source,
+    write_hrd_timing_sei_source,
+    write_non_utf8_metadata_source,
+)
 
 
 def _ffmpeg(*args: str) -> None:
@@ -157,6 +161,62 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         render_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
     for frame_index in range(12):
         assert np.array_equal(output_frames[12 + frame_index], render_frames[frame_index])
+
+
+@pytest.mark.parametrize(
+    "selections",
+    [
+        [SegmentRange(1.2, 1.8)],
+        [SegmentRange(1.1, 1.4), SegmentRange(3.1, 3.5)],
+    ],
+)
+def test_splice_keeps_source_timestamps_of_hrd_timing_sei_source(
+    tmp_path: Path, selections: list[SegmentRange]
+) -> None:
+    source = write_hrd_timing_sei_source(tmp_path / "hrd.mp4")
+    metadata = get_video_meta_data(str(source))
+    index = probe_keyframes(source, metadata)
+    plan = build_splice_plan(selections, index, duration=metadata.duration)
+    assert [span.kind for span in plan.spans][:2] == ["copy", "render"]
+
+    fragments = []
+    for span_index, span in enumerate(plan.spans):
+        raw = tmp_path / f"raw-{span_index}.nut"
+        duration = float((span.end_pts - span.start_pts) * index.time_base)
+        if span.kind == "copy":
+            create_copy_fragment(source, span, index, raw, codec="h264")
+        else:
+            _ffmpeg(
+                "-ss", f"{index.seconds_for_pts(span.start_pts):.6f}",
+                "-i", str(source),
+                "-t", f"{duration:.6f}",
+                "-map", "0:v:0",
+                "-an",
+                "-vf", "hue=s=0",
+                "-c:v", "libx264", "-profile:v", "main",
+                "-g", "30", "-bf", "3", "-flags", "+cgop", "-b:v", "500k",
+                "-x264-params", "nal-hrd=vbr:vbv-maxrate=1000:vbv-bufsize=2000",
+                "-f", "nut",
+                str(raw),
+            )
+        normalized = tmp_path / f"part-{span_index}.ts"
+        normalize_fragment(raw, normalized, codec="h264")
+        fragments.append((normalized, duration))
+    assembled = tmp_path / "assembled.ts"
+    concatenate_fragments(fragments, manifest=tmp_path / "parts.ffconcat", destination=assembled, codec="h264")
+    output = tmp_path / "output.mp4"
+    mux_final_output(assembled, source, output, codec="h264")
+
+    def shown_seconds(path: Path) -> list[float]:
+        with av.open(str(path)) as container:
+            stream = container.streams.video[0]
+            return sorted(
+                round(float((packet.pts - stream.start_time) * stream.time_base), 4)
+                for packet in container.demux(stream)
+                if packet.size
+            )
+
+    assert shown_seconds(output) == shown_seconds(source)
 
 
 @pytest.mark.parametrize("selection", [SegmentRange(0.0, 0.25), SegmentRange(0.9, 1.1)])
