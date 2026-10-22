@@ -357,7 +357,7 @@ def ltx_auto_split(
         ltx_min_size=config.ltx_auto_split_percent / 100,
         stride=samples.stride,
         duration=metadata.duration,
-        keyframes=tuple(index.seconds_for_pts(pts) for pts in index.pts),
+        keyframes=index.keyframe_seconds(),
         ltx_seed=config.ltx_seed,
     )
     if not segments:

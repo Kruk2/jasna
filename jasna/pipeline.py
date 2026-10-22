@@ -516,7 +516,7 @@ class Pipeline:
         standard_frames = sum(
             _span_frames(span, index, metadata)
             for span in plan.spans
-            if span not in ltx_spans and (span.is_render or reencode_copies)
+            if span not in ltx_spans and (span.kind != "copy" or reencode_copies)
         )
         ltx_callback = standard_callback = self.progress_callback
         if self.progress_callback is not None and ltx_spans and standard_frames:
@@ -571,10 +571,10 @@ class Pipeline:
                 for span_index, span in enumerate(plan.spans):
                     if self._cancel_event.is_set():
                         return
-                    if not span.is_render and reencode_copies:
-                        self._reencode_span(metadata, index, span, fragment_writer(span_index, span)(), progress)
-                    elif not span.is_render:
+                    if span.kind == "copy" and not reencode_copies:
                         create_copy_fragment(self.input_video, span, index, raw_path(span_index), codec=codec)
+                    elif not span.is_render:
+                        self._reencode_span(metadata, index, span, fragment_writer(span_index, span)(), progress)
                     elif span not in ltx_spans:
                         self._run_pass(
                             metadata=metadata,

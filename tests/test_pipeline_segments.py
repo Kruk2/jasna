@@ -438,6 +438,20 @@ def test_a_lut_job_encodes_the_parts_between_ranges_again_so_the_lut_covers_them
     assert len(concatenate.call_args.args[0]) == 4
 
 
+def test_a_span_that_cannot_be_copied_is_encoded_again_without_restoring(tmp_path) -> None:
+    segments = (SegmentRange(2.5, 3.0),)
+    spans = (SpliceSpan("reencode", 0, 60), SpliceSpan("render", 60, 120, ((75, 90),)), SpliceSpan("copy", 120, 240))
+    pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", segments, spans)
+    pipeline._reencode_span = MagicMock()
+
+    with patch("jasna.pipeline.Progressbar") as progressbar:
+        _run_smart_mocked(pipeline)
+
+    assert [reencode.args[2] for reencode in pipeline._reencode_span.call_args_list] == [spans[0]]
+    assert [restored.kwargs["end_pts"] for restored in pipeline._run_pass.call_args_list] == [120]
+    assert progressbar.call_args.kwargs["total_frames"] == 120
+
+
 def test_reencoded_span_writes_every_decoded_frame_and_closes_its_writer(tmp_path) -> None:
     pipeline = _mixed_pipeline(tmp_path, "basicvsrpp", (), ())
     pipeline.batch_size = 2

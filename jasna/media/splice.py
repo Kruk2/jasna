@@ -57,10 +57,15 @@ class KeyframeIndex:
     def seconds_for_pts(self, pts: int) -> float:
         return float((int(pts) - self.start_pts) * self.time_base)
 
+    def keyframe_seconds(self) -> tuple[float, ...]:
+        """Keyframe times past the stream start; the lead-in keyframe of an MP4 cut
+        mid-GOP counts as the start, where its render span begins."""
+        return tuple(max(0.0, self.seconds_for_pts(pts)) for pts in self.pts)
+
 
 @dataclass(frozen=True)
 class SpliceSpan:
-    kind: str  # "copy" or "render"
+    kind: str  # "copy", "render", or "reencode" (encoded again unrestored: it cannot be copied)
     start_pts: int
     end_pts: int
     effect_ranges: tuple[tuple[int, int], ...] = ()
@@ -393,12 +398,21 @@ def segment_render_span(segment: SegmentRange, index: KeyframeIndex) -> SpliceSp
             "The first selected segment begins before the first random-access keyframe",
             reason="before_first_keyframe",
         )
-    render_start = index.pts[left_index]
+    render_start = max(index.pts[left_index], index.start_pts)
     right_index = bisect.bisect_left(index.pts, effect_end)
     render_end = index.pts[right_index] if right_index < len(index.pts) else index.end_pts
     if render_end <= render_start:
         render_end = index.end_pts
     return SpliceSpan("render", render_start, render_end, ((effect_start, effect_end),))
+
+
+def _first_copyable_pts(index: KeyframeIndex) -> int:
+    """Where stream copy may start. An MP4 cut mid-GOP shows video from before its
+    first keyframe at or after the stream start: that keyframe is hidden lead-in."""
+    if index.pts[0] >= index.start_pts:
+        return index.start_pts
+    position = bisect.bisect_left(index.pts, index.start_pts)
+    return index.pts[position] if position < len(index.pts) else index.end_pts
 
 
 def build_splice_plan(
@@ -430,14 +444,21 @@ def build_splice_plan(
         require_one_model(tuple(owners))
 
     spans: list[SpliceSpan] = []
+    copy_from = _first_copyable_pts(index)
+
+    def add_unrendered(start: int, end: int) -> None:
+        if start < min(end, copy_from):
+            spans.append(SpliceSpan("reencode", start, min(end, copy_from)))
+            start = copy_from
+        if start < end:
+            spans.append(SpliceSpan("copy", start, end))
+
     cursor = index.start_pts
     for start, end, effects, _owners in merged:
-        if cursor < start:
-            spans.append(SpliceSpan("copy", cursor, start))
+        add_unrendered(cursor, start)
         spans.append(SpliceSpan("render", start, end, tuple(effects)))
         cursor = end
-    if cursor < index.end_pts:
-        spans.append(SpliceSpan("copy", cursor, index.end_pts))
+    add_unrendered(cursor, index.end_pts)
     if (
         len(spans) == 1
         and spans[0].is_render

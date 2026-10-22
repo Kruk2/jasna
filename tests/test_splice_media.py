@@ -12,6 +12,7 @@ from jasna.media.audio_utils import source_audio_codec
 from jasna.media.probe import get_video_meta_data
 from jasna.media.splice import (
     SpliceSpan,
+    build_splice_plan,
     concatenate_fragments,
     create_copy_fragment,
     mux_final_output,
@@ -20,6 +21,7 @@ from jasna.media.splice import (
     resolve_smart_encoder_settings,
 )
 from jasna.os_utils import resolve_executable, subprocess_no_window_kwargs
+from jasna.segments import SegmentRange
 
 from factories import write_double_adts_aac_source, write_non_utf8_metadata_source
 
@@ -155,6 +157,65 @@ def test_mixed_encoder_splice_decodes_with_exact_duration_and_audio(
         render_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
     for frame_index in range(12):
         assert np.array_equal(output_frames[12 + frame_index], render_frames[frame_index])
+
+
+@pytest.mark.parametrize("selection", [SegmentRange(0.0, 0.25), SegmentRange(0.9, 1.1)])
+def test_mid_gop_cut_splices_to_the_shown_frames_and_duration(tmp_path: Path, selection: SegmentRange) -> None:
+    # A `-c copy` cut at 1.5 s keeps the GOP from 1.0 s as a hidden lead-in, so the
+    # shown video starts half a GOP before the first keyframe at or after its start.
+    full = tmp_path / "full.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=12:duration=4.5",
+        "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=4.5",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "12", "-keyint_min", "12", "-sc_threshold", "0", "-bf", "3",
+        "-c:a", "aac",
+        str(full),
+    )
+    source = tmp_path / "cut.mp4"
+    _ffmpeg("-ss", "1.5", "-i", str(full), "-c", "copy", str(source))
+    metadata = get_video_meta_data(str(source))
+    index = probe_keyframes(source, metadata)
+    assert index.pts[0] < index.start_pts
+    plan = build_splice_plan([selection], index, duration=metadata.duration)
+
+    fragments = []
+    for span_index, span in enumerate(plan.spans):
+        raw = tmp_path / f"raw-{span_index}.nut"
+        if span.kind == "copy":
+            assert span.start_pts in index.pts
+            create_copy_fragment(source, span, index, raw, codec="h264")
+        else:
+            _ffmpeg(
+                "-ss", f"{index.seconds_for_pts(span.start_pts):.6f}",
+                "-i", str(source),
+                "-t", f"{float((span.end_pts - span.start_pts) * index.time_base):.6f}",
+                "-map", "0:v:0",
+                "-an",
+                "-c:v", "libx264",
+                "-g", "12", "-bf", "3", "-flags", "+cgop",
+                "-f", "nut",
+                str(raw),
+            )
+        normalized = tmp_path / f"part-{span_index}.ts"
+        normalize_fragment(raw, normalized, codec="h264")
+        fragments.append((normalized, float((span.end_pts - span.start_pts) * index.time_base)))
+    assembled = tmp_path / "assembled.ts"
+    concatenate_fragments(fragments, manifest=tmp_path / "parts.ffconcat", destination=assembled, codec="h264")
+    output = tmp_path / "output.mp4"
+    mux_final_output(assembled, source, output, codec="h264")
+
+    with av.open(str(source)) as container:
+        source_frames = sum(1 for _ in container.decode(video=0))
+    with av.open(str(output)) as container:
+        assert sum(1 for _ in container.decode(video=0)) == source_frames
+        video, audio = container.streams.video[0], container.streams.audio[0]
+        video_seconds = float(video.duration * video.time_base)
+        assert video_seconds == pytest.approx(source_frames / 12, abs=0.01)
+        assert float(audio.start_time * audio.time_base) == pytest.approx(
+            float(video.start_time * video.time_base), abs=0.05
+        )
 
 
 @pytest.mark.parametrize(

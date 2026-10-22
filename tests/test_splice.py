@@ -120,6 +120,26 @@ def test_plan_offsets_effect_pts_by_stream_start_time() -> None:
     assert plan.render_spans[0].start_pts == 960
 
 
+def test_plan_of_a_mid_gop_cut_starts_at_the_stream_start_and_copies_only_from_keyframes() -> None:
+    index = KeyframeIndex((-30, 30, 90, 150), Fraction(1, 30), 0, 180)
+    head = build_splice_plan([SegmentRange(0.2, 0.5)], index, duration=6)
+    later = build_splice_plan([SegmentRange(1.5, 2.0)], index, duration=6)
+    assert [(span.kind, span.start_pts, span.end_pts) for span in head.spans] == [
+        ("render", 0, 30),
+        ("copy", 30, 180),
+    ]
+    assert [(span.kind, span.start_pts, span.end_pts) for span in later.spans] == [
+        ("reencode", 0, 30),
+        ("render", 30, 90),
+        ("copy", 90, 180),
+    ]
+
+
+def test_keyframe_seconds_put_a_mid_gop_cuts_lead_in_keyframe_at_the_stream_start() -> None:
+    index = KeyframeIndex((870, 930, 990), Fraction(1, 30), 900, 1080)
+    assert index.keyframe_seconds() == (0.0, 1.0, 3.0)
+
+
 def test_plan_rejects_when_only_full_reencode_is_possible() -> None:
     with pytest.raises(SmartRenderCompatibilityError, match="entire video"):
         build_splice_plan([SegmentRange(2, 3)], _index(points=(0,)), duration=6)

@@ -726,7 +726,7 @@ class SegmentEditor(ctk.CTkToplevel):
         index = self._keyframe_index
         if index is None:
             return None
-        return tuple(index.seconds_for_pts(pts) for pts in index.pts)
+        return index.keyframe_seconds()
 
     def _ltx_blocked_reason(self) -> str | None:
         """Locale key saying why a range cannot use LTX here, or None when it can."""
