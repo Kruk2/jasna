@@ -15,6 +15,13 @@ from jasna.pipeline_items import ClipRestoreItem, FrameMeta, PrimaryRestoreResul
 from jasna.tracking.clip_tracker import TrackedClip
 
 
+@pytest.fixture(autouse=True)
+def _skip_encoder_size_check():
+    """The 8x8 frames are below the AMF minimum on AMD runs; the check has its own tests."""
+    with patch("jasna.pipeline.require_encodable_size"):
+        yield
+
+
 def _fake_metadata() -> VideoMetadata:
     return VideoMetadata(
         video_file="fake_input.mkv",
