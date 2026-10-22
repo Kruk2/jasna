@@ -105,8 +105,9 @@ def test_native_block_runs_its_own_int8_attention_whatever_comfy_kitchen_is_inst
 
 
 def test_extension_sources_look_up_no_launchers_at_runtime():
-    sources = [path for path in native._HERE.rglob("*") if path.suffix in (".cpp", ".cu", ".cuh", ".h")]
-    assert {path.name for path in sources} >= {"block.cpp", "glue.cu", *native._ATTENTION_SOURCES}
+    sources = [path for path in native._HERE.rglob("*") if path.suffix in (".cpp", ".cu", ".cuh", ".h", ".hip")]
+    assert {path.name for path in sources} >= {
+        "block.cpp", "glue.cu", *native._ATTENTION_SOURCES, *native._HIP_ATTENTION_SOURCES}
     for path in sources:
         text = path.read_text()
         for lookup in ("dlopen", "dlsym", "GetProcAddress", "GetModuleHandle", 'extern "C" void', "kitchen_library"):
@@ -272,7 +273,7 @@ def test_native_block_can_be_turned_off(monkeypatch):
     monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
     assert native.load(torch.device("cuda"), _block_specs("int8")) is None
     monkeypatch.delenv("JASNA_LTX_NATIVE")
-    assert "NVIDIA GPU" in native.unavailable_reason(torch.device("cpu"), _block_specs("int8"))
+    assert "NVIDIA or AMD GPU" in native.unavailable_reason(torch.device("cpu"), _block_specs("int8"))
 
 
 def test_python_hands_every_constant_to_the_native_block(monkeypatch, tmp_path):
@@ -412,9 +413,17 @@ def test_sampler_compiles_blocks_when_native_cannot_run(monkeypatch):
     assert enabled
 
 
-def test_amd_blocks_compile_without_importing_the_native_block(monkeypatch):
+def test_amd_blocks_run_the_native_block_where_triton_builds_its_kernels(monkeypatch):
     monkeypatch.setattr(sampler, "is_nvidia_device", lambda device: False)
-    monkeypatch.setattr(native, "load", lambda device, specs: pytest.fail("native block loaded on AMD"))
+    native_forward = object()
+    monkeypatch.setattr(native, "load", lambda device, specs: native_forward)
+    assert sampler._block_functions(torch.device("cuda"), {}) == (native_forward, T.prompt_key_value, "native")
+
+
+def test_amd_blocks_without_triton_compile_without_importing_the_native_block(monkeypatch):
+    monkeypatch.setattr(sampler, "is_nvidia_device", lambda device: False)
+    monkeypatch.setattr(sampler.importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(native, "load", lambda device, specs: pytest.fail("native block loaded without Triton"))
     monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
     monkeypatch.setattr(sampler, "compiled_block_forward", lambda device: "compiled block")
     monkeypatch.setattr(sampler, "compile_static", lambda function, mode, device, dtype: ("compiled", function))
@@ -438,3 +447,151 @@ def test_each_source_checkout_builds_its_extension_in_its_own_directory(monkeypa
         native._extension()
     assert built[0] != built[1] and built[0] == built[2]
     assert all(path.parent == tmp_path and path.name.startswith(f"extension-torch{torch.__version__}") for path in built)
+
+
+def _amd_architecture(monkeypatch, architecture="gfx1201"):
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 0))
+    monkeypatch.setattr(torch.version, "cuda", None)
+    monkeypatch.setattr(torch.version, "hip", "7.15")
+    monkeypatch.setattr(kernels, "amd_gpu_architecture", lambda device: architecture)
+
+
+@pytest.mark.parametrize("architecture", sorted(kernels.AMD_INT8_MM_TILES))
+def test_amd_kernel_variants_are_the_amd_torch_paths_triton_kernels(architecture):
+    found = aot.variants(architecture, aot.BlockDims(dim=4096, ff_dim=16384, heads=32), fp4=False)
+    assert {v.family for v in found} == {"rotate_quantize", "gated_rotate_quantize", "mm"}
+    gated = [dict(v.constexprs) for v in found if v.family == "gated_rotate_quantize"]
+    assert gated == [{"K": 4096, "HEAD_DIM": 128}]
+    gemm_tiles = {(dict(v.constexprs)["BM"], dict(v.constexprs)["BN"], dict(v.constexprs)["BK"], v.num_stages, v.num_warps)
+                  for v in found if v.family == "mm"}
+    assert gemm_tiles == {*kernels.AMD_INT8_MM_TILES[architecture], kernels.SMALL_MM_TILE}
+    # GEMMs carry the JIT launch's options (no fp fusion under ROCm), the quantizers none
+    assert all(v.options == tuple(kernels.GEMM_OPTIONS.items()) for v in found if v.family == "mm")
+    assert all(v.options == () for v in found if v.family != "mm")
+
+
+def test_amd_kernels_build_only_under_a_rocm_triton(monkeypatch, tmp_path):
+    import triton.language as tl
+
+    monkeypatch.setattr(kernels, "HIP", tl.constexpr(False))
+    variant = aot.variants("gfx1201", aot.BlockDims(4096, 16384, 32), fp4=False)[0]
+    with pytest.raises(RuntimeError, match="ROCm"):
+        aot._compile(variant, "gfx1201", tmp_path)
+
+
+def test_amd_kernel_profiles_are_named_by_gfx_architecture():
+    assert aot._profile_name("gfx1201") == "gfx1201" and aot._profile_name((12, 0)) == "sm120"
+
+
+@pytest.mark.parametrize("architecture", sorted(kernels.AMD_INT8_MM_TILES))
+def test_amd_block_parameters_take_the_amd_tiles_by_name(monkeypatch, architecture):
+    values = native.block_parameters(architecture, 32)
+    assert (tuple(values["narrow_tile"]), tuple(values["wide_tile"])) == kernels.AMD_INT8_MM_TILES[architecture]
+    assert not values["has_tma"] and not values["cublas_int8"]
+    assert values.keys() == native.block_parameters((12, 0), 32).keys()
+
+
+def test_amd_native_block_launches_comfy_kitchens_hip_attention_tile(monkeypatch, tmp_path):
+    _amd_architecture(monkeypatch)
+    monkeypatch.setattr(kernels, "programs", lambda device: 64)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text("[]")
+    calls = []
+
+    class Block:
+        def __init__(self, config):
+            self.config = config
+
+        def forward(self, *args):
+            calls.append(args)
+
+    module = SimpleNamespace(Config=SimpleNamespace, Block=Block)
+    forward = native.NativeBlockForward(module, torch.device("cuda", 0), aot.BlockDims(4096, 16384, 32), manifest)
+    assert (tuple(forward.block.config.narrow_tile), tuple(forward.block.config.wide_tile)) == (
+        kernels.AMD_INT8_MM_TILES["gfx1201"])
+    weights = {"attn1.q_norm.weight": None, "attn1.k_norm.weight": None, "attn2.q_norm.weight": None,
+               "scale_shift_table": None}
+    weights |= {f"{name}.qdata": None for name in T.LINEAR_NAMES} | {f"{name}.scales": None for name in T.LINEAR_NAMES}
+    cond = SimpleNamespace(block_rows=None)
+    rope = SimpleNamespace(cos=None, sin=None)
+    forward(weights, torch.zeros(1, 8192, 1), cond, (None, None), rope)
+    assert calls[0][-2:] == (native.HIP_ATTENTION_CTA_K, False)
+
+
+@pytest.mark.parametrize("quantization, architecture, reason", [
+    ("nvfp4", "gfx1201", "NVFP4 blocks need SM 12.0 / 12.1"),
+    ("int8", "gfx90a", "no tuned kernels for gfx90a"),
+])
+def test_amd_native_block_refuses_what_it_has_no_kernels_for(monkeypatch, quantization, architecture, reason):
+    _amd_architecture(monkeypatch, architecture)
+    assert reason in native.unavailable_reason(torch.device("cuda"), _block_specs(quantization))
+
+
+def test_amd_source_build_needs_hipcc(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    _amd_architecture(monkeypatch)
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
+    monkeypatch.setattr(native, "is_frozen", lambda: False)
+    monkeypatch.setattr(native.shutil, "which", lambda name: name)
+    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    monkeypatch.setattr(cpp_extension, "ROCM_HOME", None)
+    assert "hipcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+    monkeypatch.setattr(cpp_extension, "ROCM_HOME", str(tmp_path))
+    assert "hipcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+    native._hipcc(tmp_path).parent.mkdir()
+    native._hipcc(tmp_path).touch()
+    assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
+
+
+def test_hip_targets_follow_pytorch_rocm_arch_else_this_gpu(monkeypatch):
+    monkeypatch.setattr(kernels, "gpu_architecture", lambda device: "gfx1201")
+    monkeypatch.delenv("PYTORCH_ROCM_ARCH", raising=False)
+    assert native.hip_architectures() == ["gfx1201"]
+    monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1100;gfx1101 gfx1201")
+    assert native.hip_architectures() == ["gfx1100", "gfx1101", "gfx1201"]
+
+
+def test_hip_objects_compile_glue_and_attention_once_with_their_own_flags(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    commands = []
+
+    def compile_object(command, check):
+        commands.append(command)
+        Path(command[-1]).write_bytes(b"object")
+
+    monkeypatch.setattr(native.subprocess, "run", compile_object)
+    monkeypatch.setattr(native, "_IS_WINDOWS", False)
+    monkeypatch.setattr(cpp_extension, "include_paths", lambda device_type: ["/torch/include"])
+    monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1100;gfx1201")
+    objects = native._hip_objects(tmp_path, PurePosixPath("/rocm"))
+    assert [path.name for path in objects] == ["glue.o", "quant_qk_int8.o", "quant_v_int8.o", "int8_attn.o"]
+    assert [command[-3] for command in commands] == [
+        str(native._HERE / "glue.cu"), *(str(native._HIP_ATTENTION / source) for source in native._HIP_ATTENTION_SOURCES)]
+    glue, *attention = commands
+    assert glue[0] == "/rocm/bin/hipcc" and {"-x", "hip", "-I/torch/include", "-DUSE_ROCM=1"} <= set(glue)
+    assert "-ffast-math" not in glue and all("-ffast-math" in command for command in attention)
+    assert all({"--offload-arch=gfx1100", "--offload-arch=gfx1201", "-mno-wavefrontsize64", "-fPIC"} <= set(command)
+               for command in commands)
+    assert native._hip_objects(tmp_path, PurePosixPath("/rocm")) == objects and len(commands) == 4
+
+    monkeypatch.setenv("PYTORCH_ROCM_ARCH", "gfx1201")
+    assert native._hip_objects(tmp_path, PurePosixPath("/rocm"))[0].parent != objects[0].parent
+
+
+def test_amd_extension_builds_host_sources_only_so_nothing_is_hipified(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    objects = [tmp_path / "glue.o", tmp_path / "int8_attn.o"]
+    monkeypatch.setattr(torch.version, "hip", "7.15")
+    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    monkeypatch.setattr(native, "_IS_WINDOWS", False)
+    monkeypatch.setattr(cpp_extension, "ROCM_HOME", "/rocm")
+    monkeypatch.setattr(cpp_extension, "library_paths", lambda device_type: ["/torch/lib"])
+    monkeypatch.setattr(native, "_hip_objects", lambda build_directory, rocm_home: objects)
+    monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: kwargs)
+    built = native._build_extension(tmp_path / "build")
+    assert built["sources"] == [str(native._HERE / "module.cpp"), str(native._HERE / "block.cpp")]
+    assert built["extra_ldflags"] == ["-L/torch/lib", "-lamdhip64", "-lc10_hip", "-ltorch_hip", *map(str, objects)]
+    assert built["extra_include_paths"] == ["/rocm/include"]

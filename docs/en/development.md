@@ -202,11 +202,19 @@ $P scripts/benchmark_na3d.py                                             # Trito
   (`--use_fast_math` must not reach `glue.cu`) and must stay bit-identical with
   `comfy_kitchen.int8_attention` (`tests/test_ltx_native_gpu.py`). Re-vendor it
   when the torch path's comfy-kitchen pin changes.
+- AMD (Linux ROCm with Triton) builds the same sources: `gpu_runtime.h` maps
+  the CUDA spellings, hipcc compiles `glue.cu` and comfy-kitchen 0.2.38's HIP
+  INT8 attention (`sage_attention_hip/`, bit-identical with
+  `comfy_kitchen.int8_attention` there) into objects, and the host compiler
+  builds `block.cpp` (nothing is hipified). INT8 only, AMD tiles by gfx name,
+  INT8 cross-attention and the gated-quantize epilogue as the AMD torch path.
+  `PYTORCH_ROCM_ARCH` picks the gfx targets (default: this GPU). Windows ROCm
+  has no Triton and keeps the eager path.
 - Release packaging keeps the vendored kernels' `NOTICE` in `licenses/`.
 - A change to any path must be compared with identical weights, inputs, seeds
   and warmed caches.
-- GPU-qualified on SM 12.0 (RTX 5090), SM 8.9 (RTX 4090), SM 8.6 (RTX 3090) and
-  SM 7.5 (RTX 2080 Ti). Below SM 12.0 it is INT8 only: plain Triton GEMMs on
+- GPU-qualified on SM 12.0 (RTX 5090), SM 8.9 (RTX 4090), SM 8.6 (RTX 3090),
+  SM 7.5 (RTX 2080 Ti) and gfx1201 (Radeon AI PRO R9700). Below SM 12.0 it is INT8 only: plain Triton GEMMs on
   SM 8.x, cuBLAS INT8 GEMMs with the Triton epilogue on SM 7.5. Cubins for
   another SM do not by themselves establish support.
 

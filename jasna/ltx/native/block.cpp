@@ -1,16 +1,15 @@
 // One LTX transformer block (``jasna.ltx.transformer.block_forward``) as a single native call.
 //
 // GEMMs and quantization run the Triton kernels of ``jasna/ltx/kernels.py``, compiled ahead of
-// time to cubins (``aot.py``) and launched through the CUDA driver; NVFP4 GEMMs and the prompt
-// cross-attention are the same ATen ops the torch path calls; video self-attention is the INT8
-// attention vendored from comfy-kitchen (``sage_attention/``); the rest is ``glue.cu``. Every model constant
-// and launch policy value comes from the shared typed configuration.
+// time to cubins / AMD code objects (``aot.py``) and launched through the GPU driver; NVFP4 GEMMs
+// and the NVIDIA prompt cross-attention are the same ATen ops the torch path calls; video
+// self-attention is the INT8 attention vendored from comfy-kitchen (``sage_attention/``, on AMD
+// ``sage_attention_hip/``, which as in the AMD torch path also runs the prompt cross-attention);
+// the rest is ``glue.cu``. Every model constant and launch policy value comes from the shared
+// typed configuration.
 
 #include <torch/extension.h>
 
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <cuda.h>
 #include <pybind11/stl.h>
 
 #include <cmath>
@@ -25,19 +24,20 @@
 
 #include "glue.h"
 #include "block.h"
+#include "gpu_runtime.h"
+#ifdef USE_ROCM
+#include "sage_attention_hip/launchers.h"
+#else
 #include "sage_attention/launchers.h"
+#endif
 
 namespace py = pybind11;
 
 namespace jasna_ltx {
 namespace {
 
-void check_cu(CUresult result, const char* what) {
-  if (result != CUDA_SUCCESS) {
-    const char* message = nullptr;
-    cuGetErrorString(result, &message);
-    TORCH_CHECK(false, "LTX native block: ", what, " failed: ", message ? message : "unknown CUDA error");
-  }
+void check_gpu(gpu::Result result, const char* what) {
+  TORCH_CHECK(result == gpu::kSuccess, "LTX native block: ", what, " failed: ", gpu::error_string(result));
 }
 
 int64_t cdiv(int64_t a, int64_t b) { return (a + b - 1) / b; }
@@ -48,15 +48,15 @@ class ModuleOwner {
   ModuleOwner(const ModuleOwner&) = delete;
   ModuleOwner& operator=(const ModuleOwner&) = delete;
   ~ModuleOwner() {
-    if (module_ && cuModuleUnload(std::exchange(module_, nullptr)) != CUDA_SUCCESS)
+    if (module_ && gpu::module_unload(std::exchange(module_, nullptr)) != gpu::kSuccess)
       std::fputs("LTX native block: unloading a kernel module failed\n", stderr);
   }
-  CUmodule* address() { return &module_; }
-  CUmodule get() const { return module_; }
-  CUmodule release() { return std::exchange(module_, nullptr); }
+  gpu::Module* address() { return &module_; }
+  gpu::Module get() const { return module_; }
+  gpu::Module release() { return std::exchange(module_, nullptr); }
 
  private:
-  CUmodule module_ = nullptr;
+  gpu::Module module_ = nullptr;
 };
 
 // One ahead-of-time compiled Triton kernel and the argument list its launcher expects.
@@ -74,27 +74,29 @@ class Kernel {
     descriptors_ = std::move(spec.tensordesc);
     ModuleOwner loaded;
     if (source_.kind() == KernelSource::Kind::Image)
-      check_cu(cuModuleLoadData(loaded.address(), source_.image().data()), "loading a kernel image");
+      check_gpu(gpu::module_load_data(loaded.address(), source_.image().data()), "loading a kernel image");
     else
-      check_cu(cuModuleLoad(loaded.address(), source_.path().c_str()), "loading a kernel cubin");
-    check_cu(cuModuleGetFunction(&function_, loaded.get(), function_name_.c_str()), "finding a kernel");
+      check_gpu(gpu::module_load(loaded.address(), source_.path().c_str()), "loading a kernel cubin");
+    check_gpu(gpu::module_get_function(&function_, loaded.get(), function_name_.c_str()), "finding a kernel");
+#ifndef USE_ROCM  // AMD launches take a workgroup's whole LDS without opting in
     if (shared_ > 49152) {  // as Triton's own loader: opt in to more than 48 KiB of dynamic shared memory
       CUdevice device;
-      check_cu(cuCtxGetDevice(&device), "querying the device");
+      check_gpu(cuCtxGetDevice(&device), "querying the device");
       int optin = 0, static_shared = 0;
-      check_cu(cuDeviceGetAttribute(&optin, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, device), "shared");
-      check_cu(cuFuncGetAttribute(&static_shared, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function_), "shared");
+      check_gpu(cuDeviceGetAttribute(&optin, CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN, device), "shared");
+      check_gpu(cuFuncGetAttribute(&static_shared, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function_), "shared");
       TORCH_CHECK(shared_ <= optin, "LTX native block: ", function_name_, " needs more shared memory than the GPU has");
-      check_cu(cuFuncSetCacheConfig(function_, CU_FUNC_CACHE_PREFER_SHARED), "shared");
-      check_cu(cuFuncSetAttribute(function_, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, optin - static_shared),
-               "shared");
+      check_gpu(cuFuncSetCacheConfig(function_, CU_FUNC_CACHE_PREFER_SHARED), "shared");
+      check_gpu(cuFuncSetAttribute(function_, CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, optin - static_shared),
+                "shared");
     }
+#endif
     module_ = loaded.release();
   }
   Kernel(const Kernel&) = delete;
   Kernel& operator=(const Kernel&) = delete;
   ~Kernel() {
-    if (module_ && cuModuleUnload(std::exchange(module_, nullptr)) != CUDA_SUCCESS)
+    if (module_ && gpu::module_unload(std::exchange(module_, nullptr)) != gpu::kSuccess)
       std::fputs("LTX native block: unloading a kernel module failed\n", stderr);
   }
 
@@ -102,8 +104,8 @@ class Kernel {
 
  private:
   KernelSource source_;
-  CUmodule module_ = nullptr;
-  CUfunction function_ = nullptr;
+  gpu::Module module_ = nullptr;
+  gpu::Function function_ = nullptr;
   std::string function_name_;
   int shared_ = 0, threads_ = 0;
   std::vector<std::string> args_;
@@ -144,6 +146,9 @@ class Launch {
   // launcher expands it: the CUtensorMap, then the shape (i32) and strides (i64).
   Launch& tensor_descriptor(const at::Tensor& t) {
     TORCH_CHECK(next() == "nvTmaDesc", where(), " expects a tensor descriptor");
+#ifdef USE_ROCM
+    TORCH_CHECK(false, "LTX native block: AMD GPUs have no TMA descriptors");
+#else
     TORCH_CHECK(t.dim() == 2 && t.stride(1) == 1, "tensor descriptors need a row-major matrix");
     const auto& layout = kernel_.descriptors_.at(descriptor_++);
     alignas(64) CUtensorMap map;
@@ -151,28 +156,29 @@ class Launch {
     const cuuint64_t strides[1] = {static_cast<cuuint64_t>(t.stride(0) * layout.elem_size)};
     const cuuint32_t box[2] = {static_cast<cuuint32_t>(layout.block[1]), static_cast<cuuint32_t>(layout.block[0])};
     const cuuint32_t element_strides[2] = {1, 1};
-    check_cu(cuTensorMapEncodeTiled(&map, static_cast<CUtensorMapDataType>(layout.elem_type), 2, t.data_ptr(),
-                                    shape, strides, box, element_strides, CU_TENSOR_MAP_INTERLEAVE_NONE,
-                                    static_cast<CUtensorMapSwizzle>(layout.swizzle), CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
-                                    CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE),
-             "encoding a TMA descriptor");
+    check_gpu(cuTensorMapEncodeTiled(&map, static_cast<CUtensorMapDataType>(layout.elem_type), 2, t.data_ptr(),
+                                     shape, strides, box, element_strides, CU_TENSOR_MAP_INTERLEAVE_NONE,
+                                     static_cast<CUtensorMapSwizzle>(layout.swizzle), CU_TENSOR_MAP_L2_PROMOTION_L2_128B,
+                                     CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE),
+              "encoding a TMA descriptor");
     put(&map, sizeof(map));
     i32(t.size(0)).i32(t.size(1));
     return i64(t.stride(0)).i64(1);
+#endif
   }
 
   void operator()(int64_t x, int64_t y, int64_t z) {
     TORCH_CHECK(index_ == kernel_.args_.size(), "LTX native block: ", kernel_.function_name_, " got ", index_, " of ",
                 kernel_.args_.size(), " arguments");
-    const CUdeviceptr scratch = 0;
+    const void* scratch = nullptr;
     put(&scratch, sizeof(scratch));
     put(&scratch, sizeof(scratch));
     std::vector<void*> params;
     for (auto& slot : slots_) params.push_back(slot.bytes);
     if (x * y * z == 0) return;
-    check_cu(cuLaunchKernel(kernel_.function_, x, y, z, kernel_.threads_, 1, 1, kernel_.shared_,
-                            at::cuda::getCurrentCUDAStream(), params.data(), nullptr),
-             kernel_.function_name_.c_str());
+    check_gpu(gpu::launch(kernel_.function_, x, y, z, kernel_.threads_, kernel_.shared_,
+                          at::cuda::getCurrentCUDAStream(), params.data()),
+              kernel_.function_name_.c_str());
   }
 
  private:
@@ -249,7 +255,7 @@ class Block::Impl {
                 "GEMM tiles are (BM, BN, BK, stages, warps)");
     TORCH_CHECK(config_.epilogue_tile.size() == 2, "the cuBLAS-path epilogue tile is (BM, BN)");
     c10::cuda::CUDAGuard guard(static_cast<c10::DeviceIndex>(config_.device));
-    C10_CUDA_CHECK(cudaFree(nullptr));  // makes the device's primary context current for the driver API
+    gpu::bind_primary_context();
     for (auto& input : kernels) {
       const auto identity = kernel_key(input.spec.family, input.spec.constexprs);
       kernels_.emplace(identity, std::make_unique<Kernel>(std::move(input.spec), std::move(input.source)));
@@ -297,7 +303,11 @@ class Block::Impl {
     const at::Tensor q = at::empty({rows, dim}, x.options().dtype(prompt_key.scalar_type()));
     norm_rope(linear(query, w[CrossQ]), cross_q_norm, nullptr, nullptr, q, head_dim, config_.eps);
     const at::Tensor q_heads = q.view({1, rows, heads, head_dim}).transpose(1, 2);
+#ifdef USE_ROCM
+    const at::Tensor cross = int8_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
+#else
     const at::Tensor cross = at::scaled_dot_product_attention(q_heads, prompt_key, prompt_value)[0].transpose(0, 1);
+#endif
     h = project_gated(cross, linear(query, w[CrossGate]), w[CrossOut], h, ada[8], rows, fp4);
 
     // feed-forward with gated residual, quantized or modulated over all rows, then in row chunks
@@ -315,6 +325,11 @@ class Block::Impl {
       TORCH_CHECK(t->scalar_type() == at::kBFloat16 && t->dim() == 2 && t->size(0) == rows &&
                   t->size(1) == heads * head_dim && t->stride(1) == 1, "q/k/v must be (rows, heads * head_dim) bf16");
     }
+#ifdef USE_ROCM
+    TORCH_CHECK(cta_k == kHipAttentionCtaK, "AMD INT8 attention runs ", kHipAttentionCtaK, "-key tiles");
+    const auto heads_first = [&](const at::Tensor& t) { return t.view({1, rows, heads, head_dim}).transpose(1, 2); };
+    return int8_attention(heads_first(q), heads_first(k), heads_first(v))[0].transpose(0, 1);
+#else
     const int L = static_cast<int>(rows), H = static_cast<int>(heads), D = static_cast<int>(head_dim);
     const int64_t padded = cdiv(L, cta_k) * cta_k;
     const auto i8 = q.options().dtype(at::kChar), f32 = q.options().dtype(at::kFloat);
@@ -324,7 +339,7 @@ class Block::Impl {
     const at::Tensor v_int8 = at::empty({H * D, padded}, i8), v_scale = at::empty({H * D}, f32);
     const at::Tensor anchors = at::empty({1, H}, q.options().dtype(at::kInt));
     const at::Tensor out = at::empty({1, H, L, D}, q.options());
-    const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    const gpu::Stream stream = at::cuda::getCurrentCUDAStream();
     const int64_t token_stride = q.stride(0);
     const int code = sage_attention::kBFloat16;
     sage_attention::launch_quant_qk_per_thread_int8(
@@ -342,6 +357,7 @@ class Block::Impl {
         nullptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return out.view({H, L, D}).transpose(0, 1);
+#endif
   }
 
   std::pair<at::Tensor, at::Tensor> prompt_key_value(
@@ -360,6 +376,52 @@ class Block::Impl {
     return {key.view({1, input.size(1), heads, head_dim}).transpose(1, 2).to(dtype),
             linear(prepared, w[CrossV]).view({1, input.size(1), heads, head_dim}).transpose(1, 2).to(dtype)};
   }
+
+#ifdef USE_ROCM
+  // comfy-kitchen's HIP tiles: 128 queries, 64 keys, one key scale per 16 keys.
+  static constexpr int64_t kHipAttentionCtaQ = 128, kHipAttentionCtaK = 64, kHipKeyGroup = 16;
+
+  // comfy-kitchen's HIP INT8 attention of q [1, heads, rows, d] against k/v [1, heads, keys, d]
+  // (any token/head strides, contiguous d), launched the way comfy_kitchen.backends.hip.sage_int8_sdpa
+  // launches it unmasked: a contiguous [1, heads, rows, d] result.
+  static at::Tensor int8_attention(const at::Tensor& q, const at::Tensor& k, const at::Tensor& v) {
+    namespace sage = sage_attention_hip;
+    for (const auto* t : {&q, &k, &v})
+      TORCH_CHECK(t->scalar_type() == at::kBFloat16 && t->dim() == 4 && t->size(0) == 1 && t->stride(3) == 1,
+                  "INT8 attention takes [1, heads, tokens, head_dim] bf16 with a contiguous head_dim");
+    TORCH_CHECK(k.sizes() == v.sizes() && k.size(1) == q.size(1) && k.size(3) == q.size(3),
+                "INT8 attention keys and values must match the query heads");
+    const int64_t H = q.size(1), Lq = q.size(2), Lk = k.size(2), D = q.size(3);
+    TORCH_CHECK(D == 64 || D == 128 || D == 256, "INT8 attention needs a head size of 64/128/256");
+    const int64_t padded_q = cdiv(Lq, kHipAttentionCtaQ) * kHipAttentionCtaQ;
+    const int64_t padded_k = cdiv(Lk, kHipAttentionCtaK) * kHipAttentionCtaK, key_groups = padded_k / kHipKeyGroup;
+    // comfy-kitchen's sage_rotation: short keys H4, longer ones the widest Hadamard of the head
+    const int rotation = Lk <= 256 ? 4 : D >= 256 ? 129 : D >= 128 ? 128 : 64;
+    const auto i8 = q.options().dtype(at::kChar), f32 = q.options().dtype(at::kFloat);
+    const at::Tensor q_int8 = at::empty({1, H, Lq, D}, i8), k_int8 = at::empty({1, H, Lk, D}, i8);
+    const at::Tensor q_scale = at::empty({1, H, padded_q}, f32), k_scale = at::empty({1, H, key_groups}, f32);
+    const at::Tensor v_int8 = at::empty({H * D, padded_k}, i8), v_scale = at::empty({H * D}, f32);
+    const at::Tensor anchors = at::empty({1, H}, q.options().dtype(at::kInt));
+    const at::Tensor out = at::empty({1, H, Lq, D}, q.options());
+    const gpu::Stream stream = at::cuda::getCurrentCUDAStream();
+    const int h = static_cast<int>(H), lq = static_cast<int>(Lq), lk = static_cast<int>(Lk), d = static_cast<int>(D);
+    sage::launch_quant_qk_int8(q.data_ptr(), q_int8.data_ptr(), q_scale.data_ptr(), k.data_ptr(), k_int8.data_ptr(),
+                               k_scale.data_ptr(), anchors.data_ptr(), 1, h, lq, static_cast<int>(padded_q), h, lk,
+                               static_cast<int>(key_groups), d, q.stride(0), q.stride(1), q.stride(2), k.stride(0),
+                               k.stride(1), k.stride(2), sage::kBFloat16, rotation, stream);
+    sage::launch_quant_v_int8(v.data_ptr(), v_int8.data_ptr(), v_scale.data_ptr(), 1, h, lk, d,
+                              static_cast<int>(padded_k), v.stride(0), v.stride(1), v.stride(2), sage::kBFloat16,
+                              stream);
+    sage::launch_int8_attn(q_int8.data_ptr(), k_int8.data_ptr(), v_int8.data_ptr(), out.data_ptr(), q_scale.data_ptr(),
+                           k_scale.data_ptr(), v_scale.data_ptr(), nullptr, 0, 0, 0, 0, 0,
+                           static_cast<int>(kHipAttentionCtaK), 1, lq, lk, static_cast<int>(padded_q), h, h, d,
+                           static_cast<int>(key_groups), H * Lq * D, Lq * D, H * Lk * D, Lk * D, H * D * padded_k,
+                           D * padded_k, padded_k, H * Lq * D, Lq * D, D,
+                           static_cast<float>(1.0 / std::sqrt(static_cast<double>(D))), sage::kBFloat16, stream);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    return out;
+  }
+#endif
 
   // tensor_utils.half_dtype: no fused attention kernel takes bf16 before SM 8.0.
   static at::ScalarType prompt_attention_dtype(const at::Tensor& context) {
@@ -418,6 +480,19 @@ class Block::Impl {
     Launch(kernel("rotate_quantize", {{"K", k}, {"MODULATE", shift != nullptr}}))
         .ptr(x).ptr(shift ? *shift : x).ptr(scale ? *scale : x).ptr(codes).ptr(scales)
         .i32(x.stride(0)).i32(std::max<int64_t>(rows / 2, 1))(rows, 1, 1);
+    return {codes, scales};
+  }
+
+  // rotate_quantize of attention heads (heads, rows, head_dim) read as token rows, each head times
+  // 2 * sigmoid(logits[row, head]) (kernels.gated_rotate_quantize).
+  std::pair<at::Tensor, at::Tensor> gated_rotate_quantize(const at::Tensor& heads, const at::Tensor& logits) const {
+    const int64_t count = heads.size(0), rows = heads.size(1), head_dim = heads.size(2), k = count * head_dim;
+    TORCH_CHECK(heads.is_contiguous() && logits.is_contiguous() && logits.size(0) == rows && logits.size(1) == count,
+                "gated_rotate_quantize needs contiguous (heads, rows, head_dim) heads and (rows, heads) logits");
+    const at::Tensor codes = at::empty({rows, k}, heads.options().dtype(at::kChar));
+    const at::Tensor scales = at::empty({rows}, heads.options().dtype(at::kFloat));
+    Launch(kernel("gated_rotate_quantize", {{"K", k}, {"HEAD_DIM", head_dim}}))
+        .ptr(heads).ptr(logits).ptr(codes).ptr(scales).i32(rows)(rows, 1, 1);
     return {codes, scales};
   }
 
@@ -538,6 +613,14 @@ class Block::Impl {
   // residual + gate[half] * out_projection(attention * 2 * sigmoid(gate_logits)): a new tensor.
   at::Tensor project_gated(const at::Tensor& attention, const at::Tensor& logits, const Linear& w,
                            const at::Tensor& residual, const at::Tensor& gate, int64_t rows, bool fp4) const {
+#ifdef USE_ROCM
+    // as the AMD torch path: an attention output is gated and quantized straight from its heads
+    if (!fp4 && attention.transpose(0, 1).is_contiguous()) {
+      auto [codes, scales] = gated_rotate_quantize(attention.transpose(0, 1), logits);
+      const at::Tensor out = at::empty_like(residual);
+      return int8_mm(codes, scales, w, out, false, &residual, &gate, rows / 2, 0);
+    }
+#endif
     const at::Tensor gated = at::empty({rows, attention.size(1) * attention.size(2)}, residual.options());
     if (!fp4) {
       gate_heads(attention, logits, gated, nullptr);

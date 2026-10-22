@@ -1,0 +1,27 @@
+INT8 SageAttention kernels vendored from ComfyKitchen's HIP backend
+
+Source: https://github.com/Comfy-Org/comfy-kitchen, tag v0.2.38
+(commit 42081bf9bb5fad3992c1256aab4f01b27cbb5816), files
+comfy_kitchen/backends/hip/sage_attention/{int8_attn.hip, quant_qk_int8.hip,
+quant_v_int8.hip, sage_common.h, dense_mask.h} and
+comfy_kitchen/backends/hip/{mma.h, fp8_utils.h}; architecture_config.h is what
+its CMakeLists.txt generates from architectures.json. License: Apache-2.0
+(assets/licenses/Apache-2.0.txt).
+
+Jasna's changes: only the bf16-input, bf16-output, unmasked launches are kept
+(the mask preparation, masked Q quantization, paged-decode launchers and the
+other dtypes are removed), the three launchers are C++ functions in namespace
+jasna_ltx::sage_attention_hip declared in launchers.h instead of extern "C"
+exports, and the headers are included from one directory. The kernels
+themselves are unchanged and are compiled with comfy-kitchen's hipcc flags.
+
+Upstream NOTICE (relevant parts):
+
+ComfyKitchen
+
+Copyright (c) 2025 Comfy Org. All rights reserved.
+
+SageAttention
+Copyright (c) 2024 by SageAttention team.
+License: Apache-2.0
+Website: https://github.com/thu-ml/SageAttention

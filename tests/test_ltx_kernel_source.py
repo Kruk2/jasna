@@ -70,7 +70,19 @@ int cuDeviceGetAttribute(int* p, int, CUdevice) { *p = 98304; return fail(); }
 int cuFuncGetAttribute(int* p, int, CUfunction) { *p = 0; return fail(); }
 int cuFuncSetCacheConfig(CUfunction, int) { return fail(); }
 int cuFuncSetAttribute(CUfunction, int, int) { return fail(); }
-void check_cu(CUresult code, const char*) { if (code) throw std::runtime_error("original CUDA error"); }
+void check_gpu(CUresult code, const char*) { if (code) throw std::runtime_error("original CUDA error"); }
+int cudaFree(void*) { ++contexts; return 0; }
+namespace gpu {
+using Module = CUmodule;
+using Function = CUfunction;
+using Result = CUresult;
+constexpr Result kSuccess = CUDA_SUCCESS;
+Result module_load_data(Module* m, const void* image) { return cuModuleLoadData(m, image); }
+Result module_load(Module* m, const char* path) { return cuModuleLoad(m, path); }
+Result module_get_function(Function* f, Module m, const char* name) { return cuModuleGetFunction(f, m, name); }
+Result module_unload(Module m) { return cuModuleUnload(m); }
+void bind_primary_context() { check_gpu(cudaFree(nullptr), "context"); }
+}
 '''
 
 
@@ -119,8 +131,6 @@ def kernel_fixture(record_testsuite_property):
         body += r'''
 namespace pybind11 = py;
 namespace c10 { using DeviceIndex = int; namespace cuda { struct CUDAGuard { explicit CUDAGuard(int) {} }; } }
-int cudaFree(void*) { ++contexts; return 0; }
-#define C10_CUDA_CHECK(code) check_cu(code, "context")
 '''
         body += config_header[config_start:config_end] + "\n" + loading_impl
         construction = r'''

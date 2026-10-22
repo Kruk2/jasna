@@ -1,6 +1,6 @@
 """The native LTX block against ``transformer.block_forward`` on the same trial-shaped weights
-and inputs. Needs a GPU ``kernels.supports``, Triton, comfy-kitchen and the toolchain that
-builds the native block; NVFP4 needs SM 12.x."""
+and inputs. Needs a GPU ``kernels.supports`` (NVIDIA or AMD), Triton, comfy-kitchen and the
+toolchain that builds the native block; NVFP4 needs SM 12.x."""
 
 from __future__ import annotations
 
@@ -18,11 +18,12 @@ from jasna.ltx.model_files import PlaceholderHandle, PlaceholderTensors
 from jasna.tensor_utils import half_dtype
 
 pytestmark = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.version.cuda is None or not supports(torch.device("cuda")),
+    not torch.cuda.is_available() or not supports(torch.device("cuda")),
     reason="needs a GPU the LTX kernels support",
 )
+AMD = torch.version.hip is not None
 needs_nvfp4 = pytest.mark.skipif(
-    not torch.cuda.is_available() or torch.cuda.get_device_capability() not in native.FP4_ARCHS,
+    not torch.cuda.is_available() or AMD or torch.cuda.get_device_capability() not in native.FP4_ARCHS,
     reason="NVFP4 blocks need consumer Blackwell",
 )
 QUANTIZATIONS = ["int8", pytest.param("nvfp4", marks=needs_nvfp4)]
@@ -131,7 +132,8 @@ def test_native_int8_attention_is_comfy_kitchens_bit_for_bit(int8_block, head_di
     heads = 4096 // head_dim
     generator = torch.Generator(device=DEVICE).manual_seed(rows * head_dim)
     q, k, v = (torch.randn(rows, heads * head_dim, generator=generator, device=DEVICE).to(torch.bfloat16) for _ in range(3))
-    attention = int8_block.block.self_attention(q, k, v, rows, heads, head_dim, native.attention_cta_k(head_dim, rows))
+    cta_k = native.HIP_ATTENTION_CTA_K if AMD else native.attention_cta_k(head_dim, rows)
+    attention = int8_block.block.self_attention(q, k, v, rows, heads, head_dim, cta_k)
 
     def heads_first(t: torch.Tensor) -> torch.Tensor:
         return t.view(1, rows, heads, head_dim).transpose(1, 2)

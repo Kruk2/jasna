@@ -4,16 +4,14 @@
 
 #include "glue.h"
 
-#include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAException.h>
 #include <c10/util/Exception.h>
-#include <cuda_bf16.h>
-#include <cuda_fp16.h>
+
+#include "gpu_runtime.h"
 
 namespace jasna_ltx {
 namespace {
 
-using bf16 = __nv_bfloat16;
+using gpu::bf16;
 constexpr int kThreads = 256;
 constexpr int kVector = 8;  // bf16 per 16-byte access
 
@@ -34,11 +32,11 @@ __device__ __forceinline__ void store8(bf16* p, const Vec& in) {
   uint4 raw;
   bf16* values = reinterpret_cast<bf16*>(&raw);
 #pragma unroll
-  for (int i = 0; i < kVector; ++i) values[i] = __float2bfloat16_rn(in.v[i]);
+  for (int i = 0; i < kVector; ++i) values[i] = gpu::to_bf16(in.v[i]);
   *reinterpret_cast<uint4*>(p) = raw;
 }
 
-__device__ __forceinline__ float round_bf16(float x) { return __bfloat162float(__float2bfloat16_rn(x)); }
+__device__ __forceinline__ float round_bf16(float x) { return __bfloat162float(gpu::to_bf16(x)); }
 
 // fp16 holds the prompt attention before SM 8.0; the values passing through it are bf16-rounded,
 // as ``.to(torch.float16)`` of a bf16 tensor and ``.to(torch.bfloat16)`` of the fp16 result.
@@ -69,7 +67,7 @@ __device__ float block_reduce(float value) {
   __syncthreads();  // partial may still be read by a previous reduction
 #pragma unroll
   for (int offset = 16; offset; offset >>= 1) {
-    const float other = __shfl_xor_sync(0xffffffffu, value, offset);
+    const float other = gpu::shuffle_xor(value, offset);
     value = kMax ? fmaxf(value, other) : value + other;
   }
   const int lane = threadIdx.x % 32, warp = threadIdx.x / 32;

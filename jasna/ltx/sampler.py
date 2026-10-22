@@ -10,6 +10,7 @@ reuses the conditional pass's hidden state up to that block (skipped at scale 0)
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import math
@@ -134,14 +135,18 @@ def _opaque_blocks(reader) -> bool:
     return is_frozen() and not isinstance(reader, PlaceholderHandle)
 
 
+def _native_block_importable(device: torch.device) -> bool:
+    """The native block builds its kernels with Triton, which Windows ROCm ships without."""
+    return is_nvidia_device(device) or importlib.util.find_spec("triton") is not None
+
+
 def _block_functions(
     device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]
 ) -> tuple[Callable, Callable, str]:
     """(block forward, prompt key/value, backend name) for plain-tensor blocks: the native block
     when it can run here, with eager prompt keys/values (once per block and step), else both
     compiled."""
-    if is_nvidia_device(device):
-        # The native block is NVIDIA-only and imports Triton, which Windows ROCm ships without.
+    if _native_block_importable(device):
         from jasna.ltx import native
 
         native_forward = native.load(device, block_specs)

@@ -83,6 +83,7 @@ include-package-data = false
 "jasna.ltx.native" = [
   "*.cpp", "*.cu", "*.h",
   "sage_attention/*.cu", "sage_attention/*.cuh", "sage_attention/*.h", "sage_attention/NOTICE",
+  "sage_attention_hip/*.hip", "sage_attention_hip/*.h", "sage_attention_hip/NOTICE",
 ]
 
 [tool.setuptools.packages.find]

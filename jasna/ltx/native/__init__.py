@@ -1,4 +1,4 @@
-"""Native LTX transformer block: ``transformer.block_forward`` as one C++/CUDA call.
+"""Native LTX transformer block: ``transformer.block_forward`` as one C++/CUDA (or HIP) call.
 
 ``block.cpp`` runs a whole block on plain weight tensors: the Triton kernels of
 ``ltx/kernels.py`` compiled ahead of time for this GPU (``aot.py``), the same cuBLAS
@@ -6,11 +6,17 @@ NVFP4 GEMMs and prompt SDPA as the torch path, the INT8 self-attention vendored 
 comfy-kitchen (``sage_attention/``) and the element-wise glue of ``glue.cu``. Python owns
 every model constant and launch policy value and hands them over in ``Config``.
 
-Source installs build it on first use into the compile cache (needs nvcc, a C++ compiler
-and ninja; on Windows MSVC's ``cl`` on PATH, from an x64 Visual Studio developer shell whose
-MSVC this CUDA supports); a frozen release never builds it and loads it only when ``prebuild``
-output is shipped in ``PREBUILT``. Without the toolchain, on a GPU it has no kernels for, or with
-``JASNA_LTX_NATIVE=0`` the sampler keeps the torch.compile path.
+The same sources build for AMD (ROCm PyTorch, ``gpu_runtime.h`` maps the CUDA spellings):
+INT8 blocks only, with the AMD tiles of ``kernels.AMD_INT8_MM_TILES`` and, as the AMD torch
+path does, comfy-kitchen's HIP INT8 attention (``sage_attention_hip/``) for the self- and
+prompt cross-attention and the attention epilogue ``kernels.gated_rotate_quantize``. hipcc
+compiles ``glue.cu`` and the attention into objects that the host compiler's extension links.
+
+Source installs build it on first use into the compile cache (needs nvcc or hipcc, a C++
+compiler and ninja; on Windows MSVC's ``cl`` on PATH, from an x64 Visual Studio developer shell
+whose MSVC this CUDA supports); a frozen release never builds it and loads it only when
+``prebuild`` output is shipped in ``PREBUILT``. Without the toolchain, on a GPU it has no kernels
+for, or with ``JASNA_LTX_NATIVE=0`` the sampler keeps the torch.compile path.
 """
 
 from __future__ import annotations
@@ -31,12 +37,14 @@ from torch.nn.attention import sdpa_kernel
 from jasna._frozen import is_frozen
 from jasna.ltx import kernels
 from jasna.ltx import transformer as T
-from jasna.ltx.native.aot import FP4_ARCHS, BlockDims, build_kernels
+from jasna.ltx.native.aot import FP4_ARCHS, BlockDims, build_kernels, is_amd
 
 logger = logging.getLogger(__name__)
 
 _HERE = Path(__file__).resolve().parent
 _SOURCES = ("module.cpp", "block.cpp", "glue.cu")
+# AMD: only host C++ goes through cpp_extension, which would otherwise hipify the sources
+_HIP_SOURCES = ("module.cpp", "block.cpp")
 _ATTENTION = _HERE / "sage_attention"
 _ATTENTION_SOURCES = ("quant_qk_int8.cu", "quant_v_int8.cu", "sage_attn_launcher.cu")
 # comfy-kitchen 0.2.38's nvcc flags (its CMakeLists.txt): the vendored attention computes kitchen's
@@ -44,6 +52,12 @@ _ATTENTION_SOURCES = ("quant_qk_int8.cu", "quant_v_int8.cu", "sage_attn_launcher
 # NDEBUG keeps CUDA 13's fp4/fp8 header asserts out of device code, which the release build's
 # glibc 2.35 host headers cannot compile.
 _ATTENTION_NVCC_FLAGS = ("-std=c++17", "-O3", "-DNDEBUG", "--use_fast_math", "--expt-relaxed-constexpr")
+# comfy-kitchen 0.2.38's HIP backend: its CMakeLists.txt flags for the kernels and the key tile it
+# always launches (``_sage_cta_k``).
+_HIP_ATTENTION = _HERE / "sage_attention_hip"
+_HIP_ATTENTION_SOURCES = ("quant_qk_int8.hip", "quant_v_int8.hip", "int8_attn.hip")
+_HIP_ATTENTION_FLAGS = ("-std=c++20", "-O3", "-DNDEBUG", "-ffast-math", "-mno-wavefrontsize64")
+HIP_ATTENTION_CTA_K = 64
 PREBUILT = _HERE / "prebuilt"
 _IS_WINDOWS = os.name == "nt"
 EXTENSION_NAME = "jasna_ltx_native"
@@ -74,20 +88,24 @@ def _prebuilt_extension() -> Path | None:
     return next(PREBUILT.glob(f"{EXTENSION_NAME}*.so"), None)
 
 
+def _architecture_name(architecture: tuple[int, int] | str) -> str:
+    return architecture if is_amd(architecture) else f"SM {architecture[0]}.{architecture[1]}"
+
+
 def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]) -> str | None:
     """Why the native block cannot run blocks shaped like ``block_specs`` here, or None when it can."""
     if os.environ.get("JASNA_LTX_NATIVE") == "0":
         return "turned off by JASNA_LTX_NATIVE=0"
-    if device.type != "cuda" or torch.version.cuda is None:
-        return "it needs an NVIDIA GPU"
+    if device.type != "cuda" or (torch.version.cuda is None and torch.version.hip is None):
+        return "it needs an NVIDIA or AMD GPU"
     dims = BlockDims.from_specs(block_specs)
     quantization = block_quantization(block_specs)
     if quantization is None:
         return "the model's linears are not INT8 or NVFP4"
-    major, minor = torch.cuda.get_device_capability(device)
+    architecture = kernels.gpu_architecture(device)
     if not kernels.supports(device):
-        return f"there are no tuned kernels for SM {major}.{minor}"
-    if quantization == "nvfp4" and (major, minor) not in FP4_ARCHS:
+        return f"there are no tuned kernels for {_architecture_name(architecture)}"
+    if quantization == "nvfp4" and architecture not in FP4_ARCHS:
         return f"NVFP4 blocks need SM {' / '.join(f'{a}.{b}' for a, b in FP4_ARCHS)}"
     if dims.dim // dims.heads not in (64, 128, 256) or dims.dim % dims.heads:
         return f"INT8 attention has no kernel for {dims.dim // dims.heads}-wide heads"
@@ -95,9 +113,12 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
         return None
     if is_frozen():
         return "a release ships no native block to load and cannot build one"
-    from torch.utils.cpp_extension import CUDA_HOME, get_cxx_compiler
+    from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME, get_cxx_compiler
 
-    if CUDA_HOME is None or not _nvcc(Path(CUDA_HOME)).is_file():
+    if torch.version.hip is not None:
+        if ROCM_HOME is None or not _hipcc(Path(ROCM_HOME)).is_file():
+            return "no HIP compiler (hipcc) found to build it"
+    elif CUDA_HOME is None or not _nvcc(Path(CUDA_HOME)).is_file():
         return "no CUDA compiler (nvcc) found to build it"
     compiler = get_cxx_compiler()
     if shutil.which(compiler) is None:
@@ -115,6 +136,10 @@ def _cache() -> Path:
 
 def _nvcc(cuda_home: Path) -> Path:
     return cuda_home / "bin" / ("nvcc.exe" if _IS_WINDOWS else "nvcc")
+
+
+def _hipcc(rocm_home: Path) -> Path:
+    return rocm_home / "bin" / ("hipcc.exe" if _IS_WINDOWS else "hipcc")
 
 
 def _build_flags(cuda_home: Path) -> dict[str, list[str]]:
@@ -162,6 +187,70 @@ def _attention_objects(build_directory: Path, cuda_home: Path) -> list[Path]:
     return objects
 
 
+def hip_architectures() -> list[str]:
+    """The gfx targets an AMD build compiles for: ``PYTORCH_ROCM_ARCH`` (``;``- or space-separated,
+    as PyTorch reads it), else this machine's GPU."""
+    requested = os.environ.get("PYTORCH_ROCM_ARCH", "").replace(";", " ").split()
+    return requested or [kernels.gpu_architecture(torch.device("cuda"))]
+
+
+def _hip_build_flags(rocm_home: Path) -> dict[str, list[str]]:
+    """Host compiler and linker flags of the AMD extension: the HIP runtime and PyTorch's HIP
+    libraries, which ``cpp_extension.load`` links only for sources it hipifies (none here)."""
+    from torch.utils import cpp_extension
+
+    runtime = "amdhip64.lib" if _IS_WINDOWS else "-lamdhip64"
+    torch_hip = ["c10_hip.lib", "torch_hip.lib"] if _IS_WINDOWS else ["-lc10_hip", "-ltorch_hip"]
+    library_paths = [f"/LIBPATH:{path}" if _IS_WINDOWS else f"-L{path}" for path in cpp_extension.library_paths("cuda")]
+    return {
+        "extra_cflags": ["/O2"] if _IS_WINDOWS else ["-O3", "-fvisibility=hidden"],
+        "extra_ldflags": [*library_paths, runtime, *torch_hip],
+        "extra_include_paths": [str(rocm_home / "include")],
+    }
+
+
+def _hipcc_command(rocm_home: Path, flags: tuple[str, ...]) -> list[str]:
+    """hipcc with ``flags``, position-independent hidden symbols and every ``hip_architectures`` target."""
+    host = ["-fms-runtime-lib=dll"] if _IS_WINDOWS else ["-fPIC", "-fvisibility=hidden"]
+    return [str(_hipcc(rocm_home)), *flags, *host, *(f"--offload-arch={arch}" for arch in hip_architectures())]
+
+
+def _glue_hipcc_flags() -> tuple[str, ...]:
+    """glue.cu's flags under hipcc: PyTorch's own HIP extension flags and headers, no fast math."""
+    from torch.utils import cpp_extension
+
+    includes = [f"-I{path}" for path in cpp_extension.include_paths("cuda")]
+    abi = [] if _IS_WINDOWS else [f"-D_GLIBCXX_USE_CXX11_ABI={int(torch._C._GLIBCXX_USE_CXX11_ABI)}"]
+    return ("-x", "hip", "-std=c++20", "-O3", "-mno-wavefrontsize64", *cpp_extension.COMMON_HIP_FLAGS,
+            *cpp_extension.COMMON_HIPCC_FLAGS, *abi, *includes)
+
+
+def _hip_objects(build_directory: Path, rocm_home: Path) -> list[Path]:
+    """glue.cu and the vendored HIP INT8 attention compiled by hipcc for the extension's link, in a
+    directory named after their sources and commands so a change relinks the extension."""
+    commands = {
+        _HERE / "glue.cu": _hipcc_command(rocm_home, _glue_hipcc_flags()),
+        **{_HIP_ATTENTION / source: _hipcc_command(rocm_home, (*_HIP_ATTENTION_FLAGS, f"-I{_HIP_ATTENTION}"))
+           for source in _HIP_ATTENTION_SOURCES},
+    }
+    digest = hashlib.sha256()
+    for source, command in commands.items():
+        digest.update("\0".join(command).encode() + b"\0" + source.read_bytes())
+    for path in sorted([*_HIP_ATTENTION.iterdir(), *(_HERE / name for name in ("glue.h", "gpu_runtime.h"))]):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes())
+    directory = build_directory / f"hip-objects-{digest.hexdigest()[:16]}"
+    directory.mkdir(parents=True, exist_ok=True)
+    objects = []
+    for source, command in commands.items():
+        target = directory / source.with_suffix(".obj" if _IS_WINDOWS else ".o").name
+        if not target.is_file():
+            partial = target.with_name(f"partial-{target.name}")
+            subprocess.run([*command, "-c", str(source), "-o", str(partial)], check=True)
+            partial.replace(target)
+        objects.append(target)
+    return objects
+
+
 def _build_extension(build_directory: Path):
     from torch.utils import cpp_extension
 
@@ -172,12 +261,19 @@ def _build_extension(build_directory: Path):
     if shutil.which("gcc-15") and shutil.which("g++-15"):
         os.environ["CC"], os.environ["CXX"] = "gcc-15", "g++-15"
     try:
-        cuda_home = Path(cpp_extension.CUDA_HOME)
-        flags = _build_flags(cuda_home)
-        flags["extra_ldflags"] += [str(path) for path in _attention_objects(build_directory, cuda_home)]
+        if torch.version.hip is not None:
+            rocm_home = Path(cpp_extension.ROCM_HOME)
+            flags = _hip_build_flags(rocm_home)
+            flags["extra_ldflags"] += [str(path) for path in _hip_objects(build_directory, rocm_home)]
+            sources = _HIP_SOURCES
+        else:
+            cuda_home = Path(cpp_extension.CUDA_HOME)
+            flags = _build_flags(cuda_home)
+            flags["extra_ldflags"] += [str(path) for path in _attention_objects(build_directory, cuda_home)]
+            sources = _SOURCES
         return cpp_extension.load(
             name=EXTENSION_NAME,
-            sources=[str(_HERE / source) for source in _SOURCES],
+            sources=[str(_HERE / source) for source in sources],
             build_directory=str(build_directory),
             **flags,
         )
@@ -200,11 +296,11 @@ def _extension():
     return module
 
 
-def _kernel_manifest(capability: tuple[int, int], dims: BlockDims, *, fp4: bool) -> Path:
+def _kernel_manifest(architecture: tuple[int, int] | str, dims: BlockDims, *, fp4: bool) -> Path:
     prebuilt = PREBUILT / "kernels"
     if prebuilt.is_dir():
-        return build_kernels(capability, dims, fp4=fp4, cache=prebuilt)
-    return build_kernels(capability, dims, fp4=fp4, cache=_cache() / "kernels")
+        return build_kernels(architecture, dims, fp4=fp4, cache=prebuilt)
+    return build_kernels(architecture, dims, fp4=fp4, cache=_cache() / "kernels")
 
 
 def attention_cta_k(head_dim: int, rows: int) -> int:
@@ -229,6 +325,7 @@ class NativeBlockForward:
             setattr(config, name, value)
         self.block = module.Block(config)
         self.head_dim = dims.dim // dims.heads
+        self._amd = is_amd(kernels.gpu_architecture(device))
 
     def __call__(
         self, w: T.Weights, x: torch.Tensor, cond: T.StepConditioning,
@@ -239,20 +336,22 @@ class NativeBlockForward:
             return self.block.forward(
                 linears, w["attn1.q_norm.weight"], w["attn1.k_norm.weight"], w["attn2.q_norm.weight"],
                 w["scale_shift_table"], x, cond.block_rows, *prompt, rope.cos, rope.sin,
-                attention_cta_k(self.head_dim, x.shape[1]), skip_self_attention,
+                HIP_ATTENTION_CTA_K if self._amd else attention_cta_k(self.head_dim, x.shape[1]), skip_self_attention,
             )
 
 
-def block_parameters(capability: tuple[int, int], heads: int) -> dict[str, object]:
-    """Public launch policy from architecture only; no device or kernel queries."""
-    tiles = kernels.INT8_MM_TILES.get(capability, (kernels.SMALL_MM_TILE,) * 2)
+def block_parameters(architecture: tuple[int, int] | str, heads: int) -> dict[str, object]:
+    """Public launch policy from architecture (``kernels.gpu_architecture``) only; no device or
+    kernel queries."""
+    table = kernels.AMD_INT8_MM_TILES if is_amd(architecture) else kernels.INT8_MM_TILES
+    tiles = table.get(architecture, (kernels.SMALL_MM_TILE,) * 2)
     return {
         "heads": heads, "eps": T.EPS, "chunk_rows": T.CHUNK_ROWS,
-        "cublas_int8": capability in kernels.CUBLAS_INT8_MM,
+        "cublas_int8": architecture in kernels.CUBLAS_INT8_MM,
         "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(kernels.SMALL_MM_TILE),
         "small_max_n": kernels.SMALL_MM_MAX_N, "wide_k": kernels.WIDE_K, "group_m": kernels.GROUP_M,
         "stream_k_max_waves": kernels.STREAM_K_MAX_WAVES,
-        "has_tma": kernels.has_tma(capability), "epilogue_tile": list(kernels.CUBLAS_EPILOGUE_TILE),
+        "has_tma": kernels.has_tma(architecture), "epilogue_tile": list(kernels.CUBLAS_EPILOGUE_TILE),
         "fp4_tensor_scale_divisor": T.FP4_MAX * T.FP8_E4M3_MAX, "fp4_block": T.FP4_BLOCK,
         "fp4_quantize_rows": kernels.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": kernels.FP4_QUANTIZE_COLS,
         "fp4_scale_tile_rows": kernels.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernels.FP4_SCALE_TILE_COLS,
@@ -263,10 +362,9 @@ def block_parameters(capability: tuple[int, int], heads: int) -> dict[str, objec
 
 def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict[str, object]:
     """Typed native-block configuration shared by public and protected bindings."""
-    capability = torch.cuda.get_device_capability(device)
     return {
         "device": device.index if device.index is not None else torch.cuda.current_device(),
-        **block_parameters(capability, dims.heads),
+        **block_parameters(kernels.gpu_architecture(device), dims.heads),
         "programs": kernels.programs(device),
         "kernels": json.loads(manifest.read_text()), "kernel_directory": str(manifest.parent),
     }
@@ -282,7 +380,7 @@ def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[i
     dims = BlockDims.from_specs(block_specs)
     try:
         manifest = _kernel_manifest(
-            torch.cuda.get_device_capability(device), dims, fp4=block_quantization(block_specs) == "nvfp4"
+            kernels.gpu_architecture(device), dims, fp4=block_quantization(block_specs) == "nvfp4"
         )
         return NativeBlockForward(_extension(), device, dims, manifest)
     except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
