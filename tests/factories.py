@@ -178,7 +178,8 @@ def write_non_utf8_metadata_source(path: Path) -> Path:
     subprocess.run(
         [
             resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
-            "-f", "lavfi", "-i", "testsrc2=size=256x256:rate=12:duration=2",
+            # 384 px wide: the narrowest frame hevc_amf encodes.
+            "-f", "lavfi", "-i", "testsrc2=size=384x256:rate=12:duration=2",
             "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
             "-i", str(chapters), "-map", "0", "-map", "1", "-map_chapters", "2",
             "-metadata", f"title={marker.decode()}",

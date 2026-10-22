@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 import torch
 
+from jasna.accelerator import AcceleratorVendor, is_nvidia_device, vendor_for_device
 from jasna.media.probe import get_video_meta_data
 from jasna.media.audio_utils import needs_audio_reencode
 from jasna.media.splice import probe_keyframes
@@ -28,6 +29,8 @@ from factories import write_non_utf8_metadata_source
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
 
 DEVICE = torch.device("cuda:0")
+# AMF encodes HEVC only from 384 px wide and AV1 from 320 px (R9700); NVENC takes less.
+SOURCE_SIZE = "384x256"
 
 
 _EXPECTED_STREAM = {
@@ -38,13 +41,13 @@ _EXPECTED_STREAM = {
 
 
 def _av1_probe(tmp_path_factory) -> str | None:
-    """One minimal av1_nvenc open; returns the failure text when AV1 NVENC is missing."""
+    """One minimal AV1 encoder open; returns the failure text when the GPU has no AV1 encoder."""
     import av as _av
 
     tmp = tmp_path_factory.mktemp("av1probe")
     src = _make_source(tmp, "probe_src.mp4", acodec=None)
     metadata = get_video_meta_data(str(src))
-    frame = torch.zeros((3, 256, 256), dtype=torch.uint8, device=DEVICE)
+    frame = torch.zeros((3, metadata.video_height, metadata.video_width), dtype=torch.uint8, device=DEVICE)
     try:
         with VideoEncoder(
             str(tmp / "probe.mp4"), device=DEVICE, metadata=metadata, codec="av1", encoder_settings={}
@@ -52,7 +55,7 @@ def _av1_probe(tmp_path_factory) -> str | None:
             for i in range(8):
                 enc.encode(frame.clone(), i * 512)
     except RuntimeError as exc:
-        if "Failed to open av1 encoder (av1_nvenc)" in str(exc):
+        if "Failed to open av1 encoder" in str(exc):
             return str(exc)
         raise
     return None
@@ -62,7 +65,7 @@ def _av1_probe(tmp_path_factory) -> str | None:
 def av1_capability(tmp_path_factory):
     failure = _av1_probe(tmp_path_factory)
     if failure is not None:
-        pytest.skip(f"AV1 NVENC unavailable on this GPU: {failure}")
+        pytest.skip(f"AV1 encoding unavailable on this GPU: {failure}")
 
 
 @pytest.fixture
@@ -86,7 +89,7 @@ def _make_source(
     out = tmp_path / name
     cmd = [
         resolve_executable("ffmpeg"), "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", f"testsrc2=size=256x256:rate={rate}:duration={duration}",
+        "-f", "lavfi", "-i", f"testsrc2=size={SOURCE_SIZE}:rate={rate}:duration={duration}",
     ]
     if acodec:
         cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:duration={duration}", "-c:a", acodec]
@@ -117,7 +120,7 @@ def _make_count_only_stereo_pcm_source(tmp_path: Path) -> Path:
             "-f",
             "lavfi",
             "-i",
-            f"testsrc2=size=256x256:rate=12:duration={duration}",
+            f"testsrc2=size={SOURCE_SIZE}:rate=12:duration={duration}",
             "-guess_layout_max",
             "0",
             "-i",
@@ -227,8 +230,13 @@ def test_unaligned_pitch_encodes_in_isolated_process(
     codec,
     width,
     require_codec,
+    request,
 ):
     require_codec(codec)
+    if codec == "av1" and width % 8 and vendor_for_device(DEVICE) is AcceleratorVendor.AMD:
+        request.applymarker(
+            pytest.mark.xfail(strict=True, reason="av1_amf pads the coded and render width to a multiple of 8")
+        )
     src = _make_source(tmp_path, "pitch-src.mp4", acodec=None)
     dst = tmp_path / f"pitch-{codec}-{width}.mp4"
     command = [
@@ -302,6 +310,8 @@ def test_smart_fragment_keeps_periodic_random_access_points(tmp_path):
     keyframes = probe_keyframes(dst, output_metadata)
 
     assert len(keyframes.pts) >= 3
+    if not is_nvidia_device(DEVICE):
+        return  # hevc_amf encodes no B-frames
     with av.open(str(dst)) as container:
         stream = container.streams.video[0]
         assert any(
@@ -721,7 +731,8 @@ def _encode_synthetic_vfr(tmp_path: Path, codec: str, suffix: str) -> tuple[Path
         pts_list.append(pts)
         pts += step
     with VideoEncoder(str(dst), device=DEVICE, metadata=metadata, codec=codec, encoder_settings={}) as enc:
-        assert enc._cuda_ctx.cuda_stream == enc.stream.cuda_stream
+        if enc.vendor is AcceleratorVendor.NVIDIA:
+            assert enc._cuda_ctx.cuda_stream == enc.stream.cuda_stream
         for i, p in enumerate(pts_list):
             enc.encode(_gradient_frame(i, h, w), p)
     return dst, pts_list, metadata.time_base
@@ -756,10 +767,11 @@ def test_codec_smoke_matrix(tmp_path, codec, suffix, require_codec):
         for a, b in zip(out_seconds, in_seconds):
             assert a == pytest.approx(b, abs=tolerance)
 
-    # bf=4/b_ref_mode=middle defaults must yield B-frames: reordering shows up
-    # as pts != dts on at least one packet. AV1 hides reordering behind
-    # show_existing_frame, so its packets stay in presentation order.
-    if codec != "av1":
+    # NVENC's bf=4/b_ref_mode=middle defaults must yield B-frames: reordering
+    # shows up as pts != dts on at least one packet. AV1 hides reordering behind
+    # show_existing_frame, so its packets stay in presentation order. The AMF
+    # defaults set no B-frames.
+    if codec != "av1" and is_nvidia_device(DEVICE):
         with av.open(str(dst)) as c:
             v = c.streams.video[0]
             assert any(
