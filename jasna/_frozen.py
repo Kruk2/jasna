@@ -54,6 +54,7 @@ def patch_frozen_torch() -> None:
     torch.jit.interface = interface
 
     if is_frozen():
+        match_bundled_distribution_names_like_pip()
         from torch.utils import _config_module
         _config_module.get_assignments_with_compile_ignored_comments = lambda module: set()
 
@@ -72,6 +73,37 @@ def patch_frozen_torch() -> None:
             root = Path(get_application_executable()).parent
             register_ltx_sources(root)
             use_prebuilt_triton_modules(root / "triton_prebuilt")
+
+
+class NormalizedDistributionNameFinder:
+    """Nuitka finds bundled package metadata only by its exact, case-insensitive name, so
+    transformers' ``importlib.metadata.version("huggingface-hub")`` misses the bundled
+    ``huggingface_hub``. Match the normalized name, as installed packages do."""
+
+    @staticmethod
+    def find_spec(*_args):
+        return None
+
+    @staticmethod
+    def find_distributions(context):
+        if context.name is None:
+            return iter(())
+        from importlib.metadata import distributions
+
+        wanted = _normalized_distribution_name(context.name)
+        return iter([distribution for distribution in distributions()
+                     if distribution.name.lower() != context.name.lower()
+                     and _normalized_distribution_name(distribution.name) == wanted])
+
+
+def _normalized_distribution_name(name: str) -> str:
+    import re
+
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def match_bundled_distribution_names_like_pip() -> None:
+    sys.meta_path.append(NormalizedDistributionNameFinder)
 
 
 def ignore_triton_cuda_toolkit_lookup_warning() -> None:
