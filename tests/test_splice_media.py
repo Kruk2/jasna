@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import subprocess
 from pathlib import Path
 
@@ -40,6 +41,78 @@ def _ffmpeg(*args: str) -> None:
     )
     if completed.returncode != 0:
         pytest.fail(completed.stderr)
+
+
+def _shorten_mp4_video_duration(path: Path, ticks: int) -> None:
+    """Lower the video track's mdhd duration, leaving every sample in place."""
+    data = bytearray(path.read_bytes())
+
+    def boxes(start: int, end: int):
+        while start + 8 <= end:
+            size, kind = struct.unpack_from(">I4s", data, start)
+            yield start, size, kind
+            start += size
+
+    def child(start: int, size: int, kind: bytes) -> int:
+        return next(at for at, _, k in boxes(start + 8, start + size) if k == kind)
+
+    moov, moov_size = next((at, size) for at, size, kind in boxes(0, len(data)) if kind == b"moov")
+    for trak, trak_size, kind in boxes(moov + 8, moov + moov_size):
+        if kind != b"trak":
+            continue
+        mdia = child(trak, trak_size, b"mdia")
+        mdia_size = struct.unpack_from(">I", data, mdia)[0]
+        hdlr = child(mdia, mdia_size, b"hdlr")
+        if data[hdlr + 16 : hdlr + 20] != b"vide":
+            continue
+        mdhd = child(mdia, mdia_size, b"mdhd")
+        field, offset = (">Q", 32) if data[mdhd + 8] == 1 else (">I", 24)
+        (duration,) = struct.unpack_from(field, data, mdhd + offset)
+        struct.pack_into(field, data, mdhd + offset, duration - ticks)
+        path.write_bytes(bytes(data))
+        return
+    raise AssertionError(f"{path} has no video track")
+
+
+def test_copy_span_keeps_frames_past_the_recorded_video_duration(tmp_path: Path) -> None:
+    # Some MP4s, e.g. lossless cuts of B-frame streams, record a video duration that
+    # ends before the last frame. The tail copy must still carry that frame: the
+    # B-frames shown before it reference it.
+    source = tmp_path / "short-duration.mp4"
+    _ffmpeg(
+        "-f", "lavfi", "-i", "testsrc2=size=160x96:rate=12:duration=3",
+        "-an",
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        "-g", "12",
+        "-keyint_min", "12",
+        "-bf", "3",
+        "-x264-params", "scenecut=0",
+        str(source),
+    )
+    with av.open(str(source)) as container:
+        stream = container.streams.video[0]
+        frame_ticks = round(1 / (stream.average_rate * stream.time_base))
+    _shorten_mp4_video_duration(source, frame_ticks)
+    with av.open(str(source)) as container:
+        stream = container.streams.video[0]
+        last_pts = max(packet.pts for packet in container.demux(stream) if packet.pts is not None)
+        assert stream.start_time + stream.duration <= last_pts
+    with av.open(str(source)) as container:
+        source_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    assert len(source_frames) == 36
+
+    metadata = get_video_meta_data(str(source))
+    index = probe_keyframes(source, metadata)
+    assert index.end_pts > last_pts
+
+    copied = tmp_path / "tail.nut"
+    create_copy_fragment(source, SpliceSpan("copy", index.pts[-1], index.end_pts), index, copied, codec="h264")
+    with av.open(str(copied)) as container:
+        tail_frames = [frame.to_ndarray(format="rgb24") for frame in container.decode(video=0)]
+    assert len(tail_frames) == 12
+    for frame_index, frame in enumerate(tail_frames):
+        assert np.array_equal(frame, source_frames[24 + frame_index])
 
 
 def test_h264_probe_resolves_source_compatible_smart_settings(tmp_path: Path) -> None:

@@ -281,9 +281,13 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
         length_size, length_prefixed = _nal_framing(stream, codec)
         time_base = Fraction(stream.time_base)
         start_pts = resolve_video_start_pts(stream.start_time, metadata.start_pts)
+        frame_ticks = max(1, round(1 / (metadata.video_fps * time_base)))
+        packets_end: int | None = None
         for packet in container.demux(stream):
             if packet.pts is not None:
                 packet_pts.append(int(packet.pts))
+                packet_end = int(packet.pts) + (int(packet.duration) if packet.duration else frame_ticks)
+                packets_end = packet_end if packets_end is None else max(packets_end, packet_end)
             if (
                 packet.pts is not None
                 and packet.is_keyframe
@@ -304,8 +308,12 @@ def probe_keyframes(path: str | Path, metadata: VideoMetadata) -> KeyframeIndex:
         end_pts = start_pts + int(stream_duration)
     else:
         end_pts = start_pts + round(float(metadata.duration) / time_base)
+    # The recorded duration can end before the last frame (seen in MP4 edit lists);
+    # dropping that frame would also break the B-frames that reference it.
+    if packets_end is not None:
+        end_pts = max(end_pts, packets_end)
     if end_pts <= keyframes[-1]:
-        end_pts = keyframes[-1] + max(1, round(1 / (metadata.video_fps * time_base)))
+        end_pts = keyframes[-1] + frame_ticks
     max_b_frames, uses_b_references = _analyze_packet_reordering(packet_pts)
     return KeyframeIndex(
         tuple(keyframes),
