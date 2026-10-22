@@ -645,9 +645,9 @@ def run_restoration_pass(
     """Run the decode/detect -> primary -> secondary -> blend threads over one span.
 
     ``poll`` is called while the threads run; returning True cancels the pass.
-    After a cancel the queues are drained so blocked producers can exit. Returns
-    the first error a thread recorded (errors are not recorded after a cancel);
-    each caller decides whether it matters.
+    A cancel or the first thread error stops every thread, and the queues are
+    drained so blocked producers can exit. Returns that first error (errors are
+    not recorded after a cancel); each caller decides whether it matters.
     """
     device = pipeline.device
     restoration_pipeline = pipeline.restoration_pipeline
@@ -661,6 +661,7 @@ def run_restoration_pass(
     queues = (clip_queue, secondary_queue, encode_queue, metadata_queue)
 
     error_holder: list[BaseException] = []
+    stop_event = threading.Event()
     blend_buffer = BlendBuffer(device=device, vr_projector=pipeline.vr_projector)
     crop_buffers: dict[int, CropBuffer] = {}
     primary_idle_event = threading.Event()
@@ -682,7 +683,7 @@ def run_restoration_pass(
         secondary_queue=secondary_queue,
         encode_queue=encode_queue,
         error_holder=error_holder,
-        cancel_event=cancel_event,
+        cancel_event=stop_event,
         debug_memory=debug_memory,
     )
     if use_async_secondary:
@@ -712,7 +713,7 @@ def run_restoration_pass(
                 clip_queue=clip_queue,
                 metadata_queue=metadata_queue,
                 error_holder=error_holder,
-                cancel_event=cancel_event,
+                cancel_event=stop_event,
                 debug_memory=debug_memory,
                 vr_mode=pipeline.vr_resolution.resolved,
                 vr_projector=pipeline.vr_projector,
@@ -734,7 +735,7 @@ def run_restoration_pass(
                 secondary_queue=secondary_queue,
                 error_holder=error_holder,
                 primary_idle_event=primary_idle_event,
-                cancel_event=cancel_event,
+                cancel_event=stop_event,
                 debug_memory=debug_memory,
             ),
             name="PrimaryRestore", daemon=True,
@@ -751,7 +752,7 @@ def run_restoration_pass(
                 metadata_queue=metadata_queue,
                 error_holder=error_holder,
                 frame_writer=frame_writer,
-                cancel_event=cancel_event,
+                cancel_event=stop_event,
                 vram_offloader=vram_offloader,
                 seek_ts=seek_ts,
                 frame_stride=frame_stride,
@@ -766,8 +767,9 @@ def run_restoration_pass(
     while any(thread.is_alive() for thread in threads):
         if poll is not None and poll():
             cancel_event.set()
-        if cancel_event.wait(0.05):
+        if cancel_event.wait(0.05) or error_holder:
             break
+    stop_event.set()
 
     for thread in threads:
         while thread.is_alive():

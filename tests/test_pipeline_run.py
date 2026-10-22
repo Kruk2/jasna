@@ -549,6 +549,80 @@ class TestPipelineRun:
             with pytest.raises(RuntimeError, match="secondary boom"):
                 p.run()
 
+    def test_run_fails_promptly_when_blend_encode_dies_while_secondary_is_blocked(self):
+        p = _make_pipeline()
+
+        frames_t = torch.randint(0, 256, (2, 3, 8, 8), dtype=torch.uint8)
+        r1 = MagicMock()
+        r1.__enter__ = MagicMock(return_value=r1)
+        r1.__exit__ = MagicMock(return_value=False)
+        r1.frames.return_value = iter([(frames_t, [0, 1])])
+        r2 = MagicMock()
+        r2.__enter__ = MagicMock(return_value=r2)
+        r2.__exit__ = MagicMock(return_value=False)
+        blend_reader_failed = threading.Event()
+
+        def _failing_frames(seek_ts):
+            blend_reader_failed.set()
+            raise RuntimeError("AMF decode failed")
+
+        r2.frames.side_effect = _failing_frames
+        readers = iter([r1, r2])
+        reader_cls = MagicMock(side_effect=lambda *a, **kw: next(readers))
+
+        mock_encoder = MagicMock()
+        mock_encoder.__enter__ = MagicMock(return_value=mock_encoder)
+        mock_encoder.__exit__ = MagicMock(return_value=False)
+
+        clip_frames = 40
+        clip = TrackedClip(
+            track_id=1, start_frame=0, mask_resolution=(2, 2),
+            bboxes=[np.array([1, 1, 5, 5], dtype=np.float32)] * 2,
+            masks=[torch.zeros((2, 2), dtype=torch.bool)] * 2,
+        )
+
+        from jasna.pipeline_processing import BatchProcessResult
+
+        def fake_process_batch(**kwargs):
+            kwargs["metadata_queue"].put(FrameMeta(frame_idx=0, pts=0))
+            for _ in range(2):
+                kwargs["clip_queue"].put(
+                    ClipRestoreItem(clip=clip, raw_crops=[], frame_shape=(8, 8), keep_start=0, keep_end=clip_frames, crossfade_weights=None),
+                    frame_count=clip_frames,
+                )
+            return BatchProcessResult(next_frame_idx=2, clips_emitted=2)
+
+        def _primary_after_blend_failed(*args):
+            assert blend_reader_failed.wait(timeout=5)
+            return MagicMock(keep_start=0, keep_end=clip_frames)
+
+        p.restoration_pipeline.prepare_and_run_primary.side_effect = _primary_after_blend_failed
+        p.restoration_pipeline.build_secondary_result.return_value = MagicMock(keep_end=clip_frames, frame_count=clip_frames)
+
+        raised: list[BaseException] = []
+
+        def _run():
+            try:
+                p.run()
+            except BaseException as exc:
+                raised.append(exc)
+
+        with (
+            patch("jasna.pipeline.get_video_meta_data", return_value=_fake_metadata()),
+            patch("jasna.pipeline_threads.VideoReader", reader_cls),
+            patch("jasna.pipeline.VideoEncoder", return_value=mock_encoder),
+            patch("jasna.pipeline_threads.process_frame_batch", side_effect=fake_process_batch),
+            patch("jasna.pipeline_threads.finalize_processing"),
+            patch("jasna.pipeline_threads.torch.cuda.set_device"),
+            patch("jasna.pipeline_threads.torch.inference_mode", return_value=MagicMock(__enter__=MagicMock(), __exit__=MagicMock(return_value=False))),
+        ):
+            runner = threading.Thread(target=_run, daemon=True)
+            runner.start()
+            runner.join(timeout=10)
+
+        assert not runner.is_alive(), "restoration pass hung after a thread error"
+        assert len(raised) == 1 and "AMF decode failed" in str(raised[0])
+
     def test_run_secondary_loop(self, monkeypatch):
         """Cover _run_secondary_loop: push_clip → flush → pop_completed → build_secondary_result."""
         p = _make_pipeline()
