@@ -37,7 +37,7 @@ jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 | --- | --- | --- |
 | 速度 | 速い | かなり遅い（動画 1 分あたり数分） |
 | 品質 | 良い | より精細で自然 |
-| GPU | 対応するすべての GPU | NVIDIA のみ（AMD はお試しモードのみ） |
+| GPU | 対応するすべての GPU | NVIDIA または Linux の対応 AMD GPU（Windows の AMD はお試しモードのみ） |
 | 料金 | 無料 | 支援者向け（[プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)） |
 
 LTX は、特に大事な動画やシーンに使ってください。選ぶ前に
@@ -57,8 +57,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   [プロジェクトを支援する](../../README.ja.md#プロジェクトを支援する)を参照）。ない場合、アプリでは
   代わりに**お試しモード**を選べます（下記参照）。CLI はエラーで止まります。
 - **GPU**: NVIDIA RTX 30、40、50 シリーズ。RTX 20 シリーズも動くはずですが、
-  検証したのは RTX 2080 Ti だけです。GTX 16 シリーズは未検証です。AMD では
-  今のところ**お試しモード**だけ動きます。
+  検証したのは RTX 2080 Ti だけです。GTX 16 シリーズは未検証です。Linux では
+  Radeon RX 7000/9000 と Radeon AI PRO R9700 にも対応します。AMD 内蔵 GPU の
+  LTX は未検証です。Windows の AMD では**お試しモード**のみ使えます。
 - **VRAM**: 最低 8 GB。VRAM が多いほど速くなります。少ないカードではモデルの
   一部をシステム RAM に置きます。
 - **システム RAM**: 最低 16 GB（LTX は約 10 GB 使います）。

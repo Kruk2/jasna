@@ -232,21 +232,21 @@ def _build_basicvsrpp_pipeline(
     )
 
 
-LICENSED_LTX_NEEDS_NVIDIA = (
-    "LTX quality models need an NVIDIA GPU for now. On AMD you can try the free LTX trial (--ltx-trial)."
+LICENSED_LTX_AMD_UNAVAILABLE = (
+    "LTX quality models on AMD require Linux. On Windows you can try the free LTX trial (--ltx-trial)."
 )
 LTX_FAST_NEEDS_BLACKWELL = "The fast LTX model needs an RTX 50-series (Blackwell) GPU"
 
 
-def licensed_ltx_on_amd(config: SessionConfig) -> bool:
-    """Whether this LTX job needs the licensed model files on an AMD GPU, where their
-    protected loader does not run yet; the trial and plain source files do."""
-    from jasna.accelerator import is_amd_device
+def unsupported_licensed_ltx_on_amd(config: SessionConfig) -> bool:
+    """Whether this job needs the protected AMD worker on an unsupported OS."""
+    from jasna.accelerator import is_amd_device, supports_licensed_ltx_on_amd
     from jasna.ltx.model_files import needs_license
 
     return (
         not config.ltx_trial
         and is_amd_device(config.device)
+        and not supports_licensed_ltx_on_amd()
         and needs_license(restoration_model_path_for(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
     )
 
@@ -260,8 +260,8 @@ def _ltx_model_files(
     from jasna.accelerator import supports_nvfp4
     from jasna.ltx.transformer import require_kernels
 
-    if licensed_ltx_on_amd(config):
-        raise ValueError(LICENSED_LTX_NEEDS_NVIDIA)
+    if unsupported_licensed_ltx_on_amd(config):
+        raise ValueError(LICENSED_LTX_AMD_UNAVAILABLE)
     if config.ltx_fast and not supports_nvfp4(device):
         raise ValueError(LTX_FAST_NEEDS_BLACKWELL)
     require_kernels(device)

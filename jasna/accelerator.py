@@ -89,6 +89,11 @@ def is_amd_device(device: torch.device | str | None = None) -> bool:
     return vendor_for_device(device) is AcceleratorVendor.AMD
 
 
+def supports_licensed_ltx_on_amd() -> bool:
+    """Whether this OS has the protected AMD worker; GPU kernels are checked separately."""
+    return sys.platform == "linux"
+
+
 def supports_nvfp4(device: torch.device | str) -> bool:
     return is_nvidia_device(device) and torch.cuda.get_device_capability(device)[0] >= 10
 

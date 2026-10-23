@@ -271,20 +271,22 @@ def test_cli_fast_ltx_checks_hardware_before_models_or_downloads(tmp_path, monke
 
 
 @pytest.mark.parametrize(("trial", "source_files", "refused"), [(False, False, True), (True, False, False), (False, True, False)])
-def test_only_licensed_ltx_is_refused_on_amd(tmp_path, monkeypatch, trial, source_files, refused):
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_only_windows_licensed_ltx_is_refused_on_amd(tmp_path, monkeypatch, trial, source_files, refused, platform):
     from factories import session_config
     from jasna import accelerator, session_factory
 
     monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: True)
+    monkeypatch.setattr(accelerator.sys, "platform", platform)
     if source_files:
         for name in bundle_names("distilled", fast=False):
             (tmp_path / name).touch()
     config = session_config(
         restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_model="distilled", ltx_trial=trial
     )
-    assert session_factory.licensed_ltx_on_amd(config) is refused
+    assert session_factory.unsupported_licensed_ltx_on_amd(config) is (refused and platform == "win32")
     monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: False)
-    assert not session_factory.licensed_ltx_on_amd(config)
+    assert not session_factory.unsupported_licensed_ltx_on_amd(config)
 
 
 def test_licensed_ltx_on_amd_stops_before_the_download_offer_and_the_session(tmp_path, monkeypatch):
@@ -294,9 +296,25 @@ def test_licensed_ltx_on_amd_stops_before_the_download_offer_and_the_session(tmp
     monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: True)
     monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("offered a download"))
     monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: pytest.fail("loaded LTX"))
+    monkeypatch.setattr(accelerator.sys, "platform", "win32")
     config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
 
-    with pytest.raises(SystemExit, match="LTX quality models need an NVIDIA GPU"):
+    with pytest.raises(SystemExit, match="LTX quality models on AMD require Linux"):
         main._ensure_ltx_model(config, None)
-    with pytest.raises(ValueError, match="LTX quality models need an NVIDIA GPU"):
+    with pytest.raises(ValueError, match="LTX quality models on AMD require Linux"):
+        session_factory._ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+
+
+def test_linux_licensed_amd_reaches_the_normal_model_preflight(tmp_path, monkeypatch):
+    from factories import session_config
+    from jasna import accelerator, main, session_factory
+
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda device=None: True)
+    monkeypatch.setattr(model_files, "missing_downloads", Mock(side_effect=RuntimeError("normal download preflight")))
+    monkeypatch.setattr("jasna.ltx.transformer.require_kernels", Mock(side_effect=RuntimeError("normal kernel preflight")))
+    monkeypatch.setattr(accelerator.sys, "platform", "linux")
+    config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path)
+    with pytest.raises(RuntimeError, match="normal download preflight"):
+        main._ensure_ltx_model(config, None)
+    with pytest.raises(RuntimeError, match="normal kernel preflight"):
         session_factory._ltx_model_files(config, torch.device("cuda:0"), log_callback=None)

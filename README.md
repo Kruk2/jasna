@@ -35,7 +35,7 @@ and a command line, and runs on your GPU.
 - Finds mosaics in a video and restores them. The rest of the picture is not
   touched.
 - Two restoration models: fast **BasicVSR++** (free) and slow but more
-  detailed **LTX** (for supporters, NVIDIA only).
+  detailed **LTX** (for supporters, NVIDIA or supported AMD GPUs on Linux).
 - Restores only the parts you choose, with a preview, in the **Segment
   Editor**.
 - Works with VR180 videos and still images (SD 1.5, for supporters).
@@ -57,11 +57,12 @@ and a command line, and runs on your GPU.
   [GPU table](https://developer.nvidia.com/cuda/gpus).
 - AMD: a GPU supported by ROCm (Radeon RX 7000/9000, Radeon 780M/760M/740M,
   Ryzen AI). On Windows, AMD Adrenalin driver 26.8.1 or newer. Secondary
-  restoration and LTX are NVIDIA only; LTX Trial mode runs on AMD.
+  restoration is NVIDIA only. LTX supports Radeon RX 7000/9000 and Radeon AI PRO
+  R9700 on Linux; on Windows, AMD supports LTX Trial mode only.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
-- LTX needs an NVIDIA RTX GPU, at least 8 GB VRAM and 16 GB RAM. See
+- LTX needs an NVIDIA RTX GPU or a supported AMD GPU on Linux, at least 8 GB VRAM and 16 GB RAM. See
   [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 </details>
@@ -108,7 +109,7 @@ Supporters get a License code for the supporter models:
 | Support | Models |
 | --- | --- |
 | **$15 USD** or more in total | **UNet 4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
-| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA only. Includes future updates of this LTX model. |
+| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA or supported AMD GPUs on Linux. Includes future updates of this LTX model. |
 
 Supporters who gave **$15 USD or more on or before 14 October 2026** get LTX for free.
 

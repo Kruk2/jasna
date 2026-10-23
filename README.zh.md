@@ -31,7 +31,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 ## Jasna 能做什么
 
 - 找出视频中的马赛克并修复。画面的其他部分不会被改动。
-- 两个修复模型：快速的 **BasicVSR++**（免费），以及慢但细节更多的 **LTX**（支持者专享，仅限 NVIDIA）。
+- 两个修复模型：快速的 **BasicVSR++**（免费），以及慢但细节更多的 **LTX**（支持者专享，支持 NVIDIA 或 Linux 上兼容的 AMD 显卡）。
 - 在**区间编辑器**中只修复你选择的部分，并可预览。
 - 可用于 VR180 视频和静态图片（支持者专享的 SD 1.5 模型）。
 - 在**视频播放器**中实时观看修复后的视频，不用生成文件。
@@ -49,10 +49,11 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 - NVIDIA：你的 GPU 在 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus)
   中需要计算能力 7.5 或更高。
 - AMD：ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI）。
-  Windows 上需要 AMD Adrenalin 驱动 26.8.1 或更新。二次修复和 LTX 仅限 NVIDIA；LTX 试用模式可在 AMD 上运行。
+  Windows 上需要 AMD Adrenalin 驱动 26.8.1 或更新。二次修复仅限 NVIDIA。
+  LTX 支持 Linux 上的 Radeon RX 7000/9000 和 Radeon AI PRO R9700；Windows 上的 AMD 仅支持 LTX 试用模式。
 - 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
   固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
-- LTX 需要 NVIDIA RTX GPU，至少 8 GB 显存和 16 GB 内存。见
+- LTX 需要 NVIDIA RTX 显卡或 Linux 上兼容的 AMD 显卡，至少 8 GB 显存和 16 GB 内存。见
   [LTX 需要什么](docs/zh/models.md#ltx-需要什么)。
 
 </details>
@@ -94,7 +95,7 @@ Jasna 是免费的。你的支持用于训练新模型，主要是租用 GPU。�
 | 支持 | 模型 |
 | --- | --- |
 | 累计 **15 美元**或以上 | **UNet 4x**：让修复区域更清晰。<br>**SD 1.5**：用于静态图片的实验性模型。 |
-| **25 美元** | **UNet 4x** 和 **SD 1.5**，再加上<br>**LTX**：比 BasicVSR++ 慢很多，但细节更多。仅限 NVIDIA。包含这个 LTX 模型以后的更新。 |
+| **25 美元** | **UNet 4x** 和 **SD 1.5**，再加上<br>**LTX**：比 BasicVSR++ 慢很多，但细节更多。支持 NVIDIA 或 Linux 上兼容的 AMD 显卡。包含这个 LTX 模型以后的更新。 |
 
 **截至 2026 年 10 月 14 日（含当天）**累计支持 **15 美元或以上**的支持者可免费获得 LTX。
 

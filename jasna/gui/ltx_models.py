@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from jasna.accelerator import AcceleratorVendor
+from jasna.accelerator import AcceleratorVendor, supports_licensed_ltx_on_amd
 from jasna.gui.download_worker import start_download
 from jasna.gui.activation_worker import read_license_info
 from jasna.gui.locales import get_locale, t
@@ -37,7 +37,7 @@ class LtxInstallState:
         return not self.missing[(model, fast)]
 
     def usable(self, model: LtxModelName, fast: bool, vendor: AcceleratorVendor | None) -> bool:
-        if vendor is AcceleratorVendor.AMD:
+        if vendor is AcceleratorVendor.AMD and not supports_licensed_ltx_on_amd():
             return self.installed(model, fast) and not self.licensed[(model, fast)]
         return self.downloadable or self.installed(model, fast)
 
@@ -64,7 +64,11 @@ def trial_only(state: LtxInstallState, vendor: AcceleratorVendor | None) -> bool
 
 def trial_only_reason(vendor: AcceleratorVendor | None) -> str:
     """Locale key saying why only a trial run is possible."""
-    return "model_ltx_licensed_needs_nvidia" if vendor is AcceleratorVendor.AMD else "model_ltx_trial_only"
+    return (
+        "model_ltx_licensed_needs_nvidia"
+        if vendor is AcceleratorVendor.AMD and not supports_licensed_ltx_on_amd()
+        else "model_ltx_trial_only"
+    )
 
 
 def run_unavailable_reason(
@@ -75,7 +79,7 @@ def run_unavailable_reason(
         return "model_ltx_needs_nvidia"
     if trial:
         return None
-    if vendor is AcceleratorVendor.AMD and not state.usable(model, fast, vendor):
+    if vendor is AcceleratorVendor.AMD and not supports_licensed_ltx_on_amd() and not state.usable(model, fast, vendor):
         return "model_ltx_licensed_needs_nvidia"
     if state.installed(model, fast):
         return None

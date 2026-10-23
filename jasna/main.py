@@ -878,15 +878,15 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     if not uses_ltx:
         return
     from jasna.accelerator import supports_nvfp4
-    from jasna.session_factory import LICENSED_LTX_NEEDS_NVIDIA, LTX_FAST_NEEDS_BLACKWELL, licensed_ltx_on_amd
+    from jasna.session_factory import LICENSED_LTX_AMD_UNAVAILABLE, LTX_FAST_NEEDS_BLACKWELL, unsupported_licensed_ltx_on_amd
 
     if config.ltx_fast and not supports_nvfp4(config.device):
         sys.exit(f"Error: {LTX_FAST_NEEDS_BLACKWELL}")
     if config.ltx_trial:
         print(LTX_TRIAL_NOTICE)
         return
-    if licensed_ltx_on_amd(config):
-        sys.exit(f"Error: {LICENSED_LTX_NEEDS_NVIDIA}")
+    if unsupported_licensed_ltx_on_amd(config):
+        sys.exit(f"Error: {LICENSED_LTX_AMD_UNAVAILABLE}")
     directory = config.restoration_model_path if config.restoration_model_name == "ltx" else default_restoration_model_path("ltx")
     missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
     if not missing:

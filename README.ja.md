@@ -32,7 +32,7 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 
 - 動画のモザイクを見つけて復元します。画面のほかの部分には手を加えません。
 - 2 つの復元モデル: 高速な **BasicVSR++**（無料）と、遅いけれどより精細な
-  **LTX**（支援者向け、NVIDIA のみ）。
+  **LTX**（支援者向け、NVIDIA または Linux の対応 AMD GPU）。
 - **区間エディター**で、選んだ部分だけをプレビューしながら復元できます。
 - VR180 動画と静止画（支援者向けの SD 1.5 モデル）にも使えます。
 - **動画プレーヤー**で、ファイルを作らずに復元しながら動画を見られます。
@@ -51,12 +51,13 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 - NVIDIA: NVIDIA の [GPU 一覧](https://developer.nvidia.com/cuda/gpus)で
   コンピュート能力が 7.5 以上である必要があります。
 - AMD: ROCm 対応 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、
-  Ryzen AI）。Windows では AMD Adrenalin ドライバー 26.8.1 以降。二次復元と
-  LTX は NVIDIA のみです。LTX のお試しモードは AMD でも動きます。
+  Ryzen AI）。Windows では AMD Adrenalin ドライバー 26.8.1 以降。二次復元は
+  NVIDIA のみです。LTX は Linux の Radeon RX 7000/9000 と Radeon AI PRO R9700 に
+  対応します。Windows の AMD では LTX のお試しモードのみ使えます。
 - ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS、ZFS。ネットワーク
   ディスクは非対応です。SSD を使ってください。ハードディスク（HDD）では起動と
   モデルの読み込みが遅くなります。
-- LTX には NVIDIA RTX GPU、8 GB 以上の VRAM、16 GB 以上の RAM が必要です。
+- LTX には NVIDIA RTX GPU または Linux の対応 AMD GPU、8 GB 以上の VRAM、16 GB 以上の RAM が必要です。
   [LTX に必要なもの](docs/ja/models.md#ltx-に必要なもの)をご覧ください。
 
 </details>
@@ -103,7 +104,7 @@ Jasna は無料です。支援は新しいモデルの訓練に使われます�
 | 支援額 | モデル |
 | --- | --- |
 | **合計 15 USD** 以上 | **UNet 4x**: 復元した部分をよりシャープにします。<br>**SD 1.5**: 静止画用の実験的なモデル。 |
-| **25 USD** | **UNet 4x** と **SD 1.5**、さらに<br>**LTX**: BasicVSR++ よりずっと遅いですが、より細かく復元します。NVIDIA のみ。この LTX モデルの今後のアップデートも含みます。 |
+| **25 USD** | **UNet 4x** と **SD 1.5**、さらに<br>**LTX**: BasicVSR++ よりずっと遅いですが、より細かく復元します。NVIDIA または Linux の対応 AMD GPU。この LTX モデルの今後のアップデートも含みます。 |
 
 **2026 年 10 月 14 日までに 15 USD 以上**支援した方は、LTX を無料で使えます。
 

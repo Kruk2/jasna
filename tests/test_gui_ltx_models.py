@@ -87,7 +87,10 @@ def test_availability_with_downloads(tmp_path, downloadable) -> None:
     assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=False) == "model_ltx_not_downloaded"
 
 
-def test_amd_runs_the_trial_and_source_models_but_not_licensed_ones(tmp_path, downloadable) -> None:
+def test_windows_amd_runs_trial_and_source_models_only(tmp_path, downloadable, monkeypatch) -> None:
+    from jasna import accelerator
+
+    monkeypatch.setattr(accelerator.sys, "platform", "win32")
     _install(tmp_path, "distilled", fast=False)
     state = read_install_state(tmp_path)
 
@@ -97,6 +100,17 @@ def test_amd_runs_the_trial_and_source_models_but_not_licensed_ones(tmp_path, do
     assert run_unavailable_reason(state, "undistilled", False, AMD, trial=True) is None
     assert trial_only_reason(AMD) == "model_ltx_licensed_needs_nvidia"
     assert trial_only_reason(NVIDIA) == "model_ltx_trial_only"
+
+
+def test_linux_amd_uses_normal_licensed_model_downloads(tmp_path, downloadable, monkeypatch) -> None:
+    from jasna import accelerator
+
+    monkeypatch.setattr(accelerator.sys, "platform", "linux")
+    state = read_install_state(tmp_path)
+    assert not trial_only(state, AMD)
+    assert state.usable("distilled2", False, AMD)
+    assert run_unavailable_reason(state, "distilled2", False, AMD, trial=False) == "model_ltx_not_downloaded"
+    assert trial_only_reason(AMD) == "model_ltx_trial_only"
 
 
 def _answer(monkeypatch, yes: bool) -> list[str]:
@@ -488,7 +502,9 @@ def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downlo
     def refuse(*_args, **_kwargs):
         raise LicenseError("No license found.")
 
-    monkeypatch.setattr(model_files.LtxModelFiles, "from_dir", refuse)
+    monkeypatch.setattr(model_files, "needs_license", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(ltx_models_module, "read_license_info", lambda: (True, True))
+    monkeypatch.setattr("jasna.protection.protected_tensors.check_ltx_license", refuse)
     assert ltx_models_module.license_missing(directory, "distilled", False)
 
 

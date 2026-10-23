@@ -38,7 +38,7 @@ for each video.
 | --- | --- | --- |
 | Speed | Fast | Much slower (minutes per minute of video) |
 | Quality | Good | More detail, more natural |
-| GPU | Every supported GPU | NVIDIA only (AMD: Trial mode) |
+| GPU | Every supported GPU | NVIDIA or supported AMD GPUs on Linux (Windows AMD: Trial mode) |
 | Cost | Free | For supporters ([Supporting the project](../../README.md#supporting-the-project)) |
 
 Use LTX for the videos or scenes you care about most. Before you choose it, look
@@ -59,8 +59,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   one, the app offers **Trial mode** instead (see below); the CLI stops with
   an error.
 - **GPU**: NVIDIA RTX 30, 40 or 50-series. RTX 20-series should work, but
-  only the RTX 2080 Ti was tested. GTX 16-series is untested. On AMD only
-  **Trial mode** runs for now.
+  only the RTX 2080 Ti was tested. GTX 16-series is untested. Linux also supports
+  Radeon RX 7000/9000 and Radeon AI PRO R9700 cards. AMD integrated GPUs are
+  untested for LTX. On Windows, AMD supports **Trial mode** only.
 - **VRAM**: 8 GB minimum. More VRAM is faster: on smaller cards parts of the
   model are kept in system RAM.
 - **System RAM**: 16 GB minimum (LTX uses about 10 GB).
