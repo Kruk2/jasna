@@ -210,12 +210,39 @@ def test_load_video_encoder_before_sm80_compiles_fp16_with_a_float32_tail(tmp_pa
     assert compiled == [torch.float16]
 
 
-def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_path, monkeypatch):
+def _amd_encoder_checkpoint(tmp_path):
     source = VideoEncoder(**encoder_kwargs(_vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)))
     path = tmp_path / "vae.safetensors"
     save_file({f"encoder.{k}" if not k.startswith("per_channel") else k: v.bfloat16()
                for k, v in source.state_dict().items()},
               str(path), metadata={"config": json.dumps({"vae": _vae_config(TINY_ENCODER_CONFIG, {})})})
+    return path
+
+
+@pytest.mark.parametrize("triton", (True, False))
+def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path, monkeypatch, triton):
+    path = _amd_encoder_checkpoint(tmp_path)
+    monkeypatch.setattr(loader, "is_amd_device", lambda device: True)
+    monkeypatch.setattr(loader, "has_triton_package", lambda: triton)
+    monkeypatch.setattr(video_encoder, "_kitchen_conv3d", False)
+    monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
+
+    encoder = load_video_encoder(path, torch.device("cpu"))
+
+    head = video_encoder.KITCHEN_DOWN_BLOCKS
+    def channels_last(layer):
+        return next(layer.parameters()).is_contiguous(memory_format=torch.channels_last_3d)
+    assert [channels_last(layer) for layer in (encoder.conv_in, *encoder.down_blocks, encoder.conv_out)] == (
+        [True] * (1 + head) + [triton] * (len(encoder.down_blocks) - head + 1))
+    tail = encoder.down_blocks[head]
+    sample = torch.randn(1, 3, 2, 4, 4, dtype=torch.float16).contiguous(memory_format=torch.channels_last_3d)
+    converted = video_encoder._layer_input(sample, tail)
+    tail_format = torch.channels_last_3d if triton else torch.contiguous_format
+    assert converted.dtype == torch.bfloat16 and converted.is_contiguous(memory_format=tail_format)
+
+
+def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_path, monkeypatch):
+    path = _amd_encoder_checkpoint(tmp_path)
     compiled = []
     monkeypatch.setattr(loader, "is_amd_device", lambda device: True)
     monkeypatch.setattr(video_encoder, "_kitchen_conv3d", False)

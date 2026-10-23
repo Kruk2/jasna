@@ -11,6 +11,7 @@ from typing import TypeVar
 
 import torch
 from torch import nn
+from torch.utils._triton import has_triton_package
 
 from jasna.accelerator import is_amd_device
 from jasna.ltx.model_files import open_tensors
@@ -198,7 +199,11 @@ def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
         elif is_amd_device(device):
             encoder.to_fp16_head(KITCHEN_DOWN_BLOCKS)
             enable_kitchen_conv3d()
-        encoder.to(memory_format=torch.channels_last_3d)
+        # Without Triton the encoder runs eagerly: there MIOpen and ROCm's copies run the tail faster
+        # in NCDHW (1.39 -> 1.28 s per 512 window on an R9700); kitchen's head needs channels-last.
+        eager_amd = is_amd_device(device) and not has_triton_package()
+        for layer in (encoder.conv_in, *encoder.down_blocks[:KITCHEN_DOWN_BLOCKS]) if eager_amd else (encoder,):
+            layer.to(memory_format=torch.channels_last_3d)
         _clear_tensors(bf16_contiguous_weights, encoder)
         compile_video_encoder(device, dtype)
         return encoder

@@ -200,16 +200,25 @@ def _weight_dtype(layer: nn.Module) -> torch.dtype:
     return next(layer.parameters()).dtype
 
 
+def _layer_input(sample: torch.Tensor, layer: nn.Module) -> torch.Tensor:
+    """``sample`` in ``layer``'s weight dtype, and contiguous (in the same copy) for a layer whose
+    conv weights are, as in an eager AMD encoder's tail."""
+    weight = next(layer.parameters())
+    if weight.is_contiguous(memory_format=torch.channels_last_3d):
+        return sample.to(weight.dtype)
+    return sample.to(dtype=weight.dtype, memory_format=torch.contiguous_format)
+
+
 def encode_cropped(encoder: VideoEncoder, sample: torch.Tensor) -> torch.Tensor:
     """Latent means of ``sample`` (in ``conv_in``'s dtype); every later layer computes in its
-    own weights' dtype."""
+    own weights' dtype and memory format."""
     sample = patchify(sample, patch_size_hw=encoder.patch_size)
     sample = encoder.conv_in(sample)
 
     for down_block in encoder.down_blocks:
-        sample = down_block(sample.to(_weight_dtype(down_block)))
+        sample = down_block(_layer_input(sample, down_block))
 
-    sample = sample.to(_weight_dtype(encoder.conv_out))
+    sample = _layer_input(sample, encoder.conv_out)
     sample = encoder.conv_norm_out(sample)
     sample = encoder.conv_act(sample)
     sample = encoder.conv_out(sample)
