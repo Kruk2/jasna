@@ -232,7 +232,8 @@ def _hip_build_flags(rocm_home: Path) -> dict[str, list[str]]:
 
 def _hipcc_command(rocm_home: Path, flags: tuple[str, ...]) -> list[str]:
     """hipcc with ``flags``, position-independent hidden symbols and every ``hip_architectures`` target."""
-    host = ["-fms-runtime-lib=dll", "-DNO_EXPORT=1"] if _IS_WINDOWS else ["-fPIC", "-fvisibility=hidden"]
+    host = (["-fms-runtime-lib=dll", "-DNO_EXPORT=1", f"-ffile-prefix-map={_HERE.parents[2]}=."]
+            if _IS_WINDOWS else ["-fPIC", "-fvisibility=hidden"])
     return [str(_hipcc(rocm_home)), *flags, *host, *(f"--offload-arch={arch}" for arch in hip_architectures())]
 
 
