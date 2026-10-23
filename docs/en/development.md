@@ -115,6 +115,15 @@ protection submodule. A test of NVIDIA-only behavior that mocks the GPU takes th
 `nvidia_vendor` fixture (`tests/conftest.py`); tests that need TensorRT, NVDEC,
 NVFP4 or the protection source skip when they are missing.
 
+On an idle AMD GPU, run the driver memory cleanup check explicitly:
+
+```bash
+JASNA_TEST_AMD_VRAM_CLEANUP=1 python -m pytest -q -s tests/test_amd_vram_cleanup_gpu.py
+```
+
+It fills most VRAM with a synthetic marker, kills that process, and scans new
+HIP allocations in a fresh process. A pass applies only to the tested driver and GPU.
+
 ## CUDA kernels
 
 `jasna/media/*.cu` are prebuilt into committed binaries next to them, so
