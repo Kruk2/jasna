@@ -117,6 +117,10 @@ download `amf_installer_<version>.zip`, unpack it and run
 Supporter models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
 the header.
 
+If Jasna is already activated, opening this window checks online and shows
+**Devices used**, for example **2 of 3**. If the count is unavailable, reopen
+the window to try again. Restoration still works offline.
+
 - **Online** (default): enter your **License code** and click
   **Activate online**.
 - **Manual**, for a PC without internet or when online fails:
@@ -131,7 +135,7 @@ the header.
 Good to know:
 
 - One License code works on **3 PCs or cloud workspaces**. Activating the same
-  PC again does not use a new slot. Only the owner can free a slot.
+  PC again does not use a new slot.
 - A new motherboard (Windows) or a fresh Linux install counts as a new PC
   and uses a slot. Reinstalling Windows or changing the GPU, disk or RAM
   does not: just activate again. On a few Windows PCs without a real

@@ -350,6 +350,10 @@ class LicenseDialog(ctk.CTkToplevel):
             wraplength=460, justify="left",
         )
         self._status.pack(anchor="w", pady=(6, 0))
+        self._devices = ctk.CTkLabel(
+            outer, text="", text_color=Colors.TEXT_PRIMARY,
+            font=(Fonts.FAMILY, Fonts.SIZE_SMALL), wraplength=460, justify="left",
+        )
         if protection_available():
             activation_worker.start_license_info(
                 lambda info, error: self._post_result(self._loaded, info, error)
@@ -421,7 +425,21 @@ class LicenseDialog(ctk.CTkToplevel):
                 self._key.insert(0, key)
             if licensed:
                 self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+                self._devices.configure(text=t("license_devices_checking"))
+                self._devices.pack(anchor="w", pady=(6, 0))
+                self._resize()
+                activation_worker.start_device_count(
+                    key, lambda count, error: self._post_result(self._devices_ready, count, error)
+                )
         self._load_machine_key()
+
+    def _devices_ready(self, count, error):
+        if error is not None:
+            self._devices.configure(text=t("license_devices_unavailable"))
+        else:
+            used, limit = count
+            self._devices.configure(text=t("license_devices_count", used=used, limit=limit))
+        self._resize()
 
     def _load_machine_key(self):
         self._set_busy(True)
@@ -507,6 +525,7 @@ class LicenseDialog(ctk.CTkToplevel):
             return
         self._set_machine_key(identity)
         self._status.configure(text=t("license_active"), text_color=Colors.STATUS_COMPLETED)
+        self._devices.pack_forget()
         self._on_activated()
 
     def _show_error(self, text: str) -> None:

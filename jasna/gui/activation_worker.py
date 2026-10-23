@@ -47,6 +47,20 @@ def start_license_info(on_done) -> threading.Thread:
     return _start(read_license_info, on_done)
 
 
+def start_device_count(key: str, on_done) -> threading.Thread:
+    from jasna.gui.locales import get_locale
+
+    prefer_hong_kong = get_locale().current_language == "zh"
+
+    def read():
+        require_protection()
+        from jasna.protection import activation
+
+        return activation.get_device_count(key, prefer_hong_kong=prefer_hong_kong)
+
+    return _start(read, on_done)
+
+
 def start_machine_key(on_done) -> threading.Thread:
     def read():
         require_protection()
