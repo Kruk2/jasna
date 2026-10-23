@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from jasna.models.ltx_vae import diffusion_hip, na_hip
+from jasna.models.ltx_vae import diffusion_hip, layout_hip, na_hip
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 from factories import offload_bundle_targets
@@ -22,7 +22,8 @@ def test_every_window_ships_a_code_object_for_every_architecture(window):
     assert all(module in kernels for kernels in KERNEL_LAUNCH.values())
 
 
-@pytest.mark.parametrize("module", [diffusion_hip.SWIGLU_MODULE, *map(diffusion_hip.qkv_module, diffusion_hip.QKV_DIMS)])
+@pytest.mark.parametrize("module", [diffusion_hip.SWIGLU_MODULE, *map(diffusion_hip.qkv_module, diffusion_hip.QKV_DIMS),
+                                    layout_hip.MODULE])
 def test_every_diffusion_kernel_ships_a_code_object_for_every_architecture(module):
     targets = offload_bundle_targets(MEDIA / f"{module}.hipfb")
 
@@ -80,3 +81,10 @@ def test_rejects_inputs_the_kernel_was_not_built_for():
 def test_a_window_without_a_built_kernel_fails_loudly():
     with pytest.raises(RuntimeError, match="no ahead-of-time neighborhood-attention kernel"):
         na_hip._kernel("gfx1201", (5, 5, 5))
+
+
+def test_the_channels_first_copy_takes_only_channels_last_fp16():
+    with pytest.raises(ValueError, match="channels-last 3D fp16"):
+        layout_hip.channels_first_bf16(torch.zeros(1, 4, 2, 3, 3, dtype=torch.float16))
+    with pytest.raises(ValueError, match="channels-last 3D fp16"):
+        layout_hip.channels_first_bf16(torch.zeros(1, 4, 2, 3, 3).contiguous(memory_format=torch.channels_last_3d))

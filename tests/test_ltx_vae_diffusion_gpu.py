@@ -169,3 +169,16 @@ def test_the_wider_deterministic_stages_keep_the_torch_qkv(monkeypatch):
     attn, x = _deterministic_stage(1024)
     with torch.inference_mode():
         assert attn(x).shape == x.shape
+
+
+@amd_only
+@pytest.mark.parametrize("shape", [(1, 128, 121, 128, 128), (2, 70, 3, 5, 9)])
+def test_the_ahead_of_time_channels_first_copy_matches_torch(shape):
+    from jasna.models.ltx_vae import layout_hip
+
+    x = torch.randn(shape, device="cuda", dtype=torch.float16).contiguous(memory_format=torch.channels_last_3d)
+
+    out = layout_hip.channels_first_bf16(x)
+
+    assert out.is_contiguous()
+    assert torch.equal(out, x.to(dtype=torch.bfloat16, memory_format=torch.contiguous_format))

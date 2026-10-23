@@ -3,12 +3,13 @@
 Compiled ahead of time, bf16: ``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
 shipped DiffVAE decoder with that size's AMD ``na_geometry`` config, and ``diffusion_triton``'s residual
 SwiGLU and slab Q/K/V kernels at the shipped diffusion-block shapes (Q/K/V also at the 512-wide
-deterministic stages). Windows ROCm ships no Triton, so ``na_hip`` and ``diffusion_hip`` launch these there.
+deterministic stages), and the eager encoder's channels-first copy (``layout_triton``). Windows ROCm ships no Triton, so ``na_hip`` and ``diffusion_hip`` launch these there.
 
 Usage (Linux, ROCm Torch + Triton, ROCm's clang-offload-bundler):
     python scripts/build_ltx_vae_hipfbs.py
 
-Writes ``jasna/media/ltx_na3d_*.hipfb``, ``ltx_swiglu_*.hipfb``, ``ltx_slab_qkv_*.hipfb`` and the launch table
+Writes ``jasna/media/ltx_na3d_*.hipfb``, ``ltx_swiglu_*.hipfb``, ``ltx_slab_qkv_*.hipfb``,
+``ltx_channels_first_*.hipfb`` and the launch table
 ``jasna/models/ltx_vae/hip_launch.py`` (the grids come from the launchers).
 """
 from __future__ import annotations
@@ -16,8 +17,9 @@ from __future__ import annotations
 from triton_hipfb import ARCHITECTURES, MEDIA, REPO, WARP_SIZE, _write_launch_table, bundle, compile_code_object
 
 from jasna.models.ltx_vae import diffusion_hip as aot
-from jasna.models.ltx_vae import na_hip
+from jasna.models.ltx_vae import layout_hip, na_hip
 from jasna.models.ltx_vae.diffusion_triton import _residual_swiglu_kernel, _slab_qkv_kernel
+from jasna.models.ltx_vae.layout_triton import _channels_first_kernel
 from jasna.models.ltx_vae.na_geometry import config_for
 from jasna.models.ltx_vae.na_triton import _na3d_fwd_kernel
 
@@ -50,6 +52,10 @@ def _kernel_specs():
              "BLOCK_ROWS": aot.QKV_BLOCK_ROWS, "MODULATE": dim == aot.DIM},
             aot.QKV_WARPS, 1,
         )
+    specs[layout_hip.MODULE] = (
+        _channels_first_kernel, layout_hip.ARGUMENTS, {"BLOCK_S": layout_hip.BLOCK_S, "BLOCK_C": layout_hip.BLOCK_C},
+        layout_hip.WARPS, 1,
+    )
     return specs
 
 

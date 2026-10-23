@@ -206,6 +206,10 @@ def _layer_input(sample: torch.Tensor, layer: nn.Module) -> torch.Tensor:
     weight = next(layer.parameters())
     if weight.is_contiguous(memory_format=torch.channels_last_3d):
         return sample.to(weight.dtype)
+    if sample.is_cuda and sample.dtype == torch.float16 and weight.dtype == torch.bfloat16:
+        from jasna.models.ltx_vae.layout_hip import channels_first_bf16
+
+        return channels_first_bf16(sample)
     return sample.to(dtype=weight.dtype, memory_format=torch.contiguous_format)
 
 
