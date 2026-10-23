@@ -90,8 +90,8 @@ BasicVSR++ 整段视频任务、预览和流式播放不支持续跑。
 ### 手动下载 LTX
 
 如果在 Jasna 里下载一直失败，可以用浏览器从
-[hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main)
-（或 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main)）
+[hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)
+（或 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)）
 下载。需要 3 个文件：你所选模型的文件 1 个，加上 2 个 VAE 文件。
 
 | 你选的模型 | 文件 |

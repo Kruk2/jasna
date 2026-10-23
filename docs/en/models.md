@@ -102,8 +102,8 @@ BasicVSR++ whole-video jobs, previews and streaming do not resume.
 ### Downloading LTX yourself
 
 If the download in Jasna keeps failing, get the files in your browser from
-[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main)
-(or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main)).
+[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)
+(or [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)).
 You need 3 files: one for the model you picked, plus the two VAE files.
 
 | You picked | Files |

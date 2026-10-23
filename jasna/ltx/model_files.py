@@ -30,8 +30,8 @@ LTX_MODELS: tuple[LtxModelName, ...] = get_args(LtxModelName)
 
 # Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}",
 # and from the same path on LTX_MIRROR_URL (reachable from mainland China) when that fails.
-LTX_DOWNLOAD_URL = "https://huggingface.co/Kruk2/ltx-restore/resolve/main"
-LTX_MIRROR_URL = "https://hf-mirror.com/Kruk2/ltx-restore/resolve/main"
+LTX_DOWNLOAD_URL = "https://huggingface.co/Kruk2/ltx-restore/resolve/main/block-layout3"
+LTX_MIRROR_URL = "https://hf-mirror.com/Kruk2/ltx-restore/resolve/main/block-layout3"
 _NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
 
 DownloadProgressCallback = Callable[[int, int], None]

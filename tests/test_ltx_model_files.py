@@ -131,6 +131,27 @@ def test_download_falls_back_to_the_other_source(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("mirror_first", [False, True])
+def test_replacement_models_use_separate_remote_folder_on_both_sources(tmp_path, monkeypatch, mirror_first):
+    content = b"replacement model"
+    name = "ltx-restore-alpha1-distill2-int8.safetensors.enc"
+    file = model_files.DownloadableFile(name, len(content), hashlib.sha256(content).hexdigest())
+    requests = []
+
+    def open_url(url, **kwargs):
+        requests.append(url)
+        if len(requests) == 1:
+            raise urllib.error.URLError("primary unreachable")
+        return io.BytesIO(content)
+
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
+    model_files.download_files(tmp_path, [file], None, mirror_first=mirror_first)
+    expected = [f"https://{host}/Kruk2/ltx-restore/resolve/main/block-layout3/{name}"
+                for host in ("huggingface.co", "hf-mirror.com")]
+    assert requests == (list(reversed(expected)) if mirror_first else expected)
+    assert (tmp_path / name).read_bytes() == content
+
+
+@pytest.mark.parametrize("mirror_first", [False, True])
 def test_download_uses_bundled_ca_for_primary_and_fallback_with_empty_system_trust(tmp_path, monkeypatch, mirror_first):
     real_create_context = ssl.create_default_context
     monkeypatch.setattr(ssl.SSLContext, "load_default_certs", lambda *args, **kwargs: None)
