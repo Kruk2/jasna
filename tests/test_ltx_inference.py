@@ -180,6 +180,34 @@ def test_worker_peak_vram_counts_the_native_block_store(monkeypatch, allocator):
     assert stats["peak_vram_bytes"] == (5 << 30) + (13 << 30)
 
 
+def test_worker_reports_denoise_progress_after_gpu_completion(monkeypatch, allocator):
+    backend = inference.WorkerBackend({"transformer": "t.enc", "vae": "v.enc", "tuned_decoder": "d.enc", "device": "cpu"})
+    events = []
+    monkeypatch.setattr(torch.cuda, "synchronize", lambda device: events.append(("synchronize", device)))
+
+    class Transformer:
+        def native_vram_bytes(self):
+            return 0
+
+        def denoise_chain(self, references, seeds, window_hop, advance):
+            for count in (1, 2):
+                events.append(("queued", count))
+                advance(count)
+            return references
+
+    backend.transformer = Transformer()
+    latent = torch.zeros(1)
+    _, result = backend.dispatch(
+        "denoise_chain", {"seeds": [1], "window_hop": 88}, [latent],
+        lambda count: events.append(("progress", count)),
+    )
+    assert result == [latent]
+    assert events == [
+        ("queued", 1), ("synchronize", backend.device), ("progress", 1),
+        ("queued", 2), ("synchronize", backend.device), ("progress", 2),
+    ]
+
+
 def test_worker_sizes_the_transformer_from_the_parents_device_wide_free_vram(monkeypatch, allocator):
     """On Windows the worker's CUDA view misses the parent's and other programs' VRAM."""
     gib = 1 << 30

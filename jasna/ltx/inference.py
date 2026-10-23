@@ -300,7 +300,13 @@ class WorkerBackend:
         elif op == "denoise_chain":
             if self.transformer is None:
                 raise RuntimeError("LTX transformer is not loaded")
-            return {}, self.transformer.denoise_chain(tensors, params["seeds"], params["window_hop"], advance)
+
+            def completed(count: int) -> None:
+                # The parent times progress on its CPU clock, outside this GPU process.
+                torch.cuda.synchronize(self.device)
+                advance(count)
+
+            return {}, self.transformer.denoise_chain(tensors, params["seeds"], params["window_hop"], completed)
         elif op == "load_decoder":
             if self.decoder is None:
                 self.decoder = load_video_decoder(self.files.vae, self.files.tuned_decoder, self.device)
