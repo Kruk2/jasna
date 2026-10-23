@@ -100,7 +100,8 @@ def _ninja_available() -> bool:
 
 
 def _prebuilt_extension() -> Path | None:
-    return next(PREBUILT.glob(f"{EXTENSION_NAME}*.so"), None)
+    suffix = '.pyd' if _IS_WINDOWS else '.so'
+    return next(PREBUILT.glob(f"{EXTENSION_NAME}*{suffix}"), None)
 
 
 def _architecture_name(architecture: tuple[int, int] | str) -> str:

@@ -27,6 +27,18 @@ from jasna.ltx.native import aot
 NVIDIA_RELEASE = sorted({*kernel_policy.INT8_MM_TILES, *kernel_policy.CUBLAS_INT8_MM})
 
 
+@pytest.mark.parametrize('windows, suffix', [(False, '.so'), (True, '.pyd')])
+def test_prebuilt_extension_uses_the_platforms_python_extension(tmp_path, monkeypatch, windows, suffix):
+    monkeypatch.setattr(native, 'PREBUILT', tmp_path)
+    monkeypatch.setattr(native, '_IS_WINDOWS', windows)
+    foreign = tmp_path / ('jasna_ltx_native.so' if windows else 'jasna_ltx_native.pyd')
+    foreign.touch()
+    assert native._prebuilt_extension() is None
+    extension = tmp_path / ('jasna_ltx_native' + suffix)
+    extension.touch()
+    assert native._prebuilt_extension() == extension
+
+
 def _block_specs(quantization: str) -> dict:
     specs = PlaceholderHandle(PlaceholderTensors(quantization, "distilled")).tensor_specs()
     return {name.split(".", 2)[2]: spec for name, spec in specs.items() if name.startswith("blocks.0.")}
