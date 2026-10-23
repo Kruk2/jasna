@@ -439,12 +439,103 @@ def controlled_activation_workers(monkeypatch):
     pytest.importorskip("jasna.protection.license_store")
     from jasna.gui import activation_worker
 
-    pending = SimpleNamespace(info=[], machine=[], activation=[], online=[])
+    pending = SimpleNamespace(info=[], machine=[], activation=[], online=[], devices=[])
     monkeypatch.setattr(activation_worker, "start_license_info", lambda done: pending.info.append(done))
     monkeypatch.setattr(activation_worker, "start_machine_key", lambda done: pending.machine.append(done))
     monkeypatch.setattr(activation_worker, "start_activation", lambda key, done: pending.activation.append((key, done)))
     monkeypatch.setattr(activation_worker, "start_online_activation", lambda code, machine, done: pending.online.append((code, machine, done)))
+    monkeypatch.setattr(activation_worker, "start_device_count", lambda key, done: pending.devices.append((key, done)))
     return pending
+
+
+@pytest.mark.parametrize("licensed,cloud", [(False, False), (True, False), (True, True)])
+def test_device_count_is_requested_only_when_opened_with_active_desktop_license(root, controlled_activation_workers, licensed, cloud):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+
+    pending = controlled_activation_workers
+    dialog = LicenseDialog(root, on_activated=lambda: None)
+    assert pending.devices == []
+    identity = ("JW1-" if cloud else "JM1-") + "1" * 64
+    pending.info.pop()(("saved-grant", licensed, identity), None)
+    _wait(root, lambda: len(pending.machine) == 1)
+    if licensed and not cloud:
+        key, done = pending.devices.pop()
+        assert key == "saved-grant"
+        assert dialog._devices.cget("text") == t("license_devices_checking")
+        done((2, 3), None)
+        _wait(root, lambda: dialog._devices.cget("text") == t("license_devices_count", used=2, limit=3))
+        root.update_idletasks()
+        assert dialog._devices.winfo_y() + dialog._devices.winfo_height() <= dialog.winfo_height()
+        assert dialog._status.cget("text") == t("license_active")
+        dialog._select_method(t("license_manual"))
+        root.update()
+        assert pending.devices == []
+    else:
+        assert pending.devices == []
+        assert dialog._devices.winfo_manager() == ""
+
+
+@pytest.mark.parametrize("closed", [False, True])
+def test_device_count_failure_preserves_activation_and_ignores_closed_window(root, controlled_activation_workers, closed):
+    from jasna.gui.components import LicenseDialog
+    from jasna.gui.locales import t
+
+    pending = controlled_activation_workers
+    dialog = LicenseDialog(root, on_activated=lambda: None)
+    pending.info.pop()(("saved-grant", True, "JM1-" + "1" * 64), None)
+    _wait(root, lambda: len(pending.devices) == 1)
+    _, done = pending.devices.pop()
+    if closed:
+        dialog.destroy()
+    done(None, OSError("private-request-body"))
+    if closed:
+        root.update()
+    else:
+        _wait(root, lambda: dialog._devices.cget("text") == t("license_devices_unavailable"))
+        assert dialog._status.cget("text") == t("license_active")
+        assert dialog._key.get() == "saved-grant"
+
+
+@pytest.mark.parametrize("language,prefer_hong_kong", [("en", False), ("zh", True)])
+def test_device_count_worker_uses_background_thread_and_locale(monkeypatch, protection_api, language, prefer_hong_kong):
+    from jasna.gui.activation_worker import start_device_count
+    from jasna.gui.locales import get_locale
+    from jasna.protection import activation
+
+    monkeypatch.setattr(get_locale(), "_current_lang", language)
+    threads = []
+    def count(key, *, prefer_hong_kong):
+        threads.append(threading.get_ident())
+        return (2, 3)
+    lookup = Mock(side_effect=count)
+    monkeypatch.setattr(activation, "get_device_count", lookup)
+    result = []
+    worker = start_device_count("saved-grant", lambda value, error: result.append((value, error)))
+    worker.join(timeout=3)
+    assert result == [((2, 3), None)]
+    assert threads[0] != threading.get_ident()
+    lookup.assert_called_once_with("saved-grant", prefer_hong_kong=prefer_hong_kong)
+
+
+@pytest.mark.parametrize("already_activated", [False, True])
+def test_activation_success_does_not_start_a_device_count_or_keep_a_stale_count(root, controlled_activation_workers, already_activated):
+    from jasna.gui.components import LicenseDialog
+
+    pending = controlled_activation_workers
+    dialog = LicenseDialog(root, on_activated=lambda: None)
+    identity = "JM1-" + "1" * 64
+    pending.info.pop()(("saved-grant" if already_activated else None, already_activated, identity), None)
+    _wait(root, lambda: len(pending.machine) == 1)
+    pending.machine.pop()(identity, None)
+    _wait(root, lambda: not dialog._busy)
+    dialog._activation_done(identity, None)
+    if already_activated:
+        _, done = pending.devices.pop()
+        done((2, 3), None)
+        root.update()
+    assert pending.devices == []
+    assert dialog._devices.winfo_manager() == ""
 
 
 @pytest.mark.parametrize("error", [None, OSError("config volume unavailable")])

@@ -117,6 +117,10 @@ download `amf_installer_<version>.zip`, unpack it and run
 Supporter models (UNet 4x, SD 1.5, LTX) need activation. Open **Activate Jasna** in
 the header.
 
+If Jasna is already activated, opening this window checks online and shows
+**Devices used**, for example **2 of 3**. If the count is unavailable, reopen
+the window to try again. Restoration still works offline.
+
 - **Online** (default): enter your **License code** and click
   **Activate online**.
 - **Manual**, for a PC without internet or when online fails:
