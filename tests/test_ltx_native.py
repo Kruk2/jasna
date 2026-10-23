@@ -509,6 +509,24 @@ def test_each_source_checkout_builds_its_extension_in_its_own_directory(monkeypa
     assert all(path.parent == tmp_path and path.name.startswith(f"extension-torch{torch.__version__}") for path in built)
 
 
+@pytest.mark.parametrize("windows", [False, True])
+def test_prebuild_retains_a_loaded_windows_extension_until_its_process_exits(monkeypatch, tmp_path, windows):
+    monkeypatch.setattr(native, "_IS_WINDOWS", windows)
+    monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.setattr(native, "cuda_arch_list", lambda: "12.0")
+
+    def build(directory):
+        directory.mkdir()
+        extension = directory / ("jasna_ltx_native.pyd" if windows else "jasna_ltx_native.so")
+        extension.write_bytes(b"compiled extension")
+        return SimpleNamespace(__file__=str(extension))
+
+    monkeypatch.setattr(native, "_build_extension", build)
+    native.prebuild_extension(tmp_path)
+    assert (tmp_path / "build").exists() is windows
+    assert len(list(tmp_path.glob("jasna_ltx_native.*"))) == 1
+
+
 def _amd_architecture(monkeypatch, architecture="gfx1201"):
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device=None: (12, 0))
     monkeypatch.setattr(torch.version, "cuda", None)

@@ -485,4 +485,6 @@ def prebuild_extension(directory: Path) -> None:
         os.environ["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list()
     module = _build_extension(directory / "build")
     shutil.copy2(module.__file__, directory / Path(module.__file__).name)
-    shutil.rmtree(directory / "build")
+    # Windows keeps the loaded .pyd locked; the release caller cleans up after this process exits.
+    if not _IS_WINDOWS:
+        shutil.rmtree(directory / "build")

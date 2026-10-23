@@ -70,6 +70,20 @@ CUDA build, which breaks RF-DETR):
 python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK')"
 ```
 
+To compile native LTX code on Windows, open an x64 Visual Studio developer
+shell and initialize the matching development wheel. Its HIP headers require
+the SDK's `clang-cl`; MSVC `cl` cannot compile them:
+
+```powershell
+pip install --no-deps --index-url $I rocm-sdk-devel==10.0.0
+python -m rocm_sdk init --quiet
+$R = (python -m rocm_sdk path --root).Trim()
+$env:ROCM_HOME = $R
+$env:HIP_PATH = $R
+$env:HIP_DEVICE_LIB_PATH = "$R\lib\llvm\amdgcn\bitcode"
+$env:CXX = "$R\lib\llvm\bin\clang-cl.exe"
+```
+
 A new GPU target needs its matching `device-gfx*` extra above.
 
 AMD runs RF-DETR as the `rfdetr` torch model and decodes/encodes with AMF
