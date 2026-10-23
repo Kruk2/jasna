@@ -25,14 +25,14 @@ WARP_SIZE = 32
 
 def compile_code_object(kernel, arguments, constants, options, architecture):
     """``arguments`` maps each runtime argument to its Triton type; ``"i32:16"`` is an int the caller
-    guarantees divisible by 16."""
-    signature = {name: kind.removesuffix(":16") for name, kind in arguments.items()}
+    guarantees divisible by 16, ``"*bf16:wide"`` a tensor that may exceed 2 GB."""
+    signature = {name: kind.split(":")[0] for name, kind in arguments.items()}
     signature.update({name: "constexpr" for name in constants})
-    # Every tensor is at most a few hundred MB: 16-byte aligned and inside the 2 GB range of AMD buffer loads.
+    # Tensors are 16-byte aligned and, unless wide, inside the 2 GB range of AMD buffer loads.
     attrs = {}
     for index, kind in enumerate(arguments.values()):
         if kind.startswith("*"):
-            attrs[(index,)] = [["tt.divisibility", 16], ["tt.pointer_range", 32]]
+            attrs[(index,)] = [["tt.divisibility", 16]] + ([] if kind.endswith(":wide") else [["tt.pointer_range", 32]])
         elif kind.endswith(":16"):
             attrs[(index,)] = [["tt.divisibility", 16]]
     compiled = triton.compile(

@@ -24,7 +24,8 @@ ROPE_PAIRS = (8, 12, 12)
 """The shipped DiffVAE decoder's diffusion blocks: width, MLP width, head dim, RoPE pairs per (T, H, W)."""
 QKV_DIMS = (DIM, 512)
 """Widths the Q/K/V kernel is built for: the diffusion blocks' and the 512-wide deterministic stages 3-4
-(the 1024/2048-wide stages 1-2 do not fit its one-tile projections)."""
+(the 1024/2048-wide stages 1-2 do not fit its one-tile projections). Only the diffusion blocks' kernel
+modulates its slab."""
 SWIGLU_MODULE = f"ltx_swiglu_{DIM}x{HIDDEN}"
 
 
@@ -34,16 +35,18 @@ def qkv_module(dim: int) -> str:
 _SWIGLU_POINTERS = ("x_ptr", "norm_ptr", "scale_ptr", "shift_ptr", "gate_ptr", "up_ptr", "down_ptr")
 SWIGLU_ARGUMENTS = {**{name: "*bf16" for name in _SWIGLU_POINTERS}, "rows": "i32"}
 _SWIGLU_TYPES = (ctypes.c_void_p,) * len(_SWIGLU_POINTERS) + (ctypes.c_int32,)
-_QKV_BF16 = ("y_ptr", "wq_ptr", "bq_ptr", "wk_ptr", "bk_ptr", "wv_ptr", "bv_ptr", "qn_ptr", "kn_ptr")
+_QKV_SLAB = ("x_ptr", "halo_ptr")
+_QKV_BF16 = ("norm_ptr", "scale_ptr", "shift_ptr", "wq_ptr", "bq_ptr", "wk_ptr", "bk_ptr", "wv_ptr", "bv_ptr", "qn_ptr", "kn_ptr")
 _QKV_FP32 = ("inv_ptr", "wpos_ptr")
 _QKV_OUT = ("q_ptr", "k_ptr", "v_ptr")
-_QKV_INTS = ("rows", "H", "EXT", "halo", "core")
+_QKV_INTS = ("rows", "H", "W", "EXT", "halo", "core")
 QKV_ARGUMENTS = {
-    **{name: "*bf16" for name in _QKV_BF16}, **{name: "*fp32" for name in _QKV_FP32},
-    **{name: "*bf16" for name in _QKV_OUT}, **{name: "i32" for name in _QKV_INTS}, "q_scale": "fp32",
+    "x_ptr": "*bf16:wide", "halo_ptr": "*bf16", "col_ptr": "*i64", **{name: "*bf16" for name in _QKV_BF16},
+    **{name: "*fp32" for name in _QKV_FP32}, **{name: "*bf16" for name in _QKV_OUT},
+    **{name: "i32" for name in _QKV_INTS}, "q_scale": "fp32",
 }
-_QKV_TYPES = (ctypes.c_void_p,) * (len(_QKV_BF16) + len(_QKV_FP32) + len(_QKV_OUT)) + (ctypes.c_int32,) * len(
-    _QKV_INTS) + (ctypes.c_float,)
+_QKV_TYPES = (ctypes.c_void_p,) * (len(_QKV_SLAB) + 1 + len(_QKV_BF16) + len(_QKV_FP32) + len(_QKV_OUT)) + (
+    ctypes.c_int32,) * len(_QKV_INTS) + (ctypes.c_float,)
 
 
 @functools.cache
@@ -88,7 +91,10 @@ def residual_swiglu_(
 
 
 def slab_qkv(
-    y: torch.Tensor,
+    x: torch.Tensor,
+    left_halo: torch.Tensor,
+    columns: torch.Tensor,
+    modulation: list[torch.Tensor],
     weights: list[torch.Tensor],
     inv_freqs: torch.Tensor,
     w_pos: torch.Tensor,
@@ -98,13 +104,18 @@ def slab_qkv(
     q_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """``diffusion_triton.slab_qkv`` at the shipped decoder's shapes."""
-    batch, t, h, ext, dim = y.shape
-    _require_bf16((y, *weights), dim in QKV_DIMS and weights[7].shape == (HEAD_DIM,) and tuple(rope_pairs) == ROPE_PAIRS[:2])
-    q = y.new_empty(batch, t, h, core_len, dim // HEAD_DIM, HEAD_DIM)
-    k = y.new_empty(batch, t, h, ext, dim // HEAD_DIM, HEAD_DIM)
+    batch, t, h, w, dim = x.shape
+    _require_bf16((x, left_halo, *modulation, *weights),
+                  dim in QKV_DIMS and bool(modulation) == (dim == DIM) and weights[7].shape == (HEAD_DIM,)
+                  and tuple(rope_pairs) == ROPE_PAIRS[:2] and columns.dtype == torch.int64 and columns.is_contiguous())
+    ext = halo + columns.numel()
+    q = x.new_empty(batch, t, h, core_len, dim // HEAD_DIM, HEAD_DIM)
+    k = x.new_empty(batch, t, h, ext, dim // HEAD_DIM, HEAD_DIM)
     v = torch.empty_like(k)
     rows = batch * t * h * ext
-    pointers = (y, *weights, inv_freqs.float().contiguous(), w_pos.float().contiguous(), q, k, v)
-    _launch(qkv_module(dim), _QKV_TYPES, QKV_BLOCK_ROWS, rows, y.device,
-            (*(p.data_ptr() for p in pointers), rows, h, ext, halo, core_len, q_scale))
+    norm, scale, shift = modulation or (x, x, x)
+    pointers = (x, left_halo, columns, norm, scale, shift, *weights, inv_freqs.float().contiguous(),
+                w_pos.float().contiguous(), q, k, v)
+    _launch(qkv_module(dim), _QKV_TYPES, QKV_BLOCK_ROWS, rows, x.device,
+            (*(p.data_ptr() for p in pointers), rows, h, w, ext, halo, core_len, q_scale))
     return q, k, v

@@ -51,10 +51,17 @@ def test_the_diffusion_kernels_reject_inputs_they_were_not_built_for():
                                        torch.zeros(256, 1024, dtype=torch.bfloat16))
     with pytest.raises(ValueError, match="width 256"):
         diffusion_hip.residual_swiglu_(torch.zeros(4, 512, dtype=torch.bfloat16), *(vector,) * 6)
-    y = torch.zeros(1, 2, 2, 12, 256, dtype=torch.bfloat16)
+    x = torch.zeros(1, 2, 2, 12, 256, dtype=torch.bfloat16)
+    columns = torch.arange(7)
+    modulation = [vector] * 3
     weights = [torch.zeros(256, 256, dtype=torch.bfloat16), vector] * 3 + [torch.zeros(32, dtype=torch.bfloat16)] * 2
     with pytest.raises(ValueError, match="width 256"):
-        diffusion_hip.slab_qkv(y, weights, torch.zeros(32), torch.zeros(12), [8, 12], 2, 5, 0.125)
+        diffusion_hip.slab_qkv(x, x[:, :, :, :5], columns, modulation, weights, torch.zeros(32), torch.zeros(12),
+                               [8, 12], 2, 5, 0.125)
+    weights[6:] = [torch.zeros(64, dtype=torch.bfloat16)] * 2
+    with pytest.raises(ValueError, match="width 256"):
+        diffusion_hip.slab_qkv(x, x[:, :, :, :5].contiguous(), columns, [], weights, torch.zeros(32),
+                               torch.zeros(12), [8, 12], 2, 5, 0.125)
 
 
 def test_a_module_without_a_built_kernel_fails_loudly():

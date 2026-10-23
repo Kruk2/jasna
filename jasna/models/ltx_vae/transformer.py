@@ -217,12 +217,18 @@ class NeighborhoodAttention3D(nn.Module):
         self.k_norm = nn.RMSNorm(head_dim, eps=_NORM_EPS)
 
     def fused_qkv(
-        self, y: torch.Tensor, w_pos: torch.Tensor, core_len: int, halo: int
+        self, x: torch.Tensor, left_halo: torch.Tensor, columns: torch.Tensor, modulation: list[torch.Tensor],
+        w_pos: torch.Tensor, core_len: int, halo: int,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Q (scaled) of the core columns and K/V of every column of ``y`` through the fused Q/K/V kernel."""
+        """Q (scaled) of the core columns and K/V of every column of the slab ``left_halo`` then ``x``'s W
+        ``columns`` (modulated by the norm weight, scale and shift in ``modulation`` unless empty) through
+        the fused Q/K/V kernel."""
         qkv = self.qkv
         return _fused_slab_qkv(
-            y,
+            x,
+            left_halo,
+            columns,
+            modulation,
             [qkv.to_q.weight, qkv.to_q.bias, qkv.to_k.weight, qkv.to_k.bias, qkv.to_v.weight, qkv.to_v.bias,
              self.q_norm.weight, self.k_norm.weight],
             torch.cat([self.rope_inv_t, self.rope_inv_h, self.rope_inv_w]),
@@ -250,7 +256,9 @@ class NeighborhoodAttention3D(nn.Module):
             )
         w_pos = torch.arange(w, dtype=torch.float32, device=x.device)
         if _fused_slab_qkv is not None and x.is_cuda and self.dim in QKV_DIMS:
-            q, k, v = self.fused_qkv(x.contiguous(), w_pos, w, 0)
+            x = x.contiguous()
+            columns = torch.arange(w, device=x.device)
+            q, k, v = self.fused_qkv(x, x, columns, [], w_pos, w, 0)
         else:
             q, k, v = self.project_qkv(x)
             q = self.q_norm(q)
@@ -367,18 +375,18 @@ def _attn_on_w_slab(
     shift: torch.Tensor,
     core_len: int,
 ) -> torch.Tensor:
-    """One W slab, ``left_halo`` then ``x``'s W ``columns`` (compiled, that gather fuses into the
-    slab's first read): rms_norm + modulate + QKV / in-slab RoPE / NA / proj, output for the
-    ``core_len`` columns after the ``kernel_w // 2`` halo only."""
-    x_chunk = torch.cat([left_halo, x.index_select(3, columns)], dim=3)
-    batch, t, h, ext_w, _ = x_chunk.shape
+    """One W slab, ``left_halo`` then ``x``'s W ``columns`` (the fused Q/K/V kernel, or compiled, reads
+    that gather in the slab's first read): rms_norm + modulate + QKV / in-slab RoPE / NA / proj, output
+    for the ``core_len`` columns after the ``kernel_w // 2`` halo only."""
+    batch, t, h = x.shape[:3]
     halo = attn.kernel_size[2] // 2
-    y = F.rms_norm(x_chunk, (attn.dim,), norm.weight, _NORM_EPS)
-    y = y * (1.0 + scale) + shift
-
-    if _fused_slab_qkv is not None and y.is_cuda:
-        q, k, v = attn.fused_qkv(y, w_pos, core_len, halo)
+    if _fused_slab_qkv is not None and x.is_cuda and scale.numel() == attn.dim:
+        q, k, v = attn.fused_qkv(x, left_halo, columns, [norm.weight, scale, shift], w_pos, core_len, halo)
     else:
+        x_chunk = torch.cat([left_halo, x.index_select(3, columns)], dim=3)
+        ext_w = x_chunk.shape[3]
+        y = F.rms_norm(x_chunk, (attn.dim,), norm.weight, _NORM_EPS)
+        y = y * (1.0 + scale) + shift
         head_shape = (batch, t, h, ext_w, attn.num_heads, attn.head_dim)
         core_shape = (batch, t, h, core_len, attn.num_heads, attn.head_dim)
         y_core = y[:, :, :, halo : halo + core_len].reshape(-1, attn.dim)
@@ -389,7 +397,7 @@ def _attn_on_w_slab(
         k = F.rms_norm(k, (attn.head_dim,), attn.k_norm.weight, _NORM_EPS)
         k = apply_abs_rope_slab(k, attn, w_pos)
         v = F.linear(y, attn.qkv.to_v.weight, attn.qkv.to_v.bias).view(head_shape)
-    del y
+        del y
 
     out = neighborhood_attention(attn, q.contiguous(), k.contiguous(), v.contiguous(), halo)
     del q, k, v

@@ -47,7 +47,7 @@ def _kernel_specs():
         specs[aot.qkv_module(dim)] = (
             _slab_qkv_kernel, aot.QKV_ARGUMENTS,
             {"DIM": dim, "HEAD_DIM": aot.HEAD_DIM, "PAIRS_T": aot.ROPE_PAIRS[0], "PAIRS_H": aot.ROPE_PAIRS[1],
-             "BLOCK_ROWS": aot.QKV_BLOCK_ROWS},
+             "BLOCK_ROWS": aot.QKV_BLOCK_ROWS, "MODULATE": dim == aot.DIM},
             aot.QKV_WARPS, 1,
         )
     return specs
