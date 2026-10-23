@@ -3,6 +3,8 @@ import io
 import runpy
 import ssl
 import urllib.error
+from dataclasses import replace
+from pathlib import Path
 from unittest.mock import Mock
 
 import certifi
@@ -55,6 +57,39 @@ def test_installed_checks_the_chosen_model_only(tmp_path):
     assert [f.name for f in model_files.missing_downloads(tmp_path, "distilled", fast=True)] == [
         "ltx-restore-alpha1-distill8-nvfp4.safetensors.enc"
     ]
+
+
+@pytest.mark.parametrize("old_size", [64, 96])
+def test_outdated_encrypted_model_is_missing_until_verified_download_replaces_it(tmp_path, monkeypatch, old_size):
+    from jasna.protection import protected_tensors
+
+    names = bundle_names("distilled2", fast=False)
+    current = b"m" * 80
+    entries = {name: replace(model_files.LTX_DOWNLOADS[name], size_bytes=len(current),
+                            sha256=hashlib.sha256(current).hexdigest()) for name in names}
+    monkeypatch.setattr(model_files, "LTX_DOWNLOADS", {**model_files.LTX_DOWNLOADS, **entries})
+    monkeypatch.setattr(model_files, "is_frozen", lambda: True)
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    checked = Mock()
+    monkeypatch.setattr(protected_tensors, "check_ltx_license", checked)
+    for name in names:
+        (tmp_path / (name + ".enc")).write_bytes(current)
+    transformer = tmp_path / (names[0] + ".enc")
+    transformer.write_bytes(b"o" * old_size)
+    with monkeypatch.context() as stat_only:
+        stat_only.setattr(Path, "open", lambda *a, **k: pytest.fail("availability read model bytes"))
+        assert not model_files.model_installed(tmp_path, "distilled2", fast=False)
+        needed = model_files.missing_downloads(tmp_path, "distilled2", fast=False)
+        assert needed == [replace(entries[names[0]], name=transformer.name)]
+        with pytest.raises(FileNotFoundError, match="missing or outdated"):
+            LtxModelFiles.from_dir(tmp_path, "distilled2", fast=False)
+    assert checked.call_count == 1
+    monkeypatch.setattr(model_files.urllib.request, "urlopen", lambda *a, **k: io.BytesIO(current))
+    model_files.download_files(tmp_path, needed, None, mirror_first=False)
+    assert transformer.read_bytes() == current
+    assert model_files.model_installed(tmp_path, "distilled2", fast=False)
+    assert model_files.missing_downloads(tmp_path, "distilled2", fast=False) == []
+    assert LtxModelFiles.from_dir(tmp_path, "distilled2", fast=False).transformer == transformer
 
 
 def test_download_verifies_and_replaces_atomically(tmp_path, monkeypatch):

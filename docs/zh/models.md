@@ -68,6 +68,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
   仍然下载失败？见[手动下载 LTX](#手动下载-ltx)。
 
+更新后，Jasna 可能会要求重新下载所选的 LTX 模型。原来的许可证代码仍然可用。
+
 LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。
 
 使用 ESET？如果 LTX 启动不了，并且消息里提到 `ebehmonl.dll` 或 `ebehmoni.dll`，

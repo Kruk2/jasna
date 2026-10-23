@@ -194,6 +194,8 @@ slower), High (about 2.5x slower) and Top (about 5x slower). See
 
 LTX jobs can pause and continue, including range jobs and auto split. See [Pause and continue](docs/en/models.md#pause-and-continue).
 
+After an update, Jasna may ask to download your chosen LTX model again. Your existing License code still works.
+
 ### Command line
 
 The command line can do most of what the app does (not the Video Player,

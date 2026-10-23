@@ -267,6 +267,9 @@ def test_saved_cloud_activation_blocks_encrypted_ltx_gui_paths(protection_api, m
     _, store = protection_api
     directory = tmp_path / "ltx-restore"
     directory.mkdir()
+    monkeypatch.setattr(model_files, "LTX_DOWNLOADS", {
+        name: replace(entry, size_bytes=0) for name, entry in model_files.LTX_DOWNLOADS.items()
+    })
     for name in model_files.bundle_names("distilled", fast=False):
         (directory / (name + ".enc")).touch()
         if frozen:
@@ -337,6 +340,7 @@ def test_gui_standard_machine_activation_keeps_exact_ltx_entitlements(protection
     monkeypatch.setattr(store, "is_licensed", lambda: True)
     accepted = Mock()
     monkeypatch.setattr(protected_tensors, "check_ltx_license", accepted)
+    assert not model_files.model_installed(tmp_path, "distilled", fast=False)
     assert not ltx_models.license_missing(tmp_path, "distilled", False)
     accepted.assert_called_once()
     accepted.side_effect = ModelNotLicensedError("LTX not included")
