@@ -89,6 +89,10 @@ def is_amd_device(device: torch.device | str | None = None) -> bool:
     return vendor_for_device(device) is AcceleratorVendor.AMD
 
 
+def supports_nvfp4(device: torch.device | str) -> bool:
+    return is_nvidia_device(device) and torch.cuda.get_device_capability(device)[0] >= 10
+
+
 def amd_gpu_architecture(device: torch.device | str) -> str:
     """The AMD GPU's architecture without target features, e.g. ``gfx1201``."""
     return torch.cuda.get_device_properties(device).gcnArchName.split(":")[0]

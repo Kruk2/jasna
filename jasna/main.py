@@ -877,11 +877,14 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     )
     if not uses_ltx:
         return
+    from jasna.accelerator import supports_nvfp4
+    from jasna.session_factory import LICENSED_LTX_NEEDS_NVIDIA, LTX_FAST_NEEDS_BLACKWELL, licensed_ltx_on_amd
+
+    if config.ltx_fast and not supports_nvfp4(config.device):
+        sys.exit(f"Error: {LTX_FAST_NEEDS_BLACKWELL}")
     if config.ltx_trial:
         print(LTX_TRIAL_NOTICE)
         return
-    from jasna.session_factory import LICENSED_LTX_NEEDS_NVIDIA, licensed_ltx_on_amd
-
     if licensed_ltx_on_amd(config):
         sys.exit(f"Error: {LICENSED_LTX_NEEDS_NVIDIA}")
     directory = config.restoration_model_path if config.restoration_model_name == "ltx" else default_restoration_model_path("ltx")

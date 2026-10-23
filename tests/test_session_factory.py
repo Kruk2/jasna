@@ -332,3 +332,14 @@ def test_fast_ltx_needs_a_blackwell_nvidia_gpu(nvidia, capability, allowed) -> N
         else:
             with pytest.raises(ValueError, match="Blackwell"):
                 _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)
+
+
+def test_fast_ltx_refuses_unsupported_hardware_before_loading_kernels(monkeypatch):
+    import torch
+    from jasna.session_factory import _ltx_model_files
+
+    monkeypatch.setattr("jasna.accelerator.is_nvidia_device", lambda device: False)
+    monkeypatch.setattr("jasna.ltx.transformer.require_kernels", lambda device: pytest.fail("loaded unsupported kernels"))
+    config = session_config(restoration_model_name="ltx", ltx_fast=True, ltx_trial=True)
+    with pytest.raises(ValueError, match="Blackwell"):
+        _ltx_model_files(config, torch.device("cuda:0"), log_callback=None)

@@ -63,11 +63,11 @@ def _warm_up_cuda() -> tuple[AcceleratorVendor, bool]:
     if not gpu_ok:
         return AcceleratorVendor.CPU, False
     import torch
-    from jasna.accelerator import vendor_for_device
+    from jasna.accelerator import supports_nvfp4, vendor_for_device
 
     torch.zeros(1, device="cuda")
     vendor = vendor_for_device()
-    return vendor, vendor is AcceleratorVendor.NVIDIA and torch.cuda.get_device_capability(0)[0] >= 10
+    return vendor, supports_nvfp4("cuda:0")
 
 
 class JasnaApp(ctk.CTk, TkinterDnD.DnDWrapper):

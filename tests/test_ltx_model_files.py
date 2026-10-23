@@ -184,6 +184,7 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch, nvidia_ven
     monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: (12, 0))
     fast = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_fast=True)
 
     with pytest.raises(FileNotFoundError, match="missing"):
@@ -191,6 +192,26 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch, nvidia_ven
 
     assert "ltx-restore-alpha1-distill8-nvfp4" in asked[0] and "int8" not in asked[0]
     assert "9.2 GB" in asked[0]
+
+
+@pytest.mark.parametrize("nvidia", [False, True], ids=["amd", "older-nvidia"])
+@pytest.mark.parametrize("trial", [False, True])
+def test_cli_fast_ltx_checks_hardware_before_models_or_downloads(tmp_path, monkeypatch, nvidia, trial):
+    from factories import session_config
+    from jasna import accelerator, main
+
+    monkeypatch.setattr(accelerator, "is_nvidia_device", lambda device: nvidia)
+    monkeypatch.setattr(accelerator, "is_amd_device", lambda device: not nvidia)
+    def capability(device):
+        assert nvidia, "AMD capability aliases cannot establish NVIDIA FP4 support"
+        return (8, 9)
+    monkeypatch.setattr(torch.cuda, "get_device_capability", capability)
+    monkeypatch.setattr(model_files, "missing_downloads", lambda *args, **kwargs: pytest.fail("checked/downloaded incompatible files"))
+    monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail("offered an incompatible download"))
+    config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path,
+                            ltx_fast=True, ltx_trial=trial)
+    with pytest.raises(SystemExit, match="Blackwell"):
+        main._ensure_ltx_model(config, None)
 
 
 @pytest.mark.parametrize(("trial", "source_files", "refused"), [(False, False, True), (True, False, False), (False, True, False)])

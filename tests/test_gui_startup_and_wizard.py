@@ -48,8 +48,9 @@ def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=Accelerator
         cuda=types.SimpleNamespace(get_device_capability=lambda _index: (major, 0)),
     )
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setattr(accelerator, "torch", fake_torch)
     monkeypatch.setattr(os_utils, "check_supported_gpu", lambda: gpu_check_result)
-    monkeypatch.setattr(accelerator, "vendor_for_device", lambda: vendor)
+    monkeypatch.setattr(accelerator, "vendor_for_device", lambda device=None: vendor)
     from jasna.gui.app import _warm_up_cuda
 
     return calls, _warm_up_cuda()
