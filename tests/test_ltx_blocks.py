@@ -94,7 +94,7 @@ def test_blocks_are_read_in_file_order(tmp_path):
 @pytest.mark.parametrize("error_type", [RuntimeError, KeyboardInterrupt])
 def test_opaque_load_preserves_native_transaction_failure(error_type, monkeypatch):
     pytest.importorskip("jasna.protection.opaque_ltx")
-    from jasna.ltx.native.aot import BlockDims
+    from jasna.ltx.kernel_policy import BlockDims
 
     primary = error_type("original native transaction failure")
     operations = []
@@ -118,7 +118,7 @@ def test_opaque_load_preserves_native_transaction_failure(error_type, monkeypatc
 
 def test_opaque_load_rejects_cpu_before_decryption(monkeypatch):
     pytest.importorskip("jasna.protection.opaque_ltx")
-    from jasna.ltx.native.aot import BlockDims
+    from jasna.ltx.kernel_policy import BlockDims
     from types import SimpleNamespace
 
     monkeypatch.setattr(BlockDims, "from_specs", lambda specs: SimpleNamespace(dim=8, heads=2))
@@ -128,6 +128,35 @@ def test_opaque_load_rejects_cpu_before_decryption(monkeypatch):
         OpaqueBlockStore.from_reader(
             reader, [{"weight": "blocks.0.weight"}], torch.device("cpu"), resident=1,
         )
+
+
+def test_opaque_load_does_not_require_the_offline_compiler(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    pytest.importorskip("jasna.protection.opaque_ltx")
+    monkeypatch.setitem(sys.modules, "triton", None)
+    monkeypatch.setitem(sys.modules, "jasna.ltx.native.aot", None)
+    specs = {
+        "attn1.q_norm.weight": (torch.bfloat16, (8,)),
+        "ff.net.0.proj.qdata": (torch.int8, (32, 8)),
+        "attn1.to_gate_logits.qdata": (torch.int8, (2, 8)),
+    }
+    owner = object()
+    calls = []
+
+    def private_load(device, resident):
+        calls.append((device, resident))
+        return owner
+
+    reader = SimpleNamespace(tensor_specs=lambda: specs, private_load=private_load)
+    store = OpaqueBlockStore.from_reader(
+        reader, [{name: name for name in specs}], torch.device("cuda:1"), resident=0,
+    )
+    assert calls == [(1, 0)]
+    assert store._native._store is owner
+    assert store._native.head_dim == 4
+    assert store.count == 1 and store.resident == 0
 
 
 @needs_cuda

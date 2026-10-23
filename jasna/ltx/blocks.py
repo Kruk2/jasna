@@ -334,7 +334,7 @@ class OpaqueBlockStore:
         *,
         resident: int,
     ) -> OpaqueBlockStore:
-        from jasna.ltx.native.aot import BlockDims
+        from jasna.ltx.kernel_policy import BlockDims
         from jasna.protection.opaque_ltx import OpaqueInferenceStore
 
         specs = reader.tensor_specs()
