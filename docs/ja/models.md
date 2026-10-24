@@ -104,10 +104,12 @@ BasicVSR++ の全動画処理、プレビュー、ストリーミングは再開
 ### LTX を手動でダウンロードする
 
 Jasna でのダウンロードが何度も失敗する場合は、ブラウザで
-[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)
-（または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)）から
+[huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.0)
+（または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)）から
 ファイルを取得してください。必要なのは 3 ファイルです：選んだモデルのファイル 1 つと、
 VAE の 2 ファイル。
+このリンクは Jasna 0.12 と保護された AMD ベータ版用です。安定版 0.11.3 以前では、
+リポジトリの `main` ブランチを使ってください。
 
 | 選んだモデル | ファイル |
 | --- | --- |

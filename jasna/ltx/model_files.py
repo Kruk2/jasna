@@ -21,6 +21,7 @@ from typing import get_args
 
 import certifi
 
+from jasna import __version__
 from jasna._frozen import is_frozen
 from jasna.session_config import LtxModelName
 
@@ -28,10 +29,19 @@ logger = logging.getLogger(__name__)
 
 LTX_MODELS: tuple[LtxModelName, ...] = get_args(LtxModelName)
 
-# Where the model files are published; each file is fetched from f"{LTX_DOWNLOAD_URL}/{name}",
-# and from the same path on LTX_MIRROR_URL (reachable from mainland China) when that fails.
-LTX_DOWNLOAD_URL = "https://huggingface.co/Kruk2/ltx-restore/resolve/main/block-layout3"
-LTX_MIRROR_URL = "https://hf-mirror.com/Kruk2/ltx-restore/resolve/main/block-layout3"
+# Register new model branches with their matching download hashes before building a release.
+_MODEL_BRANCHES = ("0.12.0",)
+
+
+def _model_branch(version: str) -> str:
+    version_key = tuple(map(int, version.split(".")))
+    branches = sorted(_MODEL_BRANCHES, key=lambda branch: tuple(map(int, branch.split("."))), reverse=True)
+    return next((branch for branch in branches if tuple(map(int, branch.split("."))) <= version_key), "main")
+
+
+LTX_MODEL_BRANCH = _model_branch(__version__)
+LTX_DOWNLOAD_URL = f"https://huggingface.co/Kruk2/ltx-restore/resolve/{LTX_MODEL_BRANCH}"
+LTX_MIRROR_URL = f"https://hf-mirror.com/Kruk2/ltx-restore/resolve/{LTX_MODEL_BRANCH}"
 _NETWORK_ERRORS = (urllib.error.URLError, http.client.HTTPException, ConnectionError, TimeoutError)
 
 DownloadProgressCallback = Callable[[int, int], None]

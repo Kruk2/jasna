@@ -89,6 +89,8 @@ apps and don't use the PC during this time. When you update Jasna, copy the
 **LTX update in 0.12:** models copied from 0.11.3 need downloading again,
 including on NVIDIA. Press **▶** and accept the model update. Your existing
 License code and shared VAE files still work.
+For [manual model downloads](docs/en/models.md#downloading-ltx-yourself), use
+branch `0.12.0` for Jasna 0.12, or `main` for 0.11.3 and older.
 
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
 memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See

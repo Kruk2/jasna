@@ -9,6 +9,22 @@ models require the official release. LTX trial mode uses random weights and
 does not restore videos. A missing private module disables activation; errors
 inside an installed module still report a failure.
 
+## LTX model versions
+
+Each app release pins its model branch and expected file hashes in
+`jasna/ltx/model_files.py`. `_MODEL_BRANCHES` lists published model versions;
+the app selects the highest registered version no newer than its own version,
+or `main` if none matches. Both Hugging Face and its mirror use that same branch.
+Jasna 0.12.0 uses `0.12.0`; later app versions reuse it until a newer compatible
+model branch is registered. Released 0.11.3 and older keep their original `main`
+URLs. Branch selection is local; startup does not query the Hub for new branches.
+
+When publishing new model files, create the version branch, verify its encrypted
+checkpoints and public signatures, then register it with the matching sizes and
+hashes before building the app. Retain earlier branch contents for their shipped
+releases. The existing AMD beta archives still use `main/block-layout3`; keep
+that compatibility path available. This release mapping is shared by NVIDIA and AMD.
+
 ## Requirements
 
 - Python **3.12+** (releases ship 3.13 on NVIDIA, 3.12 on AMD).

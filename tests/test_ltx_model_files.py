@@ -130,8 +130,24 @@ def test_download_falls_back_to_the_other_source(tmp_path, monkeypatch):
     assert (tmp_path / "b" / "model.enc").read_bytes() == content
 
 
+@pytest.mark.parametrize("version,expected", [
+    ("0.10.0", "main"), ("0.11.3", "main"), ("0.11.4", "main"),
+    ("0.12.0", "0.12.0"), ("0.12.1", "0.12.0"), ("0.13.0", "0.12.0"),
+])
+def test_model_branch_uses_latest_known_version_not_newer_than_jasna(version, expected):
+    assert model_files._model_branch(version) == expected
+
+
+def test_model_branch_orders_versions_numerically_and_ignores_future_models(monkeypatch):
+    monkeypatch.setattr(model_files, "_MODEL_BRANCHES", ("0.12.10", "0.13.0", "0.12.0", "0.12.2"))
+    assert model_files._model_branch("0.12.1") == "0.12.0"
+    assert model_files._model_branch("0.12.9") == "0.12.2"
+    assert model_files._model_branch("0.12.10") == "0.12.10"
+    assert model_files._model_branch("0.13.0") == "0.13.0"
+
+
 @pytest.mark.parametrize("mirror_first", [False, True])
-def test_replacement_models_use_separate_remote_folder_on_both_sources(tmp_path, monkeypatch, mirror_first):
+def test_replacement_models_use_release_branch_on_both_sources(tmp_path, monkeypatch, mirror_first):
     content = b"replacement model"
     name = "ltx-restore-alpha1-distill2-int8.safetensors.enc"
     file = model_files.DownloadableFile(name, len(content), hashlib.sha256(content).hexdigest())
@@ -145,7 +161,7 @@ def test_replacement_models_use_separate_remote_folder_on_both_sources(tmp_path,
 
     monkeypatch.setattr(model_files.urllib.request, "urlopen", open_url)
     model_files.download_files(tmp_path, [file], None, mirror_first=mirror_first)
-    expected = [f"https://{host}/Kruk2/ltx-restore/resolve/main/block-layout3/{name}"
+    expected = [f"https://{host}/Kruk2/ltx-restore/resolve/0.12.0/{name}"
                 for host in ("huggingface.co", "hf-mirror.com")]
     assert requests == (list(reversed(expected)) if mirror_first else expected)
     assert (tmp_path / name).read_bytes() == content
