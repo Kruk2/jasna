@@ -93,6 +93,15 @@ def install() -> None:
         "ignore",
         message=r"^TensorRT-LLM is not installed\..*",
     )
+    warnings.filterwarnings(
+        "ignore",
+        message=(
+            r"^bgemm_internal_cublaslt error: HIPBLAS_STATUS_NOT_SUPPORTED when calling hipblasLtMatmul "
+            r".*\. Will attempt to recover by calling cublas instead\."
+        ),
+        category=UserWarning,
+        module=r"^torch(?:\.|$)",
+    )
     warnings.filterwarnings("ignore", message=r".*isinstance\(treespec, LeafSpec\).*", category=FutureWarning)
     warnings.filterwarnings(
         "ignore",

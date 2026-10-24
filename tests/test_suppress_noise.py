@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import subprocess
 import sys
+import warnings
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -10,6 +11,32 @@ import pytest
 
 import jasna._suppress_noise as suppress_noise
 from jasna._suppress_noise import install
+
+
+_HIPBLAS_FALLBACK_WARNING = (
+    "bgemm_internal_cublaslt error: HIPBLAS_STATUS_NOT_SUPPORTED when calling hipblasLtMatmul "
+    "with transpose_mat1 t transpose_mat2 n m 461 n 1383 k 512 lda 512 ldb 512 ldc 461 "
+    "abType 0 cType 0 computeType 6 scaleType 0. "
+    "Will attempt to recover by calling cublas instead. "
+    "(Triggered internally at /w/rockrel/pytorch/aten/src/ATen/hip/HIPBlas.cpp:575.)"
+)
+
+
+@pytest.mark.parametrize(("message", "muted"), [
+    (_HIPBLAS_FALLBACK_WARNING, True),
+    (_HIPBLAS_FALLBACK_WARNING.replace("HIPBLAS_STATUS_NOT_SUPPORTED", "HIPBLAS_STATUS_ALLOC_FAILED"), False),
+    (_HIPBLAS_FALLBACK_WARNING.replace("HIPBLAS_STATUS", "CUBLAS_STATUS").replace("hipblasLtMatmul", "cublasLtMatmul"), False),
+    (_HIPBLAS_FALLBACK_WARNING.split("Will attempt to recover")[0], False),
+    ("an unrelated AMD warning", False),
+], ids=["amd-fallback", "allocation-failure", "nvidia-fallback", "no-fallback", "unrelated"])
+def test_only_unsupported_hipblas_fallback_warning_is_muted(monkeypatch, message, muted) -> None:
+    monkeypatch.setattr(suppress_noise, "_installed", False)
+    monkeypatch.setattr(sys, "meta_path", list(sys.meta_path))
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        install()
+        warnings.warn_explicit(message, UserWarning, "torch/functional.py", 373, module="torch.functional")
+    assert len(caught) == (0 if muted else 1)
 
 
 def test_deserialized_symbol_warning_is_filtered() -> None:
