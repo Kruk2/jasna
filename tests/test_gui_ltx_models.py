@@ -156,6 +156,27 @@ def test_ensure_does_nothing_when_the_user_declines(tmp_path, monkeypatch, downl
     assert downloads == [] and not models.downloading
 
 
+@pytest.mark.parametrize("fast,old_size", [(False, 13_368_048_749), (True, 7_733_294_997)])
+def test_ensure_warns_before_replacing_models_from_older_release(tmp_path, monkeypatch, downloadable, fast, old_size):
+    from jasna.gui.locales import EN
+
+    monkeypatch.setattr(model_files, "is_frozen", lambda: True)
+    monkeypatch.setattr(ltx_models_module, "t", lambda key, **values: EN[key].format(**values))
+    names = bundle_names("distilled2", fast=fast)
+    for index, name in enumerate(names):
+        with (tmp_path / (name + ".enc")).open("wb") as stream:
+            stream.truncate(old_size if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
+    asked = _answer(monkeypatch, yes=False)
+    downloads = _fake_download(monkeypatch, error=None)
+    models = LtxModels(tmp_path, _NowCalls(), lambda: None)
+
+    assert not models.ensure("distilled2", fast, on_ready=lambda: pytest.fail("download declined"))
+    assert len(asked) == 1 and "needs updating" in asked[0]
+    assert "older Jasna" in asked[0] and "License code still works" in asked[0]
+    assert len(models.state.missing[("distilled2", fast)]) == 1
+    assert downloads == [] and (tmp_path / (names[0] + ".enc")).stat().st_size == old_size
+
+
 def test_ensure_shows_the_download_error(tmp_path, monkeypatch, downloadable) -> None:
     _answer(monkeypatch, yes=True)
     _fake_download(monkeypatch, error="checksum failed")

@@ -132,8 +132,12 @@ class LtxModels:
         if self.downloading or not self.state.downloadable:
             return False
         name = t(f"model_{model_key('ltx', model)}")
+        confirm_key = (
+            "ltx_update_confirm" if any((self._directory / file.name).is_file() for file in files)
+            else "ltx_download_confirm"
+        )
         if not messagebox.askyesno(
-            t("ltx_download_title"), t("ltx_download_confirm", model=name, size=download_size_text(list(files)))
+            t("ltx_download_title"), t(confirm_key, model=name, size=download_size_text(list(files)))
         ):
             return False
         self.percent = 0

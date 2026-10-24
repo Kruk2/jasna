@@ -86,6 +86,10 @@ your exact GPU. This takes about **15–60 minutes**, only once. Close other
 apps and don't use the PC during this time. When you update Jasna, copy the
 `model_weights` folder to the new version, so you don't wait again.
 
+**LTX update in 0.12:** models copied from 0.11.3 need downloading again,
+including on NVIDIA. Press **▶** and accept the model update. Your existing
+License code and shared VAE files still work.
+
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
 memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
 [Tuning](docs/en/tuning.md).

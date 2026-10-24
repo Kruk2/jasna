@@ -250,6 +250,35 @@ def test_cli_offers_only_the_fast_models_files(tmp_path, monkeypatch, nvidia_ven
     assert "9.2 GB" in asked[0]
 
 
+@pytest.mark.parametrize("interactive", [False, True])
+def test_cli_explains_models_copied_from_older_release_need_updating(tmp_path, monkeypatch, nvidia_vendor, interactive):
+    import sys
+
+    from factories import session_config
+    from jasna import main
+
+    monkeypatch.setattr(model_files, "is_frozen", lambda: True)
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: interactive)
+    asked = []
+    monkeypatch.setattr("builtins.input", lambda prompt: asked.append(prompt) or "n")
+    names = bundle_names("distilled2", fast=False)
+    for index, name in enumerate(names):
+        with (tmp_path / (name + ".enc")).open("wb") as stream:
+            stream.truncate(13_368_048_749 if index == 0 else model_files.LTX_DOWNLOADS[name].size_bytes)
+    config = session_config(restoration_model_name="ltx", restoration_model_path=tmp_path, ltx_model="distilled2")
+
+    with pytest.raises(FileNotFoundError) as error:
+        main._ensure_ltx_model(config, None)
+    message = asked[0] if interactive else str(error.value)
+    assert "need updating" in message and "older Jasna" in message
+    assert "License code still works" in message
+    assert names[0] in message and names[1] not in message and names[2] not in message
+    assert (tmp_path / (names[0] + ".enc")).stat().st_size == 13_368_048_749
+    if not interactive:
+        assert asked == [] and "Run jasna in a terminal" in message
+
+
 @pytest.mark.parametrize("nvidia", [False, True], ids=["amd", "older-nvidia"])
 @pytest.mark.parametrize("trial", [False, True])
 def test_cli_fast_ltx_checks_hardware_before_models_or_downloads(tmp_path, monkeypatch, nvidia, trial):

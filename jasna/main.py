@@ -896,11 +896,16 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     require_protection()
     names = ", ".join(file.name for file in missing)
     size = download_size_text(missing)
+    updating = any((directory / file.name).is_file() for file in missing)
+    status = "need updating" if updating else "missing"
+    message = f"LTX model files {status} in {directory}: {names}."
+    if updating:
+        message += " Models copied from older Jasna versions cannot be used. Your existing License code still works."
     if not sys.stdin.isatty():
-        raise FileNotFoundError(f"LTX model files missing in {directory}: {names}. Run jasna in a terminal to download them ({size}).")
-    answer = input(f"LTX {config.ltx_model} model not found in {directory}:\n  {names}\nDownload it ({size})? [y/N]: ")
+        raise FileNotFoundError(f"{message} Run jasna in a terminal to download them ({size}).")
+    answer = input(f"{message}\nDownload ({size})? [y/N]: ")
     if answer.strip().lower() not in ("y", "yes"):
-        raise FileNotFoundError(f"LTX model files missing in {directory}: {names}")
+        raise FileNotFoundError(message)
     from tqdm import tqdm
 
     from jasna.gui.locales import get_locale

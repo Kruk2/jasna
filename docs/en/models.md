@@ -78,7 +78,9 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   hf-mirror.com automatically. Download still fails? See
   [Downloading LTX yourself](#downloading-ltx-yourself).
 
-After an update, Jasna may ask to download your chosen LTX model again. Your existing License code still works.
+Jasna 0.12 needs updated LTX model files, including on NVIDIA. If you copy
+`model_weights` from 0.11.3, press ▶ and accept the model update; your existing
+License code and shared VAE files still work.
 
 LTX does not work with VR180 side-by-side videos or streaming. Secondary
 restoration and denoising are turned off with LTX.

@@ -69,7 +69,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
   仍然下载失败？见[手动下载 LTX](#手动下载-ltx)。
 
-更新后，Jasna 可能会要求重新下载所选的 LTX 模型。原来的许可证代码仍然可用。
+Jasna 0.12 需要更新 LTX 模型文件，NVIDIA 也一样。如果从 0.11.3 复制了
+`model_weights`，请按 ▶ 并同意更新模型；原来的许可证代码和共用 VAE 文件仍然可用。
 
 LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。
 
