@@ -71,9 +71,16 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
    - Windows: `jasna.exe` をダブルクリックします。
    - Linux NVIDIA: `jasna` ファイルを実行します。
    - Linux AMD: 最初に一度だけ AMD の AMF 動画ランタイムをインストールします。
-     [repo.radeon.com/amf](https://repo.radeon.com/amf/) の最新フォルダーから
-     `amf_installer_<version>.zip` をダウンロードして展開し、
-     `sudo ./amf_installer_<version>.sh` を実行します。その後 `run_jasna_amd.sh` を実行します。
+     [AMF 26.20](https://repo.radeon.com/amf/26.20/) で動作確認しています:
+
+     ```bash
+     curl -fLO https://repo.radeon.com/amf/26.20/amf_installer_26.20.zip
+     unzip amf_installer_26.20.zip
+     sudo bash amf_installer_26.20.sh
+     ```
+
+     求められたら AMD のライセンスに同意し、`run_jasna_amd.sh` を実行します。
+     Distrobox を使う場合は、Jasna と同じコンテナー内に AMF をインストールしてください。
 4. 動画を追加し、設定を選んで、画面下の **▶** ボタンを押します。
 
 **最初のジョブは時間がかかります。** NVIDIA では、Jasna がまずお使いの GPU

@@ -98,10 +98,18 @@ and the install path. You can run it again from the header, for example after a 
 update.
 
 On AMD it also checks AMD's AMF video runtime, which Jasna needs to read and
-write videos. On Windows it comes with the AMD driver. On Linux, install it once
-with AMD's [AMF installer](https://repo.radeon.com/amf/): open the newest folder,
-download `amf_installer_<version>.zip`, unpack it and run
-`sudo ./amf_installer_<version>.sh`.
+write videos. On Windows it comes with the AMD driver. On Linux, install it once.
+We tested [AMF 26.20](https://repo.radeon.com/amf/26.20/):
+
+```bash
+curl -fLO https://repo.radeon.com/amf/26.20/amf_installer_26.20.zip
+unzip amf_installer_26.20.zip
+sudo bash amf_installer_26.20.sh
+```
+
+Accept AMD's license when prompted, then restart Jasna. If using Distrobox,
+install AMF inside the same container as Jasna. Compiling FFmpeg with
+`--enable-amf` does not install this runtime.
 
 ## Other settings
 

@@ -98,10 +98,18 @@ SSD を使ってください。ハードディスク（HDD）では起動とモ�
 パスを確認します。ドライバーを更新した後などに、ヘッダーから再実行できます。
 
 AMD では、動画の読み書きに必要な AMD の AMF 動画ランタイムも確認します。Windows
-では AMD ドライバーに含まれています。Linux では AMD の
-[AMF インストーラー](https://repo.radeon.com/amf/)で一度だけインストールします:
-最新フォルダーを開き、`amf_installer_<version>.zip` をダウンロードして展開し、
-`sudo ./amf_installer_<version>.sh` を実行します。
+では AMD ドライバーに含まれています。Linux では一度だけインストールしてください。
+[AMF 26.20](https://repo.radeon.com/amf/26.20/) で動作確認しています:
+
+```bash
+curl -fLO https://repo.radeon.com/amf/26.20/amf_installer_26.20.zip
+unzip amf_installer_26.20.zip
+sudo bash amf_installer_26.20.sh
+```
+
+求められたら AMD のライセンスに同意し、Jasna を再起動します。Distrobox を使う場合は、
+Jasna と同じコンテナー内に AMF をインストールしてください。FFmpeg を `--enable-amf`
+付きでビルドしても、このランタイムはインストールされません。
 
 ## その他の設定
 

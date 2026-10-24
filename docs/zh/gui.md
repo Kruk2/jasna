@@ -80,9 +80,17 @@
 再次运行它，例如在更新驱动后。
 
 在 AMD 上，它还会检查 AMD 的 AMF 视频运行库，Jasna 读写视频需要它。Windows 上它随
-AMD 驱动一起安装。Linux 上请用 AMD 的 [AMF 安装程序](https://repo.radeon.com/amf/)
-安装一次：打开最新的文件夹，下载 `amf_installer_<version>.zip`，解压后运行
-`sudo ./amf_installer_<version>.sh`。
+AMD 驱动一起安装。Linux 上请安装一次。我们测试过
+[AMF 26.20](https://repo.radeon.com/amf/26.20/)：
+
+```bash
+curl -fLO https://repo.radeon.com/amf/26.20/amf_installer_26.20.zip
+unzip amf_installer_26.20.zip
+sudo bash amf_installer_26.20.sh
+```
+
+按提示同意 AMD 的许可协议，然后重启 Jasna。如果使用 Distrobox，请在运行 Jasna 的
+同一个容器内安装 AMF。使用 `--enable-amf` 编译 FFmpeg 不会安装这个运行库。
 
 ## 其他设置
 
