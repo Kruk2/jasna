@@ -34,7 +34,7 @@ jasna --input input.mp4 --output output.mkv --detection-model rfdetr-v6
 | --- | --- | --- |
 | 速度 | 快 | 慢很多（每分钟视频需要几分钟） |
 | 质量 | 好 | 细节更多，更自然 |
-| GPU | 所有支持的 GPU | NVIDIA 或 Linux 上兼容的 AMD 显卡（Windows AMD 仅限试用模式） |
+| GPU | 所有支持的 GPU | NVIDIA 或兼容的 AMD 显卡（Windows AMD LTX 为测试版） |
 | 费用 | 免费 | 支持者专享（[支持本项目](../../README.zh.md#支持本项目)） |
 
 把 LTX 用在你最在意的视频或场景上。选择之前，先看看
@@ -54,7 +54,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   **试用模式（速度测试）**（见下文）；CLI 会报错停止。
 - **GPU**：NVIDIA RTX 30、40 或 50 系列。RTX 20 系列应该可以用，但只测试过
   RTX 2080 Ti。GTX 16 系列未测试。Linux 还支持 Radeon RX 7000/9000 和
-  Radeon AI PRO R9700。AMD 核显的 LTX 尚未测试。Windows 上的 AMD 仅支持**试用模式**。
+  Radeon AI PRO R9700。AMD 核显的 LTX 尚未测试。Windows AMD LTX 为**测试版**，尚待 GPU 测试。
 - **显存**：至少 8 GB。显存越大越快：显存较小的显卡会把模型的一部分放在系统
   内存中。
 - **系统内存**：至少 16 GB（LTX 约占用 10 GB）。

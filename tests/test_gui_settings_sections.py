@@ -506,7 +506,7 @@ def test_gpu_support_disables_ltx_and_shows_fast_mode_on_blackwell(_panel_factor
 
 
 @pytest.mark.parametrize("downloadable", [True, False])
-def test_amd_without_source_models_runs_ltx_as_a_locked_trial(_panel_factory, monkeypatch, downloadable) -> None:
+def test_amd_without_source_models_offers_downloads_or_a_locked_trial(_panel_factory, monkeypatch, downloadable) -> None:
     from jasna.gui.locales import t
 
     monkeypatch.setattr(ltx_models_module, "protection_available", lambda: downloadable)
@@ -517,10 +517,13 @@ def test_amd_without_source_models_runs_ltx_as_a_locked_trial(_panel_factory, mo
     _select_ltx(panel)
 
     settings = panel.get_settings()
-    assert (settings.restoration_model, settings.ltx_trial) == ("ltx", True)
-    assert section._widgets["ltx_trial"].cget("state") == "disabled"
-    assert section._trial_status.cget("text") == t("model_ltx_licensed_needs_nvidia")
-    assert section.unavailable_reason() is None
+    assert (settings.restoration_model, settings.ltx_trial) == ("ltx", not downloadable)
+    assert section._widgets["ltx_trial"].cget("state") == ("normal" if downloadable else "disabled")
+    if downloadable:
+        assert not section._trial_status.winfo_manager()
+    else:
+        assert section._trial_status.cget("text") == t("model_ltx_trial_only")
+    assert section.unavailable_reason() == ("model_ltx_not_downloaded" if downloadable else None)
 
 
 def test_amd_runs_installed_source_models_without_the_trial(_panel_factory) -> None:

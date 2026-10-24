@@ -233,7 +233,7 @@ def _build_basicvsrpp_pipeline(
 
 
 LICENSED_LTX_AMD_UNAVAILABLE = (
-    "LTX quality models on AMD require Linux. On Windows you can try the free LTX trial (--ltx-trial)."
+    "LTX quality models are unavailable for this AMD setup. You can try the free LTX trial (--ltx-trial)."
 )
 LTX_FAST_NEEDS_BLACKWELL = "The fast LTX model needs an RTX 50-series (Blackwell) GPU"
 

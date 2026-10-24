@@ -248,7 +248,7 @@ JA = {
         "model_ltx": "LTX",
         "model_ltx_description": "最高画質・低速",
         "model_ltx_needs_nvidia": "NVIDIA または対応する AMD GPU が必要",
-        "model_ltx_licensed_needs_nvidia": "AMD の LTX 本番モデルには Linux が必要です。Windows ではお試しモードを使えます。",
+        "model_ltx_licensed_needs_nvidia": "この AMD 環境では LTX 本番モデルを使えません。お試しモードを使えます。",
         "model_ltx_not_installed": "この PC に LTX モデルがありません。",
         "ltx_model": "モデル",
         "ltx_model_distilled2": "標準画質（おすすめ）",

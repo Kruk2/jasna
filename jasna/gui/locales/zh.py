@@ -248,7 +248,7 @@ ZH = {
         "model_ltx": "LTX",
         "model_ltx_description": "画质最好，速度慢",
         "model_ltx_needs_nvidia": "需要 NVIDIA 或兼容的 AMD 显卡",
-        "model_ltx_licensed_needs_nvidia": "AMD 的 LTX 正式模型需要 Linux。Windows 上可使用试用模式。",
+        "model_ltx_licensed_needs_nvidia": "此 AMD 配置无法使用 LTX 正式模型。可以使用试用模式。",
         "model_ltx_not_installed": "此电脑上没有 LTX 模型。",
         "ltx_model": "模型",
         "ltx_model_distilled2": "标准画质（推荐）",

@@ -248,7 +248,7 @@ TH = {
         "model_ltx": "LTX",
         "model_ltx_description": "คุณภาพดีที่สุด ช้า",
         "model_ltx_needs_nvidia": "ต้องใช้ GPU NVIDIA หรือ AMD ที่รองรับ",
-        "model_ltx_licensed_needs_nvidia": "โมเดล LTX ตัวเต็มบน AMD ต้องใช้ Linux บน Windows ใช้โหมดทดลองได้",
+        "model_ltx_licensed_needs_nvidia": "การตั้งค่า AMD นี้ยังใช้โมเดล LTX ตัวเต็มไม่ได้ ใช้โหมดทดลองได้",
         "model_ltx_not_installed": "ไม่มีโมเดล LTX ในพีซีเครื่องนี้",
         "ltx_model": "โมเดล",
         "ltx_model_distilled2": "คุณภาพมาตรฐาน (แนะนำ)",

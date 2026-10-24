@@ -35,7 +35,7 @@ and a command line, and runs on your GPU.
 - Finds mosaics in a video and restores them. The rest of the picture is not
   touched.
 - Two restoration models: fast **BasicVSR++** (free) and slow but more
-  detailed **LTX** (for supporters, NVIDIA or supported AMD GPUs on Linux).
+  detailed **LTX** (for supporters, NVIDIA or supported AMD GPUs; Windows AMD LTX is in beta).
 - Restores only the parts you choose, with a preview, in the **Segment
   Editor**.
 - Works with VR180 videos and still images (SD 1.5, for supporters).
@@ -58,11 +58,11 @@ and a command line, and runs on your GPU.
 - AMD: a GPU supported by ROCm (Radeon RX 7000/9000, Radeon 780M/760M/740M,
   Ryzen AI). On Windows, AMD Adrenalin driver 26.8.1 or newer. Secondary
   restoration is NVIDIA only. LTX supports Radeon RX 7000/9000 and Radeon AI PRO
-  R9700 on Linux; on Windows, AMD supports LTX Trial mode only.
+  R9700 on Linux. Windows AMD LTX is in beta and still needs GPU testing.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
-- LTX needs an NVIDIA RTX GPU or a supported AMD GPU on Linux, at least 8 GB VRAM and 16 GB RAM. See
+- LTX needs an NVIDIA RTX GPU or a supported AMD GPU, at least 8 GB VRAM and 16 GB RAM. See
   [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 </details>
@@ -109,7 +109,7 @@ Supporters get a License code for the supporter models:
 | Support | Models |
 | --- | --- |
 | **$15 USD** or more in total | **UNet 4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
-| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA or supported AMD GPUs on Linux. Includes future updates of this LTX model. |
+| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA or supported AMD GPUs; Windows AMD LTX is in beta. Includes future updates of this LTX model. |
 
 Supporters who gave **$15 USD or more on or before 14 October 2026** get LTX for free.
 

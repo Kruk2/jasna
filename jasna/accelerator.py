@@ -91,7 +91,7 @@ def is_amd_device(device: torch.device | str | None = None) -> bool:
 
 def supports_licensed_ltx_on_amd() -> bool:
     """Whether this OS has the protected AMD worker; GPU kernels are checked separately."""
-    return sys.platform == "linux"
+    return sys.platform in {"linux", "win32"}
 
 
 def supports_nvfp4(device: torch.device | str) -> bool:

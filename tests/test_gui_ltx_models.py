@@ -87,10 +87,10 @@ def test_availability_with_downloads(tmp_path, downloadable) -> None:
     assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=False) == "model_ltx_not_downloaded"
 
 
-def test_windows_amd_runs_trial_and_source_models_only(tmp_path, downloadable, monkeypatch) -> None:
+def test_unsupported_amd_os_runs_trial_and_source_models_only(tmp_path, downloadable, monkeypatch) -> None:
     from jasna import accelerator
 
-    monkeypatch.setattr(accelerator.sys, "platform", "win32")
+    monkeypatch.setattr(accelerator.sys, "platform", "darwin")
     _install(tmp_path, "distilled", fast=False)
     state = read_install_state(tmp_path)
 
@@ -102,10 +102,11 @@ def test_windows_amd_runs_trial_and_source_models_only(tmp_path, downloadable, m
     assert trial_only_reason(NVIDIA) == "model_ltx_trial_only"
 
 
-def test_linux_amd_uses_normal_licensed_model_downloads(tmp_path, downloadable, monkeypatch) -> None:
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+def test_supported_amd_os_uses_normal_licensed_model_downloads(tmp_path, downloadable, monkeypatch, platform) -> None:
     from jasna import accelerator
 
-    monkeypatch.setattr(accelerator.sys, "platform", "linux")
+    monkeypatch.setattr(accelerator.sys, "platform", platform)
     state = read_install_state(tmp_path)
     assert not trial_only(state, AMD)
     assert state.usable("distilled2", False, AMD)
