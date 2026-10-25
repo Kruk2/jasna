@@ -100,7 +100,7 @@ def install() -> None:
             r".*\. Will attempt to recover by calling cublas instead\."
         ),
         category=UserWarning,
-        module=r"^torch(?:\.|$)",
+        module=r"^(?:torch|jasna)(?:\.|$)",
     )
     warnings.filterwarnings("ignore", message=r".*isinstance\(treespec, LeafSpec\).*", category=FutureWarning)
     warnings.filterwarnings(
