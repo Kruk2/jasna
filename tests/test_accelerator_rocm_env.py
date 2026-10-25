@@ -85,8 +85,11 @@ def test_aotriton_flash_images_need_the_forward_kernel(tmp_path):
     assert has_aotriton_flash_images(_torch_lib(tmp_path / "installed", "amd-gfx120x/flash/attn_fwd.zip"))
 
 
-@pytest.mark.parametrize(("image_files", "expected"), [((), {"flash": False, "mem_efficient": False}), (("amd-gfx110x/flash/attn_fwd.zip",), {})])
-def test_rocm_keeps_flash_sdpa_only_with_aotriton_images(monkeypatch, tmp_path, sdpa_switches, image_files, expected):
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize(("image_files", "expected"), [((), {"flash": False, "mem_efficient": False}), (("amd-gfx120x/flash/attn_fwd.zip",), {})])
+def test_rocm_keeps_flash_sdpa_only_with_aotriton_images(monkeypatch, tmp_path, sdpa_switches, platform, image_files, expected):
+    monkeypatch.setattr("torch.utils._triton.has_triton_package", lambda: False)
+    monkeypatch.setattr(accelerator.sys, "platform", platform)
     monkeypatch.setattr(torch.version, "hip", "7.2")
     _torch_lib(tmp_path, *image_files)
     monkeypatch.setattr(accelerator.torch, "__file__", str(tmp_path / "__init__.py"))

@@ -64,26 +64,32 @@ neither).
 The NVIDIA extras also install SciPy directly for the LTX worker; the release
 bundler copies its Python modules, native extensions and bundled BLAS libraries.
 
-## AMD (ROCm 10.0)
+## AMD (ROCm 10.1)
 
-Linux: work inside the `rocm/pytorch` ROCm 10.0 image (torch comes from the
-image), then `uv pip install -e ".[amd,dev]"`.
+Linux: work inside `rocm/pytorch:rocm10.1.0_ubuntu24.04_py3.12_pytorch_release_2.14.0`.
+This image installs Python packages system-wide. Inside the container, run:
 
-Windows (Python 3.12, Adrenalin 26.8.1 or newer): install torch from AMD's
-index **first**, otherwise a later dependency pulls the CPU torch from PyPI:
+```bash
+python3 -m pip install --break-system-packages uv
+uv pip install --system --break-system-packages -e ".[amd,dev]"
+```
+
+Windows (Python 3.12, Adrenalin 26.8.1 or newer): install the matching
+PyTorch builds and GPU kernel packs from AMD's index:
 
 ```powershell
 $I = "https://stable.repo.amd.com/rocm/whl-next/"
 $D = "device-gfx1100,device-gfx1101,device-gfx1102,device-gfx1103,device-gfx1150,device-gfx1151,device-gfx1200,device-gfx1201"
-pip install --index-url $I "torch[$D]==2.12.0+rocm10.0.0" "torchvision[$D]==0.27.0+rocm10.0.0"
+pip install --index-url $I "torch[$D]==2.14.0+rocm10.1.0" "torchvision[$D]==0.29.0a0+rocm10.1.0"
 uv pip install -e ".[amd,dev]"
 ```
 
-Check that ROCm stuck (an unsatisfiable torch pin makes uv silently install the
-CUDA build, which breaks RF-DETR):
+AMD's matching torchvision 0.29 wheel is labeled `0.29.0a0` in its stable index.
+Keep the complete ROCm version suffix so another vendor's wheel cannot satisfy the pin.
+Check the installed builds:
 
 ```bash
-python -c "import torch, torchvision; assert torch.version.hip and '+rocm' in torchvision.__version__; print('ROCm OK')"
+python -c "import torch, torchvision; assert torch.version.hip and torch.__version__ == '2.14.0+rocm10.1.0'; assert torchvision.__version__ == '0.29.0a0+rocm10.1.0'; print('ROCm OK')"
 ```
 
 To compile native LTX code on Windows, open an x64 Visual Studio developer
@@ -91,7 +97,7 @@ shell and initialize the matching development wheel. Its HIP headers require
 the SDK's `clang-cl`; MSVC `cl` cannot compile them:
 
 ```powershell
-pip install --no-deps --index-url $I rocm-sdk-devel==10.0.0
+pip install --no-deps --index-url $I rocm-sdk-devel==10.1.0
 python -m rocm_sdk init --quiet
 $R = (python -m rocm_sdk path --root).Trim()
 $env:ROCM_HOME = $R
