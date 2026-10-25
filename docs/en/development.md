@@ -86,6 +86,8 @@ uv pip install -e ".[amd,dev]"
 
 AMD's matching torchvision 0.29 wheel is labeled `0.29.0a0` in its stable index.
 Keep the complete ROCm version suffix so another vendor's wheel cannot satisfy the pin.
+If installing those AMD wheels with uv 0.10 instead of pip, add `--prerelease=allow`
+so its matching torchvision GPU packages resolve.
 Check the installed builds:
 
 ```bash
