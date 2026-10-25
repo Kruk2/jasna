@@ -17,10 +17,27 @@ ROCM_DEFAULTS = {
 }
 
 
-def test_rocm_pins_the_allocator_and_miopen_find_mode():
+def test_rocm_pins_the_allocator_and_miopen_find_mode(monkeypatch):
+    monkeypatch.setattr(accelerator.sys, "platform", "linux")
     environ: dict[str, str] = {}
     apply_rocm_env_defaults(environ)
     assert environ == ROCM_DEFAULTS
+
+
+def test_windows_keeps_the_supported_attention_default(monkeypatch):
+    monkeypatch.setattr(accelerator.sys, "platform", "win32")
+    environ: dict[str, str] = {}
+    apply_rocm_env_defaults(environ)
+    assert "TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL" not in environ
+
+
+@pytest.mark.parametrize("platform", ["linux", "win32"])
+@pytest.mark.parametrize("value", ["0", "1"])
+def test_an_explicit_attention_setting_wins(monkeypatch, platform, value):
+    monkeypatch.setattr(accelerator.sys, "platform", platform)
+    environ = {"TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL": value}
+    apply_rocm_env_defaults(environ)
+    assert environ["TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL"] == value
 
 
 def test_a_user_setting_wins():
@@ -78,6 +95,7 @@ def test_rocm_keeps_flash_sdpa_only_with_aotriton_images(monkeypatch, tmp_path, 
 
 
 def test_process_env_gets_rocm_defaults_on_rocm(monkeypatch, sdpa_switches):
+    monkeypatch.setattr(accelerator.sys, "platform", "linux")
     monkeypatch.setattr(torch.version, "hip", "7.2")
     for name in ROCM_DEFAULTS:
         monkeypatch.delenv(name, raising=False)
