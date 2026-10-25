@@ -29,13 +29,14 @@ _HIPBLAS_FALLBACK_WARNING = (
     (_HIPBLAS_FALLBACK_WARNING.split("Will attempt to recover")[0], False),
     ("an unrelated AMD warning", False),
 ], ids=["amd-fallback", "allocation-failure", "nvidia-fallback", "no-fallback", "unrelated"])
-def test_only_unsupported_hipblas_fallback_warning_is_muted(monkeypatch, message, muted) -> None:
+@pytest.mark.parametrize("module", ["torch.functional", "jasna.ltx.inference", "jasna.models.ltx_vae.transformer"])
+def test_only_unsupported_hipblas_fallback_warning_is_muted(monkeypatch, message, muted, module) -> None:
     monkeypatch.setattr(suppress_noise, "_installed", False)
     monkeypatch.setattr(sys, "meta_path", list(sys.meta_path))
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         install()
-        warnings.warn_explicit(message, UserWarning, "torch/functional.py", 373, module="torch.functional")
+        warnings.warn_explicit(message, UserWarning, module.replace(".", "/") + ".py", 373, module=module)
     assert len(caught) == (0 if muted else 1)
 
 
