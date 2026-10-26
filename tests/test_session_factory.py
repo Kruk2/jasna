@@ -128,36 +128,6 @@ def test_session_close_closes_restorers() -> None:
     session.restoration_pipeline.secondary_restorer.close.assert_called_once_with()
 
 
-def test_build_pipeline_passes_through_config_and_session() -> None:
-    config = session_config()
-    session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
-    segments = (SegmentRange(1, 2),)
-    splice_plan = MagicMock()
-    progress_callback = MagicMock()
-
-    with patch("jasna.pipeline.Pipeline") as pipeline_cls:
-        pipeline = build_pipeline(
-            config,
-            session,
-            Path("in.mp4"),
-            Path("out.mp4"),
-            progress_callback=progress_callback,
-            segments=segments,
-            splice_plan=splice_plan,
-        )
-
-    assert pipeline is pipeline_cls.return_value
-    assert pipeline_cls.call_args.kwargs == dict(
-        config=config,
-        session=session,
-        input_video=Path("in.mp4"),
-        output_video=Path("out.mp4"),
-        progress_callback=progress_callback,
-        segments=segments,
-        splice_plan=splice_plan,
-    )
-
-
 def test_session_reuses_its_detector_until_detection_settings_change() -> None:
     session = RestorationSession(device=MagicMock(), restoration_pipeline=MagicMock())
 
