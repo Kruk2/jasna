@@ -88,6 +88,8 @@ Changing max clip size does not start the compilation again.
 ## AMD experimental attention
 
 AMD builds enable experimental attention by default on Windows and Linux.
+The initial Windows 0.12.0 beta archive predates this change. To enable it
+there, use `1` instead of `0` in the Windows command below.
 If you get GPU errors, close Jasna and opt out before starting it again:
 
 Windows (PowerShell, in the Jasna folder):

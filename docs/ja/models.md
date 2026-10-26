@@ -59,7 +59,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **GPU**: NVIDIA RTX 30、40、50 シリーズ。RTX 20 シリーズも動くはずですが、
   検証したのは RTX 2080 Ti だけです。GTX 16 シリーズは未検証です。Linux では
   Radeon RX 7000/9000 と Radeon AI PRO R9700 にも対応します。AMD 内蔵 GPU の
-  LTX は未検証です。Windows の AMD LTX は**ベータ版**で、GPU での検証はこれからです。
+  LTX は未検証です。Windows の AMD LTX は**ベータ版**で、Radeon PRO V710 で動作確認済みです。
+  デスクトップ向け Radeon での検証は継続中です。
 - **VRAM**: 最低 8 GB。VRAM が多いほど速くなります。少ないカードではモデルの
   一部をシステム RAM に置きます。
 - **システム RAM**: 最低 16 GB（LTX は約 10 GB 使います）。
@@ -108,8 +109,10 @@ Jasna でのダウンロードが何度も失敗する場合は、ブラウザ�
 （または [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)）から
 ファイルを取得してください。必要なのは 3 ファイルです：選んだモデルのファイル 1 つと、
 VAE の 2 ファイル。
-このリンクは Jasna 0.12 と保護された AMD ベータ版用です。安定版 0.11.3 以前では、
-リポジトリの `main` ブランチを使ってください。
+このリンクは Jasna 0.12 用です。最初の AMD 0.12.0 ベータ版の配布ファイルでは、引き続き
+[main/block-layout3](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)
+（または[ミラー](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)）を使います。
+安定版 0.11.3 以前では、リポジトリの `main` ブランチを使ってください。
 
 | 選んだモデル | ファイル |
 | --- | --- |

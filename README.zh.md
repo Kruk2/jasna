@@ -49,8 +49,9 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 - NVIDIA：你的 GPU 在 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus)
   中需要计算能力 7.5 或更高。
 - AMD：ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI）。
-  Windows 上需要 AMD Adrenalin 驱动 26.8.1 或更新。二次修复仅限 NVIDIA。
-  LTX 支持 Linux 上的 Radeon RX 7000/9000 和 Radeon AI PRO R9700；Windows AMD LTX 为测试版，尚待 GPU 测试。
+  Windows 请使用下方链接的驱动。二次修复仅限 NVIDIA。
+  LTX 支持 Linux 上的 Radeon RX 7000/9000 和 Radeon AI PRO R9700；Windows AMD LTX
+  为测试版，已在 Radeon PRO V710 上验证，桌面 Radeon 显卡的测试仍在进行中。
 - 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
   固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
 - LTX 需要 NVIDIA RTX 显卡或兼容的 AMD 显卡，至少 8 GB 显存和 16 GB 内存。见
@@ -63,7 +64,10 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 1. 下载适合你的系统和 GPU 的发行包。
 2. 解压到一个文件夹，路径中不能有中文、日文、带重音的字母或其他非英文字符。
 3. 启动应用：
-   - Windows：双击 `jasna.exe`。
+   - Windows：双击 `jasna.exe`。AMD 用户请先安装
+     [适用于 ROCm 10.1 的 AMD 驱动](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
+     （**26.10.41.05**，[下载 .exe](https://drivers.amd.com/drivers/amd-software-adrenalin-edition-26.10.41.05-win11-b-204865.exe)），
+     然后重启电脑。Jasna 已包含 ROCm 10.1，无需单独安装 ROCm。
    - Linux NVIDIA：运行 `jasna` 文件。
    - Linux AMD：先安装一次 AMD 的 AMF 视频运行库。我们测试过
      [AMF 26.20](https://repo.radeon.com/amf/26.20/)：
@@ -78,8 +82,8 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
      如果使用 Distrobox，请在运行 Jasna 的同一个容器内安装 AMF。
 4. 添加视频，选择设置，点击界面底部的 **▶** 按钮。
 
-AMD 默认开启实验性注意力。遇到 GPU 错误时，可
-[关闭它](docs/zh/tuning.md#amd-实验性注意力)。
+AMD 实验性注意力可能提高速度，见
+[开启或关闭方法](docs/zh/tuning.md#amd-实验性注意力)。
 
 **第一个任务会很慢。** 在 NVIDIA 上，Jasna 会先为你的 GPU 准备模型。这大约需要
 **15–60 分钟**，只会发生一次。在此期间请关闭其他应用，也不要使用电脑。更新 Jasna 时，
@@ -89,6 +93,7 @@ AMD 默认开启实验性注意力。遇到 GPU 错误时，可
 请按 **▶** 并同意更新模型。原来的许可证代码和共用 VAE 文件仍然可用。
 [手动下载模型](docs/zh/models.md#手动下载-ltx)时，Jasna 0.12 请使用 `0.12.0`
 分支，0.11.3 或更早版本请使用 `main`。
+首个 AMD 0.12.0 测试版压缩包仍使用 `main/block-layout3`。
 
 每个设置都有提示：把鼠标移到 ⓘ 图标上即可查看。GPU 显存不足？降低
 **最大片段大小**，例如从 `90` 降到 `60`。见[调整显存和 GPU 占用](docs/zh/tuning.md)。

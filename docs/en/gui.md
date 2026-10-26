@@ -97,6 +97,13 @@ On the first start of each version, Jasna checks FFprobe, the GPU, the driver
 and the install path. You can run it again from the header, for example after a driver
 update.
 
+On Windows AMD, use [AMD's driver for ROCm 10.1](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
+(26.10.41.05; Windows driver version 32.0.31041.5005), then reboot.
+Jasna includes ROCm 10.1; you do not need to install ROCm separately.
+
+If startup reports `invalid kernel file`, check the driver first. A passing
+system check does not guarantee that every GPU operation works.
+
 On AMD it also checks AMD's AMF video runtime, which Jasna needs to read and
 write videos. On Windows it comes with the AMD driver. On Linux, install it once.
 We tested [AMF 26.20](https://repo.radeon.com/amf/26.20/):

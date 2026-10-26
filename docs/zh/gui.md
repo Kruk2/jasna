@@ -79,6 +79,13 @@
 每个版本首次启动时，Jasna 会检查 FFprobe、GPU、驱动和安装路径。你可以从页眉
 再次运行它，例如在更新驱动后。
 
+Windows AMD 用户请安装[适用于 ROCm 10.1 的 AMD 驱动](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
+（26.10.41.05；Windows 驱动版本 32.0.31041.5005），然后重启电脑。
+Jasna 已包含 ROCm 10.1，无需单独安装 ROCm。
+
+如果启动时出现 `invalid kernel file`，请先检查驱动。
+系统检查通过并不保证所有 GPU 操作都能正常运行。
+
 在 AMD 上，它还会检查 AMD 的 AMF 视频运行库，Jasna 读写视频需要它。Windows 上它随
 AMD 驱动一起安装。Linux 上请安装一次。我们测试过
 [AMF 26.20](https://repo.radeon.com/amf/26.20/)：
