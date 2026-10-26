@@ -105,13 +105,21 @@ class TestRfDetrInit:
 
 
 class TestRfDetrPreprocess:
-    def test_output_shape_and_dtype(self):
+    def test_frames_are_resized_and_normalized_with_imagenet_statistics(self):
         model, _ = _build_rfdetr_model()
         model.input_dtype = torch.float32
-        frames = torch.randint(0, 256, (2, 3, 100, 200), dtype=torch.uint8)
-        out = model._preprocess(frames)
-        assert out.shape == (2, 3, 768, 768)
-        assert out.dtype == torch.float32
+        out = model._preprocess(torch.full((2, 3, 100, 200), 255, dtype=torch.uint8))
+        assert out.shape == (2, 3, 768, 768) and out.dtype == torch.float32
+        white = (1 - torch.tensor([0.485, 0.456, 0.406])) / torch.tensor([0.229, 0.224, 0.225])
+        torch.testing.assert_close(out[:, :, 0, 0], white.expand(2, 3))
+
+    def test_normalization_tensors_are_reused_per_dtype(self):
+        model, _ = _build_rfdetr_model()
+        mean, std = model._normalization(torch.zeros(1, 3, 4, 4))
+        again_mean, again_std = model._normalization(torch.zeros(2, 3, 8, 8))
+        assert again_mean is mean and again_std is std
+        half_mean, _ = model._normalization(torch.zeros(1, 3, 4, 4, dtype=torch.float16))
+        assert half_mean is not mean and half_mean.dtype == torch.float16
 
 
 class TestRfDetrCall:
