@@ -46,7 +46,7 @@ and a command line, and runs on your GPU.
 
 - **NVIDIA** GTX 16-series / RTX 20-series or newer, with a recent driver
   (610+ on Windows, 580+ on Linux). GTX 10-series and older don't work.
-- Or **AMD** Radeon RX 7000/9000 (experimental).
+- Or **AMD** Radeon RX 7000/9000 (experimental). RX 6000 and older don't work.
 - A folder on a local disk, with no Chinese, Japanese, accented or other
   non-English characters in its path.
 
@@ -55,13 +55,19 @@ and a command line, and runs on your GPU.
 
 - NVIDIA: your GPU needs compute capability 7.5 or higher in NVIDIA's
   [GPU table](https://developer.nvidia.com/cuda/gpus).
-- AMD: a GPU supported by ROCm (Radeon RX 7000/9000, Radeon 780M/760M/740M,
-  Ryzen AI). Secondary restoration is NVIDIA only.
+- AMD: see the table below. Secondary restoration is NVIDIA only.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
 - LTX needs an NVIDIA RTX or AMD Radeon RX 7000/9000 GPU, at least 8 GB VRAM
   and 16 GB RAM. See [What LTX needs](docs/en/models.md#what-ltx-needs).
+
+| AMD GPU | Jasna | LTX |
+| --- | --- | --- |
+| Radeon RX 9060/9070, Radeon AI PRO R9700 | yes | yes (Windows: beta) |
+| Radeon RX 7600–7900, Radeon PRO W7000 | yes | yes (Windows: beta) |
+| Radeon 740M/760M/780M/880M/890M, Ryzen AI Max (8050S/8060S) | yes, untested | not yet |
+| Radeon RX 6000 and older, Radeon 820M/840M/860M | no | no |
 
 </details>
 

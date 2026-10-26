@@ -40,7 +40,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 
 - **NVIDIA** GTX 16 系列 / RTX 20 系列或更新，并使用较新的驱动
   （Windows 610 或更新，Linux 580 或更新）。GTX 10 系列及更旧的显卡无法使用。
-- 或 **AMD** Radeon RX 7000/9000（实验性）。
+- 或 **AMD** Radeon RX 7000/9000（实验性）。RX 6000 及更早的显卡不能用。
 - 本地磁盘上的一个文件夹，路径中不能有中文、日文、带重音的字母或其他非英文字符。
 
 <details>
@@ -48,12 +48,18 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 
 - NVIDIA：你的 GPU 在 NVIDIA 的 [GPU 表格](https://developer.nvidia.com/cuda/gpus)
   中需要计算能力 7.5 或更高。
-- AMD：ROCm 支持的 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、Ryzen AI）。
-  二次修复仅限 NVIDIA。
+- AMD：见下表。二次修复仅限 NVIDIA。
 - 磁盘格式：Windows 用 NTFS；Linux 用 ext4、Btrfs、XFS 或 ZFS。不支持网络磁盘。请使用
   固态硬盘（SSD）；在机械硬盘（HDD）上 Jasna 启动和加载模型都很慢。
 - LTX 需要 NVIDIA RTX 或 AMD Radeon RX 7000/9000 显卡，至少 8 GB 显存和 16 GB 内存。见
   [LTX 需要什么](docs/zh/models.md#ltx-需要什么)。
+
+| AMD 显卡 | Jasna | LTX |
+| --- | --- | --- |
+| Radeon RX 9060/9070、Radeon AI PRO R9700 | 支持 | 支持（Windows 为测试版） |
+| Radeon RX 7600–7900、Radeon PRO W7000 | 支持 | 支持（Windows 为测试版） |
+| Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 支持（未测试） | 暂不支持 |
+| Radeon RX 6000 及更早、Radeon 820M/840M/860M | 不支持 | 不支持 |
 
 </details>
 

@@ -59,7 +59,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **GPU**: NVIDIA RTX 30、40、50 シリーズ。RTX 20 シリーズも動くはずですが、
   検証したのは RTX 2080 Ti だけです。GTX 16 シリーズは未検証です。AMD Radeon
   RX 7000/9000 と Radeon AI PRO R9700 は Linux で動作し、Windows の AMD は
-  **ベータ版**です。AMD 内蔵 GPU は未検証です。
+  **ベータ版**です。AMD 内蔵 GPU にはまだ対応していません。
+  [AMD GPU の表](../../README.ja.md#必要なもの)をご覧ください。
 - **VRAM**: 最低 8 GB。VRAM が多いほど速くなります。少ないカードではモデルの
   一部をシステム RAM に置きます。
 - **システム RAM**: 最低 16 GB（LTX は約 10 GB 使います）。
