@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import struct
 import subprocess
+import sys
+from contextlib import contextmanager
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import av
 import torch
@@ -113,6 +115,47 @@ def primary_result(
         pad_offsets=[(126, 126)] * frames,
         resize_shapes=[(4, 4)] * frames,
     )
+
+
+def cli_args(tmp_path: Path, *extra: str, missing: tuple[str, ...] = ()) -> list[str]:
+    """CLI arguments for one video job in ``tmp_path``; every file exists unless its flag is ``missing``."""
+    paths = {
+        "--input": tmp_path / "in.mp4",
+        "--output": tmp_path / "out.mkv",
+        "--restoration-model-path": tmp_path / "model_weights" / "restore.pth",
+        "--detection-model-path": tmp_path / "model_weights" / "det.onnx",
+    }
+    paths["--restoration-model-path"].parent.mkdir(exist_ok=True)
+    for flag in ("--input", "--restoration-model-path", "--detection-model-path"):
+        if flag not in missing:
+            paths[flag].touch()
+    return [arg for flag, path in paths.items() for arg in (flag, str(path))] + list(extra)
+
+
+@contextmanager
+def cli_environment(pipeline=None):
+    """Passing system checks, no engine builds and a mocked ``Pipeline`` class, which it yields."""
+    pipeline_cls = MagicMock(return_value=MagicMock() if pipeline is None else pipeline)
+    with (
+        patch("jasna.main.check_ascii_install_path", return_value=(True, "C:\\fake")),
+        patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
+        patch("jasna.main.check_gpu_driver_version", return_value=(True, "610.18")),
+        patch("jasna.main.check_required_executables"),
+        patch("jasna.main.check_windows_nvidia_sysmem_fallback_policy", return_value=(True, "OK")),
+        patch("jasna.engine_compiler.ensure_engines_compiled", return_value=MagicMock(use_basicvsrpp_tensorrt=False)),
+        patch("jasna.pipeline.Pipeline", pipeline_cls),
+        patch("jasna.restorer.basicvsrpp_mosaic_restorer.BasicvsrppMosaicRestorer", MagicMock()),
+    ):
+        yield pipeline_cls
+
+
+def run_cli(argv: list[str], *, pipeline=None) -> MagicMock:
+    """Run ``jasna`` with ``argv`` in ``cli_environment``; returns the mocked ``Pipeline`` class."""
+    from jasna.main import main
+
+    with cli_environment(pipeline) as pipeline_cls, patch.object(sys, "argv", ["jasna", *argv]):
+        main()
+    return pipeline_cls
 
 
 def no_resume_conflict(directory: Path):
