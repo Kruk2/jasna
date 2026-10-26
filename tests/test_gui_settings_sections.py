@@ -201,16 +201,10 @@ def test_processor_rejects_cq_in_custom_args(monkeypatch) -> None:
         build_job_encoder_settings(settings, "hevc")
 
 
-def test_settings_panel_get_settings_is_locale_independent(panel_factory) -> None:
-    from jasna.gui.locales import get_locale
+def test_settings_panel_get_settings_is_locale_independent(panel_factory, gui_language) -> None:
+    gui_language("ja")
 
-    locale = get_locale()
-    original = locale.current_language
-    locale.set_language("ja")
-    try:
-        panel = panel_factory()
-    finally:
-        locale.set_language(original)
+    panel = panel_factory()
 
     assert panel.get_settings() == replace(AppSettings(), encoder_cq=28)
     assert panel._saved_preset_settings == panel.get_settings()
