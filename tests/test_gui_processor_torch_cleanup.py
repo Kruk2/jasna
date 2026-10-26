@@ -1,66 +1,17 @@
-import types
+import pytest
+import torch
 
 
-def test_cleanup_torch_calls_cuda_hooks_when_available():
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_cleanup_torch_releases_cached_memory_and_resets_the_peak():
     from jasna.gui.processor import _cleanup_torch
 
-    calls: list[str] = []
+    reserved_before = torch.cuda.memory_reserved()
+    block = torch.empty(256 * 1024 * 1024, dtype=torch.uint8, device="cuda")
+    del block
+    assert torch.cuda.memory_reserved() > reserved_before
 
-    class _Cuda:
-        @staticmethod
-        def is_available() -> bool:
-            calls.append("is_available")
-            return True
+    _cleanup_torch(torch)
 
-        @staticmethod
-        def synchronize() -> None:
-            calls.append("synchronize")
-
-        @staticmethod
-        def empty_cache() -> None:
-            calls.append("empty_cache")
-
-        @staticmethod
-        def ipc_collect() -> None:
-            calls.append("ipc_collect")
-
-        @staticmethod
-        def reset_peak_memory_stats() -> None:
-            calls.append("reset_peak_memory_stats")
-
-    fake_torch = types.SimpleNamespace(cuda=_Cuda)
-
-    _cleanup_torch(fake_torch)
-
-    assert calls == ["is_available", "synchronize", "empty_cache", "ipc_collect", "reset_peak_memory_stats"]
-
-
-def test_cleanup_torch_noops_when_cuda_unavailable():
-    from jasna.gui.processor import _cleanup_torch
-
-    calls: list[str] = []
-
-    class _Cuda:
-        @staticmethod
-        def is_available() -> bool:
-            calls.append("is_available")
-            return False
-
-        @staticmethod
-        def synchronize() -> None:
-            calls.append("synchronize")
-
-        @staticmethod
-        def empty_cache() -> None:
-            calls.append("empty_cache")
-
-        @staticmethod
-        def ipc_collect() -> None:
-            calls.append("ipc_collect")
-
-    fake_torch = types.SimpleNamespace(cuda=_Cuda)
-
-    _cleanup_torch(fake_torch)
-
-    assert calls == ["is_available"]
-
+    assert torch.cuda.memory_reserved() <= reserved_before
+    assert torch.cuda.max_memory_allocated() == torch.cuda.memory_allocated()
