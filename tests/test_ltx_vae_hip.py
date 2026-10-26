@@ -31,17 +31,28 @@ def test_every_diffusion_kernel_ships_a_code_object_for_every_architecture(modul
     assert all(module in kernels for kernels in KERNEL_LAUNCH.values())
 
 
-def test_without_triton_the_decoder_runs_the_ahead_of_time_kernels(monkeypatch):
+def test_amd_without_triton_runs_the_ahead_of_time_kernels(monkeypatch):
     monkeypatch.setattr(T, "_fused_na3d", None)
     monkeypatch.setattr(T, "_fused_residual_swiglu", None)
     monkeypatch.setattr(T, "_fused_slab_qkv", None)
     monkeypatch.setattr(T, "has_triton_package", lambda: False)
+    monkeypatch.setattr(T, "is_amd_device", lambda device: True)
 
     T.enable_fused_kernels(torch.device("cpu"))
 
     assert T._fused_na3d is na_hip.na3d
     assert T._fused_residual_swiglu is diffusion_hip.residual_swiglu_
     assert T._fused_slab_qkv is diffusion_hip.slab_qkv
+
+
+def test_nvidia_never_takes_the_amd_kernels(monkeypatch):
+    monkeypatch.setattr(T, "_fused_na3d", None)
+    monkeypatch.setattr(T, "has_triton_package", lambda: False)
+    monkeypatch.setattr(T, "is_amd_device", lambda device: False)
+
+    T.enable_fused_kernels(torch.device("cpu"))
+
+    assert T._fused_na3d is not na_hip.na3d
 
 
 def test_the_diffusion_kernels_reject_inputs_they_were_not_built_for():
