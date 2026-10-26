@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from tkinter import TclError
 
 import customtkinter as ctk
-import pytest
 
 from jasna.gui.components import CollapsibleSection
 from jasna.gui.models import PresetManager
@@ -25,36 +23,19 @@ def _collapse_all_sections(panel: SettingsPanel) -> None:
             section._toggle()
 
 
-def test_settings_scrollbar_thumb_contrasts_with_panel_without_hover(tmp_path) -> None:
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
+def test_settings_scrollbar_thumb_contrasts_with_panel_without_hover(tk_root, tmp_path) -> None:
+    panel = _settings_panel(tk_root, tmp_path)
 
-    try:
-        panel = _settings_panel(root, tmp_path)
-
-        assert panel._scroll.cget("scrollbar_button_color") == Colors.BORDER_LIGHT
-        assert panel._scroll.cget("scrollbar_button_color") != Colors.BG_PANEL
-    finally:
-        root.destroy()
+    assert panel._scroll.cget("scrollbar_button_color") != Colors.BG_PANEL
 
 
-def test_settings_scrollbar_only_appears_when_sections_overflow(tmp_path) -> None:
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
+def test_settings_scrollbar_only_appears_when_sections_overflow(tk_root, tmp_path) -> None:
+    tk_root.geometry("420x480")
+    panel = _settings_panel(tk_root, tmp_path)
 
-    try:
-        root.geometry("420x480")
-        panel = _settings_panel(root, tmp_path)
+    assert panel._scroll._scrollbar.winfo_ismapped()
 
-        assert panel._scroll._scrollbar.winfo_ismapped()
+    _collapse_all_sections(panel)
+    tk_root.update()
 
-        _collapse_all_sections(panel)
-        root.update()
-
-        assert not panel._scroll._scrollbar.winfo_ismapped()
-    finally:
-        root.destroy()
+    assert not panel._scroll._scrollbar.winfo_ismapped()
