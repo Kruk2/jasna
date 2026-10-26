@@ -62,8 +62,12 @@ def test_placeholders_are_deterministic_and_finite():
 
 def test_placeholder_vae_loads_into_the_encoder_and_decoder():
     files = LtxModelFiles.placeholder("distilled", fast=False)
-    load_video_encoder(files.vae, torch.device("cpu"))
-    load_video_decoder(files.vae, files.tuned_decoder, torch.device("cpu"))
+    encoder = load_video_encoder(files.vae, torch.device("cpu"))
+    decoder = load_video_decoder(files.vae, files.tuned_decoder, torch.device("cpu"))
+    with torch.no_grad():
+        latents = encoder(torch.zeros(1, 3, 9, 64, 64, dtype=torch.bfloat16))
+    assert latents.shape == (1, 128, 2, 2, 2) and torch.isfinite(latents.float()).all()
+    assert all(torch.isfinite(parameter.float()).all() for parameter in decoder.parameters())
 
 
 def test_trial_session_uses_placeholders_without_files_or_license():

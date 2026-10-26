@@ -36,6 +36,14 @@ def kernels():
     return kernels
 
 
+@pytest.fixture(params=["triton", "cublas"])
+def gemm(request, kernels, monkeypatch):
+    """The INT8 GEMM path: Triton throughout, or cuBLAS with the Triton epilogue."""
+    if request.param == "cublas":
+        monkeypatch.setattr(kernels, "_cached_gpu_architecture", lambda device: next(iter(kernel_policy.CUBLAS_INT8_MM)))
+    return kernels
+
+
 def _activations(rows: int, cols: int, generator: torch.Generator) -> torch.Tensor:
     x = torch.randn(rows, cols, generator=generator)
     x[:, torch.randperm(cols, generator=generator)[:4]] *= 40
@@ -86,7 +94,7 @@ def test_int8_residual_mm_adds_the_gated_projection_per_half(kernels):
     torch.testing.assert_close(out.float(), expected, atol=1e-2, rtol=1e-2)
 
 
-def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeypatch):
+def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(gemm, monkeypatch):
     monkeypatch.setattr(T, "_quant_kernels", None)
     generator = torch.Generator().manual_seed(0)
     # 8192 x 4096 leaves a mostly idle last wave, so it takes the split-K tail path
@@ -99,26 +107,20 @@ def test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeyp
         bias = torch.randn(out_features, generator=generator).to("cuda", torch.bfloat16)
         for b in (bias, None):
             expected = T.int8_linear(x, qdata, scales, b)
-            assert torch.equal(kernels.int8_scaled_mm(codes, act_scales, qdata, scales, b, False), expected)
-        gelu = kernels.int8_scaled_mm(codes, act_scales, qdata, scales, bias, True)
+            assert torch.equal(gemm.int8_scaled_mm(codes, act_scales, qdata, scales, b, False), expected)
+        gelu = gemm.int8_scaled_mm(codes, act_scales, qdata, scales, bias, True)
         expected = F.gelu(T.int8_linear(x, qdata, scales, bias), approximate="tanh")
         assert torch.allclose(gelu, expected, rtol=2**-7, atol=2**-7)
 
 
-def test_cublas_gemm_with_triton_epilogue_is_bit_exact(kernels, monkeypatch):
-    monkeypatch.setattr(kernels, "_cached_gpu_architecture", lambda device: next(iter(kernel_policy.CUBLAS_INT8_MM)))
-    test_int8_scaled_mm_is_bit_exact_with_the_reference_rescale(kernels, monkeypatch)
-    test_fused_norm_modulation_and_feed_forward(kernels)
-
-
-def test_fused_norm_modulation_and_feed_forward(kernels):
+def test_fused_norm_modulation_and_feed_forward(gemm):
     generator = torch.Generator().manual_seed(0)
     x = _activations(256, 1024, generator)
     shift, scale, gate = (torch.randn(3, 2, 1024, generator=generator) * 0.3).to("cuda", torch.bfloat16)
     halves = F.rms_norm(x.float(), (1024,), eps=T.EPS).view(2, 128, 1024)
     modulated = (halves * (1 + scale.float()[:, None]) + shift.float()[:, None]).view(256, 1024).to(torch.bfloat16)
-    codes, scales = kernels.modulate_rotate_quantize(x, shift, scale)
-    expected_codes, expected_scales = kernels.rotate_quantize(modulated)
+    codes, scales = gemm.modulate_rotate_quantize(x, shift, scale)
+    expected_codes, expected_scales = gemm.rotate_quantize(modulated)
     assert (codes != expected_codes).float().mean() < 1e-4
     assert torch.allclose(scales, expected_scales, rtol=1e-2, atol=0)
 
@@ -127,10 +129,10 @@ def test_fused_norm_modulation_and_feed_forward(kernels):
         return qdata.cuda(), torch.full((out_features,), 4e-4, device="cuda"), None
 
     up, down = weights(4096, 1024), weights(1024, 4096)
-    hidden = kernels.int8_scaled_mm(codes, scales, *up, True)
-    down_out = kernels.int8_scaled_mm(*kernels.rotate_quantize(hidden), *down, False).float().view(2, 128, 1024)
+    hidden = gemm.int8_scaled_mm(codes, scales, *up, True)
+    down_out = gemm.int8_scaled_mm(*gemm.rotate_quantize(hidden), *down, False).float().view(2, 128, 1024)
     expected = (x.float() + (down_out * gate.float()[:, None]).view(256, 1024)).to(torch.bfloat16)
-    assert torch.equal(kernels.int8_feed_forward(codes, scales, *up, *down, x, gate, 96), expected)
+    assert torch.equal(gemm.int8_feed_forward(codes, scales, *up, *down, x, gate, 96), expected)
 
 
 @needs_blackwell
