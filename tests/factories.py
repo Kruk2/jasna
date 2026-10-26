@@ -11,6 +11,7 @@ import av
 import torch
 
 from jasna.pipeline import Pipeline
+from jasna.pipeline_items import PrimaryRestoreResult
 from jasna.os_utils import resolve_executable
 from jasna.session_config import SessionConfig
 
@@ -65,6 +66,28 @@ def session_config(**overrides) -> SessionConfig:
     )
     base.update(overrides)
     return SessionConfig(**base)
+
+
+def primary_result(
+    *, track_id: int = 1, start_frame: int = 0, frames: int = 2, keep_start: int = 0, keep_end: int | None = None
+) -> PrimaryRestoreResult:
+    """A primary-restored clip of an 8x8 video: ``frames`` 256x256 crops of the box (1, 1, 5, 5)."""
+    return PrimaryRestoreResult(
+        track_id=track_id,
+        start_frame=start_frame,
+        frame_count=frames,
+        frame_shape=(8, 8),
+        frame_device=torch.device("cpu"),
+        masks=[torch.ones((8, 8), dtype=torch.bool)] * frames,
+        primary_raw=torch.ones((frames, 3, 256, 256)),
+        keep_start=keep_start,
+        keep_end=frames if keep_end is None else keep_end,
+        crossfade_weights=None,
+        enlarged_bboxes=[(1, 1, 5, 5)] * frames,
+        crop_shapes=[(4, 4)] * frames,
+        pad_offsets=[(126, 126)] * frames,
+        resize_shapes=[(4, 4)] * frames,
+    )
 
 
 def no_resume_conflict(directory: Path):
