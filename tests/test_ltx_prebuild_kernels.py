@@ -16,7 +16,7 @@ from jasna.ltx.native import aot
 
 
 PROFILES = [(7, 5), (8, 6), (8, 9), (12, 0), (12, 1)]
-AMD_PROFILES = ["gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201"]
+AMD_PROFILES = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1200", "gfx1201"]
 
 
 def _forbidden(*args, **kwargs):

@@ -54,7 +54,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   **试用模式（速度测试）**（见下文）；CLI 会报错停止。
 - **GPU**：NVIDIA RTX 30、40 或 50 系列。RTX 20 系列应该可以用，但只测试过
   RTX 2080 Ti。GTX 16 系列未测试。AMD Radeon RX 7000/9000 和 Radeon AI PRO R9700
-  可在 Linux 上使用；Windows AMD 为**测试版**。AMD 核显暂不支持。
+  可在 Linux 上使用；Windows AMD 为**测试版**。AMD 核显未测试。
   见 [AMD 显卡表](../../README.zh.md#要求)。
 - **显存**：至少 8 GB。显存越大越快：显存较小的显卡会把模型的一部分放在系统
   内存中。

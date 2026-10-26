@@ -61,7 +61,7 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 | --- | --- | --- |
 | Radeon RX 9060/9070、Radeon AI PRO R9700 | 対応 | 対応（Windows はベータ版） |
 | Radeon RX 7600–7900、Radeon PRO W7000 | 対応 | 対応（Windows はベータ版） |
-| Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 対応（未検証） | 未対応 |
+| Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 対応（未検証） | 対応（未検証） |
 | Radeon RX 6000 以前、Radeon 820M/840M/860M | 非対応 | 非対応 |
 
 </details>

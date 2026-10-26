@@ -61,7 +61,7 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
 - **GPU**: NVIDIA RTX 30, 40 or 50-series. RTX 20-series should work, but
   only the RTX 2080 Ti was tested. GTX 16-series is untested. AMD Radeon
   RX 7000/9000 and Radeon AI PRO R9700 work on Linux; on Windows AMD is in
-  **beta**. AMD integrated GPUs are not supported yet. See the
+  **beta**. AMD integrated GPUs are untested. See the
   [AMD GPU table](../../README.md#what-you-need).
 - **VRAM**: 8 GB minimum. More VRAM is faster: on smaller cards parts of the
   model are kept in system RAM.

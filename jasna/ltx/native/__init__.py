@@ -432,7 +432,7 @@ def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[i
 
 def release_architectures() -> list[tuple[int, int]] | list[str]:
     """Every architecture of this build's GPU vendor a release compiles the native block for:
-    those with tuned INT8 kernels (SMs, or gfx names under ROCm, where gfx1103 has none)."""
+    those with tuned INT8 kernels (SMs, or gfx names under ROCm)."""
     if torch.version.hip is not None:
         return sorted(policy.AMD_INT8_MM_TILES)
     return nvidia_release_architectures()

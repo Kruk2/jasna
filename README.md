@@ -66,7 +66,7 @@ and a command line, and runs on your GPU.
 | --- | --- | --- |
 | Radeon RX 9060/9070, Radeon AI PRO R9700 | yes | yes (Windows: beta) |
 | Radeon RX 7600–7900, Radeon PRO W7000 | yes | yes (Windows: beta) |
-| Radeon 740M/760M/780M/880M/890M, Ryzen AI Max (8050S/8060S) | yes, untested | not yet |
+| Radeon 740M/760M/780M/880M/890M, Ryzen AI Max (8050S/8060S) | yes, untested | yes, untested |
 | Radeon RX 6000 and older, Radeon 820M/840M/860M | no | no |
 
 </details>
