@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from jasna import os_utils
 from jasna.gui.models import AppSettings, PresetManager, get_settings_path
 
@@ -19,158 +21,74 @@ def test_get_user_config_dir_linux_uses_xdg_config_home(monkeypatch, tmp_path: P
     assert os_utils.get_user_config_dir("jasna") == (tmp_path / "xdg" / "jasna")
 
 
-def test_preset_manager_saves_to_user_config_dir(monkeypatch, tmp_path: Path) -> None:
+@pytest.fixture
+def windows_settings(monkeypatch, tmp_path: Path) -> Path:
+    """Settings live under a Windows %APPDATA% in ``tmp_path``; returns the settings file."""
     monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
     monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-
-    mgr = PresetManager()
-    assert mgr.create_preset("MyPreset", AppSettings())
-
-    settings_path = get_settings_path()
-    assert settings_path == tmp_path / "Roaming" / "jasna" / "settings.json"
-    assert settings_path.exists()
-
-    data = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert "user_presets" in data
-    assert "MyPreset" in data["user_presets"]
+    return tmp_path / "Roaming" / "jasna" / "settings.json"
 
 
-def test_preset_manager_preserves_other_settings_keys(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+def test_preset_manager_saves_to_user_config_dir(windows_settings) -> None:
+    assert PresetManager().create_preset("MyPreset", AppSettings())
 
-    settings_path = get_settings_path()
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps({"language": "zh"}, indent=2), encoding="utf-8")
-
-    mgr = PresetManager()
-    assert mgr.create_preset("MyPreset", AppSettings())
-
-    data = json.loads(settings_path.read_text(encoding="utf-8"))
-    assert data.get("language") == "zh"
+    assert get_settings_path() == windows_settings
+    assert "MyPreset" in json.loads(windows_settings.read_text(encoding="utf-8"))["user_presets"]
 
 
-def test_preset_manager_saves_and_loads_last_output_folder(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+def test_preset_manager_preserves_other_settings_keys(windows_settings) -> None:
+    windows_settings.parent.mkdir(parents=True)
+    windows_settings.write_text(json.dumps({"language": "zh"}), encoding="utf-8")
 
-    mgr = PresetManager()
-    assert mgr.get_last_output_folder() == ""
-    mgr.set_last_output_folder("/some/output")
-    assert mgr.get_last_output_folder() == "/some/output"
+    assert PresetManager().create_preset("MyPreset", AppSettings())
 
-    mgr2 = PresetManager()
-    assert mgr2.get_last_output_folder() == "/some/output"
-
-    data = json.loads(get_settings_path().read_text(encoding="utf-8"))
-    assert data.get("last_output_folder") == "/some/output"
+    assert json.loads(windows_settings.read_text(encoding="utf-8"))["language"] == "zh"
 
 
-def test_preset_manager_persists_lut_path_in_user_preset(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+@pytest.mark.parametrize(
+    "settings",
+    [
+        AppSettings(lut_path=r"C:\luts\film.cube"),
+        AppSettings(working_directory=r"D:\scratch"),
+        AppSettings(retarget_high_fps=True),
+        AppSettings(sharpen_strength=0.45),
+        AppSettings(post_export_action="command", post_export_command="echo done", post_export_video_command="remux {output}"),
+        AppSettings(restoration_model="ltx", ltx_seed=42, ltx_fast=True, ltx_large_canvas=True, ltx_less_overlap=True),
+    ],
+    ids=["lut", "working-directory", "frame-rate", "sharpen", "post-export", "ltx"],
+)
+def test_preset_manager_persists_user_preset(windows_settings, settings) -> None:
+    assert PresetManager().create_preset("Mine", settings)
 
-    mgr = PresetManager()
-    settings = AppSettings(lut_path=r"C:\luts\film.cube")
-    assert mgr.create_preset("WithLut", settings)
-
-    mgr2 = PresetManager()
-    loaded = mgr2.get_preset("WithLut")
-    assert loaded is not None
-    assert loaded.lut_path == r"C:\luts\film.cube"
-
-
-def test_preset_manager_persists_working_directory(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-
-    mgr = PresetManager()
-    settings = AppSettings(working_directory=r"D:\scratch")
-    assert mgr.create_preset("WithWorkDir", settings)
-
-    mgr2 = PresetManager()
-    loaded = mgr2.get_preset("WithWorkDir")
-    assert loaded is not None
-    assert loaded.working_directory == r"D:\scratch"
+    assert PresetManager().get_preset("Mine") == settings
 
 
-def test_preset_manager_persists_frame_rate_retargeting(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+@pytest.mark.parametrize(
+    ("getter", "setter", "value"),
+    [
+        ("get_last_output_folder", "set_last_output_folder", "/some/output"),
+        ("get_last_output_pattern", "set_last_output_pattern", "{original}_done.mkv"),
+    ],
+)
+def test_preset_manager_remembers_the_last_output(windows_settings, getter, setter, value) -> None:
+    manager = PresetManager()
+    assert getattr(manager, getter)() != value
 
-    mgr = PresetManager()
-    assert mgr.create_preset("HalfRate", AppSettings(retarget_high_fps=True))
+    getattr(manager, setter)(value)
 
-    loaded = PresetManager().get_preset("HalfRate")
-    assert loaded is not None
-    assert loaded.retarget_high_fps is True
-
-
-def test_preset_manager_persists_sharpen_strength(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-
-    mgr = PresetManager()
-    assert mgr.create_preset("Crisp", AppSettings(sharpen_strength=0.45))
-
-    loaded = PresetManager().get_preset("Crisp")
-    assert loaded is not None
-    assert loaded.sharpen_strength == 0.45
+    assert getattr(PresetManager(), getter)() == value
 
 
-def test_preset_manager_persists_post_export_action(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+def test_preset_manager_resolve_falls_back_to_default(windows_settings) -> None:
+    manager = PresetManager()
+    assert manager.resolve("DoesNotExist") == ("Default", AppSettings())
 
-    mgr = PresetManager()
-    settings = AppSettings(
-        post_export_action="command",
-        post_export_command="echo done",
-        post_export_video_command="remux {output}",
-    )
-    assert mgr.create_preset("WithAction", settings)
-
-    mgr2 = PresetManager()
-    loaded = mgr2.get_preset("WithAction")
-    assert loaded is not None
-    assert loaded.post_export_action == "command"
-    assert loaded.post_export_command == "echo done"
-    assert loaded.post_export_video_command == "remux {output}"
+    assert manager.create_preset("Mine", AppSettings(encoder_cq=30))
+    name, preset = manager.resolve("Mine")
+    assert (name, preset.encoder_cq) == ("Mine", 30)
 
 
-def test_preset_manager_resolve_falls_back_to_default(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-
-    mgr = PresetManager()
-    name, preset = mgr.resolve("DoesNotExist")
-    assert name == "Default"
-    assert preset == AppSettings()
-
-    assert mgr.create_preset("Mine", AppSettings(encoder_cq=30))
-    name, preset = mgr.resolve("Mine")
-    assert name == "Mine"
-    assert preset.encoder_cq == 30
-
-
-def test_preset_manager_saves_and_loads_last_output_pattern(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-
-    mgr = PresetManager()
-    default = mgr.get_last_output_pattern()
-    assert "{original}" in default
-    mgr.set_last_output_pattern("{original}_done.mkv")
-    assert mgr.get_last_output_pattern() == "{original}_done.mkv"
-
-    mgr2 = PresetManager()
-    assert mgr2.get_last_output_pattern() == "{original}_done.mkv"
-
-
-def test_preset_manager_saves_do_not_overwrite_keys_changed_elsewhere(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-
+def test_preset_manager_saves_do_not_overwrite_keys_changed_elsewhere(windows_settings) -> None:
     panel_mgr = PresetManager()
     app_mgr = PresetManager()
     assert panel_mgr.create_preset("MyPreset", AppSettings())
@@ -181,13 +99,3 @@ def test_preset_manager_saves_do_not_overwrite_keys_changed_elsewhere(monkeypatc
     assert reloaded.get_preset("MyPreset") is not None
     assert reloaded.get_system_check_passed_version() == "9.9.9"
     assert reloaded.get_last_selected() == "MyPreset"
-
-
-def test_preset_manager_persists_ltx_settings(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(os_utils.sys, "platform", "win32", raising=False)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
-    ltx = AppSettings(restoration_model="ltx", ltx_seed=42, ltx_fast=True, ltx_large_canvas=True, ltx_less_overlap=True)
-
-    assert PresetManager().create_preset("Ltx", ltx)
-
-    assert PresetManager().get_preset("Ltx") == ltx
