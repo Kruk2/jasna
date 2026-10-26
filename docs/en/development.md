@@ -188,14 +188,17 @@ kernel needs a Torch equivalent: AMD GPUs outside the bundle and CPU use it, and
 the tests use it as the reference. The GPU parity tests run on whichever vendor
 the machine has.
 
-Three AMD paths run Triton kernels compiled ahead of time, since AMD ships
-Triton for Linux only: the BasicVSR++ propagation step
+Three AMD paths run Triton kernels compiled ahead of time, on Linux and Windows
+alike (AMD ships Triton for Linux only): the BasicVSR++ propagation step
 (`restorer/basicvsrpp_fused_body.py`), the RF-DETR segmentation-head blocks
 (`mosaic/rfdetr_fused_head.py`) and the LTX VAE kernels
-(`models/ltx_vae/{na,diffusion,layout}_hip.py`). `scripts/build_basicvsrpp_hipfbs.py`,
-`scripts/build_rfdetr_hipfbs.py` and `scripts/build_ltx_vae_hipfbs.py` list their
-kernels; all build through `scripts/triton_hipfb.py` (compiler:
-`media/triton_hip.compile_hip`, shared with the LTX native block's AMD kernels)
+(`models/ltx_vae/{na,diffusion,layout}_hip.py`). The Triton sources sit next to
+their launchers (`restorer/basicvsrpp_triton.py`, `mosaic/rfdetr_triton.py`,
+`models/ltx_vae/{na,diffusion,layout}_triton.py`; NVIDIA also runs `na_triton`
+JIT); `scripts/build_basicvsrpp_hipfbs.py`, `scripts/build_rfdetr_hipfbs.py` and
+`scripts/build_ltx_vae_hipfbs.py` list the kernels; all build through
+`scripts/triton_hipfb.py` (compiler: `media/triton_hip.compile_hip`, shared with
+the LTX native block's AMD kernels)
 on a Linux ROCm machine with the ROCm Torch + Triton venv, for
 `accelerator.TRITON_HIP_ARCHITECTURES` (RDNA3, RDNA3.5, RDNA4), into
 `jasna/media/*.hipfb` plus a generated launch table (`*_hip_launch.py`); commit

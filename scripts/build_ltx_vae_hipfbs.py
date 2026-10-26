@@ -3,7 +3,7 @@
 Compiled ahead of time, bf16: ``na_triton._na3d_fwd_kernel`` (head dim 64) once per window size of the
 shipped DiffVAE decoder with that size's AMD ``na_geometry`` config, and ``diffusion_triton``'s residual
 SwiGLU and slab Q/K/V kernels at the shipped diffusion-block shapes (Q/K/V also at the 512-wide
-deterministic stages), and the eager encoder's channels-first copy (``layout_triton``). Windows ROCm ships no Triton, so ``na_hip`` and ``diffusion_hip`` launch these there.
+deterministic stages), and the eager encoder's channels-first copy (``layout_triton``). Every AMD GPU launches these through ``na_hip``, ``diffusion_hip`` and ``layout_hip``.
 
 Usage (Linux, ROCm Torch + Triton, ROCm's clang-offload-bundler):
     python scripts/build_ltx_vae_hipfbs.py

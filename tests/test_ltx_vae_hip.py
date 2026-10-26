@@ -17,14 +17,14 @@ def test_the_launch_table_has_every_kernel_the_launchers_launch():
 
 
 def _backend_kernels():
-    from jasna.models.ltx_vae import diffusion_triton, na_triton
+    from jasna.models.ltx_vae import na_triton
 
+    prebuilt = T.DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv)
     return [
         (KernelBackend.NVIDIA, T.DecoderKernels(na3d=na_triton.na3d)),
         (KernelBackend.NVIDIA_PRE_SM80, T.DecoderKernels(na3d=T._fp16_eager_na3d)),
-        (KernelBackend.AMD_TRITON,
-         T.DecoderKernels(na_triton.na3d, diffusion_triton.residual_swiglu_, diffusion_triton.slab_qkv)),
-        (KernelBackend.AMD_PREBUILT, T.DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv)),
+        (KernelBackend.AMD_TRITON, prebuilt),
+        (KernelBackend.AMD_PREBUILT, prebuilt),
         (KernelBackend.CPU, T.DecoderKernels()),
     ]
 
@@ -44,6 +44,20 @@ def test_a_model_runs_the_kernels_it_was_given_and_others_keep_the_torch_code():
 
     assert block.attn.kernels is kernels and block.mlp.kernels is kernels
     assert T.ChunkedDiffusionNABlock(64, (3, 5, 5), context_channels=16, head_dim=32).attn.kernels == T.DecoderKernels()
+
+
+def test_the_compiled_slab_calls_the_prebuilt_kernels_as_opaque_ops():
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with FakeTensorMode():
+        q = torch.empty(1, 4, 5, 6, 4, 64, dtype=torch.bfloat16)
+        assert na_hip.na3d(q, q, q, [3, 5, 5], 0).shape == q.shape
+        x = torch.empty(1, 2, 3, 12, 256, dtype=torch.bfloat16)
+        vector = torch.empty(256, dtype=torch.bfloat16)
+        weights = [torch.empty(256, 256, dtype=torch.bfloat16), vector] * 3 + [torch.empty(64, dtype=torch.bfloat16)] * 2
+        q, k, v = diffusion_hip.slab_qkv(x, x[:, :, :, :5], torch.arange(7), [vector] * 3, weights, torch.empty(32),
+                                         torch.empty(12), [8, 12], 2, 5, 0.125)
+    assert (q.shape, k.shape, v.shape) == ((1, 2, 3, 2, 4, 64), (1, 2, 3, 12, 4, 64), (1, 2, 3, 12, 4, 64))
 
 
 def test_the_diffusion_kernels_reject_inputs_they_were_not_built_for():

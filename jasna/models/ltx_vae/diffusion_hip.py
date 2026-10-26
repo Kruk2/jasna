@@ -1,5 +1,11 @@
 """The diffusion blocks' fused kernels (``diffusion_triton``) built ahead of time for AMD
-(``scripts/build_ltx_vae_hipfbs.py``), for GPUs without Triton: Windows ROCm ships none."""
+(``scripts/build_ltx_vae_hipfbs.py``): every AMD GPU runs them, with or without Triton.
+
+- ``residual_swiglu_``: ``transformer.modulated_swiglu`` plus the residual add, ``x += w_down(silu(gate) * up)``
+  with ``gate, up = w_gate(y), w_up(y)`` and ``y = rms_norm(x) * (1 + scale) + shift``.
+- ``slab_qkv``: a W slab's Q/K/V projections with Q/K RMSNorm and absolute RoPE (``_attn_on_w_slab``),
+  an opaque op, so a compiled slab calls it in one piece.
+"""
 
 import torch
 
@@ -62,13 +68,15 @@ def residual_swiglu_(
     w_up: torch.Tensor,
     w_down: torch.Tensor,
 ) -> None:
-    """``diffusion_triton.residual_swiglu_`` at the shipped decoder's shapes."""
+    """In place on contiguous ``x`` ``(rows, dim)``: one row each of ``scale``/``shift`` ``(dim,)``,
+    ``w_gate``/``w_up`` ``(hidden, dim)``, ``w_down`` ``(dim, hidden)``, at the shipped decoder's shapes."""
     tensors = (x, norm_weight, scale, shift, w_gate, w_up, w_down)
     _require_bf16(tensors, x.shape[1] == DIFFUSION_DIM and w_gate.shape == (DIFFUSION_HIDDEN, DIFFUSION_DIM))
     rows = x.shape[0]
     _launch(SWIGLU_MODULE, SWIGLU_ARGUMENTS, SWIGLU_BLOCK_ROWS, rows, x.device, (*tensors, rows))
 
 
+@torch.library.custom_op("jasna::slab_qkv_aot", mutates_args=())
 def slab_qkv(
     x: torch.Tensor,
     left_halo: torch.Tensor,
@@ -82,7 +90,14 @@ def slab_qkv(
     halo: int,
     q_scale: float,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """``diffusion_triton.slab_qkv`` at the shipped decoder's shapes."""
+    """Q of the core columns ``[halo, halo + core_len)`` (scaled by ``q_scale``) and K/V of every column of
+    the W slab ``(B, T, H, halo + len(columns), DIM)`` made of ``left_halo`` ``(B, T, H, halo, DIM)`` then
+    ``x``'s ``(B, T, H, W, DIM)`` W ``columns``, as ``(B, T, H, W, heads, head_dim)``. ``modulation``: empty,
+    or the norm weight, scale and shift ``(DIM,)`` the slab is modulated with (``rms_norm(slab) * (1 + scale)
+    + shift``). ``weights``: to_q weight, bias, to_k weight, bias, to_v weight, bias, q_norm weight, k_norm
+    weight; ``inv_freqs`` the (T, H, W) RoPE frequencies, ``rope_pairs`` the T and H pair counts, ``w_pos``
+    each slab column's W."""
+    x, left_halo, columns = x.contiguous(), left_halo.contiguous(), columns.contiguous()
     batch, t, h, w, dim = x.shape
     _require_bf16((x, left_halo, *modulation, *weights),
                   dim in FUSED_QKV_DIMS and bool(modulation) == (dim == DIFFUSION_DIM)
@@ -99,3 +114,10 @@ def slab_qkv(
     _launch(qkv_module(dim), QKV_ARGUMENTS, QKV_BLOCK_ROWS, rows, x.device,
             (*pointers, rows, h, w, ext, halo, core_len, q_scale))
     return q, k, v
+
+
+@slab_qkv.register_fake
+def _slab_qkv_fake(x, left_halo, columns, modulation, weights, inv_freqs, w_pos, rope_pairs, core_len, halo, q_scale):
+    batch, t, h, _w, dim = x.shape
+    k = x.new_empty(batch, t, h, halo + columns.shape[0], dim // DIFFUSION_HEAD_DIM, DIFFUSION_HEAD_DIM)
+    return x.new_empty(batch, t, h, core_len, dim // DIFFUSION_HEAD_DIM, DIFFUSION_HEAD_DIM), k, torch.empty_like(k)

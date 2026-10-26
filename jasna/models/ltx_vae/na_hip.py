@@ -1,5 +1,5 @@
 """Neighborhood attention through ``na_triton``'s kernel built ahead of time for AMD
-(``scripts/build_ltx_vae_hipfbs.py``), for GPUs without Triton: Windows ROCm ships none."""
+(``scripts/build_ltx_vae_hipfbs.py``): every AMD GPU runs it, with or without Triton."""
 
 import torch
 
@@ -27,8 +27,9 @@ def module_name(window: tuple[int, int, int]) -> str:
     return "ltx_na3d_{}x{}x{}".format(*window)
 
 
+@torch.library.custom_op("jasna::na3d_aot", mutates_args=())
 def na3d(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: list[int], query_w_start: int) -> torch.Tensor:
-    """``na_triton.na3d`` for bf16, head dim 64."""
+    """``na_triton.na3d`` for bf16, head dim 64; an opaque op, so a compiled slab calls it in one piece."""
     if {q.dtype, k.dtype, v.dtype} != {torch.bfloat16} or k.shape[5] != HEAD_DIM:
         raise ValueError(f"the ahead-of-time NA kernel takes bf16 with head dim {HEAD_DIM}, got {q.dtype} {tuple(k.shape)}")
     q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
@@ -43,3 +44,8 @@ def na3d(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, kernel_size: list[in
     out = torch.empty_like(q)
     kernel.launch((*launch.grid, 1), torch.cuda.current_stream(q.device).cuda_stream, q, k, v, out, *launch.scalars)
     return out
+
+
+@na3d.register_fake
+def _na3d_fake(q, k, v, kernel_size, query_w_start):
+    return torch.empty_like(q)
