@@ -2,7 +2,6 @@ import contextlib
 import json
 import tempfile
 import threading
-import time
 import weakref
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -965,14 +964,15 @@ def test_encrypted_worker_starts_on_its_own_thread_while_the_scan_runs(fakes, mo
 
 
 def test_a_failed_scan_waits_for_the_worker_start_before_it_raises(fakes, monkeypatch, tmp_path):
-    finished = []
+    finished, scan_failed = [], threading.Event()
 
     def request(self, op, params, tensors, advance=None):
-        time.sleep(0.2)
+        assert scan_failed.wait(5)
         finished.append(op)
         return {}, []
 
     def failing_scan(*_args, **_kwargs):
+        scan_failed.set()
         raise RuntimeError("synthetic scan failure")
 
     monkeypatch.setattr(restore, "scan_span", failing_scan)
