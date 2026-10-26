@@ -6,8 +6,9 @@ from unittest.mock import MagicMock
 
 import av
 import pytest
+import torch
 
-from jasna.accelerator import AcceleratorVendor
+from factories import video_metadata
 from jasna.media.video_decoder import (
     CORRUPT_PACKET_TOLERANCE,
     VideoReader,
@@ -16,10 +17,7 @@ from jasna.media.video_decoder import (
 
 
 def _reader():
-    reader = VideoReader.__new__(VideoReader)
-    reader.file = "broken.mp4"
-    reader._decoder_ctx = None
-    return reader
+    return VideoReader("broken.mp4", 1, torch.device("cuda:0"), video_metadata())
 
 
 def _corrupt_packet():
@@ -79,17 +77,13 @@ def test_other_ffmpeg_errors_raise_video_decode_error():
         reader._decode_packet(packet, 0)
 
 
-def test_backend_dispatch_releases_outer_first_group_reference():
+@pytest.mark.usefixtures("nvidia_vendor")
+def test_backend_dispatch_releases_outer_first_group_reference(monkeypatch):
     class Frame:
         format = SimpleNamespace(name="cuda")
 
-    reader = VideoReader.__new__(VideoReader)
-    reader._vali_source = None
-    reader.vendor = AcceleratorVendor.NVIDIA
+    reader = _reader()
     reader.video_stream = SimpleNamespace(start_time=0)
-    reader.metadata = SimpleNamespace(start_pts=0)
-    reader.frame_stride = 1
-    reader._decoded_frames = lambda seek_ts: iter(())
     calls = 0
 
     def read_group(decoded):
@@ -103,8 +97,9 @@ def test_backend_dispatch_releases_outer_first_group_reference():
         gc.collect()
         yield frame_ref() is None, []
 
-    reader._read_group = read_group
-    reader._frames_hardware = hardware_backend
+    monkeypatch.setattr(reader, "_decoded_frames", lambda seek_ts: iter(()))
+    monkeypatch.setattr(reader, "_read_group", read_group)
+    monkeypatch.setattr(reader, "_frames_hardware", hardware_backend)
 
     released, _ = next(reader.frames())
     assert released, "outer dispatch retained the first NVDEC surface group"

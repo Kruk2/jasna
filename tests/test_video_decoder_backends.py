@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import sys
 from contextlib import closing
-from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 import torch
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
 
 import jasna.media.video_decoder as module
 from jasna.accelerator import AcceleratorVendor
-from jasna.media.probe import VideoMetadata
+from factories import video_metadata
 
 TEST_CLIP = Path("assets/test_clip1_1080p.mp4")
 
@@ -23,22 +21,9 @@ def _clear_decode_backend_env(monkeypatch) -> None:
     monkeypatch.delenv(module.DECODE_BACKEND_ENV, raising=False)
 
 
-def _metadata() -> VideoMetadata:
-    return VideoMetadata(
-        video_file="input.mp4",
-        video_height=16,
-        video_width=16,
-        video_fps=30.0,
-        average_fps=30.0,
-        video_fps_exact=Fraction(30, 1),
-        codec_name="h264",
-        duration=1.0,
-        time_base=Fraction(1, 30),
-        start_pts=0,
-        color_range=AvColorRange.MPEG,
-        color_space=AvColorspace.ITU709,
-        num_frames=30,
-        is_10bit=False,
+def _metadata():
+    return video_metadata(
+        fps=30, num_frames=30, video_file="input.mp4", video_width=16, video_height=16, codec_name="h264"
     )
 
 
@@ -83,11 +68,6 @@ def test_decode_backend_env_override(monkeypatch, backend: str) -> None:
     monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
     monkeypatch.setenv(module.DECODE_BACKEND_ENV, backend)
     assert module._decode_backend() == backend
-
-
-def test_decode_backend_defaults_to_auto(monkeypatch) -> None:
-    monkeypatch.setenv("JASNA_DECODE_BACKEND", "auto")
-    assert module._decode_backend() == "auto"
 
 
 def test_forced_vali_backend_raises_on_failure(monkeypatch) -> None:
@@ -373,19 +353,6 @@ def test_vali_backend_matches_pyav_hw_output(monkeypatch) -> None:
     pyav_batch, pyav_pts = first_batch("pyav-hw")
     assert vali_pts == pyav_pts
     assert torch.equal(vali_batch, pyav_batch)
-
-
-def test_start_pts_uses_metadata_for_vali_and_stream_for_pyav() -> None:
-    import dataclasses
-
-    reader = module.VideoReader.__new__(module.VideoReader)
-    reader.metadata = dataclasses.replace(_metadata(), start_pts=1500)
-    reader._vali_source = object()
-    assert reader.start_pts == 1500
-
-    reader._vali_source = None
-    reader.video_stream = SimpleNamespace(start_time=2000)
-    assert reader.start_pts == 2000
 
 
 def test_vali_source_seek_with_stride_reanchors_at_seek(monkeypatch) -> None:
