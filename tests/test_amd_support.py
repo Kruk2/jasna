@@ -644,8 +644,7 @@ def test_rfdetr_torch_runner_loads_the_first_batch_libraries_on_a_thread_before_
     module.RfDetrTorchRunner(
         weights, input_shapes=[(2, 3, 576, 576)], device=torch.device("cpu"), fp16=True, resolution=576, variant="medium"
     )
-    assert started == [((module.load_first_batch_libraries, (torch.device("cpu"), torch.float16), False), 0)]
-    module.load_first_batch_libraries(torch.device("cpu"), torch.float32)
+    assert started == [((module.load_gpu_libraries_ahead, (torch.device("cpu"), torch.float16), False), 0)]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

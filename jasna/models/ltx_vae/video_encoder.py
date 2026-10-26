@@ -23,8 +23,6 @@ KITCHEN_DOWN_BLOCKS = 1
 (``conv_in`` and ``down_blocks[0]``), and needs no workspace there, where MIOpen's first-run solver
 search asks for ~13 GiB at 512 px. MIOpen's bf16 conv3d is faster on every later shape."""
 
-_kitchen_conv3d = False
-
 
 class CausalConv3d(nn.Module):
     """3x3x3 conv; time is padded causally by repeating the first frame."""
@@ -34,6 +32,7 @@ class CausalConv3d(nn.Module):
     def __init__(self, in_channels: int, out_channels: int) -> None:
         super().__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, 3, padding=(0, 1, 1), padding_mode="zeros")
+        self.kitchen = False
 
     def _causal_frames(self, x: torch.Tensor) -> torch.Tensor:
         # Views of x keep its memory format: a contiguous ``repeat`` beside a channels-last x makes
@@ -42,7 +41,7 @@ class CausalConv3d(nn.Module):
         return torch.concatenate((first_frame,) * (self.time_kernel_size - 1) + (x,), dim=2)
 
     def _runs_on_kitchen(self) -> bool:
-        return _kitchen_conv3d and self.conv.weight.dtype == torch.float16
+        return self.kitchen and self.conv.weight.dtype == torch.float16
 
     def _kitchen_forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
         padded = F.pad(self._causal_frames(x), (1, 1, 1, 1)).contiguous(memory_format=torch.channels_last_3d)
@@ -175,6 +174,15 @@ class VideoEncoder(nn.Module):
             layer.half()
         return self
 
+    def run_fp16_convs_on_kitchen(self) -> None:
+        """Run the fp16 layers' convs through comfy-kitchen's ``fp16_conv3d`` (an opaque op, so a
+        compiled encoder keeps one graph)."""
+        import comfy_kitchen  # noqa: F401
+
+        for module in self.modules():
+            if isinstance(module, CausalConv3d):
+                module.kitchen = True
+
     def to_fp16_with_float32_tail(self) -> "VideoEncoder":
         """fp16 for the high-resolution layers (nearly all the FLOPs), fp32 for the tail."""
         return self.float().to_fp16_head(FP16_DOWN_BLOCKS)
@@ -232,15 +240,6 @@ def encode_cropped(encoder: VideoEncoder, sample: torch.Tensor) -> torch.Tensor:
 
 
 _encode_cropped = encode_cropped
-
-
-def enable_kitchen_conv3d() -> None:
-    """Run the fp16 layers' convs through comfy-kitchen's ``fp16_conv3d`` (an opaque op, so a
-    compiled encoder keeps one graph)."""
-    global _kitchen_conv3d
-    import comfy_kitchen  # noqa: F401
-
-    _kitchen_conv3d = True
 
 
 def compile_video_encoder(device: torch.device, dtype: torch.dtype) -> None:

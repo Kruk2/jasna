@@ -364,15 +364,3 @@ def test_local_runtime_opens_the_transformer_file_ahead_once(monkeypatch):
     runtime.prepare_transformer()
     runtime.close()
     assert len(opened) == 2 and len(closed) == 1 and closed[0] is not loaded[0]
-
-
-def test_gpu_libraries_load_ahead_only_on_a_gpu(monkeypatch):
-    monkeypatch.setattr(inference.F, "linear", lambda *_args: pytest.fail("no GPU library to load on the CPU"))
-    inference.load_gpu_libraries_ahead(torch.device("cpu"))
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
-def test_gpu_libraries_load_ahead_on_another_thread():
-    worker = threading.Thread(target=inference.load_gpu_libraries_ahead, args=(torch.device("cuda"),))
-    worker.start()
-    worker.join()

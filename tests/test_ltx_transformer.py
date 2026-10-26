@@ -199,6 +199,7 @@ def test_ltx_refuses_to_run_without_its_kernels(package, monkeypatch):
     import importlib.util
 
     monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.setattr(T, "has_triton", lambda: package != "triton")
     real_find_spec = importlib.util.find_spec
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == package else real_find_spec(name))
     with pytest.raises(RuntimeError, match=package):
@@ -219,7 +220,19 @@ def test_ltx_names_why_the_int8_attention_extension_did_not_load(monkeypatch):
     monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: False)
     monkeypatch.setattr(kitchen_cuda, "_EXT_ERROR", "unverified runtime extension")
     monkeypatch.setattr(torch.version, "hip", None)
-    with pytest.raises(RuntimeError, match=r"did not load \(unverified runtime extension\)\.$"):
+    with pytest.raises(RuntimeError, match=r"^LTX can't run on this GPU: .* did not load \(unverified runtime extension\)\.$"):
+        T.require_kernels(torch.device("cuda"))
+
+
+def test_ltx_names_the_amd_gpu_and_why_kitchens_hip_extension_did_not_load(monkeypatch):
+    comfy_kitchen = pytest.importorskip("comfy_kitchen")
+    from comfy_kitchen.backends import hip as kitchen_hip
+
+    monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: False)
+    monkeypatch.setattr(kitchen_hip, "_EXT_ERROR", "HIP extension not built")
+    monkeypatch.setattr(torch.version, "hip", "7.0")
+    monkeypatch.setattr(T, "amd_gpu_architecture", lambda device: "gfx1030")
+    with pytest.raises(RuntimeError, match=r"^LTX can't run on this GPU \(gfx1030\): .* did not load \(HIP extension not built\)\.$"):
         T.require_kernels(torch.device("cuda"))
 
 
@@ -287,10 +300,7 @@ def test_compile_cache_lives_in_model_weights_unless_set(monkeypatch):
 
 
 def _without_triton(monkeypatch, hip):
-    import importlib.util
-
-    real_find_spec = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
+    monkeypatch.setattr(T, "has_triton", lambda: False)
     monkeypatch.setattr(torch.version, "hip", hip)
     monkeypatch.setattr(T, "_quant_kernels", None)
     monkeypatch.setattr(T, "_kitchen_int8_linear", None)
@@ -329,11 +339,8 @@ def test_prompt_cross_attention_runs_int8_attention_only_on_amd(monkeypatch, hip
 
 def test_amd_runs_ltx_without_triton(monkeypatch):
     """Windows ROCm ships no Triton; its LTX runs comfy-kitchen and prebuilt kernels instead."""
-    import importlib.util
-
     comfy_kitchen = pytest.importorskip("comfy_kitchen")
-    real_find_spec = importlib.util.find_spec
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == "triton" else real_find_spec(name))
+    monkeypatch.setattr(T, "has_triton", lambda: False)
     monkeypatch.setattr(torch.version, "hip", "7.0")
     monkeypatch.setattr(comfy_kitchen, "int8_attention_is_available", lambda device: True)
     T.require_kernels(torch.device("cuda"))

@@ -145,7 +145,9 @@ def test_attention_tile_follows_comfy_kitchen():
     sage_attention = pytest.importorskip("comfy_kitchen.sage_attention")
     for head_dim in (64, 128, 256):
         for rows in (16, 1024, 1025, 8192):
-            assert native.attention_cta_k(head_dim, rows) == sage_attention._select_cta_k(head_dim, rows, has_mask=False)
+            expected = sage_attention._select_cta_k(head_dim, rows, has_mask=False)
+            assert kernel_policy.attention_key_tile((12, 0), head_dim, rows) == expected
+            assert kernel_policy.attention_key_tile("gfx1201", head_dim, rows) == kernel_policy.AMD_ATTENTION_KEY_TILE
 
 
 def test_vendored_attention_compiles_once_with_comfy_kitchens_flags(monkeypatch, tmp_path):
@@ -202,7 +204,7 @@ def test_source_build_finds_the_platform_nvcc(monkeypatch, tmp_path, windows, nv
     monkeypatch.setattr(native, "_IS_WINDOWS", windows)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", str(tmp_path))
     monkeypatch.setattr(native.shutil, "which", lambda name: name)
-    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    monkeypatch.setattr(native, "_ninja_path", lambda: "ninja path")
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / ("nvcc" if windows else "nvcc.exe")).touch()
     assert "nvcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
@@ -254,6 +256,7 @@ def test_extension_build_finds_ninja_from_its_package_when_off_path(monkeypatch,
     monkeypatch.setattr(native, "_attention_objects", lambda build_directory, cuda_home: [])
     monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: os.environ["PATH"].split(os.pathsep))
     assert ninja.BIN_DIR in native._build_extension(tmp_path / "build")
+    assert os.environ["PATH"] == str(tmp_path / "empty")
 
 
 def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
@@ -261,7 +264,7 @@ def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
 
     objects = [tmp_path / "quant_qk_int8.o", tmp_path / "sage_attn_launcher.o"]
     monkeypatch.setattr(torch.version, "hip", None)
-    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    monkeypatch.setattr(native, "_ninja_path", lambda: "ninja path")
     monkeypatch.setattr(native, "_IS_WINDOWS", False)
     monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
     monkeypatch.setattr(native, "_attention_objects", lambda build_directory, cuda_home: objects)
@@ -283,10 +286,30 @@ def test_build_flags_link_the_platform_cuda_driver_library(monkeypatch):
     assert linux["extra_ldflags"] == ["-L/cuda/lib64/stubs", "-lcuda"]
 
 
-def test_release_arch_list_covers_every_sm_with_tuned_int8_kernels(monkeypatch):
-    monkeypatch.setattr(torch.version, "hip", None)
+@pytest.mark.parametrize("hip", [None, "7.15"])
+def test_release_arch_list_covers_every_sm_with_tuned_int8_kernels(monkeypatch, hip):
+    monkeypatch.setattr(torch.version, "hip", hip)
     archs = {tuple(int(part) for part in arch.split(".")) for arch in native.cuda_arch_list().split(";")}
     assert archs == {*kernel_policy.INT8_MM_TILES, *kernel_policy.CUBLAS_INT8_MM}
+
+
+def test_building_the_extension_restores_the_environment_it_builds_in(monkeypatch, tmp_path):
+    from torch.utils import cpp_extension
+
+    _cuda_capability(monkeypatch, (12, 0))
+    monkeypatch.setenv("PATH", "user path")
+    monkeypatch.delenv("CC", raising=False)
+    monkeypatch.setattr(native.shutil, "which", lambda name: name)
+    monkeypatch.setattr(native, "_ninja_path", lambda: "ninja dir:user path")
+    monkeypatch.setattr(cpp_extension, "CUDA_HOME", "/cuda")
+    monkeypatch.setattr(native, "_attention_objects", lambda build_directory, cuda_home: [])
+    seen = []
+    monkeypatch.setattr(cpp_extension, "load", lambda **kwargs: seen.append((os.environ["PATH"], os.environ["CC"])))
+
+    native._build_extension(tmp_path / "build")
+
+    assert seen == [("ninja dir:user path", "gcc-15")]
+    assert os.environ["PATH"] == "user path" and "CC" not in os.environ
 
 
 def test_native_block_can_be_turned_off(monkeypatch):
@@ -446,7 +469,7 @@ def test_native_block_without_triton_needs_shipped_kernels(monkeypatch, tmp_path
     _amd_architecture(monkeypatch)
     monkeypatch.setattr(native, "PREBUILT", tmp_path)
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: tmp_path / "jasna_ltx_native.so")
-    monkeypatch.setattr(native.importlib.util, "find_spec", lambda name: None if name == "triton" else ModuleSpec(name, None))
+    monkeypatch.setattr(native, "has_triton", lambda: False)
     assert "Triton" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
     manifest = _shipped_manifest(tmp_path, "gfx1201-int8", [
         _quantizer("rotate_quantize", K=4096, MODULATE=1), _quantizer("rotate_quantize", K=16384, MODULATE=0),
@@ -601,7 +624,7 @@ def test_amd_native_block_launches_comfy_kitchens_hip_attention_tile(monkeypatch
     cond = SimpleNamespace(block_rows=None)
     rope = SimpleNamespace(cos=None, sin=None)
     forward(weights, torch.zeros(1, 8192, 1), cond, (None, None), rope)
-    assert calls[0][-2:] == (native.HIP_ATTENTION_CTA_K, False)
+    assert calls[0][-2:] == (kernel_policy.AMD_ATTENTION_KEY_TILE, False)
 
 
 @pytest.mark.parametrize("quantization, architecture, reason", [
@@ -620,7 +643,7 @@ def test_amd_source_build_needs_hipcc(monkeypatch, tmp_path):
     monkeypatch.setattr(native, "_prebuilt_extension", lambda: None)
     monkeypatch.setattr(native, "is_frozen", lambda: False)
     monkeypatch.setattr(native.shutil, "which", lambda name: name)
-    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    monkeypatch.setattr(native, "_ninja_path", lambda: "ninja path")
     monkeypatch.setattr(cpp_extension, "ROCM_HOME", None)
     assert "hipcc" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
     monkeypatch.setattr(cpp_extension, "ROCM_HOME", str(tmp_path))
@@ -671,7 +694,7 @@ def test_amd_extension_builds_host_sources_only_so_nothing_is_hipified(monkeypat
 
     objects = [tmp_path / "glue.o", tmp_path / "int8_attn.o"]
     monkeypatch.setattr(torch.version, "hip", "7.15")
-    monkeypatch.setattr(native, "_ninja_available", lambda: True)
+    monkeypatch.setattr(native, "_ninja_path", lambda: "ninja path")
     monkeypatch.setattr(native, "_IS_WINDOWS", False)
     monkeypatch.setattr(cpp_extension, "ROCM_HOME", "/rocm")
     monkeypatch.setattr(cpp_extension, "library_paths", lambda device_type: ["/torch/lib"])

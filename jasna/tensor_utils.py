@@ -4,6 +4,8 @@ from collections.abc import Callable
 
 import torch
 
+from jasna.accelerator import has_triton
+
 
 def pad_batch_with_last(x: torch.Tensor, *, batch_size: int) -> torch.Tensor:
     n = int(x.shape[0])
@@ -34,9 +36,7 @@ def compile_static(fn: Callable, mode: str, device: torch.device, dtype: torch.d
     instead of a silent eager run. ``fn`` stays eager without Triton (Windows ROCm ships none, so
     inductor has no GPU backend there) and, in bf16, where inductor has no bf16 (:func:`half_dtype`
     is fp16)."""
-    from torch.utils._triton import has_triton_package
-
-    if not has_triton_package() or (dtype == torch.bfloat16 and half_dtype(device) != torch.bfloat16):
+    if not has_triton() or (dtype == torch.bfloat16 and half_dtype(device) != torch.bfloat16):
         return fn
     torch._dynamo.config.cache_size_limit = max(torch._dynamo.config.cache_size_limit, 64)
     torch._dynamo.config.accumulated_cache_size_limit = max(torch._dynamo.config.accumulated_cache_size_limit, 1024)

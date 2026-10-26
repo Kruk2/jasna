@@ -89,16 +89,26 @@ def patched(target, name: str, value):
         setattr(target, name, original)
 
 
-def variant_patches(variant: str) -> contextlib.ExitStack:
+@contextlib.contextmanager
+def decoder_na3d(decoder, na3d):
+    shipped = next(module.kernels for module in decoder.modules() if isinstance(module, T.NeighborhoodAttention3D))
+    T.use_kernels(decoder, shipped._replace(na3d=na3d))
+    try:
+        yield
+    finally:
+        T.use_kernels(decoder, shipped)
+
+
+def variant_patches(variant: str, decoder) -> contextlib.ExitStack:
     options = variant.split("+")
     unknown = set(options) - set(OPTIONS)
     if unknown:
         raise ValueError(f"unknown variant options {sorted(unknown)}; choose from {OPTIONS}")
     stack = contextlib.ExitStack()
     if "kitchen" in options:
-        stack.enter_context(patched(T, "_fused_na3d", kitchen_na3d))
+        stack.enter_context(decoder_na3d(decoder, kitchen_na3d))
     if "natten" in options:
-        stack.enter_context(patched(T, "_fused_na3d", natten_na3d))
+        stack.enter_context(decoder_na3d(decoder, natten_na3d))
     if "eager" in options:
         stack.enter_context(patched(T, "_slab_attention", T._attn_on_w_slab))
         stack.enter_context(patched(T, "_mlp_chunk", T.modulated_swiglu))
@@ -206,7 +216,7 @@ def main() -> None:
 
     reference: torch.Tensor | None = None
     for index, variant in enumerate(args.variants.split(",")):
-        with variant_patches(variant):
+        with variant_patches(variant, decoder):
             _video, first_s = decode(decoder, latent, budget, seed=1)
             torch.cuda.reset_peak_memory_stats(device)
             runs = []

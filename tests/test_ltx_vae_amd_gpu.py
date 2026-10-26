@@ -36,15 +36,17 @@ def test_ahead_of_time_na3d_matches_the_jit_kernel(kernel_size, shape, query_w):
     torch.testing.assert_close(aot, jit, atol=1e-2, rtol=1e-2)
 
 
-def test_kitchen_resnet_block_matches_miopen(monkeypatch):
+def test_kitchen_resnet_block_matches_miopen():
     torch.manual_seed(0)
     block = video_encoder.ResnetBlock3D(128).cuda().half().eval().to(memory_format=torch.channels_last_3d)
     x = torch.randn(1, 128, 9, 32, 32, device="cuda", dtype=torch.float16)
     with torch.inference_mode():
         reference = block.float()(x.float())
         block.half()
-        monkeypatch.setattr(video_encoder, "_kitchen_conv3d", True)
-        video_encoder.enable_kitchen_conv3d()
+        import comfy_kitchen  # noqa: F401
+
+        for conv in (block.conv1, block.conv2):
+            conv.kitchen = True
         kitchen = block(x)
 
     assert kitchen.is_contiguous(memory_format=torch.channels_last_3d)

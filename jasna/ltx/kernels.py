@@ -22,6 +22,7 @@ import triton.language as tl
 from triton.language.extra import libdevice
 from triton.tools.tensor_descriptor import TensorDescriptor
 
+from jasna.accelerator import is_amd_device
 from jasna.ltx.kernel_policy import (
     CUBLAS_EPILOGUE_TILE,
     CUBLAS_EPILOGUE_WARPS,
@@ -44,8 +45,8 @@ from jasna.ltx.kernel_policy import (
 EPS = tl.constexpr(1e-6)
 # HIP has no add_rn: AMD compiles the GEMM kernels without fp fusion (``GEMM_OPTIONS``), so a
 # plain add stays a separate rounding there.
-HIP = tl.constexpr(torch.version.hip is not None)
-GEMM_OPTIONS = {"enable_fp_fusion": False} if torch.version.hip else {}
+HIP = tl.constexpr(is_amd_device())
+GEMM_OPTIONS = {"enable_fp_fusion": False} if is_amd_device() else {}
 
 
 @triton.jit

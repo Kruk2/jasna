@@ -11,19 +11,13 @@ from typing import TypeVar
 
 import torch
 from torch import nn
-from torch.utils._triton import has_triton_package
 
-from jasna.accelerator import is_amd_device
+from jasna.accelerator import KernelBackend, kernel_backend
 from jasna.ltx.model_files import open_tensors
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
 from jasna.models.ltx_vae.tiling import TileSizeConfig
-from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, enable_fused_kernels
-from jasna.models.ltx_vae.video_encoder import (
-    KITCHEN_DOWN_BLOCKS,
-    VideoEncoder,
-    compile_video_encoder,
-    enable_kitchen_conv3d,
-)
+from jasna.models.ltx_vae.transformer import compile_diffusion_blocks, decoder_kernels, use_kernels
+from jasna.models.ltx_vae.video_encoder import KITCHEN_DOWN_BLOCKS, VideoEncoder, compile_video_encoder
 from jasna.tensor_utils import half_dtype
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"
@@ -193,15 +187,16 @@ def load_video_encoder(vae_path: Path, device: torch.device) -> VideoEncoder:
             checkpoint = _read_tensors(reader, ("encoder.", "per_channel_statistics."))
         encoder = _build(lambda: VideoEncoder(**kwargs), encoder_state_dict(checkpoint), device, torch.bfloat16)
         dtype = half_dtype(device)
+        backend = kernel_backend(device)
         bf16_contiguous_weights = list(encoder.state_dict().values())
         if dtype == torch.float16:
             encoder.to_fp16_with_float32_tail()
-        elif is_amd_device(device):
+        elif backend.is_amd:
             encoder.to_fp16_head(KITCHEN_DOWN_BLOCKS)
-            enable_kitchen_conv3d()
+            encoder.run_fp16_convs_on_kitchen()
         # Without Triton the encoder runs eagerly: there MIOpen and ROCm's copies run the tail faster
         # in NCDHW (1.39 -> 1.28 s per 512 window on an R9700); kitchen's head needs channels-last.
-        eager_amd = is_amd_device(device) and not has_triton_package()
+        eager_amd = backend is KernelBackend.AMD_PREBUILT
         for layer in (encoder.conv_in, *encoder.down_blocks[:KITCHEN_DOWN_BLOCKS]) if eager_amd else (encoder,):
             layer.to(memory_format=torch.channels_last_3d)
         _clear_tensors(bf16_contiguous_weights, encoder)
@@ -232,7 +227,7 @@ def load_video_decoder(vae_path: Path, tuned_decoder_path: Path, device: torch.d
         for name, tensor in tuned.items():
             overlay[name] = tensor.to(own[name].dtype)
         decoder.load_state_dict(overlay, strict=False)
-        enable_fused_kernels(device)
+        use_kernels(decoder, decoder_kernels(device))
         compile_diffusion_blocks(device, dtype)
         complete = True
         return decoder

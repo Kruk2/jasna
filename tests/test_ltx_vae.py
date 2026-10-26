@@ -7,6 +7,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from jasna.accelerator import KernelBackend
 from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder, loader, video_encoder
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.diffusion_video_decoder import DiffusionVideoDecoder
@@ -222,9 +223,8 @@ def _amd_encoder_checkpoint(tmp_path):
 @pytest.mark.parametrize("triton", (True, False))
 def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path, monkeypatch, triton):
     path = _amd_encoder_checkpoint(tmp_path)
-    monkeypatch.setattr(loader, "is_amd_device", lambda device: True)
-    monkeypatch.setattr(loader, "has_triton_package", lambda: triton)
-    monkeypatch.setattr(video_encoder, "_kitchen_conv3d", False)
+    backend = KernelBackend.AMD_TRITON if triton else KernelBackend.AMD_PREBUILT
+    monkeypatch.setattr(loader, "kernel_backend", lambda device: backend)
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
 
     encoder = load_video_encoder(path, torch.device("cpu"))
@@ -244,8 +244,7 @@ def test_an_eager_amd_encoder_keeps_only_the_kitchen_head_channels_last(tmp_path
 def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_path, monkeypatch):
     path = _amd_encoder_checkpoint(tmp_path)
     compiled = []
-    monkeypatch.setattr(loader, "is_amd_device", lambda device: True)
-    monkeypatch.setattr(video_encoder, "_kitchen_conv3d", False)
+    monkeypatch.setattr(loader, "kernel_backend", lambda device: KernelBackend.AMD_TRITON)
     monkeypatch.setattr(video_encoder, "_encode_cropped", video_encoder.encode_cropped)
     monkeypatch.setattr(video_encoder, "compile_static",
                         lambda fn, mode, device, dtype: compiled.append(dtype) or fn)
@@ -257,18 +256,19 @@ def test_load_video_encoder_on_amd_runs_the_full_resolution_head_on_kitchen(tmp_
         [torch.float16] * head + [torch.bfloat16] * (len(encoder.down_blocks) - head))
     assert encoder.conv_in.conv.weight.dtype == torch.float16
     assert encoder.conv_out.conv.weight.dtype == torch.bfloat16
-    assert video_encoder._kitchen_conv3d
+    assert all(conv.kitchen for conv in encoder.modules() if isinstance(conv, video_encoder.CausalConv3d))
     assert compiled == [torch.bfloat16]
 
 
-def test_kitchen_conv3d_matches_the_causal_conv_and_fuses_the_residual(monkeypatch):
+def test_kitchen_conv3d_matches_the_causal_conv_and_fuses_the_residual():
+    pytest.importorskip("comfy_kitchen")
     torch.manual_seed(0)
     block = video_encoder.ResnetBlock3D(16).half()
     x = torch.randn(1, 16, 5, 6, 7).half()
     with torch.inference_mode():
         reference = block(x).float()
-        monkeypatch.setattr(video_encoder, "_kitchen_conv3d", True)
-        video_encoder.enable_kitchen_conv3d()
+        for conv in (block.conv1, block.conv2):
+            conv.kitchen = True
         out = block(x)
 
     assert out.dtype == torch.float16
@@ -289,7 +289,7 @@ def test_causal_frames_repeat_the_first_frame_in_the_input_memory_format(memory_
 
 def test_kitchen_conv3d_leaves_non_fp16_layers_on_the_torch_conv(monkeypatch):
     conv = video_encoder.CausalConv3d(4, 8).bfloat16()
-    monkeypatch.setattr(video_encoder, "_kitchen_conv3d", True)
+    conv.kitchen = True
     monkeypatch.setattr(torch.ops.comfy_kitchen, "fp16_conv3d", None, raising=False)
     x = torch.randn(1, 4, 3, 5, 5).bfloat16()
 

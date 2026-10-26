@@ -59,8 +59,9 @@ def patch_frozen_torch() -> None:
         _config_module.get_assignments_with_compile_ignored_comments = lambda module: set()
 
         import hashlib
-        import importlib.util
         from pathlib import Path
+
+        from jasna.accelerator import has_triton
 
         os.environ["TRITON_BACKENDS_IN_TREE"] = "1"
         import torch
@@ -68,7 +69,7 @@ def patch_frozen_torch() -> None:
         from torch._inductor import codecache
         inductor_config.compile_threads = 1
         codecache.torch_key.set(hashlib.sha256(f"frozen torch {torch.__version__}".encode()).digest())
-        if importlib.util.find_spec("triton") is not None:
+        if has_triton():
             from jasna.os_utils import get_application_executable
             root = Path(get_application_executable()).parent
             register_ltx_sources(root)

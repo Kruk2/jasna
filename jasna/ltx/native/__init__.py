@@ -32,6 +32,8 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import torch
@@ -39,6 +41,7 @@ import torch.nn.functional as F
 from torch.nn.attention import sdpa_kernel
 
 from jasna._frozen import is_frozen
+from jasna.accelerator import has_triton, is_amd_device, is_nvidia_device
 from jasna.ltx import kernel_policy as policy
 from jasna.ltx import transformer as T
 from jasna.ltx.kernel_policy import FP4_ARCHS, BlockDims, is_amd
@@ -56,14 +59,12 @@ _ATTENTION_SOURCES = ("quant_qk_int8.cu", "quant_v_int8.cu", "sage_attn_launcher
 # NDEBUG keeps CUDA 13's fp4/fp8 header asserts out of device code, which the release build's
 # glibc 2.35 host headers cannot compile.
 _ATTENTION_NVCC_FLAGS = ("-std=c++17", "-O3", "-DNDEBUG", "--use_fast_math", "--expt-relaxed-constexpr")
-# comfy-kitchen 0.2.38's HIP backend: its CMakeLists.txt flags for the kernels and the key tile it
-# always launches (``_sage_cta_k``).
+# comfy-kitchen 0.2.38's HIP backend: its CMakeLists.txt flags for the kernels.
 _HIP_ATTENTION = _HERE / "sage_attention_hip"
 # norm_rope_quant.hip compiles comfy-kitchen's quant_qk_int8.hip together with the norm fused into it
 _HIP_ATTENTION_SOURCES = (_HERE / "norm_rope_quant.hip", _HIP_ATTENTION / "quant_v_int8.hip",
                           _HIP_ATTENTION / "int8_attn.hip")
 _HIP_ATTENTION_FLAGS = ("-std=c++20", "-O3", "-DNDEBUG", "-ffast-math", "-mno-wavefrontsize64")
-HIP_ATTENTION_CTA_K = 64
 _IS_WINDOWS = os.name == "nt"
 
 
@@ -85,18 +86,32 @@ def block_quantization(block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]
     return "nvfp4" if block_specs["attn1.to_v.weight"][0] == torch.uint8 else None
 
 
-def _ninja_available() -> bool:
-    """Whether ninja runs; puts the ``ninja`` package's binary on PATH when only it has one."""
+def _ninja_path() -> str | None:
+    """``PATH`` with ninja on it: unchanged when ninja is already there, else with the ``ninja``
+    package's binary first; None without ninja."""
+    path = os.environ.get("PATH", "")
     if shutil.which("ninja"):
-        return True
+        return path
     if importlib.util.find_spec("ninja") is None:
-        return False
+        return None
     import ninja
 
-    if not ninja.BIN_DIR:
-        return False
-    os.environ["PATH"] = ninja.BIN_DIR + os.pathsep + os.environ.get("PATH", "")
-    return True
+    return ninja.BIN_DIR + os.pathsep + path if ninja.BIN_DIR else None
+
+
+@contextmanager
+def _environment(values: dict[str, str]) -> Iterator[None]:
+    """``os.environ`` with ``values`` set until the block exits."""
+    previous = {name: os.environ.get(name) for name in values}
+    os.environ.update(values)
+    try:
+        yield
+    finally:
+        for name, value in previous.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
 
 
 def _prebuilt_extension() -> Path | None:
@@ -112,7 +127,7 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
     """Why the native block cannot run blocks shaped like ``block_specs`` here, or None when it can."""
     if os.environ.get("JASNA_LTX_NATIVE") == "0":
         return "turned off by JASNA_LTX_NATIVE=0"
-    if device.type != "cuda" or (torch.version.cuda is None and torch.version.hip is None):
+    if device.type != "cuda" or not (is_nvidia_device(device) or is_amd_device(device)):
         return "it needs an NVIDIA or AMD GPU"
     dims = BlockDims.from_specs(block_specs)
     quantization = block_quantization(block_specs)
@@ -128,7 +143,7 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
     if (PREBUILT / "kernels").is_dir():
         if _prebuilt_manifest(architecture, dims, fp4=quantization == "nvfp4") is None:
             return f"no shipped kernels for {_architecture_name(architecture)} fit this model"
-    elif importlib.util.find_spec("triton") is None:
+    elif not has_triton():
         return "Triton is not installed to compile its kernels and none are shipped"
     if _prebuilt_extension() is not None:
         return None
@@ -136,7 +151,7 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
         return "a release ships no native block to load and cannot build one"
     from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME, get_cxx_compiler
 
-    if torch.version.hip is not None:
+    if is_amd_device():
         if ROCM_HOME is None or not _hipcc(Path(ROCM_HOME)).is_file():
             return "no HIP compiler (hipcc) found to build it"
     elif CUDA_HOME is None or not _nvcc(Path(CUDA_HOME)).is_file():
@@ -144,7 +159,7 @@ def unavailable_reason(device: torch.device, block_specs: dict[str, tuple[torch.
     compiler = get_cxx_compiler()
     if shutil.which(compiler) is None:
         return f"no C++ compiler ({compiler}) found to build it"
-    if not _ninja_available():
+    if _ninja_path() is None:
         return "ninja is not installed"
     return None
 
@@ -277,14 +292,13 @@ def _hip_objects(build_directory: Path, rocm_home: Path) -> list[Path]:
 def _build_extension(build_directory: Path):
     from torch.utils import cpp_extension
 
-    if not _ninja_available():
+    ninja_path = _ninja_path()
+    if ninja_path is None:
         raise RuntimeError("building the native LTX block needs ninja")
     build_directory.mkdir(parents=True, exist_ok=True)
-    previous = {name: os.environ.get(name) for name in ("CC", "CXX")}
-    if shutil.which("gcc-15") and shutil.which("g++-15"):
-        os.environ["CC"], os.environ["CXX"] = "gcc-15", "g++-15"
-    try:
-        if torch.version.hip is not None:
+    compilers = {"CC": "gcc-15", "CXX": "g++-15"} if shutil.which("gcc-15") and shutil.which("g++-15") else {}
+    with _environment({"PATH": ninja_path, **compilers}):
+        if is_amd_device():
             rocm_home = Path(cpp_extension.ROCM_HOME)
             flags = _hip_build_flags(rocm_home)
             flags["extra_ldflags"] += [str(path) for path in _hip_objects(build_directory, rocm_home)]
@@ -300,12 +314,6 @@ def _build_extension(build_directory: Path):
             build_directory=str(build_directory),
             **flags,
         )
-    finally:
-        for name, value in previous.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
 
 
 def _extension():
@@ -345,11 +353,6 @@ def _kernel_manifest(architecture: tuple[int, int] | str, dims: BlockDims, *, fp
     return build_kernels(architecture, dims, fp4=fp4, cache=_cache() / "kernels")
 
 
-def attention_cta_k(head_dim: int, rows: int) -> int:
-    """The INT8 attention key tile for ``rows`` tokens, as comfy-kitchen 0.2.38 picks it unmasked."""
-    return 128 if head_dim >= 128 and rows > 1024 else 64
-
-
 def _linear_tensors(w: T.Weights, name: str) -> tuple[torch.Tensor | None, ...]:
     """(weight, scale, scale_2, bias) of one linear in ``block.cpp``'s slot order."""
     if f"{name}.qdata" in w:
@@ -367,7 +370,7 @@ class NativeBlockForward:
             setattr(config, name, value)
         self.block = module.Block(config)
         self.head_dim = dims.dim // dims.heads
-        self._amd = is_amd(policy.gpu_architecture(device))
+        self._architecture = policy.gpu_architecture(device)
 
     def __call__(
         self, w: T.Weights, x: torch.Tensor, cond: T.StepConditioning,
@@ -378,7 +381,7 @@ class NativeBlockForward:
             return self.block.forward(
                 linears, w["attn1.q_norm.weight"], w["attn1.k_norm.weight"], w["attn2.q_norm.weight"],
                 w["scale_shift_table"], x, cond.block_rows, *prompt, rope.cos, rope.sin,
-                HIP_ATTENTION_CTA_K if self._amd else attention_cta_k(self.head_dim, x.shape[1]), skip_self_attention,
+                policy.attention_key_tile(self._architecture, self.head_dim, x.shape[1]), skip_self_attention,
             )
 
 
@@ -433,7 +436,7 @@ def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[i
 def release_architectures() -> list[tuple[int, int]] | list[str]:
     """Every architecture of this build's GPU vendor a release compiles the native block for:
     those with tuned INT8 kernels (SMs, or gfx names under ROCm)."""
-    if torch.version.hip is not None:
+    if is_amd_device():
         return sorted(policy.AMD_INT8_MM_TILES)
     return nvidia_release_architectures()
 
@@ -445,7 +448,7 @@ def nvidia_release_architectures() -> list[tuple[int, int]]:
 
 def cuda_arch_list() -> str:
     """``TORCH_CUDA_ARCH_LIST`` for a release build of code that links the native block."""
-    return ";".join(f"{major}.{minor}" for major, minor in release_architectures())
+    return ";".join(f"{major}.{minor}" for major, minor in nvidia_release_architectures())
 
 
 def prebuild_profiles() -> list[tuple[tuple[int, int] | str, BlockDims, bool]]:
@@ -480,11 +483,12 @@ def prebuild(directory: Path) -> None:
 
 def prebuild_extension(directory: Path) -> None:
     """The extension for every ``release_architectures`` entry, into ``directory`` as ``PREBUILT`` expects."""
-    if torch.version.hip is not None:
-        os.environ["PYTORCH_ROCM_ARCH"] = ";".join(release_architectures())
+    if is_amd_device():
+        architectures = {"PYTORCH_ROCM_ARCH": ";".join(release_architectures())}
     else:
-        os.environ["TORCH_CUDA_ARCH_LIST"] = cuda_arch_list()
-    module = _build_extension(directory / "build")
+        architectures = {"TORCH_CUDA_ARCH_LIST": cuda_arch_list()}
+    with _environment(architectures):
+        module = _build_extension(directory / "build")
     shutil.copy2(module.__file__, directory / Path(module.__file__).name)
     # Windows keeps the loaded .pyd locked; the release caller cleans up after this process exits.
     if not _IS_WINDOWS:
