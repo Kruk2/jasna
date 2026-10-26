@@ -2,6 +2,7 @@ import torch
 import pytest
 from safetensors.torch import save_file
 
+from factories import ReadObserver
 from jasna.ltx.blocks import BlockStore, OpaqueBlockStore
 from jasna.ltx.model_files import PlaceholderTensors, open_tensors
 from jasna.ltx import sampler, trial_shapes, transformer as T
@@ -46,28 +47,6 @@ def _without_compiling(monkeypatch):
     monkeypatch.setattr(T, "require_kernels", lambda device: None)
     monkeypatch.setattr(T, "enable_int8_attention", lambda: None)
     monkeypatch.setattr(sampler, "compile_static", lambda function, **kwargs: function)
-
-
-class _ReadObserver:
-    """Wraps a reader's ``read_tensors_into``: records each call's tensor names and every
-    destination it fills, then raises ``failure`` once the read is done, when given."""
-
-    def __init__(self, reader, failure: Exception | None = None):
-        self.operations, self.destinations = [], []
-        load = reader.read_tensors_into
-
-        def observe(group_names, groups):
-            self.operations.append(group_names)
-            load(group_names, self._record(groups))
-            if failure is not None:
-                raise failure
-
-        reader.read_tensors_into = observe
-
-    def _record(self, groups):
-        for group in groups:
-            self.destinations.extend(group.values())
-            yield group
 
 
 class _NativeStore:
@@ -205,7 +184,7 @@ def test_block_loading_streams_all_destinations_in_one_reader_operation(tmp_path
                 for index in range(3)}
     save_file(expected, str(path))
     with open_tensors(path) as reader:
-        reads = _ReadObserver(reader)
+        reads = ReadObserver(reader)
         store = BlockStore.from_reader(reader, [{"weight": name} for name in expected],
                                        torch.device("cpu"), resident=3)
     try:
@@ -278,7 +257,7 @@ def test_vae_stream_failure_clears_the_entire_owned_state(tmp_path):
     path = tmp_path / "vae.safetensors"
     save_file({"encoder.weight": torch.ones(6), "encoder.bias": torch.ones(3), "decoder.bias": torch.ones(2)}, str(path))
     with open_tensors(path) as reader:
-        reads = _ReadObserver(reader, ValueError("synthetic final VAE verification failure"))
+        reads = ReadObserver(reader, ValueError("synthetic final VAE verification failure"))
         with pytest.raises(ValueError, match="final VAE verification"):
             vae_loader._read_tensors(reader, ("encoder.",))
     assert len(reads.destinations) == 2
@@ -293,7 +272,7 @@ def test_cuda_block_loading_and_close_clear_retained_storage(tmp_path, resident)
     save_file(expected, str(path))
     original = path.read_bytes()
     with open_tensors(path) as reader:
-        reads = _ReadObserver(reader)
+        reads = ReadObserver(reader)
         store = BlockStore.from_reader(reader, [{"weight": name} for name in expected],
                                        torch.device("cuda"), resident=resident)
     staging = [tensor.data_ptr() for tensor in reads.destinations]
@@ -325,7 +304,7 @@ def test_cuda_stream_final_failure_clears_gpu_pinned_and_staging_storage(tmp_pat
 
     monkeypatch.setattr(BlockStore, "_allocate", observe_allocation)
     with open_tensors(path) as reader:
-        reads = _ReadObserver(reader, ValueError("synthetic final GPU verification failure"))
+        reads = ReadObserver(reader, ValueError("synthetic final GPU verification failure"))
         with pytest.raises(ValueError, match="final GPU verification"):
             BlockStore.from_reader(reader, [{"weight": name} for name in names],
                                    torch.device("cuda"), resident=1)

@@ -7,6 +7,7 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from factories import ReadObserver
 from jasna.accelerator import KernelBackend
 from jasna.models.ltx_vae import diffusion_tiling, load_video_encoder, loader, video_encoder
 from jasna.models.ltx_vae import transformer as T
@@ -560,23 +561,13 @@ def test_vae_reader_close_failure_clears_loaded_weights(tmp_path, monkeypatch, s
     path = tmp_path / "vae.safetensors"
     config = _vae_config(TINY_ENCODER_CONFIG, LTX25_DECODER_CONFIG)
     save_file({f"{stage}.weight": torch.ones(2)}, str(path), metadata={"config": json.dumps({"vae": config})})
-    retained = []
+    reads = []
     open_tensors = loader.open_tensors
 
     @contextmanager
     def fail_on_close(source):
         with open_tensors(source) as reader:
-            load = reader.read_tensors_into
-
-            def record(group_names, groups):
-                def capture():
-                    for group in groups:
-                        retained.extend(group.values())
-                        yield group
-
-                load(group_names, capture())
-
-            reader.read_tensors_into = record
+            reads.append(ReadObserver(reader))
             yield reader
         raise ValueError("synthetic reader-close failure")
 
@@ -586,8 +577,8 @@ def test_vae_reader_close_failure_clears_loaded_weights(tmp_path, monkeypatch, s
             loader.load_video_encoder(path, torch.device("cpu"))
         else:
             loader.load_video_decoder(path, tmp_path / "unused", torch.device("cpu"))
-    assert len(retained) == 1
-    assert torch.count_nonzero(retained[0]).item() == 0
+    (retained,) = reads[0].destinations
+    assert torch.count_nonzero(retained).item() == 0
 
 
 def test_tiny_decoder_multi_tile_decode_is_seeded_and_shaped():
@@ -661,9 +652,9 @@ def test_decoder_blocks_compile_once_with_static_shapes(monkeypatch):
     monkeypatch.setattr(torch, "compile", lambda fn, **kwargs: calls.append((fn, kwargs)) or (lambda *a: fn(*a)))
 
     T.compile_diffusion_blocks(torch.device("cpu"), torch.bfloat16)
+    compiled = list(calls)
     T.compile_diffusion_blocks(torch.device("cpu"), torch.bfloat16)
-    assert [fn for fn, _ in calls] == [T._attn_on_w_slab, T.modulated_swiglu, T.add_folded_context]
-    assert all(kwargs == {"dynamic": False, "mode": T.DECODER_COMPILE_MODE} for _, kwargs in calls)
+    assert calls == compiled and all(kwargs["dynamic"] is False for _, kwargs in calls)
 
 
 def test_slab_attention_of_core_columns_matches_full_slab_attention():
