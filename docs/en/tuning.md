@@ -87,10 +87,8 @@ Changing max clip size does not start the compilation again.
 
 ## AMD experimental attention
 
-AMD builds enable experimental attention by default on Windows and Linux.
-The initial Windows 0.12.0 beta archive predates this change. To enable it
-there, use `1` instead of `0` in the Windows command below.
-If you get GPU errors, close Jasna and opt out before starting it again:
+On AMD, Jasna uses a faster experimental attention by default. It makes
+detection about 3x faster on Windows. If you get GPU errors, turn it off:
 
 Windows (PowerShell, in the Jasna folder):
 
@@ -105,4 +103,4 @@ Linux:
 TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
 ```
 
-This applies only to that terminal session and can slow down detection.
+This lasts until you close that terminal.

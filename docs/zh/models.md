@@ -53,9 +53,8 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   [支持本项目](../../README.zh.md#支持本项目)）。没有的话，应用会改为提供
   **试用模式（速度测试）**（见下文）；CLI 会报错停止。
 - **GPU**：NVIDIA RTX 30、40 或 50 系列。RTX 20 系列应该可以用，但只测试过
-  RTX 2080 Ti。GTX 16 系列未测试。Linux 还支持 Radeon RX 7000/9000 和
-  Radeon AI PRO R9700。AMD 核显的 LTX 尚未测试。Windows AMD LTX 为**测试版**，
-  已在 Radeon PRO V710 上验证，桌面 Radeon 显卡的测试仍在进行中。
+  RTX 2080 Ti。GTX 16 系列未测试。AMD Radeon RX 7000/9000 和 Radeon AI PRO R9700
+  可在 Linux 上使用；Windows AMD 为**测试版**。AMD 核显未测试。
 - **显存**：至少 8 GB。显存越大越快：显存较小的显卡会把模型的一部分放在系统
   内存中。
 - **系统内存**：至少 16 GB（LTX 约占用 10 GB）。
@@ -70,9 +69,6 @@ jasna --input input.mp4 --output output.mkv --restoration-model-name ltx
   如果无法访问 Hugging Face（例如在中国），Jasna 会自动使用 hf-mirror.com。
   仍然下载失败？见[手动下载 LTX](#手动下载-ltx)。
 
-Jasna 0.12 需要更新 LTX 模型文件，NVIDIA 也一样。如果从 0.11.3 复制了
-`model_weights`，请按 ▶ 并同意更新模型；原来的许可证代码和共用 VAE 文件仍然可用。
-
 LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时，二次修复和降噪会关闭。
 
 使用 ESET？如果 LTX 启动不了，并且消息里提到 `ebehmonl.dll` 或 `ebehmoni.dll`，
@@ -81,14 +77,12 @@ LTX 不支持 VR180 左右并排视频，也不支持流媒体。使用 LTX 时�
 
 ### 暂停与继续
 
-LTX 会自动保存进度，包括区间任务和“仅大马赛克用 LTX”。用 **Ⅱ** 暂停，用 **▶** 继续。
-关闭 Jasna 后，请重新添加同一视频，使用相同的输出路径和设置。命令行中重新运行同一命令即可。
+LTX 会边处理边保存进度。用 **Ⅱ** 暂停，用 **▶** 继续。
+关闭 Jasna 后，请重新添加同一视频，使用相同的输出路径和设置；命令行中重新运行同一命令即可。
 
-当前未完成的跟踪段可能需要重新处理，输出保存会从头开始；区间任务中已完成的部分会保留。
-很长的单镜头可能属于同一个跟踪段。如果输入、检测或 LTX 设置、应用版本改变，替换进度前会先询问。
-只改输出设置（编码、画质、颜色 LUT、锐化）会保留已保存的 LTX 进度。
-以 768 px 保存的大马赛克进度，继续时同样需要 12 GB 空闲显存。
-BasicVSR++ 整段视频任务、预览和流式播放不支持续跑。
+最后未完成的部分可能会重新处理。如果改了输入、检测或 LTX 设置，或更新了 Jasna，
+重新开始前会先询问。只改编码、画质、颜色 LUT 或锐化会保留已保存的进度。
+BasicVSR++ 任务不支持续跑。
 
 ### 手动下载 LTX
 
@@ -96,10 +90,7 @@ BasicVSR++ 整段视频任务、预览和流式播放不支持续跑。
 [hf-mirror.com](https://hf-mirror.com/Kruk2/ltx-restore/tree/0.12.0)
 （或 [huggingface.co/Kruk2/ltx-restore](https://huggingface.co/Kruk2/ltx-restore/tree/0.12.0)）
 下载。需要 3 个文件：你所选模型的文件 1 个，加上 2 个 VAE 文件。
-以上链接适用于 Jasna 0.12。首个 AMD 0.12.0 测试版压缩包仍使用
-[main/block-layout3](https://hf-mirror.com/Kruk2/ltx-restore/tree/main/block-layout3)
-（或 [Hugging Face](https://huggingface.co/Kruk2/ltx-restore/tree/main/block-layout3)）。
-稳定版 0.11.3 或更早版本请使用仓库的 `main` 分支。
+Jasna 0.11.3 或更早版本请使用 `main` 分支。
 
 | 你选的模型 | 文件 |
 | --- | --- |

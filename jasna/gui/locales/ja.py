@@ -532,7 +532,7 @@ JA = {
         "tip_ltx_auto_split": "大きなモザイクは LTX、小さなものは高速な BasicVSR++ で復元します。最も長い辺が動画の高さのこの割合以上なら大きいとみなします。モザイクのない部分はそのままコピーする（カラー LUT やシャープネスがあるとエンコードし直す）ため、出力は元動画のコーデックのままです。「エンコード」で別のコーデックを選んでいる場合、その CQ とカスタム設定は使われません。\n区間エディターで設定した区間はそのまま使われます。",
         "tip_ltx_trial": "モデルファイルなしで LTX を動かし、速度を確認します。\n出力は復元されません。",
         "tip_model_basicvsrpp": "標準のモデル。速く、ほとんどの動画でうまく動きます。",
-        "tip_model_ltx": "高画質ですが、かなり遅くなります。\nNVIDIA RTX GPU または Linux の対応 AMD GPU が必要です。Windows の AMD ではお試しモードのみ使えます。",
+        "tip_model_ltx": "高画質ですが、かなり遅くなります。\nNVIDIA RTX または AMD Radeon RX 7000/9000 GPU が必要です。Windows の AMD はベータ版です。",
         "tip_model_ltx_distilled": "高画質の LTX モデル：より精細で、標準画質より約 2.5 倍遅くなります。",
         "tip_model_ltx_undistilled": "最高画質の LTX モデル：高画質より少し良く、標準画質より約 5 倍遅くなります。通常は不要です。",
         "tip_model_ltx_distilled2": "おすすめの LTX モデル：最も速いモデルです。",

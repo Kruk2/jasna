@@ -532,7 +532,7 @@ ZH = {
         "tip_ltx_auto_split": "大马赛克用 LTX 修复，较小的用更快的 BasicVSR++。马赛克最长边达到视频高度的这个比例即算大。没有马赛克的部分直接复制（设置了色彩 LUT 或锐化时会重新编码），因此输出保留源视频的编解码器。如果在“编码”中选了另一种编解码器，它的 CQ 和自定义设置不会使用。\n在区间编辑器中设置的区间按原样使用。",
         "tip_ltx_trial": "无需模型文件即可运行 LTX，用于测试速度。\n输出不会被修复。",
         "tip_model_basicvsrpp": "默认模型。速度快，适合大多数视频。",
-        "tip_model_ltx": "画质很高，但慢得多。\n需要 NVIDIA RTX 显卡或 Linux 上兼容的 AMD 显卡。Windows 上的 AMD 仅支持试用模式。",
+        "tip_model_ltx": "画质很高，但慢得多。\n需要 NVIDIA RTX 或 AMD Radeon RX 7000/9000 显卡。Windows 上的 AMD 为测试版。",
         "tip_model_ltx_distilled": "高画质 LTX 模型：细节更多，比标准画质慢约 2.5 倍。",
         "tip_model_ltx_undistilled": "顶级画质 LTX 模型：比高画质稍好，比标准画质慢约 5 倍，通常不值得。",
         "tip_model_ltx_distilled2": "推荐的 LTX 模型，速度最快。",

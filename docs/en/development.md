@@ -22,8 +22,7 @@ URLs. Branch selection is local; startup does not query the Hub for new branches
 When publishing new model files, create the version branch, verify its encrypted
 checkpoints and public signatures, then register it with the matching sizes and
 hashes before building the app. Retain earlier branch contents for their shipped
-releases. The existing AMD beta archives still use `main/block-layout3`; keep
-that compatibility path available. This release mapping is shared by NVIDIA and AMD.
+releases. This release mapping is shared by NVIDIA and AMD.
 
 ## Requirements
 

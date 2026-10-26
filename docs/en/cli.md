@@ -119,11 +119,8 @@ Still images route here automatically; `--restoration-model-name` is video-only.
 
 ## Continuing LTX jobs
 
-After Ctrl+C, an error or closing the app, run the same LTX command again to continue
-from saved work. This also works with `--segments` and `--ltx-auto-split`. The unfinished
-track may run again, and writing the output starts over. If the input, settings or app
-version changed, Jasna asks before replacing saved work; without a terminal, it stops
-and keeps the saved work.
+After Ctrl+C, an error or closing the app, run the same LTX command again to
+continue from saved work. See [Pause and continue](models.md#pause-and-continue).
 
 ## Encoding
 

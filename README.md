@@ -35,7 +35,7 @@ and a command line, and runs on your GPU.
 - Finds mosaics in a video and restores them. The rest of the picture is not
   touched.
 - Two restoration models: fast **BasicVSR++** (free) and slow but more
-  detailed **LTX** (for supporters, NVIDIA or supported AMD GPUs; Windows AMD LTX is in beta).
+  detailed **LTX** (for supporters).
 - Restores only the parts you choose, with a preview, in the **Segment
   Editor**.
 - Works with VR180 videos and still images (SD 1.5, for supporters).
@@ -56,15 +56,12 @@ and a command line, and runs on your GPU.
 - NVIDIA: your GPU needs compute capability 7.5 or higher in NVIDIA's
   [GPU table](https://developer.nvidia.com/cuda/gpus).
 - AMD: a GPU supported by ROCm (Radeon RX 7000/9000, Radeon 780M/760M/740M,
-  Ryzen AI). Use the Windows driver linked below. Secondary restoration is
-  NVIDIA only. LTX supports Radeon RX 7000/9000 and Radeon AI PRO R9700 on Linux.
-  Windows AMD LTX is in beta, tested on Radeon PRO V710; testing on desktop
-  Radeon cards is still in progress.
+  Ryzen AI). Secondary restoration is NVIDIA only.
 - Disk format: NTFS on Windows; ext4, Btrfs, XFS or ZFS on Linux. Network disks
   are not supported. Use an SSD; on a hard disk (HDD) Jasna starts and loads
   models slowly.
-- LTX needs an NVIDIA RTX GPU or a supported AMD GPU, at least 8 GB VRAM and 16 GB RAM. See
-  [What LTX needs](docs/en/models.md#what-ltx-needs).
+- LTX needs an NVIDIA RTX or AMD Radeon RX 7000/9000 GPU, at least 8 GB VRAM
+  and 16 GB RAM. See [What LTX needs](docs/en/models.md#what-ltx-needs).
 
 </details>
 
@@ -77,7 +74,7 @@ and a command line, and runs on your GPU.
    - Windows: double-click `jasna.exe`. On AMD, first install
      [AMD's driver for ROCm 10.1](https://www.amd.com/en/resources/support-articles/release-notes/RN-RAD-ROCM-10-01.html)
      (**26.10.41.05**, [download .exe](https://drivers.amd.com/drivers/amd-software-adrenalin-edition-26.10.41.05-win11-b-204865.exe))
-     and reboot. Jasna already includes ROCm 10.1; no separate ROCm installation is needed.
+     and reboot. You don't need to install ROCm.
    - Linux NVIDIA: run the `jasna` file.
    - Linux AMD: first install AMD's AMF video runtime once. We tested
      [AMF 26.20](https://repo.radeon.com/amf/26.20/):
@@ -92,20 +89,11 @@ and a command line, and runs on your GPU.
      If using Distrobox, install AMF inside the same container as Jasna.
 4. Add a video, choose settings and click the **▶** button at the bottom.
 
-AMD experimental attention can improve speed. See
-[how to enable or disable it](docs/en/tuning.md#amd-experimental-attention).
-
 **Your first job is slow.** On NVIDIA, Jasna first prepares the models for
 your exact GPU. This takes about **15–60 minutes**, only once. Close other
 apps and don't use the PC during this time. When you update Jasna, copy the
-`model_weights` folder to the new version, so you don't wait again.
-
-**LTX update in 0.12:** models copied from 0.11.3 need downloading again,
-including on NVIDIA. Press **▶** and accept the model update. Your existing
-License code and shared VAE files still work.
-For [manual model downloads](docs/en/models.md#downloading-ltx-yourself), use
-branch `0.12.0` for Jasna 0.12, or `main` for 0.11.3 and older.
-The initial AMD 0.12.0 beta archives still use `main/block-layout3`.
+`model_weights` folder to the new version, so you don't wait again. LTX may
+still ask to download its model again after an update.
 
 Every setting has a tooltip: move the mouse over the ⓘ icon. Out of GPU
 memory (VRAM)? Lower **Max Clip Size**, for example from `90` to `60`. See
@@ -130,7 +118,7 @@ Supporters get a License code for the supporter models:
 | Support | Models |
 | --- | --- |
 | **$15 USD** or more in total | **UNet 4x**: makes restored areas sharper.<br>**SD 1.5**: experimental model for still images. |
-| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. NVIDIA or supported AMD GPUs; Windows AMD LTX is in beta. Includes future updates of this LTX model. |
+| **$25 USD** | **UNet 4x** and **SD 1.5**, plus<br>**LTX**: much slower than BasicVSR++, but more detail. Includes future updates of this LTX model. |
 
 Supporters who gave **$15 USD or more on or before 14 October 2026** get LTX for free.
 
@@ -170,9 +158,6 @@ GitHub.
 
 One License code works on **3 PCs or cloud workspaces**. After activation,
 Jasna works offline. Rented GPUs: see [Cloud GPUs](docs/en/cloud.md).
-
-After activation, opening **Activate Jasna** checks online and shows how many
-device slots are used.
 
 What counts as a new PC: on Windows, a new motherboard; on Linux, a fresh
 Linux install. Each uses one of your 3 slots. Reinstalling Windows or
@@ -214,9 +199,8 @@ real detail. Its quality choices: Standard (default, fastest), Good (about 1.5x
 slower), High (about 2.5x slower) and Top (about 5x slower). See
 [Choosing models](docs/en/models.md#restoration-model).
 
-LTX jobs can pause and continue, including range jobs and auto split. See [Pause and continue](docs/en/models.md#pause-and-continue).
-
-After an update, Jasna may ask to download your chosen LTX model again. Your existing License code still works.
+LTX jobs can pause and continue. See
+[Pause and continue](docs/en/models.md#pause-and-continue).
 
 ### Command line
 
