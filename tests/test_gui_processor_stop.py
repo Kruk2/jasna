@@ -147,30 +147,77 @@ def test_changed_progress_requires_confirmation_and_declining_skips_only_that_jo
 
 
 @pytest.mark.parametrize("file_conflict", ["auto_rename", "skip"])
-def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conflict):
+@pytest.mark.parametrize("ranges", ["editor", "auto_split", "none"])
+def test_saved_progress_wins_over_file_conflict(tmp_path, monkeypatch, file_conflict, ranges):
+    """The processor's saved-work lookup derives the job exactly as running it does, also
+    when ranges keep a source codec other than the chosen one."""
     from fractions import Fraction
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    from factories import session_config
-    from jasna.job_resume import ResumeJob
+    import torch
 
-    run = MagicMock()
-    processor, job, _updates = _processor_with_job(tmp_path, run)
+    from jasna.media.splice import KeyframeIndex
+    from jasna.mosaic_scan import MosaicSamples
+    from jasna.pipeline import Pipeline
+    from jasna.segments import SegmentRange
+
+    metadata = SimpleNamespace(
+        codec_name="hevc", duration=6.0, num_frames=180, time_base=Fraction(1, 30),
+        video_width=1920, video_height=1080, sample_aspect_ratio=Fraction(1, 1),
+    )
+    for target, value in {
+        "jasna.media.probe.get_video_meta_data": lambda *_a: metadata,
+        "jasna.pipeline.get_video_meta_data": lambda *_a: metadata,
+        "jasna.media.splice.validate_smart_render": lambda *_a, **_k: None,
+        "jasna.media.splice.probe_keyframes": lambda *_a: KeyframeIndex((0, 60, 120), Fraction(1, 30), 0, 180),
+        "jasna.mosaic_scan.scan_mosaic_sizes": lambda *_a, **_k: MosaicSamples(
+            times=(1.0, 3.0), scores=(0.9, 0.9), sizes=(0.05, 0.3), stride=1.0
+        ),
+        "jasna.mosaic.detection_registry.require_detection_model_weights": lambda name: tmp_path / "det.onnx",
+        "jasna.session_factory.provide_restoration_models": lambda *_a, **_k: None,
+        "jasna.pipeline.require_encodable_size": lambda *_a: None,
+        "jasna.pipeline.require_ltx_input": lambda *_a: None,
+    }.items():
+        monkeypatch.setattr(target, value)
+    resumed = []
+
+    def restore(pipeline, _metadata):
+        latent = pipeline.resume.directory / "ltx" / "000000.0-1-0.reference.pt"
+        resumed.append(latent.exists())
+        latent.parent.mkdir(parents=True, exist_ok=True)
+        latent.write_bytes(b"latent")
+        if len(resumed) == 1:
+            pipeline.cancel()
+
+    monkeypatch.setattr(Pipeline, "_run_smart", restore)
+    monkeypatch.setattr(Pipeline, "_run_ltx", restore)
+    monkeypatch.setattr(Pipeline, "validate_metadata", lambda *_a: None)
+    monkeypatch.setattr(Pipeline, "configure_vr", lambda *_a: None)
+
+    processor, job, _updates = _processor_with_job(tmp_path, None)
+    del processor._run_pipeline
+    processor._ensure_video_session = lambda _settings: setattr(
+        processor, "_video_session", MagicMock(device=torch.device("cpu"))
+    )
+    processor._prepare_job_detector = MagicMock()
     job.path.touch()
+    if ranges == "editor":
+        job.segments = (SegmentRange(2.5, 3.0),)
+    processor._settings = AppSettings(
+        restoration_model="ltx", ltx_auto_split=ranges == "auto_split", codec="av1", encoder_cq=38,
+        vr_mode="off", file_conflict=file_conflict,
+    )
+
+    processor._run()
+    assert job.status is JobStatus.PENDING
     output = tmp_path / "clip_restored.mp4"
     output.touch()
-    processor._settings.restoration_model = "ltx"
-    processor._settings.file_conflict = file_conflict
-    config = session_config(restoration_model_name="ltx")
-    metadata = SimpleNamespace(num_frames=120, duration=4.0, time_base=Fraction(1,30))
-    ResumeJob(config, job.path, output, metadata, ()).prepare()
-    monkeypatch.setattr("jasna.gui.processor.video_session_config", lambda *_a, **_k: config)
-    monkeypatch.setattr("jasna.gui.processor.build_job_encoder_settings", lambda *_a: {})
-    monkeypatch.setattr("jasna.media.probe.get_video_meta_data", lambda *_a: metadata)
     processor._run()
-    assert run.call_args.args[2] == output
+
+    assert resumed == [False, True]
     assert job.status is JobStatus.COMPLETED
+    assert job.output_path == output
 
 
 def test_control_bar_shows_pause_for_ltx_and_uses_pause_confirmation():

@@ -33,7 +33,8 @@ import torch
 from tqdm import tqdm
 
 from jasna.accelerator import device_free_bytes
-from jasna.job_resume import atomic_write, write_json
+from jasna.job_resume import write_json
+from jasna.os_utils import atomic_write
 from jasna.ltx import speed
 from jasna.ltx.camera import PLAN_CANVAS, WINDOW_FRAMES
 from jasna.ltx.compose import Candidate, composite_frame, crop_to_canvas

@@ -9,7 +9,7 @@ from pathlib import Path
 from dataclasses import dataclass, replace
 from typing import Callable
 
-from jasna.job_resume import ResumeMismatchError, find_resume_output, resume_directories
+from jasna.job_resume import ResumeMismatchError, resume_directories, run_with_resume_prompt
 from jasna.gui.models import DEFAULT_OUTPUT_PATTERN, JobItem, JobStatus, AppSettings
 from jasna.gui.video_session import build_image_session, build_video_session, release_session_memory, video_session_config
 from jasna.media.probe import UnsupportedVideoError
@@ -17,7 +17,14 @@ from jasna.media import media_files
 from jasna.media.media_files import folder_output_path, unique_path
 from jasna.progressbar import StageProgress
 from jasna.session_config import SessionConfig
-from jasna.session_factory import RestorationSession, build_pipeline, ltx_auto_split, segment_job_config
+from jasna.session_factory import (
+    RestorationSession,
+    build_job_pipeline,
+    find_resume_output,
+    ltx_auto_split,
+    plan_segment_job,
+    splice_source,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +112,13 @@ def build_job_encoder_settings(settings: AppSettings, codec: str) -> dict:
             )
         encoder_settings.update(custom_settings)
     return validate_encoder_settings(encoder_settings, codec=codec, vendor=vendor)
+
+
+def job_config(settings: AppSettings) -> SessionConfig:
+    """The config of a video job; the saved-work lookup and the run both use it."""
+    return video_session_config(
+        settings, codec=settings.codec, encoder_settings=build_job_encoder_settings(settings, settings.codec)
+    )
 
 
 class Processor:
@@ -247,11 +261,7 @@ class Processor:
             if not is_image:
                 root = Path(job_settings.working_directory) if job_settings.working_directory else output_path.parent
                 if resume_directories(root, output_path):
-                    config = video_session_config(
-                        job_settings, codec=job_settings.codec,
-                        encoder_settings=build_job_encoder_settings(job_settings, job_settings.codec),
-                    )
-                    resumed_output = find_resume_output(config, input_path, output_path, segments)
+                    resumed_output = find_resume_output(job_config(job_settings), input_path, output_path, segments)
             if resumed_output is not None:
                 output_path = resumed_output
             # Handle file conflict based on settings
@@ -386,21 +396,22 @@ class Processor:
         self._log("INFO", "Restoration models loaded (reused across video jobs)")
 
     def _run_video_job(self, job_id, input_path, output_path, *, segments, settings):
-        while True:
-            try:
-                return self._run_video_pipeline(job_id, input_path, output_path, segments=segments, settings=settings)
-            except ResumeMismatchError as error:
-                answer = self._on_resume_conflict(error.directory)
-                while not answer.done():
-                    if self._stop_event.wait(0.1):
-                        answer.cancel()
-                        raise ProcessingStopped("Processing stopped")
-                if self._stop_event.is_set():
-                    raise ProcessingStopped("Processing stopped")
-                if not answer.result():
-                    raise
-                error.discard()
-                self._log("INFO", "Saved LTX progress replaced after confirmation")
+        run_with_resume_prompt(
+            lambda: self._run_video_pipeline(job_id, input_path, output_path, segments=segments, settings=settings),
+            self._confirm_replacing_progress,
+        )
+
+    def _confirm_replacing_progress(self, error: ResumeMismatchError) -> bool:
+        answer = self._on_resume_conflict(error.directory)
+        while not answer.done():
+            if self._stop_event.wait(0.1):
+                answer.cancel()
+                raise ProcessingStopped("Processing stopped")
+        if self._stop_event.is_set():
+            raise ProcessingStopped("Processing stopped")
+        if answer.result():
+            self._log("INFO", "Replacing saved LTX progress after confirmation")
+        return answer.result()
 
     def _run_video_pipeline(
         self,
@@ -413,27 +424,11 @@ class Processor:
     ):
         if self._stop_event.is_set():
             raise ProcessingStopped("Processing stopped")
-        config = video_session_config(
-            settings, codec=settings.codec, encoder_settings=build_job_encoder_settings(settings, settings.codec)
+        config = job_config(settings)
+        segment_job = (
+            plan_segment_job(config, input_path, splice_source(config, input_path, output_path), segments)
+            if segments else None
         )
-        splice_plan = None
-        if segments:
-            from jasna.media.probe import get_video_meta_data
-            from jasna.media.splice import build_splice_plan, canonical_codec, probe_keyframes, validate_smart_render
-            metadata = get_video_meta_data(str(input_path))
-            source_codec = canonical_codec(metadata.codec_name)
-            validate_smart_render(
-                metadata,
-                output_path=output_path,
-                codec=source_codec,
-                retarget_high_fps=settings.retarget_high_fps,
-            )
-            splice_plan = build_splice_plan(
-                tuple(segments),
-                probe_keyframes(input_path, metadata),
-                duration=metadata.duration,
-            )
-            config = segment_job_config(config, source_codec, input_path)
         self._ensure_video_session(settings)
         s = self._video_session
         self._prepare_job_detector(config, s)
@@ -461,21 +456,13 @@ class Processor:
                 stage=stage,
             ))
 
-        if not segments:
-            split = ltx_auto_split(config, s, input_path, output_path, progress_callback=progress_callback)
-            if split is not None:
-                config, segments, splice_plan = split.config, split.segments, split.splice_plan
+        if segment_job is None:
+            segment_job = ltx_auto_split(config, s, input_path, output_path, progress_callback=progress_callback)
 
         pipeline = None
         try:
-            pipeline = build_pipeline(
-                config,
-                s,
-                input_path,
-                output_path,
-                progress_callback=progress_callback,
-                segments=tuple(segments) or None,
-                splice_plan=splice_plan,
+            pipeline = build_job_pipeline(
+                config, s, input_path, output_path, segment_job, progress_callback=progress_callback
             )
             self._current_pipeline = pipeline
             if self._stop_event.is_set():

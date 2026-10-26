@@ -11,7 +11,7 @@ All heavy imports (torch, restorers, pipeline) stay inside the functions.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
@@ -21,7 +21,8 @@ if TYPE_CHECKING:
     import torch
 
     from jasna.ltx.model_files import LtxModelFiles
-    from jasna.media.splice import SplicePlan
+    from jasna.media.probe import VideoMetadata
+    from jasna.media.splice import KeyframeIndex, SplicePlan
     from jasna.mosaic.rfdetr import RfDetrMosaicDetectionModel
     from jasna.mosaic.yolo import YoloMosaicDetectionModel
     from jasna.pipeline import Pipeline
@@ -178,20 +179,11 @@ def provide_restoration_models(
     *,
     log_callback: Callable[[str], None] | None,
 ) -> None:
-    """Load each of ``models`` the session does not hold yet. ``--restoration-model-path``
-    belongs to the job's model; another model loads from its default path."""
+    """Load each of ``models`` the session does not hold yet."""
     if "basicvsrpp" in models and session.restoration_pipeline is None:
         session.restoration_pipeline = _build_basicvsrpp_pipeline(config, session.device, log_callback=log_callback)
     if "ltx" in models and session.ltx_files is None:
         session.ltx_files = _ltx_model_files(config, session.device, log_callback=log_callback)
-
-
-def restoration_model_path_for(config: SessionConfig, name: RestorationModelName) -> Path:
-    from jasna.engine_paths import default_restoration_model_path
-
-    if name == config.restoration_model_name:
-        return config.restoration_model_path
-    return default_restoration_model_path(name)
 
 
 def _build_basicvsrpp_pipeline(
@@ -203,7 +195,7 @@ def _build_basicvsrpp_pipeline(
     from jasna.restorer.denoise import DenoiseStep, DenoiseStrength
     from jasna.restorer.restoration_pipeline import RestorationPipeline
 
-    model_path = restoration_model_path_for(config, "basicvsrpp")
+    model_path = config.model_path("basicvsrpp")
     compile_result = ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
@@ -253,7 +245,7 @@ def _ltx_model_files(
         logger.warning(LTX_TRIAL_NOTICE)
         files = LtxModelFiles.placeholder(config.ltx_model, fast=config.ltx_fast)
     else:
-        files = LtxModelFiles.from_dir(restoration_model_path_for(config, "ltx"), config.ltx_model, fast=config.ltx_fast)
+        files = LtxModelFiles.from_dir(config.model_path("ltx"), config.ltx_model, fast=config.ltx_fast)
     ensure_engines_compiled(
         EngineCompilationRequest(
             device=str(device),
@@ -291,12 +283,44 @@ def segment_job_config(config: SessionConfig, source_codec: str, input_video: Pa
 
 
 @dataclass(frozen=True)
-class AutoSplit:
-    """A job's LTX auto split: its config in the source codec, its ranges and their smart-render plan."""
+class SpliceSource:
+    """A video that can be restored in parts: its metadata, codec and keyframes."""
+
+    metadata: "VideoMetadata"
+    codec: str
+    index: "KeyframeIndex"
+
+
+def splice_source(config: SessionConfig, source: Path, output: Path) -> SpliceSource:
+    """Raises ``SmartRenderCompatibilityError`` when ``source`` cannot be restored in parts
+    into ``output``."""
+    from jasna.media.probe import get_video_meta_data
+    from jasna.media.splice import canonical_codec, probe_keyframes, validate_smart_render
+
+    metadata = get_video_meta_data(str(source))
+    codec = canonical_codec(metadata.codec_name)
+    validate_smart_render(metadata, output_path=output, codec=codec, retarget_high_fps=config.retarget_high_fps)
+    return SpliceSource(metadata, codec, probe_keyframes(source, metadata))
+
+
+@dataclass(frozen=True)
+class SegmentJob:
+    """A job that restores ranges and copies the rest: its config in the source codec and
+    the plan of its ranges."""
 
     config: SessionConfig
-    segments: "tuple[SegmentRange, ...]"
     splice_plan: "SplicePlan"
+
+
+def plan_segment_job(
+    config: SessionConfig, source: Path, spliced: SpliceSource, segments: "tuple[SegmentRange, ...]"
+) -> SegmentJob:
+    from jasna.media.splice import build_splice_plan
+
+    return SegmentJob(
+        segment_job_config(config, spliced.codec, source),
+        build_splice_plan(segments, spliced.index, duration=spliced.metadata.duration),
+    )
 
 
 def ltx_auto_split(
@@ -306,87 +330,79 @@ def ltx_auto_split(
     output_video: Path,
     *,
     progress_callback: "ProgressCallback | None",
-) -> AutoSplit | None:
+) -> SegmentJob | None:
     """For an LTX job with ``ltx_auto_split_percent`` and no ranges of its own: scan the
     video, give big mosaics LTX and the rest BasicVSR++, copy the parts without mosaics.
     None when the job does not split, including a video segment processing cannot handle
     or with no mosaics found; those are logged and restored whole with LTX."""
-    from jasna.media.probe import get_video_meta_data
-    from jasna.media.splice import (
-        SmartRenderCompatibilityError,
-        build_splice_plan,
-        canonical_codec,
-        probe_keyframes,
-        validate_smart_render,
-    )
     from jasna.mosaic_scan import ltx_auto_segments, scan_mosaic_sizes
     from jasna.progressbar import StageProgress
-    from jasna.vr180 import require_ltx_input, resolve_vr_mode
-
-    if config.ltx_auto_split_percent is None or config.restoration_model_name != "ltx":
-        return None
-    metadata = get_video_meta_data(str(input_video))
-    require_ltx_input(resolve_vr_mode(config.vr_mode, metadata, input_video, projection=config.vr_projection))
-    codec = canonical_codec(metadata.codec_name)
-    try:
-        validate_smart_render(
-            metadata, output_path=output_video, codec=codec, retarget_high_fps=config.retarget_high_fps
-        )
-        index = probe_keyframes(input_video, metadata)
-    except SmartRenderCompatibilityError as exc:
-        logger.warning("%s: LTX auto split skipped (%s); restoring the whole video with LTX", input_video.name, exc)
-        return None
 
     def on_progress(fraction: float) -> None:
         if progress_callback is not None:
             progress_callback(0.0, 0.0, 0.0, 0, 0, StageProgress("split", 1, 1, fraction, 0.0))
 
-    from jasna.job_resume import (
-        ResumeMismatchError,
-        has_saved_work,
-        job_fingerprints,
-        read_json,
-        resume_directory,
-        segments_from_json,
-        write_json,
-    )
-
-    root = resume_directory(config, output_video)
-    key = job_fingerprints(config, input_video, output_video, metadata, ())[1]
-    cached = read_json(root / "split.json")
-    if cached is not None and cached["fingerprint"] == key:
-        segments = segments_from_json(cached["segments"])
-        logger.info("Reusing saved LTX auto split for %s", input_video.name)
-    else:
-        if has_saved_work(root):
-            raise ResumeMismatchError(root)
+    def scan(spliced: SpliceSource) -> "tuple[SegmentRange, ...]":
         samples = scan_mosaic_sizes(
             session.detection_model_for(config),
             input_video,
-            metadata,
+            spliced.metadata,
             batch_size=config.batch_size,
             device=session.device,
             disable_progress=config.disable_progress,
             on_progress=on_progress,
         )
-        segments = ltx_auto_segments(
+        return ltx_auto_segments(
             samples.times,
             samples.scores,
             samples.sizes,
             threshold=config.detection_score_threshold,
             ltx_min_size=config.ltx_auto_split_percent / 100,
             stride=samples.stride,
-            duration=metadata.duration,
-            keyframes=index.keyframe_seconds(),
+            duration=spliced.metadata.duration,
+            keyframes=spliced.index.keyframe_seconds(),
             ltx_seed=config.ltx_seed,
         )
-        root.mkdir(parents=True, exist_ok=True)
-        write_json(root / "split.json", {"fingerprint": key, "segments": [asdict(segment) for segment in segments]})
+
+    return _auto_split_job(config, input_video, output_video, scan)
+
+
+def _auto_split_job(
+    config: SessionConfig,
+    input_video: Path,
+    output_video: Path,
+    scan: "Callable[[SpliceSource], tuple[SegmentRange, ...]] | None",
+) -> SegmentJob | None:
+    """The auto split job from the saved split, else from ``scan``; with ``scan`` None only
+    a saved split counts."""
+    from jasna.job_resume import ResumeJob
+    from jasna.media.probe import get_video_meta_data
+    from jasna.media.splice import SmartRenderCompatibilityError
+    from jasna.vr180 import require_ltx_input, resolve_vr_mode
+
+    if config.ltx_auto_split_percent is None or config.restoration_model_name != "ltx":
+        return None
+    metadata = get_video_meta_data(str(input_video))
+    require_ltx_input(resolve_vr_mode(config.vr_mode, metadata, input_video, projection=config.vr_projection))
+    try:
+        spliced = splice_source(config, input_video, output_video)
+    except SmartRenderCompatibilityError as exc:
+        logger.warning("%s: LTX auto split skipped (%s); restoring the whole video with LTX", input_video.name, exc)
+        return None
+    checkpoint = ResumeJob(config, input_video, output_video, spliced.metadata, None)
+    segments = checkpoint.saved_split()
+    if segments is not None:
+        logger.info("Reusing saved LTX auto split for %s", input_video.name)
+    elif scan is None:
+        return None
+    else:
+        segments = scan(spliced)
+        checkpoint.save_split(segments)
     if not segments:
         logger.warning("%s: LTX auto split found no mosaics; restoring the whole video with LTX", input_video.name)
         return None
     try:
-        splice_plan = build_splice_plan(segments, index, duration=metadata.duration)
+        job = plan_segment_job(config, input_video, spliced, segments)
     except SmartRenderCompatibilityError as exc:
         logger.warning("%s: LTX auto split skipped (%s); restoring the whole video with LTX", input_video.name, exc)
         return None
@@ -399,7 +415,34 @@ def ltx_auto_split(
         ltx_seconds,
         ltx_seconds / mosaic_seconds * 100,
     )
-    return AutoSplit(segment_job_config(config, codec, input_video), segments, splice_plan)
+    return job
+
+
+def find_resume_output(
+    config: SessionConfig, source: Path, output: Path, segments: "tuple[SegmentRange, ...]"
+) -> Path | None:
+    """The output whose saved work continues this job, so it wins over GUI file conflicts
+    (idea from #415), including an earlier auto-rename. The job is derived as a run derives
+    it; ranges that cannot be restored in parts raise as the run would."""
+    from jasna.job_resume import ResumeJob, ResumeMismatchError, saved_outputs
+    from jasna.media.probe import get_video_meta_data
+
+    for saved in saved_outputs(config, output):
+        try:
+            job = (
+                plan_segment_job(config, source, splice_source(config, source, saved), segments) if segments
+                else _auto_split_job(config, source, saved, None)
+            )
+        except ResumeMismatchError:
+            continue
+        metadata = get_video_meta_data(str(source))
+        checkpoint = (
+            ResumeJob(config, source, saved, metadata, None) if job is None
+            else ResumeJob(job.config, source, saved, metadata, job.splice_plan)
+        )
+        if checkpoint.matches():
+            return saved
+    return None
 
 
 def build_pipeline(
@@ -427,4 +470,27 @@ def build_pipeline(
         progress_callback=progress_callback,
         segments=segments,
         splice_plan=splice_plan,
+    )
+
+
+def build_job_pipeline(
+    config: SessionConfig,
+    session: RestorationSession,
+    input_video: Path,
+    output_video: Path,
+    segment_job: SegmentJob | None,
+    *,
+    progress_callback: Callable | None,
+) -> "Pipeline":
+    """The pipeline of a job: ``segment_job`` when it restores ranges, else the whole video."""
+    if segment_job is None:
+        return build_pipeline(config, session, input_video, output_video, progress_callback=progress_callback)
+    return build_pipeline(
+        segment_job.config,
+        session,
+        input_video,
+        output_video,
+        progress_callback=progress_callback,
+        segments=segment_job.splice_plan.segments,
+        splice_plan=segment_job.splice_plan,
     )

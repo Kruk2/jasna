@@ -87,7 +87,8 @@ Limits:
 - One video at a time. No folders, images or streaming.
 - Input: H.264, HEVC or AV1 with a constant frame rate. Output: MP4, MOV or
   MKV.
-- The output codec is always the input codec.
+- The output codec is always the input codec. `--cq` and `--encoder-settings`
+  are used only when `--codec` (default `hevc`) is the input codec.
 - On AMD, some H.264 files are encoded again in full. Only the ranges are
   restored.
 - With `--restoration-model-name ltx`, every range uses LTX.

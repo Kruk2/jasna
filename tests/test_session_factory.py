@@ -240,7 +240,7 @@ def test_ltx_auto_split_sends_big_mosaics_to_ltx_and_keeps_the_source_codec() ->
     config = session_config(restoration_model_name="ltx", ltx_seed=3, ltx_auto_split_percent=12.0)
     split, scan = _auto_split(config, samples=_samples((0.05, 0.3)))
     assert split.config == config
-    assert split.segments == (
+    assert split.splice_plan.segments == (
         SegmentRange(0.5, 2.0, SegmentRestoration("basicvsrpp", None)),
         SegmentRange(2.0, 4.5, SegmentRestoration("ltx", 3)),
     )

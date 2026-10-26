@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 from jasna._frozen import is_frozen
@@ -508,3 +509,25 @@ def get_user_config_dir(app_name: str) -> Path:
     if xdg:
         return Path(xdg) / app_name
     return Path.home() / ".config" / app_name
+
+
+@contextmanager
+def atomic_write(path: Path, mode: str):
+    """Write ``path`` through a temporary file renamed over it, so a reader or a crash never
+    leaves a partial ``path``."""
+    partial = path.with_name(f"{path.name}.{os.getpid()}.part")
+    with partial.open(mode) as stream:
+        yield stream
+        stream.flush()
+        os.fsync(stream.fileno())
+    commit_file(partial, path)
+
+
+def commit_file(partial: Path, path: Path) -> None:
+    partial.replace(path)
+    if os.name == "posix":
+        descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)

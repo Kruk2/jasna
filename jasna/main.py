@@ -3,6 +3,7 @@ import logging
 import sys
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from jasna import __version__
 from jasna.cli_help import CLI_HELP
@@ -22,6 +23,9 @@ from jasna.os_utils import (
     install_on_hard_disk,
 )
 from jasna.session_config import LTX_DEFAULT_MODEL, LTX_DEFAULT_SEED, LtxModelName, RestorationModelName, SessionConfig
+
+if TYPE_CHECKING:
+    from jasna.session_factory import SegmentJob
 
 # CLI restoration model name -> (restoration backend, LTX model variant).
 CLI_RESTORATION_MODELS: dict[str, tuple[RestorationModelName, LtxModelName]] = {
@@ -735,48 +739,34 @@ def _plan_folder(
     return images, videos, output_dir
 
 
-def _resolve_segments(
+def _plan_segments(
     parser: argparse.ArgumentParser,
     args: argparse.Namespace,
+    config: SessionConfig,
     input_video: Path,
     output_video: Path,
     *,
     codec_was_explicit: bool,
-):
-    """Parse --segments and return (codec, segments, splice_plan); smart rendering keeps the input codec."""
-    from jasna.media.probe import get_video_meta_data
-    from jasna.media.splice import (
-        SmartRenderCompatibilityError,
-        build_splice_plan,
-        canonical_codec,
-        probe_keyframes,
-        validate_smart_render,
-    )
+) -> "SegmentJob":
+    """The job of --segments; its output keeps the input codec."""
+    from jasna.media.splice import SmartRenderCompatibilityError
     from jasna.segments import parse_segments
+    from jasna.session_factory import plan_segment_job, splice_source
 
-    metadata = get_video_meta_data(str(input_video))
     try:
-        segments = parse_segments(str(args.segments).strip(), duration=metadata.duration)
-    except ValueError as exc:
-        parser.error(f"invalid --segments: {exc}")
-    input_codec = canonical_codec(metadata.codec_name)
-    if codec_was_explicit and str(args.codec).lower() != input_codec:
-        parser.error(f"with --segments output codec must match input; pass --codec {input_codec}")
-    try:
-        validate_smart_render(
-            metadata,
-            output_path=output_video,
-            codec=input_codec,
-            retarget_high_fps=bool(args.retarget_high_fps),
-        )
-        splice_plan = build_splice_plan(
-            segments,
-            probe_keyframes(input_video, metadata),
-            duration=metadata.duration,
-        )
+        spliced = splice_source(config, input_video, output_video)
     except SmartRenderCompatibilityError as exc:
         parser.error(str(exc))
-    return input_codec, segments, splice_plan
+    if codec_was_explicit and config.codec != spliced.codec:
+        parser.error(f"with --segments output codec must match input; pass --codec {spliced.codec}")
+    try:
+        segments = parse_segments(str(args.segments).strip(), duration=spliced.metadata.duration)
+    except ValueError as exc:
+        parser.error(f"invalid --segments: {exc}")
+    try:
+        return plan_segment_job(config, input_video, spliced, segments)
+    except SmartRenderCompatibilityError as exc:
+        parser.error(str(exc))
 
 
 def _run_streaming(args: argparse.Namespace, make_pipeline, input_video: Path | None) -> None:
@@ -820,7 +810,7 @@ def _run_videos(
     total: int,
 ) -> bool:
     """Process videos one by one; returns False when a per-video command failed in a folder batch."""
-    from jasna.job_resume import ResumeMismatchError
+    from jasna.job_resume import ResumeMismatchError, run_with_resume_prompt
     from jasna.post_export_action import PostExportVideoCommandError, run_post_export_video_command
 
     post_export_video_command = str(args.post_export_video_command).strip()
@@ -830,10 +820,14 @@ def _run_videos(
         if in_folder:
             print(f"[{i}/{total}] Processing {vid.name} -> {out_path.name}")
         try:
-            _run_resumable_video(make_pipeline, vid, out_path)
-        except (UnsupportedVideoError, ResumeMismatchError) as e:
-            if isinstance(e, ResumeMismatchError):
-                all_commands_ok = False
+            run_with_resume_prompt(lambda: make_pipeline(vid, out_path).run(), _ask_to_replace_progress)
+        except UnsupportedVideoError as e:
+            print(f"Error processing {vid.name}: {e}")
+            if not in_folder:
+                sys.exit(1)
+            continue
+        except ResumeMismatchError as e:
+            all_commands_ok = False
             print(f"Error processing {vid.name}: {e}")
             if not in_folder:
                 sys.exit(1)
@@ -851,20 +845,12 @@ def _run_videos(
     return all_commands_ok
 
 
-def _run_resumable_video(make_pipeline, source: Path, output: Path) -> None:
-    from jasna.job_resume import ResumeMismatchError
-
-    while True:
-        try:
-            make_pipeline(source, output).run()
-            return
-        except ResumeMismatchError as error:
-            if not sys.stdin.isatty():
-                raise ResumeMismatchError(error.directory) from None
-            answer = input(f"{error}\nReplace saved progress and start over? [y/N]: ")
-            if answer.strip().lower() not in ("y", "yes"):
-                raise
-            error.discard()
+def _ask_to_replace_progress(error) -> bool:
+    """Without a terminal to ask in, saved progress is kept."""
+    if not sys.stdin.isatty():
+        return False
+    answer = input(f"{error}\nReplace saved progress and start over? [y/N]: ")
+    return answer.strip().lower() in ("y", "yes")
 
 
 def _ensure_ltx_model(config: SessionConfig, segments) -> None:
@@ -877,14 +863,14 @@ def _ensure_ltx_model(config: SessionConfig, segments) -> None:
     if "ltx" not in job_models(config.restoration_model_name, segments):
         return
     from jasna.accelerator import supports_nvfp4
-    from jasna.session_factory import LTX_FAST_NEEDS_BLACKWELL, restoration_model_path_for
+    from jasna.session_factory import LTX_FAST_NEEDS_BLACKWELL
 
     if config.ltx_fast and not supports_nvfp4(config.device):
         sys.exit(f"Error: {LTX_FAST_NEEDS_BLACKWELL}")
     if config.ltx_trial:
         print(LTX_TRIAL_NOTICE)
         return
-    directory = restoration_model_path_for(config, "ltx")
+    directory = config.model_path("ltx")
     missing = missing_downloads(directory, config.ltx_model, fast=config.ltx_fast)
     if not missing:
         return
@@ -1094,14 +1080,7 @@ def main() -> None:
     if restoration_backend != "ltx" and not restoration_model_path.exists():
         parser.error(f"restoration model not found: {restoration_model_path}")
 
-    segments = None
-    splice_plan = None
     codec = str(args.codec).lower()
-    if segments_spec:
-        codec, segments, splice_plan = _resolve_segments(
-            parser, args, input_video, output_video, codec_was_explicit=codec_was_explicit
-        )
-
     from jasna.accelerator import device_context, vendor_for_device
 
     with _usage_errors(parser):
@@ -1122,20 +1101,20 @@ def main() -> None:
             lut_path=lut_arg or None,
         )
 
-    _ensure_ltx_model(config, segments)
+    segment_job = (
+        _plan_segments(parser, args, config, input_video, output_video, codec_was_explicit=codec_was_explicit)
+        if segments_spec else None
+    )
+    _ensure_ltx_model(config, segment_job.splice_plan.segments if segment_job is not None else None)
 
-    from jasna.session_factory import build_pipeline, build_restoration_session, ltx_auto_split
+    from jasna.session_factory import build_job_pipeline, build_restoration_session, ltx_auto_split
 
     with device_context(config.device):
         session = build_restoration_session(config, log_callback=None)
 
         def make_pipeline(vid_input: Path, out_path: Path):
-            split = None if segments else ltx_auto_split(config, session, vid_input, out_path, progress_callback=None)
-            if split is None:
-                return build_pipeline(config, session, vid_input, out_path, segments=segments, splice_plan=splice_plan)
-            return build_pipeline(
-                split.config, session, vid_input, out_path, segments=split.segments, splice_plan=split.splice_plan
-            )
+            job = segment_job or ltx_auto_split(config, session, vid_input, out_path, progress_callback=None)
+            return build_job_pipeline(config, session, vid_input, out_path, job, progress_callback=None)
 
         def output_path_for(vid: Path) -> Path:
             if input_is_dir:
