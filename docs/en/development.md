@@ -12,12 +12,9 @@ inside an installed module still report a failure.
 ## LTX model versions
 
 Each app release pins its model branch and expected file hashes in
-`jasna/ltx/model_files.py`. `_MODEL_BRANCHES` lists published model versions;
-the app selects the highest registered version no newer than its own version,
-or `main` if none matches. Both Hugging Face and its mirror use that same branch.
-Jasna 0.12.0 uses `0.12.0`; later app versions reuse it until a newer compatible
-model branch is registered. Released 0.11.3 and older keep their original `main`
-URLs. Branch selection is local; startup does not query the Hub for new branches.
+`jasna/ltx/model_files.py`: `LTX_MODEL_BRANCH` next to `LTX_DOWNLOADS`. Both
+Hugging Face and its mirror use that branch. Released 0.11.3 and older keep
+their original `main` URLs.
 
 When publishing new model files, create the version branch, verify its encrypted
 checkpoints and public signatures, then register it with the matching sizes and

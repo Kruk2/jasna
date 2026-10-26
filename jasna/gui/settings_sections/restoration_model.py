@@ -14,7 +14,6 @@ from jasna.gui.ltx_models import (
     card_unavailable_reason,
     run_unavailable_reason,
     trial_only,
-    trial_only_reason,
 )
 from jasna.gui.settings_sections.widgets import ValueOptionMenu, add_setting_label, create_slider_value_label, get_tooltip
 from jasna.gui.theme import Colors, Fonts, Sizing
@@ -299,12 +298,12 @@ class RestorationModelSection:
         )
         self._ltx_model.configure(state="normal" if editable else "disabled")
         self._new_seed_btn.configure(state="normal" if self._enabled else "disabled")
-        locked = trial_only(state, self._vendor)
+        locked = trial_only(state)
         if locked:
             self._widgets["ltx_trial"].select()
         self._widgets["ltx_trial"].configure(state="normal" if editable and not locked else "disabled")
         if self._trial():
-            self._trial_status.configure(text=t(trial_only_reason(self._vendor) if locked else "ltx_trial_notice"))
+            self._trial_status.configure(text=t("model_ltx_trial_only" if locked else "ltx_trial_notice"))
             self._trial_status.pack(fill="x", padx=12, pady=(0, 8), after=self._trial_row)
         else:
             self._trial_status.pack_forget()
@@ -322,7 +321,7 @@ class RestorationModelSection:
         if self._model.get() != "ltx" or card_unavailable_reason(self._vendor) is not None:
             return "basicvsrpp"
         model, fast = self._ltx_model.get_value(), self._fast()
-        if not self._trial() and not state.usable(model, fast, self._vendor) and state.installed(model, not fast):
+        if not self._trial() and not state.usable(model, fast) and state.installed(model, not fast):
             self._set_fast(not fast)
         return "ltx"
 
