@@ -222,6 +222,20 @@ def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(
     assert slider.get() == 30
 
 
+def test_temporal_filter_sliders_stay_below_max_clip_size(_basic_section_panel) -> None:
+    panel, basic = _basic_section_panel
+    sliders = [panel._widgets[key] for key in ("max_detection_gap", "min_detection_duration")]
+    for slider in sliders:
+        slider.set(10)
+
+    basic._on_max_clip_size_slider(10)
+    assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(9, 9), (9, 9)]
+    assert panel._widgets["max_detection_gap_val"].cget("text") == "9"
+
+    basic._on_max_clip_size_slider(90)
+    assert [(slider.cget("to"), slider.get()) for slider in sliders] == [(10, 9), (10, 9)]
+
+
 def test_only_queue_wide_post_export_action_stays_editable_while_processing(_basic_section_panel) -> None:
     panel, _basic = _basic_section_panel
 
