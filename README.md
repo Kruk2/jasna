@@ -88,6 +88,9 @@ and a command line, and runs on your GPU.
      If using Distrobox, install AMF inside the same container as Jasna.
 4. Add a video, choose settings and click the **▶** button at the bottom.
 
+AMD enables experimental attention by default. If you get GPU errors,
+[turn it off](docs/en/tuning.md#amd-experimental-attention).
+
 **Your first job is slow.** On NVIDIA, Jasna first prepares the models for
 your exact GPU. This takes about **15–60 minutes**, only once. Close other
 apps and don't use the PC during this time. When you update Jasna, copy the

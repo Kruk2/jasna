@@ -3,7 +3,7 @@
 显存不够时，Jasna 会把等待中的帧移到系统内存，需要时再移回来。这一点不需要
 任何设置。下面的设置会改变一个任务占用多少显存和 GPU 时间。
 
-这些设置用于 BasicVSR++。LTX 会自己管理内存，见
+片段和编译设置用于 BasicVSR++。LTX 会自己管理内存，见
 [LTX 需要什么](models.md#ltx-需要什么)。
 
 ## 最大片段大小和时间重叠
@@ -74,3 +74,23 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 | 不编译              | 107 秒 | 4.6 GB |
 
 更改最大片段大小不会重新开始编译。
+
+## AMD 实验性注意力
+
+AMD 版本在 Windows 和 Linux 上都默认开启实验性注意力。
+遇到 GPU 错误时，先关闭 Jasna，再按以下方式关闭此功能并启动：
+
+Windows（在 Jasna 文件夹中打开 PowerShell）：
+
+```powershell
+$env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
+.\jasna.exe
+```
+
+Linux：
+
+```bash
+TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+```
+
+此设置只在当前终端会话中生效，可能会降低检测速度。

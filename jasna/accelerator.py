@@ -36,8 +36,7 @@ def apply_rocm_env_defaults(environ: MutableMapping[str, str]) -> None:
     environ.setdefault("MIOPEN_DEBUG_CONV_GEMM", "0")
     environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:False")
     environ.setdefault("PYTORCH_HIP_ALLOC_CONF", "expandable_segments:False")
-    if sys.platform != "win32":
-        environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
+    environ.setdefault("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "1")
 
 
 def has_aotriton_flash_images(torch_lib: Path) -> bool:

@@ -4,7 +4,7 @@ VRAM が少なくなると、Jasna は待機中のフレームをシステム RA
 戻します。そのための設定は不要です。以下の設定で、処理が使う VRAM と GPU
 時間を変えられます。
 
-これらは BasicVSR++ 用の設定です。LTX はメモリを自分で管理します。
+クリップとコンパイルの設定は BasicVSR++ 用です。LTX はメモリを自分で管理します。
 [LTX に必要なもの](models.md#ltx-に必要なもの)を参照してください。
 
 ## 最大クリップサイズと時間オーバーラップ
@@ -85,3 +85,23 @@ jasna --input input.mp4 --output output.mkv --no-compile-basicvsrpp
 | コンパイルなし            | 107 秒 | 4.6 GB |
 
 最大クリップサイズを変えても、コンパイルはやり直しになりません。
+
+## AMD の実験的アテンション
+
+AMD 版では、Windows と Linux の両方で実験的なアテンションが既定で有効です。
+GPU エラーが出る場合は Jasna を閉じ、次のように無効にして起動します。
+
+Windows（Jasna フォルダーで PowerShell を開く）:
+
+```powershell
+$env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
+.\jasna.exe
+```
+
+Linux:
+
+```bash
+TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+```
+
+この設定は、そのターミナルのセッション内だけで有効です。検出が遅くなることがあります。
