@@ -71,6 +71,18 @@ def jasna_app(monkeypatch, tmp_path):
 
 
 @pytest.fixture
+def gui_language(monkeypatch, tmp_path):
+    """Switch the GUI language for one test; the choice is saved under ``tmp_path``."""
+    from jasna.gui.locales import get_locale
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    locale = get_locale()
+    original = locale.current_language
+    yield locale.set_language
+    locale.set_language(original)
+
+
+@pytest.fixture
 def show_window():
     """Process Tk events until a window is viewable, so its widgets have real sizes.
 
