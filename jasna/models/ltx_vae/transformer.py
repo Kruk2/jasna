@@ -164,7 +164,7 @@ def enable_fused_kernels(device: torch.device) -> None:
     if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
         _fused_na3d = _fp16_eager_na3d
         return
-    if not has_triton_package():
+    if is_amd_device(device) and not has_triton_package():
         from jasna.models.ltx_vae import diffusion_hip, na_hip
 
         _fused_na3d = na_hip.na3d
