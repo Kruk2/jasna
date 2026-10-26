@@ -13,41 +13,24 @@ def _command(template: list[str]) -> list[str]:
 
 
 @pytest.mark.parametrize(
-    ("system", "command"),
+    ("system", "select_file", "command"),
     [
-        ("Windows", ["explorer", "{folder}"]),
-        ("Linux", ["xdg-open", "{folder}"]),
-        ("Darwin", ["open", "{folder}"]),
+        ("Windows", False, ["explorer", "{folder}"]),
+        ("Linux", False, ["xdg-open", "{folder}"]),
+        ("Darwin", False, ["open", "{folder}"]),
+        ("Windows", True, ["explorer", "/select,", "{file}"]),
+        ("Linux", True, ["xdg-open", "{folder}"]),
+        ("Darwin", True, ["open", "-R", "{file}"]),
     ],
 )
 def test_open_containing_folder_uses_platform_launcher(
-    monkeypatch, system: str, command: list[str]
+    monkeypatch, system: str, select_file: bool, command: list[str]
 ) -> None:
     launch = MagicMock()
     monkeypatch.setattr(file_actions.platform, "system", lambda: system)
     monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
 
-    file_actions.open_containing_folder(VIDEO, parent=MagicMock())
-
-    launch.assert_called_once_with(_command(command))
-
-
-@pytest.mark.parametrize(
-    ("system", "command"),
-    [
-        ("Windows", ["explorer", "/select,", "{file}"]),
-        ("Linux", ["xdg-open", "{folder}"]),
-        ("Darwin", ["open", "-R", "{file}"]),
-    ],
-)
-def test_open_containing_folder_selects_file_when_supported(
-    monkeypatch, system: str, command: list[str]
-) -> None:
-    launch = MagicMock()
-    monkeypatch.setattr(file_actions.platform, "system", lambda: system)
-    monkeypatch.setattr(file_actions.subprocess, "Popen", launch)
-
-    file_actions.open_containing_folder(VIDEO, parent=MagicMock(), select_file=True)
+    file_actions.open_containing_folder(VIDEO, parent=MagicMock(), select_file=select_file)
 
     launch.assert_called_once_with(_command(command))
 
