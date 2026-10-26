@@ -1,165 +1,77 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
-import torch.nn.functional as F
+from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
 
 import jasna.restorer.sd15_inpaint_restorer as sd15
 from jasna.engine_paths import SD15_CKPT_ENC_PATH, SD15_CKPT_PATH
 from jasna.restorer.sd15_inpaint_restorer import Sd15InpaintRestorer, _read_checkpoint, use_plaintext_sd15
 
-
-def _write_bundle(model_dir: Path, *, with_plaintext: bool, with_enc: bool) -> None:
-    (model_dir / "unet").mkdir(parents=True)
-    (model_dir / "unet" / "config.json").write_text("{}")
-    if with_plaintext:
-        (model_dir / SD15_CKPT_PATH.name).write_bytes(b"x")
-    if with_enc:
-        (model_dir / SD15_CKPT_ENC_PATH.name).write_bytes(b"x")
+FREEU = {"s1": 0.9, "s2": 0.2, "b1": 1.2, "b2": 1.4}
 
 
-class TestModelId:
-    def test_model_id(self):
-        assert Sd15InpaintRestorer.MODEL_ID == "sd-15-jav"
+@pytest.fixture
+def tiny_model_dir(tmp_path: Path) -> Path:
+    """An SD 1.5 inpaint model directory laid out like the real one, with a tiny random UNet and VAE."""
+    torch.manual_seed(0)
+    unet = UNet2DConditionModel(
+        sample_size=64, in_channels=9, out_channels=4, layers_per_block=1, block_out_channels=(8, 8),
+        down_block_types=("DownBlock2D",) * 2, up_block_types=("UpBlock2D",) * 2,
+        cross_attention_dim=8, norm_num_groups=4, attention_head_dim=2,
+    )
+    (tmp_path / "unet").mkdir()
+    (tmp_path / "unet" / "config.json").write_text(json.dumps(dict(unet.config)))
+    torch.save({"state_dict": {f"unet.{k}": v for k, v in unet.state_dict().items()}}, tmp_path / SD15_CKPT_PATH.name)
+    AutoencoderKL(
+        block_out_channels=(4,) * 4, norm_num_groups=4, latent_channels=4,
+        down_block_types=("DownEncoderBlock2D",) * 4, up_block_types=("UpDecoderBlock2D",) * 4,
+    ).save_pretrained(tmp_path / "vae")
+    DDPMScheduler().save_pretrained(tmp_path / "scheduler")
+    torch.save(torch.zeros(1, 77, 8), tmp_path / "null_embedding.pt")
+    return tmp_path
 
 
-class TestCheckpointPathSelection:
-    def test_plaintext_loaded_directly_when_present(self, tmp_path: Path):
-        pytest.importorskip("jasna.protection.protected_model")
-        _write_bundle(tmp_path, with_plaintext=True, with_enc=True)
-        with (
-            patch.object(sd15, "is_frozen", return_value=False),
-            patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_buffer") as mock_decrypt,
-        ):
-            assert use_plaintext_sd15(tmp_path) is True
-            _read_checkpoint(tmp_path)
-            mock_decrypt.assert_not_called()
-            assert str(tmp_path / SD15_CKPT_PATH.name) == mock_load.call_args.args[0]
-
-    def test_encrypted_path_when_no_plaintext(self, tmp_path: Path):
-        pytest.importorskip("jasna.protection.protected_model")
-        _write_bundle(tmp_path, with_plaintext=False, with_enc=True)
-        with (
-            patch.object(sd15, "is_frozen", return_value=False),
-            patch.object(sd15.torch, "load", return_value={"state_dict": {}}) as mock_load,
-            patch("jasna.protection.protected_model.decrypt_model_to_buffer", return_value=io.BytesIO(b"x")) as mock_decrypt,
-        ):
-            assert use_plaintext_sd15(tmp_path) is False
-            _read_checkpoint(tmp_path)
-            mock_decrypt.assert_called_once()
-            # decrypted bytes are loaded from an in-memory buffer, never written to disk.
-            assert mock_load.call_count == 1
-
-    def test_frozen_ignores_plaintext(self, tmp_path: Path):
-        _write_bundle(tmp_path, with_plaintext=True, with_enc=True)
-        with patch.object(sd15, "is_frozen", return_value=True):
-            assert use_plaintext_sd15(tmp_path) is False
+@pytest.mark.parametrize("plaintext, frozen, expected", [
+    (True, False, True), (True, True, False), (False, False, False)])
+def test_source_runs_load_a_plaintext_checkpoint_and_releases_never_do(tmp_path, monkeypatch, plaintext, frozen, expected):
+    monkeypatch.setattr(sd15, "is_frozen", lambda: frozen)
+    if plaintext:
+        (tmp_path / SD15_CKPT_PATH.name).write_bytes(b"x")
+    assert use_plaintext_sd15(tmp_path) is expected
 
 
-class TestVaeLoad:
-    def test_vae_loaded_without_low_cpu_mem_usage(self, tmp_path: Path):
-        _write_bundle(tmp_path, with_plaintext=True, with_enc=False)
-        unet = MagicMock()
-        unet.to.return_value.eval.return_value = unet
-        with (
-            patch.object(sd15, "_read_checkpoint", return_value={"state_dict": {}}),
-            patch.object(sd15.UNet2DConditionModel, "from_config", return_value=unet),
-            patch.object(sd15.AutoencoderKL, "from_pretrained") as mock_vae,
-            patch.object(sd15.DDPMScheduler, "from_pretrained"),
-            patch.object(sd15.DPMSolverMultistepScheduler, "from_config"),
-            patch.object(sd15.torch, "load", return_value=MagicMock()),
-        ):
-            Sd15InpaintRestorer(tmp_path, torch.device("cpu"), fp16=False)
-            assert mock_vae.call_args.kwargs["low_cpu_mem_usage"] is False
+@pytest.mark.parametrize("plaintext", [True, False])
+def test_checkpoint_reads_the_plaintext_file_else_the_packaged_one(tmp_path, monkeypatch, plaintext):
+    protected_model = pytest.importorskip("jasna.protection.protected_model")
+    checkpoint = {"state_dict": {"unet.weight": torch.arange(3.0)}}
+    buffer = io.BytesIO()
+    torch.save(checkpoint, buffer)
+    if plaintext:
+        (tmp_path / SD15_CKPT_PATH.name).write_bytes(buffer.getvalue())
+        monkeypatch.setattr(protected_model, "decrypt_model_to_buffer", lambda *args: pytest.fail("decrypted"))
+    else:
+        (tmp_path / SD15_CKPT_ENC_PATH.name).write_bytes(b"sealed")
+        monkeypatch.setattr(protected_model, "decrypt_model_to_buffer", lambda *args: io.BytesIO(buffer.getvalue()))
+    monkeypatch.setattr(sd15, "is_frozen", lambda: False)
+    monkeypatch.setattr("jasna.license_api.require_protection", lambda: None)
+    assert torch.equal(_read_checkpoint(tmp_path)["state_dict"]["unet.weight"], torch.arange(3.0))
 
 
-class _FakeLatentDist:
-    def __init__(self, latents: torch.Tensor):
-        self._latents = latents
+def test_restore_crop_is_a_seeded_uint8_crop(tiny_model_dir):
+    restorer = Sd15InpaintRestorer(tiny_model_dir, torch.device("cpu"), fp16=False)
+    mosaic = torch.rand(1, 3, 512, 512, generator=torch.Generator().manual_seed(0))
+    mask = torch.zeros(1, 1, 512, 512)
 
-    def mode(self) -> torch.Tensor:
-        return self._latents
+    def restore(seed, freeu=None):
+        return restorer.restore_crop(mosaic, mask, steps=4, strength=0.6, seed=seed, freeu=freeu)
 
-
-class _FakeVae:
-    def encode(self, x: torch.Tensor):
-        b = x.shape[0]
-        return MagicMock(latent_dist=_FakeLatentDist(torch.zeros(b, 4, 64, 64)))
-
-    def decode(self, z: torch.Tensor):
-        img = F.interpolate(z[:, :3], size=(512, 512), mode="nearest")
-        return MagicMock(sample=img)
-
-
-class _FakeUnet:
-    def enable_freeu(self, **_kw):
-        pass
-
-    def disable_freeu(self):
-        pass
-
-    def __call__(self, unet_input, t, ehs):
-        latents = unet_input[:, :4]
-        return MagicMock(sample=torch.zeros_like(latents))
-
-
-class _FakeScheduler:
-    def __init__(self):
-        self.timesteps = torch.zeros(0, dtype=torch.long)
-
-    def set_timesteps(self, steps, device=None):
-        self.timesteps = torch.arange(steps - 1, -1, -1, dtype=torch.long)
-
-    def add_noise(self, init, noise, t):
-        return init + noise
-
-    def step(self, noise_pred, t, latents):
-        return MagicMock(prev_sample=latents)
-
-
-def _make_restorer() -> Sd15InpaintRestorer:
-    r = Sd15InpaintRestorer.__new__(Sd15InpaintRestorer)
-    r.device = torch.device("cpu")
-    r.fp16 = False
-    r._dtype = torch.float32
-    r.unet = _FakeUnet()
-    r.vae = _FakeVae()
-    r.scheduler = _FakeScheduler()
-    r.null_embedding = torch.zeros(1, 77, 768)
-    return r
-
-
-class TestRestoreCrop:
-    def test_output_shape_and_dtype(self):
-        r = _make_restorer()
-        mosaic = torch.rand(1, 3, 512, 512)
-        mask = torch.zeros(1, 1, 512, 512)
-        out = r.restore_crop(mosaic, mask, steps=10, strength=0.6, seed=1, freeu=None)
-        assert out.shape == (3, 512, 512)
-        assert out.dtype == torch.uint8
-
-    def test_seed_determinism(self):
-        r = _make_restorer()
-        mosaic = torch.rand(1, 3, 512, 512)
-        mask = torch.zeros(1, 1, 512, 512)
-        a = r.restore_crop(mosaic, mask, steps=10, strength=0.6, seed=7, freeu=None)
-        b = r.restore_crop(mosaic, mask, steps=10, strength=0.6, seed=7, freeu=None)
-        c = r.restore_crop(mosaic, mask, steps=10, strength=0.6, seed=8, freeu=None)
-        assert torch.equal(a, b)
-        assert not torch.equal(a, c)
-
-    def test_freeu_toggle_invoked(self):
-        r = _make_restorer()
-        r.unet = MagicMock(side_effect=None)
-        r.unet.side_effect = lambda unet_input, t, ehs: MagicMock(sample=torch.zeros_like(unet_input[:, :4]))
-        mosaic = torch.rand(1, 3, 512, 512)
-        mask = torch.zeros(1, 1, 512, 512)
-        r.restore_crop(mosaic, mask, steps=5, strength=0.6, seed=1, freeu={"s1": 0.9, "s2": 0.2, "b1": 1.2, "b2": 1.4})
-        r.unet.enable_freeu.assert_called_once()
-        r.restore_crop(mosaic, mask, steps=5, strength=0.6, seed=1, freeu=None)
-        r.unet.disable_freeu.assert_called_once()
+    first = restore(7)
+    assert first.shape == (3, 512, 512) and first.dtype == torch.uint8
+    assert torch.equal(restore(7), first) and not torch.equal(restore(8), first)
+    assert not torch.equal(restore(7, FREEU), first)
+    assert torch.equal(restore(7), first)
