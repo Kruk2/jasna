@@ -6,15 +6,15 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 import torch
-from av.video.reformatter import Colorspace as AvColorspace, ColorRange as AvColorRange
+from av.video.reformatter import Colorspace as AvColorspace
 
-from factories import make_pipeline, primary_result
+from factories import make_pipeline, primary_result, video_metadata
 from jasna import pipeline_threads
 from jasna.accelerator import AcceleratorVendor
 from jasna.crop_buffer import RawCrop
 from jasna.frame_queue import FrameQueue
 from jasna.media.encoder_settings import AMF_MIN_SIZE
-from jasna.media.probe import UnsupportedVideoError, VideoMetadata
+from jasna.media.probe import UnsupportedVideoError
 from jasna.pipeline import Pipeline
 from jasna.pipeline_items import ClipRestoreItem, FrameMeta, _SENTINEL
 from jasna.pipeline_processing import BatchProcessResult
@@ -34,23 +34,8 @@ def _mock_gpu_monitoring():
         yield
 
 
-def _fake_metadata() -> VideoMetadata:
-    return VideoMetadata(
-        video_file="fake_input.mkv",
-        num_frames=2,
-        video_fps=24.0,
-        average_fps=24.0,
-        video_fps_exact=Fraction(24, 1),
-        codec_name="hevc",
-        duration=2.0 / 24.0,
-        video_width=8,
-        video_height=8,
-        time_base=Fraction(1, 24),
-        start_pts=0,
-        color_space=AvColorspace.ITU709,
-        color_range=AvColorRange.MPEG,
-        is_10bit=True,
-    )
+def _fake_metadata():
+    return video_metadata(is_10bit=True)
 
 
 class _WhitePrimary:
@@ -290,10 +275,7 @@ def test_run_fails_promptly_when_blend_encode_dies_while_secondary_is_blocked():
 
 
 def test_retarget_high_fps_halves_the_rate_for_readers_encoder_and_progress():
-    metadata = _fake_metadata()
-    metadata.video_fps = metadata.average_fps = 60.0
-    metadata.video_fps_exact = Fraction(60, 1)
-    metadata.num_frames = 5
+    metadata = video_metadata(fps=60, num_frames=5)
 
     with patch("jasna.pipeline.Progressbar") as progress_cls:
         reader_cls, encoder_cls, _ = _run(_pipeline(retarget_high_fps=True), metadata=metadata)
