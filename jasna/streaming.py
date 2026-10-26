@@ -505,10 +505,6 @@ class HlsStreamingServer:
     def segment_start_time(self, segment_index: int) -> float:
         return segment_index * self.segment_duration
 
-    def segment_start_frame(self, segment_index: int) -> int:
-        fps = self.metadata.video_fps
-        return int(segment_index * self.segment_duration * fps)
-
     def request_seek(
         self,
         segment_index: int,

@@ -171,10 +171,3 @@ def parse_segments(spec: str, *, duration: float | None = None) -> tuple[Segment
     if not parsed:
         raise ValueError("at least one segment is required")
     return normalize_segments(parsed, duration=duration)
-
-
-def format_segments(segments: tuple[SegmentRange, ...] | list[SegmentRange]) -> str:
-    return ",".join(
-        f"{format_timestamp(segment.start)}-{format_timestamp(segment.end)}"
-        for segment in segments
-    )
