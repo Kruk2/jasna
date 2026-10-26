@@ -2,7 +2,6 @@ import os
 import subprocess
 import sys
 import threading
-import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -11,14 +10,13 @@ import pytest
 
 
 @pytest.fixture
-def protection_api(monkeypatch):
+def protection_api(monkeypatch, gui_language):
     pytest.importorskip("jasna.protection.license_store")
     from jasna import protection
-    from jasna.gui.locales import get_locale
     from jasna.protection import license_store, signing
 
     machine = SimpleNamespace(machine_key=Mock(return_value="JM1-" + "1" * 64))
-    monkeypatch.setattr(get_locale(), "_current_lang", "en")
+    gui_language("en")
     monkeypatch.setattr(protection, "machine", machine, raising=False)
     monkeypatch.setattr(license_store, "load_license", lambda: None)
     monkeypatch.setattr(license_store, "is_licensed", lambda: False)
@@ -27,6 +25,18 @@ def protection_api(monkeypatch):
     monkeypatch.setattr(license_store, "_decode", lambda key: signing.decode_license(key))
     monkeypatch.setattr(signing, "license_identity", lambda proof: "JM1-" + "1" * 64, raising=False)
     return machine, license_store
+
+
+@pytest.fixture
+def saved_cloud_activation(protection_api, monkeypatch):
+    """A desktop whose saved activation belongs to a cloud workspace (a JW1 identity)."""
+    from jasna.protection import signing
+
+    _, store = protection_api
+    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
+    monkeypatch.setattr(store, "is_licensed", lambda: True)
+    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    return protection_api
 
 
 @pytest.mark.parametrize("cloud", [False, True])
@@ -128,62 +138,49 @@ runpy.run_module('jasna', run_name='__main__')
     assert not (tmp_path / "jasna" / "workspace.id").exists()
 
 
-@pytest.fixture
-def root():
-    import customtkinter as ctk
-
-    window = ctk.CTk()
-    yield window
-    window.destroy()
-
-
-def _wait(root, ready):
-    deadline = time.monotonic() + 3
-    while not ready() and time.monotonic() < deadline:
-        root.update()
-        time.sleep(0.01)
-    assert ready()
-
-
-def test_dialog_copies_only_readonly_system_machine_key(root, protection_api):
+def test_dialog_copies_only_readonly_system_machine_key(tk_root, protection_api, settle_activation):
     from jasna.gui.components import LicenseDialog
 
     machine, _ = protection_api
-    dialog = LicenseDialog(root, on_activated=lambda: None)
-    _wait(root, lambda: dialog._machine.get() != "")
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+    assert dialog._machine.get() != ""
     assert dialog._machine.cget("state") == "readonly"
     dialog._machine.insert(0, "altered")
     dialog._copy.invoke()
-    assert root.clipboard_get() == "JM1-" + "1" * 64
+    assert tk_root.clipboard_get() == "JM1-" + "1" * 64
     machine.machine_key.assert_called_once_with(cloud_workspace=False)
 
     assert "_cloud_check" not in vars(dialog)
     assert "_cloud_workspace" not in vars(dialog)
 
 
-def test_dialog_logs_machine_identity_error(root, protection_api, caplog):
+def test_dialog_logs_machine_identity_error(tk_root, protection_api, caplog, settle_activation):
     from jasna.gui.components import LicenseDialog
 
     machine, _ = protection_api
     machine.machine_key.side_effect = RuntimeError("machine identity is unavailable or unsafe")
-    dialog = LicenseDialog(root, on_activated=lambda: None)
-    _wait(root, lambda: "unavailable or unsafe" in dialog._status.cget("text"))
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+    assert "unavailable or unsafe" in dialog._status.cget("text")
     assert any(
         record.levelname == "WARNING" and "unavailable or unsafe" in record.getMessage()
         for record in caplog.records
     )
 
 
-def test_dialog_saves_only_activation_key_and_calls_ui_on_main_thread(root, protection_api):
+def test_dialog_saves_only_activation_key_and_calls_ui_on_main_thread(tk_root, protection_api, settle_activation):
     from jasna.gui.components import LicenseDialog
 
     _, store = protection_api
     callback_threads = []
-    dialog = LicenseDialog(root, on_activated=lambda: callback_threads.append(threading.get_ident()))
-    _wait(root, lambda: dialog._activate_button.cget("state") == "normal")
+    dialog = LicenseDialog(tk_root, on_activated=lambda: callback_threads.append(threading.get_ident()))
+    settle_activation(dialog)
+    assert dialog._activate_button.cget("state") == "normal"
     dialog._key.insert(0, "  activation  ")
     dialog._activate_button.invoke()
-    _wait(root, lambda: callback_threads != [])
+    settle_activation(dialog)
+    assert callback_threads != []
     store.set_license.assert_called_once_with("activation")
     assert callback_threads == [threading.get_ident()]
 
@@ -193,30 +190,25 @@ def test_dialog_saves_only_activation_key_and_calls_ui_on_main_thread(root, prot
     ("zh", "https://47.238.135.110"),
     ("ja", "https://jasna-activation.kruk2.workers.dev"),
 ])
-def test_dialog_opens_activation_page_without_sending_credentials(root, protection_api, monkeypatch, language, expected_url):
+def test_dialog_opens_activation_page_without_sending_credentials(tk_root, protection_api, monkeypatch, language, expected_url, gui_language):
     from jasna.gui.components import LicenseDialog
-    from jasna.gui.locales import get_locale
-
-    monkeypatch.setattr(get_locale(), "_current_lang", language)
+    gui_language(language)
     opened = Mock()
     monkeypatch.setattr("jasna.gui.components.webbrowser.open", opened)
-    dialog = LicenseDialog(root, on_activated=lambda: None)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     dialog._key.insert(0, "private-activation")
     dialog._activation_page_button.invoke()
     opened.assert_called_once_with(expected_url)
 
 
-def test_saved_cloud_activation_does_not_switch_gui_identity(root, monkeypatch, protection_api):
+def test_saved_cloud_activation_does_not_switch_gui_identity(tk_root, monkeypatch, saved_cloud_activation, settle_activation):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
-    from jasna.protection import signing
 
-    machine, store = protection_api
-    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
-    monkeypatch.setattr(signing, "decode_license", lambda key: (b"proof", {}))
-    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64, raising=False)
-    dialog = LicenseDialog(root, on_activated=lambda: None)
-    _wait(root, lambda: dialog._machine.get().startswith("JM1-"))
+    machine, store = saved_cloud_activation
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+    assert dialog._machine.get().startswith("JM1-")
     assert dialog._status.cget("text") == t("license_cloud_cli_only")
     assert dialog._key.get() == ""
     machine.machine_key.assert_called_once_with(cloud_workspace=False)
@@ -235,16 +227,13 @@ def test_activation_worker_runs_io_and_errors_off_the_main_thread(protection_api
     assert thread.ident != threading.get_ident()
 
 
-def test_gui_status_does_not_offer_a_saved_cloud_activation(protection_api, monkeypatch):
+def test_gui_status_does_not_offer_a_saved_cloud_activation(saved_cloud_activation, monkeypatch):
     from jasna.gui.activation_worker import start_license_info
-    from jasna.protection import signing
 
-    machine, store = protection_api
+    machine, store = saved_cloud_activation
     identity = "JW1-" + "2" * 64
-    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
     approved = Mock(return_value=True)
     monkeypatch.setattr(store, "is_licensed", approved)
-    monkeypatch.setattr(signing, "license_identity", lambda proof: identity)
     result = []
     thread = start_license_info(lambda value, error: result.append((value, error)))
     thread.join(timeout=3)
@@ -255,16 +244,16 @@ def test_gui_status_does_not_offer_a_saved_cloud_activation(protection_api, monk
 
 
 @pytest.mark.parametrize("frozen", [False, True])
-def test_saved_cloud_activation_blocks_encrypted_ltx_gui_paths(protection_api, monkeypatch, tmp_path, frozen):
+def test_saved_cloud_activation_blocks_encrypted_ltx_gui_paths(saved_cloud_activation, monkeypatch, tmp_path, frozen):
     from dataclasses import replace
     from jasna.gui import ltx_models, video_session
     from jasna.gui.locales import t
     from jasna.gui.models import AppSettings
     from jasna.ltx import model_files
-    from jasna.protection import protected_tensors, signing
+    from jasna.protection import protected_tensors
     from jasna.mosaic import detection_registry
 
-    _, store = protection_api
+    _, store = saved_cloud_activation
     directory = tmp_path / "ltx-restore"
     directory.mkdir()
     monkeypatch.setattr(model_files, "LTX_DOWNLOADS", {
@@ -275,9 +264,6 @@ def test_saved_cloud_activation_blocks_encrypted_ltx_gui_paths(protection_api, m
         if frozen:
             (directory / name).touch()
     monkeypatch.setattr(model_files, "is_frozen", lambda: frozen)
-    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
-    monkeypatch.setattr(store, "is_licensed", lambda: True)
-    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
     accepted = Mock()
     monkeypatch.setattr(protected_tensors, "check_ltx_license", accepted)
     model_files.LtxModelFiles.from_dir(directory, "distilled", fast=False)
@@ -296,16 +282,15 @@ def test_saved_cloud_activation_blocks_encrypted_ltx_gui_paths(protection_api, m
 
 
 @pytest.mark.parametrize("mode", ["plaintext", "trial", "free"])
-def test_gui_cloud_restriction_keeps_plaintext_trial_and_free_paths(protection_api, monkeypatch, tmp_path, mode):
+def test_gui_cloud_restriction_keeps_plaintext_trial_and_free_paths(saved_cloud_activation, monkeypatch, tmp_path, mode):
     from dataclasses import replace
     from jasna.gui import ltx_models, video_session
     from jasna.gui.models import AppSettings
     from jasna.ltx import model_files
-    from jasna.protection import signing
     from jasna.mosaic import detection_registry
     from jasna.session_config import LTX_DEFAULT_MODEL
 
-    _, store = protection_api
+    _, store = saved_cloud_activation
     directory = tmp_path / "ltx-restore"
     directory.mkdir()
     for name in model_files.bundle_names(LTX_DEFAULT_MODEL, fast=False):
@@ -313,9 +298,6 @@ def test_gui_cloud_restriction_keeps_plaintext_trial_and_free_paths(protection_a
         if mode == "plaintext":
             (directory / name).touch()
     monkeypatch.setattr(model_files, "is_frozen", lambda: False)
-    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
-    monkeypatch.setattr(store, "is_licensed", lambda: True)
-    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
     if mode == "plaintext":
         assert not ltx_models.license_missing(directory, LTX_DEFAULT_MODEL, False)
     built = Mock()
@@ -348,17 +330,13 @@ def test_gui_standard_machine_activation_keeps_exact_ltx_entitlements(protection
 
 
 @pytest.mark.parametrize("plaintext", [False, True])
-def test_gui_saved_cloud_unet_grant_only_allows_plaintext_source(protection_api, monkeypatch, tmp_path, plaintext):
+def test_gui_saved_cloud_unet_grant_only_allows_plaintext_source(saved_cloud_activation, monkeypatch, tmp_path, plaintext):
     from dataclasses import replace
     from jasna.gui import video_session
     from jasna.gui.locales import t
     from jasna.gui.models import AppSettings
-    from jasna.protection import signing
 
-    _, store = protection_api
-    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
-    monkeypatch.setattr(store, "is_licensed", lambda: True)
-    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    _, store = saved_cloud_activation
     monkeypatch.setattr("jasna.engine_paths.unet4x_plaintext_available", lambda: plaintext)
     monkeypatch.setattr("jasna.mosaic.detection_registry.require_detection_model_weights", lambda name: tmp_path / "det.onnx")
     built = Mock()
@@ -374,18 +352,14 @@ def test_gui_saved_cloud_unet_grant_only_allows_plaintext_source(protection_api,
 
 
 @pytest.mark.parametrize("plaintext,frozen", [(False, False), (True, False), (True, True)])
-def test_gui_saved_cloud_sd_grant_only_allows_plaintext_source(protection_api, monkeypatch, tmp_path, plaintext, frozen):
+def test_gui_saved_cloud_sd_grant_only_allows_plaintext_source(saved_cloud_activation, monkeypatch, tmp_path, plaintext, frozen):
     from jasna.gui import video_session
     from jasna.gui.locales import t
     from jasna.gui.models import AppSettings
-    from jasna.protection import signing
     from jasna.restorer import sd15_inpaint_restorer
     from jasna.engine_paths import SD15_CKPT_PATH
 
-    _, store = protection_api
-    monkeypatch.setattr(store, "load_license", lambda: "stored-cloud-activation")
-    monkeypatch.setattr(store, "is_licensed", lambda: True)
-    monkeypatch.setattr(signing, "license_identity", lambda proof: "JW1-" + "2" * 64)
+    _, store = saved_cloud_activation
     monkeypatch.setattr("jasna.engine_paths.SD15_DIR", tmp_path)
     if plaintext:
         (tmp_path / SD15_CKPT_PATH.name).touch()
@@ -453,27 +427,29 @@ def controlled_activation_workers(monkeypatch):
 
 
 @pytest.mark.parametrize("licensed,cloud", [(False, False), (True, False), (True, True)])
-def test_device_count_is_requested_only_when_opened_with_active_desktop_license(root, controlled_activation_workers, licensed, cloud):
+def test_device_count_is_requested_only_when_opened_with_active_desktop_license(tk_root, controlled_activation_workers, licensed, cloud):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
 
     pending = controlled_activation_workers
-    dialog = LicenseDialog(root, on_activated=lambda: None)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     assert pending.devices == []
     identity = ("JW1-" if cloud else "JM1-") + "1" * 64
     pending.info.pop()(("saved-grant", licensed, identity), None)
-    _wait(root, lambda: len(pending.machine) == 1)
+    dialog._main_thread._run_pending()
+    assert len(pending.machine) == 1
     if licensed and not cloud:
         key, done = pending.devices.pop()
         assert key == "saved-grant"
         assert dialog._devices.cget("text") == t("license_devices_checking")
         done((2, 3), None)
-        _wait(root, lambda: dialog._devices.cget("text") == t("license_devices_count", used=2, limit=3))
-        root.update_idletasks()
+        dialog._main_thread._run_pending()
+        assert dialog._devices.cget("text") == t("license_devices_count", used=2, limit=3)
+        tk_root.update_idletasks()
         assert dialog._devices.winfo_y() + dialog._devices.winfo_height() <= dialog.winfo_height()
         assert dialog._status.cget("text") == t("license_active")
         dialog._select_method(t("license_manual"))
-        root.update()
+        tk_root.update()
         assert pending.devices == []
     else:
         assert pending.devices == []
@@ -481,33 +457,34 @@ def test_device_count_is_requested_only_when_opened_with_active_desktop_license(
 
 
 @pytest.mark.parametrize("closed", [False, True])
-def test_device_count_failure_preserves_activation_and_ignores_closed_window(root, controlled_activation_workers, closed):
+def test_device_count_failure_preserves_activation_and_ignores_closed_window(tk_root, controlled_activation_workers, closed):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
 
     pending = controlled_activation_workers
-    dialog = LicenseDialog(root, on_activated=lambda: None)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     pending.info.pop()(("saved-grant", True, "JM1-" + "1" * 64), None)
-    _wait(root, lambda: len(pending.devices) == 1)
+    dialog._main_thread._run_pending()
+    assert len(pending.devices) == 1
     _, done = pending.devices.pop()
     if closed:
         dialog.destroy()
     done(None, OSError("private-request-body"))
     if closed:
-        root.update()
+        tk_root.update()
     else:
-        _wait(root, lambda: dialog._devices.cget("text") == t("license_devices_unavailable"))
+        dialog._main_thread._run_pending()
+        assert dialog._devices.cget("text") == t("license_devices_unavailable")
         assert dialog._status.cget("text") == t("license_active")
         assert dialog._key.get() == "saved-grant"
 
 
 @pytest.mark.parametrize("language,prefer_hong_kong", [("en", False), ("zh", True)])
-def test_device_count_worker_uses_background_thread_and_locale(monkeypatch, protection_api, language, prefer_hong_kong):
+def test_device_count_worker_uses_background_thread_and_locale(monkeypatch, protection_api, language, prefer_hong_kong, gui_language):
     from jasna.gui.activation_worker import start_device_count
-    from jasna.gui.locales import get_locale
     from jasna.protection import activation
 
-    monkeypatch.setattr(get_locale(), "_current_lang", language)
+    gui_language(language)
     threads = []
     def count(key, *, prefer_hong_kong):
         threads.append(threading.get_ident())
@@ -523,34 +500,37 @@ def test_device_count_worker_uses_background_thread_and_locale(monkeypatch, prot
 
 
 @pytest.mark.parametrize("already_activated", [False, True])
-def test_activation_success_does_not_start_a_device_count_or_keep_a_stale_count(root, controlled_activation_workers, already_activated):
+def test_activation_success_does_not_start_a_device_count_or_keep_a_stale_count(tk_root, controlled_activation_workers, already_activated):
     from jasna.gui.components import LicenseDialog
 
     pending = controlled_activation_workers
-    dialog = LicenseDialog(root, on_activated=lambda: None)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     identity = "JM1-" + "1" * 64
     pending.info.pop()(("saved-grant" if already_activated else None, already_activated, identity), None)
-    _wait(root, lambda: len(pending.machine) == 1)
+    dialog._main_thread._run_pending()
+    assert len(pending.machine) == 1
     pending.machine.pop()(identity, None)
-    _wait(root, lambda: not dialog._busy)
+    dialog._main_thread._run_pending()
+    assert not dialog._busy
     dialog._activation_done(identity, None)
     if already_activated:
         _, done = pending.devices.pop()
         done((2, 3), None)
-        root.update()
+        tk_root.update()
     assert pending.devices == []
     assert dialog._devices.winfo_manager() == ""
 
 
 @pytest.mark.parametrize("error", [None, OSError("config volume unavailable")])
-def test_dialog_serializes_machine_read_and_activation(root, controlled_activation_workers, error):
+def test_dialog_serializes_machine_read_and_activation(tk_root, controlled_activation_workers, error):
     from jasna.gui.components import LicenseDialog
 
     pending = controlled_activation_workers
     activated = Mock()
-    dialog = LicenseDialog(root, on_activated=activated)
+    dialog = LicenseDialog(tk_root, on_activated=activated)
     pending.info.pop()((None, False, None), None)
-    _wait(root, lambda: len(pending.machine) == 1)
+    dialog._main_thread._run_pending()
+    assert len(pending.machine) == 1
     dialog._key.insert(0, "activation")
     assert dialog._activate_button.cget("state") == "disabled"
     dialog._activate_button.invoke()
@@ -558,7 +538,8 @@ def test_dialog_serializes_machine_read_and_activation(root, controlled_activati
 
     done = pending.machine.pop()
     done("JM1-" + "1" * 64, None)
-    _wait(root, lambda: dialog._activate_button.cget("state") == "normal")
+    dialog._main_thread._run_pending()
+    assert dialog._activate_button.cget("state") == "normal"
     dialog._activate_button.invoke()
     assert dialog._method.cget("state") == "disabled"
     assert pending.machine == []
@@ -566,7 +547,8 @@ def test_dialog_serializes_machine_read_and_activation(root, controlled_activati
     key, done = pending.activation.pop()
     assert key == "activation"
     done("JM1-" + "1" * 64 if error is None else None, error)
-    _wait(root, lambda: dialog._activate_button.cget("state") == "normal")
+    dialog._main_thread._run_pending()
+    assert dialog._activate_button.cget("state") == "normal"
     assert dialog._method.cget("state") == "normal"
     if error is None:
         assert dialog._machine.get() == "JM1-" + "1" * 64
@@ -577,16 +559,18 @@ def test_dialog_serializes_machine_read_and_activation(root, controlled_activati
         activated.assert_not_called()
 
 
-def test_dialog_restores_controls_after_machine_read_failure(root, controlled_activation_workers):
+def test_dialog_restores_controls_after_machine_read_failure(tk_root, controlled_activation_workers):
     from jasna.gui.components import LicenseDialog
 
     pending = controlled_activation_workers
-    dialog = LicenseDialog(root, on_activated=lambda: None)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     pending.info.pop()((None, False, None), None)
-    _wait(root, lambda: len(pending.machine) == 1)
+    dialog._main_thread._run_pending()
+    assert len(pending.machine) == 1
     done = pending.machine.pop()
     done(None, OSError("system identity unavailable"))
-    _wait(root, lambda: dialog._method.cget("state") == "normal")
+    dialog._main_thread._run_pending()
+    assert dialog._method.cget("state") == "normal"
     assert dialog._activate_button.cget("state") == "normal"
     assert dialog._copy.cget("state") == "disabled"
     assert "system identity unavailable" in dialog._status.cget("text")
@@ -594,28 +578,27 @@ def test_dialog_restores_controls_after_machine_read_failure(root, controlled_ac
     assert dialog._online_activate_button.cget("state") == "disabled"
 
 
-def test_dialog_ignores_worker_result_after_close(root, controlled_activation_workers, caplog):
+def test_dialog_ignores_worker_result_after_close(tk_root, controlled_activation_workers, caplog):
     from jasna.gui.components import LicenseDialog
 
     caplog.set_level("DEBUG", logger="jasna.gui.components")
-    dialog = LicenseDialog(root, on_activated=lambda: None)
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
     done = controlled_activation_workers.info.pop()
     dialog.destroy()
     done((None, False, None), None)
-    root.update()
+    tk_root.update()
     assert controlled_activation_workers.machine == []
     assert "closed activation dialog" in caplog.text
 
 
 @pytest.mark.parametrize("cloud", [False, True])
 @pytest.mark.parametrize("language,prefer_hong_kong", [("en", False), ("zh", True)])
-def test_cli_online_activation_exits_before_gpu_setup(monkeypatch, protection_api, capsys, cloud, language, prefer_hong_kong):
+def test_cli_online_activation_exits_before_gpu_setup(monkeypatch, protection_api, capsys, cloud, language, prefer_hong_kong, gui_language):
     from jasna import main
-    from jasna.gui.locales import get_locale
     from jasna.protection import activation
 
     machine, _ = protection_api
-    monkeypatch.setattr(get_locale(), "_current_lang", language)
+    gui_language(language)
     request = Mock(return_value="private-returned-key")
     monkeypatch.setattr(activation, "activate_license_code", request)
     monkeypatch.setattr(main, "_check_system", lambda args: pytest.fail("GPU check ran"))
@@ -669,12 +652,13 @@ def test_cli_online_failure_is_safe_and_stops_processing(monkeypatch, protection
     assert code not in output.out + output.err
 
 
-def test_dialog_defaults_to_online_and_can_use_manual(root, protection_api):
+def test_dialog_defaults_to_online_and_can_use_manual(tk_root, protection_api, settle_activation):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
 
-    dialog = LicenseDialog(root, on_activated=lambda: None)
-    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    dialog = LicenseDialog(tk_root, on_activated=lambda: None)
+    settle_activation(dialog)
+    assert dialog._online_activate_button.cget("state") == "normal"
     assert dialog._method.get() == t("license_online")
     assert dialog._online_frame.winfo_manager() == "pack"
     assert dialog._manual_frame.winfo_manager() == ""
@@ -685,21 +669,23 @@ def test_dialog_defaults_to_online_and_can_use_manual(root, protection_api):
     dialog._key.insert(0, "activation")
     dialog._activate_button.invoke()
     _, store = protection_api
-    _wait(root, lambda: store.set_license.called)
+    settle_activation(dialog)
+    assert store.set_license.called
     store.set_license.assert_called_once_with("activation")
 
 
 @pytest.mark.parametrize("error_code", [None, "slots_full", "cloud_not_enabled", "network_error"])
-def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(root, controlled_activation_workers, error_code):
+def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(tk_root, controlled_activation_workers, error_code):
     from jasna.gui.components import LicenseDialog
     from jasna.gui.locales import t
     from jasna.protection.activation import ActivationServiceError
 
     pending = controlled_activation_workers
     activated = Mock()
-    dialog = LicenseDialog(root, on_activated=activated)
+    dialog = LicenseDialog(tk_root, on_activated=activated)
     pending.info.pop()((None, False, None), None)
-    _wait(root, lambda: len(pending.machine) == 1)
+    dialog._main_thread._run_pending()
+    assert len(pending.machine) == 1
     code = "JL1-" + "A" * 43
     dialog._code.insert(0, code)
     dialog._online_activate_button.invoke()
@@ -707,7 +693,8 @@ def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(roo
     done = pending.machine.pop()
     identity = "JM1-" + "1" * 64
     done(identity, None)
-    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    dialog._main_thread._run_pending()
+    assert dialog._online_activate_button.cget("state") == "normal"
     dialog._online_activate_button.invoke()
     sent_code, sent_machine, done = pending.online.pop()
     assert (sent_code, sent_machine) == (code, identity)
@@ -721,7 +708,8 @@ def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(roo
         done(("returned-activation", identity), None)
     else:
         done(None, ActivationServiceError(error_code))
-    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    dialog._main_thread._run_pending()
+    assert dialog._online_activate_button.cget("state") == "normal"
     if error_code is None:
         assert dialog._code.get() == ""
         assert dialog._key.get() == "returned-activation"
@@ -732,37 +720,38 @@ def test_dialog_online_activation_uses_displayed_identity_and_locks_requests(roo
         activated.assert_not_called()
 
 
-def test_dialog_ignores_online_result_after_close(root, controlled_activation_workers, caplog):
+def test_dialog_ignores_online_result_after_close(tk_root, controlled_activation_workers, caplog):
     from jasna.gui.components import LicenseDialog
 
     caplog.set_level("DEBUG", logger="jasna.gui.components")
     pending = controlled_activation_workers
     activated = Mock()
-    dialog = LicenseDialog(root, on_activated=activated)
+    dialog = LicenseDialog(tk_root, on_activated=activated)
     pending.info.pop()((None, False, None), None)
-    _wait(root, lambda: len(pending.machine) == 1)
+    dialog._main_thread._run_pending()
+    assert len(pending.machine) == 1
     done = pending.machine.pop()
     identity = "JM1-" + "1" * 64
     done(identity, None)
-    _wait(root, lambda: dialog._online_activate_button.cget("state") == "normal")
+    dialog._main_thread._run_pending()
+    assert dialog._online_activate_button.cget("state") == "normal"
     dialog._code.insert(0, "JL1-" + "A" * 43)
     dialog._online_activate_button.invoke()
     _, _, done = pending.online.pop()
     dialog.destroy()
     done(("returned-activation", identity), None)
-    root.update()
+    tk_root.update()
     activated.assert_not_called()
     assert "closed activation dialog" in caplog.text
 
 
 @pytest.mark.parametrize("language,prefer_hong_kong", [("en", False), ("zh", True), ("ja", False)])
-def test_online_worker_runs_network_off_tk_thread(protection_api, monkeypatch, language, prefer_hong_kong):
+def test_online_worker_runs_network_off_tk_thread(protection_api, monkeypatch, language, prefer_hong_kong, gui_language):
     from jasna.gui.activation_worker import start_online_activation
-    from jasna.gui.locales import get_locale
     from jasna.protection import activation
 
     network_threads, results = [], []
-    monkeypatch.setattr(get_locale(), "_current_lang", language)
+    gui_language(language)
 
     def request(code, machine_key, *, prefer_hong_kong):
         network_threads.append((threading.get_ident(), prefer_hong_kong))
