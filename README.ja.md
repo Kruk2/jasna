@@ -41,7 +41,7 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 
 - **NVIDIA** の GTX 16 シリーズ / RTX 20 シリーズ以降と、新しいドライバー
   （Windows で 610 以上、Linux で 580 以上）。GTX 10 シリーズ以前では動きません。
-- または **AMD** Radeon RX 7000/9000（実験的）。
+- または **AMD** Radeon RX 7000/9000（実験的）。RX 6000 以前は動きません。
 - ローカルディスク上のフォルダー。パスに日本語、中国語、アクセント付きの文字
   など、英語以外の文字を含まないこと。
 
@@ -50,13 +50,19 @@ Jasna は動画と画像のモザイクを復元します。無料で、シン�
 
 - NVIDIA: NVIDIA の [GPU 一覧](https://developer.nvidia.com/cuda/gpus)で
   コンピュート能力が 7.5 以上である必要があります。
-- AMD: ROCm 対応 GPU（Radeon RX 7000/9000、Radeon 780M/760M/740M、
-  Ryzen AI）。二次復元は NVIDIA のみです。
+- AMD: 下の表をご覧ください。二次復元は NVIDIA のみです。
 - ディスク形式: Windows では NTFS、Linux では ext4、Btrfs、XFS、ZFS。ネットワーク
   ディスクは非対応です。SSD を使ってください。ハードディスク（HDD）では起動と
   モデルの読み込みが遅くなります。
 - LTX には NVIDIA RTX または AMD Radeon RX 7000/9000 GPU、8 GB 以上の VRAM、16 GB 以上の RAM が必要です。
   [LTX に必要なもの](docs/ja/models.md#ltx-に必要なもの)をご覧ください。
+
+| AMD GPU | Jasna | LTX |
+| --- | --- | --- |
+| Radeon RX 9060/9070、Radeon AI PRO R9700 | 対応 | 対応（Windows はベータ版） |
+| Radeon RX 7600–7900、Radeon PRO W7000 | 対応 | 対応（Windows はベータ版） |
+| Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 対応（未検証） | 未対応 |
+| Radeon RX 6000 以前、Radeon 820M/840M/860M | 非対応 | 非対応 |
 
 </details>
 
