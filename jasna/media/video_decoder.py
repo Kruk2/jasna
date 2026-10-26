@@ -439,6 +439,7 @@ class VideoReader:
         }.get(str(self.metadata.codec_name).lower())
         if decoder_name is None:
             source_ctx.thread_type = "AUTO"
+            log.info("AMF has no %s decoder; decoding %s on the CPU", self.metadata.codec_name, self.file)
             return
         try:
             # Without an FFmpeg hwaccel the AMF decoder downloads each surface in

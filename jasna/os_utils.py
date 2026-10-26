@@ -50,6 +50,7 @@ def check_supported_gpu(
         import torch
         from jasna.accelerator import AcceleratorVendor, amd_gpu_architecture, vendor_for_device
     except ImportError:
+        logger.warning("PyTorch failed to import", exc_info=True)
         return False, "no_cuda"
     if not torch.cuda.is_available():
         return False, "no_cuda"

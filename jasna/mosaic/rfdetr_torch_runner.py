@@ -103,7 +103,7 @@ class RfDetrTorchRunner:
         self._wrapper = wrapper
         self._core = core.to(device=self.device, dtype=self._dtype).eval()
         export_without_host_syncs(self._core)
-        fuse_segmentation_head(self._core, int(resolution))
+        fused_head = fuse_segmentation_head(self._core, int(resolution))
 
         if isinstance(input_shapes, dict):
             input_shapes = list(input_shapes.values())
@@ -119,12 +119,13 @@ class RfDetrTorchRunner:
         }
 
         logger.info(
-            "RF-DETR torch model loaded: %s (%s) on %s (num_classes=%d, fp16=%s)",
+            "RF-DETR torch model loaded: %s (%s) on %s (num_classes=%d, fp16=%s, fused_head=%s)",
             weights_path,
             cls_name,
             device_name(self.device),
             num_classes,
             self.fp16,
+            fused_head,
         )
 
     def close(self) -> None:

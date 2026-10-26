@@ -107,8 +107,7 @@ def test_cpu_and_fp32_keep_rfdetrs_head():
     core = SimpleNamespace(segmentation_head=_Head())
     original = core.segmentation_head
 
-    fuse_segmentation_head(core, SIZE * 4)
-
+    assert not fuse_segmentation_head(core, SIZE * 4)
     assert core.segmentation_head is original
 
 

@@ -93,8 +93,10 @@ def check_gpu() -> tuple[bool, str]:
         _, major, minor = result
         return False, t("wizard_gpu_compute_too_low", major=major, minor=minor)
     except Exception as e:
+        logger.warning("GPU check failed", exc_info=True)
         return False, str(e)
-        
+
+
 def check_cuda() -> tuple[bool, str]:
     try:
         import torch
@@ -111,4 +113,5 @@ def check_cuda() -> tuple[bool, str]:
             )
         return False, t("wizard_not_available")
     except Exception as e:
+        logger.warning("GPU runtime check failed", exc_info=True)
         return False, str(e)

@@ -31,12 +31,14 @@ def has_fused_head_kernels(weight: torch.Tensor, feature_size: int) -> bool:
     return weight.dtype == torch.float16 and has_aot_kernel(KERNEL_LAUNCH, _module_name(feature_size), weight.device)
 
 
-def fuse_segmentation_head(core: nn.Module, resolution: int) -> None:
-    """Swap ``core``'s segmentation head for the fused one when this GPU has its kernel."""
+def fuse_segmentation_head(core: nn.Module, resolution: int) -> bool:
+    """Swap ``core``'s segmentation head for the fused one when this GPU has its kernel; return whether it did."""
     head = core.segmentation_head
     feature_size = resolution // head.downsample_ratio
-    if has_fused_head_kernels(head.bias, feature_size):
-        core.segmentation_head = FusedSegmentationHead(head, feature_size)
+    if not has_fused_head_kernels(head.bias, feature_size):
+        return False
+    core.segmentation_head = FusedSegmentationHead(head, feature_size)
+    return True
 
 
 class FusedSegmentationHead(nn.Module):
