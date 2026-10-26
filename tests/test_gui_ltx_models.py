@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
-from tkinter import TclError, messagebox
-from types import SimpleNamespace
+from tkinter import messagebox
 
-import customtkinter as ctk
 import pytest
 
 from factories import ltx_models
@@ -21,7 +19,7 @@ from jasna.gui.ltx_models import (
     run_unavailable_reason,
     trial_only,
 )
-from jasna.gui.models import AppSettings, JobItem, PresetManager
+from jasna.gui.models import AppSettings, PresetManager
 from jasna.ltx import model_files
 from jasna.ltx.model_files import bundle_names
 from jasna.segments import SegmentRange, SegmentRestoration
@@ -178,15 +176,10 @@ def test_ensure_skips_installed_models_and_unavailable_downloads(tmp_path, monke
 
 
 @pytest.fixture
-def tk_root(monkeypatch, tmp_path):
+def tk_root(tk_root, monkeypatch, tmp_path):
     monkeypatch.setattr(os_utils.sys, "platform", "linux", raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    yield root
-    root.destroy()
+    return tk_root
 
 
 def _panel(root, models):
@@ -233,37 +226,72 @@ def test_picking_a_missing_variant_never_asks_or_reverts(tk_root, tmp_path, monk
     assert section._notice.winfo_manager()
 
 
-def test_start_downloads_only_the_fast_model(tk_root, tmp_path, monkeypatch, downloadable) -> None:
-    from jasna.gui.app import JasnaApp
+def _queue_job(app, settings: AppSettings, **job_options) -> None:
+    app._settings_panel.set_gpu_support(vendor=NVIDIA, blackwell=True)
+    for section in app._settings_panel._sections:
+        section.apply(settings)
+    app._queue_panel.add_job(Path("a.mp4"))
+    for name, value in job_options.items():
+        setattr(app._queue_panel.get_jobs()[0], name, value)
 
+
+@pytest.fixture
+def validated(monkeypatch) -> list[AppSettings]:
+    """Settings each Start reached validation with; validation then stops it before processing."""
+    from jasna.gui import validation
+
+    calls: list[AppSettings] = []
+
+    def stop(settings, jobs, **_kwargs):
+        calls.append(settings)
+        return ["stopped before processing"]
+
+    monkeypatch.setattr(validation, "validate_gui_start", stop)
+    monkeypatch.setattr(messagebox, "showerror", lambda *_args, **_kwargs: None)
+    return calls
+
+
+@pytest.fixture
+def ltx_installed(tmp_path) -> None:
+    _install(tmp_path / "models" / "ltx", LTX_DEFAULT_MODEL, fast=False)
+
+
+def test_start_downloads_only_the_fast_model_then_starts(downloadable, jasna_app, monkeypatch, validated) -> None:
     _answer(monkeypatch, yes=True)
+    monkeypatch.setattr(ltx_models_module, "license_missing", lambda *_args: False)
     downloaded: list[str] = []
-    monkeypatch.setattr(
-        model_files, "download_files", lambda _directory, files, _progress, **_kw: downloaded.extend(f.name for f in files)
-    )
-    monkeypatch.setattr(ltx_models_module, "start_download", lambda download, _on_percent, on_done: (download(None), on_done(None)))
-    models = LtxModels(tmp_path / "ltx", _NowCalls(), lambda: None)
-    panel = _panel(tk_root, models)
-    section = panel._model_section
-    section.set_gpu_support(vendor=NVIDIA, blackwell=True)
-    section._cards["ltx"].radio.invoke()
-    section._widgets["ltx_fast"]._toggle()
-    restarted: list[bool] = []
-    app = SimpleNamespace(
-        _preview_gpu_busy=False,
-        _processor=None,
-        _queue_panel=SimpleNamespace(
-            get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: ""
-        ),
-        _settings_panel=panel,
-        _ltx_models=models,
-        _on_start=lambda: restarted.append(True),
-    )
 
-    JasnaApp._on_start(app)
+    def download_files(directory, files, _progress, **_kwargs):
+        directory.mkdir(parents=True, exist_ok=True)
+        for file in files:
+            downloaded.append(file.name)
+            with (directory / file.name).open("wb") as stream:
+                stream.truncate(file.size_bytes)
+
+    monkeypatch.setattr(model_files, "download_files", download_files)
+    monkeypatch.setattr(ltx_models_module, "start_download", lambda download, _on_percent, on_done: (download(None), on_done(None)))
+    _queue_job(jasna_app, replace(AppSettings(), restoration_model="ltx", ltx_fast=True))
+
+    jasna_app._on_start()
+    jasna_app._main_thread._run_pending()
 
     assert sorted(downloaded) == sorted(f"{name}.enc" for name in bundle_names(LTX_DEFAULT_MODEL, fast=True))
-    assert restarted == [True]
+    assert [settings.ltx_fast for settings in validated] == [True]
+
+
+def test_declining_the_download_a_job_needs_does_not_start(downloadable, jasna_app, monkeypatch, validated) -> None:
+    asked = _answer(monkeypatch, yes=False)
+    _queue_job(
+        jasna_app,
+        replace(AppSettings(), ltx_model="undistilled"),
+        segments=(SegmentRange(1, 2, SegmentRestoration("ltx", 5)),),
+    )
+
+    jasna_app._on_start()
+
+    assert len(asked) == 1 and t("model_ltx_undistilled") in asked[0]
+    assert validated == []
+    assert not [entry for entry in jasna_app._log_panel._entries if entry[1] == "ERROR"]
 
 
 def test_a_missing_downloadable_model_stays_selectable(tk_root, tmp_path, downloadable) -> None:
@@ -280,9 +308,8 @@ def test_a_running_download_locks_the_choice(tk_root, tmp_path, monkeypatch, dow
     _answer(monkeypatch, yes=True)
     started = []
     monkeypatch.setattr(ltx_models_module, "start_download", lambda *args: started.append(args))
-    models = ltx_models(tk_root, tmp_path / "ltx", installed=False)
+    models = ltx_models(tk_root, tmp_path / "ltx", installed=False, on_change=lambda: panel.refresh_ltx_models())
     panel = _panel(tk_root, models)
-    models._on_change = panel.refresh_ltx_models
     panel._model_section._cards["ltx"].radio.invoke()
 
     models.ensure("distilled", False, on_ready=lambda: None)
@@ -335,55 +362,6 @@ def test_every_model_option_has_a_tooltip(tk_root, tmp_path, monkeypatch) -> Non
         assert section._widgets[key] in tips[t(f"tip_{key}")]
 
 
-def test_start_downloads_a_missing_ltx_model_first(monkeypatch) -> None:
-    from jasna.gui.app import JasnaApp
-
-    ensured: list[tuple] = []
-    settings = replace(AppSettings(), ltx_model="undistilled")
-    job = JobItem(Path("a.mp4"), segments=(SegmentRange(1, 2, SegmentRestoration("ltx", 5)),))
-    app = SimpleNamespace(
-        _preview_gpu_busy=False,
-        _processor=None,
-        _queue_panel=SimpleNamespace(get_jobs=lambda: [job], get_output_folder=lambda: "", get_output_pattern=lambda: ""),
-        _settings_panel=SimpleNamespace(
-            get_settings=lambda: settings, ltx_unavailable_reason=lambda: "model_ltx_not_downloaded"
-        ),
-        _ltx_models=SimpleNamespace(ensure=lambda model, fast, on_ready: ensured.append((model, fast)) or True),
-    )
-    app._on_start = lambda: None
-
-    JasnaApp._on_start(app)
-
-    assert ensured == [("undistilled", False)]
-
-
-def test_declining_the_ltx_download_at_start_shows_no_error(tk_root, tmp_path, monkeypatch, downloadable) -> None:
-    from jasna.gui.app import JasnaApp
-
-    asked = _answer(monkeypatch, yes=False)
-    errors: list[str] = []
-    monkeypatch.setattr(messagebox, "showerror", lambda _title, message: errors.append(message))
-    settings = replace(AppSettings(), restoration_model="ltx")
-    app = SimpleNamespace(
-        _preview_gpu_busy=False,
-        _processor=None,
-        _queue_panel=SimpleNamespace(
-            get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: ""
-        ),
-        _settings_panel=SimpleNamespace(
-            get_settings=lambda: settings, ltx_unavailable_reason=lambda: "model_ltx_not_downloaded"
-        ),
-        _ltx_models=ltx_models(tk_root, tmp_path / "ltx", installed=False),
-        _log_panel=SimpleNamespace(error=errors.append),
-    )
-    app._on_start = lambda: None
-
-    JasnaApp._on_start(app)
-
-    assert len(asked) == 1
-    assert errors == []
-
-
 def test_the_trial_switch_round_trips_and_skips_the_download(tk_root, tmp_path, monkeypatch, downloadable) -> None:
     asked = _answer(monkeypatch, yes=True)
     panel = _panel(tk_root, ltx_models(tk_root, tmp_path / "ltx", installed=False))
@@ -430,43 +408,27 @@ def test_without_any_ltx_model_only_a_locked_trial_is_possible(tk_root, tmp_path
     assert section._widgets["ltx_trial"].cget("cursor") == ""
 
 
-def _start_app(settings: AppSettings, *, license_missing: bool, yes: bool, monkeypatch):
-    from jasna.gui.app import JasnaApp
+@pytest.mark.parametrize("accept", [True, False])
+def test_start_offers_a_trial_when_the_license_is_missing(ltx_installed, jasna_app, monkeypatch, validated, accept) -> None:
+    monkeypatch.setattr(ltx_models_module, "license_missing", lambda *_args: True)
+    asked = _answer(monkeypatch, yes=accept)
+    _queue_job(jasna_app, replace(AppSettings(), restoration_model="ltx"))
 
-    monkeypatch.setattr(ltx_models_module, "license_missing", lambda directory, model, fast: license_missing)
-    asked = _answer(monkeypatch, yes=yes)
-    trials: list[bool] = []
-    restarted: list[bool] = []
-    app = SimpleNamespace(
-        _preview_gpu_busy=False,
-        _processor=None,
-        _queue_panel=SimpleNamespace(get_jobs=lambda: [JobItem(Path("a.mp4"))], get_output_folder=lambda: "", get_output_pattern=lambda: ""),
-        _settings_panel=SimpleNamespace(
-            get_settings=lambda: settings, ltx_unavailable_reason=lambda: None, set_ltx_trial=trials.append
-        ),
-        _ltx_models=SimpleNamespace(directory=Path("ltx")),
-        _on_start=lambda: restarted.append(True),
-    )
-    return app, asked, trials, restarted, JasnaApp._on_start
-
-
-def test_start_offers_a_trial_when_the_license_is_missing(monkeypatch) -> None:
-    settings = replace(AppSettings(), restoration_model="ltx")
-    app, asked, trials, restarted, on_start = _start_app(settings, license_missing=True, yes=True, monkeypatch=monkeypatch)
-
-    on_start(app)
+    jasna_app._on_start()
 
     assert asked == [t("ltx_license_trial_confirm")]
-    assert trials == [True] and restarted == [True]
+    assert [settings.ltx_trial for settings in validated] == ([True] if accept else [])
 
 
-def test_declining_the_trial_offer_does_not_start(monkeypatch) -> None:
-    settings = replace(AppSettings(), restoration_model="ltx")
-    app, asked, trials, restarted, on_start = _start_app(settings, license_missing=True, yes=False, monkeypatch=monkeypatch)
+def test_start_with_a_trial_skips_the_license_offer(ltx_installed, jasna_app, monkeypatch, validated) -> None:
+    monkeypatch.setattr(ltx_models_module, "license_missing", lambda *_args: True)
+    asked = _answer(monkeypatch, yes=True)
+    _queue_job(jasna_app, replace(AppSettings(), restoration_model="ltx", ltx_trial=True))
 
-    on_start(app)
+    jasna_app._on_start()
 
-    assert len(asked) == 1 and trials == [] and restarted == []
+    assert asked == []
+    assert len(validated) == 1
 
 
 def test_trial_session_config_and_key(monkeypatch, tmp_path) -> None:
@@ -507,25 +469,6 @@ def test_license_missing_only_for_encrypted_models(tmp_path, monkeypatch, downlo
     monkeypatch.setattr(ltx_models_module, "read_license_info", lambda: (True, True))
     monkeypatch.setattr("jasna.protection.protected_tensors.check_ltx_license", refuse)
     assert ltx_models_module.license_missing(directory, "distilled", False)
-
-
-def test_start_with_a_trial_skips_the_license_offer(monkeypatch) -> None:
-    from jasna.gui import validation
-
-    class Validated(Exception):
-        pass
-
-    def validated(*_args, **_kwargs):
-        raise Validated
-
-    settings = replace(AppSettings(), restoration_model="ltx", ltx_trial=True)
-    app, asked, trials, restarted, on_start = _start_app(settings, license_missing=True, yes=True, monkeypatch=monkeypatch)
-    monkeypatch.setattr(validation, "validate_gui_start", validated)
-
-    with pytest.raises(Validated):
-        on_start(app)
-
-    assert asked == [] and trials == [] and restarted == []
 
 
 def test_the_progress_stage_is_marked_as_a_trial(tk_root) -> None:
