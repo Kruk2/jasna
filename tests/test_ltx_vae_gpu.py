@@ -30,9 +30,9 @@ def _qkv(shape: tuple[int, ...]) -> list[torch.Tensor]:
 @pytest.mark.parametrize("kernel", [na_triton.na3d, T._fp16_eager_na3d], ids=["triton", "fp16 eager"])
 @pytest.mark.parametrize("kernel_size", [(3, 5, 5), (11, 11, 11)])
 @pytest.mark.parametrize("query_w", [(0, 14), (5, 4)])
-def test_cuda_na3d_matches_the_eager_windows(kernel, kernel_size, query_w, monkeypatch):
-    monkeypatch.setattr(T, "_fused_na3d", kernel)
+def test_cuda_na3d_matches_the_eager_windows(kernel, kernel_size, query_w):
     attn = T.NeighborhoodAttention3D(128, kernel_size, head_dim=64)
+    attn.kernels = T.DecoderKernels(na3d=kernel)
     q, k, v = _qkv((1, 12, 13, 14, 2, 64))
     w_start, w_len = query_w
 
@@ -44,17 +44,15 @@ def test_cuda_na3d_matches_the_eager_windows(kernel, kernel_size, query_w, monke
 
 @pytest.mark.parametrize("capability, kernel", [((7, 5), T._fp16_eager_na3d), ((8, 6), na_triton.na3d)])
 def test_gpus_without_triton_tensor_core_dots_use_the_fp16_eager_na3d(capability, kernel, monkeypatch):
-    monkeypatch.setattr(T, "_fused_na3d", None)
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda device: capability)
-    T.enable_fused_kernels(torch.device("cuda"))
-    assert T._fused_na3d is kernel
+    assert T.decoder_kernels(torch.device("cuda")).na3d is kernel
 
 
 @pytest.mark.parametrize("kernel, breaks", [(na_triton.na3d, 0), (T._fp16_eager_na3d, 1)], ids=["triton", "fp16 eager"])
-def test_na3d_compiles_into_the_slab_with_at_most_one_graph_break(kernel, breaks, monkeypatch):
-    monkeypatch.setattr(T, "_fused_na3d", kernel)
+def test_na3d_compiles_into_the_slab_with_at_most_one_graph_break(kernel, breaks):
     torch.manual_seed(0)
     attn = T.NeighborhoodAttention3D(128, (3, 5, 5), head_dim=64).cuda().bfloat16().eval()
+    attn.kernels = T.DecoderKernels(na3d=kernel)
     norm = torch.nn.RMSNorm(128).cuda().bfloat16()
     x = torch.randn(1, 4, 8, 16, 128, device="cuda", dtype=torch.bfloat16)
     scale, shift = torch.randn(2, 1, 1, 1, 1, 128, device="cuda", dtype=torch.bfloat16) * 0.1
@@ -73,7 +71,6 @@ def test_na3d_compiles_into_the_slab_with_at_most_one_graph_break(kernel, breaks
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
 def test_compiled_diffusion_block_matches_eager(dtype, monkeypatch):
-    monkeypatch.setattr(T, "_fused_na3d", None)
     monkeypatch.setattr(T, "_slab_attention", T._attn_on_w_slab)
     monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
     monkeypatch.setattr(T, "_add_context", T.add_folded_context)
@@ -89,7 +86,7 @@ def test_compiled_diffusion_block_matches_eager(dtype, monkeypatch):
             return block(x.clone(), stage4, modulation, upsample, drop_leading_frame=True)
 
     eager = run()
-    T.enable_fused_kernels(torch.device("cuda"))
+    T.use_kernels(block, T.decoder_kernels(torch.device("cuda")))
     T.compile_diffusion_blocks(torch.device("cuda"), dtype)
     compiled = run()
 

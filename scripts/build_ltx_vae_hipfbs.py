@@ -17,6 +17,7 @@ from __future__ import annotations
 from triton_hipfb import REPO, build
 
 from jasna.models.ltx_vae import diffusion_hip as aot
+from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae import layout_hip, na_hip
 from jasna.models.ltx_vae.diffusion_triton import _residual_swiglu_kernel, _slab_qkv_kernel
 from jasna.models.ltx_vae.layout_triton import _channels_first_kernel
@@ -43,14 +44,14 @@ def _kernel_specs():
         )
     specs[aot.SWIGLU_MODULE] = (
         _residual_swiglu_kernel, aot.SWIGLU_ARGUMENTS,
-        {"DIM": aot.DIM, "HIDDEN": aot.HIDDEN, "BLOCK_ROWS": aot.SWIGLU_BLOCK_ROWS, "BLOCK_HIDDEN": aot.SWIGLU_BLOCK_HIDDEN},
+        {"DIM": T.DIFFUSION_DIM, "HIDDEN": T.DIFFUSION_HIDDEN, "BLOCK_ROWS": aot.SWIGLU_BLOCK_ROWS, "BLOCK_HIDDEN": aot.SWIGLU_BLOCK_HIDDEN},
         aot.SWIGLU_WARPS, 1, _GRID,
     )
-    for dim in aot.QKV_DIMS:
+    for dim in T.FUSED_QKV_DIMS:
         specs[aot.qkv_module(dim)] = (
             _slab_qkv_kernel, aot.QKV_ARGUMENTS,
-            {"DIM": dim, "HEAD_DIM": aot.HEAD_DIM, "PAIRS_T": aot.ROPE_PAIRS[0], "PAIRS_H": aot.ROPE_PAIRS[1],
-             "BLOCK_ROWS": aot.QKV_BLOCK_ROWS, "MODULATE": dim == aot.DIM},
+            {"DIM": dim, "HEAD_DIM": T.DIFFUSION_HEAD_DIM, "PAIRS_T": T.DIFFUSION_ROPE_PAIRS[0],
+             "PAIRS_H": T.DIFFUSION_ROPE_PAIRS[1], "BLOCK_ROWS": aot.QKV_BLOCK_ROWS, "MODULATE": dim == T.DIFFUSION_DIM},
             aot.QKV_WARPS, 1, _GRID,
         )
     specs[layout_hip.MODULE] = (

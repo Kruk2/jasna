@@ -132,7 +132,7 @@ def test_native_int8_attention_is_comfy_kitchens_bit_for_bit(int8_block, head_di
     heads = 4096 // head_dim
     generator = torch.Generator(device=DEVICE).manual_seed(rows * head_dim)
     q, k, v = (torch.randn(rows, heads * head_dim, generator=generator, device=DEVICE).to(torch.bfloat16) for _ in range(3))
-    cta_k = native.HIP_ATTENTION_CTA_K if AMD else native.attention_cta_k(head_dim, rows)
+    cta_k = native.policy.attention_key_tile(native.policy.gpu_architecture(DEVICE), head_dim, rows)
     attention = int8_block.block.self_attention(q, k, v, rows, heads, head_dim, cta_k)
 
     def heads_first(t: torch.Tensor) -> torch.Tensor:
@@ -162,7 +162,7 @@ def test_native_normed_self_attention_is_norm_rope_then_self_attention(int8_bloc
     q_projection, k_projection, v = projection(0), projection(4), projection(0)
     q_norm, k_norm = ((1 + 0.2 * torch.randn(dim, generator=generator, device=DEVICE)).to(torch.bfloat16) for _ in range(2))
     rope = T.build_rope(frames, side, side, dim=dim, heads=heads, device=DEVICE)
-    cta_k = native.HIP_ATTENTION_CTA_K if AMD else native.attention_cta_k(head_dim, rows)
+    cta_k = native.policy.attention_key_tile(native.policy.gpu_architecture(DEVICE), head_dim, rows)
     module = native._extension()
     q, k = torch.empty_like(q_projection), torch.empty_like(k_projection)
     module.norm_rope(q_projection, q_norm, rope.cos, rope.sin, q, head_dim, T.EPS)

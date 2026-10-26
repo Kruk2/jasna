@@ -131,6 +131,7 @@ def test_prebuild_delegates_then_preserves_extension_copy_and_cleanup(monkeypatc
                      ("extension", directory / "build", "7.5;8.6;8.9;12.0;12.1"),
                      ("copy", module.__file__, directory / "jasna_ltx_native.pyd"),
                      ("cleanup", directory / "build")]
+    assert native.os.environ["TORCH_CUDA_ARCH_LIST"] == "previous"
 
 
 def test_prebuild_kernel_failure_prevents_extension_and_env_change(monkeypatch):
@@ -187,3 +188,4 @@ def test_amd_prebuild_targets_the_extension_at_the_profiled_architectures(monkey
     monkeypatch.setattr(native.shutil, "rmtree", lambda path: None)
     native.prebuild(directory)
     assert targets == [";".join(AMD_PROFILES)]
+    assert native.os.environ["PYTORCH_ROCM_ARCH"] == "gfx1103"

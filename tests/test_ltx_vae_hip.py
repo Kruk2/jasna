@@ -3,6 +3,7 @@
 import pytest
 import torch
 
+from jasna.accelerator import KernelBackend
 from jasna.models.ltx_vae import diffusion_hip, layout_hip, na_hip
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
@@ -10,33 +11,39 @@ from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 
 def test_the_launch_table_has_every_kernel_the_launchers_launch():
     launched = {*map(na_hip.module_name, na_hip.WINDOWS), diffusion_hip.SWIGLU_MODULE,
-                *map(diffusion_hip.qkv_module, diffusion_hip.QKV_DIMS), layout_hip.MODULE}
+                *map(diffusion_hip.qkv_module, T.FUSED_QKV_DIMS), layout_hip.MODULE}
 
     assert all(set(kernels) == launched for kernels in KERNEL_LAUNCH.values())
 
 
-def test_amd_without_triton_runs_the_ahead_of_time_kernels(monkeypatch):
-    monkeypatch.setattr(T, "_fused_na3d", None)
-    monkeypatch.setattr(T, "_fused_residual_swiglu", None)
-    monkeypatch.setattr(T, "_fused_slab_qkv", None)
-    monkeypatch.setattr(T, "has_triton_package", lambda: False)
-    monkeypatch.setattr(T, "is_amd_device", lambda device: True)
+def _backend_kernels():
+    from jasna.models.ltx_vae import diffusion_triton, na_triton
 
-    T.enable_fused_kernels(torch.device("cpu"))
+    return [
+        (KernelBackend.NVIDIA, T.DecoderKernels(na3d=na_triton.na3d)),
+        (KernelBackend.NVIDIA_PRE_SM80, T.DecoderKernels(na3d=T._fp16_eager_na3d)),
+        (KernelBackend.AMD_TRITON,
+         T.DecoderKernels(na_triton.na3d, diffusion_triton.residual_swiglu_, diffusion_triton.slab_qkv)),
+        (KernelBackend.AMD_PREBUILT, T.DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv)),
+        (KernelBackend.CPU, T.DecoderKernels()),
+    ]
 
-    assert T._fused_na3d is na_hip.na3d
-    assert T._fused_residual_swiglu is diffusion_hip.residual_swiglu_
-    assert T._fused_slab_qkv is diffusion_hip.slab_qkv
+
+@pytest.mark.parametrize(("backend", "expected"), _backend_kernels(), ids=lambda value: str(value)[:20])
+def test_each_backend_runs_its_decoder_kernels(monkeypatch, backend, expected):
+    monkeypatch.setattr(T, "kernel_backend", lambda device: backend)
+
+    assert T.decoder_kernels(torch.device("cuda")) == expected
 
 
-def test_nvidia_never_takes_the_amd_kernels(monkeypatch):
-    monkeypatch.setattr(T, "_fused_na3d", None)
-    monkeypatch.setattr(T, "has_triton_package", lambda: False)
-    monkeypatch.setattr(T, "is_amd_device", lambda device: False)
+def test_a_model_runs_the_kernels_it_was_given_and_others_keep_the_torch_code():
+    kernels = T.DecoderKernels(na3d=na_hip.na3d, residual_swiglu=diffusion_hip.residual_swiglu_)
+    block = T.ChunkedDiffusionNABlock(64, (3, 5, 5), context_channels=16, head_dim=32)
 
-    T.enable_fused_kernels(torch.device("cpu"))
+    T.use_kernels(block, kernels)
 
-    assert T._fused_na3d is not na_hip.na3d
+    assert block.attn.kernels is kernels and block.mlp.kernels is kernels
+    assert T.ChunkedDiffusionNABlock(64, (3, 5, 5), context_channels=16, head_dim=32).attn.kernels == T.DecoderKernels()
 
 
 def test_the_diffusion_kernels_reject_inputs_they_were_not_built_for():

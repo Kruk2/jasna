@@ -8,18 +8,27 @@ SDPA (same window semantics) on the CPU, torch SwiGLU, W-chunked diffusion resid
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from typing import NamedTuple
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from torch.utils._triton import has_triton_package
 
-from jasna.accelerator import is_amd_device
-from jasna.models.ltx_vae.diffusion_hip import QKV_DIMS
+from jasna.accelerator import KernelBackend, kernel_backend
 from jasna.models.ltx_vae.eager_na import na3d
 from jasna.tensor_utils import compile_static
 
+DIFFUSION_DIM = 256
+DIFFUSION_HIDDEN = 1024
+DIFFUSION_HEAD_DIM = 64
+DIFFUSION_ROPE_PAIRS = (8, 12, 12)
+"""The shipped decoder's diffusion blocks: width, MLP width, head dim, RoPE pairs per (T, H, W)."""
+FUSED_QKV_DIMS = (DIFFUSION_DIM, 512)
+"""Widths the fused Q/K/V kernel is built for: the diffusion blocks' and the 512-wide deterministic stages
+3-4 (the 1024/2048-wide stages 1-2 do not fit its one-tile projections). Only the diffusion blocks' kernel
+modulates its slab."""
 EAGER_ROPE_T_TILES = 4
 DIFFUSION_W_CHUNKS = 4
 SWIGLU_TILE_TOKENS = 16_384
@@ -140,9 +149,13 @@ class QKVProjections(nn.Module):
         return self.to_q(x), self.to_k(x), self.to_v(x)
 
 
-_fused_na3d = None
-_fused_residual_swiglu = None
-_fused_slab_qkv = None
+class DecoderKernels(NamedTuple):
+    """The fused kernels a decoder's attention and MLP modules run (``decoder_kernels``); None keeps
+    the torch code they replace."""
+
+    na3d: Callable | None = None
+    residual_swiglu: Callable | None = None
+    slab_qkv: Callable | None = None
 
 
 @torch.compiler.disable
@@ -154,31 +167,35 @@ def _fp16_eager_na3d(
     return na3d(q.half(), k.half(), v.half(), tuple(kernel_size), query_w_start).to(q.dtype)
 
 
-def enable_fused_kernels(device: torch.device) -> None:
-    """Run CUDA neighborhood attention through jasna's Triton kernel (``na_triton``): JIT, or on
-    AMD without Triton (Windows ROCm) built ahead of time (``na_hip``); before SM 8.0, where Triton
-    has no tensor-core dot, through the fp16 pure-torch ``na3d``. On AMD the diffusion blocks'
-    residual MLP and the slab Q/K/V projections run as fused kernels (``diffusion_triton``, ahead of
-    time ``diffusion_hip``); the Q/K/V kernel also serves the 512-wide deterministic stages."""
-    global _fused_na3d, _fused_residual_swiglu, _fused_slab_qkv
-    if device.type == "cuda" and torch.cuda.get_device_capability(device) < (8, 0):
-        _fused_na3d = _fp16_eager_na3d
-        return
-    if is_amd_device(device) and not has_triton_package():
+def decoder_kernels(device: torch.device) -> DecoderKernels:
+    """Neighborhood attention through jasna's Triton kernel (``na_triton``): JIT, or on AMD without
+    Triton (Windows ROCm) built ahead of time (``na_hip``); before SM 8.0, where Triton has no
+    tensor-core dot, through the fp16 pure-torch ``na3d``. On AMD the diffusion blocks' residual MLP
+    and the slab Q/K/V projections also run as fused kernels (``diffusion_triton``, ahead of time
+    ``diffusion_hip``); the Q/K/V kernel also serves the 512-wide deterministic stages."""
+    backend = kernel_backend(device)
+    if backend is KernelBackend.NVIDIA_PRE_SM80:
+        return DecoderKernels(na3d=_fp16_eager_na3d)
+    if backend is KernelBackend.AMD_PREBUILT:
         from jasna.models.ltx_vae import diffusion_hip, na_hip
 
-        _fused_na3d = na_hip.na3d
-        _fused_residual_swiglu = diffusion_hip.residual_swiglu_
-        _fused_slab_qkv = diffusion_hip.slab_qkv
-        return
-    from jasna.models.ltx_vae import na_triton
+        return DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv)
+    if backend is KernelBackend.AMD_TRITON:
+        from jasna.models.ltx_vae import diffusion_triton, na_triton
 
-    _fused_na3d = na_triton.na3d
-    if is_amd_device(device):
-        from jasna.models.ltx_vae import diffusion_triton
+        return DecoderKernels(na_triton.na3d, diffusion_triton.residual_swiglu_, diffusion_triton.slab_qkv)
+    if backend is KernelBackend.NVIDIA:
+        from jasna.models.ltx_vae import na_triton
 
-        _fused_residual_swiglu = diffusion_triton.residual_swiglu_
-        _fused_slab_qkv = diffusion_triton.slab_qkv
+        return DecoderKernels(na3d=na_triton.na3d)
+    return DecoderKernels()
+
+
+def use_kernels(model: nn.Module, kernels: DecoderKernels) -> None:
+    """Run ``model``'s neighborhood attention and SwiGLU modules on ``kernels`` (CUDA tensors only)."""
+    for module in model.modules():
+        if isinstance(module, (NeighborhoodAttention3D, SwiGLU)):
+            module.kernels = kernels
 
 
 def neighborhood_attention(
@@ -190,8 +207,8 @@ def neighborhood_attention(
     if q.dtype != v.dtype or k.dtype != v.dtype:
         q = q.to(dtype=v.dtype)
         k = k.to(dtype=v.dtype)
-    if _fused_na3d is not None and q.is_cuda:
-        return _fused_na3d(q, k, v, list(attn.kernel_size), query_w_start)
+    if attn.kernels.na3d is not None and q.is_cuda:
+        return attn.kernels.na3d(q, k, v, list(attn.kernel_size), query_w_start)
     return na3d(q, k, v, attn.kernel_size, query_w_start)
 
 
@@ -215,6 +232,7 @@ class NeighborhoodAttention3D(nn.Module):
         self.proj = nn.Linear(dim, dim, bias=True)
         self.q_norm = nn.RMSNorm(head_dim, eps=_NORM_EPS)
         self.k_norm = nn.RMSNorm(head_dim, eps=_NORM_EPS)
+        self.kernels = DecoderKernels()
 
     def fused_qkv(
         self, x: torch.Tensor, left_halo: torch.Tensor, columns: torch.Tensor, modulation: list[torch.Tensor],
@@ -224,7 +242,7 @@ class NeighborhoodAttention3D(nn.Module):
         ``columns`` (modulated by the norm weight, scale and shift in ``modulation`` unless empty) through
         the fused Q/K/V kernel."""
         qkv = self.qkv
-        return _fused_slab_qkv(
+        return self.kernels.slab_qkv(
             x,
             left_halo,
             columns,
@@ -255,7 +273,7 @@ class NeighborhoodAttention3D(nn.Module):
                 f"got (T,H,W)=({t},{h},{w}) vs kernel={self.kernel_size}"
             )
         w_pos = torch.arange(w, dtype=torch.float32, device=x.device)
-        if _fused_slab_qkv is not None and x.is_cuda and self.dim in QKV_DIMS:
+        if self.kernels.slab_qkv is not None and x.is_cuda and self.dim in FUSED_QKV_DIMS:
             x = x.contiguous()
             columns = torch.arange(w, device=x.device)
             q, k, v = self.fused_qkv(x, x, columns, [], w_pos, w, 0)
@@ -279,6 +297,7 @@ class SwiGLU(nn.Module):
         self.w_up = nn.Linear(dim, hidden_dim, bias=False)
         self.w_gate = nn.Linear(dim, hidden_dim, bias=False)
         self.w_down = nn.Linear(hidden_dim, dim, bias=False)
+        self.kernels = DecoderKernels()
 
 
 def _swiglu_hidden_dim(dim: int) -> int:
@@ -334,9 +353,9 @@ def residual_modulating_mlp(
     x_flat = x.reshape(-1, dim)
     s = scale.reshape(-1, dim)
     sh = shift.reshape(-1, dim)
-    if _fused_residual_swiglu is not None and x.is_cuda:
+    if mlp.kernels.residual_swiglu is not None and x.is_cuda:
         for start in range(0, x_flat.shape[0], SWIGLU_TILE_TOKENS):
-            _fused_residual_swiglu(
+            mlp.kernels.residual_swiglu(
                 x_flat[start : start + SWIGLU_TILE_TOKENS], norm.weight, s[0], sh[0],
                 mlp.w_gate.weight, mlp.w_up.weight, mlp.w_down.weight,
             )
@@ -380,7 +399,7 @@ def _attn_on_w_slab(
     for the ``core_len`` columns after the ``kernel_w // 2`` halo only."""
     batch, t, h = x.shape[:3]
     halo = attn.kernel_size[2] // 2
-    if _fused_slab_qkv is not None and x.is_cuda and scale.numel() == attn.dim:
+    if attn.kernels.slab_qkv is not None and x.is_cuda and scale.numel() == attn.dim:
         q, k, v = attn.fused_qkv(x, left_halo, columns, [norm.weight, scale, shift], w_pos, core_len, halo)
     else:
         x_chunk = torch.cat([left_halo, x.index_select(3, columns)], dim=3)

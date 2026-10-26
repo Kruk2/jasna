@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 
 log = logging.getLogger(__name__)
 
@@ -58,9 +59,7 @@ def configure_rocm_process_env() -> None:
     # and output: the compiled LTX VAE encoder 5 % faster and 0.5 GiB lighter on an R9700. Eager
     # encoders (no Triton: Windows ROCm, AMD releases) run 1.6x slower with it, and BasicVSR++ and
     # RF-DETR pass no channels-last conv inputs.
-    from torch.utils._triton import has_triton_package
-
-    if has_triton_package():
+    if has_triton():
         os.environ.setdefault("PYTORCH_MIOPEN_SUGGEST_NHWC", "1")
     # Windows ROCm ships the AOTriton kernel images in a separate device wheel;
     # without them the first flash/mem-efficient SDPA launch dies with a HIP error.
@@ -93,6 +92,58 @@ def is_nvidia_device(device: torch.device | str | None = None) -> bool:
 
 def is_amd_device(device: torch.device | str | None = None) -> bool:
     return vendor_for_device(device) is AcceleratorVendor.AMD
+
+
+@functools.cache
+def has_triton() -> bool:
+    """Whether Triton imports here: NVIDIA installs and Linux ROCm source installs; Windows ROCm and
+    AMD releases ship none (no ``torch.compile`` there, only prebuilt kernels)."""
+    from torch.utils._triton import has_triton_package
+
+    return has_triton_package()
+
+
+class KernelBackend(StrEnum):
+    """Which GPU kernels a device runs."""
+
+    NVIDIA = "nvidia"
+    NVIDIA_PRE_SM80 = "nvidia-pre-sm80"
+    """No bf16 and no Triton tensor-core dot: fp16 torch kernels where Triton would run."""
+    AMD_TRITON = "amd-triton"
+    AMD_PREBUILT = "amd-prebuilt"
+    """No Triton: only kernels built ahead of time, and no ``torch.compile``."""
+    CPU = "cpu"
+
+    @property
+    def is_amd(self) -> bool:
+        return self in (KernelBackend.AMD_TRITON, KernelBackend.AMD_PREBUILT)
+
+
+def kernel_backend(device: torch.device | str) -> KernelBackend:
+    resolved = torch.device(device)
+    if resolved.type != "cuda":
+        return KernelBackend.CPU
+    if is_amd_device(resolved):
+        return KernelBackend.AMD_TRITON if has_triton() else KernelBackend.AMD_PREBUILT
+    if torch.cuda.get_device_capability(resolved) < (8, 0):
+        return KernelBackend.NVIDIA_PRE_SM80
+    return KernelBackend.NVIDIA
+
+
+def load_gpu_libraries_ahead(device: torch.device, dtype: torch.dtype) -> None:
+    """Pay what a process's first conv, first ``x @ wᵀ`` in ``dtype``, first fp32 ``a @ b`` and first
+    ``torch.compile`` (hashing the Triton install) cost once, off the critical path: on ROCm each loads
+    a library (MIOpen, a GEMM library per dtype and layout) or hashes ~1 GB, 0.4-1.2 s apiece."""
+    if device.type != "cuda":
+        return
+    square = torch.zeros(8, 8, device=device, dtype=dtype)
+    F.conv2d(square[None, None], square[None, None, :3, :3])
+    F.linear(square, square)
+    square.float() @ square.float()
+    if has_triton():
+        from triton.runtime.cache import triton_key
+
+        triton_key()
 
 
 def supports_nvfp4(device: torch.device | str) -> bool:

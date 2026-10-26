@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 import torch
 
-from jasna.accelerator import TRITON_HIP_ARCHITECTURES, amd_gpu_architecture
+from jasna.accelerator import TRITON_HIP_ARCHITECTURES, amd_gpu_architecture, is_amd_device
 
 ROTATE_QUANTIZE_WARPS = 8
 GROUP_M = 8
@@ -48,6 +48,8 @@ AMD_INT8_MM_TILES = dict.fromkeys(TRITON_HIP_ARCHITECTURES, ((128, 256, 128, 2, 
 # int8 GEMM runs on cuBLAS (``torch._int_mm``) and only its epilogue in Triton.
 CUBLAS_INT8_MM = {(7, 5)}  # RTX 20 series
 FP4_ARCHS = ((12, 0), (12, 1))
+AMD_ATTENTION_KEY_TILE = 64
+"""The key tile comfy-kitchen 0.2.38's HIP INT8 attention always launches (``_sage_cta_k``)."""
 
 
 @dataclass(frozen=True)
@@ -96,7 +98,14 @@ def gemm_tile(n: int, k: int, architecture: tuple[int, int] | str) -> tuple[int,
 
 def gpu_architecture(device: torch.device) -> tuple[int, int] | str:
     """Key of the tile tables: the CUDA capability on NVIDIA, the gfx name on AMD."""
-    return amd_gpu_architecture(device) if torch.version.hip else torch.cuda.get_device_capability(device)
+    return amd_gpu_architecture(device) if is_amd_device(device) else torch.cuda.get_device_capability(device)
+
+
+def attention_key_tile(architecture: tuple[int, int] | str, head_dim: int, rows: int) -> int:
+    """The INT8 attention key tile for ``rows`` tokens, as comfy-kitchen 0.2.38 picks it unmasked."""
+    if is_amd(architecture):
+        return AMD_ATTENTION_KEY_TILE
+    return 128 if head_dim >= 128 and rows > 1024 else 64
 
 
 def supports(device: torch.device) -> bool:

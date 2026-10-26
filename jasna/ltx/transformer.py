@@ -30,6 +30,7 @@ import torch
 import torch.nn.functional as F
 from torch.nn.attention import SDPBackend, sdpa_kernel
 
+from jasna.accelerator import amd_gpu_architecture, has_triton, is_amd_device
 from jasna.tensor_utils import half_dtype
 
 Weights = Mapping[str, torch.Tensor]
@@ -298,12 +299,13 @@ def enable_quant_kernels(device: torch.device) -> str | None:
     comfy-kitchen's ConvRot INT8 linear (Windows ROCm has no Triton). Returns the kernels in use."""
     global _quant_kernels, _kitchen_int8_linear
     if _quant_kernels is None and _kitchen_int8_linear is None and device.type == "cuda":
-        if importlib.util.find_spec("triton") is not None:
+        amd = is_amd_device(device)
+        if has_triton():
             from jasna.ltx import kernel_policy, kernels
 
             if kernel_policy.supports(device):
-                _quant_kernels = _triton_ops(kernels)
-        if _quant_kernels is None and torch.version.hip:
+                _quant_kernels = _triton_ops(kernels, attention_epilogues=amd)
+        if _quant_kernels is None and amd:
             import comfy_kitchen
 
             _kitchen_int8_linear = functools.partial(comfy_kitchen.int8_linear, convrot=True, convrot_groupsize=ROT_SIZE)
@@ -312,7 +314,7 @@ def enable_quant_kernels(device: torch.device) -> str | None:
     return "comfy-kitchen" if _kitchen_int8_linear is not None else None
 
 
-def _triton_ops(kernels) -> SimpleNamespace:
+def _triton_ops(kernels, attention_epilogues: bool) -> SimpleNamespace:
     @torch.library.custom_op("jasna::int8_rotate_quantize", mutates_args=())
     def int8_rotate_quantize(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         return kernels.rotate_quantize(x.contiguous())
@@ -415,7 +417,7 @@ def _triton_ops(kernels) -> SimpleNamespace:
         int8_feed_forward=int8_feed_forward,
         # AMD also quantizes gated attention outputs straight from their heads and adds the attention
         # residuals in the output projections' epilogue (fewer passes over the block's activations).
-        attention_epilogues=torch.version.hip is not None,
+        attention_epilogues=attention_epilogues,
         quantize_fp4=quantize_fp4_op,
     )
 
@@ -424,17 +426,22 @@ def require_kernels(device: torch.device) -> None:
     """Fail unless Triton (NVIDIA; AMD without it runs comfy-kitchen and prebuilt kernels) and
     comfy-kitchen's INT8 attention can run on ``device``: without them every LTX pass would run on
     far slower fallbacks."""
-    for package in ("comfy_kitchen",) if torch.version.hip else ("triton", "comfy_kitchen"):
-        if importlib.util.find_spec(package) is None:
-            raise RuntimeError(f"LTX restoration needs {package}, which is missing from this install. Reinstall Jasna.")
+    amd = is_amd_device(device)
+    if not amd and not has_triton():
+        raise RuntimeError("LTX restoration needs triton, which is missing from this install. Reinstall Jasna.")
+    if importlib.util.find_spec("comfy_kitchen") is None:
+        raise RuntimeError("LTX restoration needs comfy_kitchen, which is missing from this install. Reinstall Jasna.")
     import comfy_kitchen
 
     if not comfy_kitchen.int8_attention_is_available(device):
-        from comfy_kitchen.backends import cuda as kitchen_cuda
+        if amd:
+            from comfy_kitchen.backends import hip as kitchen_backend
+        else:
+            from comfy_kitchen.backends import cuda as kitchen_backend
 
-        load_error = None if torch.version.hip else kitchen_cuda._EXT_ERROR
-        reason = f" ({load_error})" if load_error else ""
-        raise RuntimeError(f"LTX can't run on this GPU: comfy-kitchen's INT8 attention did not load{reason}.")
+        gpu = f" ({amd_gpu_architecture(device)})" if amd else ""
+        reason = f" ({kitchen_backend._EXT_ERROR})" if kitchen_backend._EXT_ERROR else ""
+        raise RuntimeError(f"LTX can't run on this GPU{gpu}: comfy-kitchen's INT8 attention did not load{reason}.")
 
 
 _int8_attention = None
@@ -467,7 +474,7 @@ def cross_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.
     """Prompt cross-attention ``[1, heads, tokens, d]`` against ``[1, heads, prompt, d]``: INT8 attention
     on AMD once enabled (twice AOTriton's flash speed on RDNA4, and Windows ROCm ships no AOTriton
     kernels), else SDPA (on NVIDIA INT8 is slower here)."""
-    if _int8_attention is not None and torch.version.hip and q.is_cuda:
+    if _int8_attention is not None and is_amd_device() and q.is_cuda:
         return _int8_attention(q, k, v)
     with sdpa_kernel(SDPA_PRIORITY, set_priority=True):
         return F.scaled_dot_product_attention(q, k, v)

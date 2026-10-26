@@ -7,9 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 
-from jasna.accelerator import device_name
+from jasna.accelerator import device_name, load_gpu_libraries_ahead
 from jasna.mosaic.rfdetr_fused_head import fuse_segmentation_head
 from jasna.mosaic.rfdetr_sync_free import export_without_host_syncs
 
@@ -40,15 +39,6 @@ class TorchTensorInfo:
         return len(self.shape)
 
 
-def load_first_batch_libraries(device: torch.device, dtype: torch.dtype) -> None:
-    """Load MIOpen and the ``x @ wᵀ`` GEMM library of ``dtype``, which a process's first conv and
-    linear otherwise load on the first detection batch (1.2 s + 0.5 s on an R9700); a thread
-    started before the model is built overlaps them with the import and build."""
-    square = torch.zeros(8, 8, device=device, dtype=dtype)
-    F.conv2d(square[None, None], square[None, None, :3, :3])
-    F.linear(square, square)
-
-
 class RfDetrTorchRunner:
     """AMD/ROCm RF-DETR path: run the trained checkpoint through the rfdetr torch
     model instead of ONNX + MIGraphX. Mirrors the runner contract consumed by
@@ -70,7 +60,7 @@ class RfDetrTorchRunner:
         self.fp16 = bool(fp16)
         self._dtype = torch.float16 if self.fp16 else torch.float32
         threading.Thread(
-            target=load_first_batch_libraries, args=(self.device, self._dtype), name="RfDetrLibraries", daemon=False
+            target=load_gpu_libraries_ahead, args=(self.device, self._dtype), name="RfDetrLibraries", daemon=False
         ).start()
         try:
             import rfdetr

@@ -5,6 +5,13 @@ import torch
 
 from jasna.media.cuda_kernel import aot_kernel
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
+from jasna.models.ltx_vae.transformer import (
+    DIFFUSION_DIM,
+    DIFFUSION_HEAD_DIM,
+    DIFFUSION_HIDDEN,
+    DIFFUSION_ROPE_PAIRS,
+    FUSED_QKV_DIMS,
+)
 
 # Launch configs, fastest on a Radeon AI PRO R9700 (gfx1201). Residual SwiGLU: rows per program,
 # hidden columns per step, warps (swept 64/128 rows, 32/64 columns, 4/8 warps, 1/2 stages). Slab
@@ -14,20 +21,12 @@ SWIGLU_BLOCK_HIDDEN = 64
 SWIGLU_WARPS = 8
 QKV_BLOCK_ROWS = 32
 QKV_WARPS = 8
-DIM = 256
-HIDDEN = 1024
-HEAD_DIM = 64
-ROPE_PAIRS = (8, 12, 12)
-"""The shipped DiffVAE decoder's diffusion blocks: width, MLP width, head dim, RoPE pairs per (T, H, W)."""
-QKV_DIMS = (DIM, 512)
-"""Widths the Q/K/V kernel is built for: the diffusion blocks' and the 512-wide deterministic stages 3-4
-(the 1024/2048-wide stages 1-2 do not fit its one-tile projections). Only the diffusion blocks' kernel
-modulates its slab."""
-SWIGLU_MODULE = f"ltx_swiglu_{DIM}x{HIDDEN}"
+SWIGLU_MODULE = f"ltx_swiglu_{DIFFUSION_DIM}x{DIFFUSION_HIDDEN}"
 
 
 def qkv_module(dim: int) -> str:
-    return f"ltx_slab_qkv_{dim}x{HEAD_DIM}"
+    return f"ltx_slab_qkv_{dim}x{DIFFUSION_HEAD_DIM}"
+
 
 _SWIGLU_POINTERS = ("x_ptr", "norm_ptr", "scale_ptr", "shift_ptr", "gate_ptr", "up_ptr", "down_ptr")
 SWIGLU_ARGUMENTS = {**{name: "*bf16" for name in _SWIGLU_POINTERS}, "rows": "i32"}
@@ -50,8 +49,8 @@ def _launch(module: str, arguments: dict[str, str], rows_per_program: int, rows:
 
 def _require_bf16(tensors, shapes_match: bool) -> None:
     if not shapes_match or {t.dtype for t in tensors} != {torch.bfloat16} or not all(t.is_contiguous() for t in tensors):
-        raise ValueError(f"the ahead-of-time diffusion-block kernels take contiguous bf16 tensors of width {DIM}"
-                         f" (Q/K/V: {' or '.join(map(str, QKV_DIMS))})")
+        raise ValueError(f"the ahead-of-time diffusion-block kernels take contiguous bf16 tensors of width {DIFFUSION_DIM}"
+                         f" (Q/K/V: {' or '.join(map(str, FUSED_QKV_DIMS))})")
 
 
 def residual_swiglu_(
@@ -65,7 +64,7 @@ def residual_swiglu_(
 ) -> None:
     """``diffusion_triton.residual_swiglu_`` at the shipped decoder's shapes."""
     tensors = (x, norm_weight, scale, shift, w_gate, w_up, w_down)
-    _require_bf16(tensors, x.shape[1] == DIM and w_gate.shape == (HIDDEN, DIM))
+    _require_bf16(tensors, x.shape[1] == DIFFUSION_DIM and w_gate.shape == (DIFFUSION_HIDDEN, DIFFUSION_DIM))
     rows = x.shape[0]
     _launch(SWIGLU_MODULE, SWIGLU_ARGUMENTS, SWIGLU_BLOCK_ROWS, rows, x.device, (*tensors, rows))
 
@@ -86,11 +85,12 @@ def slab_qkv(
     """``diffusion_triton.slab_qkv`` at the shipped decoder's shapes."""
     batch, t, h, w, dim = x.shape
     _require_bf16((x, left_halo, *modulation, *weights),
-                  dim in QKV_DIMS and bool(modulation) == (dim == DIM) and weights[7].shape == (HEAD_DIM,)
-                  and tuple(rope_pairs) == ROPE_PAIRS[:2] and columns.dtype == torch.int64 and columns.is_contiguous())
+                  dim in FUSED_QKV_DIMS and bool(modulation) == (dim == DIFFUSION_DIM)
+                  and weights[7].shape == (DIFFUSION_HEAD_DIM,) and tuple(rope_pairs) == DIFFUSION_ROPE_PAIRS[:2]
+                  and columns.dtype == torch.int64 and columns.is_contiguous())
     ext = halo + columns.numel()
-    q = x.new_empty(batch, t, h, core_len, dim // HEAD_DIM, HEAD_DIM)
-    k = x.new_empty(batch, t, h, ext, dim // HEAD_DIM, HEAD_DIM)
+    q = x.new_empty(batch, t, h, core_len, dim // DIFFUSION_HEAD_DIM, DIFFUSION_HEAD_DIM)
+    k = x.new_empty(batch, t, h, ext, dim // DIFFUSION_HEAD_DIM, DIFFUSION_HEAD_DIM)
     v = torch.empty_like(k)
     rows = batch * t * h * ext
     norm, scale, shift = modulation or (x, x, x)

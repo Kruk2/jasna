@@ -10,11 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
-from torch.utils._triton import has_triton_package
 
 from jasna._frozen import is_frozen
-from jasna.accelerator import device_free_bytes
+from jasna.accelerator import device_free_bytes, load_gpu_libraries_ahead
 from jasna.ltx.model_files import LtxModelFiles, PlaceholderTensors
 from jasna.ltx.sampler import LtxTransformer, TransformerSource
 from jasna.models.ltx_vae import decode_latent, load_video_decoder, load_video_encoder
@@ -140,7 +138,7 @@ class ModelRuntime:
         if self.protected:
             self.request("prepare_transformer", {}, [])
         elif self._transformer_source is None:
-            load_gpu_libraries_ahead(self.device)
+            load_gpu_libraries_ahead(self.device, torch.bfloat16)
             self._transformer_source = TransformerSource(self.files.transformer)
 
     def load_transformer(self):
@@ -207,21 +205,6 @@ class ModelRuntime:
 
     def __exit__(self, *_exc) -> None:
         self.close()
-
-
-def load_gpu_libraries_ahead(device: torch.device) -> None:
-    """Pay what a process's first bf16 ``x @ wᵀ`` (transformer AdaLN), first fp32 ``a @ b`` (decoder
-    context fold) and first ``torch.compile`` (hashing the Triton install) cost once, off the critical
-    path: on ROCm each loads a library (one per dtype and layout) or hashes ~1 GB, 0.4-0.8 s apiece."""
-    if device.type != "cuda":
-        return
-    square = torch.zeros(8, 8, device=device, dtype=torch.bfloat16)
-    F.linear(square, square)
-    square.float() @ square.float()
-    if has_triton_package():
-        from triton.runtime.cache import triton_key
-
-        triton_key()
 
 
 def free_vram_beside_parent(device: torch.device, parent_free_bytes: int) -> Callable[[torch.device], int]:

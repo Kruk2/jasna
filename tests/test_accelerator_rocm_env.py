@@ -82,7 +82,7 @@ def test_aotriton_flash_images_need_the_forward_kernel(tmp_path):
 @pytest.mark.parametrize("platform", ["linux", "win32"])
 @pytest.mark.parametrize(("image_files", "expected"), [((), {"flash": False, "mem_efficient": False}), (("amd-gfx120x/flash/attn_fwd.zip",), {})])
 def test_rocm_keeps_flash_sdpa_only_with_aotriton_images(monkeypatch, tmp_path, sdpa_switches, platform, image_files, expected):
-    monkeypatch.setattr("torch.utils._triton.has_triton_package", lambda: False)
+    monkeypatch.setattr(accelerator, "has_triton", lambda: False)
     monkeypatch.setattr(accelerator.sys, "platform", platform)
     monkeypatch.setattr(torch.version, "hip", "7.2")
     _torch_lib(tmp_path, *image_files)
@@ -106,7 +106,7 @@ def test_miopen_runs_channels_last_convs_natively_only_where_they_compile(monkey
     monkeypatch.setattr(torch.version, "hip", "7.2")
     monkeypatch.setenv("PYTORCH_MIOPEN_SUGGEST_NHWC", "restored after the test")
     monkeypatch.delenv("PYTORCH_MIOPEN_SUGGEST_NHWC")
-    monkeypatch.setattr("torch.utils._triton.has_triton_package", lambda: triton)
+    monkeypatch.setattr(accelerator, "has_triton", lambda: triton)
     configure_rocm_process_env()
     assert os.environ.get("PYTORCH_MIOPEN_SUGGEST_NHWC") == ("1" if triton else None)
 
