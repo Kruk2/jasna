@@ -1,6 +1,5 @@
 import ctypes
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -21,15 +20,6 @@ TRITON_LAUNCH_TABLES = {
 }
 
 
-def _use_rocm(monkeypatch, architecture: str = "gfx1201") -> None:
-    monkeypatch.setattr(torch.version, "hip", "7.15.26333")
-    monkeypatch.setattr(
-        torch.cuda,
-        "get_device_properties",
-        lambda _device: SimpleNamespace(gcnArchName=f"{architecture}:sramecc-:xnack-"),
-    )
-
-
 def test_nvidia_always_runs_the_kernels(monkeypatch):
     monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
@@ -39,14 +29,14 @@ def test_nvidia_always_runs_the_kernels(monkeypatch):
 
 
 @pytest.mark.parametrize("architecture", sorted(HIP_KERNEL_ARCHITECTURES))
-def test_amd_runs_the_kernels_on_bundled_architectures(monkeypatch, architecture):
-    _use_rocm(monkeypatch, architecture)
+def test_amd_runs_the_kernels_on_bundled_architectures(amd_gpu, architecture):
+    amd_gpu(architecture)
 
     assert has_precompiled_kernels(torch.device("cuda:0"))
 
 
-def test_amd_falls_back_to_torch_on_an_architecture_missing_from_the_bundle(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1036")
+def test_amd_falls_back_to_torch_on_an_architecture_missing_from_the_bundle(amd_gpu):
+    amd_gpu("gfx1036")
 
     assert not has_precompiled_kernels(torch.device("cuda:0"))
     assert not has_precompiled_kernels(torch.device("cpu"))
@@ -121,8 +111,8 @@ class _FakeHip:
         monkeypatch.setattr(cuda_kernel, "_modules", {})
 
 
-def test_amd_kernel_loads_the_hip_bundle_and_launches_on_the_given_stream(monkeypatch):
-    _use_rocm(monkeypatch)
+def test_amd_kernel_loads_the_hip_bundle_and_launches_on_the_given_stream(amd_gpu, monkeypatch):
+    amd_gpu()
     hip = _FakeHip()
     hip.install(monkeypatch)
     kernel = Kernel("cas", "cas_luma8", (ctypes.c_uint64, ctypes.c_float))
@@ -135,8 +125,8 @@ def test_amd_kernel_loads_the_hip_bundle_and_launches_on_the_given_stream(monkey
     assert hip.launches == [(0x2000, (4, 2, 1), (32, 8, 1), 0, 0xBEEF)] * 2
 
 
-def test_kernel_launches_with_its_dynamic_shared_memory(monkeypatch):
-    _use_rocm(monkeypatch)
+def test_kernel_launches_with_its_dynamic_shared_memory(amd_gpu, monkeypatch):
+    amd_gpu()
     hip = _FakeHip()
     hip.install(monkeypatch)
     kernel = Kernel("cas", "cas_luma8", (ctypes.c_uint64,), 8192)
@@ -146,8 +136,8 @@ def test_kernel_launches_with_its_dynamic_shared_memory(monkeypatch):
     assert hip.launches == [(0x2000, (128, 1, 1), (128, 1, 1), 8192, 0xBEEF)]
 
 
-def test_amd_launch_failure_names_the_hip_error(monkeypatch):
-    _use_rocm(monkeypatch)
+def test_amd_launch_failure_names_the_hip_error(amd_gpu, monkeypatch):
+    amd_gpu()
     _FakeHip(launch_result=719).install(monkeypatch)
     kernel = Kernel("cas", "cas_luma8", (ctypes.c_uint64,))
 
@@ -196,8 +186,8 @@ def test_host_memory_is_page_locked_portably_through_the_vendor_runtime(monkeypa
 _LAUNCH_TABLE = {"gfx1201": {"demo": ("demo_kernel", (4, 1, 1), 128, 2048)}}
 
 
-def test_triton_kernel_passes_tensors_as_pointers_then_ints_floats_and_the_unused_scratch(monkeypatch):
-    _use_rocm(monkeypatch)
+def test_triton_kernel_passes_tensors_as_pointers_then_ints_floats_and_the_unused_scratch(amd_gpu, monkeypatch):
+    amd_gpu()
     hip = _FakeHip()
     hip.install(monkeypatch)
     kernel = TritonKernel("cas", ("cas_luma8", (4, 1, 1), 128, 2048), {"x": "*bf16:wide", "n": "i32:16", "scale": "fp32"})
@@ -209,8 +199,8 @@ def test_triton_kernel_passes_tensors_as_pointers_then_ints_floats_and_the_unuse
     assert hip.launches == [(0x2000, (4, 1, 1), (128, 1, 1), 2048, 0xBEEF)]
 
 
-def test_aot_kernel_is_built_once_per_architecture(monkeypatch):
-    _use_rocm(monkeypatch)
+def test_aot_kernel_is_built_once_per_architecture(amd_gpu, monkeypatch):
+    amd_gpu()
     monkeypatch.setattr(cuda_kernel, "_aot_kernels", {})
 
     kernel = aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"), {"x": "*fp16"})
@@ -219,20 +209,20 @@ def test_aot_kernel_is_built_once_per_architecture(monkeypatch):
     assert (kernel.grid, kernel.block) == ((4, 1, 1), (128, 1, 1))
 
 
-def test_a_module_without_a_built_kernel_fails_loudly(monkeypatch):
-    _use_rocm(monkeypatch, "gfx1100")
+def test_a_module_without_a_built_kernel_fails_loudly(amd_gpu):
+    amd_gpu("gfx1100")
 
     with pytest.raises(RuntimeError, match="no ahead-of-time kernel demo on gfx1100"):
         aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"), {"x": "*fp16"})
 
 
-def test_only_amd_gpus_in_the_launch_table_have_an_aot_kernel(monkeypatch):
-    _use_rocm(monkeypatch)
+def test_only_amd_gpus_in_the_launch_table_have_an_aot_kernel(amd_gpu, monkeypatch):
+    amd_gpu()
     assert has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"))
     assert not has_aot_kernel(_LAUNCH_TABLE, "other", torch.device("cuda:0"))
     assert not has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cpu"))
 
-    _use_rocm(monkeypatch, "gfx1030")
+    amd_gpu("gfx1030")
     assert not has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"))
 
     monkeypatch.setattr(torch.version, "hip", None)
