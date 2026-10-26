@@ -1,90 +1,50 @@
 import threading
-import time
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from jasna.gui.processor import Processor, ProgressUpdate
-from jasna.gui.models import JobStatus, JobItem, AppSettings
+from jasna.gui.processor import Processor
+from jasna.gui.models import JobItem, AppSettings
 from factories import no_resume_conflict
 
-pytestmark = pytest.mark.usefixtures("tk_garbage_collected")
+pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
 
 
-def test_processor_join_waits_for_thread():
-    """stop() + join() should wait for the background thread to finish."""
+def _start(processor: Processor) -> None:
+    processor.start([JobItem(path=Path("test.mp4"))], AppSettings(), output_folder="", output_pattern="{original}_restored.mp4")
+
+
+def test_join_waits_for_the_running_job_and_is_safe_before_and_after():
     entered = threading.Event()
-    p = Processor(on_resume_conflict=no_resume_conflict)
+    release = threading.Event()
+    processor = Processor(on_resume_conflict=no_resume_conflict)
+    processor.join(timeout=1.0)
+    assert not processor.is_running()
 
-    class FakeJob:
-        path = None
-        filename = "a.mp4"
+    with patch.object(processor, "_run_pipeline", side_effect=lambda *_args, **_kwargs: entered.set() or release.wait()):
+        _start(processor)
+        entered.wait(timeout=5.0)
+        assert processor.is_running()
+        processor.stop()
+        release.set()
+        processor.join(timeout=5.0)
 
-    class FakeSettings:
-        pass
-
-    # Monkey-patch _run so we control when the thread finishes
-    original_run = p._run
-
-    def slow_run():
-        entered.set()
-        time.sleep(0.3)
-
-    p._run = slow_run
-    p._stop_event.clear()
-    p._thread = threading.Thread(target=p._run, daemon=True)
-    p._thread.start()
-
-    entered.wait(timeout=2)
-    p.stop()
-    p.join(timeout=5.0)
-
-    assert not p.is_running()
-
-
-def test_processor_join_noop_when_not_started():
-    """join() should be safe to call when no thread was started."""
-    p = Processor(on_resume_conflict=no_resume_conflict)
-    p.join(timeout=1.0)
-
-
-def test_processor_join_noop_after_thread_finished():
-    """join() should be safe to call after thread has already exited."""
-    p = Processor(on_resume_conflict=no_resume_conflict)
-
-    p._run = lambda: None
-    p._thread = threading.Thread(target=p._run, daemon=True)
-    p._thread.start()
-    p._thread.join()
-
-    p.stop()
-    p.join(timeout=1.0)
-    assert not p.is_running()
+    assert not processor.is_running()
+    processor.join(timeout=1.0)
+    assert not processor.is_running()
 
 
 def test_processor_error_logs_full_traceback():
     logs: list[tuple[str, str]] = []
+    processor = Processor(on_resume_conflict=no_resume_conflict, on_log=lambda level, message: logs.append((level, message)))
 
-    def on_log(level: str, message: str) -> None:
-        logs.append((level, message))
+    with patch.object(processor, "_run_pipeline", side_effect=ValueError("test error")):
+        _start(processor)
+        processor.join(timeout=5.0)
 
-    p = Processor(on_resume_conflict=no_resume_conflict, on_log=on_log)
-    job = JobItem(path=Path("test.mp4"))
-    settings = AppSettings()
-
-    with patch.object(p, "_run_pipeline", side_effect=ValueError("test error")):
-        p.start(
-            [job],
-            settings,
-            output_folder="",
-            output_pattern="{original}_restored.mp4",
-        )
-        p.join(timeout=5.0)
-
-    error_logs = [m for lvl, m in logs if lvl == "ERROR"]
+    error_logs = [message for level, message in logs if level == "ERROR"]
     assert len(error_logs) == 1
-    msg = error_logs[0]
-    assert "Failed to process test.mp4: test error" in msg
-    assert "Traceback (most recent call last):" in msg
-    assert "ValueError: test error" in msg
+    assert "Failed to process test.mp4: test error" in error_logs[0]
+    assert "Traceback (most recent call last):" in error_logs[0]
+    assert "ValueError: test error" in error_logs[0]
