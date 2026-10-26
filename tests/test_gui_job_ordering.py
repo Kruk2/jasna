@@ -1,6 +1,5 @@
 """Tests for GUI job ordering — stable job_id tracking during reorder/remove/add."""
 
-import threading
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -16,43 +15,6 @@ pytestmark = pytest.mark.usefixtures("no_gpu_cleanup", "tk_garbage_collected")
 
 def _make_jobs(*names: str) -> list[JobItem]:
     return [JobItem(path=Path(n)) for n in names]
-
-
-class TestNextPendingJob:
-    def test_returns_first_pending(self):
-        p = Processor(on_resume_conflict=no_resume_conflict)
-        jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
-        jobs[0].status = JobStatus.COMPLETED
-        p._jobs = jobs
-        assert p._next_pending_job() is jobs[1]
-
-    def test_returns_none_when_all_done(self):
-        p = Processor(on_resume_conflict=no_resume_conflict)
-        jobs = _make_jobs("a.mp4", "b.mp4")
-        jobs[0].status = JobStatus.COMPLETED
-        jobs[1].status = JobStatus.ERROR
-        p._jobs = jobs
-        assert p._next_pending_job() is None
-
-    def test_respects_reordered_list(self):
-        p = Processor(on_resume_conflict=no_resume_conflict)
-        jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
-        jobs[0].status = JobStatus.COMPLETED
-        # Simulate reorder: move c before b
-        jobs[1], jobs[2] = jobs[2], jobs[1]
-        p._jobs = jobs
-        result = p._next_pending_job()
-        assert result.filename == "c.mp4"
-
-    def test_picks_up_newly_added_job(self):
-        p = Processor(on_resume_conflict=no_resume_conflict)
-        jobs = _make_jobs("a.mp4")
-        jobs[0].status = JobStatus.COMPLETED
-        p._jobs = jobs
-        assert p._next_pending_job() is None
-        new_job = JobItem(path=Path("b.mp4"))
-        jobs.append(new_job)
-        assert p._next_pending_job() is new_job
 
 
 class TestProcessorPullLoop:
@@ -165,31 +127,34 @@ class TestProcessorPullLoop:
 
         assert processed_filenames == ["a.mp4", "c.mp4", "b.mp4"]
 
-    def test_reports_finished_queue_on_complete(self):
+    @pytest.mark.parametrize("stop_during_first_job", [False, True])
+    def test_reports_whether_the_queue_finished(self, stop_during_first_job):
         finished: list[bool] = []
         p = Processor(on_resume_conflict=no_resume_conflict, on_complete=finished.append)
-        jobs = _make_jobs("a.mp4")
+        jobs = _make_jobs("a.mp4", "b.mp4")
 
-        with patch.object(p, "_run_pipeline"):
-            p.start(
-                jobs,
-                AppSettings(post_export_action="shutdown"),
-                output_folder="",
-                output_pattern="{original}_restored.mp4",
-            )
+        def run_pipeline(*_args, **_kwargs):
+            if stop_during_first_job:
+                p.stop()
+
+        with patch.object(p, "_run_pipeline", side_effect=run_pipeline):
+            p.start(jobs, AppSettings(post_export_action="shutdown"), output_folder="", output_pattern="{original}_restored.mp4")
             p.join(timeout=5.0)
 
-        assert finished == [True]
+        assert finished == [not stop_during_first_job]
+        assert (jobs[1].status is JobStatus.PENDING) is stop_during_first_job
 
-    def test_reports_stopped_queue_on_complete(self):
-        finished: list[bool] = []
-        p = Processor(on_resume_conflict=no_resume_conflict, on_complete=finished.append)
-        p._settings = AppSettings(post_export_action="shutdown")
-        p._stop_event.set()
+    def test_skips_jobs_that_already_finished(self):
+        processed: list[str] = []
+        p = Processor(on_resume_conflict=no_resume_conflict)
+        jobs = _make_jobs("a.mp4", "b.mp4")
+        jobs[0].status = JobStatus.COMPLETED
 
-        p._run()
+        with patch.object(p, "_run_pipeline", side_effect=lambda job_id, inp, out, **_kwargs: processed.append(inp.name)):
+            p.start(jobs, AppSettings(), output_folder="", output_pattern="{original}_restored.mp4")
+            p.join(timeout=5.0)
 
-        assert finished == [False]
+        assert processed == ["b.mp4"]
 
     def test_runs_post_export_video_command_after_each_video(self, tmp_path):
         calls: list[tuple[str, Path, Path]] = []
@@ -301,10 +266,3 @@ class TestJobItemId:
         jobs = _make_jobs("a.mp4", "b.mp4", "c.mp4")
         ids = [j.id for j in jobs]
         assert len(set(ids)) == 3
-
-    def test_id_survives_list_reorder(self):
-        jobs = _make_jobs("a.mp4", "b.mp4")
-        id_a, id_b = jobs[0].id, jobs[1].id
-        jobs.reverse()
-        assert jobs[0].id == id_b
-        assert jobs[1].id == id_a
