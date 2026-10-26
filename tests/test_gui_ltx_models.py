@@ -20,7 +20,6 @@ from jasna.gui.ltx_models import (
     read_install_state,
     run_unavailable_reason,
     trial_only,
-    trial_only_reason,
 )
 from jasna.gui.models import AppSettings, JobItem, PresetManager
 from jasna.ltx import model_files
@@ -71,7 +70,7 @@ def test_availability_without_downloads(tmp_path) -> None:
     assert card_unavailable_reason(NVIDIA) is None
     assert card_unavailable_reason(AMD) is None
     assert card_unavailable_reason(CPU) == "model_ltx_needs_nvidia"
-    assert not trial_only(state, NVIDIA) and trial_only(read_install_state(tmp_path / "empty"), NVIDIA)
+    assert not trial_only(state) and trial_only(read_install_state(tmp_path / "empty"))
     assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=False) == "model_ltx_not_installed"
     assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=True) is None
     assert run_unavailable_reason(state, "distilled", False, None, trial=False) is None
@@ -83,35 +82,15 @@ def test_availability_with_downloads(tmp_path, downloadable) -> None:
     state = read_install_state(tmp_path)
 
     assert state.downloadable
-    assert not trial_only(state, NVIDIA)
+    assert not trial_only(state)
     assert run_unavailable_reason(state, "undistilled", False, NVIDIA, trial=False) == "model_ltx_not_downloaded"
 
 
-def test_unsupported_amd_os_runs_trial_and_source_models_only(tmp_path, downloadable, monkeypatch) -> None:
-    from jasna import accelerator
-
-    monkeypatch.setattr(accelerator.sys, "platform", "darwin")
-    _install(tmp_path, "distilled", fast=False)
+def test_amd_uses_normal_licensed_model_downloads(tmp_path, downloadable) -> None:
     state = read_install_state(tmp_path)
-
-    assert not trial_only(state, AMD) and trial_only(read_install_state(tmp_path / "empty"), AMD)
-    assert run_unavailable_reason(state, "distilled", False, AMD, trial=False) is None
-    assert run_unavailable_reason(state, "undistilled", False, AMD, trial=False) == "model_ltx_licensed_needs_nvidia"
-    assert run_unavailable_reason(state, "undistilled", False, AMD, trial=True) is None
-    assert trial_only_reason(AMD) == "model_ltx_licensed_needs_nvidia"
-    assert trial_only_reason(NVIDIA) == "model_ltx_trial_only"
-
-
-@pytest.mark.parametrize("platform", ["linux", "win32"])
-def test_supported_amd_os_uses_normal_licensed_model_downloads(tmp_path, downloadable, monkeypatch, platform) -> None:
-    from jasna import accelerator
-
-    monkeypatch.setattr(accelerator.sys, "platform", platform)
-    state = read_install_state(tmp_path)
-    assert not trial_only(state, AMD)
-    assert state.usable("distilled2", False, AMD)
+    assert not trial_only(state)
+    assert state.usable("distilled2", False)
     assert run_unavailable_reason(state, "distilled2", False, AMD, trial=False) == "model_ltx_not_downloaded"
-    assert trial_only_reason(AMD) == "model_ltx_trial_only"
 
 
 def _answer(monkeypatch, yes: bool) -> list[str]:
