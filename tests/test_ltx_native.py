@@ -4,6 +4,7 @@ checks, the constants handed to the native side and the sampler's choice of bloc
 from __future__ import annotations
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -11,6 +12,7 @@ import tomllib
 from importlib.machinery import ModuleSpec
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -310,6 +312,49 @@ def test_building_the_extension_restores_the_environment_it_builds_in(monkeypatc
 
     assert seen == [("ninja dir:user path", "gcc-15")]
     assert os.environ["PATH"] == "user path" and "CC" not in os.environ
+
+
+@pytest.mark.parametrize(("compiled", "triton", "level", "path"), [
+    (True, True, logging.INFO, "the torch.compile path"),
+    (False, False, logging.WARNING, "eager PyTorch (no Triton)"),
+    (False, True, logging.WARNING, "eager PyTorch (no bf16 torch.compile"),
+])
+def test_native_block_off_names_the_path_that_runs_instead(monkeypatch, caplog, compiled, triton, level, path):
+    monkeypatch.setenv("JASNA_LTX_NATIVE", "0")
+    monkeypatch.setattr(native, "compiles", lambda device, dtype: compiled)
+    monkeypatch.setattr(native, "has_triton", lambda: triton)
+
+    with caplog.at_level(logging.INFO, logger=native.logger.name):
+        assert native.load(torch.device("cuda"), _block_specs("int8")) is None
+
+    assert [(record.levelno, path in record.getMessage()) for record in caplog.records] == [(level, True)]
+
+
+def _native_load_fails(monkeypatch, frozen: bool):
+    monkeypatch.setattr(native, "unavailable_reason", lambda device, specs: None)
+    monkeypatch.setattr(native, "compiles", lambda device, dtype: False)
+    monkeypatch.setattr(native, "has_triton", lambda: False)
+    monkeypatch.setattr(native, "is_frozen", lambda: frozen)
+    monkeypatch.setattr(native, "_prebuilt_extension", lambda: native.PREBUILT / "jasna_ltx_native.so")
+    monkeypatch.setattr(native.policy, "gpu_architecture", lambda device: "gfx1201")
+    monkeypatch.setattr(native, "_kernel_manifest", lambda architecture, dims, fp4: Path("manifest.json"))
+    monkeypatch.setattr(native, "_extension", Mock(side_effect=OSError("undefined symbol")))
+
+
+def test_a_source_run_whose_native_block_fails_to_load_warns_and_runs_the_torch_path(monkeypatch, caplog):
+    _native_load_fails(monkeypatch, frozen=False)
+
+    with caplog.at_level(logging.WARNING, logger=native.logger.name):
+        assert native.load(torch.device("cuda"), _block_specs("int8")) is None
+
+    assert "eager PyTorch (no Triton)" in caplog.text and "undefined symbol" in caplog.text
+
+
+def test_a_release_whose_shipped_native_block_fails_to_load_is_broken(monkeypatch):
+    _native_load_fails(monkeypatch, frozen=True)
+
+    with pytest.raises(RuntimeError, match=r"does not load \(undefined symbol\)\. Reinstall Jasna\."):
+        native.load(torch.device("cuda"), _block_specs("int8"))
 
 
 def test_native_block_can_be_turned_off(monkeypatch):

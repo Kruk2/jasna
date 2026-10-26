@@ -86,3 +86,19 @@ def test_compile_static_runs_eager_without_triton(monkeypatch) -> None:
         return x * 2
 
     assert compile_static(double, mode="default", device=torch.device("cuda"), dtype=torch.float16) is double
+
+
+@pytest.mark.parametrize(("triton", "half", "dtype", "expected"), [
+    (True, torch.bfloat16, torch.bfloat16, True),
+    (True, torch.float16, torch.bfloat16, False),
+    (True, torch.float16, torch.float16, True),
+    (False, torch.bfloat16, torch.bfloat16, False),
+])
+def test_compiles_only_with_triton_and_inductor_support_for_the_dtype(monkeypatch, triton, half, dtype, expected):
+    import jasna.tensor_utils
+    from jasna.tensor_utils import compiles
+
+    monkeypatch.setattr(jasna.tensor_utils, "has_triton", lambda: triton)
+    monkeypatch.setattr(jasna.tensor_utils, "half_dtype", lambda device: half)
+
+    assert compiles(torch.device("cuda"), dtype) is expected
