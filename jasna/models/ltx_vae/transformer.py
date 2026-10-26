@@ -170,9 +170,10 @@ def _fp16_eager_na3d(
 def decoder_kernels(device: torch.device) -> DecoderKernels:
     """Neighborhood attention through jasna's Triton kernel: JIT on NVIDIA (``na_triton``), built
     ahead of time on AMD (``na_hip``, with or without Triton); before SM 8.0, where Triton has no
-    tensor-core dot, through the fp16 pure-torch ``na3d``. On AMD the diffusion blocks' residual MLP
-    and the slab Q/K/V projections also run as fused kernels built ahead of time (``diffusion_hip``);
-    the Q/K/V kernel also serves the 512-wide deterministic stages."""
+    tensor-core dot, through the fp16 pure-torch ``na3d``. The slab Q/K/V projections run as one fused
+    kernel (JIT ``diffusion_triton`` on NVIDIA, ahead of time ``diffusion_hip`` on AMD), which also serves
+    the 512-wide deterministic stages; on AMD the diffusion blocks' residual MLP is fused too (NVIDIA's
+    compiled torch MLP is faster than every fused config that fits its shared memory)."""
     backend = kernel_backend(device)
     if backend is KernelBackend.NVIDIA_PRE_SM80:
         return DecoderKernels(na3d=_fp16_eager_na3d)
@@ -181,9 +182,9 @@ def decoder_kernels(device: torch.device) -> DecoderKernels:
 
         return DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv)
     if backend is KernelBackend.NVIDIA:
-        from jasna.models.ltx_vae import na_triton
+        from jasna.models.ltx_vae import diffusion_triton, na_triton
 
-        return DecoderKernels(na3d=na_triton.na3d)
+        return DecoderKernels(na3d=na_triton.na3d, slab_qkv=diffusion_triton.slab_qkv)
     return DecoderKernels()
 
 

@@ -17,11 +17,11 @@ def test_the_launch_table_has_every_kernel_the_launchers_launch():
 
 
 def _backend_kernels():
-    from jasna.models.ltx_vae import na_triton
+    from jasna.models.ltx_vae import diffusion_triton, na_triton
 
     prebuilt = T.DecoderKernels(na_hip.na3d, diffusion_hip.residual_swiglu_, diffusion_hip.slab_qkv)
     return [
-        (KernelBackend.NVIDIA, T.DecoderKernels(na3d=na_triton.na3d)),
+        (KernelBackend.NVIDIA, T.DecoderKernels(na3d=na_triton.na3d, slab_qkv=diffusion_triton.slab_qkv)),
         (KernelBackend.NVIDIA_PRE_SM80, T.DecoderKernels(na3d=T._fp16_eager_na3d)),
         (KernelBackend.AMD_TRITON, prebuilt),
         (KernelBackend.AMD_PREBUILT, prebuilt),
