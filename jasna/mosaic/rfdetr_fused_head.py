@@ -13,12 +13,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from jasna.accelerator import amd_gpu_architecture, is_amd_device
-from jasna.media.cuda_kernel import TritonKernel
+from jasna.media.cuda_kernel import aot_kernel, has_aot_kernel
 from jasna.mosaic.rfdetr_hip_launch import KERNEL_LAUNCH
 
 CHANNELS = 256
 LAYER_NORM_EPS = 1e-6
+ARGUMENTS = {name: "*fp16" for name in ("x", "dw_w", "dw_b", "ln_w", "ln_b", "pw_w", "pw_b", "out")}
+"""The block kernel's runtime arguments and the Triton types it is built for."""
 
 
 def _module_name(feature_size: int) -> str:
@@ -27,11 +28,7 @@ def _module_name(feature_size: int) -> str:
 
 def has_fused_head_kernels(weight: torch.Tensor, feature_size: int) -> bool:
     """Whether a head owning ``weight`` with ``feature_size``² mask features can run the fused kernel."""
-    return (
-        weight.dtype == torch.float16
-        and is_amd_device(weight.device)
-        and _module_name(feature_size) in KERNEL_LAUNCH.get(amd_gpu_architecture(weight.device), {})
-    )
+    return weight.dtype == torch.float16 and has_aot_kernel(KERNEL_LAUNCH, _module_name(feature_size), weight.device)
 
 
 def fuse_segmentation_head(core: nn.Module, resolution: int) -> None:
@@ -65,8 +62,7 @@ class FusedSegmentationHead(nn.Module):
         self.projection_weight = projection.weight.view(CHANNELS, CHANNELS)
         self.projection_bias = projection.bias
         self.bias = head.bias
-        module_name = _module_name(feature_size)
-        self._block = TritonKernel(module_name, KERNEL_LAUNCH[amd_gpu_architecture(head.bias.device)][module_name], 8)
+        self._block = aot_kernel(KERNEL_LAUNCH, _module_name(feature_size), head.bias.device, ARGUMENTS)
 
     def forward(
         self, spatial_features: torch.Tensor, query_features: list[torch.Tensor], image_size: tuple[int, int]

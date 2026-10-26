@@ -6,7 +6,7 @@ Each kernel variant the native block launches is compiled for one GPU architectu
 explicit constexprs, divisibility hints and target), so no GPU is needed and a release can
 build every architecture of ``kernel_policy.INT8_MM_TILES`` / ``CUBLAS_INT8_MM`` on one
 machine; AMD architectures (``kernel_policy.AMD_INT8_MM_TILES``, keyed by gfx name) are compiled with
-the hints and options the Triton JIT uses there and need a ROCm Triton. ``triton.tools.compile``
+the hints and options the Triton JIT uses there (``media.triton_hip``) and need a ROCm Triton. ``triton.tools.compile``
 itself emits C launchers that cannot pass the stream-K GEMM's TMA descriptors, so the images go
 to a manifest that the native launcher reads instead: kernel name, shared memory, warps and the
 expanded argument list.
@@ -27,6 +27,7 @@ from triton.backends.nvidia.driver import expand_signature
 from jasna.ltx import kernel_policy as policy
 from jasna.ltx import kernels
 from jasna.ltx.kernel_policy import BlockDims, is_amd
+from jasna.media.triton_hip import compile_hip
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,8 @@ def _compile(variant: Variant, architecture: tuple[int, int] | str, directory: P
     source = triton.compiler.ASTSource(fn=variant.kernel, signature=signature, constexprs=constexprs, attrs=attrs)
     compiled = triton.compile(source, target=target, options=options.__dict__)
     metadata = compiled.metadata
-    _check_scratch(variant, metadata)
+    if metadata.global_scratch_size or metadata.profile_scratch_size:
+        raise RuntimeError(f"{variant.key} needs Triton scratch memory, which the native launcher does not provide")
     cubin = directory / (hashlib.sha256(variant.key.encode()).hexdigest()[:16] + ".cubin")
     cubin.write_bytes(compiled.asm["cubin"])
     tensordesc = [dict(meta) for meta in metadata.tensordesc_meta or ()]
@@ -178,36 +180,21 @@ def _compile(variant: Variant, architecture: tuple[int, int] | str, directory: P
     return _entry(variant, cubin.name, metadata, args, divisible, tensordesc)
 
 
-def _check_scratch(variant: Variant, metadata) -> None:
-    if metadata.global_scratch_size or metadata.profile_scratch_size:
-        raise RuntimeError(f"{variant.key} needs Triton scratch memory, which the native launcher does not provide")
-
-
 def _compile_amd(variant: Variant, architecture: str, directory: Path) -> dict:
-    """An AMD code object specialized as the Triton JIT specializes the same launch: every pointer
-    16-byte aligned and inside the 2 GiB range of buffer loads, the variant's options added."""
+    """An AMD code object specialized as the Triton JIT specializes the same launch (``compile_hip``),
+    the variant's options added."""
     if not kernels.HIP.value:
         raise RuntimeError("AMD native-block kernels must be compiled with a ROCm PyTorch and Triton")
-    names = variant.kernel.arg_names
     constexprs = dict(variant.constexprs)
-    runtime = [name for name in names if name not in constexprs]
-    signature = dict(zip(runtime, variant.types, strict=True)) | {name: "constexpr" for name in constexprs}
-    pointers = {name for name, kind in zip(runtime, variant.types) if kind.startswith("*")}
-    attrs = {(names.index(name),): [["tt.divisibility", 16], ["tt.pointer_range", 32]] for name in pointers}
-    attrs |= {(names.index(name),): [["tt.divisibility", 16]] for name in variant.divisible if name not in pointers}
-    target = GPUTarget("hip", architecture, 32)
-    backend = triton.compiler.make_backend(target)
-    options = backend.parse_options(
-        {"num_warps": variant.num_warps, "num_stages": variant.num_stages, **dict(variant.options)}
-    )
-    source = triton.compiler.ASTSource(fn=variant.kernel, signature=signature, constexprs=constexprs, attrs=attrs)
-    compiled = triton.compile(source, target=target, options=options.__dict__)
-    metadata = compiled.metadata
-    _check_scratch(variant, metadata)
+    runtime = [name for name in variant.kernel.arg_names if name not in constexprs]
+    arguments = {name: f"{kind}:16" if name in variant.divisible and not kind.startswith("*") else kind
+                 for name, kind in zip(runtime, variant.types, strict=True)}
+    options = {"num_warps": variant.num_warps, "num_stages": variant.num_stages, **dict(variant.options)}
+    compiled = compile_hip(variant.kernel, arguments, constexprs, options, architecture)
     image = directory / (hashlib.sha256(variant.key.encode()).hexdigest()[:16] + ".hsaco")
     image.write_bytes(compiled.asm["hsaco"])
-    divisible = [name in pointers or name in variant.divisible for name in runtime]
-    return _entry(variant, image.name, metadata, list(variant.types), divisible, [])
+    divisible = [kind.startswith("*") or name in variant.divisible for name, kind in zip(runtime, variant.types)]
+    return _entry(variant, image.name, compiled.metadata, list(variant.types), divisible, [])
 
 
 def _entry(variant: Variant, image: str, metadata, args: list[str], divisible: list[bool], tensordesc: list[dict]) -> dict:

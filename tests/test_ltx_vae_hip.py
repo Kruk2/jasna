@@ -1,34 +1,18 @@
 """The ahead-of-time AMD decoder kernels (``na_hip``, ``diffusion_hip``) and their routing; no GPU needed."""
 
-from pathlib import Path
-
 import pytest
 import torch
 
 from jasna.models.ltx_vae import diffusion_hip, layout_hip, na_hip
 from jasna.models.ltx_vae import transformer as T
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
-from factories import offload_bundle_targets
-
-MEDIA = Path(__file__).resolve().parent.parent / "jasna" / "media"
 
 
-@pytest.mark.parametrize("window", na_hip.WINDOWS)
-def test_every_window_ships_a_code_object_for_every_architecture(window):
-    module = na_hip.module_name(window)
-    targets = offload_bundle_targets(MEDIA / f"{module}.hipfb")
+def test_the_launch_table_has_every_kernel_the_launchers_launch():
+    launched = {*map(na_hip.module_name, na_hip.WINDOWS), diffusion_hip.SWIGLU_MODULE,
+                *map(diffusion_hip.qkv_module, diffusion_hip.QKV_DIMS), layout_hip.MODULE}
 
-    assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == set(KERNEL_LAUNCH)
-    assert all(module in kernels for kernels in KERNEL_LAUNCH.values())
-
-
-@pytest.mark.parametrize("module", [diffusion_hip.SWIGLU_MODULE, *map(diffusion_hip.qkv_module, diffusion_hip.QKV_DIMS),
-                                    layout_hip.MODULE])
-def test_every_diffusion_kernel_ships_a_code_object_for_every_architecture(module):
-    targets = offload_bundle_targets(MEDIA / f"{module}.hipfb")
-
-    assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == set(KERNEL_LAUNCH)
-    assert all(module in kernels for kernels in KERNEL_LAUNCH.values())
+    assert all(set(kernels) == launched for kernels in KERNEL_LAUNCH.values())
 
 
 def test_amd_without_triton_runs_the_ahead_of_time_kernels(monkeypatch):
@@ -76,22 +60,12 @@ def test_the_diffusion_kernels_reject_inputs_they_were_not_built_for():
                                torch.zeros(12), [8, 12], 2, 5, 0.125)
 
 
-def test_a_module_without_a_built_kernel_fails_loudly():
-    with pytest.raises(RuntimeError, match="no ahead-of-time kernel"):
-        diffusion_hip._kernel("gfx1201", "ltx_swiglu_512x2048", ())
-
-
 def test_rejects_inputs_the_kernel_was_not_built_for():
     q = torch.zeros(1, 4, 4, 4, 1, 32, dtype=torch.bfloat16)
     with pytest.raises(ValueError, match="head dim 64"):
         na_hip.na3d(q, q, q, [3, 3, 3], 0)
     with pytest.raises(ValueError, match="head dim 64"):
         na_hip.na3d(q.half(), q.half(), q.half(), [3, 3, 3], 0)
-
-
-def test_a_window_without_a_built_kernel_fails_loudly():
-    with pytest.raises(RuntimeError, match="no ahead-of-time neighborhood-attention kernel"):
-        na_hip._kernel("gfx1201", (5, 5, 5))
 
 
 def test_the_channels_first_copy_takes_only_channels_last_fp16():

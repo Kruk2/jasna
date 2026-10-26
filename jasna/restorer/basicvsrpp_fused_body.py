@@ -13,8 +13,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from jasna.accelerator import amd_gpu_architecture, is_amd_device
-from jasna.media.cuda_kernel import TritonKernel
+from jasna.media.cuda_kernel import aot_kernel, has_aot_kernel
 from jasna.restorer.basicvsrpp_hip_launch import KERNEL_LAUNCH
 
 CHANNELS = 64
@@ -25,15 +24,14 @@ LEAKY_SLOPE = 0.1
 _CONV_RELU = "basicvsrpp_conv3x3_relu"
 _CONV_RESIDUAL = "basicvsrpp_conv3x3_residual"
 _DCN = "basicvsrpp_dcn"
+CONV_ARGUMENTS = {name: "*fp16" for name in ("x", "w", "b", "res", "out")}
+DCN_ARGUMENTS = {name: "*fp16" for name in ("xa", "xb", "om", "f1", "f2", "w", "b", "out")}
+"""The kernels' runtime arguments and the Triton types they are built for."""
 
 
 def has_fused_body_kernels(weight: torch.Tensor) -> bool:
     """Whether the propagation step owning ``weight`` can run the fused kernels."""
-    return (
-        weight.dtype == torch.float16
-        and is_amd_device(weight.device)
-        and amd_gpu_architecture(weight.device) in KERNEL_LAUNCH
-    )
+    return weight.dtype == torch.float16 and has_aot_kernel(KERNEL_LAUNCH, _DCN, weight.device)
 
 
 def pack_conv3x3_weight(weight: torch.Tensor) -> torch.Tensor:
@@ -62,11 +60,10 @@ class FusedPropagateBody(nn.Module):
             (pack_conv3x3_weight(b.conv1.weight), b.conv1.bias, pack_conv3x3_weight(b.conv2.weight), b.conv2.bias)
             for b in blocks
         ]
-        architecture = amd_gpu_architecture(deform_align.weight.device)
-        launch = KERNEL_LAUNCH[architecture]
-        self._conv_relu = TritonKernel(_CONV_RELU, launch[_CONV_RELU], 5)
-        self._conv_residual = TritonKernel(_CONV_RESIDUAL, launch[_CONV_RESIDUAL], 5)
-        self._dcn = TritonKernel(_DCN, launch[_DCN], 8)
+        device = deform_align.weight.device
+        self._conv_relu = aot_kernel(KERNEL_LAUNCH, _CONV_RELU, device, CONV_ARGUMENTS)
+        self._conv_residual = aot_kernel(KERNEL_LAUNCH, _CONV_RESIDUAL, device, CONV_ARGUMENTS)
+        self._dcn = aot_kernel(KERNEL_LAUNCH, _DCN, device, DCN_ARGUMENTS)
 
     def forward(
         self,

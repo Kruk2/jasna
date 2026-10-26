@@ -21,6 +21,8 @@ import triton
 import triton.language as tl
 from triton_hipfb import REPO, build
 
+from jasna.restorer.basicvsrpp_fused_body import CONV_ARGUMENTS, DCN_ARGUMENTS
+
 LAUNCH_TABLE = REPO / "jasna" / "restorer" / "basicvsrpp_hip_launch.py"
 
 CHANNELS = 64
@@ -150,21 +152,19 @@ def _dcn_constants() -> dict:
     }
 
 
-# module stem -> (kernel, pointer arguments, constexprs, num_warps, grid)
+# module stem -> (kernel, arguments, constexprs, num_warps, num_stages, grid)
 def _kernel_specs() -> dict[str, tuple]:
     conv_grid = (SIZE * SIZE // TILES["conv3x3"]["BLOCK_M"], CHANNELS // TILES["conv3x3"]["BLOCK_N"], 1)
     dcn_grid = (SIZE * SIZE // TILES["dcn"]["BLOCK_M"], 1, 1)
-    conv_args = ("x", "w", "b", "res", "out")
     return {
         "basicvsrpp_conv3x3_relu": (
-            conv3x3_kernel, conv_args, _conv_constants(True, False), TILES["conv3x3"]["num_warps"], conv_grid,
+            conv3x3_kernel, CONV_ARGUMENTS, _conv_constants(True, False), TILES["conv3x3"]["num_warps"], 1, conv_grid,
         ),
         "basicvsrpp_conv3x3_residual": (
-            conv3x3_kernel, conv_args, _conv_constants(False, True), TILES["conv3x3"]["num_warps"], conv_grid,
+            conv3x3_kernel, CONV_ARGUMENTS, _conv_constants(False, True), TILES["conv3x3"]["num_warps"], 1, conv_grid,
         ),
         "basicvsrpp_dcn": (
-            dcn_kernel, ("xa", "xb", "om", "f1", "f2", "w", "b", "out"), _dcn_constants(),
-            TILES["dcn"]["num_warps"], dcn_grid,
+            dcn_kernel, DCN_ARGUMENTS, _dcn_constants(), TILES["dcn"]["num_warps"], 1, dcn_grid,
         ),
     }
 

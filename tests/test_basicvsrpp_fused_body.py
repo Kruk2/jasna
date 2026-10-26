@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -6,17 +5,15 @@ import pytest
 import torch
 import torch.nn.functional as F
 import torchvision
-from factories import offload_bundle_targets
 
 import jasna.media.cuda_kernel as cuda_kernel
+from jasna.accelerator import TRITON_HIP_ARCHITECTURES
 import jasna.restorer.basicvsrpp_fused_body as fused_body
 import jasna.restorer.basicvsrpp_sub_engines as sub_engines
 from jasna.models.basicvsrpp.mmagic.basicvsr_plusplus_net import BasicVSRPlusPlusNet
 from jasna.restorer.basicvsrpp_fused_body import FusedPropagateBody, has_fused_body_kernels
-from jasna.restorer.basicvsrpp_hip_launch import KERNEL_LAUNCH
 from jasna.restorer.basicvsrpp_sub_engines import _PropagateBodyWrapper
 
-MEDIA = Path(cuda_kernel.__file__).resolve().parent
 FS = 64
 
 
@@ -48,7 +45,7 @@ def _body_inputs(device: str, dtype: torch.dtype, seed: int = 1) -> list[torch.T
     ]
 
 
-@pytest.mark.parametrize("architecture", ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1200", "gfx1201"])
+@pytest.mark.parametrize("architecture", TRITON_HIP_ARCHITECTURES)
 def test_rdna3_and_rdna4_run_the_fused_kernels_in_fp16(monkeypatch, architecture):
     _use_rocm(monkeypatch, architecture)
 
@@ -64,14 +61,6 @@ def test_other_gpus_keep_the_eager_body(monkeypatch):
     monkeypatch.setattr(torch.version, "hip", None)
     monkeypatch.setattr(torch.version, "cuda", "13.0")
     assert not has_fused_body_kernels(_weight(torch.float16))
-
-
-@pytest.mark.parametrize("module_name", sorted(KERNEL_LAUNCH["gfx1201"]))
-def test_every_architecture_in_the_launch_table_ships_its_code_object(module_name):
-    targets = offload_bundle_targets(MEDIA / f"{module_name}.hipfb")
-
-    assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == set(KERNEL_LAUNCH)
-    assert all(set(kernels) == set(KERNEL_LAUNCH["gfx1201"]) for kernels in KERNEL_LAUNCH.values())
 
 
 def test_eager_split_uses_the_fused_body_when_the_kernels_match(monkeypatch):

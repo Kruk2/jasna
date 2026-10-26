@@ -7,10 +7,18 @@ import torch
 from factories import offload_bundle_targets
 
 import jasna.media.cuda_kernel as cuda_kernel
-from jasna.media.cuda_kernel import HIP_KERNEL_ARCHITECTURES, Kernel, has_precompiled_kernels
+from jasna.accelerator import HIP_KERNEL_ARCHITECTURES, TRITON_HIP_ARCHITECTURES
+from jasna.media.cuda_kernel import Kernel, TritonKernel, aot_kernel, has_aot_kernel, has_precompiled_kernels
+from jasna.models.ltx_vae import hip_launch as ltx_vae_launch
+from jasna.mosaic import rfdetr_hip_launch
+from jasna.restorer import basicvsrpp_hip_launch
 
 MEDIA = Path(cuda_kernel.__file__).resolve().parent
 KERNEL_SOURCES = sorted(MEDIA.glob("*.cu"))
+TRITON_LAUNCH_TABLES = {
+    table.__name__.rpartition(".")[2]: table.KERNEL_LAUNCH
+    for table in (ltx_vae_launch, rfdetr_hip_launch, basicvsrpp_hip_launch)
+}
 
 
 def _use_rocm(monkeypatch, architecture: str = "gfx1201") -> None:
@@ -51,6 +59,23 @@ def test_every_kernel_ships_for_both_vendors(source):
     assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == (
         HIP_KERNEL_ARCHITECTURES
     )
+
+
+@pytest.mark.parametrize(
+    ("table", "module_name"),
+    [(name, module) for name, table in TRITON_LAUNCH_TABLES.items() for module in sorted(table["gfx1201"])],
+)
+def test_every_triton_kernel_ships_for_every_triton_architecture(table, module_name):
+    launch = TRITON_LAUNCH_TABLES[table]
+    targets = offload_bundle_targets(MEDIA / f"{module_name}.hipfb")
+
+    assert {target.rpartition("--")[2] for target in targets if target.startswith("hipv4-")} == set(TRITON_HIP_ARCHITECTURES)
+    assert set(launch) == set(TRITON_HIP_ARCHITECTURES)
+    assert all(module_name in kernels for kernels in launch.values())
+
+
+def test_the_triton_architectures_are_media_kernel_architectures():
+    assert set(TRITON_HIP_ARCHITECTURES) < HIP_KERNEL_ARCHITECTURES
 
 
 class _FakeHip:
@@ -166,3 +191,50 @@ def test_host_memory_is_page_locked_portably_through_the_vendor_runtime(monkeypa
     cuda_kernel.host_unregister(4096)
 
     assert recorder.calls == [(register, 4096, 1 << 20, 1), (unregister, 4096)]
+
+
+_LAUNCH_TABLE = {"gfx1201": {"demo": ("demo_kernel", (4, 1, 1), 128, 2048)}}
+
+
+def test_triton_kernel_passes_tensors_as_pointers_then_ints_floats_and_the_unused_scratch(monkeypatch):
+    _use_rocm(monkeypatch)
+    hip = _FakeHip()
+    hip.install(monkeypatch)
+    kernel = TritonKernel("cas", ("cas_luma8", (4, 1, 1), 128, 2048), {"x": "*bf16:wide", "n": "i32:16", "scale": "fp32"})
+    x = torch.zeros(4)
+
+    kernel.launch((4, 1, 1), 0xBEEF, x, 32, 0.5)
+
+    assert [value.value for value in kernel._kernel._values] == [x.data_ptr(), 32, 0.5, None, None]
+    assert hip.launches == [(0x2000, (4, 1, 1), (128, 1, 1), 2048, 0xBEEF)]
+
+
+def test_aot_kernel_is_built_once_per_architecture(monkeypatch):
+    _use_rocm(monkeypatch)
+    monkeypatch.setattr(cuda_kernel, "_aot_kernels", {})
+
+    kernel = aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"), {"x": "*fp16"})
+
+    assert aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"), {"x": "*fp16"}) is kernel
+    assert (kernel.grid, kernel.block) == ((4, 1, 1), (128, 1, 1))
+
+
+def test_a_module_without_a_built_kernel_fails_loudly(monkeypatch):
+    _use_rocm(monkeypatch, "gfx1100")
+
+    with pytest.raises(RuntimeError, match="no ahead-of-time kernel demo on gfx1100"):
+        aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"), {"x": "*fp16"})
+
+
+def test_only_amd_gpus_in_the_launch_table_have_an_aot_kernel(monkeypatch):
+    _use_rocm(monkeypatch)
+    assert has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"))
+    assert not has_aot_kernel(_LAUNCH_TABLE, "other", torch.device("cuda:0"))
+    assert not has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cpu"))
+
+    _use_rocm(monkeypatch, "gfx1030")
+    assert not has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"))
+
+    monkeypatch.setattr(torch.version, "hip", None)
+    monkeypatch.setattr(torch.version, "cuda", "13.0")
+    assert not has_aot_kernel(_LAUNCH_TABLE, "demo", torch.device("cuda:0"))

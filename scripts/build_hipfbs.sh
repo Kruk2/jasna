@@ -5,16 +5,20 @@
 #   scripts/build_hipfbs.sh              # all kernels
 #   scripts/build_hipfbs.sh cas          # just jasna/media/cas.cu
 #
-# Needs ROCm's hipcc (HIPCC=, default /opt/rocm/bin/hipcc). The sources are the
-# CUDA ones: hip_runtime.h is force-included and cuda_fp16.h resolves to
-# hip_fp16.h. ARCHS must match cuda_kernel.HIP_KERNEL_ARCHITECTURES; other
-# GPUs fall back to the Torch path.
+# Needs ROCm's hipcc (HIPCC=, default /opt/rocm/bin/hipcc) and a Python with
+# Torch (PYTHON=, default python3) to read the targets from
+# accelerator.HIP_KERNEL_ARCHITECTURES; other GPUs fall back to the Torch path.
+# The sources are the CUDA ones: hip_runtime.h is force-included and
+# cuda_fp16.h resolves to hip_fp16.h.
 set -euo pipefail
 
 HIPCC="${HIPCC:-/opt/rocm/bin/hipcc}"
 BUNDLER="$(dirname "$HIPCC")/../llvm/bin/clang-offload-bundler"
-MEDIA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/jasna/media"
-ARCHS=(gfx1030 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1200 gfx1201 gfx908 gfx90a gfx942 gfx950)
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MEDIA_DIR="$REPO_DIR/jasna/media"
+ARCH_LIST="$(cd "$REPO_DIR" && "${PYTHON:-python3}" -c \
+    'from jasna.accelerator import HIP_KERNEL_ARCHITECTURES; print(*sorted(HIP_KERNEL_ARCHITECTURES))')"
+read -r -a ARCHS <<< "$ARCH_LIST"
 
 OFFLOAD=()
 for arch in "${ARCHS[@]}"; do

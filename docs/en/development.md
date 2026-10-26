@@ -179,23 +179,28 @@ scripts/build_hipfbs.sh         # every kernel, all AMD targets
 scripts/build_hipfbs.sh cas
 ```
 
-The AMD target list in `build_hipfbs.sh` must match
-`cuda_kernel.HIP_KERNEL_ARCHITECTURES` (`tests/test_cuda_kernel.py` checks the
-committed bundles). Keep the release kernel inventory in sync when adding kernels.
+`build_hipfbs.sh` reads the AMD targets from
+`accelerator.HIP_KERNEL_ARCHITECTURES` (`PYTHON=` picks an interpreter with Torch;
+`tests/test_cuda_kernel.py` checks the committed bundles). Keep the release
+kernel inventory in sync when adding kernels.
 Every
 kernel needs a Torch equivalent: AMD GPUs outside the bundle and CPU use it, and
 the tests use it as the reference. The GPU parity tests run on whichever vendor
 the machine has.
 
-Two AMD paths run Triton kernels compiled ahead of time, since AMD ships
+Three AMD paths run Triton kernels compiled ahead of time, since AMD ships
 Triton for Linux only: the BasicVSR++ propagation step
-(`restorer/basicvsrpp_fused_body.py`) and the RF-DETR segmentation-head blocks
-(`mosaic/rfdetr_fused_head.py`). `scripts/build_basicvsrpp_hipfbs.py` and
-`scripts/build_rfdetr_hipfbs.py` hold their source; both build through
-`scripts/triton_hipfb.py` on a Linux ROCm machine with the ROCm Torch + Triton
-venv into `jasna/media/basicvsrpp_*.hipfb` / `rfdetr_dwblock_*.hipfb` (RDNA3,
-RDNA3.5, RDNA4) plus the launch tables `jasna/restorer/basicvsrpp_hip_launch.py`
-/ `jasna/mosaic/rfdetr_hip_launch.py`; commit all of them. Shapes and tiles
+(`restorer/basicvsrpp_fused_body.py`), the RF-DETR segmentation-head blocks
+(`mosaic/rfdetr_fused_head.py`) and the LTX VAE kernels
+(`models/ltx_vae/{na,diffusion,layout}_hip.py`). `scripts/build_basicvsrpp_hipfbs.py`,
+`scripts/build_rfdetr_hipfbs.py` and `scripts/build_ltx_vae_hipfbs.py` list their
+kernels; all build through `scripts/triton_hipfb.py` (compiler:
+`media/triton_hip.compile_hip`, shared with the LTX native block's AMD kernels)
+on a Linux ROCm machine with the ROCm Torch + Triton venv, for
+`accelerator.TRITON_HIP_ARCHITECTURES` (RDNA3, RDNA3.5, RDNA4), into
+`jasna/media/*.hipfb` plus a generated launch table (`*_hip_launch.py`); commit
+all of them. Each runtime module owns its kernels' Triton argument types, which
+the build compiles and `cuda_kernel.aot_kernel` launches with. Shapes and tiles
 are fixed (RF-DETR: 144² and 192² mask features, 256 channels); `--tune` times
 tile candidates on the local GPU (current tiles were picked on a gfx1201).
 Other GPUs and fp32 run the torch modules, which are the reference for the
@@ -206,6 +211,7 @@ parity tests in `tests/test_basicvsrpp_fused_body.py` and
 ```bash
 python scripts/build_basicvsrpp_hipfbs.py          # ~1 min, all targets
 python scripts/build_rfdetr_hipfbs.py              # ~30 s, all targets
+python scripts/build_ltx_vae_hipfbs.py             # all targets
 python scripts/build_basicvsrpp_hipfbs.py --tune   # needs an AMD GPU (same for rfdetr)
 ```
 

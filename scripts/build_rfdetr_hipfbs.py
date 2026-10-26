@@ -21,6 +21,8 @@ import triton
 import triton.language as tl
 from triton_hipfb import REPO, build
 
+from jasna.mosaic.rfdetr_fused_head import ARGUMENTS
+
 LAUNCH_TABLE = REPO / "jasna" / "mosaic" / "rfdetr_hip_launch.py"
 
 CHANNELS = 256
@@ -74,18 +76,15 @@ def dwblock_kernel(
         tl.store(ob + o_idx, (z + r).to(tl.float16), mask=pmask[:, None])
 
 
-POINTER_ARGS = ("x", "dw_w", "dw_b", "ln_w", "ln_b", "pw_w", "pw_b", "out")
-
-
 def _constants(size: int, block_p: int, block_n: int) -> dict:
     return {"C": CHANNELS, "H": size, "W": size, "EPS": LAYER_NORM_EPS, "BLOCK_P": block_p, "BLOCK_N": block_n}
 
 
-# module stem -> (kernel, pointer arguments, constexprs, num_warps, grid)
+# module stem -> (kernel, arguments, constexprs, num_warps, num_stages, grid)
 def _kernel_specs() -> dict[str, tuple]:
     return {
         f"rfdetr_dwblock_{size}": (
-            dwblock_kernel, POINTER_ARGS, _constants(size, TILE["BLOCK_P"], TILE["BLOCK_N"]), TILE["num_warps"],
+            dwblock_kernel, ARGUMENTS, _constants(size, TILE["BLOCK_P"], TILE["BLOCK_N"]), TILE["num_warps"], 1,
             (triton.cdiv(size * size, TILE["BLOCK_P"]), 1, 1),
         )
         for size in FEATURE_SIZES
