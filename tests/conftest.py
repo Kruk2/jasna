@@ -16,7 +16,6 @@ collect_ignore = [] if _HAS_TENSORRT else [
     "test_basicvsrpp_sub_engines.py",
     "test_rtx_superres_restorer.py",
     "test_torch_tensorrt_export.py",
-    "test_trt_runner.py",
     "test_trt_utils.py",
     "test_unet4x_secondary_restorer.py",
 ]
