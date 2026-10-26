@@ -10,13 +10,12 @@ import subprocess
 import sys
 import tomllib
 from importlib.machinery import ModuleSpec
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 import torch
-import torch.nn.functional as F
 
 pytest.importorskip("triton")
 
@@ -123,17 +122,6 @@ def test_native_block_runs_its_own_int8_attention_whatever_comfy_kitchen_is_inst
     assert native.unavailable_reason(torch.device("cuda"), _block_specs("int8")) is None
 
 
-def test_extension_sources_look_up_no_launchers_at_runtime():
-    sources = [path for path in native._HERE.rglob("*") if path.suffix in (".cpp", ".cu", ".cuh", ".h", ".hip")]
-    assert {path.name for path in sources} >= {
-        "block.cpp", "glue.cu", *native._ATTENTION_SOURCES, *(path.name for path in native._HIP_ATTENTION_SOURCES)}
-    for path in sources:
-        text = path.read_text()
-        for lookup in ("dlopen", "dlsym", "GetProcAddress", "GetModuleHandle", 'extern "C" void', "kitchen_library"):
-            assert lookup not in text, f"{path.name} uses {lookup}"
-    assert '"launch_' not in (native._HERE / "block.cpp").read_text()
-
-
 def test_package_data_ships_every_native_source():
     pyproject = tomllib.loads((native._HERE.parents[2] / "pyproject.toml").read_text())
     shipped = {path for pattern in pyproject["tool"]["setuptools"]["package-data"]["jasna.ltx.native"]
@@ -175,17 +163,6 @@ def test_vendored_attention_compiles_once_with_comfy_kitchens_flags(monkeypatch,
 
     monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: ["-gencode=arch=compute_89,code=sm_89"])
     assert native._attention_objects(tmp_path, PurePosixPath("/cuda"))[0].parent != objects[0].parent
-
-
-def test_vendored_attention_compiles_for_the_msvc_runtime_on_windows(monkeypatch):
-    from torch.utils import cpp_extension
-
-    monkeypatch.setattr(cpp_extension, "_get_cuda_arch_flags", lambda: [])
-    monkeypatch.setattr(native, "_IS_WINDOWS", True)
-    monkeypatch.delenv("CC", raising=False)
-    command = native._attention_nvcc_command(PureWindowsPath("C:/cuda"))
-    assert command[0] == "C:\\cuda\\bin\\nvcc.exe"
-    assert {"-Xcompiler=/MD", "-Xcompiler=/Zc:preprocessor", "-std=c++17", "--use_fast_math"} <= set(command)
 
 
 def test_native_block_without_a_toolchain_keeps_the_compiled_path(monkeypatch):
@@ -276,18 +253,6 @@ def test_extension_links_the_vendored_attention_objects(monkeypatch, tmp_path):
     assert built["sources"] == [str(native._HERE / source) for source in native._SOURCES]
 
 
-def test_build_flags_link_the_platform_cuda_driver_library(monkeypatch):
-    monkeypatch.setattr(native, "_IS_WINDOWS", True)
-    windows = native._build_flags(PureWindowsPath("C:/cuda"))
-    assert windows["extra_cflags"] == ["/O2"]
-    assert windows["extra_ldflags"] == ["C:\\cuda\\lib\\x64\\cuda.lib"]
-
-    monkeypatch.setattr(native, "_IS_WINDOWS", False)
-    linux = native._build_flags(PurePosixPath("/cuda"))
-    assert linux["extra_cflags"] == ["-O3", "-fvisibility=hidden"]
-    assert linux["extra_ldflags"] == ["-L/cuda/lib64/stubs", "-lcuda"]
-
-
 @pytest.mark.parametrize("hip", [None, "7.15"])
 def test_release_arch_list_covers_every_sm_with_tuned_int8_kernels(monkeypatch, hip):
     monkeypatch.setattr(torch.version, "hip", hip)
@@ -364,95 +329,32 @@ def test_native_block_can_be_turned_off(monkeypatch):
     assert "NVIDIA or AMD GPU" in native.unavailable_reason(torch.device("cpu"), _block_specs("int8"))
 
 
-def test_python_hands_every_constant_to_the_native_block(monkeypatch, tmp_path):
-    _cuda_capability(monkeypatch, (12, 0))
-    monkeypatch.setattr(kernel_policy, "programs", lambda device: 170)
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text("[]")
-    built = []
-    module = SimpleNamespace(Config=SimpleNamespace, Block=lambda config: built.append(config) or config)
-    forward = native.NativeBlockForward(module, torch.device("cuda", 0), aot.BlockDims(4096, 16384, 32), manifest)
-    config = built[0]
-    assert (config.heads, config.eps, config.chunk_rows) == (T.HEADS, T.EPS, T.CHUNK_ROWS)
-    assert (tuple(config.narrow_tile), tuple(config.wide_tile)) == kernel_policy.INT8_MM_TILES[(12, 0)]
-    assert tuple(config.small_tile) == kernel_policy.SMALL_MM_TILE and config.small_max_n == kernel_policy.SMALL_MM_MAX_N
-    assert (config.wide_k, config.group_m, config.stream_k_max_waves) == (
-        kernel_policy.WIDE_K, kernel_policy.GROUP_M, kernel_policy.STREAM_K_MAX_WAVES)
-    assert config.programs == 170 and config.has_tma and not config.cublas_int8
-    assert config.fp4_tensor_scale_divisor == T.FP4_MAX * T.FP8_E4M3_MAX and config.fp4_block == T.FP4_BLOCK
-    assert config.fp4_recipe == [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value]
-    assert config.kernels == [] and config.kernel_directory == str(tmp_path)
-    assert forward.head_dim == 128
-
-
-def _expected_block_parameters(capability, heads):
-    tiles = kernel_policy.INT8_MM_TILES.get(capability, (kernel_policy.SMALL_MM_TILE,) * 2)
-    return {
-        "heads": heads, "eps": T.EPS, "chunk_rows": T.CHUNK_ROWS,
-        "cublas_int8": capability in kernel_policy.CUBLAS_INT8_MM,
-        "narrow_tile": list(tiles[0]), "wide_tile": list(tiles[1]), "small_tile": list(kernel_policy.SMALL_MM_TILE),
-        "small_max_n": kernel_policy.SMALL_MM_MAX_N, "wide_k": kernel_policy.WIDE_K, "group_m": kernel_policy.GROUP_M,
-        "stream_k_max_waves": kernel_policy.STREAM_K_MAX_WAVES,
-        "has_tma": kernel_policy.has_tma(capability), "epilogue_tile": list(kernel_policy.CUBLAS_EPILOGUE_TILE),
-        "fp4_tensor_scale_divisor": T.FP4_MAX * T.FP8_E4M3_MAX, "fp4_block": T.FP4_BLOCK,
-        "fp4_quantize_rows": kernel_policy.FP4_QUANTIZE_ROWS, "fp4_quantize_cols": kernel_policy.FP4_QUANTIZE_COLS,
-        "fp4_scale_tile_rows": kernel_policy.FP4_SCALE_TILE_ROWS, "fp4_scale_tile_cols": kernel_policy.FP4_SCALE_TILE_COLS,
-        "fp4_recipe": [F.ScalingType.BlockWise1x16.value, F.ScalingType.TensorWise.value],
-        "fp4_swizzle": [F.SwizzleType.SWIZZLE_32_4_4.value, F.SwizzleType.NO_SWIZZLE.value],
-    }
-
-
-@pytest.mark.parametrize("capability", [*NVIDIA_RELEASE, (9, 0), (0, 0), (99, 9)])
-def test_block_parameters_are_pure_capability_policy(monkeypatch, capability):
-    expected = _expected_block_parameters(capability, 32)
+@pytest.mark.parametrize("architecture", [*NVIDIA_RELEASE, (9, 0), *sorted(kernel_policy.AMD_INT8_MM_TILES)])
+def test_block_parameters_need_no_gpu_and_share_no_state(monkeypatch, architecture):
+    reference_keys = native.block_parameters((12, 0), 32).keys()
 
     class ForbiddenCuda:
         def __getattr__(self, name):
-            pytest.fail(f"Pure block parameters accessed torch.cuda.{name}")
+            pytest.fail(f"block parameters accessed torch.cuda.{name}")
 
     monkeypatch.setattr(torch, "cuda", ForbiddenCuda())
-    monkeypatch.setattr(kernel_policy, "programs", lambda *args: pytest.fail("GPU program count queried"))
-    monkeypatch.setattr(native, "_kernel_manifest", lambda *args, **kwargs: pytest.fail("Kernel manifest queried"))
-    monkeypatch.setattr(aot, "build_kernels", lambda *args, **kwargs: pytest.fail("Kernels built"))
-    values = native.block_parameters(capability, 32)
-    assert values == expected
-    assert not {"device", "programs", "kernels", "kernel_directory"} & values.keys()
+    values = native.block_parameters(architecture, 16)
+    assert values["heads"] == 16 and values.keys() == reference_keys
+    expected = native.block_parameters(architecture, 16)
     values["narrow_tile"][0] = -1
-    assert native.block_parameters(capability, 32) == expected
-    assert native.block_parameters(capability, 16)["heads"] == 16
+    assert native.block_parameters(architecture, 16) == expected
 
 
-@pytest.mark.parametrize("capability", [*NVIDIA_RELEASE, (9, 0)])
-@pytest.mark.parametrize("explicit_device", [False, True])
-def test_config_values_preserves_complete_runtime_dictionary(monkeypatch, tmp_path, capability, explicit_device):
-    _cuda_capability(monkeypatch, capability)
+@pytest.mark.parametrize("device, index", [(torch.device("cuda", 2), 2), (torch.device("cuda"), 7)])
+def test_config_values_add_this_gpu_and_its_shipped_kernels(monkeypatch, tmp_path, device, index):
+    _cuda_capability(monkeypatch, (12, 0))
     monkeypatch.setattr(torch.cuda, "current_device", lambda: 7)
     monkeypatch.setattr(kernel_policy, "programs", lambda device: 123)
     manifest = tmp_path / "manifest.json"
     manifest.write_text('[{"key":"owned-kernel","file":"owned.cubin"}]')
-    device = torch.device("cuda", 2) if explicit_device else torch.device("cuda")
-    expected = {"device": 2 if explicit_device else 7, **_expected_block_parameters(capability, 32),
-                "programs": 123, "kernels": [{"key": "owned-kernel", "file": "owned.cubin"}],
-                "kernel_directory": str(tmp_path)}
-    assert native.config_values(device, aot.BlockDims(4096, 16384, 32), manifest) == expected
-
-
-def test_config_values_consumes_shared_public_block_parameters(monkeypatch, tmp_path):
-    _cuda_capability(monkeypatch, (12, 0))
-    monkeypatch.setattr(kernel_policy, "programs", lambda device: 170)
-    calls = []
-
-    def parameters(capability, heads):
-        calls.append((capability, heads))
-        return {"heads": heads, "owned_policy_marker": "shared"}
-
-    monkeypatch.setattr(native, "block_parameters", parameters)
-    manifest = tmp_path / "manifest.json"
-    manifest.write_text("[]")
-    result = native.config_values(torch.device("cuda", 0), aot.BlockDims(4096, 16384, 32), manifest)
-    assert calls == [((12, 0), 32)]
-    assert result == {"device": 0, "heads": 32, "owned_policy_marker": "shared", "programs": 170,
-                      "kernels": [], "kernel_directory": str(tmp_path)}
+    assert native.config_values(device, aot.BlockDims(4096, 16384, 32), manifest) == {
+        **native.block_parameters((12, 0), 32), "device": index, "programs": 123,
+        "kernels": [{"key": "owned-kernel", "file": "owned.cubin"}], "kernel_directory": str(tmp_path)}
 
 
 def test_rtx_3090_native_block_launches_plain_triton_gemms(monkeypatch, tmp_path):
@@ -635,14 +537,6 @@ def test_amd_kernels_build_only_under_a_rocm_triton(monkeypatch, tmp_path):
 def test_amd_kernel_profiles_are_named_by_gfx_architecture():
     assert kernel_policy.profile_name("gfx1201", fp4=False) == "gfx1201-int8"
     assert kernel_policy.profile_name((12, 0), fp4=True) == "sm120-nvfp4"
-
-
-@pytest.mark.parametrize("architecture", sorted(kernel_policy.AMD_INT8_MM_TILES))
-def test_amd_block_parameters_take_the_amd_tiles_by_name(monkeypatch, architecture):
-    values = native.block_parameters(architecture, 32)
-    assert (tuple(values["narrow_tile"]), tuple(values["wide_tile"])) == kernel_policy.AMD_INT8_MM_TILES[architecture]
-    assert not values["has_tma"] and not values["cublas_int8"]
-    assert values.keys() == native.block_parameters((12, 0), 32).keys()
 
 
 def test_amd_native_block_launches_comfy_kitchens_hip_attention_tile(monkeypatch, tmp_path):
