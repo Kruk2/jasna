@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from jasna.media.media_files import (
     classify_folder,
     file_dialog_patterns,
@@ -59,42 +61,23 @@ class TestFolderMediaInProcessingOrder:
         ]
 
 
-class TestFolderOutputPath:
-    def test_out_suffix_and_dir(self):
-        out = folder_output_path(Path("/out"), Path("/in/photo.png"))
-        assert out == Path("/out/photo_out.png")
-
-    def test_preserves_extension(self):
-        out = folder_output_path(Path("/out"), Path("/in/clip.mkv"))
-        assert out == Path("/out/clip_out.mkv")
-
-    def test_pattern_uses_video_template_extension(self):
-        out = folder_output_path(Path("/out"), Path("/in/clip.mkv"), "{original}_restored.mp4")
-        assert out == Path("/out/clip_restored.mp4")
-
-    def test_pattern_keeps_image_extension(self):
-        out = folder_output_path(Path("/out"), Path("/in/photo.jpg"), "{original}_restored.mp4")
-        assert out == Path("/out/photo_restored.jpg")
-
-    def test_pattern_without_suffix_preserves_input_extension(self):
-        out = folder_output_path(Path("/out"), Path("/in/clip.mkv"), "{original}_restored")
-        assert out == Path("/out/clip_restored.mkv")
-
-    def test_pattern_without_suffix_keeps_dotted_video_stem(self):
-        out = folder_output_path(Path("/out"), Path("/in/clip.v2.mkv"), "{original}_restored")
-        assert out == Path("/out/clip.v2_restored.mkv")
-
-    def test_pattern_keeps_dotted_image_stem(self):
-        out = folder_output_path(Path("/out"), Path("/in/a.b.png"), "{original}_restored")
-        assert out == Path("/out/a.b_restored.png")
-
-    def test_pattern_with_suffix_and_dotted_stem(self):
-        out = folder_output_path(Path("/out"), Path("/in/a.b.jpg"), "{original}_restored.mp4")
-        assert out == Path("/out/a.b_restored.jpg")
-
-    def test_pattern_with_only_original_and_suffix_keeps_dotted_video_stem(self):
-        out = folder_output_path(Path("/out"), Path("/in/clip.v2.mkv"), "{original}.mp4")
-        assert out == Path("/out/clip.v2.mp4")
+@pytest.mark.parametrize(
+    ("source", "pattern", "output"),
+    [
+        ("photo.png", None, "photo_out.png"),
+        ("clip.mkv", None, "clip_out.mkv"),
+        ("clip.mkv", "{original}_restored.mp4", "clip_restored.mp4"),
+        ("photo.jpg", "{original}_restored.mp4", "photo_restored.jpg"),
+        ("clip.mkv", "{original}_restored", "clip_restored.mkv"),
+        ("clip.v2.mkv", "{original}_restored", "clip.v2_restored.mkv"),
+        ("a.b.png", "{original}_restored", "a.b_restored.png"),
+        ("a.b.jpg", "{original}_restored.mp4", "a.b_restored.jpg"),
+        ("clip.v2.mkv", "{original}.mp4", "clip.v2.mp4"),
+    ],
+)
+def test_folder_output_path_names_videos_by_pattern_and_keeps_image_extensions(source, pattern, output):
+    arguments = (Path("/out"), Path("/in") / source) + ((pattern,) if pattern else ())
+    assert folder_output_path(*arguments) == Path("/out") / output
 
 
 def test_file_dialog_patterns_are_sorted_globs():
