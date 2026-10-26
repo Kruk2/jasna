@@ -1,4 +1,5 @@
 import sys
+import threading
 import types
 
 import pytest
@@ -15,28 +16,19 @@ def test_elapsed_ms_is_monotonic_nonnegative():
     assert second >= first
 
 
-def test_evaluate_all_passed():
-    results = {"ascii_path": (True, ""), "gpu": (True, ""), "sysmem": (True, "")}
-    all_passed, required_failure = evaluate_check_results(results, results.keys())
-    assert all_passed is True
-    assert required_failure is False
-
-
-def test_evaluate_missing_check_counts_as_required_failure():
-    # gpu/cuda never ran (e.g. check thread died) -> must read as failure, never "ready".
-    results = {"ascii_path": (True, "")}
-    all_passed, required_failure = evaluate_check_results(
-        results, ["ascii_path", "gpu", "cuda"]
-    )
-    assert all_passed is False
-    assert required_failure is True
-
-
-def test_evaluate_sysmem_only_failure_is_warning_not_required():
-    results = {"gpu": (True, ""), "sysmem": (False, "")}
-    all_passed, required_failure = evaluate_check_results(results, results.keys())
-    assert all_passed is False  # a warning still means "not all passed"
-    assert required_failure is False  # but sysmem is warning-only, not blocking
+@pytest.mark.parametrize(
+    ("results", "checks", "expected"),
+    [
+        ({"ascii_path": (True, ""), "gpu": (True, ""), "sysmem": (True, "")}, None, (True, False)),
+        # A check that never ran (the check thread died) must read as a failure, never "ready".
+        ({"ascii_path": (True, "")}, ["ascii_path", "gpu", "cuda"], (False, True)),
+        ({"gpu": (True, ""), "sysmem": (False, "")}, None, (False, False)),
+        ({"gpu": (True, ""), "amf": (False, "")}, None, (False, True)),
+    ],
+    ids=["all-passed", "missing-check", "sysmem-warning-only", "amf-blocks"],
+)
+def test_evaluate_check_results(results, checks, expected):
+    assert evaluate_check_results(results, results.keys() if checks is None else checks) == expected
 
 
 def _warm_up_with_gpu_check(monkeypatch, gpu_check_result, *, vendor=AcceleratorVendor.NVIDIA, major=8) -> tuple[dict, tuple]:
@@ -83,44 +75,38 @@ def test_warm_up_cuda_launches_no_kernel_on_unsupported_gpu(monkeypatch, gpu_che
     assert support == (AcceleratorVendor.CPU, False)
 
 
+def _logged_warnings(app) -> list[str]:
+    return [message for _, level, message in app._log_panel._entries if level == "WARNING"]
+
+
 @pytest.mark.parametrize("loaded", [True, False])
-def test_startup_warns_only_when_windhawk_is_loaded(monkeypatch, loaded):
+def test_startup_warns_only_when_windhawk_is_loaded(jasna_app, monkeypatch, loaded):
     from tkinter import messagebox
 
     from jasna import os_utils
-    from jasna.gui import app as app_module
     from jasna.gui.locales import t
 
     monkeypatch.setattr(os_utils, "windows_module_loaded", lambda name: loaded and name == "windhawk.dll")
     shown = []
     monkeypatch.setattr(messagebox, "showwarning", lambda title, message, parent: shown.append((title, message)))
-    logged = []
-    fake_app = types.SimpleNamespace(_log_panel=types.SimpleNamespace(warning=logged.append))
 
-    app_module.JasnaApp._warn_if_windhawk_loaded(fake_app)
+    jasna_app._warn_if_windhawk_loaded()
 
     expected = [(t("windhawk_warning_title"), t("windhawk_warning_body"))] if loaded else []
     assert shown == expected
-    assert logged == [message for _title, message in expected]
+    assert _logged_warnings(jasna_app) == [message for _title, message in expected]
 
 
 @pytest.mark.parametrize("hard_disk", [True, False])
-def test_startup_warns_when_installed_on_a_hard_disk(monkeypatch, hard_disk):
+def test_startup_warns_when_installed_on_a_hard_disk(jasna_app, monkeypatch, hard_disk):
     from jasna import os_utils
-    from jasna.gui import app as app_module
     from jasna.gui.locales import t
 
     monkeypatch.setattr(os_utils, "install_on_hard_disk", lambda: hard_disk)
-    logged = []
-    fake_app = types.SimpleNamespace(_log_panel=types.SimpleNamespace(warning=logged.append))
 
-    app_module.JasnaApp._warn_if_installed_on_hard_disk(fake_app)
+    jasna_app._warn_if_installed_on_hard_disk()
 
-    assert logged == ([t("hard_disk_warning")] if hard_disk else [])
-
-
-def test_evaluate_amf_failure_blocks():
-    assert evaluate_check_results({"gpu": (True, ""), "amf": (False, "")}, ["gpu", "amf"]) == (False, True)
+    assert _logged_warnings(jasna_app) == ([t("hard_disk_warning")] if hard_disk else [])
 
 
 @pytest.mark.parametrize("amd", [True, False])
@@ -148,13 +134,53 @@ def test_system_checks_check_amf_only_on_amd(monkeypatch, amd):
         ("win32", "Not found. Update your AMD graphics driver."),
     ],
 )
-def test_missing_amf_runtime_tells_the_user_what_to_do(monkeypatch, platform, message):
+def test_missing_amf_runtime_tells_the_user_what_to_do(monkeypatch, gui_language, platform, message):
     from jasna import os_utils
     from jasna.gui import system_checks
-    from jasna.gui.locales import get_locale
 
-    monkeypatch.setattr(get_locale(), "_current_lang", "en")
+    gui_language("en")
     monkeypatch.setattr(system_checks.sys, "platform", platform)
     monkeypatch.setattr(os_utils, "check_amd_amf_runtime", lambda: (False, "cannot open"))
 
     assert system_checks.check_amf() == (False, message)
+
+
+@pytest.fixture
+def wizard_factory(tk_root, monkeypatch):
+    """Build the first-run wizard with system checks that run ``checks`` instead of probing the machine."""
+    from jasna.gui import wizard as wizard_module
+
+    def build(checks=lambda results: None, on_complete=None):
+        monkeypatch.setattr(wizard_module, "run_system_checks", checks)
+        return wizard_module.FirstRunWizard(tk_root, on_complete=on_complete)
+
+    return build
+
+
+def test_wizard_close_button_releases_the_user(wizard_factory) -> None:
+    completed: list[tuple[bool, bool]] = []
+    wizard = wizard_factory(on_complete=lambda can_continue, all_passed: completed.append((can_continue, all_passed)))
+
+    wizard.tk.call(wizard.protocol("WM_DELETE_WINDOW"))
+
+    assert not wizard.winfo_exists()
+    assert completed == [(False, False)]
+
+
+def test_wizard_stops_waiting_on_a_wedged_check_thread(wizard_factory, monkeypatch) -> None:
+    from jasna.gui import wizard as wizard_module
+    from jasna.gui.locales import t
+
+    monkeypatch.setattr(wizard_module, "_CHECKS_TIMEOUT_SECONDS", 0.0)
+    release = threading.Event()
+    wizard = wizard_factory(checks=lambda results: release.wait())
+    try:
+        assert wizard._continue_btn.cget("state") == "disabled"
+
+        wizard._start_checks_in_background()
+        wizard._poll_checks_thread()
+
+        assert wizard._continue_btn.cget("state") == "normal"
+        assert wizard._continue_btn.cget("text") == t("btn_exit")
+    finally:
+        release.set()
