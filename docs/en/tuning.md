@@ -4,7 +4,7 @@ When VRAM gets low, Jasna moves waiting frames to system RAM and back. You
 don't need to set anything for this. The settings below change how much VRAM
 and GPU time a job uses.
 
-These settings are for BasicVSR++. LTX manages its memory by itself, see
+The clip and compilation settings are for BasicVSR++. LTX manages its memory by itself, see
 [What LTX needs](models.md#what-ltx-needs).
 
 ## Max clip size and temporal overlap
@@ -84,3 +84,23 @@ Same 1080p video, clip size 180:
 | Not compiled       | 107 s | 4.6 GB |
 
 Changing max clip size does not start the compilation again.
+
+## AMD experimental attention
+
+AMD builds enable experimental attention by default on Windows and Linux.
+If you get GPU errors, close Jasna and opt out before starting it again:
+
+Windows (PowerShell, in the Jasna folder):
+
+```powershell
+$env:TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL = "0"
+.\jasna.exe
+```
+
+Linux:
+
+```bash
+TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL=0 ./run_jasna_amd.sh
+```
+
+This applies only to that terminal session and can slow down detection.
