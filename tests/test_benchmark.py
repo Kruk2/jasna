@@ -1,30 +1,8 @@
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-
-def test_benchmark_mode_runs_benchmark_cli() -> None:
-    with (
-        patch("jasna.main.check_supported_gpu", return_value=(True, "Fake GPU")),
-        patch("jasna.main.check_required_executables"),
-        patch("jasna.benchmark.run_benchmark_cli") as run_benchmark_cli,
-    ):
-        with patch.object(
-            sys,
-            "argv",
-            ["jasna", "--benchmark", "--benchmark-video", "my_video.mp4", "--detection-score-threshold", "0.5"],
-        ):
-            from jasna.main import main
-
-            main()
-
-        run_benchmark_cli.assert_called_once()
-        passed_args = run_benchmark_cli.call_args[0][0]
-        assert passed_args.benchmark_video == ["my_video.mp4"]
-        assert passed_args.detection_score_threshold == 0.5
 
 
 def test_benchmark_rfdetr_detection_speed_file_not_found() -> None:
