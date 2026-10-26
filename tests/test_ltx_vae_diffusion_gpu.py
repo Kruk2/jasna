@@ -1,6 +1,6 @@
-"""The decoder's fused diffusion-block kernels (``diffusion_triton`` and their ahead-of-time build) against
-the torch code they replace, and their AMD-only routing. Needs a GPU and Triton; the kernel tests an AMD
-GPU (their tiles are sized for RDNA)."""
+"""The decoder's fused diffusion-block kernels (the ``diffusion_triton`` source, JIT here, and its ahead-of-time
+build ``diffusion_hip``) against the torch code they replace, and their AMD-only routing. Needs a GPU and
+Triton; the kernel tests an AMD GPU (their tiles are sized for RDNA)."""
 
 import importlib.util
 
@@ -31,6 +31,44 @@ def _operands(rows: int):
         randn(hidden, dim, scale=dim**-0.5), randn(dim, hidden, scale=hidden**-0.5)
 
 
+def _jit_residual_swiglu_(x, norm_weight, scale, shift, w_gate, w_up, w_down):
+    """The ``diffusion_triton`` source compiled by the Triton JIT, launched as ``diffusion_hip`` launches its build."""
+    import triton
+
+    from jasna.models.ltx_vae import diffusion_triton
+
+    rows, dim = x.shape
+    diffusion_triton._residual_swiglu_kernel[(triton.cdiv(rows, diffusion_hip.SWIGLU_BLOCK_ROWS),)](
+        x, norm_weight, scale, shift, w_gate, w_up, w_down, rows,
+        DIM=dim, HIDDEN=w_gate.shape[0], BLOCK_ROWS=diffusion_hip.SWIGLU_BLOCK_ROWS,
+        BLOCK_HIDDEN=diffusion_hip.SWIGLU_BLOCK_HIDDEN, num_warps=diffusion_hip.SWIGLU_WARPS, num_stages=1,
+    )
+
+
+def _jit_slab_qkv(x, left_halo, columns, modulation, weights, inv_freqs, w_pos, rope_pairs, core_len, halo, q_scale):
+    import triton
+
+    from jasna.models.ltx_vae import diffusion_triton
+
+    batch, t, h, w, dim = x.shape
+    ext = halo + columns.numel()
+    head_dim = weights[6].shape[0]
+    q = x.new_empty(batch, t, h, core_len, dim // head_dim, head_dim)
+    k = x.new_empty(batch, t, h, ext, dim // head_dim, head_dim)
+    v = torch.empty_like(k)
+    rows = batch * t * h * ext
+    norm, scale, shift = modulation or (x, x, x)
+    diffusion_triton._slab_qkv_kernel[(triton.cdiv(rows, diffusion_hip.QKV_BLOCK_ROWS),)](
+        x.contiguous(), left_halo.contiguous(), columns.contiguous(), norm, scale, shift,
+        *weights, inv_freqs.float().contiguous(), w_pos.float().contiguous(), q, k, v,
+        rows, h, w, ext, halo, core_len, q_scale,
+        DIM=dim, HEAD_DIM=head_dim, PAIRS_T=rope_pairs[0], PAIRS_H=rope_pairs[1],
+        BLOCK_ROWS=diffusion_hip.QKV_BLOCK_ROWS, MODULATE=bool(modulation), num_warps=diffusion_hip.QKV_WARPS,
+        num_stages=1,
+    )
+    return q, k, v
+
+
 def _reference(x, norm, scale, shift, w_gate, w_up, w_down):
     return x + T.modulated_swiglu(x, norm, scale, shift, torch.cat([w_gate, w_up]), w_down)
 
@@ -38,23 +76,19 @@ def _reference(x, norm, scale, shift, w_gate, w_up, w_down):
 @amd_only
 @pytest.mark.parametrize("rows", [1, 300, 16_384])
 def test_fused_residual_swiglu_matches_the_torch_chunk(rows):
-    from jasna.models.ltx_vae import diffusion_triton
-
     x, *weights = _operands(rows)
     expected = _reference(x, *weights)
 
-    diffusion_triton.residual_swiglu_(x, *weights)
+    diffusion_hip.residual_swiglu_(x, *weights)
 
     torch.testing.assert_close(x, expected, atol=6e-2, rtol=2e-2)
 
 
 @amd_only
-def test_the_ahead_of_time_kernel_matches_the_jit_one():
-    from jasna.models.ltx_vae import diffusion_triton
-
+def test_the_ahead_of_time_kernel_matches_its_source():
     x, *weights = _operands(5000)
     jit = x.clone()
-    diffusion_triton.residual_swiglu_(jit, *weights)
+    _jit_residual_swiglu_(jit, *weights)
 
     diffusion_hip.residual_swiglu_(x, *weights)
 
@@ -62,19 +96,15 @@ def test_the_ahead_of_time_kernel_matches_the_jit_one():
 
 
 def test_amd_routes_the_diffusion_blocks_through_the_fused_kernels_and_nvidia_keeps_torch():
-    from jasna.models.ltx_vae import diffusion_triton
-
     kernels = T.decoder_kernels(torch.device("cuda"))
 
     amd = is_amd_device("cuda")
-    assert kernels.residual_swiglu is (diffusion_triton.residual_swiglu_ if amd else None)
-    assert kernels.slab_qkv is (diffusion_triton.slab_qkv if amd else None)
+    assert kernels.residual_swiglu is (diffusion_hip.residual_swiglu_ if amd else None)
+    assert kernels.slab_qkv is (diffusion_hip.slab_qkv if amd else None)
 
 
 @amd_only
 def test_the_fused_diffusion_mlp_covers_every_token_chunk(monkeypatch):
-    from jasna.models.ltx_vae import diffusion_triton
-
     dim = T.DIFFUSION_DIM
     torch.manual_seed(0)
     mlp = T.SwiGLU(dim, T._swiglu_hidden_dim(dim)).cuda().bfloat16()
@@ -85,7 +115,7 @@ def test_the_fused_diffusion_mlp_covers_every_token_chunk(monkeypatch):
     monkeypatch.setattr(T, "_mlp_chunk", T.modulated_swiglu)
     with torch.inference_mode():
         expected = T.residual_modulating_mlp(x.clone(), mlp, norm, scale, shift)
-        mlp.kernels = T.DecoderKernels(residual_swiglu=diffusion_triton.residual_swiglu_)
+        mlp.kernels = T.DecoderKernels(residual_swiglu=diffusion_hip.residual_swiglu_)
         fused = T.residual_modulating_mlp(x.clone(), mlp, norm, scale, shift)
 
     torch.testing.assert_close(fused, expected, atol=6e-2, rtol=2e-2)
@@ -107,14 +137,11 @@ def _slab(core_len: int = 6):
 
 
 @amd_only
-@pytest.mark.parametrize("fused", ["triton", "aot"])
-def test_fused_slab_qkv_matches_the_torch_slab(fused):
-    from jasna.models.ltx_vae import diffusion_triton
-
+@pytest.mark.parametrize("kernel", [_jit_slab_qkv, diffusion_hip.slab_qkv], ids=["source", "aot"])
+def test_fused_slab_qkv_matches_the_torch_slab(kernel):
     slab = _slab()
     with torch.inference_mode():
         expected = T._attn_on_w_slab(*slab)
-        kernel = diffusion_triton.slab_qkv if fused == "triton" else diffusion_hip.slab_qkv
         slab[0].kernels = T.DecoderKernels(slab_qkv=kernel)
         actual = T._attn_on_w_slab(*slab)
 
@@ -123,10 +150,8 @@ def test_fused_slab_qkv_matches_the_torch_slab(fused):
 
 @amd_only
 def test_the_fused_slab_qkv_compiles_into_the_slab_without_a_graph_break():
-    from jasna.models.ltx_vae import diffusion_triton
-
     slab = _slab()
-    slab[0].kernels = T.DecoderKernels(slab_qkv=diffusion_triton.slab_qkv)
+    slab[0].kernels = T.DecoderKernels(slab_qkv=diffusion_hip.slab_qkv)
     torch._dynamo.reset()
     with torch.inference_mode():
         explanation = torch._dynamo.explain(T._attn_on_w_slab)(*slab)
@@ -144,14 +169,12 @@ def _deterministic_stage(dim: int):
 
 
 @amd_only
-@pytest.mark.parametrize("fused", ["triton", "aot"])
-def test_the_512_wide_deterministic_stages_take_the_fused_qkv(fused):
-    from jasna.models.ltx_vae import diffusion_triton
-
+@pytest.mark.parametrize("kernel", [_jit_slab_qkv, diffusion_hip.slab_qkv], ids=["source", "aot"])
+def test_the_512_wide_deterministic_stages_take_the_fused_qkv(kernel):
     attn, x = _deterministic_stage(512)
     with torch.inference_mode():
         expected = attn(x)
-        attn.kernels = T.DecoderKernels(slab_qkv=diffusion_triton.slab_qkv if fused == "triton" else diffusion_hip.slab_qkv)
+        attn.kernels = T.DecoderKernels(slab_qkv=kernel)
         actual = attn(x)
 
     torch.testing.assert_close(actual, expected, atol=3e-2, rtol=2e-2)
