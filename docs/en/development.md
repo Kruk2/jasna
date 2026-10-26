@@ -247,8 +247,7 @@ $P scripts/benchmark_na3d.py                                             # Trito
 - `JASNA_LTX_NATIVE=0` forces `torch.compile`, for an A/B in one tree.
 - `jasna.ltx.native.prebuild(dir)` builds the extension and the kernels of every
   table architecture of the build's vendor for a release (cubins per SM; under
-  ROCm `.hsaco` per gfx name, gfx1100/1101/1102/1200/1201, as gfx1103 has no
-  tuned tiles); copy `dir` to `jasna/ltx/native/prebuilt/`. Shipped kernels load
+  ROCm `.hsaco` per gfx name, gfx1100-1103/1150/1151/1200/1201); copy `dir` to `jasna/ltx/native/prebuilt/`. Shipped kernels load
   without Triton.
 - Launch constants and tile tables live in `jasna/ltx/kernel_policy.py`, which
   imports no Triton; `kernels.py` and the native block both read it.

@@ -58,7 +58,7 @@ Jasna 修复视频和图片中的马赛克。Jasna 免费，提供简单的应�
 | --- | --- | --- |
 | Radeon RX 9060/9070、Radeon AI PRO R9700 | 支持 | 支持（Windows 为测试版） |
 | Radeon RX 7600–7900、Radeon PRO W7000 | 支持 | 支持（Windows 为测试版） |
-| Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 支持（未测试） | 暂不支持 |
+| Radeon 740M/760M/780M/880M/890M、Ryzen AI Max（8050S/8060S） | 支持（未测试） | 支持（未测试） |
 | Radeon RX 6000 及更早、Radeon 820M/840M/860M | 不支持 | 不支持 |
 
 </details>

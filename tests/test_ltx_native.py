@@ -484,10 +484,17 @@ def test_native_block_and_its_policy_import_without_triton():
     subprocess.run([sys.executable, "-c", blocker], check=True, cwd=native._HERE.parents[2])
 
 
-def test_gfx1103_has_no_tuned_kernels_to_ship_or_run(monkeypatch):
-    _amd_architecture(monkeypatch, "gfx1103")
-    assert "gfx1103" not in native.release_architectures()
-    assert "no tuned kernels for gfx1103" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
+@pytest.mark.parametrize("architecture", ["gfx1103", "gfx1150", "gfx1151"])
+def test_amd_integrated_gpus_ship_tuned_kernels(monkeypatch, architecture):
+    _amd_architecture(monkeypatch, architecture)
+    assert architecture in native.release_architectures()
+    assert kernel_policy.supports(torch.device("cuda"))
+
+
+def test_gfx1152_has_no_tuned_kernels_to_ship_or_run(monkeypatch):
+    _amd_architecture(monkeypatch, "gfx1152")
+    assert "gfx1152" not in native.release_architectures()
+    assert "no tuned kernels for gfx1152" in native.unavailable_reason(torch.device("cuda"), _block_specs("int8"))
 
 
 def test_native_package_imports_without_the_protection_module(monkeypatch):
