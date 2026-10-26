@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import xml.etree.ElementTree as ET
-from unittest.mock import MagicMock
 
 from PIL import Image
 
@@ -47,17 +46,7 @@ def test_header_logo_uses_high_resolution_source_at_display_size() -> None:
     assert logo.cget("dark_image").size == (512, 512)
 
 
-def test_install_window_icon_sets_default_icon(monkeypatch) -> None:
-    window = MagicMock()
-    icon = object()
-    constructor = MagicMock(return_value=icon)
-    monkeypatch.setattr(branding.tk, "PhotoImage", constructor)
+def test_install_window_icon_loads_the_full_size_logo(tk_root) -> None:
+    icon = branding.install_window_icon(tk_root)
 
-    result = branding.install_window_icon(window)
-
-    assert result is icon
-    constructor.assert_called_once_with(
-        master=window,
-        file=str(branding.brand_asset_path(branding.LOGO_PNG)),
-    )
-    window.iconphoto.assert_called_once_with(True, icon)
+    assert (icon.width(), icon.height()) == (512, 512)
