@@ -8,7 +8,7 @@ from jasna.models.ltx_vae import na_geometry
 from jasna.models.ltx_vae.hip_launch import KERNEL_LAUNCH
 
 HEAD_DIM = 64
-WINDOWS = ((11, 11, 11), (3, 7, 7), (3, 5, 5))
+WINDOWS = ((9, 9, 9), (3, 7, 7), (3, 5, 5))
 """The shipped DiffVAE decoder's stage-5 and stage 1-4 windows."""
 
 _POINTERS = ("q_ptr", "k_ptr", "v_ptr", "o_ptr")

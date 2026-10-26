@@ -22,6 +22,9 @@ from jasna.tensor_utils import half_dtype
 
 _VAE_CLASS_NAME = "CausalDiffusionVAE"
 _DECODER_CLASS_NAME = "NADiffusionDecoder"
+STAGE5_KERNEL = (9, 9, 9)
+"""Stage-5 neighborhood-attention window, in place of the checkpoint's 11x11x11 (the weights do not depend on
+it): 13 % faster decode, the same in a human A/B on four real clips (benchmarks/2026-10-26_ltx_decoder_na9.md)."""
 _GATE_SUFFIXES = (".gate_msa", ".gate_mlp", ".gate_ctx")
 _QKV_LEAVES = ("weight", "bias")
 _UNUSED_DECODER_KEYS = frozenset({"type_emb"})
@@ -76,7 +79,7 @@ def decoder_kwargs(config: dict) -> dict:
         "stage_depths": tuple(decoder["stage_depths"]),
         "stage_kernels": tuple(tuple(kernel) for kernel in decoder["stage_kernels"]),
         "upsamples": tuple((tuple(stride), reduction) for stride, reduction in decoder["upsamples"]),
-        "stage5_kernel": tuple(decoder["stage5_kernel"]),
+        "stage5_kernel": STAGE5_KERNEL,
         "stage5_channels": decoder.get("stage5_channels", stage_channels[-1]),
         "t_emb_dim": decoder.get("t_emb_dim", 384),
         "timestep_scale_multiplier": decoder["timestep_scale_multiplier"],
