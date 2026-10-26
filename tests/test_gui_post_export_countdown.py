@@ -2,101 +2,79 @@
 
 from __future__ import annotations
 
-import time
-from tkinter import TclError
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import customtkinter as ctk
 import pytest
 
-from jasna.gui.app import JasnaApp
 from jasna.gui.components import ShutdownCountdownDialog
 from jasna.gui.models import AppSettings
 
 
-@pytest.fixture
-def root():
-    try:
-        root = ctk.CTk()
-    except TclError as exc:
-        pytest.skip(f"Tk display unavailable: {exc}")
-    yield root
-    root.destroy()
+def _use_settings(app, settings: AppSettings) -> None:
+    app._preset_manager.create_preset("test", settings)
+    app._settings_panel._apply_preset("test")
 
 
-def _pump_until(root, condition, timeout: float) -> None:
-    deadline = time.monotonic() + timeout
-    while not condition() and time.monotonic() < deadline:
-        root.update()
-        time.sleep(0.02)
+def _countdown_dialogs(app) -> list[ShutdownCountdownDialog]:
+    return [w for w in app.winfo_children() if isinstance(w, ShutdownCountdownDialog)]
 
 
-def _app_with_settings(root, settings: AppSettings):
-    root._settings_panel = MagicMock(get_settings=MagicMock(return_value=settings))
-    root._log_panel = MagicMock()
-    return root
+def _logged(app) -> list[str]:
+    return [message for _, _, message in app._log_panel._entries]
 
 
-def _countdown_dialogs(root) -> list[ShutdownCountdownDialog]:
-    return [w for w in root.winfo_children() if isinstance(w, ShutdownCountdownDialog)]
-
-
-def test_countdown_shows_remaining_seconds_and_expires(root):
+def test_countdown_shows_remaining_seconds_and_expires(tk_root):
     expired: list[bool] = []
     cancelled: list[bool] = []
-    dialog = ShutdownCountdownDialog(root, 2, lambda: expired.append(True), lambda: cancelled.append(True))
+    dialog = ShutdownCountdownDialog(tk_root, 2, lambda: expired.append(True), lambda: cancelled.append(True))
     assert "2" in dialog._message.cget("text")
 
-    _pump_until(root, lambda: "1" in dialog._message.cget("text"), timeout=3)
+    dialog._tick()
     assert "1" in dialog._message.cget("text")
     assert expired == []
 
-    _pump_until(root, lambda: expired, timeout=3)
+    dialog._tick()
     assert expired == [True]
     assert cancelled == []
     assert not dialog.winfo_exists()
 
 
-def test_countdown_cancel_stops_shutdown(root):
+def test_countdown_cancel_stops_shutdown(tk_root):
     expired: list[bool] = []
     cancelled: list[bool] = []
-    dialog = ShutdownCountdownDialog(root, 1, lambda: expired.append(True), lambda: cancelled.append(True))
+    dialog = ShutdownCountdownDialog(tk_root, 1, lambda: expired.append(True), lambda: cancelled.append(True))
 
     dialog.cancel_button.invoke()
-    _pump_until(root, lambda: expired, timeout=1.5)
 
     assert cancelled == [True]
     assert expired == []
     assert not dialog.winfo_exists()
 
 
-def test_queue_end_uses_current_command_settings(root):
-    app = _app_with_settings(root, AppSettings(post_export_action="command", post_export_command="notify"))
+@pytest.mark.parametrize(
+    ("settings", "expected_runs"),
+    [
+        (AppSettings(post_export_action="command", post_export_command="notify"), [("command", "notify")]),
+        (AppSettings(post_export_action="none"), []),
+    ],
+)
+def test_queue_end_runs_the_current_action(jasna_app, settings, expected_runs):
+    _use_settings(jasna_app, settings)
 
     with patch("jasna.post_export_action.run_post_export_action") as run:
-        JasnaApp._run_post_export_action(app)
+        jasna_app._handle_complete(queue_finished=True)
 
-    run.assert_called_once_with("command", "notify")
-    assert _countdown_dialogs(root) == []
-
-
-def test_queue_end_does_nothing_when_action_was_turned_off(root):
-    app = _app_with_settings(root, AppSettings(post_export_action="none"))
-
-    with patch("jasna.post_export_action.run_post_export_action") as run:
-        JasnaApp._run_post_export_action(app)
-
-    run.assert_not_called()
-    assert _countdown_dialogs(root) == []
+    assert [call.args for call in run.call_args_list] == expected_runs
+    assert _countdown_dialogs(jasna_app) == []
 
 
-def test_queue_end_shutdown_waits_for_countdown_and_can_be_cancelled(root):
-    app = _app_with_settings(root, AppSettings(post_export_action="shutdown"))
+def test_queue_end_shutdown_waits_for_countdown_and_can_be_cancelled(jasna_app):
+    _use_settings(jasna_app, AppSettings(post_export_action="shutdown"))
 
     with patch("jasna.post_export_action.run_post_export_action") as run:
-        JasnaApp._run_post_export_action(app)
-        (dialog,) = _countdown_dialogs(root)
+        jasna_app._handle_complete(queue_finished=True)
+        (dialog,) = _countdown_dialogs(jasna_app)
         dialog.cancel_button.invoke()
 
     run.assert_not_called()
-    app._log_panel.info.assert_called_with("Shutdown cancelled by user")
+    assert _logged(jasna_app)[-1] == "Shutdown cancelled by user"
