@@ -199,10 +199,6 @@ class _ScanTensorCollector:
         else:
             self._gpu_masks, self._gpu_scores = self._allocate_gpu(self.capacity)
 
-    @property
-    def spilling(self) -> bool:
-        return self._spilling
-
     def _allocate_gpu(self, capacity: int):
         torch_mod = self._torch
         masks = torch_mod.empty(

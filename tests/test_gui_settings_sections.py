@@ -384,29 +384,16 @@ def test_settings_panel_get_settings_is_locale_independent(monkeypatch, tmp_path
         root.destroy()
 
 
-def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty() -> None:
-    """The sub-engines stopped depending on the clip length, so the slider is no
-    longer capped at the largest clip an engine had been compiled for."""
-    from jasna.gui.settings_sections import basic
+def test_max_clip_size_slider_spans_ten_to_seven_hundred_twenty_in_steps_of_ten(_basic_section_panel) -> None:
+    panel, _basic = _basic_section_panel
+    slider = panel._widgets["max_clip_size"]
 
-    captured: dict = {}
-
-    class _Slider:
-        def __init__(self, _parent, **kwargs):
-            captured.update(kwargs)
-
-        def pack(self, **_kwargs) -> None:
-            pass
-
-        def set(self, _value) -> None:
-            pass
-
-    basic.build_max_clip_size_slider(_Slider, None, lambda _value: None)
-
-    assert captured["from_"] == 10
-    assert captured["to"] == 720
-    assert (captured["to"] - captured["from_"]) % captured["number_of_steps"] == 0
-    assert (captured["to"] - captured["from_"]) // captured["number_of_steps"] == 10
+    slider.set(10)
+    assert slider.get() == 10
+    slider.set(723)
+    assert slider.get() == 720
+    slider.set(34)
+    assert slider.get() == 30
 
 
 def test_only_queue_wide_post_export_action_stays_editable_while_processing(_basic_section_panel) -> None:
