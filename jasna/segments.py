@@ -23,6 +23,16 @@ def job_restoration(model: RestorationModelName, ltx_seed: int) -> SegmentRestor
     return SegmentRestoration(model, ltx_seed if model == "ltx" else None)
 
 
+def job_models(
+    model: RestorationModelName, segments: "tuple[SegmentRange, ...] | None"
+) -> frozenset[RestorationModelName]:
+    """The models a job runs: its ranges' models (a range without one uses ``model``), or
+    ``model`` when it has no ranges."""
+    return frozenset(
+        model if segment.restoration is None else segment.restoration.model for segment in segments or ()
+    ) or frozenset({model})
+
+
 @dataclass(frozen=True)
 class SegmentRange:
     """A user-visible half-open time range, in seconds. ``restoration`` None means the

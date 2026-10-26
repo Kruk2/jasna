@@ -3,15 +3,11 @@ from pathlib import Path
 
 from jasna.gui.models import AppSettings, JobItem
 from jasna.gui.locales import t
-from jasna.segments import job_restoration, resolve_restorations
+from jasna.segments import job_models
 
 
 def _uses_ltx(job: JobItem, settings: AppSettings) -> bool:
-    segments = job.snapshot_segments()
-    if not segments:
-        return settings.restoration_model == "ltx"
-    default = job_restoration(settings.restoration_model, settings.ltx_seed)
-    return any(segment.restoration.model == "ltx" for segment in resolve_restorations(segments, default))
+    return "ltx" in job_models(settings.restoration_model, job.snapshot_segments())
 
 
 def any_job_uses_ltx(jobs: list[JobItem], settings: AppSettings) -> bool:

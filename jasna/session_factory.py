@@ -414,13 +414,11 @@ def build_pipeline(
 ) -> "Pipeline":
     """A per-video ``Pipeline``; the session first loads any model the segments ask for."""
     from jasna.pipeline import Pipeline
-    from jasna.segments import job_restoration, resolve_restorations
+    from jasna.segments import job_models
 
-    default = job_restoration(config.restoration_model_name, config.ltx_seed)
-    models = frozenset(
-        segment.restoration.model for segment in resolve_restorations(tuple(segments or ()), default)
-    ) or frozenset({config.restoration_model_name})
-    provide_restoration_models(config, session, models, log_callback=None)
+    provide_restoration_models(
+        config, session, job_models(config.restoration_model_name, segments), log_callback=None
+    )
     return Pipeline(
         config=config,
         session=session,
