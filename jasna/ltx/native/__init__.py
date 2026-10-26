@@ -18,8 +18,8 @@ compiler and ninja; on Windows MSVC's ``cl`` on PATH, from an x64 Visual Studio 
 whose MSVC this CUDA supports); a frozen release never builds it and loads it only when
 ``prebuild`` output is shipped in ``PREBUILT``. Kernels shipped in ``PREBUILT/kernels`` load
 without Triton (Windows ROCm has none); otherwise Triton compiles them into the cache. Without
-the toolchain, on a GPU it has no kernels for, or with ``JASNA_LTX_NATIVE=0`` the sampler keeps
-the torch.compile path.
+the toolchain, on a GPU it has no kernels for, or with ``JASNA_LTX_NATIVE=0`` the sampler runs the
+torch path instead: compiled where ``tensor_utils.compiles``, else eager and far slower.
 """
 
 from __future__ import annotations
@@ -45,6 +45,7 @@ from jasna.accelerator import has_triton, is_amd_device, is_nvidia_device
 from jasna.ltx import kernel_policy as policy
 from jasna.ltx import transformer as T
 from jasna.ltx.kernel_policy import FP4_ARCHS, BlockDims, is_amd
+from jasna.tensor_utils import compiles
 
 logger = logging.getLogger(__name__)
 
@@ -415,12 +416,23 @@ def config_values(device: torch.device, dims: BlockDims, manifest: Path) -> dict
     }
 
 
+def _torch_path(device: torch.device) -> tuple[str, int]:
+    """What the sampler runs instead of the native block, and the log level that deserves."""
+    if compiles(device, torch.bfloat16):
+        return "the torch.compile path", logging.INFO
+    if not has_triton():
+        return "eager PyTorch (no Triton), much slower", logging.WARNING
+    return "eager PyTorch (no bf16 torch.compile on this GPU), much slower", logging.WARNING
+
+
 def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[int, ...]]]) -> NativeBlockForward | None:
     """The native block forward for blocks shaped like ``block_specs``, or None (logged) when it
-    cannot run here, so the caller keeps the torch.compile path."""
+    cannot run here, so the caller keeps the torch path. A release whose shipped native block fails
+    to load is broken and raises."""
+    torch_path, level = _torch_path(device)
     reason = unavailable_reason(device, block_specs)
     if reason is not None:
-        logger.info("LTX native blocks off (%s); using the torch.compile path", reason)
+        logger.log(level, "LTX native blocks off (%s); running %s", reason, torch_path)
         return None
     dims = BlockDims.from_specs(block_specs)
     try:
@@ -429,7 +441,9 @@ def load(device: torch.device, block_specs: dict[str, tuple[torch.dtype, tuple[i
         )
         return NativeBlockForward(_extension(), device, dims, manifest)
     except (RuntimeError, OSError, subprocess.CalledProcessError) as error:
-        logger.warning("LTX native blocks failed to build or load; using the torch.compile path: %s", error)
+        if is_frozen() and _prebuilt_extension() is not None:
+            raise RuntimeError(f"The installed LTX native block does not load ({error}). Reinstall Jasna.") from error
+        logger.warning("LTX native blocks failed to build or load; running %s: %s", torch_path, error)
         return None
 
 
